@@ -28,9 +28,27 @@ NUMBER_AFTER_PHRASE = re.compile(r"[\s,.:;!?-]*" + ORDER_MARK + r"?[\s№#:.-]*(
 ARRIVED, ISSUED, NO_SHOW = "приехал", "выдан", "клиент не пришёл"
 ARRIVE_FROM = ("placed", "moving")                 # the owner 2026-10-21 (order 423): the panel often still says «Заказ оформлен» when the tyres come
 ISSUE_FROM = ("at_point",) + ARRIVE_FROM           # the owner 2026-10-21: «выдал» also when the panel never said the tyres came
-BUILTIN = dict([(w, (ARRIVE_FROM, "at_point")) for w in ("приехал", "приехали")] +         # the words of the decisions 2026-10-19: they work
-               [(w, (ISSUE_FROM, "done")) for w in ("выдал", "выдали", "забрал", "забрали")])  # without being set up in «Команды»
+ISSUE_PHRASE = "отдал клиенту"                     # the owner 2026-10-25: «отдал/отдала/отдали клиенту» is «выдал»
+BUILTIN = dict([(w, (ARRIVE_FROM, "at_point")) for w in ("приехал", "приехали", "приехала", "привезли", "пришли")] +   # the words of the
+               [(w, (ISSUE_FROM, "done")) for w in ("выдал", "выдали", "выдала", "забрал", "забрали", "забрала", ISSUE_PHRASE)])   # decisions
+#  2026-10-19 and of the owner 2026-10-25 (the audit of «Входящие»): they work without being set up in «Команды»
 NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её]л|ла|ли)(?![а-я])", re.I)       # «не пришёл заказ» is about goods: not this
+# the owner 2026-10-25: «Возврат отдал», «отдал на возврат», «отправлен(о) на возврат», «отправили на возврат» — the tyres went back to the
+# supplier. No typo is guessed («лтправлен» stays a question). The client is never written to.
+RETURN, RETURNED = "возврат отдал", "шины отданы на возврат"   # the command is a phrase only: a bare «возврат» is not it
+RETURN_FROM = ("at_point", "oth", "refused")      # the stages where the tyres are at the point (the lead 2026-10-26)
+RETURN_REASON = "точка: шины отданы поставщику"
+RETURN_LINE = "точка: шины отданы поставщику (возврат)"
+RETURN_ASK = "Точка отдала шины поставщику (возврат): заполните сумму возврата и переведите в «Возврат»."
+RETURN_GAPS = "Точка отдала шины поставщику (возврат): не заполнено — %s; заполните и переведите в «Возврат»."
+PHRASES = ((NO_SHOW_PHRASE, NO_SHOW),
+           (re.compile(r"^\W*отдал[аи]?\s+клиенту(?![^\W\d_])", re.I), ISSUE_PHRASE),
+           (re.compile(r"^\W*(?:возврат\s+отдал[аи]?|(?:отдал[аи]?|отправлен[аоы]?|отправили)\s+на\s+возврат)(?![^\W\d_])", re.I), RETURN))
+# «пришли» is also «send» («пришли фото», «пришли нам»), «приехала» is also a car or a client, «отдал клиенту» also money («отдал клиенту
+# деньги», review 2026-10-26): after these only the order, the tyres, «все», «шт», «на точку»
+STRICT = ("привезли", "пришли", "приехала", ISSUE_PHRASE)
+STRICT_TAIL = {"шина", "шины", "колёса", "колеса", "комплект", "все", "всё", "шт", "по", "на", "точку", "точке"}
+NOUN = r"(?:шин[аы]|кол[её]са|комплект)(?![^\W\d_])"   # «Шины приехали», «5245392 шина приехала!», «приехали 5259052 шины»
 DISPUTE = "спорно: "
 BOT_MARK = "(бот) "                                 # the owner 2026-10-24: «Подписывай сообщение от бота вк так: (бот) …» (never to a client)
 MISSING = "заказа №%d нет в CRM"                   # the outcome of a number the panel does not know: the partner is told (missing_orders)
@@ -56,6 +74,29 @@ GREETING = re.compile(r"^\W*(?:(?:привет(?:ик|ствую)?|здра(?:в
 NUMBER_FIRST = re.compile(r"^[\s,.:;!—–-]*(" + ORDER_MARK + r"[\s№#:.-]*\d{1,9}|\d{5,9})(?!\d)[\s,.:;!—–-]*(?=[^\W\d_])",
                           re.I)                                     # «заказали 4», «заказчик 2» are not a number in front  # «2 приехали»: a quantity
 LEAD_WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*")
+NOUN_FIRST = re.compile(r"^[\s,.:;!—–-]*" + NOUN, re.I)          # the tyres in front of the command, or right after its number
+SEPARATORS = " \t\r\n,.:;!—–-"
+
+
+def _phrase(text):
+    """The command of several words a text starts with: (its match, the command) or (None, '')."""
+    for pattern, word in PHRASES:
+        found = pattern.match(text)
+        if found:
+            return found, word
+    return None, ""
+
+
+def _drop_noun(text) -> str:
+    """«Шины приехали», «шина 5245392 приехала»: the tyres in front of a built-in command (with a number between or not) are dropped."""
+    noun = NOUN_FIRST.match(text)
+    if not noun:
+        return text
+    rest = text[noun.end():].lstrip(SEPARATORS)
+    first = NUMBER_FIRST.match(rest)
+    probe = rest[first.end():] if first else rest
+    lead = LEAD_WORD.match(probe)
+    return rest if _phrase(probe)[0] or (lead and rules.normalise_word(lead.group(0)) in BUILTIN) else text
 
 
 def _command_text(text) -> str:
@@ -65,18 +106,20 @@ def _command_text(text) -> str:
     greeting = GREETING.match(text)
     if greeting and text[greeting.end():].strip():
         text = text[greeting.end():]
+    text = _drop_noun(text)
     first = NUMBER_FIRST.match(text)
     if first:
-        rest = text[first.end():]
-        lead = NO_SHOW_PHRASE.match(rest) or LEAD_WORD.match(rest)
+        rest = _drop_noun(text[first.end():])
+        lead = _phrase(rest)[0] or LEAD_WORD.match(rest)
         text = "%s %s%s" % (rest[:lead.end()], first.group(1), rest[lead.end():])
     return text
 
 
 def _word(text) -> str:
-    """The command a message starts with: «клиент не пришёл» (three words) or the first word."""
+    """The command a message starts with: a phrase («клиент не пришёл», «отдал клиенту», «возврат отдал») or the first word."""
     text = _command_text(text)
-    return NO_SHOW if NO_SHOW_PHRASE.match(text) else _first_word(text)
+    found, word = _phrase(text)
+    return word if found else _first_word(text)
 
 
 MARKED_NUMBER = re.compile(ORDER_MARK + r"[\s№#:.-]*(\d{1,9})(?!\d)", re.I)
@@ -89,9 +132,9 @@ def order_number(text):
     if marked:                                                   # «заказы 123456 и 654321», «заказ 123456, 4 шт», «5000100 и заказ 654321»: none
         rest = text[:marked.start()] + " " + text[marked.end():]
         return None if re.search(r"\d", text[marked.end():]) or re.search(r"\d{5,}", rest) else int(marked.group(1))
-    phrase = NO_SHOW_PHRASE.match(text)
+    phrase = _phrase(text)[0]
     after = NUMBER_AFTER_PHRASE.match(text, phrase.end()) if phrase else NUMBER_AFTER_WORD.match(text)
-    if after and not re.search(r"[^\W\d_]|\d", text[after.end():]):
+    if after and not re.search(r"[^\W\d_]|\d", NOUN_FIRST.sub("", text[after.end():], count=1)):   # «приехали 5259052 шины»
         return int(after.group(1))
     return None
 
@@ -105,6 +148,7 @@ COUNT = r"(?:\d+(?!\d)|(?:одн[аиоу]|дв[аеу]|тр[её]?[иеху]|ч
 PART = re.compile(r"(?<!\w)" + COUNT + r"(?:\s*[^\W\d_]+(?![^\W\d_])\.?){0,2}\s*из(?![^\W\d_])"   # «3 шины из 4», «три из четырёх», «3из4»
                   r"|(?<!\d)\d+\s*/\s*\d|(?<!\w)(?:только|пока|лишь)\s+" + COUNT + r"|(?<!\w)частичн", re.I)   # «3/4», «только 2»
 DOUBT = ("кроме", "без", "вроде", "наверное", "ли", "другой", "другая", "другое", "другие", "другую", "другого", "других")   # the lead 2026-10-25
+ORDER_WORD = re.compile(r"^(?:заказ(?:а|у|е|ом)?|номер)$")
 DAMAGE = ("нехватк", "недостач", "брак", "бит", "поврежд", "царап", "порез", "грыж", "слома", "порва", "дефект", "вмятин", "перепута", "ошиб")   # anywhere in a word: «побиты», «разбиты», «перепутали»
 
 
@@ -114,20 +158,24 @@ def is_command(conn, text) -> bool:
     parser did not take («приехали 5259052 шины», two numbers), a part («3 из 4», «только 2»), «приехал клиент». Those are questions for the owner."""
     word = _word(text)
     words = {c["word"] for c in rules.list_commands(conn)}
-    if not word or not (word == NO_SHOW or word in BUILTIN or word in words) or re.search(r"[?？]", str(text or "")):
+    if not word or not (word in (NO_SHOW, RETURN) or word in BUILTIN or word in words) or re.search(r"[?？]", str(text or "")):
         return False
     body = _command_text(text)
-    phrase = NO_SHOW_PHRASE.match(body)
+    phrase = _phrase(body)[0]
     tokens = WORD_PART.findall(rules.normalise_word(body[phrase.end():] if phrase else body))      # «не-а» is «не» and «а»
     if any(t in NEGATION or t in DOUBT or any(d in t for d in DAMAGE) for t in tokens) or PART.search(body):
         return False
-    if BUILTIN.get(word, (None, None))[1] == "at_point" and any(t.startswith("клиент") for t in tokens):
-        return False                                  # «приехал клиент» is about the client, not the tyres (the owner 2026-10-25)
-    meanings = {NO_SHOW} if phrase else set()
+    target = RETURN if word == RETURN else BUILTIN.get(word, (None, None))[1]
+    if target in ("at_point", RETURN) and any(t.startswith("клиент") for t in tokens):
+        return False                                  # «приехал клиент» is about the client, not the tyres (the owner 2026-10-25);
+    number = order_number(text)                       # «возврат отдал клиенту» is not the supplier's return
+    if word in STRICT and any(t not in STRICT_TAIL and not (number is not None and ORDER_WORD.match(t)) for t in (tokens if phrase else tokens[1:])):
+        return False                                  # «пришли фото», «приехала машина»: not about the tyres
+    meanings = {NO_SHOW if word == NO_SHOW else target} if phrase else set()
     meanings |= {BUILTIN[t][1] if t in BUILTIN else t for t in tokens if t in BUILTIN or t in words}
+    meanings |= {RETURN for t in tokens if t.startswith("возврат")} | {"done" for t in tokens if t in ("отдал", "отдала", "отдали")}
     if len(meanings) > 1:
-        return False
-    number = order_number(text)                       # every number that names an order («заказ 17», «№4», 5+ digits) must be the one taken
+        return False                                  # every number that names an order («заказ 17», «№4», 5+ digits) must be the one taken
     named = LONG_NUMBER.findall(body) + [m.group(1) for m in MARKED_NUMBER.finditer(body)]
     spaced = [n for n in SPACED_NUMBER.findall(body) if len(re.sub(r"\D", "", n)) >= 5]
     return not spaced and all(number is not None and int(n) == number for n in named)
@@ -244,6 +292,14 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                            CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
         return finish(*no_show(conn, card, "менеджер %s" % point["name"], now, notify))
+    if word == RETURN:
+        if code == "return":
+            return finish("уже отмечено", "Заказ №%s уже отмечен: %s." % (label(card), RETURNED))
+        if code not in RETURN_FROM:
+            return dispute(point, "«%s», а заказ на этапе «%s»" % (RETURN, card["stage"]["name"]),
+                           CANCELLED % label(card) if code == "cancel" else
+                           "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
+        return finish(*returned(conn, card, "менеджер %s" % point["name"], now))
     command = rules.find_command(conn, card["stage_id"], word)                   # a word the owner set up for this stage comes first
     if command is None and word in BUILTIN:
         sources, target = BUILTIN[word]
@@ -286,6 +342,36 @@ def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional
             conn.commit()
         return "заказ перенесён на «%s»" % stage["name"], "Заказ №%s — отмечено: %s (теперь на этапе «%s»)." % (label(card), ISSUED, stage["name"])
     return "заказ перенесён на «%s»" % stage["name"], "Готово: заказ №%s на этапе «%s»." % (label(card), stage["name"])
+
+
+def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
+    """«Возврат отдал»: the tyres went back to the supplier (the owner 2026-10-25). The type and the reason of the return are filled when empty,
+    the amount never (the lead 2026-10-26): without it the stage stays and the responsible gets a yellow record to finish it. The client is
+    never written to. (outcome for the log, answer for the point)."""
+    stage = orders.get_stage(conn, _stage_id(conn, "return"))
+    changes = {k: v for k, v in (("return_kind", "supplier"), ("return_reason", RETURN_REASON)) if not card[k]}
+    gaps = orders.missing_for(dict(card, **changes), stage)
+    answer = "Заказ №%s: отмечено — %s" % (label(card), RETURNED)
+    if gaps:                                       # the type and the reason are kept, so that the amount is all the manager fills (review 2026-10-26)
+        if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'point' AND text = ? AND at >= ? LIMIT 1",
+                        (card["id"], RETURN_LINE, card["entered_at"] or "")).fetchone():
+            return "уже отмечено: ждёт суммы возврата", "Заказ №%s уже отмечен: %s." % (label(card), RETURNED)
+        if changes:
+            orders.update_card(conn, card["id"], changes, now, who, commit=False)
+        orders.add_event(conn, card["id"], now, who, "point", RETURN_LINE)
+        orders.add_event(conn, card["id"], now, who, "point", RETURN_ASK if gaps == ["сумма возврата"] else RETURN_GAPS % ", ".join(gaps),
+                         level="yellow")
+        conn.commit()
+        return "возврат: этап не изменён, не заполнено: %s (жёлтая запись)" % ", ".join(gaps), answer
+    try:
+        moved = orders.move_card(conn, card["id"], stage["id"], now, who, changes=changes)
+    except OrderError as err:
+        return "не выполнено: %s" % err, "Не получилось: %s" % err
+    if not moved:
+        return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % label(card)
+    orders.add_event(conn, card["id"], now, who, "point", RETURN_LINE)
+    conn.commit()
+    return "заказ перенесён на «%s»" % stage["name"], answer
 
 
 def no_show(conn, card: dict, who: str, now: str, notify: Optional[Notify]) -> Tuple[str, str]:
@@ -572,8 +658,9 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
         raise OrderError("Заказ №%s не этой точки: исправьте точку в заказе или переведите его вручную." % label(card))
     word, who, code = item["word"], "%s (подтверждение из «Входящих»)" % author, card["stage"]["code"]
     sources, target = BUILTIN.get(word, ((), None))
-    command = None if word == NO_SHOW or target else rules.find_command(conn, card["stage_id"], word)
-    fits = (code == "at_point") if word == NO_SHOW else ((code in sources or code == target) if target else command is not None)
+    command = None if word in (NO_SHOW, RETURN) or target else rules.find_command(conn, card["stage_id"], word)
+    fits = (code == "at_point") if word == NO_SHOW else (code in RETURN_FROM) if word == RETURN else \
+        ((code in sources or code == target) if target else command is not None)
     if not fits:
         raise OrderError("Команда «%s» не подходит к заказу №%s на этапе «%s»: переведите заказ вручную и ответьте точке."
                          % (word, label(card), card["stage"]["name"]))
@@ -585,6 +672,11 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
     try:
         if word == NO_SHOW:
             outcome, reply = no_show(conn, card, who, now, notify)
+        elif word == RETURN:
+            outcome, reply = returned(conn, card, who, now)
+            if outcome.startswith("не "):
+                raise OrderError(reply)
+            reply = reply.replace(": отмечено", ": отмечено (подтвердил владелец)", 1)
         elif target and code == target:                                 # moved by hand already: only what the command adds
             sent, note = tell_client_arrived(conn, card["id"], deliver, now, who) if target == "at_point" else (False, "")
             outcome = "уже на «%s»%s" % (card["stage"]["name"], "; клиенту %s" % ("отправлено" if sent else "не отправлено") if note else "")
@@ -720,7 +812,8 @@ BUTTON_ANSWER = ("Напишите одним сообщением телефо�
                  "Можно и как раньше: клиент <телефон> <что нужно>.")
 
 
-HINT = "Команды: приехал <номер>, выдал <номер>, клиент <телефон> что нужно — или кнопка «%s»." % BUTTON
+HINT = ("Команды: приехал <номер>, выдал <номер>, клиент <телефон> что нужно — или кнопка «%s».\n"
+        "Лучше всего — ответом на сообщение о заказе или с номером заказа." % BUTTON)
 HINT_KEY = "vk_hint_%s"                           # app_state: the last hint to the point
 HINT_EVERY = timedelta(minutes=30)
 

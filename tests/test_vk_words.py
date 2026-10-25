@@ -47,7 +47,7 @@ def test_a_greeting_and_a_number_in_front_are_read_around_the_command(text, word
     assert mgr._word(text) == word and mgr.order_number(text) == number, text
 
 
-@pytest.mark.parametrize("text", ["Привет", "Привет, коллеги!", "Павел, приехали", "2 приехали", "1234 приехали", "приветливо приехали"])
+@pytest.mark.parametrize("text", ["Привет", "Привет, коллеги!", "Иван, приехали", "2 приехали", "1234 приехали", "приветливо приехали"])
 def test_no_greeting_no_name_and_a_quantity_in_front_change_nothing(text):
     assert mgr._word(text) not in mgr.BUILTIN and mgr.order_number(text) is None, text
 
@@ -81,7 +81,7 @@ def test_a_greeting_alone_or_without_a_number_is_not_guessed(tmp_path):
     "не приехали", "ещё не приехал", "пока не приехали", "шины не приехали?", "приехали?", "Привет, не приехали", "Добрый день, ещё не приехал",
     "5259052 не приехали", "приехали не все", "приехали, но не все", "приехали 2, одной нет", "приехали, одной нету", "Нет, не приехали", "Приехали? 5259052",
     "приехали и выдали 5259052", "приехал 5259052, клиент забрал", "клиент не пришёл, выдали",
-    "приехали 5259052 и 5253058", "приехали 5259052 шины", "приехал заказ 5259052, 4 шт", "приехал 5259052, заказ 5259052",
+    "приехали 5259052 и 5253058", "приехал заказ 5259052, 4 шт", "приехал 5259052, заказ 5259052",   # «приехали 5259052 шины»: a command now (the owner 2026-10-25)
     "клиент не пришёл, не отвечает",
     # review 1: a marked number in front that the parser did not take is never read as «the order of the reply»
     "Заказали 4, приехали 3", "Заказ 4 приехали 2", "№4 приехали 2", "№4, приехали 2 из 4", "заказ 17, приехали 2 шт", "Заказчик 2 приехал",
