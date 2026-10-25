@@ -14,4 +14,4 @@ imageproc = { version = "0.24", default-features = false }
 rand = "0.8"
 resvg = "0.42"
 usvg = { version = "0.42", default-features = false, features = ["text"] }
-tiny-skia = "0.11"
+tiny-skia = "0.12"
