@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Tires Sync Avito statistics
+
+[Timer]
+OnCalendar=*-*-* 04:20:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Ссылка для клиента · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Ссылка для клиента</h1><p class="sub">Клиент увидит только фото, название, характеристики и (по вашему выбору) цену продажи. Данные фиксируются на момент создания, ссылка действует 7 дней и отзывается кнопкой.</p></div></header>
+{% if too_many %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">В одной ссылке не больше {{ limit }} позиций, выбрано {{ items|length }}. Вернитесь в каталог и сократите выбор.</div></div>{% endif %}
+{% if skipped %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Не попадут в ссылку ({{ skipped|length }}): {% for name, why in skipped %}{{ name }} — {{ why }}{% if not loop.last %}; {% endif %}{% endfor %}.</div></div>{% endif %}
+{% if items %}
+<section class="card"><div class="card-head"><h3>Позиции в ссылке: {{ items|length }}</h3></div>
+<div class="table-wrap"><table class="table table--plain"><thead><tr><th>Название</th><th>Размер</th><th class="num">Цена продажи</th></tr></thead><tbody>
+{% for i in items %}<tr><td>{{ i.name }}</td><td>{{ i.size }}</td><td class="num">{{ i.price|money }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="card"><div class="card-body">
+<form method="post" action="/shares" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% for g in ids %}<input type="hidden" name="g" value="{{ g }}">{% endfor %}
+<label class="check"><input type="checkbox" name="show_price" value="1" checked>Показывать клиенту цену продажи</label>
+<div class="field" style="max-width:520px"><span class="label">Подпись для клиента (необязательно, до 200 знаков)</span><input class="input" name="note" maxlength="200" placeholder="Например: подборка для Audi A4"></div>
+<div class="row"><button class="btn btn--primary"{% if too_many %} disabled{% endif %}>{{ icon("link") }}Создать ссылку</button><a class="btn btn--link-gray" href="/catalog">Отмена</a></div>
+<p class="small muted">Фото копируются к нам с сервера поставщика при создании. Это занимает до минуты, если позиций много.</p>
+</form></div></section>
+{% else %}<div class="card"><div class="empty"><div class="empty-icon">{{ icon("inbox") }}</div><h3>Нечего отправлять</h3><p>Ни у одной выбранной позиции нет цены продажи.</p><a class="btn btn--secondary" href="/catalog">В каталог</a></div></div>{% endif %}
+{% endblock %}

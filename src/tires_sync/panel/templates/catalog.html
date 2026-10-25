@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, season %}
+{% block title %}Каталог · Tires Sync{% endblock %}
+{% block page_class %} page--wide{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Каталог</h1><p class="sub">Все позиции поставщика и то, попадают ли они в фид. Здесь можно вручную добавить или снять отдельную позицию. Наценки и публикация брендов: <a href="/settings/brands">Настройки → Бренды и наценки</a>, сопоставление моделей: <a href="/mappings">Сопоставления</a>.</p></div>
+<div class="actions">{% if can_post("feed_update_fetch") %}<form method="post" action="/feed/update/fetch" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary" title="Скачать выгрузку поставщика, показать изменения, обновить фид и запустить загрузку на Авито">{{ icon("refresh") }}Принудительная синхронизация</button></form>{% endif %}</div></header>
+{% if supplier_tabs %}<nav class="tabs">{% for t in supplier_tabs %}<a{% if t.on %} class="is-active"{% endif %} href="{{ t.url }}">{{ t.label }} <span class="badge badge--neutral">{{ t.count }}</span></a>{% endfor %}</nav>{% endif %}
+<section class="card">
+<form method="get" action="/catalog" class="filters" data-autosubmit>
+<input type="hidden" name="o" value="{{ sort }}">{% if descending %}<input type="hidden" name="r" value="1">{% endif %}{% if sup %}<input type="hidden" name="sup" value="{{ sup }}">{% endif %}{% if page_size != 100 %}<input type="hidden" name="n" value="{{ page_size }}">{% endif %}
+<div class="field"><span class="label">Размер</span><div class="ig">
+<input name="w" value="{{ size.w }}" title="Можно несколько значений ширины через запятую, например 205, 215" placeholder="Шир." aria-label="Ширина" list="dl-w" inputmode="numeric"><span class="ig-sep">/</span>
+<input name="h" value="{{ size.h }}" title="Можно несколько значений профиля через запятую, например 205, 215" placeholder="Проф." aria-label="Профиль" list="dl-h" inputmode="numeric"><span class="ig-sep">R</span>
+<input name="d" value="{{ size.d }}" title="Можно несколько значений диаметра через запятую, например 205, 215" placeholder="Диам." aria-label="Диаметр" list="dl-d" inputmode="numeric"></div></div>
+<datalist id="dl-w">{% for v in size_options.w %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-h">{% for v in size_options.h %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-d">{% for v in size_options.d %}<option value="{{ v }}">{% endfor %}</datalist>
+<div class="field" style="width:260px"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ q }}" placeholder="Размер, название, артикул" title="Например: 205/55 R16, Ikon, часть названия или артикул"></div></div>
+<div class="field"><span class="label">Сезон</span><div class="seg">
+<label><input type="radio" name="s" value=""{% if not season %} checked{% endif %}>Все</label>
+<label title="Лето"><input type="radio" name="s" value="summer"{% if season == "summer" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span><span class="sr-only">Лето</span></label>
+<label title="Зима"><input type="radio" name="s" value="winter"{% if season == "winter" %} checked{% endif %}><span class="ico-snow">{{ icon("snow") }}</span><span class="sr-only">Зима</span></label></div></div>
+<div class="field"><span class="label">Шипы</span><div class="seg">
+<label><input type="radio" name="t" value=""{% if not studs %} checked{% endif %}>Все</label>
+<label><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}><span class="spike" title="Шипы"><span>ш</span></span>Шипы</label>
+<label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div></div>
+<div class="field" style="width:140px"><span class="label">Статус</span><select class="select" name="st"><option value=""{% if status == "all" %} selected{% endif %}>Все</option><option value="feed"{% if status == "feed" %} selected{% endif %}>В фиде</option><option value="no"{% if status == "no" %} selected{% endif %}>Не в фиде</option><option value="nopair"{% if status == "nopair" %} selected{% endif %}>Нет пары</option><option value="problem"{% if status == "problem" %} selected{% endif %}>Проблемы</option><option value="gone"{% if status == "gone" %} selected{% endif %}>Нет у поставщика</option></select></div>
+<noscript><button class="btn btn--secondary" style="height:40px">Показать</button></noscript>
+<a class="btn btn--link-gray" style="height:40px" href="/catalog{% if sup %}?sup={{ sup }}{% endif %}">Сбросить</a>
+</form>
+</section>
+<div id="items" data-url="{{ table_url }}">{% include "_catalog_table.html" %}</div>
+
+
+{# the buttons by rights: «менять» in the catalog puts a position in or out by hand, «отправлять клиенту» makes a link for the client #}
+{% if can_post("catalog_stage") %}<form id="stage" method="post" action="/catalog/stage" data-ajax data-scope="page" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}"></form>{% endif %}
+{% if can_post("catalog_stage") or can_post("share_new") %}<form id="bulk" method="post" action="{{ '/catalog/stage' if can_post('catalog_stage') else '/shares/new' }}" class="bulkbar" data-ajax data-scope="bulk" hidden>
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}">
+<b><span data-count>0</span> выбрано</b><span class="sep"></span>
+{% if can_post("catalog_stage") %}<button name="bulk" value="off" class="btn btn--danger-outline btn--sm">Снять выбранные</button>
+<button name="bulk" value="on" class="btn btn--secondary btn--sm">Добавить вручную выбранные</button>
+<button name="bulk" value="clear" class="btn btn--secondary btn--sm">Отменить ручное решение у выбранных</button>{% endif %}
+{% if can_post("share_new") %}<button type="submit" formaction="/shares/new" class="btn btn--primary btn--sm" title="Страница для клиента: фото, название, характеристики и цена продажи">{{ icon("send", "i-sm") }}Ссылка для клиента</button>{% endif %}
+<button type="button" id="bulk-clear" class="btn btn--ghost btn--sm">Снять выделение</button>
+</form>{% endif %}
+{% if wait %}{% include "_catalog_wait.html" %}{% endif %}
+<div class="modal-backdrop" id="pv"><div class="modal"><div class="modal-head"><h3>Предпросмотр объявления</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div><div class="modal-body" id="pvbody"></div><div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Закрыть</button></div></div></div>
+{% endblock %}

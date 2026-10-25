@@ -1,0 +1,11 @@
+<div class="grid-2"><label class="field"><span class="label">Бренд</span><input class="input" name="brand" value="{{ w.brand }}" maxlength="60"></label>
+<label class="field"><span class="label">Модель</span><input class="input" name="model" value="{{ w.model }}" maxlength="60"></label></div>
+<div class="row" style="gap:var(--s-2);flex-wrap:wrap"><label class="field"><span class="label">Ширина</span><input class="input input--num" name="width" value="{{ w.width or '' }}" inputmode="numeric" style="width:90px"></label>
+<label class="field"><span class="label">Профиль</span><input class="input input--num" name="profile" value="{{ w.profile or '' }}" inputmode="numeric" style="width:90px"></label>
+<label class="field"><span class="label">Радиус</span><input class="input input--num" name="radius" value="{{ w.radius or '' }}" inputmode="numeric" style="width:90px"></label>
+<label class="field"><span class="label">Количество</span><input class="input input--num" name="qty" value="{{ w.qty }}" inputmode="numeric" style="width:90px"></label></div>
+<div class="grid-2"><label class="field"><span class="label">Сезон</span><select class="select" name="season"><option value="">Любой</option>{% for key, label in want_seasons.items() %}<option value="{{ key }}"{% if w.season == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Шипы</span><select class="select" name="studded"><option value="">Любые</option>{% for key, label in want_studs.items() %}<option value="{{ key }}"{% if w.studded == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label></div>
+<label class="field"><span class="label">Артикул (если клиент назвал точный)</span><input class="input mono" name="code" value="{{ w.code }}" maxlength="40"></label>
+<div class="row" style="gap:var(--s-4);flex-wrap:wrap"><label class="row" style="gap:var(--s-2)"><input type="checkbox" name="any_brand" value="1"{% if w.any_brand %} checked{% endif %}> можно другие бренды</label>
+<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="any_size" value="1"{% if w.any_size %} checked{% endif %}> можно другие размеры</label></div>

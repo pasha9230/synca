@@ -1,0 +1,100 @@
+# Внешний сторож (план ERP/CRM 2026-10-21, заход 1): раз в 30 минут с серверов GitHub, то есть вне tires-server, проверяет
+# /health панели — адрес в секрете репозитория PANEL_HEALTH_URL (панель отвечает, цикл не старше 2 часов, чаты читались за 15 минут).
+# Сбой: сообщение в Telegram через секреты репозитория TG_BOT_TOKEN и TG_CHAT_ID, тот же сбой не чаще раза в час,
+# после восстановления одно сообщение «снова в порядке». Без секретов только предупреждение в журнале, запуск не красный.
+# Раз в 30 минут (так было заведено при закрытом репозитории с лимитом минут). Настройка: docs/backup-offsite.md.
+# Расписание GitHub не точное: запуск может опоздать на 5–20 минут.
+name: watch
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Прошлое состояние
+        uses: actions/cache/restore@v4
+        with:
+          path: watch-state
+          key: watch-state-${{ github.run_id }}
+          restore-keys: watch-state-
+
+      - name: Проверка панели
+        id: check
+        shell: bash
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          URL: ${{ secrets.PANEL_HEALTH_URL }}                       # https://<панель>/health; секрет, не переменная: журналы публичного репозитория видны всем
+          REPEAT_SECONDS: "3600"
+        run: |
+          set -u
+          mkdir -p watch-state
+          prev_status=ok
+          grep -qx 'status=fail' watch-state/state 2>/dev/null && prev_status=fail
+          prev_alerted=$(sed -n 's/^alerted=\([0-9][0-9]*\)$/\1/p' watch-state/state 2>/dev/null | tail -1 || true)
+          prev_alerted=${prev_alerted:-0}
+          prev_told=0
+          grep -qx 'told=1' watch-state/state 2>/dev/null && prev_told=1
+          now=$(date +%s)
+          if [ -z "$URL" ]; then                                                   # the secret is not set: a loud failure, never a silent skip
+            status=fail reasons="не задан адрес проверки (секрет репозитория PANEL_HEALTH_URL)"
+          else
+            code=$(curl -s -o body.txt -w '%{http_code}' -m 20 --retry 2 --retry-delay 20 --retry-all-errors "$URL" || true)
+            body=$(head -c 100 body.txt 2>/dev/null | tr -cd 'a-z ' || true)
+            if [ "$code" = 200 ] && [ "$body" = ok ]; then
+              status=ok
+            else
+              status=fail
+              reasons=""
+              case " $body " in *" cycle "*) reasons="$reasons; цикл не запускался больше 2 часов" ;; esac
+              case " $body " in *" chats "*) reasons="$reasons; чаты Авито не читались больше 15 минут" ;; esac
+              case " $body " in *" db "*) reasons="$reasons; панель не читает базу" ;; esac
+              [ -n "$reasons" ] || reasons="; панель не отвечает (код ${code:-нет})"
+              reasons=${reasons#; }
+            fi
+          fi
+          send() {
+            if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+              echo "::warning::Секреты TG_BOT_TOKEN и TG_CHAT_ID не заведены, сообщение не отправлено: $1"
+              return 1
+            fi
+            sent=$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TG_CHAT_ID}" --data-urlencode "text=$1" || true)
+            if [ "$sent" != 200 ]; then
+              echo "::error::Telegram не принял сообщение (код ${sent:-нет}): $1"
+              exit 1
+            fi
+          }
+          alerted=$prev_alerted told=$prev_told                                      # alerted: the time of the last alert, never reset
+          if [ "$status" = fail ]; then
+            echo "::warning::Сбой: $reasons"
+            if [ $(( now - prev_alerted )) -ge "$REPEAT_SECONDS" ]; then
+              if send "⚠️ Tires Sync (внешняя проверка): $reasons. Проверьте сервер и панель."; then alerted=$now told=1; fi
+            fi
+          elif [ "$prev_told" = 1 ]; then                                          # the recovery only of a failure that was told
+            if send "✅ Tires Sync: внешняя проверка снова в порядке."; then told=0; fi
+          else
+            echo "Панель в порядке."
+          fi
+          printf 'status=%s\nalerted=%s\ntold=%s\n' "$status" "$alerted" "$told" > watch-state/state
+          if [ "$status" != "$prev_status" ] || [ "$alerted" != "$prev_alerted" ] || [ "$told" != "$prev_told" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Запомнить состояние
+        if: steps.check.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: watch-state
+          key: watch-state-${{ github.run_id }}-${{ github.run_attempt }}

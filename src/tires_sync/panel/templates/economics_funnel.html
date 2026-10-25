@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Воронка · Юнит-экономика · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "funnel" %}{% include "_economics_head.html" %}
+<section class="card">
+<div class="card-head"><div><h3 style="font-size:var(--fs-lg)">Воронка карточки за {{ days }} дней</h3>
+<p class="small muted">Показы → просмотры → контакты → продажи → маржа по каждому объявлению. Данные Авито собираются раз в сутки{% if collected %}, обновлено {{ collected|dt_utc }}{% endif %}.</p></div>
+<div class="seg" role="group" aria-label="Период">{% for n, label in periods %}<a href="/economics/funnel?p={{ n }}{% if pick %}&c={{ pick }}{% endif %}"{% if n == days %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div></div>
+{% if not total.positions %}
+<div class="empty"><div class="empty-icon">{{ icon("chart") }}</div><h3>Статистики ещё нет</h3><p>Данные Авито собираются раз в сутки в 04:20. Объявления должны быть опубликованы и сопоставлены с позициями.</p></div>
+{% else %}
+<div class="tiles" style="padding:var(--s-4) var(--s-5)">
+<div class="tile tile--brand"><span class="tile-label">Объявлений</span><span class="tile-value">{{ total.positions }}</span><span class="tile-sub">действуют на Авито</span></div>
+<div class="tile"><span class="tile-label">Просмотры</span><span class="tile-value">{{ total.views }}</span><span class="tile-sub">уникальные, за период</span></div>
+<div class="tile"><span class="tile-label">Контакты</span><span class="tile-value">{{ total.contacts }}</span><span class="tile-sub">{{ (total.rate * 100)|pct }} % от просмотров · в избранное {{ total.favorites }}</span></div>
+<div class="tile"><span class="tile-label">Продано</span><span class="tile-value">{{ total.pieces }} шт.</span><span class="tile-sub">записано в «Продажи»</span></div>
+<div class="tile"><span class="tile-label">Маржа факта</span><span class="tile-value">{{ total.margin|money }}</span><span class="tile-sub">за период</span></div>
+</div>
+<div class="chips" style="padding:0 var(--s-5) var(--s-3)">
+<a class="chip{% if not pick %} is-active{% endif %}" href="/economics/funnel?p={{ days }}">Все {{ total.positions }}</a>
+{% for code in codes %}{% if total.counts[code] %}<a class="chip{% if pick == code %} is-active{% endif %}" href="/economics/funnel?p={{ days }}&c={{ code }}">{{ labels[code][0] }} {{ total.counts[code] }}</a>{% endif %}{% endfor %}
+</div>
+<div class="table-wrap"><table class="table table--plain table--econ">
+<thead><tr><th>Объявление</th><th class="num">Цена</th><th class="num">Просмотры</th><th class="num">Контакты</th><th class="num">Избранное</th><th class="num">Контакт / просмотр</th><th class="num">Продано</th><th class="num">Маржа</th><th>Где проседает</th></tr></thead>
+<tbody>{% for r in rows %}<tr>
+<td><div class="t-name"><span class="gname">{{ r.title }}</span></div><span class="xs muted">наблюдаем {{ r.observed_days }} дн.</span></td>
+<td class="num">{% if r.price %}{{ r.price|money }}{% else %}—{% endif %}</td>
+<td class="num">{{ r.views }}</td><td class="num">{{ r.contacts }}</td><td class="num">{{ r.favorites }}</td>
+<td class="num">{% if r.views %}{{ (r.rate * 100)|pct }} %{% else %}—{% endif %}</td>
+<td class="num">{% if r.pieces %}{{ r.pieces }} шт.{% else %}<span class="muted">—</span>{% endif %}</td>
+<td class="num">{% if r.pieces %}<b class="strong">{{ r.margin|money }}</b>{% else %}<span class="muted">—</span>{% endif %}</td>
+<td><span class="badge badge--{{ 'ok' if r.code in ('ok', 'selling') else ('neutral' if r.code == 'watching' else 'warn') }}" title="{{ r.advice }}">{{ r.label }}</span>{% if not r.reliable and r.code != 'watching' %}<div class="xs muted">мало данных</div>{% endif %}<div class="xs muted">{{ r.advice }}</div></td>
+</tr>{% endfor %}</tbody></table></div>
+{% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
+<div class="card-foot"><p class="small muted">Как читать: вывод делается после {{ thresholds.days }} дней наблюдения. «Мало просмотров» — меньше {{ thresholds.views }} за период. «Смотрят, но не пишут» — контактов меньше {{ thresholds.rate }} % от просмотров. «Пишут, но не покупают» — от {{ thresholds.contacts }} контактов и ни одной записанной продажи. Продажи берутся из раздела «Продажи», который вы заполняете вручную: пока продажа не записана, воронка считает, что её не было. Это подсказка, где искать, а не приговор: по одной карточке за неделю данных мало.</p></div>
+{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}{{ title }} · Tires Sync{% endblock %}
+{% block content %}
+<div class="card"><div class="empty"><div class="empty-icon">{{ icon("lock" if code == 403 else "alert") }}</div><h3>{{ title }}</h3><p>{{ text }}</p><a class="btn btn--secondary" href="/">На главную</a></div></div>
+{% endblock %}
+{% block auth %}
+<h3>{{ title }}</h3><p class="muted">{{ text }}</p><a class="btn btn--secondary" href="/login">Войти</a>
+{% endblock %}

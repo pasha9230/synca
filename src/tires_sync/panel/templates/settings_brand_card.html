@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, season %}
+{% block title %}{{ row.label }} · Бренды и наценки · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "brands" %}{% include "_settings_head.html" %}
+{% set snames = {"winter": "Зима", "summer": "Лето", "all": "Всесезонные"} %}
+<section class="card">
+<div class="card-head"><div><div class="crumbs"><a href="/settings/brands#pricing-{{ supplier.id }}">Бренды и наценки</a>{{ icon("chev", "i-sm") }}<span>{{ row.label }}</span></div><h3 style="font-size:var(--fs-lg)">Настройки бренда {{ row.label }}</h3></div>
+<span class="ml-auto row" style="gap:8px">
+{% if can_post("settings_pricing") %}<form method="post" action="/settings/pricing" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="brand_all"><input type="hidden" name="supplier" value="{{ supplier.id }}"><input type="hidden" name="brand" value="{{ row.brand }}"><input type="hidden" name="next" value="{{ card_url }}"><input type="hidden" name="enabled" value="off"><button class="btn btn--danger-outline">Снять весь бренд</button>{% if can_post("settings_pricing") %}</form>{% else %}</fieldset>{% endif %}
+{% if can_post("settings_pricing") %}<form method="post" action="/settings/pricing" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="brand_all"><input type="hidden" name="supplier" value="{{ supplier.id }}"><input type="hidden" name="brand" value="{{ row.brand }}"><input type="hidden" name="next" value="{{ card_url }}"><input type="hidden" name="enabled" value="on"><button class="btn btn--secondary">{{ icon("undo") }}Вернуть весь бренд</button>{% if can_post("settings_pricing") %}</form>{% else %}</fieldset>{% endif %}
+</span></div>
+<div class="card-body stack">
+{% if stale %}<p class="small"><span class="badge badge--warn" data-stale-unload title="Списки взяты из этой выгрузки; цикл её не берёт, объявления поставщика держатся как были. Настройки сохраняются и применятся к свежей выгрузке.">{{ stale }}</span></p>{% endif %}
+<p class="muted small">Минус — уценка, плюс — наценка; допустимо от −{{ "%g" % raw.pct_limit }} до +{{ "%g" % raw.pct_limit }} %. Сезон попадает в фид, когда задан процент и стоит «Публиковать». Изменения показываются списком, и вы подтверждаете их одной кнопкой.
+{% if not row.brand_known %} <a class="text-warn" href="/mappings#brands">Бренд ещё не сопоставлен с Авито</a>.{% elif row.unmatched %} <a class="text-warn" href="/mappings?b={{ row.brand|urlencode }}">Не сопоставлено моделей: {{ row.unmatched }}</a>.{% else %} <span class="text-ok">Все модели сопоставлены.</span>{% endif %}</p>
+<div class="season-grid">
+{% for sname in ("winter", "summer", "all") %}{% set sc = row.seasons[sname] %}
+{% if can_post("settings_pricing") %}<form method="post" action="/settings/pricing" class="season-card{% if sc.pending or sc.enabled_pending %} is-pend{% endif %}{% if not sc.enabled %} is-off{% endif %}">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="brand"><input type="hidden" name="supplier" value="{{ supplier.id }}"><input type="hidden" name="brand" value="{{ row.brand }}"><input type="hidden" name="next" value="{{ card_url }}"><input type="hidden" name="{{ sname }}_form" value="1">
+<div class="row">{% if sname == "winter" %}{{ season("winter") }}{% elif sname == "summer" %}{{ season("summer") }}{% else %}{{ season("all") }}{% endif %}<span class="muted small">{{ sc.count }} {{ plural(sc.count, "позиция", "позиции", "позиций") }}</span>{% if sc.pending or sc.enabled_pending %}<span class="ml-auto badge badge--pend">изменено, не подтверждено</span>{% endif %}</div>
+<div class="pct-row">
+<label class="field"><span class="label">до R17, %</span><input class="input input--sm input--num{% if sc.pending %} is-pend{% endif %}" name="{{ sname }}_small" value="{{ sc.small }}" inputmode="decimal" placeholder="−3.8"></label>
+<label class="field"><span class="label">от R18, %</span><input class="input input--sm input--num{% if sc.pending %} is-pend{% endif %}" name="{{ sname }}_large" value="{{ sc.large }}" inputmode="decimal" placeholder="−4.3"></label></div>
+<div class="row"><label class="check"><input type="checkbox" name="{{ sname }}_on"{% if sc.enabled %} checked{% endif %}>Публиковать</label><button class="btn btn--secondary btn--xs ml-auto">Применить</button></div>
+{% if can_post("settings_pricing") %}</form>{% else %}</fieldset>{% endif %}{% endfor %}
+</div>
+</div>
+</section>
+{% endblock %}

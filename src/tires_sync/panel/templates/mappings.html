@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, season %}
+{% block title %}Сопоставления · Tires Sync{% endblock %}
+{% block content %}
+<nav class="tabs2"><a{% if request.path.startswith('/mappings') %} class="is-active" aria-current="page"{% endif %} href="/mappings">Модели</a><a{% if request.path.startswith('/pairs') %} class="is-active" aria-current="page"{% endif %} href="/pairs">Пары поставщиков</a></nav>
+<header class="page-head"><div><h1>Сопоставления</h1><p class="sub">Модели поставщика нужно связать с моделями из справочника Авито — иначе объявление не соберётся. Сохраняется сразу, без черновика.</p></div>
+<div class="actions">
+<a class="btn btn--secondary" href="/mappings/export.csv">{{ icon("download") }}Выгрузить CSV</a>
+{% if can_post("import_mappings") %}<form method="post" action="/mappings/import" enctype="multipart/form-data" class="inline" data-autosubmit><input type="hidden" name="csrf" value="{{ csrf_token() }}"><label class="btn btn--secondary">{{ icon("upload") }}Загрузить CSV<input type="file" name="file" accept=".csv,text/csv" class="sr-only"></label><noscript><button class="btn btn--secondary btn--sm">Отправить</button></noscript></form>{% endif %}
+{% if can_post("accept_confident") %}<form method="post" action="/mappings/accept-confident" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="b" value="{{ only_brand }}"><input type="hidden" name="next" value="{{ next_url }}"><button class="btn btn--primary"{% if not confident %} disabled{% endif %}>{{ icon("check") }}Принять все уверенные{% if filtered %} (по фильтру){% endif %} ({{ confident }})</button></form>{% endif %}
+</div></header>
+<div class="flash flash--info">{{ icon("info") }}<div class="grow"><div class="flash-title">Загрузка CSV</div><div class="flash-text">В выгруженной таблице заполните столбец <code>avito_model</code> и загрузите её обратно: заменятся только строки с заполненным столбцом, пустые пропускаются, ошибки покажем списком.</div></div><button class="close" type="button" aria-label="Закрыть">{{ icon("x") }}</button></div>
+
+{% if mirror_rows %}<section class="card" id="mirror">
+<div class="card-head"><h3>Зеркальные фиды: модели вне справочника Авито</h3><span class="sub">{{ mirror_rows|length }} {{ plural(mirror_rows|length, "модель", "модели", "моделей") }}</span></div>
+<div class="flash flash--warn"><div class="grow"><div class="flash-title">Авито не найдёт эти модели в справочнике</div><div class="flash-text">Объявления с ними блокируются («Модель — значение не найдено»). Сверьте с полным названием из WebMIM, выберите значение из справочника и подтвердите: в фиде заменится только поле «Модель», Id и тексты не меняются. Сопоставление сохраняется в общей таблице: оно действует и для основного фида с той же моделью поставщика.</div></div></div>
+<table class="table table--plain">
+<thead><tr><th>Аккаунт</th><th>Бренд · модель в фиде</th><th>Объявления: Id · полное название WebMIM · остаток</th><th>Модель в Авито</th><th></th></tr></thead>
+<tbody>{% for r in mirror_rows %}{% set fid = "mr-%d" % loop.index %}
+<tr><td class="muted">{{ r.account }}</td>
+<td class="t-name">{{ r.brand }} · <b>{{ r.model }}</b> <span class="badge badge--warn">вне справочника</span>
+{% if can_post("confirm_model") %}<form id="{{ fid }}" method="post" action="/mappings/model" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="brand" value="{{ r.brand }}"><input type="hidden" name="model_raw" value="{{ r.model }}"><input type="hidden" name="next" value="/mappings#mirror"></form>{% endif %}</td>
+<td>{% for a in r.ads %}<div class="small"><code>{{ a.id }}</code> · {% if a.name %}{{ a.name }}{% else %}<span class="muted">нет в выгрузке WebMIM</span>{% endif %}{% if a.stock is not none %} · <span class="muted">остаток {{ a.stock }}</span>{% endif %}</div>{% endfor %}</td>
+<td><input class="input input--sm" style="width:240px" form="{{ fid }}"{% if not can_post("confirm_model") %} readonly{% endif %} name="avito_model" list="{{ r.list_id }}" value="{{ r.hint }}" placeholder="модель как в Авито" autocomplete="off" required aria-label="Модель в Авито для {{ r.model }}">
+{% if r.hint %}<div class="muted xs">{% if r.from_name %}по полному названию{% else %}по модели{% endif %}{% if r.options|length > 1 %}; ещё: {{ r.options[1:]|join(", ") }}{% endif %}</div>{% else %}<div class="muted xs">подсказки нет: выберите из справочника бренда</div>{% endif %}
+</td>
+<td class="t-actions">{% if can_post("confirm_model") %}<button class="btn btn--primary btn--xs" form="{{ fid }}">Подтвердить</button>{% endif %}</td></tr>
+{% endfor %}</tbody></table>
+{% for list_id, names in mirror_lists.items() %}<datalist id="{{ list_id }}">{% for o in names %}<option value="{{ o }}">{% endfor %}</datalist>{% endfor %}
+</section>{% endif %}
+
+{% if brands %}<section class="card" id="brands">
+<div class="card-head"><h3>Бренды без сопоставления</h3><span class="sub">{{ brands|length }} {{ plural(brands|length, "бренд", "бренда", "брендов") }}</span></div>
+<table class="table table--plain">
+<thead><tr><th>Бренд поставщика</th><th>Подсказка из справочника</th><th>Бренд в Авито</th><th></th></tr></thead>
+<tbody>{% for b in brands %}{% set fid = "bf-%d" % loop.index %}
+<tr><td class="t-name">{{ brand_label(b.brand_key) }}{% if b.brand_key != brand_label(b.brand_key) %} <span class="badge badge--neutral">другой поставщик</span>{% endif %} <span class="muted small">· {{ b.goods }} {{ plural(b.goods, "позиция", "позиции", "позиций") }}</span>
+{% if can_post("confirm_brand") %}<form id="{{ fid }}" method="post" action="/mappings/brand" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="brand_key" value="{{ b.brand_key }}"></form>{% endif %}</td>
+<td>{% if b.suggestions %}<span class="text-warn">предложение: <b>{{ b.suggestions[0] }}</b></span>{% else %}<span class="muted">нет подсказки</span>{% endif %}</td>
+<td><input class="input input--sm" style="width:240px" form="{{ fid }}"{% if not can_post("confirm_brand") %} readonly{% endif %} name="avito_brand_manual" list="avito-brands" value="{{ b.suggestions[0] if b.suggestions else '' }}" placeholder="бренд как в Авито" autocomplete="off" required aria-label="Бренд в Авито для {{ brand_label(b.brand_key) }}"></td>
+<td class="t-actions">{% if can_post("confirm_brand") %}<button class="btn {{ 'btn--primary' if b.suggestions else 'btn--secondary' }} btn--xs" form="{{ fid }}">{% if b.suggestions %}Сопоставить{% else %}Сохранить{% endif %}</button>{% endif %}</td></tr>
+{% endfor %}</tbody></table>
+<datalist id="avito-brands">{% for name in avito_brand_names %}<option value="{{ name }}">{% endfor %}</datalist>
+</section>{% endif %}
+
+<section class="card">
+<div class="card-head"><h3>Модели, ждущие сопоставления</h3><span class="sub">{{ total }} не сопоставлено из {{ model_total }} · показано {{ shown_models }} {{ plural(shown_models, "модель", "модели", "моделей") }}, {{ shown_goods }} {{ plural(shown_goods, "позиция", "позиции", "позиций") }}</span>
+<div class="seg seg--sm ml-auto">{% for c in chips %}<a{% if c.on %} class="is-active" aria-current="page"{% endif %} href="{{ c.url }}">{{ c.label }}</a>{% endfor %}</div></div>
+<form method="get" action="/mappings" class="row" style="padding:var(--s-3) var(--s-5);gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--gray-100)" data-autosubmit>
+{% if kind %}<input type="hidden" name="c" value="{{ kind }}">{% endif %}
+<input class="input input--sm" style="width:240px" name="q" value="{{ q }}" placeholder="Поиск по бренду или модели" aria-label="Поиск">
+<select class="select select--sm" name="b" style="width:220px" aria-label="Бренд"><option value="">Все бренды</option>{% for key, label in brand_options %}<option value="{{ key }}"{% if key == only_brand %} selected{% endif %}>{{ brand_label(key) }}</option>{% endfor %}</select>
+<label class="check"><input type="checkbox" name="a" value="all"{% if show_all %} checked{% endif %}>Показывать и сопоставленные</label>
+<button class="btn btn--secondary btn--sm">Показать</button></form>
+{% if groups %}<table class="table table--plain">
+<thead><tr><th>Модель поставщика</th><th class="num">Позиций</th><th>Подсказка</th><th>Уверенность</th><th>Модель в Авито</th><th></th></tr></thead>
+{% for g in groups %}<tbody id="b-{{ g.dom_id }}">
+<tr><td colspan="6" style="background:var(--gray-50);height:32px"><b class="strong">{{ brand_label(g.brand) }}</b> <span class="muted small">· {{ g.models|length }}</span>
+{% if g.confident %}{% if can_post("accept_confident") %}<form method="post" action="/mappings/accept-confident" class="inline" style="float:right"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="b" value="{{ g.brand }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="next" value="{{ next_url }}#b-{{ g.dom_id }}"><button class="btn btn--ghost btn--xs">Принять уверенные ({{ g.confident }})</button></form>{% endif %}{% endif %}</td></tr>
+{% for m in g.models %}{% set fid = "mf-%s-%d" % (g.dom_id, loop.index) %}
+<tr><td class="t-name">{{ m.name }} <span class="model-kinds">{% for k in m.seasons %}{{ season(k) }}{% endfor %}{% for c in m.cartypes %}<span class="badge badge--neutral" title="Коммерческая шина ({{ c }}): по умолчанию не публикуется, можно добавить вручную">{{ c }}</span>{% endfor %}</span>{% if can_post("confirm_model") %}<form id="{{ fid }}" method="post" action="/mappings/model" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="brand" value="{{ g.avito_brand }}"><input type="hidden" name="model_raw" value="{{ m.name }}"><input type="hidden" name="next" value="{{ next_url }}#b-{{ g.dom_id }}"></form>{% endif %}</td>
+<td class="num">{{ m.goods }}</td>
+<td>{% if m.avito_model %}<span class="muted">—</span>{% elif m.hint %}<b>{{ m.hint }}</b> <span class="muted xs">{{ m.pct }} %</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+<td>{% if m.kind == "done" %}<span class="badge badge--ok">сопоставлена</span>{% elif m.kind == "conf" %}<span class="badge badge--ok">уверенно</span>{% elif m.kind == "check" %}<span class="badge badge--warn">проверьте</span>{% else %}<span class="badge badge--neutral">нет подсказки</span>{% endif %}</td>
+<td><input class="input input--sm" style="width:240px" form="{{ fid }}"{% if not can_post("confirm_model") %} readonly{% endif %} name="avito_model" list="dl-{{ g.dom_id }}" value="{{ m.avito_model or m.hint }}" placeholder="модель как в Авито" autocomplete="off" required aria-label="Модель в Авито для {{ m.name }}"></td>
+<td class="t-actions">{% if can_post("confirm_model") %}<button class="btn {{ 'btn--primary' if m.kind == 'conf' else 'btn--secondary' }} btn--xs" form="{{ fid }}">{% if m.kind == "none" or m.kind == "done" %}Сохранить{% else %}Подтвердить{% endif %}</button>{% endif %}</td></tr>
+{% endfor %}</tbody>{% endfor %}
+</table>
+{% for g in groups %}<datalist id="dl-{{ g.dom_id }}">{% for o in g.avito_models %}<option value="{{ o }}">{% endfor %}</datalist>{% endfor %}
+{% else %}
+{% if filtered or show_all %}<div class="empty"><div class="empty-icon">{{ icon("search") }}</div><h3>Ничего не найдено</h3><p>Измените фильтры или <a href="/mappings">сбросьте их</a>.</p></div>
+{% else %}<div class="empty"><div class="empty-icon">{{ icon("check-circle") }}</div><h3>Нет моделей, ожидающих сопоставления</h3></div>{% endif %}
+{% endif %}
+</section>
+
+<section class="card" id="old-names">
+<div class="card-head"><h3>Прежние названия моделей</h3><span class="sub">{{ old_names|length }} {{ plural(old_names|length, "запись", "записи", "записей") }}</span></div>
+<div class="flash flash--info">{{ icon("info") }}<div class="grow"><div class="flash-text">Для подстановки <code>{old_model}</code> в шаблоне описания, например «Ikon Tyres · Autograph Ice 9 → Nokian Hakkapeliitta 9». В каталоге не показывается. Строка шаблона с <code>{old_model}</code> выводится только у моделей с записью. Фид обновится со следующим циклом.</div></div></div>
+<table class="table table--plain">
+<thead><tr><th>Бренд в Авито</th><th>Модель в Авито</th><th>Прежнее название</th><th></th></tr></thead>
+<tbody>{% for r in old_names %}{% set fid = "on-%d" % loop.index %}
+<tr><td>{{ r.brand }}</td><td>{{ r.model }}{% if can_post("save_old_model_name") %}<form id="{{ fid }}" method="post" action="/mappings/old-name" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="brand" value="{{ r.brand }}"><input type="hidden" name="model" value="{{ r.model }}"></form>{% endif %}</td>
+<td><input class="input input--sm" style="width:280px" form="{{ fid }}" name="old_name" value="{{ r.name }}" maxlength="100"{% if not can_post("save_old_model_name") %} readonly{% endif %} aria-label="Прежнее название для {{ r.brand }} {{ r.model }}"><div class="muted xs">пусто и «Сохранить» — убрать</div></td>
+<td class="t-actions">{% if can_post("save_old_model_name") %}<button class="btn btn--secondary btn--xs" form="{{ fid }}">Сохранить</button>{% endif %}</td></tr>
+{% endfor %}
+{% if can_post("save_old_model_name") %}<tr><td><form id="on-new" method="post" action="/mappings/old-name" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form>
+<input class="input input--sm" style="width:200px" form="on-new" name="brand" list="old-brands" placeholder="бренд как в Авито" autocomplete="off" required aria-label="Бренд в Авито"></td>
+<td><input class="input input--sm" style="width:220px" form="on-new" name="model" list="old-models" placeholder="модель как в Авито" autocomplete="off" required aria-label="Модель в Авито"></td>
+<td><input class="input input--sm" style="width:280px" form="on-new" name="old_name" maxlength="100" placeholder="например, Nokian Hakkapeliitta 9" required aria-label="Прежнее название"></td>
+<td class="t-actions"><button class="btn btn--primary btn--xs" form="on-new">Добавить</button></td></tr>{% endif %}
+</tbody></table>
+<datalist id="old-brands">{% for b in old_brands %}<option value="{{ b }}">{% endfor %}</datalist>
+<datalist id="old-models">{% for m in old_models %}<option value="{{ m }}">{% endfor %}</datalist>
+</section>
+{% endblock %}

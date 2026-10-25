@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, empty %}
+{% block title %}Шаблоны сообщений · Заказы · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Шаблоны сообщений</span></div><h1>Шаблоны сообщений</h1>
+<p class="sub">Текст для клиента или менеджера точки. Правила воронки подставляют данные заказа и показывают готовый текст в карточке заказа.</p></div></header>
+<details class="card" style="margin-bottom:var(--s-4)"><summary class="card-body strong">Какие подстановки есть</summary><div class="card-body"><table class="table table--plain"><tbody>{% for key, label in variables.items() %}<tr><td><code>{{ "{" ~ key ~ "}" }}</code></td><td>{{ label }}</td></tr>{% endfor %}</tbody></table><p class="small muted">Если для заказа нет значения (например, телефона), сообщение не готовится: задача покажет, чего не хватает.</p></div></details>
+<section class="card">
+{% for t in templates %}{% if can_post("orders_template_save") %}<form method="post" action="/orders/templates/save" class="card-body stack" style="border-bottom:1px solid var(--gray-200)">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="id" value="{{ t.id }}">
+<div class="row" style="gap:var(--s-3);flex-wrap:wrap"><label class="field" style="width:260px"><span class="label">Название</span><input class="input" name="name" value="{{ t.name }}" maxlength="80"></label>
+<label class="field"><span class="label">Кому</span><select class="select" name="audience">{% for k, v in audiences.items() %}<option value="{{ k }}"{% if t.audience == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label></div>
+<label class="field"><span class="label">Текст</span><textarea class="textarea" name="body" rows="3" maxlength="2000">{{ t.body }}</textarea></label>
+<div class="row" style="gap:var(--s-2)"><button class="btn btn--primary btn--sm">Сохранить</button>{% if can_post("orders_template_delete") %}<button class="btn btn--danger-outline btn--sm ml-auto" formaction="/orders/templates/{{ t.id }}/delete">Удалить</button>{% endif %}</div>{% if can_post("orders_template_save") %}</form>{% else %}</fieldset>{% endif %}
+{% else %}{{ empty("edit", "Шаблонов пока нет", "Шаблон — готовый текст для клиента или точки: правила этапов подставят в него данные заказа. Добавьте первый ниже или возьмите образцы.") }}{% endfor %}
+{% if can_post("orders_template_samples") %}<form method="post" action="/orders/templates/samples" class="card-body">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Добавить тексты «заказ оформлен» (клиенту и менеджеру)</button>{% if can_post("orders_template_samples") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card">{% if can_post("orders_template_save") %}<form method="post" action="/orders/templates/save">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><div class="card-head"><h3>Новый шаблон</h3></div>
+<div class="card-body stack"><div class="row" style="gap:var(--s-3);flex-wrap:wrap"><label class="field" style="width:260px"><span class="label">Название</span><input class="input" name="name" maxlength="80"></label>
+<label class="field"><span class="label">Кому</span><select class="select" name="audience">{% for k, v in audiences.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label></div>
+<label class="field"><span class="label">Текст</span><textarea class="textarea" name="body" rows="3" maxlength="2000"></textarea></label></div>
+<div class="card-foot"><button class="btn btn--primary">{{ icon("plus") }}Добавить шаблон</button></div>{% if can_post("orders_template_save") %}</form>{% else %}</fieldset>{% endif %}</section>
+{% endblock %}

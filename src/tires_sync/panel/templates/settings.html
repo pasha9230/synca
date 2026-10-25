@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Настройки · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "general" %}{% include "_settings_head.html" %}
+{% if can_post("settings_draft") %}<form method="post" action="/settings/draft" class="stack-lg">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<section class="card">
+<div class="card-head"><h3>Остатки и отбор</h3></div>
+<div class="card-body grid-3">
+<label class="field"><span class="label">Минимальный остаток</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="min_stock" value="{{ raw.min_stock }}" inputmode="numeric"><span class="ig-addon">шт.</span></div><span class="hint">Объявление снимается, когда в наличии меньше этого числа, и возвращается, как только остаток снова достигнет его.</span></label>
+<label class="field"><span class="label">Минимальный диаметр</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="min_diameter" value="{{ raw.min_diameter }}" inputmode="numeric"><span class="ig-addon">R</span></div><span class="hint">Меньшие диаметры не публикуются.</span></label>
+</div>
+</section>
+<section class="card">
+<div class="card-head"><h3>Публикация</h3></div>
+<div class="card-body stack">
+<div class="grid-3">
+<label class="field"><span class="label">Лимит новых за цикл</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="portion_limit" value="{{ raw.portion_limit }}" inputmode="numeric"><span class="ig-addon">шт.</span></div><span class="hint">Сколько новых объявлений добавляется за одну публикацию. Фид публикуется каждый час и после каждого подтверждённого изменения, поэтому при частых подтверждениях новых за сутки выйдет больше. Остальные встанут в очередь до следующей публикации. От 0 до 100 000; 0 — новые не публиковать. Уже опубликованные не затрагиваются.</span></label>
+<label class="field"><span class="label">Дней «пропуска» до снятия</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="stale_days" value="{{ raw.stale_days }}" inputmode="numeric"><span class="ig-addon">дн.</span></div><span class="hint">Если у опубликованной позиции появилась проблема (пустые или некорректные размер, остаток, цена в выгрузке), ждём столько дней и снимаем. 0 — снимать сразу. Позиция, которой нет в выгрузке поставщика, снимается сразу при любом значении.</span></label>
+<label class="field"><span class="label">Срок размещения вперёд</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="date_end_days" value="{{ raw.date_end_days }}" inputmode="numeric"><span class="ig-addon">дн.</span></div><span class="hint">На сколько дней вперёд размещать объявление.</span></label>
+</div>
+<input type="hidden" name="pack4_form" value="1">
+<div class="stack-sm">
+<div><b>Второе объявление «за 4 шт.»</b><div class="hint">Для позиций с остатком от 4 шт. рядом с обычным публикуется объявление на комплект: цена за комплект, отдельный Id, заголовок и артикул. Включается только для выбранных брендов, сезонов и радиусов; пока правил нет, комплектов нет.</div></div>
+<div class="chips">{% for r in pack4_rules %}<label class="chip chip--on"><span>{{ r.text }}</span><span class="small muted">убрать</span><input type="checkbox" name="p4_del" value="{{ r.rule }}" aria-label="Убрать правило {{ r.text }}"></label>{% else %}<span class="muted small">Правил нет: комплекты не публикуются.</span>{% endfor %}</div>
+<div class="row">
+<select class="select" name="p4_brand" style="max-width:240px" aria-label="Бренд"><option value="">Бренд…</option><option value="*">Все бренды</option>{% for b in pack4_brands %}<option value="{{ b.value }}">{{ b.label }}</option>{% endfor %}</select>
+<select class="select" name="p4_season" style="max-width:180px" aria-label="Сезон"><option value="*">Все сезоны</option><option value="winter">Зима</option><option value="summer">Лето</option><option value="all">Всесезонные</option></select>
+<select class="select" name="p4_d" style="max-width:140px" aria-label="Радиус"><option value="*">Все радиусы</option>{% for d in pack4_diameters %}<option value="{{ d }}">R{{ d }}</option>{% endfor %}</select>
+<button class="btn btn--secondary" name="p4_add" value="1">{{ icon("plus") }}Добавить правило</button>
+</div>
+</div>
+</div>
+</section>
+<section class="card">
+<div class="card-head"><h3>Распределение по точкам по умолчанию</h3></div>
+<div class="card-body stack">
+<div class="seg"><label><input type="radio" name="point_mode" value="percent"{% if raw.point_mode == "percent" %} checked{% endif %}>В процентах</label><label><input type="radio" name="point_mode" value="count"{% if raw.point_mode == "count" %} checked{% endif %}>В штуках, с адресом «остаток»</label></div>
+<div class="grid-3">{% for point, value in raw.point_values.items() %}<label class="field"><span class="label">{{ point }}{% if point_names.get(point|string) %} · {{ point_names[point|string] }}{% endif %}</span><input class="input" name="pv|{{ point }}" value="{{ value }}"></label>{% endfor %}</div>
+<label class="field" style="max-width:320px"><span class="label">Точка «остаток» (режим количества){% if raw.point_rest and point_names.get(raw.point_rest|string) %} · {{ point_names[raw.point_rest|string] }}{% endif %}</span><input class="input" name="point_rest" value="{{ raw.point_rest or '' }}"></label>
+<p class="small muted">Применяется к кабинетам, где своё распределение не задано (задаётся в Подключения → кабинет → Авито адреса).</p>
+</div>
+</section>
+<div class="row"><button class="btn btn--primary">Создать черновик {{ icon("arrow-right") }}</button><span class="small muted">Дальше экран подтверждения</span></div>
+{% if can_post("settings_draft") %}</form>{% else %}</fieldset>{% endif %}
+{% endblock %}

@@ -1,0 +1,20 @@
+[Unit]
+Description=Tires Sync encrypted database copy outside the server (S3)
+OnFailure=tires-alert@%n.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+UMask=0077
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync backup-offsite --db /var/lib/tires-sync/state.db --config /etc/tires-sync/offsite.conf
+TimeoutStartSec=30min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# в режиме WAL читатель создаёт state.db-shm/-wal, если базу сейчас никто не держит открытой
+ReadWritePaths=/var/lib/tires-sync

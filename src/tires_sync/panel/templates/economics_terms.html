@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, season %}
+{% block title %}Условия поставщика · Юнит-экономика · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "terms" %}{% include "_economics_head.html" %}
+<section class="card">
+<div class="card-head"><h3>{% if editing %}Изменение условий: {{ brand_label(editing.brand_key) }} {{ season(editing.season) }}{% else %}Условия поставщика{% endif %}</h3><span class="sub">Что вы получаете от поставщика: уценка или наценка вашей продажи, скидка при закупке, бонус и ЕЖ. Всё в процентах от цены поставщика в выгрузке.</span></div>
+<div class="card-body stack">
+{% if can_post("economics_terms_save") %}<form method="post" action="/economics/terms/{{ 'update' if editing else 'save' }}" class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% if editing %}<input type="hidden" name="id" value="{{ editing.id }}">{% endif %}
+<label class="field"><span class="label">Бренд</span><input class="input input--sm" style="width:200px" name="brand_key" list="term-brands" required placeholder="Начните вводить" autocomplete="off"{% if editing %} value="{{ editing.brand_key }}"{% endif %}><datalist id="term-brands">{% for k in brand_keys %}<option value="{{ k }}">{% endfor %}</datalist></label>
+<label class="field"><span class="label">Сезон</span><select class="select select--sm" name="season">{% for v, l in (("winter", "Зима"), ("summer", "Лето"), ("all", "Всесезонные")) %}<option value="{{ v }}"{% if editing and editing.season == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Радиус</span><select class="select select--sm" name="size_class">{% for v, l in (("all", "Все радиусы"), ("small", "До R17 вкл."), ("large", "Выше R17")) %}<option value="{{ v }}"{% if editing and editing.size_class == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Уценка / наценка, %</span><input class="input input--sm input--num" style="width:100px" name="markdown_pct" value="{{ editing.markdown_pct if editing else 0 }}" inputmode="decimal" aria-label="Уценка или наценка продажи, %"></label>
+<label class="field"><span class="label">Скидка, %</span><input class="input input--sm input--num" style="width:80px" name="discount_pct" value="{{ editing.discount_pct if editing else 0 }}" inputmode="decimal"></label>
+<label class="field"><span class="label">Бонус, %</span><input class="input input--sm input--num" style="width:80px" name="bonus_pct" value="{{ editing.bonus_pct if editing else 0 }}" inputmode="decimal"></label>
+<label class="field"><span class="label">ЕЖ, %</span><input class="input input--sm input--num" style="width:80px" name="monthly_pct" value="{{ editing.monthly_pct if editing else 10 }}" inputmode="decimal"></label>
+<label class="field"><span class="label">Действует с</span><input class="input input--sm" style="width:140px" name="valid_from" value="{{ editing.valid_from if editing else today[:8] ~ '01' }}" aria-label="Дата начала, ГГГГ-ММ-ДД"></label>
+<button class="btn btn--primary">{% if editing %}Сохранить изменения{% else %}Сохранить{% endif %}</button>{% if editing %}<a class="btn btn--link-gray" href="/economics/terms">Отмена</a>{% endif %}</form>{% endif %}
+<p class="small muted">Для того же бренда, сезона и радиуса побеждают условия с более поздней датой «Действует с»: так таблицу можно менять каждый месяц, а прошлые месяцы остаются в списке.</p>
+</div></section>
+
+<section class="card">
+<div class="card-head"><h3>Загрузка и цены</h3></div>
+<div class="card-body row" style="gap:16px;flex-wrap:wrap;align-items:flex-end">
+{% if can_post("economics_terms_import") %}<form method="post" action="/economics/terms/import" enctype="multipart/form-data" class="row" style="gap:10px"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Таблица CSV</span><input type="file" name="file" accept=".csv,text/csv"></label>
+<label class="field"><span class="label">Действует с</span><input class="input input--sm" style="width:140px" name="valid_from" value="{{ today[:8] }}01"></label>
+<button class="btn btn--secondary">{{ icon("upload") }}Загрузить</button></form>{% endif %}
+{% if can_post("economics_apply_pricing") %}<form method="post" action="/economics/terms/apply-pricing" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="day" value="{{ today }}"><button class="btn btn--secondary" title="Проценты продажи «до R17» и «выше R17» из этой таблицы попадут в «Настройки → Бренды и наценки»; перед применением вы увидите список изменений">Применить уценки к ценам</button></form>{% endif %}
+</div>
+<p class="small muted" style="padding:0 var(--s-5) var(--s-4)">Столбцы CSV: Бренд; Сезон (зима, лето, всесезонные); Диаметр (до R17 вкл., выше R17, все радиусы); Уценка; Скидка; Бонус; ЕЖ (если нет, берётся 10 %). Колонки «Сумма» и «Итого» не нужны: они считаются сами.</p>
+</section>
+
+<section class="card">
+<div class="card-head"><h3>Расходы Авито</h3><span class="sub">В процентах от цены продажи. Если Авито берёт с вас только за размещение, оставьте 0.</span></div>
+{% if can_post("economics_params") %}<form method="post" action="/economics/params" class="card-body row" style="gap:10px;align-items:flex-end"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Комиссия Авито, %</span><input class="input input--sm input--num" style="width:110px" name="fee_pct" value="{{ params.fee_pct }}" inputmode="decimal"></label>
+<label class="field"><span class="label">Реклама, %</span><input class="input input--sm input--num" style="width:110px" name="promo_pct" value="{{ params.promo_pct }}" inputmode="decimal"></label>
+<button class="btn btn--secondary">Сохранить</button></form>{% endif %}
+</section>
+
+<section class="card">
+<div class="card-head"><h3>Все условия</h3><span class="sub">{{ terms|length }} {{ plural(terms|length, "строка", "строки", "строк") }}</span></div>
+<div class="table-wrap"><table class="table table--plain">
+<thead><tr><th>Бренд</th><th>Сезон</th><th>Радиус</th><th class="num">Уценка / наценка</th><th class="num">Скидка</th><th class="num">Бонус</th><th class="num">ЕЖ</th><th class="num" title="Уценка + скидка + бонус + ЕЖ: ваша маржа от цены поставщика до комиссии и рекламы">Итого</th><th>Действует с</th><th></th></tr></thead>
+<tbody>{% for t in terms %}<tr><td class="strong">{{ brand_label(t.brand_key) }}</td>
+<td>{{ season(t.season) }}</td><td>{{ {"small": "до R17 вкл.", "large": "выше R17", "all": "все радиусы"}[t.size_class] }}</td>
+<td class="num">{{ t.markdown_pct|pct(2) }} %</td><td class="num">{{ t.discount_pct|pct(2) }} %</td><td class="num">{{ t.bonus_pct|pct(2) }} %</td><td class="num">{{ t.monthly_pct|pct(2) }} %</td><td class="num"><b>{{ t.total|pct(2) }} %</b></td><td>{{ t.valid_from }}</td>
+<td><div class="row" style="gap:6px;flex-wrap:nowrap">{% if can_post("economics_terms_update") %}<a class="btn btn--secondary btn--xs" href="/economics/terms?edit={{ t.id }}" aria-label="Изменить условия {{ brand_label(t.brand_key) }}">Изменить</a>{% endif %}{% if can_post("economics_terms_delete") %}<form method="post" action="/economics/terms/delete" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="id" value="{{ t.id }}"><button class="btn btn--danger-outline btn--xs" aria-label="Удалить условия {{ brand_label(t.brand_key) }}">Удалить</button></form>{% endif %}</div></td></tr>
+{% else %}<tr><td colspan="10" class="muted">Условий пока нет: добавьте строкой выше или загрузите вашу таблицу.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

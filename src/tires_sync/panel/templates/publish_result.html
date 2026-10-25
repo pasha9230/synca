@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Результат публикации · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Результат публикации</h1><p class="sub">{% if last %}{{ last.at|dt_utc }}{% else %}Публикаций ещё не было{% endif %}</p></div></header>
+{% if last %}
+<section class="card">
+<ul class="checklist">
+{% for line in last.lines %}<li style="grid-template-columns:auto minmax(0,1fr)"><span class="badge badge--{{ 'ok' if line.ok else 'warn' }} badge--dot">{{ "Готово" if line.ok else "Проверьте" }}</span><div class="cl-text" style="color:var(--gray-700)">{{ line.text }}</div></li>
+{% else %}<li style="grid-template-columns:minmax(0,1fr)"><span class="muted">Публиковать было нечего.</span></li>{% endfor %}
+</ul>
+</section>
+{% else %}<div class="card"><div class="empty"><div class="empty-icon">{{ icon("inbox") }}</div><h3>Публикаций ещё не было</h3></div></div>{% endif %}
+<div class="row"><a class="btn btn--primary" href="{{ back }}">{{ icon("arrow-left") }}{% if back == "/catalog" %}Вернуться в каталог{% else %}Вернуться на прежнюю страницу{% endif %}</a><a class="btn btn--secondary" href="/">На главную</a></div>
+{% endblock %}

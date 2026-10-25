@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Обновить фид · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Обновить фид</h1><p class="sub">Сначала смотрим, что изменится в фиде для Авито, потом подтверждаем. Пока вы не нажали кнопку внизу, ничего не публикуется.</p></div></header>
+<div class="stack-lg">
+<section class="card">
+<div class="card-head"><h3>Данные поставщика</h3></div>
+<div class="card-body row" style="gap:16px;flex-wrap:wrap">
+<span>Выгрузка основного поставщика скачана: <b>{{ loaded|dt_utc if loaded else "неизвестно" }}</b></span>
+{% if can_post("feed_update_fetch") %}<form method="post" action="/feed/update/fetch" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary">{{ icon("refresh") }}Скачать свежую выгрузку и пересчитать</button></form>{% endif %}
+</div></section>
+{% for a in p.accounts %}
+<section class="card">
+<div class="card-head"><h3>{{ a.name }}</h3>{% if a.live %}<span class="badge badge--ok badge--dot">публикация включена</span>{% else %}<span class="badge badge--warn badge--dot">публикация выключена</span>{% endif %}</div>
+{% if a.error %}<div class="card-body"><div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{{ a.error }}</div></div></div>
+{% else %}
+<div class="card-body stack">
+<div class="tiles">
+<div class="tile"><span class="tile-label">В фиде сейчас</span><span class="tile-value">{{ a.before }}</span><span class="tile-sub">объявлений</span></div>
+<div class="tile tile--brand"><span class="tile-label">Станет</span><span class="tile-value">{{ a.after }}</span><span class="tile-sub">объявлений</span></div>
+<div class="tile"><span class="tile-label">Появится</span><span class="tile-value">+{{ a.appear|length }}</span><span class="tile-sub">{% if a.deferred %}ещё {{ a.deferred }} ждут очереди (лимит за цикл){% else %}новых позиций{% endif %}</span></div>
+<div class="tile tile--err"><span class="tile-label">Исчезнет</span><span class="tile-value">−{{ a.gone|length }}</span><span class="tile-sub">позиций</span></div>
+<div class="tile"><span class="tile-label">Изменится цена</span><span class="tile-value">{{ a.changes|length }}</span><span class="tile-sub">позиций</span></div>
+</div>
+{% if a.guard %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Сработала защита от массового снятия: часть объявлений удержана со старыми ценами и остатками.</div></div>{% endif %}
+{% if a.held %}<p class="small muted">Удержано со старыми данными: {{ a.held }}.</p>{% endif %}
+{% if a.unbuilt %}<p class="small muted">Объявление не соберётся или возьмётся из прежнего снимка у позиций: {{ a.unbuilt }}.</p>{% endif %}
+{% if a.warning %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{{ a.warning }}</div></div>{% endif %}
+{% if not a.live %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">У этого аккаунта публикация выключена: фид соберётся, но на Авито не уйдёт. Включите её в «Подключения».</div></div>{% endif %}
+{% if a.reasons %}<p class="small"><b>Почему исчезнут:</b> {% for r, n in a.reasons %}{{ r }} — {{ n }}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+{% if a.appear %}<details><summary class="strong">Появятся ({{ a.appear|length }})</summary><div class="table-wrap"><table class="table table--plain"><thead><tr><th>Позиция</th><th class="num">Цена</th></tr></thead><tbody>{% for x in a.appear %}<tr><td>{{ x.name }}</td><td class="num">{{ x.price|money }}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+{% if a.waiting %}<details><summary class="strong">Ждут утра ({{ a.waiting|length }})</summary><p class="small muted" style="margin:var(--s-2) 0">Пропали из выгрузки днём: поставщик убирает товар, который другие продавцы положили в корзину, и возвращает его после обнуления корзин. Объявление остаётся в фиде до утреннего цикла; если позиции и после наполнения нет, оно снимется.</p><div class="table-wrap"><table class="table table--plain"><thead><tr><th>Позиция</th><th>Почему ждём</th></tr></thead><tbody>{% for x in a.waiting %}<tr><td>{{ x.name }}</td><td>{{ x.reason }}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+{% if a.gone %}<details><summary class="strong">Исчезнут ({{ a.gone|length }})</summary><div class="table-wrap"><table class="table table--plain"><thead><tr><th>Позиция</th><th>Причина</th></tr></thead><tbody>{% for x in a.gone %}<tr><td>{{ x.name }}</td><td>{{ x.reason }}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+{% if a.changes %}<details><summary class="strong">Изменится цена ({{ a.changes|length }})</summary><div class="table-wrap"><table class="table table--plain"><thead><tr><th>Позиция</th><th class="num">Было</th><th class="num">Станет</th></tr></thead><tbody>{% for x in a.changes %}<tr><td>{{ x.name }}</td><td class="num">{{ x.old|money }}</td><td class="num"><b>{{ x.new|money }}</b> <span class="muted xs">{{ "%+d"|format(x.new - x.old) }} ₽</span></td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+</div>{% endif %}
+</section>
+{% endfor %}
+<section class="card"><div class="card-body">
+{% if can_post("feed_update_confirm") %}<form method="post" action="/feed/update/confirm" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="rev" value="{{ p.rev }}">
+{% if p.over %}<label class="check check--danger"><input type="checkbox" name="understand" value="1">Я понимаю, что исчезнет много объявлений.</label>{% endif %}
+{% for text in p.problems %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{{ text }}</div></div>{% endfor %}
+{% if p.blocked %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">Обновление недоступно: сначала устраните предупреждения выше.</div></div>{% endif %}
+{% if any_live %}<label class="check"><input type="checkbox" name="upload" value="1" checked>После публикации сразу запустить загрузку на Авито. Авито принимает запуск не чаще раза в час: если час ещё не прошёл, фид обновится у нас, а Авито заберёт его сам по расписанию.</label>{% endif %}
+<div class="row"><button class="btn btn--primary"{% if p.blocked %} disabled{% endif %}>{% if any_live %}{{ icon("upload") }}Обновить фид и опубликовать{% else %}Собрать фид (без публикации){% endif %}</button>
+<a class="btn btn--link-gray" href="/">Отмена</a>
+{% if not p.anything %}<span class="small muted">Изменений нет: фид обновится с теми же данными.</span>{% endif %}</div></form>{% endif %}
+</div></section>
+</div>
+{% endblock %}

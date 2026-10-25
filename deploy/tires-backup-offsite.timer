@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily encrypted Tires Sync database copy outside the server
+
+[Timer]
+# after the local copy (03:30); 04:12-04:17 is clear of the cycle (:40), the orders (:07) and the statistics (04:20)
+OnCalendar=*-*-* 04:12:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

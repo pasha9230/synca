@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · OpenAI{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card">
+{% if can_post("connections_openai") %}<form method="post" action="/connections/openai">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Генерация своих фото</h3><span class="sub">OpenAI рисует базовые кадры (около $0,07 за кадр, не больше дневного лимита); копии, вырезки и карточки размеров агент делает бесплатно. Запуск — кнопками «Сгенерировать» в «Генерации».</span></div>
+<div class="card-body grid-2">
+<label class="field"><span class="label">Ключ OpenAI {% if secrets.api_key %}<span class="badge badge--ok">задан {{ secrets.api_key.mask }} ({{ secrets.api_key.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="api_key" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается. Ключ хранится зашифрованным.</span></label>
+<label class="field"><span class="label">Прокси для OpenAI {% if secrets.proxy %}<span class="badge badge--ok">задан ({{ secrets.proxy.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="proxy" autocomplete="new-password" placeholder="socks5://хост:порт"><span class="hint">OpenAI не отвечает на запросы из России: через этот адрес идут только запросы к OpenAI. Вид: socks5://хост:порт или http://логин:пароль@хост:порт. Значение не показывается.</span></label>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>
+{% if can_post("connections_openai") %}</form>{% else %}</fieldset>{% endif %}
+{% if can_post("connections_openai_clear") and (secrets.api_key or secrets.proxy) %}<div class="card-foot">
+{% for name, text in (("api_key", "Удалить ключ"), ("proxy", "Удалить прокси")) %}{% if secrets[name] %}<form method="post" action="/connections/openai/clear" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="what" value="{{ name }}"><button class="btn btn--secondary btn--xs">{{ text }}</button></form> {% endif %}{% endfor %}
+</div>{% endif %}
+</section>
+{% endblock %}

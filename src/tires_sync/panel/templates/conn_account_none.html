@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · Аккаунты Авито{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card" id="add">
+<div class="empty"><div class="empty-icon">{{ icon("plug") }}</div><h3>Аккаунтов пока нет</h3><p>Добавьте кабинет Авито: название нужно только для вас, после проверки ключей вкладка получит номер кабинета (ID).</p>
+{% if can_post("connections_add_account") %}<form method="post" action="/connections/accounts" class="row">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input class="input" style="width:280px" name="name" placeholder="Название аккаунта" maxlength="60"><button class="btn btn--primary">Добавить аккаунт</button>{% if can_post("connections_add_account") %}</form>{% else %}</fieldset>{% endif %}</div>
+</section>
+{% endblock %}

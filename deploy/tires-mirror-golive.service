@@ -1,0 +1,22 @@
+[Unit]
+Description=One time: bring the mirrored feed of account 2 to Avito (rebuild, verify every Id, publish, attach the link, start the upload)
+OnFailure=tires-alert@%n.service
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+UMask=0027
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+Environment=TIRES_SECRET_KEY_FILE=/etc/tires-sync/secret.key
+# Домен панели: при установке заменить @PANEL_DOMAIN@ в строке PANEL_BASE на свой (https://<домен панели>).
+# Пока заглушка не заменена (или стоит пример example.com), служба падает до запуска команды: --confirm пишет адрес
+# в профиль автозагрузки Авито, и пример туда попасть не должен.
+Environment=PANEL_BASE=https://@PANEL_DOMAIN@
+ExecStartPre=/bin/sh -c 'case "$$PANEL_BASE" in https://*@*|*example.*|https://) echo "PANEL_BASE: домен панели не подставлен, служба остановлена" >&2; exit 1;; https://?*) exit 0;; *) echo "PANEL_BASE: нужен https://<домен>" >&2; exit 1;; esac'
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync mirror-go-live --db /var/lib/tires-sync/state.db --account 2 --public-base ${PANEL_BASE} --feed-root /var/lib/tires-sync/feed --unload /var/lib/tires-sync/unload.xml --confirm
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tires-sync

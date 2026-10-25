@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Вернуть после перевода · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Вернуть карточки на прежние этапы</h1><p class="sub">Массовый перевод от {{ plan.run.at|dt }} ({{ plan.run.author }}). Отмеченные карточки вернутся туда, где стояли до него; причина отмены, которую он вписал, убирается, пропущенные им задачи снова ждут. Правила этапа второй раз не срабатывают, сообщения клиентам не уходят, в Авито и WebMIM ничего не пишется. Перед возвратом снимается копия базы.</p></div>
+<div class="actions"><a class="btn btn--secondary" href="/orders/bulk">Назад</a></div></header>
+{% if can_post("orders_bulk_undo_run") %}<form method="post" action="/orders/bulk/undo/{{ plan.run.id }}" data-once data-confirm-title="Вернуть карточки на прежние этапы?" data-confirm="Отмеченные карточки вернутся туда, где были до массового перевода. Перед этим панель сохранит копию базы." data-confirm-ok="Вернуть">
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<section class="card"><div class="card-body">
+<p>Можно вернуть: <b>{{ plan.ok|length }}</b>. Сразу отмечены те, что до перевода стояли не на «Новом заказе»: <b>{{ plan.ok|rejectattr("first")|list|length }}</b>. Карточки с «Нового заказа» отметьте сами, если их тоже нужно вернуть.</p>
+{% if plan.ok %}<button class="btn btn--primary">Вернуть отмеченные</button>{% else %}<p class="muted">Возвращать нечего.</p>{% endif %}
+</div></section>
+{% if plan.ok %}<section class="card"><div class="table-wrap"><table class="table">
+<thead><tr><th></th><th>Заказ</th><th>Вернётся на этап</th></tr></thead><tbody>
+{% for line in plan.ok %}<tr><td><input type="checkbox" name="id" value="{{ line.card.id }}"{% if not line.first %} checked{% endif %} aria-label="Заказ №{{ line.card.id }}"></td><td><a href="/orders/{{ line.card.id }}">№{{ line.card.id }}</a> {{ line.card.client_name or (line.card.client_phone|phone) }}</td><td>{{ line.back.name }}</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
+</form>{% endif %}
+{% if plan.skip %}<section class="card"><div class="card-body"><h2>Не вернутся</h2></div><div class="table-wrap"><table class="table">
+<thead><tr><th>Заказ</th><th>Почему</th></tr></thead><tbody>
+{% for c, why in plan.skip %}<tr><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a> {{ c.client_name or (c.client_phone|phone) }}</td><td>{{ why }}</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
+{% endblock %}

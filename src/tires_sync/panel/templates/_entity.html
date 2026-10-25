@@ -1,0 +1,28 @@
+{# The one look of a card (order, client, position, account; owner 2026-10-21). The data of a card is a dict built in Python (the services),
+   ready to be JSON when the panel moves to Ant Design; these macros only lay it out, so keep them thin.
+   A card dict: {"type", "kind", "ref", "title", "status": {"text", "tone"} | none, "crumbs": [{"label", "href"}],
+   "fields": [{"label", "value", "fmt", "href", "mono", "wide"}]}; the values stay raw (a date, a sum, a phone), `fmt` says how to show them. #}
+{% from "_ui.html" import icon %}
+
+{# a raw value as the panel shows it: fmt «dt» a date and time, «money» a sum, «phone» a phone, a list is joined by commas #}
+{% macro value(v, fmt=none) %}{% if v in (none, "") or (v is iterable and v is not string and not v) %}<span class="muted">—</span>{% elif v is iterable and v is not string %}{% for x in v %}{{ value(x, fmt) }}{% if not loop.last %}, {% endif %}{% endfor %}{% elif fmt == "dt" %}<time>{{ v|dt }}</time>{% elif fmt == "money" %}{{ v|money }}{% elif fmt == "phone" %}{{ v|phone }}{% else %}{{ v }}{% endif %}{% endmacro %}
+
+{% macro crumbs(items) %}<div class="crumbs">{% for c in items %}{% if not loop.first %}{{ icon("chev", "i-sm") }}{% endif %}{% if c.href and not loop.last %}<a href="{{ c.href }}">{{ c.label }}</a>{% else %}<span>{{ c.label }}</span>{% endif %}{% endfor %}</div>{% endmacro %}
+
+{# the head: «Заказ №5» and the status above the title, the actions (the caller) on the right #}
+{% macro head(e, id=none, title_class="", extra="", level=1) %}<div class="entity-head {{ extra }}">
+<div class="entity-id">{% if e.kind or e.status %}<div class="entity-eyebrow"><span class="entity-kind"{% if id %} id="{{ id }}-kind"{% endif %}>{{ e.kind }}{% if e.ref %} {{ e.ref }}{% endif %}</span>{% if e.status %}<span class="badge badge--{{ e.status.tone or 'neutral' }}">{{ e.status.text }}</span>{% endif %}</div>{% endif %}
+<h{{ level }} class="entity-title {{ title_class }}"{% if id %} id="{{ id }}"{% endif %}{% if e.hint %} title="{{ e.hint }}"{% endif %}>{{ e.title }}</h{{ level }}></div>
+{% if caller is defined %}<div class="entity-actions">{{ caller() }}</div>{% endif %}</div>{% endmacro %}
+
+{# «поле — значение» in a grid; one column on a phone #}
+{% macro fields(rows) %}<dl class="entity-fields">{% for f in rows %}<div class="entity-field{{ ' is-wide' if f.wide }}"><dt>{{ f.label }}</dt><dd{% if f.mono %} class="mono"{% endif %}>{% if f.href and f.value not in (none, "") %}<a href="{{ f.href }}">{{ value(f.value, f.fmt) }}</a>{% else %}{{ value(f.value, f.fmt) }}{% endif %}</dd></div>{% endfor %}</dl>{% endmacro %}
+
+{# a block of the card: a .card with a head; the content is the caller #}
+{% macro section(title, id=none, sub=none, extra="") %}<section class="card entity-sec {{ extra }}"{% if id %} id="{{ id }}"{% endif %}><div class="card-head"><h3>{{ title }}</h3>{% if sub %}<span class="sub">{{ sub }}</span>{% endif %}</div>{{ caller() }}</section>{% endmacro %}
+
+{# a list (orders, chats, events): columns [{"key", "label", "num", "fmt"}], a cell is a value or {"text", "fmt", "href", "mono"};
+   the caller, if any, draws one more cell per row (its actions) #}
+{% macro listing(columns, rows, empty="Пусто.") %}<div class="entity-list"><table class="table"><thead><tr>{% for c in columns %}<th{% if c.num %} class="num"{% endif %}>{{ c.label }}</th>{% endfor %}{% if caller is defined %}<th></th>{% endif %}</tr></thead><tbody>
+{% for r in rows %}<tr>{% for c in columns %}{% set cell = r[c.key] %}<td data-label="{{ c.label }}"{% if c.num %} class="num"{% endif %}>{% if cell is mapping %}{% if cell.href %}<a href="{{ cell.href }}"{% if cell.mono %} class="mono"{% endif %}>{{ value(cell.text, cell.fmt) }}</a>{% else %}<span{% if cell.mono %} class="mono"{% endif %}>{{ value(cell.text, cell.fmt) }}</span>{% endif %}{% else %}{{ value(cell, c.fmt) }}{% endif %}</td>{% endfor %}{% if caller is defined %}<td class="entity-row-actions">{{ caller(r) }}</td>{% endif %}</tr>
+{% else %}<tr><td colspan="{{ columns|length + (1 if caller is defined else 0) }}" class="muted">{{ empty }}</td></tr>{% endfor %}</tbody></table></div>{% endmacro %}

@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Сообщение · Tires Sync{% endblock %}
+{% block content %}
+<div class="card"><div class="empty"><div class="empty-icon">{{ icon("alert") }}</div><h3>Не получилось</h3><p>{{ text }}</p><a class="btn btn--secondary" href="/">На главную</a></div></div>
+{% endblock %}

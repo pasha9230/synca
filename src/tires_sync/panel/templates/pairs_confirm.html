@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}: было → стало · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>{{ title }}: {{ a }} | {{ b }}</h1><p class="sub">Склейка в фиде включена, и это изменит опубликованные объявления. Ниже — что сделает ближайший цикл. Пока вы не подтвердили, ничего не записано.</p></div></header>
+{% set risk = namespace(on=false) %}
+{% for acc in accounts %}
+<section class="card"><div class="card-head"><h3>№{{ acc.id }} «{{ acc.name }}»</h3></div>
+<div class="table-wrap"><table class="table"><thead><tr><th>Id</th><th>Было</th><th>Стало</th></tr></thead><tbody>
+{% for r in acc.rows %}<tr><td class="t-code">{{ r.id }}</td>
+{% if r.what == "stays" %}<td>{{ r.code }}{% if r.model %} · «{{ r.model }}»{% endif %}</td><td>остаётся как есть</td>
+{% elif r.what == "leaves" %}<td>{{ r.code }}{% if r.model %} · «{{ r.model }}»{% endif %}</td><td><span class="badge badge--warn">уйдёт из фида</span></td>
+{% elif r.what == "comes" %}{% set risk.on = true %}<td class="muted">объявления нет</td><td><span class="badge badge--warn">новый Id</span> {{ r.code }}{% if r.model %} · «{{ r.model }}»{% endif %}<br><span class="xs muted">Если у этой шины живо или недавно снято прежнее объявление под другим Id, Авито заблокирует новое и вернёт прежнее («Повторное размещение»).</span></td>
+{% elif r.what == "moves" %}<td>{{ r.was }}{% if r.was_model %} · «{{ r.was_model }}»{% endif %}</td><td>перейдёт к позиции {{ r.code }}{% if r.model %} · «{{ r.model }}»{% endif %}</td>
+{% else %}<td>модель «{{ r.was_model }}»</td><td>модель «{{ r.model }}»</td>{% endif %}</tr>
+{% endfor %}</tbody></table></div></section>
+{% endfor %}
+{% if risk.on %}<div class="flash flash--warn"><div class="grow"><div class="flash-title">Риск «Повторного размещения»</div><div class="flash-text">Появится объявление с новым Id. Если на Авито у этой шины ещё стоит или недавно снято прежнее объявление, новое заблокируют, а прежнее включат снова.</div></div></div>{% endif %}
+<form method="post" action="{{ action }}" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="a" value="{{ a }}"><input type="hidden" name="b" value="{{ b }}">{% if undo %}<input type="hidden" name="undo" value="1">{% endif %}<input type="hidden" name="seen" value="{{ digest }}"><button class="btn btn--primary">Подтвердить: {{ title|lower }}</button></form>
+<a class="btn btn--secondary" href="/pairs">Отмена</a>
+{% endblock %}

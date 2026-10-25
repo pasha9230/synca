@@ -1,0 +1,18 @@
+# Тесты master. Выкладку на tires-server делает сам сервер: опрос tires-pull ждёт зелёную проверку «tests / pytest»
+# этого коммита и выкладывает его (deploy/AUTODEPLOY.md). Задачи выкладки здесь нет: в публичном репозитории нет
+# своих раннеров и окружения выкладки. Откат — на сервере: sudo /usr/local/sbin/tires-deploy rollback.
+# Имя задачи (tests) и задачи pytest в tests.yml не менять: из них складывается имя проверки, которую ждёт tires-pull.
+name: deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:   # перепроверить последний master вручную
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    if: github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/tests.yml

@@ -1,0 +1,13 @@
+[Unit]
+Description=Tires Sync deploy by polling GitHub every 2 minutes (deploy/AUTODEPLOY.md, tires-pull)
+
+[Timer]
+# Installed and enabled only by the owner by hand: tires-deploy never installs a timer that is not on the server yet.
+# Only the keys allowed by tires-deploy (TIMER_KEYS): once installed, a deploy replaces this file from the repository.
+OnCalendar=*-*-* *:00/2:00
+Persistent=false
+RandomizedDelaySec=20
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

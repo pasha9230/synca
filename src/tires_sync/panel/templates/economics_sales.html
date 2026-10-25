@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, season %}
+{% block title %}Продажи · Юнит-экономика · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "sales" %}{% include "_economics_head.html" %}
+<section class="card">
+<form method="get" action="/economics/sales" class="filters" style="padding:var(--s-4) var(--s-5) 0" data-autosubmit>
+<div class="field"><span class="label">Период</span><div class="seg">{% for d, text in periods %}<a href="/economics/sales?p={{ d }}{% if rest %}&amp;{{ rest }}{% endif %}"{% if days == d %} class="is-active" aria-current="page"{% endif %}>{{ text }}</a>{% endfor %}</div></div>
+{% if days %}<input type="hidden" name="p" value="{{ days }}"><div class="field"><span class="label">Даты</span><span class="small muted" style="height:40px;display:flex;align-items:center">{{ start }} — {{ end }} · <a href="/economics/sales?from={{ start }}&to={{ end }}{% if rest %}&amp;{{ rest }}{% endif %}">свои даты</a></span></div>
+{% else %}<div class="field"><label class="label" for="f-from">С</label><input class="input" id="f-from" type="date" name="from" value="{{ start }}"></div>
+<div class="field"><label class="label" for="f-to">По</label><input class="input" id="f-to" type="date" name="to" value="{{ end }}"></div>{% endif %}
+<div class="field" style="width:180px"><label class="label" for="f-b">Бренд</label><select class="select" id="f-b" name="b"><option value="">Все</option>{% for b in brands %}<option value="{{ b }}"{% if args.get("b") == b %} selected{% endif %}>{{ brand_label(b) }}</option>{% endfor %}</select></div>
+<div class="field" style="width:200px"><label class="label" for="f-a">Аккаунт</label><select class="select" id="f-a" name="a"><option value="">Все</option>{% for id, name in accounts.items() %}<option value="{{ id }}"{% if args.get("a") == id|string %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+<div class="field" style="width:180px"><label class="label" for="f-pt">Точка</label><select class="select" id="f-pt" name="pt"><option value="">Все</option>{% for p in points %}<option value="{{ p }}"{% if args.get("pt") == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+<div class="field" style="width:150px"><label class="label" for="f-g">Динамика по</label><select class="select" id="f-g" name="g"><option value="day"{% if gran == "day" %} selected{% endif %}>Дням</option><option value="week"{% if gran == "week" %} selected{% endif %}>Неделям</option><option value="month"{% if gran == "month" %} selected{% endif %}>Месяцам</option></select></div>
+<label class="check" style="height:40px;align-items:center"><input type="checkbox" name="rev" value="1"{% if show_reversed %} checked{% endif %}>Показать сторнированные</label>
+<noscript><button class="btn btn--secondary" style="height:40px">Показать</button></noscript>
+<a class="btn btn--link-gray" style="height:40px" href="/economics/sales">Сбросить</a>
+</form>
+<div class="tiles" style="padding:var(--s-4) var(--s-5)">
+<div class="tile tile--brand"><span class="tile-label">Продано</span><span class="tile-value">{{ total.pieces }} шт.</span><span class="tile-sub">{{ total.sales }} {{ plural(total.sales, "продажа", "продажи", "продаж") }}</span></div>
+<div class="tile"><span class="tile-label">Выручка</span><span class="tile-value">{{ total.sale|money }}</span><span class="tile-sub">по цене поставщика {{ total.price|money }}</span></div>
+<div class="tile"><span class="tile-label">Прибыль</span><span class="tile-value">{{ total.margin|money }}</span><span class="tile-sub">после закупки, бонуса, ЕЖ и расходов Авито ({{ total.fee|money }})</span></div>
+<div class="tile"><span class="tile-label">Маржа</span><span class="tile-value">{{ total.margin_pct_price|pct }} %</span><span class="tile-sub">от цены поставщика · {{ total.margin_pct_sale|pct }} % от выручки</span></div>
+</div></section>
+
+<section class="card">
+<div class="card-head"><h3>Динамика</h3><span class="sub">по {{ {"day": "дням", "week": "неделям", "month": "месяцам"}[gran] }}</span></div>
+<div class="card-body">{% if chart_margin %}<div class="grid-2">
+<div><div class="small muted">Прибыль, ₽</div><svg viewBox="0 0 {{ chart_margin.width }} {{ chart_margin.height }}" width="100%" role="img" aria-label="Прибыль по периодам"><polyline fill="none" stroke="var(--primary-600)" stroke-width="2" points="{{ chart_margin.points }}"/></svg><div class="small muted">{{ chart_margin.first }} → {{ chart_margin.last }} · от {{ chart_margin.low|pct(0) }} до {{ chart_margin.high|pct(0) }}</div></div>
+<div><div class="small muted">Продано, шт.</div><svg viewBox="0 0 {{ chart_pieces.width }} {{ chart_pieces.height }}" width="100%" role="img" aria-label="Продано шин по периодам"><polyline fill="none" stroke="var(--ok-600, #079455)" stroke-width="2" points="{{ chart_pieces.points }}"/></svg><div class="small muted">от {{ chart_pieces.low|pct(0) }} до {{ chart_pieces.high|pct(0) }}</div></div></div>
+{% endif %}
+<div class="table-wrap"><table class="table table--plain table--econ"><thead><tr><th>Период</th><th class="num">Продаж</th><th class="num">Шин</th><th class="num">Выручка</th><th class="num">Прибыль</th><th class="num">Маржа от прайса</th></tr></thead>
+<tbody>{% for p in series %}<tr><td>{{ p.key }}</td><td class="num">{{ p.sales }}</td><td class="num">{{ p.pieces }}</td><td class="num">{{ p.sale|money }}</td><td class="num"><b>{{ p.margin|money }}</b></td><td class="num">{{ p.margin_pct_price|pct }} %</td></tr>
+{% else %}<tr><td colspan="6" class="muted">За этот период продаж нет.</td></tr>{% endfor %}</tbody></table></div></div></section>
+
+<div class="grid-2" style="align-items:start">
+{% for title, head, items in breakdowns %}<section class="card"><div class="card-head"><h3>{{ title }}</h3></div>
+<div class="table-wrap"><table class="table table--plain table--econ"><thead><tr><th>{{ head }}</th><th class="num">Шин</th><th class="num">Выручка</th><th class="num">Прибыль</th><th class="num">Маржа</th></tr></thead>
+<tbody>{% for r in items %}<tr><td class="strong">{% if head == "Сезон" %}{{ season(r.key) }}{% else %}{{ r.label }}{% endif %}</td><td class="num">{{ r.pieces }}</td><td class="num">{{ r.sale|money }}</td><td class="num"><b>{{ r.margin|money }}</b></td><td class="num">{{ r.margin_pct_price|pct }} %</td></tr>
+{% else %}<tr><td colspan="5" class="muted">Нет данных.</td></tr>{% endfor %}</tbody></table></div></section>{% endfor %}
+</div>
+
+<section class="card">
+<div class="card-head"><h3>Список продаж</h3><span class="sub">{{ rows|length }} {{ plural(rows|length, "запись", "записи", "записей") }}</span>
+<a class="btn btn--secondary btn--sm ml-auto" href="/economics/sales/export.csv{% if query %}?{{ query }}{% endif %}" title="Сторнированные в файл не попадают">{{ icon("download") }}Выгрузить CSV</a></div>
+<div class="table-wrap"><table class="table table--plain table--econ"><thead><tr><th>Дата</th><th>Позиция</th><th>Вид</th><th class="num">Шин</th><th class="num">Выручка</th><th class="num">Прибыль</th><th>Аккаунт</th><th>Точка</th><th>Заметка</th><th></th></tr></thead>
+<tbody>{% for r in rows %}<tr{% if r.reversed_at %} class="muted"{% endif %}><td>{{ r.day }}</td><td>{{ r.name }}</td><td>{{ "комплект ×4" if r.ad_kind == "set4" else "одиночное" }}</td><td class="num">{{ r.pieces }}</td><td class="num">{{ r.sale_total|money }}</td><td class="num"><b>{{ r.margin_total|money }}</b></td>
+<td>{{ account_names.get(r.account_id, "—") if r.account_id else "—" }}</td><td>{{ r.point or "—" }}</td><td class="small muted">{{ r.note }}</td>
+<td>{% if r.reversed_at %}<span class="badge badge--neutral" title="Сторнировал {{ r.reversed_by }}, {{ (r.reversed_at|dt if r.source == "order" else r.reversed_at|dt_utc) }}">сторнирована</span>{% else %}{% if can_post("economics_sale_reverse") %}<form method="post" action="/economics/sales/reverse" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="id" value="{{ r.id }}"><input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}"><button class="btn btn--danger-outline btn--xs" aria-label="Сторнировать продажу {{ r.name }}" title="Убрать из итогов: запись останется в журнале">Сторно</button></form>{% endif %}{% endif %}</td></tr>
+{% else %}<tr><td colspan="10" class="muted">Продаж пока нет. Отметьте проданную позицию кнопкой «Продано» в каталоге.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

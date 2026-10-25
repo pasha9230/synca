@@ -1,0 +1,10 @@
+[Unit]
+Description=One time: what Avito made of the mirrored feed of account 2 (read only)
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+Environment=TIRES_SECRET_KEY_FILE=/etc/tires-sync/secret.key
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync avito-status --db /var/lib/tires-sync/state.db --account 2

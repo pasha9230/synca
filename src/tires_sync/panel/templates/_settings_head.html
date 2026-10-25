@@ -1,0 +1,6 @@
+<header class="page-head"><div><h1>Настройки</h1><p class="sub">Общие правила, бренды с наценками и публикацией, исключения. Любое изменение сначала показывается списком: вы подтверждаете его одной кнопкой, и оно действует сразу.</p></div></header>
+<nav class="tabs">
+<a href="/settings"{% if tab == "general" %} class="is-active" aria-current="page"{% endif %}>Общие</a>
+<a href="/settings/brands"{% if tab == "brands" %} class="is-active" aria-current="page"{% endif %}>Бренды и наценки</a>
+<a href="/settings/exclusions"{% if tab == "exclusions" %} class="is-active" aria-current="page"{% endif %}>Исключения</a>
+</nav>

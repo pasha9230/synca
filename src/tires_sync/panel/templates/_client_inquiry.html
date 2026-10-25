@@ -1,0 +1,5 @@
+{# lane B in the client card and the client list (lane A: {% with inquiry_client_id = <id>, inquiry_place = "card"|"list" %}{% include … ignore missing %}{% endwith %}):
+   the status of the inquiry; in the card also «Перезвонить» (the open tasks and the form) folded under a button #}
+{% import "_inquiry.html" as inq_ui %}{% set inq_status = inquiry_client(inquiry_client_id) %}
+{% if inquiry_place == "card" %}<span class="row" style="gap:var(--s-2);align-items:center">{{ inq_ui.badge(inq_status) }}{% if may_callback() %}{% set inq_tasks = callbacks_for(client_id=inquiry_client_id) %}<details class="menu"><summary class="btn btn--secondary btn--sm">Перезвонить{% if inq_tasks %} ({{ inq_tasks|length }}){% endif %}</summary><div class="menu-list" style="min-width:420px">{{ inq_ui.callbacks(inq_tasks, client_id=inquiry_client_id, back="/clients/%d"|format(inquiry_client_id)) }}</div></details>{% endif %}</span>
+{% else %}{{ inq_ui.badge(inq_status) }}{% endif %}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Avito chats every minute (light runs; every fifth reads the whole list)
+
+[Timer]
+OnCalendar=minutely
+Persistent=true
+RandomizedDelaySec=5
+
+[Install]
+WantedBy=timers.target

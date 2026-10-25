@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Фиды · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Фиды</h1><p class="sub">{% if d.run %}Последний запуск: {{ d.run.started|dt_utc }}{% else %}Запусков ещё не было{% endif %}</p></div>
+<div class="actions"><a class="btn btn--secondary" href="/history/ads">История объявлений</a>{% if can_post("feed_update_confirm") %}<a class="btn btn--primary" href="/feed/update">{{ icon("refresh") }}Обновить фид</a>{% endif %}</div></header>
+{% if feed_attention %}<section class="card" style="margin-bottom:var(--s-4)"><div class="card-head"><h3>Требует внимания по фиду</h3></div><ul class="checklist">
+{% for a in feed_attention %}<li><span><span class="badge badge--{{ 'err' if a.level == 'bad' else 'warn' }} badge--dot">{{ "Нужно сделать" if a.level == "bad" else "Проверьте" }}</span></span>
+<div><div class="cl-title">{{ a.title }}</div><div class="cl-text">{{ a.detail }}</div></div>
+<a class="btn btn--secondary btn--sm" href="{{ a.href }}"{% if a.external %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ a.action }}</a></li>{% endfor %}
+</ul></section>{% endif %}
+<div style="margin-bottom:var(--s-4)">{% include "_feed_state.html" %}</div>
+{% endblock %}

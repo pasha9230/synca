@@ -1,0 +1,51 @@
+{% from "_ui.html" import icon, season %}
+<section class="card">
+{% if can_post("addresses_save") %}<form method="post" action="/accounts/{{ account.id }}/addresses">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Авито адреса</h3><span class="sub">Откуда отгружаем: каждое объявление привязывается к одному адресу</span></div>
+<div class="card-body stack">
+{% for e in form.errors %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{{ e }}</div></div>{% endfor %}
+<p class="small hint">Перечислите точки отгрузки и доли. Пример: Север 40, Юг 40, Запад 20 → из 100 новых объявлений по 40, 40 и 20.</p>
+<details class="collapse"><summary>{{ icon("chev", "chev") }}Как это работает</summary><div class="collapse-body small">
+<p><b>Что это.</b> Точки, откуда вы отгружаете товар. Каждая должна быть добавлена в вашем кабинете Авито (Профиль → Адреса → «Адреса для объявлений»). Здесь вы перечисляете их и говорите, как делить между ними объявления.</p>
+<p><b>Как заполнить.</b> Для каждой точки: название (любое, для вас), номер адреса Авито (число рядом с адресом в кабинете) и полный адрес так, как он написан в кабинете. В колонке «Доля» укажите, какую часть новых объявлений отправлять на эту точку.</p>
+<p><b>Как делятся объявления.</b> Каждое новое объявление получает адрес так, чтобы доли сошлись. Например: Север 40, Юг 40, Запад 20 → из 100 новых объявлений 40 уйдёт на Север, 40 на Юг, 20 на Запад. Объявления, которые уже опубликованы, на другие адреса не переезжают.</p></div></details>
+<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px"><table class="table">
+<thead><tr><th style="width:70px">Включён</th><th>Название</th><th style="width:150px">Номер адреса Авито</th><th>Полный адрес</th><th class="num" style="width:110px">Доля</th></tr></thead>
+<tbody>{% for r in form.rows %}<tr>
+<td><label class="toggle"><input type="checkbox" name="on_{{ loop.index0 }}"{% if r.enabled %} checked{% endif %} aria-label="Включён"></label></td>
+<td><input class="input input--sm" name="name_{{ loop.index0 }}" value="{{ r.name }}" maxlength="60" placeholder="Название"></td>
+<td><input class="input input--sm mono" name="addr_{{ loop.index0 }}" value="{{ r.address_id }}" inputmode="numeric" placeholder="—"></td>
+<td><input class="input input--sm" name="text_{{ loop.index0 }}" value="{{ r.address_text }}" maxlength="256" placeholder="Город, улица, дом"></td>
+<td><input class="input input--sm input--num" name="share_{{ loop.index0 }}" value="{{ r.share }}" placeholder="0"></td></tr>{% endfor %}</tbody></table></div>
+<div class="grid-2">
+<div class="field"><span class="label">Как делить</span><div class="seg"><label><input type="radio" name="mode" value="percent"{% if form.mode == "percent" %} checked{% endif %}>В процентах (сумма = 100)</label><label><input type="radio" name="mode" value="count"{% if form.mode == "count" %} checked{% endif %}>В штуках, с адресом «остаток»</label></div>
+<input class="input input--sm" style="margin-top:8px;max-width:260px" name="rest" value="{{ form.rest }}" placeholder="номер адреса «остаток»"></div>
+<div class="field"><span class="label">Как передавать адрес</span><div class="stack-sm">
+<label class="radio"><input type="radio" name="address_mode" value="text"{% if form.address_mode == "text" or not form.has_own %} checked{% endif %}><span>Полным адресом текстом<small>Рекомендуется: Авито принимает.</small></span></label>
+<label class="radio"><input type="radio" name="address_mode" value="id"{% if form.address_mode == "id" and form.has_own %} checked{% endif %}><span>По номеру адреса Авито<small>Авито может ответить «не удалось определить адрес».</small></span></label></div></div>
+</div>
+<p class="muted xs">Панель не проверяет, что адрес существует в кабинете: список адресов Авито по API не отдаёт. Если данные неверны, Авито отклонит объявление в отчёте загрузки.</p>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить адреса</button><span class="small muted">Адреса и правила по брендам сохраняются сразу, без черновика. В фиде они появятся при ближайшем цикле (раз в час).</span></div>
+{% if can_post("addresses_save") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card">
+<div class="card-head"><h3>Распределение по брендам</h3><span class="sub">Закрепите бренд и сезон за одним адресом</span></div>
+<div class="card-body stack">
+<p class="small hint">Закрепите бренд за одним адресом: например, все новые IKON TYRES · зима только на Юг. Действует только на новые объявления.</p>
+<details class="collapse"><summary>{{ icon("chev", "chev") }}Как это работает</summary><div class="collapse-body small">
+<p><b>Для чего.</b> По умолчанию адрес новому объявлению выбирается по долям выше. Здесь можно закрепить бренд (и сезон) за одним адресом.</p>
+<p><b>Как пользоваться.</b> 1) выберите бренд и сезон, 2) выберите адрес, 3) нажмите «Назначить». Чтобы отменить, нажмите «Снять» рядом с правилом.</p>
+<p><b>Что важно.</b> Правило действует только на новые объявления: уже опубликованные остаются на своих адресах. Бренды без правила делятся по долям. Бренды в списке берутся из включённых в «Настройки → Бренды и наценки».</p></div></details>
+</div>
+{% if form.rules %}<ul class="changes">{% for r in form.rules %}<li><span class="verb">{{ brand_label(r.brand_key) }} {{ season(r.season) }}</span><span class="grow">→ {{ r.address_name }}</span>
+{% if can_post("point_rules") %}<form method="post" action="/accounts/{{ account.id }}/point-rules" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="pair" value="{{ r.brand_key }}|{{ r.season }}"><input type="hidden" name="action" value="clear"><button class="btn btn--secondary btn--xs">Снять</button>{% if can_post("point_rules") %}</form>{% else %}</fieldset>{% endif %}</li>{% endfor %}</ul>
+{% else %}<div class="card-body" style="padding-top:0"><p class="muted small">Правил пока нет: все бренды делятся по долям.</p></div>{% endif %}
+{% if form.choices and form.pairs %}
+{% if can_post("point_rules") %}<form method="post" action="/accounts/{{ account.id }}/point-rules" class="card-foot" style="flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="set">
+<span class="muted small">Бренд и сезон:</span><select class="select select--sm" style="width:260px" name="pair">{% for p in form.pairs %}<option value="{{ p.key }}">{{ p.label }}</option>{% endfor %}</select>
+<span class="muted">→</span><select class="select select--sm" style="width:200px" name="address_id">{% for c in form.choices %}<option value="{{ c.address_id }}">{{ c.name }}</option>{% endfor %}</select>
+<button class="btn btn--secondary btn--sm">Назначить</button>{% if can_post("point_rules") %}</form>{% else %}</fieldset>{% endif %}
+{% else %}<div class="card-foot"><span class="muted small">Чтобы создать правило, сначала сохраните адреса и включите хотя бы одно сочетание «бренд × сезон» в «Настройки → Бренды и наценки».</span></div>{% endif %}
+</section>

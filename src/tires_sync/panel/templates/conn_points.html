@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · Точки{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card">
+<div class="card-head"><h3>Точки самовывоза</h3><span class="sub">Менеджер точки получает сообщения о заказах в ВК или работает в панели («Моя точка»). Канал выбирается для каждой точки отдельно.</span></div>
+<div class="card-body stack" data-webmim-addresses style="border-bottom:1px solid var(--gray-200)">
+{% if webmim %}{% if webmim.rows is not none %}<span class="small">Адреса доставки на сервере «{{ webmim.server }}» — впишите идентификатор в поле «Адрес доставки в WebMIM» точки:</span>
+{% if webmim.rows %}<table class="table small"><thead><tr><th>Идентификатор</th><th>Адрес</th></tr></thead><tbody>{% for a in webmim.rows %}<tr><td class="mono">{{ a.id }}</td><td>{{ a.address }}</td></tr>{% endfor %}</tbody></table>
+<datalist id="webmim-addresses">{% for a in webmim.rows %}<option value="{{ a.id }}">{{ a.address }}</option>{% endfor %}</datalist>
+{% else %}<span class="small muted">На сервере нет адресов доставки: заведите адрес в личном кабинете WebMIM.</span>{% endif %}
+{% else %}<span class="small text-err">{{ webmim.problem }}</span>{% endif %}
+{% elif can_post("connections_points_save") %}<div class="row" style="gap:var(--s-3);flex-wrap:wrap"><a class="btn btn--secondary btn--sm" href="/connections/points?addresses=1">Показать адреса WebMIM</a><span class="small muted">Прочитает адреса доставки выбранного сервера WebMIM, ничего не меняет.</span></div>{% endif %}
+</div>
+{% for r in rows %}
+{% if can_post("connections_points_save") %}<form method="post" action="/connections/points/save" class="card-body stack" style="border-bottom:1px solid var(--gray-200)">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="id" value="{{ r.id }}">
+<div class="grid-2">
+<label class="field"><span class="label">Название точки</span><input class="input" name="name" value="{{ r.name }}" maxlength="60"></label>
+<label class="field"><span class="label">Менеджер</span><input class="input" name="manager_name" value="{{ r.manager_name }}" maxlength="80"></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Телефон менеджера</span><input class="input" type="tel" inputmode="tel" name="manager_phone" value="{{ r.manager_phone }}" maxlength="30" placeholder="+7 900 111-22-33"></label>
+<label class="field"><span class="label">Канал связи</span><select class="select" name="channel">{% for key, label in channels.items() %}<option value="{{ key }}"{% if r.channel == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="hint">«Панель»: бот в ВК этой точке ничего не пишет — заказы, ответы и оповещения на её «Моей точке»; команды из ВК принимаются. «ВК» — как раньше.</span></label>
+{% set acc = r.avito_account_id %}<label class="field"><span class="label">Аккаунт Авито точки</span><select class="select" name="avito_account_id"><option value="">не выбран (менеджер точки не видит чатов)</option>{% for a in accounts %}<option value="{{ a.id }}"{% if acc == a.id %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select><span class="hint">Менеджер точки видит в «Чатах» только чаты этого аккаунта.</span></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Адрес доставки в WebMIM (идентификатор)</span><input class="input mono" name="webmim_address_id" value="{{ r.webmim_address_id }}" maxlength="40"{% if webmim and webmim.rows %} list="webmim-addresses"{% endif %}></label>
+<label class="field"><span class="label">Время доставки по умолчанию</span><input class="input" name="default_time" value="{{ r.default_time }}" maxlength="60" placeholder="до 18:00"></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">ВК менеджера (номер или адрес страницы)</span><input class="input mono" name="vk_peer_id" value="{{ r.vk_peer_id }}" maxlength="60" placeholder="vk.com/id123456"></label>
+<label class="field"><span class="label">Адрес точки для клиента</span><input class="input" name="address" value="{{ r.address }}" maxlength="200" placeholder="Город, улица, дом"></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">График работы</span><input class="input" name="hours" value="{{ r.hours }}" maxlength="120" placeholder="ежедневно 10:00–20:00"></label>
+<label class="field"><span class="label">Ссылка на Яндекс Карты</span><input class="input mono" name="map_url" value="{{ r.map_url }}" maxlength="300" placeholder="https://yandex.ru/maps/-/…"></label>
+</div>
+<p class="small muted">Адрес, график и ссылку на карту клиент получает в сообщении «можно забирать», когда менеджер пишет боту «приехал». Без них сообщение не уходит, владелец отправляет его сам.</p>
+<div class="row">
+<button class="btn btn--primary btn--sm">Сохранить</button>
+{% if can_post("connections_points_code") %}<button class="btn btn--secondary btn--sm" formaction="/connections/points/{{ r.id }}/code">Новый код привязки</button>{% endif %}
+{% if r.bind_code and has_right("connections") %}<span class="small">Код для менеджера: <b class="mono">{{ r.bind_code }}</b> — пусть отправит его сообществу в ВК</span>{% endif %}
+<details class="ml-auto"><summary class="btn btn--danger-outline btn--sm">Удалить</summary><span class="small">Точно удалить? </span>{% if can_post("connections_points_delete") %}<button class="btn btn--danger-outline btn--sm" formaction="/connections/points/{{ r.id }}/delete">Да, удалить</button>{% endif %}</details>
+</div>
+{% if can_post("connections_points_save") %}</form>{% else %}</fieldset>{% endif %}
+{% else %}
+<div class="card-body"><span class="muted">Точек пока нет. Добавьте первую ниже.</span></div>
+{% endfor %}
+</section>
+<section class="card">
+{% if can_post("connections_points_save") %}<form method="post" action="/connections/points/save">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Добавить точку</h3></div>
+<div class="card-body stack">
+<div class="grid-2">
+<label class="field"><span class="label">Название точки</span><input class="input" name="name" maxlength="60"></label>
+<label class="field"><span class="label">Менеджер</span><input class="input" name="manager_name" maxlength="80"></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Телефон менеджера</span><input class="input" type="tel" inputmode="tel" name="manager_phone" maxlength="30" placeholder="+7 900 111-22-33"></label>
+<label class="field"><span class="label">Канал связи</span><select class="select" name="channel">{% for key, label in channels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+{% set acc = none %}<label class="field"><span class="label">Аккаунт Авито точки</span><select class="select" name="avito_account_id"><option value="">не выбран (менеджер точки не видит чатов)</option>{% for a in accounts %}<option value="{{ a.id }}"{% if acc == a.id %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select><span class="hint">Менеджер точки видит в «Чатах» только чаты этого аккаунта.</span></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">ВК менеджера (номер или адрес страницы)</span><input class="input mono" name="vk_peer_id" maxlength="60" placeholder="vk.com/id123456"></label>
+<label class="field"><span class="label">Адрес точки для клиента</span><input class="input" name="address" maxlength="200"></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">График работы</span><input class="input" name="hours" maxlength="120" placeholder="ежедневно 10:00–20:00"></label>
+<label class="field"><span class="label">Ссылка на Яндекс Карты</span><input class="input mono" name="map_url" maxlength="300" placeholder="https://yandex.ru/maps/-/…"></label>
+</div>
+</div>
+<div class="card-foot"><button class="btn btn--primary">{{ icon("plus") }}Добавить точку</button></div>
+{% if can_post("connections_points_save") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+{% endblock %}

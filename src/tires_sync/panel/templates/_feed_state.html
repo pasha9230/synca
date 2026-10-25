@@ -1,0 +1,39 @@
+{% from "_ui.html" import icon %}
+{# The state of the feeds: the tiles of the accounts, the last run, the readiness (the main page before 2026-10-21, now «Фиды») #}
+<div class="tiles">
+{% for f in d.feeds %}<a class="tile{% if f.warn %} tile--warn{% endif %}" href="/connections/avito"><span class="tile-label">{{ f.title }}</span><span class="tile-value">{{ f.ads }}</span><span class="tile-sub">{{ plural(f.ads, "объявление", "объявления", "объявлений") }} в фиде{% if f.known %}{% if f.public_short %}, обновлён {{ f.public_short }} МСК{% else %}, ещё не публиковался{% endif %}{% endif %}{% if not f.live %}<br>публикация выключена, Авито читает старый фид{% endif %}{% if f.draft_short %}<br>свежий собран {{ f.draft_short }}{% endif %}</span></a>{% endfor %}
+<a class="tile tile--warn" href="/mappings"><span class="tile-label">Ждут сопоставления</span><span class="tile-value">{{ d.pending_pairs }}</span><span class="tile-sub">{{ d.pending_pairs }} {{ plural(d.pending_pairs, "модель", "модели", "моделей") }} ({{ d.pending_goods }} {{ plural(d.pending_goods, "позиция", "позиции", "позиций") }})</span></a>
+</div>
+<div class="stack-lg">
+<section class="card">
+<div class="card-head"><h3>Последний запуск</h3>{% if d.run %}<span class="sub">{{ d.run.started|dt_utc }}</span>{% endif %}<a class="btn btn--link small ml-auto" href="/history">Журнал</a></div>
+<div class="card-body">
+{% if d.run %}
+{% set s = d.run.summary %}
+<div class="counters">
+<div class="counter"><b class="text-ok">{{ s.get("publish", 0) }}</b><span>{{ run_text("publish") }}</span></div>
+<div class="counter"><b>{{ s.get("update", 0) }}</b><span>{{ run_text("update") }}</span></div>
+<div class="counter"><b>{{ s.get("keep", 0) }}</b><span>{{ run_text("keep") }}</span></div>
+<div class="counter"><b class="text-err">{{ s.get("remove", 0) }}</b><span>{{ run_text("remove") }}</span></div>
+<div class="counter"><b>{{ s.get("hold", 0) }}</b><span>{{ run_text("hold") }}</span></div>
+<div class="counter"><b>{{ s.get("skip", 0) }}</b><span>{{ run_text("skip") }}</span></div>
+<div class="counter"><b>{{ s.get("defer", 0) }}</b><span>{{ run_text("defer") }}</span></div>
+</div>
+<p class="xs muted" style="margin-top:10px">«На удержании» — позиции временно пропали у поставщика; снимутся, если не вернутся за несколько дней. «Ждут очереди» — сверх лимита новых позиций за цикл.</p>
+{% else %}<p class="muted">Запусков ещё не было.</p>{% endif %}
+</div>
+</section>
+{% if d.readiness %}
+<section class="card" id="readiness">
+{% set warn_n = d.readiness|selectattr("level", "equalto", "warn")|list|length %}{% set bad_n = d.readiness|selectattr("level", "equalto", "bad")|list|length %}
+<div class="card-head"><h3>Готовность к публикации</h3><span class="ml-auto row-wrap">{% if warn_n %}<span class="badge badge--warn">{{ warn_n }} проверьте</span>{% endif %}{% if bad_n %}<span class="badge badge--err">{{ bad_n }} нужно сделать</span>{% endif %}</span></div>
+<ul class="checklist">
+{% for s in d.readiness %}
+<li><span><span class="badge badge--{{ 'warn' if s.level == 'warn' else 'err' }} badge--dot">{% if s.level == "warn" %}Проверьте{% else %}Нужно сделать{% endif %}</span></span>
+<div><div class="cl-title">{{ s.title }}</div><div class="cl-text">{{ s.detail }}</div></div>
+<a class="btn btn--secondary btn--sm" href="{{ s.href }}">Открыть</a></li>
+{% endfor %}
+</ul>
+</section>
+{% endif %}
+</div>

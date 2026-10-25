@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Пустые карточки · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Убрать пустые карточки из «Нового заказа»</h1><p class="sub">Карточки уходят в «Удалённые», оттуда любую можно восстановить. Чаты остаются в «Чатах», из них можно снова создать сделку. В Авито и WebMIM ничего не меняется. Перед удалением панель сама снимает копию базы (на крайний случай: она не знает о сообщениях и заказах, пришедших после; одну карточку возвращайте через «Удалённые»).</p></div>
+<div class="actions"><a class="btn btn--secondary" href="/orders">К заказам</a><a class="btn btn--secondary" href="/deleted">Удалённые</a></div></header>
+<section class="card"><div class="card-body">
+<h2>Правило</h2>
+<p>Убирается карточка на этапе «Новый заказ», которую панель сама создала из чата Авито и с которой никто не работал. Остаётся карточка, если:</p>
+<ul>{% for text in reasons.values() %}<li>{{ text }}</li>{% endfor %}</ul>
+<p class="muted">Позиция из объявления, привязка чата и пометка «Ранее писал», которые появились вместе с карточкой, работой не считаются. Задачи, которые только ждут, уходят вместе с карточкой.</p>
+</div></section>
+<section class="card"><div class="card-body">
+<h2>Сейчас</h2>
+<p>На «Новом заказе» карточек: <b>{{ plan.total }}</b>. Будет убрано: <b>{{ plan.remove|length }}</b>. Останется: <b>{{ plan.total - plan.remove|length }}</b>.</p>
+{% if plan.kept %}<ul>{% for text, count in plan.kept %}<li>{{ text }}: {{ count }}</li>{% endfor %}</ul>{% endif %}
+{% if plan.remove %}
+{% if can_post("orders_cleanup_run") %}<form method="post" action="/orders/cleanup" data-once data-confirm-title="Убрать {{ plan.remove|length }} {{ plural(plan.remove|length, 'карточку', 'карточки', 'карточек') }} из «Нового заказа»?" data-confirm="Карточки уйдут в «Удалённые», вернуть их можно там. Перед этим панель сохранит копию базы." data-confirm-ok="Убрать" data-confirm-danger>
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="expected" value="{{ plan.sign }}">
+<button class="btn btn--danger">Убрать {{ plan.remove|length }} карточек</button></form>{% endif %}
+{% else %}<p class="muted">Убирать нечего.</p>{% endif %}
+</div></section>
+{% if shown %}<section class="card">
+<div class="table-wrap"><table class="table">
+<thead><tr><th>Карточка</th><th>Чат</th><th>Создана</th></tr></thead><tbody>
+{% for c in shown %}<tr><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a> {{ c.client_name or (c.client_phone|phone) }}</td><td>{{ c.avito_chat }}</td><td>{{ c.created_at|dt }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% if plan.remove|length > shown|length %}<div class="card-body"><p class="muted">Показаны первые {{ shown|length }} из {{ plan.remove|length }}.</p></div>{% endif %}
+</section>{% endif %}
+{% endblock %}

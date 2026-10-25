@@ -1,0 +1,3 @@
+# /etc/sudoers.d/tires-deploy (ставить: visudo -cf этот_файл && install -m 0440 этот_файл /etc/sudoers.d/tires-deploy)
+# Пользователь раннера GitHub может только вызвать скрипт выкладки; аргументы скрипт проверяет сам.
+tires-deploy ALL=(root) NOPASSWD: /usr/local/sbin/tires-deploy

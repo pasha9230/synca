@@ -1,0 +1,24 @@
+{% from "_ui.html" import icon %}
+<div class="preview">
+<div class="row" style="gap:var(--s-3);align-items:center"><p class="muted small grow">{{ p.name }} · код {{ p.code }} · остаток {{ p.stock }}{% if p.account %} · аккаунт {{ p.account }}{% endif %}</p>
+<a class="btn btn--secondary btn--xs" href="/catalog/item/{{ p.goods_id|urlencode }}">Открыть карточку</a></div>
+{% if not p.built %}
+<div class="flash flash--warn" style="margin-top:12px">{{ icon("warn") }}<div class="flash-text">Объявление не собирается: {{ p.reason }}.</div></div>
+{% endif %}
+{% if p.fields %}
+<div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:20px;margin-top:12px">
+{% if p.image %}<img src="{{ p.image }}" alt="" width="160" style="border-radius:10px;border:1px solid var(--gray-200)" loading="lazy" referrerpolicy="no-referrer">{% else %}<div class="photo">нет фото</div>{% endif %}
+<dl class="kv">
+<dt>Заголовок</dt><dd>{{ p.fields.Title }} <span class="muted xs">(Авито может сформировать свой из бренда, модели и размеров)</span></dd>
+<dt>Цена</dt><dd>{% if p.price %}<b>{{ p.price|money }}</b>{% else %}<b>—</b> <span class="muted xs">({{ p.price_note or "не рассчитана" }})</span>{% endif %}{% if p.pack %} · комплект за 4 шт.: {{ p.pack.price|money }}{% endif %}</dd>
+<dt>Количество</dt><dd>по 1 шт.</dd>
+<dt>Бренд, модель</dt><dd>{{ p.fields.Brand }}, {{ p.fields.Model }}</dd>
+<dt>Тип шин</dt><dd>{{ p.fields.TireType }}</dd>
+<dt>Состояние</dt><dd>{{ p.fields.Condition }}</dd>
+<dt>Адрес</dt><dd>{{ p.address }}</dd>
+</dl></div>
+<h4 style="margin-top:16px">Описание</h4>
+<pre style="white-space:pre-wrap;font-family:inherit;margin:8px 0 0">{{ p.fields.Description }}</pre>
+{% endif %}
+<p class="muted xs" style="margin-top:12px">Статус сейчас: {{ p.reason }}.</p>
+</div>

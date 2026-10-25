@@ -1,0 +1,39 @@
+/* The top bar: the one search (left of the bell). The list under the field and the page of Enter (search.html). */
+.topbar{height:40px}
+.topsearch{position:absolute;top:6px;right:44px;width:320px;max-width:calc(100% - 60px)}
+.topsearch-box{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid var(--gray-200);border-radius:var(--r-full);background:var(--gray-0);color:var(--gray-500);box-shadow:var(--sh-xs);cursor:text}
+.topsearch-box:focus-within{border-color:var(--primary-500);box-shadow:0 0 0 3px rgba(16,24,40,.08)}
+.topsearch-box .i{flex:none;width:16px;height:16px}
+.topsearch-input{flex:1;min-width:0;height:100%;padding:0;border:0;outline:0;background:none;color:var(--gray-900);font:inherit;font-size:var(--fs-sm)}
+.topsearch-input::-webkit-search-cancel-button{cursor:pointer}
+.topsearch-open{display:none;width:28px;height:28px;place-items:center;margin-left:auto;padding:0;border:1px solid var(--gray-200);border-radius:var(--r-full);background:var(--gray-0);color:var(--gray-700);cursor:pointer;box-shadow:var(--sh-xs)}
+.topsearch-open .i{width:17px;height:17px}
+.topsearch-pop{position:absolute;top:34px;right:0;width:440px;max-width:calc(100vw - 32px);max-height:min(480px,70vh);overflow-y:auto;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-xl);box-shadow:0 12px 32px rgba(16,24,40,.18)}
+.topsearch-pop[hidden]{display:none}
+.topsearch-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:10px 14px 4px;color:var(--gray-500);font-size:var(--fs-xs);font-weight:600;text-transform:uppercase;letter-spacing:.02em}
+.topsearch-head a{text-transform:none;letter-spacing:0;font-weight:600}
+.topsearch-item{display:block;padding:7px 14px;color:inherit;text-decoration:none}
+.topsearch-item:hover,.topsearch-item.is-active{background:var(--gray-50)}
+.topsearch-item.is-active{background:var(--primary-50);box-shadow:inset 3px 0 0 var(--primary-500)}
+.topsearch-title{display:block;font-weight:600;color:var(--gray-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topsearch-sub{display:block;color:var(--gray-600);font-size:var(--fs-xs);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topsearch-empty{padding:16px 14px;color:var(--gray-500)}
+.topsearch-all{display:block;padding:10px 14px;text-align:center;font-weight:600;border-top:1px solid var(--gray-200)}
+@media (max-width:720px){
+  .topsearch{width:auto;left:16px;right:44px;max-width:none;display:flex}
+  .topsearch .topsearch-box{display:none}
+  .topsearch-open{display:inline-grid}
+  .topsearch.is-open{left:8px;right:8px;z-index:2}
+  .topsearch.is-open .topsearch-box{display:flex;flex:1}
+  .topsearch.is-open .topsearch-open{display:none}
+  .topsearch-pop{left:0;right:0;width:auto;max-width:none}
+}
+/* the page of Enter */
+.search-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s-3);margin-bottom:var(--s-2)}
+.search-group-head h2{margin:0;font-size:var(--fs-lg)}
+.search-list{list-style:none;margin:0;padding:0}
+.search-list li+li{border-top:1px solid var(--gray-100)}
+.search-item{display:block;padding:8px 0;color:inherit;text-decoration:none}
+.search-item:hover .search-item-title{text-decoration:underline}
+.search-item-title{display:block;font-weight:600;color:var(--gray-900)}
+.search-item-sub{display:block;color:var(--gray-500);font-size:var(--fs-sm)}

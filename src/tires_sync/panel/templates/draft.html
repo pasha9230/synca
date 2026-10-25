@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Черновик № {{ r.draft.id }} · Tires Sync{% endblock %}
+{% block content %}
+{% set appear = r.preview.appear|length %}{% set gone = r.preview.disappear|length %}{% set prices = r.preview.price_changes|length %}
+{% set tone = "red" if r.guard.over else ("yellow" if gone else "green") %}
+<header class="page-head"><div><div class="crumbs"><a href="{{ back_url }}">{{ back_label }}</a>{{ icon("chev", "i-sm") }}<span>Подтверждение изменений</span></div>
+<h1>Черновик № {{ r.draft.id }}</h1><p class="sub">Проверьте, что изменится. Пока вы не нажмёте «Подтвердить», настройки и фид остаются прежними.</p></div>
+<div class="actions"><span class="badge badge--brand badge--dot" style="align-self:center;font-size:13px;padding:4px 12px">{{ draft_status(r.draft.status) }}</span></div></header>
+{% if r.stale %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Черновик устарел: настройки уже изменены. Создайте новый.</div></div>{% endif %}
+{% if r.needs_strong %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">Есть процент вне допустимого диапазона: нужно усиленное подтверждение.</div></div>{% endif %}
+<section class="summary summary--{{ tone }}">
+<div class="summary-strip"></div>
+<div class="summary-body">
+<div class="muted xs" style="text-transform:uppercase;letter-spacing:.06em;font-weight:600">К чему это приведёт</div>
+{% if r.guard.over %}<div class="row" style="align-items:flex-start">{{ icon("warn") }}<div class="grow"><h2 class="text-err">Исчезнет много объявлений</h2><p class="muted" style="margin-top:4px">Исчезнет {{ r.guard.gone }} {{ plural(r.guard.gone, "объявление", "объявления", "объявлений") }}: это больше порога защиты ({{ r.guard.limit }}). Применить можно только с отметкой «Я понимаю».</p></div></div>
+{% elif gone %}<h2 class="text-warn">Часть объявлений исчезнет из фида</h2>{% else %}<h2 class="text-ok">Объявления не исчезают</h2>{% endif %}
+<div class="grid-3" style="gap:16px">
+<div class="tile tile--ok"><span class="tile-label">Появится</span><span class="tile-value">+{{ appear }}</span><span class="tile-sub">{{ plural(appear, "объявление", "объявления", "объявлений") }}</span></div>
+<div class="tile tile--err"><span class="tile-label">Исчезнет</span><span class="tile-value">−{{ gone }}</span><span class="tile-sub">{{ plural(gone, "объявление", "объявления", "объявлений") }}</span></div>
+<div class="tile tile--warn"><span class="tile-label">Изменится цена</span><span class="tile-value">{{ prices }}</span><span class="tile-sub">{{ plural(prices, "объявление", "объявления", "объявлений") }}</span></div>
+</div>
+{% if r.draft.status == "open" and r.guard.over %}<label class="check check--danger" style="font-size:15px"><input type="checkbox" id="understand" name="understand" form="confirm-form">Я понимаю, что исчезнет {{ r.guard.gone }} {{ plural(r.guard.gone, "объявление", "объявления", "объявлений") }}</label>{% endif %}
+{% if r.draft.status == "open" and r.needs_strong %}<label class="check check--danger"><input type="checkbox" id="strong" name="strong" form="confirm-form">Подтверждаю значения вне диапазона</label>{% endif %}
+</div>
+</section>
+<div class="grid-main-side">
+<div class="stack-lg">
+<section class="card">
+<div class="card-head"><h3>Что меняется</h3><span class="sub">{{ r.lines|length }} {{ plural(r.lines|length, "изменение", "изменения", "изменений") }}</span></div>
+<ul class="changes">{% for line in r.lines %}<li><span>{{ line }}</span></li>{% else %}<li class="muted">Изменений нет.</li>{% endfor %}</ul>
+<details class="collapse" style="margin:0 20px 20px"><summary>{{ icon("chev", "chev") }}Технические детали</summary>
+<div class="collapse-body"><table class="table table--plain"><thead><tr><th>Параметр</th><th>Было</th><th>Станет</th></tr></thead>
+<tbody>{% for key, v in r.diff.items() %}<tr><td class="mono">{{ key }}</td><td class="mono xs">{{ v.old }}</td><td class="mono xs">{{ v.new }}</td></tr>{% endfor %}</tbody></table></div></details>
+</section>
+{% if r.price_rows %}
+<section class="card">
+<div class="card-head"><h3>Изменения цен</h3><span class="sub">{{ prices }} {{ plural(prices, "позиция", "позиции", "позиций") }}{% if r.price_more %} · показаны первые {{ r.price_rows|length }}{% endif %}</span></div>
+<table class="table table--plain"><thead><tr><th>Позиция</th><th class="num">Было</th><th class="num">Станет</th><th class="num">Разница</th></tr></thead>
+<tbody>{% for p in r.price_rows %}<tr><td class="t-name">{{ p.name }} <span class="t-code">({{ p.id }})</span></td><td class="num muted">{{ p.old|money }}</td><td class="num strong">{{ p.new|money }}</td><td class="num {{ 'delta-down' if p.new < p.old else 'delta-up' }}">{{ (p.new - p.old)|money_delta }}</td></tr>{% endfor %}</tbody></table>
+{% if r.price_more %}<div class="card-foot"><span class="small muted">и ещё {{ r.price_more }}</span></div>{% endif %}
+</section>
+{% endif %}
+</div>
+<div class="stack-lg">
+{% if r.by_brand %}
+<section class="card"><div class="card-head"><h3>По брендам</h3></div>
+<table class="table table--plain"><thead><tr><th>Бренд</th><th class="num">Появится</th><th class="num">Исчезнет</th></tr></thead>
+<tbody>{% for b in r.by_brand %}<tr><td class="t-name">{{ brand_label(b.brand) }}</td><td class="num {{ 'text-ok strong' if b.appear else 'muted' }}">{{ ("+" ~ b.appear) if b.appear else "—" }}</td><td class="num {{ 'text-err strong' if b.disappear else 'muted' }}">{{ ("−" ~ b.disappear) if b.disappear else "—" }}</td></tr>{% endfor %}</tbody>
+<tfoot><tr><td>Итого</td><td class="num text-ok">+{{ appear }}</td><td class="num text-err">−{{ gone }}</td></tr></tfoot></table>
+</section>
+{% endif %}
+{% if r.funnel %}
+<section class="card"><div class="card-head"><h3>Что попадёт в фид по новым сочетаниям</h3></div>
+<div class="card-body stack">
+{% for f in r.funnel %}
+<div class="row"><span class="strong">{{ f.label }}</span><span class="ml-auto small muted">из {{ f.total }} {{ plural(f.total, "позиции", "позиций", "позиций") }} пройдут <b class="strong">{{ f.ok }}</b></span></div>
+<div class="statusbar" style="background:linear-gradient(90deg,var(--ok-500) {{ (100 * f.ok / f.total)|round|int if f.total else 0 }}%,var(--gray-200) 0)"></div>
+{% if f.reasons %}<ul class="stack-sm" style="margin:0;padding:0;list-style:none;font-size:13px">{% for text, count in f.reasons %}<li class="row"><span class="grow muted">{{ text }}</span><b class="strong">{{ count }}</b></li>{% endfor %}</ul>{% endif %}
+{% endfor %}
+</div></section>
+{% endif %}
+</div>
+</div>
+{% if r.draft.status == "open" %}
+<div class="card" style="position:sticky;bottom:16px;box-shadow:var(--sh-xl)"><div class="card-body row">
+<span class="small muted grow">После подтверждения настройки станут новой версией. Публикация пройдёт в ближайший цикл (раз в час) или сразу, если выбрать «Применить и опубликовать сейчас».</span>
+{% if r.draft.status == "open" %}<a class="btn btn--link-gray" href="{{ back_url }}">Вернуться к правке</a>{% endif %}
+{% if can_post("draft_cancel") %}<form method="post" action="/draft/{{ r.draft.id }}/cancel" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--link-gray">Отменить</button>{% if can_post("draft_cancel") %}</form>{% else %}</fieldset>{% endif %}
+{% if can_post("draft_confirm") %}<form id="confirm-form" method="post" action="/draft/{{ r.draft.id }}/confirm" class="row" style="gap:12px">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="rev" value="{{ r.rev }}">
+{% set req = [] %}{% if r.guard.over %}{% set _ = req.append("understand") %}{% endif %}{% if r.needs_strong %}{% set _ = req.append("strong") %}{% endif %}
+<button class="btn btn--primary" data-busy="Применяю…"{% if req %} data-requires="{{ req|join(',') }}" disabled{% endif %} title="Применить настройки, пересобрать фид и сразу опубликовать его для Авито (у аккаунтов с включённой публикацией)">{{ icon("send") }}Применить и опубликовать</button>{% if can_post("draft_confirm") %}</form>{% else %}</fieldset>{% endif %}
+</div></div>
+{% endif %}
+{% endblock %}

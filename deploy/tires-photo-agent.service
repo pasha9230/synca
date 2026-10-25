@@ -1,0 +1,22 @@
+[Unit]
+Description=Tires Sync photo agent: runs when «Сгенерировать» is pressed in the panel, exits at once otherwise (agent/README.md)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+UMask=0027
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+Environment=TIRES_SECRET_KEY_FILE=/etc/tires-sync/secret.key
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync photo-agent-tick --db /var/lib/tires-sync/state.db --agent-bin /opt/tires-sync/agent/tire-photo-agent --agent-dir /var/lib/tires-sync/agent
+TimeoutStartSec=4h
+Nice=10
+CPUQuota=80%
+MemoryMax=500M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tires-sync

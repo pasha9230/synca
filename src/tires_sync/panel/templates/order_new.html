@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Новый заказ · Tires Sync{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Новый заказ</span></div>
+<p class="sub owin-lead">Достаточно имени, телефона, чата клиента или одной позиции. Остальное можно заполнить по ходу переговоров.</p>
+<div class="owin-page">{% include "_order_window.html" %}</div>
+{% endblock %}

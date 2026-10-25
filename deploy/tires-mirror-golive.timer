@@ -1,0 +1,10 @@
+[Unit]
+Description=One time: the mirrored feed of account 2 goes to Avito at 06:47 on 2026-10-14, before Avito reads at 07:00
+
+[Timer]
+OnCalendar=2026-10-14 06:47:00
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

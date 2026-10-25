@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Каталог по часам · История · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>История</h1><p class="sub">Сколько наших опубликованных позиций сейчас есть в выгрузке поставщика. Днём другие продавцы кладут шины в корзину, и они пропадают; в полночь корзины обнуляются и каталог наполняется заново. Здесь видно, когда именно.</p></div></header>
+{% set tab = "catalog" %}{% include "_history_tabs.html" %}
+{% if summary %}<section class="card"><div class="card-head"><h3>Когда каталог наполняется</h3></div>
+<ul class="log">{% for s in summary %}<li><time>{{ s.day|day }}</time><span>{% if s.first_at %}Накануне вечером на месте было {{ s.before }}, наполнение замечено в {{ s.first_at|hm }}: стало {{ s.after }} из {{ s.published }}.{% else %}Накануне вечером на месте было {{ s.before }}; за ночь прироста не было.{% endif %}</span></li>{% endfor %}</ul></section>{% endif %}
+<section class="card">
+<div class="card-head"><h3>Проверки за последние {{ days }} дня</h3></div>
+{% if probes %}<div class="table-wrap"><table class="table table--plain table--econ">
+<thead><tr><th>Время (МСК)</th><th>Проверка</th><th class="num">Товаров в выгрузке</th><th class="num">Наших опубликованных</th><th class="num">На месте</th><th class="num">Нет в выгрузке</th><th class="num">Остаток ниже порога</th><th class="num">Ждут или удержаны</th></tr></thead>
+<tbody>{% for p in probes %}<tr><td class="muted nowrap">{{ p.at|dt }}</td><td>{{ "цикл" if p.source == "cycle" else "ночная" }}</td><td class="num">{{ p.items }}</td><td class="num">{{ p.published }}</td>
+<td class="num"><b class="strong">{{ p.present }}</b></td><td class="num">{{ p.absent }}</td><td class="num">{{ p.low }}</td><td class="num">{{ p.waiting }}</td></tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty"><div class="empty-icon">{{ icon("clock") }}</div><h3>Проверок пока нет</h3><p>Запись делает каждый цикл (00:11, 06:11, 06:45, 12:11, 18:11) и проверка каталога в 00:40, 01:30, 03:00, 04:30, 05:30, 06:30.</p></div>{% endif %}
+</section>
+{% endblock %}

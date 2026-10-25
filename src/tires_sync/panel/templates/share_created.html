@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Ссылка создана · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Ссылка создана</h1><p class="sub">Позиций: {{ count }}. Цена {{ "показывается" if show_price else "скрыта" }}. Действует 7 дней.</p></div></header>
+<section class="card"><div class="card-body stack">
+<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Скопируйте ссылку сейчас: повторно её показать нельзя (у нас хранится только отпечаток). Потеряли — отзовите и создайте новую.</div></div>
+<div class="field"><span class="label">Ссылка для клиента</span><div class="row"><input class="input" id="shareurl" readonly value="{{ url }}" style="max-width:640px"><button type="button" class="btn btn--primary" data-copy="#shareurl">Скопировать</button></div></div>
+{% if no_photo %}<p class="small muted">Без фото: {{ no_photo }} {{ "позиция" if no_photo == 1 else "позиций" }} (у поставщика нет фото или оно не скачалось).</p>{% endif %}
+{% if skipped %}<p class="small muted">Не попали в ссылку: {% for name, why in skipped %}{{ name }} — {{ why }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
+<div class="row"><a class="btn btn--secondary" href="/shares">Все ссылки</a><a class="btn btn--link-gray" href="/catalog">В каталог</a></div>
+</div></section>
+{% endblock %}

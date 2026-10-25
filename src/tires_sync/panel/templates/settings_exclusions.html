@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Исключения · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "exclusions" %}{% include "_settings_head.html" %}
+{% for sp in suppliers_ex %}{% with supplier=sp.supplier, ex=sp.ex, multi=suppliers_ex|length > 1 %}{% include "_exclusions.html" %}{% endwith %}{% endfor %}
+{% endblock %}

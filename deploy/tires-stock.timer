@@ -1,0 +1,12 @@
+[Unit]
+Description=Check the supplier's stock between the hourly cycles: at :10, :25 and :55 (the hourly cycle runs at :40)
+
+[Timer]
+# the owner's word of 2026-10-24 (variant B): a fall of the stock leaves the feed within about 15 minutes; a pass that finds the
+# feeds busy (the hourly cycle, the panel) is skipped, a pass whose unload did not come is skipped quietly
+OnCalendar=*-*-* *:10,25,55:00
+Persistent=false
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

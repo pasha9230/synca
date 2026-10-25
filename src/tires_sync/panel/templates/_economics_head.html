@@ -1,0 +1,8 @@
+{% from "_ui.html" import icon %}
+<header class="page-head"><div><h1>Юнит-экономика</h1><p class="sub">Сколько мы зарабатываем на каждой шине с учётом скидки, бонуса и ЕЖ поставщика. Обзор — потенциал: при текущих ценах и остатках, если всё будет продано. «Продажи» — факт: что продано на самом деле. Закупка, бонус и ЕЖ считаются от цены поставщика в выгрузке.</p></div></header>
+<nav class="tabs">
+<a href="/economics"{% if tab == "overview" %} class="is-active" aria-current="page"{% endif %}>Обзор</a>
+<a href="/economics/funnel"{% if tab == "funnel" %} class="is-active" aria-current="page"{% endif %}>Воронка</a>
+<a href="/economics/sales"{% if tab == "sales" %} class="is-active" aria-current="page"{% endif %}>Продажи</a>
+<a href="/economics/terms"{% if tab == "terms" %} class="is-active" aria-current="page"{% endif %}>Условия поставщика</a>
+</nav>

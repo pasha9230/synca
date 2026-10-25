@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Сверка с WebMIM · Заказы · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Сверка с WebMIM</span></div><h1>Сверка с WebMIM</h1>
+<p class="sub">{{ r.server }} · {% if r.seen_at %}снимок {{ r.seen_at|short_dt_utc }}{% else %}снимка ещё нет: панель читает заказы WebMIM раз в час{% endif %} · окно {{ r.days }} дн. ·
+заказов WebMIM в снимке {{ r.total }}, сопоставлено {{ r.paired }}. В WebMIM панель ничего не пишет; номер в заказ панели попадает только по кнопке «Это он».</p>
+{% if r.test %}<p class="small text-err" data-webmim-test>Выбран тестовый сервер WebMIM: его заказы не наши, поэтому подсказок и кнопки «Это он» нет. Сервер меняется в «Подключения → WebMIM → Заказы в WebMIM».</p>{% endif %}</div></header>
+{% if r.shared %}<section class="card" id="shared" style="margin-bottom:var(--s-4)"><div class="card-head"><h3 class="text-err">Один заказ WebMIM у нескольких заказов панели ({{ r.shared|length }})</h3></div>
+<div class="card-body"><ul class="small">{% for s in r.shared %}<li data-shared="{{ s.order.id }}">№{{ s.order.number or s.order.id }}: {% for cid in s.cards %}<a href="/orders/{{ cid }}">№{{ cid }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul></div></section>{% endif %}
+
+<section class="card" id="unpaired"><div class="card-head"><h3>Заказы панели без пары ({{ r.unpaired|length }})</h3><span class="sub">созданы за окно, кроме отменённых и сделок из наличия точки</span></div>
+<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Этап</th><th>Подсказки WebMIM</th></tr></thead><tbody>
+{% for c in r.unpaired %}<tr data-unpaired="{{ c.id }}"><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}{% if c.client_phone %}<div class="small muted">{{ c.client_phone|phone }}</div>{% endif %}</td>
+<td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.stage }}</td><td>
+{% for h in c.hints %}{% set o = h.order %}<div class="row" style="gap:var(--s-2);flex-wrap:wrap" data-webmim-hint="{{ o.id }}"><b>№{{ o.number or o.id }}</b><span class="badge badge--neutral">{{ h.score }}%</span>
+<span class="small">{{ o.status_text }}{% if o.create_date %} · {{ o.create_date|dt }}{% endif %}{% if o.customer_name %} · {{ o.customer_name }}{% endif %}</span><span class="small muted">{{ h.why|join(", ") }}</span>
+{% if can_post("order_webmim_link") %}<form method="post" action="/orders/{{ c.id }}/webmim/link" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="order" value="{{ o.id }}"><input type="hidden" name="back" value="webmim"><button class="btn btn--secondary btn--xs">Это он</button></form>{% endif %}</div>
+{% else %}<span class="small muted">похожих нет</span>{% endfor %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">Все заказы окна сопоставлены.</td></tr>{% endfor %}</tbody></table></div></section>
+
+{% if r.not_found %}<section class="card" id="not-found" style="margin-top:var(--s-4)"><div class="card-head"><h3>Номер WebMIM есть, но в снимке его нет ({{ r.not_found|length }})</h3><span class="sub">проверьте номер в карточке</span></div>
+<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Номер / ID WebMIM в карточке</th></tr></thead><tbody>
+{% for c in r.not_found %}<tr><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}</td><td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.webmim_number or "—" }} / {{ c.webmim_id or "—" }}</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
+
+<section class="card" id="lonely" style="margin-top:var(--s-4)"><div class="card-head"><h3>Заказы WebMIM без пары ({{ r.lonely|length }})</h3></div>
+<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Номер</th><th>Создан</th><th>Статус</th><th>Покупатель</th><th>Внешний номер</th>{% if has_right("money") %}<th class="num">Сумма</th>{% endif %}</tr></thead><tbody>
+{% for o in r.lonely %}<tr data-lonely="{{ o.id }}"><td>№{{ o.number or o.id }}</td><td class="small">{{ o.create_date|dt if o.create_date else "—" }}</td><td class="small">{{ o.status_text or o.status_code or "—" }}</td>
+<td class="small">{{ o.customer_name or "—" }}</td><td class="small">{{ o.external_number or "—" }}</td>{% if has_right("money") %}<td class="num">{{ o.sum|money if o.sum is not none else "—" }}</td>{% endif %}</tr>
+{% else %}<tr><td colspan="{{ 6 if has_right('money') else 5 }}" class="muted">Таких нет.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

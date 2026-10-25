@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Поиск · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Поиск</h1><p class="sub">{% if result.q %}По запросу «{{ result.q }}»{% else %}Номер заказа (№123), чата (Ч-123), WebMIM, телефон, имя клиента, текст переписки за 3 месяца, размер, модель или код шины.{% endif %}</p></div></header>
+{% for g in result.groups %}
+<section class="card search-group"><div class="card-body">
+<div class="search-group-head"><h2>{{ g.title }}</h2><a href="{{ g.all_url }}">Все в разделе «{{ g.title }}» &rsaquo;</a></div>
+<ul class="search-list">{% for i in g["items"] %}<li><a class="search-item" href="{{ i.url }}"><span class="search-item-title">{{ i.title }}</span>{% if i.subtitle %}<span class="search-item-sub">{{ i.subtitle }}</span>{% endif %}</a></li>{% endfor %}</ul>
+{% if g.more %}<p class="small muted">Показаны первые {{ g["items"]|length }}: остальные — в разделе.</p>{% endif %}
+</div></section>
+{% else %}
+{% if result.q %}<p class="muted">Ничего не нашли.</p>{% endif %}
+{% endfor %}
+{% endblock %}

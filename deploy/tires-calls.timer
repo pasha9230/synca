@@ -1,0 +1,10 @@
+[Unit]
+Description=Avito calls every 2 minutes (the recordings come up to 30 minutes later and are asked again)
+
+[Timer]
+OnCalendar=*:0/2
+Persistent=true
+RandomizedDelaySec=10
+
+[Install]
+WantedBy=timers.target

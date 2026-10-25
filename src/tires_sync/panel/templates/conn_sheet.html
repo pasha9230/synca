@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · Google-таблица{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card">
+{% if can_post("connections_sheet") %}<form method="post" action="/connections/sheet">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Google-таблица заказов</h3><span class="sub">Панель сама добавляет строки на лист «{{ sheet_name }}» при оформлении заказа и обновляет их: перемещение, этап, реализация, списание, уведомления, прибыль</span></div>
+<div class="card-body stack">
+<label class="field"><span class="label">Адрес веб-приложения Apps Script</span><input class="input mono" name="url" value="{{ sheet.url }}" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec" data-sheet-url><span class="hint">Как получить: инструкция «Google-таблица заказов: скрипт» — у владельца.</span></label>
+<label class="field"><span class="label">Секрет {% if sheet_secrets.secret %}<span class="badge badge--ok">задан ({{ sheet_secrets.secret.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span>
+<div class="row" style="gap:var(--s-2)"><input class="input grow mono" type="password" name="secret" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять" maxlength="200" data-sheet-secret>
+<button type="button" class="btn btn--secondary btn--sm" data-sheet-secret-new title="Придумать случайный секрет: впишите его же в свойства скрипта (SECRET)">Придумать</button></div>
+<span class="hint">Тот же текст, что в свойстве SECRET скрипта. Хранится зашифрованным, на странице не показывается.</span></label>
+<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="enabled" value="1"{% if sheet.enabled %} checked{% endif %}> Включено{% if sheet.enabled and sheet.since %} <span class="small muted">с {{ sheet.since|dt_utc }}: в таблицу идут заказы, оформленные с этого момента</span>{% endif %}</label>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button>
+{% if can_post("connections_sheet_check") %}<button class="btn btn--secondary" formaction="/connections/sheet/check">{{ icon("check-circle") }}Проверить</button>{% endif %}
+{% if sheet_check %}<span class="ml-auto"><span class="row small {{ 'text-ok' if sheet_check.status.startswith('ok') else 'text-err' }}" style="gap:6px">{{ icon("check-circle" if sheet_check.status.startswith('ok') else "x-circle", "i-sm") }}{{ sheet_check.status }} · {{ sheet_check.at|dt_utc }}</span></span>{% endif %}</div>
+{% if can_post("connections_sheet") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card"><div class="card-head"><h3>Отправка</h3></div><div class="card-body stack small">
+<p>Заказов в таблице: <b>{{ sheet_status.orders }}</b>{% if sheet_status.failing %} · с ошибкой сейчас: <b class="text-err">{{ sheet_status.failing }}</b> (панель повторит сама){% endif %}.</p>
+{% if sheet_status.last_error %}<p class="text-err">Последняя ошибка: <a href="/orders/{{ sheet_status.last_error.order_id }}">заказ №{{ sheet_status.last_error.order_id }}</a> — {{ sheet_status.last_error.error }}</p>{% endif %}
+<p class="muted">Колонки листа (по названию в первой строке, порядок любой): {{ columns|join(", ") }}. Остальные колонки и строки, добавленные вручную, панель не трогает.</p>
+</div></section>
+{% endblock %}

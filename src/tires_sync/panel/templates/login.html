@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Вход · Tires Sync{% endblock %}
+{% block auth %}
+<form method="post" action="/login" class="card card-body stack">
+<h2>Вход</h2>
+{% if error %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{{ error }}</div></div>{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Логин</span><input class="input" name="login" autofocus autocomplete="username" placeholder="пусто — владелец"></label>
+<label class="field"><span class="label">Пароль</span><input class="input" type="password" name="password" autocomplete="current-password"></label>
+<button class="btn btn--primary btn--block">Войти</button>
+</form>
+{% endblock %}

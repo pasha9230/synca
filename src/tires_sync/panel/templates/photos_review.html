@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Генерация · Tires Sync{% endblock %}
+{% block content %}
+{% set badge = {"pending": "badge--warn", "approved": "badge--ok", "rejected": "badge--err", "withdrawn": "badge--neutral"} %}
+{% set label = {"pending": "Ждёт решения", "approved": "Одобрен", "rejected": "Отклонён", "withdrawn": "Снят"} %}
+{% set kinds = {"three_quarter": "Вполоборота", "set4": "Комплект 4 шт."} %}
+{% set dkinds = {"crop": "вырезка", "card": "карточка", "copy": "копия"} %}
+<header class="page-head"><div><h1>Генерация</h1><p class="sub">Кадры, нарисованные агентом. Одобренные уходят в фид, если включён выключатель ниже.</p></div></header>
+{% if new_token %}<section class="card"><p><b>Новый токен агента</b> (показан один раз, прежний больше не работает; обновление страницы выпустит ещё один):</p><p><code>{{ new_token }}</code></p></section>{% endif %}
+<section class="card">
+{% if can_post("photos_switch") %}<form method="post" action="/photos/switch" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="tab" value="{{ tab }}">
+<span class="badge badge--dot {{ 'badge--ok' if on else 'badge--neutral' }}">Свои фото в фиде: {{ "включены" if on else "выключены" }}</span>
+<input type="hidden" name="on" value="{{ 0 if on else 1 }}"><button class="btn btn--secondary btn--xs">{{ "Выключить" if on else "Включить" }}</button></form>{% endif %}
+{% if can_post("photos_agent_token") %}<form method="post" action="/photos/agent-token" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Выпустить токен агента</button></form>{% endif %}
+</section>
+<nav class="tabs2">
+<a{% if tab == 'pending' %} class="is-active" aria-current="page"{% endif %} href="/photos/review?tab=pending">На проверке ({{ counts.pending }})</a>
+<a{% if tab == 'approved' %} class="is-active" aria-current="page"{% endif %} href="/photos/review?tab=approved">Одобрены ({{ counts.approved }})</a>
+<a{% if tab == 'decision' %} class="is-active" aria-current="page"{% endif %} href="/photos/review?tab=decision">Нужно решение ({{ counts.decision }})</a>
+<a{% if tab == 'models' %} class="is-active" aria-current="page"{% endif %} href="/photos/review?tab=models">По моделям</a>
+<a{% if tab == 'queue' %} class="is-active" aria-current="page"{% endif %} href="/photos/review?tab=queue">Очередь и расходы</a>
+</nav>
+{% macro agent_line(agent) %}<p class="small" style="margin:8px 0 0"><span class="badge badge--dot {{ {'running': 'badge--pend', 'waiting': 'badge--warn' if agent.silent else 'badge--neutral', 'error': 'badge--warn', 'done': 'badge--ok'}.get(agent.state, 'badge--neutral') }}">{{ agent.text }}</span>{% if agent.at %} <span class="muted">{{ "с" if agent.state == "running" else "" }} {{ agent.at|short_dt_utc }}</span>{% endif %}</p>{% endmacro %}
+{% if queue %}
+{% set fbadge = {"approved": "badge--ok", "pending": "badge--warn", "running": "badge--pend", "queued": "badge--neutral"} %}
+<section class="card">
+<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
+<b>Потрачено сегодня: ${{ "%.2f"|format(queue.spent) }} из ${{ "%.2f"|format(queue.cap) }}</b>
+<span class="muted small">В очереди: {{ queue.queued }}, в работе: {{ queue.running }}, на проверке: {{ queue.review }}</span>
+</div>
+<div class="statusbar" style="margin:8px 0 12px;background:linear-gradient(90deg,var({{ '--err-500' if queue.spent_pct >= 100 else '--warn-500' if queue.spent_pct >= 80 else '--ok-500' }}) {{ queue.spent_pct }}%,var(--gray-200) 0)"></div>
+{% if can_post("photos_queue_switch") %}<form method="post" action="/photos/queue-switch" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<span class="badge badge--dot {{ 'badge--neutral' if queue.stopped else 'badge--ok' }}">{{ queue.state }}</span>
+<input type="hidden" name="on" value="{{ 1 if queue.stopped else 0 }}"><button class="btn btn--secondary btn--xs">{{ "Запустить очередь" if queue.stopped else "Остановить очередь" }}</button></form>{% endif %}
+{% if can_post("photos_generate") %}<form method="post" action="/photos/generate" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--xs"{% if agent.state in ("running", "waiting") %} disabled{% endif %}>Сгенерировать очередь</button></form>{% endif %}
+{{ agent_line(agent) }}
+</section>
+<section class="card">
+<details{% if not sold_text %} open{% endif %}><summary>{% if sold_text %}<b>Список продаж:</b> моделей вперёд — {{ sold_count }}, строк без пары — {{ sold_missing|sum(attribute=1) }}. <span class="btn--link">Изменить</span>{% else %}<b>Проданные модели идут первыми</b>{% endif %}</summary>
+<p class="muted small">Вставьте названия проданных шин, по одной в строке, как в отчёте: «Ikon Tyres 205/55/16 T 94 Ikon Character Ice 8 XL Ш.». Чем больше продаж модели, тем раньше её генерируем. R14 и меньше не учитываются.</p>
+<form method="post" action="/photos/priority"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<textarea name="sold" rows="8" style="width:100%">{{ sold_text }}</textarea>
+<button class="btn btn--primary btn--xs">Сохранить список</button></form>
+{% if sold_missing %}<p class="muted small">Без пары в наличии (летние, нет у поставщика или другое написание):</p>
+<ul class="small">{% for line, n in sold_missing %}<li>{{ line }}{% if n > 1 %} — {{ n }} шт.{% endif %}</li>{% endfor %}</ul>{% endif %}
+</details>
+</section>
+{% macro qtable(rows) %}
+<div class="table-wrap" style="max-height:none;border-top:0"><table class="table table--plain">
+<thead><tr><th></th><th>Набор</th><th>Класс</th><th>Вполоборота</th><th>Комплект</th></tr></thead>
+<tbody>{% for s in rows %}<tr>
+<td style="width:56px">{% if s.ref_url %}<a href="/photos/ref/{{ s.set_id }}" target="_blank" rel="noopener"><img src="/photos/ref/{{ s.set_id }}" alt="" loading="lazy" style="width:48px;height:48px;object-fit:contain"></a>{% endif %}</td>
+<td>{{ s.brand_name }} {{ s.model_name }}<div class="muted small">{{ s|season_text }}{% if s.sold %} · Продано: {{ s.sold }}{% endif %}</div>{% if s.spellings %}<div class="muted small">У поставщика: {{ s.spellings|join(", ") }}</div>{% endif %}</td>
+<td>{{ s.size_text }}</td>
+{% for kind in ("three_quarter", "set4") %}{% set f = s.frames[kind] %}<td>{% if f.state == "none" %}<span class="muted">—</span>{% else %}<span class="badge {{ fbadge[f.state] }}">{{ f.label }}</span>{% endif %}{% if f.tries %}<div class="muted small">попыток {{ f.tries }} из {{ queue.max_attempts }}</div>{% endif %}</td>{% endfor %}
+</tr>{% endfor %}</tbody>
+</table></div>
+{% endmacro %}
+{% set active = queue_rows|selectattr("group", "equalto", "active")|list %}
+{% set waiting = queue_rows|selectattr("group", "equalto", "waiting")|list %}
+{% set done = queue_rows|selectattr("group", "equalto", "done")|list %}
+<section class="card">
+<div class="card-head"><h3>Сейчас в работе ({{ active|length }})</h3></div>
+{% if active %}{{ qtable(active) }}{% else %}<p class="muted">Очередь пуста.</p>{% endif %}
+</section>
+{% if waiting %}<section class="card"><details><summary><b>Ждут своей очереди ({{ waiting|length }})</b></summary>{{ qtable(waiting) }}</details></section>{% endif %}
+{% if done %}<section class="card"><details><summary><b>Готовы ({{ done|length }})</b></summary>{{ qtable(done) }}</details></section>{% endif %}
+{% elif tab == 'models' %}
+{% set mbadge = {"approved": "badge--ok", "pending": "badge--warn", "running": "badge--pend", "queued": "badge--neutral"} %}
+<section class="card">
+<p class="muted small">Модели в наличии у поставщика (зима, R15 и больше, от 4 шт.). Список обновляется сам каждый час.</p>
+{{ agent_line(agent) }}
+<nav class="tabs2">
+{% for key, text in (("todo", "Не сгенерировано"), ("done", "Сгенерировано"), ("all", "Все")) %}<a{% if show == key %} class="is-active" aria-current="page"{% endif %} href="/photos/review?tab=models&show={{ key }}">{{ text }}</a>
+{% endfor %}</nav>
+</section>
+{% if show != "todo" and not on %}<section class="card"><p class="badge badge--warn">Общий выключатель выключен: отмеченные модели в фид не уйдут, пока его не включить. Отметки сохраняются.</p></section>{% endif %}
+{% for b in models %}
+{% set done_rows = b.rows|selectattr("group", "equalto", "done")|list %}
+<section class="card"><details open><summary><b>{{ b.brand }}</b> <span class="muted small">— готово {{ b.done }} из {{ b.total }}, в наличии {{ b.stock }} шт.</span></summary>
+<form method="post" action="/photos/feed"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="show" value="{{ show }}">
+{% if done_rows %}<div style="display:flex;gap:8px;margin:8px 0"><button class="btn btn--primary btn--xs" name="on" value="1">Отправить выбранные в фид</button><button class="btn btn--secondary btn--xs" name="on" value="0">Убрать выбранные из фида</button></div>{% endif %}
+<div class="table-wrap" style="max-height:none;border-top:0"><table class="table table--plain">
+<thead><tr><th style="width:28px">{% if done_rows %}<input type="checkbox" title="Выбрать все готовые в бренде" data-check-all="set">{% endif %}</th><th></th><th>Модель</th><th>Класс</th><th>В наличии</th><th>Вполоборота</th><th>Комплект</th><th>Фид</th></tr></thead>
+<tbody>{% for s in b.rows %}<tr>
+<td>{% if s.group == "done" %}<input type="checkbox" name="set" value="{{ s.set_id }}">{% endif %}</td>
+<td style="width:56px">{% if s.ref_url %}<a href="/photos/ref/{{ s.set_id }}" target="_blank" rel="noopener"><img src="/photos/ref/{{ s.set_id }}" alt="" loading="lazy" style="width:48px;height:48px;object-fit:contain"></a>{% endif %}</td>
+<td>{{ s.model_name }}<div class="muted small">{{ s|season_text }}</div>{% if s.spellings %}<div class="muted small">У поставщика: {{ s.spellings|join(", ") }}</div>{% endif %}</td>
+<td>{{ s.size_text }}</td>
+<td>{% if s.gone %}<span class="badge badge--warn">нет в наличии</span>{% else %}{{ s.stock }} шт.<div class="muted small">размеров: {{ s.positions }}</div>{% endif %}</td>
+{% for kind in ("three_quarter", "set4") %}{% set f = s.frames[kind] %}<td>{% if f.state == "none" %}<span class="muted">—</span>{% else %}<span class="badge {{ mbadge[f.state] }}">{{ f.label }}</span>{% endif %}</td>{% endfor %}
+<td>{% if s.group != "done" and not s.gone and can_post("photos_generate") %}<button class="btn btn--secondary btn--xs" formaction="/photos/generate" name="set" value="{{ s.set_id }}">Сгенерировать</button> {% endif %}{% if s.group == "done" %}{% if s.in_feed %}<span class="badge badge--ok">в фиде</span> <button class="btn btn--secondary btn--xs" name="one" value="{{ s.set_id }}:0">Убрать</button>{% else %}<span class="badge badge--neutral">не в фиде</span> <button class="btn btn--primary btn--xs" name="one" value="{{ s.set_id }}:1">В фид</button>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+</tr>{% endfor %}</tbody>
+</table></div></form></details></section>
+{% else %}<section class="card"><p class="muted">Здесь пока пусто.</p></section>{% endfor %}
+{% else %}
+<section class="card">
+<div class="table-wrap" style="max-height:none;border-top:0"><table class="table table--plain">
+<thead><tr><th>Набор</th><th>Кадры</th></tr></thead>
+<tbody>{% for s in rows %}<tr>
+<td>{{ s.brand_name }} {{ s.model_name }}<div class="muted small">{{ s|season_text }}, {{ s.size_class|class_text }}</div>{% if s.state == "needs_decision" %}<div class="small">{{ s.reason }}</div>{% endif %}</td>
+<td><div style="display:flex;gap:16px;align-items:flex-start">
+{% if s.ref_url %}<div style="width:200px"><span class="muted small">Образец</span><br><a href="/photos/ref/{{ s.set_id }}" target="_blank" rel="noopener"><img src="/photos/ref/{{ s.set_id }}" alt="" style="max-width:200px;max-height:200px"></a></div>{% endif %}
+{% for kind in ("three_quarter", "set4") %}<div style="width:200px"><span class="muted small">{{ kinds[kind] }}</span>
+{% for f in s.frames if f.kind == kind %}<div style="margin-bottom:8px"><span class="badge {{ badge[f.status] }}">{{ label[f.status] }}</span><br>
+{% if f.url %}<a href="{{ f.url }}" target="_blank" rel="noopener"><img src="{{ f.url }}" alt="" style="max-width:200px;max-height:200px"></a><br>{% endif %}
+{% for d in f.derived %}{% if d.url %}<img src="{{ d.url }}" alt="{{ dkinds.get(d.kind, d.kind) }}" title="{{ dkinds.get(d.kind, d.kind) }}, аккаунт {{ d.account_id }}" width="48">{% endif %}{% endfor %}
+{% for act, text in ([("approve", "Одобрить"), ("reject", "Отклонить"), ("regenerate", "Перегенерировать")] if f.status == "pending" else [("withdraw", "Снять")] if f.status == "approved" else []) %}{% if can_post("photos_frame_action") %}<form method="post" action="/photos/frame/{{ f.id }}/{{ act }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="tab" value="{{ tab }}"><button class="btn btn--secondary btn--xs">{{ text }}</button></form>{% endif %} {% endfor %}
+</div>{% endfor %}</div>{% endfor %}
+</div></td>
+</tr>{% else %}<tr><td colspan="2" class="muted">Здесь пока пусто.</td></tr>{% endfor %}</tbody>
+</table></div>
+</section>
+{% endif %}
+{% endblock %}

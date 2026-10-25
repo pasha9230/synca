@@ -1,0 +1,22 @@
+{% from "_ui.html" import empty %}<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow, noarchive"><meta name="referrer" content="no-referrer"><title>Подборка шин</title><link rel="stylesheet" href="/static/share.css"></head>
+<body><main>
+<header><h1>Подборка шин</h1>{% if link.note %}<p class="note">{{ link.note }}</p>{% endif %}<p class="meta">Данные на {{ link.created_label }} (МСК){% if link.show_price %}: цены указаны на этот момент{% endif %}.</p></header>
+{% if not items %}{{ empty("inbox", "Сейчас в подборке нет шин", "Позиции подборки закончились или их убрали. Напишите менеджеру в чат Авито: он подберёт другие.") }}{% endif %}
+<ul class="cards">
+{% for i in items %}<li class="card">
+<div class="photo">{% if i.photo %}<img src="/s/{{ token }}/p/{{ i.photo }}" alt="{{ i.name }}" loading="lazy">{% else %}<span>нет фото</span>{% endif %}</div>
+<div class="body"><h2>{{ i.name }}</h2>
+<dl>
+<dt>Бренд</dt><dd>{{ i.brand }}</dd>
+{% if i.model %}<dt>Модель</dt><dd>{{ i.model }}</dd>{% endif %}
+<dt>Размер</dt><dd>{{ i.size }}</dd>
+{% if i.season %}<dt>Сезон</dt><dd>{{ i.season }}{% if i.studded %}, шипы{% endif %}</dd>{% endif %}
+{% if i.load or i.speed %}<dt>Индексы</dt><dd>{{ i.load }}{{ i.speed }}</dd>{% endif %}
+{% if i.runflat %}<dt>RunFlat</dt><dd>да</dd>{% endif %}
+{% if i.country %}<dt>Страна</dt><dd>{{ i.country }}</dd>{% endif %}
+{% if i.year %}<dt>Год выпуска</dt><dd>{{ i.year }}</dd>{% endif %}
+</dl>
+{% if link.show_price %}<p class="price">{{ i.price|money }}</p>{% endif %}
+</div></li>{% endfor %}
+</ul></main></body></html>

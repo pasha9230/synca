@@ -1,0 +1,19 @@
+[Unit]
+Description=Tires Sync stock pass between the hourly cycles (take off the positions whose stock fell, publish the feed without them)
+OnFailure=tires-alert@%n.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+UMask=0027
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+Environment=TIRES_SECRET_KEY_FILE=/etc/tires-sync/secret.key
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync run-cycle --stock-only --fetch --publish --db /var/lib/tires-sync/state.db --unload /var/lib/tires-sync/unload.xml --reference /var/lib/tires-sync/reference.txt --feed-root /var/lib/tires-sync/feed
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tires-sync

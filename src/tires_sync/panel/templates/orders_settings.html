@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Настройка воронки · Заказы · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Настройка воронки</span></div><h1>Настройка воронки</h1>
+<p class="sub"><a href="/orders/templates">Шаблоны сообщений</a>. Этапы заказа слева направо. Системные этапы связаны с правилами (оформление, отмена, возврат): их можно переименовать и перекрасить, но не удалить.</p></div></header>
+<section class="card"><div class="card-head"><h3>Ответственный по умолчанию</h3></div>
+{% if can_post("orders_default_responsible") %}<form method="post" action="/orders/settings/responsible" class="card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Ответственный по умолчанию (заказы из чатов Авито)</span><select class="select" name="responsible"><option value="">Не назначен (отвечает тот, кто завёл)</option>{% for o in responsible_options %}<option value="{{ o.login }}"{% if o.login == default_responsible %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+<button class="btn btn--primary">Сохранить</button>{% if can_post("orders_default_responsible") %}</form>{% else %}</fieldset>{% endif %}</section>
+<section class="card"><div class="card-head"><h3>Клиенты с точек: дежурный</h3></div>
+{% if can_post("orders_duty") %}<form method="post" action="/orders/settings/duty" class="card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% for day in weekdays %}{% set d = loop.index0 %}<label class="field"><span class="label">{{ day }}</span><select class="select" name="day{{ d }}"><option value="">—</option>{% for o in responsible_options %}<option value="{{ o.login }}"{% if o.login == duty.week.get(d) %} selected{% endif %}>{{ o.login }}</option>{% endfor %}</select></label>{% endfor %}
+<label class="field"><span class="label">Сегодня вместо дежурного</span><select class="select" name="today"><option value="">— как по графику</option>{% for o in responsible_options %}<option value="{{ o.login }}"{% if duty.today.get("date") == today and o.login == duty.today.get("login") %} selected{% endif %}>{{ o.login }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Рабочие часы (МСК), с</span><input class="input" type="number" name="start" min="0" max="23" value="{{ duty.hours[0] }}" style="width:80px"></label>
+<label class="field"><span class="label">до</span><input class="input" type="number" name="end" min="1" max="24" value="{{ duty.hours[1] }}" style="width:80px"></label>
+<button class="btn btn--primary">Сохранить</button>
+<p class="small muted" style="flex-basis:100%">Клиент, переданный точкой командой ВК «клиент &lt;телефон&gt; &lt;что нужно&gt;», попадает на этап «Передано с точки» к дежурному; не взят за 15 минут рабочего времени — красная запись. Без дежурного — «ответственный по умолчанию».</p>{% if can_post("orders_duty") %}</form>{% else %}</fieldset>{% endif %}</section>
+<section class="card">
+{% for s in stages %}
+<details class="stage-block" style="border-bottom:1px solid var(--gray-200)"><summary class="card-body row" style="gap:var(--s-3);align-items:center"><span class="dot" style="background:{{ s.color }};width:10px;height:10px;border-radius:50%;display:inline-block"></span><b>{{ s.name }}</b>{% if s.code %}<span class="badge badge--neutral">Системный</span>{% endif %}<span class="small muted">{{ kinds[s.kind] }} · заказов {{ counts.get(s.id, 0) }} · правил {{ rules_by_stage[s.id]|length }}, команд {{ commands_by_stage[s.id]|length }}{% if s.limit_hours %} · срок {{ s.limit_hours }} ч.{% endif %}</span></summary>
+{% if can_post("orders_stage_update") %}<form method="post" action="/orders/settings/stage/{{ s.id }}/update" class="card-body stack">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="row" style="gap:var(--s-3);flex-wrap:wrap;align-items:flex-end">
+<label class="field" style="width:230px"><span class="label">Название {% if s.code %}<span class="badge badge--neutral">Системный</span>{% endif %}</span><input class="input" name="name" value="{{ s.name }}" maxlength="60"></label>
+<label class="field"><span class="label">Цвет</span><input class="input" type="color" name="color" value="{{ s.color }}" style="width:64px;padding:2px"></label>
+{% if s.code %}<div class="field"><span class="label">Тип</span><input type="hidden" name="kind" value="{{ s.kind }}"><span class="badge badge--neutral" title="Тип системного этапа менять нельзя">{{ kinds[s.kind] }}</span></div>
+{% else %}<label class="field"><span class="label">Тип</span><select class="select" name="kind">{% for key, label in kinds.items() %}<option value="{{ key }}"{% if s.kind == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endif %}
+<label class="field" style="width:110px"><span class="label">Срок, часов</span><input class="input input--num" name="limit_hours" value="{{ s.limit_hours }}" inputmode="numeric" title="0 — без срока"></label>
+<label class="field" style="flex:1;min-width:220px"><span class="label">Подсказка сотруднику</span><input class="input" name="hint" value="{{ s.hint }}" maxlength="300"></label>
+</div>
+<div class="row" style="gap:var(--s-2)">
+<button class="btn btn--primary btn--sm">Сохранить</button>
+{% if can_post("orders_stage_shift") %}<button class="btn btn--secondary btn--xs" formaction="/orders/settings/stage/{{ s.id }}/shift" name="dir" value="up" title="Выше" aria-label="Выше">{{ icon("arrow-up", "i-sm") }}</button>{% endif %}
+{% if can_post("orders_stage_shift") %}<button class="btn btn--secondary btn--xs" formaction="/orders/settings/stage/{{ s.id }}/shift" name="dir" value="down" title="Ниже" aria-label="Ниже">{{ icon("arrow-down", "i-sm") }}</button>{% endif %}
+<span class="small muted">Заказов на этапе: {{ counts.get(s.id, 0) }}</span>
+{% if (not s.code or s.code in removable) and not counts.get(s.id) %}{% if can_post("orders_stage_delete") %}<button class="btn btn--danger-outline btn--sm ml-auto" formaction="/orders/settings/stage/{{ s.id }}/delete">Удалить</button>{% endif %}{% endif %}
+</div>{% if can_post("orders_stage_update") %}</form>{% else %}</fieldset>{% endif %}
+<div class="card-body stack"><div class="strong">Правила и команды этапа</div>
+{% for r in rules_by_stage[s.id] %}<div class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:center"><span class="{{ '' if r.enabled else 'muted' }}">{{ triggers[r.trigger] }}{% if r.trigger == "stale" %} {{ r.hours }} ч.{% endif %} → {{ actions[r.action] }}{% if r.action == "message" %} «{{ template_names.get(r.template_id, "?") }}»{% elif r.action == "move" %} «{{ stage_names.get(r.arg|int, "?") }}»{% elif r.arg %} «{{ r.arg }}»{% endif %} · {{ modes[r.mode] }}{% if r.point_id %} · {{ point_names.get(r.point_id, "?") }}{% endif %}</span>
+{% if can_post("orders_rule_toggle") %}<form method="post" action="/orders/settings/rule/{{ r.id }}/toggle" class="ml-auto">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">{{ "Выключить" if r.enabled else "Включить" }}</button>{% if can_post("orders_rule_toggle") %}</form>{% else %}</fieldset>{% endif %}
+{% if can_post("orders_rule_delete") %}<form method="post" action="/orders/settings/rule/{{ r.id }}/delete">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--danger-outline btn--xs">Удалить</button>{% if can_post("orders_rule_delete") %}</form>{% else %}</fieldset>{% endif %}</div>{% else %}<p class="small muted">Правил нет.</p>{% endfor %}
+{% if can_post("orders_rule_add") %}<form method="post" action="/orders/settings/rule/add" class="row rule-form" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ s.id }}" data-rule-form>
+<label class="field"><span class="label">Когда</span><select class="select" name="trigger">{% for k, v in triggers.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+<label class="field" data-trigger="stale" style="width:90px"><span class="label">Через сколько часов</span><input class="input input--num" name="hours" value="0" inputmode="numeric" title="Только для «завис на этапе»"></label>
+<label class="field"><span class="label">Что сделать</span><select class="select" name="action">{% for k, v in actions.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+<label class="field" data-action="message"><span class="label">Шаблон</span><select class="select" name="template_id"><option value="">—</option>{% for t in templates %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}</select></label>
+<label class="field" data-action="move"><span class="label">Перенести на этап</span><select class="select" name="arg_stage"><option value="">—</option>{% for st in stages %}{% if st.id != s.id %}<option value="{{ st.id }}">{{ st.name }}</option>{% endif %}{% endfor %}</select></label>
+<label class="field" data-action="remind tag_add tag_remove" style="width:240px"><span class="label" data-text-label>Текст или тег</span><input class="input" name="arg" maxlength="200"></label>
+<label class="field"><span class="label">Режим</span><select class="select" name="mode">{% for k, v in modes.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Точка</span><select class="select" name="point_id"><option value="">Любая</option>{% for p in points %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></label>
+<button class="btn btn--secondary btn--sm">Добавить правило</button>{% if can_post("orders_rule_add") %}</form>{% else %}</fieldset>{% endif %}
+<div class="small strong" style="margin-top:var(--s-3)">Команды менеджера на этом этапе</div><p class="small muted">Менеджер пишет слово и номер заказа («принял 17»), заказ переходит на выбранный этап.</p>
+{% for c in commands_by_stage[s.id] %}{% if can_post("orders_command_delete") %}<form method="post" action="/orders/settings/command/{{ c.id }}/delete" class="row" style="gap:var(--s-2)">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><span>«{{ c.word }}» → {{ stage_names.get(c.to_stage_id, "?") }}</span><button class="btn btn--danger-outline btn--xs ml-auto">Удалить</button>{% if can_post("orders_command_delete") %}</form>{% else %}</fieldset>{% endif %}{% endfor %}
+{% if can_post("orders_command_add") %}<form method="post" action="/orders/settings/command/add" class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ s.id }}">
+<label class="field" style="width:160px"><span class="label">Слово</span><input class="input" name="word" maxlength="30" placeholder="принял"></label>
+<label class="field"><span class="label">Перенести на</span><select class="select" name="to_stage_id">{% for st in stages %}{% if st.id != s.id %}<option value="{{ st.id }}">{{ st.name }}</option>{% endif %}{% endfor %}</select></label>
+<button class="btn btn--secondary btn--sm">Добавить команду</button>{% if can_post("orders_command_add") %}</form>{% else %}</fieldset>{% endif %}</div>
+</details>
+{% endfor %}
+</section>
+<section class="card">{% if can_post("orders_stage_add") %}<form method="post" action="/orders/settings/stage/add">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Добавить этап</h3></div>
+<div class="card-body row" style="gap:var(--s-3);flex-wrap:wrap;align-items:flex-end">
+<label class="field" style="width:230px"><span class="label">Название</span><input class="input" name="name" maxlength="60"></label>
+<label class="field"><span class="label">Цвет</span><input class="input" type="color" name="color" value="#7F56D9" style="width:64px;padding:2px"></label>
+<label class="field"><span class="label">Тип</span><select class="select" name="kind">{% for key, label in kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+<label class="field" style="width:110px"><span class="label">Срок, часов</span><input class="input input--num" name="limit_hours" value="0" inputmode="numeric"></label>
+<label class="field" style="flex:1;min-width:220px"><span class="label">Подсказка</span><input class="input" name="hint" maxlength="300"></label>
+</div>
+<div class="card-foot"><button class="btn btn--primary">{{ icon("plus") }}Добавить этап</button></div>{% if can_post("orders_stage_add") %}</form>{% else %}</fieldset>{% endif %}</section>
+{% endblock %}

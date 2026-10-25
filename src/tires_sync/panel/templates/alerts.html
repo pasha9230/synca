@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, empty %}
+{% block title %}Уведомления · Tires Sync{% endblock %}
+{% block content %}
+{% set badge = {"red": "badge--err", "yellow": "badge--warn", "green": "badge--ok"} %}
+{% set label = {"red": "Нужно действие", "yellow": "Внимание", "green": "Движется"} %}
+<header class="page-head"><div><h1>Уведомления</h1><p class="sub">События заказов, которые вы ещё не видели. Красные горят, пока вы не нажмёте «Разобрался» или причина не исправлена; остальные гаснут, когда вы открываете заказ, зелёные — и сами через 7 дней (в журнале заказа остаются). «Клиент написал» по чату без заказа горит, пока чат не прочитан, не отвечен или не помечен «Не требует ответа». «Срочно ответить» — клиент ждёт ответа в чате дольше часа рабочего времени: горит, пока ему не ответят или чат не закроют. «Перезвонить» появляется в назначенное время и горит до «Сделано».</p></div></header>
+<section class="card">
+<table class="table table--plain">
+<thead><tr><th>Цвет</th><th>Заказ</th><th>Время</th><th>Событие</th><th></th></tr></thead>
+<tbody>{% for r in rows %}<tr>
+<td><span class="badge badge--dot {{ badge[r.level] }}">{{ label[r.level] }}</span></td>
+<td class="nowrap">{% if r.title %}<a href="{{ r.href }}">{{ r.title }}</a>{% elif r.chat_row %}<a href="/chats/{{ r.chat_row }}">Чат без заказа</a>{% else %}<a href="{{ r.href }}">№ {{ r.order_id }}</a>{% endif %}{% if r.order.client %} <span class="muted">· {{ r.order.client }}</span>{% endif %}</td>
+<td class="muted nowrap"><time title="{{ r.at|dt }}">{{ r.at|short_dt }}</time></td>
+<td>{{ r.text }}{% if r.more %} <span class="muted">· ещё {{ r.more }}</span>{% endif %}</td>
+<td class="t-actions">{% if r.handoff %}<a class="btn btn--primary btn--xs" href="{{ r.href }}">Открыть</a>{% if staff %} <form method="post" action="/alerts/{{ r.id }}/take" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Взять в работу</button></form>{% endif %}{% endif %}{% if r.urgent and can_post("chat_status") %}{% for key, label in (("no_reply", "Не требует ответа"), ("closed", "Закрыть")) %}<form method="post" action="/chats/{{ r.chat_row }}/status" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="status" value="{{ key }}"><input type="hidden" name="back" value="alerts"><button class="btn btn--secondary btn--xs">{{ label }}</button></form> {% endfor %}{% endif %}{% if r.callback and may_callback() %}<form method="post" action="/callbacks/{{ r.callback }}/done" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="/alerts"><button class="btn btn--secondary btn--xs">{{ icon("check", "i-sm") }}Сделано</button></form> {% endif %}{% if r.level == "red" and not r.urgent and not r.callback %}<form method="post" action="/alerts/{{ r.id }}/ack" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">{{ icon("check", "i-sm") }}Разобрался</button></form>{% endif %}</td>
+</tr>{% else %}<tr><td colspan="5">{{ empty("check-circle", "Новых уведомлений нет", "Здесь появятся события заказов и сообщения клиентов, которые вы ещё не видели.") }}</td></tr>{% endfor %}</tbody>
+</table>
+</section>
+{% endblock %}

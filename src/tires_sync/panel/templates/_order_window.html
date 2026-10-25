@@ -1,0 +1,108 @@
+{# The window of an order (the owner's mockup docs/mockups/2026-10-20-order-window.html): «Новый заказ» (no `c`) and the top of the card.
+   The fields are one form; on the card the rows of the positions and the deletion are forms of their own below it, their fields name them by form="…".
+   The row that adds a position is in the window's form (the owner 2026-10-23): «Сохранить» adds the chosen tyre with the rest, «+» sends the same row to
+   /items/add alone (formnovalidate: the card's own fields are not its business). data-once: a double press adds nothing twice. #}
+{% import "_entity.html" as entity_ui %}
+{% set card = c is defined %}
+{% set amount = v.special_amount %}
+{# without the right to change the order (the viewer, the manager of a point) the window is read-only: no form, the fields are disabled, no buttons;
+   the positions, the deletion and the chats have the same right as the window (orders, «менять»), the deletion needs «удалять» on top #}
+{% set ro = not can_post("order_save" if card else "order_new") %}
+{% set can_delete = card and can_post("order_delete") %}
+<section class="card owin" aria-labelledby="{{ 'ow-title-kind ' if card else '' }}ow-title">
+{% if ro %}<div id="ow-main"><fieldset disabled style="border:0;padding:0;margin:0;min-width:0">{% else %}<form id="ow-main" method="post" action="{{ '/orders/%d/save' % c.id if card else '/orders/new' }}" data-once data-owin>
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% if card %}<input type="hidden" name="was" value="{{ was }}">{% endif %}
+<button class="sr-only" tabindex="-1" aria-hidden="true">Сохранить</button>{% endif %}{# the first button is the one Enter presses: Enter in a field saves, it never moves the card #}
+<div class="owin-head">
+{% call entity_ui.head(entity if card else {"type": "order", "kind": "", "title": "Новый заказ"}, id="ow-title", title_class="owin-title", extra="owin-top") %}
+{% if card and c.stage.kind == "open" %}{% set next_stage = stages|selectattr("kind", "in", ["open", "won"])|selectattr("position", "gt", c.stage.position)|first %}{% endif %}
+{# one button to the next stage of the flow (review 2026-10-21, 2.5): like a chip of the strip, it saves the window, then moves #}
+{% if next_stage and not ro %}<button class="btn btn--primary btn--sm owin-next" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ next_stage.id }}" title="Сохранить окно и перенести заказ на этап «{{ next_stage.name }}»">Перевести в «{{ next_stage.name }}» {{ icon("arrow-right", "i-sm") }}</button>{% endif %}
+{% if card and (not ro or can_delete or (c.stage.code not in ("cancel", "return") and can_post("order_move"))) %}<details class="menu owin-menu"><summary>Ещё ⋯</summary><div class="menu-list">
+{% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}<a class="menu-item menu-item--danger" href="#finish" data-open-modal="finish-window">Отменить заказ или оформить возврат…</a>{% endif %}
+{% for s in stages if not ro and s.kind not in ("open", "won") and s.code not in ("cancel", "return") and s.id != c.stage_id %}<button class="menu-item" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ s.id }}">Перенести на этап «{{ s.name }}»</button>{% endfor %}
+{% if can_delete %}<hr><button class="menu-item menu-item--danger" form="ow-delete">Удалить заказ…</button>
+<span class="small muted menu-note">Удаляется только из нашей базы: в Авито и WebMIM ничего не меняется. <a href="/deleted">Удалённые</a></span>{% endif %}
+</div></details>{% endif %}{% endcall %}
+{% if card %}{% set flow = stages|selectattr("kind", "in", ["open", "won"])|list %}
+<div class="owin-stages" aria-label="Этапы заказа: нажмите, чтобы сохранить окно и перенести заказ">{% for s in flow %}{% if s.id == c.stage_id %}<span class="owin-stage is-current" aria-current="step">{{ s.name }} · {{ days }} дн.</span>{% elif ro %}<span class="owin-stage{{ ' is-done' if c.stage.kind in ('open', 'won') and s.position < c.stage.position else '' }}">{{ s.name }}</span>{% else %}<button class="owin-stage{{ ' is-done' if c.stage.kind in ('open', 'won') and s.position < c.stage.position else '' }}" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ s.id }}" title="Перенести на этап «{{ s.name }}»">{{ s.name }}</button>{% endif %}{% endfor %}
+{% if c.stage.kind not in ("open", "won") %}<span class="owin-stage is-stopped" aria-current="step">{{ c.stage.name }} · {{ days }} дн.</span>{% endif %}</div>
+<p class="owin-note">Этап «{{ c.stage.name }}» с {{ c.entered_at|short_dt }}{% if c.stage.hint %} · {{ c.stage.hint }}{% endif %}</p>{% endif %}
+<div class="owin-tags"{% if not ro %} data-tags{% endif %}>{% for t in tags %}<span class="owin-tag" data-tag="{{ t }}">{{ t }}{% if not ro %}<button type="button" class="owin-tag-x" data-tag-x aria-label="Убрать тег «{{ t }}»">{{ icon("x", "i-sm") }}</button>{% endif %}</span>{% endfor %}
+{% if not ro %}<input class="owin-tagin" list="ow-known-tags" maxlength="30" placeholder="+ тег" aria-label="Добавить тег (Enter)" data-tag-in><input type="hidden" name="tags" value="{{ tags|join(', ') }}" data-tag-value>
+<datalist id="ow-known-tags">{% for t in known_tags %}<option value="{{ t }}">{% endfor %}</datalist>{% endif %}</div>
+</div>
+<div class="owin-body">
+<div class="owin-grid">
+<label class="field"><span class="label">Имя клиента{% if card and c.client and can("clients") %} · <a href="/clients/{{ c.client.id }}">карточка клиента №{{ c.client.id }}</a>{% endif %}</span><input class="input" name="client_name" value="{{ v.client_name or '' }}" maxlength="120"{% if not card %} autofocus{% endif %}></label>
+<div class="field"><label class="label" for="client-phone">Телефон</label><div class="row" style="gap:var(--s-2)"><input class="input grow" id="client-phone" type="tel" inputmode="tel" autocomplete="tel" name="client_phone" value="{{ v.client_phone or '' }}" maxlength="30" placeholder="+7 900 000-00-00">{% if card and c.client_phone %}<button type="button" class="btn btn--secondary btn--sm" data-copy="client-phone">Копировать</button>{% endif %}</div></div>
+<label class="field"><span class="label">Точка (ПВЗ)</span><select class="select" name="point_id"><option value="">Не выбрана</option>{% for p in points %}<option value="{{ p.id }}"{% if v.point_id|string == p.id|string %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>{% if card and c.point %}<span class="hint">Менеджер: {{ c.point.manager_name or "не указан" }}{% if c.point.manager_phone %} · {{ c.point.manager_phone|phone }}{% endif %}</span>{% endif %}</label>
+<label class="field"><span class="label">Тип сделки</span><select class="select" name="deal_kind">{% for key, label in deal_kinds.items() %}<option value="{{ key }}"{% if (v.deal_kind or "webmim") == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Ответственный (ему приходят уведомления)</span><select class="select" name="responsible">{% for o in responsible_options %}<option value="{{ o.login }}"{% if o.login == v.responsible %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+</div>
+
+<h2 class="owin-sec" id="items">Позиции</h2>
+{% if not ro %}<div class="owin-add" data-item-row{% if not card %} data-item-new{% endif %}>
+<div class="field grow"><label class="label" for="ow-find">Код или модель</label><div class="suggest-wrap" data-item-find="/orders/items/find"><input type="hidden" name="{{ 'goods_id' if card else 'item_goods_id' }}" data-find-code{% if card %} value="{{ v.row_goods_id or '' }}"{% endif %}><input class="input" id="ow-find" name="{{ 'query' if card else 'item_query' }}" placeholder="Модель, бренд или размер, например «ikon autograph»" autocomplete="off" data-find-text{% if card %} value="{{ v.row_query or '' }}"{% endif %}><ul class="suggest" role="listbox" hidden></ul></div></div>
+<label class="field owin-qty"><span class="label">Шт.</span><input class="input input--num" name="{{ 'qty' if card else 'item_qty' }}" value="{{ (v.row_qty if card else '') or 4 }}" inputmode="numeric" data-find-qty></label>
+<label class="field owin-price"><span class="label">Цена за шт.</span><input class="input input--num" name="{{ 'sale_unit' if card else 'item_sale_unit' }}" placeholder="из панели"{% if card and v.row_sale_unit %} value="{{ v.row_sale_unit }}"{% endif %} inputmode="decimal" data-find-price></label>
+{% if card %}<button class="btn btn--secondary owin-plus" formaction="/orders/{{ c.id }}/items/add" formnovalidate title="Добавить позицию">{{ icon("plus") }}<span class="sr-only">Добавить позицию</span></button>{% else %}<button type="button" class="btn btn--secondary owin-plus" data-item-plus title="Добавить в список">{{ icon("plus") }}<span class="sr-only">Добавить в список</span></button>{% endif %}
+</div>
+<p class="hint owin-hint">Начните вводить модель, бренд или размер: появятся позиции с остатком и ценой объявления, цену за шт. можно поменять. Код позиции из «Каталога» тоже подходит. Без цены подставится цена из панели. В сделке «Из наличия точки» шину, которой нет в выгрузке, выберите последней строкой списка «шина с точки» и впишите цену.</p>{% endif %}
+<table class="owin-items"><tbody data-item-list>
+{% if card %}{% for i in c['items'] %}<tr><td class="owin-iname">{{ i.name }}{% if i.goods_id == "point" %}<div><span class="badge badge--neutral" title="Шина из наличия точки: в выгрузке WebMIM её нет">с точки · нет в выгрузке</span></div>{% else %}<div class="mono owin-code">{{ i.code or i.goods_id }}</div>{% endif %}</td>
+<td class="owin-iqty"><input class="input input--sm input--num" style="width:56px" name="qty" value="{{ i.qty }}" form="ow-item-{{ i.id }}" aria-label="Количество"> шт × <input class="input input--sm input--num" style="width:96px" name="sale_unit" value="{{ ('%.2f'|format(i.sale_unit)).rstrip('0').rstrip('.') }}" form="ow-item-{{ i.id }}" aria-label="Цена за шт."> ₽ {% if not ro %}<button class="btn btn--secondary btn--xs" form="ow-item-{{ i.id }}">Сохранить</button>{% endif %}
+{% if has_right("money") %}<div class="owin-buy hint" style="white-space:normal;margin-top:6px" data-buy>Закупка за 1 шт <input class="input input--sm input--num" style="width:96px" name="supplier_price" value="{{ ('%.2f'|format(i.supplier_price)).rstrip('0').rstrip('.') if i.supplier_price > 0 else '' }}"{% if not i.supplier_price > 0 %} placeholder="не указана"{% endif %} form="ow-item-{{ i.id }}" inputmode="decimal" aria-label="Закупка за 1 шт" data-buy-unit> ₽ · за <span data-buy-qty>{{ i.qty }}</span> шт <b data-buy-sum>{{ (i.supplier_price * i.qty)|money if i.supplier_price > 0 else "—" }}</b>{% if i.purchase_manual and i.supplier_price > 0 %} <span class="badge badge--neutral" title="Закупку поправили вручную: данные WebMIM её не меняют">вручную</span>{% endif %}</div>{% endif %}</td>
+<td class="num owin-isum">{{ i.money.sale|money }}</td>
+<td class="owin-ix">{% if not ro %}<button class="icon-btn" form="ow-item-del-{{ i.id }}" title="Удалить позицию" aria-label="Удалить позицию {{ i.name }}">{{ icon("x") }}</button>{% endif %}</td></tr>{% endfor %}
+{% else %}{% for r in rows %}<tr data-item-line><td class="owin-iname">{{ r.name or r.query or r.goods_id }}{% if r.goods_id == "point" %}<div><span class="badge badge--neutral">с точки · нет в выгрузке</span></div>{% elif r.goods_id %}<div class="mono owin-code">{{ r.goods_id }}</div>{% endif %}<input type="hidden" name="item_goods_id" value="{{ r.goods_id }}"><input type="hidden" name="item_query" value="{{ r.query }}"><input type="hidden" name="item_qty" value="{{ r.qty }}"><input type="hidden" name="item_sale_unit" value="{{ r.sale_unit }}"></td>
+<td class="owin-iqty">{{ r.qty }} шт × {% if r.unit is not none %}{{ r.unit|money }}{% elif r.sale_unit %}{{ r.sale_unit }} ₽{% else %}цена из панели{% endif %}</td>
+<td class="num owin-isum" data-sum="{{ r.sum if r.sum is not none else '' }}">{{ r.sum|money if r.sum is not none else "—" }}</td>
+<td class="owin-ix"><button type="button" class="icon-btn" data-item-x title="Убрать из списка" aria-label="Убрать {{ r.name or r.query or r.goods_id }}">{{ icon("x") }}</button></td></tr>{% endfor %}{% endif %}
+</tbody></table>
+<p class="owin-total">{% if card %}{% if c['items'] %}Итого: <b>{{ totals.sale|money }}</b>{% else %}<span class="muted">Позиций пока нет.</span>{% endif %}{% else %}<span data-item-total>{% if rows %}Итого: <b>{{ rows|selectattr("sum", "ne", none)|map(attribute="sum")|sum|money }}</b>{% if rows|selectattr("sum", "none")|list %} <span class="muted">без позиций по цене панели</span>{% endif %}{% else %}<span class="muted">Позиций пока нет.</span>{% endif %}</span>{% endif %}</p>
+
+<h2 class="owin-sec">Доставка и WebMIM</h2>
+<div class="owin-grid">
+<label class="field"><span class="label">Дата доставки</span><input class="input" type="date" name="delivery_date" value="{{ v.delivery_date or '' }}"></label>
+<label class="field"><span class="label">Время доставки</span><input class="input" name="delivery_time" value="{{ v.delivery_time or '' }}" maxlength="60" placeholder="после 18"></label>
+<label class="field"><span class="label">Номер заказа WebMIM</span><input class="input mono" name="webmim_number" value="{{ v.webmim_number or '' }}" maxlength="60" placeholder="1234567"></label>
+<label class="field"><span class="label">Номер перемещения</span><input class="input mono" name="transfer_number" value="{{ v.transfer_number or '' }}" maxlength="40" placeholder="26R-…"></label>
+{% if card and c.stage.code == "cancel" %}<label class="field is-wide"><span class="label">Причина отмены</span><input class="input" name="cancel_reason" value="{{ v.cancel_reason }}" maxlength="300"></label>{% endif %}
+{% if card and c.stage.code == "return" %}
+<label class="field"><span class="label">Тип возврата</span><select class="select" name="return_kind"><option value="">Не выбран</option>{% for key, label in return_kinds.items() %}<option value="{{ key }}"{% if v.return_kind == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Сумма возврата, ₽</span><input class="input" name="return_amount" value="{{ v.return_amount or '' }}" inputmode="decimal"></label>
+<label class="field is-wide"><span class="label">Причина возврата</span><input class="input" name="return_reason" value="{{ v.return_reason }}" maxlength="300"></label>
+{% endif %}
+</div>
+
+{% if card and chat_bind and (chat_links or chat_bind.other or chat_bind.missing or chat_bind.offer) %}<div class="stack small owin-chat" style="gap:var(--s-1)" data-chat-bind>
+{% for ch in chat_links %}<div class="row" style="gap:var(--s-2);align-items:center">Чат заказа: <a href="/chats/{{ ch.id }}">Ч-{{ ch.id }}</a> · {{ ch.peer_name or "без имени" }}{% if not ro %} <button class="btn btn--secondary btn--xs" form="ow-main" name="chat_unlink" value="{{ ch.id }}">Отвязать</button>{% endif %}</div>{% endfor %}
+{% if chat_bind.other %}<div class="row text-err" style="gap:var(--s-2);align-items:center" role="alert">Чат Ч-{{ chat_bind.other.chat }} уже в заказе №{{ chat_bind.other.order }} (<a href="/orders/{{ chat_bind.other.order }}">открыть</a>): сюда он не привязан.{% if not ro %} <button class="btn btn--secondary btn--xs" form="ow-main" name="chat_move" value="{{ chat_bind.other.chat }}">Перепривязать сюда</button>{% endif %}</div>{% endif %}
+{% if chat_bind.missing %}<div class="text-err">Чат {{ chat_bind.missing }} не найден среди чатов панели: привязать можно номер «Ч-…» или ссылку на чат Авито.</div>{% endif %}
+{% if chat_bind.offer %}<div class="row" style="gap:var(--s-2);align-items:center">Найден чат {{ chat_bind.offer.why }}: Ч-{{ chat_bind.offer.chat }} · {{ chat_bind.offer.name }}{% if chat_bind.offer.item %} · {{ chat_bind.offer.item }}{% endif %} — привязать? <a href="/chats/{{ chat_bind.offer.chat }}">открыть</a>{% if not ro %} <button class="btn btn--secondary btn--xs" form="ow-main" name="chat_bind" value="{{ chat_bind.offer.chat }}">Привязать</button>{% endif %}</div>{% endif %}
+</div>{% endif %}
+<details class="owin-extra"><summary>Дополнительно{% if v.special_terms %} <span class="badge badge--warn" title="{{ v.special_terms }}">Особые условия{% if amount and amount is number %}: {{ amount|money }}{% endif %}</span>{% endif %}{% if v.receipt_needed %} <span class="badge badge--neutral">Нужен товарный чек</span>{% endif %}</summary>
+<div class="owin-grid">
+<label class="field is-wide"><span class="label">Комментарий</span><textarea class="textarea" name="comment" rows="2" maxlength="2000">{{ v.comment or '' }}</textarea></label>
+<label class="field"><span class="label">Особые условия (предоплата, перевод на карту, долгий резерв; пусто, если нет)</span><input class="input" name="special_terms" value="{{ v.special_terms or '' }}" maxlength="300"></label>
+<label class="field"><span class="label">Сумма по особым условиям, ₽</span><input class="input" name="special_amount" value="{{ (('%.2f'|format(amount)).rstrip('0').rstrip('.') if amount else '') if amount is number else (amount or '') }}" inputmode="decimal"></label>
+<label class="row owin-check"><input type="checkbox" name="receipt_needed" value="1"{% if v.receipt_needed %} checked{% endif %}><span>Нужен товарный чек</span></label><input type="hidden" name="receipt_needed" value="">
+{% if card %}<label class="row owin-check"><input type="checkbox" name="codes_written_off" value="1"{% if c.codes_written_off_at %} checked{% endif %}><span>Коды маркировки списаны{% if c.codes_written_off_at %} ({{ c.codes_written_off_at|day }}){% endif %}</span></label><input type="hidden" name="codes_written_off_was" value="{{ '1' if c.codes_written_off_at else '0' }}">{% endif %}
+<label class="field"><span class="label">Чат Авито (ссылка или номер)</span><input class="input" name="avito_chat" value="{{ v.avito_chat or '' }}" maxlength="200">{% if card and chat_ref %}<a class="small" href="{{ chat_ref[0] }}"{% if chat_ref[1] %} target="_blank" rel="noopener noreferrer"{% endif %}>Открыть чат</a>{% endif %}</label>
+<label class="field"><span class="label">Откуда клиент</span><select class="select" name="source"><option value="">Не указано</option>{% for key, label in sources.items() %}<option value="{{ key }}"{% if v.source == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+{% if card %}
+<label class="field"><span class="label">ID заказа WebMIM</span><input class="input mono" name="webmim_id" value="{{ v.webmim_id }}" maxlength="60"></label>
+<label class="field"><span class="label">Статус WebMIM</span><input class="input" name="webmim_status" value="{{ v.webmim_status }}" maxlength="60"></label>
+<label class="field is-wide"><span class="label">Крайняя дата резерва (по умолчанию 3 дня с приезда на точку; поставьте позже, если клиент просит продлить)</span><input class="input" type="date" name="reserve_until" value="{{ v.reserve_until }}"></label>
+{% endif %}
+</div></details>
+{% if ro %}<p class="hint owin-foot">Только просмотр: менять заказ может тот, у кого есть право «Заказы: менять».</p>{% else %}<div class="owin-foot"><a class="btn btn--secondary" href="{{ '/orders/%d' % c.id if card else '/orders' }}">Отмена</a><button class="btn btn--primary">Сохранить</button></div>{% endif %}
+</div>
+{% if ro %}</fieldset></div>{% else %}</form>{% endif %}
+{% if can_delete %}
+<form id="ow-delete" method="post" action="/orders/{{ c.id }}/delete" data-once data-confirm-title="Удалить заказ №{{ c.id }}?" data-confirm="Заказ{% if c.client_name %} ({{ c.client_name }}){% endif %} уйдёт в «Удалённые», вернуть его можно там. В Авито и WebMIM ничего не меняется." data-confirm-ok="Удалить заказ" data-confirm-danger><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form>{% endif %}
+{% if card and not ro %}
+{% for i in c['items'] %}<form id="ow-item-{{ i.id }}" method="post" action="/orders/{{ c.id }}/items/{{ i.id }}/update"><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form><form id="ow-item-del-{{ i.id }}" method="post" action="/orders/{{ c.id }}/items/{{ i.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form>{% endfor %}
+{% endif %}
+</section>

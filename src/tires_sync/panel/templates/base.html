@@ -1,0 +1,93 @@
+{% from "_ui.html" import icon %}
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>{% block title %}Tires Sync{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='bell.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='topbar.css') }}">
+</head>
+<body>
+{% if session.get("user") %}
+<div class="app">
+<aside class="sidebar">
+<div class="sb-logo"><span class="sb-logo-mark">{{ icon("tire") }}</span>Tires Sync</div>
+{% set path = request.path %}
+{% if can("home") %}<nav class="sb-group">
+<a class="sb-link{% if path == '/' %} is-active{% endif %}" href="/">{{ icon("home") }}Главная</a>
+</nav>{% endif %}
+{% if can("orders") or can("chats") or can("calls") or can("alerts") %}<nav class="sb-group"><div class="sb-label">Продажи</div>
+{% if can("orders") %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}
+{% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_unread %}<span class="sb-count">{{ nav.chat_unread }}</span>{% endif %}</a>{% endif %}
+{% if can("calls") %}<a class="sb-link{% if path.startswith('/calls') %} is-active{% endif %}" href="/calls">{{ icon("clock") }}Звонки</a>{% endif %}
+{% if can("clients") %}<a class="sb-link{% if path.startswith('/clients') %} is-active{% endif %}" href="/clients">{{ icon("users") }}CRM</a>{% endif %}
+{% if can("alerts") %}<a class="sb-link{% if path.startswith('/alerts') %} is-active{% endif %}" href="/alerts">{{ icon("alert") }}Уведомления{% if nav.alerts %}<span class="sb-count{% if nav.alerts_red %} sb-count--red{% endif %}">{{ nav.alerts }}</span>{% endif %}</a>{% endif %}
+{% if can("chats") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/shares') %} is-active{% endif %}" href="/shares">{{ icon("send") }}Ссылки для клиентов</a>{% endif %}
+</nav>{% endif %}
+{% if can("catalog") %}<nav class="sb-group"><div class="sb-label">Товар и фид</div>
+<a class="sb-link{% if path.startswith('/catalog') or path.startswith('/draft') or path.startswith('/publish') %} is-active{% endif %}" href="/catalog">{{ icon("tire") }}Каталог<span class="sb-count sb-count--pend" id="navpend" title="Неподтверждённые изменения" data-pend-count{% if not nav.staged %} hidden{% endif %}>{{ nav.staged }}</span></a>
+<a class="sb-link{% if path.startswith('/new') %} is-active{% endif %}" href="/new">{{ icon("sparkle") }}Новые позиции{% if nav.new_count %}<span class="sb-count">{{ nav.new_count }}</span>{% endif %}</a>
+<a class="sb-link{% if path.startswith('/mappings') or path.startswith('/pairs') %} is-active{% endif %}" href="/mappings">{{ icon("link") }}Сопоставления{% if nav.pending_pairs %}<span class="sb-count">{{ nav.pending_pairs }}</span>{% endif %}</a>
+<a class="sb-link{% if path.startswith('/photos') %} is-active{% endif %}" href="/photos/review">{{ icon("image") }}Генерация</a>
+<a class="sb-link{% if path.startswith('/feeds') %} is-active{% endif %}" href="/feeds">{{ icon("upload") }}Фиды</a>
+<a class="sb-link{% if path.startswith('/oth') %} is-active{% endif %}" href="/oth">{{ icon("undo") }}На ОТХ</a>
+</nav>{% endif %}
+{% if can("home") %}<nav class="sb-group"><div class="sb-label">Аналитика</div>
+<a class="sb-link{% if path.startswith('/analytics') %} is-active{% endif %}" href="/analytics">{{ icon("arrow-up") }}Продажи и воронка</a>
+{% if can("analytics") and has_right("money") %}<a class="sb-link{% if path.startswith('/economics') %} is-active{% endif %}" href="/economics">{{ icon("chart") }}Юнит-экономика</a>
+<a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>{% endif %}
+</nav>{% endif %}
+{% if can("setup") or can("users") %}<nav class="sb-group"><div class="sb-label">Настройка</div>
+{% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
+<a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
+<a class="sb-link{% if path.startswith(('/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders/settings">{{ icon("layers") }}Настройки заказов</a>
+<a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>{% endif %}
+{% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
+</nav>{% endif %}
+{% set me = current_user() %}
+<div class="sb-foot">{{ icon("lock", "i-sm") }}<a href="/account/password" title="Свой пароль">{{ me.display_name or (me.login if me.login != config.AUTHOR else "Владелец") }}</a>
+<form method="post" action="/logout" class="inline ml-auto"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form>
+</div>
+</aside>
+<main class="main">
+<div class="topbar"><form class="topsearch" id="topsearch" method="get" action="/search" role="search"><button type="button" class="topsearch-open" id="topsearch-open" aria-label="Поиск" aria-controls="topsearch-input">{{ icon("search") }}</button><label class="topsearch-box">{{ icon("search") }}<input class="topsearch-input" id="topsearch-input" type="search" name="q" maxlength="80" value="{{ request.args.get('q', '') if request.endpoint == 'search' else '' }}" placeholder="Заказ, клиент, телефон, чат, шина" autocomplete="off" aria-label="Поиск: заказ, клиент, телефон, чат, шина" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="topsearch-list"></label><div class="topsearch-pop" id="topsearch-list" role="listbox" aria-label="Найдено" hidden></div></form>{% if can("alerts") %}<div class="bell" id="bell">
+<button type="button" class="bell-btn" id="bell-btn" aria-label="Уведомления{% if nav.alerts %}: {{ nav.alerts }}{% endif %}" aria-haspopup="dialog" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="bell-count" id="bell-count"{% if not nav.alerts %} hidden{% endif %}>{{ ("99+" if nav.alerts > 99 else nav.alerts) if nav.alerts else "" }}</span></button>
+<div class="bell-pop" id="bell-pop" role="dialog" aria-label="Уведомления" hidden>
+<div class="bell-head"><strong>Уведомления</strong><button type="button" class="bell-close" id="bell-close" aria-label="Закрыть">{{ icon("x") }}</button></div>
+<div class="bell-list" id="bell-list"></div>
+<a class="bell-all" href="/alerts">Все уведомления &rsaquo;</a>
+</div></div>{% endif %}</div>
+{% if nav.stale and can("catalog", "edit") %}
+<div class="stickybar stickybar--stale"><div class="grow"><div class="stickybar-title">Рабочий черновик устарел</div><div class="small muted">Настройки изменились после того, как вы начали правки. Отмените черновик и повторите изменения.</div></div>
+<form method="post" action="/catalog/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path.rstrip('?') if request.method == 'GET' and not request.path.startswith(('/draft', '/publish', '/catalog/')) else '/catalog' }}"><button class="btn btn--link-gray">Отменить всё</button></form></div>
+{% endif %}
+{% if not nav.stale and can("catalog", "edit") %}
+<div class="stickybar" id="pendbar"{% if not nav.staged %} hidden{% endif %}><span class="pend-count" data-pend-count>{{ nav.staged }}</span><div class="grow"><div class="stickybar-title" data-pend-title>Неподтверждённых изменений: {{ nav.staged }}</div><div class="small muted">Пока вы их не подтвердите, фид не меняется</div></div>
+<form method="post" action="/catalog/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path.rstrip('?') if request.method == 'GET' and not request.path.startswith(('/draft', '/publish', '/catalog/')) else '/catalog' }}"><button class="btn btn--link-gray">Отменить всё</button></form>
+<a class="btn btn--primary" href="/catalog/review">Посмотреть и применить {{ icon("arrow-right") }}</a></div>
+{% endif %}
+<div class="page{% block page_class %}{% endblock %}">
+<div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' or kind.startswith('field:') else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' or kind.startswith('field:') %} role="alert"{% endif %}{% if kind.startswith('field:') %} data-field-error="{{ kind[6:] }}"{% endif %}>{{ icon("check" if kind == "ok" else "info") }}<div class="flash-text">{{ message }}</div><button type="button" class="close" aria-label="Закрыть">{{ icon("x") }}</button></div>{% endfor %}</div>
+{% block content %}{% endblock %}
+</div>
+</main>
+</div>
+{% else %}
+<main class="auth">
+<div class="auth-card">
+<div class="sb-logo"><span class="sb-logo-mark">{{ icon("tire") }}</span>Tires Sync</div>
+<div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' else ('flash--ok' if kind == 'ok' else 'flash--info') }}"><div class="flash-text">{{ message }}</div></div>{% endfor %}</div>
+{% block auth %}{% endblock %}
+</div>
+</main>
+{% endif %}
+<div id="toasts" aria-live="polite"></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% if session.get("user") and can("alerts") %}<script src="{{ url_for('static', filename='bell.js') }}"></script>{% endif %}
+{% if session.get("user") and current_user().role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}"></script>{% endif %}
+{% if session.get("user") %}<script src="{{ url_for('static', filename='topbar.js') }}"></script>{% endif %}
+</body>
+</html>

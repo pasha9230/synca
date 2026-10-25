@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Шаблон описания · Tires Sync{% endblock %}
+{% block content %}
+{% if can_post("description_save") %}<form method="post" action="/accounts/{{ account.id }}/description" class="stack-lg">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<header class="page-head"><div><div class="crumbs"><a href="/connections/avito/{{ account.id }}">Аккаунты Авито</a>{{ icon("chev", "i-sm") }}<span>Шаблон описания</span></div><h1>Шаблон описания</h1><p class="sub">Аккаунт {{ account_label(account.id) }}. Этот текст попадает в описание каждого объявления аккаунта. Подстановки в фигурных скобках заменяются данными позиции; если значения нет (например, страны), строка с этой подстановкой пропускается. {% if custom %}Сейчас используется ваш шаблон.{% else %}Сейчас используется стандартный шаблон.{% endif %}</p></div>
+<div class="actions"><button name="action" value="reset" class="btn btn--link-gray">Сбросить к стандартному</button><button name="action" value="preview" class="btn btn--secondary">Предпросмотр</button><button name="action" value="save" class="btn btn--primary">Сохранить</button></div></header>
+{% for e in errors %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{{ e }}</div></div>{% endfor %}
+<div class="grid-main-side" style="grid-template-columns:minmax(0,1fr) 320px">
+<div class="stack-lg">
+<section class="card"><div class="card-body stack-sm">
+<span class="label">Текст шаблона</span>
+<textarea class="textarea textarea--code" name="template" style="min-height:340px">{{ text }}</textarea>
+<span class="hint">Длина шаблона — не более 6000 символов. Переводы строк сохраняются как есть.</span>
+</div></section>
+<section class="card">
+<div class="card-head"><h3>Предпросмотр</h3></div>
+{% if preview %}<div class="card-body"><p class="muted small">На примере позиции: {{ sample.offer.name }}</p><div class="preview-text" style="white-space:pre-line;font-size:14px;line-height:1.6;margin-top:8px">{{ preview }}</div></div>
+{% elif errors %}<div class="card-body"><p class="muted">Исправьте ошибки, и предпросмотр появится.</p></div>
+{% else %}<div class="card-body"><p class="muted">Нет данных поставщика для предпросмотра: скачайте выгрузку.</p></div>{% endif %}
+</section>
+</div>
+<section class="card"><div class="card-head"><h3>Подстановки</h3></div>
+<ul class="changes">{% for name, help in placeholders %}<li><code class="strong" style="min-width:90px">{{ "{" ~ name ~ "}" }}</code><span class="muted">{{ help }}</span></li>{% endfor %}</ul></section>
+</div>
+{% if can_post("description_save") %}</form>{% else %}</fieldset>{% endif %}
+{% endblock %}

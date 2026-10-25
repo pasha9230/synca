@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% macro side(s) %}<span class="t-code">{{ s.code }}</span> <span class="xs muted">поставщик №{{ s.supplier }}</span>{% if s.here %}<br>{{ s.name }} · остаток {{ s.stock }} · {% if s.model %}модель Авито «{{ s.model }}»{% else %}<span class="muted">не в фиде ({{ s.why }})</span>{% endif %}{% else %}<br><span class="muted">нет в выгрузке</span>{% endif %}{% endmacro %}
+{% block title %}Пары поставщиков · Сопоставления · Tires Sync{% endblock %}
+{% block content %}
+<nav class="tabs2"><a{% if request.path.startswith('/mappings') %} class="is-active" aria-current="page"{% endif %} href="/mappings">Модели</a><a{% if request.path.startswith('/pairs') %} class="is-active" aria-current="page"{% endif %} href="/pairs">Пары поставщиков</a></nav>
+{% if error %}<header class="page-head"><div><h1>Пары поставщиков</h1><p class="sub">Выгрузка поставщика не читается, пары сейчас не показать: {{ error }}</p></div></header>
+{% else %}
+<header class="page-head"><div><h1>Пары поставщиков</h1><p class="sub">Одна и та же шина у разных поставщиков. Склейка в фиде {% if switch_on %}<b>включена</b>{% else %}<b>выключена</b>: страница показывает, что система нашла, в фидах это пока не используется{% endif %}. Позиций по поставщикам: {% for sid, n in by_supplier %}№{{ sid }}: {{ n }}{% if not loop.last %}, {% endif %}{% else %}нет{% endfor %}. Страница ничего не меняет, кроме «Забыть пару» и «Это не пара» у владельца.</p></div></header>
+{% for n in notes %}<p class="xs muted">{{ n }}</p>{% endfor %}
+
+<section class="card"><div class="card-head"><h3>Пары сейчас <span class="badge badge--neutral">{{ groups|length }}</span></h3></div>
+{% if groups %}<div class="table-wrap"><table class="table"><thead><tr><th>Позиции одной шины</th><th></th></tr></thead><tbody>
+{% for g in groups %}<tr><td>{% for s in g.sides %}<div>{{ side(s) }}</div>{% endfor %}</td><td>{% if g.apart %}<span class="badge badge--warn">модели Авито расходятся</span>{% endif %}{% if can_post("pairs_not_pair") %}{% for t in g.twos %}<form method="post" action="/pairs/not-pair" data-once data-confirm-title="Это не пара?" data-confirm="Склейка поставщиков больше не объединит {{ t.a }} и {{ t.b }}, даже если обе в выгрузке, и память пар их не использует{% if g.twos|length > 1 %}; группа целиком не склеится{% endif %}.{% if t.same_model %} У обеих одна модель Авито «{{ t.same_model }}»: правило «одна шина — одно объявление» всё равно оставит их одним объявлением.{% endif %}{% if not switch_on %} Склейка в фиде выключена: в фидах ничего не изменится.{% elif not t.same_model %}{% if t.both_here %} При ближайшем цикле вторая позиция выйдет своим объявлением с новым Id, а у объявления, которое сейчас несёт модель другой стороны, модель сменится на свою.{% else %} Не все позиции в выгрузке: память перестанет держать объявление на ушедшей. Если объявление уже перешло, запрет не пройдёт; иначе оставшаяся позиция может выйти своим объявлением с новым Id, и при недавно снятом прежнем Авито его заблокирует («Повторное размещение»).{% endif %}{% endif %} Снять запрет можно здесь же." data-confirm-ok="Это не пара"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="a" value="{{ t.a }}"><input type="hidden" name="b" value="{{ t.b }}"><button class="btn btn--secondary btn--xs">{% if g.twos|length > 1 %}Не пара: {{ t.a }} | {{ t.b }}{% else %}Это не пара{% endif %}</button></form>{% endfor %}{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty"><p>Пар не найдено.</p></div>{% endif %}</section>
+
+<section class="card"><div class="card-head"><h3>Запомненные пары <span class="badge badge--neutral">используется {{ used }} из {{ stored|length }}</span></h3></div>
+<p class="xs muted">Пару запоминает цикл при включённой склейке. Если одна сторона уйдёт из выгрузки, память продолжит объявление под прежним Id. Забытая пара памятью не используется, строка остаётся.</p>
+{% if stored %}<div class="table-wrap"><table class="table"><thead><tr><th>Сторона 1</th><th>Сторона 2</th><th>Найдена</th><th>Состояние</th><th class="t-actions" style="width:1%"></th></tr></thead><tbody>
+{% for p in stored %}<tr><td>{{ side(p.a) }}</td><td>{{ side(p.b) }}</td><td>{{ p.found_at|dt }}</td>
+<td>{% if p.apart %}<span class="badge badge--warn">запрет: это не пара</span><br>{% endif %}{% if p.forgotten %}<span class="badge badge--warn">забыта</span><br><span class="xs muted">{{ p.forgotten[0]|dt_utc }} · {{ author_label(p.forgotten[1]) }}</span>{% elif not p.apart %}используется{% endif %}{% if p.live and not p.forgotten and not p.apart %}<br><span class="badge badge--neutral" title="Одной стороны нет в выгрузке: объявление держится на этой паре">держит объявление</span>{% endif %}</td>
+<td class="t-actions" style="white-space:nowrap">{% if can_post("pairs_forget") %}<form method="post" action="/pairs/forget" data-once data-confirm-title="{% if p.forgotten %}Вернуть пару?{% else %}Забыть пару?{% endif %}" data-confirm="{% if p.apart %}Пока стоит запрет «это не пара», память эту пару и так не использует: {% if p.forgotten %}возврат{% else %}забывание{% endif %} скажется только после снятия запрета.{% else %}{% if p.forgotten %}Память снова будет использовать эту пару.{% else %}Память перестанет использовать эту пару.{% endif %}{% if p.live %} Одной стороны сейчас нет в выгрузке{% if not p.forgotten %}, и объявление держится на этой паре{% endif %}: при ближайшем цикле у него сменятся Id или модель, а новое объявление при живом прежнем Авито заблокирует («Повторное размещение»).{% else %} Пока обе стороны в выгрузке, это ничего не меняет; если одна уйдёт, объявление{% if p.forgotten %} продолжится под прежним Id{% else %} может выйти под другим Id или с другой моделью{% endif %}.{% endif %}{% if not p.forgotten %} Строка пары останется, вернуть можно здесь же.{% endif %}{% endif %}" data-confirm-ok="{% if p.forgotten %}Вернуть{% else %}Забыть{% endif %}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="a" value="{{ p.a.code }}"><input type="hidden" name="b" value="{{ p.b.code }}">{% if p.forgotten %}<input type="hidden" name="undo" value="1"><button class="btn btn--secondary btn--xs">{{ icon("undo", "i-sm") }}Вернуть пару</button>{% else %}<button class="btn btn--secondary btn--xs">Забыть пару</button>{% endif %}</form>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty"><p>Запомненных пар нет.</p></div>{% endif %}
+{% if remembered %}<h4>Группы, дополненные памятью <span class="badge badge--neutral">{{ remembered|length }}</span></h4><ul>{% for g in remembered %}<li>{% for s in g %}{{ side(s) }}{% if not loop.last %} | {% endif %}{% endfor %}</li>{% endfor %}</ul>{% endif %}
+</section>
+
+<section class="card"><div class="card-head"><h3>Не пары (запрет владельца) <span class="badge badge--neutral">{{ not_pairs|length }}</span></h3></div>
+<p class="xs muted">Владелец сказал: это не одна шина. Такие позиции не склеиваются, даже если обе в выгрузке, и память пар их не использует.</p>
+{% if not_pairs %}<div class="table-wrap"><table class="table"><thead><tr><th>Позиция 1</th><th>Позиция 2</th><th>Запрет</th><th class="t-actions" style="width:1%"></th></tr></thead><tbody>
+{% for n in not_pairs %}<tr><td>{{ side(n.a) }}</td><td>{{ side(n.b) }}</td><td><span class="xs muted">{{ n.at|dt_utc }} · {{ author_label(n.author) }}</span></td>
+<td class="t-actions" style="white-space:nowrap">{% if can_post("pairs_not_pair") %}<form method="post" action="/pairs/not-pair" data-once data-confirm-title="Снять запрет?" data-confirm="{{ n.a.code }} и {{ n.b.code }} снова могут склеиваться{% if switch_on %}: при ближайшем цикле они могут стать одним объявлением, одна из позиций уйдёт из фида (та же шина), а у оставшегося объявления может смениться модель{% endif %}." data-confirm-ok="Это пара"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="a" value="{{ n.a.code }}"><input type="hidden" name="b" value="{{ n.b.code }}"><input type="hidden" name="undo" value="1"><button class="btn btn--secondary btn--xs">{{ icon("undo", "i-sm") }}Это пара</button></form>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty"><p>Запретов нет.</p></div>{% endif %}
+{% if refused %}<h4>Не склеены из-за запрета внутри группы <span class="badge badge--neutral">{{ refused|length }}</span></h4><ul>{% for g in refused %}<li>{% for s in g %}{{ side(s) }}{% if not loop.last %} | {% endif %}{% endfor %}</li>{% endfor %}</ul>{% endif %}
+</section>
+
+<section class="card"><div class="card-head"><h3>Неоднозначные группы <span class="badge badge--neutral">{{ ambiguous|length }}</span></h3></div>
+<p class="xs muted">У одного поставщика в группе две разные модели: не склеиваются.</p>
+{% if ambiguous %}<ul>{% for g in ambiguous %}<li>{% for s in g %}{{ side(s) }}{% if not loop.last %} | {% endif %}{% endfor %}</li>{% endfor %}</ul>{% endif %}</section>
+
+<section class="card"><div class="card-head"><h3>Сомнительные позиции <span class="badge badge--neutral">{{ doubtful|length }}</span></h3></div>
+<p class="xs muted">Название противоречит полям: не склеиваются.</p>
+{% if doubtful %}<div class="table-wrap"><table class="table"><thead><tr><th>Позиция</th><th>Почему</th></tr></thead><tbody>
+{% for d in doubtful %}<tr><td>{{ side(d) }}</td><td>{{ d.reason }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}</section>
+
+<section class="card"><div class="card-head"><h3>Смены поставщика по аккаунтам</h3></div>
+{% for a in accounts %}<h4>№{{ a.id }} «{{ a.name }}»</h4>
+{% if a.switches %}<ul>{% for s in a.switches %}<li>Id {{ s.ad_id }}: {{ s.from }} → {{ s.to }}, {{ s.at|dt }}; следующая смена не раньше {{ s.until|dt }}</li>{% endfor %}</ul>{% else %}<p class="xs muted">Смен поставщика не было.</p>{% endif %}
+{% if a.waiting %}<p>Ждут смены поставщика:</p><ul>{% for w in a.waiting %}<li>{{ w.code }} (Id {{ w.ad_id }}, не раньше {{ w.until|dt }})</li>{% endfor %}</ul>{% else %}<p class="xs muted">Никто не ждёт смены.</p>{% endif %}
+{% else %}<p class="xs muted">Аккаунтов со своей сборкой нет.</p>{% endfor %}</section>
+
+{% if synonyms %}<section class="card"><div class="card-head"><h3>Синонимы моделей владельца <span class="badge badge--neutral">{{ synonyms|length }}</span></h3></div>
+<ul>{% for s in synonyms %}<li>{{ s.brand }}: {{ s.alias }} = {{ s.canonical }}</li>{% endfor %}</ul></section>{% endif %}
+{% endif %}
+{% endblock %}

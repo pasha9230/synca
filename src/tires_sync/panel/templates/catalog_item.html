@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% import "_entity.html" as entity_ui %}
+{% block title %}{{ entity.title }} · Tires Sync{% endblock %}
+{% block content %}
+<div class="entity-page">
+<header>{{ entity_ui.crumbs(entity.crumbs) }}{% if can_post("catalog_wait") %}{% call entity_ui.head(entity) %}<a class="btn btn--secondary btn--sm" href="{{ wait_url }}" title="Клиент ждёт эту шину: заказ на этапе «Ожидает наличие» с именем и телефоном клиента">В лист ожидания</a>{% endcall %}{% else %}{{ entity_ui.head(entity) }}{% endif %}</header>
+{% if not entity.built %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Объявление не собирается: {{ entity.reason }}.{% if entity.price_note %} Цена: {{ entity.price_note }}.{% endif %}</div></div>{% endif %}
+<section class="card card-body"><div class="entity-media">{% if entity.image %}<img src="{{ entity.image }}" alt="" width="160" loading="lazy" referrerpolicy="no-referrer">{% else %}<div class="photo">нет фото</div>{% endif %}
+{{ entity_ui.fields(entity.fields) }}</div></section>
+{% call entity_ui.section("Объявления по аккаунтам", sub="по последнему опубликованному фиду") %}{{ entity_ui.listing([{"key": "account", "label": "Аккаунт"}, {"key": "ad_id", "label": "Id объявления"}, {"key": "price", "label": "Цена", "num": true}, {"key": "point", "label": "Точка"}], entity.ads, "Ни в одном опубликованном фиде этой позиции нет.") }}{% endcall %}
+{% if entity.orders is not none %}{% call entity_ui.section("Заказы с этой позицией") %}{{ entity_ui.listing([{"key": "ref", "label": "№"}, {"key": "client", "label": "Клиент"}, {"key": "stage", "label": "Этап"}, {"key": "qty", "label": "Шт.", "num": true}, {"key": "unit", "label": "Цена за шт.", "num": true}, {"key": "created", "label": "Создан"}], entity.orders, "Заказов с этой позицией нет.") }}{% endcall %}{% endif %}
+{% call entity_ui.section("Объявление сейчас", sub="как оно собралось бы для первого аккаунта") %}<div class="card-body stack">
+<p><b>{{ entity.ad_title }}</b> <span class="muted xs">(Авито может сформировать свой заголовок из бренда, модели и размеров)</span></p>
+<pre style="white-space:pre-wrap;font-family:inherit;margin:0">{{ entity.description }}</pre></div>{% endcall %}
+</div>
+{% if wait %}{% include "_catalog_wait.html" %}{% endif %}
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Возможные дубли · CRM · Tires Sync{% endblock %}
+{% block content %}
+{% set edit = can("clients", "edit") %}
+<header class="page-head"><div><div class="crumbs"><a href="/clients">CRM</a></div><h1>Возможные дубли</h1>
+<p class="sub">Клиенты с общим надёжным признаком: телефон, собеседник Авито, чат и заказ, телефон из переписки. Сами не склеиваются: «Склеить» переносит всё во второго слева, «Не тот же» убирает пару из списка.</p></div></header>
+<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Оставить</th><th>Присоединить</th><th>Почему</th><th></th></tr></thead><tbody>
+{% for p in pairs %}<tr><td><a href="/clients/{{ p.a }}">№{{ p.a }} {{ names.get(p.a) or "без имени" }}</a></td><td><a href="/clients/{{ p.b }}">№{{ p.b }} {{ names.get(p.b) or "без имени" }}</a></td>
+<td>{{ p.why|join("; ") }}</td><td class="entity-row-actions">{% if edit %}
+<form method="post" action="/clients/{{ p.a }}/merge" class="inline" data-confirm-title="Склеить №{{ p.b }} в №{{ p.a }}?" data-confirm="Заказы, чаты, звонки, телефоны и теги №{{ p.b }} перейдут к №{{ p.a }}. Разъединить можно в карточке №{{ p.a }}." data-confirm-ok="Склеить"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="other" value="{{ p.b }}"><input type="hidden" name="back" value="duplicates"><button class="btn btn--primary btn--xs">Склеить</button></form>
+<form method="post" action="/clients/{{ p.a }}/skip/{{ p.b }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="duplicates"><button class="btn btn--secondary btn--xs">Не тот же</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">Возможных дублей нет.</td></tr>{% endfor %}
+</tbody></table>{% if more %}<p class="muted">И ещё пар: {{ more }} — появятся здесь, когда склеите или отметите эти.</p>{% endif %}</div></section>
+{% endblock %}

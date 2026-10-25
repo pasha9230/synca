@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "_inquiry.html" as inq_ui %}
+{% from "_handoff_dialog.html" import handoff_window with context %}
+{% block title %}Звонки · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Звонки</h1><p class="sub">Звонки через подменные номера Авито{% if mine %} аккаунта вашей точки{% endif %}. Запись разговора появляется до 30 минут после звонка и хранится 7 дней.</p></div></header>
+<form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;margin-bottom:var(--s-4);flex-wrap:wrap">
+{% if not mine %}<label class="field"><span class="label">Аккаунт</span><select class="input" name="account"><option value="">Все</option>{% for a in accounts %}<option value="{{ a.id }}"{% if a.id == account %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>{% endif %}
+<label class="field"><span class="label">Период</span><select class="input" name="days">{% for k, v in periods.items() %}<option value="{{ k }}"{% if k == days %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+<label class="field grow"><span class="label">Телефон</span><input class="input" type="search" name="q" value="{{ q }}" inputmode="numeric"></label>
+<label class="row" style="gap:var(--s-2);align-items:center"><input type="checkbox" name="missed" value="1"{% if missed %} checked{% endif %}> Только пропущенные</label>
+<button class="btn btn--primary">Показать</button></form>
+<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table calls-table"><thead><tr><th>Когда</th><th>Аккаунт / точка</th><th>Клиент</th><th>Итог</th><th>Запись</th><th></th></tr></thead><tbody>
+{% set inq = inquiry_calls(rows|map(attribute="id")|list) %}{% for c in rows %}<tr id="call-{{ c.id }}"{% if not c.answered %} class="is-missed"{% endif %}>
+<td data-label="Когда"><time title="{{ c.call_at|dt }}">{{ c.call_at|dt }}</time></td>
+<td data-label="Аккаунт">{{ c.account_name }}{% if c.point_name %} · {{ c.point_name }}{% endif %}</td>
+<td data-label="Клиент">{% if c.client_id and clients_link %}<a href="/clients/{{ c.client_id }}">{{ c.buyer_phone|phone }}</a>{% else %}{{ c.buyer_phone|phone if c.buyer_phone else "номер скрыт" }}{% endif %}{% if c.client_name %} · {{ c.client_name }}{% endif %} {{ inq_ui.badge(inq.get(c.id)) }}
+{# the client's chat and order (the owner 2026-10-23); the point gets those of its account and its point only (calls.client_links); the call's own order is in the last cell #}
+{% set cl = links.get(c.client_id) %}{% set go_chat = chat_links and cl and cl.chat %}{% set go_order = order_links and cl and cl.order and cl.order != c.order_id %}{% if go_chat or go_order %}<div class="row" style="gap:var(--s-1);margin-top:var(--s-1)">{% if go_chat %}<a class="btn btn--secondary btn--xs" href="/chats/{{ cl.chat }}">Чат</a>{% endif %}{% if go_order %}<a class="btn btn--secondary btn--xs" href="/orders/{{ cl.order }}">Заказ №{{ cl.order }}</a>{% endif %}</div>{% endif %}</td>
+<td data-label="Итог">{% if c.answered %}Принят, {{ "%d:%02d"|format(c.talk_seconds // 60, c.talk_seconds % 60) }}{% else %}<span class="badge badge--err">Пропущен</span>{% endif %}{% if c.wait_seconds %} <span class="muted">· ждал {{ c.wait_seconds }} с</span>{% endif %}</td>
+<td data-label="Запись">{% if c.may_listen %}<audio controls preload="none" src="/calls/{{ c.id }}/record"></audio>{% elif c.record_state == "saved" %}<span class="muted">есть (слушают оператор и владельцы)</span>{% else %}<span class="muted">{{ c.record_text }}</span>{% endif %}</td>
+{# the actions of the call: «Создать заказ» here; lane B puts «Передать под заказ» into this same cell (data-call, data-phone) #}
+<td class="call-actions" data-call="{{ c.id }}" data-phone="{{ c.buyer_phone }}">{% set hd = handed.get(c.id) %}{% if hd %}<a class="badge badge--warn" href="/orders/{{ hd.order }}">передан точкой · №{{ hd.order }}</a> {% endif %}{% if handoff and not (hd and hd.open) %}<button type="button" class="btn btn--primary btn--xs" data-open-modal="handoff" data-handoff-action="/calls/{{ c.id }}/handoff" data-handoff-phone="{{ c.buyer_phone|phone if c.buyer_phone else '' }}">Передать под заказ</button> {% endif %}{% if c.order_id and c.order_id > 0 %}<a class="btn btn--secondary btn--xs" href="/orders/{{ c.order_id }}">Заказ №{{ c.order_id }}</a>{% elif can_order %}<form method="post" action="/calls/{{ c.id }}/order" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Создать заказ</button></form>{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="6" class="muted">{% if no_account %}К вашей точке не привязан аккаунт Авито: звонков нет.{% else %}Звонков за этот период нет.{% endif %}</td></tr>{% endfor %}
+</tbody></table>{% if rows|length >= 300 %}<p class="muted">Показаны последние 300 звонков: сузьте период или фильтр.</p>{% endif %}</div></section>
+{{ handoff_window(handoff) }}
+{% if handoff %}<script src="{{ url_for('static', filename='handoff.js') }}"></script>{% endif %}
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · ВК{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card">
+{% if can_post("connections_vk") %}<form method="post" action="/connections/vk">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Сообщество ВК для менеджеров точек</h3><span class="sub">Бот пишет менеджерам о заказах, менеджеры отвечают кнопками или словами. Пока приёмник только подтверждает адрес и записывает события, заказы по ним не меняются.</span></div>
+<div class="card-body stack">
+<div class="grid-2">
+<label class="field"><span class="label">Номер сообщества</span><input class="input mono" name="group_id" value="{{ vk.group_id }}" inputmode="numeric" autocomplete="off"><span class="hint">Число из окна Callback API: «group_id».</span></label>
+<label class="field"><span class="label">Строка подтверждения</span><input class="input mono" name="confirmation" value="{{ vk.confirmation }}" autocomplete="off"><span class="hint">«Строка, которую должен вернуть сервер» из того же окна.</span></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Секретный ключ Callback API {% if vk_secrets.callback_secret %}<span class="badge badge--ok">задан ({{ vk_secrets.callback_secret.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="callback_secret" autocomplete="new-password" placeholder="{{ 'оставьте пустым, чтобы не менять' if vk_secrets.callback_secret else '' }}"><span class="hint">Придумайте свой (латиница и цифры) и впишите то же значение в ВК.</span></label>
+<label class="field"><span class="label">Ключ доступа сообщества {% if vk_secrets.token %}<span class="badge badge--ok">задан ({{ vk_secrets.token.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="token" autocomplete="new-password" placeholder="{{ 'оставьте пустым, чтобы не менять' if vk_secrets.token else '' }}"><span class="hint">Нужен для отправки сообщений (право «Сообщения сообщества»). Можно добавить позже.</span></label>
+</div>
+{% if has_right("connections") %}<div class="field"><span class="label">Адрес для ВК (поле «Адрес» в Callback API)</span><div class="row"><input class="input mono" id="hookurl" readonly value="{{ hook_url }}" style="max-width:640px"><button type="button" class="btn btn--secondary" data-copy="#hookurl">Скопировать</button></div>
+<span class="hint">Сначала сохраните настройки здесь, потом вставьте адрес в ВК и нажмите «Подтвердить». Адрес секретный: не публикуйте его.</span></div>{% endif %}
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>
+{% if can_post("connections_vk") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card"><div class="card-head"><h3>Последние события от ВК</h3><span class="sub">Если здесь появляются строки, ВК доставляет события нам</span></div>
+{% if events %}<ul class="log">{% for e in events %}<li><time>{{ e.at|dt_utc }}</time><span>{{ e.type }}</span></li>{% endfor %}</ul>{% else %}<div class="card-body"><span class="muted">Пока ничего не приходило. Отправьте сообществу сообщение от своего аккаунта после настройки.</span></div>{% endif %}
+</section>
+{% endblock %}

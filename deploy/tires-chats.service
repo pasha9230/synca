@@ -1,0 +1,19 @@
+[Unit]
+Description=Tires Sync Avito chats (read only; deals are made from the first message of a client)
+OnFailure=tires-alert@%n.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+UMask=0027
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+Environment=TIRES_SECRET_KEY_FILE=/etc/tires-sync/secret.key
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync chats-sync --db /var/lib/tires-sync/state.db --unload /var/lib/tires-sync/unload.xml --reference /var/lib/tires-sync/reference.txt
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tires-sync

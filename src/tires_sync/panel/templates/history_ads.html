@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}События позиций · История · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>История</h1><p class="sub">Жизнь каждой позиции в фиде: когда опубликована, когда стала ждать утра или удержана защитой, когда вернулась и когда снята. Записи копятся с {{ since or "первого цикла после обновления" }}.</p></div></header>
+{% set tab = "ads" %}{% include "_history_tabs.html" %}
+<section class="card">
+<div class="tiles" style="padding:var(--s-4) var(--s-5)">
+<div class="tile tile--brand"><span class="tile-label">Опубликовано</span><span class="tile-value">{{ week.published }}</span><span class="tile-sub">за 7 дней</span></div>
+<div class="tile"><span class="tile-label">Ждали или удержаны</span><span class="tile-value">{{ week.waiting }}</span><span class="tile-sub">за 7 дней</span></div>
+<div class="tile"><span class="tile-label">Вернулись</span><span class="tile-value">{{ week.returned }}</span><span class="tile-sub">после ожидания</span></div>
+<div class="tile"><span class="tile-label">Сняты</span><span class="tile-value">{{ week.removed }}</span><span class="tile-sub">за 7 дней</span></div>
+</div>
+<div class="chips" style="padding:0 var(--s-5) var(--s-3)">
+<a class="chip{% if not kind %} is-active{% endif %}" href="/history/ads{% if q %}?q={{ q|urlencode }}{% endif %}">Все</a>
+{% for key, label in labels.items() %}<a class="chip{% if kind == key %} is-active{% endif %}" href="/history/ads?f={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ label }}</a>{% endfor %}
+<form method="get" action="/history/ads" class="ml-auto" style="display:flex;gap:var(--s-2)">{% if kind %}<input type="hidden" name="f" value="{{ kind }}">{% endif %}<input class="input input--sm" name="q" value="{{ q }}" placeholder="Название или код" aria-label="Поиск"><button class="btn btn--secondary btn--sm">Найти</button></form>
+</div>
+{% if rows %}<div class="table-wrap"><table class="table table--plain">
+<thead><tr><th>Время</th><th>Позиция</th><th>Событие</th><th>Причина</th></tr></thead>
+<tbody>{% for r in rows %}<tr><td class="muted nowrap">{{ r.at|dt }}</td><td><span class="gname">{{ r.name or r.goods_id }}</span><div class="xs muted">{{ r.goods_id }}</div></td>
+<td><span class="badge badge--{{ r.tone }}">{{ r.label }}</span></td><td class="small">{{ r.why }}</td></tr>{% endfor %}</tbody></table></div>
+{% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
+{% else %}<div class="empty"><div class="empty-icon">{{ icon("clock") }}</div><h3>Событий пока нет</h3><p>Записи появятся после ближайшего цикла, в котором что-то опубликуется, снимется или будет ждать.</p></div>{% endif %}
+</section>
+{% endblock %}

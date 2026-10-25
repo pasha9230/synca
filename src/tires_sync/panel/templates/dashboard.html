@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Главная · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Главная</h1><p class="sub">{% if d.run %}Последний запуск: {{ d.run.started|dt_utc }}{% else %}Запусков ещё не было{% endif %}</p></div>
+<div class="actions">{% if can_post("feed_update_confirm") %}<a class="btn btn--primary" href="/feed/update">{{ icon("refresh") }}Обновить фид</a>{% endif %}</div></header>
+{% if not d.has_data %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">Нет данных от поставщика: файл выгрузки не найден или не читается.</div></div>{% endif %}
+{% set money_ok = has_right("money") %}
+<div class="tiles tiles--row" style="margin-bottom:var(--s-4)">
+{% if can("orders") %}<a class="tile" href="/orders"><span class="tile-label">Заказы в работе</span><span class="tile-value">{{ day.orders_open }}</span><span class="tile-sub">на обычных этапах</span></a>
+<a class="tile{% if day.orders_overdue %} tile--warn{% endif %}" href="/orders"><span class="tile-label">Просрочено</span><span class="tile-value">{{ day.orders_overdue }}</span><span class="tile-sub">дольше срока этапа</span></a>
+<a class="tile" href="/orders"><span class="tile-label">Новые сегодня</span><span class="tile-value">{{ day.orders_new_today }}</span><span class="tile-sub">заказов создано</span></a>{% endif %}
+{% if money_ok %}<a class="tile" href="/analytics"><span class="tile-label">Выручка</span><span class="tile-value">{{ day.money_today.revenue|money }}</span><span class="tile-sub">сегодня · 7 дней {{ day.money_week.revenue|money }}</span></a>
+<a class="tile" href="/analytics"><span class="tile-label">Прибыль</span><span class="tile-value">{{ day.money_today.profit|money }}</span><span class="tile-sub">сегодня · 7 дней {{ day.money_week.profit|money }}</span></a>{% endif %}
+{% if can("chats") %}<a class="tile" href="/chats"><span class="tile-label">Непрочитанные чаты</span><span class="tile-value">{{ day.chats_unread }}</span><span class="tile-sub">открытые</span></a>
+<a class="tile{% if day.waiting_long %} tile--warn{% endif %}" href="/chats"><span class="tile-label">Клиент ждёт ответа</span><span class="tile-value">{{ day.waiting|length }}</span><span class="tile-sub">{% if day.waiting %}дольше всех {{ day.waiting[0].minutes }} мин{% else %}никто не ждёт{% endif %}</span></a>{% endif %}
+{% if can("catalog") %}<a class="tile" href="/feeds"><span class="tile-label">Объявления в фидах</span><span class="tile-value">{{ d.feeds|sum(attribute="ads") }}</span><span class="tile-sub">аккаунтов с фидом: {{ d.feeds|length }}</span></a>{% endif %}
+</div>
+<div class="stack-lg" style="margin-bottom:var(--s-5)">
+<section class="card">
+<div class="card-head"><h3>Требует внимания</h3>{% set attn = extra + (d.attention if can("catalog") else []) %}{% if attn %}<span class="ml-auto badge badge--warn">{{ attn|length }}</span>{% endif %}</div>
+{% if attn %}<ul class="checklist">
+{% for a in attn %}<li><span><span class="badge badge--{{ 'err' if a.level == 'bad' else 'warn' }} badge--dot">{{ "Нужно сделать" if a.level == "bad" else "Проверьте" }}</span></span>
+<div><div class="cl-title">{{ a.title }}</div><div class="cl-text">{{ a.detail }}</div></div>
+<a class="btn btn--secondary btn--sm" href="{{ a.href }}"{% if a.external %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ a.action }}</a></li>{% endfor %}
+</ul>{% else %}<div class="card-body"><span class="badge badge--ok badge--dot">Всё в порядке</span> <span class="muted">Внимания ничего не требует: можно не заходить.</span></div>{% endif %}
+</section>
+<section class="card"><div class="card-head"><h3>Мои дела на сегодня</h3><span class="sub">{{ mine.orders_total }} заказ(ов), {{ mine.chats_total }} чат(ов) ждут ответа</span></div>
+{% if mine.orders or mine.chats %}<ul class="checklist">
+{% for o in mine.orders %}<li><span>{% if o.overdue %}<span class="badge badge--err badge--dot">Просрочен</span>{% else %}<span class="badge badge--neutral">{{ o.stage }}</span>{% endif %}</span>
+<div><div class="cl-title">Заказ №{{ o.id }} · {{ o.client }}</div><div class="cl-text">{{ o.stage }} · {{ o.hours|round|int }} ч на этапе</div></div><a class="btn btn--secondary btn--sm" href="/orders/{{ o.id }}">Открыть</a></li>{% endfor %}
+{% for c in mine.chats %}<li><span><span class="badge badge--warn badge--dot">Ждёт {{ c.minutes }} мин</span></span>
+<div><div class="cl-title">Чат · {{ c.peer_name or "клиент" }}</div><div class="cl-text">клиент ждёт ответа</div></div><a class="btn btn--secondary btn--sm" href="/chats/{{ c.id }}">Ответить</a></li>{% endfor %}
+</ul>{% else %}<div class="card-body muted">На вас сейчас ничего не висит.</div>{% endif %}</section>
+{% if can("catalog") %}<h2 style="margin-top:var(--s-4)">Фиды</h2>{% include "_feed_state.html" %}{% endif %}
+{% if can("setup", "edit") %}<section class="card card-body row" style="gap:var(--s-3);align-items:center"><span>Утренняя сводка в Telegram (владельцу и партнёру, после 9:00 МСК): <b>{{ "включена" if summary_on else "выключена" }}</b></span>
+{% if can_post("summary_toggle") %}<form method="post" action="/summary/toggle" class="inline ml-auto">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="on" value="{{ 0 if summary_on else 1 }}"><button class="btn btn--secondary btn--sm">{{ "Выключить" if summary_on else "Включить" }}</button>{% if can_post("summary_toggle") %}</form>{% else %}</fieldset>{% endif %}</section>{% endif %}
+</div>
+{% endblock %}

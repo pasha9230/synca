@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}На ОТХ · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>На ОТХ</h1><p class="sub">Шины на нашем складе не под клиентов: клиент отказался, заказ на этапе «На ОТХ». Клиент от такого заказа отвязан. На Авито эти шины сами не публикуются, их выставляют вручную. «Вернуть поставщику» здесь только отметка у нас: в WebMIM ничего не отправляется, этап заказа не меняется.</p></div></header>
+<section class="card"><div class="card-head"><h3>На складе <span class="badge badge--neutral">{{ stock|sum(attribute="qty") }} шт.</span></h3></div>
+{% if stock %}<div class="table-wrap"><table class="table">
+<thead><tr><th>Товар</th><th>Код</th><th class="num">Сколько</th><th>Где лежит</th><th>Заказ</th><th>На ОТХ с</th><th>Срок продажи</th><th class="t-actions" style="width:1%"></th></tr></thead>
+<tbody>{% for r in stock %}<tr>
+<td>{{ r.name }}</td><td class="t-code">{{ r.code or "—" }}</td><td class="num">{{ r.qty }} шт.{% if r.returned_qty %}<br><span class="xs muted">из {{ r.ordered }}, возвращено {{ r.returned_qty }}</span>{% endif %}</td><td>{{ r.point or "точка не указана" }}</td>
+<td>{% if can("orders") %}<a href="/orders/{{ r.order_id }}">№{{ r.order_id }}</a>{% else %}№{{ r.order_id }}{% endif %}</td><td>{{ r.since|day }}</td><td>{{ r.until|day }}</td>
+<td class="t-actions" style="white-space:nowrap">{% if can_post("oth_return") %}<form method="post" action="/oth/return" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="item" value="{{ r.item_id }}"><label class="sr-only" for="oth-q{{ r.item_id }}">Сколько вернуть</label><input class="input input--sm input--num" id="oth-q{{ r.item_id }}" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty }}" step="1" required style="width:64px" title="Сколько шин вернуть: от 1 до {{ r.qty }}"> <button class="btn btn--secondary btn--xs" title="Отметить у нас, что столько шин возвращено поставщику (в WebMIM ничего не отправляется)">Вернуть поставщику</button></form>{% endif %}</td>
+</tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty"><div class="empty-icon">{{ icon("check") }}</div><h3>На ОТХ ничего нет</h3><p>Здесь появятся позиции заказов, переведённых на этап «На ОТХ».</p></div>{% endif %}
+</section>
+{% if returned %}<section class="card"><div class="card-head"><h3>Возвращено поставщику</h3></div><div class="table-wrap"><table class="table">
+<thead><tr><th>Товар</th><th>Код</th><th class="num">Сколько</th><th>Заказ</th><th>Отмечено</th><th class="t-actions" style="width:1%"></th></tr></thead>
+<tbody>{% for r in returned %}<tr>
+<td>{{ r.name }}</td><td class="t-code">{{ r.code or "—" }}</td><td class="num">{{ r.qty }} шт.{% if r.qty != r.ordered %}<br><span class="xs muted">из {{ r.ordered }}</span>{% endif %}</td><td>{% if can("orders") %}<a href="/orders/{{ r.order_id }}">№{{ r.order_id }}</a>{% else %}№{{ r.order_id }}{% endif %}</td>
+<td>{{ r.returned_at|dt }} · {{ author_label(r.returned_by) }}</td>
+<td class="t-actions" style="white-space:nowrap">{% if can_post("oth_return") %}<form method="post" action="/oth/return" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="item" value="{{ r.item_id }}"><input type="hidden" name="undo" value="1"><label class="sr-only" for="oth-u{{ r.item_id }}">Сколько отменить</label><input class="input input--sm input--num" id="oth-u{{ r.item_id }}" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty }}" step="1" required style="width:64px" title="Со скольких шин снять отметку: от 1 до {{ r.qty }}"> <button class="btn btn--secondary btn--xs" title="Снять отметку: эти шины снова на ОТХ">{{ icon("undo", "i-sm") }}Отменить</button></form>{% endif %}</td>
+</tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% endblock %}

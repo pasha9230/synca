@@ -1,0 +1,20 @@
+{% from "_ui.html" import icon %}
+<header class="page-head"><div><h1>Подключения</h1><p class="sub">Поставщики, уведомления и кабинеты Авито.</p></div></header>
+<nav class="tabs">
+<a href="/connections/webmim"{% if tabs.active == "webmim" %} class="is-active"{% endif %}>WebMIM</a>
+<a href="/connections/tochki"{% if tabs.active == "tochki" %} class="is-active"{% endif %}>4 точки (поставщик)</a>
+<a href="/connections/telegram"{% if tabs.active == "telegram" %} class="is-active"{% endif %}>Telegram (уведомления о сбоях)</a>
+<a href="/connections/avito"{% if tabs.active == "avito" %} class="is-active"{% endif %}>Аккаунты Авито</a>
+<a href="/connections/vk"{% if tabs.active == "vk" %} class="is-active"{% endif %}>ВК (менеджеры точек)</a>
+<a href="/connections/sheet"{% if tabs.active == "sheet" %} class="is-active"{% endif %}>Google-таблица</a>
+<a href="/connections/points"{% if tabs.active == "points" %} class="is-active"{% endif %}>Точки выдачи</a>
+<a href="/connections/openai"{% if tabs.active == "openai" %} class="is-active"{% endif %}>OpenAI (фото)</a>
+</nav>
+{% if tabs.services %}<p class="sub conn-services">Сервисы: {% for s in tabs.services %}{% if not loop.first %} · {% endif %}<b>{{ s.label }}</b> — {% if s.state == "pause" %}<span class="text-err">пауза до {{ s.until }}</span> ({{ s.fails }} сбоев подряд{% if s.last_error %}: {{ s.last_error }}{% endif %}){% elif s.state == "trial" %}<span class="text-warn">пауза закончилась, следующий запрос пробный</span>{% else %}работает{% if s.fails %}, сбоев подряд: {{ s.fails }}{% endif %}{% if s.last_error_at %}, последний сбой {{ s.last_error_at }}{% if s.last_error %} ({{ s.last_error }}){% endif %}{% endif %}{% endif %}{% endfor %}. Время московское; во время паузы чтения ждут (раз в минуту идёт пробное), отправки и создание заказов идут всегда, «Проверить подключение» проверяет всегда.</p>{% endif %}
+{% if tabs.active == "webmim" %}
+<div class="tabs2">{% for t in tabs.suppliers %}<a href="{{ t.url }}"{% if t.id == tabs.supplier_id %} class="is-active"{% endif %}>{{ t.label }}</a>{% endfor %}<a href="#add">{{ icon("plus", "i-sm") }}Добавить поставщика</a></div>
+{% endif %}
+{% if tabs.active == "avito" %}
+<div class="tabs2">{% for t in tabs.accounts %}<a href="{{ t.url }}"{% if t.id == tabs.account_id %} class="is-active"{% endif %}>{{ t.label }}</a>{% endfor %}<a href="#add">{{ icon("plus", "i-sm") }}Добавить ещё один аккаунт Авито</a></div>
+{% endif %}
+{% if not box_ok %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">Мастер-ключ недоступен: секреты не сохраняются и не читаются. Проверьте файл ключа на сервере.</div></div>{% endif %}

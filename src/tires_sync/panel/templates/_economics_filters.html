@@ -1,0 +1,12 @@
+{% from "_ui.html" import icon, season %}
+<form method="get" action="{{ action }}" class="filters" data-autosubmit>
+{% if brand %}<input type="hidden" name="brand" value="{{ brand }}">{% endif %}{% if pick and not brand %}<input type="hidden" name="b" value="{{ pick }}">{% endif %}{% if order %}<input type="hidden" name="o" value="{{ order }}">{% endif %}
+<div class="field"><span class="label">Сезон</span><div class="seg">
+<label><input type="radio" name="s" value=""{% if not flt.season %} checked{% endif %}>Все</label>
+<label title="Лето"><input type="radio" name="s" value="summer"{% if flt.season == "summer" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span><span class="sr-only">Лето</span></label>
+<label title="Зима"><input type="radio" name="s" value="winter"{% if flt.season == "winter" %} checked{% endif %}><span class="ico-snow">{{ icon("snow") }}</span><span class="sr-only">Зима</span></label>
+<label title="Всесезонные"><input type="radio" name="s" value="all"{% if flt.season == "all" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span><span class="ico-snow">{{ icon("snow") }}</span><span class="sr-only">Всесезонные</span></label></div></div>
+<div class="field" style="width:140px"><span class="label">Радиус</span><select class="select" name="d"><option value="">Все</option>{% for d in sizes %}<option value="{{ d }}"{% if flt.diameter == d %} selected{% endif %}>R{{ d }}</option>{% endfor %}</select></div>
+<noscript><button class="btn btn--secondary" style="height:40px">Показать</button></noscript>
+<a class="btn btn--link-gray" style="height:40px" href="{{ action }}{% if brand %}?brand={{ brand|urlencode }}{% endif %}">Сбросить</a>
+</form>

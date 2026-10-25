@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Новые позиции · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Новые позиции</h1><p class="sub">Появились у поставщиков. Разберите их: включите бренд, сопоставьте модели. Список копится от запуска к запуску, пока вы не отметите его просмотренным. Новые бренды по умолчанию не публикуются: включите их в «Настройки» → «Бренды и наценки».</p></div>
+{% if not days and (report.goods or report.brands) %}<div class="actions">{% if can_post("new_positions_seen") %}<form method="post" action="/new/seen"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary">{{ icon("check") }}Отметить просмотренными</button></form>{% endif %}</div>{% endif %}</header>
+{% if not run %}
+<div class="card"><div class="empty"><div class="empty-icon">{{ icon("inbox") }}</div><h3>Запусков ещё не было</h3></div></div>
+{% else %}
+<div class="row" style="flex-wrap:wrap"><div class="seg">
+<a{% if not days %} class="is-active"{% endif %} href="/new">Не просмотренные <span class="cnt">{{ nav.new_count }}</span></a>
+{% for n, label in ((1, "За 1 день"), (3, "3 дня"), (7, "7 дней"), (14, "14 дней"), (30, "30 дней")) %}<a{% if days == n %} class="is-active"{% endif %} href="/new?days={{ n }}">{{ label }}</a>{% endfor %}</div>
+<span class="small muted ml-auto">Последний запуск #{{ run.id }} ({{ run.started|dt_utc }}){% if only_baseline %} · Это первый запуск: все товары считаются известными.{% endif %}</span></div>
+{% if not report.goods and not report.brands %}
+<div class="card"><div class="empty"><div class="empty-icon">{{ icon("check-circle") }}</div><h3>Новых позиций нет</h3><p>{% if only_baseline %}Новые позиции появятся после следующего запуска.{% else %}Всё просмотрено.{% endif %}</p></div></div>
+{% endif %}
+{% if report.brands %}
+<section class="card"><div class="card-head"><h3>Новые бренды ({{ report.brands|length }})</h3><span class="sub">по умолчанию выключены</span></div>
+<div class="card-body row-wrap" style="gap:10px">{% for b in report.brands %}<a class="badge badge--brand" style="font-size:13px;padding:5px 12px" href="/catalog?q={{ brand_label(b)|urlencode }}">{{ brand_label(b) }}</a>{% endfor %}</div></section>
+{% endif %}
+{% if report.goods %}
+<section class="card">
+<div class="card-head"><h3>Новые позиции ({{ report.goods|length }})</h3></div>
+<div class="table-wrap" style="border-top:0"><table class="table">
+<thead><tr><th>Появилась</th><th>Артикул</th><th>Бренд</th><th>Модель</th><th>Название</th></tr></thead>
+<tbody>{% for g in report.goods %}<tr><td class="muted nowrap">{{ g.seen_at|dt_utc }}</td><td class="t-code">{{ g.goods_id }}</td><td class="t-name">{{ brand_label(g.brand_key) }}</td><td>{{ g.model_raw }}</td><td>{{ g.name }}</td></tr>{% endfor %}</tbody>
+</table></div></section>
+{% endif %}
+{% endif %}
+{% endblock %}

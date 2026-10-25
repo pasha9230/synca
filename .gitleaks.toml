@@ -1,0 +1,34 @@
+# gitleaks: the default rules, without the fictional keys and tokens of the test fixtures.
+# Only the files that hold such stubs are listed (not the whole tests/): a real key put into any other test is still found.
+# The list is from our own search (AWS …EXAMPLE, sk-…, vk1.a.…, <bot id>:AA…, user:pass@ in an address, key/token/secret = "<long>");
+# gitleaks itself was not run on it (not installed, tails2 П10) — run `gitleaks dir --redact .` before the repository goes public.
+title = "tires-sync"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "fictional secrets of the tests"
+paths = [
+    '''^tests/test_avito_webhook\.py$''',
+    '''^tests/test_backup_offsite\.py$''',
+    '''^tests/test_chat_send_refusal\.py$''',
+    '''^tests/test_gunicorn_logger\.py$''',
+    '''^tests/test_handoff\.py$''',
+    '''^tests/test_min_order_cleanup\.py$''',
+    '''^tests/test_notify_flow\.py$''',
+    '''^tests/test_order_notify\.py$''',
+    '''^tests/test_order_sheet\.py$''',
+    '''^tests/test_panel_connections\.py$''',
+    '''^tests/test_photo_agent_run\.py$''',
+    '''^tests/test_review2_fixes\.py$''',
+    '''^tests/test_review3_fixes\.py$''',
+    '''^tests/test_share\.py$''',
+    '''^tests/test_share_labels\.py$''',
+    '''^tests/test_tails2_panel\.py$''',
+    '''^tests/test_vk_commands\.py$''',
+    '''^tests/test_vk_send\.py$''',
+    '''^tests/test_voice_inbox\.py$''',
+    '''(^|/)agent/tests/''',                # the stubs of the photo agent's tests (as before: the whole folder)
+    '''^tires-server/opt/tests/''',         # the copy of the server's tests (as before: the whole folder)
+]

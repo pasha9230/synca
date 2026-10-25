@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Проверка перевода · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Перевести в «{{ plan.stage.name }}»</h1><p class="sub">Проверьте и подтвердите. Правила этапа не срабатывают, сообщения клиентам не уходят. Перед переводом снимается копия базы.</p></div>
+<div class="actions"><a class="btn btn--secondary" href="/orders/bulk">Назад к выбору</a></div></header>
+<section class="card"><div class="card-body">
+<p>Будет переведено: <b>{{ plan.ok|length }}</b>. Не будет: <b>{{ plan.skip|length }}</b>.{% if plan.stage.code == "cancel" %} Причина отмены у тех, у кого её нет: «{{ reason or "не указана" }}».{% endif %}</p>
+{% if plan.webmim %}<p><b>Внимание:</b> у {{ plan.webmim|length }} из них есть заказ в WebMIM ({% for c in plan.webmim[:20] %}№{{ c.id }}{% if not loop.last %}, {% endif %}{% endfor %}{% if plan.webmim|length > 20 %} и другие{% endif %}). Панель отменит их только у нас: у поставщика заказ останется, его нужно отменить в WebMIM отдельно. Чтобы не трогать их, вернитесь и снимите галочки.</p>{% endif %}
+{% if plan.ok %}
+<form method="post" action="/orders/bulk/run" data-once data-confirm-title="Перевести {{ plan.ok|length }} {{ plural(plan.ok|length, 'заказ', 'заказа', 'заказов') }} в «{{ plan.stage.name }}»?" data-confirm="Заказы перейдут на этот этап, правила этапа для них не сработают. Перед этим панель сохранит копию базы; перевод можно отменить в «Вернуть»." data-confirm-ok="Перевести">
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="ids" value="{{ ids }}"><input type="hidden" name="to" value="{{ plan.stage.id }}">
+<input type="hidden" name="reason" value="{{ reason }}"><input type="hidden" name="expected" value="{{ plan.sign }}">
+<button class="btn btn--primary">Перевести {{ plan.ok|length }} заказов</button></form>
+{% else %}<p class="muted">Переводить нечего.</p>{% endif %}
+</div></section>
+{% if plan.skip %}<section class="card"><div class="card-body"><h2>Не будут переведены</h2></div><div class="table-wrap"><table class="table">
+<thead><tr><th>Заказ</th><th>Почему</th></tr></thead><tbody>
+{% for c, why in plan.skip %}<tr><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a> {{ c.client_name or (c.client_phone|phone) }}</td><td>{{ why }}</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
+{% endblock %}

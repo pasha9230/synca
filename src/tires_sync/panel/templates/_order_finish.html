@@ -1,0 +1,16 @@
+{# «Отмена или возврат» (the owner 2026-10-23: the item of «Ещё» did nothing to see while the block stood at the bottom of the card): a window
+   over the card, opened by «Отменить заказ или оформить возврат…» of the order window (data-open-modal) or by /orders/<id>#finish.
+   The same two forms to /move: the move asks for the reason (or the kind, the reason and the sum of a return). #}
+<div class="modal-backdrop send-window" id="finish-window" role="dialog" aria-modal="true" aria-labelledby="finish-window-h"><div class="modal">
+<div class="modal-head"><h3 id="finish-window-h">Отмена или возврат · заказ №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
+<div class="modal-body stack">
+<form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids.cancel }}">
+<label class="field"><span class="label">Причина отмены</span><input class="input" name="cancel_reason" maxlength="300" placeholder="Например: клиент передумал"></label>
+<div><button class="btn btn--danger-outline btn--sm">Отменить заказ</button></div></form>
+<hr>
+<form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids['return'] }}">
+<label class="field"><span class="label">Тип возврата</span><select class="select" name="return_kind"><option value="">Не выбран</option>{% for key, label in return_kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+<div class="grid-2"><label class="field"><span class="label">Причина возврата</span><input class="input" name="return_reason" maxlength="300"></label>
+<label class="field"><span class="label">Сумма возврата, ₽</span><input class="input" name="return_amount" inputmode="decimal"></label></div>
+<div><button class="btn btn--secondary btn--sm">Оформить возврат</button></div></form>
+</div></div></div>

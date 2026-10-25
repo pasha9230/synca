@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Пользователи · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Пользователи</h1><p class="sub">Кто входит в панель и что видит. Общий пароль владельца из настроек сервера остаётся аварийным входом.</p></div></header>
+{% if link %}<section class="card card-body" style="margin-bottom:var(--s-4)"><h2>Ссылка-приглашение</h2>
+<p class="muted">Скопируйте и отправьте человеку сами: панель её никуда не отправляет и больше не покажет. Действует 48 часов, один раз.</p>
+<input class="input" readonly value="{{ link }}"></section>{% endif %}
+<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Логин</th><th>Имя</th><th>Роль и точка</th><th>Состояние</th><th>Создан</th><th></th></tr></thead><tbody>
+{% for u in users_list %}<tr{% if not u.active %} class="muted"{% endif %}><td>{{ u.login }}</td>
+<td colspan="2">{% if can_post("users_role") %}<form method="post" action="/users/{{ u.login }}/role" class="row" style="gap:var(--s-2);flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input class="input" name="display_name" value="{{ u.display_name }}" placeholder="Имя" aria-label="Имя" style="max-width:160px">
+<select class="select" name="role" aria-label="Роль">{% for key, label in roles.items() %}<option value="{{ key }}"{% if key == u.role %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+<select class="select" name="point_id" aria-label="Точка (для менеджера точки)"><option value="">точка —</option>{% for pid, name in points.items() %}<option value="{{ pid }}"{% if pid == u.point_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+<button class="btn btn--secondary btn--sm">Сохранить</button>{% if can_post("users_role") %}</form>{% else %}</fieldset>{% endif %}</td>
+<td>{% if u.active %}<span class="badge badge--ok">включён</span>{% else %}<span class="badge badge--neutral">выключен</span>{% endif %}</td>
+<td>{{ u.created|dt_utc }}</td>
+<td>{% if can_post("users_active") %}<form method="post" action="/users/{{ u.login }}/active" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+<button class="btn {{ 'btn--danger-outline' if u.active else 'btn--secondary' }} btn--sm">{{ "Выключить" if u.active else "Включить" }}</button>{% if can_post("users_active") %}</form>{% else %}</fieldset>{% endif %}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">Пользователей пока нет: пригласите первого ниже.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="card card-body" style="margin-top:var(--s-4)"><h2>Пригласить</h2>
+{% if can_post("users_invite") %}<form method="post" action="/users/invite" class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Имя</span><input class="input" name="display_name" placeholder="например, Алексей"></label>
+<label class="field"><span class="label">Роль</span><select class="select" name="role">{% for key, label in roles.items() %}<option value="{{ key }}"{% if key == "viewer" %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Точка (для менеджера точки)</span><select class="select" name="point_id"><option value="">—</option>{% for pid, name in points.items() %}<option value="{{ pid }}">{{ name }}</option>{% endfor %}</select></label>
+<button class="btn btn--primary">Создать ссылку</button>{% if can_post("users_invite") %}</form>{% else %}</fieldset>{% endif %}
+{% if invites %}<table class="table" style="margin-top:var(--s-3)"><thead><tr><th>Роль</th><th>Имя</th><th>Действует до</th><th>Кто создал</th><th></th></tr></thead><tbody>
+{% for i in invites %}<tr><td>{{ roles[i.role] }}{% if i.point_id %} · {{ points.get(i.point_id, "точка №%s" % i.point_id) }}{% endif %}</td><td>{{ i.display_name }}</td><td>{{ i.expires|dt_utc }}</td><td>{{ i.created_by }}</td>
+<td>{% if can_post("users_invite_revoke") %}<form method="post" action="/users/invites/{{ i.id }}/revoke" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--danger-outline btn--sm">Отозвать</button>{% if can_post("users_invite_revoke") %}</form>{% else %}</fieldset>{% endif %}</td></tr>{% endfor %}
+</tbody></table>{% endif %}</section>
+<section class="card" style="margin-top:var(--s-4)"><div class="card-body" style="overflow-x:auto"><h2>Что видит каждая роль</h2>
+<table class="table"><thead><tr><th>Роль</th>{% for key, label in sections.items() if key != "self" %}<th>{{ label }}</th>{% endfor %}<th>Особые права</th></tr></thead><tbody>
+{% for key, label in roles.items() %}<tr><td>{{ label }}</td>{% for s in sections if s != "self" %}{% set lv = matrix[key].sections.get(s, 0) %}<td>{{ ("—", "смотреть", "менять")[lv] }}</td>{% endfor %}
+<td>{% for r in rights if r in matrix[key].rights %}{{ rights[r] }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td></tr>{% endfor %}
+</tbody></table><p class="muted small">Менеджер точки видит заказы своей точки, чаты её аккаунта Авито (выбирается в «Подключения → Точки выдачи») и уведомления по ним.</p></div></section>
+{% endblock %}

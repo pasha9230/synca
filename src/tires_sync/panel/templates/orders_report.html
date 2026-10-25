@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Отчёт · Заказы · Tires Sync{% endblock %}
+{% block content %}
+{% set names = {"point_fee": "Выплата точке за заказ", "owner_share": "Доля собственника", "handoff_fee": "За переданного клиента"} %}
+<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Отчёт</span></div><h1>Отчёт по проданным позициям</h1>
+<p class="sub">Продажи, записанные по заказам. Выплата точке за заказ вычитается из прибыли; чистая прибыль делится на две доли: «{{ labels.owner }}» и «{{ labels.partner }}». Ставки берутся на дату заказа (сейчас {{ fee|pct(2)|replace(",00", "") }} ₽ за заказ и {{ (owner_share * 100)|pct(2)|replace(",00", "") }} % собственнику){% if report.rates_used|length > 1 %}; в этом периоде ставки менялись{% endif %}. Продажи вручную показаны отдельной строкой и в итог не входят; продажи из Авито сюда не входят.</p></div></header>
+<form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--s-4)">
+<label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
+<label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>
+<label class="field"><span class="label">Точка</span><select class="select" name="pt"><option value="">Все</option>{% for n in point_names %}<option value="{{ n }}"{% if n == point %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+<button class="btn btn--primary">Показать</button><a class="btn btn--secondary" href="/orders/report/export.csv?from={{ start }}&to={{ end }}&pt={{ point|urlencode }}">Скачать CSV</a></form>
+<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Точка</th><th>Заказов</th><th>Шин</th><th>Выручка</th><th>Закупка</th><th>Прибыль</th><th>Выплата точке</th><th>Чистая прибыль</th><th>{{ labels.owner }}</th><th>{{ labels.partner }}</th></tr></thead><tbody>
+{% for r in (report.lines + [report.total]) if report.lines %}<tr{% if loop.last %} class="strong"{% endif %}><td>{{ r.point }}</td><td>{{ r.orders }}</td><td>{{ r.pieces }}</td>{% for k in ("sale", "cost", "margin", "fee", "net", "owner", "partner") %}<td>{{ r[k]|money }}</td>{% endfor %}</tr>
+{% endfor %}{% if not report.lines %}<tr><td colspan="10" class="muted">За период продаж по заказам нет.</td></tr>{% endif %}
+{% if report.handoff.clients %}<tr class="muted"><td>Переданные клиенты <span title="Клиенты, которых передали точки (командой ВК, с «Моей точки», из чатов и звонков), ставшие выданными заказами: фикс по ставке «За переданного клиента» входит в «Выплату точке» той точки, которая передала клиента">(входят в строки выше)</span></td><td>{{ report.handoff.clients }}</td><td colspan="4"></td><td>{{ report.handoff.fee|money }}</td><td colspan="3"></td></tr>{% endif %}
+{% if report.manual %}{% set m = report.manual %}<tr class="muted"><td>{{ m.point }} <span title="Не входят в итог и не делятся: решаются отдельно">(не в итоге)</span></td><td>—</td><td>{{ m.pieces }}</td><td>{{ m.sale|money }}</td><td>{{ m.cost|money }}</td><td>{{ m.margin|money }}</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>{% endif %}
+</tbody></table>
+{% if report.lines %}{% set w = report.webmim %}<p class="small muted" data-webmim-cost>Закупка из заказов WebMIM (боевой сервер): {{ w.count }} из {{ w.positions }} поз.{% if w.count < w.positions %}; остальные — по цене поставщика, записанной в продажу{% endif %}. Цена WebMIM идёт только в этот расчёт: в заказ и продажи не записывается.{% if w.by_point|length > 1 %} По точкам: {% for r in w.by_point %}{{ r.point }} {{ r.count }} из {{ r.positions }}{{ "; " if not loop.last }}{% endfor %}.{% endif %}</p>{% endif %}
+</div></section>
+<section class="card" style="margin-top:var(--s-4)"><div class="card-body"><h2>Ставки</h2>
+<p class="sub">Новая ставка действует с выбранной даты (сегодня или позже) для заказов с этой даты; прошлые отчёты не пересчитываются.</p>
+{% if can_post("orders_report_rates") %}<form method="post" action="/orders/report/rates" class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Выплата точке, ₽ за заказ</span><input class="input" name="point_fee" inputmode="decimal" required value="{{ fee|pct(2)|replace(',00', '') }}"><input type="hidden" name="point_fee_was" value="{{ fee|pct(2)|replace(',00', '') }}"></label>
+<label class="field"><span class="label">Доля собственника, %</span><input class="input" name="owner_pct" inputmode="decimal" required value="{{ (owner_share * 100)|pct(2)|replace(',00', '') }}"><input type="hidden" name="owner_pct_was" value="{{ (owner_share * 100)|pct(2)|replace(',00', '') }}"></label>
+<label class="field"><span class="label">За переданного клиента, ₽</span><input class="input" name="handoff_fee" inputmode="decimal" required value="{{ handoff_fee|pct(2)|replace(',00', '') }}"><input type="hidden" name="handoff_fee_was" value="{{ handoff_fee|pct(2)|replace(',00', '') }}"></label>
+<label class="field"><span class="label">Действует с</span><input class="input" type="date" name="valid_from" min="{{ today }}" required value="{{ today }}"></label>
+<button class="btn btn--primary">Сохранить</button></form>{% endif %}
+{% if rates %}<table class="table" style="margin-top:var(--s-3)"><thead><tr><th>С даты</th><th>Ставка</th><th>Значение</th><th>Кто</th><th>Когда</th></tr></thead><tbody>
+{% for r in rates|reverse %}<tr><td>{{ r.valid_from }}</td><td>{{ names[r.name] }}</td><td>{% if r.name != "owner_share" %}{{ r.value|pct(2)|replace(",00", "") }} ₽{% else %}{{ (r.value * 100)|pct(2)|replace(',00', '') }} %{% endif %}</td><td>{{ r.author }}</td><td>{{ r.created|dt }}</td></tr>
+{% endfor %}<tr class="muted"><td>до первой даты</td><td colspan="4">{{ defaults.point_fee|pct(2)|replace(",00", "") }} ₽ за заказ и {{ (defaults.owner_share * 100)|pct(2)|replace(",00", "") }} % собственнику</td></tr></tbody></table>
+{% else %}<p class="muted">Ставки не менялись: {{ fee|pct(2)|replace(",00", "") }} ₽ за заказ и {{ (owner_share * 100)|pct(2)|replace(",00", "") }} % собственнику.</p>{% endif %}
+</div></section>
+<section class="card" style="margin-top:var(--s-4)"><div class="card-body"><h2>Подписи долей</h2>
+<p class="sub">Как подписать две доли чистой прибыли в этом отчёте, в аналитике и в файле «Скачать CSV» (сейчас «{{ labels.owner }}» и «{{ labels.partner }}»).{% if can_post("orders_report_rates") %} Пустое поле: имя пользователя с ролью «Владелец» или «Партнёр», а если его нет, «{{ label_defaults.owner }}» или «{{ label_defaults.partner }}». На деньги не влияет.{% endif %}</p>
+{% if can_post("orders_report_rates") %}<form method="post" action="/orders/report/rates" class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="what" value="labels">
+<label class="field"><span class="label">Доля собственника</span><input class="input" name="owner_label" maxlength="{{ label_max }}" value="{{ saved_labels.owner }}" placeholder="{{ label_defaults.owner }}"></label>
+<label class="field"><span class="label">Вторая доля</span><input class="input" name="partner_label" maxlength="{{ label_max }}" value="{{ saved_labels.partner }}" placeholder="{{ label_defaults.partner }}"></label>
+<button class="btn btn--primary">Сохранить</button></form>{% endif %}
+</div></section>
+{% endblock %}

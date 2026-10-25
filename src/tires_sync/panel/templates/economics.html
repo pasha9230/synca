@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Юнит-экономика · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "overview" %}{% include "_economics_head.html" %}
+{% if many_accounts %}<div class="flash flash--info">{{ icon("info") }}<div class="flash-text">Цены и объявления посчитаны для аккаунта «{{ first_account }}» (первого). У других аккаунтов поправка цены может быть другой.</div></div>{% endif %}
+{% if not has_terms %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Условия поставщика ещё не заданы: прибыль считается без скидки, бонуса и ЕЖ. <a href="/economics/terms">Задать условия</a>.</div></div>{% endif %}
+<section class="card"><div style="padding:var(--s-4) var(--s-5) 0">{% set action = "/economics" %}{% set brand = "" %}{% set order = "" %}{% include "_economics_filters.html" %}</div>
+<div class="tiles" style="padding:var(--s-4) var(--s-5)">
+<div class="tile tile--brand"><span class="tile-label">Объявлений в фиде</span><span class="tile-value">{{ total.ads }}</span><span class="tile-sub">{{ total.in_feed }} {{ plural(total.in_feed, "позиция", "позиции", "позиций") }}, остаток {{ total.stock }} шт.</span></div>
+<div class="tile"><span class="tile-label">Прибыль на остатках</span><span class="tile-value">{{ total.profit|money }}</span><span class="tile-sub">выручка {{ total.sale_total|money }}</span></div>
+<div class="tile"><span class="tile-label">Средняя маржа</span><span class="tile-value">{{ total.margin_pct_price|pct }} %</span><span class="tile-sub">от цены поставщика · {{ total.margin_pct_sale|pct }} % от цены продажи</span></div>
+<div class="tile{% if total.no_terms %} tile--warn{% endif %}"><span class="tile-label">Без условий поставщика</span><span class="tile-value">{{ total.no_terms }}</span><span class="tile-sub">позиций в фиде: прибыль занижена</span></div>
+</div></section>
+
+<section class="card">
+<div class="card-head"><h3>Факт за 30 дней</h3><span class="sub">что продано на самом деле</span><a class="btn btn--secondary btn--sm ml-auto" href="/economics/sales">Все продажи</a></div>
+<div class="tiles" style="padding:var(--s-4) var(--s-5)">
+<div class="tile"><span class="tile-label">Продано</span><span class="tile-value">{{ fact.pieces }} шт.</span><span class="tile-sub">{{ fact.sales }} {{ plural(fact.sales, "продажа", "продажи", "продаж") }}</span></div>
+<div class="tile"><span class="tile-label">Выручка</span><span class="tile-value">{{ fact.sale|money }}</span><span class="tile-sub">по цене поставщика {{ fact.price|money }}</span></div>
+<div class="tile"><span class="tile-label">Прибыль</span><span class="tile-value">{{ fact.margin|money }}</span><span class="tile-sub">после всех условий и расходов</span></div>
+<div class="tile"><span class="tile-label">Маржа</span><span class="tile-value">{{ fact.margin_pct_price|pct }} %</span><span class="tile-sub">от цены поставщика</span></div>
+</div></section>
+
+<section class="card">
+<div class="card-head"><h3>Динамика</h3><span class="sub">{% if pick %}бренд {{ pick }}{% else %}все бренды{% endif %} · последние 30 дней · график по всему каталогу, без фильтров сезона и радиуса</span>
+<form method="get" action="/economics" class="ml-auto row" data-autosubmit>{% if flt.season %}<input type="hidden" name="s" value="{{ flt.season }}">{% endif %}{% if flt.diameter %}<input type="hidden" name="d" value="{{ flt.diameter }}">{% endif %}<select class="select select--sm" name="b" aria-label="Бренд для динамики"><option value="">Все бренды</option>{% for b in brands %}<option value="{{ b.brand }}"{% if b.brand == pick %} selected{% endif %}>{{ brand_label(b.brand) }}</option>{% endfor %}</select></form></div>
+<div class="card-body">
+{% if chart_profit %}<div class="grid-3">
+{% for title, ch in (("Прибыль на остатках, ₽", chart_profit), ("Объявлений в фиде", chart_ads), ("Средняя маржа, %", chart_margin)) %}
+<div><div class="small muted">{{ title }}</div><svg viewBox="0 0 {{ ch.width }} {{ ch.height }}" width="100%" role="img" aria-label="{{ title }}"><polyline fill="none" stroke="var(--primary-600)" stroke-width="2" points="{{ ch.points }}"/></svg>
+<div class="small muted">{{ ch.first }} → {{ ch.last }} · сейчас {{ ch.now|pct(0) if title.startswith("Объявл") or title.startswith("Прибыль") else ch.now|pct }} · от {{ ch.low|pct(0) }} до {{ ch.high|pct(0) }}</div></div>
+{% endfor %}</div>
+{% else %}<p class="muted">График появится после второго дня: снимок записывается при каждом обновлении каталога.{% if series %} Сейчас в журнале дней: {{ series|length }}.{% endif %}</p>{% endif %}
+</div></section>
+
+<section class="card">
+<div class="card-head"><h3>По брендам</h3><span class="sub">нажмите на бренд, чтобы увидеть его позиции</span></div>
+<div class="table-wrap"><table class="table table--plain table--econ">
+<thead><tr><th>Бренд</th><th class="num">Объявлений</th><th class="num">Остаток, шт.</th><th class="num">Выручка на остатках</th><th class="num">Прибыль на остатках</th><th class="num">Маржа от прайса</th><th class="num">Продано за 30 дней</th><th class="num">Прибыль по факту</th><th class="num">Без условий</th></tr></thead>
+<tbody>{% for b in brands %}<tr{% if not b.in_feed %} class="muted"{% endif %}><td class="strong"><a href="/economics/brand?brand={{ b.brand|urlencode }}{% if query %}&{{ query }}{% endif %}">{{ brand_label(b.brand) }}</a>{% if not b.in_feed %} <span class="badge badge--neutral">не публикуется</span>{% endif %}</td>
+<td class="num">{{ b.ads }}</td><td class="num">{{ b.stock }}</td><td class="num">{{ b.sale_total|money }}</td>{% if b.in_feed %}<td class="num"><b>{{ b.profit|money }}</b></td><td class="num">{{ b.margin_pct_price|pct }} %</td>{% else %}<td class="num" title="Прибыль на остатках, если опубликовать бренд">{% if b.potential.positions %}≈ {{ b.potential.profit|money }}{% else %}—{% endif %}</td><td class="num">{% if b.potential.positions %}≈ {{ b.potential.margin_pct_price|pct }} %{% else %}—{% endif %}</td>{% endif %}
+<td class="num">{{ fact_by_brand[b.brand].pieces if b.brand in fact_by_brand else "—" }}</td><td class="num">{{ fact_by_brand[b.brand].margin|money if b.brand in fact_by_brand else "—" }}</td>
+<td class="num">{% if b.no_terms %}<a class="text-warn" href="/economics/terms">нет условий: {{ b.no_terms }}</a>{% else %}<span class="muted">—</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">Нет позиций в фиде по этим фильтрам.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

@@ -1,0 +1,30 @@
+{
+  "version": "2026-10-25",
+  "about": "Rules of the check of a feed before it is published (docs/feed-check-rules.md). level: critical stops the publication of that account's feed (the published one stays), warning is only reported, off does not apply. Modes: generated = our own feed, mirror = a file of another owner carried over.",
+  "params": {"title_limit": 70, "shrink_warning_fraction": 0.3},
+  "rules": {
+    "template_missing":  {"generated": "critical", "mirror": "critical", "text": "Шаблон Авито не найден или испорчен: фид не проверить по тегам шаблона"},
+    "template_tags":     {"generated": "critical", "mirror": "critical", "text": "В объявлении есть тег, которого нет в шаблоне Авито категории (например Quantity, TargetAudience)"},
+    "required_fields":   {"generated": "critical", "mirror": "warning",  "text": "Не заполнено обязательное поле или значение вне допустимых (validate_ad)"},
+    "empty_feed":        {"generated": "critical", "mirror": "critical", "text": "В фиде нет ни одного объявления"},
+    "duplicate_id":      {"generated": "critical", "mirror": "critical", "text": "Один Id встречается в фиде дважды"},
+    "duplicate_position":{"generated": "critical", "mirror": "warning",  "text": "Одна и та же позиция (код и комплектность) встречается в фиде дважды"},
+    "cross_account_id":  {"generated": "critical", "mirror": "critical", "text": "Id совпадает с Id в фиде другого аккаунта"},
+    "stock":             {"generated": "critical", "mirror": "critical", "text": "Позиции нет у поставщика или остаток меньше порога аккаунта"},
+    "held_low_stock":    {"generated": "warning",  "mirror": "warning",  "text": "Позиция удерживается в фиде (защита от массового снятия, ошибка в строке), а в свежей выгрузке её остаток ниже порога"},
+    "price":             {"generated": "critical", "mirror": "critical", "text": "Цена не задана или не больше нуля"},
+    "phone":             {"generated": "critical", "mirror": "critical", "text": "Телефон в объявлении не равен телефону кабинета аккаунта"},
+    "owner_phone":       {"generated": "critical", "mirror": "critical", "text": "В объявлении общий номер владельца, а это не основной аккаунт"},
+    "address":           {"generated": "critical", "mirror": "off",      "text": "В объявлении адрес другого аккаунта (или общий адрес настроек), а не свой адрес этого аккаунта"},
+    "pack4":             {"generated": "critical", "mirror": "warning",  "text": "Комплект -x4 в фиде, а комплекты не публикуются"},
+    "commercial":        {"generated": "critical", "mirror": "warning",  "text": "Коммерческая шина (индекс C) в фиде, а коммерческие не публикуются"},
+    "model_in_reference":{"generated": "critical", "mirror": "warning",  "text": "Бренд или модель не найдены в справочнике Авито"},
+    "title":             {"generated": "critical", "mirror": "warning",  "text": "Название длиннее лимита или с двойным пробелом"},
+    "photo":             {"generated": "critical", "mirror": "warning",  "text": "Нет фото, или ссылка на фото не своя у аккаунта"},
+    "own_photo_foreign": {"generated": "critical", "mirror": "critical", "text": "Ссылка на фото из нашей библиотеки, которой у аккаунта быть не может: копия другого аккаунта, неодобренный кадр или свои фото выключены"},
+    "same_tire":         {"generated": "critical", "mirror": "warning",  "text": "Одна и та же шина (бренд, модель, размер, индексы) в фиде дважды под разными кодами"},
+    "title_age_word":    {"generated": "warning",  "mirror": "warning",  "text": "В заголовке осталось «старше» (пометка поставщика о возрасте шины)"},
+    "studs_conflict":    {"generated": "critical", "mirror": "warning",  "text": "Шипы противоречат: тип «Зимние шипованные», а в названии или описании «без шипов» («нешип.», «под шип», «шипуемая»…), или тип «Зимние нешипованные», а в названии «шип…»"},
+    "shrink":            {"generated": "warning",  "mirror": "warning",  "text": "Фид сократился заметно относительно опубликованного"}
+  }
+}

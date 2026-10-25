@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% import "_entity.html" as entity_ui %}
+{% import "_inquiry.html" as inq_ui %}
+{% block title %}Заказ №{{ c.id }} · Tires Sync{% endblock %}
+{% block content %}
+{% set csrf %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endset %}
+{{ entity_ui.crumbs(entity.crumbs) }}
+<div class="ocard-layout">
+<div class="ocard-main">
+{% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}
+{% include "_order_window.html" %}
+{% if messages %}{% call entity_ui.section("Сообщения по заказу", id="messages") %}<div class="card-body row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center">
+<span>Ждут отправки: {{ messages|length }} ({% for m in messages %}{{ m.task.title }}{% if not loop.last %}; {% endif %}{% endfor %}).</span>{% if messages|selectattr("lacking")|list %}<span class="small text-err">Не хватает данных: см. в окне.</span>{% endif %}
+<button type="button" class="btn btn--primary btn--sm ml-auto" data-open-modal="order-messages">Открыть сообщения</button></div>{% endcall %}
+{% include "_order_messages.html" %}{% endif %}
+{% if tasks %}{% call entity_ui.section("Что ждёт действия", id="tasks") %}<div class="card-body stack">
+{% for t in tasks %}<div class="stack" style="border-bottom:1px solid var(--gray-200);padding-bottom:var(--s-3)"><div class="strong">{{ t.title }} {% if t.status == "error" %}<span class="badge badge--err">Ошибка</span>{% endif %}</div>
+{% if t.body %}<textarea class="textarea" id="task-{{ t.id }}" rows="3" readonly aria-label="Текст задачи">{{ t.body }}</textarea><div><button type="button" class="btn btn--secondary btn--xs" data-copy="task-{{ t.id }}">Скопировать</button></div>{% endif %}
+{% if t.title == exact_title and t.status == "pending" and send_chats and can_post("chat_send") %}
+<form method="post" action="/chats/{{ send_chats[0].id }}/send" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="reply_token" value="o{{ c.id }}t{{ t.id }}">
+<label class="field"><span class="label">Сообщение клиенту (можно поправить): уйдёт в чат Ч-{{ send_chats[0].id }}</span><textarea class="textarea" name="text" rows="4" maxlength="1000">{{ client_text }}</textarea></label>
+<div><button class="btn btn--primary btn--sm">Отправить клиенту в чат Авито</button></div></form>{% endif %}
+{% if t.result %}<p class="small text-err">{{ t.result }}</p>{% endif %}
+{% if t.status == "running" %}<p class="small muted">Выполняется. Если зависло, через 10 минут задача вернётся в список.</p>{% endif %}
+<div class="row" style="gap:var(--s-2)">{% if t.status == "pending" and can_post("order_task_run") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/run"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">{{ "Готово" if t.kind == "remind" else "Выполнить" }}</button></form>{% endif %}
+{% if t.status != "running" and can_post("order_task_skip") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/skip"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Пропустить</button></form>{% endif %}</div></div>{% endfor %}
+</div>{% endcall %}
+{% endif %}
+<details class="card ocard-part" id="wants"{% if c.wants or part == "wants" %} open{% endif %}><summary class="card-head"><h3>Что нужно клиенту{% if c.wants %} ({{ c.wants|length }}){% endif %}</h3>{{ icon("chev", "ml-auto") }}</summary>
+<div class="card-body stack">
+<p class="small muted">Что клиент хочет купить, когда это появится в наличии. Заказ можно перенести на этап «Ожидает наличие», когда есть хотя бы одна строка. Когда все строки найдены в наличии, на заказе появится метка «Появилось» и задача; если часть строк закрыта аналогами (отмечено «можно другие бренды» или «можно другие размеры»), метка «Есть аналоги».</p>
+{% for w in c.wants %}{% if not can_post("order_want_update") %}<div class="strong">{{ want_text(w) }}</div>{% else %}
+<form method="post" action="/orders/{{ c.id }}/wants/{{ w.id }}/update" class="stack" style="border-bottom:1px solid var(--gray-200);padding-bottom:var(--s-3)"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="strong">{{ want_text(w) }}</div>
+{% include "_order_want_fields.html" %}
+<div class="row" style="gap:var(--s-2)"><button class="btn btn--secondary btn--sm">Сохранить строку</button><button class="btn btn--danger-outline btn--sm" formaction="/orders/{{ c.id }}/wants/{{ w.id }}/delete" formnovalidate>Убрать строку</button></div></form>{% endif %}
+{% else %}<p class="muted">Строк пока нет.</p>{% endfor %}
+{% if can_post("order_want_add") %}<form method="post" action="/orders/{{ c.id }}/wants/add" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="strong">Добавить строку</div>
+{% set w = {"brand": "", "model": "", "width": "", "profile": "", "radius": "", "season": "", "studded": "", "qty": 4, "code": "", "any_brand": false, "any_size": false} %}
+{% include "_order_want_fields.html" %}
+<div><button class="btn btn--primary btn--sm">{{ icon("plus") }}Добавить строку</button></div></form>{% endif %}
+</div></details>
+{% include "_order_webmim.html" %}
+{% call entity_ui.section("Продажа и расчёты", id="money") %}<div class="card-body stack">
+<p class="ocard-sum">Сумма заказа <b>{{ totals.sale|money }}</b>{% if c['items'] %} · {{ c['items']|length }} поз.{% endif %}</p>
+{% if webmim_cost and has_right("money") %}<p class="small" data-webmim-analytics>В аналитике закупка по WebMIM: <b>{{ webmim_cost.cost|money }}</b> ({{ webmim_cost.count }} из {{ webmim_cost.positions }} поз.; по цене из заказа WebMIM с учётом скидки поставщика). В заказ и продажи не записывается.</p>{% endif %}
+{% if c.stage.kind == "won" and not c.sale_ids and can_post("order_sale") %}<div class="row" style="gap:var(--s-3)"><span class="small muted">Продажа не записана</span><form method="post" action="/orders/{{ c.id }}/sale" data-once>{{ csrf }}<button class="btn btn--primary btn--sm">Записать продажу</button></form></div>{% endif %}
+{% if c.sale_ids %}<div class="row" style="gap:var(--s-3)">{% if -1 in c.sale_ids %}<span class="small text-err">Запись продажи не завершена (сбой при записи).</span>{% else %}<span class="small">Продажа записана ({{ c.sale_ids|length }} поз.).</span>{% endif %}
+{% if can_post("order_sale_reverse") %}<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once>{{ csrf }}<button class="btn btn--danger-outline btn--sm">{% if -1 in c.sale_ids %}Освободить заказ{% else %}Сторнировать продажу{% endif %}</button></form>{% endif %}</div>{% endif %}
+{% if can_post("order_save") %}<form method="post" action="/orders/{{ c.id }}/save" class="stack">{{ csrf }}<input type="hidden" name="tab" value="money">
+<p class="small muted">Дата, когда сделано; пусто, если ещё нет.</p><div class="grid-2">
+{% for key, label in marks.items() %}<label class="field"><span class="label">{{ label }}</span><input class="input" type="date" name="{{ key }}" value="{{ c[key] }}"></label>{% endfor %}</div>
+<div><button class="btn btn--secondary btn--sm">Сохранить даты</button></div></form>
+{% else %}<dl class="small">{% for key, label in marks.items() %}<dt>{{ label }}</dt><dd>{{ c[key] or "—" }}</dd>{% endfor %}</dl>{% endif %}
+</div>{% endcall %}
+{% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}{% include "_order_finish.html" %}{% endif %}
+</div>
+<div class="ocard-side">
+{% if may_callback() %}{{ inq_ui.callbacks(callbacks_for(order_id=c.id), order_id=c.id, back="/orders/%d"|format(c.id)) }}{% endif %}
+{% if chat_links %}{% call entity_ui.section("Чаты Авито") %}<div class="card-body stack">
+{% with sends=chat_sends, back="/orders/%d"|format(c.id) %}{% include "_chat_sends.html" %}{% endwith %}
+{% for ch in chat_links %}<div class="stack" style="gap:2px"><div class="row" style="gap:var(--s-2)"><a href="/chats/{{ ch.id }}"><b>Ч-{{ ch.id }}</b> · {{ ch.peer_name or "без имени" }}</a>{% if ch.unread %}<span class="badge badge--warn">новых: {{ ch.unread }}</span>{% endif %}<a class="btn btn--secondary btn--xs ml-auto" href="/chats/{{ ch.id }}">Открыть</a></div>{% if ch.item_title %}<div class="small">{{ ch.item_title }}</div>{% endif %}<div class="small muted chat-last">{{ ch.last_text }}</div></div>{% endfor %}
+</div>{% endcall %}{% endif %}
+{% call entity_ui.section("Лента событий") %}
+{% if can_post("order_note") %}<form method="post" action="/orders/{{ c.id }}/note" class="card-body row" style="gap:var(--s-2)">{{ csrf }}
+<textarea class="textarea grow" name="text" rows="1" maxlength="2000" placeholder="Заметка по заказу" aria-label="Заметка"></textarea><button class="btn btn--secondary btn--sm">Добавить</button></form>{% endif %}
+<ul class="feed card-body">{% for e in events %}<li class="{{ 'is-note' if e.kind == 'note' else '' }}"><time title="{{ e.at|dt }}">{{ e.at|short_dt }}</time><b>{{ author_label(e.author) }}</b> · {{ e.text }}{% if e.avito_link %} <a class="btn btn--secondary btn--xs" href="{{ e.avito_link }}" target="_blank" rel="noopener noreferrer">Открыть чат в Авито</a>{% endif %}</li>{% endfor %}</ul>
+{% endcall %}
+</div>
+</div>
+{% endblock %}

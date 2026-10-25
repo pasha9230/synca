@@ -1,0 +1,36 @@
+[Unit]
+Description=Tires Sync deploy by polling GitHub: latest master with green tests goes to tires-deploy
+OnFailure=tires-alert@%n.service
+After=network-online.target
+Wants=network-online.target
+# The same server switch as the runner: without the file the poll does not even start (checked by systemd as root).
+ConditionPathExists=/etc/tires-deploy/enabled
+
+[Service]
+Type=oneshot
+User=tires-pull
+Group=tires-pull
+ExecStart=/usr/local/sbin/tires-pull
+StateDirectory=tires-pull
+StateDirectoryMode=0750
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+Environment=LC_ALL=C.UTF-8
+Environment="TIRES_PULL_REPO=pasha9230/tires-avito-sync"
+Environment="TIRES_PULL_CHECK=tests / pytest"
+# The week of running next to the runner: the runner deploys first, the poll only if the runner did not within
+# 20 minutes after green tests. After the runner is switched off: 0 (systemctl edit tires-pull.service).
+Environment=TIRES_PULL_MIN_AGE_MIN=20
+# Read-only GitHub token: /etc/credstore/tires-pull.github-token (root, 0600). No file: requests without a token.
+ImportCredential=tires-pull.github-token
+SyslogIdentifier=tires-pull
+# tires-deploy runs under sudo inside this unit and inherits its namespaces: no ProtectSystem/ProtectHome/
+# NoNewPrivileges here, they would break the deploy (it writes /opt, /etc/systemd, uses root's deploy key).
+# Nor LockPersonality/RestrictRealtime/SystemCallArchitectures/ProtectKernel*/ProtectClock: for a User= service
+# they imply NoNewPrivileges=yes, and sudo would stop working.
+PrivateTmp=true
+# No core dump with the token in memory.
+LimitCORE=0
+# Longer than the longest deploy (10 min lock + 75 min quiet wait + backup + checks); stopping waits for
+# tires-deploy to leave its switch section instead of killing it in the middle.
+TimeoutStartSec=3h
+TimeoutStopSec=10min

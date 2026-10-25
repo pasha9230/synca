@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Аналитика · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Аналитика</h1><p class="sub">Продажи и прибыль, воронка «чат → заказ → выдан», время на этапах. Период: с {{ start }} по {{ end }} включительно (Москва).</p></div></header>
+<form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--s-4)">
+<label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
+<label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>
+<label class="field"><span class="label">Воронка</span><select class="select" name="by">{% for key, label in slices.items() %}<option value="{{ key }}"{% if key == by %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<button class="btn btn--primary">Показать</button></form>
+{% if money is not none %}<section class="card" style="margin-bottom:var(--s-4)"><div class="card-head"><h3>Продажи и прибыль</h3><span class="sub">по дню продажи; как в отчёте по заказам</span><a class="btn btn--link small ml-auto" href="/orders/report?from={{ start }}&to={{ end }}">Отчёт по точкам</a></div>
+{% if money.has_data %}<div class="card-body tiles tiles--row">
+<div class="tile"><span class="tile-label">Выручка</span><span class="tile-value">{{ money.revenue|money }}</span><span class="tile-sub">{{ money.orders }} заказ(ов), {{ money.pieces }} шин</span></div>
+<div class="tile"><span class="tile-label">Прибыль</span><span class="tile-value">{{ money.profit|money }}</span><span class="tile-sub">до выплат точкам</span></div>
+<div class="tile"><span class="tile-label">Чистая прибыль</span><span class="tile-value">{{ money.net|money }}</span><span class="tile-sub">точкам {{ money.point_fees|money }}</span></div>
+<div class="tile"><span class="tile-label">{{ labels.owner }} / {{ labels.partner }}</span><span class="tile-value">{{ money.owner|money }}</span><span class="tile-sub">{{ labels.partner }} {{ money.partner|money }}</span></div>
+{% if money.manual.sales %}<div class="tile"><span class="tile-label">Продажи вручную</span><span class="tile-value">{{ money.manual.revenue|money }}</span><span class="tile-sub">прибыль {{ money.manual.profit|money }}, не в итоге</span></div>{% endif %}
+</div>{% if money.webmim.of %}<div class="card-body small muted" data-webmim-cost>Закупка из заказов WebMIM: {{ money.webmim.count }} из {{ money.webmim.of }} поз.{% if money.webmim.count < money.webmim.of %}; остальные — по цене поставщика, записанной в продажу{% endif %}.</div>{% endif %}{% else %}<div class="card-body muted">За период продаж нет.</div>{% endif %}</section>{% endif %}
+<section class="card" style="margin-bottom:var(--s-4)"><div class="card-head"><h3>Воронка «чат → заказ → выдан»</h3><span class="sub">заказы, созданные в периоде, по их этапу сейчас</span></div>
+<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>{{ slices[by] if by else "" }}</th><th>Чатов</th><th>С заказом</th><th>Чат → заказ</th><th>Заказов</th><th>Выдано</th><th>Отказ</th><th>Возврат</th><th>В работе</th><th>Заказ → выдан</th></tr></thead><tbody>
+{% for r in funnel.rows + [funnel.total] %}<tr{% if loop.last %} class="strong"{% endif %}><td>{{ r.label if not loop.last else "Итого" }}</td><td>{{ r.chats if r.chats is not none else "—" }}</td><td>{{ r.chats_with_order if r.chats is not none else "—" }}</td>
+<td>{{ (r.chat_to_order * 100)|pct(0) ~ " %" if r.chat_to_order is not none else "—" }}</td><td>{{ r.orders }}</td><td>{{ r.issued }}</td><td>{{ r.cancelled }}</td><td>{{ r.returned }}</td><td>{{ r.open }}</td>
+<td>{{ (r.order_to_issued * 100)|pct(0) ~ " %" if r.order_to_issued is not none else "—" }}</td></tr>{% endfor %}
+</tbody></table>{% if funnel.chats_undated %}<p class="small muted">Чатов без даты начала от Авито: {{ funnel.chats_undated }} (в периоды не входят).</p>{% endif %}</div></section>
+<section class="card"><div class="card-head"><h3>Время на этапах</h3><span class="sub">пребывания, закончившиеся в периоде; «зависли» — сейчас дольше срока этапа</span></div>
+<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Этап</th><th>Пребываний</th><th>В среднем, ч</th><th>Медиана, ч</th><th>Зависли сейчас</th></tr></thead><tbody>
+{% set stuck = {} %}{% for s in times.stuck %}{% set _ = stuck.update({s.name: s}) %}{% endfor %}
+{% for s in times.stays %}<tr><td>{{ s.name }}</td><td>{{ s.count }}</td><td>{{ s.mean_hours|pct(1) if s.mean_hours is not none else "—" }}</td><td>{{ s.median_hours|pct(1) if s.median_hours is not none else "—" }}</td>
+<td>{% if stuck.get(s.name) and stuck[s.name].count %}<a href="/orders">{{ stuck[s.name].count }}</a> (срок {{ stuck[s.name].limit_hours }} ч){% else %}—{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

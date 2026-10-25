@@ -1,0 +1,275 @@
+"""Panel users: a login and a password hash each, a role and an «on/off» switch. The old shared password (panel.env) stays valid for the owner.
+
+The role (panel_user_role, a table of its own so that the old code keeps working after a revert) decides what a person sees and changes:
+every section of the panel at a level «нет / смотреть / менять» plus the dangerous rights apart. A user without a row is an owner
+(the users made before the roles). The table of rights is here; which page belongs to which section is in panel/common.py."""
+from __future__ import annotations
+
+import hashlib
+import re
+import secrets
+import sqlite3
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from . import store
+
+RESERVED = frozenset({"owner", "server", "system", "cli"})      # names of the shared password and of server-side actions in the journal
+LOGIN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
+MIN_PASSWORD = 10
+HASH_METHOD = "pbkdf2:sha256:600000"      # portable (no scrypt needed); tests lower the cost
+_dummy = {}
+
+
+def _hash(password: str) -> str:
+    return generate_password_hash(password, method=HASH_METHOD)
+
+
+def warm() -> None:
+    """Compute the dummy hash once at start, so that the first unknown login is not slower than the others."""
+    _dummy_hash()
+
+
+def _dummy_hash() -> str:
+    """Checked for unknown logins too, so that the answer takes as long as for a wrong password."""
+    if HASH_METHOD not in _dummy:
+        _dummy[HASH_METHOD] = _hash("no-such-user-password")
+    return _dummy[HASH_METHOD]
+
+class UserError(ValueError):
+    pass
+
+
+class WrongPassword(UserError):
+    """The current password did not match: the panel counts it as a failed sign-in (whatever the text of the message)."""
+
+
+def normalize(login: str) -> str:
+    return (login or "").strip().lower()
+
+
+def _check_password(password: str) -> None:
+    if not isinstance(password, str) or len(password) < MIN_PASSWORD:
+        raise UserError("Пароль: не короче %d символов." % MIN_PASSWORD)
+
+
+def add_user(conn, login: str, password: str, now: str, role: str = "owner", point_id: Optional[int] = None, display_name: str = "",
+             author: str = "server") -> str:
+    login = normalize(login)
+    _check_role(role, point_id)
+    if not LOGIN.match(login):
+        raise UserError("Логин: 2–32 символа, латинские буквы, цифры, точка, дефис, подчёркивание.")
+    if login in RESERVED:
+        raise UserError("Логин «%s» зарезервирован." % login)
+    _check_password(password)
+    if conn.execute("SELECT 1 FROM panel_user WHERE login = ?", (login,)).fetchone():
+        raise UserError("Пользователь «%s» уже есть." % login)
+    conn.execute("INSERT INTO panel_user VALUES (?,?,?)", (login, _hash(password), now))
+    conn.execute("INSERT OR REPLACE INTO panel_user_role (login, role, active, point_id, display_name, updated, updated_by) VALUES (?,?,1,?,?,?,?)",
+                 (login, role, point_id if role == "point" else None, _name(display_name), now, author))
+    store.write_audit(conn, now, author, "user_added", {"login": login, "role": role})
+    return login
+
+
+def set_password(conn, login: str, password: str, now: str) -> None:
+    login = normalize(login)
+    _check_password(password)
+    if not conn.execute("SELECT 1 FROM panel_user WHERE login = ?", (login,)).fetchone():
+        raise UserError("Пользователя «%s» нет." % login)
+    conn.execute("UPDATE panel_user SET password_hash = ? WHERE login = ?", (_hash(password), login))
+    store.write_audit(conn, now, "server", "user_password", {"login": login})
+    store.bump_session_epoch(conn, login)          # every open session of this user ends
+
+
+def remove_user(conn, login: str, now: str) -> None:
+    login = normalize(login)
+    if conn.execute("DELETE FROM panel_user WHERE login = ?", (login,)).rowcount == 0:
+        raise UserError("Пользователя «%s» нет." % login)
+    conn.execute("DELETE FROM panel_user_role WHERE login = ?", (login,))
+    store.write_audit(conn, now, "server", "user_removed", {"login": login})
+    store.bump_session_epoch(conn, login)
+
+
+def list_users(conn) -> List[dict]:
+    rows = conn.execute("SELECT u.login, u.created, COALESCE(r.role, 'owner'), COALESCE(r.active, 1), r.point_id, COALESCE(r.display_name, '') "
+                        "FROM panel_user u LEFT JOIN panel_user_role r ON r.login = u.login ORDER BY u.login")
+    return [{"login": r[0], "created": r[1], "role": r[2], "active": bool(r[3]), "point_id": r[4], "display_name": r[5]} for r in rows]
+
+
+def exists(conn, login: str) -> bool:
+    return conn.execute("SELECT 1 FROM panel_user WHERE login = ?", (normalize(login),)).fetchone() is not None
+
+
+def verify(conn, login: str, password: str) -> Optional[str]:
+    """The normalized login if the password is right, otherwise None."""
+    login = normalize(login)
+    row = conn.execute("SELECT password_hash FROM panel_user WHERE login = ?", (login,)).fetchone()
+    stored = row[0] if row else _dummy_hash()
+    ok = check_password_hash(stored, password or "")
+    return login if row and ok and is_active(conn, login) else None
+
+
+# ---- roles and rights -------------------------------------------------------------------------------------------------------------
+
+NONE, VIEW, EDIT = 0, 1, 2
+ROLES = {"owner": "Владелец", "partner": "Партнёр", "chats": "Менеджер чатов", "point": "Менеджер точки", "viewer": "Наблюдатель"}
+SECTIONS = {"home": "Главная", "orders": "Заказы", "chats": "Чаты", "calls": "Звонки", "clients": "CRM", "alerts": "Уведомления", "catalog": "Товар и фид",
+            "analytics": "Аналитика (деньги)", "setup": "Настройка", "users": "Пользователи", "self": "Свой пароль",
+            "mypoint": "Моя точка"}
+RIGHTS = {"money": "видеть закупку и прибыль", "delete": "удалять", "bulk": "массово закрывать", "publish": "публиковать и обновлять фид",
+          "send": "отправлять клиенту", "connections": "менять подключения и ключи", "supplier": "оформлять заказ у поставщика",
+          "listen": "слушать записи звонков"}
+# The partner looks at everything and changes the sales; never a key, never the connections nor the users (the owner 2026-10-21).
+# «supplier»: «Оформить в WebMIM» — the owner and the partner only (the owner 2026-10-19).
+# The manager of a point sees the communications, the orders and the alerts of the own point only, and works with the chats of the point's
+# Avito account: answers the clients, makes and links the orders of the point (the owner 2026-10-21; panel/common.py narrows the pages,
+# the cards, the chats and the alerts).
+# «Звонки»: the recordings are for the operator, the admins and the owners; the manager of a point hears the calls of the point's account
+# only; the observer sees the list and never the recordings (the owner 2026-10-21, the lead 2026-10-23).
+MATRIX: Dict[str, dict] = {
+    "owner": {"sections": {s: EDIT for s in SECTIONS}, "rights": set(RIGHTS)},
+    "partner": {"sections": dict(home=VIEW, orders=EDIT, chats=EDIT, calls=EDIT, clients=EDIT, alerts=EDIT, catalog=VIEW, analytics=VIEW, setup=VIEW, users=VIEW,
+                                 self=EDIT, mypoint=EDIT),
+                "rights": {"money", "delete", "bulk", "send", "supplier", "listen"}},
+    "chats": {"sections": dict(home=VIEW, orders=EDIT, chats=EDIT, calls=EDIT, clients=EDIT, alerts=EDIT, catalog=VIEW, self=EDIT),
+              "rights": {"send", "listen"}},
+    "point": {"sections": dict(orders=EDIT, chats=EDIT, calls=EDIT, alerts=EDIT, self=EDIT, mypoint=EDIT), "rights": {"send", "listen"}},
+    "viewer": {"sections": dict(home=VIEW, orders=VIEW, chats=VIEW, calls=VIEW, clients=VIEW, alerts=EDIT, catalog=VIEW, self=EDIT), "rights": set()},
+}
+INVITE_HOURS = 48
+NAME_MAX = 60
+
+
+def level(role: str, section: str) -> int:
+    return MATRIX.get(role, {"sections": {}})["sections"].get(section, NONE)
+
+
+def has_right(role: str, right: str) -> bool:
+    return right in MATRIX.get(role, {"rights": set()})["rights"]
+
+
+def _check_role(role: str, point_id) -> None:
+    if role not in ROLES:
+        raise UserError("Нет такой роли.")
+    if role == "point" and not point_id:
+        raise UserError("Менеджеру точки нужна точка.")
+
+
+def _name(text) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()[:NAME_MAX]
+
+
+def get_role(conn, login: str) -> dict:
+    """{"role", "active", "point_id", "display_name"} of a panel user; a user made before the roles is an active owner."""
+    row = conn.execute("SELECT role, active, point_id, display_name FROM panel_user_role WHERE login = ?", (normalize(login),)).fetchone()
+    if row is None:
+        return {"role": "owner", "active": True, "point_id": None, "display_name": ""}
+    return {"role": row[0], "active": bool(row[1]), "point_id": row[2], "display_name": row[3]}
+
+
+def is_active(conn, login: str) -> bool:
+    return get_role(conn, login)["active"]
+
+
+def set_role(conn, login: str, role: str, point_id, display_name: str, now: str, author: str) -> None:
+    login = normalize(login)
+    if not exists(conn, login):
+        raise UserError("Пользователя «%s» нет." % login)
+    _check_role(role, point_id)
+    old = get_role(conn, login)
+    if login == normalize(author) and role != old["role"]:
+        raise UserError("Свою роль поменять нельзя: попросите другого владельца или войдите общим паролем.")
+    conn.execute("INSERT INTO panel_user_role (login, role, active, point_id, display_name, updated, updated_by) VALUES (?,?,?,?,?,?,?) "
+                 "ON CONFLICT(login) DO UPDATE SET role = excluded.role, point_id = excluded.point_id, display_name = excluded.display_name, "
+                 "updated = excluded.updated, updated_by = excluded.updated_by",
+                 (login, role, int(old["active"]), point_id if role == "point" else None, _name(display_name), now, author))
+    store.write_audit(conn, now, author, "user_role", {"login": login, "from": old["role"], "to": role,
+                                                       "point_id": point_id if role == "point" else None})
+
+
+def set_active(conn, login: str, active: bool, now: str, author: str) -> None:
+    """Switch a user off (the history stays, the sessions end at once) or back on."""
+    login = normalize(login)
+    if not exists(conn, login):
+        raise UserError("Пользователя «%s» нет." % login)
+    if login == normalize(author) and not active:
+        raise UserError("Себя выключить нельзя.")
+    old = get_role(conn, login)
+    conn.execute("INSERT INTO panel_user_role (login, role, active, point_id, display_name, updated, updated_by) VALUES (?,?,?,?,?,?,?) "
+                 "ON CONFLICT(login) DO UPDATE SET active = excluded.active, updated = excluded.updated, updated_by = excluded.updated_by",
+                 (login, old["role"], int(bool(active)), old["point_id"], old["display_name"], now, author))
+    store.write_audit(conn, now, author, "user_on" if active else "user_off", {"login": login})
+    if not active:
+        store.bump_session_epoch(conn, login)
+
+
+def change_own_password(conn, login: str, old_password: str, new_password: str, now: str) -> None:
+    login = normalize(login)
+    if verify(conn, login, old_password) is None:
+        raise WrongPassword("Текущий пароль не подошёл.")
+    _check_password(new_password)
+    conn.execute("UPDATE panel_user SET password_hash = ? WHERE login = ?", (_hash(new_password), login))
+    store.write_audit(conn, now, login, "user_password", {"login": login, "self": True})
+    store.bump_session_epoch(conn, login)          # the other open sessions end; the caller signs this one in again
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_invite(conn, role: str, point_id, display_name: str, now: str, author: str) -> str:
+    """A one-time link for 48 hours; only its hash is kept. Returns the token (shown once, the panel sends nothing)."""
+    _check_role(role, point_id)
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.fromisoformat(now) + timedelta(hours=INVITE_HOURS)).isoformat(timespec="seconds")
+    conn.execute("INSERT INTO panel_invite (token_hash, role, point_id, display_name, created, expires, created_by) VALUES (?,?,?,?,?,?,?)",
+                 (_token_hash(token), role, point_id if role == "point" else None, _name(display_name), now, expires, author))
+    store.write_audit(conn, now, author, "invite_created", {"role": role, "expires": expires})
+    return token
+
+
+def find_invite(conn, token: str, now: str) -> Optional[dict]:
+    """The invitation if the link is still good (not used, not revoked, not expired)."""
+    row = conn.execute("SELECT role, point_id, display_name, expires FROM panel_invite WHERE token_hash = ? AND used_at IS NULL "
+                       "AND revoked_at IS NULL AND expires > ?", (_token_hash(str(token or "")), now)).fetchone()
+    return None if row is None else {"role": row[0], "point_id": row[1], "display_name": row[2], "expires": row[3]}
+
+
+def accept_invite(conn, token: str, login: str, password: str, now: str) -> str:
+    """The person sets their own login and password. The link works once: the claim is atomic."""
+    invite = find_invite(conn, token, now)
+    if invite is None:
+        raise UserError("Ссылка недействительна: она уже использована, отозвана или истекла.")
+    login = normalize(login)
+    if not LOGIN.match(login) or login in RESERVED or exists(conn, login):
+        raise UserError("Логин занят или не подходит: 2–32 символа, латинские буквы, цифры, точка, дефис, подчёркивание.")
+    _check_password(password)
+    claim = conn.execute("UPDATE panel_invite SET used_at = ?, used_by = ? WHERE token_hash = ? AND used_at IS NULL AND revoked_at IS NULL "
+                         "AND expires > ?", (now, login, _token_hash(token), now))
+    if claim.rowcount != 1:
+        conn.rollback()
+        raise UserError("Ссылка недействительна: она уже использована, отозвана или истекла.")
+    try:
+        return add_user(conn, login, password, now, role=invite["role"], point_id=invite["point_id"], display_name=invite["display_name"],
+                        author=login)
+    except sqlite3.IntegrityError:                        # the same login taken by another invitation a moment ago
+        conn.rollback()
+        raise UserError("Логин занят: выберите другой.")
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def list_invites(conn, now: str) -> List[dict]:
+    rows = conn.execute("SELECT rowid, role, point_id, display_name, created, expires, created_by FROM panel_invite "
+                        "WHERE used_at IS NULL AND revoked_at IS NULL AND expires > ? ORDER BY created DESC", (now,))
+    return [dict(zip(("id", "role", "point_id", "display_name", "created", "expires", "created_by"), r)) for r in rows]
+
+
+def revoke_invite(conn, invite_id: int, now: str, author: str) -> None:
+    if conn.execute("UPDATE panel_invite SET revoked_at = ? WHERE rowid = ? AND used_at IS NULL AND revoked_at IS NULL",
+                    (now, int(invite_id))).rowcount != 1:
+        raise UserError("Приглашение уже использовано или отозвано.")
+    store.write_audit(conn, now, author, "invite_revoked", {"id": int(invite_id)})

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · WebMIM{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card">
+{% if can_post("connections_webmim") %}<form method="post" action="/connections/webmim">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="supplier" value="{{ supplier.id }}">
+<div class="card-head"><h3>{{ supplier.name }}</h3>{% if webmim_check %}<span class="ml-auto"><span class="badge badge--{{ 'ok' if webmim_check.status.startswith('ok') else 'err' }} badge--dot">{{ "подключено" if webmim_check.status.startswith('ok') else "ошибка проверки" }}</span></span>{% endif %}</div>
+<div class="card-body stack">
+<p class="muted small">Откуда берутся товары и остатки поставщика. Для работы нужен ключ выгрузки из личного кабинета WebMIM.</p>
+<div class="grid-2">
+<label class="field"><span class="label">Адрес сервера</span><input class="input" name="base_url" value="{{ webmim.base_url }}"{% if supplier and supplier.id != 1 %} placeholder="пусто: поставщик не используется"{% endif %}></label>
+<div class="field"><span class="label">Режим входа</span><div class="seg"><label><input type="radio" name="mode" value="login"{% if webmim.mode == "login" %} checked{% endif %}>Логин и пароль (тест)</label><label><input type="radio" name="mode" value="apikey"{% if webmim.mode == "apikey" %} checked{% endif %}>Готовый API-ключ (бой)</label></div></div>
+</div>
+<div class="grid-2">
+{% if supplier.id != 1 %}<label class="field"><span class="label">Территория (номер из выгрузки поставщика)</span><input class="input mono" name="territory_rn" value="{{ webmim.territory_rn or '' }}" inputmode="numeric"></label>
+{% else %}<div class="field"><span class="label">Территория</span><p class="hint" style="font-size:var(--fs-sm)">Территория первого поставщика задаётся в общих настройках.</p></div>{% endif %}
+<label class="field"><span class="label">Логин</span><input class="input" name="login" value="{{ webmim.login }}" autocomplete="off"></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Пароль {% if webmim_secrets.password %}<span class="badge badge--ok">задан ({{ webmim_secrets.password.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="password" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается.</span></label>
+<label class="field"><span class="label">API-ключ {% if webmim_secrets.api_key %}<span class="badge badge--ok">задан {{ webmim_secrets.api_key.mask }} ({{ webmim_secrets.api_key.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="api_key" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается.</span></label>
+</div>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button>
+{% if can_post("connections_webmim_check") %}<button class="btn btn--secondary" formaction="/connections/webmim/check">{{ icon("refresh") }}Проверить подключение</button>{% endif %}
+{% if webmim_check %}<span class="ml-auto"><span class="row small {{ 'text-ok' if webmim_check.status.startswith('ok') else 'text-err' }}" style="gap:6px">{{ icon("check-circle" if webmim_check.status.startswith('ok') else "x-circle", "i-sm") }}{{ webmim_check.status }} · {{ webmim_check.at|dt_utc }}</span></span>{% endif %}</div>
+{% if can_post("connections_webmim") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card" id="orders">
+<div class="card-head"><h3>Заказы в WebMIM</h3>{% if orders_check %}<span class="ml-auto"><span class="badge badge--{{ 'ok' if orders_check.status.startswith('ok') else 'err' }} badge--dot">{{ "доступ есть" if orders_check.status.startswith('ok') else "нет доступа" }}</span></span>{% endif %}</div>
+{% if can_post("connections_webmim_orders") %}<form method="post" action="/connections/webmim/orders">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="supplier" value="{{ supplier.id }}">
+<div class="card-body stack">
+<p class="muted small">Чтобы оформлять заказы из панели, нужна служебная учётная запись WebMIM для программ (в их документации она называется «API-бот», к Telegram это не относится): её логин и пароль дают временный токен для заказов. Логин обычно начинается с BOT…. Это отдельно от ключа выгрузки: выгрузка и цикл не меняются. Проверка только читает (токен, версия API, справочники), заказ не создаётся. Начинайте с тестового сервера.</p>
+<div class="grid-2">
+<div class="field"><span class="label">Сервер</span><div class="seg">{% for key, name in orders_servers %}<label><input type="radio" name="server" value="{{ key }}"{% if orders_cfg.server == key %} checked{% endif %}>{{ name }}</label>{% endfor %}</div><span class="hint">тестовый: учётная запись для теста от WebMIM; боевой: ваш API-доступ</span></div>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Логин служебной учётной записи (API)</span><input class="input" name="login" value="{{ orders_cfg.login }}" autocomplete="off" maxlength="100"></label>
+<label class="field"><span class="label">Пароль служебной учётной записи (API) {% if orders_secrets.password %}<span class="badge badge--ok">задан ({{ orders_secrets.password.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="password" autocomplete="new-password" placeholder="{{ 'оставьте пустым, чтобы не менять' if orders_secrets.password else '' }}"></label>
+</div>
+{% if orders_check %}<p class="small {{ 'text-ok' if orders_check.status.startswith('ok') else 'text-err' }}">{{ orders_check.at|dt_utc }} · {{ orders_check.status }}</p>{% endif %}
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button>
+{% if can_post("connections_webmim_orders_check") %}<button class="btn btn--secondary" formaction="/connections/webmim/orders-check"{% if not orders_cfg.login or not orders_secrets.password %} disabled title="Сначала сохраните логин и пароль"{% endif %}>{{ icon("refresh") }}Проверить доступ к заказам</button>{% endif %}</div>
+{% if can_post("connections_webmim_orders") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card" id="add">
+<div class="card-head"><h3>Добавить поставщика</h3><span class="sub">Ещё одно подключение WebMIM со своим каталогом: бренды, проценты и сопоставления отдельные, объявления публикуются во все аккаунты Авито</span></div>
+{% if can_post("connections_add_supplier") %}<form method="post" action="/connections/suppliers" class="card-foot">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input class="input" style="max-width:320px" name="name" placeholder="Название поставщика" maxlength="60"><button class="btn btn--primary">{{ icon("plus") }}Добавить поставщика</button>{% if can_post("connections_add_supplier") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+{% endblock %}

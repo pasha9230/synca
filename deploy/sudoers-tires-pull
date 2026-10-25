@@ -1,0 +1,4 @@
+# /etc/sudoers.d/tires-pull (ставить: visudo -cf этот_файл && install -m 0440 этот_файл /etc/sudoers.d/tires-pull)
+# Опрос GitHub (deploy/tires-pull.sh) может только выложить один коммит: ровно два аргумента, «deploy» и 40 знаков hex.
+# Регулярное выражение в аргументах понимает sudo 1.9.10+ (на сервере 1.9.15); лишний аргумент, откат, timers sudo не пропустит.
+tires-pull ALL=(root) NOPASSWD: /usr/local/sbin/tires-deploy ^deploy [0-9a-f]{40}$

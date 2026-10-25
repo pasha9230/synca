@@ -1,0 +1,17 @@
+[Unit]
+Description=Tires Sync database backup
+OnFailure=tires-alert@%n.service
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+UMask=0077
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync backup --db /var/lib/tires-sync/state.db --out-dir /var/backups/tires-sync --keep 14
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# /var/lib/tires-sync: в режиме WAL читатель создаёт state.db-shm/-wal, если базу сейчас никто не держит открытой
+ReadWritePaths=/var/backups/tires-sync /var/lib/tires-sync

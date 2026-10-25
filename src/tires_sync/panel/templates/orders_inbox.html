@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Входящие от менеджеров · Заказы · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Входящие</span></div><h1>Входящие от менеджеров</h1>
+<p class="sub">Вопросы менеджеров точек боту, их команды, которые бот не понял однозначно, и сообщения клиентам, которые не ушли. Ответ уходит точке в ВК. Спорную команду подтвердите номером заказа: бот выполнит её так же, как однозначную (при «приехал» клиенту уйдёт «можно забирать»).</p></div></header>
+<section class="card">
+{% for m in messages %}<div class="card-body stack" style="border-bottom:1px solid var(--gray-200)">
+<div><b>{{ m.point or "Панель" }}</b> · <time>{{ m.at|dt }}</time> {% if m.status == "new" %}<span class="badge badge--warn">{{ "Ждёт подтверждения" if m.dispute else "Ждёт ответа" }}</span>{% else %}<span class="badge badge--neutral">Отвечено</span>{% endif %}</div>
+<div>{{ m.text }}</div>
+{% if m.client_text and m.status == "new" %}<label class="field"><span class="label">Текст клиенту (отправьте сами)</span><textarea class="textarea" id="inbox-copy-{{ m.id }}" rows="4" readonly>{{ m.client_text }}</textarea></label><div><button type="button" class="btn btn--secondary btn--xs" data-copy="inbox-copy-{{ m.id }}">Скопировать</button></div>{% endif %}
+{% if m.dispute %}<div class="small muted">Команда «{{ m.word }}» не выполнена: {{ m.dispute }}. Клиенту ничего не отправлено.{% if m.order_id %} Найденный заказ: <a href="/orders/{{ m.order_id }}">открыть №{{ m.order_id }}</a> (проверьте клиента, этап и точку).{% endif %}</div>
+{% if m.status == "new" %}{% if can_post("orders_inbox_confirm") %}<form method="post" action="/orders/inbox/{{ m.id }}/confirm" class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field" style="width:200px"><span class="label">Номер заказа (WebMIM или панели)</span><input class="input mono" name="order_no" value="{{ m.order_id or '' }}" maxlength="12" inputmode="numeric" required></label>
+<button class="btn btn--primary btn--sm">Подтвердить «{{ m.word }}»</button></form>{% endif %}{% endif %}{% endif %}
+{% if can_post("orders_inbox_answer") %}<form method="post" action="/orders/inbox/{{ m.id }}/answer" class="row" style="gap:var(--s-2)"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input class="input" name="text" value="{{ m.answer }}" maxlength="2000" placeholder="{{ 'Ответ менеджеру (уйдёт в ВК)' if m.sender.isdigit() else 'Заметка' }}" aria-label="Ответ" style="flex:1"><button class="btn btn--secondary btn--sm">{{ "Ответить в ВК" if m.sender.isdigit() else "Записать" }}</button></form>{% endif %}</div>
+{% else %}<div class="card-body"><p class="muted">Вопросов пока нет.</p></div>{% endfor %}
+</section>
+<section class="card"><div class="card-head"><h3>Автоответы</h3></div><div class="card-body stack">
+<p class="small muted">Если в вопросе есть одно из слов, бот ответит сам. Новый автоответ выключен, пока вы его не включите.</p>
+{% for a in answers %}<div class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:center"><span class="{{ '' if a.enabled else 'muted' }}"><b>{{ a.keywords }}</b> → {{ a.answer }}</span>
+{% if can_post("orders_bot_answer_toggle") %}<form method="post" action="/orders/inbox/answers/{{ a.id }}/toggle" class="ml-auto"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">{{ "Выключить" if a.enabled else "Включить" }}</button></form>{% endif %}
+{% if can_post("orders_bot_answer_delete") %}<form method="post" action="/orders/inbox/answers/{{ a.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--danger-outline btn--xs">Удалить</button></form>{% endif %}</div>{% endfor %}
+{% if can_post("orders_bot_answer_add") %}<form method="post" action="/orders/inbox/answers/add" class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field" style="width:240px"><span class="label">Слова через запятую</span><input class="input" name="keywords" maxlength="200" placeholder="график, часы работы"></label>
+<label class="field" style="flex:1;min-width:240px"><span class="label">Ответ</span><input class="input" name="answer" maxlength="2000"></label>
+<button class="btn btn--secondary btn--sm">Добавить автоответ</button></form>{% endif %}</div></section>
+{% endblock %}

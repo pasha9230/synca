@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Заказы · Tires Sync{% endblock %}
+{% block page_class %} page--wide{% endblock %}
+{% block content %}
+{# 1280 (review 2026-10-21, 2.12–2.14): the view, the inbox only when something came and the main button stay; the rest is in «Ещё» #}
+<header class="page-head"><div><h1>Заказы</h1><p class="sub">Заказы клиентов по этапам воронки: от переговоров до выдачи на точке.</p></div>
+<div class="actions"><div class="seg" role="group" aria-label="Вид"><a href="/orders?v=board{% if query %}&q={{ query|urlencode }}{% endif %}"{% if view == "board" %} class="is-active" aria-current="true"{% endif %}>Доска</a><a href="/orders?v=list{% if query %}&q={{ query|urlencode }}{% endif %}"{% if view == "list" %} class="is-active" aria-current="true"{% endif %}>Список</a></div>
+{% if inbox_new %}<a class="btn btn--secondary" href="/orders/inbox" title="Новые входящие заказы">Входящие <span class="sb-count sb-count--red">{{ inbox_new }}</span></a>{% endif %}
+<details class="menu orders-more"><summary class="btn btn--secondary">Ещё ⋯</summary><div class="menu-list">
+{% if has_right("money") %}<a class="menu-item" href="/orders/report">Отчёт</a>{% endif %}
+{% if current_user().role != "point" %}<a class="menu-item" href="/orders/webmim">Сверка с WebMIM</a>{% endif %}
+<a class="menu-item" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query}|urlencode }}" title="Файл Excel с заказами по текущим фильтрам (поиск, точка, тег)">Выгрузить в Excel</a>
+<a class="menu-item" href="/orders/inbox">Входящие{% if inbox_new %} ({{ inbox_new }}){% endif %}</a>
+{% if can_post("orders_bulk_run") %}<a class="menu-item" href="/orders/bulk">Закрыть разом</a>{% endif %}
+{% if can("setup") %}<a class="menu-item" href="/orders/templates">Шаблоны</a>
+<a class="menu-item" href="/orders/settings">Настроить воронку</a>{% endif %}
+<hr><a class="menu-item" href="/deleted">Удалённые</a>
+</div></details>
+{% if can_post("order_new") %}<a class="btn btn--primary" href="/orders/new">{{ icon("plus") }}Новый заказ</a>{% endif %}</div></header>
+<div class="tiles tiles--row">
+<div class="tile tile--brand"><span class="tile-label">В работе</span><span class="tile-value">{{ data.summary.open }}</span><span class="tile-sub">заказов на обычных этапах</span></div>
+<div class="tile{% if data.summary.overdue %} tile--warn{% endif %}"><span class="tile-label">Просрочено</span><span class="tile-value">{{ data.summary.overdue }}</span><span class="tile-sub">дольше срока этапа</span></div>
+<div class="tile{% if waiting %} tile--warn{% endif %}"><span class="tile-label">Ждут действия</span><span class="tile-value">{{ waiting|length }}</span><span class="tile-sub">заказов с задачами правил</span></div>
+<div class="tile"><span class="tile-label">Новые сегодня</span><span class="tile-value">{{ data.summary.new_today }}</span><span class="tile-sub">созданы за день</span></div>
+<div class="tile"><span class="tile-label">Сумма в работе</span><span class="tile-value">{{ data.summary.sum_open|money }}</span><span class="tile-sub">по ценам продажи</span></div>
+</div>
+<form method="get" action="/orders" class="filters filters--flat">
+<input type="hidden" name="v" value="{{ view }}">
+<div class="field" style="width:260px"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, номер"></div></div>
+<div class="field" style="width:200px"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for p in points %}<option value="{{ p.id }}"{% if point == p.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+<div class="field" style="width:160px"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}"></div>
+<button class="btn btn--secondary" style="height:40px">Показать</button><a class="btn btn--link-gray" style="height:40px" href="/orders?v={{ view }}">Сбросить</a>
+</form>
+<div class="flash flash--err" id="board-msg" hidden>{{ icon("alert") }}<div class="flash-text"></div></div>
+{% if total_cards == 0 and not query and not tag and not point %}
+<div class="flash flash--info" style="margin-bottom:var(--s-4)">{{ icon("info") }}<div class="flash-text"><b>Заказов пока нет.</b> Создайте первый, когда клиент написал вам на Авито: поле «Быстрое добавление» в первой колонке или кнопка «Новый заказ».</div></div>
+{% endif %}
+{% set dot_label = {"red": "Нужно действие", "yellow": "Внимание", "green": "Движется"} %}
+{% macro odot(id) %}{% if dots.get(id) %}<span class="odot odot--{{ dots[id] }}" title="{{ dot_label[dots[id]] }}"></span>{% endif %}{% endmacro %}
+{% if view == "list" %}
+<section class="card"><div class="table-wrap"><table class="table table--plain">
+<thead><tr><th>№</th><th>Клиент</th><th>Позиции</th><th>Точка</th><th>Дата</th><th class="num">Сумма</th><th>Этап</th></tr></thead>
+<tbody>{% for r in rows %}<tr><td>{{ odot(r.card.id) }}<a href="/orders/{{ r.card.id }}">№{{ r.card.id }}</a></td><td>{{ r.card.client }}{% if labels.get(r.card.id) %} <span class="badge badge--warn" data-origin title="{{ labels[r.card.id].hint }}">{{ labels[r.card.id].text }}</span>{% endif %}</td><td>{{ r.card.items_text or "—" }}</td><td>{{ r.card.point or "—" }}</td><td>{{ r.card.delivery_date|day }}</td><td class="num">{{ r.card.sum|money }}</td>
+<td><span class="badge badge--neutral" style="border-color:{{ r.stage.color }}">{{ r.stage.name }}</span>{% if r.card.overdue %} <span class="daymark is-over">{{ r.card.days }} дн.</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">Ничего не найдено. Измените фильтры.</td></tr>{% endfor %}</tbody></table></div></section>
+{% else %}
+<div class="board" id="board" data-csrf="{{ csrf_token() }}">
+{# the quick add sits with «Новый заказ», where a new order is made (orders._first_stage), not in the first column («Передано с точки», 2026-10-23) #}
+{% set quick_stage = ((data.columns|selectattr("stage.code", "equalto", "new")|first) or (data.columns|first) or {"stage": {}}).stage.id %}
+{% for col in data.columns %}{% set folded = col.stage.kind != "open" and not (query or tag or point) %}<section class="col{% if folded %} is-folded{% endif %}" data-stage="{{ col.stage.id }}"{% if folded %} data-fold{% endif %}>
+{% if folded %}{# a closed stage (done, cancel, return) is a narrow column unless a filter is on (then what was found shows) with its count; a click unfolds it, a card can be dropped on it folded #}
+<button type="button" class="col-head" data-fold-toggle aria-expanded="false" aria-controls="col-body-{{ col.stage.id }}" title="{% if col.stage.hint %}{{ col.stage.hint }} · {% endif %}Нажмите, чтобы показать или скрыть заказы этапа"><span class="dot" style="background:{{ col.stage.color }}"></span><span class="col-name">{{ col.stage.name }}</span> <span class="muted">{{ col.count }}</span><span class="sum">{{ col.sum|money }}</span></button>
+{% else %}<div class="col-head" title="{{ col.stage.hint }}"><span class="dot" style="background:{{ col.stage.color }}"></span>{{ col.stage.name }} <span class="muted">{{ col.count }}</span><span class="sum">{{ col.sum|money }}</span></div>{% endif %}
+<div class="col-body" id="col-body-{{ col.stage.id }}">
+{% if col.stage.id == quick_stage and can_post("order_new") %}<form method="post" action="/orders/new" class="quick"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input class="input input--sm" name="client_name" placeholder="Имя или телефон клиента" maxlength="120" aria-label="Быстрое добавление"><button class="btn btn--secondary btn--sm">Добавить</button></form>{% endif %}
+{% for c in col.cards %}<a class="ocard{% if waiting.get(c.id) %} waiting{% endif %}" draggable="{{ 'true' if can_post('order_move') else 'false' }}" data-card="{{ c.id }}" href="/orders/{{ c.id }}">
+<div class="strong">{{ odot(c.id) }}№{{ c.id }} {{ c.client }}</div>{% if labels.get(c.id) %}<div><span class="badge badge--warn" data-origin title="{{ labels[c.id].hint }}">{{ labels[c.id].text }}</span></div>{% endif %}{% if c.items_text %}<div class="small">{{ c.items_text }}</div>{% endif %}
+<div class="small muted">{% if c.point %}{{ c.point }}{% endif %}{% if c.delivery_date %} · {{ c.delivery_date|day }}{% endif %}</div>{% if waiting.get(c.id) %}<div><span class="badge badge--warn" title="Есть задачи правил: откройте заказ">Ждёт действия: {{ waiting[c.id] }}</span></div>{% endif %}
+<div class="row" style="gap:var(--s-2);margin-top:var(--s-2)"><b>{{ c.sum|money }}</b><span class="daymark{% if c.overdue %} is-over{% endif %} ml-auto">{{ c.days }} дн.</span></div>
+{% if c.tags %}<div style="margin-top:var(--s-1)">{% for t in c.tags %}<span class="badge badge--neutral">{{ t }}</span> {% endfor %}</div>{% endif %}</a>{% endfor %}
+</div></section>{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

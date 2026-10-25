@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, empty %}
+{% block title %}Закрыть заказы разом · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Закрыть заказы разом</h1><p class="sub">Отмеченные карточки переводятся на выбранный этап как обычно, с записью в истории. Правила нового этапа не срабатывают: задачи и сообщения клиентам не создаются. Перед переводом панель снимает копию базы. Вернуть карточку можно обычным переводом обратно.</p></div>
+<div class="actions"><a class="btn btn--secondary" href="/orders">К заказам</a></div></header>
+<section class="card"><div class="card-body">
+<form method="get" action="/orders/bulk"><label>Показать: <select name="from"><option value="all"{% if from_stage is none %} selected{% endif %}>все незакрытые этапы</option>{% for s in stages %}<option value="{{ s.id }}"{% if s.id == from_stage %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label> <button class="btn btn--secondary btn--xs">Показать</button></form>
+{% if from_stage is none %}<p><b>Внимание:</b> показаны заказы со всех незакрытых этапов, в том числе те, что уже в работе.</p>{% endif %}
+</div></section>
+{% if runs %}<section class="card"><div class="card-body"><h2>Уже сделанные переводы</h2><p class="muted">Карточки любого из них можно вернуть на этапы, где они были до перевода.</p>
+<ul>{% for r in runs %}<li>{{ r.at|dt }}, {{ r.author }}: в «{{ r.stage }}» {{ r.moved }} шт. {% if can_post("orders_bulk_undo_run") %}<a href="/orders/bulk/undo/{{ r.id }}">Вернуть…</a>{% endif %}</li>{% endfor %}</ul></div></section>{% endif %}
+{% if can_post("orders_bulk_check") %}<form method="post" action="/orders/bulk/check">
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<section class="card"><div class="card-body">
+<p>Куда перевести: <select name="to">{% for s in targets %}<option value="{{ s.id }}"{% if s.id == to %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></p>
+<p><label>Причина отмены (для «Отмены», у кого её ещё нет): <input name="reason" value="{{ reason }}" maxlength="200" size="40"></label></p>
+<p>Карточек в списке: <b>{{ cards|length }}</b>{% if more %} (ещё {{ more }} не поместились: закройте эти и откройте страницу снова){% endif %}. Все отмечены, снимите галочки с тех, что оставить.</p>
+<button class="btn btn--primary">Проверить</button>
+</div></section>
+{% if cards %}<section class="card"><div class="table-wrap"><table class="table">
+<thead><tr><th></th><th>Заказ</th><th>Этап</th><th>WebMIM</th><th>Создан</th></tr></thead><tbody>
+{% for c in cards %}<tr><td><input type="checkbox" name="id" value="{{ c.id }}" checked aria-label="Заказ №{{ c.id }}"></td><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a> {{ c.client_name or (c.client_phone|phone) }}</td><td>{{ c.stage.name }}</td><td>{{ c.webmim_number }}</td><td>{{ c.created_at|dt }}</td></tr>{% endfor %}
+</tbody></table></div></section>{% else %}<section class="card">{{ empty("clipboard", "Подходящих заказов нет", "На выбранном этапе открытых заказов нет: выберите другой этап выше.") }}</section>{% endif %}
+</form>{% endif %}
+{% endblock %}

@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% import "_entity.html" as entity_ui %}
+{% block title %}Подключения · {{ a.label }}{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card card-body entity-sec">{{ entity_ui.head(entity, level=2) }}{{ entity_ui.fields(entity.fields) }}
+<p class="hint" style="margin-top:var(--s-3)">Номер кабинета (ID), имя и телефон подтягиваются с Авито при «Проверить подключение».</p></section>
+{% if not a.form.has_own %}<div class="flash flash--err">{{ icon("alert") }}<div class="grow"><div class="flash-title">Адреса не добавлены</div><div class="flash-text">Пока адресов нет, фид этого аккаунта берёт общие настройки точек, и Авито такие объявления не примет. Добавьте адреса ниже.</div></div></div>{% endif %}
+<section class="card" id="exclude-types">
+{% if can_post("account_exclude_types") %}<form method="post" action="/connections/accounts/{{ a.id }}/exclude-types">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Какие шины не публиковать</h3><span class="sub">Отмеченные типы не попадают в фид этого аккаунта (объявления Авито снимет при ближайшей публикации)</span></div>
+<div class="card-body stack">{% for t in tire_types %}<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="exclude_types" value="{{ t }}"{% if t in a.exclude_types %} checked{% endif %}> {{ t }}</label>{% endfor %}</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>{% if can_post("account_exclude_types") %}</form>{% else %}</fieldset>{% endif %}</section>
+<section class="card" id="contact-name">
+{% if can_post("account_contact_name") %}<form method="post" action="/connections/accounts/{{ a.id }}/contact-name">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Имя контактного лица</h3><span class="sub">Попадает в каждое объявление этого аккаунта (ManagerName). Пусто: имя не передаётся, Авито берёт контакт из кабинета. Если в кабинете номер оформлен как сотрудник, впишите имя точно как там</span></div>
+<div class="card-body"><input class="input" name="contact_name" maxlength="40" value="{{ a.contact_name }}" placeholder="Например: Паша" autocomplete="off"></div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>{% if can_post("account_contact_name") %}</form>{% else %}</fieldset>{% endif %}</section>
+<section class="card" id="phones">
+<div class="card-head"><h3>Сверка телефонов</h3><span class="sub">телефон кабинета берётся у Авито при «Проверить подключение» и подставляется в объявления этого аккаунта; общий номер из настроек не используется</span></div>
+<table class="table table--plain">
+<thead><tr><th>Аккаунт</th><th>Телефон кабинета Авито</th><th>Уходит в объявлениях</th><th>Статус</th></tr></thead>
+<tbody>{% for p in phones %}<tr>
+<td class="t-name">{{ p.label }}{% if p.label != p.name %} <span class="muted small">· {{ p.name }}</span>{% endif %}</td>
+<td>{% if p.phone %}<b>{{ p.phone|phone }}</b>{% else %}<span class="muted">не определён</span>{% endif %}</td>
+<td>{% if p.goes %}{{ p.goes|join(", ") }}{% else %}<span class="muted">фид не опубликован</span>{% endif %}</td>
+<td><span class="badge badge--{{ 'ok' if p.level == 'ok' else ('warn' if p.level == 'bad' else 'neutral') }}">{{ p.text }}</span>{% for other in p.same %}<div class="small text-warn">тот же номер у «{{ other }}»</div>{% endfor %}{% if p.shared_places %}<div class="small text-warn">тот же адрес в другом аккаунте: {{ p.shared_places|join("; ") }}. Измените адрес в кабинете Авито</div>{% endif %}</td>
+</tr>{% endfor %}</tbody></table>
+{% if a.identity.phones %}{% if can_post("account_phone") %}<form method="post" action="/connections/accounts/{{ a.id }}/phone" class="card-foot" data-phone-pick>{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="row" style="gap:var(--s-2)">{% if a.identity.phones|length > 1 %}В кабинете несколько номеров.{% else %}В кабинете один номер.{% endif %} Номер для объявлений этого аккаунта:
+<select class="select select--sm" name="phone" style="width:200px">{% for n in a.identity.phones %}<option value="{{ n }}"{% if n == a.identity.phone %} selected{% endif %}>{{ n|phone }}</option>{% endfor %}</select></label>
+<button class="btn btn--secondary btn--sm">Закрепить</button>
+<span class="small muted" data-phone-pinned>{% if a.identity.pinned %}закреплён{% if not a.identity.phone %}, номера нет: нажмите «Проверить подключение»{% endif %}{% else %}не закреплён: уходит основной номер кабинета{% endif %}. При новых ключах проверка оставит закреплённый номер, если он есть в кабинете, иначе поставит основной.</span>
+{% if can_post("account_phone") %}</form>{% else %}</fieldset>{% endif %}{% endif %}
+{% if a.feed_mode == "mirror" %}{% if can_post("account_phone_source") %}<form method="post" action="/connections/accounts/{{ a.id }}/phone-source" class="card-foot">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="keep_file" value="1"{% if a.identity.phone_source == "file" %} checked{% endif %}> Оставлять телефон из загруженного файла (не заменять номером кабинета)</label>
+<button class="btn btn--secondary btn--sm">Сохранить</button>{% if can_post("account_phone_source") %}</form>{% else %}</fieldset>{% endif %}{% endif %}
+</section>
+<section class="card">
+{% if can_post("connections_account_keys") %}<form method="post" action="/connections/accounts/{{ a.id }}/keys">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Ключи</h3><span class="sub">Из личного кабинета Авито → Профиль → Для профессионалов → API</span></div>
+<div class="card-body stack">
+<div class="grid-2">
+<label class="field"><span class="label">Client ID {% if a.secrets.client_id %}<span class="badge badge--ok">задан {{ a.secrets.client_id.mask }}</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input mono" type="password" name="client_id" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"></label>
+<label class="field"><span class="label">Client Secret {% if a.secrets.client_secret %}<span class="badge badge--ok">задан</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="client_secret" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается.</span></label>
+</div>
+{% if has_right("connections") %}<div class="field"><span class="label">Адрес фида для автозагрузки</span><div class="row" style="gap:8px;flex-wrap:nowrap"><input class="input mono" id="feed-url" style="flex:1" readonly value="{{ a.feed_url }}"><button type="button" class="btn btn--secondary btn--sm" data-copy="#feed-url" aria-live="polite">Скопировать</button></div><span class="hint">Вставьте в Авито → Автозагрузка → Ссылка на файл.</span></div>{% endif %}
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить ключи</button>
+{% if can_post("connections_account_check") %}<button class="btn btn--secondary" formaction="/connections/accounts/{{ a.id }}/check">{{ icon("refresh") }}Проверить подключение</button>{% endif %}
+{% if a.check %}<span class="ml-auto"><span class="row small {{ 'text-ok' if a.check.status.startswith('ok') else 'text-err' }}" style="gap:6px">{{ icon("check-circle" if a.check.status.startswith('ok') else "x-circle", "i-sm") }}{{ a.check.status }} · {{ a.check.at|dt_utc }}</span></span>{% else %}<span class="ml-auto"><span class="small muted">Ещё не проверялось</span></span>{% endif %}</div>
+{% if can_post("connections_account_keys") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card">{% if can_post("account_modes") %}<form method="post" action="/connections/accounts/{{ a.id }}/modes">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Для чего используется аккаунт</h3></div>
+<div class="card-body stack"><label class="row" style="gap:var(--s-2)"><input type="checkbox" name="feed_enabled" value="1"{% if a.feed_enabled %} checked{% endif %}> Выгружать фид объявлений</label>
+<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="chats_enabled" value="1"{% if a.chats_enabled %} checked{% endif %}> Читать чаты с клиентами (раздел «Чаты»)</label>
+<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="chats_send" value="1"{% if a.chats_send %} checked{% endif %}> Разрешить отправлять ответы клиентам из раздела «Чаты» (включайте после пробной отправки)</label>
+{% set wh = avito_webhook_state(a.id) %}<p class="small">Вебхук Авито: {% if wh.subscribed %}подписан с {{ wh.subscribed_at|dt }} · последнее событие {{ wh.last_event_at|dt }} · за сутки {{ wh.day }}{% else %}не подписан (новые сообщения читаются раз в минуту){% endif %}</p>
+<p class="small muted">Аккаунт «только сообщения»: снимите первую галочку и поставьте вторую. Для чатов у приложения Авито должно быть право на мессенджер.</p></div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>{% if can_post("account_modes") %}</form>{% else %}</fieldset>{% endif %}</section>
+<section class="card">
+<div class="card-head"><h3>Публикация</h3><span class="ml-auto"><span class="badge badge--{{ 'ok' if a.live else 'neutral' }} badge--dot">{{ "включена" if a.live else "выключена" }}</span></span></div>
+<div class="card-body row"><p class="grow muted">{% if a.live %}Фид обновляется автоматически по таймеру. Выключите публикацию, чтобы остановить обновления.{% else %}Пока публикация выключена, фид этого аккаунта не обновляется автоматически и на Авито ничего не уходит.{% endif %}</p>
+{% if a.live %}{% if can_post("connections_account_live") %}<form method="post" action="/connections/accounts/{{ a.id }}/live" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="disable"><button class="btn btn--danger-outline">Выключить публикацию</button>{% if can_post("connections_account_live") %}</form>{% else %}</fieldset>{% endif %}
+{% else %}<a class="btn btn--primary" href="/connections/accounts/{{ a.id }}/live">Включить публикацию…</a>{% endif %}</div>
+</section>
+<section class="card">
+{% if can_post("connections_account_pricing") %}<form method="post" action="/connections/accounts/{{ a.id }}/pricing">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Цены и остатки аккаунта</h3></div>
+<div class="card-body stack">
+<div class="grid-2">
+<label class="field"><span class="label">Поправка к проценту, п. п.</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="delta" value="{{ a.pricing.delta }}" placeholder="0" inputmode="decimal"><span class="ig-addon">от −10 до +10</span></div></label>
+<label class="field"><span class="label">Порог остатка</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="min_stock" value="{{ a.pricing.min_stock if a.pricing.min_stock is not none else '' }}" placeholder="общий" inputmode="numeric"><span class="ig-addon">шт.</span></div><span class="hint">Пусто: берём общий из настроек.</span></label>
+</div>
+<p class="small muted" style="padding:10px 12px;background:var(--gray-50);border-radius:8px">Пример: у Nokian Зима до R17 стоит <b>−3 %</b>, поправка кабинета <b>+1 п. п.</b> → в этом кабинете цена будет <b>−2 %</b> от цены поставщика. Один и тот же товар в разных кабинетах можно продавать по разным ценам.</p>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button><span class="small muted">Сохраняется сразу; в фиде цены поменяются при ближайшем цикле (раз в час).</span></div>
+{% if can_post("connections_account_pricing") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card" id="stock">
+{% if can_post("connections_account_stock") %}<form method="post" action="/connections/accounts/{{ a.id }}/stock">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Количество «в наличии» на Авито</h3><span class="ml-auto"><span class="badge badge--{{ 'neutral' if a.stock.mode == 'off' else 'ok' }} badge--dot">{{ {"off": "выключено", "list": "только список", "all": "все объявления"}[a.stock.mode] }}</span></span></div>
+<div class="card-body stack">
+<p class="small muted">После каждого цикла Авито получает число шт. в наличии по остатку поставщика (набор из 4: число комплектов; снятое объявление: 0). Сначала проверьте на одном объявлении: режим «только из списка» и один код.</p>
+<div class="stack">
+<label class="row" style="gap:var(--s-2)"><input type="radio" name="mode" value="off"{% if a.stock.mode == 'off' %} checked{% endif %}> Выключено: на Авито ничего не уходит</label>
+<label class="row" style="gap:var(--s-2)"><input type="radio" name="mode" value="list"{% if a.stock.mode == 'list' %} checked{% endif %}> Только позиции из списка</label>
+<label class="row" style="gap:var(--s-2)"><input type="radio" name="mode" value="all"{% if a.stock.mode == 'all' %} checked{% endif %}> Все объявления аккаунта</label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Коды позиций</span><textarea class="input" name="codes" rows="2" placeholder="Например: 123456">{{ a.stock.codes|join("\n") }}</textarea><span class="hint">Через пробел, запятую или с новой строки.</span></label>
+<label class="field"><span class="label">Потолок</span><div class="ig" style="width:100%"><input style="flex:1;text-align:left" name="cap" value="{{ a.stock.cap if a.stock.cap else '' }}" placeholder="без потолка" inputmode="numeric"><span class="ig-addon">шт.</span></div><span class="hint">Пусто: показываем остаток как есть.</span></label>
+</div>
+{% set ss = a.stock_summary %}{% if ss.last_at %}<p class="small">Последняя отправка: {{ ss.last_at|dt }} · принято {{ ss.counts.get("sent", 0) }} · отказ {{ ss.counts.get("failed", 0) }} · без ответа {{ ss.counts.get("unknown", 0) }} · не отправлено {{ ss.counts.get("not_sent", 0) }}{% if ss.counts.get("restored") %} · возвращено {{ ss.counts.get("restored") }}{% endif %}</p>
+{% for r in ss.refused %}<p class="small muted">Отказ Авито: {{ r.code }} ({{ r.ad_id }}): {{ r.error }}</p>{% endfor %}{% endif %}
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button><span class="small muted">Выключили — Авито оставит последние числа; вернуть прежние: команда <code>stock-push --restore</code>.</span></div>
+{% if can_post("connections_account_stock") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card">
+{% if can_post("connections_account_brand_pricing") %}<form method="post" action="/connections/accounts/{{ a.id }}/brand-pricing">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Наценка по брендам</h3></div>
+<div class="card-body stack">
+<label class="field"><span class="label">Поправка к проценту по брендам, п. п.</span><textarea name="brands" rows="4" style="width:100%" placeholder="Kumho: 1.5&#10;Nexen: -2">{{ a.brand_delta_text }}</textarea><span class="hint">Одна строка на бренд: «Бренд: число», от −10 до +10. Складывается с общей поправкой кабинета. Пусто или 0 — без поправки.</span></label>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>
+{% if can_post("connections_account_brand_pricing") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card">
+{% if can_post("connections_account_title") %}<form method="post" action="/connections/accounts/{{ a.id }}/title">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Заголовок объявлений</h3></div>
+<div class="card-body stack">
+<label class="field"><span class="label">Шаблон заголовка</span><input name="template" style="width:100%" value="{{ a.title_template }}" placeholder="{brand} {model} {size} {indexes}"><span class="hint">Поля: {% for f in a.title_fields %}{{ '{' ~ f ~ '}' }} {% endfor %}. Пусто — стандартный заголовок. Не длиннее 70 знаков, иначе берётся стандартный. Действует для новых объявлений: размещённые названия не меняются.</span></label>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>
+{% if can_post("connections_account_title") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card">
+{% if can_post("connections_account_photo_base") %}<form method="post" action="/connections/accounts/{{ a.id }}/photo-base">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Адрес фото</h3></div>
+<div class="card-body stack">
+<label class="field"><span class="label">Адрес, с которого отдаются фото этого кабинета</span><input name="base" style="width:100%" value="{{ a.photo_base }}" placeholder="https://домен (пусто — адрес панели)"><span class="hint">Должен вести на эту же панель (домен настраивается на сервере). Ссылка получается вида «адрес/img/&lt;токен&gt;/&lt;код&gt;.jpg».</span></label>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>
+{% if can_post("connections_account_photo_base") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card">
+{% if can_post("connections_account_photo_style") %}<form method="post" action="/connections/accounts/{{ a.id }}/photo-style">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Вид фото кабинета</h3></div>
+<div class="card-body stack">
+<div class="grid-2">
+<label class="field"><span class="label">Подпись на фото</span><input name="label" maxlength="30" value="{{ a.photo_style.get('label', '') }}" placeholder="например, название кабинета"></label>
+<label class="field"><span class="label">Угол подписи</span><select name="corner">{% for v, t in [('bottom-right','справа внизу'),('bottom-left','слева внизу'),('top-right','справа вверху'),('top-left','слева вверху')] %}<option value="{{ v }}" {% if a.photo_style.get('corner', 'bottom-right') == v %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Цвет рамки</span><input name="border" value="{{ a.photo_style.get('border', '') }}" placeholder="#1A2B3C или пусто"></label>
+<label class="field"><span class="label">Обрезка краёв, %</span><input name="crop" value="{{ a.photo_style.get('crop', '') }}" placeholder="0–8" inputmode="decimal"></label>
+<label class="field"><span class="label">Качество JPEG</span><input name="quality" value="{{ a.photo_style.get('quality', '') }}" placeholder="60–95" inputmode="numeric"></label>
+</div>
+<span class="hint">Картинка остаётся той же шиной; у каждого кабинета свой вид. Всё пусто — отдаётся картинка поставщика. Обработка делается один раз для каждого фото и хранится на сервере.</span>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>
+{% if can_post("connections_account_photo_style") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+{% set form = a.form %}{% set account = a %}{% include "_addresses_form.html" %}
+<section class="card"><div class="card-body row"><div class="grow"><h3>Описание объявлений</h3><p class="small muted" style="margin-top:2px">Шаблон текста для объявлений этого кабинета{% if a.description_template %} (изменён){% else %} (стандартный){% endif %}.</p></div><a class="btn btn--secondary" href="/accounts/{{ a.id }}/description">{{ icon("edit") }}Открыть редактор шаблона</a></div></section>
+<section class="card" id="add"><div class="card-head"><h3>Добавить ещё один аккаунт Авито</h3></div>
+{% if can_post("connections_add_account") %}<form method="post" action="/connections/accounts" class="card-foot">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input class="input" style="max-width:320px" name="name" placeholder="Название аккаунта" maxlength="60"><button class="btn btn--secondary">{{ icon("plus") }}Добавить аккаунт</button>{% if can_post("connections_add_account") %}</form>{% else %}</fieldset>{% endif %}</section>
+{% endblock %}

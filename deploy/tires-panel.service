@@ -1,0 +1,23 @@
+[Unit]
+Description=Tires Sync panel
+After=network.target
+OnFailure=tires-alert@%n.service
+
+[Service]
+User=tires
+Group=tires
+WorkingDirectory=/opt/tires-sync/app
+EnvironmentFile=/etc/tires-sync/panel.env
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+ExecStart=/opt/tires-sync/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:8000 --no-control-socket --timeout 120 --access-logfile - --logger-class tires_sync.panel.gunicorn_logger.Logger tires_sync.panel.wsgi:app
+Restart=on-failure
+RestartSec=3
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tires-sync
+
+[Install]
+WantedBy=multi-user.target

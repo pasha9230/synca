@@ -1,0 +1,41 @@
+{# the block «WebMIM» of the order's page (webmim_match.card_block): the paired WebMIM order or the suggestions with «Это он».
+   The sum and the prices of WebMIM are the purchase: only with the right «money». The manager of a point: the paired order only.
+   webmim_create (webmim_create.button): «Оформить в WebMIM» and its last result, for the right «supplier» only. #}
+{% set w = webmim %}{% set point_view = current_user().role == "point" %}
+{% if w and (w.order or not point_view) %}
+{% call entity_ui.section("WebMIM", id="webmim", sub=w.server ~ (" · снимок " ~ (w.seen_at|short_dt_utc) if w.seen_at else " · снимка ещё нет")) %}<div class="card-body stack" data-webmim>
+{% if w.test and w.order %}<p class="small text-err">Тестовый сервер WebMIM: номер совпал с тестовым заказом, это может быть не наш заказ.</p>{% endif %}
+{% if w.order %}{% set o = w.order %}
+<div class="row" style="gap:var(--s-3);flex-wrap:wrap"><b>Заказ WebMIM №{{ o.number or o.id }}</b><span class="badge badge--neutral" data-webmim-status>{{ o.status_text or ("статус " ~ o.status_code if o.status_code else "статус не указан") }}</span>
+{% if o.create_date %}<span class="small muted">создан {{ o.create_date|dt }}</span>{% endif %}<span class="small muted">данные на {{ o.seen_at|short_dt_utc }}</span>
+{% if has_right("money") and o.sum is not none %}<span class="small" data-webmim-sum>сумма <b>{{ o.sum|money }}</b></span>{% endif %}</div>
+{% if o['items'] is none %}<p class="small muted">Позиции заказа WebMIM ещё не прочитаны: появятся после следующего снимка.</p>
+{% else %}<table class="table small"><thead><tr><th>Позиция WebMIM</th><th class="num">Кол-во</th>{% if has_right("money") %}<th class="num">Цена WebMIM</th><th class="num">Наша закупка</th><th class="num">Сумма</th>{% endif %}</tr></thead><tbody>
+{% for i in o['items'] %}{% set p = w.purchase.get(i.goods_id) %}<tr><td>{{ i.name or i.goods_id }} <span class="muted">{{ i.goods_id }}</span></td><td class="num">{{ i.qty if i.qty is not none else "—" }}</td>{% if has_right("money") %}<td class="num">{{ i.price|money if i.price is not none else "—" }}</td>
+<td class="num{% if p and p.differs %} text-err{% endif %}"{% if p and p.differs %} data-webmim-price-differs title="Закупка в заказе панели не совпадает с ценой, по которой заказ оформлен в WebMIM"{% endif %}>{{ p.ours|money if p else "—" }}</td><td class="num">{{ i.sum|money if i.sum is not none else "—" }}</td>{% endif %}</tr>
+{% else %}<tr><td colspan="{{ 5 if has_right('money') else 2 }}" class="muted">В заказе WebMIM нет позиций.</td></tr>{% endfor %}</tbody></table>
+{% if w.differences %}<div class="stack" data-webmim-diff><b class="text-err small">Расходится с позициями панели</b><ul class="small">
+{% for d in w.differences %}<li>{{ d.name or d.goods_id }}: {% if not d.webmim_qty %}есть в панели ({{ d.panel_qty }} шт), нет в WebMIM{% elif not d.panel_qty %}есть в WebMIM ({{ d.webmim_qty }} шт), нет в панели{% else %}в панели {{ d.panel_qty }} шт, в WebMIM {{ d.webmim_qty }} шт{% endif %}</li>{% endfor %}</ul></div>
+{% else %}<p class="small text-ok">Позиции и количество совпадают с панелью.</p>{% endif %}{% endif %}
+{% elif w.test_order %}<p class="small" data-webmim-test-order>Тестовый заказ WebMIM №{{ c.webmim_number or c.webmim_id }}: создан кнопкой на другом сервере, с заказами выбранного сервера не сопоставляется.</p>
+{% elif w.not_found %}<p class="small">Номера {{ c.webmim_number or c.webmim_id }} нет в снимке WebMIM этого сервера: заказ старше окна снимка или номер другой.</p>
+{% elif c.deal_kind == "stock" %}<p class="small muted">Сделка из наличия точки: заказа в WebMIM не ждём.</p>
+{% elif w.test %}<p class="small muted">Выбран тестовый сервер WebMIM: его заказы не наши, подсказок и сопоставления нет.</p>
+{% else %}{% if w.hints %}<p class="small muted">Номера WebMIM у заказа нет. Похожие заказы WebMIM (проверьте и подтвердите сами):</p>
+{% for h in w.hints %}{% set o = h.order %}<div class="row" style="gap:var(--s-3);flex-wrap:wrap;border-bottom:1px solid var(--gray-200);padding-bottom:var(--s-2)" data-webmim-hint="{{ o.id }}">
+<b>№{{ o.number or o.id }}</b><span class="badge badge--neutral">{{ h.score }}%</span><span class="small">{{ o.status_text }}{% if o.create_date %} · {{ o.create_date|dt }}{% endif %}{% if o.customer_name %} · {{ o.customer_name }}{% endif %}</span>
+<span class="small muted">{{ h.why|join(", ") }}</span>
+{% if can_post("order_webmim_link") %}<form method="post" action="/orders/{{ c.id }}/webmim/link" class="ml-auto" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="order" value="{{ o.id }}"><button class="btn btn--secondary btn--xs">Это он</button></form>{% endif %}</div>
+{% endfor %}{% else %}<p class="small muted">Номера WebMIM у заказа нет, похожих заказов в снимке нет.</p>{% endif %}{% endif %}
+{% set b = webmim_create %}{% if b %}<div class="stack" data-webmim-create>
+{% if b.state and b.state.state == "running" %}<p class="small" data-webmim-create-running>Оформляется в WebMIM (нажал {{ b.state.author }}, {{ b.state.started_at|short_dt }}): обновите страницу через минуту.</p>
+{% elif b.state and b.state.result %}<p class="small{% if b.state.state != 'done' %} text-err{% endif %}">{{ b.state.result }}</p>{% endif %}
+{% if b.label %}{% if b.live %}<div class="row" style="gap:var(--s-3);flex-wrap:wrap"><form method="post" action="/orders/{{ c.id }}/webmim/create" data-once
+ data-confirm-title="{{ b.label }}?" data-confirm="Заказ будет создан в WebMIM ({{ b.server }}) с позициями этого заказа: доставка на адрес точки, оплата со счёта кабинета. Заказ на более раннем этапе перейдёт в «Заказ оформлен». Когда заказ будет создан полностью, сообщения об оформлении уйдут сами: клиенту в чат Авито и менеджеру точки в ВК, если хватает данных. Сообщение подождёт в задачах заказа, если не хватает данных (например, номера перемещения) или нет чата Авито (у точки — ВК); не уйдёт второй раз, если уже отправлено, и не уйдёт, если его пропустили вручную.{% if b.test %} Это тестовый сервер: у поставщика ничего не заказывается, но номер тестового заказа впишется в карточку и может уйти в сообщениях. Ушедшее сообщение не удалить; поля WebMIM в карточке после проверки можно очистить.{% endif %}" data-confirm-ok="{{ b.label }}">
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">{{ b.label }}</button></form>
+<span class="small muted">{{ b.server }}</span></div>
+{% else %}<p class="small muted">Выбран боевой сервер WebMIM: оформление заказа кнопкой только по слову владельца.</p>{% endif %}{% endif %}
+</div>{% endif %}
+{% if can("orders") and not point_view %}<p class="small"><a href="/orders/webmim">Сверка с WebMIM</a></p>{% endif %}
+</div>{% endcall %}
+{% endif %}

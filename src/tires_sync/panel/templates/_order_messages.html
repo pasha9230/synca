@@ -1,0 +1,27 @@
+{# «Сообщения по заказу» (the owner 2026-10-23): every waiting message of the order, to the client (Avito) and to the manager of the point (VK),
+   each with its text to correct and its own button; what a message lacks is said and its button is off. Opens by itself once when messages
+   are ready (routes_orders.take_offer), again by «Открыть сообщения». Not drawn for a point (routes_orders.card_page gives it no messages). #}
+{% set ready = messages|selectattr("can")|selectattr("current")|list %}{# «Отправить все»: only the messages of this stay on the stage #}
+<div class="modal-backdrop send-window messages-window{% if open_messages %} is-open{% endif %}" id="order-messages" role="dialog" aria-modal="true" aria-labelledby="order-messages-h"><div class="modal">
+<form method="post" action="/orders/{{ c.id }}/messages/send" data-messages-form><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% for m in ready %}<input type="hidden" name="ready" value="{{ m.task.id }}">{% endfor %}
+<div class="modal-head"><h3 id="order-messages-h">Сообщения по заказу №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
+<div class="modal-body stack">
+{% for m in messages %}{% set t = m.task %}<div class="stack messages-item" data-message="{{ t.id }}">
+<div class="strong">{{ {"client": "Клиенту", "manager": "Точке"}.get(m.whom, "Сообщение") }}{% if m.where %} · {{ m.where }}{% endif %} · {{ t.title }}</div>
+{% if m.lacking %}<p class="small text-err" data-lacking>Не хватает данных. {{ m.lacking }}</p>{% endif %}
+{% if t.status == "running" %}<p class="small muted">Отправляется. Если зависло, через 10 минут сообщение вернётся сюда.</p>{% endif %}
+{% if t.status != "error" %}<label class="field"><span class="label">{{ "Текст (можно поправить)" if m.can else "Текст" }}</span><textarea class="textarea" id="message-{{ t.id }}" name="text_{{ t.id }}" rows="8" maxlength="{{ 2000 if m.whom == 'client' else 4000 }}"{% if not m.can %} readonly{% endif %}>{{ t.body }}</textarea></label>{% endif %}
+<input type="hidden" name="whom_{{ t.id }}" value="{{ m.whom }}">{% if m.chat %}<input type="hidden" name="chat_{{ t.id }}" value="{{ m.chat }}">{% endif %}{% if m.point %}<input type="hidden" name="point_{{ t.id }}" value="{{ m.point }}">{% endif %}
+{% if m.why and t.status != "error" %}<p class="small text-err" data-send-why>Из панели не отправить: {{ m.why }}</p>{% endif %}
+<p class="small" data-send-error role="alert" hidden></p>
+<div class="row" style="gap:var(--s-2);flex-wrap:wrap">
+{% if m.whom in ("client", "manager") and can_post("order_messages_send") %}<button class="btn btn--primary btn--sm" name="task" value="{{ t.id }}" data-send-one{% if not m.can %} disabled{% endif %}>{{ "Отправить клиенту в Авито" if m.whom == "client" else "Отправить точке в ВК" }}</button>{% endif %}
+{% if t.body and t.status != "error" %}<button type="button" class="btn btn--secondary btn--sm" data-copy="message-{{ t.id }}">Скопировать</button>{% endif %}
+{% if t.status == "pending" and can_post("order_task_run") %}<button class="btn btn--secondary btn--sm" formaction="/orders/{{ c.id }}/task/{{ t.id }}/run" formnovalidate data-plain>Отправлено вручную</button>{% endif %}
+{% if t.status != "running" and can_post("order_task_skip") %}<button class="btn btn--secondary btn--sm" formaction="/orders/{{ c.id }}/task/{{ t.id }}/skip" formnovalidate data-plain>Пропустить</button>{% endif %}
+</div></div>{% endfor %}
+<p class="small text-err" data-send-error-all role="alert" hidden></p>
+<p class="small muted">«Позже»: сообщения останутся в заказе, окно откроется снова кнопкой «Открыть сообщения».</p></div>
+<div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Позже</button>{% if ready|length > 1 and can_post("order_messages_send") %}<button class="btn btn--primary" name="task" value="ready" data-send-all>{{ "Отправить оба" if ready|length == 2 else "Отправить все (%d)" % ready|length }}</button>{% endif %}</div>
+</form></div></div>

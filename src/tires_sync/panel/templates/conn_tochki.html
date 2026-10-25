@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · 4 точки{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+{% if not tochki_cfg.supplier_id %}<div class="flash flash--err" role="alert" data-tochki-no-row>{{ icon("alert") }}<div class="flash-text"><b>Не выбрана строка поставщика — каталог и остатки 4 точек не загружаются.</b> Выберите её ниже в поле «Поставщик в каталоге» и сохраните.</div></div>{% endif %}
+<section class="card">
+{% if can_post("connections_tochki") %}<form method="post" action="/connections/tochki">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>4 точки (b2b.4tochki.ru)</h3>{% if tochki_check %}<span class="ml-auto"><span class="badge badge--{{ 'ok' if tochki_check.status.startswith('ok') else 'err' }} badge--dot">{{ "подключено" if tochki_check.status.startswith('ok') else "ошибка проверки" }}</span></span>{% endif %}</div>
+<div class="card-body stack">
+<p class="muted small">Второй поставщик. Логин и пароль API берутся в личном кабинете 4 точек, раздел «Параметры доступа к API». Каталог склада «Санкт-Петербург 2» загружается раз в час в общем цикле и виден в «Каталоге» с пометкой поставщика; в объявления он пока не идёт, заказы не используются. В 4 точках ничего не создаётся и не меняется.</p>
+<div class="grid-2">
+<label class="field"><span class="label">Логин API</span><input class="input" name="login" value="{{ tochki.login }}" autocomplete="off" maxlength="100"></label>
+<label class="field"><span class="label">Пароль API {% if tochki_secrets.password %}<span class="badge badge--ok">задан ({{ tochki_secrets.password.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="password" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается.</span></label>
+<label class="field"><span class="label">Поставщик в каталоге</span><select class="input" name="supplier_id">
+<option value=""{% if not tochki_cfg.supplier_id %} selected{% endif %}>{{ "не закреплён (берётся единственная подходящая строка)" if tochki_cfg.auto else "не выбран (каталог не загружается)" }}</option>
+{% for sp in tochki_choices %}<option value="{{ sp.id }}"{% if tochki_cfg.supplier_id == sp.id %} selected{% endif %}>№{{ sp.id }} · {{ sp.name }}</option>{% endfor %}
+</select>{% if tochki_cfg.auto %}{% set auto_row = tochki_choices|selectattr("id", "equalto", tochki_cfg.supplier_id)|first %}<span class="hint" data-tochki-auto>Выбрана автоматически по имени: №{{ auto_row.id }} · {{ auto_row.name }} (единственная подходящая строка); можно выбрать вручную. Выбор закрепится, когда вы сохраните вкладку или проверите подключение. Чтобы остановить загрузку 4 точек, сотрите логин.</span>{% endif %}<span class="hint">Позиции 4 точек получают номер этого поставщика: Id <code>s№-код</code>, бренды <code>S№:</code>. Подходят поставщики без адреса WebMIM.</span></label>
+<div class="field"><span class="label">В фид</span><label class="row small" style="gap:6px"><input type="checkbox" disabled{% if tochki_cfg.feed %} checked{% endif %}> {{ "включено" if tochki_cfg.feed else "выключено" }}</label><span class="hint">Включается на этапе 2 (приоритет WebMIM, смена источника не чаще раза в сутки). Пока выключено, позиции 4 точек только видны в «Каталоге» и не попадают в объявления.</span></div>
+</div>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button>
+{% if can_post("connections_tochki_check") %}<button class="btn btn--secondary" formaction="/connections/tochki/check">{{ icon("refresh") }}Проверить подключение</button>{% endif %}
+{% if tochki_check %}<span class="ml-auto"><span class="row small {{ 'text-ok' if tochki_check.status.startswith('ok') else 'text-err' }}" style="gap:6px">{{ icon("check-circle" if tochki_check.status.startswith('ok') else "x-circle", "i-sm") }}{{ tochki_check.status }} · {{ tochki_check.at|dt_utc }}</span></span>{% endif %}</div>
+{% if can_post("connections_tochki") %}</form>{% else %}</fieldset>{% endif %}
+<div class="card-body stack"><h4>Загрузка каталога</h4>
+{% if not tochki_cfg.supplier_id %}<p class="muted small">Не идёт: выберите поставщика в каталоге и сохраните.</p>
+{% elif not tochki_load.attempt_at %}<p class="muted small">Ещё не было: начнётся в ближайшем цикле (раз в час).</p>
+{% else %}<p class="small">{% if tochki_load.ok_at %}Последняя удачная: {{ tochki_load.ok_at|dt_utc }} · позиций {{ tochki_load["items"] }} · страниц {{ tochki_load.pages }} · {{ tochki_load.seconds }} с{% if tochki_load.without_card %} · без карточки (ждут следующего часа) {{ tochki_load.without_card }}{% endif %}{% if tochki_load.skipped_quality %} · не новые (брак, уценка) {{ tochki_load.skipped_quality }}{% endif %}{% else %}Удачных загрузок ещё не было.{% endif %}</p>
+{% if tochki_load.error %}<p class="small text-err">{{ icon("x-circle", "i-sm") }} Ошибка {{ tochki_load.error_at|dt_utc }}: {{ tochki_load.error }} Позиции остаются от последней удачной загрузки.</p>{% endif %}
+<p class="muted small">Последняя попытка: {{ tochki_load.attempt_at|dt_utc }}.</p>{% endif %}
+</div>
+<div class="card-body"><p class="muted small">После успешной проверки сохраняется образец ответов поставщика (склады, одна страница поиска, карточки): <a href="/connections/tochki/sample">открыть образец</a>. В нём нет логина и пароля. По нему сверяется формат ответов поставщика.</p></div>
+</section>
+{% endblock %}

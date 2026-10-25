@@ -1,0 +1,27 @@
+.env
+*.db
+*.sqlite
+__pycache__/
+.venv/
+.venv-arm/
+.testmondata*
+out/
+.DS_Store
+*.egg-info/
+agent/target/
+.venv*/
+*.db-wal
+*.db-shm
+*.key
+*.pem
+.env.*
+*.log
+docs/integrations/*.gs
+private/
+# публичный репозиторий (open5): инструкции сессий и документы — в tires-private; в публичном только два правила фида.
+# Уже отслеживаемые файлы старого репозитория это не трогает; новые файлы в docs/ там добавляются через git add -f.
+CLAUDE.md
+.claude/
+docs/*
+!docs/feed-rules.md
+!docs/feed-check-rules.md

@@ -1,0 +1,10 @@
+[Unit]
+Description=One time: look at Avito's report for account 2 at 07:30 on 2026-10-14
+
+[Timer]
+OnCalendar=2026-10-14 07:30:00
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

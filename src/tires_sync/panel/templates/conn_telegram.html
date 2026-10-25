@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Подключения · Telegram{% endblock %}
+{% block content %}
+{% include "_conn_tabs.html" %}
+<section class="card">
+{% if can_post("connections_telegram") %}<form method="post" action="/connections/telegram">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Уведомления о сбоях</h3><span class="sub">Сообщим, если поставщик не отвечает, фид не принят или снимается много объявлений</span></div>
+<div class="card-body grid-2">
+<label class="field"><span class="label">Chat ID</span><input class="input mono" name="chat_id" value="{{ telegram.chat_id or '' }}" autocomplete="off"><span class="hint">Узнать можно у бота @userinfobot</span></label>
+<label class="field"><span class="label">Токен бота {% if telegram_secrets.bot_token %}<span class="badge badge--ok">задан ({{ telegram_secrets.bot_token.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="bot_token" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается. Бота создаёт @BotFather.</span></label>
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button>
+{% if can_post("connections_telegram_test") %}<button class="btn btn--secondary" formaction="/connections/telegram/test">{{ icon("send") }}Отправить тестовое сообщение</button>{% endif %}
+{% if telegram_check %}<span class="ml-auto"><span class="row small {{ 'text-ok' if telegram_check.status.startswith('ok') else 'text-err' }}" style="gap:6px">{{ icon("check-circle" if telegram_check.status.startswith('ok') else "x-circle", "i-sm") }}{{ telegram_check.status }} · {{ telegram_check.at|dt_utc }}</span></span>{% endif %}</div>
+{% if can_post("connections_telegram") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card"><div class="card-head"><h3>Чаты менеджеров панели</h3><span class="sub">Сюда приходят оповещения по заказам, за которые отвечает этот человек (лист ожидания: нужная шина появилась). Владельцу оповещения идут в чат выше. Человек пишет боту любое сообщение, номер чата можно узнать у бота @userinfobot.</span></div>
+<div class="card-body stack">{% for login in panel_users %}
+{% if can_post("connections_telegram_user_chat") %}<form method="post" action="/connections/telegram/user-chat" class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="login" value="{{ login }}">
+<label class="field"><span class="label">{{ login }}</span><input class="input mono" name="chat_id" value="{{ user_chats.get(login, '') }}" autocomplete="off" placeholder="Номер чата"></label>
+<button class="btn btn--secondary">Сохранить</button>{% if can_post("connections_telegram_user_chat") %}</form>{% else %}</fieldset>{% endif %}{% else %}<p class="muted">Пользователей панели пока нет: добавьте их в «Настройки».</p>{% endfor %}</div></section>
+<p class="muted small">Сообщение придёт при сбое цикла или скачивания выгрузки.</p>
+{% endblock %}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Photo agent every minute (without a request from the panel it exits at once)
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

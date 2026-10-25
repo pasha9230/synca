@@ -1,0 +1,21 @@
+{# «В лист ожидания» of the catalog (the owner 2026-10-24): opened by the server (/catalog?…&wait=<position>), no script needed #}
+{% set o, l, v = wait.offer, wait.line, wait.typed %}
+<div class="modal-backdrop is-open" id="wait-window" role="dialog" aria-modal="true" aria-labelledby="wait-title"><div class="modal">
+<form method="post" action="/catalog/wait" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="goods_id" value="{{ wait.goods_id }}"><input type="hidden" name="next" value="{{ wait.next }}">
+<div class="modal-head"><h3 id="wait-title">В лист ожидания</h3><a class="icon-btn ml-auto" href="{{ wait.next }}" aria-label="Закрыть">{{ icon("x") }}</a></div>
+<div class="modal-body stack">
+{% if wait.error %}<div class="flash flash--err" role="alert"><div class="flash-text">{{ wait.error }}</div></div>{% endif %}
+<p><b class="strong">{{ o.name }}</b>{% if o.code %} <span class="t-code">{{ o.code }}</span>{% endif %}<br>
+<span class="small muted">{{ brand_label(l.brand) }}{% if l.model %} {{ l.model }}{% endif %} · {% if l.width and l.profile and l.radius %}{{ l.width }}/{{ l.profile }} R{{ l.radius }}{% else %}размер не указан{% endif %}{% if l.season %} · {{ wait.seasons[l.season] }}{% endif %} · {{ wait.studs[l.studded] }}</span></p>
+{% if o.stock and o.stock > 0 %}<div class="flash flash--info"><div class="flash-text">Сейчас в наличии {{ o.stock }} шт.: если этого хватает клиенту, ближайшая сверка сразу отметит заказ «Появилось».</div></div>{% endif %}
+<p class="small muted">Заказ создастся на этапе «Ожидает наличие». Когда шина появится, ответственный получит задачу.</p>
+<div class="grid-2"><label class="field"><span class="label">Имя клиента</span><input class="input" name="client_name" value="{{ v.client_name or '' }}" maxlength="120" required autocomplete="off"></label>
+<label class="field"><span class="label">Телефон клиента</span><input class="input" type="tel" name="client_phone" value="{{ v.client_phone or '' }}" maxlength="30" required autocomplete="off" placeholder="+7 900 000-00-00"></label></div>
+<div class="grid-2"><label class="field"><span class="label">Количество (1–100)</span><input class="input" type="number" name="qty" value="{{ v.qty or l.qty }}" min="1" max="100" step="1"></label>
+{% if not l.season %}<label class="field"><span class="label">Сезон (у позиции не указан)</span><select class="select" name="season" required><option value="">выберите</option>{% for key, label in wait.seasons.items() %}<option value="{{ key }}"{% if v.season == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endif %}</div>
+<label class="field"><span class="label">Точка (ПВЗ)</span><select class="select" name="point_id"><option value="">Не выбрана</option>{% for p in wait.points %}<option value="{{ p.id }}"{% if v.point_id|string == p.id|string %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Комментарий</span><textarea class="textarea" name="comment" rows="2" maxlength="2000">{{ v.comment or '' }}</textarea></label>
+<label class="check"><input type="checkbox" name="any_size" value="1"{% if v.any_size %} checked{% endif %}> Можно другие размеры</label><label class="check"><input type="checkbox" name="any_brand" value="1"{% if v.any_brand %} checked{% endif %}> Можно другие бренды</label><span class="small muted">Аналоги предлагаются только менеджеру.</span>
+</div>
+<div class="modal-foot"><a class="btn btn--secondary" href="{{ wait.next }}">Отмена</a><button class="btn btn--primary">Добавить в лист ожидания</button></div>
+</form></div></div>

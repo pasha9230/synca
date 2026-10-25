@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, season %}
+{% block title %}Продано · Юнит-экономика · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "sales" %}{% include "_economics_head.html" %}
+<section class="card">
+<div class="card-head"><div><div class="crumbs"><a href="/economics/sales">Продажи</a>{{ icon("chev", "i-sm") }}<span>Новая продажа</span></div><h3 style="font-size:var(--fs-lg)">Продано: {{ offer.name_orig or offer.name }}</h3></div></div>
+{% if can_post("economics_sale_add") %}<form method="post" action="/economics/sales/add" class="card-body stack" data-once>
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="sale_token" value="{{ sale_token }}"><input type="hidden" name="goods_id" value="{{ offer.goods_id }}">
+<p class="small muted">{{ brand_label(offer.brand_key) }} · {% if row %}{{ season(row.kind) }} · {{ row.size }} · остаток {{ row.stock }} шт. · цена поставщика {{ row.supplier_price|money }}{% if row.sale %} · сейчас продаём по {{ row.sale|money }}{% endif %}{% endif %}</p>
+<div class="grid-3">
+<label class="field"><span class="label">Как продано</span><select class="select" name="ad_kind"><option value="single">Одиночное объявление</option><option value="set4"{% if row and row.set4 %} selected{% endif %}>Комплект «за 4 шт.»</option></select></label>
+<label class="field"><span class="label">Сколько шин</span><input class="input" name="pieces" value="{{ 4 if row and row.set4 else 1 }}" inputmode="numeric" required></label>
+<label class="field"><span class="label">Выручка всего, ₽</span><input class="input" name="sale_total" value="{{ row.sale * (4 if row and row.set4 else 1) if row and row.sale else '' }}" inputmode="decimal" required><span class="hint">Сколько заплатил покупатель за всё количество.</span></label>
+<label class="field"><span class="label">Дата</span><input class="input" type="date" name="day" value="{{ today }}" max="{{ today }}" min="2020-01-01"></label>
+<label class="field"><span class="label">Цена поставщика за шину, ₽</span><input class="input" name="supplier_price" value="{{ offer.base_price|int if offer.base_price == offer.base_price|int else offer.base_price }}" inputmode="decimal"><span class="hint">Сейчас в выгрузке. Если продажа не сегодняшняя, а цена поставщика с тех пор менялась, впишите ту, что была.</span></label>
+<label class="field"><span class="label">Аккаунт Авито</span><select class="select" name="account_id"><option value="">Не указан</option>{% for id, name in accounts.items() %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Точка</span><input class="input" name="point" list="sale-points" maxlength="60" placeholder="Откуда отгрузили" autocomplete="off"><datalist id="sale-points">{% for p in points %}<option value="{{ p }}">{% endfor %}</datalist></label>
+</div>
+<label class="field"><span class="label">Заметка</span><input class="input" name="note" maxlength="200" placeholder="Необязательно"></label>
+<div class="row"><button class="btn btn--primary">Записать продажу</button><a class="btn btn--link-gray" href="/economics/sales">Отмена</a></div>
+</form>{% endif %}</section>
+{% endblock %}

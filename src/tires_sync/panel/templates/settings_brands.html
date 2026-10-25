@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Бренды и наценки · Tires Sync{% endblock %}
+{% block content %}
+{% set tab = "brands" %}{% include "_settings_head.html" %}
+{% for pt in pricing_tables %}{% with supplier=pt.supplier, rows=pt.rows, stale=pt.stale, multi=pricing_tables|length > 1 %}{% include "_pricing.html" %}{% endwith %}{% endfor %}
+{% endblock %}

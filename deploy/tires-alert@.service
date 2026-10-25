@@ -1,0 +1,15 @@
+[Unit]
+Description=Tires Sync alert about a failed unit (%i)
+
+[Service]
+Type=oneshot
+User=tires
+Group=tires
+Environment=PYTHONPATH=/opt/tires-sync/app/src
+Environment=TIRES_SECRET_KEY_FILE=/etc/tires-sync/secret.key
+ExecStart=/opt/tires-sync/venv/bin/python -m tires_sync alert --db /var/lib/tires-sync/state.db --message "Tires Sync: служба %i завершилась с ошибкой. Откройте журнал: journalctl -u %i"
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tires-sync
