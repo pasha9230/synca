@@ -2,7 +2,7 @@
 name = "tires-sync"
 version = "0.1.0"
 requires-python = ">=3.9"
-dependencies = ["flask>=3.1", "cryptography>=42", "Pillow>=10", "openpyxl>=3.1"]
+dependencies = ["flask>=3.1", "cryptography>=50.0.2", "Pillow>=10", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-xdist>=3.5", "pytest-testmon>=2.1"]          # scripts/test-full.sh: the tests on all cores
