@@ -62,6 +62,7 @@ PLACEHOLDER_HELP = {
 }
 
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+_NEW_ONLY_MARK = re.compile(r"[ \t]*\{new_only\}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
@@ -115,7 +116,7 @@ def render_description(template: str, c: Candidate, price: int, old_models=None)
         if NEW_ONLY in line:
             if aged:
                 continue                                # the tires are older: no line that claims this year's production
-            line = line.replace(NEW_ONLY, "")
+            line = _NEW_ONLY_MARK.sub("", line)         # with the spaces before it: «…производства {new_only}» renders as before
         names = [n for n in _PLACEHOLDER.findall(line) if n in data]
         if names and any(not data[n] for n in names):
             continue

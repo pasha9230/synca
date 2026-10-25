@@ -3,9 +3,12 @@ supplier name carries the age note («старше 3-х лет», feed.AGE_NOTE)
 (owner, 2026-10-26)."""
 from __future__ import annotations
 
-from helpers import make_offer
+from datetime import date
+
+from helpers import make_offer, make_settings
 from tires_sync.candidates import Candidate
 from tires_sync.description import ALLOWED, PLACEHOLDER_HELP, render_description, validate_template
+from tires_sync.feed import render_ad
 
 # the shape of account 1's template (its year line spelled with Latin «o» and «p», as the owner typed it)
 LINE = "Все позиции нoвые: 2025-2026 года пpoизводства"
@@ -64,6 +67,21 @@ def test_note_in_the_russian_name_only_also_counts():
 
 
 def test_marker_mid_line_is_removed_and_other_lines_stay():
-    t = "Шины {title}\nГод: 2025-2026 {new_only}(свежие)\nКонец"
+    t = "Шины {title}\nГод: 2025-2026{new_only} (свежие)\nКонец"
     assert render_description(t, cand(), 100) == "Шины Pirelli 265/55/19 V 109 Scorpion Winter (MO)\nГод: 2025-2026 (свежие)\nКонец"
     assert render_description(t, cand(AGED[0]), 100) == "Шины %s\nКонец" % AGED[0]
+
+
+def test_marker_after_a_space_renders_as_the_unmarked_line():
+    assert render_description(TEMPLATE % (LINE + " {new_only}"), cand(), 13370) == render_description(PLAIN, cand(), 13370)
+
+
+def test_marker_with_an_empty_old_model_still_drops_the_line_for_everyone():
+    t = "Шины {title}\nПреемник: {old_model}{new_only}\nКонец"
+    assert render_description(t, cand(), 100) == render_description(t, cand(AGED[0]), 100).replace(AGED[0], cand().offer.name_orig)
+
+
+def test_set_of_four_in_the_feed_follows_the_same_rule():
+    for name, shown in ((AGED[0], False), ("Pirelli 265/55/19 V 109 Scorpion Winter (MO)", True)):
+        ad = render_ad(cand(name), 13370, "1", make_settings(), date(2026, 10, 26), template=MARKED, pack=4)
+        assert ("2025-2026" in ad.find("Description").text) is shown
