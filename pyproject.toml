@@ -5,7 +5,7 @@ requires-python = ">=3.9"
 dependencies = ["flask>=3.1", "cryptography>=42", "Pillow>=10", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-xdist>=3.5", "pytest-testmon>=2.1"]          # scripts/test-full.sh: the tests on all cores
+dev = ["pytest>=9.1.1", "pytest-xdist>=3.5", "pytest-testmon>=2.1"]          # scripts/test-full.sh: the tests on all cores
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
