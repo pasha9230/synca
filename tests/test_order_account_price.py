@@ -142,3 +142,28 @@ def test_the_prices_of_positions_already_in_an_order_never_change(tmp_path, monk
     client.get("/orders/%d" % card_id)
     post(client, "/orders/%d/save" % card_id, tok, comment="перезвонить")
     assert prices(conn, card_id) == before
+
+
+def published(conn, account_id, goods_id, price):
+    """The ad of the position as the last published feed of the account carries it (store.commit_pending writes it)."""
+    conn.execute("INSERT INTO published_state (account_id, goods_id, price, base_price, point, location, snapshot) VALUES (?,?,?,?,?,?,?)",
+                 (account_id, goods_id, price, 5000.0, "", "supplier", "<Ad/>"))
+    conn.commit()
+
+
+def test_the_price_of_the_published_ad_of_the_account_comes_before_the_calculation(tmp_path, monkeypatch):
+    """The lead 2026-10-26: «Создать заказ» in a chat of the second account takes the price of that tyre's ad in the published feed of the
+    second account (what the client saw), the calculation only when the account has not published it."""
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    main, other = accounts(conn)
+    published(conn, main, "100", 4700)                                                                     # the main account's ad: not this client's
+    published(conn, other, "100", 5130)
+    chat = chat_of(conn, other)
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card_id = conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
+    assert prices(conn, card_id) == [("100", 5130.0)]
+    assert client.get("/orders/items/find?q=autograph snow&order=%d" % card_id).get_json()["items"][0]["price"] == 5130
+    post(client, "/orders/%d/items/add" % card_id, tok, goods_id="101", query="Autograph Ice 9 · 195/65 R15", qty="2")   # not published: calculated
+    assert prices(conn, card_id)[-1] == ("101", feed_price(conn, other, "101"))
+    plain = created(post(client, "/orders/new", tok, client_name="Вера", item_goods_id=["100"], item_qty=["4"], item_sale_unit=[""]))
+    assert prices(conn, plain) == [("100", 4700.0)]

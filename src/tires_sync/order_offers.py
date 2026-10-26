@@ -41,6 +41,19 @@ def effective_settings(conn, settings, account_id=None):
     return connections.effective_settings(conn, account_id, settings) if account_id is not None else settings
 
 
+def ad_prices(conn, account_id, goods_ids) -> dict:
+    """{position: the price of one tyre in the ad of the account's last published feed} (published_state, written when the feed is
+    promoted: what the client saw). A position the account has not published, or a mirror kept by hand, has none: it is calculated."""
+    if account_id is None:
+        account_id = account_for(conn)
+    ids = [str(g) for g in goods_ids]
+    if account_id is None or not ids:
+        return {}
+    rows = conn.execute("SELECT goods_id, price FROM published_state WHERE account_id = ? AND goods_id IN (%s)" % ",".join("?" * len(ids)),
+                        [account_id] + ids)
+    return {g: p for g, p in rows if p and p > 0}
+
+
 def item_args(conn, settings, parsed, ref, goods_id, day: str, account_id=None) -> dict:
     """The keyword arguments of orders.add_item for a position of the unload, priced as the ad of `account_id` (account_for; the main one
     by default) from the general `settings`. Raises OrderError when the position or its price is not there."""
@@ -51,12 +64,13 @@ def item_args(conn, settings, parsed, ref, goods_id, day: str, account_id=None) 
     params = terms_store.get_params(conn)
     rows = economics_view.positions(conn, effective_settings(conn, settings, account_id), only, ref, day, params)
     row = rows[0] if rows else None
-    if row is None or not row.get("sale"):
+    sale = ad_prices(conn, account_id, [offer.goods_id]).get(offer.goods_id) or (row or {}).get("sale")     # the ad first, the calculation else
+    if not sale:
         raise orders.OrderError("Для этой позиции не рассчитана цена продажи: задайте процент бренда.")
     season = economics_view.season_of(offer)
     found = economics.pick_terms(terms_store.list_terms(conn), offer.brand_key, season, offer.diameter, day)
     return dict(goods_id=offer.goods_id, code=offer.code, name=offer.name_orig or offer.name, brand_key=offer.brand_key, season=season,
-                diameter=offer.diameter, territory=offer.territory_rn, sale_unit=row["sale"], supplier_price=float(offer.base_price),
+                diameter=offer.diameter, territory=offer.territory_rn, sale_unit=sale, supplier_price=float(offer.base_price),
                 terms=found, fee_pct=params["fee_pct"], promo_pct=params["promo_pct"])
 
 

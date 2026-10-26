@@ -131,5 +131,6 @@ def suggestions(conn, settings, parsed, ref, query: str, day: str, limit: int = 
         return []
     only = service._Filtered({o.goods_id: o for o in offers}, getattr(parsed, "issues", {}))
     prices = {r["goods_id"]: r["sale"] for r in economics_view.positions(conn, order_offers.effective_settings(conn, settings, account_id), only, ref, day, terms_store.get_params(conn))}
+    prices.update(order_offers.ad_prices(conn, account_id, [o.goods_id for o in offers]))           # the price of the account's published ad first
     return [{"goods_id": o.goods_id, "name": o.name_orig or o.name, "size": "%d/%d R%d" % (o.width, o.height, o.diameter), "stock": o.stock,
              "price": prices.get(o.goods_id)} for o in offers]
