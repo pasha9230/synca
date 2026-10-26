@@ -14,7 +14,7 @@ import pytest
 from test_mypoint import manager, press
 from test_mypoint_board import DAY, MORNING, asked, at_point
 from test_vk_commands import _card, _stage, ready
-from tires_sync import order_points as points, orders
+from tires_sync import order_manager, order_points as points, orders
 from tires_sync.panel import routes_alerts, routes_mypoint
 
 QUESTION = "Клиент забрал заказ № 5000100?"
@@ -107,6 +107,28 @@ def test_a_return_the_point_pressed_is_a_green_row_of_its_bell_until_the_order_m
     orders.move_card(conn, card, _stage(conn, "return"), DAY + "T12:00:00", "o")
     conn.commit()
     assert returns(mine) == []
+
+
+def test_the_yellow_fill_the_sum_rows_are_for_the_staff_only(tmp_path, clock):
+    """The owner 2026-10-27: the point has its green «возврат отмечен, ждёт суммы»; the yellow «заполните сумму возврата» (and «не заполнено
+    — …») asks the manager and is no row of the point anywhere: the bell, its count, «Уведомления», /my-point/feed. Who pressed never got
+    it (one's own record); the other people of the point did. The staff keep it."""
+    app, owner, tok, conn, pid, card = ready(tmp_path)
+    at_point(conn, card)
+    mine = manager(app, conn, pid)
+    mate = manager(app, conn, pid, login_="beta2")
+    press(mine, card, "returned")
+    orders.add_event(conn, card, DAY + "T10:00:00", "o", "point", order_manager.RETURN_GAPS % "причина возврата", level="yellow")
+    conn.commit()
+    asks = ("заполните сумму возврата", "не заполнено — причина возврата")
+    for person in (mine, mate):
+        feed = bell(person)
+        assert [r["level"] for r in feed["items"] if r["order_id"] == card and "возврат" in (r["title"] + r["text"]).lower()] == ["green"]
+        assert "yellow" not in [r["level"] for r in feed["items"]] and feed["count"] == len(feed["items"])
+        for text in [person.get("/alerts").get_data(as_text=True), person.get("/my-point/feed").get_data(as_text=True)]:
+            assert not any(a in text for a in asks)
+    staff = " ".join(it["text"] for it in bell(owner)["items"])
+    assert all(a in staff for a in asks)
 
 
 def test_a_return_of_an_earlier_stay_is_no_row(tmp_path, clock):

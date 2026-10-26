@@ -30,7 +30,8 @@ def grouped(conn, login: str) -> list:
         sorted(ids) + [account, account])} if ids else set()
     chats_of = {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id = ?", (account,))} if account is not None else set()
     foreign = quiet | set(orders.origin_labels(conn, point, ours))     # not the point's own order: the client's texts named only (as in the card)
-    rows = [r for r in rows if not is_handoff(r)]                 # «Клиент хочет заказать шины…» is for the staff: the point sees it on «Моя точка»
+    rows = [r for r in rows if not is_handoff(r) and not is_return_ask(r)]   # «Клиент хочет заказать шины…» is for the staff: the point sees it on
+                                                                  # «Моя точка»; «заполните сумму возврата» too: the point has its green row
     rows = [order_engine.for_point(r) if r["order_id"] in foreign else r
             for r in rows if (r["order_id"] in ours and not (r["order_id"] in quiet and orders.client_words(r))
                               if r["order_id"] is not None else r.get("chat_row") in chats_of)]
@@ -90,6 +91,13 @@ BELL_ROWS = 10
 def is_handoff(row: dict) -> bool:
     """A row «Клиент хочет заказать шины…» (order_manager.hand_over): it opens through /alerts/<id>/go and can be taken by hand."""
     return row.get("kind") == "handoff" and str(row.get("text") or "").startswith(mgr.ASK)
+
+
+def is_return_ask(row: dict) -> bool:
+    """The yellow «заполните сумму возврата» (or «не заполнено — …») of a return the point pressed (order_manager.returned): it asks the
+    manager; the point has its green «возврат отмечен, ждёт суммы» (point_rows) instead (the owner 2026-10-27)."""
+    text = str(row.get("text") or "")
+    return row.get("kind") == "point" and (text == mgr.RETURN_ASK or text.startswith(mgr.RETURN_GAPS.split("%s")[0]))
 
 
 def may_take() -> bool:
