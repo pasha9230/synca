@@ -2,7 +2,9 @@
 A panel user (the owner or a person with a login) gets it in Telegram, in the chat saved for them (the owner: the chat of the failure alerts);
 somebody who is not in the panel (the robot, a removed user) is answered through VK by the manager of the point of the order, or, when the
 point works in the panel (channel «panel», the owner 2026-10-23), on its «Моя точка» (for the staff a grey record of the journal only);
-when there is no way, the owner is told in Telegram that nobody could be written to. Every outcome is written in the feed of the order.
+when there is no way, the owner is told in Telegram that nobody could be written to. An order of the Avito account of a point (the owner
+2026-10-26) goes only to that point: its user who answers for it, its VK or its «Моя точка»; with no way it is left on «Моя точка», never with
+the owner. Every outcome is written in the feed of the order.
 In VK the bot signs it «(бот) ». Nothing here is sent to a client."""
 from __future__ import annotations
 
@@ -67,6 +69,9 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     The owner's login is the panel setting unless one is given."""
     owner_login = owner_login or get_owner_login(conn)
     who = card["responsible"]                                      # whoever answers for the card (the maker unless another is named)
+    own = points.of_account(conn, card.get("id"))
+    if own is not None:                                            # an order of a point's Avito account: only that point (the owner 2026-10-26)
+        return dict(_point_route(conn, own, who), own_point=own["id"])
     if who in _panel_logins(conn, owner_login):
         chat = (connections.get_config(conn, "telegram", 0).get("chat_id") if who == owner_login else user_chats(conn).get(who)) or ""
         if chat:
@@ -80,6 +85,32 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     if point["channel"] != "vk" or not point["vk_peer_id"]:
         return {"channel": "owner", "to": "", "why": "у точки «%s» не привязан ВК" % point["name"]}
     return {"channel": "vk", "to": str(point["vk_peer_id"]), "why": point["name"]}
+
+
+def _point_route(conn, point: dict, who: str) -> dict:
+    """The way to the point of the order's account: a user of that point who answers for it, in their Telegram; else the point's VK or its
+    «Моя точка»; «owner» here only means there is no way (deliver then leaves it on «Моя точка», never with the owner)."""
+    role = users.get_role(conn, who) if who and users.exists(conn, who) else None
+    chat = user_chats(conn).get(who) if role and role["role"] == "point" and role["active"] and role["point_id"] == point["id"] else ""
+    if chat:
+        return {"channel": "telegram", "to": str(chat), "why": who}
+    if points.in_panel(point):
+        return {"channel": "panel", "to": str(point["id"]), "why": point["name"]}
+    if point["channel"] != "vk" or not point["vk_peer_id"]:
+        return {"channel": "owner", "to": "", "why": "у точки «%s» не привязан ВК" % point["name"]}
+    return {"channel": "vk", "to": str(point["vk_peer_id"]), "why": point["name"]}
+
+
+def _leave_on_point(conn, way: dict, card: dict, text: str, now: str, failure: str) -> str:
+    """An alert of a point's account order that could not go: kept on the point's «Моя точка» and in the journal; the owner is not told."""
+    try:
+        points.add_note(conn, way["own_point"], "alert", text, now, card["id"])
+        kept = "оставлено точке на «Моя точка»"
+    except Exception as err:                                       # a busy base: the red record of the journal is what is left
+        conn.rollback()
+        kept = "на «Моя точка» не записано (%s)" % err.__class__.__name__
+    _event(conn, card["id"], now, "Оповещение не отправлено: %s; %s (заказ аккаунта точки: владельцу не пишется)" % (failure, kept))
+    return "не отправлено: %s; %s" % (failure, kept)
 
 
 def _event(conn, card_id, now: str, text: str) -> None:
@@ -125,6 +156,8 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
         except Exception as err:                                   # a busy base: the owner is told, as when nobody can be written to
             conn.rollback()
             failure = "панель → точка «%s»: %s" % (way["why"], err.__class__.__name__)
+    if way.get("own_point") is not None:
+        return _leave_on_point(conn, way, card, text, now, failure)
     told = ""
     key = "owner|%s|%s|%s" % (card["id"], failure, text)
     try:
@@ -209,6 +242,8 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
             continue
         for note in points.unseen_alerts(conn, point["id"], start):
             if order_manager.take_deadline(note["at"], hours, UNSEEN_MINUTES) > moment:
+                continue
+            if points.of_account(conn, note.get("order_id")) is not None:     # an order of a point's account: the point's only (2026-10-26)
                 continue
             text = "Точка «%s» не открыла оповещение%s за %d минут рабочего времени.\n%s" % (
                 point["name"], " по заказу №%d" % note["order_id"] if note.get("order_id") else "", UNSEEN_MINUTES, note.get("text") or "")
