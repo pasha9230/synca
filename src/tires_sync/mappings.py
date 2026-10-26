@@ -107,3 +107,51 @@ def auto_mappings(conn, parsed, ref, now: str, author: str, apply: bool = False)
         else:
             held.append(row)
     return {"accepted": accepted, "held": held}
+
+
+def canonical_model(ref, brand: str, typed: str):
+    """The Avito spelling of a model typed by hand (case, spaces and dashes do not matter)."""
+    wanted = normalize_model(typed)
+    if not wanted:
+        return None
+    for model in sorted(ref.get(brand, frozenset())):
+        if normalize_model(model) == wanted:
+            return model
+    return None
+
+
+OLD_NAME_LIMIT = 100
+HIDDEN_CHARS = re.compile("[\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")   # DEL, C1, invisible and bidi marks
+
+
+def check_old_model_name(ref, brand: str, model: str, typed: str) -> Tuple[str, str, str]:
+    """(Avito brand, Avito model, the name as saved) of a former name, or MappingError; writes nothing."""
+    from .description import CONTROL_CHARS
+    brand = next((name for name in ref if name.casefold() == (brand or "").strip().casefold()), "")
+    if not brand:
+        raise MappingError("Выберите бренд из справочника Авито.")
+    target = canonical_model(ref, brand, model or "")
+    if target is None:
+        raise MappingError("Модели «%s» нет у бренда «%s» в справочнике Авито." % ((model or "").strip(), brand))
+    if CONTROL_CHARS.search(typed or "") or HIDDEN_CHARS.search(typed or ""):
+        raise MappingError("В прежнем названии есть управляющие символы: вставьте текст заново.")
+    text = " ".join((typed or "").split())
+    if len(text) > OLD_NAME_LIMIT:
+        raise MappingError("Прежнее название длиннее %d знаков." % OLD_NAME_LIMIT)
+    return brand, target, text
+
+
+def save_old_model_name(conn, ref, brand: str, model: str, typed: str, now: str, who: str) -> str:
+    """Check and save the former name of an Avito model (empty: remove it); returns what the owner reads. MappingError when refused."""
+    saved = store.load_old_model_names(conn)
+    if not " ".join((typed or "").split()) and (brand, model) in saved:       # a record is cleared even when the reference lost its model
+        store.set_old_model_name(conn, brand, model, "", now, who, commit=False)
+        store.write_audit(conn, now, who, "old_model_name", {"avito_brand": brand, "avito_model": model, "before": saved[(brand, model)], "after": ""})
+        return "Прежнее название убрано: %s %s." % (brand, model)
+    brand, target, text = check_old_model_name(ref, brand, model, typed)
+    before = saved.get((brand, target), "")
+    if before == text:
+        return "Без изменений: %s %s." % (brand, target)
+    store.set_old_model_name(conn, brand, target, text, now, who, commit=False)
+    store.write_audit(conn, now, who, "old_model_name", {"avito_brand": brand, "avito_model": target, "before": before, "after": text})
+    return ("Прежнее название сохранено: %s %s → %s." % (brand, target, text)) if text else ("Прежнее название убрано: %s %s." % (brand, target))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -103,6 +104,12 @@ def _build_parser() -> argparse.ArgumentParser:
     conf.add_argument("--to", required=True)
     conf.add_argument("--reference", required=True)
     conf.add_argument("--db", required=True)
+    om = sub.add_parser("old-model-import", help="прежние названия моделей ({old_model}) из CSV brand,model,former_name; без --apply только показывает")
+    om.add_argument("file")
+    om.add_argument("--db", required=True)
+    om.add_argument("--reference", required=True)
+    om.add_argument("--apply", action="store_true", help="записать одной транзакцией (сделайте копию базы до этого); без него ничего не пишется")
+    om.add_argument("--skip-bad", action="store_true", help="с --apply записать хорошие строки, даже если в файле есть отказы")
     run = sub.add_parser("run-cycle", help="цикл по всем аккаунтам Авито (без отправки на Авито), фид в папке аккаунта")
     run.add_argument("--db", required=True)
     run.add_argument("--unload", required=True)
@@ -315,6 +322,20 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--supplier", type=int, default=1, help="номер поставщика (по умолчанию первый)")
     fetch.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     return parser
+
+
+def _cmd_old_model_import(args) -> int:
+    from . import old_model_import
+    ref = parse_reference(Path(args.reference).read_text(encoding="utf-8"))
+    if not ref:
+        raise ValueError("справочник Авито пуст: %s" % args.reference)
+    conn = store.connect(args.db)
+    try:
+        return old_model_import.run(conn, ref, args.file, args.apply, args.skip_bad, datetime.utcnow().isoformat(timespec="seconds"))   # UTC like the panel
+    except (csv.Error, sqlite3.Error) as err:                       # exit 2 like any error: 1 means a refused row
+        raise ValueError("%s (ничего не записано)" % err)
+    finally:
+        conn.close()
 
 
 def _cmd_dry_run(args) -> int:
@@ -2482,6 +2503,8 @@ def main(argv=None) -> int:
             return _cmd_orders_tick(args)
         if args.command == "webmim-orders-sync":
             return _cmd_webmim_orders_sync(args)
+        if args.command == "old-model-import":
+            return _cmd_old_model_import(args)
         if args.command == "backup":
             return _cmd_backup(args)
         if args.command == "backup-offsite":
