@@ -216,3 +216,20 @@ def test_the_switch_of_the_kind_switches_the_suggestion_and_never_a_typed_sum(tm
     assert run("") == {"failed": None, "supplier": [COST, ""], "client": [SALE, ""], "none": ["", ""], "typed_kept": "9000", "emptied_follows": SALE}
     hint = run("hint")                                                                              # the order window: greyed only, never a value
     assert hint == {"failed": None, "supplier": ["", COST], "client": ["", SALE], "none": ["", ""], "typed_kept": "9000", "emptied_follows": ""}
+
+
+def test_the_supplier_suggestion_is_the_purchase_as_written_not_the_cost_after_the_supplier_terms(tmp_path):
+    """The owner 2026-10-27: a return to the supplier suggests the purchase of the order as written (each position's price × qty, the
+    «Закупка … за N шт» of the window), not `totals.cost` with the supplier's discount; the client's return keeps the sale."""
+    app, client, tok, conn, pid, cid = setup(tmp_path)
+    orders.add_item(conn, cid, goods_id="2", name="Ikon 195/65 R15", brand_key="ikon", season="winter", diameter=15, territory="1", qty=2,
+                    sale_unit=4100, supplier_price=3100, terms={"discount_pct": 5.0, "bonus_pct": 2.0, "monthly_pct": 10.0}, fee_pct=0,
+                    promo_pct=0, now=NOW, author="o")
+    money = orders.totals(orders.list_items(conn, cid))
+    assert money["cost"] != 15670 + 6200                                                            # the discount makes them differ
+    page = client.get("/orders/%d" % cid).get_data(as_text=True)
+    tag = amount_input(finish(page))
+    assert 'data-suggest-supplier="21870"' in tag and 'data-suggest-client="28692"' in tag
+    stage(conn, cid, "return", return_kind="supplier")
+    tag = amount_input(client.get("/orders/%d" % cid).get_data(as_text=True))
+    assert value(tag) == "" and attr(tag, "placeholder") == "21870"
