@@ -38,6 +38,26 @@ def test_a_point_is_found_by_its_name_or_its_street_in_russian_word_forms(text, 
     assert named(text) == expected
 
 
+@pytest.mark.parametrize("text", [
+    "Руставели не подходит, далеко", "Юнона далеко", "Юнона нет", "Я живу на Руставели", "Мы живем в Янино", "я из Янино",
+    "Казакова Мария", "Мария Казакова, телефон ниже", "Есть европейской резины?", "Голландская резина есть?",
+])
+def test_a_point_named_but_not_chosen_and_a_street_word_out_of_place_name_no_point(text):
+    assert named(text) is None
+
+
+def test_a_refusal_after_the_offer_is_never_a_choice():
+    assert named("Юнона или Руставели?", "Руставели не подходит") is None
+    assert named("Руставели не подходит, заберу на Юноне") == "Юнона"
+    assert named("На Руставели, а не на Юноне") == "Руставели"
+
+
+def test_a_street_of_another_shape_counts_after_a_preposition_or_a_street_word():
+    euro = [{"id": 7, "name": "Север", "address": "Кудрово, Европейский пр., 14"}]
+    assert deals.named_point(["Заберу на Европейском"], euro)[0]["id"] == 7
+    assert deals.named_point(["Европейский или азиатский протектор?"], euro) is None
+
+
 def test_the_last_mention_wins_and_a_message_without_a_point_never_clears_it():
     assert named("Хотел на Юноне", "Нет, лучше на Руставели") == "Руставели"
     assert named("Заберу на Руставели", "Спасибо, во сколько можно?") == "Руставели"
@@ -119,7 +139,7 @@ def test_the_point_the_client_named_wins_over_the_points_account(tmp_path):
     users.add_user(conn, "yun", "pass-word-1", NOW, role="point", point_id=pt["yunona"])
     row = chat_of(conn, acc["yunona"], [("in", "Здравствуйте"), ("out", "Забрать можно на Юноне или на Руставели"), ("in", "Мне на Руставели")])
     card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
-    assert card["point_id"] == pt["rustaveli"] and card["responsible"] == "yun"          # the manager of the chat's account answers for it
+    assert card["point_id"] == pt["rustaveli"] and card["responsible"] == "pavel"         # Руставели has no manager: the default (none = who made it)
     assert "Точка из сообщения клиента: «Руставели» («Мне на Руставели»)" in journal(conn, card["id"])
     assert not any("по аккаунту Авито" in t for t in journal(conn, card["id"]))
 
@@ -131,6 +151,21 @@ def test_the_client_naming_the_accounts_own_point_is_the_binding_by_the_account(
     assert card["point_id"] == pt["yunona"] and card["delivery_time"] == "с 12 до 20"
     assert any("по аккаунту Авито" in t for t in journal(conn, card["id"]))
     assert not any(t.startswith("Точка из сообщения клиента") for t in journal(conn, card["id"]))
+
+
+def test_the_manager_of_the_point_the_client_named_answers_on_a_points_account(tmp_path):
+    conn, acc, pt = setup(tmp_path)
+    users.add_user(conn, "yun", "pass-word-1", NOW, role="point", point_id=pt["yunona"])
+    users.add_user(conn, "rus", "pass-word-1", NOW, role="point", point_id=pt["rustaveli"])
+    row = chat_of(conn, acc["yunona"], [("in", "Мне на Руставели")])
+    card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
+    assert card["point_id"] == pt["rustaveli"] and card["responsible"] == "rus"
+
+
+def test_an_order_waiting_for_the_goods_gets_no_delivery_date(tmp_path):
+    conn, acc, pt = setup(tmp_path)
+    row = chat_of(conn, acc["main"], [("in", "Здравствуйте")])
+    assert orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel", delivery=False))["delivery_date"] == ""
 
 
 def test_a_main_account_takes_the_point_from_the_clients_words_only(tmp_path):

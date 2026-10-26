@@ -185,6 +185,11 @@ NOT_A_KEY = {"ул", "улица", "пр", "т", "проспект", "пер", "
 REGION = {"обл", "область", "ло", "р", "н", "рн", "район", "г", "гор", "город", "гп", "пгт", "край", "россия", "рф"}   # a part of the address no client names a point by
 CHANGED_MIND = {"лучше", "удобнее", "точнее", "нет", "теперь", "таки", "передумал", "передумала", "передумали"}
 NEGATION_GAP = {"в", "во", "на", "у", "к", "с", "со"}
+REFUSED_AFTER = {"не", "нет", "далеко", "неудобно", "неудобна", "неудобный", "отпадает"}     # «Руставели не подходит», «Юнона далеко»
+CLAUSE = {"а", "но", "или", "и"}                                                          # «на Руставели, а не на Юноне»: the «не» is of the next one
+LIVES = {"живу", "живем", "живет", "живут", "проживаю", "прописан", "прописана", "работаю"}   # the client's home or work, not a pick-up
+PICK_UP = {"на", "в", "во", "с", "со", "у", "к", "до", "около", "возле", "рядом", "заберу", "забрать", "заберем", "заберет", "приеду",
+           "приедем", "подъеду", "подъедем"}
 
 
 def _words(text) -> List[str]:
@@ -204,44 +209,64 @@ def _forms(word: str) -> set:
     return {word + e for e in ("", "а", "у", "е", "ом", "ым", "ы")}
 
 
-def _keys(point: dict) -> List[tuple]:
-    """The words that name a point: its name and each part of its address with a street or a place in it (not the city, the region,
-    the house). A key is the words of one part, all of them to be found."""
-    parts = [str(point.get("name") or "")] + str(point.get("address") or "").split(",")
-    keys = []
-    for part in parts:
+def _keys(point: dict) -> List[Tuple[tuple, bool]]:
+    """The words that name a point, each with «it is the point's name»: its name and each part of its address with a street or a place in
+    it (not the city, the region, the house). A key is the words of one part, all of them to be found."""
+    parts = [(str(point.get("name") or ""), True)] + [(part, False) for part in str(point.get("address") or "").split(",")]
+    keys = {}
+    for part, is_name in parts:
         words = _words(part)
         if any(w in REGION for w in words):
             continue
         key = tuple(w for w in words if len(w) >= 4 and not w.isdigit() and w not in NOT_A_KEY)
-        if key and key not in keys:
-            keys.append(key)
-    return keys
+        if key:
+            keys[key] = keys.get(key, False) or is_name
+    return list(keys.items())
+
+
+def _refused(words: List[str], at: int) -> bool:
+    """The point at `at` is named but not chosen: «не на Юноне», «Руставели не подходит», «Юнона далеко», «я живу на Руставели», «я из Янино»."""
+    before = words[max(0, at - 2):at]
+    if before[-1:] == ["не"] or (len(before) == 2 and before[0] == "не" and before[1] in NEGATION_GAP):
+        return True
+    after = []
+    for w in words[at + 1:at + 3]:
+        if w in CLAUSE:
+            break
+        after.append(w)
+    if REFUSED_AFTER & set(after):
+        return True
+    near = words[max(0, at - 3):at]
+    return bool(LIVES & set(near)) or any(a in ("я", "мы") and b == "из" for a, b in zip(near, near[1:]))
 
 
 def _mentions(words: List[str], keys: dict) -> List[Tuple[int, int, bool]]:
-    """(position, point id, said with «не»: «не на Юноне») of every point named in the words of one message."""
+    """(position, point id, named but not chosen) of every point named in the words of one message. A street or a place of the address
+    counts only after «на», «в», «заберу» or a street word («Маршала Казакова»): «Казакова Мария» is a client, «европейской резины» a tyre."""
     found = []
-    for key, point_id in keys.items():
+    for key, (point_id, is_name) in keys.items():
         places = [[i for i, w in enumerate(words) if w in _forms(k)] for k in key]
         if not all(places):
             continue
         for at in places[0]:
-            before = words[max(0, at - 2):at]
-            negated = before[-1:] == ["не"] or (len(before) == 2 and before[0] == "не" and before[1] in NEGATION_GAP)
-            found.append((at, point_id, negated))
+            if not is_name and not (at and (words[at - 1] in PICK_UP or words[at - 1] in NOT_A_KEY)):
+                continue
+            found.append((at, point_id, _refused(words, at)))
     return sorted(found)
 
 
 def named_point(texts: List[str], points: List[dict]) -> Optional[Tuple[dict, str]]:
     """The point the client named last in their own messages (`texts`: the newest first), with that message; None when they named none
-    or the last message that names a point is not clear (two points with no «лучше», «точнее», «передумал» between them, or only «не на …»).
+    or the last message that names a point is not clear (two points with no «лучше», «точнее», «передумал» between them, or only a point
+    named and not chosen: «не на …», «… не подходит», «живу на …»).
     A word two points share (a town of both) names neither. Pure: the owner 2026-10-26."""
-    by_key = {}
+    by_key, names = {}, set()
     for point in points:
-        for key in _keys(point):
+        for key, is_name in _keys(point):
             by_key.setdefault(key, set()).add(point["id"])
-    keys = {key: ids.pop() for key, ids in by_key.items() if len(ids) == 1}
+            if is_name:
+                names.add(key)
+    keys = {key: (ids.pop(), key in names) for key, ids in by_key.items() if len(ids) == 1}
     by_id = {p["id"]: p for p in points}
     for text in texts:
         words = _words(text)
@@ -275,8 +300,9 @@ def next_day(now: str) -> str:
     return (date.fromisoformat(now[:10]) + timedelta(days=1)).isoformat()
 
 
-def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None) -> int:
-    """A new deal for a chat. A chat that already has one gets no second: the deal it has is returned."""
+def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None, delivery: bool = True) -> int:
+    """A new deal for a chat. A chat that already has one gets no second: the deal it has is returned. `delivery`: the delivery date is
+    tomorrow (the button «Создать заказ»; not an order that waits for the goods)."""
     chat = chats_store.get_chat(conn, chat_row)
     if chat is None:
         raise OrderError("Такого чата нет.")
@@ -298,9 +324,10 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         named = named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))
         if named and of_account and named[0]["id"] == of_account["id"]:
             named = None                                                                                # the account's point: bound by the account below
+        final = named[0] if named else of_account
         fields = {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito", "comment": comment.strip(), "tags": tags,
-                  "responsible": point_responsible(conn, of_account and of_account["id"]) or orders.default_responsible(conn),
-                  "delivery_date": next_day(now)}
+                  "responsible": (of_account and point_responsible(conn, final["id"])) or orders.default_responsible(conn),   # a point's account: the manager of the order's point
+                  "delivery_date": next_day(now) if delivery else ""}
         if named:
             fields["point_id"] = named[0]["id"]
         card_id = orders.create_card(conn, fields, now, author, require_contact=False)
@@ -566,7 +593,7 @@ def wait_from_chat(conn, chat_row, fields: dict, offers, now: str, author: str) 
     else:
         if not chat["peer_name"]:
             raise OrderError("У чата нет имени клиента: создайте заказ вручную и укажите клиента.")
-        card_id = create_deal(conn, chat_row, now, author)
+        card_id = create_deal(conn, chat_row, now, author, delivery=False)
         card = orders.get_card(conn, card_id)
     same = [w for w in order_wait.list_wants(conn, card_id)
             if all(w[k] == clean[k] for k in SAME_LINE) and w["any_brand"] == bool(clean["any_brand"]) and w["any_size"] == bool(clean["any_size"])]
