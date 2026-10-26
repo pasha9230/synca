@@ -56,6 +56,7 @@ def test_two_points_in_one_message_are_taken_only_when_the_choice_is_clear(text,
 
 def test_an_unclear_last_message_never_falls_back_to_an_older_one():
     assert named("Заберу на Юноне", "Хм, Юнона или Руставели?") is None
+    assert named("Заберу на Юноне", "Ой, нет, не на Юноне") is None
 
 
 def test_a_word_two_points_share_names_no_point():
@@ -123,6 +124,15 @@ def test_the_point_the_client_named_wins_over_the_points_account(tmp_path):
     assert not any("по аккаунту Авито" in t for t in journal(conn, card["id"]))
 
 
+def test_the_client_naming_the_accounts_own_point_is_the_binding_by_the_account(tmp_path):
+    conn, acc, pt = setup(tmp_path)
+    row = chat_of(conn, acc["yunona"], [("in", "Заберу у вас на Юноне")])
+    card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
+    assert card["point_id"] == pt["yunona"] and card["delivery_time"] == "с 12 до 20"
+    assert any("по аккаунту Авито" in t for t in journal(conn, card["id"]))
+    assert not any(t.startswith("Точка из сообщения клиента") for t in journal(conn, card["id"]))
+
+
 def test_a_main_account_takes_the_point_from_the_clients_words_only(tmp_path):
     conn, acc, pt = setup(tmp_path)
     orders.set_default_responsible(conn, "worker2")
@@ -135,7 +145,8 @@ def test_a_main_account_takes_the_point_from_the_clients_words_only(tmp_path):
 
 def test_our_own_messages_never_choose_the_point(tmp_path):
     conn, acc, pt = setup(tmp_path)
-    row = chat_of(conn, acc["main"], [("in", "Здравствуйте, актуально?"), ("out", "Да. Забрать: Юнона, Руставели, Янино")])
+    row = chat_of(conn, acc["main"], [("in", "Здравствуйте, актуально?"), ("out", "Да. Забрать: Юнона, Руставели, Янино"),
+                                      ("out", "Ближе всего вам будет на Юноне")])
     card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
     assert card["point_id"] is None and card["delivery_date"] == "2026-10-27" and card["delivery_time"] == ""
     assert not any("Точка" in t for t in journal(conn, card["id"]))
