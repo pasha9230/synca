@@ -77,13 +77,21 @@
     try { window.localStorage.setItem(KEY + who, JSON.stringify(keys)); } catch (e) { /* private window: this page remembers it itself */ }
   }
 
+  // The question «Клиент забрал?» comes twice: as itself (question-<order>-<stay>) and as its row of the bell (alert-question-<order>-<stay>-0):
+  // one key, so one sound and one notification. Its stay is in the key: the order back at the point is asked anew and rings again.
+  function keyOf(key) { var m = /^alert-(question-\d+-\d+)-\d+$/.exec(String(key)); return m ? m[1] : String(key); }
+  function once(items) {
+    var had = {};
+    return items.filter(function (it) { var k = keyOf(it.key); if (had[k]) return false; had[k] = true; it.key = k; return true; });
+  }
+
   var memory = null;                                      // what this page has seen when the browser keeps nothing
   function check() {
     fetch("/my-point/feed", {credentials: "same-origin", headers: {"Accept": "application/json"}}).then(function (r) {
       if (!r.ok || r.redirected) throw new Error(r.status);                    // an expired login answers with the login page
       return r.json();
     }).then(function (data) {
-      var items = data.items || [], keys = items.map(function (it) { return it.key; });
+      var items = once(data.items || []), keys = items.map(function (it) { return it.key; });
       var who = String(data.who || ""), stored = readSeen(who), seen = stored === undefined ? memory : stored;
       memory = keys;
       writeSeen(who, keys);

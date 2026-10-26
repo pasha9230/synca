@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, session
 
-from .. import order_alerts, order_engine, order_manager as mgr, orders
+from .. import order_alerts, order_engine, order_manager as mgr, order_reserve as reserve, orders, store
 from .common import can, get_conn, login_required, own_point, point_account
 from .routes_orders import from_panel, local_iso
 
@@ -15,7 +16,8 @@ log = logging.getLogger(__name__)
 def grouped(conn, login: str) -> list:
     """The rows of the page, newest first: `order_alerts.page_rows` (one source with the bell, its counter and the dots by the order numbers),
     at the panel's local time, so that old green alerts are left out."""
-    rows = order_alerts.page_rows(conn, login, local_iso())
+    now = local_iso()
+    rows = order_alerts.page_rows(conn, login, now)
     point = own_point()
     if point is None:
         return rows
@@ -29,9 +31,36 @@ def grouped(conn, login: str) -> list:
     chats_of = {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id = ?", (account,))} if account is not None else set()
     foreign = quiet | set(orders.origin_labels(conn, point, ours))     # not the point's own order: the client's texts named only (as in the card)
     rows = [r for r in rows if not is_handoff(r)]                 # «Клиент хочет заказать шины…» is for the staff: the point sees it on «Моя точка»
-    return [order_engine.for_point(r) if r["order_id"] in foreign else r
+    rows = [order_engine.for_point(r) if r["order_id"] in foreign else r
             for r in rows if (r["order_id"] in ours and not (r["order_id"] in quiet and orders.client_words(r))
                               if r["order_id"] is not None else r.get("chat_row") in chats_of)]
+    return sorted(point_rows(conn, point, now) + rows, key=lambda r: r["at"] or "", reverse=True)
+
+
+def point_rows(conn, point_id, now: str) -> list:
+    """The rows of the bell of the point itself (lane 3; the owner 2026-10-26: a point hears of its news in the panel): the open question
+    «Клиент забрал?» of each order there (order_reserve.question_open), until the point answers or its working day ends. Computed, never
+    written: the staff and the other points never get them (grouped adds them for the manager of this point only). The id is the key of the
+    question in /my-point/feed (its stay at the point), so that notify.js rings for the two once. And «возврат отмечен» (green) of an order
+    the point gave back in this stay with no amount yet: it stays «На точке» until the manager fills the amount and moves it to «Возврат»."""
+    found = []
+    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? "
+                                   "AND s.code = 'at_point'", (point_id,)):
+        card = orders.get_card(conn, card_id)
+        back = conn.execute("SELECT id, at FROM order_event WHERE order_id = ? AND kind = 'point' AND text = ? AND at >= ? ORDER BY id DESC LIMIT 1",
+                            (card_id, mgr.RETURN_LINE, card["entered_at"] or "")).fetchone()
+        if back:
+            found.append({"id": "return-%d" % back[0], "order_id": card_id, "at": back[1], "author": "", "kind": "return", "level": "green",
+                          "more": 0, "title": "Заказ № %s: возврат отмечен, ждёт суммы от менеджера" % mgr.label(card),
+                          "text": "Сумму возврата вносит менеджер, после этого заказ уйдёт с точки.", "href": "/my-point"})
+        if not reserve.question_open(conn, card, now):
+            continue
+        stay = re.sub(r"\D", "", card["entered_at"] or "")
+        asked = (store.get_state(conn, reserve.ASK_KEY % (card_id, stay)) or "").split("|", 1)[-1]
+        found.append({"id": "question-%d-%s" % (card_id, stay), "order_id": card_id, "at": asked,
+                      "author": "", "kind": "question", "level": "yellow", "more": 0, "title": "Клиент забрал заказ № %s?" % mgr.label(card),
+                      "text": "Ответьте на «Моей точке»: «Выдан» или «На точке».", "href": "/my-point"})
+    return found
 
 
 def nav_counts(conn, login: str) -> dict:

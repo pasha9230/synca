@@ -296,8 +296,8 @@ def register(app) -> None:
             return jsonify({"who": who, "items": []})
         from .routes_alerts import grouped, href, with_orders
         cards, now = _cards(conn, point_id), local_iso()
-        items = [{"key": "question-%d" % card["id"], "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
-                  "href": "/my-point"} for card in cards if reserve.question_open(conn, card, now)]      # the key lane 3 rings for
+        items = [{"key": "question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
+                  "href": "/my-point"} for card in cards if reserve.question_open(conn, card, now)]      # of the stay: a new stay rings again
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
                    else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "", "href": "/my-point"} for card in cards]
         try:
