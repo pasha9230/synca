@@ -127,7 +127,8 @@ def test_a_line_a_person_answered_and_the_line_of_another_order_are_not_touched(
     conn.commit()
     assert settle(conn, sender, at(61)) == {"sent": 1}
     shown = {line["text"]: (line["status"], line["answer"]) for line in lines(conn)}
-    assert shown["раньше"] == ("answered", "Написал сам") and shown["чужой"] == ("new", "") and shown["своя тревога"] == ("new", "")
+    assert shown["раньше"] == ("answered", "Написал сам") and shown["чужой"] == ("new", "")
+    assert shown["своя тревога"][0] == "answered"     # tails-answers D1: an alert of an earlier try of the same mark asks no copy once it went
 
 
 def test_the_reserve_line_of_a_402_is_closed_when_the_sync_sent_it(tmp_path):

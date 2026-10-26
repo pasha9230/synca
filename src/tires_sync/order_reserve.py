@@ -23,7 +23,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Callable, Optional, Tuple
 
-from . import order_manager, order_templates, orders, store, vk_send
+from . import chats, order_manager, order_templates, orders, store, vk_send
 from .order_points import PANEL
 
 FIRST_HOUR = 9                                   # no alert before 09:00 (Moscow), so that nobody is woken by the hourly tick
@@ -98,9 +98,9 @@ def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now:
     if status != "sent":                                         # хвост З17: «Входящие» get the line and the text to send by hand, as «можно забирать»
         by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."
         said = why if own else "%s. %s" % (why, by_hand)
-        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) VALUES (?,?,?,?,?,'new')",
-                     (token, now, card.get("point_id"), "система", "Заказ №%s: клиенту не отправлено «%s» — %s" % (
-                         card.get("webmim_number") or card["id"], CLIENT_TEMPLATE, said) + (order_manager.COPY_MARK + copy if copy else "")))
+        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) SELECT ?,?,?,?,?,'new' "
+                     + chats.NOT_SENT_MEANWHILE, (token, now, card.get("point_id"), "система", "Заказ №%s: клиенту не отправлено «%s» — %s" % (
+                         card.get("webmim_number") or card["id"], CLIENT_TEMPLATE, said) + (order_manager.COPY_MARK + copy if copy else ""), token))
     conn.commit()
     return status
 

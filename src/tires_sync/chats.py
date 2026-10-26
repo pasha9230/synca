@@ -734,6 +734,12 @@ def _mark(conn, token: str, status: str, error: Optional[str] = None, **more) ->
     conn.commit()
 
 
+NOT_SENT_MEANWHILE = "WHERE NOT EXISTS (SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent')"    # a line about a send is
+# never written once it went (another press delivered it meanwhile): written before, it is answered by that press (tails-answers 2)
+DELIVERED_AGAIN = "Итог: сообщение клиенту дошло (отправлено повторно). Делать ничего не нужно."
+FOUND_AGAIN = "Итог: сообщение клиенту дошло (найдено в чате Авито). Делать ничего не нужно."
+
+
 def _alert_not_sent(conn, chat: dict, token: str, now: str, why: str, text: str, ending: str = "Отправьте вручную.") -> None:
     """The minute's sync could not send it (nobody is on the page): a line of «Входящие» from «система», with the text to copy (as «можно
     забирать» that did not go). Whatever happens to the line, the send is what it is."""
@@ -742,9 +748,9 @@ def _alert_not_sent(conn, chat: dict, token: str, now: str, why: str, text: str,
         card = conn.execute("SELECT point_id, webmim_number FROM order_card WHERE id = ?", (chat["order_id"],)).fetchone() \
             if chat["order_id"] and chat["order_id"] > 0 else None
         where = "Заказ №%s" % (card[1] or chat["order_id"]) if card else "Чат Ч-%d" % chat["id"]
-        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) VALUES (?,?,?,?,?,'new')",
-                     ("send-%s-%s" % (token, re.sub(r"\D", "", now)), now, card[0] if card else None, SYSTEM,
-                      "%s: клиенту не отправлено — %s %s" % (where, why, ending) + (COPY_MARK + text if text else "")))
+        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) SELECT ?,?,?,?,?,'new' "
+                     + NOT_SENT_MEANWHILE, ("send-%s-%s" % (token, re.sub(r"\D", "", now)), now, card[0] if card else None, SYSTEM,
+                      "%s: клиенту не отправлено — %s %s" % (where, why, ending) + (COPY_MARK + text if text else ""), token))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -911,11 +917,13 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
         if row[0] == "lost" and not again:
             raise ChatSendLost(_lost_said(bool(row[3])))
         if row[0] == "lost" and _lost_is_there(conn, client, chat, token, row[6] or row[4], text):    # from the first start (M1)
+            _inbox_close(conn, token, now, FOUND_AGAIN, alerts=True)
             return "found"                                                           # «Отправить снова» of a message that came meanwhile
         resumed = _resume_interrupted(conn, client, chat, token, now, author, "Сообщение", text) if row[0] == "sending" else ""
         if resumed == "sent":
             conn.execute("UPDATE chat_send_log SET text = '' WHERE token = ?", (token,))
             conn.commit()
+            _inbox_close(conn, token, now, FOUND_AGAIN, alerts=True)
             return                                                                   # a send cut off by a killed panel had gone out
         if resumed == "busy":
             raise ChatError("Это сообщение уже отправляется.")
@@ -943,6 +951,8 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
         raise _not_delivered(conn, chat, now, author, "Сообщение", ChatError(
             "Сообщение не отправлено: Авито не отдал данные кабинета (%s). Повторите позже." % why)) from None
     _deliver(conn, client, chat, user_id, token, now, author, 0, text)
+    if claim.rowcount != 1:                                                          # a new press of its mark: the lines about the old one
+        _inbox_close(conn, token, now, DELIVERED_AGAIN, alerts=True)                 # are answered, nobody copies it by hand (tails-answers 2)
 
 
 MAX_IMAGE_BYTES = 15 * 1024 * 1024        # what we accept from the manager
@@ -1019,6 +1029,7 @@ def send_image(conn, client, chat_row, data: bytes, token, now: str, author: str
             raise ChatSendLost(_lost_said(False))
         resumed = _resume_interrupted(conn, client, chat, token, now, author, "Фото", None) if row[0] == "sending" else ""
         if resumed == "sent":
+            _inbox_close(conn, token, now, FOUND_AGAIN, alerts=True)
             return
         if resumed == "busy":
             raise ChatError("Это фото уже отправляется.")
@@ -1048,6 +1059,8 @@ def send_image(conn, client, chat_row, data: bytes, token, now: str, author: str
     conn.execute("UPDATE chat_send_log SET text = ? WHERE token = ?", (str(image_id), token))       # what the sync sends again after a 402
     conn.commit()
     _deliver(conn, client, chat, user_id, token, now, author, 0, str(image_id), photo=True)
+    if claim.rowcount != 1:
+        _inbox_close(conn, token, now, DELIVERED_AGAIN, alerts=True)
 
 
 @contextmanager
@@ -1205,14 +1218,16 @@ def _stopped(conn, chat: dict, token: str) -> str:
 
 
 def _halt(conn, chat: dict, row: dict, status: str, now: str, why: str, head: str) -> str:
-    """A send the sync stopped (_stopped): «failed» with the reason, nothing kept or sent, a record in the order's journal, no «Входящие»
-    (nobody has to write it by hand: the task was skipped, the order closed)."""
+    """A send the sync stopped (_stopped): «failed» with the reason, nothing kept or sent, a record in the order's journal, no new line in
+    «Входящие» (nobody has to write it by hand: the task was skipped, the order closed); the open lines about it («…система повторит сама»,
+    «…проверьте чат») are answered with that (tails-answers 3)."""
     done = conn.execute("UPDATE chat_send_log SET status = 'failed', text = '', next_at = '', error = ? WHERE token = ? AND status = ? AND at = ?",
                         ("остановлено: " + why, row["token"], status, row["at"]))
     conn.commit()
     if done.rowcount != 1:
         return "busy"
     _note_order(conn, chat, now, "%s: %s — система больше не повторяет." % (head, why), "yellow")
+    _inbox_close(conn, row["token"], now, "Итог: система больше не повторяет: %s — писать клиенту не нужно." % why, alerts=True)
     return "stopped"
 
 
@@ -1232,19 +1247,10 @@ def _close_task(conn, token: str, text: str, now: str, how: str) -> None:
 def _inbox_done(conn, token: str, now: str, how: str) -> None:
     """The send of `token` reached the client by the sync (sent again or found in the chat): the open lines of «Входящие» its caller wrote
     about it («…система повторит сама», «…проверьте чат»: order_reserve, order_manager._tell_arrived; their id is the token, or the token and
-    the moment) are answered with the outcome, nobody sends it by hand (tails5). The sync's own alerts (`send-…`) and the lines a person
-    answered are not touched. A failure here never touches the send."""
-    token = str(token or "")
-    if not token:
-        return
-    try:
-        conn.execute("UPDATE manager_message SET status = 'answered', answer = ?, answered_at = ? WHERE sender = ? AND status = 'new' "
-                     "AND (message_id = ? OR substr(message_id, 1, ?) = ?)",
-                     ("Итог: сообщение клиенту дошло (%s). Делать ничего не нужно." % how, now, SYSTEM, token, len(token) + 1, token + "-"))
-        conn.commit()
-    except Exception:      # noqa: BLE001
-        conn.rollback()
-        log.warning("the lines of «Входящие» about the send %s were not closed after the sync delivered it", token)
+    the moment) are answered with the outcome, nobody sends it by hand (tails5); the sync's own alerts (`send-…`) of an earlier try of the
+    same mark too — pressed again after it, the mark is the sync's once more (the review of tails-answers, D1). The lines a person answered
+    are not touched. A failure here never touches the send."""
+    _inbox_close(conn, token, now, "Итог: сообщение клиенту дошло (%s). Делать ничего не нужно." % how, alerts=True)
 
 
 def _inbox_close(conn, token: str, now: str, answer: str, alerts: bool = False) -> None:

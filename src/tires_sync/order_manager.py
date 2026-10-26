@@ -667,11 +667,12 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str)
     try:
         orders.add_event(conn, card_id, now, who, "chat", "Сообщение клиенту не отправлено («%s»): %s" % (ARRIVED_TEMPLATE, why), level="red")
         point = conn.execute("SELECT point_id, webmim_number FROM order_card WHERE id = ?", (card_id,)).fetchone()
-        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) VALUES (?,?,?,?,?,'new')",
+        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) SELECT ?,?,?,?,?,'new' "
+                     + chats.NOT_SENT_MEANWHILE,                  # another «приехал» delivered it meanwhile: no line (tails-answers 2)
                      ("%s-%s" % (token or "arrived-%d" % card_id, re.sub(r"\D", "", now)), now, point[0] if point else None, "система",
                       "Заказ №%s: клиенту не отправлено «можно забирать» — %s" % ((point[1] if point and point[1] else card_id),
                                                                                    "%s. %s" % (why, by_hand) if by_hand else why)
-                      + (COPY_MARK + copy if copy else "")))
+                      + (COPY_MARK + copy if copy else ""), token))
         conn.commit()
     except Exception:
         conn.rollback()
