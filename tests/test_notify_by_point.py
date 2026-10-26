@@ -8,7 +8,7 @@ import urllib.parse
 from cryptography.fernet import Fernet
 
 from http_fakes import ScriptedHttp
-from tires_sync import connections, order_alerts, order_notify, order_points as points, orders, store, users
+from tires_sync import connections, order_alerts, order_manager, order_notify, order_points as points, orders, store, users
 from tires_sync.secretbox import SecretBox
 
 NOW = "2026-10-15T12:00:00"
@@ -149,6 +149,61 @@ def test_a_client_the_point_handed_over_stays_with_the_staff(tmp_path):
     conn.execute("INSERT INTO order_handoff (order_id, message_id, point_id, created_at) VALUES (?, 'h1', ?, ?)", (mine["id"], pid, NOW))
     conn.commit()
     assert order_notify.route(conn, mine) == {"channel": "telegram", "to": "1000", "why": "owner"}
+
+
+def _no_show(conn, box, mine, tg, vk):
+    return order_manager.no_show(conn, mine, "менеджер Гамма", NOW,
+                                 lambda c, text: order_notify.deliver(conn, box, c, text, NOW, tg_http=tg, vk_http=vk))
+
+
+def test_a_no_show_the_point_reports_on_its_own_account_order_goes_to_the_owner_not_back_to_the_point(tmp_path):
+    conn, box = env(tmp_path)                                                 # the owner 2026-10-26: «С клиентом свяжутся» stays true
+    pid = point(conn)
+    mine = card(conn, "owner", pid)
+    chat(conn, POINT_ACCOUNT, mine["id"])
+    tg, vk = ScriptedHttp(TG_OK), ScriptedHttp(VK_OK)
+    outcome, answer = _no_show(conn, box, mine, tg, vk)
+    assert vk.calls == [] and len(tg.calls) == 1 and "Клиент не пришёл" in sent_text(tg.calls[0])
+    assert "отправлено в Telegram (owner)" in outcome and "С клиентом свяжутся" in answer
+    assert points.unseen_alerts(conn, pid, "") == []
+    assert order_notify.route(conn, mine)["channel"] == "vk"                  # the other alerts of the order still go to the point
+
+
+def test_a_no_show_of_a_point_account_order_goes_to_the_partner_who_answers_for_it(tmp_path):
+    conn, box = env(tmp_path)
+    order_notify.set_user_chat(conn, "partner1", "555", NOW, "owner")
+    pid = point(conn, channel="panel")
+    mine = card(conn, "partner1", pid)
+    chat(conn, POINT_ACCOUNT, mine["id"])
+    tg = ScriptedHttp(TG_OK)
+    outcome, _answer = _no_show(conn, box, mine, tg, ScriptedHttp())
+    assert "отправлено в Telegram (partner1)" in outcome and len(tg.calls) == 1 and "555" in tg.calls[0][3].decode("utf-8")
+    assert points.unseen_alerts(conn, pid, "") == []
+
+
+def test_a_no_show_of_a_point_account_order_nobody_in_the_panel_answers_for_goes_to_the_owner(tmp_path):
+    conn, box = env(tmp_path)
+    for responsible, channel in (("chats-robot", "vk"), ("chats-robot", "panel")):
+        pid = point(conn, channel=channel, name="Гамма-" + channel)
+        conn.execute("UPDATE point SET avito_account_id = NULL WHERE id != ?", (pid,))
+        mine = card(conn, responsible, pid)
+        chat(conn, POINT_ACCOUNT, mine["id"], peer=channel)
+        tg, vk = ScriptedHttp(TG_OK), ScriptedHttp(VK_OK)
+        outcome, _answer = _no_show(conn, box, mine, tg, vk)
+        assert vk.calls == [] and len(tg.calls) == 1 and "отправлено в Telegram (owner)" in outcome, outcome
+        assert points.unseen_alerts(conn, pid, "") == []
+
+
+def test_a_no_show_with_nobody_to_tell_goes_to_the_owner_not_to_the_point_page(tmp_path):
+    conn, box = env(tmp_path)
+    users.add_user(conn, "owner2", "пароль-для-владельца-2", NOW, role="owner")
+    pid = point(conn)
+    mine = card(conn, "owner2", pid)                                          # a staff member with no Telegram chat
+    chat(conn, POINT_ACCOUNT, mine["id"])
+    tg, vk = ScriptedHttp(TG_OK), ScriptedHttp(VK_OK)
+    outcome, _answer = _no_show(conn, box, mine, tg, vk)
+    assert vk.calls == [] and "владельцу написано" in outcome
+    assert points.unseen_alerts(conn, pid, "") == []
 
 
 def test_the_safety_net_of_unseen_alerts_skips_the_point_account_orders(tmp_path):

@@ -69,7 +69,7 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     The owner's login is the panel setting unless one is given."""
     owner_login = owner_login or get_owner_login(conn)
     who = card["responsible"]                                      # whoever answers for the card (the maker unless another is named)
-    own = points.of_account(conn, card.get("id"))
+    own = None if card.get("to_staff") else points.of_account(conn, card.get("id"))   # to_staff: order_manager.staff_card
     if own is not None:                                            # an order of a point's Avito account: only that point (the owner 2026-10-26)
         return dict(_point_route(conn, own, who), own_point=own["id"])
     if who in _panel_logins(conn, owner_login):
