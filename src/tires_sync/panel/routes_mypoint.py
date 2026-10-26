@@ -7,8 +7,8 @@ one), never in the template. «Передать клиента» (a POST to the 
 «клиент <телефон> <что нужно>»: an order on «Передано с точки» for the person on duty; nothing goes to the client; the point needs no VK for
 it. «Для точки» shows what the bot did not write to a point in the panel (order_points.notes). /my-point/feed is what notify.js asks every
 half a minute for the sound and the browser's notification: the orders of the point, its notes and the rows of its bell (one source with it).
-The owner 2026-10-26: counters at the top; one list, newest first by the order's last event; the card's text is the VK message «Менеджеру:
-заказ оформлен» (its template, with the client's prices: the point takes the cash; never the purchase); «Возврат» on an order at the point is
+The owner 2026-10-26: counters at the top; one list, newest first by the order's last event that matters to the point (_cards); the card's text is
+the VK message «Менеджеру: заказ оформлен» (its template, with the client's prices: the point takes the cash; never the purchase); «Возврат» on an order at the point is
 the VK «возврат отдал» (order_manager.returned); the question of the last day of the reservation (order_reserve, asked in VK) is answered
 here too: «Выдан» is «выдал», «На точке» is «на точке» (order_reserve.here), one answer whichever comes first."""
 from __future__ import annotations
@@ -41,13 +41,20 @@ def _point_id(conn):
     return known[0] if known else None
 
 
+RAISE = ("(e.kind = 'chat' AND e.text LIKE 'Клиент написал%') OR "      # the client's message in the order's chat (chats.py)
+         "(e.kind = 'reserve' AND e.text LIKE 'Точке «%' AND e.text LIKE '%[резерв:точке:%')")   # the reserve question (order_reserve.ask_point)
+
+
 def _cards(conn, point_id) -> list:
-    """The orders of the point on «placed», «moving» or «at_point», newest first by their last event (the owner 2026-10-26: «приехал на
-    точку» brings an order up): the filter is here, in the query."""
+    """The orders of the point on «placed», «moving» or «at_point», newest first by the last event that matters to the point (the owner
+    2026-10-26): the arrival at the point (the move to «at_point» of this stay), the client's message in the order's chat, the reserve
+    question to the point; the other records of the journal leave an order where it is (else it stands by its creation). The filter is here,
+    in the query."""
     ids = [r[0] for r in conn.execute(
         "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (%s) "
-        "ORDER BY COALESCE((SELECT MAX(e.at) FROM order_event e WHERE e.order_id = c.id), c.created_at) DESC, c.id DESC"
-        % ",".join("?" * len(STAGES)), (point_id,) + STAGES)]
+        "ORDER BY MAX(c.created_at, CASE WHEN s.code = 'at_point' THEN COALESCE(c.entered_at, '') ELSE '' END, "
+        "COALESCE((SELECT MAX(e.at) FROM order_event e WHERE e.order_id = c.id AND (%s)), '')) DESC, c.id DESC"
+        % (",".join("?" * len(STAGES)), RAISE), (point_id,) + STAGES)]
     return [orders.get_card(conn, card_id) for card_id in ids]
 
 
