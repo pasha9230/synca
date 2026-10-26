@@ -727,6 +727,7 @@
     var price = row && row.querySelector("[data-find-price]"), timer = null, asked = "", items = [], active = -1, autoPrice = "";   // the price of this row, not of the page
     var auto = row && row.querySelector("[data-find-auto]");      // the price the list put in the field goes with it: kept as it is, the server prices it again
     function remember() { if (auto) auto.value = autoPrice; }      // by the account of the window when it is saved
+    if (auto && price && auto.value && price.value === auto.value) autoPrice = auto.value;      // a window back with an error, or after «Назад»
     function close() { list.hidden = true; active = -1; }
     function mark() {
       Array.prototype.forEach.call(list.children, function (li, i) { li.setAttribute("aria-selected", i === active ? "true" : "false"); });

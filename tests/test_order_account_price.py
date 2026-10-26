@@ -234,3 +234,15 @@ def test_a_mirror_account_is_priced_by_the_calculation_not_by_a_stored_row(tmp_p
     post(client, "/chats/%d/create-deal" % chat, tok)
     card_id = conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
     assert prices(conn, card_id) == [("100", feed_price(conn, other, "100"))]
+
+
+def test_a_window_back_with_an_error_keeps_the_mark_of_the_listed_price(tmp_path, monkeypatch):
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    main, other = accounts(conn)
+    r = post(client, "/orders/new", tok, client_name="Анна", item_goods_id=["100", "999"], item_query=["", ""], item_qty=["4", "1"],
+             item_sale_unit=["4860", ""], item_sale_auto=["4860", ""])                                     # 999 is not in the unload
+    assert r.status_code == 200 and '<input type="hidden" name="item_sale_auto" value="4860">' in r.get_data(as_text=True)
+    card_id = created(post(client, "/orders/new", tok, client_name="Вера"))
+    r = post(client, "/orders/%d/save" % card_id, tok, client_phone="12", goods_id="100", query="Autograph Snow 3 · 205/55 R16", qty="4",
+             sale_unit="4860", sale_auto="4860")
+    assert 'name="sale_auto" data-find-auto value="4860"' in r.get_data(as_text=True)
