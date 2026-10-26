@@ -89,7 +89,7 @@ def test_a_refused_row_stops_the_whole_apply(paths, capsys):
 
 
 @pytest.mark.parametrize("bad", ["Nobody,Autograph Ice 9,X", "Ikon Tyres,Autograph Snow 3," + "x" * 101,
-                                 "Ikon Tyres,Autograph Snow 3,bad​name"])
+                                 "Ikon Tyres,Autograph Snow 3,bad\u200bname"])
 def test_every_kind_of_refusal_blocks(paths, bad):
     _, db, _ = paths
     assert run(paths, GOOD + [bad], "--apply") == 1
@@ -142,7 +142,8 @@ def test_the_same_model_twice_in_the_file_is_refused(paths):
     assert names(db) == {}
 
 
-@pytest.mark.parametrize("header", ["brand,model", "марка,модель,старое", ""])
+@pytest.mark.parametrize("header", ["brand,model", "марка,модель,старое", "", "brand,model,former_name,Brand",
+                                    "brand;model;former_name"])
 def test_a_file_without_the_columns_is_an_error(paths, header, capsys):
     _, db, _ = paths
     assert run(paths, GOOD, "--apply", header=header) == 2
@@ -178,4 +179,33 @@ def test_a_failure_in_the_middle_of_the_apply_leaves_nothing(paths, monkeypatch)
 def test_skip_bad_without_apply_still_writes_nothing(paths):
     _, db, _ = paths
     assert run(paths, GOOD + ["Ikon Tyres,No Such Model,X"], "--skip-bad") == 1
+    assert names(db) == {} and journal(db) == []
+
+
+def test_header_case_and_spaces_do_not_matter_and_a_quoted_comma_stays(paths):
+    _, db, _ = paths
+    assert run(paths, ['Ikon Tyres,Autograph Ice 9,"Nokian, Hakkapeliitta 9"'], "--apply", header=" Brand ,MODEL,Former_Name") == 0
+    assert names(db) == {("Ikon Tyres", "Autograph Ice 9"): "Nokian, Hakkapeliitta 9"}
+
+
+def test_a_file_not_in_utf8_is_an_error(paths):
+    tmp, db, ref = paths
+    csv_file = tmp / "names.csv"
+    csv_file.write_bytes("brand,model,former_name\nIkon Tyres,Autograph Ice 9,Нокиан\n".encode("cp1251"))
+    assert main(["old-model-import", str(csv_file), "--db", str(db), "--reference", str(ref), "--apply"]) == 2
+    assert names(db) == {}
+
+
+def test_a_broken_csv_or_base_is_an_error_not_a_refusal(paths, monkeypatch):
+    import sqlite3
+    _, db, _ = paths
+    assert run(paths, ["Ikon Tyres,Autograph Ice 9," + "x" * 200000], "--apply") == 2           # longer than the csv field limit
+    real = store.write_audit
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "write_audit", locked)
+    assert run(paths, GOOD, "--apply") == 2
+    monkeypatch.setattr(store, "write_audit", real)
     assert names(db) == {} and journal(db) == []

@@ -26,13 +26,16 @@ class _OneTransaction:
 
 
 def read_rows(path):
-    """[(line number, brand, model, former name)]; ValueError when the header lacks a column."""
+    """[(line number, brand, model, former name)]; ValueError when the header lacks a column or has it twice."""
     with open(Path(path), encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         header = [(name or "").strip().casefold() for name in (reader.fieldnames or [])]
         missing = [c for c in COLUMNS if c not in header]
         if missing:
-            raise ValueError("в первой строке файла нет колонок: %s (нужны %s)" % (", ".join(missing), ",".join(COLUMNS)))
+            raise ValueError("в первой строке файла нет колонок: %s (нужны %s, через запятую)" % (", ".join(missing), ",".join(COLUMNS)))
+        twice = [c for c in COLUMNS if header.count(c) > 1]
+        if twice:
+            raise ValueError("колонка в первой строке файла повторяется: %s" % ", ".join(twice))
         reader.fieldnames = header
         return [(reader.line_num, row.get("brand") or "", row.get("model") or "", row.get("former_name") or "") for row in reader]
 

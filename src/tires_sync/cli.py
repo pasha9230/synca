@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -331,6 +332,8 @@ def _cmd_old_model_import(args) -> int:
     conn = store.connect(args.db)
     try:
         return old_model_import.run(conn, ref, args.file, args.apply, args.skip_bad, datetime.utcnow().isoformat(timespec="seconds"))   # UTC like the panel
+    except (csv.Error, sqlite3.Error) as err:                       # exit 2 like any error: 1 means a refused row
+        raise ValueError("%s (ничего не записано)" % err)
     finally:
         conn.close()
 

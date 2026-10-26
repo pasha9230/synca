@@ -121,7 +121,7 @@ def canonical_model(ref, brand: str, typed: str):
 
 
 OLD_NAME_LIMIT = 100
-HIDDEN_CHARS = re.compile("[\x7f-\x9f​-‏‪-‮⁠-⁤⁦-⁩﻿]")   # DEL, C1, invisible and bidi marks
+HIDDEN_CHARS = re.compile("[\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")   # DEL, C1, invisible and bidi marks
 
 
 def check_old_model_name(ref, brand: str, model: str, typed: str) -> Tuple[str, str, str]:
