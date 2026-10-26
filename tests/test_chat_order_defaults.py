@@ -166,6 +166,10 @@ def test_an_order_waiting_for_the_goods_gets_no_delivery_date(tmp_path):
     conn, acc, pt = setup(tmp_path)
     row = chat_of(conn, acc["main"], [("in", "Здравствуйте")])
     assert orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel", delivery=False))["delivery_date"] == ""
+    other = chat_of(conn, acc["main"], [("in", "Жду Ikon 205/55 R16")], chat_id="c2")
+    form = {"brand": "Ikon Tyres", "width": "205", "profile": "55", "radius": "16", "season": "winter", "qty": "4", "any_brand": "1"}
+    card_id, _added, _moved = deals.wait_from_chat(conn, other, form, [], NOW, "pavel")       # «Клиент ждёт эту шину»
+    assert orders.get_card(conn, card_id)["delivery_date"] == ""
 
 
 def test_a_main_account_takes_the_point_from_the_clients_words_only(tmp_path):
