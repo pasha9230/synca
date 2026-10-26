@@ -729,7 +729,8 @@ def test_a_move_the_order_lacks_data_for_is_refused_out_loud_and_the_deal_block_
     stage = {s["code"]: s["id"] for s in orders.list_stages(conn)}
     orders.add_item(conn, cid, goods_id="1", name="Nokian 205/55 R16", brand_key="nokian", season="winter", diameter=16, territory="1",
                     qty=4, sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=NOW, author="o")
-    orders.update_card(conn, cid, {"client_name": "Алексей", "client_phone": "+79990001122", "cancel_reason": "Не заказ"}, NOW, "o")
+    orders.update_card(conn, cid, {"client_name": "Алексей", "client_phone": "+79990001122", "cancel_reason": "Не заказ",
+                                   "delivery_date": ""}, NOW, "o")     # a chat's order comes with tomorrow (the owner 2026-10-26): №226 had none
     orders.move_card(conn, cid, stage["cancel"], NOW, "o", fire_rules=False)
     page = client.get("/chats/%d" % ivan["id"]).get_data(as_text=True)
     assert "не хватает: <b>точка, дата доставки</b>" in page and 'href="/orders/%d">Заполнить в заказе' % cid in page and "дата не указана" in page

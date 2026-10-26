@@ -217,6 +217,7 @@ def test_an_order_without_a_chat_opens_the_window_to_copy_and_explains(tmp_path)
 
 def test_a_message_lacking_values_does_not_open_the_window_and_says_what_it_lacks(tmp_path):
     app, client, tok, conn, tanya, card_id = _ready(tmp_path, SENT, body="Доставка {delivery_date}")
+    orders.update_card(conn, card_id, {"delivery_date": ""}, NOW, "o")        # a chat's order comes with tomorrow (the owner 2026-10-26)
     _move_in_card(client, tok, card_id, conn)
     task = _task(conn, card_id)
     assert task["status"] == "error"
