@@ -44,11 +44,28 @@ class CycleReport:
     titles_held: int = 0                                         # the supplier renamed this many tires at once: their titles are kept (guard)
 
 
-def _final_id(code: str, id_map, id_suffix: str, reissued) -> str:
+def _final_id(code: str, id_map, id_suffix: str, reissued, acct=None) -> str:
     """The Id the ad of this position has in the feed (the same rules as the last loop of build_ads)."""
     base = (id_map or {}).get(code) or code + id_suffix
     stamp = (reissued or {}).get(code)
-    return "%s_%s" % (base, stamp) if stamp and not base.endswith("_" + stamp) else base
+    return "%s_%s" % (base, stamp) if stamp and not base.endswith("_" + stamp) and _takes_mark(base, code, acct) else base
+
+
+REISSUE_MARK = re.compile(r"_r\d{8}(?!\d)")                          # a renewal mark (`_r20261020`)
+
+
+def _takes_mark(ad_id: str, code: str, acct=None) -> bool:
+    """Whether the renewal of `code` marks this Id. An Id it took over from another position (same_tire, a binding to an older ad) that already
+    carries a mark stays as it is in the cabinet: `106_r…` never becomes `106_r…_r…` (tails2 report, 2026-10-25). Its own Id is marked as before."""
+    if re.sub(r"-x\d+$", "", ad_id.split("_")[0]) == code:
+        return True
+    if ALIAS_ID.match(ad_id) and acct is not None:
+        from .mirror_feed import alias_id
+        if ad_id.startswith(alias_id(acct, code)):
+            return True
+    elif ALIAS_ID.match(ad_id):
+        return True                                                       # no account to tell: an alias counts as its own, as before
+    return not REISSUE_MARK.search(ad_id)
 
 
 ALIAS_ID = re.compile(r"k[0-9a-z]{11}(-x\d+)?(_r\d{8})?$")                         # an Id of the alias scheme: nothing to take a code from, already final
@@ -93,7 +110,7 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     reissued = mirror_feed.reissued_own(conn, acct)
 
     def live_id_of(code):                                                 # the Id the code has (or would have) in this account's cabinet
-        return _final_id(code, id_map, suffix, reissued)                  # a renewed one with its mark (`_r<stamp>`), as build_ads writes it
+        return _final_id(code, id_map, suffix, reissued, acct)            # a renewed one with its mark (`_r<stamp>`), as build_ads writes it
 
     def first_seen_of(ad_id):
         row = conn.execute("SELECT MIN(first_seen) FROM avito_ad WHERE account_id = ? AND ad_id = ?", (acct, ad_id)).fetchone()
@@ -104,7 +121,7 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
             bound = mirror_feed.adopted_maps(conn, other["id"])[0]
             other_suffix = "" if other["id"] == connections.PRIMARY_ACCOUNT else "_a%d" % other["id"]
             other_reissued = mirror_feed.reissued_own(conn, other["id"])
-            foreign |= {_final_id(code, bound, other_suffix, other_reissued) for code in store.load_published(conn, other["id"])}
+            foreign |= {_final_id(code, bound, other_suffix, other_reissued, other["id"]) for code in store.load_published(conn, other["id"])}
     from . import tire_match
     cross = (tire_match.for_feed(conn, parsed.offers, acct, now, getattr(parsed, "unavailable", ()))
              if (tire_match.switch_on(conn) if cross_supplier is None else cross_supplier) else None)
@@ -305,8 +322,9 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             node.text = id_map[code] + "-x4"                   # a set of four in an account with the alias scheme: the Id of its single ad + -x4
         elif id_suffix and not (node.text.endswith(id_suffix) or (id_suffix + "_") in node.text):
             node.text = node.text + id_suffix                  # the Id of this account: the same position never has the same Id in two accounts
-        stamp = reissued.get(code)
-        if stamp and not node.text.endswith("_" + stamp):
+        owner = owner_of.get(id(ad)) or code                 # the position behind the ad: a saved ad may carry the Id it took over
+        stamp = reissued.get(owner)
+        if stamp and not node.text.endswith("_" + stamp) and _takes_mark(node.text, owner, acct):
             node.text = "%s_%s" % (node.text, stamp)        # renewed on purpose (mirror-reissue): Avito does not take back an ad deleted in the cabinet
         if live_titles and live_titles.get(node.text) and ad.find("Title") is not None:
             before = _name_before(basis.get(node.text), names[id(ad)][0]) if id(ad) in names else None
@@ -438,7 +456,7 @@ def run_cycle(
                 if d.action in (Action.PUBLISH, Action.UPDATE, Action.REMOVE, Action.HOLD) or twin_sync or back:
                     item = _pending_item(d, ev, rendered, rendered4)
                     if d.action is Action.REMOVE:
-                        item["ad_id"] = _final_id(d.goods_id, id_map, id_suffix, mirror_feed.reissued_own(conn, acct))   # the Id the ad has on Avito
+                        item["ad_id"] = _final_id(d.goods_id, id_map, id_suffix, mirror_feed.reissued_own(conn, acct), acct)   # the Id the ad has on Avito
                     if back and not twin_sync:
                         item["back_only"] = True          # it only stops waiting: its set of four stays as it is
                     pending.append(item)

@@ -340,3 +340,85 @@ def test_a_new_lot_takes_the_renewed_id_with_its_mark_in_a_second_account_too(tm
     assert ids(tmp_path, conn, second) == ["101_a2", "106_a2_r20261020"]
     assert mirror_feed.adopted_maps(conn, second)[0]["125"] == "106_a2_r20261020"
     assert ids(tmp_path, conn, first) == ["101", "106"]                                      # the first account: its own Id, no mark
+
+
+def test_a_renewed_lot_that_takes_the_renewed_id_of_another_lot_gets_no_second_mark(tmp_path):
+    """tails2 report: 125 has its own mark (`125_r20261021`) and takes the Id of 106 (`106_r20261020`): that Id as it stands in the cabinet,
+    never `106_r20261020_r20261021` (an Id Avito has never seen: a new ad, a repeat of the live one, blocked)."""
+    conn, account = setup(tmp_path)
+    run(conn, tmp_path, lots_and_another(8, 4))
+    mirror_feed.reissue_own(conn, account, ["106"], "20261020", NOW, "o")
+    mirror_feed.reissue_own(conn, account, ["125"], "20261021", NOW, "o")
+    run(conn, tmp_path, lots_and_another(8, 4), day=15)
+    assert ids(tmp_path, conn, account) == ["101", "106_r20261020"]
+    for day in (16, 17):
+        run(conn, tmp_path, lots_and_another(0, 50), day=day)
+        assert ids(tmp_path, conn, account) == ["101", "106_r20261020"]                       # 125 under the Id of 106, one mark
+    assert set(store.load_published(conn, account)) == {"101", "125"}
+
+
+def test_a_renewed_lot_marks_a_plain_inherited_id_as_before(tmp_path):
+    """Only 125 renewed and its inherited Id `106` has no mark: marked as before (`ids-heal --renew` of an inherited Id deleted in the cabinet
+    gives it a new Id); `_final_id` says the same."""
+    from tires_sync.sync import _final_id
+    conn, account = setup(tmp_path)
+    run(conn, tmp_path, lots_and_another(8, 4))
+    mirror_feed.reissue_own(conn, account, ["125"], "20261021", NOW, "o")
+    for day in (16, 17):
+        run(conn, tmp_path, lots_and_another(0, 50), day=day)
+        assert ids(tmp_path, conn, account) == ["101", "106_r20261021"]
+    assert _final_id("125", mirror_feed.adopted_maps(conn, account)[0], "", mirror_feed.reissued_own(conn, account), account) == "106_r20261021"
+
+
+def test_no_second_mark_on_an_inherited_id_in_a_second_account_either(tmp_path):
+    conn, first = setup(tmp_path)
+    second = connections.create_account(conn, "Второй", NOW, "o")
+    connections.set_live(conn, second, True, NOW, "o")
+    conn.commit()
+    run(conn, tmp_path, lots_and_another(8, 4))
+    mirror_feed.reissue_own(conn, second, ["106"], "20261020", NOW, "o")
+    mirror_feed.reissue_own(conn, second, ["125"], "20261021", NOW, "o")
+    run(conn, tmp_path, lots_and_another(8, 4), day=15)
+    for day in (16, 17):
+        run(conn, tmp_path, lots_and_another(0, 50), day=day)
+        assert ids(tmp_path, conn, second) == ["101_a2", "106_a2_r20261020"]
+    assert ids(tmp_path, conn, first) == ["101", "106"]
+
+
+def test_the_id_of_a_position_is_the_one_the_feed_writes():
+    """`_final_id` (what the hourly pass hands over and removes) and `build_ads` agree: the mark only on the position's own Id."""
+    from tires_sync.sync import _final_id
+    renewed = {"125": "r20261021", "106": "r20261020"}
+    assert _final_id("125", {}, "", renewed) == "125_r20261021"
+    assert _final_id("125", {}, "_a2", renewed) == "125_a2_r20261021"
+    assert _final_id("125", {"125": "106_r20261020"}, "", renewed) == "106_r20261020"            # inherited: as it is
+    assert _final_id("125", {"125": "106_a2"}, "_a2", renewed) == "106_a2_r20261021"             # not marked yet: as before
+    assert _final_id("125", {"125": "106_a2_r20261020"}, "_a2", renewed) == "106_a2_r20261020"
+    assert _final_id("125", {"125": "125_r20261014"}, "", renewed) == "125_r20261014_r20261021"   # its own Id renewed twice: as before
+    assert _final_id("125", {"125": "125_a2"}, "_a2", renewed) == "125_a2_r20261021"            # bound to its own code: its own Id
+    assert _final_id("106", {"106": "106_r20261020"}, "", renewed) == "106_r20261020"
+
+
+def test_an_inherited_alias_with_a_mark_gets_no_second_one():
+    """An account with the alias scheme: 125 took the alias of 106 (`k…_r20261020`); its own renewal does not mark it again. Its own alias does."""
+    from tires_sync.sync import _final_id
+    own, other = mirror_feed.alias_id(3, "125"), mirror_feed.alias_id(3, "106")
+    renewed = {"125": "r20261021"}
+    assert _final_id("125", {"125": other + "_r20261020"}, "_a3", renewed, 3) == other + "_r20261020"
+    assert _final_id("125", {"125": own}, "_a3", renewed, 3) == own + "_r20261021"
+    assert _final_id("125", {"125": own + "_r20261014"}, "_a3", renewed, 3) == own + "_r20261014_r20261021"     # its own, renewed twice
+
+
+def test_the_mirror_new_positions_never_mark_a_renewed_id_twice(tmp_path):
+    """`apply_reissued_own` (the new positions of a mirror account, after build_ads): an Id that already has a mark, its own one written by
+    build_ads or a renewed Id taken over, stays; a plain own Id is marked as before."""
+    conn, account = setup(tmp_path)
+    mirror_feed.reissue_own(conn, account, ["106", "300"], "20261027", NOW, "o")
+
+    def ad(ad_id):
+        node = ET.Element("Ad")
+        ET.SubElement(node, "Id").text = ad_id
+        return node
+    ads = [ad("106_r20261020"), ad("106_a2_r20261027"), ad("300"), ad("300-x4")]
+    mirror_feed.apply_reissued_own(conn, account, ads)
+    assert [a.findtext("Id") for a in ads] == ["106_r20261020", "106_a2_r20261027", "300_r20261027", "300-x4_r20261027"]

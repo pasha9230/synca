@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-25",
+  "version": "2026-10-27",
   "about": "Rules of the check of a feed before it is published (docs/feed-check-rules.md). level: critical stops the publication of that account's feed (the published one stays), warning is only reported, off does not apply. Modes: generated = our own feed, mirror = a file of another owner carried over.",
   "params": {"title_limit": 70, "shrink_warning_fraction": 0.3},
   "rules": {
@@ -8,6 +8,7 @@
     "required_fields":   {"generated": "critical", "mirror": "warning",  "text": "Не заполнено обязательное поле или значение вне допустимых (validate_ad)"},
     "empty_feed":        {"generated": "critical", "mirror": "critical", "text": "В фиде нет ни одного объявления"},
     "duplicate_id":      {"generated": "critical", "mirror": "critical", "text": "Один Id встречается в фиде дважды"},
+    "double_reissue_mark":{"generated": "warning",  "mirror": "warning",  "text": "В Id две метки переиздания _r…_r…: если это не переиздание дважды нарочно, такого Id нет в кабинете и Авито примет объявление за повторное размещение"},
     "duplicate_position":{"generated": "critical", "mirror": "warning",  "text": "Одна и та же позиция (код и комплектность) встречается в фиде дважды"},
     "cross_account_id":  {"generated": "critical", "mirror": "critical", "text": "Id совпадает с Id в фиде другого аккаунта"},
     "stock":             {"generated": "critical", "mirror": "critical", "text": "Позиции нет у поставщика или остаток меньше порога аккаунта"},
