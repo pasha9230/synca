@@ -123,3 +123,23 @@ def test_a_number_after_a_non_breaking_space_a_hash_or_n_is_left_out_cleanly(tmp
     reserve.check(conn, at(10), notify, deliver, vk)
     say(conn, "на точке", deliver, at(11), reply=cid)
     assert [(c, t) for c, t, _ in deliver.sent] == [(chat, "Заказ и и до 18.10.2026.")]
+
+
+def test_without_an_automatic_client_message_the_manager_is_still_asked_for_the_number_once(tmp_path):
+    conn, cid, _chat, _deliver_, vk, notify = ready(tmp_path)                    # the owner 2026-10-26: no sender of the client's messages
+    for hour in (9, 10, 12, 18):
+        reserve.check(conn, at(hour), notify, None, vk)
+    assert asks(notify) == [(cid, ASK_NUMBER % cid)]
+    assert vk.sent == []                                                          # the client side as before: the point is not asked
+    assert not any("[резерв:клиенту:" in e["text"] for e in orders.list_events(conn, cid))
+
+
+def test_without_avito_keys_the_number_is_asked_once_and_the_client_side_is_as_before(tmp_path):
+    import tires_sync.chats as chats
+    conn, cid, _chat, _ok, vk, notify = ready(tmp_path)
+    deliver = _deliver(conn, chats.ChatError("У аккаунта не заданы ключи Авито."))
+    reserve.check(conn, at(10), notify, deliver, vk)
+    say(conn, "на точке", deliver, at(11), reply=cid)
+    reserve.check(conn, at(12), notify, deliver, vk)
+    assert asks(notify) == [(cid, ASK_NUMBER % cid)] and deliver.sent == []
+    assert any("не заданы ключи" in e["text"] for e in orders.list_events(conn, cid))
