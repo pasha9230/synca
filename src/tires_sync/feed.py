@@ -94,6 +94,8 @@ _STUDS = re.compile(r"(?<!\S)[Шш]\.?(?!\S)")
 _ORIGIN = re.compile(r"(?<!\S)(KOREA|CN|CHINA|VIETNAM|THAILAND|INDONESIA|JAPAN|TURKEY|RUSSIA|ITALY|GERMANY|FRANCE|SPAIN|FINLAND|SERBIA|POLAND|HUNGARY|ROMANIA|TAIWAN|INDIA|MALAYSIA|USA)\.?(?!\S)\s*$")
 IN_STOCK = "в наличии"
 AGE_NOTE = re.compile(r"(?<!\S)старше\s+\d+(?:-?(?:х|ти|и|ми|ех))?\s+лет(?!\S)", re.I)   # «старше 3-х лет», «старше 5-ти лет» (supplier's age note)
+_AGE_PHRASE = re.compile(r"\(?старше\s+\d+(?:-?(?:х|ти|и|ми|ех))?\s+лет\)?[.,;!]*", re.I)   # the phrase in a form that is not the note:
+# «(старше 5-ти лет)», «старше 5-ти лет.» stay supplier's text (owner's narrow list), but a cut takes them off as one
 AGE_WORD = re.compile(r"(?<!\S)старше(?!\S)", re.I)                  # what a cut of the note leaves in a title: «… (BMW) старше в наличии»
 _PAIR_SEPARATORS = ":-–—"
 _PAIR_EDGE = "()[]«»\"'!?.,;"                                        # punctuation around a word, not part of its meaning
@@ -157,6 +159,9 @@ def compose_title(name: str, country: str = "", limit: int = TITLE_LIMIT, tail: 
                 break
     floor = max([3] + [i + 1 for i, word in enumerate(words) if re.fullmatch(r"R\d{2}", word)][:1])   # a pair never takes the size
     while words and not fits() and len(words) > 3:
+        if len(words) - 3 >= floor and _AGE_PHRASE.fullmatch(" ".join(words[-3:])):
+            del words[-3:]                                             # never «… (BMW) старше в наличии»
+            continue
         gone = words.pop()
         for _ in range(2):                                             # never half a pair: «… Шипы: нет» loses both words, not «нет»
             if len(words) <= floor or not _glued(words[-1], gone):     # (a pair is at most «key», «separator», «value»)
