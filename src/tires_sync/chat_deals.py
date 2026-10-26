@@ -225,7 +225,8 @@ def _keys(point: dict) -> List[Tuple[tuple, bool]]:
 
 
 def _refused(words: List[str], at: int) -> bool:
-    """The point at `at` is named but not chosen: «не на Юноне», «Руставели не подходит», «Юнона далеко», «я живу на Руставели», «я из Янино»."""
+    """The point at `at` is named but not chosen: «не на Юноне», «Руставели не подходит», «Юнона далеко», «я живу на Руставели», «я на Шоссейной живу»,
+    «я из Янино», «я с Кудрово», «сам из Янино»."""
     before = words[max(0, at - 2):at]
     if before[-1:] == ["не"] or (len(before) == 2 and before[0] == "не" and before[1] in NEGATION_GAP):
         return True
@@ -234,10 +235,10 @@ def _refused(words: List[str], at: int) -> bool:
         if w in CLAUSE:
             break
         after.append(w)
-    if REFUSED_AFTER & set(after):
+    if (REFUSED_AFTER | LIVES) & set(after):
         return True
     near = words[max(0, at - 3):at]
-    return bool(LIVES & set(near)) or any(a in ("я", "мы") and b == "из" for a, b in zip(near, near[1:]))
+    return bool(LIVES & set(near)) or any(a in ("я", "мы", "сам", "сама", "сами") and b in ("из", "с", "со") for a, b in zip(near, near[1:]))
 
 
 def _mentions(words: List[str], keys: dict) -> List[Tuple[int, int, bool]]:
