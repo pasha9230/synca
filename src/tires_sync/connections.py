@@ -82,6 +82,8 @@ def create_account(conn, name: str, now: str, author: str) -> int:
         (name, secrets.token_hex(16), now),
     )
     account_id = cur.lastrowid
+    if account_id == PRIMARY_ACCOUNT:                                     # own tire photos: on for the primary account, the others opt in
+        conn.execute("UPDATE account SET own_photos = 1 WHERE id = ?", (account_id,))
     store.write_audit(conn, now, author, "account_created", {"account_id": account_id, "name": name})
     return account_id
 
@@ -245,6 +247,17 @@ def set_account_pricing(conn, account_id: int, delta, min_stock, now: str, autho
         raise ValueError("Порог остатка: целое число от 1 до 1000 или пусто (общий).")
     conn.execute("UPDATE account SET price_delta = ?, min_stock = ? WHERE id = ?", (float(delta), min_stock, account_id))
     store.write_audit(conn, now, author, "account_pricing", {"account_id": account_id, "delta": float(delta), "min_stock": min_stock})
+
+
+def account_own_photos(conn, account_id: int) -> bool:
+    """Whether this account's feed gets our own tire photos (owner's choice per account)."""
+    row = conn.execute("SELECT own_photos FROM account WHERE id = ?", (account_id,)).fetchone()
+    return bool(row and row[0])
+
+
+def set_account_own_photos(conn, account_id: int, on: bool, now: str, author: str) -> None:
+    conn.execute("UPDATE account SET own_photos = ? WHERE id = ?", (int(bool(on)), account_id))
+    store.write_audit(conn, now, author, "account_own_photos", {"account_id": account_id, "on": bool(on)})
 
 
 def _clean_brand(text: str) -> str:

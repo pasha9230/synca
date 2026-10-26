@@ -64,6 +64,8 @@ def audit_text(entry: dict) -> str:
         return "Созданы начальные настройки"
     if action == "account_pricing":
         return "Изменены цены и остатки аккаунта %s" % d.get("account_id", "?")
+    if action == "account_own_photos":
+        return "Свои фото шин в аккаунте %s %s" % (d.get("account_id", "?"), "включены" if d.get("on") else "выключены")
     if action == "secret_set":
         return "Сохранён секрет: %s" % d.get("name", "?")
     if action == "sale_added":

@@ -302,7 +302,7 @@ def register(app) -> None:
                 feed_url="%sfeed/%s/avito_feed.xml" % (request.url_root, account["feed_token"]),
                 secrets=connections.secret_status(conn, box, "avito", account_id),
                 check=connections.get_check(conn, "avito", account_id), form=build_form(conn, account_id),
-                pricing=connections.get_account_pricing(conn, account_id), exclude_types=connections.get_excluded_types(conn, account_id),
+                pricing=connections.get_account_pricing(conn, account_id), own_photos=connections.account_own_photos(conn, account_id), exclude_types=connections.get_excluded_types(conn, account_id),
                 contact_name=connections.get_contact_name(conn, account_id),
                 brand_delta_text="\n".join("%s: %s" % (k, ("%g" % v)) for k, v in sorted(connections.get_brand_deltas(conn, account_id).items())),
                 title_template=connections.get_title_template(conn, account_id), photo_base=connections.get_photo_base(conn, account_id),
@@ -639,6 +639,16 @@ def register(app) -> None:
             flash("Цены и остатки аккаунта сохранены. Применятся при ближайшем цикле.")
         except ValueError as err:
             flash(str(err) if "Поправка" in str(err) or "Порог" in str(err) else "Введите числа: поправка в процентных пунктах, порог целым числом.")
+        return redirect("/connections/avito/%d" % account_id)
+
+    @app.route("/connections/accounts/<int:account_id>/own-photos", methods=["POST"])
+    @login_required
+    def connections_account_own_photos(account_id):
+        _account_or_404(account_id)
+        on = request.form.get("on") == "1"
+        connections.set_account_own_photos(get_conn(), account_id, on, now_iso(), author())
+        get_conn().commit()
+        flash("Свои фото шин в этом аккаунте %s. Применится при ближайшем цикле." % ("включены" if on else "выключены"))
         return redirect("/connections/avito/%d" % account_id)
 
     @app.route("/connections/accounts/<int:account_id>/stock", methods=["POST"])

@@ -240,7 +240,7 @@ def register(app) -> None:
     @agent_required
     def agent_copies_todo():
         conn = get_conn()
-        accounts = connections.list_feed_accounts(conn)
+        accounts = [a for a in connections.list_feed_accounts(conn) if connections.account_own_photos(conn, a["id"])]   # no files for an account without own photos
         settings = active_settings(conn)
         effective = {a["id"]: connections.effective_settings(conn, a["id"], settings) for a in accounts}
         have = {tuple(r) for r in conn.execute("SELECT account_id, source_photo_id, kind, variant FROM account_photo")}
@@ -295,7 +295,7 @@ def register(app) -> None:
             abort(400)
         if kind not in COPY_KINDS or len(variant) > 200:
             abort(400)
-        if account_id not in {a["id"] for a in connections.list_feed_accounts(conn)}:
+        if account_id not in {a["id"] for a in connections.list_feed_accounts(conn)} or not connections.account_own_photos(conn, account_id):
             abort(400)
         if kind == "copy" and account_id == connections.PRIMARY_ACCOUNT:
             abort(400)

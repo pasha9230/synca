@@ -194,6 +194,7 @@ def test_copies_todo_lists_missing_only(tmp_path):
     app, conn, client, auth = setup(tmp_path)
     key = add_set(app, conn)
     second = connections.create_account(conn, "Второй", NOW, "o")
+    connections.set_account_own_photos(conn, second, True, NOW, "o")       # chosen for own photos (owner, 2026-10-27)
     conn.commit()
     pid = approve(conn, app, key, "three_quarter", (5, 5, 5))
     todo = client.get("/api/photo-copies/todo", headers=auth).get_json()

@@ -439,11 +439,12 @@ def _account_link(conn, base: str, account_id: int, source_id: int, kind: str, v
 
 
 def own_photos_for(conn, account_id: int, base: str) -> Optional[OwnPhotos]:
-    """The account's own library links, or None when the switch `own_photos` is off or the account has no photo address.
+    """The account's own library links, or None when the switch `own_photos` is off, the account is not chosen for own photos
+    or has no photo address.
     A set counts only when the owner sent it to the feed, with both frames approved and this account's files ready:
     originals for the primary account, `copy` for the rest."""
     from . import connections, store
-    if store.get_state(conn, "own_photos") != "1" or not base:
+    if store.get_state(conn, "own_photos") != "1" or not base or not connections.account_own_photos(conn, account_id):
         return None
     by_set: Dict[str, List[str]] = {}
     cards: Dict[str, str] = {}

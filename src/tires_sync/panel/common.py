@@ -256,7 +256,7 @@ for _section, _endpoints in {
               "history", "history_rollback", "connections_page", "connections_add_account", "connections_account_brand_pricing",
               "connections_account_check", "account_contact_name", "account_exclude_types", "connections_account_keys",
               "connections_account_live", "account_modes", "account_phone", "account_phone_source", "connections_account_photo_base",
-              "connections_account_photo_style", "connections_account_pricing", "connections_account_stock", "connections_account_title", "connections_avito_page",
+              "connections_account_own_photos", "connections_account_photo_style", "connections_account_pricing", "connections_account_stock", "connections_account_title", "connections_avito_page",
               "connections_account_page", "connections_add_supplier", "connections_excluded_brand", "connections_excluded_brands_bulk",
               "connections_excluded_size", "connections_telegram_page", "connections_telegram", "connections_telegram_test",
               "connections_telegram_user_chat", "connections_tochki_page", "connections_tochki", "connections_tochki_check",
