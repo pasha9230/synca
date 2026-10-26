@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS sale (
     diameter INTEGER NOT NULL, name TEXT NOT NULL, ad_kind TEXT NOT NULL, pieces INTEGER NOT NULL, price_total REAL NOT NULL,
     sale_total REAL NOT NULL, cost_total REAL NOT NULL, bonus_total REAL NOT NULL, monthly_total REAL NOT NULL, fee_total REAL NOT NULL,
     promo_total REAL NOT NULL, margin_total REAL NOT NULL, account_id INTEGER, point TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
-    source TEXT NOT NULL DEFAULT 'manual', created TEXT NOT NULL, author TEXT NOT NULL, reversed_at TEXT, reversed_by TEXT);
+    source TEXT NOT NULL DEFAULT 'manual', created TEXT NOT NULL, author TEXT NOT NULL, reversed_at TEXT, reversed_by TEXT, point_id INTEGER);
 CREATE INDEX IF NOT EXISTS sale_day ON sale (day);
 CREATE TABLE IF NOT EXISTS order_rate (
     name TEXT NOT NULL, valid_from TEXT NOT NULL, value REAL NOT NULL, created TEXT NOT NULL, author TEXT NOT NULL,
@@ -447,6 +447,24 @@ def _rebuild_with_account(conn, table: str, columns: str) -> None:
             raise
 
 
+def _add_sale_point_id(conn) -> None:
+    """2026-10-26: the sale is tied to its point by the id (a renamed point keeps its money in one line). Once, in one transaction: the column
+    and its filling from the point with exactly the name written in the sale; the name stays as it was (history). A point named so later is
+    never tied backwards: the filling runs only with the column's birth."""
+    if "point_id" in {row[1] for row in conn.execute("PRAGMA table_info(sale)")}:
+        return
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if "point_id" not in {row[1] for row in conn.execute("PRAGMA table_info(sale)")}:      # another process may have done it meanwhile
+            conn.execute("ALTER TABLE sale ADD COLUMN point_id INTEGER")
+            conn.execute("UPDATE sale SET point_id = (SELECT p.id FROM point p WHERE p.name = sale.point) WHERE point != ''")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def _migrate(conn) -> None:
     _rebuild_with_account(conn, "published_state", "goods_id, price, base_price, point, location, first_hold, snapshot")
     _rebuild_with_account(conn, "suppressed", "goods_id")
@@ -497,6 +515,7 @@ def _migrate(conn) -> None:
     for column in ("address", "hours", "map_url"):                     # what the client is told on the arrival (order_templates)
         _add_column(conn, "point", column, "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "point", "avito_account_id", "INTEGER")          # the Avito account of the point: its manager sees its chats (none: no chat)
+    _add_sale_point_id(conn)
     for column, ddl in (("car_brand", "TEXT NOT NULL DEFAULT ''"), ("car_model", "TEXT NOT NULL DEFAULT ''"), ("car_year", "INTEGER")):
         _add_column(conn, "client", column, ddl)                       # the client's car, typed by hand (CRM, the owner 2026-10-23)
     if not conn.execute("SELECT 1 FROM order_alert_start").fetchone():                      # once: the journal written before the alerts counts as seen

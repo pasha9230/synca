@@ -415,29 +415,28 @@ def _position_setup(tmp_path, monkeypatch, item_args):
     conn.execute("INSERT INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (?, 222, 'G7-x4', 't', ?)", (account, NOW))
     conn.commit()
     monkeypatch.setattr(routes_chats, "context", lambda app_: (None, object(), object(), object()))
-    monkeypatch.setattr(routes_chats, "_effective", lambda c, s: s)
     monkeypatch.setattr(order_offers, "item_args", item_args)
     ivan = next(c for c in chats.list_chats(conn) if c["peer_name"] == "Иван")
-    return client, tok, conn, ivan
+    return client, tok, conn, ivan, account
 
 
 def test_the_create_deal_button_adds_the_position_of_the_ad_of_the_chat(tmp_path, monkeypatch):
     seen = []
 
-    def item_args(conn_, settings, parsed, ref, goods_id, day):
-        seen.append(goods_id)
+    def item_args(conn_, settings, parsed, ref, goods_id, day, account_id=None):
+        seen.append((goods_id, account_id))
         return dict(goods_id=goods_id, code="T7", name="Шина", brand_key="ikon", season="winter", diameter=15, territory="1", sale_unit=5750,
                     supplier_price=4800, terms=None, fee_pct=0, promo_pct=0)
-    client, tok, conn, ivan = _position_setup(tmp_path, monkeypatch, item_args)
+    client, tok, conn, ivan, account = _position_setup(tmp_path, monkeypatch, item_args)
     post(client, "/chats/%d/create-deal" % ivan["id"], tok)
     deal = orders.get_card(conn, chats.get_chat(conn, ivan["id"])["order_id"])
-    assert seen == ["G7"] and [(i["code"], i["qty"]) for i in deal["items"]] == [("T7", 4)]
+    assert seen == [("G7", account)] and [(i["code"], i["qty"]) for i in deal["items"]] == [("T7", 4)]
 
 
 def test_the_create_deal_button_still_makes_the_deal_when_the_position_cannot_be_priced(tmp_path, monkeypatch):
     def item_args(*a):
         raise RuntimeError("broken unload")
-    client, tok, conn, ivan = _position_setup(tmp_path, monkeypatch, item_args)
+    client, tok, conn, ivan, _account = _position_setup(tmp_path, monkeypatch, item_args)
     post(client, "/chats/%d/create-deal" % ivan["id"], tok)
     deal = orders.get_card(conn, chats.get_chat(conn, ivan["id"])["order_id"])
     assert deal["items"] == []
@@ -446,7 +445,7 @@ def test_the_create_deal_button_still_makes_the_deal_when_the_position_cannot_be
 
 def test_the_create_deal_button_says_so_when_the_unload_cannot_be_read(tmp_path, monkeypatch):
     from tires_sync.panel import routes_chats
-    client, tok, conn, ivan = _position_setup(tmp_path, monkeypatch, lambda *a: {})
+    client, tok, conn, ivan, _account = _position_setup(tmp_path, monkeypatch, lambda *a: {})
 
     def broken(app_):
         raise RuntimeError("no unload")

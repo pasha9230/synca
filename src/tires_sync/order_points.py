@@ -44,6 +44,35 @@ def point_by_account(conn, account_id) -> Optional[dict]:
     return _row(rows[0]) if len(rows) == 1 else None
 
 
+POINT_ACCOUNTS = "SELECT avito_account_id FROM point WHERE avito_account_id IS NOT NULL GROUP BY avito_account_id HAVING COUNT(*) = 1"
+ACCOUNT_ORDERS = ("SELECT s.order_id FROM (SELECT order_id, account_id FROM avito_chat WHERE order_id > 0 UNION ALL "
+                  "SELECT order_id, account_id FROM avito_call WHERE order_id > 0) s "
+                  "JOIN order_card c ON c.id = s.order_id JOIN point p ON p.id = c.point_id "
+                  "LEFT JOIN (" + POINT_ACCOUNTS + ") u ON u.avito_account_id = s.account_id %s "
+                  "GROUP BY s.order_id HAVING SUM(u.avito_account_id IS NULL OR s.account_id != p.avito_account_id) = 0 "
+                  "AND NOT EXISTS (SELECT 1 FROM order_handoff h WHERE h.order_id = s.order_id)")
+
+
+def account_orders(conn) -> set:
+    """The orders of the Avito accounts of the points (the owner 2026-10-26: their alerts go only to the point): every chat and call of the
+    order is of the account of its own point (order_card.point_id; an account of one point only), so the point told is the point whose bell
+    shows it. Any other order is as before and never lost for the staff: a chat or a call of an account of no point or of another point, no
+    point, no chat nor call, or a client the point handed over to the staff (order_handoff: the point asks them)."""
+    return {r[0] for r in conn.execute(ACCOUNT_ORDERS % "")}
+
+
+def account_chats(conn) -> set:
+    """The chats of the Avito accounts of the points."""
+    return {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id IN (" + POINT_ACCOUNTS + ")")}
+
+
+def of_account(conn, order_id) -> Optional[dict]:
+    """The point of an order of a point's Avito account (account_orders); None for any other order."""
+    if not order_id or not conn.execute(ACCOUNT_ORDERS % "WHERE s.order_id = ?", (order_id,)).fetchone():
+        return None
+    return get_point(conn, conn.execute("SELECT point_id FROM order_card WHERE id = ?", (order_id,)).fetchone()[0])
+
+
 def _single(value, limit: int, label: str) -> str:
     text = " ".join(str(value or "").split())
     if len(text) > limit:

@@ -89,7 +89,7 @@
       if (!form.dataset.sent || form.querySelector("[data-item-new]")) return;  // «Новый заказ» stays blocked: one more press would be one more order
       delete form.dataset.sent;
       form.querySelectorAll("button").forEach(function (b) { b.removeAttribute("aria-busy"); });
-      form.querySelectorAll("[data-find-code], [data-find-text], [data-find-price]").forEach(function (f) { f.value = ""; });   // the row went with it: not twice
+      form.querySelectorAll("[data-find-code], [data-find-text], [data-find-price], [data-find-auto]").forEach(function (f) { f.value = ""; });   // the row went with it: not twice
     });
   });
 
@@ -725,6 +725,9 @@
   document.querySelectorAll("[data-item-find]").forEach(function (wrap) {
     var input = wrap.querySelector("[data-find-text]"), code = wrap.querySelector("[data-find-code]"), list = wrap.querySelector(".suggest"), row = wrap.closest("[data-item-row]");
     var price = row && row.querySelector("[data-find-price]"), timer = null, asked = "", items = [], active = -1, autoPrice = "";   // the price of this row, not of the page
+    var auto = row && row.querySelector("[data-find-auto]");      // the price the list put in the field goes with it: kept as it is, the server prices it again
+    function remember() { if (auto) auto.value = autoPrice; }      // by the account of the window when it is saved
+    if (auto && price && auto.value && price.value === auto.value) autoPrice = auto.value;      // a window back with an error, or after «Назад»
     function close() { list.hidden = true; active = -1; }
     function mark() {
       Array.prototype.forEach.call(list.children, function (li, i) { li.setAttribute("aria-selected", i === active ? "true" : "false"); });
@@ -739,11 +742,11 @@
       if (it.point) {                                               // the price is the manager's: none in the panel, and not the one an earlier pick brought
         input.value = asked = it.name; code.value = it.goods_id;
         if (price && autoPrice && price.value === autoPrice) price.value = "";
-        autoPrice = ""; close(); if (price) price.focus(); return;
+        autoPrice = ""; remember(); close(); if (price) price.focus(); return;
       }
       input.value = asked = it.name + " · " + it.size; code.value = it.goods_id;
       if (price && it.price != null && (price.value === "" || price.value === autoPrice)) { price.value = autoPrice = String(Math.round(it.price)); }
-      close();
+      remember(); close();
       if (price) price.focus();
     }
     function show(found) {
@@ -764,12 +767,22 @@
       });
       list.hidden = false;
     }
+    function address(q, kind) {                                     // the account of the window prices the list (the order, the chat; a new
+      var url = wrap.getAttribute("data-item-find"), form = wrap.closest("form"), more = "";     // window: its «Чат Авито» or its point)
+      if (url.indexOf("?") < 0 && form) {
+        ["avito_chat", "point_id"].forEach(function (name) {
+          var f = form.querySelector('[name="' + name + '"]');
+          if (f && f.value.trim()) more += "&" + name + "=" + encodeURIComponent(f.value.trim());
+        });
+      }
+      return url + (url.indexOf("?") < 0 ? "?" : "&") + "q=" + encodeURIComponent(q) + (kind ? "&deal=" + kind : "") + more;
+    }
     function ask() {
-      var q = input.value.replace(/·/g, " ").trim(), kind = deal(), key = kind ? q + "|" + kind : q;
+      var q = input.value.replace(/·/g, " ").trim(), kind = deal(), key = address(q, kind);     // another point or chat asks again
       if (q.length < 2) { close(); return; }
       if (key === asked) { list.hidden = false; return; }
       asked = key;
-      fetch(wrap.getAttribute("data-item-find") + "?q=" + encodeURIComponent(q) + (kind ? "&deal=" + kind : ""), {credentials: "same-origin"})
+      fetch(key, {credentials: "same-origin"})
         .then(function (r) { if (!r.ok || r.redirected) throw new Error("find"); return r.json(); })
         .then(function (res) { if (asked === key && input.value.replace(/·/g, " ").trim() === q) show(res.items || []); })
         .catch(function () {                         // say it instead of an empty list: the manager would think there is nothing
@@ -782,7 +795,7 @@
     input.addEventListener("input", function () {
       code.value = "";                                              // the text changed: the chosen position and the price it brought are no longer meant
       if (price && autoPrice && price.value === autoPrice) price.value = "";
-      autoPrice = "";
+      autoPrice = ""; remember();
       clearTimeout(timer); timer = setTimeout(ask, 250); });
     input.addEventListener("focus", function () { if (input.value.trim().length >= 2) ask(); });
     input.addEventListener("blur", function () { setTimeout(close, 150); });
@@ -858,6 +871,7 @@
   document.querySelectorAll("[data-item-new]").forEach(function (row) {
     var form = row.closest("form"), list = form.querySelector("[data-item-list]"), total = form.querySelector("[data-item-total]");
     var text = row.querySelector("[data-find-text]"), code = row.querySelector("[data-find-code]"), qty = row.querySelector("[data-find-qty]"), price = row.querySelector("[data-find-price]");
+    var auto = row.querySelector("[data-find-auto]");
     function recount() {
       var lines = list.querySelectorAll("[data-item-line]"), sum = 0, open = 0;
       Array.prototype.forEach.call(lines, function (line) {
@@ -888,7 +902,7 @@
       name.textContent = t || c;
       if (c === "point") { var tag = document.createElement("div"), badge = document.createElement("span"); badge.className = "badge badge--neutral"; badge.textContent = "с точки · нет в выгрузке"; tag.appendChild(badge); name.appendChild(tag); }
       else if (c) { var mono = document.createElement("div"); mono.className = "mono owin-code"; mono.textContent = c; name.appendChild(mono); }
-      hidden(name, "item_goods_id", c); hidden(name, "item_query", t); hidden(name, "item_qty", n); hidden(name, "item_sale_unit", p);
+      hidden(name, "item_goods_id", c); hidden(name, "item_query", t); hidden(name, "item_qty", n); hidden(name, "item_sale_unit", p); hidden(name, "item_sale_auto", auto ? auto.value : "");
       many.textContent = n + " шт × " + (p ? rub(unit) : "цена из панели");
       sum.setAttribute("data-sum", p ? String(Math.round(unit * +n * 100) / 100) : "");
       sum.textContent = p ? rub(Math.round(unit * +n * 100) / 100) : "—";

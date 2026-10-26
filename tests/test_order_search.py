@@ -80,7 +80,7 @@ def test_the_price_is_that_of_the_catalog_and_the_text_adds_the_only_match(tmp_p
     post(client, "/orders/%d/items/add" % cid, tok, query="ICE ZERO", qty="1")                    # exact and the only one, any case
     assert orders.get_card(conn, cid)["items"][2]["goods_id"] == "103"
     html = client.get("/orders/%d?tab=items" % cid).get_data(as_text=True)
-    assert 'data-item-find="/orders/items/find"' in html
+    assert 'data-item-find="/orders/items/find?order=%d"' % cid in html                       # the list is priced by the account of the order
 
 
 def test_a_text_is_added_only_when_exact_and_alone(tmp_path, monkeypatch):

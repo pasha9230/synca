@@ -16,7 +16,8 @@ from . import economics, store
 AD_KINDS = ("single", "set4")
 SEASONS = ("winter", "summer", "all")
 COLUMNS = ("id, day, goods_id, brand_key, season, diameter, name, ad_kind, pieces, price_total, sale_total, cost_total, bonus_total, "
-           "monthly_total, fee_total, promo_total, margin_total, account_id, point, note, source, created, author, reversed_at, reversed_by")
+           "monthly_total, fee_total, promo_total, margin_total, account_id, point, note, source, created, author, reversed_at, reversed_by, point_id")
+POINT_NAME = "COALESCE(p.name, s.point)"            # the point's name now, else the name written in the sale (sale s LEFT JOIN point p)
 FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 
@@ -35,7 +36,9 @@ def _check_day(value: str, today: Optional[str]) -> str:
 def add_sale(conn, *, day: str, goods_id: str, brand_key: str, season: str, diameter: int, name: str, ad_kind: str, pieces: int,
              sale_total: float, supplier_price: float, terms: Optional[dict], fee_pct: float, promo_pct: float,
              account_id: Optional[int], point: str, note: str, now: str, author: str, today: Optional[str] = None,
-             source: str = "manual") -> int:
+             source: str = "manual", point_id: Optional[int] = None) -> int:
+    """`point` is the name at the time of the sale (kept as it was); `point_id` ties the sale to the point. Without it, the point with
+    exactly that name, if any (a manual sale names its point by hand)."""
     day = _check_day(day, today)
     if not str(goods_id).strip() or not str(brand_key).strip():
         raise ValueError("Не указана позиция.")
@@ -55,13 +58,16 @@ def add_sale(conn, *, day: str, goods_id: str, brand_key: str, season: str, diam
     note = str(note or "").strip()
     if len(point) > 60 or len(note) > 200:
         raise ValueError("Точка не длиннее 60 знаков, заметка не длиннее 200.")
+    if point_id is None and point:
+        found = conn.execute("SELECT id FROM point WHERE name = ?", (point,)).fetchone()
+        point_id = found[0] if found else None
     money = economics.unit(float(supplier_price), float(sale_total) / pieces, terms, fee_pct, promo_pct, pieces)
     cur = conn.execute(
         "INSERT INTO sale (day, goods_id, brand_key, season, diameter, name, ad_kind, pieces, price_total, sale_total, cost_total, bonus_total,"
-        " monthly_total, fee_total, promo_total, margin_total, account_id, point, note, source, created, author)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " monthly_total, fee_total, promo_total, margin_total, account_id, point, note, source, created, author, point_id)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (day, str(goods_id), brand_key, season, int(diameter), name, ad_kind, pieces, money["price"], round(float(sale_total), 2), money["cost"],
-         money["bonus"], money["monthly"], money["fee"], money["promo"], money["margin"], account_id, point, note, source, now, author))
+         money["bonus"], money["monthly"], money["fee"], money["promo"], money["margin"], account_id, point, note, source, now, author, point_id))
     conn.commit()
     store.write_audit(conn, now, author, "sale_added", {"id": cur.lastrowid, "goods_id": str(goods_id), "pieces": pieces, "day": day})
     return int(cur.lastrowid)
@@ -84,18 +90,20 @@ def reverse_sale(conn, sale_id: int, now: str, author: str, from_order: bool = F
 
 def list_sales(conn, start: str = "", end: str = "", brand: str = "", account_id: Optional[int] = None, point: str = "",
                include_reversed: bool = False) -> List[dict]:
+    """`point` of a row is the point's name now (the id ties it), else the name written in the sale (no id, or the point is gone)."""
+    names = [c.strip() for c in COLUMNS.split(",")]
     where, args = [], []
     if not include_reversed:
-        where.append("reversed_at IS NULL")
-    for clause, value in (("day >= ?", start), ("day <= ?", end), ("brand_key = ?", brand), ("point = ?", point)):
+        where.append("s.reversed_at IS NULL")
+    for clause, value in (("s.day >= ?", start), ("s.day <= ?", end), ("s.brand_key = ?", brand), (POINT_NAME + " = ?", point)):
         if value:
             where.append(clause)
             args.append(value)
     if account_id is not None:
-        where.append("account_id = ?")
+        where.append("s.account_id = ?")
         args.append(account_id)
-    query = "SELECT %s FROM sale %s ORDER BY day DESC, id DESC" % (COLUMNS, ("WHERE " + " AND ".join(where)) if where else "")
-    names = [c.strip() for c in COLUMNS.split(",")]
+    query = "SELECT %s FROM sale s LEFT JOIN point p ON p.id = s.point_id %s ORDER BY s.day DESC, s.id DESC" % (
+        ", ".join(POINT_NAME if n == "point" else "s." + n for n in names), ("WHERE " + " AND ".join(where)) if where else "")
     return [dict(zip(names, r)) for r in conn.execute(query, args)]
 
 

@@ -155,7 +155,7 @@ def test_a_position_is_found_and_added_to_the_order_from_the_chat(tmp_path):
     tanya, ivan = chat_of(conn, "Татьяна"), chat_of(conn, "Иван")
     page = client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)
     deal = page.split('class="card chats-deal"')[1]
-    assert 'data-item-find="/orders/items/find"' in deal and 'action="/chats/%d/items/add"' % tanya["id"] in deal and "Добавить в заказ" in deal
+    assert 'data-item-find="/orders/items/find?chat=%d"' % tanya["id"] in deal and 'action="/chats/%d/items/add"' % tanya["id"] in deal and "Добавить в заказ" in deal
     found = client.get("/orders/items/find?q=205/55").get_json()["items"]
     assert found
     before = len(orders.get_card(conn, tanya["order_id"])["items"])

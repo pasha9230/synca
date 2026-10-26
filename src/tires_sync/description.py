@@ -14,8 +14,9 @@ MAX_LENGTH = 6000
 
 ALLOWED = (
     "title", "title_ru", "brand", "brand_ru", "brand_full", "model", "size", "size_slash", "indexes", "season",
-    "code", "country", "price", "search", "stock", "old_model",
+    "code", "country", "price", "search", "stock", "old_model", "new_only",
 )
+NEW_ONLY = "{new_only}"     # a line marker, not a value: the line is left out for a position with the supplier's age note (owner, 2026-10-26)
 
 DEFAULT_TEMPLATE = """🔥 {title}
 
@@ -56,9 +57,12 @@ PLACEHOLDER_HELP = {
     "stock": "остаток у поставщика, штук (в объявление количество не передаётся, только в текст)",
     "old_model": "прежнее название модели с брендом, например Nokian Hakkapeliitta 9 у Ikon Autograph Ice 9 (задаётся в «Сопоставлениях»); "
                  "если не задано, строка с этой подстановкой не выводится",
+    "new_only": "метка строки, сама не печатается: строка выводится, только если в названии у поставщика нет пометки о возрасте "
+                "(«старше 3-х лет», «старше 5-ти лет»); например, в конце строки «Все позиции новые: 2025-2026 года производства»",
 }
 
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+_NEW_ONLY_MARK = re.compile(r"[ \t]*\{new_only\}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
@@ -104,9 +108,15 @@ def validate_template(template: str) -> List[str]:
 
 def render_description(template: str, c: Candidate, price: int, old_models=None) -> str:
     """`old_models`: (Avito brand, Avito model) -> the former name (store.load_old_model_names); without it {old_model} is empty."""
+    from .feed import AGE_NOTE                          # feed imports this module: the supplier's age note, read here when rendering
     data = values(c, price, (old_models or {}).get((c.avito_brand, c.avito_model), ""))
+    aged = bool(AGE_NOTE.search(c.offer.name_orig or "") or AGE_NOTE.search(c.offer.name or ""))
     lines: List[str] = []
     for line in template.splitlines():
+        if NEW_ONLY in line:
+            if aged:
+                continue                                # the tires are older: no line that claims this year's production
+            line = _NEW_ONLY_MARK.sub("", line)         # with the spaces before it: «…производства {new_only}» renders as before
         names = [n for n in _PLACEHOLDER.findall(line) if n in data]
         if names and any(not data[n] for n in names):
             continue
