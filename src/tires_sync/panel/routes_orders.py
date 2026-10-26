@@ -95,13 +95,13 @@ def _price_text(value) -> str:
 def _new_rows(form) -> list:
     """The positions of the window of a new order, one per row: the code chosen in the list, the text, pieces and the price for one
     (empty = the panel's). A row without a code and without a text is the empty field of the window: skipped."""
-    names = ("item_goods_id", "item_query", "item_qty", "item_sale_unit")
+    names = ("item_goods_id", "item_query", "item_qty", "item_sale_unit", "item_sale_auto")
     lists = [form.getlist(name) for name in names]
     rows = []
     for i in range(max(len(values) for values in lists)):
-        code, text, qty, price = (values[i].strip() if i < len(values) else "" for values in lists)
+        code, text, qty, price, auto = (values[i].strip() if i < len(values) else "" for values in lists)
         if code or text:
-            rows.append({"goods_id": code, "query": text, "name": text, "qty": qty or "1", "sale_unit": price})
+            rows.append({"goods_id": code, "query": text, "name": text, "qty": qty or "1", "sale_unit": price, "sale_auto": auto})
     return rows
 
 
@@ -344,14 +344,15 @@ def register(app) -> None:
             raise orders.OrderError("По «%s» нашлось позиций: %d. Выберите нужную в списке под полем.%s" % (text[:80], count, hint))
         raise orders.OrderError("По «%s» не нашлось ни кода позиции, ни модели с остатком.%s" % (text[:80], hint))
 
-    def row_item(conn, code, text, sale_unit, stock=False, account_id=None):
+    def row_item(conn, code, text, sale_unit, stock=False, account_id=None, sale_auto=""):
         """(keyword arguments of orders.add_item without qty, name found by the text) for a row of «Позиции»: a position of the unload, or a tyre of the
-        point (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's."""
+        point (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's; the price the list or the catalog
+        put in the field and nobody changed (`sale_auto`, the same text) is the panel's: priced now by the account of the window."""
         if code == orders.POINT_GOODS:
             return order_offers.point_item_args(conn, text, sale_unit), ""
         goods_id, by_text = typed_goods(conn, code, text, stock)
         args = offer_item(conn, goods_id, account_id)
-        if str(sale_unit or "").strip():
+        if str(sale_unit or "").strip() and str(sale_unit).strip() != str(sale_auto or "").strip():
             args["sale_unit"] = sale_unit
         return args, by_text
 
@@ -508,7 +509,8 @@ def register(app) -> None:
         if goods_id:                                                      # «Оформить заказ» from the catalog: the position is already in the window
             try:
                 args = offer_item(conn, goods_id)
-                rows.append({"goods_id": args["goods_id"], "query": args["name"], "name": args["name"], "qty": "1", "sale_unit": _price_text(args["sale_unit"])})
+                shown = _price_text(args["sale_unit"])                     # the main account's: priced again by the window's account if kept
+                rows.append({"goods_id": args["goods_id"], "query": args["name"], "name": args["name"], "qty": "1", "sale_unit": shown, "sale_auto": shown})
             except orders.OrderError as err:
                 flash(str(err), "error")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
@@ -525,14 +527,15 @@ def register(app) -> None:
         rows = _new_rows(request.form)
         goods_id = request.form.get("goods_id", "").strip()
         if goods_id:                                                      # the older form of the catalog: one position, one piece, the panel's price
-            rows.insert(0, {"goods_id": goods_id, "query": "", "name": "", "qty": "1", "sale_unit": ""})
+            rows.insert(0, {"goods_id": goods_id, "query": "", "name": "", "qty": "1", "sale_unit": "", "sale_auto": ""})
         found = []
         try:
             if len(rows) > MAX_NEW_ROWS:
                 raise orders.OrderError("В новом заказе не больше %d позиций: остальные добавьте в карточке." % MAX_NEW_ROWS)
             items, account = [], window_account(conn, fields) if rows else None
             for row in rows:                                              # every position is checked before anything is written
-                args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock", account)
+                args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock", account,
+                                         row["sale_auto"])
                 items.append(dict(args, qty=row["qty"]))
                 if by_text:
                     found.append(by_text)
@@ -653,7 +656,7 @@ def register(app) -> None:
             changes.pop("responsible")                                       # the form shows who answers now: sending that back names nobody new
         # the row of «Позиции» chosen or typed and not added by «+»: «Сохранить» adds it with the rest (the owner 2026-10-23, order №428).
         # A choice in the list fills the text too: a code without the text is what a browser restored after «Назад», not a choice
-        typed_row = {"row_" + k: request.form.get(k, "").strip() for k in ("goods_id", "query", "qty", "sale_unit")}
+        typed_row = {"row_" + k: request.form.get(k, "").strip() for k in ("goods_id", "query", "qty", "sale_unit", "sale_auto")}
         typed_row = typed_row if typed_row["row_query"] else {}
         try:
             changed = orders.update_card(conn, card_id, changes, local_iso(), author())
@@ -664,6 +667,20 @@ def register(app) -> None:
             if "stage_id" in request.form or request.form.get("tab") != "money":
                 return card_page(conn, card, dict(changes, **typed_row))  # the window comes back with what was typed: nothing saved, nothing moved
             return back(card_id, "money")
+        if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one;
+            # before the row: the row is priced by the account of the chats the order has after this press (order_offers.account_for)
+            unlink, moved, offered = (_int(request.form.get(k)) for k in ("chat_unlink", "chat_move", "chat_bind"))
+            if unlink is not None:
+                if deals.unbind_chat(conn, card_id, unlink, local_iso(), author()):
+                    flash("Чат %s отвязан от заказа." % deals.ref(unlink), "ok")
+            elif moved is not None:
+                bind_chat(conn, card_id, moved, "field", move=True)
+            elif offered is not None:
+                bind_chat(conn, card_id, offered, "field" if offered == deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"]) else "phone")
+            elif "avito_chat" in changed:
+                named = deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"])
+                if named is not None:
+                    bind_chat(conn, card_id, named, "field")
         refused = None
         if typed_row:
             try:
@@ -684,19 +701,6 @@ def register(app) -> None:
             _conn, _settings, parsed, _ref = context(app)
             prices, source = order_offers.webmim_purchase(conn, orders.get_card(conn, card_id), parsed, app.config)
             orders.refresh_purchase(conn, card_id, prices, source, local_iso(), author())
-        if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one
-            unlink, moved, offered = (_int(request.form.get(k)) for k in ("chat_unlink", "chat_move", "chat_bind"))
-            if unlink is not None:
-                if deals.unbind_chat(conn, card_id, unlink, local_iso(), author()):
-                    flash("Чат %s отвязан от заказа." % deals.ref(unlink), "ok")
-            elif moved is not None:
-                bind_chat(conn, card_id, moved, "field", move=True)
-            elif offered is not None:
-                bind_chat(conn, card_id, offered, "field" if offered == deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"]) else "phone")
-            elif "avito_chat" in changed:
-                named = deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"])
-                if named is not None:
-                    bind_chat(conn, card_id, named, "field")
         if lacking_before:                                                # a lacking value typed (the transfer number): the window opens
             engine.refresh_tasks(conn, card_id, local_iso())
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
@@ -825,7 +829,7 @@ def register(app) -> None:
         if not text:                                     # a choice in the list fills the text too: a code alone is what a browser restored after «Назад»
             raise orders.OrderError("Позиция не выбрана: начните вводить модель и выберите шину из списка.")
         args, by_text = row_item(conn, code, text, form.get("sale_unit", ""), orders._row(conn, card_id)["deal_kind"] == "stock",
-                                 window_account(conn, {}, card_id))
+                                 window_account(conn, {}, card_id), form.get("sale_auto", ""))
         orders.add_item(conn, card_id, qty=form.get("qty", "1"), now=local_iso(), author=author(), **args)
         return by_text
 

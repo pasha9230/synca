@@ -167,3 +167,59 @@ def test_the_price_of_the_published_ad_of_the_account_comes_before_the_calculati
     assert prices(conn, card_id)[-1] == ("101", feed_price(conn, other, "101"))
     plain = created(post(client, "/orders/new", tok, client_name="Вера", item_goods_id=["100"], item_qty=["4"], item_sale_unit=[""]))
     assert prices(conn, plain) == [("100", 4700.0)]
+
+
+def feed_of(conn, tmp_path, account_id) -> dict:
+    """{position: price} of the feed the cycle really builds for the account (the plan it promotes: the <Price> of its ads)."""
+    import json
+    from datetime import date
+    import panel_helpers
+    from tires_sync import cycle
+    from tires_sync.catalog import parse_reference
+    cycle.run_for_accounts(conn, panel_helpers.UNLOAD, parse_reference(panel_helpers.REF_TEXT), date(2026, 10, 12), tmp_path / "feed")
+    row = conn.execute("SELECT payload FROM pending_state WHERE account_id = ?", (account_id,)).fetchone()
+    return {i["goods_id"]: i["price"] for i in json.loads(row[0]) if i["action"] in ("publish", "update")}
+
+
+def test_a_deal_of_a_chat_of_the_second_account_costs_what_the_feed_of_that_account_asks(tmp_path, monkeypatch):
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    main, other = accounts(conn)
+    feed = feed_of(conn, tmp_path, other)
+    assert feed["100"] != feed_of(conn, tmp_path, main)["100"]
+    chat = chat_of(conn, other)
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card_id = conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
+    assert prices(conn, card_id) == [("100", float(feed["100"]))]
+
+
+def test_a_price_the_list_put_in_the_field_is_priced_again_by_the_account_of_the_window(tmp_path, monkeypatch):
+    """The review 2026-10-26 (D1): the list priced the row before «Чат Авито» or the point was chosen; kept as it is, it is the panel's price,
+    so the account of the window prices it when saved. A price changed by hand stays."""
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    main, other = accounts(conn)
+    chat = chat_of(conn, other)
+    listed = "%d" % feed_price(conn, main, "100")
+    kept = created(post(client, "/orders/new", tok, client_name="Анна", avito_chat="Ч-%d" % chat, item_goods_id=["100"], item_qty=["4"],
+                        item_sale_unit=[listed], item_sale_auto=[listed]))
+    assert prices(conn, kept) == [("100", feed_price(conn, other, "100"))]
+    typed = created(post(client, "/orders/new", tok, client_name="Борис", avito_chat="Ч-%d" % chat, item_goods_id=["100"], item_qty=["4"],
+                         item_sale_unit=["4800"], item_sale_auto=[listed]))
+    assert prices(conn, typed) == [("100", 4800.0)]
+    page = client.get("/orders/new?goods_id=100").get_data(as_text=True)                                  # «Оформить заказ» from the catalog
+    assert '<input type="hidden" name="item_sale_auto" value="%s">' % listed in page
+    point = points.save_point(conn, {"name": "Гамма", "avito_account_id": other})
+    card_id = created(post(client, "/orders/new", tok, client_name="Вера"))
+    r = post(client, "/orders/%d/items/add" % card_id, tok, was="", client_name="Вера", point_id=str(point), goods_id="100",
+             query="Autograph Snow 3 · 205/55 R16", qty="4", sale_unit=listed, sale_auto=listed)                # the point chosen with «+»
+    assert r.status_code == 302 and prices(conn, card_id) == [("100", feed_price(conn, other, "100"))]
+
+
+def test_the_row_saved_with_a_chat_typed_in_the_same_press_is_priced_by_that_chat(tmp_path, monkeypatch):
+    """The review 2026-10-26 (D2): «Сохранить» binds the chat typed in «Чат Авито» before the row is priced."""
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    main, other = accounts(conn)
+    chat = chat_of(conn, other)
+    card_id = created(post(client, "/orders/new", tok, client_name="Анна"))
+    post(client, "/orders/%d/save" % card_id, tok, avito_chat="Ч-%d" % chat, goods_id="100", query="Autograph Snow 3 · 205/55 R16", qty="4")
+    assert conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0] == card_id
+    assert prices(conn, card_id) == [("100", feed_price(conn, other, "100"))]

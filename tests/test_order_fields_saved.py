@@ -111,7 +111,7 @@ def test_the_plus_of_the_card_saves_the_point_and_the_fields_chosen_with_the_pos
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     r = send(client, "/orders/%d/items/add" % cid, window(page), point_id=str(a), comment="к вечеру", goods_id="100",
              query="Autograph Snow 3 · 205/55 R16", qty="4")
-    assert r.status_code == 302 and r.headers["Location"].endswith("/orders/%d#items" % cid) or "items" in r.headers["Location"]
+    assert r.status_code == 302 and r.headers["Location"].endswith("#items")
     c = orders.get_card(conn, cid)
     assert (c["point_id"], c["comment"], [(i["goods_id"], i["qty"]) for i in c["items"]]) == (a, "к вечеру", [("100", 4)])
     page = client.get("/orders/%d" % cid).get_data(as_text=True)                                   # the next «Сохранить» keeps them
@@ -138,3 +138,13 @@ def test_the_plus_without_the_window_adds_the_position_as_before(tmp_path, monke
     post(client, "/orders/%d/items/add" % cid, tok, goods_id="100", query="Autograph Snow 3 · 205/55 R16", qty="4")
     c = orders.get_card(conn, cid)
     assert (c["point_id"], c["comment"], len(c["items"])) == (a, "старый", 1)
+
+
+def test_the_plus_with_no_row_saves_the_fields_and_says_the_position_is_not_chosen(tmp_path, monkeypatch):
+    app, client, tok, conn, a, b = world(tmp_path, monkeypatch)
+    cid = created(post(client, "/orders/new", tok, client_name="Иван"))
+    page = client.get("/orders/%d" % cid).get_data(as_text=True)
+    r = send(client, "/orders/%d/items/add" % cid, window(page), point_id=str(b))
+    c = orders.get_card(conn, cid)
+    assert r.status_code == 302 and (c["point_id"], c["items"]) == (b, [])
+    assert "Позиция не выбрана" in client.get(r.headers["Location"]).get_data(as_text=True)
