@@ -474,6 +474,19 @@ def _migrate(conn) -> None:
         conn.execute("UPDATE avito_ad SET first_seen = seen_at WHERE first_seen IS NULL")
         conn.commit()
     _add_column(conn, "account", "description_template", "TEXT")
+    if "own_photos" not in {row[1] for row in conn.execute("PRAGMA table_info(account)")}:
+        # owner, 2026-10-27: own tire photos only in the accounts chosen for them; at first only the primary one.
+        # The column and the primary's «on» land together: a crash in between must not leave the primary without photos.
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if "own_photos" not in {row[1] for row in conn.execute("PRAGMA table_info(account)")}:   # another process was first
+                conn.execute("ALTER TABLE account ADD COLUMN own_photos INTEGER NOT NULL DEFAULT 0")
+                conn.execute("UPDATE account SET own_photos = 1 WHERE id = 1")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     _add_column(conn, "photo_set", "positions", "INTEGER NOT NULL DEFAULT 0")     # in stock now: sizes of the model and pieces
     _add_column(conn, "photo_set", "stock", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "photo_set", "in_feed", "INTEGER NOT NULL DEFAULT 0")       # the owner sent this model's own photos to the feed

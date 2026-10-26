@@ -31,6 +31,7 @@ def env(tmp_path, switch="1", **settings):
     for n in (first, second):
         connections.save_addresses(conn, n, "percent", None, [{"name": "Точка", "address_id": "10%d" % n, "enabled": True, "share": 100, "address_text": ""}], NOW, "o")
     store.set_state(conn, "public_base", BASE)
+    conn.execute("UPDATE account SET own_photos = 1 WHERE id = ?", (second,))      # both accounts chosen for own photos
     if switch is not None:
         store.set_state(conn, "own_photos", switch)
     conn.commit()
