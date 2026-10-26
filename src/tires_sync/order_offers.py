@@ -9,19 +9,47 @@ from .transport import urllib_transport
 from .panel import economics_view, service
 
 
-def effective_settings(conn, settings):
-    accounts = connections.list_feed_accounts(conn)
-    return connections.effective_settings(conn, accounts[0]["id"], settings) if accounts else settings
+def account_for(conn, chat_row=None, card_id=None, point_id=None):
+    """The Avito account whose ad prices a position of an order (the owner 2026-10-26: «калькуляция с объявления аккаунта авито, по которому
+    идет обращение»): the account of the chat; else of the order's earliest chat; else of the order's point (or of `point_id`, the point of a
+    window not saved yet); else the main one. The first one found decides: an account without a feed has no ad, the main one prices it then.
+    None when no account has a feed."""
+    feed = [a["id"] for a in connections.list_feed_accounts(conn)]
+    if not feed:
+        return None
+    found = None
+    if chat_row is not None:
+        row = conn.execute("SELECT account_id FROM avito_chat WHERE id = ?", (chat_row,)).fetchone()
+        found = row[0] if row else None
+    if found is None and card_id is not None:
+        row = conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? ORDER BY id LIMIT 1", (card_id,)).fetchone()
+        found = row[0] if row else None
+        if found is None and point_id is None:
+            row = conn.execute("SELECT point_id FROM order_card WHERE id = ?", (card_id,)).fetchone()
+            point_id = row[0] if row else None
+    if found is None and point_id:
+        row = conn.execute("SELECT avito_account_id FROM point WHERE id = ?", (point_id,)).fetchone()
+        found = row[0] if row else None
+    return found if found in feed else feed[0]
 
 
-def item_args(conn, settings, parsed, ref, goods_id, day: str) -> dict:
-    """The keyword arguments of orders.add_item for a position of the unload. Raises OrderError when the position or its price is not there."""
+def effective_settings(conn, settings, account_id=None):
+    """The general settings as the feed of the account sees them (its markup and its brands' markups, once); the main account by default.
+    `settings` are the general ones, never those of an account already."""
+    if account_id is None:
+        account_id = account_for(conn)
+    return connections.effective_settings(conn, account_id, settings) if account_id is not None else settings
+
+
+def item_args(conn, settings, parsed, ref, goods_id, day: str, account_id=None) -> dict:
+    """The keyword arguments of orders.add_item for a position of the unload, priced as the ad of `account_id` (account_for; the main one
+    by default) from the general `settings`. Raises OrderError when the position or its price is not there."""
     offer = parsed.offers.get(goods_id)
     if offer is None:
         raise orders.OrderError("Этой позиции нет в выгрузке поставщика.")
     only = service._Filtered({offer.goods_id: offer}, getattr(parsed, "issues", {}))
     params = terms_store.get_params(conn)
-    rows = economics_view.positions(conn, effective_settings(conn, settings), only, ref, day, params)
+    rows = economics_view.positions(conn, effective_settings(conn, settings, account_id), only, ref, day, params)
     row = rows[0] if rows else None
     if row is None or not row.get("sale"):
         raise orders.OrderError("Для этой позиции не рассчитана цена продажи: задайте процент бренда.")

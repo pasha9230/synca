@@ -764,12 +764,22 @@
       });
       list.hidden = false;
     }
+    function address(q, kind) {                                     // the account of the window prices the list (the order, the chat; a new
+      var url = wrap.getAttribute("data-item-find"), form = wrap.closest("form"), more = "";     // window: its «Чат Авито» or its point)
+      if (url.indexOf("?") < 0 && form) {
+        ["avito_chat", "point_id"].forEach(function (name) {
+          var f = form.querySelector('[name="' + name + '"]');
+          if (f && f.value.trim()) more += "&" + name + "=" + encodeURIComponent(f.value.trim());
+        });
+      }
+      return url + (url.indexOf("?") < 0 ? "?" : "&") + "q=" + encodeURIComponent(q) + (kind ? "&deal=" + kind : "") + more;
+    }
     function ask() {
-      var q = input.value.replace(/·/g, " ").trim(), kind = deal(), key = kind ? q + "|" + kind : q;
+      var q = input.value.replace(/·/g, " ").trim(), kind = deal(), key = address(q, kind);     // another point or chat asks again
       if (q.length < 2) { close(); return; }
       if (key === asked) { list.hidden = false; return; }
       asked = key;
-      fetch(wrap.getAttribute("data-item-find") + "?q=" + encodeURIComponent(q) + (kind ? "&deal=" + kind : ""), {credentials: "same-origin"})
+      fetch(key, {credentials: "same-origin"})
         .then(function (r) { if (!r.ok || r.redirected) throw new Error("find"); return r.json(); })
         .then(function (res) { if (asked === key && input.value.replace(/·/g, " ").trim() === q) show(res.items || []); })
         .catch(function () {                         // say it instead of an empty list: the manager would think there is nothing

@@ -16,7 +16,6 @@ import logging
 from datetime import datetime
 from urllib.parse import urlencode
 
-from .routes_economics import _effective
 from .routes_main import context
 from .routes_orders import local_iso, local_now, offer_send, send_offer
 
@@ -162,11 +161,12 @@ def register(app) -> None:
         line = order_wait.line_from_title(chat["item_title"], {order_wait._offer_brand(o) for o in live.values()})
         return {"line": line, "source": "названия объявления" if len(line) > 1 else ""}
 
-    def _position_provider(conn):
-        """Prices the position of the ad of a chat as the panel prices it today; no unload or no price is a lesser trouble than no deal."""
+    def _position_provider(conn, chat_row):
+        """Prices the position of the ad of a chat as the feed of the chat's account prices it today (order_offers.account_for); no unload or
+        no price is a lesser trouble than no deal."""
         try:
             _conn, settings, parsed, ref = context(app)
-            settings = _effective(conn, settings)
+            account = order_offers.account_for(conn, chat_row=chat_row)
         except Exception:
             log.exception("the position of a chat ad was not priced: the unload is not readable")
 
@@ -177,7 +177,7 @@ def register(app) -> None:
 
         def provider(goods_id, pack):
             try:
-                return order_offers.item_args(conn, settings, parsed, ref, goods_id, day)
+                return order_offers.item_args(conn, settings, parsed, ref, goods_id, day, account)
             except orders.OrderError:
                 raise
             except Exception as err:
@@ -367,7 +367,7 @@ def register(app) -> None:
             return back(chat_row)
         try:
             _conn, settings, parsed, ref = context(app)
-            args = order_offers.item_args(conn, _effective(conn, settings), parsed, ref, goods_id, local_now().date().isoformat())
+            args = order_offers.item_args(conn, settings, parsed, ref, goods_id, local_now().date().isoformat(), order_offers.account_for(conn, chat_row=chat_row))
             if request.form.get("sale_unit", "").strip():
                 args["sale_unit"] = request.form["sale_unit"]
             orders.add_item(conn, chat["order_id"], qty=request.form.get("qty", "1"), now=local_iso(), author=author(), **args)
@@ -594,7 +594,7 @@ def register(app) -> None:
         conn = get_conn()
         _chat_or_404(conn, chat_row)
         try:
-            card_id = deals.create_deal(conn, chat_row, local_iso(), author(), position_provider=_position_provider(conn))
+            card_id = deals.create_deal(conn, chat_row, local_iso(), author(), position_provider=_position_provider(conn, chat_row))
             _to_own_point(conn, card_id)
         except orders.OrderError as err:
             flash(str(err))
