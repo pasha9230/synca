@@ -378,7 +378,7 @@ const windowForm = (isNew) => {
   const buttons = [attrs(), attrs()], fields = [{value: "101"}, {value: "Autograph Ice 9 · 195/65 R15"}, {value: "4800"}];
   return {dataset: {}, buttons, fields, matches: (s) => s === "form[data-once]",
     querySelector: (s) => s === "[data-item-new]" && isNew ? {} : null,
-    querySelectorAll: (s) => s === "button" ? buttons : (s === "[data-find-code], [data-find-text], [data-find-price]" ? fields : [])};
+    querySelectorAll: (s) => s === "button" ? buttons : (s === "[data-find-code], [data-find-text], [data-find-price], [data-find-auto]" ? fields : [])};
 };
 const card = windowForm(false), fresh = windowForm(true);
 let reloaded = 0, shown = card;
