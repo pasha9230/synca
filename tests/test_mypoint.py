@@ -61,10 +61,10 @@ def test_the_manager_sees_the_orders_of_the_own_point_only_with_phone_items_and_
     page = mine.get("/my-point?p=%d" % other).get_data(as_text=True)                      # asking for another point gives the own one
     assert "Бета" in page and "5000100" in page and "700200" in page
     assert "700100" not in page and "Чужой Клиент" not in page and "+7 911" not in page
-    assert 'href="tel:+79001112233"' in page and "Nokian Hakkapeliitta 10" in page and "× 4" in page
+    assert 'href="tel:+79001112233"' in page and "Nokian Hakkapeliitta 10" in page and "Кол-во 4 шт" in page    # the VK text (owner 2026-10-26)
     assert "Хранение до" in page                                                          # the order at the point has its term
     assert 'class="sidebar"' not in page and 'name="viewport" content="width=device-width' in page and "mypoint.css" in page
-    assert page.index("700200") < page.index("5000100")                                   # what lies at the point comes first
+    assert page.index("700200") < page.index("5000100")                                   # newest first (same last event: the later order)
     assert '/my-point/%d/arrived' % card in page and '/my-point/%d/issued' % here in page and '/my-point/%d/no_show' % here in page
     assert '/my-point/%d/no_show' % card not in page                                      # only the marks that fit the stage («выдал» fits on the way too: owner 2026-10-21)
     assert 'data-confirm-title="Выдать заказ' in page and 'data-confirm-title="Клиент не пришёл?"' in page       # the panel's window (UX 1.0g)

@@ -6,7 +6,11 @@ commands (order_manager.apply, no_show, tell_client_arrived) with the same check
 one), never in the template. «Передать клиента» (a POST to the page itself) is order_manager.handoff, the function of the VK command
 «клиент <телефон> <что нужно>»: an order on «Передано с точки» for the person on duty; nothing goes to the client; the point needs no VK for
 it. «Для точки» shows what the bot did not write to a point in the panel (order_points.notes). /my-point/feed is what notify.js asks every
-half a minute for the sound and the browser's notification: the orders of the point, its notes and the rows of its bell (one source with it)."""
+half a minute for the sound and the browser's notification: the orders of the point, its notes and the rows of its bell (one source with it).
+The owner 2026-10-26: counters at the top; one list, newest first by the order's last event; the card's text is the VK message «Менеджеру:
+заказ оформлен» (its template, with the client's prices: the point takes the cash; never the purchase); «Возврат» on an order at the point is
+the VK «возврат отдал» (order_manager.returned); the question of the last day of the reservation (order_reserve, asked in VK) is answered
+here too: «Выдан» is «выдал», «На точке» is «на точке» (order_reserve.here), one answer whichever comes first."""
 from __future__ import annotations
 
 import re
@@ -15,12 +19,13 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
 
-from .. import order_manager as mgr, order_points as points, order_report, orders, users
+from .. import order_manager as mgr, order_placed, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_orders import local_iso
 
 STAGES = ("placed", "moving", "at_point")          # placed (the panel may not say «on the way» yet), on the way to the point, at the point
-ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "no_show": mgr.NO_SHOW}
+ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "no_show": mgr.NO_SHOW, "returned": mgr.RETURN,
+           "reserve_issued": "выдал", "reserve_here": mgr.HERE}         # the two answers to «Клиент забрал?» (the question of the reservation)
 BUILTIN = {"arrived": (mgr.ARRIVE_FROM, "at_point"), "issued": (mgr.ISSUE_FROM, "done")}
 
 
@@ -37,11 +42,12 @@ def _point_id(conn):
 
 
 def _cards(conn, point_id) -> list:
-    """The orders of the point on «placed», «moving» or «at_point»: the filter is here, in the query."""
+    """The orders of the point on «placed», «moving» or «at_point», newest first by their last event (the owner 2026-10-26: «приехал на
+    точку» brings an order up): the filter is here, in the query."""
     ids = [r[0] for r in conn.execute(
         "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (%s) "
-        "ORDER BY CASE s.code WHEN 'at_point' THEN 0 ELSE 1 END, c.reserve_until IS NULL, c.reserve_until, c.id" % ",".join("?" * len(STAGES)),
-        (point_id,) + STAGES)]
+        "ORDER BY COALESCE((SELECT MAX(e.at) FROM order_event e WHERE e.order_id = c.id), c.created_at) DESC, c.id DESC"
+        % ",".join("?" * len(STAGES)), (point_id,) + STAGES)]
     return [orders.get_card(conn, card_id) for card_id in ids]
 
 
@@ -65,10 +71,38 @@ def tel(phone) -> str:
     return ("+" if str(phone or "").strip().startswith("+") else "") + digits if digits else ""
 
 
+def vk_text(conn, card: dict, now: str) -> str:
+    """What the VK message «Менеджеру: заказ оформлен» says of the order: the owner's template of that name (as order_placed sends it), else
+    the sample; a value the order lacks is left out, as in the message."""
+    row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = 'manager' ORDER BY id LIMIT 1",
+                       (order_placed.POINT_TEMPLATE,)).fetchone()
+    body = row[0] if row else next(b for name, _a, b in templates.SAMPLES if name == order_placed.POINT_TEMPLATE)
+    return templates.render(conn, card, body, now)[0].strip()
+
+
+def _not_here(card: dict, what: str):
+    return ("не подходит: заказ на этапе «%s»" % card["stage"]["name"],
+            "Заказ №%s сейчас на этапе «%s»: «%s» отмечают, когда заказ на точке." % (mgr.label(card), card["stage"]["name"], what), False)
+
+
 def act(conn, card: dict, action: str, who: str, now: str, deliver, notify):
     """What the VK command of the same word does for an order of the point (order_manager._command for the built-in words): returns
     (outcome for the log, answer for the manager, done). A word that does not fit the stage changes nothing."""
     code = card["stage"]["code"]
+    if action == "reserve_issued":                                              # «Выдан» to the question is «выдал»
+        action = "issued"
+    if action == "returned":                                                    # the VK «возврат отдал»; the button is on the orders at the point only
+        if code == "return":
+            return "уже отмечено", "Заказ №%s уже отмечен: %s." % (mgr.label(card), mgr.RETURNED), True
+        if code != "at_point":
+            return _not_here(card, "возврат")
+        outcome, answer = mgr.returned(conn, card, who, now)
+        return outcome, answer, not outcome.startswith("не ")
+    if action == "reserve_here":                                                # the VK «на точке»: the client hears the reminder only when asked
+        if code != "at_point":
+            return _not_here(card, "на точке")
+        outcome, answer = reserve.here(conn, card, who, now, deliver)
+        return outcome, answer, not outcome.startswith("«")
     if action == "no_show":
         if code != "at_point":
             return ("не подходит: заказ на этапе «%s»" % card["stage"]["name"],
@@ -186,7 +220,8 @@ def register(app) -> None:
             if not isinstance(done, tuple):
                 return done
             error, form = done
-        today = local_iso()[:10]
+        now = local_iso()
+        today = now[:10]
         cards = []
         for card in (_cards(conn, point_id) if point_id is not None else []):
             until = card["reserve_until"] or ""
@@ -194,7 +229,8 @@ def register(app) -> None:
             cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": card["stage"]["code"] == "at_point",
                           "tokens": {action: secrets.token_hex(12) for action in ACTIONS},          # every button is its own press
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
-                          "delivery": _short_date(delivery)})
+                          "ends": bool(until) and until <= today, "delivery": _short_date(delivery), "text": vk_text(conn, card, now),
+                          "asked": reserve.question_open(conn, card, now)})
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over
@@ -207,7 +243,10 @@ def register(app) -> None:
                 points.mark_seen(conn, point_id, max(n["at"] for n in notes))
             except Exception:                                                    # noqa: BLE001  (a busy base: the page still opens)
                 conn.rollback()
-        return render_template("mypoint.html", point=point, here=[r for r in cards if r["here"]], coming=[r for r in cards if not r["here"]],
+        here = [r for r in cards if r["here"]]
+        counts = {"coming": len(cards) - len(here), "here": len(here), "ending": sum(1 for r in here if r["ends"]),
+                  "asked": sum(1 for r in cards if r["asked"])}
+        return render_template("mypoint.html", point=point, cards=cards, counts=counts, questions=[r for r in cards if r["asked"]],
                                notes=notes, choose=own_point() is None, handed=handed, seasons=mgr.SEASONS, bonus=bonus,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form), 400 if error else 200
@@ -256,9 +295,11 @@ def register(app) -> None:
         if point_id is None:
             return jsonify({"who": who, "items": []})
         from .routes_alerts import grouped, href, with_orders
-        items = [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
-                  else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "", "href": "/my-point"}
-                 for card in _cards(conn, point_id)]
+        cards, now = _cards(conn, point_id), local_iso()
+        items = [{"key": "question-%d" % card["id"], "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
+                  "href": "/my-point"} for card in cards if reserve.question_open(conn, card, now)]      # the key lane 3 rings for
+        items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
+                   else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "", "href": "/my-point"} for card in cards]
         try:
             point = points.get_point(conn, point_id)
         except points.PointError:                                               # the manager's point was deleted: nothing to show
