@@ -111,7 +111,7 @@ def test_a_position_without_a_season_needs_one_chosen_in_the_window(tmp_path):
     assert orders.get_card(conn, cid)["wants"][0]["season"] == "summer"
 
 
-def test_the_same_client_and_tire_again_makes_no_second_order_but_another_tire_or_phone_does(tmp_path):
+def test_the_same_client_and_tire_again_makes_no_second_order_another_tire_is_refused_another_phone_makes_one(tmp_path):
     app, client, tok, conn = owner_app(tmp_path)
     send(client, tok)
     send(client, tok, client_phone="8 (900) 555 44 33")                          # the same number typed otherwise
@@ -119,9 +119,10 @@ def test_the_same_client_and_tire_again_makes_no_second_order_but_another_tire_o
     assert "Клиент уже ждёт эту шину: заказ №%d" % cards(conn)[0] in client.get("/catalog").get_data(as_text=True)
     send(client, tok, comment="перезвонить")
     assert "точку и комментарий из окна допишите в этом заказе" in client.get("/catalog").get_data(as_text=True)
-    send(client, tok, qty="2")                                                    # another line (two, not four): a new order
+    send(client, tok, qty="2")                                                    # another line (two, not four): the client's open order is
+    assert len(cards(conn)) == 1                                                  # named instead (one open order per phone, the owner 2026-10-27)
     send(client, tok, client_phone="+7 900 555-44-00")
-    assert len(cards(conn)) == 3
+    assert len(cards(conn)) == 2
 
 
 def test_a_position_the_supplier_took_away_can_be_waited_for(tmp_path):

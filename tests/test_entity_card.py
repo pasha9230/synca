@@ -89,6 +89,8 @@ def test_the_order_card_keeps_its_window_and_actions_in_the_one_head(tmp_path):
 def test_the_client_card_has_fields_lists_and_its_events(tmp_path):
     app, owner, tok, conn = setup(tmp_path)
     cid = new_order(owner, tok)
+    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE code = 'done') WHERE id = ?", (cid,))   # issued: one open
+    conn.commit()                                                                 # order per phone (the owner 2026-10-27), the second is allowed
     second = new_order(owner, tok)
     client_id = orders.get_card(conn, cid)["client"]["id"]
     assert orders.get_card(conn, second)["client"]["id"] == client_id             # the same phone: one client

@@ -67,9 +67,8 @@
 <label class="field"><span class="label">Комментарий</span><textarea class="input mp-need" name="need" rows="3" maxlength="500" placeholder="например: 4 шт, нужно к пятнице">{{ handoff_form.need or '' }}</textarea></label>
 <button type="button" class="btn btn--secondary mp-dictate" data-dictate hidden>Надиктовать</button>
 <button class="btn btn--primary mp-btn">Передать</button>
-{% if handoff_form.dup %}<div class="flash flash--info" id="mp-dup" role="alert"><div class="flash-text">На этот телефон уже есть открытый заказ № {{ handoff_form.dup.label }}{% if handoff_form.dup.date %} от {{ handoff_form.dup.date }}{% endif %}.
+{% if handoff_form.dup %}<div class="flash flash--err" id="mp-dup" role="alert"><div class="flash-text">У клиента уже есть открытый заказ № {{ handoff_form.dup.label }}{% if handoff_form.dup.date %} от {{ handoff_form.dup.date }}{% endif %} — откройте его.
 {% if handoff_form.dup.href %}<a href="{{ handoff_form.dup.href }}" data-dup-open>Открыть его</a>{% endif %}
-<button class="btn btn--secondary btn--sm" name="force" value="{{ handoff_form.dup.phone }}" data-dup-force>Всё равно создать</button>
 <a href="/my-point{% if choose %}?p={{ point.id }}{% endif %}" data-dup-cancel>Отмена</a></div></div>{% endif %}
 <p class="mp-hint">Клиента возьмёт в работу дежурный менеджер; что с ним стало — в блоке «Переданные клиенты».</p></form>
 </section>{% endif %}

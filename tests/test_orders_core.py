@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from order_fixtures import card_of_phone
 from tires_sync import orders, store
 
 NOW = "2026-10-12T12:00:00"
@@ -582,7 +583,7 @@ def test_the_delivery_time_of_the_point_is_filled_in_when_the_point_is_chosen_an
 
 def test_the_search_by_number_finds_that_order_and_not_every_order_that_has_the_digit(tmp_path):
     conn = db(tmp_path)
-    ids = [orders.create_card(conn, dict(client_name="Клиент %d" % n, client_phone="+7 900 000 01 3%d" % (n % 10)), NOW, "o") for n in range(1, 13)]
+    ids = [card_of_phone(conn, dict(client_name="Клиент %d" % n, client_phone="+7 900 000 01 3%d" % (n % 10)), NOW, "o") for n in range(1, 13)]
     import datetime as dt
     def found(q):
         data = orders.board(conn, dt.datetime(2026, 10, 12, 13, 0, 0), query=q)
@@ -625,7 +626,7 @@ def test_board_phone_search_stays_inside_the_point(tmp_path):
     conn = db(tmp_path)
     mine, other = points.save_point(conn, {"name": "Гамма"}), points.save_point(conn, {"name": "Мурино"})
     a = card(conn, client_name="Иван", client_phone="+7 900 000-00-11", point_id=str(mine))
-    card(conn, client_name="Пётр", client_phone="8 900 000 00 11", point_id=str(other), webmim_number="7700001")
+    card_of_phone(conn, dict(client_name="Пётр", client_phone="8 900 000 00 11", point_id=str(other), webmim_number="7700001"), NOW, "owner")
     ids = lambda q: [c["id"] for col in orders.board(conn, datetime(2026, 10, 12, 12), point_id=mine, query=q)["columns"] for c in col["cards"]]
     assert ids("89000000011") == [a] and ids("7700001") == []
 

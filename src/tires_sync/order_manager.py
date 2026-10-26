@@ -1187,6 +1187,11 @@ def handoff(conn, message_id, sender, handed: Optional[dict], voice: str, now: s
         conn.execute("UPDATE order_command_log SET outcome = 'передан клиент', order_id = ? WHERE message_id = ?", (card_id, str(message_id)))
         conn.commit()
         orders._fire_rules(conn, card_id, now, ())                # the rules of «Передано с точки», as on entering it: they prepare, never send
+    except orders.OpenOrderExists as busy:                        # the owner 2026-10-27: one open order per phone, the point is told which
+        conn.rollback()
+        conn.execute("UPDATE order_command_log SET outcome = 'открытый заказ', order_id = ? WHERE message_id = ?", (busy.order_id, str(message_id)))
+        conn.commit()
+        return str(busy)
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the client of message %s could not be handed over", message_id)

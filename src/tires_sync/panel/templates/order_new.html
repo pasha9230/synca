@@ -4,5 +4,6 @@
 {% block content %}
 <div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Новый заказ</span></div>
 <p class="sub owin-lead">Достаточно имени, телефона, чата клиента или одной позиции. Остальное можно заполнить по ходу переговоров.</p>
+{% if busy %}<p class="owin-lead"><a class="btn btn--secondary btn--sm" href="/orders/{{ busy }}" data-open-order>Открыть заказ №{{ busy }}</a></p>{% endif %}
 <div class="owin-page">{% include "_order_window.html" %}</div>
 {% endblock %}

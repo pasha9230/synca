@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from order_fixtures import free_phone
 from tires_sync import order_engine as engine, order_points as points, order_rules as rules, order_templates as tpl, orders, store
 
 NOW = "2026-10-12T12:00:00"
@@ -23,7 +24,7 @@ def stage(conn, code):
 def full_card(conn, point_name="Бета"):
     existing = [p for p in points.list_points(conn) if p["name"] == point_name]
     pid = existing[0]["id"] if existing else points.save_point(conn, dict(name=point_name, manager_name="Алексей", channel="vk"))
-    card_id = orders.create_card(conn, dict(client_name="Иван", client_phone="+7 900 111 22 33", point_id=pid, delivery_date="2026-10-15",
+    card_id = orders.create_card(conn, dict(client_name="Иван", client_phone=free_phone(conn, "+7 900 111 22 33"), point_id=pid, delivery_date="2026-10-15",
                                             delivery_time="14:00"), NOW, "o")
     orders.add_item(conn, card_id, goods_id="1", name="Nokian 205/55 R16", brand_key="nokian", season="winter", diameter=16, territory="1",
                     qty=4, sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=NOW, author="o")

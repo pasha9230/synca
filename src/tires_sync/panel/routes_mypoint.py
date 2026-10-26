@@ -139,7 +139,7 @@ def _who(conn, login: str) -> str:
 
 
 def _dup_view(conn, busy: dict, point_id: int) -> dict:
-    """What the warning says of the open order: its number and date only (nothing of another point's order). `href`: the order's own
+    """What the refusal says of the open order: its number and date only (nothing of another point's order). `href`: the order's own
     card for the owner and the partner; for a manager the anchor of the card on this page when it lies there, else no link."""
     card = orders.get_card(conn, busy["id"])
     if own_point() is None:
@@ -175,10 +175,9 @@ def _hand_over(conn, point: dict, back: str):
             flash("Этот клиент уже передан, заказ №%s." % earlier[1])
             return redirect(back)
         return "Прошлая попытка не удалась: обновите страницу и передайте клиента снова.", form
-    if str(request.form.get("force") or "") != phone:                             # the owner 2026-10-25: warn, never forbid (another size, a second set); «force» is the phone that was warned about
-        busy = orders.open_card_by_phone(conn, phone)
-        if busy is not None:
-            return "", dict(form, dup=dict(_dup_view(conn, busy, point["id"]), phone=phone))
+    busy = orders.open_card_by_phone(conn, phone)                                 # the owner 2026-10-27: a second open order on one phone is forbidden
+    if busy is not None:
+        return "", dict(form, dup=_dup_view(conn, busy, point["id"]))
     now = local_iso()
     try:
         from . import routes_vk
@@ -206,6 +205,9 @@ def _hand_over(conn, point: dict, back: str):
     if answer == "Это сообщение уже обработано.":
         flash("Этот клиент уже передан.")
         return redirect(back)
+    busy = orders.open_card_by_phone(conn, phone)                                 # another tab made the client's order between the check and now
+    if busy is not None:
+        return "", dict(form, dup=_dup_view(conn, busy, point["id"]))
     return (answer or "Не получилось принять клиента. Напишите владельцу."), form
 
 

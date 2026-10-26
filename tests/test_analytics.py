@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from order_fixtures import free_phone
 from tires_sync import analytics, connections, order_points as points, order_report, orders, sales, store
 
 MADE = "2026-07-01T09:00:00"
@@ -17,7 +18,7 @@ def ts(moment: str) -> int:
 
 
 def make_card(conn, created: str, source="", responsible="", point=None, name="Иван"):
-    cid = orders.create_card(conn, {"client_name": name, "client_phone": "+79001234567", "source": source, "responsible": responsible,
+    cid = orders.create_card(conn, {"client_name": name, "client_phone": free_phone(conn, "+79001234567"), "source": source, "responsible": responsible,
                                     "point_id": str(point) if point else "", "delivery_date": created[:10]}, created, "manager")
     orders.add_item(conn, cid, goods_id="1", name="Ikon 185/65 R15", brand_key="ikon", season="winter", diameter=15, territory="1", qty=4,
                     sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=created, author="manager")

@@ -1,4 +1,5 @@
-"""«Моя точка»: a second order for a phone that has an open order is warned about, never forbidden (the owner 2026-10-25)."""
+"""«Моя точка»: a second order for a phone that has an open order is refused with that order named (the owner 2026-10-27; it was a warning
+with «Всё равно создать» since 2026-10-25)."""
 from __future__ import annotations
 
 from panel_helpers import post
@@ -19,26 +20,26 @@ def send(client, phone, need="", tok_=None, force=False, p=None):
     return data["token"], post(client, "/my-point", "tok", **data)
 
 
-def test_an_open_order_of_the_phone_is_warned_about_and_nothing_is_made(tmp_path):
+def test_an_open_order_of_the_phone_refuses_and_nothing_is_made(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
     _t, r = send(mine, PHONE, "второй комплект 205/55 R16")
     page = r.get_data(as_text=True)
     assert r.status_code == 200 and 'id="mp-dup"' in page
-    assert "На этот телефон уже есть открытый заказ № 5000100 от 13.10" in page and 'href="#order-%d"' % card in page
+    assert "У клиента уже есть открытый заказ № 5000100 от 13.10 — откройте его." in page and 'href="#order-%d"' % card in page
     assert "второй комплект 205/55 R16</textarea>" in page and 'value="%s"' % PHONE in page          # the form is not lost
     assert handed(conn) == [] and conn.execute("SELECT COUNT(*) FROM order_command_log").fetchone()[0] == 0
 
 
-def test_all_the_same_anyway_makes_the_order_with_the_same_token(tmp_path):
+def test_the_force_of_an_old_page_makes_no_order(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
     first, _r = send(mine, PHONE, "другой размер")
     _t, r = send(mine, PHONE, "другой размер", tok_=first, force=True)
-    assert r.status_code == 302 and len(handed(conn)) == 1
+    assert r.status_code == 200 and 'id="mp-dup"' in r.get_data(as_text=True) and handed(conn) == []
 
 
-def test_a_stale_second_tab_gets_the_warning_when_the_first_tab_made_the_order(tmp_path):
+def test_a_stale_second_tab_is_refused_when_the_first_tab_made_the_order(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
     stale = handoff_token(mine.get("/my-point").get_data(as_text=True))
@@ -67,7 +68,7 @@ def test_a_closed_order_and_another_phone_do_not_warn(tmp_path):
     assert r.status_code == 302
 
 
-def test_an_order_of_another_point_warns_with_number_and_date_only_and_no_link(tmp_path):
+def test_an_order_of_another_point_is_named_by_number_and_date_only_and_no_link(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     other = points.save_point(conn, dict(name="Секретная точка", channel="vk", vk_peer_id="777"))
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (other, card))
@@ -75,7 +76,7 @@ def test_an_order_of_another_point_warns_with_number_and_date_only_and_no_link(t
     mine = manager(app, conn, pid)
     page = send(mine, PHONE)[1].get_data(as_text=True)
     assert "уже есть открытый заказ № 5000100" in page and "Секретная точка" not in page and "Татьяна" not in page
-    assert "data-dup-open" not in page and "data-dup-force" in page
+    assert "data-dup-open" not in page and "data-dup-force" not in page
 
 
 def test_the_owner_gets_a_link_to_the_order_card(tmp_path):
@@ -91,13 +92,12 @@ def test_open_card_by_phone_reads_only_open_orders_by_the_normalized_phone(tmp_p
     assert orders.open_card_by_phone(conn, "+7 900 000-00-00") is None
 
 
-def test_the_warning_button_is_after_the_main_one_and_belongs_to_the_warned_phone(tmp_path):
+def test_the_refusal_has_no_button_around_it_and_another_phone_still_goes(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
     page = send(mine, PHONE)[1].get_data(as_text=True)
-    assert page.index('mp-btn">Передать') < page.index("data-dup-force")                      # Enter takes the first button: it must not be «force»
-    assert 'name="force" value="+79001112233"' in page
-    first, _r = send(mine, "+7 900 111-22-34", "x", force="+79001112233")                 # a force for another phone is no force... (no open order there: made)
+    assert 'name="force"' not in page and "Всё равно создать" not in page
+    send(mine, "+7 900 111-22-34", "x", force="+79001112233")                              # no open order there: made, whatever the old field says
     assert len(handed(conn)) == 1
-    _t, r = send(mine, PHONE, "x", force="+79990000000")                                    # ...and a wrong force does not skip the check
+    _t, r = send(mine, PHONE, "x", force="+79990000000")
     assert r.status_code == 200 and 'id="mp-dup"' in r.get_data(as_text=True)

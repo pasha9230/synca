@@ -329,7 +329,14 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
                   "delivery_date": next_day(now) if delivery else ""}
         if named:
             fields["point_id"] = named[0]["id"]
-        card_id = orders.create_card(conn, fields, now, author, require_contact=False)
+        try:
+            card_id = orders.create_card(conn, fields, now, author, require_contact=False)
+        except orders.OpenOrderExists as busy:                              # the owner 2026-10-27: one open order per phone; the chat of the same
+            _attach(conn, chat, busy.order_id, now, author)                 # client joins it, its positions untouched
+            orders.add_event(conn, busy.order_id, now, author, "chat", "Новый заказ по чату %s не создан: тот же телефон клиента, чат привязан сюда%s" % (
+                ref(chat_row), " (%s)" % comment if comment else ""))
+            conn.commit()
+            return busy.order_id
         if named:
             orders.add_event(conn, card_id, now, author, "field", "Точка из сообщения клиента: «%s» («%s»)" % (
                 named[0]["name"], " ".join(named[1].split())[:80]))
@@ -558,8 +565,9 @@ def process_all(conn, now: str, position_provider=None, auto_create: bool = Fals
                 continue                                                      # only our own words, or an old chat nobody wrote to since
             if not auto_create:
                 continue
-            create_deal(conn, chat["id"], now, position_provider=position_provider)       # a deal for every chat: every ad of a client has its own
-            stats["created"] += 1
+            last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_card").fetchone()[0]
+            made = create_deal(conn, chat["id"], now, position_provider=position_provider)   # a deal for every chat; one of the phone of an open order joins it
+            stats["created" if made > last else "linked"] += 1
         except Exception:                                                    # one bad chat must not stop the others
             conn.rollback()
             log.exception("binding of chat %s failed", chat["id"])
@@ -593,7 +601,12 @@ def wait_from_chat(conn, chat_row, fields: dict, offers, now: str, author: str) 
         if not chat["peer_name"]:
             raise OrderError("У чата нет имени клиента: создайте заказ вручную и укажите клиента.")
         card_id = create_deal(conn, chat_row, now, author, delivery=False)
-        card = orders.get_card(conn, card_id)
+        card = orders.get_card(conn, card_id)                             # the client's open order the chat joined (same phone) is checked as above
+        if card["stage"]["code"] not in ("new", "talk", "wait"):
+            raise OrderError("Чат привязан к открытому заказу клиента №%d, он уже в работе (этап «%s»): кнопка не возвращает его назад. "
+                             "Добавьте строку во вкладке «Что нужно»." % (card_id, card["stage"]["name"]))
+        if card["sale_ids"]:
+            raise OrderError("По заказу записана продажа: сначала сторнируйте её.")
     same = [w for w in order_wait.list_wants(conn, card_id)
             if all(w[k] == clean[k] for k in SAME_LINE) and w["any_brand"] == bool(clean["any_brand"]) and w["any_size"] == bool(clean["any_size"])]
     if not same:

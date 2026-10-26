@@ -16,6 +16,15 @@ class OrderError(ValueError):
     pass
 
 
+class OpenOrderExists(OrderError):
+    """A new order refused: the client's phone has an open order (the owner 2026-10-27: a second open order on one phone is forbidden).
+    `order_id`: that order, for a link to it."""
+
+    def __init__(self, order_id: int):
+        super().__init__("У клиента уже есть открытый заказ №%d — откройте его." % order_id)
+        self.order_id = order_id
+
+
 KINDS = ("open", "won", "lost", "closed")
 KIND_NAMES = {"open": "обычный", "won": "успешный", "lost": "отказ", "closed": "завершающий"}
 DEFAULT_STAGES = (
@@ -400,6 +409,11 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
         "INSERT INTO order_card (stage_id, %s, created_at, created_by, entered_at, updated_at) VALUES (?, %s, ?, ?, ?, ?)" % (
             ", ".join(keys), ", ".join("?" for _ in keys)),
         [stage["id"]] + [base[k] for k in keys] + [now, author, now, now])
+    busy = open_card_by_phone(conn, base["client_phone"], besides=cur.lastrowid) if base["client_phone"] else None
+    if busy is not None:                                      # asked after the insert: the write holds the lock, so two tabs at once make one order
+        if commit:
+            conn.rollback()                                   # the caller saves nothing of it; with commit=False the caller rolls back
+        raise OpenOrderExists(busy["id"])
     add_event(conn, cur.lastrowid, now, author, "created", "Заказ создан на этапе «%s»" % stage["name"])
     _attach_client(conn, cur.lastrowid, now, author)
     if commit:
@@ -1023,17 +1037,17 @@ def reverse_sales(conn, card_id, now: str, author: str) -> int:
     return count
 
 
-def open_card_by_phone(conn, phone) -> Optional[dict]:
+def open_card_by_phone(conn, phone, besides: Optional[int] = None) -> Optional[dict]:
     """The newest open order (its stage is of kind «open») of this client phone, or None: {"id", "created_at", "point_id"}. The phone is
     compared the way the feed writes it (connections.normalize_phone), however the card has it typed; a phone that is no phone matches nothing.
-    Reading only."""
+    `besides`: an order not to count (the one being made). Reading only."""
     from . import connections
     wanted = connections.normalize_phone(phone)
     if not wanted:
         return None
     for card_id, created_at, point_id, card_phone in conn.execute(
             "SELECT c.id, c.created_at, c.point_id, c.client_phone FROM order_card c JOIN order_stage s ON s.id = c.stage_id "
-            "WHERE s.kind = 'open' AND c.client_phone != '' ORDER BY c.id DESC"):
+            "WHERE s.kind = 'open' AND c.client_phone != '' AND c.id != ? ORDER BY c.id DESC", (besides or 0,)):
         if connections.normalize_phone(card_phone) == wanted:
             return {"id": card_id, "created_at": created_at, "point_id": point_id}
     return None

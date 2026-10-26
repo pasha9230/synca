@@ -12,6 +12,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from panel_helpers import make_app, post, shared_mark_of
+from order_fixtures import free_phone
 from tires_sync import connections, order_points as points, order_report, orders, store, users, webmim_create, webmim_match, webmim_orders
 from tires_sync.secretbox import SecretBox
 
@@ -114,7 +115,7 @@ def card(conn, goods=(("111", 4), ("222", 2)), territory=TERRITORY, brand="b", p
     if point_id == "auto":
         found = conn.execute("SELECT id FROM point WHERE name = 'Гамма'").fetchone()
         point_id = found[0] if found else point(conn)
-    data = dict({"client_name": "Иван", "client_phone": "+7 (911) 111-22-33", "delivery_date": "2026-10-24", "point_id": point_id, "tags": "тест"}, **fields)
+    data = dict({"client_name": "Иван", "client_phone": free_phone(conn, "+7 (911) 111-22-33"), "delivery_date": "2026-10-24", "point_id": point_id, "tags": "тест"}, **fields)
     if point_id is None:
         data.pop("point_id")
     card_id = orders.create_card(conn, data, NOW, "owner")
