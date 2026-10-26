@@ -223,3 +223,14 @@ def test_the_row_saved_with_a_chat_typed_in_the_same_press_is_priced_by_that_cha
     post(client, "/orders/%d/save" % card_id, tok, avito_chat="Ч-%d" % chat, goods_id="100", query="Autograph Snow 3 · 205/55 R16", qty="4")
     assert conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0] == card_id
     assert prices(conn, card_id) == [("100", feed_price(conn, other, "100"))]
+
+
+def test_a_mirror_account_is_priced_by_the_calculation_not_by_a_stored_row(tmp_path, monkeypatch):
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    main, other = accounts(conn)
+    conn.execute("UPDATE account SET feed_mode = 'mirror' WHERE id = ?", (other,))
+    published(conn, other, "100", 5130)                                                                    # a row of an older state of the mirror
+    chat = chat_of(conn, other)
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card_id = conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
+    assert prices(conn, card_id) == [("100", feed_price(conn, other, "100"))]

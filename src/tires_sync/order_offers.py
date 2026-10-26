@@ -43,11 +43,13 @@ def effective_settings(conn, settings, account_id=None):
 
 def ad_prices(conn, account_id, goods_ids) -> dict:
     """{position: the price of one tyre in the ad of the account's last published feed} (published_state, written when the feed is
-    promoted: what the client saw). A position the account has not published, or a mirror kept by hand, has none: it is calculated."""
+    promoted: what the client saw). A position the account has not published has none: it is calculated. A mirror kept by hand has none
+    either: the cycle prices its ads again each time by the same rule (mirror_feed.prices_for), its stored rows may be of an older state."""
     if account_id is None:
         account_id = account_for(conn)
     ids = [str(g) for g in goods_ids]
-    if account_id is None or not ids:
+    account = connections.get_account(conn, account_id) if account_id is not None else None
+    if account is None or account["feed_mode"] == "mirror" or not ids:
         return {}
     rows = conn.execute("SELECT goods_id, price FROM published_state WHERE account_id = ? AND goods_id IN (%s)" % ",".join("?" * len(ids)),
                         [account_id] + ids)
