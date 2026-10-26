@@ -224,7 +224,8 @@ def test_the_feed_has_one_key_per_open_question(tmp_path, clock):
     assert not [i for i in mine.get("/my-point/feed").get_json()["items"] if i["key"].startswith("question-")]
     asked(conn, card)
     items = [i for i in mine.get("/my-point/feed").get_json()["items"] if i["key"].startswith("question-")]
-    assert [i["key"] for i in items] == ["question-%d" % card] and "5000100" in items[0]["title"]
+    stay = re.sub(r"\D", "", orders.get_card(conn, card)["entered_at"])                    # lane 3: the key is of the stay at the point
+    assert [i["key"] for i in items] == ["question-%d-%s" % (card, stay)] and stay and "5000100" in items[0]["title"]
     assert store.get_state(conn, reserve._ask_key(orders.get_card(conn, card))).startswith("asked|")       # the feed reads, never moves
 
 

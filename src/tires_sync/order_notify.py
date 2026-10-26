@@ -1,5 +1,6 @@
 """The alert to the responsible manager of an order (the waiting list): who gets it and through what.
-A panel user (the owner or a person with a login) gets it in Telegram, in the chat saved for them (the owner: the chat of the failure alerts);
+A panel user (the owner or a person with a login) gets it in Telegram, in the chat saved for them (the owner: the chat of the failure alerts),
+except a point user: through their point («Моя точка» or its VK), never Telegram (the owner 2026-10-26: the bell with the sound is enough);
 somebody who is not in the panel (the robot, a removed user) is answered through VK by the manager of the point of the order, or, when the
 point works in the panel (channel «panel», the owner 2026-10-23), on its «Моя точка» (for the staff a grey record of the journal only);
 when there is no way, the owner is told in Telegram that nobody could be written to. An order of the Avito account of a point (the owner
@@ -71,7 +72,10 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     who = card["responsible"]                                      # whoever answers for the card (the maker unless another is named)
     own = None if card.get("to_staff") else points.of_account(conn, card.get("id"))   # to_staff: order_manager.staff_card
     if own is not None:                                            # an order of a point's Avito account: only that point (the owner 2026-10-26)
-        return dict(_point_route(conn, own, who), own_point=own["id"])
+        return dict(_point_route(own), own_point=own["id"])
+    mine = _users_point(conn, who)
+    if mine is not None:                                           # a point user: through their point, never Telegram (the owner 2026-10-26)
+        return _point_route(mine) if mine else {"channel": "owner", "to": "", "why": "точки пользователя «%s» больше нет" % who}
     if who in _panel_logins(conn, owner_login):
         chat = (connections.get_config(conn, "telegram", 0).get("chat_id") if who == owner_login else user_chats(conn).get(who)) or ""
         if chat:
@@ -87,13 +91,22 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     return {"channel": "vk", "to": str(point["vk_peer_id"]), "why": point["name"]}
 
 
-def _point_route(conn, point: dict, who: str) -> dict:
-    """The way to the point of the order's account: a user of that point who answers for it, in their Telegram; else the point's VK or its
-    «Моя точка»; «owner» here only means there is no way (deliver then leaves it on «Моя точка», never with the owner)."""
+def _users_point(conn, who: str) -> Optional[dict]:
+    """The point of a point user (role «point»), whose news go through the point only: {} when it is gone (still never Telegram, review of
+    lane 3); None for anybody else."""
     role = users.get_role(conn, who) if who and users.exists(conn, who) else None
-    chat = user_chats(conn).get(who) if role and role["role"] == "point" and role["active"] and role["point_id"] == point["id"] else ""
-    if chat:
-        return {"channel": "telegram", "to": str(chat), "why": who}
+    if not role or role["role"] != "point":
+        return None
+    try:
+        return points.get_point(conn, role["point_id"]) if role["point_id"] else {}
+    except points.PointError:
+        return {}
+
+
+def _point_route(point: dict) -> dict:
+    """The way to a point: its «Моя точка» (the panel) or its VK; never the Telegram of a person of the point, even with a chat saved (the
+    owner 2026-10-26, plan answer 8: the bell with the sound is enough). «owner» here only means there is no way (for an order of the point's
+    account deliver then leaves it on «Моя точка», never with the owner)."""
     if points.in_panel(point):
         return {"channel": "panel", "to": str(point["id"]), "why": point["name"]}
     if point["channel"] != "vk" or not point["vk_peer_id"]:
@@ -227,7 +240,8 @@ UNSEEN_START_KEY = "point_unseen_start"           # app_state: the notes written
 
 def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport = urllib_transport) -> int:
     """The safety net of a point in the panel (the lead 2026-10-23, as the old «no VK → the owner»): an alert on its «Моя точка» that nobody of
-    the point opened within 15 minutes of working time (the hours of the handoffs) goes to the owner in Telegram, once. Returns how many."""
+    the point opened within 15 minutes of working time (the hours of the handoffs) goes to the owner in Telegram, once. Opened: its «Моя точка»
+    or, since the alert, the order's card (lane 3: the owner is never told what the point already saw). Returns how many."""
     from datetime import datetime
     from . import order_manager
     start = store.get_state(conn, UNSEEN_START_KEY)
@@ -245,6 +259,9 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
                 continue
             if points.of_account(conn, note.get("order_id")) is not None:     # an order of a point's account: the point's only (2026-10-26)
                 points.mark_escalated(conn, note["id"], now, "заказ аккаунта точки: владельцу не передаётся")
+                continue
+            if points.opened_order(conn, point["id"], note.get("order_id"), note.get("at")):   # the point opened the order: it is seen
+                points.mark_escalated(conn, note["id"], now, "точка открыла заказ: владельцу не передаётся")
                 continue
             text = "Точка «%s» не открыла оповещение%s за %d минут рабочего времени.\n%s" % (
                 point["name"], " по заказу №%d" % note["order_id"] if note.get("order_id") else "", UNSEEN_MINUTES, note.get("text") or "")

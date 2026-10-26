@@ -300,6 +300,13 @@ def unseen_alerts(conn, point_id, since: str) -> List[dict]:
     return found
 
 
+def opened_order(conn, point_id, order_id, since: str) -> bool:
+    """A person of the point opened the order's card since `since` (the bell leads there, not to «Моя точка»): its alert is seen too."""
+    return bool(order_id) and conn.execute(
+        "SELECT 1 FROM order_event_seen s JOIN panel_user_role r ON r.login = s.login WHERE s.order_id = ? AND s.at >= ? "
+        "AND r.role = 'point' AND r.point_id = ? LIMIT 1", (int(order_id), str(since or ""), int(point_id))).fetchone() is not None
+
+
 def mark_escalated(conn, note_id: str, now: str, outcome: str) -> bool:
     """The note was passed to the owner (once): kept in the note itself. False when it is gone or was passed already."""
     row = conn.execute("SELECT value FROM app_state WHERE key = ?", (note_id,)).fetchone()

@@ -87,7 +87,9 @@ def test_the_partner_who_answers_for_a_point_account_order_gets_no_telegram_eith
     assert tg.calls == []
 
 
-def test_a_point_user_who_answers_for_its_own_account_order_gets_it_in_telegram(tmp_path):
+def test_a_point_user_who_answers_for_its_own_account_order_gets_it_from_the_point_not_in_telegram(tmp_path):
+    """Changed on purpose (the owner 2026-10-26, plan answer 8: no Telegram for a point, the bell with the sound is enough): it was the
+    user's Telegram; now the point's own way (its VK here, «Моя точка» in the panel), even with a chat saved for the user."""
     conn, box = env(tmp_path)
     pid = point(conn)
     users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
@@ -95,7 +97,28 @@ def test_a_point_user_who_answers_for_its_own_account_order_gets_it_in_telegram(
     mine = card(conn, "gamma1", pid)
     chat(conn, POINT_ACCOUNT, mine["id"])
     way = order_notify.route(conn, mine)
-    assert (way["channel"], way["to"], way["why"]) == ("telegram", "777000", "gamma1")
+    assert (way["channel"], way["to"], way["why"]) == ("vk", "777", "Гамма")
+    conn.execute("UPDATE point SET channel = 'panel' WHERE id = ?", (pid,))
+    conn.commit()
+    tg = ScriptedHttp(TG_OK)
+    assert order_notify.deliver(conn, box, mine, "Конец резерва", NOW, tg_http=tg).startswith("показано точке")
+    assert tg.calls == []
+
+
+def test_a_point_user_who_answers_for_an_own_account_order_gets_it_from_the_point_not_in_telegram(tmp_path):
+    """The same for an order of an account of no point: a point user is told through its point (the owner 2026-10-26), never Telegram."""
+    conn, box = env(tmp_path)
+    pid = point(conn, channel="panel", peer="")
+    users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
+    order_notify.set_user_chat(conn, "gamma1", "777000", NOW, "owner")
+    mine = card(conn, "gamma1", pid)
+    chat(conn, OWN_ACCOUNT, mine["id"])
+    tg = ScriptedHttp(TG_OK)
+    assert order_notify.route(conn, mine) == {"channel": "panel", "to": str(pid), "why": "Гамма"}
+    assert order_notify.deliver(conn, box, mine, "Конец резерва", NOW, tg_http=tg).startswith("показано точке")
+    assert tg.calls == [] and [n["text"] for n in points.notes(conn, pid)] == ["Конец резерва"]
+    elsewhere = card(conn, "gamma1")                                                       # no point on the order: the user's own point
+    assert order_notify.route(conn, elsewhere)["channel"] == "panel"
 
 
 def test_with_no_way_to_the_point_the_alert_stays_on_its_page_and_the_owner_is_not_told(tmp_path):
@@ -297,3 +320,49 @@ def test_the_safety_net_marks_a_point_account_note_so_that_it_is_not_looked_at_a
     tg = ScriptedHttp(TG_OK)
     assert order_notify.escalate_unseen(conn, box, "2026-10-15T12:30:00", tg_http=tg) == 0
     assert points.unseen_alerts(conn, pid, "") == [] and tg.calls == []
+
+
+# ---- lane 3: the safety net never tells the owner what the point already opened ---------------------------------------------------------
+
+def unseen_order_alert(tmp_path):
+    """An alert of an own-account order (it may go to the owner) left on the «Моя точка» of a point in the panel at NOW."""
+    conn, box = env(tmp_path)
+    pid = point(conn, channel="panel")
+    users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
+    store.set_state(conn, order_notify.UNSEEN_START_KEY, "2026-10-01T00:00:00")
+    ours = card(conn, "chats-robot", pid)
+    chat(conn, OWN_ACCOUNT, ours["id"], peer="b")
+    assert order_notify.deliver(conn, box, ours, "Наш заказ", NOW).startswith("показано точке")
+    return conn, box, pid, ours
+
+
+def test_the_safety_net_tells_the_owner_nothing_of_an_order_the_point_opened(tmp_path):
+    conn, box, pid, ours = unseen_order_alert(tmp_path)
+    order_alerts.mark_seen(conn, "gamma1", ours["id"], "2026-10-15T12:05:00")          # the bell → the order's card, not «Моя точка»
+    conn.commit()
+    tg = ScriptedHttp(TG_OK)
+    assert order_notify.escalate_unseen(conn, box, "2026-10-15T12:30:00", tg_http=tg) == 0
+    assert tg.calls == [] and points.unseen_alerts(conn, pid, "") == []                    # marked: not looked at again
+
+
+def test_the_safety_net_still_tells_the_owner_when_only_the_staff_or_an_older_look_opened_it(tmp_path):
+    conn, box, pid, ours = unseen_order_alert(tmp_path)
+    order_alerts.mark_seen(conn, "gamma1", ours["id"], "2026-10-15T11:00:00")          # before the alert: not a look at it
+    order_alerts.mark_seen(conn, "owner", ours["id"], "2026-10-15T12:05:00")           # the owner's look is not the point's
+    conn.commit()
+    tg = ScriptedHttp(TG_OK)
+    assert order_notify.escalate_unseen(conn, box, "2026-10-15T12:30:00", tg_http=tg) == 1
+    assert len(tg.calls) == 1 and "Наш заказ" in sent_text(tg.calls[0])
+
+
+def test_a_user_of_a_deleted_point_gets_no_telegram_either(tmp_path):
+    """Review of lane 3: the point was deleted, its user keeps the role «point»: still never Telegram (the owner is told nobody could be)."""
+    conn, box = env(tmp_path)
+    pid = point(conn, channel="panel", peer="", account=None)
+    users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
+    order_notify.set_user_chat(conn, "gamma1", "777000", NOW, "owner")
+    mine = card(conn, "gamma1")
+    chat(conn, OWN_ACCOUNT, mine["id"])
+    points.delete_point(conn, pid)
+    way = order_notify.route(conn, mine)
+    assert way["channel"] == "owner" and way["to"] == ""
