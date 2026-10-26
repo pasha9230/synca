@@ -293,7 +293,8 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file",
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
-                         "calls_page", "call_record", "call_create_order", "call_handoff"})            # the calls of the point's account (own_call)
+                         "calls_page", "call_record", "call_create_order", "call_handoff",            # the calls of the point's account (own_call)
+                         "clients_page", "client_page"})          # «CRM»: looks at its own part of a client only (own_client; the owner 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})
 
@@ -374,6 +375,12 @@ def own_call(call_row) -> bool:
     return account is not None and row is not None and row[0] == account
 
 
+def own_client(client_id) -> bool:
+    """The manager's point has a part of the client: an order of the point, a chat or a call of the point's account (clients.point_part)."""
+    from .. import clients
+    return clients.point_part(get_conn(), client_id, own_point(), point_account()) is not None
+
+
 def own_event(event_id) -> bool:
     """The record is of an order of the manager's point."""
     row = get_conn().execute("SELECT c.point_id FROM order_event e JOIN order_card c ON c.id = e.order_id WHERE e.id = ?", (event_id,)).fetchone()
@@ -403,6 +410,7 @@ def check_access():
         if endpoint not in POINT_PAGES or ("card_id" in args and _card_point(args["card_id"]) != user["point_id"]) \
                 or ("chat_row" in args and not own_chat(args["chat_row"])) or ("event_id" in args and not own_event(args["event_id"])) \
                 or ("call_row" in args and not own_call(args["call_row"])) \
+                or ("client_id" in args and not own_client(args["client_id"])) \
                 or (request.method == "POST" and "chat_row" in args and chat_of_other_point(args["chat_row"])):
             abort(403)
     if users.level(role, section) < (users.EDIT if request.method == "POST" and not (role == "point" and endpoint in VIEW_POSTS) else users.VIEW):

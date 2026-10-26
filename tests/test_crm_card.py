@@ -353,13 +353,13 @@ def test_the_card_page_the_list_the_duplicates_and_the_rights(tmp_path, monkeypa
     pid = conn.execute("INSERT INTO point (name) VALUES ('Бета')").lastrowid
     conn.commit()
     point = _as(app, conn, "pointman", "point", point_id=pid)
-    for url in ("/clients", "/clients/%d" % a, "/clients/duplicates"):
-        assert point.get(url).status_code == 403
+    for url in ("/clients/%d" % a, "/clients/duplicates"):                                    # not the point's client; «CRM» of its own part:
+        assert point.get(url).status_code == 403                                               # tests/test_point_isolation.py (2026-10-26)
     assert point.post("/clients/%d/tag" % a, data={"csrf": "tok", "tag": "x", "on": "1"}).status_code == 403
 
 
 def test_the_menu_has_crm_and_the_lane_of_the_inquiries_has_its_place(tmp_path, monkeypatch):
-    """«CRM» in the menu for those who see the clients, never for a point; _client_inquiry.html (the lane crm-inquiry) is drawn in the
+    """«CRM» in the menu for those who see the clients, a point too (its own part, 2026-10-26); _client_inquiry.html (the lane crm-inquiry) is drawn in the
     head of the card and in every row of the list with the client's number."""
     from jinja2 import ChoiceLoader, DictLoader
     monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
@@ -373,7 +373,7 @@ def test_the_menu_has_crm_and_the_lane_of_the_inquiries_has_its_place(tmp_path, 
     pid = conn.execute("INSERT INTO point (name) VALUES ('Бета')").lastrowid
     conn.commit()
     point = _as(app, conn, "pointman", "point", point_id=pid)
-    assert 'href="/clients"' not in point.get("/my-point").get_data(as_text=True)
+    assert 'href="/clients"' in point.get("/orders").get_data(as_text=True)                   # the menu of the panel («Моя точка» has its own)
     app.jinja_env.loader = ChoiceLoader([DictLoader({"_client_inquiry.html": "[статус {{ inquiry_client_id }} {{ inquiry_place }}]"}), app.jinja_env.loader])
     assert "[статус %d card]" % a in owner.get("/clients/%d" % a).get_data(as_text=True)
     assert "[статус %d list]" % a in owner.get("/clients").get_data(as_text=True)

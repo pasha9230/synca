@@ -401,7 +401,8 @@ def register(app) -> None:
         orders.ensure_pipeline(conn, local_iso())
         view = "list" if request.args.get("v") == "list" else "board"
         point, tag, query = own_point() or _int(request.args.get("p")), request.args.get("t", "").strip()[:30], request.args.get("q", "").strip()[:80]
-        data = orders.board(conn, local_now(), point_id=point, tag=tag, query=query)          # a manager of a point: only the point (common.own_point)
+        data = orders.board(conn, local_now(), point_id=point, tag=tag, query=query,          # a manager of a point: only the point (common.own_point),
+                            with_sums=own_point() is None)                                       # and no sums (the owner 2026-10-26)
         rows = sorted(({"card": c, "stage": col["stage"]} for col in data["columns"] for c in col["cards"]), key=lambda r: -r["card"]["id"])
         labels = orders.origin_labels(conn, own_point(), [r["card"]["id"] for r in rows]) if own_point() else {}   # not from the point's account
         return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels,

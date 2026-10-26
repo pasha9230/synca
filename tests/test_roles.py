@@ -177,7 +177,7 @@ def test_the_manager_of_a_point_sees_only_the_orders_of_the_point(tmp_path):
     assert client.get("/orders/%d" % their_card).status_code == 403
     assert client.get("/orders/%d" % nowhere).status_code == 403
     assert client.post("/orders/%d/note" % their_card, data={"csrf": "tok", "text": "x"}).status_code == 403
-    for url in ("/orders/new", "/orders/inbox", "/orders/settings", "/catalog", "/clients", "/shares"):
+    for url in ("/orders/new", "/orders/inbox", "/orders/settings", "/catalog", "/clients/duplicates", "/shares"):   # «CRM»: its own part (2026-10-26)
         assert client.get(url).status_code == 403, url
     assert client.get("/chats").status_code == client.get("/alerts").status_code == 200     # the owner 2026-10-21: the point's own (tests/test_point_rights.py)
     with pytest.raises(users.UserError):

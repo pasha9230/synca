@@ -101,7 +101,7 @@ def test_the_point_starts_on_its_page_and_keeps_only_its_own_doors(tmp_path):
     mine = manager(app, conn, pid)
     assert mine.get("/").headers["Location"].endswith("/my-point")
     assert mine.get("/my-point").status_code == 200 and mine.get("/account/password").status_code == 200
-    for url in ("/catalog", "/economics", "/connections", "/users", "/clients", "/shares"):     # «Чаты» and «Уведомления»: the point's own (2026-10-21)
+    for url in ("/catalog", "/economics", "/connections", "/users", "/clients/duplicates", "/shares"):     # «Чаты», «Уведомления», «CRM»: its own
         assert mine.get(url).status_code == 403, url
 
 
