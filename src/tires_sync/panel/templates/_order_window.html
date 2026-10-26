@@ -72,7 +72,7 @@
 {% if card and c.stage.code == "cancel" %}<label class="field is-wide"><span class="label">Причина отмены</span><input class="input" name="cancel_reason" value="{{ v.cancel_reason }}" maxlength="300"></label>{% endif %}
 {% if card and c.stage.code == "return" %}
 <label class="field"><span class="label">Тип возврата</span><select class="select" name="return_kind"><option value="">Не выбран</option>{% for key, label in return_kinds.items() %}<option value="{{ key }}"{% if v.return_kind == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-<label class="field"><span class="label">Сумма возврата, ₽</span><input class="input" name="return_amount" value="{{ v.return_amount or '' }}" inputmode="decimal"></label>
+<label class="field"><span class="label">Сумма возврата, ₽</span><input class="input" name="return_amount" value="{{ return_amount.value }}" inputmode="decimal" autocomplete="off"{% if not return_amount.value %} placeholder="{{ return_amount.hint }}"{% for k, s in return_amount.suggest.items() %} data-suggest-{{ k }}="{{ s }}"{% endfor %} data-return-amount="hint"{% endif %}></label>
 <label class="field is-wide"><span class="label">Причина возврата</span><input class="input" name="return_reason" value="{{ v.return_reason }}" maxlength="300"></label>
 {% endif %}
 </div>
