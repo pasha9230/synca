@@ -82,7 +82,7 @@ BONUS_TO = "handed"                  # who gets the fixed sum for a handed-over 
                                      # "issued" — the point that issued the order, as the 75 ₽
 
 
-def bonus_point(issued, handed_by):
+def bonus_point(issued: tuple, handed_by: Optional[tuple]) -> tuple:
     """The point (its key in the report) that gets the fixed sum for a handed-over client's issued order: the one place of that choice."""
     return (handed_by or issued) if BONUS_TO == "handed" else issued
 
