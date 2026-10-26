@@ -123,3 +123,31 @@ def test_nothing_about_the_purchase_or_the_margin_is_in_the_file(tmp_path):
     cells = [c.value for row in ws.iter_rows() for c in row]
     assert not any(isinstance(v, str) and ("закуп" in v.lower() or "марж" in v.lower()) for v in cells)
     assert 1234.56 not in cells and 4938.24 not in cells                            # neither the price of the supplier nor four of them
+
+
+def test_the_file_of_a_point_has_no_money_at_all_and_the_staff_file_keeps_the_sum(tmp_path):
+    """The owner 2026-10-27: the manager of a point exports the orders without any sum (no sale, no purchase, no margin, no fees)."""
+    from test_mypoint import manager
+    app = make_app(tmp_path, NOW=lambda: datetime(2026, 10, 15, 9, 0, 0))
+    staff = app.test_client()
+    login(staff)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    pid = points.save_point(conn, {"name": "Гамма"})
+    cid = orders.create_card(conn, {"client_name": "Иван", "point_id": pid}, NOW, "o")
+    item(conn, cid, name="Pirelli 225/55 R17", qty=4, sale_unit=9617.0, supplier_price=7311.0)
+    conn.commit()
+    point = manager(app, conn, pid)
+    rows = list(sheet(point.get("/orders/export.xlsx").get_data()).iter_rows(values_only=True))
+    head = list(rows[0])
+    assert head == [h for h in HEAD if h != "Сумма, ₽"] and [r[0] for r in rows[1:]] == [cid]
+    one = dict(zip(head, rows[1]))
+    assert one["Клиент"] == "Иван" and one["Позиции"] == "Pirelli 225/55 R17 × 4" and one["Штук"] == 4
+    cells = [v for row in rows for v in row]
+    money = (9617.0, 4 * 9617.0, 7311.0, 4 * 7311.0, 4 * (9617.0 - 7311.0))
+    assert not any(v in money for v in cells if isinstance(v, (int, float)))
+    assert not any(isinstance(v, str) and (any(w in v.lower() for w in ("сумм", "₽", "цен", "закуп", "марж", "прибыл", "комисс"))
+                                            or any(s in v.replace(" ", "") for s in ("9617", "38468", "7311", "29244")))
+                   for v in cells)
+    rows = list(sheet(staff.get("/orders/export.xlsx").get_data()).iter_rows(values_only=True))
+    assert list(rows[0]) == HEAD and dict(zip(HEAD, rows[1]))["Сумма, ₽"] == 4 * 9617.0               # the staff: unchanged

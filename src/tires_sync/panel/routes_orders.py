@@ -442,7 +442,7 @@ def register(app) -> None:
         stamp = local_now()
         try:
             data = orders_export.build(conn, stamp, point_id=own_point() or _int(request.args.get("p")), tag=request.args.get("t", "").strip()[:30],
-                                       query=request.args.get("q", "").strip()[:80])
+                                       query=request.args.get("q", "").strip()[:80], money=own_point() is None)   # a point: no sums
         except ImportError:                                           # the library of Excel files is not installed on this machine
             flash("Выгрузка в Excel недоступна: на сервере не установлена библиотека openpyxl.")
             return redirect("/orders")
