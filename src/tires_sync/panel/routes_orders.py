@@ -14,7 +14,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, terms as terms_store, trash, vk_send, webmim_create, webmim_match
+from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
 from .routes_economics import _effective
@@ -432,7 +432,8 @@ def register(app) -> None:
         """What the orders sold, per point, with the point fee and the split of the profit. Read only."""
         conn = get_conn()
         start, end, point = _report_args()
-        names = [r[0] for r in conn.execute("SELECT DISTINCT point FROM sale WHERE source = 'order' AND point != '' ORDER BY point")]
+        names = [r[0] for r in conn.execute("SELECT DISTINCT %s FROM sale s LEFT JOIN point p ON p.id = s.point_id WHERE s.source = 'order'"
+                                            " AND %s != ''" % (sales_store.POINT_NAME, sales_store.POINT_NAME))]        # the point's name now
         report = order_report.build(conn, start, end, point)
         every = order_report.build(conn, start, end) if point else report               # a point paid only for the clients it handed over
         names = sorted(set(names) | {r["point"] for r in every["handoff"]["lines"] if r["point"] != order_report.NO_POINT})   # is chosen too (З8)

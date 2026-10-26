@@ -981,7 +981,8 @@ def record_sales(conn, card_id, day: str, now: str, author: str, today: str) -> 
                 conn, day=day, goods_id=it["goods_id"], brand_key=it["brand_key"] or "-", season=it["season"], diameter=it["diameter"],
                 name=it["name"], ad_kind="single", pieces=it["qty"], sale_total=float(it["sale_unit"]) * it["qty"],
                 supplier_price=float(it["supplier_price"]), terms=it["terms"] or None, fee_pct=float(it["fee_pct"]), promo_pct=float(it["promo_pct"]),
-                account_id=None, point=point, note="Заказ №%d" % card_id, now=now, author=author, today=today, source="order"))
+                account_id=None, point=point, note="Заказ №%d" % card_id, now=now, author=author, today=today, source="order",
+                point_id=card["point"]["id"] if card["point"] else None))
     except Exception as err:
         for sale_id in ids:
             sales_store.reverse_sale(conn, sale_id, now, author, from_order=True)
