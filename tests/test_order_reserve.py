@@ -340,6 +340,29 @@ def test_a_reserve_message_of_unknown_outcome_is_a_line_without_the_text_and_a_s
     assert len(_inbox(conn)) == 1
 
 
+def test_a_reserve_line_is_never_written_once_its_message_went_meanwhile(tmp_path, monkeypatch):
+    """Tails-answers 2: the send refused here, another thread delivered the same mark before the line was written: no line to copy from."""
+    from tires_sync import chats
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    chat = chat_of(conn, cid)
+    real = reserve.orders.add_event
+
+    def and_it_went_meanwhile(conn_, card, now, who, kind, text, level="grey"):
+        if kind == "reserve" and level == "red":
+            conn.execute("UPDATE chat_send_log SET status = 'sent'")
+            conn.commit()
+        return real(conn_, card, now, who, kind, text, level=level)
+    monkeypatch.setattr(reserve.orders, "add_event", and_it_went_meanwhile)
+
+    def refused(chat_row, text, token):
+        conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES (?, ?, '2026-10-18T12:00:00', 'система', 'failed')",
+                     (token, chat))
+        conn.commit()
+        raise chats.ChatError("Авито не принял сообщение (403).")
+    told(conn, "2026-10-18T12:00:00", refused)
+    assert _inbox(conn) == []
+
 class AvitoSender:
     """The writing client of the chats (chats.send_reply): records what went."""
 

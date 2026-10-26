@@ -89,3 +89,74 @@ def test_a_failed_send_pressed_twice_with_nothing_in_the_chat_goes_once(env):
     assert chats.send_reply(conn, sender, chat_row, "Добрый день", "tok-1", at(110), "owner") is None
     assert sender.sent == ["Добрый день"]
 
+
+# --- 2: the line of «Входящие» is answered once the message reached the client ---------------------------------------------------------
+
+DELIVERED = "Итог: сообщение клиенту дошло (отправлено повторно). Делать ничего не нужно."
+
+
+def test_a_second_arrived_that_goes_answers_the_line_with_the_text_to_copy_of_the_first(env, monkeypatch):
+    conn, chat_row, card = env
+    sender = Refusing(refused403())
+    sent, _note = arrived(conn, card, sender, monkeypatch, NOW)
+    [line] = lines(conn)
+    assert not sent and line["status"] == "new" and order_manager.COPY_MARK + ARRIVED in line["text"]
+    sent, _note = arrived(conn, card, sender, monkeypatch, at(1000))                            # nothing in the chat: it goes
+    assert sent and sender.sent == [ARRIVED]
+    [line] = lines(conn)
+    assert line["status"] == "answered" and line["answer"] == DELIVERED
+    assert order_manager.new_count(conn) == 0
+
+
+def test_a_new_press_after_the_402s_ended_answers_the_alert_of_the_sync(env):
+    conn, chat_row, card = env
+    sender = Refusing(*[refused402() for _ in range(4)])
+    refused_402s_to_the_end(conn, chat_row, sender)
+    conn.execute("INSERT INTO manager_message (message_id, at, point_id, sender, text, status) VALUES ('send-tok-10-1', ?, NULL, 'система', "
+                 "'чужая', 'new')", (NOW,))
+    conn.commit()
+    assert chats.send_reply(conn, sender, chat_row, "Добрый день", "tok-1", at(1000), "owner") is None
+    assert sender.sent == ["Добрый день"]
+    shown = {line["message_id"][:11]: (line["status"], line["answer"]) for line in lines(conn)}
+    assert shown["send-tok-1-"] == ("answered", DELIVERED) and shown["send-tok-10"] == ("new", "")
+
+
+def test_a_new_press_of_a_refused_photo_that_goes_answers_its_lines(env):
+    from test_chat_send_refusal import picture
+    conn, chat_row, card = env
+    sender = Refusing(refused403())
+    with pytest.raises(chats.ChatError):
+        chats.send_image(conn, sender, chat_row, picture(), "img-1", NOW, "owner")
+    conn.execute("INSERT INTO manager_message (message_id, at, point_id, sender, text, status) VALUES ('img-1-1', ?, NULL, 'система', 'фото', 'new')",
+                 (NOW,))
+    conn.commit()
+    chats.send_image(conn, sender, chat_row, picture(), "img-1", at(1000), "owner")
+    assert sender.sent == ["img-1"]
+    [line] = lines(conn)
+    assert line["status"] == "answered" and line["answer"] == DELIVERED
+
+
+def test_the_first_press_of_a_send_answers_no_line(env):
+    conn, chat_row, card = env
+    conn.execute("INSERT INTO manager_message (message_id, at, point_id, sender, text, status) VALUES ('tok-1-1', ?, NULL, 'система', 'x', 'new')",
+                 (NOW,))
+    conn.commit()
+    chats.send_reply(conn, Refusing(), chat_row, "Добрый день", "tok-1", NOW, "owner")
+    assert lines(conn)[0]["status"] == "new"                                                    # a first send has no line of its own
+
+
+def test_a_line_about_a_send_that_went_meanwhile_is_never_written(env, monkeypatch):
+    """The race of two «приехал» of one arrival: the first one refused, the second one delivered it before the first wrote its line."""
+    conn, chat_row, card = env
+    sender = Refusing(refused403())
+    real = order_manager.orders.add_event
+
+    def and_the_other_one_goes(conn_, card_, now, who, kind, text, level="grey"):
+        if level == "red" and not sender.sent:
+            chats.send_reply(conn, sender, chat_row, ARRIVED, arrived_token(conn), at(5), "система")
+        return real(conn_, card_, now, who, kind, text, level=level)
+    monkeypatch.setattr(order_manager.orders, "add_event", and_the_other_one_goes)
+    sent, _note = arrived(conn, card, sender, monkeypatch, NOW)
+    assert not sent and sender.sent == [ARRIVED] and row(conn, arrived_token(conn))["status"] == "sent"
+    assert lines(conn) == []
+

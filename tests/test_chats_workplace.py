@@ -229,11 +229,11 @@ def test_a_call_of_the_client_is_a_line_and_an_alert_in_the_open_order(tmp_path)
 
 # --- the guard: sending to the client is not changed by this lane ----------------------------------------------------------------------
 
-SEND_CODE = {"send_reply": "11626f40fa5c4302", "send_image": "7008d7cb77d43324", "_not_delivered": "a8956eb6a6144a6f",
+SEND_CODE = {"send_reply": "67a2e20061cd2c7d", "send_image": "246067c5cbb76d35", "_not_delivered": "a8956eb6a6144a6f",
              "_definitely_not_sent": "54fccf3440320712", "prepare_image": "49124b261ee79487", "_ours_at_avito": "b314973f9e146a88",
              "_resume_interrupted": "6dafc631f5931af4", "_avito_said": "c548573094ccd636", "_refused_hint": "43286dbe7edeb825",
              "_send_record": "31f9efceaa31c6ea", "_quotes": "fd5e8049fdeab435", "_deliver": "cffc525c2f695af0",
-             "_mark": "d70d75c8ce7b5088", "_alert_not_sent": "1a583ca72e26f625", "_retry_refused": "fb82d89ea741b009",
+             "_mark": "d70d75c8ce7b5088", "_alert_not_sent": "74efc5b821020db2", "_retry_refused": "fb82d89ea741b009",
              "_check_unknown": "3aed91f55d552351", "settle_sends": "c527b46d7c743787", "_lost_is_there": "a5c7e7ea4c1266ec",
              "_claim_by_sync": "12aa42afe40970a8", "_same_text": "3f655b3cb9d97bfe", "_since": "6194713c717a8ee2",
              "_others": "2a2ad9a520585a3f", "_retry_late": "322e8e40b2498e09", "_stopped": "252620f625d49f18", "_halt": "e55440bb8fb342be",
@@ -267,6 +267,9 @@ SEND_CODE = {"send_reply": "11626f40fa5c4302", "send_image": "7008d7cb77d43324",
 # an unreadable chat does not hold it back; either outcome closes the open lines of «Входящие» with a text to copy, the sync's alerts too.
 # _check_unknown's cannot() closes the caller's line of «Входящие» for a skipped task or a closed order (_inbox_close). What is sent
 # otherwise is unchanged (tests/test_send_settle4.py).
+# 2026-10-27 tails-answers (RED, reviewed): a new press of a send that goes (send_reply/send_image: a failed one, an interrupted or a lost one
+# found) answers the open lines of «Входящие» about it, the sync's alerts too («дошло»); no line about a send is written once it went
+# (_alert_not_sent, order_manager._tell_arrived, order_reserve: NOT_SENT_MEANWHILE). What is sent is unchanged (tests/test_send_settle5.py).
 
 
 def test_the_functions_that_send_to_the_client_are_as_they_were():

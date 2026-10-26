@@ -734,6 +734,12 @@ def _mark(conn, token: str, status: str, error: Optional[str] = None, **more) ->
     conn.commit()
 
 
+NOT_SENT_MEANWHILE = "WHERE NOT EXISTS (SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent')"    # a line about a send is
+# never written once it went (another press delivered it meanwhile): written before, it is answered by that press (tails-answers 2)
+DELIVERED_AGAIN = "Итог: сообщение клиенту дошло (отправлено повторно). Делать ничего не нужно."
+FOUND_AGAIN = "Итог: сообщение клиенту дошло (найдено в чате Авито). Делать ничего не нужно."
+
+
 def _alert_not_sent(conn, chat: dict, token: str, now: str, why: str, text: str, ending: str = "Отправьте вручную.") -> None:
     """The minute's sync could not send it (nobody is on the page): a line of «Входящие» from «система», with the text to copy (as «можно
     забирать» that did not go). Whatever happens to the line, the send is what it is."""
@@ -742,9 +748,9 @@ def _alert_not_sent(conn, chat: dict, token: str, now: str, why: str, text: str,
         card = conn.execute("SELECT point_id, webmim_number FROM order_card WHERE id = ?", (chat["order_id"],)).fetchone() \
             if chat["order_id"] and chat["order_id"] > 0 else None
         where = "Заказ №%s" % (card[1] or chat["order_id"]) if card else "Чат Ч-%d" % chat["id"]
-        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) VALUES (?,?,?,?,?,'new')",
-                     ("send-%s-%s" % (token, re.sub(r"\D", "", now)), now, card[0] if card else None, SYSTEM,
-                      "%s: клиенту не отправлено — %s %s" % (where, why, ending) + (COPY_MARK + text if text else "")))
+        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) SELECT ?,?,?,?,?,'new' "
+                     + NOT_SENT_MEANWHILE, ("send-%s-%s" % (token, re.sub(r"\D", "", now)), now, card[0] if card else None, SYSTEM,
+                      "%s: клиенту не отправлено — %s %s" % (where, why, ending) + (COPY_MARK + text if text else ""), token))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -911,11 +917,13 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
         if row[0] == "lost" and not again:
             raise ChatSendLost(_lost_said(bool(row[3])))
         if row[0] == "lost" and _lost_is_there(conn, client, chat, token, row[6] or row[4], text):    # from the first start (M1)
+            _inbox_close(conn, token, now, FOUND_AGAIN, alerts=True)
             return "found"                                                           # «Отправить снова» of a message that came meanwhile
         resumed = _resume_interrupted(conn, client, chat, token, now, author, "Сообщение", text) if row[0] == "sending" else ""
         if resumed == "sent":
             conn.execute("UPDATE chat_send_log SET text = '' WHERE token = ?", (token,))
             conn.commit()
+            _inbox_close(conn, token, now, FOUND_AGAIN, alerts=True)
             return                                                                   # a send cut off by a killed panel had gone out
         if resumed == "busy":
             raise ChatError("Это сообщение уже отправляется.")
@@ -943,6 +951,8 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
         raise _not_delivered(conn, chat, now, author, "Сообщение", ChatError(
             "Сообщение не отправлено: Авито не отдал данные кабинета (%s). Повторите позже." % why)) from None
     _deliver(conn, client, chat, user_id, token, now, author, 0, text)
+    if claim.rowcount != 1:                                                          # a new press of its mark: the lines about the old one
+        _inbox_close(conn, token, now, DELIVERED_AGAIN, alerts=True)                 # are answered, nobody copies it by hand (tails-answers 2)
 
 
 MAX_IMAGE_BYTES = 15 * 1024 * 1024        # what we accept from the manager
@@ -1019,6 +1029,7 @@ def send_image(conn, client, chat_row, data: bytes, token, now: str, author: str
             raise ChatSendLost(_lost_said(False))
         resumed = _resume_interrupted(conn, client, chat, token, now, author, "Фото", None) if row[0] == "sending" else ""
         if resumed == "sent":
+            _inbox_close(conn, token, now, FOUND_AGAIN, alerts=True)
             return
         if resumed == "busy":
             raise ChatError("Это фото уже отправляется.")
@@ -1048,6 +1059,8 @@ def send_image(conn, client, chat_row, data: bytes, token, now: str, author: str
     conn.execute("UPDATE chat_send_log SET text = ? WHERE token = ?", (str(image_id), token))       # what the sync sends again after a 402
     conn.commit()
     _deliver(conn, client, chat, user_id, token, now, author, 0, str(image_id), photo=True)
+    if claim.rowcount != 1:
+        _inbox_close(conn, token, now, DELIVERED_AGAIN, alerts=True)
 
 
 @contextmanager
