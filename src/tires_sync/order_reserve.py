@@ -9,6 +9,8 @@ The owner 2026-10-26 (a client got it after picking the order up): the point is 
 that day («Заказ №… ещё на точке?»). Only its «на точке <номер>» the same day before the end of the working hours sends the client the message
 (`here`); «выдал» closes the order as any «выдал»; silence, or a point that cannot be asked, sends nothing and leaves a yellow record for the
 responsible. The state of the question is one row of app_state per stay at the point, moved from «asked» by one UPDATE only (`_move`).
+The owner 2026-10-26: an order without a WebMIM number on that day asks the responsible once per order for the number (`_ask_number`, the
+same alert as the end of the reservation: a point account's order goes to its point); the client's text then has no «№…» (`_client_body`).
 """
 from __future__ import annotations
 
@@ -27,6 +29,9 @@ PointSend = Callable[..., object]                 # vk_send.sender_for: (peer_id
 ASK_KEY = "reserve_ask:%d:%s"                     # app_state, per order and stay at the point: «asking|<at>» → asked → answered / silent; failed, unasked
 ASK = "Заказ №%s (%s) ещё на точке? Ответьте «выдал %s» или «на точке %s»."
 HERE = "на точке"
+ASK_NUMBER = "Укажите номер заказа WebMIM по заказу %d (%s)"
+NO_NUMBER_MARK = "[резерв:нет-номера]"            # once per order, whatever its stays at the point
+NUMBER = re.compile(r"[ \t]*№?[ \t]*\{webmim_number\}")
 
 
 def _marker(kind: str, until: str, stage: str) -> str:
@@ -72,7 +77,7 @@ def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now:
                          "забирать» %s" % (CLIENT_TEMPLATE, marker), level="grey")
         conn.commit()
         return ""
-    status, why, copy = order_manager.send_to_client(conn, card, order_manager.template_body(conn, order_templates.RESERVE_SAMPLE), token, deliver, now)
+    status, why, copy = order_manager.send_to_client(conn, card, _client_body(conn, card), token, deliver, now)
     mark = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (token,)).fetchone() if status == "unknown" else None
     own = bool(mark) and mark[0] in ("retry", "lost")              # a 402 the sync sends again, a lost one: their own words only (L3)
     if status == "sent":
@@ -93,6 +98,22 @@ def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now:
                          card.get("webmim_number") or card["id"], CLIENT_TEMPLATE, said) + (order_manager.COPY_MARK + copy if copy else "")))
     conn.commit()
     return status
+
+
+def _client_body(conn, card: dict) -> str:
+    """The reminder's template; without a WebMIM number its «№{webmim_number}» is left out with the space before it (the owner 2026-10-26)."""
+    body = order_manager.template_body(conn, order_templates.RESERVE_SAMPLE)
+    return body if card.get("webmim_number") else NUMBER.sub("", body)
+
+
+def _ask_number(conn, card: dict, notify: Notify, now: str) -> None:
+    """No WebMIM number on the day of the reminder: the responsible is asked for it once per order (the record of the journal is the mark)."""
+    if card.get("webmim_number") or _done(conn, card["id"], NO_NUMBER_MARK):
+        return
+    text = ASK_NUMBER % (card["id"], card["client_name"] or card["client_phone"] or "клиент")
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Менеджеру: «%s»: %s %s" % (text, notify(card, text), NO_NUMBER_MARK),
+                     level="yellow")
+    conn.commit()
 
 
 def _ask_key(card: dict) -> str:
@@ -208,7 +229,7 @@ def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.D
     return "на точке; клиенту не отправлено", "Заказ №%s — отмечено: на точке. Клиенту сообщение не отправлено: менеджер разберётся." % number
 
 
-def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, deliver, point_send) -> None:
+def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, deliver, point_send, notify: Notify) -> None:
     """A card at the point: the question of the last day (only where a client could be written to), the silence after it."""
     key = _ask_key(card)
     was = store.get_state(conn, key) or ""
@@ -229,6 +250,7 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
         return
     if _done(conn, card["id"], "[резерв:клиенту:%s]" % (card["entered_at"] or "")):
         return                                                  # the client was told in this stay already
+    _ask_number(conn, card, notify, now)
     if _arrived_today(conn, card, now):
         tell_client(conn, card, deliver, now)                   # «можно забирать» went today: the grey record only, nobody is asked
         return
@@ -268,7 +290,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
             until = date.fromisoformat(card["reserve_until"])
             if stage == "at_point":
                 try:
-                    _point_step(conn, card, today, now, hours, working, deliver, point_send)
+                    _point_step(conn, card, today, now, hours, working, deliver, point_send, notify)
                 except Exception:                             # the alert of the manager still goes
                     conn.rollback()
                     logging.getLogger("tires_sync.orders").exception("the reserve question to the point of card %s failed", card_id)
