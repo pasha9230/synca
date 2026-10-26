@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from panel_helpers import post
-from test_vk_commands import SENT, _card, _stage, hook, ready, to_client
+from test_vk_commands import SENT, _card, _stage, hook, ready, to_client, to_points
 from tires_sync import order_points as points, orders, store, users
 
 PASSWORD = "password-123"
@@ -162,6 +162,25 @@ def test_no_show_writes_the_red_record_as_the_vk_command_and_the_client_hears_no
     assert red and red == [(k, t) for k, t, l in journal(vk_conn, vk_card) if l == "red"]
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and to_client(app) == []
     assert "отмечено: клиент не пришёл" in page
+
+
+def test_no_show_of_the_point_account_order_tells_the_staff_and_not_the_point_by_vk_and_by_button(tmp_path):
+    """The owner 2026-10-26: the point says «клиент не пришёл» about an order of its own Avito account; the staff call the client."""
+    (vk_app, _c, _t, vk_conn, vk_pid, vk_card), (app, client, tok, conn, pid, card) = two(tmp_path)
+    for c, point_id, order in ((vk_conn, vk_pid, vk_card), (conn, pid, card)):
+        account = c.execute("SELECT account_id FROM avito_chat WHERE order_id = ?", (order,)).fetchone()[0]
+        c.execute("UPDATE point SET avito_account_id = ? WHERE id = ?", (account, point_id))
+        orders.move_card(c, order, _stage(c, "at_point"), "2026-10-13T12:00:00", "o")
+        c.commit()
+        assert points.of_account(c, order) is not None
+    hook(vk_app, vk_conn, "клиент не пришёл 5000100")
+    said = [text for _peer, text in to_points(vk_app)]
+    assert said and all("Клиент не пришёл за заказом" not in t for t in said) and any("С клиентом свяжутся" in t for t in said)
+    _t, page = press(manager(app, conn, pid), card, "no_show")
+    assert "отмечено: клиент не пришёл" in page and points.unseen_alerts(conn, pid, "") == []
+    for c, order in ((vk_conn, vk_card), (conn, card)):
+        told = [t for k, t, _l in journal(c, order) if k == "notify"]
+        assert told and not any("точк" in t for t in told), told
 
 
 def test_a_mark_that_does_not_fit_the_stage_changes_nothing(tmp_path):

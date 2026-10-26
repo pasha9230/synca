@@ -194,6 +194,19 @@ def test_a_no_show_of_a_point_account_order_nobody_in_the_panel_answers_for_goes
         assert points.unseen_alerts(conn, pid, "") == []
 
 
+def test_a_no_show_of_an_order_a_point_user_answers_for_goes_to_the_owner_not_to_that_user(tmp_path):
+    conn, box = env(tmp_path)                                                 # review 1: a deal the point made answers to its user
+    pid = point(conn)
+    users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
+    order_notify.set_user_chat(conn, "gamma1", "777000", NOW, "owner")
+    mine = card(conn, "gamma1", pid)
+    chat(conn, POINT_ACCOUNT, mine["id"])
+    tg, vk = ScriptedHttp(TG_OK), ScriptedHttp(VK_OK)
+    outcome, _answer = _no_show(conn, box, mine, tg, vk)
+    assert vk.calls == [] and len(tg.calls) == 1 and "отправлено в Telegram (owner)" in outcome, outcome
+    assert "777000" not in tg.calls[0][3].decode("utf-8")
+
+
 def test_a_no_show_with_nobody_to_tell_goes_to_the_owner_not_to_the_point_page(tmp_path):
     conn, box = env(tmp_path)
     users.add_user(conn, "owner2", "пароль-для-владельца-2", NOW, role="owner")

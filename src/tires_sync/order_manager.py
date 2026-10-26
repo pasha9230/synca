@@ -1504,10 +1504,12 @@ def point_handoffs(conn, point_id, since: str, limit: int = 50) -> List[dict]:
 def staff_card(conn, card: dict) -> dict:
     """The card for an alert that is for the staff and never for the point: the person who answers for it; when nobody in the panel does,
     the owner. order_notify would write to the point's VK (or its «Моя точка») for an order of the point's account (to_staff skips that)
-    or for a card whose responsible is not in the panel."""
-    from . import order_notify
+    or for a card whose responsible is not in the panel, and to the point's own user who answers for it (a deal the point made)."""
+    from . import order_notify, users
     card = dict(card, to_staff=True)
-    if order_notify.route(conn, card)["channel"] in ("vk", "panel"):
+    who = card.get("responsible") or ""
+    role = users.get_role(conn, who) if who and users.exists(conn, who) else None
+    if (role and role["role"] == "point") or order_notify.route(conn, card)["channel"] in ("vk", "panel"):
         card["responsible"] = order_notify.get_owner_login(conn)
     return card
 
