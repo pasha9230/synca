@@ -125,12 +125,16 @@ def test_of_two_workers_only_one_takes_the_hour_of_the_alert(tmp_path):
     assert store.claim_state(second, "k", "2026-10-07T13:00:01", "2026-10-07T12:00:01") is True      # an hour later
 
 
-def test_an_alert_sent_by_the_other_worker_this_hour_is_not_sent_again(tmp_path, monkeypatch):
+def test_an_alert_sent_by_the_other_worker_for_this_series_is_not_sent_again(tmp_path, monkeypatch):
+    """The owner 2026-10-27: once a series, not once an hour; the series of the other worker is still going (its failures are in the window)."""
     from tires_sync import notify
     said = []
     monkeypatch.setattr(notify, "notifier_for", lambda conn, box, http=None: said.append)
     app = make_app(tmp_path, TRUST_PROXY=1)
-    store.set_state(store.connect(app.config["DB_PATH"]), common.LOGIN_ALERT_KEY, "2026-10-07T11:50:00")
+    conn = store.connect(app.config["DB_PATH"])
+    for n in range(common.LOGIN_ALERT_FAILURES + 1):
+        store.add_login_failure(conn, "10.5.0.%d" % n, "2026-10-07T11:50:00")
+    store.set_state(conn, common.LOGIN_ALERT_KEY, "2026-10-07T11:50:00")
     client = app.test_client()
     tok = csrf_of(client)
     for n in range(common.LOGIN_ALERT_FAILURES + 3):
@@ -173,7 +177,7 @@ def test_a_refused_telegram_is_tried_again_in_five_minutes_not_in_an_hour(tmp_pa
     assert len(tries) == 2
 
 
-def test_a_sent_alert_waits_the_whole_hour(tmp_path, monkeypatch):
+def test_a_sent_alert_is_not_repeated_while_its_series_goes_on(tmp_path, monkeypatch):
     from tires_sync import notify
     said = []
     monkeypatch.setattr(notify, "notifier_for", lambda conn, box, http=None: said.append)
