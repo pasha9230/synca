@@ -12,6 +12,7 @@ from . import orders
 HEAD = ["№ заказа", "Создан", "Этап", "Клиент", "Телефон", "Точка", "Ответственный", "Источник", "Теги", "Позиции", "Штук", "Сумма, ₽",
         "Дата доставки", "Номер заказа WebMIM", "Статус WebMIM", "Комментарий", "Чат Авито"]
 WIDTHS = [10, 17, 22, 28, 18, 16, 16, 18, 24, 60, 8, 14, 14, 18, 18, 40, 16]
+MONEY = {"Сумма, ₽"}                                                # the columns of money: never in the file of a point (the owner 2026-10-27)
 FORBIDDEN = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")        # signs a sheet cannot hold (XML 1.0 forbids these too)
 
 
@@ -35,8 +36,8 @@ def _row(card: dict) -> list:
             card["delivery_date"], card["webmim_number"], card["webmim_status"], card["comment"], card["avito_chat"]]
 
 
-def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "") -> bytes:
-    """The file (bytes) with the orders the page would list under these filters."""
+def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", money: bool = True) -> bytes:
+    """The file (bytes) with the orders the page would list under these filters; without `money` (a point) no column of MONEY."""
     import openpyxl
     from openpyxl.styles import Font
     data = orders.board(conn, now, point_id=point_id, tag=tag, query=query)
@@ -44,11 +45,12 @@ def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = "Заказы"
-    sheet.append(HEAD)
+    keep = [i for i, name in enumerate(HEAD) if money or name not in MONEY]
+    sheet.append([HEAD[i] for i in keep])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     for card_id in ids:
-        values = _row(orders.get_card(conn, card_id))
+        values = [_row(orders.get_card(conn, card_id))[i] for i in keep]
         sheet.append([None] * len(values))
         for column, value in enumerate(values, start=1):
             cell = sheet.cell(row=sheet.max_row, column=column)
@@ -57,7 +59,7 @@ def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
             else:
                 cell.value = _text(value)
                 cell.data_type = "s"                                    # a text, never a formula, whatever it starts with
-    for index, width in enumerate(WIDTHS, start=1):
+    for index, width in enumerate([WIDTHS[i] for i in keep], start=1):
         sheet.column_dimensions[openpyxl.utils.get_column_letter(index)].width = width
     sheet.freeze_panes = "A2"
     out = io.BytesIO()

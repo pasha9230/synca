@@ -110,16 +110,17 @@ def _amount_field(amount) -> str:
     return ("%.2f" % float(amount)).rstrip("0").rstrip(".") if amount and float(amount) > 0 else ""
 
 
-def _return_amount(values: dict, money: dict, typed) -> dict:
-    """«Сумма возврата» (the owner 2026-10-26): an empty sum is suggested by the kind, a return to the supplier with the purchase, a client's
-    return with the sale; the manager keeps or types it and saves. `suggest`: the sum of each kind, for app.js to switch with the kind;
+def _return_amount(values: dict, money: dict, items: list, typed) -> dict:
+    """«Сумма возврата» (the owner 2026-10-26): an empty sum is suggested by the kind, a return to the supplier with the purchase as
+    written in the order (each position's price × qty, the «Закупка … за N шт» of the window, not `money["cost"]` with the supplier's
+    discount: the owner 2026-10-27), a client's return with the sale; the manager keeps or types it and saves. `suggest`: the sum of each kind, for app.js to switch with the kind;
     the purchase is money: never in the page of who has no right «money», nor of a point, nor when a position has no purchase yet (it
     would be short). The window «Отмена или возврат» fills its empty field (its one button makes the return); the order window only
     shows the suggestion greyed (`hint`): every button of that window sends the whole form, so a value put there would be saved by
     «Отвязать» or a stage too. A saved or a typed sum stays as it is."""
     suggest = {"client": _amount_field(money["sale"])}
     if has_right("money") and own_point() is None and not money["no_purchase"]:
-        suggest["supplier"] = _amount_field(money["cost"])
+        suggest["supplier"] = _amount_field(round(sum(float(i["supplier_price"]) * int(i["qty"]) for i in items), 2))
     saved = values["return_amount"]
     empty = not (typed and "return_amount" in typed) and not float(saved or 0) > 0
     shown = "" if empty else _amount_field(saved) if isinstance(saved, (int, float)) else str(saved)
@@ -441,7 +442,7 @@ def register(app) -> None:
         stamp = local_now()
         try:
             data = orders_export.build(conn, stamp, point_id=own_point() or _int(request.args.get("p")), tag=request.args.get("t", "").strip()[:30],
-                                       query=request.args.get("q", "").strip()[:80])
+                                       query=request.args.get("q", "").strip()[:80], money=own_point() is None)   # a point: no sums
         except ImportError:                                           # the library of Excel files is not installed on this machine
             flash("Выгрузка в Excel недоступна: на сервере не установлена библиотека openpyxl.")
             return redirect("/orders")
@@ -650,7 +651,7 @@ def register(app) -> None:
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
-            events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
+            events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),
             chat_ref=chat_ref, responsible_options=_responsible_options(app, conn, card["responsible"]),
             want_seasons=order_wait.SEASON_NAMES, want_studs=order_wait.STUD_NAMES, want_text=order_wait.describe,
