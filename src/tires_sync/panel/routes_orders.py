@@ -17,7 +17,6 @@ from ..transport import urllib_transport
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
-from .routes_economics import _effective
 from .routes_main import context
 
 log = logging.getLogger(__name__)
@@ -96,13 +95,13 @@ def _price_text(value) -> str:
 def _new_rows(form) -> list:
     """The positions of the window of a new order, one per row: the code chosen in the list, the text, pieces and the price for one
     (empty = the panel's). A row without a code and without a text is the empty field of the window: skipped."""
-    names = ("item_goods_id", "item_query", "item_qty", "item_sale_unit")
+    names = ("item_goods_id", "item_query", "item_qty", "item_sale_unit", "item_sale_auto")
     lists = [form.getlist(name) for name in names]
     rows = []
     for i in range(max(len(values) for values in lists)):
-        code, text, qty, price = (values[i].strip() if i < len(values) else "" for values in lists)
+        code, text, qty, price, auto = (values[i].strip() if i < len(values) else "" for values in lists)
         if code or text:
-            rows.append({"goods_id": code, "query": text, "name": text, "qty": qty or "1", "sale_unit": price})
+            rows.append({"goods_id": code, "query": text, "name": text, "qty": qty or "1", "sale_unit": price, "sale_auto": auto})
     return rows
 
 
@@ -325,10 +324,11 @@ def card_or_404(conn, card_id):
 
 
 def register(app) -> None:
-    def offer_item(conn, goods_id):
-        """The keyword arguments of orders.add_item for a position of the supplier's unload, with its money of today."""
+    def offer_item(conn, goods_id, account_id=None):
+        """The keyword arguments of orders.add_item for a position of the supplier's unload, with its money of today: the price of its ad in
+        the Avito account `account_id` (order_offers.account_for; the main one by default)."""
         _conn, settings, parsed, ref = context(app)
-        return order_offers.item_args(conn, _effective(conn, settings), parsed, ref, goods_id, local_now().date().isoformat())
+        return order_offers.item_args(conn, settings, parsed, ref, goods_id, local_now().date().isoformat(), account_id)
 
     def typed_goods(conn, code, text, stock=False):
         """(code, name when found by the text): the position the manager chose in the list, or the one the text names exactly. Raises OrderError when the text is not exact
@@ -344,16 +344,26 @@ def register(app) -> None:
             raise orders.OrderError("По «%s» нашлось позиций: %d. Выберите нужную в списке под полем.%s" % (text[:80], count, hint))
         raise orders.OrderError("По «%s» не нашлось ни кода позиции, ни модели с остатком.%s" % (text[:80], hint))
 
-    def row_item(conn, code, text, sale_unit, stock=False):
+    def row_item(conn, code, text, sale_unit, stock=False, account_id=None, sale_auto=""):
         """(keyword arguments of orders.add_item without qty, name found by the text) for a row of «Позиции»: a position of the unload, or a tyre of the
-        point (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's."""
+        point (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's; the price the list or the catalog
+        put in the field and nobody changed (`sale_auto`, the same text) is the panel's: priced now by the account of the window."""
         if code == orders.POINT_GOODS:
             return order_offers.point_item_args(conn, text, sale_unit), ""
         goods_id, by_text = typed_goods(conn, code, text, stock)
-        args = offer_item(conn, goods_id)
-        if str(sale_unit or "").strip():
+        args = offer_item(conn, goods_id, account_id)
+        if str(sale_unit or "").strip() and str(sale_unit).strip() != str(sale_auto or "").strip():
             args["sale_unit"] = sale_unit
         return args, by_text
+
+    def window_account(conn, values, card_id=None):
+        """The Avito account that prices the positions of a window (order_offers.account_for): the order's (`card_id`, or `order` of the
+        search), the chat's (`chat`, the search of «Чаты»), else the chat named in «Чат Авито» or the point of a window not saved yet."""
+        card_id = card_id if card_id is not None else _int(values.get("order"))
+        chat_row = _int(values.get("chat"))
+        if card_id is None and chat_row is None and values.get("avito_chat"):
+            chat_row = deals.chat_of_field(conn, values.get("avito_chat"))
+        return order_offers.account_for(conn, chat_row=chat_row, card_id=card_id, point_id=None if card_id is not None else _int(values.get("point_id")))
 
     @app.route("/orders/items/find")
     @login_required
@@ -361,7 +371,8 @@ def register(app) -> None:
         conn = get_conn()
         _conn, settings, parsed, ref = context(app)
         query = request.args.get("q", "").strip()
-        items = order_search.suggestions(conn, _effective(conn, settings), parsed, ref, query, local_now().date().isoformat()) if len(query) >= 2 else []
+        account = window_account(conn, request.args) if len(query) >= 2 else None
+        items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account) if len(query) >= 2 else []
         if len(query) >= 2 and request.args.get("deal") == "stock":           # a deal of the point's stock: its tyre may be one the unload has not
             items.append({"goods_id": orders.POINT_GOODS, "name": " ".join(query.split())[:200], "point": True})
         return jsonify({"items": items})
@@ -499,7 +510,8 @@ def register(app) -> None:
         if goods_id:                                                      # «Оформить заказ» from the catalog: the position is already in the window
             try:
                 args = offer_item(conn, goods_id)
-                rows.append({"goods_id": args["goods_id"], "query": args["name"], "name": args["name"], "qty": "1", "sale_unit": _price_text(args["sale_unit"])})
+                shown = _price_text(args["sale_unit"])                     # the main account's: priced again by the window's account if kept
+                rows.append({"goods_id": args["goods_id"], "query": args["name"], "name": args["name"], "qty": "1", "sale_unit": shown, "sale_auto": shown})
             except orders.OrderError as err:
                 flash(str(err), "error")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
@@ -516,14 +528,15 @@ def register(app) -> None:
         rows = _new_rows(request.form)
         goods_id = request.form.get("goods_id", "").strip()
         if goods_id:                                                      # the older form of the catalog: one position, one piece, the panel's price
-            rows.insert(0, {"goods_id": goods_id, "query": "", "name": "", "qty": "1", "sale_unit": ""})
+            rows.insert(0, {"goods_id": goods_id, "query": "", "name": "", "qty": "1", "sale_unit": "", "sale_auto": ""})
         found = []
         try:
             if len(rows) > MAX_NEW_ROWS:
                 raise orders.OrderError("В новом заказе не больше %d позиций: остальные добавьте в карточке." % MAX_NEW_ROWS)
-            items = []
+            items, account = [], window_account(conn, fields) if rows else None
             for row in rows:                                              # every position is checked before anything is written
-                args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock")
+                args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock", account,
+                                         row["sale_auto"])
                 items.append(dict(args, qty=row["qty"]))
                 if by_text:
                     found.append(by_text)
@@ -631,7 +644,7 @@ def register(app) -> None:
 
     @app.route("/orders/<int:card_id>/save", methods=["POST"])
     @login_required
-    def order_save(card_id):
+    def order_save(card_id, part=None):
         conn = get_conn()
         card = card_or_404(conn, card_id)
         changes = _touched(conn, {k: v for k, v in request.form.items() if k in orders.EDITABLE}, request.form.get("was"), orders._row(conn, card_id))
@@ -644,7 +657,7 @@ def register(app) -> None:
             changes.pop("responsible")                                       # the form shows who answers now: sending that back names nobody new
         # the row of «Позиции» chosen or typed and not added by «+»: «Сохранить» adds it with the rest (the owner 2026-10-23, order №428).
         # A choice in the list fills the text too: a code without the text is what a browser restored after «Назад», not a choice
-        typed_row = {"row_" + k: request.form.get(k, "").strip() for k in ("goods_id", "query", "qty", "sale_unit")}
+        typed_row = {"row_" + k: request.form.get(k, "").strip() for k in ("goods_id", "query", "qty", "sale_unit", "sale_auto")}
         typed_row = typed_row if typed_row["row_query"] else {}
         try:
             changed = orders.update_card(conn, card_id, changes, local_iso(), author())
@@ -655,25 +668,8 @@ def register(app) -> None:
             if "stage_id" in request.form or request.form.get("tab") != "money":
                 return card_page(conn, card, dict(changes, **typed_row))  # the window comes back with what was typed: nothing saved, nothing moved
             return back(card_id, "money")
-        refused = None
-        if typed_row:
-            try:
-                by_text = add_typed_item(conn, card_id, request.form)
-                flash("Сохранено, позиция добавлена.", "ok")
-                if by_text:
-                    flash("Добавлено по тексту: %s." % by_text)
-            except orders.OrderError as err:
-                refused = err                                              # the fields stay saved; the window comes back with the row typed
-                flash("Поля заказа сохранены. Позиция не добавлена: %s" % err, "error")
-        else:
-            flash("Сохранено.", "ok")
-        row = orders._row(conn, card_id)
-        if row["webmim_number"] and (("webmim_number" in changed and not number_before) or "webmim_id" in changed):
-            # placed in WebMIM (the number appeared, or the id for the API came): the purchase from there; a corrected number keeps the purchase
-            _conn, _settings, parsed, _ref = context(app)
-            prices, source = order_offers.webmim_purchase(conn, orders.get_card(conn, card_id), parsed, app.config)
-            orders.refresh_purchase(conn, card_id, prices, source, local_iso(), author())
-        if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one
+        if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one;
+            # before the row: the row is priced by the account of the chats the order has after this press (order_offers.account_for)
             unlink, moved, offered = (_int(request.form.get(k)) for k in ("chat_unlink", "chat_move", "chat_bind"))
             if unlink is not None:
                 if deals.unbind_chat(conn, card_id, unlink, local_iso(), author()):
@@ -686,6 +682,26 @@ def register(app) -> None:
                 named = deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"])
                 if named is not None:
                     bind_chat(conn, card_id, named, "field")
+        refused = None
+        if typed_row:
+            try:
+                by_text = add_typed_item(conn, card_id, request.form)
+                flash("Сохранено, позиция добавлена.", "ok")
+                if by_text:
+                    flash("Добавлено по тексту: %s." % by_text)
+            except orders.OrderError as err:
+                refused = err                                              # the fields stay saved; the window comes back with the row typed
+                flash("Поля заказа сохранены. Позиция не добавлена: %s" % err, "error")
+        elif part == "items":                                              # «+» with no row chosen: the fields are saved, the row is not there
+            flash("Поля заказа сохранены. Позиция не выбрана: начните вводить модель и выберите шину из списка.", "error")
+        else:
+            flash("Сохранено.", "ok")
+        row = orders._row(conn, card_id)
+        if row["webmim_number"] and (("webmim_number" in changed and not number_before) or "webmim_id" in changed):
+            # placed in WebMIM (the number appeared, or the id for the API came): the purchase from there; a corrected number keeps the purchase
+            _conn, _settings, parsed, _ref = context(app)
+            prices, source = order_offers.webmim_purchase(conn, orders.get_card(conn, card_id), parsed, app.config)
+            orders.refresh_purchase(conn, card_id, prices, source, local_iso(), author())
         if lacking_before:                                                # a lacking value typed (the transfer number): the window opens
             engine.refresh_tasks(conn, card_id, local_iso())
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
@@ -705,7 +721,7 @@ def register(app) -> None:
                     offer_send(conn, card_id, stamp)
             except orders.OrderError as err:
                 flash(str(err), "error")                                  # the fields stay saved; the refusal is a red record of the journal
-        part = request.form.get("tab", "")
+        part = part or request.form.get("tab", "")
         return back(card_id, part if part in ORDER_PARTS else "")
 
     @app.route("/orders/webmim")
@@ -813,7 +829,8 @@ def register(app) -> None:
         code, text = form.get("goods_id", "").strip(), form.get("query", "").strip()
         if not text:                                     # a choice in the list fills the text too: a code alone is what a browser restored after «Назад»
             raise orders.OrderError("Позиция не выбрана: начните вводить модель и выберите шину из списка.")
-        args, by_text = row_item(conn, code, text, form.get("sale_unit", ""), orders._row(conn, card_id)["deal_kind"] == "stock")
+        args, by_text = row_item(conn, code, text, form.get("sale_unit", ""), orders._row(conn, card_id)["deal_kind"] == "stock",
+                                 window_account(conn, {}, card_id), form.get("sale_auto", ""))
         orders.add_item(conn, card_id, qty=form.get("qty", "1"), now=local_iso(), author=author(), **args)
         return by_text
 
@@ -822,6 +839,8 @@ def register(app) -> None:
     def order_item_add(card_id):
         conn = get_conn()
         card_or_404(conn, card_id)
+        if "was" in request.form:                                          # «+» of the card's window sends the whole window (the owner 2026-10-26:
+            return order_save(card_id, part="items")                       # «Точка» was lost): its fields are saved as by «Сохранить», with the row
         try:
             by_text = add_typed_item(conn, card_id, request.form)
             if by_text:

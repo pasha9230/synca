@@ -123,12 +123,14 @@ def typed(conn, parsed, ref, text: str):
     return (exact[0] if len(exact) == 1 and len(found) == 1 else None), len(found)
 
 
-def suggestions(conn, settings, parsed, ref, query: str, day: str, limit: int = LIMIT) -> List[dict]:
-    """What the order shows while a position is typed: up to `limit` positions with a stock, each with its size, stock and the price of its ad."""
+def suggestions(conn, settings, parsed, ref, query: str, day: str, limit: int = LIMIT, account_id=None) -> List[dict]:
+    """What the order shows while a position is typed: up to `limit` positions with a stock, each with its size, stock and the price of its ad
+    in the account `account_id` (order_offers.account_for; the main one by default) from the general `settings`."""
     offers = find(conn, parsed, ref, query)[:limit]
     if not offers:
         return []
     only = service._Filtered({o.goods_id: o for o in offers}, getattr(parsed, "issues", {}))
-    prices = {r["goods_id"]: r["sale"] for r in economics_view.positions(conn, order_offers.effective_settings(conn, settings), only, ref, day, terms_store.get_params(conn))}
+    prices = {r["goods_id"]: r["sale"] for r in economics_view.positions(conn, order_offers.effective_settings(conn, settings, account_id), only, ref, day, terms_store.get_params(conn))}
+    prices.update(order_offers.ad_prices(conn, account_id, [o.goods_id for o in offers]))           # the price of the account's published ad first
     return [{"goods_id": o.goods_id, "name": o.name_orig or o.name, "size": "%d/%d R%d" % (o.width, o.height, o.diameter), "stock": o.stock,
              "price": prices.get(o.goods_id)} for o in offers]
