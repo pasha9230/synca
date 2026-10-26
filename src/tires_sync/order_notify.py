@@ -75,7 +75,7 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
         return dict(_point_route(own), own_point=own["id"])
     mine = _users_point(conn, who)
     if mine is not None:                                           # a point user: through their point, never Telegram (the owner 2026-10-26)
-        return _point_route(mine)
+        return _point_route(mine) if mine else {"channel": "owner", "to": "", "why": "точки пользователя «%s» больше нет" % who}
     if who in _panel_logins(conn, owner_login):
         chat = (connections.get_config(conn, "telegram", 0).get("chat_id") if who == owner_login else user_chats(conn).get(who)) or ""
         if chat:
@@ -92,14 +92,15 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
 
 
 def _users_point(conn, who: str) -> Optional[dict]:
-    """The point of a point user (role «point»), whose news go through the point only; None for anybody else or a point that is gone."""
+    """The point of a point user (role «point»), whose news go through the point only: {} when it is gone (still never Telegram, review of
+    lane 3); None for anybody else."""
     role = users.get_role(conn, who) if who and users.exists(conn, who) else None
-    if not role or role["role"] != "point" or not role["point_id"]:
+    if not role or role["role"] != "point":
         return None
     try:
-        return points.get_point(conn, role["point_id"])
+        return points.get_point(conn, role["point_id"]) if role["point_id"] else {}
     except points.PointError:
-        return None
+        return {}
 
 
 def _point_route(point: dict) -> dict:

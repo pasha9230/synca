@@ -42,14 +42,14 @@ def point_rows(conn, point_id, now: str) -> list:
     «Клиент забрал?» of each order there (order_reserve.question_open), until the point answers or its working day ends. Computed, never
     written: the staff and the other points never get them (grouped adds them for the manager of this point only). The id is the key of the
     question in /my-point/feed (its stay at the point), so that notify.js rings for the two once. And «возврат отмечен» (green) of an order
-    the point gave back in this stay with no amount yet: it stays «На точке» until the manager fills the amount and moves it to «Возврат»."""
+    the point gave back in this stay with no amount yet: it stays «На точке» until the manager fills the amount (and moves it to «Возврат»)."""
     found = []
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? "
                                    "AND s.code = 'at_point'", (point_id,)):
         card = orders.get_card(conn, card_id)
         back = conn.execute("SELECT id, at FROM order_event WHERE order_id = ? AND kind = 'point' AND text = ? AND at >= ? ORDER BY id DESC LIMIT 1",
                             (card_id, mgr.RETURN_LINE, card["entered_at"] or "")).fetchone()
-        if back:
+        if back and not card["return_amount"]:                     # the amount is in: it waits for the move to «Возврат» only (review)
             found.append({"id": "return-%d" % back[0], "order_id": card_id, "at": back[1], "author": "", "kind": "return", "level": "green",
                           "more": 0, "title": "Заказ № %s: возврат отмечен, ждёт суммы от менеджера" % mgr.label(card),
                           "text": "Сумму возврата вносит менеджер, после этого заказ уйдёт с точки.", "href": "/my-point"})

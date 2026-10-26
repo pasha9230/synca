@@ -102,6 +102,8 @@ def test_a_return_the_point_pressed_is_a_green_row_of_its_bell_until_the_order_m
     assert returns(theirs) == [] and returns(owner) == []                                  # the staff keep their yellow «заполните сумму»
     assert any("заполните сумму возврата" in it["text"] for it in bell(owner)["items"])
     orders.update_card(conn, card, dict(return_amount="16000"), DAY + "T12:00:00", "o")
+    conn.commit()
+    assert returns(mine) == []                                                             # the amount is in: it waits for it no more
     orders.move_card(conn, card, _stage(conn, "return"), DAY + "T12:00:00", "o")
     conn.commit()
     assert returns(mine) == []
@@ -192,6 +194,11 @@ def test_notify_rings_once_per_question_key_and_its_bell_row_is_the_same_questio
     got = run_notify(tmp_path, [[], [question, row], [question, row], [row, question], [later, item("alert-question-7-20261017100000-0")]])
     assert got["shown"] == [[QUESTION, "question-7-20261016123000"], [QUESTION, "question-7-20261017100000"]]
     assert got["rings"] == [2, 5]                                                            # the second and the fifth look only
+
+
+def test_notify_rings_once_for_a_question_of_a_stay_with_no_time(tmp_path):
+    got = run_notify(tmp_path, [[], [item("question-7-", QUESTION), item("alert-question-7--0", QUESTION)]])
+    assert got["shown"] == [[QUESTION, "question-7-"]] and got["rings"] == [2]
 
 
 def test_notify_says_nothing_of_what_was_there_at_the_first_look(tmp_path):

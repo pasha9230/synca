@@ -353,3 +353,16 @@ def test_the_safety_net_still_tells_the_owner_when_only_the_staff_or_an_older_lo
     tg = ScriptedHttp(TG_OK)
     assert order_notify.escalate_unseen(conn, box, "2026-10-15T12:30:00", tg_http=tg) == 1
     assert len(tg.calls) == 1 and "Наш заказ" in sent_text(tg.calls[0])
+
+
+def test_a_user_of_a_deleted_point_gets_no_telegram_either(tmp_path):
+    """Review of lane 3: the point was deleted, its user keeps the role «point»: still never Telegram (the owner is told nobody could be)."""
+    conn, box = env(tmp_path)
+    pid = point(conn, channel="panel", peer="", account=None)
+    users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
+    order_notify.set_user_chat(conn, "gamma1", "777000", NOW, "owner")
+    mine = card(conn, "gamma1")
+    chat(conn, OWN_ACCOUNT, mine["id"])
+    points.delete_point(conn, pid)
+    way = order_notify.route(conn, mine)
+    assert way["channel"] == "owner" and way["to"] == ""
