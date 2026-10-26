@@ -161,6 +161,41 @@ def test_a_line_about_a_send_that_went_meanwhile_is_never_written(env, monkeypat
     assert lines(conn) == []
 
 
+def failed_with_an_alert_then_pressed_again(conn, chat_row, monkeypatch, sender, card):
+    """The review of tails-answers, D1: «можно забирать» refused by 402 to the end (the sync's alert with the text to copy), then a second
+    «приехал» under the same mark gets a 402 again or no answer: the sync settles it later."""
+    sent, _note = arrived(conn, card, sender, monkeypatch, NOW)
+    for minute in (1, 2, 3):
+        settle(conn, sender, at(61 * minute))
+    token = arrived_token(conn)
+    assert row(conn, token)["status"] == "failed"
+    [alert] = [line for line in lines(conn) if line["message_id"].startswith("send-")]
+    assert alert["status"] == "new" and order_manager.COPY_MARK + ARRIVED in alert["text"]
+    sent, _note = arrived(conn, card, sender, monkeypatch, at(600))
+    assert not sent
+    return token
+
+
+def test_the_alert_of_an_earlier_try_is_answered_when_the_sync_sends_the_new_press_again(env, monkeypatch):
+    conn, chat_row, card = env
+    sender = Refusing(*[refused402() for _ in range(5)])
+    token = failed_with_an_alert_then_pressed_again(conn, chat_row, monkeypatch, sender, card)
+    assert row(conn, token)["status"] == "retry"
+    assert settle(conn, sender, at(661)) == {"sent": 1} and sender.sent == [ARRIVED]
+    assert all(line["status"] == "answered" for line in lines(conn))
+    assert order_manager.new_count(conn) == 0
+
+
+def test_the_alert_of_an_earlier_try_is_answered_when_the_sync_finds_the_new_press_in_the_chat(env, monkeypatch):
+    conn, chat_row, card = env
+    sender = Refusing(*[refused402() for _ in range(4)], TimeoutError())
+    token = failed_with_an_alert_then_pressed_again(conn, chat_row, monkeypatch, sender, card)
+    assert row(conn, token)["status"] == "unknown"
+    sender.history = [out("m-late", ARRIVED, created=NOW_TS + 605)]                               # it had gone after all
+    assert settle(conn, sender, at(661)) == {"sent": 1} and sender.sent == []
+    assert all(line["status"] == "answered" for line in lines(conn))
+
+
 # --- 3: a send the sync stopped for a closed order answers its caller's line ------------------------------------------------------------
 
 STOPPED = "Итог: система больше не повторяет: заказ в «Отмена» — писать клиенту не нужно."

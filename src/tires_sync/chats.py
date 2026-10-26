@@ -1247,19 +1247,10 @@ def _close_task(conn, token: str, text: str, now: str, how: str) -> None:
 def _inbox_done(conn, token: str, now: str, how: str) -> None:
     """The send of `token` reached the client by the sync (sent again or found in the chat): the open lines of «Входящие» its caller wrote
     about it («…система повторит сама», «…проверьте чат»: order_reserve, order_manager._tell_arrived; their id is the token, or the token and
-    the moment) are answered with the outcome, nobody sends it by hand (tails5). The sync's own alerts (`send-…`) and the lines a person
-    answered are not touched. A failure here never touches the send."""
-    token = str(token or "")
-    if not token:
-        return
-    try:
-        conn.execute("UPDATE manager_message SET status = 'answered', answer = ?, answered_at = ? WHERE sender = ? AND status = 'new' "
-                     "AND (message_id = ? OR substr(message_id, 1, ?) = ?)",
-                     ("Итог: сообщение клиенту дошло (%s). Делать ничего не нужно." % how, now, SYSTEM, token, len(token) + 1, token + "-"))
-        conn.commit()
-    except Exception:      # noqa: BLE001
-        conn.rollback()
-        log.warning("the lines of «Входящие» about the send %s were not closed after the sync delivered it", token)
+    the moment) are answered with the outcome, nobody sends it by hand (tails5); the sync's own alerts (`send-…`) of an earlier try of the
+    same mark too — pressed again after it, the mark is the sync's once more (the review of tails-answers, D1). The lines a person answered
+    are not touched. A failure here never touches the send."""
+    _inbox_close(conn, token, now, "Итог: сообщение клиенту дошло (%s). Делать ничего не нужно." % how, alerts=True)
 
 
 def _inbox_close(conn, token: str, now: str, answer: str, alerts: bool = False) -> None:
