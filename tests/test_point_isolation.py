@@ -307,3 +307,28 @@ def test_the_point_role_matrix(w):
         assert m.get(url).status_code == 403, url
     for url in ("/connections/telegram", "/users/invite", "/orders/settings/duty", "/draft/1/confirm"):
         assert m.post(url, data={"csrf": "tok"}).status_code == 403, url
+
+
+# ---- review 2: the card reads nothing of the whole client; our own numbers are never the client's ------------------------------------
+
+def test_the_points_card_never_reads_the_whole_clients_journal_inquiries_or_tags(w, monkeypatch):
+    def never(*args, **kwargs):
+        raise AssertionError("read the whole client")
+    for name in ("inquiries", "client_events", "tags_of", "handed"):
+        monkeypatch.setattr(clients, name, never)
+    assert w["manager"].get("/clients/%d" % w["shared"]).status_code == 200
+
+
+def test_our_own_number_typed_into_an_order_is_not_the_clients_phone_for_the_point(w):
+    conn, own = w["conn"], "+79006660066"
+    conn.execute("UPDATE point SET manager_phone = ? WHERE id = ?", (own, w["pa"]))
+    card = orders.create_card(conn, {"client_name": "Свой по нашему номеру", "client_phone": own, "point_id": str(w["pa"])}, NOW, "o")
+    if clients.client_of_order(conn, card) is None:                                      # an order typed with our number joins nobody:
+        conn.execute("INSERT INTO client_order (client_id, order_id, how, at) VALUES (?,?,'manual',?)", (w["shared"], card, NOW))   # by hand
+    conn.commit()
+    m = w["manager"]
+    pages = [_text(m.get("/clients")), _text(m.get("/clients/%d" % w["shared"]))]
+    assert "Свой по нашему номеру" in pages[1] or "/orders/%d\"" % card in pages[1]
+    for page in pages:
+        assert "666-00-66" not in page and "6660066" not in re.sub(r"\D", "", page)
+    assert [g for g in m.get("/search.json", query_string={"q": own}).get_json()["groups"] if g["key"] == "clients"] == []
