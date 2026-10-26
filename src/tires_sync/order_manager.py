@@ -302,7 +302,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
             return dispute(point, "«%s» без вопроса бота" % HERE,
                            "Про заказ №%s бот не спрашивал, ничего не изменено; сообщение передано владельцу. Если шины приехали, напишите «приехал %s»."
                            % (label(card), label(card)))
-        return finish(*order_reserve.here(conn, card, "менеджер %s" % point["name"], now, deliver))
+        return finish(*order_reserve.here(conn, card, "менеджер %s" % point["name"], now, deliver, notify))
     if word == NO_SHOW:
         if code != "at_point":
             return dispute(point, "«%s», а заказ на этапе «%s»" % (NO_SHOW, card["stage"]["name"]),

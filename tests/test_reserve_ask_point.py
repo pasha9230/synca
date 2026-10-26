@@ -285,3 +285,21 @@ def test_after_an_extension_the_silence_is_no_yellow_record(tmp_path):
     orders.update_card(conn, cid, {"reserve_until": "2026-10-21"}, at(11), "o")
     reserve.check(conn, at(20), ok, deliver, vk)
     assert yellow(conn, cid) == [] and deliver.sent == []
+
+
+def test_an_order_without_the_webmim_number_tells_the_responsible_not_the_client(tmp_path):
+    """The owner 2026-10-27: the reminder carries the WebMIM number; without it the client gets nothing and the responsible is told."""
+    conn, cid, _chat, deliver, vk = ready(tmp_path)
+    conn.execute("UPDATE order_card SET webmim_number = '' WHERE id = ?", (cid,))
+    conn.commit()
+    reserve.check(conn, at(10), ok, deliver, vk)
+    assert vk.sent[0][1].startswith("(бот) Заказ №%d (" % cid)                          # the point knows it by the panel's number
+    alerts = []
+    answer = mgr.dispatch(conn, "m1", POINT_VK, "на точке №%d" % cid, None, at(11), deliver, lambda card, text: (alerts.append(text), "ok")[1])
+    assert answer == "Заказ №%d — отмечено: на точке. Клиенту напоминание не отправлено: менеджер напишет ему сам." % cid
+    assert deliver.sent == [] and len(alerts) == 1 and "не хватает — Номер заказа WebMIM" in alerts[0] and "Напишите клиенту вручную" in alerts[0]
+    [record] = yellow(conn, cid)
+    assert record.startswith("Заказ №%d: точка «Бета» подтвердила" % cid) and "Оповещение: ok" in record
+    reserve.check(conn, at(20), ok, deliver, vk)
+    assert say(conn, "на точке №%d" % cid, deliver, at(19), "m2") == "Заказ №%d уже отмечен: на точке." % cid
+    assert deliver.sent == [] and len(alerts) == 1 and len(yellow(conn, cid)) == 1

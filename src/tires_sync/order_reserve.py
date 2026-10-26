@@ -171,10 +171,11 @@ def _silent(conn, card: dict, key: str, was: str, now: str) -> bool:
     return True
 
 
-def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.Deliver]) -> Tuple[str, str]:
+def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.Deliver], notify: Optional[Notify] = None) -> Tuple[str, str]:
     """The point's «на точке <номер>» about an order at the point (order_manager checks the point and the stage): the client gets «срок резерва
     истекает» only when the point was asked in this stay at the point, the same day, before the end of the working hours, and the reservation
-    still ends that day. (outcome for the log, answer for the point)."""
+    still ends that day. A text that lacks a value (an order without the WebMIM number: the owner 2026-10-27) is not sent: the responsible is
+    told to write by hand. (outcome for the log, answer for the point)."""
     number = order_manager.label(card)
     key = _ask_key(card)
     was = store.get_state(conn, key) or ""
@@ -200,12 +201,27 @@ def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.D
     if card["reserve_until"] != was.split("|", 1)[1][:10]:      # the date was moved since the question: the reservation does not end today
         return ("на точке; резерв продлён: клиенту не отправлено",
                 "Заказ №%s — отмечено: на точке. Резерв уже продлён, клиенту не пишем." % number)
+    missing = order_templates.render(conn, card, order_manager.template_body(conn, order_templates.RESERVE_SAMPLE), now)[1]
+    if missing and not _done(conn, card["id"], "[резерв:клиенту:%s]" % (card["entered_at"] or "")):
+        return (_tell_responsible(conn, card, missing, now, notify),
+                "Заказ №%s — отмечено: на точке. Клиенту напоминание не отправлено: менеджер напишет ему сам." % number)
     status = tell_client(conn, card, deliver, now)
     if status == "sent":
         return "на точке; клиенту отправлено", "Заказ №%s — отмечено: на точке. Клиенту отправлено напоминание о сроке хранения." % number
     if not status:
         return "на точке; клиенту уже писали", "Заказ №%s — отмечено: на точке. Клиенту сегодня уже писали, второе сообщение не отправляем." % number
     return "на точке; клиенту не отправлено", "Заказ №%s — отмечено: на точке. Клиенту сообщение не отправлено: менеджер разберётся." % number
+
+
+def _tell_responsible(conn, card: dict, missing, now: str, notify: Optional[Notify]) -> str:
+    """The point said «на точке», but the reminder lacks a value: nothing to the client, a yellow record and an alert to the responsible."""
+    marker = "[резерв:клиенту:%s]" % (card["entered_at"] or "")
+    text = ("Заказ №%d: точка «%s» подтвердила, что заказ на точке, резерв истекает сегодня. Клиенту «%s» не отправлено: не хватает — %s. "
+            "Напишите клиенту вручную." % (card["id"], _point_name(card), CLIENT_TEMPLATE, ", ".join(missing)))
+    told = notify(card, text) if notify is not None else "оповещение не отправлено: канал не настроен"
+    orders.add_event(conn, card["id"], now, "система", "reserve", "%s Оповещение: %s %s" % (text, told, marker), level="yellow")
+    conn.commit()
+    return "на точке; клиенту не отправлено (не хватает: %s), ответственному: %s" % (", ".join(missing), told)
 
 
 def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, deliver, point_send) -> None:
