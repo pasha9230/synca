@@ -201,3 +201,31 @@ def test_the_staff_do_not_see_the_point_account_alerts_and_the_point_does(tmp_pa
     point_rows = order_alerts.page_rows(conn, "gamma1", NOW)
     assert theirs["id"] in {r["order_id"] for r in point_rows}
     assert any(r.get("chat_row") and r["order_id"] is None and "Есть шины" in r["text"] for r in point_rows)
+
+
+def test_an_order_of_the_point_account_with_another_point_or_none_stays_with_the_staff(tmp_path):
+    conn, box = env(tmp_path)
+    gamma = point(conn)
+    delta = point(conn, peer="888", account=None, name="Дельта")
+    elsewhere = card(conn, "owner", delta)                                    # the staff moved it to another point: that point's bell
+    chat(conn, POINT_ACCOUNT, elsewhere["id"], peer="a")                      # would not be the one told: as before, nothing lost
+    nowhere = card(conn, "owner")
+    chat(conn, POINT_ACCOUNT, nowhere["id"], peer="b")
+    for mine in (elsewhere, nowhere):
+        assert order_notify.route(conn, mine)["channel"] == "telegram"
+        orders.add_event(conn, mine["id"], NOW, "система", "rule", "Задача не подготовлена", level="red")
+    conn.commit()
+    assert {elsewhere["id"], nowhere["id"]} <= {r["order_id"] for r in order_alerts.page_rows(conn, "owner", NOW)}
+    assert points.of_account(conn, elsewhere["id"]) is None and gamma
+
+
+def test_the_safety_net_marks_a_point_account_note_so_that_it_is_not_looked_at_again(tmp_path):
+    conn, box = env(tmp_path)
+    pid = point(conn, channel="panel")
+    store.set_state(conn, order_notify.UNSEEN_START_KEY, "2026-10-01T00:00:00")
+    theirs = card(conn, "chats-robot", pid)
+    chat(conn, POINT_ACCOUNT, theirs["id"])
+    order_notify.deliver(conn, box, theirs, "Их заказ", NOW)
+    tg = ScriptedHttp(TG_OK)
+    assert order_notify.escalate_unseen(conn, box, "2026-10-15T12:30:00", tg_http=tg) == 0
+    assert points.unseen_alerts(conn, pid, "") == [] and tg.calls == []

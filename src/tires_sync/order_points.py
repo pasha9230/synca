@@ -47,15 +47,17 @@ def point_by_account(conn, account_id) -> Optional[dict]:
 POINT_ACCOUNTS = "SELECT avito_account_id FROM point WHERE avito_account_id IS NOT NULL GROUP BY avito_account_id HAVING COUNT(*) = 1"
 ACCOUNT_ORDERS = ("SELECT s.order_id FROM (SELECT order_id, account_id FROM avito_chat WHERE order_id > 0 UNION ALL "
                   "SELECT order_id, account_id FROM avito_call WHERE order_id > 0) s "
-                  "LEFT JOIN (" + POINT_ACCOUNTS + ") p ON p.avito_account_id = s.account_id %s "
-                  "GROUP BY s.order_id HAVING SUM(p.avito_account_id IS NULL) = 0 "
+                  "JOIN order_card c ON c.id = s.order_id JOIN point p ON p.id = c.point_id "
+                  "LEFT JOIN (" + POINT_ACCOUNTS + ") u ON u.avito_account_id = s.account_id %s "
+                  "GROUP BY s.order_id HAVING SUM(u.avito_account_id IS NULL OR s.account_id != p.avito_account_id) = 0 "
                   "AND NOT EXISTS (SELECT 1 FROM order_handoff h WHERE h.order_id = s.order_id)")
 
 
 def account_orders(conn) -> set:
-    """The orders of the Avito accounts of the points (the owner 2026-10-26: their alerts go only to the point): a chat or a call of the account
-    of one point and none of an account of no point (such an order is never lost for the owner); never an order the point handed over to
-    the staff (order_handoff: the point asks them)."""
+    """The orders of the Avito accounts of the points (the owner 2026-10-26: their alerts go only to the point): every chat and call of the
+    order is of the account of its own point (order_card.point_id; an account of one point only), so the point told is the point whose bell
+    shows it. Any other order is as before and never lost for the staff: a chat or a call of an account of no point or of another point, no
+    point, no chat nor call, or a client the point handed over to the staff (order_handoff: the point asks them)."""
     return {r[0] for r in conn.execute(ACCOUNT_ORDERS % "")}
 
 
@@ -65,12 +67,10 @@ def account_chats(conn) -> set:
 
 
 def of_account(conn, order_id) -> Optional[dict]:
-    """The point an order is of by its Avito account (account_orders): the point of its first chat (else call); None for any other order."""
+    """The point of an order of a point's Avito account (account_orders); None for any other order."""
     if not order_id or not conn.execute(ACCOUNT_ORDERS % "WHERE s.order_id = ?", (order_id,)).fetchone():
         return None
-    row = (conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? ORDER BY id LIMIT 1", (order_id,)).fetchone()
-           or conn.execute("SELECT account_id FROM avito_call WHERE order_id = ? ORDER BY id LIMIT 1", (order_id,)).fetchone())
-    return point_by_account(conn, row[0]) if row else None
+    return get_point(conn, conn.execute("SELECT point_id FROM order_card WHERE id = ?", (order_id,)).fetchone()[0])
 
 
 def _single(value, limit: int, label: str) -> str:

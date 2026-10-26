@@ -244,6 +244,7 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
             if order_manager.take_deadline(note["at"], hours, UNSEEN_MINUTES) > moment:
                 continue
             if points.of_account(conn, note.get("order_id")) is not None:     # an order of a point's account: the point's only (2026-10-26)
+                points.mark_escalated(conn, note["id"], now, "заказ аккаунта точки: владельцу не передаётся")
                 continue
             text = "Точка «%s» не открыла оповещение%s за %d минут рабочего времени.\n%s" % (
                 point["name"], " по заказу №%d" % note["order_id"] if note.get("order_id") else "", UNSEEN_MINUTES, note.get("text") or "")
