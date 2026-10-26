@@ -160,3 +160,46 @@ def test_a_line_about_a_send_that_went_meanwhile_is_never_written(env, monkeypat
     assert not sent and sender.sent == [ARRIVED] and row(conn, arrived_token(conn))["status"] == "sent"
     assert lines(conn) == []
 
+
+# --- 3: a send the sync stopped for a closed order answers its caller's line ------------------------------------------------------------
+
+STOPPED = "Итог: система больше не повторяет: заказ в «Отмена» — писать клиенту не нужно."
+
+
+def test_a_402_of_an_arrived_whose_order_was_cancelled_answers_its_line(env, monkeypatch):
+    from test_send_settle2 import to_stage
+    conn, chat_row, card = env
+    sender = Refusing(refused402())
+    sent, _note = arrived(conn, card, sender, monkeypatch, NOW)
+    [line] = lines(conn)
+    assert not sent and line["status"] == "new" and "повтор" in line["text"]                 # «…система повторит сама»
+    to_stage(conn, card, "cancel")
+    assert settle(conn, sender, at(61)) == {"stopped": 1} and sender.sent == []
+    [line] = lines(conn)
+    assert line["status"] == "answered" and line["answer"] == STOPPED
+    assert order_manager.new_count(conn) == 0
+
+
+def test_an_unknown_arrived_not_in_the_chat_whose_order_was_cancelled_answers_its_line(env, monkeypatch):
+    from test_send_settle2 import to_stage
+    conn, chat_row, card = env
+    sender = Refusing(TimeoutError())
+    sent, _note = arrived(conn, card, sender, monkeypatch, NOW)
+    assert not sent and lines(conn)[0]["status"] == "new"
+    to_stage(conn, card, "cancel")
+    settle(conn, sender, at(61))
+    settle(conn, sender, at(301))
+    assert sender.sent == [] and row(conn, arrived_token(conn))["status"] == "failed"
+    [line] = lines(conn)
+    assert line["status"] == "answered" and line["answer"] == STOPPED
+
+
+def test_a_402_of_an_arrived_of_an_open_order_keeps_its_line_until_it_goes(env, monkeypatch):
+    conn, chat_row, card = env
+    sender = Refusing(refused402(), refused402())
+    arrived(conn, card, sender, monkeypatch, NOW)
+    assert settle(conn, sender, at(61)) == {"retry": 1}
+    assert lines(conn)[0]["status"] == "new"
+    assert settle(conn, sender, at(122)) == {"sent": 1} and sender.sent == [ARRIVED]
+    [line] = lines(conn)
+    assert line["status"] == "answered" and line["answer"].startswith("Итог: сообщение клиенту дошло (повтор после отказа Авито")

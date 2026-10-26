@@ -1218,14 +1218,16 @@ def _stopped(conn, chat: dict, token: str) -> str:
 
 
 def _halt(conn, chat: dict, row: dict, status: str, now: str, why: str, head: str) -> str:
-    """A send the sync stopped (_stopped): «failed» with the reason, nothing kept or sent, a record in the order's journal, no «Входящие»
-    (nobody has to write it by hand: the task was skipped, the order closed)."""
+    """A send the sync stopped (_stopped): «failed» with the reason, nothing kept or sent, a record in the order's journal, no new line in
+    «Входящие» (nobody has to write it by hand: the task was skipped, the order closed); the open lines about it («…система повторит сама»,
+    «…проверьте чат») are answered with that (tails-answers 3)."""
     done = conn.execute("UPDATE chat_send_log SET status = 'failed', text = '', next_at = '', error = ? WHERE token = ? AND status = ? AND at = ?",
                         ("остановлено: " + why, row["token"], status, row["at"]))
     conn.commit()
     if done.rowcount != 1:
         return "busy"
     _note_order(conn, chat, now, "%s: %s — система больше не повторяет." % (head, why), "yellow")
+    _inbox_close(conn, row["token"], now, "Итог: система больше не повторяет: %s — писать клиенту не нужно." % why, alerts=True)
     return "stopped"
 
 

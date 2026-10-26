@@ -236,7 +236,7 @@ SEND_CODE = {"send_reply": "67a2e20061cd2c7d", "send_image": "246067c5cbb76d35",
              "_mark": "d70d75c8ce7b5088", "_alert_not_sent": "74efc5b821020db2", "_retry_refused": "fb82d89ea741b009",
              "_check_unknown": "3aed91f55d552351", "settle_sends": "c527b46d7c743787", "_lost_is_there": "a5c7e7ea4c1266ec",
              "_claim_by_sync": "12aa42afe40970a8", "_same_text": "3f655b3cb9d97bfe", "_since": "6194713c717a8ee2",
-             "_others": "2a2ad9a520585a3f", "_retry_late": "322e8e40b2498e09", "_stopped": "252620f625d49f18", "_halt": "e55440bb8fb342be",
+             "_others": "2a2ad9a520585a3f", "_retry_late": "322e8e40b2498e09", "_stopped": "252620f625d49f18", "_halt": "bba4642d8e4cd798",
              "_close_task": "d2a8bb9dfb018951",
              "_inbox_done": "b1391e1a4ad6222b", "_again_said": "1f6b922254a554a8", "_failed_is_there": "f9de17b3a9f270aa",
              "_inbox_close": "480dcd9ae2041726"}       # run8, lane stuck-sending: a mark «sending» older than 5 minutes is resolved (tests/test_stuck_sending.py)
@@ -269,7 +269,8 @@ SEND_CODE = {"send_reply": "67a2e20061cd2c7d", "send_image": "246067c5cbb76d35",
 # otherwise is unchanged (tests/test_send_settle4.py).
 # 2026-10-27 tails-answers (RED, reviewed): a new press of a send that goes (send_reply/send_image: a failed one, an interrupted or a lost one
 # found) answers the open lines of «Входящие» about it, the sync's alerts too («дошло»); no line about a send is written once it went
-# (_alert_not_sent, order_manager._tell_arrived, order_reserve: NOT_SENT_MEANWHILE). What is sent is unchanged (tests/test_send_settle5.py).
+# (_alert_not_sent, order_manager._tell_arrived, order_reserve: NOT_SENT_MEANWHILE); a send the sync stopped for a skipped task or a closed
+# order answers its open lines «писать клиенту не нужно» (_halt). What is sent is unchanged (tests/test_send_settle5.py).
 
 
 def test_the_functions_that_send_to_the_client_are_as_they_were():
