@@ -20,6 +20,7 @@ RULES_PATH = Path(__file__).with_name("feed_check_rules.json")
 PACK = re.compile(r"-x(\d+)$")
 COMMERCIAL = re.compile(r"\b\d{2,3}/\d{2,3}\s*C\b")
 STUDS_WORD = re.compile(r"[а-яё]*шип[а-яё]*", re.I)
+REISSUE_MARK = re.compile(r"_r\d{8}(?!\d)")                          # a renewal mark of an Id (mirror-reissue, `_r20261020`)
 TITLE_AGE_WORD = re.compile(r"(?<![^\W\d_])старше(?![^\W\d_])", re.I)   # «старше» as a whole word: not «старшее», but also «(старше)», «старше,»
 SUMMARY_BY_TEXT = frozenset({"template_missing"})       # rules summarized by their text, not by a count of ads
 
@@ -106,6 +107,8 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
     ids = [a.findtext("Id") or "" for a in ads]
     for i in sorted({i for i in ids if ids.count(i) > 1}):
         add("duplicate_id", i)
+    for i in sorted({i for i in ids if len(REISSUE_MARK.findall(i)) > 1}):
+        add("double_reissue_mark", i)                    # `_r…` goes only on the position's own Id once (sync._own_id): `106_r…_r…` is no cabinet's
     seen: Dict[tuple, str] = {}
     tires: Dict[tuple, str] = {}
     for ad in ads:

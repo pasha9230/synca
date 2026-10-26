@@ -100,3 +100,29 @@ def test_the_shortening_of_the_day_is_checked_against_the_studs_rule_at_every_cu
                 for tail in ("", "комплект 4 шт."):
                     title = compose_title(name, tail=tail)
                     assert not STUDS_WORD.search(NOT_STUDDED.sub(" ", title)), (name, title)
+
+
+
+BMW = "Pirelli  275/40/20  V 106 WINTER SOTTOZERO 3  XL Run Flat (BMW)"   # the live position of 2026-10-25 (Id 125773629632, `_a2` in account 2)
+
+
+@pytest.mark.parametrize("note", [" (старше 5-ти лет)", " Старше 5-ти лет.", " старше 5-ти лет,", " (старше 3-х лет).", " старше 5-ти лет;"])
+def test_a_cut_takes_the_age_phrase_whole_never_its_first_word(note):
+    """«… (BMW) старше в наличии»: the forms that are not the note (owner's narrow list, test_title_age) stay supplier's text, but the
+    shortening takes the phrase off as one, like a «feature: value» pair."""
+    for tail in ("в наличии", "комплект 4 шт."):                        # the indexes go first, as for any long name
+        assert compose_title(BMW + note, tail=tail) == "Pirelli 275 40 R20 WINTER SOTTOZERO 3 Run Flat (BMW) " + tail
+
+
+def test_an_age_phrase_that_fits_stays_whole():
+    assert compose_title("Ikon 205/55/16 Character (старше 3-х лет)") == "Ikon 205 55 R16 Character (старше 3-х лет) в наличии"
+
+
+def test_the_age_phrase_and_a_studs_pair_together_never_leave_half_of_either():
+    from tires_sync.feed_check import TITLE_AGE_WORD
+    for pad in range(60):
+        for note in (" (старше 5-ти лет)", " старше 5-ти лет.", " (старше 3-х лет)"):
+            title = compose_title(HEAD + "W" * pad + " Шипы: нет" + note)
+            kept = title.replace(" в наличии", "")
+            assert kept.endswith(note.strip()) or not TITLE_AGE_WORD.search(title), title
+            assert not kept.endswith(("Шипы", "Шипы:", "3-х", "5-ти")), title

@@ -168,7 +168,7 @@ def feed_ads(conn, parsed, ref, settings, now) -> dict:
         id_map = dict(mirror_feed.adopted_maps(conn, acct)[0], **ev.aliases, **ev.inherit)
         suffix = "" if acct == connections.PRIMARY_ACCOUNT else "_a%d" % acct
         reissued = mirror_feed.reissued_own(conn, acct)
-        out[acct] = {sync._final_id(d.goods_id, id_map, suffix, reissued): (d.goods_id, ev.ok[d.goods_id].avito_model if d.goods_id in ev.ok else "")
+        out[acct] = {sync._final_id(d.goods_id, id_map, suffix, reissued, acct): (d.goods_id, ev.ok[d.goods_id].avito_model if d.goods_id in ev.ok else "")
                      for d in ds.decisions if d.action.value in MATCH_LIVE}
     return out
 

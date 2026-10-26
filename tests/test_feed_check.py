@@ -129,7 +129,7 @@ def test_the_rules_file_covers_every_rule_the_code_uses():
     rules = feed_check.load_rules()["rules"]
     for rule in ("template_tags", "required_fields", "empty_feed", "duplicate_id", "duplicate_position", "cross_account_id", "stock", "price",
                  "phone", "pack4", "commercial", "model_in_reference", "title", "photo", "shrink",
-                 "own_photo_foreign", "held_low_stock", "studs_conflict", "template_missing", "title_age_word"):
+                 "own_photo_foreign", "held_low_stock", "studs_conflict", "template_missing", "title_age_word", "double_reissue_mark"):
         assert set(rules[rule]) >= {"generated", "mirror", "text"} and rules[rule]["generated"] in ("critical", "warning", "off")
 
 
@@ -564,3 +564,18 @@ def test_the_word_older_only_in_the_description_is_not_reported():
 def test_a_feed_with_the_word_older_in_a_title_passes_the_gate_with_a_note():
     found = feed_check.check_feed([ad(Title="Ikon Tyres 205 55 R16 Test Model (BMW) старше в наличии")], ctx())
     assert feed_check.critical(found) == [] and feed_check.summarize(found) == "title_age_word: 1 (например 100)"
+
+
+# ---- «double_reissue_mark»: an Id with two renewal marks (tails2 report, 2026-10-25). A warning for now: an Id of a mirror file renewed
+# twice on purpose (mirror-reissue) is legal and stays after a move to our assembly; critical only after the live feeds are measured
+
+@pytest.mark.parametrize("ad_id", ["106_r20261020_r20261021", "106_a2_r20261020_r20261021", "106-x4_r20261020_r20261021"])
+def test_an_id_with_two_renewal_marks_is_reported(ad_id):
+    for mode in ("generated", "mirror"):
+        found = feed_check.check_feed([ad(Id=ad_id)], ctx(mode=mode))
+        assert [(f.rule, f.level, f.ad_id) for f in found if f.rule == "double_reissue_mark"] == [("double_reissue_mark", "warning", ad_id)]
+
+
+@pytest.mark.parametrize("ad_id", ["106", "106_r20261020", "106_a2_r20261020", "106-x4_a2_r20261020", "kabc123def45_r20261020", "106_r2026102"])
+def test_an_id_with_one_mark_or_none_is_not_reported(ad_id):
+    assert [f for f in feed_check.check_feed([ad(Id=ad_id)], ctx()) if f.rule == "double_reissue_mark"] == []

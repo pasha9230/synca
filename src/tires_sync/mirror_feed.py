@@ -168,7 +168,7 @@ def apply_reissued_own(conn, account_id: int, ads: Iterable[ET.Element]) -> None
         if node is None or not node.text:
             continue
         code = PACK_SUFFIX.sub("", node.text.split("_")[0])
-        if code in known and not node.text.endswith("_" + known[code]):
+        if code in known and not re.search(r"_r\d{8}(?!\d)", node.text):   # build_ads marked it already, or it is a renewed Id taken over
             node.text = "%s_%s" % (node.text, known[code])
 
 
