@@ -136,14 +136,16 @@ def test_a_chat_of_a_points_account_gives_the_point_its_manager_the_next_day_and
     assert any("по аккаунту Авито" in t and "Юнона" in t for t in journal(conn, card["id"]))
 
 
-def test_the_point_the_client_named_wins_over_the_points_account(tmp_path):
+def test_a_points_account_always_keeps_its_point_whatever_the_client_names(tmp_path):
+    """The owner 2026-10-26: «У точек только 1 пункт выдачи всегда» — the client's words never move an order of a point's account."""
     conn, acc, pt = setup(tmp_path)
     users.add_user(conn, "yun", "pass-word-1", NOW, role="point", point_id=pt["yunona"])
+    users.add_user(conn, "rus", "pass-word-1", NOW, role="point", point_id=pt["rustaveli"])
     row = chat_of(conn, acc["yunona"], [("in", "Здравствуйте"), ("out", "Забрать можно на Юноне или на Руставели"), ("in", "Мне на Руставели")])
     card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
-    assert card["point_id"] == pt["rustaveli"] and card["responsible"] == "pavel"         # Руставели has no manager: the default (none = who made it)
-    assert "Точка из сообщения клиента: «Руставели» («Мне на Руставели»)" in journal(conn, card["id"])
-    assert not any("по аккаунту Авито" in t for t in journal(conn, card["id"]))
+    assert card["point_id"] == pt["yunona"] and card["responsible"] == "yun" and card["delivery_time"] == "с 12 до 20"
+    assert any("по аккаунту Авито" in t and "Юнона" in t for t in journal(conn, card["id"]))
+    assert not any(t.startswith("Точка из сообщения клиента") for t in journal(conn, card["id"]))
 
 
 def test_the_client_naming_the_accounts_own_point_is_the_binding_by_the_account(tmp_path):
@@ -153,15 +155,6 @@ def test_the_client_naming_the_accounts_own_point_is_the_binding_by_the_account(
     assert card["point_id"] == pt["yunona"] and card["delivery_time"] == "с 12 до 20"
     assert any("по аккаунту Авито" in t for t in journal(conn, card["id"]))
     assert not any(t.startswith("Точка из сообщения клиента") for t in journal(conn, card["id"]))
-
-
-def test_the_manager_of_the_point_the_client_named_answers_on_a_points_account(tmp_path):
-    conn, acc, pt = setup(tmp_path)
-    users.add_user(conn, "yun", "pass-word-1", NOW, role="point", point_id=pt["yunona"])
-    users.add_user(conn, "rus", "pass-word-1", NOW, role="point", point_id=pt["rustaveli"])
-    row = chat_of(conn, acc["yunona"], [("in", "Мне на Руставели")])
-    card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
-    assert card["point_id"] == pt["rustaveli"] and card["responsible"] == "rus"
 
 
 def test_an_order_waiting_for_the_goods_gets_no_delivery_date(tmp_path):

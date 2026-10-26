@@ -303,7 +303,8 @@ def next_day(now: str) -> str:
 
 def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None, delivery: bool = True) -> int:
     """A new deal for a chat. A chat that already has one gets no second: the deal it has is returned. `delivery`: the delivery date is
-    tomorrow (the button «Создать заказ»; not an order that waits for the goods)."""
+    tomorrow (the button «Создать заказ»; not an order that waits for the goods). The point: a point's account gives its own (one pick-up place,
+    the owner 2026-10-26), another account the point the client named."""
     chat = chats_store.get_chat(conn, chat_row)
     if chat is None:
         raise OrderError("Такого чата нет.")
@@ -322,12 +323,9 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         name = (chat["peer_name"] or "")[:120]                                                          # the client's own name only; the ad stays in the comment
         tags = ",".join(t for t in (_account_tag(conn, chat["account_id"]), "повторный" if earlier else "") if t)
         of_account = points_store.point_by_account(conn, chat["account_id"])
-        named = named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))
-        if named and of_account and named[0]["id"] == of_account["id"]:
-            named = None                                                                                # the account's point: bound by the account below
-        final = named[0] if named else of_account
+        named = None if of_account else named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))   # a point's account keeps its point, bound by _attach
         fields = {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito", "comment": comment.strip(), "tags": tags,
-                  "responsible": (of_account and point_responsible(conn, final["id"])) or orders.default_responsible(conn),   # a point's account: the manager of the order's point
+                  "responsible": (of_account and point_responsible(conn, of_account["id"])) or orders.default_responsible(conn),   # a point's account: its manager
                   "delivery_date": next_day(now) if delivery else ""}
         if named:
             fields["point_id"] = named[0]["id"]
