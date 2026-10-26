@@ -13,6 +13,8 @@ The owner 2026-10-26: an order without a WebMIM number on that day asks the resp
 same alert as the end of the reservation: a point account's order goes to its point), also when no message to the client can go; the
 client's text then has no «№…» (`_client_body`).
 The lead 2026-10-26: a point on «Панель» is asked on its «Моя точка» instead of VK (the same state «asked», then the same answers and silence).
+The owner 2026-10-26: an order the point gave back to the supplier in this stay («Возврат», order_manager.returned) stays «На точке» until the
+manager fills the amount; nobody is asked about it, the client gets no reminder and no yellow record is left (`_returned`).
 """
 from __future__ import annotations
 
@@ -119,6 +121,12 @@ def _ask_number(conn, card: dict, notify: Notify, now: str) -> None:
     conn.commit()
 
 
+def _returned(conn, card: dict) -> bool:
+    """The point gave the goods back to the supplier in this stay at the point (the record of order_manager.returned): no question, no client."""
+    return conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'point' AND text = ? AND at >= ? LIMIT 1",
+                        (card["id"], order_manager.RETURN_LINE, card["entered_at"] or "")).fetchone() is not None
+
+
 def _ask_key(card: dict) -> str:
     return ASK_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""))
 
@@ -208,6 +216,9 @@ def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.D
     истекает» only when the point was asked in this stay at the point, the same day, before the end of the working hours, and the reservation
     still ends that day. (outcome for the log, answer for the point)."""
     number = order_manager.label(card)
+    if _returned(conn, card):                                   # the owner 2026-10-26: the goods went back, the question is over
+        return ("«на точке» после возврата: клиенту не отправлено",
+                "Заказ №%s: отмечен возврат поставщику, клиенту не пишем. Заказ уйдёт с точки, когда менеджер внесёт сумму." % number)
     key = _ask_key(card)
     was = store.get_state(conn, key) or ""
     if was.startswith("asked|") and _late(was, now, order_manager.duty_settings(conn)["hours"]):
@@ -247,7 +258,7 @@ def question_open(conn, card: dict, now: str) -> bool:
     if (card.get("stage") or {}).get("code") != "at_point":
         return False
     was = store.get_state(conn, _ask_key(card)) or ""
-    if not was.startswith("asked|"):
+    if not was.startswith("asked|") or _returned(conn, card):
         return False
     return card["reserve_until"] == was.split("|", 1)[1][:10] and not _late(was, now, order_manager.duty_settings(conn)["hours"])
 
@@ -256,6 +267,12 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
     """A card at the point: the question of the last day (only where a client could be written to), the silence after it."""
     key = _ask_key(card)
     was = store.get_state(conn, key) or ""
+    if was.startswith(("asked|", "asking|")) and _returned(conn, card):    # the owner 2026-10-26: given back after the question
+        if _move(conn, key, was, "silent|" + now):
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Вопрос точке снят: точка отметила возврат поставщику, клиенту «%s» "
+                             "не отправлено" % CLIENT_TEMPLATE, level="grey")
+            conn.commit()
+        return
     if was.startswith("asked|"):
         if _late(was, now, hours) and card["reserve_until"] == was.split("|", 1)[1][:10]:
             _silent(conn, card, key, was, now)
@@ -279,6 +296,8 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the WebMIM number notice of card %s failed", card["id"])
     if deliver is None:                                         # nothing could be sent to the client: the point is not asked
+        return
+    if _returned(conn, card):                                   # the owner 2026-10-26: given back, waits for the amount: nobody is asked
         return
     if _arrived_today(conn, card, now):
         tell_client(conn, card, deliver, now)                   # «можно забирать» went today: the grey record only, nobody is asked

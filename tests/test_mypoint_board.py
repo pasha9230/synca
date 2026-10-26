@@ -62,18 +62,55 @@ def test_the_counters_say_what_lies_comes_ends_and_waits(tmp_path, clock):
     assert placed
 
 
-def test_one_list_newest_first_by_the_last_event(tmp_path, clock):
+def order_of(page, *cards):
+    """The cards in the order the page lists them."""
+    return sorted(cards, key=lambda c: page.index('id="order-%d"' % c))
+
+
+def test_one_list_newest_first_by_the_events_that_matter_to_the_point(tmp_path, clock):
+    """The owner 2026-10-26: only the arrival at the point, the client's message in the order's chat and the reserve question raise an
+    order; the other records of the journal (notes, the alerts of the reservation, a yellow «точку не спросить») leave it where it is."""
     app, client, tok, conn, pid, card = ready(tmp_path)                                     # 5000100: on its way
     lying = _card(conn, pid, webmim="700200", code="at_point")
-    orders.add_event(conn, card, "2026-10-14T09:00:00", "o", "note", "что-то случилось позже")
-    conn.commit()
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
-    assert page.index('id="order-%d"' % card) < page.index('id="order-%d"' % lying)       # its last event is the newest
-    orders.add_event(conn, lying, "2026-10-15T09:00:00", "o", "point", "приехал на точку")
+
+    def listed():
+        return order_of(mine.get("/my-point").get_data(as_text=True), card, lying)
+
+    orders.move_card(conn, lying, _stage(conn, "moving"), "2026-10-14T08:00:00", "o")
+    orders.move_card(conn, lying, _stage(conn, "at_point"), "2026-10-14T09:00:00", "o")      # arrived at the point
     conn.commit()
-    page = mine.get("/my-point").get_data(as_text=True)
-    assert page.index('id="order-%d"' % lying) < page.index('id="order-%d"' % card)
+    assert listed() == [lying, card]
+    for kind, text, level in (("note", "что-то случилось позже", ""), ("reserve", "Оповещение о конце резерва: ok [резерв:due:2026-10-16]", ""),
+                              ("reserve", "Клиенту «Клиенту: срок резерва истекает» не отправлено: точку не спросить, ещё ли заказ на точке "
+                               "(x). Узнайте у точки [резерв:точке:2026-10-13T12:00:00]", "yellow"),
+                              ("chat", "Менеджер написал клиенту: привет", ""), ("field", "Ответственный: o", ""),
+                              ("chat", "Клиент звонил: пропущенный", "yellow")):           # a call is not a message in the chat
+        orders.add_event(conn, card, "2026-10-15T09:00:00", "o", kind, text, level=level)
+        conn.commit()
+        assert listed() == [lying, card], text                                              # not a raise
+    orders.add_event(conn, card, "2026-10-15T10:00:00", "чаты Авито", "chat", "Клиент написал: когда можно забрать?", level="yellow")
+    conn.commit()
+    assert listed() == [card, lying]                                                        # the client wrote in the order's chat
+    asked(conn, lying, "2026-10-15T11:00:00")                                               # the reserve question to the point
+    assert listed() == [lying, card]
+    orders.add_event(conn, card, "2026-10-15T12:00:00", "o", "point", "приехал на точку")     # a point record of an order on its way: no arrival
+    conn.commit()
+    assert listed() == [lying, card]
+    orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-15T13:00:00", "o")      # it arrives
+    conn.commit()
+    assert listed() == [card, lying]
+
+
+def test_a_question_to_a_point_in_the_panel_raises_the_order_too(tmp_path, clock):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    lying = _card(conn, pid, webmim="700200", code="at_point")
+    orders.add_event(conn, card, "2026-10-15T10:00:00", "чаты Авито", "chat", "Клиент написал: я завтра", level="yellow")
+    conn.execute("UPDATE point SET channel = 'panel'")
+    conn.commit()
+    assert reserve.ask_point(conn, orders.get_card(conn, lying), None, "2026-10-15T11:00:00") == "asked"
+    page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
+    assert order_of(page, card, lying) == [lying, card]
 
 
 def test_the_card_says_what_the_vk_message_says_with_the_clients_prices(tmp_path, clock):

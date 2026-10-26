@@ -285,3 +285,67 @@ def test_after_an_extension_the_silence_is_no_yellow_record(tmp_path):
     orders.update_card(conn, cid, {"reserve_until": "2026-10-21"}, at(11), "o")
     reserve.check(conn, at(20), ok, deliver, vk)
     assert yellow(conn, cid) == [] and deliver.sent == []
+
+
+# ---- the owner 2026-10-26: «Возврат» without an amount -------------------------------------------------------------------------
+
+def other_yellow(conn, cid):
+    """The yellow records besides «заполните сумму возврата» of the return itself."""
+    return [t for t in yellow(conn, cid) if t != mgr.RETURN_ASK]
+
+
+def test_after_a_return_without_an_amount_nobody_is_asked_and_the_client_gets_nothing(tmp_path):
+    conn, cid, _chat, deliver, vk = ready(tmp_path)
+    say(conn, "возврат отдал 5200001", deliver, at(11, day="2026-10-17"), "m0")
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == "at_point" and not card["return_amount"]          # it waits for the manager's amount
+    for hour in (10, 15, 20):
+        reserve.check(conn, at(hour), ok, deliver, vk)
+    reserve.check(conn, at(10, day="2026-10-19"), ok, deliver, vk)
+    assert vk.sent == [] and deliver.sent == [] and other_yellow(conn, cid) == []
+    assert not reserve.question_open(conn, orders.get_card(conn, cid), at(11))
+    assert not any("[резерв:точке:" in e["text"] for e in orders.list_events(conn, cid))
+
+
+def test_a_point_in_the_panel_is_not_asked_after_a_return(tmp_path):
+    conn, cid, _chat, deliver, vk = ready(tmp_path)
+    say(conn, "возврат отдал 5200001", deliver, at(11, day="2026-10-17"), "m0")
+    conn.execute("UPDATE point SET channel = 'panel'")
+    conn.commit()
+    reserve.check(conn, at(10), ok, deliver, vk)
+    assert not reserve.question_open(conn, orders.get_card(conn, cid), at(11))
+    assert deliver.sent == [] and other_yellow(conn, cid) == []
+    assert not any("задан вопрос" in e["text"] for e in orders.list_events(conn, cid))
+
+
+def test_a_return_after_the_question_closes_it_and_here_tells_the_client_nothing(tmp_path):
+    conn, cid, _chat, deliver, vk = ready(tmp_path)
+    reserve.check(conn, at(10), ok, deliver, vk)
+    assert reserve.question_open(conn, orders.get_card(conn, cid), at(10, 30))
+    say(conn, "возврат отдал 5200001", deliver, at(10, 40), "m0")
+    assert not reserve.question_open(conn, orders.get_card(conn, cid), at(10, 50))
+    answer = say(conn, "на точке 5200001", deliver, at(11), "m1")
+    assert "клиенту не пишем" in answer and "возврат" in answer
+    reserve.check(conn, at(20), ok, deliver, vk)
+    reserve.check(conn, at(10, day="2026-10-19"), ok, deliver, vk)
+    assert deliver.sent == [] and len(vk.sent) == 1 and other_yellow(conn, cid) == []
+
+
+def test_a_return_of_an_earlier_stay_does_not_stop_the_question(tmp_path):
+    conn, cid, _chat, deliver, vk = ready(tmp_path)
+    say(conn, "возврат отдал 5200001", deliver, at(11, day="2026-10-14"), "m0")      # before this stay at the point began (2026-10-15)
+    conn.execute("UPDATE order_event SET at = ? WHERE text = ?", ("2026-10-14T11:05:00", mgr.RETURN_LINE))
+    conn.commit()
+    reserve.check(conn, at(10), ok, deliver, vk)
+    assert len(vk.sent) == 1
+
+
+def test_a_question_cut_while_sending_and_then_a_return_leave_no_yellow_record(tmp_path):
+    conn, cid, _chat, deliver, vk = ready(tmp_path)
+    key = reserve._ask_key(orders.get_card(conn, cid))
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (key, "asking|" + at(10)))     # the tick was cut while sending
+    conn.commit()
+    say(conn, "возврат отдал 5200001", deliver, at(10, 30), "m0")
+    reserve.check(conn, at(20), ok, deliver, vk)
+    reserve.check(conn, at(10, day="2026-10-19"), ok, deliver, vk)
+    assert deliver.sent == [] and vk.sent == [] and other_yellow(conn, cid) == []
