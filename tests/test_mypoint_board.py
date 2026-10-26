@@ -84,7 +84,8 @@ def test_one_list_newest_first_by_the_events_that_matter_to_the_point(tmp_path, 
     for kind, text, level in (("note", "что-то случилось позже", ""), ("reserve", "Оповещение о конце резерва: ok [резерв:due:2026-10-16]", ""),
                               ("reserve", "Клиенту «Клиенту: срок резерва истекает» не отправлено: точку не спросить, ещё ли заказ на точке "
                                "(x). Узнайте у точки [резерв:точке:2026-10-13T12:00:00]", "yellow"),
-                              ("chat", "Менеджер написал клиенту: привет", ""), ("field", "Ответственный: o", "")):
+                              ("chat", "Менеджер написал клиенту: привет", ""), ("field", "Ответственный: o", ""),
+                              ("chat", "Клиент звонил: пропущенный", "yellow")):           # a call is not a message in the chat
         orders.add_event(conn, card, "2026-10-15T09:00:00", "o", kind, text, level=level)
         conn.commit()
         assert listed() == [lying, card], text                                              # not a raise

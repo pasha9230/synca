@@ -338,3 +338,14 @@ def test_a_return_of_an_earlier_stay_does_not_stop_the_question(tmp_path):
     conn.commit()
     reserve.check(conn, at(10), ok, deliver, vk)
     assert len(vk.sent) == 1
+
+
+def test_a_question_cut_while_sending_and_then_a_return_leave_no_yellow_record(tmp_path):
+    conn, cid, _chat, deliver, vk = ready(tmp_path)
+    key = reserve._ask_key(orders.get_card(conn, cid))
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (key, "asking|" + at(10)))     # the tick was cut while sending
+    conn.commit()
+    say(conn, "возврат отдал 5200001", deliver, at(10, 30), "m0")
+    reserve.check(conn, at(20), ok, deliver, vk)
+    reserve.check(conn, at(10, day="2026-10-19"), ok, deliver, vk)
+    assert deliver.sent == [] and vk.sent == [] and other_yellow(conn, cid) == []
