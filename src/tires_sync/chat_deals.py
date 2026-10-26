@@ -8,7 +8,8 @@ import json
 import logging
 import re
 import sqlite3
-from typing import List, Optional
+from datetime import date, timedelta
+from typing import List, Optional, Tuple
 
 from . import chats as chats_store, clients, order_points as points_store, order_wait, orders, store
 from .orders import OrderError
@@ -174,6 +175,106 @@ def _add_position(conn, chat: dict, card_id: int, provider, now: str, author: st
     conn.commit()
 
 
+# ---- what «Создать заказ» fills in (the owner 2026-10-26): the point, the responsible, the delivery date ---------------------------------
+
+WORD = re.compile(r"[0-9a-zа-яё]+")
+NOT_A_KEY = {"ул", "улица", "пр", "т", "проспект", "пер", "переулок", "ш", "шоссе", "наб", "набережная", "б", "бульвар", "пл", "площадь",
+             "линия", "д", "дом", "к", "корп", "корпус", "стр", "строение", "лит", "литер", "литера", "оф", "офис", "пом", "помещение", "этаж",
+             "тц", "трк", "тк", "центр", "торговый", "комплекс", "пункт", "выдачи", "шиномонтаж", "склад", "точка", "санкт", "петербург", "спб",
+             "питер", "маршала", "генерала", "адмирала", "академика", "профессора", "героя", "космонавта", "капитана", "лейтенанта"}
+REGION = {"обл", "область", "ло", "р", "н", "рн", "район", "г", "гор", "город", "гп", "пгт", "край", "россия", "рф"}   # a part of the address no client names a point by
+CHANGED_MIND = {"лучше", "удобнее", "точнее", "нет", "теперь", "таки", "передумал", "передумала", "передумали"}
+NEGATION_GAP = {"в", "во", "на", "у", "к", "с", "со"}
+
+
+def _words(text) -> List[str]:
+    return WORD.findall(str(text or "").lower().replace("ё", "е"))
+
+
+def _forms(word: str) -> set:
+    """The Russian forms a client writes a name or a street in: «Юнона» → «на Юноне», «с Юноны»; «Голландская» → «на Голландской»;
+    a word ending in another vowel (Руставели, Янино) is said as it is."""
+    for end, endings in (("ая", ("ая", "ой", "ую")), ("яя", ("яя", "ей", "юю")), ("ий", ("ий", "ого", "ому", "ом", "им")),
+                         ("ый", ("ый", "ого", "ому", "ом", "ым")), ("а", ("а", "ы", "и", "е", "у", "ой", "ою")), ("я", ("я", "и", "е", "ю", "ей", "ею")),
+                         ("ь", ("ь", "и", "ю", "ью", "я", "ем", "е"))):
+        if word.endswith(end):
+            return {word[:-len(end)] + e for e in endings}
+    if word[-1] in "оеиуюыэ":
+        return {word}
+    return {word + e for e in ("", "а", "у", "е", "ом", "ым", "ы")}
+
+
+def _keys(point: dict) -> List[tuple]:
+    """The words that name a point: its name and each part of its address with a street or a place in it (not the city, the region,
+    the house). A key is the words of one part, all of them to be found."""
+    parts = [str(point.get("name") or "")] + str(point.get("address") or "").split(",")
+    keys = []
+    for part in parts:
+        words = _words(part)
+        if any(w in REGION for w in words):
+            continue
+        key = tuple(w for w in words if len(w) >= 4 and not w.isdigit() and w not in NOT_A_KEY)
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def _mentions(words: List[str], keys: dict) -> List[Tuple[int, int, bool]]:
+    """(position, point id, said with «не»: «не на Юноне») of every point named in the words of one message."""
+    found = []
+    for key, point_id in keys.items():
+        places = [[i for i, w in enumerate(words) if w in _forms(k)] for k in key]
+        if not all(places):
+            continue
+        for at in places[0]:
+            before = words[max(0, at - 2):at]
+            negated = before[-1:] == ["не"] or (len(before) == 2 and before[0] == "не" and before[1] in NEGATION_GAP)
+            found.append((at, point_id, negated))
+    return sorted(found)
+
+
+def named_point(texts: List[str], points: List[dict]) -> Optional[Tuple[dict, str]]:
+    """The point the client named last in their own messages (`texts`: the newest first), with that message; None when they named none
+    or the last message that names a point is not clear (two points with no «лучше», «точнее», «передумал» between them, or only «не на …»).
+    A word two points share (a town of both) names neither. Pure: the owner 2026-10-26."""
+    by_key = {}
+    for point in points:
+        for key in _keys(point):
+            by_key.setdefault(key, set()).add(point["id"])
+    keys = {key: ids.pop() for key, ids in by_key.items() if len(ids) == 1}
+    by_id = {p["id"]: p for p in points}
+    for text in texts:
+        words = _words(text)
+        found = _mentions(words, keys)
+        if not found:
+            continue
+        said = [(at, pid) for at, pid, negated in found if not negated]
+        if not said:
+            return None
+        last = said[-1][1]
+        other = [i for i, (_, pid) in enumerate(said) if pid != last]
+        if other:
+            j = other[-1]
+            if not CHANGED_MIND & set(words[said[j][0] + 1:said[j + 1][0]]):
+                return None
+        return by_id[last], text
+    return None
+
+
+def point_responsible(conn, point_id) -> str:
+    """The manager of the point in the panel (role «point»): the first active one made; empty when the point has none."""
+    if point_id is None:
+        return ""
+    row = conn.execute("SELECT u.login FROM panel_user u JOIN panel_user_role r ON r.login = u.login WHERE r.role = 'point' AND r.active = 1 "
+                       "AND r.point_id = ? ORDER BY u.rowid LIMIT 1", (point_id,)).fetchone()
+    return row[0] if row else ""
+
+
+def next_day(now: str) -> str:
+    """The delivery date of a new order: the day after the day it is made (the panel's local date in `now`)."""
+    return (date.fromisoformat(now[:10]) + timedelta(days=1)).isoformat()
+
+
 def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None) -> int:
     """A new deal for a chat. A chat that already has one gets no second: the deal it has is returned."""
     chat = chats_store.get_chat(conn, chat_row)
@@ -193,9 +294,19 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         earlier = earlier_deals(conn, chat)
         name = (chat["peer_name"] or "")[:120]                                                          # the client's own name only; the ad stays in the comment
         tags = ",".join(t for t in (_account_tag(conn, chat["account_id"]), "повторный" if earlier else "") if t)
-        card_id = orders.create_card(conn, {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito",
-                                            "comment": comment.strip(), "tags": tags, "responsible": orders.default_responsible(conn)},
-                                    now, author, require_contact=False)
+        of_account = points_store.point_by_account(conn, chat["account_id"])
+        named = named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))
+        if named and of_account and named[0]["id"] == of_account["id"]:
+            named = None                                                                                # the account's point: bound by the account below
+        fields = {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito", "comment": comment.strip(), "tags": tags,
+                  "responsible": point_responsible(conn, of_account and of_account["id"]) or orders.default_responsible(conn),
+                  "delivery_date": next_day(now)}
+        if named:
+            fields["point_id"] = named[0]["id"]
+        card_id = orders.create_card(conn, fields, now, author, require_contact=False)
+        if named:
+            orders.add_event(conn, card_id, now, author, "field", "Точка из сообщения клиента: «%s» («%s»)" % (
+                named[0]["name"], " ".join(named[1].split())[:80]))
         _attach(conn, chat, card_id, now, author)
         if earlier:
             orders.add_event(conn, card_id, now, author, "chat", "Ранее писал: заказы %s" % ", ".join("№%d" % i for i in earlier))
