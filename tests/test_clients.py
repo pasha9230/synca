@@ -160,7 +160,9 @@ def test_the_card_the_list_and_the_money_right(tmp_path, monkeypatch):
     client = app.test_client()
     with client.session_transaction() as s:
         s["user"], s["epoch"] = "pointman", store.get_session_epoch(conn, "pointman")
-    assert client.get("/clients").status_code == 403
+    page = client.get("/clients")                                                              # «CRM» of a point: its own part (2026-10-26)
+    assert page.status_code == 200 and "Иван Петров" not in page.get_data(as_text=True)
+    assert client.get("/clients/%d" % client_id).status_code == 403
 
 
 def test_the_old_code_reads_a_base_with_clients(conn, tmp_path):

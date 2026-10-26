@@ -217,7 +217,9 @@ def test_the_point_sees_the_name_and_only_its_own_chat_and_order(setup):
     other_order = _order(conn, "+79113330000", point_id=other_point)                            # newer, of another point
     manager = person(app, conn, "point", ids["point"])
     row = _row_of(manager.get("/calls").get_data(as_text=True), ids["rows"][3])
-    assert "Ольга" in row and "/clients/" not in row                                            # the point has no «Клиенты»
+    assert "Ольга" in row and 'href="/clients/%d"' % client_id in row                         # «CRM»: the point's own part (2026-10-26)
+    card = manager.get("/clients/%d" % client_id).get_data(as_text=True)
+    assert "/orders/%d\"" % own_order in card and "/orders/%d\"" % other_order not in card and "Ч-%d" % other_chat not in card
     assert 'href="/chats/%d"' % own_chat in row and 'href="/chats/%d"' % other_chat not in row
     assert 'href="/orders/%d"' % own_order in row and 'href="/orders/%d"' % other_order not in row
     assert manager.get("/chats/%d" % own_chat).status_code == 200 and manager.get("/orders/%d" % own_order).status_code == 200

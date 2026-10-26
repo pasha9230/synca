@@ -6,7 +6,7 @@ from __future__ import annotations
 from flask import abort, flash, redirect, render_template, request
 
 from .. import clients, connections, order_manager
-from .common import author, can, get_conn, has_right, now_iso
+from .common import author, can, get_conn, has_right, now_iso, own_point, point_account
 
 DUPLICATES_SHOWN = 300                  # the page of the duplicates shows this many pairs at most (the rest after these are joined or waved off)
 
@@ -16,6 +16,9 @@ def register(app) -> None:
     def clients_page():
         conn = get_conn()
         query, tag = request.args.get("q", "").strip()[:80], request.args.get("tag", "").strip()[:clients.TAG_MAX]
+        if own_point() is not None:                     # the manager of a point: the clients of its own part only, no tags (the owner 2026-10-26)
+            return render_template("clients.html", rows=clients.list_clients_for_point(conn, own_point(), point_account(), query), query=query,
+                                   tag="", tags=[], narrow=True, PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED)
         return render_template("clients.html", rows=clients.list_clients(conn, query, fold=True, tag=tag), query=query, tag=tag,
                                tags=clients.all_tags(conn), PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED)
 
@@ -37,6 +40,14 @@ def register(app) -> None:
             abort(404)
         if client["merged_into"]:
             return redirect("/clients/%d" % client["merged_into"])
+        if own_point() is not None:                     # the manager of a point: its own part only (common.own_client let it in)
+            links = clients.point_part(conn, client_id, own_point(), point_account())
+            if links is None:
+                abort(403)
+            accounts = {a["id"]: a["name"] for a in connections.list_accounts(conn) if a["id"] == point_account()}
+            entity, narrow = clients.card_view_for_point(conn, client, links, accounts, can("chats"))
+            return render_template("client.html", c=narrow, entity=entity, handed_calls={}, dups=[], dup_names={}, joined=[], narrow=True,
+                                   PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED, GAP=clients.NEW_INQUIRY_GAP_HOURS)
         accounts = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
         bought = clients.purchases(conn, client_id) if has_right("money") else None
         dups = clients.duplicates(conn, client_id)

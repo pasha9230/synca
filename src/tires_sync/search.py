@@ -5,7 +5,8 @@ chats.find, the catalog's offer_matches given by the panel); here: how the query
 
 The rights are one filter, scope_for: a section the role has not is never searched (not searched and hidden); the manager of a point finds
 the orders of the own point and the chats of the point's account only, and a chat through an order (its number, its phone) only when the
-order is of the point; without «money» no purchase price."""
+order is of the point, the clients it has a part of (clients.list_clients_for_point, the owner 2026-10-26); without «money» no purchase
+price."""
 from __future__ import annotations
 
 import re
@@ -38,12 +39,12 @@ class Scope:
 
 
 def scope_for(role: str, point_id: Optional[int] = None, point_account: Optional[int] = None) -> Scope:
-    """What a role finds: the groups of the sections it may look at; the manager of a point the orders of the point and the chats of its
-    account (no account chosen: no chat; no point: nothing), never the clients nor the positions."""
+    """What a role finds: the groups of the sections it may look at; the manager of a point the orders of the point, the chats of its
+    account (no account chosen: no chat; no point: nothing) and the clients of its own part, never the positions."""
     groups = {g for g in GROUPS if users.level(role, SECTION[g]) >= users.VIEW}
     if role != "point":
         return Scope(frozenset(groups), money=users.has_right(role, "money"))
-    groups &= {"orders", "chats"}
+    groups &= {"orders", "chats", "clients"}
     if not point_id:
         groups = set()
     if point_account is None:
@@ -94,7 +95,9 @@ def _clients(conn, p: dict, scope: Scope, limit: int) -> list:
     if p["kind"] in ("chat", "order") or (p["kind"] == "number" and len(p["digits"]) < 5):
         return []                                                  # a short number is an order's, not a piece of every phone
     found = []
-    for c in clients.list_clients(conn, p["phone"] or p["text"], limit=limit + 1, fold=True):
+    rows = (clients.list_clients_for_point(conn, scope.point, scope.account, p["phone"] or p["text"], limit=limit + 1) if scope.point is not None
+            else clients.list_clients(conn, p["phone"] or p["text"], limit=limit + 1, fold=True))      # the point: its own part, its own counts
+    for c in rows:
         counts = "заказов: %d · чатов: %d" % (c["orders"], c["chats"])
         found.append({"type": "client", "title": c["name"] or "Клиент №%d" % c["id"],
                       "subtitle": " · ".join(x for x in (clients.display(c["phone"]) if c["phone"] else "", counts) if x),

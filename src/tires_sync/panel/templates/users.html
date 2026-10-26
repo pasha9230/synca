@@ -20,6 +20,7 @@
 {% else %}<tr><td colspan="6" class="muted">Пользователей пока нет: пригласите первого ниже.</td></tr>{% endfor %}
 </tbody></table></div></section>
 <section class="card card-body" style="margin-top:var(--s-4)"><h2>Пригласить</h2>
+<p class="small muted">Ссылка одноразовая и живёт 48 часов; человек сам задаёт логин и пароль. Менеджеру точки выберите точку: он увидит только её заказы, чаты и звонки её аккаунта Авито и начнёт с «Моей точки».</p>
 {% if can_post("users_invite") %}<form method="post" action="/users/invite" class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <label class="field"><span class="label">Имя</span><input class="input" name="display_name" placeholder="например, Алексей"></label>
 <label class="field"><span class="label">Роль</span><select class="select" name="role">{% for key, label in roles.items() %}<option value="{{ key }}"{% if key == "viewer" %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>

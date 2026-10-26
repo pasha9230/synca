@@ -913,7 +913,9 @@ def client_words(event: dict) -> bool:
     return event.get("kind") == "chat" and str(event.get("text") or "").startswith(("Клиент написал", "Клиент звонил"))
 
 
-def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "") -> dict:
+def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", with_sums: bool = True) -> dict:
+    """The board: the cards by stage with their sums of sale, the columns' sums and «Сумма в работе»; `with_sums=False` (the manager of a point,
+    the owner 2026-10-26): every sum is None — not counted, not given."""
     stages = list_stages(conn)
     names = {p["id"]: p["name"] for p in points_store.list_points(conn)}
     sums: Dict[int, float] = {}
@@ -944,7 +946,8 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
-                                      "delivery_date": delivery, "sum": total, "days": int(seconds // 86400), "overdue": overdue, "tags": tag_names})
+                                      "delivery_date": delivery, "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
+                                      "tags": tag_names})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":
@@ -953,6 +956,10 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
             summary["overdue"] += 1 if overdue else 0
         if created[:10] == now.date().isoformat():
             summary["new_today"] += 1
+    if not with_sums:
+        summary["sum_open"] = None
+        for column in columns.values():
+            column["sum"] = None
     return {"columns": [columns[s["id"]] for s in stages], "summary": summary}
 
 

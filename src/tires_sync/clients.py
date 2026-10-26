@@ -89,12 +89,13 @@ def get_client(conn, client_id) -> dict:
     return client
 
 
-def card_view(conn, client: dict, accounts: Dict[int, str], bought: Optional[float], chat_links: bool) -> dict:
+def card_view(conn, client: dict, accounts: Dict[int, str], bought: Optional[float], chat_links: bool, whole: bool = True) -> dict:
     """The client's card in the one look of the cards (_entity.html), a dict ready to be JSON. `bought` is None without the right «money»,
-    `chat_links`: the person may open the chats. The events are what the data already keeps: the orders made, the journal of the client."""
+    `chat_links`: the person may open the chats. The events are what the data already keeps: the orders made, the journal of the client.
+    `whole=False` (the point's part, card_view_for_point): the journal, the inquiries and the tags of the whole client are not read at all."""
     cid = client["id"]
-    events = client_events(conn, client)
-    asked = inquiries(conn, cid)
+    events = client_events(conn, client) if whole else []
+    asked = inquiries(conn, cid) if whole else []
     fields = [{"label": "Телефоны", "value": client["phones"], "fmt": "phone"}, {"label": "Автомобиль", "value": car_text(client)},
               {"label": "Первое обращение", "value": asked[-1]["at"] if asked else None, "fmt": "dt"},
               {"label": "Последнее обращение", "value": asked[0]["at"] if asked else None, "fmt": "dt"}, {"label": "Обращений", "value": len(asked)},
@@ -120,7 +121,7 @@ def card_view(conn, client: dict, accounts: Dict[int, str], bought: Optional[flo
               if k["order_id"] and k["order_id"] > 0 else None} for k in client.get("calls") or []]
     return {"type": "client", "kind": "Клиент", "ref": "№%d" % cid, "title": client["name"] or "Клиент без имени",
             "status": None,                                    # the status of the inquiry is drawn by _client_inquiry.html (the lane crm-inquiry)
-            "crumbs": [{"label": "CRM", "href": "/clients"}, {"label": "№%d" % cid}], "tags": tags_of(conn, cid) + ([HANDED] if handed(conn, cid) else []),
+            "crumbs": [{"label": "CRM", "href": "/clients"}, {"label": "№%d" % cid}], "tags": (tags_of(conn, cid) + ([HANDED] if handed(conn, cid) else [])) if whole else [],
             "fields": fields, "orders": orders, "purchases": purchases_view(conn, client), "chats": chats, "calls": calls,
             "inquiries": asked_rows, "events": events}
 
@@ -295,6 +296,114 @@ def list_clients(conn, query: str = "", limit: int = 200, fold: bool = False, ta
         r["tags"] = sorted(tags[r["id"]], key=lambda t: (t != PRAGMATIC, t.casefold())) + ([HANDED] if r.pop("handed") else [])
         r["car"] = car_text(r)
     return found
+
+
+# ---- the CRM of a manager of a point (the owner 2026-10-26) ---------------------------------------------------------------------------
+# A point sees its own part of a client only: the orders of the point, the chats and the calls of the point's Avito account (none without
+# one), the phones of those, the sales of those orders. Never the other points' orders, the other accounts' chats and calls, the phones only
+# they know, the tags, the comment, the car, the duplicates, the joins. The selection is in the queries of the point's part (point_part); the
+# card is built from that part only (the client read whole is narrowed before card_view, which then reads nothing of the whole client).
+
+def _point_part(conn, point_id, account_id) -> Dict[int, dict]:
+    """{client: {"orders": [order ids], "chats": [chat rows], "calls": [call rows], "phones": {E.164}}} of the clients the point has a part
+    of (the clients joined away have no links of their own)."""
+    part: Dict[int, dict] = defaultdict(lambda: {"orders": [], "chats": [], "calls": [], "phones": set()})
+    for client_id, order_id, phone in conn.execute(
+            "SELECT l.client_id, k.id, k.client_phone FROM client_order l JOIN order_card k ON k.id = l.order_id WHERE k.point_id = ? "
+            "ORDER BY k.id DESC", (point_id,)):
+        part[client_id]["orders"].append(order_id)
+        part[client_id]["phones"].add(normalize(phone))
+    if account_id is not None:
+        for client_id, chat_row in conn.execute("SELECT l.client_id, a.id FROM client_chat l JOIN avito_chat a ON a.id = l.chat_row "
+                                                "WHERE a.account_id = ?", (account_id,)):
+            part[client_id]["chats"].append(chat_row)
+        for client_id, call_row, phone in conn.execute("SELECT l.client_id, k.id, k.buyer_phone FROM client_call l JOIN avito_call k ON k.id = l.call_row "
+                                                       "WHERE k.account_id = ?", (account_id,)):
+            part[client_id]["calls"].append(call_row)
+            part[client_id]["phones"].add(normalize(phone))
+    own = own_phones(conn)                                # our own numbers typed into an order are never the client's (as in client_phone)
+    for links in part.values():
+        links["phones"] = {p for p in links["phones"] if usable(p, own)}
+    return dict(part)
+
+
+def point_part(conn, client_id, point_id, account_id) -> Optional[dict]:
+    """The point's part of one client (see _point_part); None when the point has nothing of this client."""
+    if not point_id:
+        return None
+    links = {"orders": [r[0] for r in conn.execute("SELECT k.id FROM client_order l JOIN order_card k ON k.id = l.order_id "
+                                                    "WHERE l.client_id = ? AND k.point_id = ? ORDER BY k.id DESC", (client_id, point_id))],
+             "chats": [], "calls": [], "phones": set()}
+    links["phones"] = {normalize(r[0]) for r in conn.execute("SELECT client_phone FROM order_card WHERE id IN (%s)" % ",".join("?" * len(links["orders"])),
+                                                             links["orders"])} if links["orders"] else set()
+    if account_id is not None:
+        links["chats"] = [r[0] for r in conn.execute("SELECT a.id FROM client_chat l JOIN avito_chat a ON a.id = l.chat_row "
+                                                      "WHERE l.client_id = ? AND a.account_id = ?", (client_id, account_id))]
+        for call_row, phone in conn.execute("SELECT k.id, k.buyer_phone FROM client_call l JOIN avito_call k ON k.id = l.call_row "
+                                            "WHERE l.client_id = ? AND k.account_id = ?", (client_id, account_id)):
+            links["calls"].append(call_row)
+            links["phones"].add(normalize(phone))
+    own = own_phones(conn)
+    links["phones"] = {p for p in links["phones"] if usable(p, own)}
+    return links if links["orders"] or links["chats"] or links["calls"] else None
+
+
+def list_clients_for_point(conn, point_id, account_id, query: str = "", limit: int = 200) -> List[dict]:
+    """The clients the point has a part of, the newest first, with the point's own counts, phone and last touch; `query` finds the name or a
+    phone the point knows (never a phone only another point or account knows)."""
+    part = _point_part(conn, point_id, account_id)
+    if not part:
+        return []
+    ids = sorted(part, reverse=True)
+    names = dict(conn.execute(                            # the same selection in SQL: no list of ids bound (a big account has tens of thousands)
+        "SELECT id, name FROM client WHERE merged_into IS NULL AND id IN (SELECT l.client_id FROM client_order l JOIN order_card k ON k.id = l.order_id "
+        "WHERE k.point_id = ? UNION SELECT l.client_id FROM client_chat l JOIN avito_chat a ON a.id = l.chat_row WHERE a.account_id = ? "
+        "UNION SELECT l.client_id FROM client_call l JOIN avito_call k ON k.id = l.call_row WHERE k.account_id = ?)", (point_id, account_id, account_id)))
+    query = " ".join(str(query or "").split()).casefold()
+    phone, digits = normalize(query), re.sub(r"\D", "", query)
+    found = []
+    for client_id in ids:
+        if client_id not in names:
+            continue
+        links = part[client_id]
+        if query and query not in (names[client_id] or "").casefold() \
+                and not any((phone and phone in p) or (len(digits) >= 3 and digits in p) for p in links["phones"]):
+            continue
+        found.append({"id": client_id, "name": names[client_id], "phone": min(links["phones"]) if links["phones"] else "",
+                      "orders": len(links["orders"]), "chats": len(links["chats"]), "calls": len(links["calls"]), "links": links})
+        if len(found) >= limit:
+            break
+    for r in found:
+        r["last"] = _last_touch(conn, r.pop("links"))
+    return found
+
+
+def _last_touch(conn, links: dict) -> str:
+    def newest(sql, ids):
+        return (conn.execute(sql % ",".join("?" * len(ids)), ids).fetchone()[0] or "") if ids else ""
+    return max(newest("SELECT MAX(created_at) FROM order_card WHERE id IN (%s)", links["orders"]),
+               newest("SELECT MAX(last_at) FROM avito_chat WHERE id IN (%s)", links["chats"]),
+               newest("SELECT MAX(call_at) FROM avito_call WHERE id IN (%s)", links["calls"]))
+
+
+def card_view_for_point(conn, client: dict, links: dict, accounts: Dict[int, str], chat_links: bool) -> tuple:
+    """(the card, the client narrowed) as the point sees it: card_view built from the point's part only (`links`: point_part), with the sum of the
+    sales of the point's orders; no tags, comment, car, inquiries nor journal (they are of the whole client)."""
+    orders_kept, chats_kept, calls_kept = set(links["orders"]), set(links["chats"]), set(links["calls"])
+    narrow = {"id": client["id"], "name": client["name"], "created_at": client["created_at"], "created_by": "", "car_brand": "", "car_model": "",
+              "car_year": None, "note": "", "merged_into": None, "phones": sorted(links["phones"]), "peers": [],
+              "orders": [o for o in client["orders"] if o["id"] in orders_kept], "chats": [h for h in client["chats"] if h["id"] in chats_kept],
+              "calls": [dict(k, point_name="", order_id=k["order_id"] if k["order_id"] in orders_kept else None)      # the call's point and
+                        for k in client.get("calls") or [] if k["id"] in calls_kept]}                                    # order: its own only
+    view = card_view(conn, narrow, accounts, None, chat_links, whole=False)
+    notes = ["Заказ №%d" % i for i in links["orders"]]
+    bought = conn.execute("SELECT COALESCE(SUM(sale_total), 0) FROM sale WHERE source = 'order' AND reversed_at IS NULL AND note IN (%s)"
+                          % ",".join("?" * len(notes)), notes).fetchone()[0] if notes else 0
+    keep = ("Телефоны", "Заказов", "Чатов Авито", "Звонков")
+    view["fields"] = [f for f in view["fields"] if f["label"] in keep]
+    view["fields"].insert(1, {"label": "Куплено на", "value": round(float(bought), 2), "fmt": "money"})
+    view.update(tags=[], inquiries=[], events=[])
+    return view, narrow
 
 
 def merged_from(conn, client_id) -> List[dict]:

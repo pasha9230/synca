@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block title %}CRM · Клиенты · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>CRM · Клиенты</h1><p class="sub">Один человек за заказами, чатами Авито и звонками: склеиваются сами по телефону и собеседнику Авито, остальное — вручную.</p></div>
-<div><a class="btn btn--secondary" href="/clients/duplicates">Возможные дубли</a></div></header>
+<header class="page-head"><div><h1>CRM · Клиенты</h1><p class="sub">{% if narrow %}Клиенты вашей точки: её заказы, чаты и звонки её аккаунта Авито.{% else %}Один человек за заказами, чатами Авито и звонками: склеиваются сами по телефону и собеседнику Авито, остальное — вручную.{% endif %}</p></div>
+{% if not narrow %}<div><a class="btn btn--secondary" href="/clients/duplicates">Возможные дубли</a></div>{% endif %}</header>
 <form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;margin-bottom:var(--s-4);flex-wrap:wrap">
-<label class="field grow"><span class="label">Имя, телефон или автомобиль</span><input class="input" type="search" name="q" value="{{ query }}"></label>
-<label class="field"><span class="label">Тег</span><select class="input" name="tag"><option value="">Все</option>{% for t in tags %}<option value="{{ t }}"{% if t == tag %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+<label class="field grow"><span class="label">{{ "Имя или телефон" if narrow else "Имя, телефон или автомобиль" }}</span><input class="input" type="search" name="q" value="{{ query }}"></label>
+{% if not narrow %}<label class="field"><span class="label">Тег</span><select class="input" name="tag"><option value="">Все</option>{% for t in tags %}<option value="{{ t }}"{% if t == tag %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>{% endif %}
 <button class="btn btn--primary">Найти</button></form>
-<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>№</th><th>Имя</th><th>Обращение</th><th>Теги</th><th>Телефон</th><th>Автомобиль</th><th>Заказов</th><th>Чатов</th><th>Звонков</th><th>Последняя активность</th></tr></thead><tbody>
+<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>№</th><th>Имя</th>{% if not narrow %}<th>Обращение</th><th>Теги</th>{% endif %}<th>Телефон</th>{% if not narrow %}<th>Автомобиль</th>{% endif %}<th>Заказов</th><th>Чатов</th><th>Звонков</th><th>Последняя активность</th></tr></thead><tbody>
 {% for r in rows %}<tr><td><a href="/clients/{{ r.id }}">№{{ r.id }}</a></td><td><a href="/clients/{{ r.id }}">{{ r.name or "без имени" }}</a></td>
-<td>{% with inquiry_client_id = r.id, inquiry_place = "list" %}{% include "_client_inquiry.html" ignore missing %}{% endwith %}</td>
-<td>{% for t in r.tags %}<span class="badge {{ 'badge--err' if t == PRAGMATIC else ('badge--warn' if t == HANDED else 'badge--neutral') }}">{{ t }}</span> {% endfor %}</td>
-<td>{{ r.phone|phone }}</td><td>{{ r.car or "—" }}</td><td>{{ r.orders }}</td><td>{{ r.chats }}</td><td>{{ r.calls }}</td><td>{% if r.last %}<time>{{ r.last|dt }}</time>{% else %}—{% endif %}</td></tr>
-{% else %}<tr><td colspan="10" class="muted">{% if query or tag %}Никого не нашли.{% else %}Клиентов пока нет: они появляются с новыми заказами, сделками из чатов и звонками; старые заказы и чаты связывает команда на сервере.{% endif %}</td></tr>{% endfor %}
+{% if not narrow %}<td>{% with inquiry_client_id = r.id, inquiry_place = "list" %}{% include "_client_inquiry.html" ignore missing %}{% endwith %}</td>
+<td>{% for t in r.tags %}<span class="badge {{ 'badge--err' if t == PRAGMATIC else ('badge--warn' if t == HANDED else 'badge--neutral') }}">{{ t }}</span> {% endfor %}</td>{% endif %}
+<td>{{ r.phone|phone }}</td>{% if not narrow %}<td>{{ r.car or "—" }}</td>{% endif %}<td>{{ r.orders }}</td><td>{{ r.chats }}</td><td>{{ r.calls }}</td><td>{% if r.last %}<time>{{ r.last|dt }}</time>{% else %}—{% endif %}</td></tr>
+{% else %}<tr><td colspan="{{ 7 if narrow else 10 }}" class="muted">{% if query or tag %}Никого не нашли.{% else %}Клиентов пока нет: они появляются с новыми заказами, сделками из чатов и звонками; старые заказы и чаты связывает команда на сервере.{% endif %}</td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endblock %}

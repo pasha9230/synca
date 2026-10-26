@@ -58,7 +58,7 @@ def _check_password(password: str) -> None:
 def add_user(conn, login: str, password: str, now: str, role: str = "owner", point_id: Optional[int] = None, display_name: str = "",
              author: str = "server") -> str:
     login = normalize(login)
-    _check_role(role, point_id)
+    _check_role(None, role, point_id)
     if not LOGIN.match(login):
         raise UserError("Логин: 2–32 символа, латинские буквы, цифры, точка, дефис, подчёркивание.")
     if login in RESERVED:
@@ -128,6 +128,8 @@ RIGHTS = {"money": "видеть закупку и прибыль", "delete": "�
 # the cards, the chats and the alerts).
 # «Звонки»: the recordings are for the operator, the admins and the owners; the manager of a point hears the calls of the point's account
 # only; the observer sees the list and never the recordings (the owner 2026-10-21, the lead 2026-10-23).
+# «CRM» of a point: looks only, at its own part of a client (the orders of the point, the chats and the calls of its account, their sums; the
+# owner 2026-10-26); panel/common.own_client opens the card, clients.*_for_point select the part.
 MATRIX: Dict[str, dict] = {
     "owner": {"sections": {s: EDIT for s in SECTIONS}, "rights": set(RIGHTS)},
     "partner": {"sections": dict(home=VIEW, orders=EDIT, chats=EDIT, calls=EDIT, clients=EDIT, alerts=EDIT, catalog=VIEW, analytics=VIEW, setup=VIEW, users=VIEW,
@@ -135,7 +137,7 @@ MATRIX: Dict[str, dict] = {
                 "rights": {"money", "delete", "bulk", "send", "supplier", "listen"}},
     "chats": {"sections": dict(home=VIEW, orders=EDIT, chats=EDIT, calls=EDIT, clients=EDIT, alerts=EDIT, catalog=VIEW, self=EDIT),
               "rights": {"send", "listen"}},
-    "point": {"sections": dict(orders=EDIT, chats=EDIT, calls=EDIT, alerts=EDIT, self=EDIT, mypoint=EDIT), "rights": {"send", "listen"}},
+    "point": {"sections": dict(orders=EDIT, chats=EDIT, calls=EDIT, clients=VIEW, alerts=EDIT, self=EDIT, mypoint=EDIT), "rights": {"send", "listen"}},
     "viewer": {"sections": dict(home=VIEW, orders=VIEW, chats=VIEW, calls=VIEW, clients=VIEW, alerts=EDIT, catalog=VIEW, self=EDIT), "rights": set()},
 }
 INVITE_HOURS = 48
@@ -150,11 +152,15 @@ def has_right(role: str, right: str) -> bool:
     return right in MATRIX.get(role, {"rights": set()})["rights"]
 
 
-def _check_role(role: str, point_id) -> None:
+def _check_role(conn, role: str, point_id) -> None:
+    """The role is known; a manager of a point gets a point, and with `conn` a point that is there (an invitation, accepting it and a
+    change of the role: a deleted point is refused, the owner 2026-10-26; the server's own add_user does not look)."""
     if role not in ROLES:
         raise UserError("Нет такой роли.")
     if role == "point" and not point_id:
         raise UserError("Менеджеру точки нужна точка.")
+    if role == "point" and conn is not None and not conn.execute("SELECT 1 FROM point WHERE id = ?", (point_id,)).fetchone():
+        raise UserError("Такой точки нет: она удалена или не заведена.")
 
 
 def _name(text) -> str:
@@ -177,7 +183,7 @@ def set_role(conn, login: str, role: str, point_id, display_name: str, now: str,
     login = normalize(login)
     if not exists(conn, login):
         raise UserError("Пользователя «%s» нет." % login)
-    _check_role(role, point_id)
+    _check_role(conn, role, point_id)
     old = get_role(conn, login)
     if login == normalize(author) and role != old["role"]:
         raise UserError("Свою роль поменять нельзя: попросите другого владельца или войдите общим паролем.")
@@ -221,7 +227,7 @@ def _token_hash(token: str) -> str:
 
 def create_invite(conn, role: str, point_id, display_name: str, now: str, author: str) -> str:
     """A one-time link for 48 hours; only its hash is kept. Returns the token (shown once, the panel sends nothing)."""
-    _check_role(role, point_id)
+    _check_role(conn, role, point_id)
     token = secrets.token_urlsafe(32)
     expires = (datetime.fromisoformat(now) + timedelta(hours=INVITE_HOURS)).isoformat(timespec="seconds")
     conn.execute("INSERT INTO panel_invite (token_hash, role, point_id, display_name, created, expires, created_by) VALUES (?,?,?,?,?,?,?)",
@@ -242,6 +248,7 @@ def accept_invite(conn, token: str, login: str, password: str, now: str) -> str:
     invite = find_invite(conn, token, now)
     if invite is None:
         raise UserError("Ссылка недействительна: она уже использована, отозвана или истекла.")
+    _check_role(conn, invite["role"], invite["point_id"])            # the point was deleted after the invitation: refused, the link stays
     login = normalize(login)
     if not LOGIN.match(login) or login in RESERVED or exists(conn, login):
         raise UserError("Логин занят или не подходит: 2–32 символа, латинские буквы, цифры, точка, дефис, подчёркивание.")
