@@ -105,6 +105,28 @@ def _new_rows(form) -> list:
     return rows
 
 
+def _amount_field(amount) -> str:
+    """A sum for a field of the window: «16000», «1500.5»; empty when there is none."""
+    return ("%.2f" % float(amount)).rstrip("0").rstrip(".") if amount and float(amount) > 0 else ""
+
+
+def _return_amount(values: dict, money: dict, typed) -> dict:
+    """«Сумма возврата» (the owner 2026-10-26): an empty sum is suggested by the kind, a return to the supplier with the purchase, a client's
+    return with the sale; the manager keeps or types it and saves. `suggest`: the sum of each kind, for app.js to switch with the kind;
+    the purchase is money: never in the page of who has no right «money», nor of a point, nor when a position has no purchase yet (it
+    would be short). The window «Отмена или возврат» fills its empty field (its one button makes the return); the order window only
+    shows the suggestion greyed (`hint`): every button of that window sends the whole form, so a value put there would be saved by
+    «Отвязать» or a stage too. A saved or a typed sum stays as it is."""
+    suggest = {"client": _amount_field(money["sale"])}
+    if has_right("money") and own_point() is None and not money["no_purchase"]:
+        suggest["supplier"] = _amount_field(money["cost"])
+    saved = values["return_amount"]
+    empty = not (typed and "return_amount" in typed) and not float(saved or 0) > 0
+    shown = "" if empty else _amount_field(saved) if isinstance(saved, (int, float)) else str(saved)
+    return {"value": shown, "hint": suggest.get(values["return_kind"] or "", "") if empty else "",
+            "suggest": {k: v for k, v in suggest.items() if v}}
+
+
 def _row_money(row) -> None:
     """The price for one and what a row of the window comes to (pieces × the price typed); None while the price is the panel's or is not a number."""
     row["unit"] = row["sum"] = None
@@ -611,6 +633,7 @@ def register(app) -> None:
                          and (can_post("order_messages_send") or bool(request.args.get("messages"))))     # by itself: only for who may send
         linked = chats_store.chats_of_order(conn, card_id)
         links, bind, chat_ref, origin = linked, chat_bind_view(conn, card, linked), orders.chat_link(card["avito_chat"]), None
+        money = orders.totals(card["items"])
         if own_point() is not None:                                      # the manager of a point (the owner 2026-10-22): an order not from the
             origin = orders.origin_labels(conn, own_point(), [card_id]).get(card_id)        # point's account is labelled; the chats of other
             account = point_account()                                    # accounts and the client's words in them are not shown
@@ -627,7 +650,7 @@ def register(app) -> None:
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
-            events=_with_stubs(events, links), totals=orders.totals(card["items"]), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
+            events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),
             chat_ref=chat_ref, responsible_options=_responsible_options(app, conn, card["responsible"]),
             want_seasons=order_wait.SEASON_NAMES, want_studs=order_wait.STUD_NAMES, want_text=order_wait.describe,

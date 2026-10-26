@@ -942,6 +942,21 @@
     unit.addEventListener("input", recount);
     if (qty) qty.addEventListener("input", recount);
   });
+  // 13d) Возврат: пустая «Сумма возврата» по типу (поставщику — закупка, клиенту — продажа; суммы в data-suggest-*). Окно «Отмена или
+  //      возврат» подставляет её в поле, смена типа меняет подставленную, набранную руками не трогает. Окно заказа только показывает
+  //      подсказку серым (data-return-amount="hint"): любая его кнопка шлёт всю форму, подставленное сохранилось бы без «Сохранить»
+  document.querySelectorAll("[data-return-amount]").forEach(function (amount) {
+    var kind = amount.form && amount.form.elements.namedItem("return_kind"), hint = amount.getAttribute("data-return-amount") === "hint";
+    if (!kind) return;
+    amount.addEventListener("input", function () {
+      if (amount.value.trim()) amount.removeAttribute("data-auto"); else amount.setAttribute("data-auto", "");   // стёрта — снова подсказка
+    });
+    kind.addEventListener("change", function () {
+      var suggest = amount.getAttribute("data-suggest-" + kind.value) || "";
+      if (hint) amount.placeholder = suggest;
+      else if (amount.hasAttribute("data-auto")) amount.value = suggest;
+    });
+  });
   // 12) «Отправить клиенту?»: готовый текст задачи уходит в чат Авито только по нажатию «Отправить»; при сбое окно остаётся с текстом и ошибкой
   function focusSend(win) {
     var area = win.querySelector("textarea:not([readonly])");
