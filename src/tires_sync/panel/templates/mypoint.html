@@ -2,15 +2,27 @@
 {% macro card(row) %}{% set c = row.card %}
 <article class="mp-card{% if row.here %} mp-card--here{% endif %}" id="order-{{ c.id }}" data-order="{{ c.id }}">
 <div class="mp-card-head"><span class="mp-no">№ {{ row.label }}</span>{% if row.origin %}<span class="badge badge--warn" data-origin title="{{ row.origin.hint }}">{{ row.origin.text }}</span>{% endif %}<span class="badge {{ 'badge--ok' if row.here else 'badge--warn' }}">{{ "на точке" if row.here else "едет на точку" }}</span></div>
-{% if not row.here %}<dl class="mp-facts">{% if c.webmim_number %}<div><dt>Заказ WebMIM</dt><dd>{{ c.webmim_number }}</dd></div>{% endif %}<div><dt>Перемещение</dt><dd>{{ c.transfer_number or "номер ещё не вписан" }}</dd></div>{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}
+<div class="mp-text">{{ row.text }}</div>
+{% if not row.here %}<dl class="mp-facts"><div><dt>Перемещение</dt><dd>{{ c.transfer_number or "номер ещё не вписан" }}</dd></div>{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}
 <div class="mp-client"><span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% if row.tel %}<a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a>{% endif %}</div>
-{% if c["items"] %}<ul class="mp-items">{% for it in c["items"] %}<li>{{ it.name }} <span class="mp-qty">× {{ it.qty }}</span></li>{% endfor %}</ul>{% endif %}
 {% if row.until %}<div class="mp-until{% if row.late %} mp-until--late{% endif %}">Хранение до {{ row.until }}{% if row.late %} — срок прошёл{% endif %}</div>{% endif %}
 <div class="mp-actions">
 {% if not row.here %}<form method="post" action="/my-point/{{ c.id }}/arrived" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.arrived }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--primary mp-btn">Приехал</button></form>
 <form method="post" action="/my-point/{{ c.id }}/issued" data-once data-confirm-title="Выдать заказ № {{ row.label }}?" data-confirm="Заказ ещё не отмечен на точке. {{ ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' }} забирает заказ; он закроется." data-confirm-ok="Выдал"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.issued }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--secondary mp-btn">Выдал</button></form>
 {% else %}<form method="post" action="/my-point/{{ c.id }}/issued" data-once data-confirm-title="Выдать заказ № {{ row.label }}?" data-confirm="{{ ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' }} забирает заказ; он закроется." data-confirm-ok="Выдал"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.issued }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--primary mp-btn">Выдал</button></form>
-<form method="post" action="/my-point/{{ c.id }}/no_show" data-once data-confirm-title="Клиент не пришёл?" data-confirm="Заказ № {{ row.label }} останется на точке, владелец свяжется с клиентом." data-confirm-ok="Не пришёл"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.no_show }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--danger-outline mp-btn">Клиент не пришёл</button></form>{% endif %}
+<form method="post" action="/my-point/{{ c.id }}/no_show" data-once data-confirm-title="Клиент не пришёл?" data-confirm="Заказ № {{ row.label }} останется на точке, владелец свяжется с клиентом." data-confirm-ok="Не пришёл"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.no_show }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--danger-outline mp-btn">Клиент не пришёл</button></form>
+<form method="post" action="/my-point/{{ c.id }}/returned" data-once data-confirm-title="Возврат поставщику: заказ № {{ row.label }}?" data-confirm="Шины отданы поставщику. Сумму возврата внесёт менеджер." data-confirm-ok="Возврат"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.returned }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--secondary mp-btn">Возврат</button></form>{% endif %}
+</div>
+</article>
+{% endmacro %}
+{% macro ask(row) %}{% set c = row.card %}
+<article class="mp-card mp-card--ask" data-question="{{ c.id }}">
+<div class="mp-card-head"><span class="mp-no">Клиент забрал заказ № {{ row.label }}?</span></div>
+<div class="mp-client"><span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% if row.tel %}<a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a>{% endif %}</div>
+<p class="mp-hint">Сегодня последний день хранения. «На точке» — клиенту уйдёт напоминание о сроке хранения.</p>
+<div class="mp-actions">
+<form method="post" action="/my-point/{{ c.id }}/reserve_issued" data-once data-confirm-title="Выдать заказ № {{ row.label }}?" data-confirm="{{ ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' }} забрал заказ; он закроется." data-confirm-ok="Выдан"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.reserve_issued }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--primary mp-btn">Выдан</button></form>
+<form method="post" action="/my-point/{{ c.id }}/reserve_here" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.reserve_here }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--secondary mp-btn">На точке</button></form>
 </div>
 </article>
 {% endmacro %}
@@ -39,10 +51,11 @@
 <p class="mp-hint">Точка работает в панели: бот не пишет в ВК, его ответы и оповещения — здесь.</p></section>{% endif %}
 {% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
 {% else %}
-<section class="mp-block" aria-labelledby="mp-here-h"><h2 id="mp-here-h">На точке{% if here %} <span class="mp-count">{{ here|length }}</span>{% endif %}</h2>
-{% for row in here %}{{ card(row) }}{% else %}<p class="mp-empty">На точке сейчас ничего не лежит.</p>{% endfor %}</section>
-<section class="mp-block" aria-labelledby="mp-coming-h"><h2 id="mp-coming-h">Едут к нам{% if coming %} <span class="mp-count">{{ coming|length }}</span>{% endif %}</h2>
-{% for row in coming %}{{ card(row) }}{% else %}<p class="mp-empty">Сейчас к точке ничего не едет.</p>{% endfor %}</section>
+<div class="mp-counters">{% for key, name in (("coming", "Едут"), ("here", "На точке"), ("ending", "Резерв истекает"), ("asked", "Ждут ответа")) %}<div class="mp-counter{% if key in ('ending', 'asked') and counts[key] %} mp-counter--hot{% endif %}" data-counter="{{ key }}"><b>{{ counts[key] }}</b><span>{{ name }}</span></div>{% endfor %}</div>
+{% if questions %}<section class="mp-questions" aria-labelledby="mp-ask-h"><h2 id="mp-ask-h">Ждут ответа <span class="mp-count">{{ questions|length }}</span></h2>
+{% for row in questions %}{{ ask(row) }}{% endfor %}</section>{% endif %}
+<section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">Заказы точки{% if cards %} <span class="mp-count">{{ cards|length }}</span>{% endif %}</h2>
+{% for row in cards %}{{ card(row) }}{% else %}<p class="mp-empty">Сейчас на точке ничего не лежит и ничего не едет.</p>{% endfor %}</section>
 {% endif %}
 {% if point %}<section class="mp-handoff" aria-labelledby="mp-handoff-h"><h2 id="mp-handoff-h">Передать клиента</h2>
 <form method="post" action="/my-point" class="mp-handoff-form" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ handoff_token }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}

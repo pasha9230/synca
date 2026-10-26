@@ -150,9 +150,9 @@ def test_my_point_shows_at_the_point_and_coming_with_what_the_message_to_the_man
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
     page = mine.get("/my-point").get_data(as_text=True)
-    assert page.index("На точке") < page.index("700200") < page.index("Едут к нам") < page.index("5000100")
-    coming = page[page.index("Едут к нам"):]
-    assert "26R-922352" in coming and "15.10, до 18:00" in coming and "Nokian Hakkapeliitta 10" in coming and "× 4" in coming
+    coming, lying = (re.search(r'<article[^>]*id="order-%d".*?</article>' % c, page, re.S).group(0) for c in (card, here))   # one list (owner 2026-10-26)
+    assert "едет на точку" in coming and "на точке" in lying and "700200" in lying
+    assert "26R-922352" in coming and "15.10, до 18:00" in coming and "Nokian Hakkapeliitta 10" in coming and "Кол-во 4 шт" in coming
     assert "Татьяна" in coming and 'href="tel:+79001112233"' in coming
     assert "Включить уведомления" in page and "notify.js" in page
     assert here

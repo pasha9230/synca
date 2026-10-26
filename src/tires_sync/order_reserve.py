@@ -11,6 +11,7 @@ that day («Заказ №… ещё на точке?»). Only its «на точ
 responsible. The state of the question is one row of app_state per stay at the point, moved from «asked» by one UPDATE only (`_move`).
 The owner 2026-10-26: an order without a WebMIM number on that day asks the responsible once per order for the number (`_ask_number`, the
 same alert as the end of the reservation: a point account's order goes to its point); the client's text then has no «№…» (`_client_body`).
+The lead 2026-10-26: a point on «Панель» is asked on its «Моя точка» instead of VK (the same state «asked», then the same answers and silence).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from datetime import date, datetime, timedelta
 from typing import Callable, Optional, Tuple
 
 from . import order_manager, order_templates, orders, store, vk_send
+from .order_points import PANEL
 
 FIRST_HOUR = 9                                   # no alert before 09:00 (Moscow), so that nobody is woken by the hourly tick
 STAGE_CODES = ("at_point", "oth")
@@ -157,6 +159,14 @@ def ask_point(conn, card: dict, point_send: Optional[PointSend], now: str) -> st
         why = "ВК не настроен: нет ключа сообщества"
     number = order_manager.label(card)
     text = ASK % (number, ", ".join(w for w in (card["client_name"], order_manager.short(card)) if w) or "без позиций", number, number)
+    if point and point.get("channel") == PANEL:                 # the lead 2026-10-26: a point in the panel is asked on «Моя точка» (question_open)
+        if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, "asked|" + now)).rowcount != 1:
+            conn.commit()
+            return ""
+        orders.add_event(conn, card["id"], now, "система", "reserve", "Точке «%s» задан вопрос в «Моей точке»: «Клиент забрал заказ №%s?» %s"
+                         % (point["name"], number, marker), level="grey")
+        conn.commit()
+        return "asked"
     state = ("unasked|" if why else "asking|") + now
     taken = conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, state)).rowcount == 1
     conn.commit()
@@ -227,6 +237,18 @@ def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.D
     if not status:
         return "на точке; клиенту уже писали", "Заказ №%s — отмечено: на точке. Клиенту сегодня уже писали, второе сообщение не отправляем." % number
     return "на точке; клиенту не отправлено", "Заказ №%s — отмечено: на точке. Клиенту сообщение не отправлено: менеджер разберётся." % number
+
+
+def question_open(conn, card: dict, now: str) -> bool:
+    """«Моя точка» shows the question of the last day («Клиент забрал?») while the point can still answer it as in VK: asked in this stay at
+    the point, the reservation still ends on the day it was asked, and that day's working hours are not over. It only reads: the answers
+    (`here`, «выдал») and the tick move the question."""
+    if (card.get("stage") or {}).get("code") != "at_point":
+        return False
+    was = store.get_state(conn, _ask_key(card)) or ""
+    if not was.startswith("asked|"):
+        return False
+    return card["reserve_until"] == was.split("|", 1)[1][:10] and not _late(was, now, order_manager.duty_settings(conn)["hours"])
 
 
 def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, deliver, point_send, notify: Notify) -> None:
