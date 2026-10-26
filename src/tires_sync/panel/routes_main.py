@@ -42,7 +42,7 @@ def register(app) -> None:
         alerts) and the person's own work; the state of the feeds is on «Фиды»."""
         conn, settings, parsed, ref = context(app)
         local = (now() + timedelta(hours=3)).replace(tzinfo=None)                  # Moscow, as the times of the base
-        day = analytics.day_numbers(conn, local, with_money=has_right("money"))
+        day = analytics.day_numbers(conn, local, with_money=has_right("money"), without_points=True)   # the staff's page: not the points' chats
         login = current_user()["login"]
         extra = []
         try:

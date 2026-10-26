@@ -3,6 +3,7 @@ in Telegram (off by default, once a day after 9:00, to the owner and the partner
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 import pytest
@@ -10,7 +11,7 @@ from cryptography.fernet import Fernet
 
 from http_fakes import ScriptedHttp
 from panel_helpers import login, make_app, post
-from tires_sync import analytics, connections, daily_summary, order_notify, orders, sales, store, users
+from tires_sync import analytics, chats, connections, daily_summary, order_notify, order_points, orders, sales, store, users
 from tires_sync.secretbox import SecretBox
 
 NOW = datetime(2026, 10, 21, 12, 0, 0)                  # Moscow
@@ -82,6 +83,50 @@ def test_the_dashboard_shows_the_figures_and_the_money_only_with_the_right(tmp_p
         if name == "olya":
             assert "Заказ №1 · Иван" in page and "Ответить" in page                              # her own work
         assert client.post("/summary/toggle", data={"csrf": "tok", "on": "1"}).status_code == 403
+
+
+def _point_account_waiting(conn):
+    """An account of a point (point.avito_account_id) with a client waiting an hour: the point's own, not counted for the staff."""
+    account = connections.create_account(conn, "Точка-аккаунт", "2026-10-21T10:00:00", "o")
+    connections.set_modes(conn, account, True, False, "2026-10-21T10:00:00", "o")
+    pid = order_points.save_point(conn, {"name": "Руставели", "manager_name": "А", "channel": "panel"})
+    conn.execute("UPDATE point SET avito_account_id = ? WHERE id = ?", (account, pid))
+    for chat_id, at in (("p1", "2026-10-21T11:00:00"), ("p2", "2026-10-21T10:50:00")):
+        conn.execute("INSERT INTO avito_chat (account_id, chat_id, peer_name, last_dir, last_at, unread, status) VALUES (?,?,?,?,?,?,?)",
+                     (account, chat_id, "Клиент точки", "in", at, 1, "open"))
+    conn.commit()
+    return account
+
+
+def _chats_link(page):
+    return re.search(r'<a class="sb-link[^"]*" href="/chats">.*?</a>', page, re.S).group(0)
+
+
+def test_the_staff_counters_leave_out_the_chats_of_the_point_accounts(tmp_path):
+    app = make_app(tmp_path, NOW=lambda: UTC_NOW)
+    conn = store.connect(app.config["DB_PATH"])
+    fill(conn)
+    _point_account_waiting(conn)
+    day = analytics.day_numbers(conn, NOW, without_points=True)
+    assert day["chats_unread"] == 1 and [w["minutes"] for w in day["waiting"]] == [40] and len(day["waiting_long"]) == 1
+    assert analytics.day_numbers(conn, NOW)["chats_unread"] == 3                         # the morning summary counts as before
+    owner = app.test_client()
+    login(owner)
+    page = owner.get("/").get_data(as_text=True)
+    assert "Клиенты ждут ответа дольше 15 минут: 1" in page and "Дольше всех — 40 мин" in page and "Клиент точки" not in page
+    assert re.findall(r'<span class="sb-count">(\d+)</span>', _chats_link(page)) == ["1"]
+    assert chats.unread_total(conn) == 3 and chats.unread_total(conn, without_points=True) == 1
+
+
+def test_with_only_point_chats_waiting_the_staff_see_no_banner_nor_counter(tmp_path):
+    app = make_app(tmp_path, NOW=lambda: UTC_NOW)
+    conn = store.connect(app.config["DB_PATH"])
+    _point_account_waiting(conn)
+    owner = app.test_client()
+    login(owner)
+    page = owner.get("/").get_data(as_text=True)
+    assert "Клиенты ждут ответа дольше" not in page
+    assert "sb-count" not in _chats_link(page)
 
 
 def test_the_feeds_page(tmp_path):

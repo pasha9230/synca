@@ -538,6 +538,8 @@ def no_show(conn, card: dict, who: str, now: str, notify: Optional[Notify]) -> T
         point, ", резерв до %s" % date.fromisoformat(until).strftime("%d.%m.%Y") if until else "")
     orders.add_event(conn, card["id"], now, who, "point", text, level="red")
     conn.commit()
+    if notify is not None and points.of_account(conn, card["id"]) is not None:    # the point itself reports it: the staff call the client,
+        card = staff_card(conn, card)                                              # not the point again (the owner 2026-10-26)
     told = notify(card, "Заказ №%d: %s" % (card["id"], text)) if notify is not None else "оповещение не отправлено: канал не настроен"
     return "клиент не пришёл: красная запись, %s" % told, "Заказ №%s — отмечено: %s. С клиентом свяжутся." % (label(card), NO_SHOW)
 
@@ -1499,15 +1501,24 @@ def point_handoffs(conn, point_id, since: str, limit: int = 50) -> List[dict]:
     return found
 
 
+def staff_card(conn, card: dict) -> dict:
+    """The card for an alert that is for the staff and never for the point: the person who answers for it; when nobody in the panel does,
+    the owner. order_notify would write to the point's VK (or its «Моя точка») for an order of the point's account (to_staff skips that)
+    or for a card whose responsible is not in the panel, and to the point's own user who answers for it (a deal the point made)."""
+    from . import order_notify, users
+    card = dict(card, to_staff=True)
+    who = card.get("responsible") or ""
+    role = users.get_role(conn, who) if who and users.exists(conn, who) else None
+    if (role and role["role"] == "point") or order_notify.route(conn, card)["channel"] in ("vk", "panel"):
+        card["responsible"] = order_notify.get_owner_login(conn)
+    return card
+
+
 def _tell_staff(conn, card: dict, text: str, notify: Optional[Notify]) -> None:
-    """An alert about a handed-over client for the person who answers for it; when nobody in the panel does, for the owner. Never for the
-    point: order_notify would write to the point's VK (or its «Моя точка») for a card whose responsible is not in the panel."""
+    """An alert about a handed-over client for the staff (staff_card)."""
     if notify is None:
         return
-    from . import order_notify
-    if order_notify.route(conn, card)["channel"] in ("vk", "panel"):
-        card = dict(card, responsible=order_notify.get_owner_login(conn))
-    notify(card, text)                                            # never raises
+    notify(staff_card(conn, card), text)                          # never raises
 
 
 def _status_of(card: dict, placed: Optional[dict], taken: bool = False) -> str:

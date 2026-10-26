@@ -10,7 +10,8 @@ that day («Заказ №… ещё на точке?»). Only its «на точ
 (`here`); «выдал» closes the order as any «выдал»; silence, or a point that cannot be asked, sends nothing and leaves a yellow record for the
 responsible. The state of the question is one row of app_state per stay at the point, moved from «asked» by one UPDATE only (`_move`).
 The owner 2026-10-26: an order without a WebMIM number on that day asks the responsible once per order for the number (`_ask_number`, the
-same alert as the end of the reservation: a point account's order goes to its point); the client's text then has no «№…» (`_client_body`).
+same alert as the end of the reservation: a point account's order goes to its point), also when no message to the client can go; the
+client's text then has no «№…» (`_client_body`).
 """
 from __future__ import annotations
 
@@ -246,15 +247,17 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
                              "прервалась). Узнайте у точки, забрал ли клиент заказ, и при необходимости напишите клиенту" % CLIENT_TEMPLATE, level="yellow")
             conn.commit()
         return
-    if was or deliver is None or not working or card["reserve_until"] != today.isoformat():
+    if was or not working or card["reserve_until"] != today.isoformat():
         return
     if _done(conn, card["id"], "[резерв:клиенту:%s]" % (card["entered_at"] or "")):
         return                                                  # the client was told in this stay already
     try:
-        _ask_number(conn, card, notify, now)
+        _ask_number(conn, card, notify, now)                    # also when no client message can go (the owner 2026-10-26)
     except Exception:                                           # the notice is a help: the question to the point still goes
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the WebMIM number notice of card %s failed", card["id"])
+    if deliver is None:                                         # nothing could be sent to the client: the point is not asked
+        return
     if _arrived_today(conn, card, now):
         tell_client(conn, card, deliver, now)                   # «можно забирать» went today: the grey record only, nobody is asked
         return
