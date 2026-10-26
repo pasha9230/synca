@@ -31,7 +31,7 @@ ASK = "Заказ №%s (%s) ещё на точке? Ответьте «выда
 HERE = "на точке"
 ASK_NUMBER = "Укажите номер заказа WebMIM по заказу %d (%s)"
 NO_NUMBER_MARK = "[резерв:нет-номера]"            # once per order, whatever its stays at the point
-NUMBER = re.compile(r"[ \t]*№?[ \t]*\{webmim_number\}")
+NUMBER = re.compile(r"[ \t\u00a0]*[№#N]?[ \t\u00a0]*\{webmim_number\}")
 
 
 def _marker(kind: str, until: str, stage: str) -> str:
@@ -250,7 +250,11 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
         return
     if _done(conn, card["id"], "[резерв:клиенту:%s]" % (card["entered_at"] or "")):
         return                                                  # the client was told in this stay already
-    _ask_number(conn, card, notify, now)
+    try:
+        _ask_number(conn, card, notify, now)
+    except Exception:                                           # the notice is a help: the question to the point still goes
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the WebMIM number notice of card %s failed", card["id"])
     if _arrived_today(conn, card, now):
         tell_client(conn, card, deliver, now)                   # «можно забирать» went today: the grey record only, nobody is asked
         return

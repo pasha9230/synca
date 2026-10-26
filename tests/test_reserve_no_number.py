@@ -102,3 +102,24 @@ def test_the_number_request_of_a_point_account_order_goes_only_to_the_point(tmp_
     from test_notify_by_point import sent_text
     assert tg.calls == [] and [sent_text(c) for c in vk_http.calls if "Укажите номер" in sent_text(c)] == ["(бот) " + ASK_NUMBER % cid]
 
+
+
+def test_a_failing_number_notice_never_stops_the_question_to_the_point(tmp_path):
+    conn, cid, _chat, deliver, vk, _notify = ready(tmp_path)
+
+    def notify(card, text):
+        if text.startswith("Укажите номер"):
+            raise RuntimeError("down")
+        return "ok"
+    reserve.check(conn, at(10), notify, deliver, vk)
+    assert len(vk.sent) == 1 and orders.list_events(conn, cid)
+
+
+def test_a_number_after_a_non_breaking_space_a_hash_or_n_is_left_out_cleanly(tmp_path):
+    conn, cid, chat, deliver, vk, notify = ready(tmp_path)
+    conn.execute("INSERT INTO order_template (name, audience, body) VALUES (?, 'client', ?)",
+                 ("Клиенту: срок резерва истекает", "Заказ № {webmim_number} и #{webmim_number} и N{webmim_number} до {hold_until}."))
+    conn.commit()
+    reserve.check(conn, at(10), notify, deliver, vk)
+    say(conn, "на точке", deliver, at(11), reply=cid)
+    assert [(c, t) for c, t, _ in deliver.sent] == [(chat, "Заказ и и до 18.10.2026.")]
