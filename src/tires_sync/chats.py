@@ -449,9 +449,13 @@ def chats_of_order(conn, order_id) -> List[dict]:
     return [_chat_row(r) for r in conn.execute("SELECT %s FROM avito_chat WHERE order_id = ? ORDER BY last_at DESC" % CHAT_FIELDS, (order_id,))]
 
 
-def unread_total(conn) -> int:
-    """Chats of enabled accounts that wait for an answer: unread and still open."""
-    return conn.execute("SELECT COUNT(*) FROM avito_chat c JOIN account a ON a.id = c.account_id WHERE a.chats_enabled = 1 AND c.unread > 0 AND c.status = 'open'").fetchone()[0]
+def unread_total(conn, without_points: bool = False) -> int:
+    """Chats of enabled accounts that wait for an answer: unread and still open. `without_points`: not the chats of the points' accounts
+    (the staff's counters, the owner 2026-10-26; order_points.account_chats)."""
+    from .order_points import POINT_ACCOUNTS
+    skip = " AND c.account_id NOT IN (" + POINT_ACCOUNTS + ")" if without_points else ""
+    return conn.execute("SELECT COUNT(*) FROM avito_chat c JOIN account a ON a.id = c.account_id WHERE a.chats_enabled = 1 AND c.unread > 0 AND c.status = 'open'"
+                        + skip).fetchone()[0]
 
 
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")

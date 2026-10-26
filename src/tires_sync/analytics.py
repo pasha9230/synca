@@ -233,16 +233,19 @@ def money(conn, start: str, end: str) -> dict:
 WAIT_ALERT_MINUTES = 15                            # a client waiting longer than this is «горит» on the dashboard
 
 
-def day_numbers(conn, now: datetime, with_money: bool = True) -> dict:
+def day_numbers(conn, now: datetime, with_money: bool = True, without_points: bool = False) -> dict:
     """The figures of the day dashboard at `now` (Moscow, naive): the orders in work, overdue and new today (the board's own summary), the
     money of today and of the last 7 days (`money`, the report of the orders), the chats unread and the clients waiting for an answer
-    (`chats.waiting_minutes`, the timer of the chats page). Read only; no formula of its own."""
-    from . import chats
+    (`chats.waiting_minutes`, the timer of the chats page); `without_points`: not those of the points' accounts (the staff's dashboard, the
+    owner 2026-10-26). Read only; no formula of its own."""
+    from . import chats, order_points
     summary = orders.board(conn, now)["summary"]
     today = now.date()
     week_start = (today - timedelta(days=6)).isoformat()
     waiting = []
     enabled = {r[0] for r in conn.execute("SELECT id FROM account WHERE chats_enabled = 1")}     # the chats the panel reads (as unread_total)
+    if without_points:
+        enabled -= {r[0] for r in conn.execute(order_points.POINT_ACCOUNTS)}
     rows = [c for c in chats.list_chats(conn) if c["account_id"] in enabled and c["status"] == "open"]
     starts = chats.wait_starts(conn, [c["id"] for c in rows])                  # as the chats page: Avito's auto-answer is no answer
     for chat in rows:
@@ -255,7 +258,7 @@ def day_numbers(conn, now: datetime, with_money: bool = True) -> dict:
     return {"orders_open": summary["open"], "orders_overdue": summary["overdue"], "orders_new_today": summary["new_today"],
             "money_today": money(conn, today.isoformat(), today.isoformat()) if with_money else None,         # not counted for whom it is not shown
             "money_week": money(conn, week_start, today.isoformat()) if with_money else None,
-            "chats_unread": chats.unread_total(conn), "waiting": waiting,
+            "chats_unread": chats.unread_total(conn, without_points), "waiting": waiting,
             "waiting_long": [w for w in waiting if w["minutes"] >= WAIT_ALERT_MINUTES]}
 
 

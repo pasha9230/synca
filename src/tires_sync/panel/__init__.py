@@ -14,11 +14,12 @@ REQUIRED = ("SECRET_KEY", "PASSWORD_HASH", "DB_PATH", "UNLOAD_PATH", "REFERENCE_
 
 
 def _chat_unread(conn) -> int:
-    """The menu counter of «Чаты»: the whole panel's; for the manager of a point, the chats of its account only (none without one)."""
+    """The menu counter of «Чаты»: the whole panel's but the points' accounts (the owner 2026-10-26); for the manager of a point, the chats
+    of its account only (none without one)."""
     from .. import chats as chats_store
     from .common import own_point, point_account
     if own_point() is None:
-        return chats_store.unread_total(conn)
+        return chats_store.unread_total(conn, without_points=True)
     account = point_account()
     if account is None:
         return 0
