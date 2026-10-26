@@ -131,16 +131,15 @@ def test_a_line_a_person_answered_and_the_line_of_another_order_are_not_touched(
 
 
 def test_the_reserve_line_of_a_402_is_closed_when_the_sync_sent_it(tmp_path):
-    from test_order_reserve import card_at, chat_of, db, ok
+    from test_order_reserve import card_at, chat_of, db, told
     from test_stuck_sending import Sender  # noqa: F401
-    from tires_sync import order_reserve as reserve
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat_row = chat_of(conn, cid)
     account = conn.execute("SELECT account_id FROM avito_chat WHERE id = ?", (chat_row,)).fetchone()[0]
     sender = Refusing(refused402())
     when = "2026-10-18T12:00:00"
-    reserve.check(conn, when, ok, lambda c, t, k: chats.send_reply(conn, sender, c, t, k, when, "система"))
+    told(conn, when, lambda c, t, k: chats.send_reply(conn, sender, c, t, k, when, "система"))
     [token] = [r[0] for r in conn.execute("SELECT token FROM chat_send_log WHERE token LIKE 'reserve-%'")]
     [line] = [r for r in lines(conn) if r["message_id"] == token]
     assert line["status"] == "new"

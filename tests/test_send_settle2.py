@@ -288,8 +288,7 @@ def test_a_crash_after_a_402_or_a_lost_send_is_never_send_it_by_hand(env, mark, 
 
 
 def test_the_reserve_message_with_a_402_says_only_that_the_system_repeats_it(tmp_path):
-    from test_order_reserve import card_at, chat_of, db, ok
-    from tires_sync import order_reserve as reserve
+    from test_order_reserve import card_at, chat_of, db, told
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat_of(conn, cid)
@@ -299,7 +298,7 @@ def test_the_reserve_message_with_a_402_says_only_that_the_system_repeats_it(tmp
                      (token, chat_row, "2026-10-18T12:00:00", text))
         conn.commit()
         raise chats.ChatSendRetry("Авито отказал (402), повторю сам через минуту (попытка 1 из 3).")
-    reserve.check(conn, "2026-10-18T12:00:00", ok, deliver)
+    told(conn, "2026-10-18T12:00:00", deliver)
     [event] = [e for e in orders.list_events(conn, cid) if e["kind"] == "reserve" and "Клиенту: срок резерва" in e["text"]]
     assert "повторю сам через минуту" in event["text"] and event["level"] == "yellow" and not any(bad in event["text"] for bad in BAD)
     [line] = [r[0] for r in conn.execute("SELECT text FROM manager_message")]

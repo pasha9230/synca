@@ -5,20 +5,28 @@ by hand when the client asks for more time. In «На ОТХ» (`orders._start_o
 back to the supplier. Only cards still in one of these two stages are looked at.
 On the last day of the reservation the client is asked once (the owner 2026-10-23, п. 17: «Срок резерва истекает…», the template
 «Клиенту: срок резерва истекает»), in the working hours, in the order's Avito chat; once per stay at the point (a date moved later brings no second one).
+The owner 2026-10-26 (a client got it after picking the order up): the point is asked first, in VK, at the first tick of the working hours of
+that day («Заказ №… ещё на точке?»). Only its «на точке <номер>» the same day before the end of the working hours sends the client the message
+(`here`); «выдал» closes the order as any «выдал»; silence, or a point that cannot be asked, sends nothing and leaves a yellow record for the
+responsible. The state of the question is one row of app_state per stay at the point, moved from «asked» by one UPDATE only (`_move`).
 """
 from __future__ import annotations
 
 import logging
 import re
 from datetime import date, datetime, timedelta
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
-from . import order_manager, order_templates, orders
+from . import order_manager, order_templates, orders, store, vk_send
 
 FIRST_HOUR = 9                                   # no alert before 09:00 (Moscow), so that nobody is woken by the hourly tick
 STAGE_CODES = ("at_point", "oth")
 Notify = Callable[[dict, str], str]               # (card, text) -> how it went; never raises
 CLIENT_TEMPLATE = order_templates.RESERVE_SAMPLE[0]
+PointSend = Callable[..., object]                 # vk_send.sender_for: (peer_id, text, random_id=None, keyboard=None); raises when it did not go
+ASK_KEY = "reserve_ask:%d:%s"                     # app_state, per order and stay at the point: «asking|<at>» → asked → answered / silent; failed, unasked
+ASK = "Заказ №%s (%s) ещё на точке? Ответьте «выдал %s» или «на точке %s»."
+HERE = "на точке"
 
 
 def _marker(kind: str, until: str, stage: str) -> str:
@@ -44,6 +52,12 @@ def _text(card: dict, kind: str, until: str, today: str, stage: str = "at_point"
     return "%s.\n%s, %s. Свяжитесь с клиентом: продлить (поставить новую крайнюю дату в заказе) или отказ." % (head, who, point)
 
 
+def _arrived_today(conn, card: dict, now: str) -> bool:
+    arrived = conn.execute("SELECT at FROM chat_send_log WHERE token = ? AND status = 'sent'",
+                           ("arrived-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")),)).fetchone()
+    return bool(arrived) and str(arrived[0])[:10] == now[:10]
+
+
 def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now: str) -> str:
     """«Срок резерва истекает» to the client, once per stay at the point (the mark in the journal and the send token both carry the moment the
     card reached «Товар на точке»). The outcome is a record of the journal: green when it went, red when somebody has to write by hand
@@ -53,9 +67,7 @@ def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now:
     if _done(conn, card["id"], marker):
         return ""
     token = "reserve-%d-%s" % (card["id"], re.sub(r"\D", "", stay))
-    arrived = conn.execute("SELECT at FROM chat_send_log WHERE token = ? AND status = 'sent'",
-                           ("arrived-%d-%s" % (card["id"], re.sub(r"\D", "", stay)),)).fetchone()
-    if arrived and str(arrived[0])[:10] == now[:10]:            # the owner 2026-10-25 (хвост З17): «можно забирать» went today, one message a day
+    if _arrived_today(conn, card, now):                         # the owner 2026-10-25 (хвост З17): «можно забирать» went today, one message a day
         orders.add_event(conn, card["id"], now, "система", "reserve", "Сообщение клиенту «%s» не отправлено: сегодня клиенту уже ушло «можно "
                          "забирать» %s" % (CLIENT_TEMPLATE, marker), level="grey")
         conn.commit()
@@ -83,6 +95,146 @@ def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now:
     return status
 
 
+def _ask_key(card: dict) -> str:
+    return ASK_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""))
+
+
+def was_asked(conn, card: dict) -> bool:
+    """The point was asked about the order in this stay at the point (whatever became of the question since)."""
+    return (store.get_state(conn, _ask_key(card)) or "").split("|", 1)[0] in ("asked", "answered", "silent")     # «asking»: not yet
+
+
+def _move(conn, key: str, was: str, to: str) -> bool:
+    """The question moves on only from the state that was read: of the point's answer and the evening tick at the same time, one wins."""
+    won = conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value = ?", (to, key, was)).rowcount == 1
+    conn.commit()
+    return won
+
+
+def _late(was: str, now: str, hours) -> bool:
+    """The point's day to answer is over: the working hours of the day it was asked have ended."""
+    asked = was.split("|", 1)[1][:10]
+    return now[:10] > asked or (now[:10] == asked and datetime.fromisoformat(now).hour >= hours[1])
+
+
+def _point_name(card: dict) -> str:
+    return (card.get("point") or {}).get("name") or "точка не указана"
+
+
+def ask_point(conn, card: dict, point_send: Optional[PointSend], now: str) -> str:
+    """The last day of the reservation: the point is asked in VK whether the order is still there, once per stay. A point that cannot be asked
+    (no VK, no key of the community, VK refused) is a yellow record for the responsible: the client gets nothing. Returns "asked", "failed",
+    "unasked", or "" (asked already)."""
+    key, point = _ask_key(card), card.get("point") or {}
+    marker = "[резерв:точке:%s]" % (card["entered_at"] or "")
+    why = ""
+    if not point:
+        why = "у заказа нет точки"
+    elif point.get("channel") != "vk" or not point.get("vk_peer_id"):
+        why = "точке «%s» бот в ВК не пишет" % point["name"]
+    elif point_send is None:
+        why = "ВК не настроен: нет ключа сообщества"
+    number = order_manager.label(card)
+    text = ASK % (number, ", ".join(w for w in (card["client_name"], order_manager.short(card)) if w) or "без позиций", number, number)
+    state = ("unasked|" if why else "asking|") + now
+    taken = conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, state)).rowcount == 1
+    conn.commit()
+    if not taken:                                               # another tick is at it: one question
+        return ""
+    if not why:
+        try:
+            point_send(point["vk_peer_id"], order_manager.signed(text), random_id=vk_send.stable_id("reserve-ask|" + key))
+        except Exception as err:                                # it did not go: never asked again, the responsible is told
+            why = "ВК не принял вопрос: %s" % (str(err)[:200] or err.__class__.__name__)
+            _move(conn, key, state, "failed|" + now)
+        else:                                                   # only a question that went makes «на точке» count
+            _move(conn, key, state, "asked|" + now)
+            conn.execute("UPDATE app_state SET value = '' WHERE key = ?", (order_manager.ISSUE_ASK_KEY % point["vk_peer_id"],))
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Точке «%s» отправлен вопрос: «%s» %s" % (point["name"], text, marker),
+                             level="grey")              # a bare «да» from now on is never the answer to «Это заказ №…?»
+            conn.commit()
+            return "asked"
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Клиенту «%s» не отправлено: точку не спросить, ещё ли заказ на точке (%s). "
+                     "Узнайте у точки, забрал ли клиент заказ, и при необходимости напишите клиенту %s" % (CLIENT_TEMPLATE, why, marker), level="yellow")
+    conn.commit()
+    return "unasked" if state.startswith("unasked") else "failed"
+
+
+def _silent(conn, card: dict, key: str, was: str, now: str) -> bool:
+    """The point did not answer by the end of its working day: nothing to the client, a yellow record for the responsible (once)."""
+    if not _move(conn, key, was, "silent|" + now):
+        return False
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Точка «%s» не ответила до конца рабочего дня, ещё ли заказ на точке: клиенту «%s» "
+                     "не отправлено. Узнайте у точки, забрал ли клиент заказ, и при необходимости напишите клиенту [резерв:точка-молчит:%s]"
+                     % (_point_name(card), CLIENT_TEMPLATE, card["entered_at"] or ""), level="yellow")
+    conn.commit()
+    return True
+
+
+def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.Deliver]) -> Tuple[str, str]:
+    """The point's «на точке <номер>» about an order at the point (order_manager checks the point and the stage): the client gets «срок резерва
+    истекает» only when the point was asked in this stay at the point, the same day, before the end of the working hours, and the reservation
+    still ends that day. (outcome for the log, answer for the point)."""
+    number = order_manager.label(card)
+    key = _ask_key(card)
+    was = store.get_state(conn, key) or ""
+    if was.startswith("asked|") and _late(was, now, order_manager.duty_settings(conn)["hours"]):
+        _silent(conn, card, key, was, now)
+        was = store.get_state(conn, key) or ""
+    if not was.startswith("asked|"):
+        kind = was.split("|", 1)[0]
+        if kind == "answered":
+            return "уже отмечено", "Заказ №%s уже отмечен: на точке." % number
+        if kind == "silent":
+            orders.add_event(conn, card["id"], now, who, "point", "Точка ответила после конца рабочего дня: заказ ещё на точке (клиенту не отправлено)",
+                             level="yellow")
+            conn.commit()
+            return ("«на точке» после конца рабочего дня: клиенту не отправлено",
+                    "Заказ №%s: ответ пришёл после конца рабочего дня, клиенту не написали — с ним свяжется менеджер." % number)
+        return ("«на точке» без вопроса бота: ничего не изменено",
+                "Про заказ №%s бот не спрашивал, ничего не изменено. Если клиент забрал заказ, напишите «выдал %s»." % (number, number))
+    if not _move(conn, key, was, "answered|" + now):            # another message of the point got it first
+        return "уже отмечено", "Заказ №%s уже отмечен: на точке." % number
+    orders.add_event(conn, card["id"], now, who, "point", "Точка ответила: заказ ещё на точке")
+    conn.commit()
+    if card["reserve_until"] != was.split("|", 1)[1][:10]:      # the date was moved since the question: the reservation does not end today
+        return ("на точке; резерв продлён: клиенту не отправлено",
+                "Заказ №%s — отмечено: на точке. Резерв уже продлён, клиенту не пишем." % number)
+    status = tell_client(conn, card, deliver, now)
+    if status == "sent":
+        return "на точке; клиенту отправлено", "Заказ №%s — отмечено: на точке. Клиенту отправлено напоминание о сроке хранения." % number
+    if not status:
+        return "на точке; клиенту уже писали", "Заказ №%s — отмечено: на точке. Клиенту сегодня уже писали, второе сообщение не отправляем." % number
+    return "на точке; клиенту не отправлено", "Заказ №%s — отмечено: на точке. Клиенту сообщение не отправлено: менеджер разберётся." % number
+
+
+def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, deliver, point_send) -> None:
+    """A card at the point: the question of the last day (only where a client could be written to), the silence after it."""
+    key = _ask_key(card)
+    was = store.get_state(conn, key) or ""
+    if was.startswith("asked|"):
+        if _late(was, now, hours) and card["reserve_until"] == was.split("|", 1)[1][:10]:
+            _silent(conn, card, key, was, now)
+        elif _late(was, now, hours) and _move(conn, key, was, "silent|" + now):   # the date was moved since: nothing to wait for
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Точка не ответила на вопрос о заказе, но резерв уже продлён", level="grey")
+            conn.commit()
+        return
+    if was.startswith("asking|"):                               # the work was cut while the question was sent: maybe it went, maybe not
+        if _late(was, now, hours) and _move(conn, key, was, "failed|" + now):
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Клиенту «%s» не отправлено: неизвестно, ушёл ли вопрос точке (отправка "
+                             "прервалась). Узнайте у точки, забрал ли клиент заказ, и при необходимости напишите клиенту" % CLIENT_TEMPLATE, level="yellow")
+            conn.commit()
+        return
+    if was or deliver is None or not working or card["reserve_until"] != today.isoformat():
+        return
+    if _done(conn, card["id"], "[резерв:клиенту:%s]" % (card["entered_at"] or "")):
+        return                                                  # the client was told in this stay already
+    if _arrived_today(conn, card, now):
+        tell_client(conn, card, deliver, now)                   # «можно забирать» went today: the grey record only, nobody is asked
+        return
+    ask_point(conn, card, point_send, now)
+
+
 def _all_returned(conn, card_id: int) -> bool:
     """Every piece of every position of the order on «На ОТХ» is marked «Вернуть поставщику» (order_oth.mark_returned: a return may be a
     part, then the rest is still to sell); an order without positions is not."""
@@ -91,10 +243,12 @@ def _all_returned(conn, card_id: int) -> bool:
     return not left and conn.execute("SELECT 1 FROM order_item WHERE order_id = ? AND qty >= 1 LIMIT 1", (card_id,)).fetchone() is not None
 
 
-def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_manager.Deliver] = None) -> int:
+def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_manager.Deliver] = None,
+          point_send: Optional[PointSend] = None) -> int:
     """Alert for the cards whose reservation ends tomorrow or has ended. Returns how many alerts were made. Without `notify` nothing happens
-    (an alert that cannot be sent must not be marked as made). With `deliver` (chats.send_reply of the chat's account) the client of a card at
-    the point is asked on the last day of the reservation, in the working hours (the hours of the handoffs); a date that is already past asks nobody."""
+    (an alert that cannot be sent must not be marked as made). With `deliver` (chats.send_reply of the chat's account) the point of a card at
+    the point is asked on the last day of the reservation, in the working hours (the hours of the handoffs), through `point_send` (the VK of
+    the community); its «на точке» tells the client (`here`). A date that is already past asks nobody."""
     if notify is None:
         return 0
     moment = datetime.fromisoformat(now)
@@ -112,12 +266,12 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
             if stage == "oth" and _all_returned(conn, card_id):
                 continue                                      # every position went back to the supplier: nothing is left to sell (хвост З14)
             until = date.fromisoformat(card["reserve_until"])
-            if stage == "at_point" and until == today and working and deliver is not None:
+            if stage == "at_point":
                 try:
-                    tell_client(conn, card, deliver, now)
+                    _point_step(conn, card, today, now, hours, working, deliver, point_send)
                 except Exception:                             # the alert of the manager still goes
                     conn.rollback()
-                    logging.getLogger("tires_sync.orders").exception("the reserve message to the client of card %s failed", card_id)
+                    logging.getLogger("tires_sync.orders").exception("the reserve question to the point of card %s failed", card_id)
             kind = "due" if until <= today else ("before" if until - timedelta(days=1) == today else "")
             if not kind:
                 continue

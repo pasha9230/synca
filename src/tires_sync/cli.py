@@ -1023,10 +1023,10 @@ def _daily_summary(conn, key_file) -> None:
 
 
 def _reserve_alerts(conn, key_file) -> None:
-    """The responsible manager is told the day before the reservation at the point ends and on the day; on the day the client is asked once
-    in the order's Avito chat (order_reserve.tell_client). A failure is only a warning."""
+    """The responsible manager is told the day before the reservation at the point ends and on the day; on the day the point is asked in VK
+    whether the order is still there, and its «на точке» asks the client once in the order's Avito chat (order_reserve). A failure is only a warning."""
     try:
-        from . import order_notify, order_reserve, orders
+        from . import order_notify, order_reserve, orders, vk_send
         box = load_box(key_file) if key_file else None
         if box is None:
             print("предупреждение: нет ключа шифрования, оповещения о конце резерва не отправляются", file=sys.stderr)
@@ -1042,7 +1042,8 @@ def _reserve_alerts(conn, key_file) -> None:
             if not client_id or not client_secret:
                 raise chats.ChatError("У аккаунта не заданы ключи Авито.")
             chats.send_reply(conn, AvitoClient(client_id, client_secret, http=_http(), now=_epoch, allow_write=True), chat_row, text, token, now, "система")
-        made = order_reserve.check(conn, now, lambda card, text: order_notify.deliver(conn, box, card, text, now, tg_http=_http(), vk_http=_http()), deliver)
+        made = order_reserve.check(conn, now, lambda card, text: order_notify.deliver(conn, box, card, text, now, tg_http=_http(), vk_http=_http()), deliver,
+                                   vk_send.sender_for(conn, box, http=_http()))     # the point is asked first, through the community (2026-10-26)
         print("оповещений о конце резерва: %d" % made)
     except Exception as err:      # noqa: BLE001
         conn.rollback()

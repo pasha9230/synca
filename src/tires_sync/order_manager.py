@@ -41,7 +41,9 @@ RETURN_REASON = "точка: шины отданы поставщику"
 RETURN_LINE = "точка: шины отданы поставщику (возврат)"
 RETURN_ASK = "Точка отдала шины поставщику (возврат): заполните сумму возврата и переведите в «Возврат»."
 RETURN_GAPS = "Точка отдала шины поставщику (возврат): не заполнено — %s; заполните и переведите в «Возврат»."
+HERE = "на точке"                                  # the point's answer to the question of the last day of the reservation (order_reserve, 2026-10-26)
 PHRASES = ((NO_SHOW_PHRASE, NO_SHOW),
+           (re.compile(r"^\W*на\s+точке(?![^\W\d_])", re.I), HERE),
            (re.compile(r"^\W*отдал[аи]?\s+клиенту(?![^\W\d_])", re.I), ISSUE_PHRASE),
            (re.compile(r"^\W*(?:возврат\s+отдал[аи]?|(?:отдал[аи]?|отправлен[аоы]?|отправили)\s+на\s+возврат)(?![^\W\d_])", re.I), RETURN))
 # «пришли» is also «send» («пришли фото», «пришли нам»), «приехала» is also a car or a client, «отдал клиенту» also money («отдал клиенту
@@ -158,14 +160,16 @@ def is_command(conn, text) -> bool:
     parser did not take («приехали 5259052 шины», two numbers), a part («3 из 4», «только 2»), «приехал клиент». Those are questions for the owner."""
     word = _word(text)
     words = {c["word"] for c in rules.list_commands(conn)}
-    if not word or not (word in (NO_SHOW, RETURN) or word in BUILTIN or word in words) or re.search(r"[?？]", str(text or "")):
+    if not word or not (word in (NO_SHOW, RETURN, HERE) or word in BUILTIN or word in words) or re.search(r"[?？]", str(text or "")):
         return False
     body = _command_text(text)
     phrase = _phrase(body)[0]
     tokens = WORD_PART.findall(rules.normalise_word(body[phrase.end():] if phrase else body))      # «не-а» is «не» and «а»
     if any(t in NEGATION or t in DOUBT or any(d in t for d in DAMAGE) for t in tokens) or PART.search(body):
         return False
-    target = RETURN if word == RETURN else BUILTIN.get(word, (None, None))[1]
+    if word == HERE and any(not ORDER_WORD.match(t) for t in tokens):
+        return False                                  # «на точке» and the order only: «на точке нет шин», «на точке клиент» are questions
+    target = word if word in (RETURN, HERE) else BUILTIN.get(word, (None, None))[1]
     if target in ("at_point", RETURN) and any(t.startswith("клиент") for t in tokens):
         return False                                  # «приехал клиент» is about the client, not the tyres (the owner 2026-10-25);
     number = order_number(text)                       # «возврат отдал клиенту» is not the supplier's return
@@ -191,11 +195,11 @@ def find_orders(conn, number) -> List[int]:
     return found
 
 
-COMMUNITY_LINE = re.compile(r"^\W*заказ\s*№?\s*(\d{1,9})(?!\d)", re.I)
+COMMUNITY_LINE = re.compile(r"^\W*(?:\(бот\)\s*)?заказ\s*№?\s*(\d{1,9})(?!\d)", re.I)     # the bot signs its lines «(бот) » (signed)
 
 
 def line_number(text):
-    """The order a line of the community starts with: the bot's «Заказ №…», the owner's «Заказ 5000100 оформлен…», an alert «Заказ №17: …»."""
+    """The order a line of the community starts with: the bot's «(бот) Заказ №…», the owner's «Заказ 5000100 оформлен…», an alert «Заказ №17: …»."""
     found = COMMUNITY_LINE.match(str(text or ""))
     return int(found.group(1)) if found else None
 
@@ -221,7 +225,7 @@ def handle_command(conn, message_id, sender, text, reply_order_no, now: str, del
     conn.commit()
     if claimed.rowcount != 1:
         return "Это сообщение уже обработано."
-    state = {"order_id": None}
+    state = {"order_id": None, "message_id": str(message_id)}
 
     def finish(outcome, answer):
         conn.rollback()
@@ -257,6 +261,8 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                        "Вы ответили на сообщение о заказе №%d, а написали №%d: какой из них? Сообщение передано владельцу." % (reply_order_no, written))
     number = written or reply_order_no
     if number is None:
+        if BUILTIN.get(word, ((), None))[1] == "done":                           # the owner 2026-10-26: «выдал» without a number
+            return _ask_which(conn, dispute, state, point, sender, word, now)
         return dispute(point, "нет номера заказа", "О каком заказе речь? Напишите номер заказа сразу после слова, например: «%s 123456», "
                                                     "или ответьте на сообщение о заказе." % (word or "приехал"))
     found = find_orders(conn, number) if written else find_named(conn, number)
@@ -286,6 +292,17 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     if card["point_id"] != point["id"]:
         return dispute(point, "заказ другой точки", "Заказ №%s не на вашей точке; сообщение передано владельцу." % label(card))
     code = card["stage"]["code"]
+    if word == HERE:                                   # the client hears «срок резерва истекает» only when the bot asked (order_reserve.here)
+        from . import order_reserve
+        if code != "at_point":
+            return dispute(point, "«%s», а заказ на этапе «%s»" % (HERE, card["stage"]["name"]),
+                           CANCELLED % label(card) if code == "cancel" else
+                           "Заказ №%s сейчас на этапе «%s», ничего не изменено; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
+        if not order_reserve.was_asked(conn, card):    # «на точке» of its own (maybe «приехал»): the owner sees it, nothing else happens
+            return dispute(point, "«%s» без вопроса бота" % HERE,
+                           "Про заказ №%s бот не спрашивал, ничего не изменено; сообщение передано владельцу. Если шины приехали, напишите «приехал %s»."
+                           % (label(card), label(card)))
+        return finish(*order_reserve.here(conn, card, "менеджер %s" % point["name"], now, deliver))
     if word == NO_SHOW:
         if code != "at_point":
             return dispute(point, "«%s», а заказ на этапе «%s»" % (NO_SHOW, card["stage"]["name"]),
@@ -317,6 +334,144 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                        CANCELLED % label(card) if code == "cancel" else
                        "Для заказа №%s на этапе «%s» такая команда не нужна; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
     return finish(*apply(conn, card, command["to_stage_id"], "менеджер %s" % point["name"], now, deliver))
+
+
+# ---- «выдал» without a number and not a reply (the owner 2026-10-26): the point's one order is asked about, several are listed; nothing
+# moves without the point's «да» to the question or a number. The line of «Входящие» stays as before; the «да» closes it.
+
+ISSUE_ASK_KEY = "vk_issue_ask_%s"                 # app_state: the question «Это заказ №…?» to this sender (json)
+ISSUE_ASK_FOR = timedelta(minutes=30)
+ISSUE_LISTED = 10
+SIZE = re.compile(r"(\d{3})\s*/\s*(\d{2})\s*(?:Z?R|/)\s*(\d{2}(?:[.,]5)?)", re.I)
+
+
+def short(card: dict) -> str:
+    """The sizes of the order's tyres («205/55 R16») for a question to the point; else the name of the first position; '' without positions."""
+    items = card.get("items") or []
+    sizes: List[str] = []
+    for item in items:
+        found = SIZE.search(item.get("name") or "")
+        size = "%s/%s R%s" % found.groups() if found else ""
+        if size and size not in sizes:
+            sizes.append(size)
+    return ", ".join(sizes) if sizes else (str(items[0].get("name") or "")[:40] if items else "")
+
+
+def _issuable(conn, point_id) -> List[dict]:
+    """The point's orders on the stages «выдал» moves from."""
+    return [orders.get_card(conn, r[0]) for r in conn.execute(
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (%s) ORDER BY c.id"
+        % ",".join("?" * len(ISSUE_FROM)), (point_id,) + ISSUE_FROM)]
+
+
+def _ask_which(conn, dispute, state, point, sender, word, now: str) -> str:
+    why = "нет номера заказа"
+    found = _issuable(conn, point["id"])
+    if len(found) == 1:
+        card = found[0]
+        answer = dispute(point, why, "Это заказ №%s (%s)? Ответьте «да» или «нет»." % (label(card), short(card) or "без позиций"))
+        store.set_state(conn, ISSUE_ASK_KEY % sender, json.dumps({"card": card["id"], "entered_at": card["entered_at"] or "", "at": now,
+                                                                  "message_id": state["message_id"], "word": word}, ensure_ascii=False))
+        return answer
+    if found:
+        listed = ", ".join("№%s — %s" % (label(c), short(c) or "без позиций") for c in found[:ISSUE_LISTED])
+        more = " и ещё %d" % (len(found) - ISSUE_LISTED) if len(found) > ISSUE_LISTED else ""
+        return dispute(point, why, "Какой заказ выдан? %s%s; напишите «выдал <номер>»." % (listed, more))
+    return dispute(point, why, "О каком заказе речь? Напишите номер заказа сразу после слова, например: «%s 123456», "
+                               "или ответьте на сообщение о заказе." % word)
+
+
+def _yes_no(text) -> str:
+    said = re.sub(r"[\s.!)]+$", "", str(text or "").strip()).casefold()
+    return said if said in ("да", "нет") else ""
+
+
+def issue_answer(conn, message_id, sender, text, now: str, deliver: Optional[Deliver] = None) -> Optional[str]:
+    """«да» or «нет» of a point to the bot's «Это заказ №…?»; None when the message is not that (not exactly the word, no question to this
+    sender). «да» issues the order only within ISSUE_ASK_FOR, when it is still the point's and on the same stage since the question, and only
+    as the point's next message: any other new message of the point ends the question."""
+    said = _yes_no(text)
+    if said and conn.execute("SELECT 1 FROM order_command_log WHERE message_id = ?", (str(message_id),)).fetchone():
+        return ""                                                       # a repeat of a «да» or «нет» handled already
+    point = _point_of(conn, sender)
+    raw = store.get_state(conn, ISSUE_ASK_KEY % sender) if point else ""
+    if not raw:
+        return None
+    if not said:
+        if not is_handled(conn, message_id):                            # a repeat of an earlier message keeps the question
+            conn.execute("UPDATE app_state SET value = '' WHERE key = ? AND value = ?", (ISSUE_ASK_KEY % sender, raw))
+            conn.commit()
+        return None
+    try:
+        asked = json.loads(raw)
+        late = datetime.fromisoformat(now[:19]) - datetime.fromisoformat(str(asked["at"])[:19]) > ISSUE_ASK_FOR
+        card_id = int(asked["card"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,'обрабатывается')",
+                           (str(message_id), now, str(sender), said, card_id))
+    conn.commit()
+    if claimed.rowcount != 1:
+        return ""                                                       # a repeat of the same message
+    taken = conn.execute("UPDATE app_state SET value = '' WHERE key = ? AND value = ?", (ISSUE_ASK_KEY % sender, raw)).rowcount == 1
+    conn.commit()
+
+    def done(outcome, answer):
+        conn.rollback()
+        conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?", (outcome, str(message_id)))
+        conn.commit()
+        return answer
+    try:
+        return _issue_yes_no(conn, done, said, asked, card_id, taken, late, point, now, deliver)
+    except Exception:                                                   # whatever happens, the message must not stay «обрабатывается»
+        logging.getLogger("tires_sync.orders").exception("the «%s» of message %s failed", said, message_id)
+        return done("ошибка при выполнении команды", "Не получилось выполнить команду. Напишите владельцу.")
+
+
+def _issue_yes_no(conn, done, said, asked, card_id, taken, late, point, now: str, deliver) -> str:
+    try:
+        card = orders.get_card(conn, card_id)
+    except OrderError:
+        card = None
+    number = label(card) if card else str(card_id)
+    original = str(asked.get("message_id") or "")
+    if not taken:
+        return done("вопрос уже разобран другим сообщением", "Ответ уже получен, ничего не изменено.")
+    if late:
+        return done("«%s» позже %d минут: ничего не изменено" % (said, ISSUE_ASK_FOR.seconds // 60),
+                    "Вопрос про заказ №%s устарел, ничего не изменено. Если выдали его, напишите «выдал %s»." % (number, number))
+    if said == "нет":
+        return done("«нет»: не этот заказ, ничего не изменено", "Понятно, ничего не изменено. Напишите «выдал <номер>» или ответьте на сообщение о заказе.")
+    if card is None or card["point_id"] != point["id"] or card["stage"]["code"] not in ISSUE_FROM or (card["entered_at"] or "") != asked.get("entered_at"):
+        return done("«да», но заказ изменился после вопроса: ничего не изменено",
+                    "Заказ №%s уже изменился, ничего не сделано. Если выдали его, напишите «выдал %s»." % (number, number))
+    command = rules.find_command(conn, card["stage_id"], asked.get("word") or "")
+    if command is not None and command["to_stage_id"] is None:          # as _command: the owner's word that moves nothing on this stage
+        return done("«да», но слово «%s» не подходит к этапу «%s»: ничего не изменено" % (asked.get("word"), card["stage"]["name"]),
+                    "Для заказа №%s такая команда не нужна, ничего не изменено." % number)
+    target = command["to_stage_id"] if command is not None else _stage_id(conn, "done")
+    dispute = conn.execute("SELECT outcome FROM order_command_log WHERE message_id = ?", (original,)).fetchone()
+    claimed = conn.execute("UPDATE order_command_log SET outcome = 'подтверждается' WHERE message_id = ? AND outcome LIKE ?",
+                           (original, DISPUTE + "%")).rowcount == 1          # as confirm(): the owner may have dealt with the «выдал» already
+    conn.commit()
+    if not claimed:
+        return done("«да», но исходное сообщение уже разобрано: ничего не изменено",
+                    "Сообщение уже разобрал владелец, ничего не изменено. Если выдали заказ №%s, напишите «выдал %s»." % (number, number))
+    try:
+        outcome, reply = apply(conn, card, target, "менеджер %s" % point["name"], now, deliver)
+    except Exception:
+        conn.rollback()
+        outcome, reply = "", ""
+    if not outcome or outcome.startswith("не "):                        # nothing moved: the line waits for the owner as before
+        conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?", (dispute[0], original))
+        conn.commit()
+        return done("«да»: %s" % (outcome or "ошибка при выполнении команды"), reply or "Не получилось выполнить команду. Напишите владельцу.")
+    conn.execute("UPDATE manager_message SET status = 'answered', answer = ?, answered_at = ? WHERE message_id = ? AND status = 'new'",
+                 (reply, now, original))                                 # the line of «Входящие» of the «выдал» without a number is closed
+    conn.execute("UPDATE order_command_log SET outcome = ?, order_id = ? WHERE message_id = ?",
+                 ("подтверждено точкой («да»): %s" % outcome, card["id"], original))
+    conn.commit()
+    return done("«да»: %s" % outcome, reply)
 
 
 def _stage_id(conn, code) -> Optional[int]:
@@ -391,9 +546,10 @@ ARRIVED_TEMPLATE = templates.ARRIVED_SAMPLE[0]
 
 
 def template_body(conn, sample: tuple) -> str:
-    """The text of a message that goes by itself: the owner's client template of the sample's name if there is one, else the sample."""
+    """The text of a message that goes by itself: the owner's client template of the sample's name if there is one, else the sample (also in
+    place of a retired sample kept word for word: the owner 2026-10-26, «убрать про предоплату»)."""
     row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = 'client' ORDER BY id LIMIT 1", (sample[0],)).fetchone()
-    return row[0] if row else sample[2]
+    return row[0] if row and row[0] not in templates.RETIRED.get(sample[0], ()) else sample[2]
 
 
 def _arrived_body(conn) -> str:
@@ -775,6 +931,9 @@ def dispatch(conn, message_id, sender, text, reply_order_no, now: str, deliver: 
         return answer
     if is_button(text) and _point_of(conn, sender) is not None:          # «Передать под заказ» of the bot's keyboard: the next message is the client
         return ask_client(conn, message_id, sender, now)
+    answered = issue_answer(conn, message_id, sender, text, now, deliver)  # «да»/«нет» to «Это заказ №…?»
+    if answered is not None:
+        return answered
     handed = parse_handoff(text) or (parse_handoff(transcript) if voice == "done" else None)     # a transcript: read for a handoff only, never a command
     if not handed and waiting(conn, sender, now):                        # after the button: «+7… что нужно» without the word «клиент»
         handed = parse_handoff("клиент " + str(text or "").strip()) or (parse_handoff("клиент " + transcript) if voice == "done" else None)

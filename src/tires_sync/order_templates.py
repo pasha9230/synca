@@ -26,10 +26,13 @@ ARRIVED_SAMPLE = ("Клиенту: товар на точке, можно заб
                   "Заказ {webmim_number} приехал в пункт выдачи, можно забирать.\nТерритория {point_address}\nГрафик работы {point_hours}\n"
                   "Локация на Яндекс Картах {point_map}\n\n{items}\n\nХранение резерва до {hold_until}\n\nПокупатель {client_name} {client_phone}\n\n"
                   "! Обратите внимание. К оплате принимаем наличные.")
-RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "client",              # goes by itself on the last day of the reservation (order_reserve); the owner's text 2026-10-23
-                  "Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "
-                  "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?")
+# goes after the point's «на точке» on the last day of the reservation (order_reserve); the owner's text 2026-10-26, without the prepayment
+RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "client",
+                  "Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — спасибо, "
+                  "не обращайте внимания. Если нужно продлить ожидание, напишите нам.")
 SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE)
+RETIRED = {RESERVE_SAMPLE[0]: ("Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "   # the owner
+                               "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",)}                                       # 2026-10-23
 FIELDS = "id, name, audience, body"
 MAX_NAME, MAX_BODY = 80, 2000
 PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
@@ -159,8 +162,13 @@ def render(conn, card: dict, body: str, now=None) -> Tuple[str, List[str]]:
 
 
 def add_samples(conn) -> int:
-    """The owner's texts as templates (a template of the same name is left alone). Returns how many were added."""
+    """The owner's texts as templates (a template of the same name is left alone, unless it still has a retired sample's text word for word).
+    Returns how many were added."""
     have = {t["name"] for t in list_templates(conn)}
+    for name, retired in RETIRED.items():                    # an old sample kept word for word becomes the new one; a text the owner changed stays
+        sample = next(body for n, _a, body in SAMPLES if n == name)
+        conn.execute("UPDATE order_template SET body = ? WHERE name = ? AND body IN (%s)" % ",".join("?" * len(retired)), (sample, name) + retired)
+    conn.commit()
     added = 0
     for name, audience, body in SAMPLES:
         if name not in have:

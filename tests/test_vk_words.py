@@ -212,7 +212,8 @@ def test_a_bare_one_or_two_digit_number_after_the_word_is_a_quantity_not_an_orde
     small = [card_at(conn, pid) for _ in range(17)]                                                # the panel's orders №1…17, no WebMIM number
     for n, text in enumerate(("приехали 2", "приехали 4", "Привет, приехал 17", "выдали 3")):
         answer = mgr.dispatch(conn, "q%d" % n, "111", text, None, NOW)
-        assert "О каком заказе речь" in answer and "нет в CRM" not in answer, text
+        asked = "Какой заказ выдан? №1 — Nokian" if text.startswith("выдали") else "О каком заказе речь"   # «выдал» lists the point's orders (2026-10-26)
+        assert asked in answer and "нет в CRM" not in answer, text
     assert all(orders.get_card(conn, c)["stage"]["code"] == "moving" for c in small)
     assert mgr.missing_orders(conn) == [] and {m["dispute"] for m in mgr.list_inbox(conn)} == {"нет номера заказа"}
     assert mgr.order_number("№5 приехали") == 5 and mgr.order_number("заказ 17 приехали") == 17
