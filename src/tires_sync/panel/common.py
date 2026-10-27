@@ -238,7 +238,7 @@ for _section, _endpoints in {
     "chats": ("chats_page", "chat_assign", "chat_items_add", "chat_create_deal", "chat_delete", "chat_link", "chat_send", "chat_send_image", "chat_stage", "chat_status",
               "chat_unlink", "chat_wait", "chat_handoff", "chats_merge", "chats_refresh", "share_create", "share_list", "share_price", "share_revoke",
               "share_created", "share_new"),
-    "alerts": ("alerts_page", "alerts_ack", "alerts_feed", "alerts_go", "alerts_take"),
+    "alerts": ("alerts_page", "alerts_ack", "alerts_feed", "alerts_go", "alerts_take", "alerts_accept_all"),
     "calls": ("calls_page", "call_record", "call_create_order", "call_handoff"),
     "clients": ("clients_page", "client_page", "client_save", "client_merge", "client_split_order", "client_split_chat",
                 "clients_duplicates", "client_tag", "client_unmerge", "client_skip"),
@@ -290,7 +290,7 @@ NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" an
 # the manager of a point: the orders of the point only (the board, the file and the cards of the point)
 POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file", "order_move", "order_note", "account_password_page",
                          "account_password", "mypoint_page", "mypoint_action", "mypoint_feed", "search", "search_json",   # the search: the point's own (search.scope_for)
-                         "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack",       # the chats of the point's account, its alerts
+                         "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
                          "calls_page", "call_record", "call_create_order", "call_handoff",            # the calls of the point's account (own_call)
