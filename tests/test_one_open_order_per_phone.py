@@ -313,3 +313,42 @@ def test_a_new_order_after_a_closed_one_joins_the_same_client(tmp_path):
     conn.commit()
     second = orders.create_card(conn, dict(client_name="Иван", client_phone="8 900 111 22 33"), NOW, "o")
     assert clients.client_of_order(conn, second)["id"] == clients.client_of_order(conn, first)["id"]
+
+
+def test_a_manager_of_point_a_on_a_shared_account_never_joins_the_order_of_point_b_the_client_named(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    shared = connections.create_account(conn, "Общий кабинет", NOW, "o")
+    pa = points.save_point(conn, dict(name="Руставели", channel="vk", avito_account_id=str(shared)))
+    pb = points.save_point(conn, dict(name="Юнона", channel="vk", avito_account_id=str(shared)))           # two points: no point of the account
+    of_b = orders.create_card(conn, dict(client_name="Валера", client_phone="+79000000017", point_id=str(pb)), NOW, "o")
+    monkeypatch.setattr(deals, "named_point", lambda texts, pts: (next(p for p in pts if p["id"] == pb), texts[0]))   # «заберу на Юноне»
+    row = chat_of(conn, shared)
+    made = deals.create_deal(conn, row, NOW, "manager-a", own_point=pa)
+    assert made != of_b and chats.get_chat(conn, row)["order_id"] == made
+    assert [e["text"] for e in orders.list_events(conn, of_b)] == [e["text"] for e in orders.list_events(conn, of_b) if "Заказ создан" in e["text"]]
+
+
+def test_a_handover_of_an_early_chat_order_keeps_out_a_phone_of_another_open_order_of_the_point(tmp_path):
+    conn = db(tmp_path)
+    acc_a, pa, pb = two_points(conn)
+    row = chat_of(conn, acc_a, text="Здравствуйте")
+    early = deals.create_deal(conn, row, NOW, "pavel")
+    busy = orders.create_card(conn, dict(client_phone="+79001112233", point_id=str(pa)), NOW, "o")
+    made, _answer = mgr.hand_over(conn, pa, {"kind": "chat", "chat_row": row}, "+7 900 111-22-33", mgr.handoff_fields({}), "ab" * 12, "a", NOW)
+    assert made == early and orders.get_card(conn, early)["client_phone"] == ""
+    assert any("уже есть открытый заказ №%d" % busy in e["text"] and e["level"] == "yellow" for e in orders.list_events(conn, early))
+
+
+def test_the_record_of_a_later_phone_never_names_the_order_of_another_point(tmp_path):
+    conn = db(tmp_path)
+    acc_a, pa, pb = two_points(conn)
+    general = connections.create_account(conn, "Основной", NOW, "o")
+    of_b = orders.create_card(conn, dict(client_phone="+79000000017", point_id=str(pb)), NOW, "o")
+    row = chat_of(conn, general, text="Здравствуйте")
+    deal = deals.create_deal(conn, row, NOW, "pavel")                                     # a deal of no point
+    conn.execute("INSERT INTO avito_message (chat_row, message_id, at, ts, direction, kind, text) VALUES (?, 'm9', ?, 1791900100, 'in', 'text', ?)",
+                 (row, NOW, "мой номер 8 900 000 00 17"))
+    conn.commit()
+    deals.process_all(conn, NOW)
+    texts = [e["text"] for e in orders.list_events(conn, deal)]
+    assert any("открытый заказ другой точки" in t for t in texts) and not any("№%d" % of_b in t for t in texts)

@@ -326,6 +326,8 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         tags = ",".join(t for t in (_account_tag(conn, chat["account_id"]), "повторный" if earlier else "") if t)
         of_account = points_store.point_by_account(conn, chat["account_id"])
         named = None if of_account else named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))   # a point's account keeps its point, bound by _attach
+        if named and own_point and named[0]["id"] != own_point:            # the manager of a point makes the order of the own point, never another's
+            named = None
         fields = {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito", "comment": comment.strip(), "tags": tags,
                   "responsible": (of_account and point_responsible(conn, of_account["id"])) or orders.default_responsible(conn),   # a point's account: its manager
                   "delivery_date": next_day(now) if delivery else ""}
@@ -563,7 +565,7 @@ def process_all(conn, now: str, position_provider=None, auto_create: bool = Fals
                 busy = (orders.open_order_conflict(conn, phone, card["point_id"], besides=card["id"])
                         if phone and not card["client_phone"] and card["stage"]["kind"] == "open" else None)
                 if busy is not None:                                          # one open order per phone and point: the phone is not written
-                    _note_phone_of_open_order(conn, card["id"], phone, busy["id"], now)
+                    _note_phone_of_open_order(conn, card["id"], phone, busy, now)
                 elif phone and not card["client_phone"]:
                     orders.update_card(conn, card["id"], {"client_phone": phone}, now, SYSTEM_AUTHOR)
                     stats["phones"] += 1
@@ -581,10 +583,13 @@ def process_all(conn, now: str, position_provider=None, auto_create: bool = Fals
     return stats
 
 
-def _note_phone_of_open_order(conn, card_id: int, phone: str, busy: int, now: str) -> None:
-    """The client wrote a phone that has another open order (of the same point or of no point): a yellow record once, the phone stays out."""
-    text = "Клиент написал в чате телефон %s, но по нему уже есть открытый заказ №%d: телефон не записан, проверьте, не тот же ли это клиент." % (
-        clients.display(phone) or phone, busy)
+def _note_phone_of_open_order(conn, card_id: int, phone: str, busy: dict, now: str) -> None:
+    """The client wrote a phone that has another open order (of the same point or of no point): a yellow record once, the phone stays out.
+    The other order is named only when it is of the same point or of none: the journal may be read by a point later."""
+    point = conn.execute("SELECT point_id FROM order_card WHERE id = ?", (card_id,)).fetchone()[0]
+    which = "№%d" % busy["id"] if not busy["point_id"] or busy["point_id"] == point else "другой точки"
+    text = "Клиент написал в чате телефон %s, но по нему уже есть открытый заказ %s: телефон не записан, проверьте, не тот же ли это клиент." % (
+        clients.display(phone) or phone, which)
     if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND text = ?", (card_id, text)).fetchone():
         orders.add_event(conn, card_id, now, SYSTEM_AUTHOR, "chat", text, level="yellow")
         conn.commit()

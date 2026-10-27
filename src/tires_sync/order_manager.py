@@ -1253,7 +1253,12 @@ def _open_handoff(conn, point: dict, message_id: str, sender: str, card: Optiona
         changes = {"tags": ",".join(tags[-orders.MAX_TAGS:])}
         if who:                                                   # nobody on duty: the order keeps who answers for it
             changes["responsible"] = who
-        if phone and not card["client_phone"]:
+        busy = orders.open_order_conflict(conn, phone, point["id"], besides=card_id) if phone and not card["client_phone"] else None
+        if busy is not None:                                      # one open order per phone and point: the phone stays out, the person on duty sees why
+            orders.add_event(conn, card_id, now, author, "handoff", "Точка передала телефон %s, но по нему уже есть открытый заказ №%s: телефон не записан, "
+                                                                   "проверьте, не тот же ли это клиент." % (connections.format_phone(phone), label(orders.get_card(conn, busy["id"]))),
+                             level="yellow")
+        elif phone and not card["client_phone"]:
             changes["client_phone"] = phone
         if need:
             changes["comment"] = ("%s\n%s" % (card["comment"], need)).strip()[:orders.MAX_COMMENT] if card["comment"] else need
