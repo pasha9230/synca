@@ -339,6 +339,7 @@ def test_brand_row_has_one_toggle_that_follows_the_state(tmp_path):
     assert "is-off" in row.split(">", 1)[0]
     laufenn = _row_of(html, "LAUFENN")                                    # never switched on: removed from the start
     assert "is-off" in laufenn.split(">", 1)[0] and "Добавить в фид" in laufenn
+    assert " disabled " in laufenn and " disabled " not in row               # no percents anywhere: nothing to add yet
 
 
 def test_toggle_buttons_post_exactly_what_the_old_buttons_posted(tmp_path):
@@ -370,3 +371,19 @@ def test_partner_sees_removed_brand_grey_with_a_label_and_no_button(tmp_path):
     assert "Добавить в фид" not in html and "Снять с фида" not in html
     denied = viewer.post("/settings/pricing", data={"csrf": "tok", "scope": "brand_all", "supplier": "1", "brand": "LAUFENN", "enabled": "off"})
     assert denied.status_code == 403
+
+
+def test_returning_a_removed_brand_puts_it_back_and_the_button_flips_again(tmp_path):
+    app, client, tok, conn = panel(tmp_path)
+    post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="off")
+    post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="on")
+    row = _row_of(client.get("/settings/brands").get_data(as_text=True), "IKON TYRES")
+    assert "Снять с фида" in row and "is-off" not in row.split(">", 1)[0]
+
+
+def test_partly_switched_on_brand_is_not_grey(tmp_path):
+    app, client, tok, conn = panel(tmp_path)
+    post(client, "/settings/pricing", tok, scope="brand", supplier="1", brand="IKON TYRES",
+         winter_form="1", summer_form="1", summer_small="-1", summer_large="-1", summer_on="on")      # winter off, summer on
+    row = _row_of(client.get("/settings/brands").get_data(as_text=True), "IKON TYRES")
+    assert "Снять с фида" in row and "is-off" not in row.split(">", 1)[0]
