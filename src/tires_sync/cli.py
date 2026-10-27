@@ -2139,7 +2139,7 @@ def _chats_sync_locked(conn, box, args, now) -> int:
     _inquiry_look(conn, box, now)
     if full:
         chats.clean_old(conn, now)
-    print("сделок создано %d, чатов привязано %d, телефонов записано %d" % (made["created"], made["linked"], made["phones"]))
+    print("сделок создано %d, чатов привязано %d, телефонов записано %d, имён из чата %d" % (made["created"], made["linked"], made["phones"], made.get("names", 0)))
     return 1 if failed else 0
 
 

@@ -1351,10 +1351,11 @@ def hand_over(conn, point_id: int, source: dict, phone: str, fields: dict, token
                 and not current["sale_ids"]):
             card = current
     author = "менеджер %s (%s)" % (point["name"], who)
+    from . import chat_deals
     try:
         card_id, text = _open_handoff(conn, point, message_id, point.get("vk_peer_id") or "", card, phone, fields,
                                       {"kind": source.get("kind", ""), "chat_row": chat_row, "call_id": source.get("call_id")}, False, author, now,
-                                      client_name=(chat or {}).get("peer_name") or "")
+                                      client_name=chat_deals.client_name_for(conn, chat) if chat is not None else "")
         if card is None:                                          # asked again inside the write (хвост З10b): two tabs at once make one order
             other = open_handoff_of_chat(conn, chat_row, besides=card_id) if chat is not None else None
             if other is None and call_row is not None:
