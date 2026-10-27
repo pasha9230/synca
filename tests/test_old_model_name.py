@@ -152,7 +152,7 @@ def test_the_variable_is_known_and_explained():
 
 def test_the_line_shows_with_a_former_name_and_is_dropped_without_it():
     names = {("Ikon Tyres", "Test Model"): "Nokian Hakkapeliitta 9"}
-    assert "▸ Преемник модели: Nokian Hakkapeliitta 9" in render_description(TEMPLATE, cand(), 4810, names)
+    assert "▸ Преемник модели: Прежнее название шин Nokian Hakkapeliitta 9" in render_description(TEMPLATE, cand(), 4810, names)
     assert "Преемник" not in render_description(TEMPLATE, cand("Autograph Ice 9"), 4810, names)
     assert "Преемник" not in render_description(TEMPLATE, cand(), 4810)
     assert render_description(DEFAULT_TEMPLATE, cand(), 4810, names) == render_description(DEFAULT_TEMPLATE, cand(), 4810)
@@ -163,7 +163,7 @@ def test_the_ad_and_its_4_pack_carry_the_former_name():
     settings = make_settings()
     for pack in (1, 4):
         ad = render_ad(cand(), 4810, "7000001", settings, date(2026, 10, 25), template=TEMPLATE, pack=pack, old_models=names)
-        assert "Преемник модели: Nokian Hakkapeliitta 9" in ad.findtext("Description"), pack
+        assert "Преемник модели: Прежнее название шин Nokian Hakkapeliitta 9" in ad.findtext("Description"), pack
 
 
 def test_the_description_preview_shows_the_former_name(tmp_path):
@@ -175,7 +175,7 @@ def test_the_description_preview_shows_the_former_name(tmp_path):
     store.set_old_model_name(conn, "Ikon Tyres", "Test Model", "Nokian Test 1", NOW, "o")
     conn.close()
     page = post(client, "/accounts/%d/description" % account, tok, action="preview", template=TEMPLATE).get_data(as_text=True)
-    assert "Преемник модели: Nokian Test 1" in page
+    assert "Преемник модели: Прежнее название шин Nokian Test 1" in page
     assert "old_model" in client.get("/accounts/%d/description" % account).get_data(as_text=True)      # the list of variables
 
 
@@ -220,7 +220,7 @@ def test_with_former_names_saved_the_feeds_stay_byte_for_byte_with_todays_templa
 def test_a_template_with_the_variable_puts_the_former_name_into_that_account_only(tmp_path, golden_clock):
     built = _feeds(tmp_path, {("Ikon Tyres", "Test Model"): "Nokian Hakkapeliitta 9"}, template=TEMPLATE)
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
-    assert built["Основной"].count("Преемник модели: Nokian Hakkapeliitta 9") == built["Основной"].count("<Ad>") > 0
+    assert built["Основной"].count("Преемник модели: Прежнее название шин Nokian Hakkapeliitta 9") == built["Основной"].count("<Ad>") > 0
     assert built["Партнёр-2"] == golden["Партнёр-2"]
     (tmp_path / "empty").mkdir()
     empty = _feeds(tmp_path / "empty", {}, template=TEMPLATE)

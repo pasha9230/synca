@@ -75,7 +75,7 @@
 
 <section class="card" id="old-names">
 <div class="card-head"><h3>Прежние названия моделей</h3><span class="sub">{{ old_names|length }} {{ plural(old_names|length, "запись", "записи", "записей") }}</span></div>
-<div class="flash flash--info">{{ icon("info") }}<div class="grow"><div class="flash-text">Для подстановки <code>{old_model}</code> в шаблоне описания, например «Ikon Tyres · Autograph Ice 9 → Nokian Hakkapeliitta 9». В каталоге не показывается. Строка шаблона с <code>{old_model}</code> выводится только у моделей с записью. Фид обновится со следующим циклом.</div></div></div>
+<div class="flash flash--info">{{ icon("info") }}<div class="grow"><div class="flash-text">Для подстановки <code>{old_model}</code> в шаблоне описания: она сама печатает слова «Прежнее название шин» перед названием, например «Ikon Tyres · Autograph Ice 9 → Nokian Hakkapeliitta 9». В каталоге не показывается. Строка шаблона с <code>{old_model}</code> выводится только у моделей с записью. Фид обновится со следующим циклом.</div></div></div>
 <table class="table table--plain">
 <thead><tr><th>Бренд в Авито</th><th>Модель в Авито</th><th>Прежнее название</th><th></th></tr></thead>
 <tbody>{% for r in old_names %}{% set fid = "on-%d" % loop.index %}
