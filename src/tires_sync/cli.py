@@ -1112,12 +1112,16 @@ def _cmd_overrides_clear_aged(args) -> int:
     parsed, _, notes = load_all_parsed(conn, active_settings(conn), Path(args.unload))
     for note in notes:
         print(note)
-    found = overrides_clear.find_aged_on(conn, parsed.offers, raw.get("overrides", {}))
+    found = overrides_clear.find_aged_on(parsed.offers, raw.get("overrides", {}))
     print("код | название | остаток | в фиде сейчас")
     for gid, offer in found:
         where = overrides_clear.in_feed_now(conn, gid)
         print("%s | %s | %d | %s" % (gid, offer.name, offer.stock, "в фиде: " + ", ".join(where) if where else "не в фиде"))
     print("Всего: %d" % len(found))
+    if parsed.unavailable:
+        print("ВНИМАНИЕ: выгрузка поставщиков %s недоступна, их позиции не проверены: список неполный." % ", ".join(str(i) for i in sorted(parsed.unavailable)))
+        if args.apply:
+            raise ValueError("не записано: список неполный (недоступна выгрузка поставщика)")
     if not found:
         return 0
     print("Что будет: ручное вкл снимется (не станет «выкл»), исключение «старше» сработает, позиции в фиде снимутся со следующим циклом.")

@@ -154,3 +154,63 @@ def test_apply_refuses_if_the_active_version_changed_after_the_list_was_made(tmp
     monkeypatch.setattr(overrides_clear, "find_aged_on", bump)
     assert main(["overrides-clear-aged"] + args + ["--apply"]) == 2
     assert _overrides(tmp_path) == ON_OFF
+
+
+def test_a_version_made_between_the_read_and_the_draft_is_not_overwritten(tmp_path, monkeypatch, capsys):
+    """The panel confirms a new «off» right after apply_clear read the settings: its overrides must not be lost."""
+    from tires_sync import overrides_clear
+    args = _setup(tmp_path, ON_OFF)
+    real_create = overrides_clear.create_draft
+
+    def create_after_a_panel_change(conn, changes, now):
+        other = store.connect(tmp_path / "t.db")
+        raw = get_active(other)[1]
+        raw.pop("version", None)
+        raw["overrides"] = dict(raw["overrides"], **{"1:102": "off"})
+        other.execute("INSERT INTO settings_version (created, author, note, json) VALUES (?,?,?,?)", (T, "panel", "x", json.dumps(raw)))
+        other.execute("UPDATE settings_active SET version_id = (SELECT MAX(id) FROM settings_version)")
+        other.commit()
+        other.close()
+        return real_create(conn, changes, now)
+
+    monkeypatch.setattr(overrides_clear, "create_draft", create_after_a_panel_change)
+    assert main(["overrides-clear-aged"] + args + ["--apply"]) == 2
+    assert "изменились" in capsys.readouterr().err
+    assert _overrides(tmp_path) == dict(ON_OFF, **{"1:102": "off"})
+    conn = store.connect(tmp_path / "t.db")
+    assert conn.execute("SELECT COUNT(*) FROM draft WHERE status = 'open'").fetchone()[0] == 0
+
+
+def test_a_panel_draft_stays_untouched_on_refusal(tmp_path):
+    args = _setup(tmp_path, ON_OFF)
+    conn = store.connect(tmp_path / "t.db")
+    staging.set_override(conn, "105", None, T)
+    before = staging.summary(conn)
+    main(["overrides-clear-aged"] + args + ["--apply"])
+    assert staging.summary(conn) == before
+
+
+def test_second_supplier_aged_position_is_cleared(tmp_path, capsys):
+    args = _setup(tmp_path, dict(ON_OFF, **{"1:s2-300": "on"}))
+    conn = store.connect(tmp_path / "t.db")
+    two = connections.create_supplier(conn, "Второй", T, "test")
+    connections.set_config(conn, "webmim", connections.supplier_owner(two),
+                           {"base_url": "https://b.example", "mode": "apikey", "territory_rn": "T2"}, T, "test")
+    conn.close()
+    (tmp_path / "unload-2.xml").write_bytes(catalog_xml(
+        commodity_xml(NNOMMODIF="300", TERRITORY_RN="T2", SMODIFNAME="IKON 205/55/16 T 94 Test старше 3-х лет")))
+    assert main(["overrides-clear-aged"] + args) == 0
+    out = capsys.readouterr().out
+    assert "s2-300 |" in out and "Всего: 3" in out
+
+
+def test_an_unavailable_supplier_blocks_apply(tmp_path, capsys):
+    args = _setup(tmp_path, ON_OFF)
+    conn = store.connect(tmp_path / "t.db")
+    connections.create_supplier(conn, "Второй", T, "test")        # no unload file for it
+    conn.close()
+    assert main(["overrides-clear-aged"] + args) == 0
+    assert "ВНИМАНИЕ" in capsys.readouterr().out
+    assert main(["overrides-clear-aged"] + args + ["--apply"]) == 2
+    assert "неполный" in capsys.readouterr().err
+    assert _overrides(tmp_path) == ON_OFF
