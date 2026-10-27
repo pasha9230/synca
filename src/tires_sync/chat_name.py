@@ -14,7 +14,7 @@ WORD = r"[A-Za-zА-Яа-яЁё]+(?:-[A-Za-zА-Яа-яЁё]+)?"
 ONLY_LETTERS = re.compile(r"^%s$" % WORD)
 NAME_WORDS = re.compile(r"\s*(%s)" % WORD)
 PHONE_LIKE = re.compile(r"(?<!\d)(?:[+]?[78][\s\-()]*)?\(?\d{3}\)?[\s\-]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)")
-EXPLICIT = re.compile(r"(?:меня\s+зовут|мо[её]\s+имя(?:\s+будет)?|зовут\s+меня|(?:^|[\s,.;!?])(?:имя\s*[:\-–—]|(?:ф\.?\s?и\.?\s?о\.?|фио)\s*[:\-–—]?))\s*(?:[:\-–—]\s*)?", re.I)
+EXPLICIT = re.compile(r"(?:меня\s+зовут|мо[её]\s+имя(?:\s+будет)?|зовут\s+меня|(?:^|[\s,.;!?])(?:имя\s*[:\-–—]|(?:ф\.?\s?и\.?\s?о\.?|фио)(?![а-яёa-z])\s*[:\-–—]?))\s*(?:[:\-–—]\s*)?", re.I)
 THIS_IS = re.compile(r"^\s*(?:это|я|зовут|меня)\s+", re.I)
 ASKED = re.compile(r"как\s+(?:к\s+вам|вас|вам|к\s+Вам|Вас|Вам)\s+(?:обращаться|зовут|называть)|ваше\s+имя|как\s+вас\s+зовут|представьтесь|назовите\s+(?:ваше\s+)?имя|на\s+какое\s+имя|имя\s+(?:и\s+)?(?:телефон|номер)", re.I)
 LABELS = {"тел", "телефон", "номер", "мобильный", "моб", "мой", "моя", "звоните", "звонить", "контакт", "контакты", "whatsapp", "ватсап", "вотсап", "тг", "wa"}
@@ -33,6 +33,39 @@ ikon nokian michelin bridgestone continental pirelli goodyear dunlop yokohama ha
 maxxis kama кама нокиан мишлен бриджстоун континенталь пирелли гудйир данлоп йокогама ханкук кумхо кордиант виатти тойо нексен
 hello hi thanks thank yes no ok okay
 """.split())
+
+
+FIRST_NAMES = frozenset("""
+александр алексей александра алина алиса алла алёна алена анатолий андрей анастасия анна
+антон антонина аркадий арсений артём артем артур богдан борис вадим валентин валентина
+валерий валерия варвара василий вера вероника виктор виктория виталий владимир владислав вячеслав
+галина геннадий георгий глеб григорий давид даниил данил данила дарья денис дмитрий
+евгений евгения екатерина елена елизавета егор ефим жанна зинаида злата зоя иван
+игорь илья инна ирина карина кирилл клавдия константин кристина ксения лариса лев
+леонид лидия лилия любовь людмила максим маргарита марина мария марк матвей михаил
+надежда наталья наталия никита николай нина олег олеся ольга оксана павел пётр
+петр полина раиса роман ростислав руслан светлана святослав сергей софия софья станислав
+степан таисия тамара татьяна тимофей тимур тихон ульяна фёдор федор филипп эдуард
+элина эльвира юлия юрий яков ярослав ян янина саша алекс леша лёша
+андрюха андрюша аня анечка антоша артемий вася витя вова володя гоша гриша
+даша дима женя жора зина игорёк катя кирюша коля костя лена леночка
+лёня лера лиза лика люда макс маша миша надя наташа ника оля
+олечка паша петя рома серёжа сережа соня стас стёпа таня тома толя
+тоня ира юра юля юлечка слава света сеня сёма семён семен тоша
+фома эльдар рустам ренат ильдар ильнур айрат азамат шамиль мурат марат ахмед
+ислам руфина альбина диана дина римма регина рената амина аида азиза гульнара
+ляйсан камилла камила милана мила майя марта ангелина анжела алевтина агата аделина
+арина вика виолетта влада эмилия ева кира лана лия мирослава василиса зарина
+нелли нонна инесса уля шура ваня вадик владик гена эльза эрик эмиль
+альберт арсен арман ашот гарик гайк армен демид захар зиновий игнат иннокентий
+ираклий кузьма лука макар мирон назар нестор никифор осип прохор радик савелий
+самуил тарас трофим устин фаддей харитон эльмир
+""".split())
+_FOLDED = frozenset(n.replace("ё", "е") for n in FIRST_NAMES)
+
+
+def _is_first_name(word: str) -> bool:
+    return word.lower().replace("ё", "е") in _FOLDED
 
 
 def _clean(words: Sequence[str]) -> Optional[str]:
@@ -86,8 +119,7 @@ def _bare(text: str, after_question: bool) -> Optional[str]:
         rest = rest[:phone.start()] + " " + rest[phone.end():]
     elif not after_question:
         return None
-    if after_question:
-        rest = THIS_IS.sub("", rest, count=1)
+    rest = THIS_IS.sub("", rest.lstrip(), count=1)                     # «это Иван», «я Ольга»
     words = re.findall(r"[^\s,;:.!?()+\-–—/|]+(?:-[^\s,;:.!?()+\-–—/|]+)*", rest)
     words = [w for w in words if w.lower() not in LABELS]
     if not words or len(words) > 2 or re.search(r"\d", rest):
@@ -96,19 +128,25 @@ def _bare(text: str, after_question: bool) -> Optional[str]:
         return None
     if len(words) == 1 and not (words[0][:1].isupper() or after_question):
         return None
+    if not any(_is_first_name(w.split('-')[0]) for w in words):             # no marker, so only a known first name is a name
+        return None
     return _clean(words)
 
 
 def name_from_messages(messages: Sequence[Tuple[str, str]]) -> str:
-    """The name the client wrote: `messages` are (direction «in»/«out», text), the oldest first. The latest statement wins; "" when none."""
+    """The name the client wrote: `messages` are (direction «in»/«out», text), the oldest first. A statement with a marker («меня зовут»,
+    «имя:») beats a guess from the shape of a message (a name beside a phone, an answer to our question); the latest wins inside each; "" when none."""
+    for index in range(len(messages) - 1, -1, -1):
+        direction, text = messages[index]
+        if direction == "in" and str(text or "").strip():
+            name = _explicit(str(text))
+            if name:
+                return name
     for index in range(len(messages) - 1, -1, -1):
         direction, text = messages[index]
         text = str(text or "")
         if direction != "in" or not text.strip():
             continue
-        name = _explicit(text)
-        if name:
-            return name
         previous = next(((d, t) for d, t in reversed(messages[:index]) if t), None)
         asked = previous is not None and previous[0] == "out" and bool(ASKED.search(str(previous[1])))
         name = _bare(text, asked)

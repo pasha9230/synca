@@ -71,9 +71,14 @@ def client_name_for(conn, chat: dict) -> str:
 def fill_name_from_chat(conn, chat: dict, card: dict, now: str) -> bool:
     """The name the client wrote goes into the open order when its «Имя клиента» is empty or still the profile name (never a name a
     manager typed); one journal line «Имя из чата: …». True when it was written."""
-    profile = (chat["peer_name"] or "")[:120]
-    if card["stage"]["kind"] != "open" or (card["client_name"] or "") not in ("", profile):
+    profile = " ".join((chat["peer_name"] or "").split())[:120]
+    if card["stage"]["kind"] != "open":
         return False
+    current = card["client_name"] or ""
+    if current not in ("", profile):
+        last = conn.execute("SELECT text FROM order_event WHERE order_id = ? AND text LIKE 'Имя из чата: %' ORDER BY id DESC LIMIT 1", (card["id"],)).fetchone()
+        if not last or last[0] != "Имя из чата: %s" % current:               # a name we wrote may be corrected by the client's later words; a manager's never
+            return False
     stated = name_in_chat(conn, chat["id"])
     if not stated or stated == card["client_name"]:
         return False

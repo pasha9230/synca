@@ -206,3 +206,53 @@ def test_the_handover_to_a_point_takes_the_name_the_client_wrote(tmp_path):
     conn.commit()
     order, _ = mgr.hand_over(conn, pid, {"kind": "chat", "chat_row": chat["id"]}, "89001112233", mgr.handoff_fields({}), secrets.token_hex(12), "point1", NOW)
     assert orders.get_card(conn, order)["client_name"] == "Иван Петров"
+
+
+# ---- review round 1 ------------------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("word", [
+    "Срочно", "Перезвоните", "Вечером", "Жду", "Вот", "Пишите", "Наберите", "Записал", "Телеграм", "Viber", "Менеджер", "Завтра", "Сегодня", "Тойота",
+    "Камри", "Солярис", "Хакка", "Нордман", "Гудиер", "Купчино", "Шушары", "Кузьмолово", "Пулково", "Ленина", "Это"])
+def test_a_word_beside_a_phone_is_a_name_only_when_it_is_a_known_first_name(word):
+    assert name(("in", "%s 8 900 123 45 67" % word)) == ""
+    assert name(("in", "%s 8 900 123 45 67" % word.lower())) == ""
+
+
+def test_this_is_or_i_before_a_known_name_beside_a_phone_is_dropped():
+    assert name(("in", "Это Иван 8 900 123 45 67")) == "Иван" and name(("in", "Я Ольга, 89001234567")) == "Ольга"
+
+
+@pytest.mark.parametrize("answer", ["Завтра", "Понял", "Минуту", "Сейчас", "Супер", "Алло", "Неважно", "Нормально", "Отправил", "Яндекс", "Авито"])
+def test_any_one_word_answer_to_our_question_is_not_a_name(answer):
+    assert name(ASK, ("in", answer)) == ""
+
+
+def test_a_marked_statement_beats_a_later_guess():
+    assert name(("in", "Меня зовут Иван"), ("in", "Перезвоните 8 900 123 45 67")) == "Иван"
+    assert name(("in", "Меня зовут Иван"), ASK, ("in", "Андрей")) == "Иван"
+
+
+@pytest.mark.parametrize("text", ["Есть фиолетовые диски?", "Фиолетовый цвет есть", "фиоленто"])
+def test_fio_inside_a_word_is_not_a_marker(text):
+    assert name(("in", text)) == ""
+
+
+def test_a_name_the_system_wrote_is_corrected_by_the_clients_later_words_but_a_managers_is_not(tmp_path):
+    conn, account, fake = setup(tmp_path)
+    card_id = make(conn, account, fake, texts=[("in", "Меня зовут Иван")])
+    fake.add("c1", "DM", [("in", "Меня зовут Иван"), ("in", "Нет, меня зовут Пётр")])
+    chats.sync_account(conn, fake, account, NOW)
+    assert deals.process_all(conn, NOW)["names"] == 1 and orders.get_card(conn, card_id)["client_name"] == "Пётр"
+    orders.update_card(conn, card_id, {"client_name": "Пётр Сидоров"}, NOW, "менеджер")
+    fake.add("c1", "DM", [("in", "Меня зовут Иван"), ("in", "Нет, меня зовут Пётр"), ("in", "Меня зовут Семён")])
+    chats.sync_account(conn, fake, account, NOW)
+    assert deals.process_all(conn, NOW)["names"] == 0 and orders.get_card(conn, card_id)["client_name"] == "Пётр Сидоров"
+
+
+def test_a_profile_name_with_a_double_space_is_still_the_profile_name(tmp_path):
+    conn, account, fake = setup(tmp_path)
+    card_id = make(conn, account, fake, nick="Д  М", texts=[("in", "Здравствуйте")])
+    assert orders.get_card(conn, card_id)["client_name"] == "Д М"
+    fake.add("c1", "Д  М", [("in", "Здравствуйте"), ("in", "Меня зовут Олег")])
+    chats.sync_account(conn, fake, account, NOW)
+    assert deals.process_all(conn, NOW)["names"] == 1 and orders.get_card(conn, card_id)["client_name"] == "Олег"
