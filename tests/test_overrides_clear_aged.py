@@ -186,8 +186,8 @@ def test_a_panel_draft_stays_untouched_on_refusal(tmp_path):
     conn = store.connect(tmp_path / "t.db")
     staging.set_override(conn, "105", None, T)
     before = staging.summary(conn)
-    main(["overrides-clear-aged"] + args + ["--apply"])
-    assert staging.summary(conn) == before
+    assert main(["overrides-clear-aged"] + args + ["--apply"]) == 2
+    assert staging.summary(conn) == before and len(_versions(tmp_path)) == 1
 
 
 def test_second_supplier_aged_position_is_cleared(tmp_path, capsys):
@@ -202,15 +202,46 @@ def test_second_supplier_aged_position_is_cleared(tmp_path, capsys):
     assert main(["overrides-clear-aged"] + args) == 0
     out = capsys.readouterr().out
     assert "s2-300 |" in out and "Всего: 3" in out
+    assert main(["overrides-clear-aged"] + args + ["--apply"]) == 0
+    assert "1:s2-300" not in _overrides(tmp_path)
 
 
-def test_an_unavailable_supplier_blocks_apply(tmp_path, capsys):
-    args = _setup(tmp_path, ON_OFF)
+def _with_unconfigured_supplier(tmp_path, overrides):
+    args = _setup(tmp_path, overrides)
     conn = store.connect(tmp_path / "t.db")
     connections.create_supplier(conn, "Второй", T, "test")        # no unload file for it
     conn.close()
-    assert main(["overrides-clear-aged"] + args) == 0
-    assert "ВНИМАНИЕ" in capsys.readouterr().out
+    return args
+
+
+def test_an_unavailable_supplier_with_a_manual_on_blocks_apply(tmp_path, capsys):
+    args = _with_unconfigured_supplier(tmp_path, dict(ON_OFF, **{"1:s2-300": "on"}))
     assert main(["overrides-clear-aged"] + args + ["--apply"]) == 2
-    assert "неполный" in capsys.readouterr().err
-    assert _overrides(tmp_path) == ON_OFF
+    out = capsys.readouterr()
+    assert "ВНИМАНИЕ" in out.out and "неполный" in out.err
+    assert _overrides(tmp_path) == dict(ON_OFF, **{"1:s2-300": "on"}) and len(_versions(tmp_path)) == 1
+
+
+def test_an_unavailable_supplier_without_a_manual_on_does_not_block_apply(tmp_path):
+    args = _with_unconfigured_supplier(tmp_path, dict(ON_OFF, **{"1:s2-300": "off"}))
+    assert main(["overrides-clear-aged"] + args + ["--apply"]) == 0
+    assert _overrides(tmp_path) == {"1:102": "on", "1:103": "off", "1:105": "off", "1:s2-300": "off"}
+
+
+def test_a_panel_draft_made_after_the_first_check_is_not_lost(tmp_path, monkeypatch, capsys):
+    from tires_sync import overrides_clear
+    args = _setup(tmp_path, ON_OFF)
+    real_create = overrides_clear.create_draft
+
+    def create_after_a_panel_click(conn, changes, now):
+        other = store.connect(tmp_path / "t.db")
+        staging.set_override(other, "105", None, T)
+        other.close()
+        return real_create(conn, changes, now)
+
+    monkeypatch.setattr(overrides_clear, "create_draft", create_after_a_panel_click)
+    assert main(["overrides-clear-aged"] + args + ["--apply"]) == 2
+    assert "черновик" in capsys.readouterr().err
+    assert len(_versions(tmp_path)) == 1 and _overrides(tmp_path) == ON_OFF
+    conn = store.connect(tmp_path / "t.db")
+    assert staging.summary(conn)["count"] == 1

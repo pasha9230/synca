@@ -1119,9 +1119,12 @@ def _cmd_overrides_clear_aged(args) -> int:
         print("%s | %s | %d | %s" % (gid, offer.name, offer.stock, "в фиде: " + ", ".join(where) if where else "не в фиде"))
     print("Всего: %d" % len(found))
     if parsed.unavailable:
-        print("ВНИМАНИЕ: выгрузка поставщиков %s недоступна, их позиции не проверены: список неполный." % ", ".join(str(i) for i in sorted(parsed.unavailable)))
-        if args.apply:
-            raise ValueError("не записано: список неполный (недоступна выгрузка поставщика)")
+        print("ВНИМАНИЕ: выгрузка поставщиков %s недоступна, их позиции не проверены." % ", ".join(str(i) for i in sorted(parsed.unavailable)))
+        blind = overrides_clear.blind_on(raw.get("overrides", {}), parsed.unavailable)
+        if blind:
+            print("Ручное вкл у позиций недоступных поставщиков (не проверены): %d" % len(blind))
+            if args.apply:
+                raise ValueError("не записано: список неполный (недоступна выгрузка поставщика с ручным вкл)")
     if not found:
         return 0
     print("Что будет: ручное вкл снимется (не станет «выкл»), исключение «старше» сработает, позиции в фиде снимутся со следующим циклом.")

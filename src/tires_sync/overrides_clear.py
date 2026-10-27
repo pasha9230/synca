@@ -16,6 +16,12 @@ def find_aged_on(offers, overrides) -> List[Tuple[str, object]]:
             if is_aged(offer) and overrides.get(override_key(gid)) == "on"]
 
 
+def blind_on(overrides, unavailable) -> List[str]:
+    """Manual «on» keys of positions of suppliers whose unload could not be read: nobody can tell whether those are aged."""
+    prefixes = tuple("1:s%d-" % sid for sid in unavailable)
+    return sorted(k for k, v in overrides.items() if v == "on" and prefixes and k.startswith(prefixes))
+
+
 def in_feed_now(conn, goods_id: str) -> List[str]:
     names = []
     for account in connections.list_feed_accounts(conn):
