@@ -175,7 +175,7 @@ def _hand_over(conn, point: dict, back: str):
             flash("Этот клиент уже передан, заказ №%s." % earlier[1])
             return redirect(back)
         return "Прошлая попытка не удалась: обновите страницу и передайте клиента снова.", form
-    busy = orders.open_card_by_phone(conn, phone)                                 # the owner 2026-10-27: a second open order on one phone is forbidden
+    busy = orders.open_order_conflict(conn, phone, point["id"])                                 # the owner 2026-10-27: a second open order on one phone is forbidden
     if busy is not None:
         return "", dict(form, dup=_dup_view(conn, busy, point["id"]))
     now = local_iso()
@@ -205,7 +205,7 @@ def _hand_over(conn, point: dict, back: str):
     if answer == "Это сообщение уже обработано.":
         flash("Этот клиент уже передан.")
         return redirect(back)
-    busy = orders.open_card_by_phone(conn, phone)                                 # another tab made the client's order between the check and now
+    busy = orders.open_order_conflict(conn, phone, point["id"])                                 # another tab made the client's order between the check and now
     if busy is not None:
         return "", dict(form, dup=_dup_view(conn, busy, point["id"]))
     return (answer or "Не получилось принять клиента. Напишите владельцу."), form

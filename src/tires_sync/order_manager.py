@@ -1187,11 +1187,12 @@ def handoff(conn, message_id, sender, handed: Optional[dict], voice: str, now: s
         conn.execute("UPDATE order_command_log SET outcome = 'передан клиент', order_id = ? WHERE message_id = ?", (card_id, str(message_id)))
         conn.commit()
         orders._fire_rules(conn, card_id, now, ())                # the rules of «Передано с точки», as on entering it: they prepare, never send
-    except orders.OpenOrderExists as busy:                        # the owner 2026-10-27: one open order per phone, the point is told which
+    except orders.OpenOrderExists as busy:                        # the owner 2026-10-27: one open order per phone and point, the point is told which
         conn.rollback()
-        conn.execute("UPDATE order_command_log SET outcome = 'открытый заказ', order_id = ? WHERE message_id = ?", (busy.order_id, str(message_id)))
+        number = label(orders.get_card(conn, busy.order_id))        # the number the point knows; order_id stays empty: nothing of it is this message's
+        conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?", ("открытый заказ №%s" % number, str(message_id)))
         conn.commit()
-        return str(busy)
+        return "У клиента уже есть открытый заказ №%s — откройте его." % number
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the client of message %s could not be handed over", message_id)
@@ -1358,9 +1359,11 @@ def hand_over(conn, point_id: int, source: dict, phone: str, fields: dict, token
         conn.commit()
     except OrderError as err:                                     # the order of the chat changed meanwhile: said as it is
         conn.rollback()
+        if isinstance(err, orders.OpenOrderExists):               # one open order per phone and point: named by the number the point knows
+            err = OrderError("У клиента уже есть открытый заказ №%s — откройте его." % label(orders.get_card(conn, err.order_id)))
         conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?", (("не передан: %s" % err)[:200], message_id))
         conn.commit()
-        raise
+        raise err
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the client of %s could not be handed over", message_id)

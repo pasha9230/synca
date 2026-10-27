@@ -393,8 +393,11 @@ def _default_time(conn, clean: dict, current_time: str, current_point=None) -> N
         clean["delivery_time"] = usual
 
 
-def create_card(conn, fields: dict, now: str, author: str, require_contact: bool = True, commit: bool = True, stage: Optional[dict] = None) -> int:
-    """A new card on the first stage (or on `stage`). `commit=False` writes it without saving and without the rules of the stage: the caller saves and fires them."""
+def create_card(conn, fields: dict, now: str, author: str, require_contact: bool = True, commit: bool = True, stage: Optional[dict] = None,
+                scope_point: Optional[int] = None) -> int:
+    """A new card on the first stage (or on `stage`). `commit=False` writes it without saving and without the rules of the stage: the caller saves and fires them.
+    Refused (OpenOrderExists) while the client's phone has an open order of the same point or of no point (open_order_conflict);
+    `scope_point`: the point the order is made for when the caller sets it after (a call, a chat of a point's account)."""
     clean = {k: _clean(k, v, conn) for k, v in fields.items() if k in EDITABLE}
     if require_contact and not any(clean.get(k) for k in ("client_name", "client_phone", "avito_chat")):
         raise OrderError("Укажите хотя бы имя, телефон или чат клиента.")
@@ -409,7 +412,7 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
         "INSERT INTO order_card (stage_id, %s, created_at, created_by, entered_at, updated_at) VALUES (?, %s, ?, ?, ?, ?)" % (
             ", ".join(keys), ", ".join("?" for _ in keys)),
         [stage["id"]] + [base[k] for k in keys] + [now, author, now, now])
-    busy = open_card_by_phone(conn, base["client_phone"], besides=cur.lastrowid) if base["client_phone"] else None
+    busy = open_order_conflict(conn, base["client_phone"], base["point_id"] or scope_point, besides=cur.lastrowid)
     if busy is not None:                                      # asked after the insert: the write holds the lock, so two tabs at once make one order
         if commit:
             conn.rollback()                                   # the caller saves nothing of it; with commit=False the caller rolls back
@@ -422,11 +425,12 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
     return cur.lastrowid
 
 
-def create_card_with_items(conn, fields: dict, items: List[dict], now: str, author: str, require_contact: bool = True) -> int:
+def create_card_with_items(conn, fields: dict, items: List[dict], now: str, author: str, require_contact: bool = True,
+                           scope_point: Optional[int] = None) -> int:
     """A new card with its positions, all or nothing: a position that cannot be added leaves no card behind. `items` are the keyword
     arguments of add_item (with qty). The rules of the first stage run after the positions, so that their texts see them."""
     try:
-        card_id = create_card(conn, fields, now, author, require_contact, commit=False)
+        card_id = create_card(conn, fields, now, author, require_contact, commit=False, scope_point=scope_point)
         for item in items:
             add_item(conn, card_id, now=now, author=author, commit=False, **item)
     except Exception:
@@ -1037,17 +1041,26 @@ def reverse_sales(conn, card_id, now: str, author: str) -> int:
     return count
 
 
-def open_card_by_phone(conn, phone, besides: Optional[int] = None) -> Optional[dict]:
+def open_order_conflict(conn, phone, point_id=None, besides: Optional[int] = None) -> Optional[dict]:
+    """The open order a new order of this phone for `point_id` (None: no point) may not stand beside (the owner 2026-10-27): one of the same
+    point or of no point; for an order of no point, any. Our own numbers and dummies (clients.usable) are no client: nothing. Reading only."""
+    from . import clients
+    if not clients.usable(clients.normalize(phone), clients.own_phones(conn)):
+        return None
+    return open_card_by_phone(conn, phone, besides, point_id)
+
+
+def open_card_by_phone(conn, phone, besides: Optional[int] = None, point_id=None) -> Optional[dict]:
     """The newest open order (its stage is of kind «open») of this client phone, or None: {"id", "created_at", "point_id"}. The phone is
     compared the way the feed writes it (connections.normalize_phone), however the card has it typed; a phone that is no phone matches nothing.
-    `besides`: an order not to count (the one being made). Reading only."""
+    `besides`: an order not to count (the one being made); `point_id`: only orders of that point or of no point. Reading only."""
     from . import connections
     wanted = connections.normalize_phone(phone)
     if not wanted:
         return None
-    for card_id, created_at, point_id, card_phone in conn.execute(
+    for card_id, created_at, card_point, card_phone in conn.execute(
             "SELECT c.id, c.created_at, c.point_id, c.client_phone FROM order_card c JOIN order_stage s ON s.id = c.stage_id "
             "WHERE s.kind = 'open' AND c.client_phone != '' AND c.id != ? ORDER BY c.id DESC", (besides or 0,)):
-        if connections.normalize_phone(card_phone) == wanted:
-            return {"id": card_id, "created_at": created_at, "point_id": point_id}
+        if connections.normalize_phone(card_phone) == wanted and (not point_id or not card_point or int(card_point) == int(point_id)):
+            return {"id": card_id, "created_at": created_at, "point_id": card_point}
     return None

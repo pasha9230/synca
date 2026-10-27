@@ -68,15 +68,25 @@ def test_a_closed_order_and_another_phone_do_not_warn(tmp_path):
     assert r.status_code == 302
 
 
-def test_an_order_of_another_point_is_named_by_number_and_date_only_and_no_link(tmp_path):
+def test_an_open_order_of_another_point_does_not_stop_the_handoff(tmp_path):
+    """The rule stays inside the point (the lead 2026-10-27): the client's order at another point is that point's business."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     other = points.save_point(conn, dict(name="Секретная точка", channel="vk", vk_peer_id="777"))
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (other, card))
     conn.commit()
     mine = manager(app, conn, pid)
+    _t, r = send(mine, PHONE, "зима")
+    assert r.status_code == 302 and len(handed(conn)) == 1
+
+
+def test_an_open_order_of_no_point_is_named_by_number_and_date_only_and_no_link(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    conn.execute("UPDATE order_card SET point_id = NULL WHERE id = ?", (card,))
+    conn.commit()
+    mine = manager(app, conn, pid)
     page = send(mine, PHONE)[1].get_data(as_text=True)
-    assert "уже есть открытый заказ № 5000100" in page and "Секретная точка" not in page and "Татьяна" not in page
-    assert "data-dup-open" not in page and "data-dup-force" not in page
+    assert "уже есть открытый заказ № 5000100" in page and "Татьяна" not in page
+    assert "data-dup-open" not in page and "data-dup-force" not in page and handed(conn) == []
 
 
 def test_the_owner_gets_a_link_to_the_order_card(tmp_path):

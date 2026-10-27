@@ -61,9 +61,11 @@ def test_an_order_on_any_open_stage_blocks(tmp_path):
     assert count(conn) == 1
 
 
-def test_two_tabs_at_once_make_one_order(tmp_path):
-    """The second tab waits for the first one's write and then sees its order: the check and the insert are one transaction."""
+@pytest.mark.parametrize("journal", ["delete", "wal"])
+def test_two_tabs_at_once_make_one_order(tmp_path, journal):
+    """The second tab waits for the first one's write and then sees its order: the check and the insert are one transaction (both journals)."""
     conn = db(tmp_path)
+    assert conn.execute("PRAGMA journal_mode=%s" % journal).fetchone()[0] == journal
     other = sqlite3.connect(str(tmp_path / "x.db"), timeout=store.BUSY_SECONDS, check_same_thread=False)   # the second tab, opened before
     orders.create_card(conn, dict(client_phone="+79001112233"), NOW, "o", commit=False)  # the first tab is inside its write
     result = {}
@@ -115,9 +117,13 @@ def test_a_vk_handoff_of_a_client_with_an_open_order_answers_with_its_number(tmp
     conn = db(tmp_path)
     first = orders.create_card(conn, dict(client_phone="+79001112233"), NOW, "o")
     point = points.get_point(conn, points.save_point(conn, dict(name="Бета", channel="vk", vk_peer_id="555")))
+    conn.execute("UPDATE order_card SET webmim_number = '5000777' WHERE id = ?", (first,))
+    conn.commit()
     answer = mgr.handoff(conn, "m1", "555", {"phone": "+79001112233", "need": "зима"}, "", NOW, None, point=point)
-    assert answer == "У клиента уже есть открытый заказ №%d — откройте его." % first and count(conn) == 1
-    assert conn.execute("SELECT outcome, order_id FROM order_command_log WHERE message_id = 'm1'").fetchone() == ("открытый заказ", first)
+    assert answer == "У клиента уже есть открытый заказ №5000777 — откройте его." and count(conn) == 1    # the number the point knows
+    assert conn.execute("SELECT outcome, order_id FROM order_command_log WHERE message_id = 'm1'").fetchone() == ("открытый заказ №5000777", None)
+    mgr._note_voice(conn, "m1", "https://vk.com/doc1", NOW)                        # a voice of the refused message goes to no order
+    assert not any("голосовое" in e["text"] for e in orders.list_events(conn, first))
 
 
 class Fake:
@@ -197,3 +203,113 @@ def test_the_point_page_refuses_with_a_link_and_offers_no_way_around(tmp_path):
     assert "data-dup-force" not in page and "Всё равно создать" not in page
     r = post(mine, "/my-point", "tok", token=token, phone="8 (900) 111-22-33", need="x", force="+79001112233")   # an old form's «force» is ignored
     assert r.status_code == 200 and 'id="mp-dup"' in r.get_data(as_text=True) and handed(conn) == []
+
+
+# ---- one open order per phone and point (the lead 2026-10-27 after the review: the rule and the binding stay inside the point) ----------
+
+def two_points(conn):
+    acc_a = connections.create_account(conn, "Кабинет А", NOW, "o")
+    acc_b = connections.create_account(conn, "Кабинет Б", NOW, "o")
+    pa = points.save_point(conn, dict(name="Руставели", channel="vk", avito_account_id=str(acc_a)))
+    pb = points.save_point(conn, dict(name="Юнона", channel="vk", avito_account_id=str(acc_b)))
+    return acc_a, pa, pb
+
+
+def chat_of(conn, account, text="Здравствуйте, 8 900 000 00 17"):
+    fake = Fake()
+    fake.add("c1", text, 1)
+    chats.sync_account(conn, fake, account, NOW)
+    return next(c["id"] for c in chats.list_chats(conn) if c["account_id"] == account)
+
+
+def test_an_open_order_of_another_point_blocks_nothing_and_one_of_no_point_blocks_everyone(tmp_path):
+    conn = db(tmp_path)
+    acc_a, pa, pb = two_points(conn)
+    of_b = orders.create_card(conn, dict(client_phone="+79001112233", point_id=str(pb)), NOW, "o")
+    of_a = orders.create_card(conn, dict(client_phone="+79001112233", point_id=str(pa)), NOW, "o")            # another point: allowed
+    with pytest.raises(orders.OpenOrderExists) as err:
+        orders.create_card(conn, dict(client_phone="8 900 111 22 33", point_id=str(pa)), NOW, "o")
+    assert err.value.order_id == of_a
+    with pytest.raises(orders.OpenOrderExists):                                         # an order of no point stands beside none
+        orders.create_card(conn, dict(client_phone="+79001112233"), NOW, "o")
+    other = orders.create_card(conn, dict(client_phone="+79004445566"), NOW, "o")       # no point, nobody else's phone
+    with pytest.raises(orders.OpenOrderExists) as err:
+        orders.create_card(conn, dict(client_phone="+79004445566", point_id=str(pb)), NOW, "o")
+    assert err.value.order_id == other and of_b != of_a
+
+
+def test_a_chat_of_point_a_does_not_join_the_open_order_of_point_b_and_gets_its_own(tmp_path):
+    conn = db(tmp_path)
+    acc_a, pa, pb = two_points(conn)
+    of_b = orders.create_card(conn, dict(client_name="Валера", client_phone="+79000000017", point_id=str(pb)), NOW, "o")
+    row = chat_of(conn, acc_a)
+    made = deals.create_deal(conn, row, NOW, "pavel")
+    assert made != of_b and orders.get_card(conn, made)["point_id"] == pa and chats.get_chat(conn, row)["order_id"] == made
+    assert not any("Привязан чат" in e["text"] for e in orders.list_events(conn, of_b))
+
+
+def test_a_chat_of_point_a_joins_an_open_order_of_no_point_which_becomes_point_a(tmp_path):
+    conn = db(tmp_path)
+    acc_a, pa, pb = two_points(conn)
+    common = orders.create_card(conn, dict(client_name="Валера", client_phone="+79000000017"), NOW, "o")
+    row = chat_of(conn, acc_a)
+    assert deals.create_deal(conn, row, NOW, "pavel") == common and count(conn) == 1
+    assert orders.get_card(conn, common)["point_id"] == pa
+
+
+def test_the_wait_button_in_a_chat_of_point_a_never_touches_the_order_of_point_b(tmp_path):
+    conn = db(tmp_path)
+    acc_a, pa, pb = two_points(conn)
+    of_b = orders.create_card(conn, dict(client_name="Валера", client_phone="+79000000017", point_id=str(pb)), NOW, "o")
+    row = chat_of(conn, acc_a)
+    card_id, added, moved = deals.wait_from_chat(conn, row, {"width": "205", "profile": "55", "radius": "16", "season": "winter", "qty": "4"}, [], NOW, "a")
+    assert card_id != of_b and orders.get_card(conn, of_b)["stage"]["code"] == "new" and orders.get_card(conn, of_b)["wants"] == []
+
+
+def test_a_call_to_point_a_makes_an_order_beside_the_open_order_of_point_b(tmp_path):
+    from test_calls import FakeClient, call, chats_on
+    conn = db(tmp_path)
+    acc_a, pa, pb = two_points(conn)
+    chats_on(conn, acc_a)
+    orders.create_card(conn, dict(client_phone="+79111234567", point_id=str(pb)), NOW, "o")
+    calls.sync_account(conn, FakeClient([[call(1)]]), acc_a, NOW, lambda s: None)
+    made = calls.create_order(conn, calls.list_calls(conn)[0]["id"], NOW, "pavel")
+    assert orders.get_card(conn, made)["point_id"] == pa and count(conn) == 2
+
+
+def test_our_own_numbers_never_block(tmp_path):
+    conn = db(tmp_path)
+    points.save_point(conn, dict(name="Гамма", channel="vk", manager_phone="+7 911 222-33-44"))
+    orders.create_card(conn, dict(client_name="Первый", client_phone="+79112223344"), NOW, "o")
+    orders.create_card(conn, dict(client_name="Второй", client_phone="8 911 222 33 44"), NOW, "o")
+    assert count(conn) == 2
+
+
+def test_a_phone_the_client_writes_later_is_not_put_into_a_second_open_order(tmp_path):
+    conn = db(tmp_path)
+    account = connections.create_account(conn, "Основной", NOW, "o")
+    first = orders.create_card(conn, dict(client_name="Валера", client_phone="+79000000017"), NOW, "o")
+    fake = Fake()
+    fake.add("c1", "Здравствуйте", 1)
+    chats.sync_account(conn, fake, account, NOW)
+    row = chats.list_chats(conn)[0]["id"]
+    deal = deals.create_deal(conn, row, NOW, "pavel")                                    # no phone yet: its own deal
+    assert deal != first
+    conn.execute("INSERT INTO avito_message (chat_row, message_id, at, ts, direction, kind, text) VALUES (?, 'm9', ?, 1791900100, 'in', 'text', ?)",
+                 (row, NOW, "мой номер 8 900 000 00 17"))
+    conn.commit()
+    for _ in range(2):
+        deals.process_all(conn, NOW)
+    assert orders.get_card(conn, deal)["client_phone"] == ""
+    notes = [e for e in orders.list_events(conn, deal) if "уже есть открытый заказ №%d" % first in e["text"]]
+    assert len(notes) == 1 and notes[0]["level"] == "yellow"
+
+
+def test_a_new_order_after_a_closed_one_joins_the_same_client(tmp_path):
+    from tires_sync import clients
+    conn = db(tmp_path)
+    first = orders.create_card(conn, dict(client_name="Иван", client_phone="+79001112233"), NOW, "o")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "done"), first))
+    conn.commit()
+    second = orders.create_card(conn, dict(client_name="Иван", client_phone="8 900 111 22 33"), NOW, "o")
+    assert clients.client_of_order(conn, second)["id"] == clients.client_of_order(conn, first)["id"]

@@ -649,6 +649,15 @@ def test_z10b_two_tabs_of_a_chat_without_an_order_make_one_order(w, monkeypatch)
     assert outcome[0] == "не передан: У клиента уже есть открытый заказ №%d — откройте его." % other and outcome[1] is None
 
 
+def test_z10b_two_tabs_of_a_chat_without_a_phone_make_one_order_by_the_chat_itself(w, monkeypatch):
+    """Without a phone the rule of one open order per phone says nothing: the second look by the chat (open_handoff_of_chat) still holds."""
+    conn, chat_row = w["conn"], w["petr"]["id"]
+    done = _the_other_tab_first(monkeypatch, w["app"].config["DB_PATH"], w["rust"], {"kind": "chat", "chat_row": chat_row}, "")
+    with pytest.raises(orders.OrderError, match="Клиент по этому чату уже передан, заказ №"):
+        mgr.hand_over(conn, w["rust"], {"kind": "chat", "chat_row": chat_row}, "", mgr.handoff_fields({}), token(), "point1", NOW)
+    assert [h["order"] for h in handed(conn)] == [done[1]]
+
+
 def test_z10b_two_tabs_of_a_call_make_one_order(setup, monkeypatch):
     app, conn, ids = setup
     orders.ensure_pipeline(conn, NOW)

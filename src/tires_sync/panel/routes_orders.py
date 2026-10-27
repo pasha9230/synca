@@ -568,7 +568,7 @@ def register(app) -> None:
                 if by_text:
                     found.append(by_text)
             stamp = local_iso()
-            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items)
+            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items, scope_point=own_point())
         except orders.OpenOrderExists as err:                            # the owner 2026-10-27: one open order per phone
             flash(str(err), "error")
             return new_page(conn, dict(request.form.items()), rows, busy=err.order_id)
