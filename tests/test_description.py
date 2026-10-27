@@ -26,7 +26,7 @@ def test_default_template_renders_every_known_field():
     assert "Ikon  205/55/16  T 94 Test Model" in text
     assert "Ikon Tyres / Айкон Тайерс" in text
     assert "Модель: Test Model" in text and "Размер: 205/55 R16" in text and "Сезон: зимняя" in text
-    assert "Артикул: TS1" in text and "▸ Страна происхождения бренда: ТАИЛАНД" in text and "Страна производства" not in text   # owner 2026-10-21
+    assert "Артикул: TS1" in text and "▸ Страна происхождения бренда: Таиланд" in text and "Страна производства" not in text   # owner 2026-10-21
     assert "Цена: 4810 руб. за 1 шт." in text
     assert "Для поиска: 205-55-16, 205/55/16" in text
     assert "{" not in text
@@ -117,5 +117,5 @@ def test_a_brand_written_whole_the_way_the_owner_writes_it():
 
 def test_the_old_and_the_new_label_of_the_country_both_render_the_suppliers_country():
     for label in ("Производитель", "Страна происхождения бренда"):                          # account 1 keeps its own text until the owner edits it
-        assert render_description("%s: {country}" % label, cand(country="КОРЕЯ"), 1) == "%s: КОРЕЯ" % label
-    assert PLACEHOLDER_HELP["country"] == "страна происхождения бренда (из выгрузки поставщика)"
+        assert render_description("%s: {country}" % label, cand(country="КОРЕЯ"), 1) == "%s: Корея" % label     # normal words, owner 2026-10-27
+    assert PLACEHOLDER_HELP["country"].startswith("страна происхождения бренда (из выгрузки поставщика")

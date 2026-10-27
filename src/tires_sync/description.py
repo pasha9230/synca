@@ -14,7 +14,7 @@ MAX_LENGTH = 6000
 
 ALLOWED = (
     "title", "title_ru", "brand", "brand_ru", "brand_full", "model", "size", "size_slash", "indexes", "season",
-    "code", "country", "price", "search", "stock", "old_model", "new_only",
+    "code", "country", "made_in", "price", "search", "stock", "old_model", "new_only",
 )
 NEW_ONLY = "{new_only}"     # a line marker, not a value: the line is left out for a position with the supplier's age note (owner, 2026-10-26)
 
@@ -51,7 +51,8 @@ PLACEHOLDER_HELP = {
     "indexes": "индексы скорости и нагрузки, например T 94",
     "season": "сезон: зимняя, летняя или всесезонная",
     "code": "артикул производителя",
-    "country": "страна происхождения бренда (из выгрузки поставщика)",
+    "country": "страна происхождения бренда (из выгрузки поставщика, обычными словами: «Корея», «КНР», «США»)",
+    "made_in": "страна производства: «КНР», если в названии у поставщика в конце «CN»; иначе пусто — строка не выводится",
     "price": "цена в рублях, целое число",
     "search": "варианты написания размера для поиска",
     "stock": "остаток у поставщика, штук (в объявление количество не передаётся, только в текст)",
@@ -63,6 +64,17 @@ PLACEHOLDER_HELP = {
 }
 
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+COUNTRY_WORDS = {           # the supplier's uppercase country names in a normal form; any other one is title-cased (owner, 2026-10-27)
+    "КИТАЙ": "КНР", "КОРЕЯ": "Корея", "КОРЕЯ, РЕСПУБЛИКА": "Корея", "СОЕДИНЕННЫЕ ШТАТЫ АМЕРИКИ": "США", "РОССИЯ": "Россия",
+    "ИТАЛИЯ": "Италия", "ГЕРМАНИЯ": "Германия", "ЯПОНИЯ": "Япония", "ТАИЛАНД": "Таиланд", "БЕЛАРУСЬ": "Беларусь",
+    "ФРАНЦИЯ": "Франция", "ВЕНГРИЯ": "Венгрия",
+}
+BRAND_COUNTRY = {           # brand -> its country over the supplier's value: Gislaved by the owner's word, the rest have none in the unload
+    "GISLAVED": "Россия", "BARS": "Россия", "HAIDA": "КНР",
+    "ATTAR": "Казахстан",   # KamaTyresKZ (Tatneft and Allur), the plant in Saran
+    "PACE": "КНР",          # SD-International, Shanghai
+}                           # Satoya: no reliable source, the line drops
+MADE_IN_CHINA = re.compile(r"\bCN\b\W*$")     # the supplier marks a tire made in China with «CN» at the end of the name
 OLD_MODEL_WORDS = "Прежнее название шин"      # {old_model} prints these words before the former name (owner, 2026-10-27)
 _OLD_MODEL_WORDS_BEFORE = re.compile(r"прежнее\s+название\s+шин[\W_]*$", re.IGNORECASE)     # the template line already says them itself (a colon, a dash, a quote after them is fine)
 _LATIN_TWINS = str.maketrans("aceopxyABCEHKMOPTXY", "асеорхуАВСЕНКМОРТХУ")     # the owner types some Cyrillic letters as Latin ones
@@ -85,6 +97,15 @@ def _starts_with_words(name: str) -> bool:
     return bool(re.match(r"\s*прежнее\s+название\s+шин\b", name, re.IGNORECASE))      # a name saved with the words in it: not doubled
 
 
+def brand_country(c: Candidate) -> str:
+    key = re.sub(r"^S\d+:", "", c.offer.brand_key or "").upper()
+    override = BRAND_COUNTRY.get((c.avito_brand or "").upper()) or BRAND_COUNTRY.get(key)
+    if override:
+        return override
+    raw = " ".join((c.offer.country or "").split()).upper()
+    return COUNTRY_WORDS.get(raw) or raw.title()
+
+
 def values(c: Candidate, price: int, old_model: str = "") -> Dict[str, str]:
     o = c.offer
     brand_ru = BRAND_RU.get(c.avito_brand, "")
@@ -94,7 +115,8 @@ def values(c: Candidate, price: int, old_model: str = "") -> Dict[str, str]:
         "brand_full": BRAND_FULL.get(c.avito_brand) or ("%s / %s" % (c.avito_brand, brand_ru) if brand_ru else c.avito_brand),
         "model": c.avito_model, "size": "%d/%d R%d" % (o.width, o.height, o.diameter),
         "size_slash": "%d/%d/%d" % (o.width, o.height, o.diameter), "indexes": speed_load,
-        "season": SEASON_WORD.get(o.season, ""), "code": o.code, "country": o.country,
+        "season": SEASON_WORD.get(o.season, ""), "code": o.code, "country": brand_country(c),
+        "made_in": "КНР" if MADE_IN_CHINA.search(o.name_orig or "") else "",
         "price": str(price), "search": search_variants(o.width, o.height, o.diameter), "stock": str(o.stock),
         "old_model": ("%s %s" % (OLD_MODEL_WORDS, old_model)) if old_model and not _starts_with_words(old_model) else old_model,
     }
