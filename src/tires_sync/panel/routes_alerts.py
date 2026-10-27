@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, session
 
@@ -221,12 +220,11 @@ def register(app):
                 taken += 1
             else:
                 accepted.setdefault(row["order_id"], []).append(row["id"])
-        border = (datetime.fromisoformat(now) - timedelta(days=order_alerts.GREEN_DAYS)).isoformat(timespec="seconds")
         for order_id, ids in accepted.items():
-            # «seen» is a mark up to a record: a record of the order that is still open and not accepted (a handed-over client, a chat row held back by
-            # «Срочно ответить») must not fall under it, so the mark stops below the first of them (what is above it stays for the next press)
-            blocks = [e["id"] for e in order_alerts.open_alerts(conn, login, order_id)
-                      if e["level"] != "red" and e["id"] not in ids and e["author"] != login and not (e["level"] == "green" and (e["at"] or "") < border)]
+            # «seen» is a mark up to a record: an open handed-over client of the order (its button «Взять в работу» is its own) must not fall
+            # under it, so the mark stops below the first one (what is above it stays). The point never sees these rows: no block for it.
+            blocks = [] if own_point() is not None else [e["id"] for e in order_alerts.open_alerts(conn, login, order_id)
+                                                         if is_handoff(e) and e["id"] not in ids]
             top = [i for i in ids if not blocks or i < min(blocks)]
             if top:
                 order_alerts.mark_seen(conn, login, order_id, now, max(top))

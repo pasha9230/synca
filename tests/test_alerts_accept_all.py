@@ -175,3 +175,15 @@ def test_a_bad_id_in_the_form_is_ignored(tmp_path):
     three(conn)
     r = client.post("/alerts/accept-all", data={"csrf": tok, "ids": ["²", "①", "-1", ""]})
     assert r.status_code == 302 and open_ids(conn)
+
+
+def test_a_folded_chat_row_of_several_messages_is_accepted_whole(tmp_path):
+    app, client, tok, conn = setup(tmp_path)
+    a = card(conn)
+    for n in range(3):
+        event(conn, a, "chat", "Клиент написал после закрытия: %d" % n)
+    later = event(conn, a, "reserve", "Оповещение о конце резерва")
+    ids, _ = shown(client)
+    assert later in ids
+    client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
+    assert open_ids(conn) == []
