@@ -156,3 +156,22 @@ def test_nothing_to_accept_does_not_fail(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     r = client.post("/alerts/accept-all", data={"csrf": tok})
     assert r.status_code == 302 and r.headers["Location"].endswith("/alerts")
+
+
+def test_a_handoff_below_an_accepted_green_row_is_not_swallowed(tmp_path):
+    app, client, tok, conn = setup(tmp_path)
+    from tires_sync import order_manager as mgr
+    a = card(conn)
+    hand = event(conn, a, "handoff", mgr.ASK + " Иван", level="yellow")
+    later = event(conn, a, "stage", "Этап изменён", level="green")                # a newer, acceptable record of the same order
+    ids, _ = shown(client)
+    assert later in ids and hand not in ids
+    client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
+    assert hand in open_ids(conn)                                                 # the handed-over client still waits for «Взять в работу»
+
+
+def test_a_bad_id_in_the_form_is_ignored(tmp_path):
+    app, client, tok, conn = setup(tmp_path)
+    three(conn)
+    r = client.post("/alerts/accept-all", data={"csrf": tok, "ids": ["²", "①", "-1", ""]})
+    assert r.status_code == 302 and open_ids(conn)

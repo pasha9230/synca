@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, session
 
@@ -201,19 +202,35 @@ def register(app):
         after loading is not among them, another user's or a point's is never): red = «Разобрался» (order_alerts.ack, as a single press),
         yellow and green = seen up to that record (as opening the order)."""
         conn = get_conn()
-        wanted = {int(i) for i in request.form.getlist("ids") if i.isdigit()}
+        wanted = set()
+        for i in request.form.getlist("ids"):
+            try:
+                wanted.add(int(i))
+            except ValueError:
+                pass
         now, login = local_iso(), session["user"]
-        taken, seen = 0, {}
+        taken, accepted = 0, {}
         for row in acceptable(grouped(conn, login)):
             if row["id"] not in wanted:
                 continue
             if row["level"] == "red":
-                order_alerts.ack(conn, row["id"], login, now)
+                try:
+                    order_alerts.ack(conn, row["id"], login, now)
+                except order_alerts.AlertError:
+                    continue
+                taken += 1
             else:
-                seen[row["order_id"]] = max(seen.get(row["order_id"], 0), row["id"])
-            taken += 1
-        for order_id, last in seen.items():
-            order_alerts.mark_seen(conn, login, order_id, now, last)
+                accepted.setdefault(row["order_id"], []).append(row["id"])
+        border = (datetime.fromisoformat(now) - timedelta(days=order_alerts.GREEN_DAYS)).isoformat(timespec="seconds")
+        for order_id, ids in accepted.items():
+            # «seen» is a mark up to a record: a record of the order that is still open and not accepted (a handed-over client, a chat row held back by
+            # «Срочно ответить») must not fall under it, so the mark stops below the first of them (what is above it stays for the next press)
+            blocks = [e["id"] for e in order_alerts.open_alerts(conn, login, order_id)
+                      if e["level"] != "red" and e["id"] not in ids and e["author"] != login and not (e["level"] == "green" and (e["at"] or "") < border)]
+            top = [i for i in ids if not blocks or i < min(blocks)]
+            if top:
+                order_alerts.mark_seen(conn, login, order_id, now, max(top))
+                taken += len(top)
         conn.commit()
         flash("Принято уведомлений: %d." % taken, "ok")
         return redirect("/alerts")
