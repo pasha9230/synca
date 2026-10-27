@@ -352,6 +352,12 @@ def test_live_photos_are_kept_only_while_our_frames_among_them_are_still_the_acc
     assert not sync._keepable(live, OwnPhotos({}, {}, frozenset()))
     assert not sync._keepable(live, None)
     assert sync._keepable(["https://panel.test/img/T/100.jpg"], None) and not sync._keepable([], None)
+    prefix = "https://panel.test/img/T/"                                                     # the photo address of the account now
+    assert sync._keepable(["https://panel.test/img/T/100.jpg"], None, prefix)
+    assert not sync._keepable(["https://old.test/img/T/100.jpg"], None, prefix)               # the address changed: the check «photo»
+    assert sync._keepable(["https://panel.test/img/T/100.jpg?s=v2"], None, prefix, "v2")
+    assert not sync._keepable(["https://panel.test/img/T/100.jpg?s=v1"], None, prefix, "v2")  # the look changed: new links, as every ad
+    assert not sync._keepable(["https://panel.test/img/T/100.jpg"], None, prefix, "v2")
 
 
 def test_a_withdrawn_frame_of_a_live_4tochki_ad_is_not_kept(tmp_path):
