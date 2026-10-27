@@ -85,3 +85,42 @@ def test_set_of_four_in_the_feed_follows_the_same_rule():
     for name, shown in ((AGED[0], False), ("Pirelli 265/55/19 V 109 Scorpion Winter (MO)", True)):
         ad = render_ad(cand(name), 13370, "1", make_settings(), date(2026, 10, 26), template=MARKED, pack=4)
         assert ("2025-2026" in ad.find("Description").text) is shown
+
+
+# --- {old_model} prints «Прежнее название шин» itself (owner, 2026-10-27) ------------------------------------------------------------
+
+FORMER = {("Pirelli", "Scorpion Winter"): "Nokian Hakkapeliitta 9 SUV"}
+
+
+def test_old_model_alone_on_a_line_gets_the_words():
+    text = render_description("Шины\n{old_model}\nКонец", cand(), 100, FORMER)
+    assert text == "Шины\nПрежнее название шин Nokian Hakkapeliitta 9 SUV\nКонец"
+
+
+def test_old_model_with_own_words_before_it_is_not_doubled():
+    for before in ("Прежнее название шин ", "прежнее  название   ШИН ", "Прежнее название шин: ", "Прежнее название шин — "):
+        text = render_description("Шины\n%s{old_model}\nКонец" % before, cand(), 100, FORMER)
+        assert text.lower().count("название") == 1, before
+        assert text.endswith("Nokian Hakkapeliitta 9 SUV\nКонец") and "шин Прежнее" not in text, before
+
+
+def test_other_words_before_it_still_get_the_prefix():
+    assert "Раньше: Прежнее название шин Nokian Hakkapeliitta 9 SUV" in render_description("Раньше: {old_model}", cand(), 100, FORMER)
+
+
+def test_old_model_without_a_former_name_drops_the_line():
+    for t in ("Шины\n{old_model}\nКонец", "Шины\nПрежнее название шин {old_model}\nКонец"):
+        assert render_description(t, cand(), 100) == "Шины\nКонец"
+
+
+def test_old_model_with_new_only_on_the_same_line():
+    t = "Шины\n{old_model}{new_only}\nКонец"
+    assert render_description(t, cand(), 100, FORMER) == "Шины\nПрежнее название шин Nokian Hakkapeliitta 9 SUV\nКонец"
+    aged = render_description(t, cand(AGED[0]), 100, FORMER)
+    assert "Nokian" not in aged and aged == "Шины\nКонец"
+    t2 = "Шины\nПрежнее название шин {old_model} {new_only}\nКонец"
+    assert render_description(t2, cand(), 100, FORMER) == "Шины\nПрежнее название шин Nokian Hakkapeliitta 9 SUV\nКонец"
+
+
+def test_help_text_mentions_the_words():
+    assert "Прежнее название шин" in PLACEHOLDER_HELP["old_model"]

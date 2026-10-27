@@ -55,13 +55,16 @@ PLACEHOLDER_HELP = {
     "price": "цена в рублях, целое число",
     "search": "варианты написания размера для поиска",
     "stock": "остаток у поставщика, штук (в объявление количество не передаётся, только в текст)",
-    "old_model": "прежнее название модели с брендом, например Nokian Hakkapeliitta 9 у Ikon Autograph Ice 9 (задаётся в «Сопоставлениях»); "
-                 "если не задано, строка с этой подстановкой не выводится",
+    "old_model": "прежнее название модели вместе со словами «Прежнее название шин», например «Прежнее название шин Nokian Hakkapeliitta 9» "
+                 "у Ikon Autograph Ice 9 (название задаётся в «Сопоставлениях»); если не задано, строка с этой подстановкой не выводится; "
+                 "если в строке перед подстановкой уже написано «Прежнее название шин», слова не повторяются",
     "new_only": "метка строки, сама не печатается: строка выводится, только если в названии у поставщика нет пометки о возрасте "
                 "(«старше 3-х лет», «старше 5-ти лет»); например, в конце строки «Все позиции новые: 2025-2026 года производства»",
 }
 
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+OLD_MODEL_WORDS = "Прежнее название шин"      # {old_model} prints these words before the former name (owner, 2026-10-27)
+_OLD_MODEL_WORDS_BEFORE = re.compile(r"прежнее\s+название\s+шин\s*[:\-–—]?\s*$", re.IGNORECASE)     # the template line already says them itself
 _NEW_ONLY_MARK = re.compile(r"[ \t]*\{new_only\}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -88,7 +91,7 @@ def values(c: Candidate, price: int, old_model: str = "") -> Dict[str, str]:
         "size_slash": "%d/%d/%d" % (o.width, o.height, o.diameter), "indexes": speed_load,
         "season": SEASON_WORD.get(o.season, ""), "code": o.code, "country": o.country,
         "price": str(price), "search": search_variants(o.width, o.height, o.diameter), "stock": str(o.stock),
-        "old_model": old_model,
+        "old_model": ("%s %s" % (OLD_MODEL_WORDS, old_model)) if old_model else "",
     }
 
 
@@ -106,10 +109,18 @@ def validate_template(template: str) -> List[str]:
     return errors
 
 
+def _value(m, line: str, data: Dict[str, str], bare_old_model: str) -> str:
+    name = m.group(1)
+    if name == "old_model" and _OLD_MODEL_WORDS_BEFORE.search(line[:m.start()]):
+        return bare_old_model                           # «Прежнее название шин {old_model}» in the template: the words are not doubled
+    return data.get(name, m.group(0))
+
+
 def render_description(template: str, c: Candidate, price: int, old_models=None) -> str:
     """`old_models`: (Avito brand, Avito model) -> the former name (store.load_old_model_names); without it {old_model} is empty."""
     from .feed import AGE_NOTE                          # feed imports this module: the supplier's age note, read here when rendering
-    data = values(c, price, (old_models or {}).get((c.avito_brand, c.avito_model), ""))
+    bare_old_model = (old_models or {}).get((c.avito_brand, c.avito_model), "")
+    data = values(c, price, bare_old_model)
     aged = bool(AGE_NOTE.search(c.offer.name_orig or "") or AGE_NOTE.search(c.offer.name or ""))
     lines: List[str] = []
     for line in template.splitlines():
@@ -120,7 +131,7 @@ def render_description(template: str, c: Candidate, price: int, old_models=None)
         names = [n for n in _PLACEHOLDER.findall(line) if n in data]
         if names and any(not data[n] for n in names):
             continue
-        lines.append(_PLACEHOLDER.sub(lambda m: data.get(m.group(1), m.group(0)), line))
+        lines.append(_PLACEHOLDER.sub(lambda m: _value(m, line, data, bare_old_model), line))
     text = "\n".join(lines)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return CONTROL_CHARS.sub("", text).strip()
