@@ -173,6 +173,8 @@ def _build_parser() -> argparse.ArgumentParser:
     mr.add_argument("--reference", required=True)
     mr.add_argument("--account", type=int, default=0, help="номер аккаунта; без него все")
     mr.add_argument("--limit", type=int, default=40, help="сколько строк каждого списка показать")
+    mr.add_argument("--tochki-mode", choices=("no_twin", "merge"), default="",
+                    help="режим пробы 4 точек для сценария «если включить пробу» (по умолчанию из настроек, иначе no_twin)")
     ms = sub.add_parser("match-synonym-add", help="записать, что у бренда модель ALIAS это та же модель CANONICAL (для tire_match; только добавление)")
     ms.add_argument("--db", required=True)
     ms.add_argument("brand")
@@ -1217,7 +1219,8 @@ def _cmd_match_report(args) -> int:
     for group in match.remembered[:limit]:
         print("  " + " | ".join(line(g) for g in group))
     today = date.today()
-    scenarios = [("как сейчас", parsed)] + ([("если 4 точки включить в фид", with_tochki)] if with_tochki is not parsed else [])
+    tochki = tochki_feed.config(conn)
+    trial_mode = args.tochki_mode or (tochki["mode"] if tochki["mode"] in tochki_feed.TRIAL_MODES else "no_twin")
     for account in connections.list_feed_accounts(conn):
         if (args.account and account["id"] != args.account) or account["feed_mode"] == "mirror":
             continue
@@ -1230,14 +1233,20 @@ def _cmd_match_report(args) -> int:
             until = (datetime.fromisoformat(at[:19]) + tire_match.SWITCH_PAUSE).isoformat(timespec="seconds")
             print("   Id %s: %s → %s, %s; следующая смена не раньше %s" % (ad_id, from_code, to_code, at, until))
         retired_model = {ad_id: key[1] for _g, ad_id, key, _at in store.load_retired(conn, account["id"], date.today())}
-        for title, source in scenarios:
+        scenarios = [("как сейчас", parsed, None)]
+        if tochki["supplier_id"]:                                               # the trial in this account (plan tochki-feed §6)
+            scenarios.append(("если включить пробу 4 точек (режим %s)" % trial_mode, with_tochki,
+                              dict(tochki, mode=trial_mode, accounts=[account["id"]])))
+        for title, source, trial in scenarios:
             account_parsed = source
             if left_out:
                 account_parsed = copy.copy(source)
                 account_parsed.offers = {k: v for k, v in source.offers.items() if cycle.feed_tire_type(v) not in left_out}
             now = moscow_now()                                                  # as the cycle: the wait for the morning refill counts
-            _, ev_off, ds_off = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=False)
-            _, ev_on, ds_on = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=True)
+            _, ev_off, ds_off = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=False,
+                                                    tochki_trial=trial)
+            _, ev_on, ds_on = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=True,
+                                                  tochki_trial=trial)
             live_off = {d.goods_id for d in ds_off.decisions if d.action.value in MATCH_LIVE}
             live_on = {d.goods_id for d in ds_on.decisions if d.action.value in MATCH_LIVE}
             gone, came = sorted(live_off - live_on), sorted(live_on - live_off)
@@ -1260,6 +1269,8 @@ def _cmd_match_report(args) -> int:
                 print("   ждёт смены поставщика: %s (Id %s, не раньше %s)" % (gid, ad_id, until))
             for gid in models[:limit]:
                 print("   модель: %s «%s» → «%s»" % (gid, ev_off.ok[gid].avito_model, ev_on.ok[gid].avito_model))
+            if trial is not None:
+                _tochki_lines(conn, account_parsed, tochki["supplier_id"], ev_on, live_on, limit)
     conn.rollback()
     wrote = conn.total_changes - changes_before
     conn.close()
@@ -1267,6 +1278,28 @@ def _cmd_match_report(args) -> int:
         print("ВНИМАНИЕ: отчёт изменил строки базы (%d), это ошибка — сообщите разработчику" % wrote, file=sys.stderr)
         return 3
     return 0
+
+
+def _tochki_lines(conn, parsed, supplier_id: int, ev, live: set, limit: int) -> None:
+    """The 4tochki positions of the trial scenario (with the merge): how many go in, why the others do not, which picture the new ones show."""
+    from . import sync
+    prefix = "s%d-" % supplier_id
+    mine = sorted(g for g in parsed.offers if g.startswith(prefix))
+    inside = [g for g in mine if g in live]
+    why: dict = {}
+    for gid in mine:
+        if gid not in live:
+            reason = ev.excluded.get(gid) or (ev.problems.get(gid) or ["—"])[0].split(":")[0]
+            why[reason] = why.get(reason, 0) + 1
+    print("   4 точки: позиций %d, в фиде %d; не вошли: %s" % (len(mine), len(inside), ", ".join(
+        "%s %d" % kv for kv in sorted(why.items(), key=lambda kv: (-kv[1], kv[0]))) or "—"))
+    photos = sync.ModelPhotos(conn, parsed.offers, prefix)
+    of_webmim = [g for g in inside if g not in ev.inherit and photos.code_for(parsed.offers[g])]
+    heirs = [g for g in inside if g in ev.inherit]
+    print("   4 точки, фото: продолжают объявление WebMIM (его фото) %d, картинка WebMIM той же модели %d, картинка 4 точек %d" % (
+        len(heirs), len(of_webmim), len(inside) - len(heirs) - len(of_webmim)))
+    for gid in heirs[:limit]:
+        print("   продолжит Id %s: %s" % (ev.inherit[gid], gid))
 
 
 def _cmd_mirror_adopt(args) -> int:

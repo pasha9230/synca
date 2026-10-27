@@ -10,7 +10,7 @@ import pytest
 import test_tire_match_feed_unchanged as golden
 from panel_helpers import post
 from test_tire_match import mim, mim_offers, tochki_offers, tochki_row
-from test_tire_match_feed_unchanged import GOLDEN, UNLOAD_WITHOUT_WEBMIM, memory_rows, prepare, publish_then_lose_webmim
+from test_tire_match_feed_unchanged import UNLOAD_WITHOUT_WEBMIM, memory_rows, prepare, publish_then_lose_webmim
 from test_tire_pair_forget import feeds, page_app, published_pair, signed_in
 from tires_sync import connections, store, tire_match, users
 from tires_sync.cli import main
@@ -137,7 +137,7 @@ def test_with_the_merge_off_a_mark_leaves_the_feeds_as_the_golden_ones(tmp_path,
     args = prepare(tmp_path, switch)
     assert say_not_a_pair(tmp_path) is True
     built = cycle(tmp_path, args)
-    assert built == json.loads(GOLDEN.read_text(encoding="utf-8"))
+    assert built == golden.trial_golden()                                 # the golden feeds as the trial builds them (account 1 only)
     assert memory_rows(tmp_path) == (0, 0)
 
 
@@ -145,7 +145,7 @@ def test_with_the_merge_on_the_pair_said_not_to_be_one_is_two_ads_as_with_the_me
     args = prepare(tmp_path, True)
     assert say_not_a_pair(tmp_path) is True
     built = cycle(tmp_path, args)
-    assert built == json.loads(GOLDEN.read_text(encoding="utf-8"))        # byte for byte the feeds of the merge off
+    assert built == golden.trial_golden(golden.TRIAL_BOTH)                # byte for byte the feeds of the merge off (both accounts in the trial)
     assert memory_rows(tmp_path) == (0, 0)                                # not remembered either
     assert say_not_a_pair(tmp_path, undo=True) is True
     built = cycle(tmp_path, args)
@@ -159,7 +159,8 @@ def test_a_published_pair_said_not_to_be_one_is_not_carried_by_the_memory(tmp_pa
     (tmp_path / "unload.xml").write_bytes(UNLOAD_WITHOUT_WEBMIM)
     assert main(["run-cycle"] + args) == 0
     built = feeds(tmp_path)
-    assert "<Id>s2-TCH1</Id>" in built["Основной"] and "<Model>Nordman 7</Model>" in built["Основной"]    # as with no memory at all
+    # as with no memory at all: the 4tochki side used to come out under a new Id; the strict entry of the trial keeps it out (plan §4б)
+    assert "s2-TCH1" not in built["Основной"] and "<Model>Nordman 7</Model>" not in built["Основной"]
     assert counts(tmp_path)["tire_match_switch"] == 0
 
 

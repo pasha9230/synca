@@ -86,7 +86,7 @@ def pairs_view(conn, parsed, ref, settings, unload_path, now=None, changes_befor
     not_pairs = store.not_tire_pairs(conn)
     stored = [{"a": side(a), "b": side(b), "found_at": found_at, "forgotten": forgotten.get((a, b)), "apart": not_pairs.get((a, b))}
               for a, b, _ia, _ib, found_at in store.load_tire_pairs(conn)]
-    switch_on = tire_match.switch_on(conn)
+    switch_on = tire_match.merge_in_feed(conn)
     for pair in stored:                  # the merge on and one side gone: the pair carries the ad, forgetting or bringing it back moves it
         pair["live"] = switch_on and pair["a"]["here"] != pair["b"]["here"]
 
@@ -119,7 +119,7 @@ def pairs_view(conn, parsed, ref, settings, unload_path, now=None, changes_befor
                 from .. import cycle
                 account_parsed = copy.copy(parsed)
                 account_parsed.offers = {k: v for k, v in parsed.offers.items() if cycle.feed_tire_type(v) not in left_out}
-            _, ev_on, _ds = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=True)
+            _, ev_on, _ds = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=None)
             if ev_on.match is not None:
                 waiting = [{"code": gid, "ad_id": ad_id, "until": until} for gid, (ad_id, until) in sorted(ev_on.match.waiting.items())]
         accounts.append({"id": account["id"], "name": account["name"], "switches": switches, "waiting": waiting})
@@ -164,7 +164,7 @@ def feed_ads(conn, parsed, ref, settings, now) -> dict:
             continue
         acct = account["id"]
         eff = connections.effective_settings(conn, acct, settings)
-        _, ev, ds = sync.plan_decisions(conn, _account_parsed(conn, parsed, acct), ref, eff, acct, now.date(), now=now, cross_supplier=True)
+        _, ev, ds = sync.plan_decisions(conn, _account_parsed(conn, parsed, acct), ref, eff, acct, now.date(), now=now, cross_supplier=None)
         id_map = dict(mirror_feed.adopted_maps(conn, acct)[0], **ev.aliases, **ev.inherit)
         suffix = "" if acct == connections.PRIMARY_ACCOUNT else "_a%d" % acct
         reissued = mirror_feed.reissued_own(conn, acct)
@@ -271,7 +271,7 @@ def register(app) -> None:
         """With the merge on, a mark that changes a published ad: the owner sees «было → стало» first. None: go on and write the mark as
         before; otherwise the answer (the screen, or a refusal)."""
         conn = get_conn()
-        if not tire_match.switch_on(conn):
+        if not tire_match.merge_in_feed(conn):
             return None                                 # the merge off: the feed does not hear of the pairs, nothing to show
         a, b, undo = request.form.get("a", ""), request.form.get("b", ""), bool(request.form.get("undo"))
         if kind == "not_pair" and not undo and (not a.strip() or not b.strip() or a.strip() == b.strip()

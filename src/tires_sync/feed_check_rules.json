@@ -24,6 +24,10 @@
     "photo":             {"generated": "critical", "mirror": "warning",  "text": "Нет фото, или ссылка на фото не своя у аккаунта"},
     "own_photo_foreign": {"generated": "critical", "mirror": "critical", "text": "Ссылка на фото из нашей библиотеки, которой у аккаунта быть не может: копия другого аккаунта, неодобренный кадр или свои фото выключены"},
     "same_tire":         {"generated": "critical", "mirror": "warning",  "text": "Одна и та же шина (бренд, модель, размер, индексы) в фиде дважды под разными кодами"},
+    "tire_twin":         {"generated": "critical", "mirror": "warning",  "text": "Одна шина 4Точек в фиде дважды: та же шина по полям поставщика (бренд, модель с синонимами, размер, индексы, тип, RunFlat, XL) под двумя кодами, даже при разных моделях Авито"},
+    "tochki_outside_trial":{"generated": "critical", "mirror": "critical", "text": "Позиция 4Точек в аккаунте, которого нет в пробе 4Точек"},
+    "tochki_stock":      {"generated": "critical", "mirror": "warning",  "text": "У позиции 4Точек в описании остаток больше 40"},
+    "tochki_model_change":{"generated": "warning",  "mirror": "warning",  "text": "У живого объявления позиции 4Точек сменилась модель Авито"},
     "title_age_word":    {"generated": "warning",  "mirror": "warning",  "text": "В заголовке осталось «старше» (пометка поставщика о возрасте шины)"},
     "studs_conflict":    {"generated": "critical", "mirror": "warning",  "text": "Шипы противоречат: тип «Зимние шипованные», а в названии или описании «без шипов» («нешип.», «под шип», «шипуемая»…), или тип «Зимние нешипованные», а в названии «шип…»"},
     "shrink":            {"generated": "warning",  "mirror": "warning",  "text": "Фид сократился заметно относительно опубликованного"}

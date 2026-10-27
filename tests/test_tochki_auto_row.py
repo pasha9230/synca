@@ -76,7 +76,8 @@ def test_none_two_or_an_unlike_row_choose_nothing_and_a_saved_row_wins(tmp_path)
     one = connections.create_supplier(conn, "4 точки", NOW, "o")
     two = connections.create_supplier(conn, "4Точки-2", NOW, "o")
     conn.commit()
-    assert tochki_feed.config(conn) == {"login": "api-user", "supplier_id": None, "feed": False, "auto": False}    # two: none
+    assert tochki_feed.config(conn) == {"login": "api-user", "supplier_id": None, "feed": False, "auto": False,    # two: none
+                                        "accounts": [], "mode": "off", "allow": []}
     page = client.get("/connections/tochki").get_data(as_text=True)
     assert "data-tochki-no-row" in page and "Выбрана автоматически" not in page
     connections.set_config(conn, "tochki", 0, {"login": "api-user", "supplier_id": two, "feed": False}, NOW, "o")

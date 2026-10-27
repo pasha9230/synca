@@ -7,14 +7,17 @@ load keeps the previous snapshot, like a failed unload keeps the previous file.
 
 The positions become the same `Offer` as a WebMIM position of a secondary supplier: Id `s<N>-<code>`, brand `S<N>:<brand>`, where N is the
 supplier row the owner chose for 4tochki. They reach the cycle only when the switch «в фид» is on (stage 2; the panel cannot turn it on
-yet); until then the catalog shows them on their own and nothing that builds a feed reads them."""
+yet); until then the catalog shows them on their own and nothing that builds a feed reads them. In the cycle an account sees them only
+in the trial (`trial`, `for_account`: the accounts and the mode of the settings, plan tochki-feed §4а)."""
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
 import re
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -62,7 +65,51 @@ def config(conn) -> dict:
         fits = [s for s in connections.tochki_supplier_choices(conn) if AUTO_NAME.search(s["name"] or "")]   # a new WebMIM row has no
         if len(fits) == 1:                                                                                  # address yet: not by itself
             sid, auto = fits[0]["id"], True
-    return {"login": str(raw.get("login", "")), "supplier_id": sid, "feed": raw.get("feed") is True and not auto, "auto": auto}
+    accounts = raw.get("accounts")
+    accounts = sorted({a for a in accounts if isinstance(a, int) and not isinstance(a, bool)}) if isinstance(accounts, list) else []
+    allow = raw.get("allow")
+    allow = sorted({str(c).strip() for c in allow if str(c).strip()}) if isinstance(allow, list) else []
+    return {"login": str(raw.get("login", "")), "supplier_id": sid, "feed": raw.get("feed") is True and not auto, "auto": auto,
+            "accounts": accounts, "mode": raw.get("mode") if raw.get("mode") in TRIAL_MODES else "off", "allow": allow}
+
+
+TRIAL_MODES = ("no_twin", "merge")       # the trial (plan tochki-feed §4а): only new tires nobody else has / and the pairs go on under one Id
+REST_SHOWN = 40                          # the owner 2026-10-27: an ad says at most 40 (the supplier's 41 means «more than 40»)
+
+
+def trial(conn, account_id: int) -> Optional[dict]:
+    """The 4tochki trial of one account: the settings when its positions may go into this account's feed («в фид» on, a saved row, the
+    account in `accounts`, `mode` no_twin or merge), else None. The owner 2026-10-27: account 1 only; no other account ever sees them."""
+    cfg = config(conn)
+    if not cfg["feed"] or not cfg["supplier_id"] or cfg["mode"] not in TRIAL_MODES or account_id not in cfg["accounts"]:
+        return None
+    from . import mirror_feed
+    if mirror_feed.alias_scheme(conn, account_id):          # its Ids carry no code: the trial's rules read a code from the Id
+        return None
+    return cfg
+
+
+def for_account(parsed, supplier_id: Optional[int], trial_cfg: Optional[dict]):
+    """The positions one account's feed is built from. Out of the trial the 4tochki positions are as if the supplier did not have them
+    (published ones leave like any position gone); in it the stock it shows is at most 40. Nothing to change: `parsed` itself."""
+    if not supplier_id:
+        return parsed
+    prefix = "s%d-" % supplier_id
+    offers = getattr(parsed, "offers", {}) or {}
+    if trial_cfg is not None:
+        if not any(g.startswith(prefix) and o.stock > REST_SHOWN for g, o in offers.items()):
+            return parsed
+        out = copy.copy(parsed)
+        out.offers = {g: (replace(o, stock=REST_SHOWN) if g.startswith(prefix) and o.stock > REST_SHOWN else o) for g, o in offers.items()}
+        return out
+    stocks, issues = getattr(parsed, "stocks", {}) or {}, getattr(parsed, "issues", {}) or {}
+    if not any(g.startswith(prefix) for g in list(offers) + list(stocks) + list(issues)):
+        return parsed
+    out = copy.copy(parsed)
+    out.offers = {g: o for g, o in offers.items() if not g.startswith(prefix)}
+    out.stocks = {g: s for g, s in stocks.items() if not g.startswith(prefix)}
+    out.issues = {g: v for g, v in issues.items() if not g.startswith(prefix)}
+    return out
 
 
 def _read_json(path: Path) -> dict:
