@@ -167,7 +167,8 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     if trial is not None:                                                 # a live 4tochki ad under another position's Id keeps its Avito brand
         prefix = "s%d-" % tochki                                          # and model (the WebMIM side may be gone, its names with it)
         for gid, cand in list(ev.ok.items()):
-            if gid.startswith(prefix) and gid in published and re.sub(r"-x\d+$", "", live_id_of(gid).split("_")[0]) != gid:
+            id_code = re.sub(r"-x\d+$", "", live_id_of(gid).split("_")[0])
+            if gid.startswith(prefix) and gid in published and id_code != gid and id_code not in parsed.offers:
                 text = store.get_snapshot(conn, gid, acct)
                 try:
                     ad = ET.fromstring(text) if text else None
@@ -398,7 +399,7 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             id_code = re.sub(r"-x\d+$", "", node.text.split("_")[0])
             if id_code != owner:                             # it goes on under the Id of another position's ad: that ad's photos stay
                 photo_code = set_code = id_code
-                if (live_images or {}).get(node.text):
+                if _keepable((live_images or {}).get(node.text), own_photos):
                     _images_node(ad)
                     _set_images(ad, live_images[node.text])
                     continue
@@ -432,7 +433,7 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
                 source = parsed.offers.get(photo_code)
                 fallback = source.image if source is not None and source.image else None
             urls = image_urls(own_photos, offer, pack, fallback)
-            if (tochki_prefix and owner.startswith(tochki_prefix) and (live_images or {}).get(node.text)
+            if (tochki_prefix and owner.startswith(tochki_prefix) and _keepable((live_images or {}).get(node.text), own_photos)
                     and not any(is_library_link(u) for u in urls)):
                 urls = live_images[node.text]                  # a live 4tochki ad keeps its photos until our own frames lead (owner 2026-10-27)
             _set_images(ad, urls)
@@ -475,6 +476,13 @@ class ModelPhotos:
                     self.index.setdefault(key, gid)
         key = self._model(offer, self.synonyms)
         return self.index.get(key) if key is not None else None
+
+
+def _keepable(urls, own_photos) -> bool:
+    """Live photo links an ad may keep: every link of our library among them is still this account's (a withdrawn frame, a set out of the
+    feed or own photos off: the ad is built afresh, the check `own_photo_foreign` would stop the account every cycle otherwise)."""
+    allowed = own_photos.allowed if own_photos is not None else frozenset()
+    return bool(urls) and all(u in allowed for u in urls if is_library_link(u))
 
 
 def _images_node(ad):

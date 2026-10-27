@@ -338,3 +338,68 @@ def test_a_changed_model_of_a_live_4tochki_ad_is_a_warning():
     levels = feed_check.load_rules()["rules"]
     assert levels["tochki_model_change"]["generated"] == "warning" and levels["tire_twin"]["generated"] == "critical"
     assert levels["tochki_outside_trial"]["mirror"] == "critical" and levels["tochki_stock"]["generated"] == "critical"
+
+
+# --- review round 2 ---
+
+def test_live_photos_are_kept_only_while_our_frames_among_them_are_still_the_account_s():
+    """A withdrawn frame, a set out of the feed or own photos off: the ad is built afresh (else `own_photo_foreign` every cycle)."""
+    from tires_sync import sync
+    from tires_sync.photo_library import OwnPhotos, photo_url
+    frame = photo_url("https://panel.test", "a" * 64, "jpg")
+    live = [frame, "https://panel.test/img/T/100.jpg"]
+    assert sync._keepable(live, OwnPhotos({}, {}, frozenset({frame})))
+    assert not sync._keepable(live, OwnPhotos({}, {}, frozenset()))
+    assert not sync._keepable(live, None)
+    assert sync._keepable(["https://panel.test/img/T/100.jpg"], None) and not sync._keepable([], None)
+
+
+def test_a_withdrawn_frame_of_a_live_4tochki_ad_is_not_kept(tmp_path):
+    args = prepare(tmp_path)
+    cycle_and_publish(tmp_path, args)
+    conn = store.connect(tmp_path / "t.db")
+    token = connections.get_account(conn, 1)["feed_token"]
+    conn.close()
+    live = tmp_path / "feed" / token / "avito_feed.xml"
+    frame = "https://panel.test/photos/%s.jpg" % ("b" * 64)
+    live.write_text(live.read_text(encoding="utf-8").replace(
+        '<Image url="https://example.test/1.jpg" />', '<Image url="%s" /><Image url="https://example.test/1.jpg" />' % frame), encoding="utf-8")
+    assert frame in live.read_text(encoding="utf-8")                                         # the live ad led with our frame, now withdrawn
+    assert main(["run-cycle"] + args) == 0                                                   # 3: own_photo_foreign would stop the account
+    draft = by_id(ET.fromstring((tmp_path / "feed" / token / "next" / "avito_feed.xml").read_bytes()).findall("Ad"))
+    assert images(draft["s2-TCH9"]) == ["https://example.test/1.jpg"]
+
+
+def test_in_merge_a_webmim_row_the_trial_does_not_merge_waits_next_to_a_live_4tochki_ad():
+    offers = {"s2-A": offer("s2-A"), "s3-W": offer("s3-W", brand_key="S3:IKON TYRES")}
+    ev = Evaluation(ok={g: Candidate(g, o, 100, "Ikon Tyres", o.model_raw) for g, o in offers.items()})
+    match = tire_match.only_webmim_and(tire_match.pairs(offers, {}, 2), 2)
+    assert match.groups == [] and match.left_out == [("s2-A", "s3-W")]
+    assert tire_match.tochki_entry(ev, match, offers, {"s2-A"}, 2, "merge") == {"s3-W": "same_tire"}
+
+
+def test_an_account_of_the_alias_scheme_is_never_in_the_trial(tmp_path, monkeypatch):
+    from tires_sync import mirror_feed
+    conn = store.connect(tmp_path / "t.db")
+    two = connections.create_supplier(conn, "4Точки", NOW, "owner")
+    connections.set_config(conn, "tochki", 0, {"login": "x", "supplier_id": two, "feed": True, "accounts": [1], "mode": "no_twin"}, NOW, "o")
+    assert tochki_feed.trial(conn, 1) is not None
+    monkeypatch.setattr(mirror_feed, "alias_scheme", lambda conn, account_id: True)
+    assert tochki_feed.trial(conn, 1) is None
+    conn.close()
+
+
+def test_the_pairs_page_builds_an_account_out_of_the_trial_without_the_merge(tmp_path, monkeypatch):
+    from tires_sync import sync
+    from tires_sync.panel import routes_pairs
+    prepare(tmp_path)
+    seen = []
+    real = sync.plan_decisions
+    monkeypatch.setattr(sync, "plan_decisions", lambda *a, **k: (seen.append((a[4], k.get("cross_supplier"))), real(*a, **k))[1])
+    conn = store.connect(tmp_path / "t.db")
+    settings = active_settings(conn)
+    parsed, _sha, _notes = load_all_parsed(conn, settings, tmp_path / "unload.xml")
+    out = routes_pairs.feed_ads(conn, parsed, parse_reference(REFERENCE), settings, datetime(2026, 10, 25, 3, 0, 0))
+    conn.close()
+    assert seen == [(1, None), (2, None)]                                                   # as the cycle reads it, account by account
+    assert not [i for i in out[2] if "s2-" in i] and "100" in out[1]

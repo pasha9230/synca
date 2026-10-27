@@ -77,6 +77,7 @@ class MatchResult:
     tochki_supplier: Optional[int] = None
     found: List[Tuple[str, str, str, str]] = field(default_factory=list)  # the pairs found now [(code, code, identity, identity)], to remember
     remembered: List[Tuple[str, ...]] = field(default_factory=list)       # groups with a remembered side that has left the unload
+    left_out: List[Tuple[str, ...]] = field(default_factory=list)         # groups the 4tochki trial does not merge (only_webmim_and)
     last_switch: Dict[str, Tuple[str, str, str]] = field(default_factory=dict)   # Id -> (from code, to code, at Moscow) of its last change
     now: str = ""                                                         # Moscow, the clock of the pause
     switches: Dict[str, Tuple[str, str]] = field(default_factory=dict)    # code -> (Id, the code before): goes over to another supplier now
@@ -353,6 +354,7 @@ def only_webmim_and(result: MatchResult, tochki_supplier: int) -> MatchResult:
     """The merge of the 4tochki trial (owner, question 8): only the groups of WebMIM row 1 and 4tochki; a group with another supplier is
     not merged (a 4tochki position of it then meets the strict entry). The pairs to remember and the remembered groups alike."""
     fits = lambda codes: {supplier_of(g) for g in codes} == {1, tochki_supplier}
+    result.left_out = [g for g in result.groups if not fits(g)]
     result.groups = [g for g in result.groups if fits(g)]
     result.remembered = [g for g in result.remembered if fits(g)]
     result.found = [p for p in result.found if fits(p[:2])]
@@ -427,12 +429,11 @@ def tochki_entry(ev, match: MatchResult, offers: Mapping[str, Offer], published,
             losers = sorted(codes, key=order)[1:]
         for g in losers:
             out[g] = "same_tire"
-    if mode != "merge":
-        for members in match.groups:
-            if any(g.startswith(prefix) and g in published and g not in out for g in members):
-                for g in members:
-                    if not g.startswith(prefix) and g in ev.ok and g not in published:
-                        out[g] = "same_tire"
+    for members in (match.groups if mode != "merge" else []) + match.left_out:     # groups not merged: the live 4tochki ad stays alone
+        if any(g.startswith(prefix) and g in published and g not in out for g in members):
+            for g in members:
+                if not g.startswith(prefix) and g in ev.ok and g not in published:
+                    out[g] = "same_tire"
     grouped = {g for members in match.groups for g in members}
     unclear = {g for members in match.ambiguous + match.refused for g in members}
     webmim: set = set()

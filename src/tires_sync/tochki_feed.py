@@ -83,6 +83,9 @@ def trial(conn, account_id: int) -> Optional[dict]:
     cfg = config(conn)
     if not cfg["feed"] or not cfg["supplier_id"] or cfg["mode"] not in TRIAL_MODES or account_id not in cfg["accounts"]:
         return None
+    from . import mirror_feed
+    if mirror_feed.alias_scheme(conn, account_id):          # its Ids carry no code: the trial's rules read a code from the Id
+        return None
     return cfg
 
 

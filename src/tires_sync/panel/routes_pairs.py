@@ -119,7 +119,7 @@ def pairs_view(conn, parsed, ref, settings, unload_path, now=None, changes_befor
                 from .. import cycle
                 account_parsed = copy.copy(parsed)
                 account_parsed.offers = {k: v for k, v in parsed.offers.items() if cycle.feed_tire_type(v) not in left_out}
-            _, ev_on, _ds = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=True)
+            _, ev_on, _ds = sync.plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now, cross_supplier=None)
             if ev_on.match is not None:
                 waiting = [{"code": gid, "ad_id": ad_id, "until": until} for gid, (ad_id, until) in sorted(ev_on.match.waiting.items())]
         accounts.append({"id": account["id"], "name": account["name"], "switches": switches, "waiting": waiting})
@@ -164,7 +164,7 @@ def feed_ads(conn, parsed, ref, settings, now) -> dict:
             continue
         acct = account["id"]
         eff = connections.effective_settings(conn, acct, settings)
-        _, ev, ds = sync.plan_decisions(conn, _account_parsed(conn, parsed, acct), ref, eff, acct, now.date(), now=now, cross_supplier=True)
+        _, ev, ds = sync.plan_decisions(conn, _account_parsed(conn, parsed, acct), ref, eff, acct, now.date(), now=now, cross_supplier=None)
         id_map = dict(mirror_feed.adopted_maps(conn, acct)[0], **ev.aliases, **ev.inherit)
         suffix = "" if acct == connections.PRIMARY_ACCOUNT else "_a%d" % acct
         reissued = mirror_feed.reissued_own(conn, acct)
