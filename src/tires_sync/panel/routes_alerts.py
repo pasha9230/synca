@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 
-from flask import abort, current_app, flash, jsonify, redirect, render_template, session
+from flask import abort, current_app, flash, jsonify, redirect, render_template, request, session
 
 from .. import order_alerts, order_engine, order_manager as mgr, order_reserve as reserve, orders, store
 from .common import can, get_conn, login_required, own_point, point_account
@@ -106,6 +106,13 @@ def may_take() -> bool:
     return own_point() is None and can("orders", "edit")
 
 
+def acceptable(rows: list) -> list:
+    """The rows «Принять все» takes (the owner 2026-10-27): the records of the order journal only (a numeric id), red, yellow and green.
+    Left out, each by its own button: the chat rows («Клиент написал» of a chat without an order, «Срочно ответить»), «Перезвонить»,
+    «Входящие», the point's questions (string ids), and the handed-over clients (a press there «берёт в работу»)."""
+    return [r for r in rows if isinstance(r["id"], int) and r["order_id"] is not None and not is_handoff(r) and r["level"] in order_alerts.ALERT_LEVELS]
+
+
 def href(row: dict) -> str:
     if row.get("href"):                                           # «Перезвонить» (inquiry.due_rows) knows its own place
         return row["href"]
@@ -120,7 +127,8 @@ def register(app):
     def alerts_page():
         conn = get_conn()
         rows = [dict(r, href=href(r), handoff=is_handoff(r)) for r in with_orders(conn, grouped(conn, session["user"]))]
-        return render_template("alerts.html", rows=rows, staff=may_take())
+        take = acceptable(rows)
+        return render_template("alerts.html", rows=rows, staff=may_take(), acceptable=take, confirm=bool(take) and request.args.get("accept") == "1")
 
     @app.route("/alerts/feed")
     @login_required
@@ -184,4 +192,43 @@ def register(app):
             conn.commit()
         except order_alerts.AlertError as err:
             flash(str(err), "error")
+        return redirect("/alerts")
+
+    @app.route("/alerts/accept-all", methods=["POST"])
+    @login_required
+    def alerts_accept_all():
+        """«Принять все» for the current user: of the ids the page showed, those that are still rows of THEIR page now (a record that came
+        after loading is not among them, another user's or a point's is never): red = «Разобрался» (order_alerts.ack, as a single press),
+        yellow and green = seen up to that record (as opening the order)."""
+        conn = get_conn()
+        wanted = set()
+        for i in request.form.getlist("ids"):
+            try:
+                wanted.add(int(i))
+            except ValueError:
+                pass
+        now, login = local_iso(), session["user"]
+        taken, accepted = 0, {}
+        for row in acceptable(grouped(conn, login)):
+            if row["id"] not in wanted:
+                continue
+            if row["level"] == "red":
+                try:
+                    order_alerts.ack(conn, row["id"], login, now)
+                except order_alerts.AlertError:
+                    continue
+                taken += 1
+            else:
+                accepted.setdefault(row["order_id"], []).append(row["id"])
+        for order_id, ids in accepted.items():
+            # «seen» is a mark up to a record: an open handed-over client of the order (its button «Взять в работу» is its own) must not fall
+            # under it, so the mark stops below the first one (what is above it stays). The point never sees these rows: no block for it.
+            blocks = [] if own_point() is not None else [e["id"] for e in order_alerts.open_alerts(conn, login, order_id)
+                                                         if is_handoff(e) and e["id"] not in ids]
+            top = [i for i in ids if not blocks or i < min(blocks)]
+            if top:
+                order_alerts.mark_seen(conn, login, order_id, now, max(top))
+                taken += len(top)
+        conn.commit()
+        flash("Принято уведомлений: %d." % taken, "ok")
         return redirect("/alerts")
