@@ -197,7 +197,7 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
 def _tochki_rules(ad, ad_id: str, code: str, pack: bool, ctx: Context, twins: Dict[str, str], code_of, add) -> None:
     """The rules of the 4tochki trial (plan tochki-feed §5, owner 2026-10-27): one tire, one ad (`tire_twin`: a pair one side of which is
     4tochki, so the WebMIM feeds are judged as before), no 4tochki outside the trial, at most 40 in the text, the live Model kept."""
-    own = code.startswith(ctx.tochki_prefix) or ad_id.startswith(ctx.tochki_prefix)
+    own = code.startswith(ctx.tochki_prefix)            # by the position behind the Id: a WebMIM lot may carry a 4tochki ad's Id (same_tire)
     tire = ctx.tire_ids.get(code)
     if tire and not pack:
         other = twins.get(tire)

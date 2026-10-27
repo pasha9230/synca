@@ -86,7 +86,7 @@ def pairs_view(conn, parsed, ref, settings, unload_path, now=None, changes_befor
     not_pairs = store.not_tire_pairs(conn)
     stored = [{"a": side(a), "b": side(b), "found_at": found_at, "forgotten": forgotten.get((a, b)), "apart": not_pairs.get((a, b))}
               for a, b, _ia, _ib, found_at in store.load_tire_pairs(conn)]
-    switch_on = tire_match.switch_on(conn)
+    switch_on = tire_match.merge_in_feed(conn)
     for pair in stored:                  # the merge on and one side gone: the pair carries the ad, forgetting or bringing it back moves it
         pair["live"] = switch_on and pair["a"]["here"] != pair["b"]["here"]
 
@@ -271,7 +271,7 @@ def register(app) -> None:
         """With the merge on, a mark that changes a published ad: the owner sees «было → стало» first. None: go on and write the mark as
         before; otherwise the answer (the screen, or a refusal)."""
         conn = get_conn()
-        if not tire_match.switch_on(conn):
+        if not tire_match.merge_in_feed(conn):
             return None                                 # the merge off: the feed does not hear of the pairs, nothing to show
         a, b, undo = request.form.get("a", ""), request.form.get("b", ""), bool(request.form.get("undo"))
         if kind == "not_pair" and not undo and (not a.strip() or not b.strip() or a.strip() == b.strip()

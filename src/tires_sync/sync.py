@@ -134,8 +134,8 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     trial_merge = cross_supplier is None and not merge and trial is not None and trial["mode"] == "merge"
     cross = (tire_match.for_feed(conn, parsed.offers, acct, now, getattr(parsed, "unavailable", ()))
              if merge or trial_merge else None)
-    if trial_merge:                                                       # the trial merges WebMIM row 1 and 4tochki only (owner, question 8)
-        cross = tire_match.only_webmim_and(cross, tochki)
+    if cross is not None and trial is not None and not tire_match.switch_on(conn):
+        cross = tire_match.only_webmim_and(cross, tochki)                 # the trial merges WebMIM row 1 and 4tochki only (owner, question 8)
     retired = store.load_retired(conn, acct, today)
     if trial is not None:                                                 # one tire, one ad: a new 4tochki position goes in only as a tire of its own
         match = cross if cross is not None else tire_match.pairs(
@@ -151,15 +151,31 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
             ev.excluded[gid] = why
     ev.inherit = same_tire.dedupe(ev, published, settings.min_stock, live_id_of, first_seen_of,
                                   lambda code: store.get_snapshot(conn, code, acct), retired, foreign, cross=cross)
-    if trial is not None and cross is not None:                           # a 4tochki position that goes on under a WebMIM ad: its «Артикул»
-        group_of = cross.group_of()                                       # and «Страна» lines from WebMIM (owner, question 4)
-        for kept in ev.inherit:
-            cand = ev.ok.get(kept)
-            twin = next((g for g in group_of.get(kept, ()) if not g.startswith("s%d-" % tochki) and g in parsed.offers), None)
-            if cand is not None and twin is not None and kept.startswith("s%d-" % tochki):
+    if trial is not None and cross is not None:                           # a 4tochki position that goes on under a WebMIM ad (this cycle or
+        group_of = cross.group_of()                                       # before): its «Артикул» and «Страна» from WebMIM (owner, question 4)
+        prefix = "s%d-" % tochki
+        for kept, cand in list(ev.ok.items()):
+            id_code = re.sub(r"-x\d+$", "", (ev.inherit.get(kept) or live_id_of(kept)).split("_")[0])
+            if not kept.startswith(prefix) or id_code == kept:
+                continue
+            twin = id_code if id_code in parsed.offers and not id_code.startswith(prefix) else next(
+                (g for g in group_of.get(kept, ()) if not g.startswith(prefix) and g in parsed.offers), None)
+            if twin is not None:
                 other = parsed.offers[twin]
                 ev.ok[kept] = dataclasses.replace(cand, offer=dataclasses.replace(
                     cand.offer, code=cand.offer.code or other.code, country=cand.offer.country or other.country))
+    if trial is not None:                                                 # a live 4tochki ad under another position's Id keeps its Avito brand
+        prefix = "s%d-" % tochki                                          # and model (the WebMIM side may be gone, its names with it)
+        for gid, cand in list(ev.ok.items()):
+            if gid.startswith(prefix) and gid in published and re.sub(r"-x\d+$", "", live_id_of(gid).split("_")[0]) != gid:
+                text = store.get_snapshot(conn, gid, acct)
+                try:
+                    ad = ET.fromstring(text) if text else None
+                except ET.ParseError:
+                    ad = None
+                brand, model = ((ad.findtext("Brand") or "").strip(), (ad.findtext("Model") or "").strip()) if ad is not None else ("", "")
+                if brand and model and (brand, model) != (cand.avito_brand, cand.avito_model):
+                    ev.ok[gid] = dataclasses.replace(cand, avito_brand=brand, avito_model=model)
     ev.match = cross                                                      # the cycle remembers its pairs and changes of supplier (run_cycle)
     for code in list(aliases):                                            # a code that takes the Id of an older ad does not need its own alias
         if code in ev.inherit:
@@ -415,7 +431,11 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             if is_library_link(fallback):                      # a saved ad led with our frame and no account link replaced it: the supplier's photo
                 source = parsed.offers.get(photo_code)
                 fallback = source.image if source is not None and source.image else None
-            _set_images(ad, image_urls(own_photos, offer, pack, fallback))
+            urls = image_urls(own_photos, offer, pack, fallback)
+            if (tochki_prefix and owner.startswith(tochki_prefix) and (live_images or {}).get(node.text)
+                    and not any(is_library_link(u) for u in urls)):
+                urls = live_images[node.text]                  # a live 4tochki ad keeps its photos until our own frames lead (owner 2026-10-27)
+            _set_images(ad, urls)
     if from_cache:
         logging.getLogger("tires_sync.sync").warning("фото из кэша: %d позиций (поставщик убрал картинку)", from_cache)
     limit = max(settings.guard_min, int(settings.guard_fraction * len(live_titles or {})))

@@ -12,7 +12,7 @@ from ..feed import FeedCheckError, check_feed
 from ..models import Action
 from ..publishing import expected_for
 from ..cycle import _own_photos, _photo_version, pass_removals_lately
-from ..sync import build_ads, plan_decisions
+from ..sync import build_ads, live_images_of, plan_decisions
 from .service import REASON_TEXT
 
 EXTRA_REASONS = {"cart_wait": "ждём утреннего наполнения каталога", "absent_from_supplier": "пропала у поставщика", "stale": "проблема с данными у поставщика",
@@ -52,7 +52,8 @@ def build_preview(conn, parsed, ref, settings, today, feed_root="", now=None) ->
         ads, invalid, final, _rendered, _rendered4, _owners = build_ads(
             conn, parsed, ev, published, ds, eff, account["id"], today, account.get("description_template"), suffix, prefix,
             dict(id_map, **ev.aliases, **ev.inherit), image_map, title_template=cx.get_title_template(conn, account["id"]) or None,
-            photo_version=_photo_version(conn, account["id"]), own_photos=_own_photos(conn, account))    # as the cycle: the photo links are the ones that will be published
+            photo_version=_photo_version(conn, account["id"]), own_photos=_own_photos(conn, account),
+            live_images=live_images_of(Path(feed_root) / account["feed_token"] / "next" if feed_root else None))    # as the cycle: the photo links are the ones that will be published
         offers = parsed.offers
         def name(gid):
             """The supplier's name; a position that left the unload has none there, so the title of the ad we published is used."""

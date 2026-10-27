@@ -24,12 +24,13 @@ REFERENCE = ('<Shiny>\n<make name="Ikon Tyres">\n<model name="Character Ice 7"/>
 TRIAL_MERGE = {"accounts": [1], "mode": "merge"}
 
 
-def unload(rest_100="12"):
-    return catalog_xml(
+def unload(rest_100="12", without_100=False, extra=()):
+    return catalog_xml(*([] if without_100 else [
         commodity_xml(NNOMMODIF="100", TERRITORY_RN="1001", NPRICE_DELAYED="4000", NREST=rest_100, SWIDTH="155", SHEIGHT="80", SDIAMETR="13",
                       SLOAD="79", SSPEED="T", SMNFCODE="CI7", SMODEL="Ikon Character Ice 7", SBRANDCOUNTRY="КОРЕЯ",
                       SPICTURE="https://example.test/ci7.jpg",
-                      SMODIFNAME="Ikon Tyres 155/80/13 T 79 Ikon Character Ice 7 Ш.", SMODIFNAME_ORIG="Ikon Tyres 155/80/13 T 79 Ikon Character Ice 7 Ш."),
+                      SMODIFNAME="Ikon Tyres 155/80/13 T 79 Ikon Character Ice 7 Ш.", SMODIFNAME_ORIG="Ikon Tyres 155/80/13 T 79 Ikon Character Ice 7 Ш.")]),
+        *extra,
         commodity_xml(NNOMMODIF="101", TERRITORY_RN="1001", NPRICE_DELAYED="6000", NREST="5", SWIDTH="215", SMNFCODE="TS2",
                       SMODIFNAME="IKON 215/55/16 T 95 Test Model", SMODIFNAME_ORIG="Ikon 215/55/16 T 95 Test Model"))
 
@@ -110,7 +111,13 @@ def test_a_webmim_ad_goes_on_under_its_id_with_4tochki_stock_and_price_and_keeps
     (tmp_path / "unload.xml").write_bytes(unload(rest_100="12"))                             # WebMIM back: the live ad stays as it is
     third = by_id(cycle_and_publish(tmp_path, args)["Основной"])
     assert not [i for i in third if "TCH1" in i] and images(third["100"]) == images(live)
-    assert "В наличии: 40 шт." in third["100"].findtext("Description")
+    assert "В наличии: 40 шт." in third["100"].findtext("Description") and "Артикул: CI7" in third["100"].findtext("Description")
+    (tmp_path / "unload.xml").write_bytes(unload(without_100=True))                         # WebMIM gone for good: the live ad is the same
+    for _ in range(2):
+        later = by_id(cycle_and_publish(tmp_path, args)["Основной"])
+        assert not [i for i in later if "TCH1" in i]
+        assert later["100"].findtext("Model") == "Character Ice 7" and later["100"].findtext("Title") == live.findtext("Title")
+        assert images(later["100"]) == images(live)
 
 
 def test_the_trial_switched_off_gives_the_ad_back_to_webmim_under_the_same_id(tmp_path):
@@ -128,6 +135,18 @@ def test_the_trial_switched_off_gives_the_ad_back_to_webmim_under_the_same_id(tm
     assert images(ads["100"]) == images(live) and ads["100"].findtext("Title") == live.findtext("Title")
 
 
+def test_without_the_merge_a_new_webmim_lot_does_not_come_next_to_a_published_4tochki_ad_of_the_tire(tmp_path):
+    """no_twin: a live 4tochki ad stays when WebMIM gets the tire, and the WebMIM position waits (one tire, one ad), whatever Avito models
+    the two are mapped to."""
+    args = prepare(tmp_path, {"accounts": [1], "mode": "no_twin"})
+    (tmp_path / "unload.xml").write_bytes(unload(without_100=True))
+    ads = by_id(cycle_and_publish(tmp_path, args)["Основной"])
+    assert "s2-TCH1" in ads                                                                  # WebMIM had no such tire: it went in
+    (tmp_path / "unload.xml").write_bytes(unload())                                          # WebMIM 100 comes: the same tire
+    ads = by_id(cycle_and_publish(tmp_path, args)["Основной"])
+    assert "s2-TCH1" in ads and "100" not in ads
+
+
 def test_the_light_pass_leaves_the_ad_whose_id_4tochki_takes_to_the_hourly_cycle(tmp_path):
     args = prepare(tmp_path)
     cycle_and_publish(tmp_path, args)
@@ -143,11 +162,18 @@ def test_the_light_pass_leaves_the_ad_whose_id_4tochki_takes_to_the_hourly_cycle
     assert "100" not in first.removed and "100" in first.left
 
 
-def test_new_4tochki_ads_show_the_webmim_picture_of_their_model_else_their_own(tmp_path):
-    ads = by_id(cycle_and_publish(tmp_path, prepare(tmp_path))["Основной"])
+def test_new_4tochki_ads_show_the_webmim_picture_of_their_model_else_their_own_and_keep_it(tmp_path):
+    args = prepare(tmp_path)
+    ads = by_id(cycle_and_publish(tmp_path, args)["Основной"])
     assert images(ads["s2-TCH9"]) == ["https://example.test/1.jpg"]                         # WebMIM 101, the same model (Test Model)
     assert images(ads["s2-TCH7"]) == ["https://img.4tochki.test/TCH7.jpg"]                  # no WebMIM of Lone Model: the supplier's
     assert "Артикул" not in ads["s2-TCH9"].findtext("Description")                           # nothing to take it from (owner, question 4)
+    other = commodity_xml(NNOMMODIF="099", TERRITORY_RN="1001", NREST="5", SWIDTH="245", SLOAD="100", SMNFCODE="TS9",
+                          SPICTURE="https://example.test/other.jpg", SMODIFNAME="IKON 245/55/16 T 100 Test Model",
+                          SMODIFNAME_ORIG="Ikon 245/55/16 T 100 Test Model")
+    (tmp_path / "unload.xml").write_bytes(unload(extra=[other]))                             # a smaller WebMIM code of the model, its own picture
+    ads = by_id(cycle_and_publish(tmp_path, args)["Основной"])
+    assert images(ads["s2-TCH9"]) == ["https://example.test/1.jpg"]                         # the live ad keeps its photo
 
 
 def test_no_twin_mode_keeps_the_pair_out_and_the_trial_switched_off_takes_4tochki_off(tmp_path):
@@ -216,6 +242,23 @@ def test_a_published_or_retired_webmim_ad_of_the_tire_keeps_it_out_but_not_its_o
     assert entry(offers, retired=[("s2-A", "s2-A", key, "2026-01-01T00:00:00")]) == {}
 
 
+def test_a_4tochki_ad_that_went_on_under_a_webmim_id_tells_that_webmim_had_the_tire():
+    key = ("IKON TYRES", "OTHERMODEL", "205", "55", "16", "Зимние нешипованные", "94", "T", False)
+    assert entry({"s2-A": offer("s2-A")}, retired=[("s2-B", "100", key, "2026-01-01T00:00:00")]) == {"s2-A": "tochki_twin"}
+    assert entry({"s2-A": offer("s2-A")}, retired=[("s2-B", "s2-B_r20261020", key, "2026-01-01T00:00:00")]) == {}
+
+
+def test_the_merge_of_the_trial_counts_as_the_merge_on_for_the_pairs_page(tmp_path):
+    conn = store.connect(tmp_path / "t.db")
+    two = connections.create_supplier(conn, "4Точки", NOW, "owner")
+    assert not tire_match.merge_in_feed(conn)
+    for cfg, on in (({"accounts": [1], "mode": "merge"}, True), ({"accounts": [1], "mode": "no_twin"}, False),
+                    ({"accounts": [], "mode": "merge"}, False), ({"accounts": [1], "mode": "merge", "feed": False}, False)):
+        connections.set_config(conn, "tochki", 0, dict({"login": "x", "supplier_id": two, "feed": True}, **cfg), NOW, "owner")
+        assert tire_match.merge_in_feed(conn) is on, cfg
+    conn.close()
+
+
 def test_a_published_4tochki_ad_stays_when_webmim_gets_the_tire():
     offers = {"s2-A": offer("s2-A"), "1": offer("1", model_raw="Other Model")}
     assert entry(offers, published={"s2-A"}) == {}
@@ -271,9 +314,17 @@ def test_tire_twin_stops_two_ads_of_one_tire_one_of_them_4tochki():
     assert inherited == {("tire_twin", "100_r20261020")}
 
 
+def test_a_webmim_position_under_a_4tochki_id_is_not_judged_as_4tochki():
+    """A WebMIM lot of a tire whose 4tochki ad was taken off takes that ad's Id (same_tire): it is WebMIM, its stock text is its own."""
+    ctx = dict(tochki_prefix="s2-", id_code={"s2-A": "100"})
+    assert rules([ad("s2-A", stock=55)], tochki_trial=False, **ctx) == set()
+    assert rules([ad("s2-A", stock=55)], tochki_trial=True, **ctx) == set()
+
+
 def test_4tochki_outside_the_trial_and_more_than_40_in_the_text_stop_the_feed():
     assert rules([ad("s2-A")], tochki_prefix="s2-", tochki_trial=False) == {("tochki_outside_trial", "s2-A")}
     assert rules([ad("100")], tochki_prefix="s2-", tochki_trial=False, id_code={"100": "s2-A"}) == {("tochki_outside_trial", "100")}
+    assert rules([ad("s2-A_r20261020")], tochki_prefix="s2-", tochki_trial=False) == {("tochki_outside_trial", "s2-A_r20261020")}
     assert rules([ad("s2-A")], tochki_prefix="s2-", tochki_trial=False, held=frozenset({"s2-A"})) == set()    # the guard holds it (rollback)
     assert rules([ad("s2-A", stock=41)], tochki_prefix="s2-", tochki_trial=True) == {("tochki_stock", "s2-A")}
     assert rules([ad("s2-A", stock=40), ad("100", stock=55)], tochki_prefix="s2-", tochki_trial=True) == set()

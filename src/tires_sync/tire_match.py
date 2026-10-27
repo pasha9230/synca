@@ -342,6 +342,13 @@ def switch_on(conn) -> bool:
     return connections.get_config(conn, CONFIG_KIND, 0).get("feed") is True
 
 
+def merge_in_feed(conn) -> bool:
+    """The merge works in some feed: the switch `tire_match.feed`, or the 4tochki trial in `merge` for an account (tochki_feed.trial)."""
+    from . import tochki_feed
+    cfg = tochki_feed.config(conn)
+    return switch_on(conn) or bool(cfg["feed"] and cfg["supplier_id"] and cfg["mode"] == "merge" and cfg["accounts"])
+
+
 def only_webmim_and(result: MatchResult, tochki_supplier: int) -> MatchResult:
     """The merge of the 4tochki trial (owner, question 8): only the groups of WebMIM row 1 and 4tochki; a group with another supplier is
     not merged (a 4tochki position of it then meets the strict entry). The pairs to remember and the remembered groups alike."""
@@ -390,7 +397,8 @@ def tochki_entry(ev, match: MatchResult, offers: Mapping[str, Offer], published,
     WebMIM and 4tochki goes in (the merge keeps the group one ad under one Id); in `no_twin` it does not: `tochki_pair`. A non-empty
     `allow` (stage 2 of the plan) lets in only its codes: `tochki_not_allowed`. Two 4tochki codes of one tire (Character / Nordman): one,
     the published one, else the one under the owner's main name, else more stock, else the smaller code: `same_tire`. A tire with a
-    tube: `with_tube`, published or not. A published 4tochki ad stays otherwise (a new WebMIM twin does not take a live ad off)."""
+    tube: `with_tube`, published or not. A published 4tochki ad stays otherwise (a new WebMIM twin does not take a live ad off); without
+    the merge the WebMIM positions of its group that are not published wait (`same_tire`): two ads of one tire otherwise."""
     prefix = "s%d-" % tochki_supplier
     published = set(published)
     allow = set(allow or ())
@@ -419,6 +427,12 @@ def tochki_entry(ev, match: MatchResult, offers: Mapping[str, Offer], published,
             losers = sorted(codes, key=order)[1:]
         for g in losers:
             out[g] = "same_tire"
+    if mode != "merge":
+        for members in match.groups:
+            if any(g.startswith(prefix) and g in published and g not in out for g in members):
+                for g in members:
+                    if not g.startswith(prefix) and g in ev.ok and g not in published:
+                        out[g] = "same_tire"
     grouped = {g for members in match.groups for g in members}
     unclear = {g for members in match.ambiguous + match.refused for g in members}
     webmim: set = set()
@@ -427,7 +441,8 @@ def tochki_entry(ev, match: MatchResult, offers: Mapping[str, Offer], published,
             key = loose_of_offer(offer)
             if key is not None:
                 webmim.add(key + (bool(offer.xl),))
-    ads = {loose_of_key(k) for k in published_keys} | {loose_of_key(k) for g, _i, k, _at in retired if not str(g).startswith(prefix)}
+    ads = {loose_of_key(k) for k in published_keys} | {loose_of_key(k) for g, i, k, _at in retired      # a 4tochki ad under its own Id is no
+           if not (str(g).startswith(prefix) and str(i).split("_")[0] == str(g))}                        # WebMIM; under a WebMIM Id it is
     ads.discard(None)
     for gid in mine:
         if gid in out or gid in published:
