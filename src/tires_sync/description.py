@@ -64,7 +64,8 @@ PLACEHOLDER_HELP = {
 
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 OLD_MODEL_WORDS = "Прежнее название шин"      # {old_model} prints these words before the former name (owner, 2026-10-27)
-_OLD_MODEL_WORDS_BEFORE = re.compile(r"прежнее\s+название\s+шин\s*[:\-–—]?\s*$", re.IGNORECASE)     # the template line already says them itself
+_OLD_MODEL_WORDS_BEFORE = re.compile(r"прежнее\s+название\s+шин[\W_]*$", re.IGNORECASE)     # the template line already says them itself (a colon, a dash, a quote after them is fine)
+_LATIN_TWINS = str.maketrans("aceopxyABCEHKMOPTXY", "асеорхуАВСЕНКМОРТХУ")     # the owner types some Cyrillic letters as Latin ones
 _NEW_ONLY_MARK = re.compile(r"[ \t]*\{new_only\}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -80,6 +81,10 @@ def search_variants(width: int, height: int, diameter: int) -> str:
     return ", ".join(variants)
 
 
+def _starts_with_words(name: str) -> bool:
+    return bool(re.match(r"\s*прежнее\s+название\s+шин\b", name, re.IGNORECASE))      # a name saved with the words in it: not doubled
+
+
 def values(c: Candidate, price: int, old_model: str = "") -> Dict[str, str]:
     o = c.offer
     brand_ru = BRAND_RU.get(c.avito_brand, "")
@@ -91,7 +96,7 @@ def values(c: Candidate, price: int, old_model: str = "") -> Dict[str, str]:
         "size_slash": "%d/%d/%d" % (o.width, o.height, o.diameter), "indexes": speed_load,
         "season": SEASON_WORD.get(o.season, ""), "code": o.code, "country": o.country,
         "price": str(price), "search": search_variants(o.width, o.height, o.diameter), "stock": str(o.stock),
-        "old_model": ("%s %s" % (OLD_MODEL_WORDS, old_model)) if old_model else "",
+        "old_model": ("%s %s" % (OLD_MODEL_WORDS, old_model)) if old_model and not _starts_with_words(old_model) else old_model,
     }
 
 
@@ -111,8 +116,8 @@ def validate_template(template: str) -> List[str]:
 
 def _value(m, line: str, data: Dict[str, str], bare_old_model: str) -> str:
     name = m.group(1)
-    if name == "old_model" and _OLD_MODEL_WORDS_BEFORE.search(line[:m.start()]):
-        return bare_old_model                           # «Прежнее название шин {old_model}» in the template: the words are not doubled
+    if name == "old_model" and _OLD_MODEL_WORDS_BEFORE.search(line[:m.start()].translate(_LATIN_TWINS)):
+        return re.sub(r"^\s*прежнее\s+название\s+шин\s*[:\-–—]?\s*", "", bare_old_model, flags=re.IGNORECASE)   # «Прежнее название шин {old_model}» in the template: the words are not doubled
     return data.get(name, m.group(0))
 
 

@@ -124,3 +124,21 @@ def test_old_model_with_new_only_on_the_same_line():
 
 def test_help_text_mentions_the_words():
     assert "Прежнее название шин" in PLACEHOLDER_HELP["old_model"]
+
+
+def test_a_stored_name_that_already_starts_with_the_words_is_not_doubled():
+    names = {("Pirelli", "Scorpion Winter"): "Прежнее название шин Nokian Hakkapeliitta 9 SUV"}
+    for t in ("{old_model}", "Прежнее название шин {old_model}"):
+        text = render_description(t, cand(), 100, names)
+        assert text == "Прежнее название шин Nokian Hakkapeliitta 9 SUV", t
+
+
+def test_a_quote_between_the_words_and_the_variable_does_not_double_them():
+    for t in ("Прежнее название шин «{old_model}»", 'Прежнее название шин "{old_model}"'):
+        assert render_description(t, cand(), 100, FORMER).lower().count("название шин") == 1, t
+
+
+def test_brackets_commas_and_latin_twin_letters_before_the_variable_do_not_double_the_words():
+    for t in ("Прежнее название шин: «{old_model}»", "Прежнее название шин ({old_model})", "Прежнее название шин, {old_model}",
+              "Пpежнее название шин {old_model}", "Прежнее назвaние шин {old_model}"):
+        assert render_description(t, cand(), 100, FORMER).count("шин") == 1, t
