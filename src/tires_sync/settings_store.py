@@ -110,7 +110,7 @@ def _load_draft(conn, draft_id: int):
     return row[0], json.loads(row[1])
 
 
-def confirm_draft(conn, draft_id: int, now: str, author: str, strong: bool = False) -> int:
+def confirm_draft(conn, draft_id: int, now: str, author: str, strong: bool = False, note: str = "") -> int:
     conn.execute("BEGIN IMMEDIATE")
     try:
         base, changes = _load_draft(conn, draft_id)
@@ -125,7 +125,7 @@ def confirm_draft(conn, draft_id: int, now: str, author: str, strong: bool = Fal
         if not strong and (changed_max > limit or limit_changed):
             raise PercentLimitError(max(changed_max, float(changes["pct_limit"])) if limit_changed else changed_max)
         settings_from_dict(merged, enforce_pct_limit=False)
-        vid = _insert_version(conn, merged, now, author, "draft %d" % draft_id)
+        vid = _insert_version(conn, merged, now, author, note or "draft %d" % draft_id)
         conn.execute("UPDATE settings_active SET version_id = ? WHERE id = 1", (vid,))
         conn.execute("DELETE FROM app_state WHERE key = 'nav_pending_pairs'")
         conn.execute("UPDATE draft SET status = 'confirmed' WHERE id = ?", (draft_id,))
