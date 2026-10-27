@@ -311,7 +311,7 @@ def test_a_first_message_makes_no_deal_by_itself_but_the_button_still_does(tmp_p
     conn, account, fake = setup(tmp_path)
     fake.add("c1", "Татьяна", [("in", "Здравствуйте, это актуально? Мой телефон +7 900 000-00-17")])
     chats.sync_account(conn, fake, account, NOW)
-    assert deals.process_all(conn, NOW) == {"created": 0, "linked": 0, "phones": 0}
+    assert deals.process_all(conn, NOW) == {"created": 0, "linked": 0, "phones": 0, "names": 0}
     [chat] = chats.list_chats(conn)
     assert chat["order_id"] is None and conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 0
     card_id = deals.create_deal(conn, chat["id"], NOW, "pavel")                      # the manager makes it with the button

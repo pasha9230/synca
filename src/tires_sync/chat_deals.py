@@ -11,7 +11,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
-from . import chats as chats_store, clients, order_points as points_store, order_wait, orders, store
+from . import chat_name, chats as chats_store, clients, order_points as points_store, order_wait, orders, store
 from .orders import OrderError
 
 log = logging.getLogger("tires_sync.chats")
@@ -55,6 +55,32 @@ def ref(chat_row) -> str:
 
 def _incoming_texts(conn, chat_row) -> List[str]:
     return [r[0] for r in conn.execute("SELECT text FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind = 'text' ORDER BY ts DESC, id DESC", (chat_row,))]
+
+
+def name_in_chat(conn, chat_row) -> str:
+    """The name the client wrote in the chat (their words only, chat_name), or ""."""
+    rows = conn.execute("SELECT direction, text FROM avito_message WHERE chat_row = ? AND kind = 'text' ORDER BY ts, id", (chat_row,)).fetchall()
+    return chat_name.name_from_messages([(r[0], r[1]) for r in rows])
+
+
+def client_name_for(conn, chat: dict) -> str:
+    """The name for a new order of the chat: what the client wrote, else the profile name."""
+    return (name_in_chat(conn, chat["id"]) or chat["peer_name"] or "")[:120]
+
+
+def fill_name_from_chat(conn, chat: dict, card: dict, now: str) -> bool:
+    """The name the client wrote goes into the open order when its «Имя клиента» is empty or still the profile name (never a name a
+    manager typed); one journal line «Имя из чата: …». True when it was written."""
+    profile = (chat["peer_name"] or "")[:120]
+    if card["stage"]["kind"] != "open" or (card["client_name"] or "") not in ("", profile):
+        return False
+    stated = name_in_chat(conn, chat["id"])
+    if not stated or stated == card["client_name"]:
+        return False
+    orders.update_card(conn, card["id"], {"client_name": stated}, now, SYSTEM_AUTHOR, commit=False)
+    orders.add_event(conn, card["id"], now, SYSTEM_AUTHOR, "chat", "Имя из чата: %s" % stated)
+    conn.commit()
+    return True
 
 
 def _open_deals_with(conn, phone: str, skip: Optional[int] = None) -> List[int]:
@@ -322,7 +348,8 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         phone = next((p for p in (extract_phone(t, own) for t in _incoming_texts(conn, chat_row)) if p), "")
         comment = "Объявление: %s %s" % (chat["item_title"], chat["item_url"]) if chat["item_title"] else ""
         earlier = earlier_deals(conn, chat)
-        name = (chat["peer_name"] or "")[:120]                                                          # the client's own name only; the ad stays in the comment
+        stated = name_in_chat(conn, chat_row)
+        name = (stated or chat["peer_name"] or "")[:120]                                               # the name the client wrote, else the profile name; the ad stays in the comment
         tags = ",".join(t for t in (_account_tag(conn, chat["account_id"]), "повторный" if earlier else "") if t)
         of_account = points_store.point_by_account(conn, chat["account_id"])
         named = None if of_account else named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))   # a point's account keeps its point, bound by _attach
@@ -338,6 +365,7 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
                                          scope_point=(of_account or {}).get("id") or own_point)
         except orders.OpenOrderExists as busy:                              # the owner 2026-10-27: one open order per phone and point; the chat
             _attach(conn, chat, busy.order_id, now, author)                 # of the same client joins it, its positions untouched
+            fill_name_from_chat(conn, chat, orders.get_card(conn, busy.order_id), now)
             orders.add_event(conn, busy.order_id, now, author, "chat", "Новый заказ по чату %s не создан: тот же телефон клиента, чат привязан сюда%s" % (
                 ref(chat_row), " (%s)" % comment if comment else ""))
             conn.commit()
@@ -346,6 +374,8 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
             orders.add_event(conn, card_id, now, author, "field", "Точка из сообщения клиента: «%s» («%s»)" % (
                 named[0]["name"], " ".join(named[1].split())[:80]))
         _attach(conn, chat, card_id, now, author)
+        if stated and stated != chat["peer_name"]:
+            orders.add_event(conn, card_id, now, author, "chat", "Имя из чата: %s" % name)
         if earlier:
             orders.add_event(conn, card_id, now, author, "chat", "Ранее писал: заказы %s" % ", ".join("№%d" % i for i in earlier))
             conn.commit()
@@ -540,7 +570,7 @@ def process_all(conn, now: str, position_provider=None, auto_create: bool = Fals
 
     With `auto_create`: a chat that was already there when its account was first read (the past) gets a deal only when its client writes again.
     A chat whose deal is closed gets no new deal: the dialog goes on in it and a note says the client wrote again."""
-    stats = {"created": 0, "linked": 0, "phones": 0}
+    stats = {"created": 0, "linked": 0, "phones": 0, "names": 0}
     repair_claims(conn, now)
     own = own_phones(conn)
     for chat in chats_store.list_chats(conn):
@@ -569,6 +599,8 @@ def process_all(conn, now: str, position_provider=None, auto_create: bool = Fals
                 elif phone and not card["client_phone"]:
                     orders.update_card(conn, card["id"], {"client_phone": phone}, now, SYSTEM_AUTHOR)
                     stats["phones"] += 1
+                if fill_name_from_chat(conn, chat, orders.get_card(conn, card["id"]), now):
+                    stats["names"] += 1
                 continue
             if not texts or not fresh:
                 continue                                                      # only our own words, or an old chat nobody wrote to since
