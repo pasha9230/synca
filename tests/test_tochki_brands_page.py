@@ -73,3 +73,19 @@ def test_brands_are_enabled_with_a_rule_through_the_same_flow_and_nothing_reache
     assert BANNER in html
     panel, cycle = both(app)                                            # the switch is off: neither the panel's set nor the cycle's has 4Точки
     assert not tochki_of(panel, sid) and not tochki_of(cycle, sid)
+
+
+def test_an_empty_snapshot_counts_as_missing(tmp_path):
+    app, client, tok, sid = app_with(tmp_path)
+    write_snapshot(tmp_path, fresh(), [])
+    html = section(client.get("/settings/brands").get_data(as_text=True), sid)
+    assert MISSING in html and BANNER in html
+
+
+def test_the_exclusions_page_and_the_brand_card_open_for_4tochki_and_the_sets_stay_without_it(tmp_path):
+    app, client, tok, sid = app_with(tmp_path)
+    write_snapshot(tmp_path, fresh(), [row("T1")])
+    assert client.get("/settings/exclusions").status_code == 200
+    assert client.get("/settings/brands/card?supplier=%d&brand=S%d:IKON%%20TYRES" % (sid, sid)).status_code == 200
+    panel, cycle = both(app)
+    assert not tochki_of(panel, sid) and not tochki_of(cycle, sid) and sid in cycle.unavailable

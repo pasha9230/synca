@@ -1134,13 +1134,17 @@ def tochki_off_state(conn, supplier_id: int, unload_path: str):
 
 def _supplier_parsed(conn, supplier_id: int, unload_path: str):
     """(positions, load time) for the settings pages of one supplier: the panel's set, or the raw parse of a secondary WebMIM unload the
-    cycle holds as old (`data.stale_unload`), whose lists stay shown and settable (their load time marks them «только просмотр»)."""
+    cycle holds as old (`data.stale_unload`), whose lists stay shown and settable (their load time marks them «только просмотр»); for the
+    4tochki row with its switch off, the last snapshot (see `tochki_off_state`), so that brands can be chosen before the feed is on."""
     from .. import tochki_feed
     from ..settings_store import active_settings
     from .data import load_merged, stale_unload
     settings = active_settings(conn)
-    if tochki_off_state(conn, supplier_id, unload_path) == "ready":      # 4tochki before its switch: its lists come from the last snapshot
-        return tochki_feed.load_snapshot(unload_path, supplier_id)[0], None
+    cfg = tochki_feed.config(conn)
+    if not cfg["feed"] and cfg["supplier_id"] == supplier_id:            # 4tochki before its switch: its lists come from the last snapshot
+        loaded = tochki_feed.load_snapshot(unload_path, supplier_id)     # read once: the answer is this object or nothing
+        if loaded is not None and loaded[0].offers:
+            return loaded[0], None
     held = stale_unload(conn, settings, unload_path, supplier_id)
     if held is not None:
         return held
