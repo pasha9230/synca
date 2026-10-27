@@ -8,6 +8,7 @@ import pytest
 
 from panel_helpers import login, make_app, post
 from test_calls import FakeClient, call
+from order_fixtures import card_of_phone
 from tires_sync import calls, clients, connections, order_points as points, orders, store, users
 
 NOW = "2026-10-07T12:00:00"                     # the panel's clock in the tests (panel_helpers)
@@ -170,7 +171,7 @@ def _chat(conn, account_id, chat_id, client_id, last_at):
 
 def _order(conn, phone, point_id=None, closed=False):
     orders.ensure_pipeline(conn, NOW)
-    card_id = orders.create_card(conn, {"client_name": "Клиент", "client_phone": phone, "point_id": point_id}, NOW, "o")
+    card_id = card_of_phone(conn, {"client_name": "Клиент", "client_phone": phone, "point_id": point_id}, NOW, "o")
     if closed:                                                    # a finished order: the test base, straight to a closed stage
         won = next(s for s in orders.list_stages(conn) if s["kind"] == "won")
         conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (won["id"], card_id))

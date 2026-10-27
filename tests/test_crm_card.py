@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from panel_helpers import login, make_app, post
+from order_fixtures import card_of_phone
 from tires_sync import clients, order_manager, orders, store, users
 
 NOW = "2026-10-23T12:00:00"
@@ -19,7 +20,7 @@ def conn(tmp_path):
 
 
 def _order(conn, phone, name="Иван", at=NOW):
-    card = orders.create_card(conn, {"client_name": name, "client_phone": phone}, at, "o")
+    card = card_of_phone(conn, {"client_name": name, "client_phone": phone}, at, "o")
     conn.execute("UPDATE order_card SET created_at = ? WHERE id = ?", (at, card))
     conn.commit()
     return card
@@ -389,7 +390,7 @@ def test_the_undoing_leaves_with_the_kept_client_its_own_order_that_has_the_othe
     chat = _chat(conn, "p-5", name="Иван")
     conn.execute("INSERT INTO client_chat (chat_row, client_id, how, at) VALUES (?, ?, 'chat', ?)", (chat, k, NOW))
     conn.execute("INSERT INTO client_peer (account_id, peer_id, client_id) VALUES (1, 'p-5', ?)", (k,))
-    x = orders.create_card(conn, {"client_name": "Иван", "client_phone": "+79005556677", "avito_chat": "Ч-%d" % chat}, NOW, "o")
+    x = card_of_phone(conn, {"client_name": "Иван", "client_phone": "+79005556677", "avito_chat": "Ч-%d" % chat}, NOW, "o")
     assert clients.client_of_order(conn, x)["id"] == k and conn.execute("SELECT how FROM client_order WHERE order_id = ?", (x,)).fetchone()[0] == "phone"
     keep, gone = (k, g) if keep_is_k else (g, k)
     clients.merge(conn, keep, gone, NOW, "owner")
@@ -408,7 +409,7 @@ def test_a_deal_made_from_a_chat_after_the_join_goes_back_with_its_chat(conn):
     clients.merge(conn, k, g, NOW, "owner")
     conn.commit()
     later = _chat(conn, "p-6", name="Ваня")                                   # the same person writes again after the join
-    order = orders.create_card(conn, {"client_name": "Ваня"}, NOW, "o")       # an order without a phone, bound to the chat (a deal of it)
+    order = card_of_phone(conn, {"client_name": "Ваня"}, NOW, "o")       # an order without a phone, bound to the chat (a deal of it)
     chat_deals._attach(conn, {"id": later, "item_title": "", "peer_name": "Ваня", "account_id": 1}, order, NOW, "o")   # «привязать к заказу»
     conn.commit()
     assert conn.execute("SELECT how FROM client_order WHERE order_id = ?", (order,)).fetchone()[0] == "chat"
@@ -488,7 +489,7 @@ def test_an_order_of_the_kept_clients_own_chat_with_the_others_phone_stays(conn)
     conn.execute("INSERT INTO client_peer (account_id, peer_id, client_id) VALUES (1, 'p-k', ?)", (k,))
     clients.merge(conn, k, g, NOW, "owner")
     conn.commit()
-    x = orders.create_card(conn, {"client_name": "Иван", "client_phone": "+79005556677", "avito_chat": "Ч-%d" % own_chat}, NOW, "o")
+    x = card_of_phone(conn, {"client_name": "Иван", "client_phone": "+79005556677", "avito_chat": "Ч-%d" % own_chat}, NOW, "o")
     assert clients.client_of_order(conn, x)["id"] == k
     clients.unmerge(conn, k, g, NOW, "owner")
     conn.commit()

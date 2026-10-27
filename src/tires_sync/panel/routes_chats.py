@@ -594,7 +594,7 @@ def register(app) -> None:
         conn = get_conn()
         _chat_or_404(conn, chat_row)
         try:
-            card_id = deals.create_deal(conn, chat_row, local_iso(), author(), position_provider=_position_provider(conn, chat_row))
+            card_id = deals.create_deal(conn, chat_row, local_iso(), author(), position_provider=_position_provider(conn, chat_row), own_point=own_point())
             _to_own_point(conn, card_id)
         except orders.OrderError as err:
             flash(str(err))
@@ -633,7 +633,7 @@ def register(app) -> None:
         _chat_or_404(conn, chat_row)
         fields = {k: request.form.get(k, "") for k in ("brand", "model", "width", "profile", "radius", "season", "studded", "qty", "any_brand", "any_size")}
         try:
-            card_id, added, moved = deals.wait_from_chat(conn, chat_row, fields, _catalog_offers(conn), local_iso(), author())
+            card_id, added, moved = deals.wait_from_chat(conn, chat_row, fields, _catalog_offers(conn), local_iso(), author(), own_point=own_point())
             _to_own_point(conn, card_id)
             flash("%s Заказ №%d%s." % ("Шина добавлена в лист ожидания." if added else "Такая строка уже есть в заказе, второй не добавлено.", card_id,
                                        ", этап «Ожидает наличие»" if moved else " уже в этапе «Ожидает наличие»"))

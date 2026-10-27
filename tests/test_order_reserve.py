@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from order_fixtures import free_phone
 from tires_sync import order_points as points, order_reserve as reserve, order_templates as tpl, orders, store
 from tires_sync.cli import main
 
@@ -23,7 +24,7 @@ def db(tmp_path):
 def card_at(conn, code, when, delivery="2026-10-13"):
     pid = next((p["id"] for p in points.list_points(conn) if p["name"] == "Бета"), None) or points.save_point(
         conn, dict(name="Бета", manager_name="Алексей", channel="vk", vk_peer_id=POINT_VK))
-    cid = orders.create_card(conn, dict(client_name="Иван", client_phone="+7 900 111 22 33", point_id=pid, delivery_date=delivery), PLACED, "o")
+    cid = orders.create_card(conn, dict(client_name="Иван", client_phone=free_phone(conn, "+7 900 111 22 33"), point_id=pid, delivery_date=delivery), PLACED, "o")
     conn.execute("UPDATE order_card SET webmim_number = ? WHERE id = ?", (str(5200000 + cid), cid))      # the number the points and the client know
     orders.add_item(conn, cid, goods_id="1", name="Nokian 205/55 R16", brand_key="nokian", season="winter", diameter=16, territory="1",
                     qty=4, sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=PLACED, author="o")

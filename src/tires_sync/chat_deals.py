@@ -301,10 +301,12 @@ def next_day(now: str) -> str:
     return (date.fromisoformat(now[:10]) + timedelta(days=1)).isoformat()
 
 
-def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None, delivery: bool = True) -> int:
+def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None, delivery: bool = True, own_point=None) -> int:
     """A new deal for a chat. A chat that already has one gets no second: the deal it has is returned. `delivery`: the delivery date is
     tomorrow (the button «Создать заказ»; not an order that waits for the goods). The point: a point's account gives its own (one pick-up place,
-    the owner 2026-10-26), another account the point the client named."""
+    the owner 2026-10-26), another account the point the client named, else `own_point` (the point of the manager who pressed it).
+    The client's phone with an open order of that point or of no point (orders.open_order_conflict): no new deal, the chat joins that order;
+    an open order of another point is left alone and the chat gets its own deal (the owner 2026-10-27)."""
     chat = chats_store.get_chat(conn, chat_row)
     if chat is None:
         raise OrderError("Такого чата нет.")
@@ -324,12 +326,22 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         tags = ",".join(t for t in (_account_tag(conn, chat["account_id"]), "повторный" if earlier else "") if t)
         of_account = points_store.point_by_account(conn, chat["account_id"])
         named = None if of_account else named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))   # a point's account keeps its point, bound by _attach
+        if named and own_point and named[0]["id"] != own_point:            # the manager of a point makes the order of the own point, never another's
+            named = None
         fields = {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito", "comment": comment.strip(), "tags": tags,
                   "responsible": (of_account and point_responsible(conn, of_account["id"])) or orders.default_responsible(conn),   # a point's account: its manager
                   "delivery_date": next_day(now) if delivery else ""}
         if named:
             fields["point_id"] = named[0]["id"]
-        card_id = orders.create_card(conn, fields, now, author, require_contact=False)
+        try:
+            card_id = orders.create_card(conn, fields, now, author, require_contact=False,
+                                         scope_point=(of_account or {}).get("id") or own_point)
+        except orders.OpenOrderExists as busy:                              # the owner 2026-10-27: one open order per phone and point; the chat
+            _attach(conn, chat, busy.order_id, now, author)                 # of the same client joins it, its positions untouched
+            orders.add_event(conn, busy.order_id, now, author, "chat", "Новый заказ по чату %s не создан: тот же телефон клиента, чат привязан сюда%s" % (
+                ref(chat_row), " (%s)" % comment if comment else ""))
+            conn.commit()
+            return busy.order_id
         if named:
             orders.add_event(conn, card_id, now, author, "field", "Точка из сообщения клиента: «%s» («%s»)" % (
                 named[0]["name"], " ".join(named[1].split())[:80]))
@@ -550,7 +562,11 @@ def process_all(conn, now: str, position_provider=None, auto_create: bool = Fals
                 if card["stage"]["kind"] != "open" and last_in and last_in > card["entered_at"]:
                     # the client wrote again about the same ad after the deal was closed: no new deal, the dialog goes on in this one
                     _note_written_again(conn, card["id"], last_in, now)
-                if phone and not card["client_phone"]:
+                busy = (orders.open_order_conflict(conn, phone, card["point_id"], besides=card["id"])
+                        if phone and not card["client_phone"] and card["stage"]["kind"] == "open" else None)
+                if busy is not None:                                          # one open order per phone and point: the phone is not written
+                    _note_phone_of_open_order(conn, card["id"], phone, busy, now)
+                elif phone and not card["client_phone"]:
                     orders.update_card(conn, card["id"], {"client_phone": phone}, now, SYSTEM_AUTHOR)
                     stats["phones"] += 1
                 continue
@@ -558,18 +574,31 @@ def process_all(conn, now: str, position_provider=None, auto_create: bool = Fals
                 continue                                                      # only our own words, or an old chat nobody wrote to since
             if not auto_create:
                 continue
-            create_deal(conn, chat["id"], now, position_provider=position_provider)       # a deal for every chat: every ad of a client has its own
-            stats["created"] += 1
+            last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_card").fetchone()[0]
+            made = create_deal(conn, chat["id"], now, position_provider=position_provider)   # a deal for every chat; one of the phone of an open order joins it
+            stats["created" if made > last else "linked"] += 1
         except Exception:                                                    # one bad chat must not stop the others
             conn.rollback()
             log.exception("binding of chat %s failed", chat["id"])
     return stats
 
 
+def _note_phone_of_open_order(conn, card_id: int, phone: str, busy: dict, now: str) -> None:
+    """The client wrote a phone that has another open order (of the same point or of no point): a yellow record once, the phone stays out.
+    The other order is named only when it is of the same point or of none: the journal may be read by a point later."""
+    point = conn.execute("SELECT point_id FROM order_card WHERE id = ?", (card_id,)).fetchone()[0]
+    which = "№%d" % busy["id"] if not busy["point_id"] or busy["point_id"] == point else "другой точки"
+    text = "Клиент написал в чате телефон %s, но по нему уже есть открытый заказ %s: телефон не записан, проверьте, не тот же ли это клиент." % (
+        clients.display(phone) or phone, which)
+    if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND text = ?", (card_id, text)).fetchone():
+        orders.add_event(conn, card_id, now, SYSTEM_AUTHOR, "chat", text, level="yellow")
+        conn.commit()
+
+
 SAME_LINE = ("brand", "model", "code", "width", "profile", "radius", "season", "studded", "qty")
 
 
-def wait_from_chat(conn, chat_row, fields: dict, offers, now: str, author: str) -> int:
+def wait_from_chat(conn, chat_row, fields: dict, offers, now: str, author: str, own_point=None) -> int:
     """«Клиент ждёт эту шину»: the deal of the chat (made when there is none), a line «Что нужно клиенту» and the stage «Ожидает наличие».
     The form and the deal are checked first, so a bad one makes nothing; the same line pressed again is not added twice. Returns (id of the deal, a line was added,
     the deal was moved to the stage). A deal that is already further on (placed, moving, at the point) is never taken back."""
@@ -592,8 +621,13 @@ def wait_from_chat(conn, chat_row, fields: dict, offers, now: str, author: str) 
     else:
         if not chat["peer_name"]:
             raise OrderError("У чата нет имени клиента: создайте заказ вручную и укажите клиента.")
-        card_id = create_deal(conn, chat_row, now, author, delivery=False)
-        card = orders.get_card(conn, card_id)
+        card_id = create_deal(conn, chat_row, now, author, delivery=False, own_point=own_point)
+        card = orders.get_card(conn, card_id)                             # the client's open order the chat joined (same phone) is checked as above
+        if card["stage"]["code"] not in ("new", "talk", "wait"):
+            raise OrderError("Чат привязан к открытому заказу клиента №%d, он уже в работе (этап «%s»): кнопка не возвращает его назад. "
+                             "Добавьте строку во вкладке «Что нужно»." % (card_id, card["stage"]["name"]))
+        if card["sale_ids"]:
+            raise OrderError("По заказу записана продажа: сначала сторнируйте её.")
     same = [w for w in order_wait.list_wants(conn, card_id)
             if all(w[k] == clean[k] for k in SAME_LINE) and w["any_brand"] == bool(clean["any_brand"]) and w["any_size"] == bool(clean["any_size"])]
     if not same:

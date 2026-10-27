@@ -265,7 +265,7 @@ def test_the_answer_to_a_point_carries_the_keyboard_and_goes_without_it_while_vk
     assert first["message"][0] == mgr.signed(mgr.BUTTON_ANSWER) and json.loads(first["keyboard"][0])["buttons"][0][0]["action"]["label"] == mgr.BUTTON
     app.config["VK_HTTP"] = ScriptedHttp((200, {"error": {"error_code": 912, "error_msg": "This is a chat bot feature"}}), (200, {"response": 7}),
                                          *[(200, {"response": n}) for n in range(8, 20)])
-    hook(app, conn, "+7 900 111-22-33 летние", event="b2")
+    hook(app, conn, "+7 900 222-33-44 летние", event="b2")              # not the phone of the open order of ready()
     calls = _sent(app)
     assert "keyboard" in calls[0] and "keyboard" not in calls[1] and calls[1]["message"][0].startswith("(бот) Клиент передан")
 
@@ -540,14 +540,14 @@ def test_a_call_of_the_client_to_the_owner_or_the_partner_after_the_handoff_take
 def test_the_point_hears_only_the_confirmation_in_vk(tmp_path):
     """The owner 2026-10-23: «Точка по-факту не должна ничего получать, просто после передачи подтверждение от бота получать и все»."""
     app, client, tok, conn, pid, card = ready(tmp_path)
-    hook(app, conn, "клиент 89001112233 шины", event="c1")
+    hook(app, conn, "клиент 89002223344 шины", event="c1")                 # not the phone of the open order of ready()
     order = handed(conn)[0]["order"]
     orders.move_card(conn, order, next(s["id"] for s in orders.list_stages(conn) if s["code"] == "talk"), NOW, "worker2")
     hook(app, conn, "привет", event="c2")                                                       # the look after the message: no status
     orders.move_card(conn, order, next(s["id"] for s in orders.list_stages(conn) if s["code"] == "cancel"), NOW, "worker2", {"cancel_reason": "нет"})
     hook(app, conn, "ау", event="c3")
     messages = [m["message"][0] for m in _sent(app)]
-    assert messages[0] == "(бот) Клиент передан: +7 900 111-22-33, заказ №%d." % order and messages[1:] == [mgr.signed(mgr.HINT)]
+    assert messages[0] == "(бот) Клиент передан: +7 900 222-33-44, заказ №%d." % order and messages[1:] == [mgr.signed(mgr.HINT)]
 
 
 def test_the_report_offers_a_point_paid_only_for_the_clients_it_handed_over(tmp_path):
@@ -640,13 +640,22 @@ def test_z10b_two_tabs_of_a_chat_without_an_order_make_one_order(w, monkeypatch)
     conn, chat_row = w["conn"], w["petr"]["id"]
     done = _the_other_tab_first(monkeypatch, w["app"].config["DB_PATH"], w["rust"], {"kind": "chat", "chat_row": chat_row}, "89001112233")
     first = token()
-    with pytest.raises(orders.OrderError, match="Клиент по этому чату уже передан, заказ №"):
+    with pytest.raises(orders.OrderError, match="У клиента уже есть открытый заказ №"):      # the other tab's order holds the phone (2026-10-27)
         mgr.hand_over(conn, w["rust"], {"kind": "chat", "chat_row": chat_row}, "89001112233", mgr.handoff_fields({}), first, "point1", NOW)
     other = done[1]
     assert [h["order"] for h in handed(conn)] == [other] and chats.get_chat(conn, chat_row)["order_id"] == other
     assert conn.execute("SELECT COUNT(*) FROM order_card WHERE tags LIKE ?", ("%" + mgr.HANDOFF_TAG + "%",)).fetchone()[0] == 1
     outcome = conn.execute("SELECT outcome, order_id FROM order_command_log WHERE message_id = ?", ("chat-" + first,)).fetchone()
-    assert outcome[0] == "не передан: Клиент по этому чату уже передан, заказ №%d." % other and outcome[1] is None
+    assert outcome[0] == "не передан: У клиента уже есть открытый заказ №%d — откройте его." % other and outcome[1] is None
+
+
+def test_z10b_two_tabs_of_a_chat_without_a_phone_make_one_order_by_the_chat_itself(w, monkeypatch):
+    """Without a phone the rule of one open order per phone says nothing: the second look by the chat (open_handoff_of_chat) still holds."""
+    conn, chat_row = w["conn"], w["petr"]["id"]
+    done = _the_other_tab_first(monkeypatch, w["app"].config["DB_PATH"], w["rust"], {"kind": "chat", "chat_row": chat_row}, "")
+    with pytest.raises(orders.OrderError, match="Клиент по этому чату уже передан, заказ №"):
+        mgr.hand_over(conn, w["rust"], {"kind": "chat", "chat_row": chat_row}, "", mgr.handoff_fields({}), token(), "point1", NOW)
+    assert [h["order"] for h in handed(conn)] == [done[1]]
 
 
 def test_z10b_two_tabs_of_a_call_make_one_order(setup, monkeypatch):
@@ -654,7 +663,7 @@ def test_z10b_two_tabs_of_a_call_make_one_order(setup, monkeypatch):
     orders.ensure_pipeline(conn, NOW)
     row = ids["rows"][3]
     done = _the_other_tab_first(monkeypatch, app.config["DB_PATH"], ids["point"], {"kind": "call", "call_id": row}, "89113330000")
-    with pytest.raises(orders.OrderError, match="Клиент по этому звонку уже передан, заказ №"):
+    with pytest.raises(orders.OrderError, match="У клиента уже есть открытый заказ №"):      # the other tab's order holds the phone (2026-10-27)
         mgr.hand_over(conn, ids["point"], {"kind": "call", "call_id": row}, "89113330000", mgr.handoff_fields({}), token(), "p", NOW)
     assert [h["order"] for h in handed(conn)] == [done[1]]
 

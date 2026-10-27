@@ -9,6 +9,7 @@ from cryptography.fernet import Fernet
 
 from http_fakes import ScriptedHttp
 from panel_helpers import login, make_app, post
+from order_fixtures import card_of_phone
 from tires_sync import cli, connections, order_points as points, orders, store, users, webmim_match, webmim_orders
 from tires_sync.secretbox import SecretBox
 
@@ -46,7 +47,7 @@ def db(tmp_path):
 
 
 def card(conn, at=NOW, phone="+7 (911) 111-22-33", goods=(), **fields):
-    card_id = orders.create_card(conn, dict({"client_name": "Иван", "client_phone": phone}, **fields), at, "owner")
+    card_id = card_of_phone(conn, dict({"client_name": "Иван", "client_phone": phone}, **fields), at, "owner")
     for goods_id, qty in goods:
         orders.add_item(conn, card_id, goods_id=goods_id, name="Шина " + goods_id, brand_key="b", season="summer", diameter=16, territory="",
                         qty=qty, sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=at, author="owner")

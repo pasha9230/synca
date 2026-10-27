@@ -345,7 +345,8 @@ def create_order(conn, call_row: int, now: str, author: str, own_point=None) -> 
         card_id = orders.create_card(conn, {"client_name": call["client_name"], "client_phone": phone, "source": "avito", "comment": comment,
                                             "tags": chat_deals._account_tag(conn, call["account_id"]), "responsible": responsible,
                                             "delivery_date": chat_deals.next_day(now)},
-                                     now, author, require_contact=False, commit=False)
+                                     now, author, require_contact=False, commit=False,
+                                     scope_point=(of_account or {}).get("id") or own_point)   # the point it is claimed for below
         orders.add_event(conn, card_id, now, author, "call", "Создан из звонка %s" % comment[len("Звонок "):])
         conn.execute("UPDATE avito_call SET order_id = ? WHERE id = ?", (card_id, call_row))
         conn.commit()                                     # the order and its link to the call together: a killed panel leaves neither (хвост З10)

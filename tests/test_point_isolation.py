@@ -10,6 +10,7 @@ import pytest
 
 from panel_helpers import login, make_app, post
 from test_roles import PASSWORD, _csrf, person
+from order_fixtures import card_of_phone
 from tires_sync import clients, connections, order_points as points, orders, store, users
 
 NOW = "2026-10-07T12:00:00"
@@ -58,10 +59,10 @@ def w(tmp_path):
     acc_a, acc_b = (connections.create_account(conn, n, NOW, "o") for n in ("Аккаунт-Руставели", "Аккаунт-Юнона"))
     pa = points.save_point(conn, {"name": "Руставели", "manager_name": "А", "channel": "vk", "avito_account_id": str(acc_a)})
     pb = points.save_point(conn, {"name": "Юнона", "manager_name": "Б", "channel": "vk", "avito_account_id": str(acc_b)})
-    order_a = orders.create_card(conn, {"client_name": "Общий", "client_phone": PHONE_SHARED, "point_id": str(pa)}, NOW, "o")
-    order_b = orders.create_card(conn, {"client_name": "Общий", "client_phone": PHONE_SHARED, "point_id": str(pb)}, NOW, "o")
-    order_b2 = orders.create_card(conn, {"client_name": "Общий второй", "client_phone": PHONE_B_ONLY, "point_id": str(pb)}, NOW, "o")
-    order_x = orders.create_card(conn, {"client_name": "Чужой Иван", "client_phone": PHONE_FOREIGN, "point_id": str(pb)}, NOW, "o")
+    order_a = card_of_phone(conn, {"client_name": "Общий", "client_phone": PHONE_SHARED, "point_id": str(pa)}, NOW, "o")
+    order_b = card_of_phone(conn, {"client_name": "Общий", "client_phone": PHONE_SHARED, "point_id": str(pb)}, NOW, "o")
+    order_b2 = card_of_phone(conn, {"client_name": "Общий второй", "client_phone": PHONE_B_ONLY, "point_id": str(pb)}, NOW, "o")
+    order_x = card_of_phone(conn, {"client_name": "Чужой Иван", "client_phone": PHONE_FOREIGN, "point_id": str(pb)}, NOW, "o")
     _item(conn, order_a, "Nokian Своя-шина 205/55 R16", 5000)
     _item(conn, order_b, "Nokian Шина-Юноны 205/55 R16", 7777, qty=2)
     _item(conn, order_x, "Nokian Шина-Чужого 205/55 R16", 6666)
@@ -240,8 +241,8 @@ def test_the_board_of_a_point_shows_no_sums_and_the_card_shows_the_clients_price
 def test_an_order_of_another_account_is_the_points_when_it_names_the_point(w):
     conn, m = w["conn"], w["manager"]
     main = connections.create_account(conn, "Основной", NOW, "o")
-    named = orders.create_card(conn, {"client_name": "С основного", "point_id": str(w["pa"])}, NOW, "o")
-    unnamed = orders.create_card(conn, {"client_name": "Без точки"}, NOW, "o")
+    named = card_of_phone(conn, {"client_name": "С основного", "point_id": str(w["pa"])}, NOW, "o")
+    unnamed = card_of_phone(conn, {"client_name": "Без точки"}, NOW, "o")
     chat = _chat(conn, main, "pm", "Чат-основного", named)
     conn.commit()
     assert m.get("/orders/%d" % named).status_code == 200 and "С основного" in _text(m.get("/orders"))
@@ -322,7 +323,7 @@ def test_the_points_card_never_reads_the_whole_clients_journal_inquiries_or_tags
 def test_our_own_number_typed_into_an_order_is_not_the_clients_phone_for_the_point(w):
     conn, own = w["conn"], "+79006660066"
     conn.execute("UPDATE point SET manager_phone = ? WHERE id = ?", (own, w["pa"]))
-    card = orders.create_card(conn, {"client_name": "Свой по нашему номеру", "client_phone": own, "point_id": str(w["pa"])}, NOW, "o")
+    card = card_of_phone(conn, {"client_name": "Свой по нашему номеру", "client_phone": own, "point_id": str(w["pa"])}, NOW, "o")
     if clients.client_of_order(conn, card) is None:                                      # an order typed with our number joins nobody:
         conn.execute("INSERT INTO client_order (client_id, order_id, how, at) VALUES (?,?,'manual',?)", (w["shared"], card, NOW))   # by hand
     conn.commit()

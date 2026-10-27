@@ -98,7 +98,8 @@ def epoch_login(conn, user: str):
 
 
 LOGIN_ALERT_FAILURES = 30          # more failed sign-ins than this in the window, all addresses together: the owner hears (never a lock)
-LOGIN_ALERT_KEY = "login_alert_at"
+LOGIN_ALERT_QUIET = LOGIN_ALERT_FAILURES // 2   # the window fell to this or lower: the series is over, the next crossing is a new alert
+LOGIN_ALERT_KEY = "login_alert_at"  # the time of the alert of the series going on; "" none; "0<time>" its send failed at that time
 
 
 def client_key() -> str:
@@ -130,6 +131,9 @@ def login_failed(conn) -> None:
         total = conn.execute("SELECT COUNT(*) FROM login_attempt WHERE at >= ?", (_login_since(),)).fetchone()[0]
         if total > LOGIN_ALERT_FAILURES:
             _tell_owner_of_guessing(conn)
+        elif total <= LOGIN_ALERT_QUIET:                    # the series ended: its sent mark goes (a failed send keeps its retry time)
+            conn.execute("UPDATE app_state SET value = '' WHERE key = ? AND value >= '1'", (LOGIN_ALERT_KEY,))
+            conn.commit()
     except Exception:                                       # noqa: BLE001 - the failure is counted; the sign-in page answers whatever the alert does
         logging.getLogger("tires_sync.panel").exception("the alert about failed sign-ins was not sent")
 
@@ -138,10 +142,11 @@ LOGIN_ALERT_RETRY = timedelta(minutes=5)       # Telegram did not take the alert
 
 
 def _tell_owner_of_guessing(conn) -> None:
-    """At most once an hour, by its own mark: never through cli._alert, whose pause would let a guesser silence the alerts of the services.
-    The mark is taken in one statement, so of two workers only one sends. A refused send moves the mark back: the next try in 5 minutes."""
+    """Once a series (the owner 2026-10-27: every series, no longer once an hour), by its own mark: never through cli._alert, whose pause
+    would let a guesser silence the alerts of the services. The mark is taken in one statement, so of two workers only one sends; it stays
+    while the series goes on (login_failed clears it). A refused send leaves "0<time>": the next try in 5 minutes."""
     at = now()
-    if not store.claim_state(conn, LOGIN_ALERT_KEY, at.isoformat(timespec="seconds"), (at - timedelta(hours=1)).isoformat(timespec="seconds")):
+    if not store.claim_state(conn, LOGIN_ALERT_KEY, at.isoformat(timespec="seconds"), "0" + (at - LOGIN_ALERT_RETRY).isoformat(timespec="seconds")):
         return
     text = ("Tires Sync: больше %d неудачных входов в панель за %d мин. Похоже на подбор пароля: адреса в журнале действий."
             % (LOGIN_ALERT_FAILURES, current_app.config["LOGIN_WINDOW_SECONDS"] // 60))
@@ -155,8 +160,8 @@ def _tell_owner_of_guessing(conn) -> None:
     except Exception:                                       # noqa: BLE001 - the sign-in page answers whatever Telegram does
         log.exception("the alert about failed sign-ins was not sent")
         try:
-            store.set_state(conn, LOGIN_ALERT_KEY, (at - timedelta(hours=1) + LOGIN_ALERT_RETRY).isoformat(timespec="seconds"))
-        except Exception:                                   # noqa: BLE001 - a busy base: the mark stays, the next try in an hour
+            store.set_state(conn, LOGIN_ALERT_KEY, "0" + at.isoformat(timespec="seconds"))
+        except Exception:                                   # noqa: BLE001 - a busy base: the mark stays, the next try with the next series
             log.exception("the mark of the alert about failed sign-ins was not moved back")
     store.write_audit(conn, now_iso(), "system", "alert", {"text": text})      # after the send: a busy base never costs the message
 

@@ -518,11 +518,14 @@ def register(app) -> None:
         resp.headers["Cache-Control"] = "no-store"
         return resp
 
-    def new_page(conn, values: dict, rows: list, status: int = 200):
-        """The window of a new order: what was typed (or the defaults) and the positions chosen so far."""
+    def new_page(conn, values: dict, rows: list, status: int = 200, busy=None):
+        """The window of a new order: what was typed (or the defaults) and the positions chosen so far. `busy`: the client's open order
+        that refused this one, linked when the user can open it (a point's manager: only an order of the point)."""
         for row in rows:
             _row_money(row)
-        return render_template("order_new.html", v=values, rows=rows, points=points.list_points(conn), sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS,
+        if busy is not None and own_point() is not None and conn.execute("SELECT point_id FROM order_card WHERE id = ?", (busy,)).fetchone() != (own_point(),):
+            busy = None
+        return render_template("order_new.html", v=values, rows=rows, busy=busy, points=points.list_points(conn), sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS,
                                responsible_options=_responsible_options(app, conn, values.get("responsible", "")), known_tags=_known_tags(conn),
                                tags=orders.tag_list(values.get("tags", ""))), status
 
@@ -565,7 +568,10 @@ def register(app) -> None:
                 if by_text:
                     found.append(by_text)
             stamp = local_iso()
-            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items)
+            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items, scope_point=own_point())
+        except orders.OpenOrderExists as err:                            # the owner 2026-10-27: one open order per phone
+            flash(str(err), "error")
+            return new_page(conn, dict(request.form.items()), rows, busy=err.order_id)
         except orders.OrderError as err:
             flash(str(err), error_kind(conn, fields))                    # the window comes back with what was typed: nothing is lost, no card is made
             return new_page(conn, dict(request.form.items()), rows)

@@ -1,6 +1,7 @@
 """What managers write to the bot: commands that move an order and free questions."""
 from __future__ import annotations
 
+from order_fixtures import free_phone
 from tires_sync import order_engine as engine, order_manager as mgr, order_points as points, order_rules as rules, orders, store
 
 NOW = "2026-10-12T12:00:00"
@@ -30,7 +31,7 @@ def panel_numbers_from(conn, first):
 
 
 def card_at(conn, pid, code="moving"):
-    card = orders.create_card(conn, dict(client_name="Иван", client_phone="+7 900 111 22 33", point_id=pid, delivery_date="2026-10-15"), NOW, "o")
+    card = orders.create_card(conn, dict(client_name="Иван", client_phone=free_phone(conn, "+7 900 111 22 33"), point_id=pid, delivery_date="2026-10-15"), NOW, "o")
     orders.add_item(conn, card, goods_id="1", name="Nokian", brand_key="nokian", season="winter", diameter=16, territory="1", qty=4,
                     sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=NOW, author="o")
     orders.move_card(conn, card, stage(conn, "placed"), NOW, "o")

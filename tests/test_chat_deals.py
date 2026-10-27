@@ -182,16 +182,16 @@ def test_a_deal_made_from_a_chat_carries_the_name_of_the_account_as_a_tag(tmp_pa
     assert tags == {"c1": ["Основной"], "z1": ["Партнёр-2"]}
 
 
-def test_every_ad_of_one_client_gets_its_own_deal_even_with_the_same_phone(tmp_path):
+def test_a_second_ad_of_one_client_with_the_same_phone_joins_the_open_deal(tmp_path):
+    """The owner 2026-10-27 (was: every ad its own deal even with the same phone): one open order per phone, the second chat joins it."""
     conn, account, fake = setup(tmp_path)
     fake.add("c1", "Валера", [("in", "Здравствуйте, 8 900 000 00 17")], item=1)
     fake.add("c2", "Валера", [("in", "А это второе объявление, тот же 8 900 000 00 17")], item=2)
     stats = sync(conn, account, fake)
-    assert stats["created"] == 2 and stats["linked"] == 0
+    assert stats["created"] == 1 and stats["linked"] == 1
     cards = [orders.get_card(conn, c["order_id"]) for c in sorted(chats.list_chats(conn), key=lambda c: c["chat_id"])]
-    assert cards[0]["id"] != cards[1]["id"] and all(c["client_name"] == "Валера" for c in cards)
-    assert all(c["client_phone"] == "+79000000017" for c in cards)                                    # the phone still fills the card, it does not merge deals
-    assert not any("дубль" in e["text"].lower() for c in cards for e in orders.list_events(conn, c["id"]))
+    assert cards[0]["id"] == cards[1]["id"] and cards[0]["client_phone"] == "+79000000017"
+    assert conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 1
 
 
 def test_the_same_client_on_a_new_ad_gets_the_repeat_tag_and_a_note_with_the_earlier_deals(tmp_path):

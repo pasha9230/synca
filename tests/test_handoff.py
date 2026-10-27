@@ -135,7 +135,7 @@ def test_a_voice_message_with_and_without_vks_transcript(base):
 def test_through_the_vk_hook_with_a_transcript_the_answer_and_no_status(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     msg = {"id": 777, "from_id": int(PEER), "peer_id": int(PEER), "text": "",
-           "attachments": [{"type": "audio_message", "audio_message": {"transcript": "клиент 89001112233 нужны шины", "transcript_state": "done"}}]}
+           "attachments": [{"type": "audio_message", "audio_message": {"transcript": "клиент 89005556677 нужны шины", "transcript_state": "done"}}]}
     body = {"type": "message_new", "group_id": 220945892, "secret": "Sup3r-Secret_key", "event_id": "ev-voice", "object": {"message": msg}}
     from tires_sync import vk_callback
     url = "/hook/vk/%s" % vk_callback.path_token(conn)
