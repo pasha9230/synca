@@ -65,7 +65,8 @@ def test_a_forgotten_pair_is_not_used_by_the_memory_and_undo_brings_it_back(tmp_
     (tmp_path / "unload.xml").write_bytes(UNLOAD_WITHOUT_WEBMIM)
     assert main(["run-cycle"] + args) == 0
     built = feeds(tmp_path)
-    assert "<Id>s2-TCH1</Id>" in built["Основной"] and "<Model>Nordman 7</Model>" in built["Основной"]    # as with no memory at all
+    # as with no memory at all: the 4tochki side used to come out under a new Id; the strict entry of the trial keeps it out (plan §4б)
+    assert "s2-TCH1" not in built["Основной"] and "<Model>Nordman 7</Model>" not in built["Основной"]
     conn = store.connect(tmp_path / "t.db")
     assert tire_match.forget_pair(conn, "100", "s2-TCH1", "owner", AT, undo=True) is True
     assert tire_match.forget_pair(conn, "100", "s2-TCH1", "owner", AT, undo=True) is False

@@ -54,7 +54,10 @@ SNAPSHOT = {"version": 1, "fetched_at": "2026-10-14T09:30:00", "warehouse_id": 7
 ]}
 
 
-def prepare(tmp_path, feed_switch=False):
+TRIAL_1 = {"accounts": [1], "mode": "no_twin"}                       # the owner 2026-10-27: the trial in account 1 only
+
+
+def prepare(tmp_path, feed_switch=False, trial=None):
     conn = store.connect(tmp_path / "t.db")
     priced = {"enabled": [["IKON TYRES", "winter"], ["S2:IKON TYRES", "winter"]],
               "pricing": {"IKON TYRES|winter": {"pct_small": -3.0, "pct_large": -3.0},
@@ -63,7 +66,7 @@ def prepare(tmp_path, feed_switch=False):
     connections.create_account(conn, "Основной", NOW, "owner")
     connections.create_account(conn, "Партнёр-2", NOW, "owner")
     two = connections.create_supplier(conn, "4Точки", NOW, "owner")              # on the server: a WebMIM supplier row without an address
-    connections.set_config(conn, "tochki", 0, {"login": "api-user", "supplier_id": two, "feed": feed_switch}, NOW, "owner")
+    connections.set_config(conn, "tochki", 0, dict({"login": "api-user", "supplier_id": two, "feed": feed_switch}, **(trial or {})), NOW, "owner")
     conn.commit()
     conn.close()
     (tmp_path / "unload.xml").write_bytes(UNLOAD)
@@ -73,8 +76,8 @@ def prepare(tmp_path, feed_switch=False):
             "--reference", str(tmp_path / "reference.txt"), "--feed-root", str(tmp_path / "feed")]
 
 
-def build(tmp_path, feed_switch=False) -> dict:
-    assert main(["run-cycle"] + prepare(tmp_path, feed_switch)) == 0
+def build(tmp_path, feed_switch=False, trial=None) -> dict:
+    assert main(["run-cycle"] + prepare(tmp_path, feed_switch, trial)) == 0
     conn = store.connect(tmp_path / "t.db")
     out = {}
     for account in connections.list_accounts(conn):
@@ -97,17 +100,33 @@ def test_feeds_of_both_accounts_are_unchanged_with_the_switch_off(tmp_path):
 
 
 def test_the_scenario_would_catch_a_leak_the_switch_on_changes_the_feeds(tmp_path):
-    """Stage 2 path (the panel cannot take it yet): with the switch on the same setup does publish 4tochki, so the golden test above
-    really guards the positions out of the feeds."""
+    """Stage 2 path: with the switch on and account 1 in the trial the same setup does publish 4tochki there, so the golden test above
+    really guards the positions out of the feeds. Only the tire WebMIM has not: TCH100 is WebMIM 100 (strict entry, plan §4б). The
+    other account is byte for byte what it was without 4tochki (plan §7, test 1)."""
     from datetime import datetime
     SNAPSHOT["fetched_at"] = datetime.utcnow().isoformat(timespec="seconds")       # a fresh load: an old one is not used
     try:
-        built = build(tmp_path, feed_switch=True)
+        built = build(tmp_path, feed_switch=True, trial=TRIAL_1)
     finally:
         SNAPSHOT["fetched_at"] = "2026-10-14T09:30:00"
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
     assert built["Основной"] != golden["Основной"] and "<Id>s2-TCH900</Id>" in built["Основной"]
-    assert "<Id>s2-TCH900_a2</Id>" in built["Партнёр-2"]
+    assert "TCH100" not in built["Основной"] and "<Id>100</Id>" in built["Основной"]
+    assert built["Партнёр-2"] == golden["Партнёр-2"]
+
+
+@pytest.mark.parametrize("trial", [None, {"accounts": [], "mode": "no_twin"}, {"accounts": [1], "mode": "off"}, {"accounts": [1]},
+                                   {"accounts": [3], "mode": "merge"}, {"accounts": ["1"], "mode": "no_twin"}])
+def test_the_switch_on_without_an_account_in_the_trial_changes_no_feed(tmp_path, trial):
+    """«в фид» alone used to put 4tochki into every account at once: now it loads them, and no feed has any (plan §4а)."""
+    from datetime import datetime
+    SNAPSHOT["fetched_at"] = datetime.utcnow().isoformat(timespec="seconds")
+    try:
+        built = build(tmp_path, feed_switch=True, trial=trial)
+    finally:
+        SNAPSHOT["fetched_at"] = "2026-10-14T09:30:00"
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    assert built == golden
 
 
 def test_an_old_or_missing_load_with_the_switch_on_holds_the_supplier(tmp_path):

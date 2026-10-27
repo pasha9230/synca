@@ -6,7 +6,7 @@ tire that WebMIM has too, and the two sides are mapped to different Avito models
 from __future__ import annotations
 
 import json
-import os
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -57,7 +57,40 @@ def snapshot():
     ]}
 
 
-def prepare(tmp_path, match_switch=None):
+TRIAL_1 = {"accounts": [1], "mode": "no_twin"}           # the 4tochki trial in account 1 without the merge (plan tochki-feed §9, stage 2)
+TRIAL_BOTH = {"accounts": [1, 2], "mode": "merge"}       # both accounts and the merge: the scenario of the merge itself, as before the trial
+
+
+def without_ads(text: str, ids) -> str:
+    """The feed text without the ads of these Ids (the rest byte for byte)."""
+    for ad_id in ids:
+        text = re.sub(r"<Ad><Id>%s</Id>.*?</Ad>" % re.escape(ad_id), "", text, flags=re.S)
+    return text
+
+
+def trial_golden(trial=None) -> dict:
+    """The golden feeds (taken when 4tochki went into every account with no entry rule) as the trial builds them with the merge off: in an
+    account of the trial the 4tochki side of the pair is out (WebMIM 100 has that tire: strict entry, plan §4б; it used to be a second ad,
+    Nordman 7) and the one 4tochki ad left changes twice, both meant: the WebMIM picture of the same model (Test Model, WebMIM 101) instead
+    of the supplier's (owner 2026-10-27), and the next pickup point of the rotation (one ad less before it); out of the trial every 4tochki
+    ad is out. Everything else byte for byte."""
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    accounts = (trial or TRIAL_1)["accounts"]
+    out = {}
+    for number, (name, suffix) in enumerate((("Основной", ""), ("Партнёр-2", "_a2")), start=1):
+        if number not in accounts:
+            out[name] = without_ads(golden[name], ["s2-TCH1" + suffix, "s2-TCH9" + suffix])
+            continue
+        text = without_ads(golden[name], ["s2-TCH1" + suffix])
+        ad = re.search(r"<Ad><Id>s2-TCH9%s</Id>.*?</Ad>" % suffix, text, re.S).group(0)
+        now = ad.replace('url="https://img.4tochki.test/TCH9.jpg"', 'url="https://example.test/1.jpg"').replace(
+            "<SellerAddressID>P1</SellerAddressID>", "<SellerAddressID>P3</SellerAddressID>")
+        assert now != ad
+        out[name] = text.replace(ad, now)
+    return out
+
+
+def prepare(tmp_path, match_switch=None, trial=None):
     conn = store.connect(tmp_path / "t.db")
     priced = {"enabled": [["IKON TYRES", "winter"], ["S2:IKON", "winter"]],
               "pricing": {"IKON TYRES|winter": {"pct_small": -3.0, "pct_large": -3.0}, "S2:IKON|winter": {"pct_small": 5.0, "pct_large": 5.0}}}
@@ -65,7 +98,8 @@ def prepare(tmp_path, match_switch=None):
     connections.create_account(conn, "Основной", NOW, "owner")
     connections.create_account(conn, "Партнёр-2", NOW, "owner")
     two = connections.create_supplier(conn, "4Точки", NOW, "owner")
-    connections.set_config(conn, "tochki", 0, {"login": "api-user", "supplier_id": two, "feed": True}, NOW, "owner")
+    connections.set_config(conn, "tochki", 0, dict({"login": "api-user", "supplier_id": two, "feed": True},
+                                                       **(trial or (TRIAL_BOTH if match_switch else TRIAL_1))), NOW, "owner")
     if match_switch is not None:
         connections.set_config(conn, "tire_match", 0, {"feed": match_switch}, NOW, "owner")
     store.upsert_brand_map(conn, "IKON", "Ikon Tyres")
@@ -80,8 +114,8 @@ def prepare(tmp_path, match_switch=None):
             "--reference", str(tmp_path / "reference.txt"), "--feed-root", str(tmp_path / "feed")]
 
 
-def build(tmp_path, match_switch=None) -> dict:
-    assert main(["run-cycle"] + prepare(tmp_path, match_switch)) == 0
+def build(tmp_path, match_switch=None, trial=None) -> dict:
+    assert main(["run-cycle"] + prepare(tmp_path, match_switch, trial)) == 0
     conn = store.connect(tmp_path / "t.db")
     out = {}
     for account in connections.list_accounts(conn):
@@ -93,15 +127,10 @@ def build(tmp_path, match_switch=None) -> dict:
 
 @pytest.mark.parametrize("switch", [None, False])
 def test_feeds_are_unchanged_with_the_match_switch_off(tmp_path, switch):
+    """The golden feeds less what the trial keeps out (trial_golden): account 1 in the trial, account 2 out of it."""
     built = build(tmp_path, switch)
-    if os.environ.get("REGENERATE_MATCH_GOLDEN") and switch is None:
-        GOLDEN.write_text(json.dumps(built, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
-    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
-    assert set(built) == set(golden) == {"Основной", "Партнёр-2"}
-    for key in golden:
-        assert built[key] == golden[key], key
-    for text in built.values():                     # the scenario does hold the pair as two ads (what the switch would change)
-        assert "<Model>Character Ice 7</Model>" in text and "<Model>Nordman 7</Model>" in text
+    assert built == trial_golden()
+    assert "<Id>s2-TCH9</Id>" in built["Основной"] and "<Model>Nordman 7</Model>" not in built["Основной"]
     assert memory_rows(tmp_path) == (0, 0)          # off: nothing of the merge is written either
 
 
@@ -119,7 +148,7 @@ UNLOAD_WITHOUT_WEBMIM = catalog_xml(
 
 def publish_then_lose_webmim(tmp_path, forget=False) -> dict:
     """Cycle 1 with the switch on (the pair is one WebMIM ad, published), then the WebMIM row leaves the unload and cycle 2 runs."""
-    args = prepare(tmp_path, True)
+    args = prepare(tmp_path, True, TRIAL_BOTH)
     assert main(["run-cycle"] + args) == 0
     conn = store.connect(tmp_path / "t.db")
     for account in connections.list_accounts(conn):
@@ -138,7 +167,7 @@ def publish_then_lose_webmim(tmp_path, forget=False) -> dict:
 
 def test_the_switch_on_merges_the_pair_into_the_webmim_ad(tmp_path):
     """The scenario does guard the merge: with the switch on the pair is one ad (WebMIM first, though 4tochki has more stock)."""
-    built = build(tmp_path, True)
+    built = build(tmp_path, True, TRIAL_BOTH)
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
     assert built["Основной"] != golden["Основной"]
     assert "<Id>100</Id>" in built["Основной"] and "<Id>s2-TCH1</Id>" not in built["Основной"] and "<Id>s2-TCH9</Id>" in built["Основной"]
@@ -163,13 +192,15 @@ def test_on_the_remembered_pair_goes_on_under_the_webmim_id_when_the_webmim_row_
     conn.close()
 
 
-def test_without_the_memory_the_4tochki_side_would_come_out_under_a_new_id(tmp_path):
-    built = publish_then_lose_webmim(tmp_path, forget=True)               # what the memory prevents (the known gap of match-core)
-    assert "<Id>s2-TCH1</Id>" in built["Основной"] and "<Model>Nordman 7</Model>" in built["Основной"]
+def test_without_the_memory_the_strict_entry_keeps_the_4tochki_twin_out(tmp_path):
+    """The memory taken away: the 4tochki side used to come out under a new Id (the known gap of match-core, a repeat for Avito). The
+    strict entry of the trial (plan §4б) knows the tire from WebMIM's published ad: it does not go in under an Id of its own."""
+    built = publish_then_lose_webmim(tmp_path, forget=True)
+    assert "s2-TCH1" not in built["Основной"] and "<Model>Nordman 7</Model>" not in built["Основной"]
 
 
 def test_match_report_counts_the_pair_and_writes_nothing(tmp_path, capsys):
-    args = prepare(tmp_path)
+    args = prepare(tmp_path, trial=TRIAL_BOTH)
     conn = store.connect(tmp_path / "t.db")
     before = conn.execute("SELECT COUNT(*) FROM audit").fetchone()[0], conn.execute("SELECT COUNT(*) FROM connection").fetchone()[0]
     conn.close()
@@ -177,8 +208,11 @@ def test_match_report_counts_the_pair_and_writes_nothing(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "склейка в фиде: выключена" in out
     assert "пар (групп одной шины у разных поставщиков): 1, из них модели Авито расходятся: 1" in out
-    assert "аккаунт №1 «Основной», как сейчас: объявлений 4 → 3; ушли бы из фида 1, пришли бы 0" in out
-    assert "ушло бы: s2-TCH1 (same_tire)" in out
+    # without the merge the 4tochki side no longer is a second ad (strict entry, plan §4б): the merge changes no count, it only holds the pair
+    assert "аккаунт №1 «Основной», как сейчас: объявлений 3 → 3; ушли бы из фида 0, пришли бы 0" in out
+    assert "аккаунт №1 «Основной», если включить пробу 4 точек (режим merge): объявлений 3 → 3" in out
+    assert "   4 точки: позиций 2, в фиде 1; не вошли: same_tire 1" in out
+    assert "картинка WebMIM той же модели 1, картинка 4 точек 0" in out
     conn = store.connect(tmp_path / "t.db")
     assert (conn.execute("SELECT COUNT(*) FROM audit").fetchone()[0], conn.execute("SELECT COUNT(*) FROM connection").fetchone()[0]) == before
     assert conn.execute("SELECT COUNT(*) FROM published_state").fetchone()[0] == 0

@@ -342,6 +342,110 @@ def switch_on(conn) -> bool:
     return connections.get_config(conn, CONFIG_KIND, 0).get("feed") is True
 
 
+def only_webmim_and(result: MatchResult, tochki_supplier: int) -> MatchResult:
+    """The merge of the 4tochki trial (owner, question 8): only the groups of WebMIM row 1 and 4tochki; a group with another supplier is
+    not merged (a 4tochki position of it then meets the strict entry). The pairs to remember and the remembered groups alike."""
+    fits = lambda codes: {supplier_of(g) for g in codes} == {1, tochki_supplier}
+    result.groups = [g for g in result.groups if fits(g)]
+    result.remembered = [g for g in result.remembered if fits(g)]
+    result.found = [p for p in result.found if fits(p[:2])]
+    kept = {g for members in result.groups for g in members}
+    result.rank = {g: r for g, r in result.rank.items() if g in kept}
+    return result
+
+
+def _loose(brand, width, height, diameter, tire_type, load, speed, runflat) -> Optional[Tuple]:
+    """The tire without its model: brand, size, indexes, type (season and studs), RunFlat. None: not enough to tell."""
+    load, speed = str(load or "").split("/")[0].strip(), str(speed or "").strip().upper()
+    brand = brand_form(brand or "")
+    if not (brand and load and speed and tire_type and str(width).strip() and str(diameter).strip()):
+        return None
+    return (brand, str(width).strip(), str(height).strip(), str(diameter).strip(), str(tire_type).strip(), load, speed, bool(runflat))
+
+
+def loose_of_offer(offer: Offer) -> Optional[Tuple]:
+    return _loose(offer.brand_raw or offer.brand_key, offer.width, offer.height, offer.diameter, _tire_type(offer.season, bool(offer.studded)),
+                  offer.load, offer.speed, offer.runflat)
+
+
+def loose_of_key(key) -> Optional[Tuple]:
+    """The same of a same_tire key (a saved or retired ad: Avito brand, model, width, height, diameter, type, load, speed, RunFlat)."""
+    if not key or len(key) < 9:
+        return None
+    brand, _model, width, height, diameter, tire_type, load, speed, runflat = tuple(key)[:9]
+    return _loose(brand, width, height, diameter, tire_type, load, speed, runflat)
+
+
+WITH_TUBE = re.compile(r"\+\s*камер|\bс\s+камер|\bкамер[аы]\b|\btube\b", re.I)    # «шина + камера» (Алтайшина): not our goods (owner 2026-10-27)
+
+
+def tochki_entry(ev, match: MatchResult, offers: Mapping[str, Offer], published, tochki_supplier: int, mode: str,
+                 published_keys=(), retired=(), allow=()) -> Dict[str, str]:
+    """The 4tochki positions of the trial that do not go into the feed: {code: why} (plan tochki-feed §4б, §4д, §4е; owner 2026-10-27).
+
+    One tire, one ad. A 4tochki position that is not published yet goes in only when it is plainly a tire of its own: it has an identity,
+    it is not doubtful, ambiguous or refused, and WebMIM has not the same tire (brand, size, indexes, type, RunFlat, XL) under any model,
+    in the unload in any state (`offers`), on a published ad of this account (`published_keys`: the same_tire keys of its saved ads whose
+    positions are not offers now) or on an ad it took off (`retired`, kept for good): `tochki_twin`. In `merge` a position of a group of
+    WebMIM and 4tochki goes in (the merge keeps the group one ad under one Id); in `no_twin` it does not: `tochki_pair`. A non-empty
+    `allow` (stage 2 of the plan) lets in only its codes: `tochki_not_allowed`. Two 4tochki codes of one tire (Character / Nordman): one,
+    the published one, else the one under the owner's main name, else more stock, else the smaller code: `same_tire`. A tire with a
+    tube: `with_tube`, published or not. A published 4tochki ad stays otherwise (a new WebMIM twin does not take a live ad off)."""
+    prefix = "s%d-" % tochki_supplier
+    published = set(published)
+    allow = set(allow or ())
+    out: Dict[str, str] = {}
+    mine = sorted(g for g in ev.ok if g.startswith(prefix))
+    for gid in mine:
+        offer = ev.ok[gid].offer
+        if WITH_TUBE.search("%s %s %s" % (offer.name, offer.name_orig, offer.model_raw)):
+            out[gid] = "with_tube"
+    by_tire: Dict[Tuple, List[str]] = {}
+    for gid in mine:
+        ident = match.identities.get(gid)
+        if gid not in out and ident is not None:
+            by_tire.setdefault(ident.bucket + (ident.model,), []).append(gid)
+    for codes in by_tire.values():
+        if len(codes) < 2:
+            continue
+        live = [g for g in codes if g in published]
+        if live:
+            losers = [g for g in codes if g not in published]
+        else:
+            def order(g):
+                offer = ev.ok[g].offer
+                own_name = model_form(offer.model_raw, offer.brand_raw or offer.brand_key) == match.identities[g].model
+                return (not own_name, -offer.stock, g)
+            losers = sorted(codes, key=order)[1:]
+        for g in losers:
+            out[g] = "same_tire"
+    grouped = {g for members in match.groups for g in members}
+    unclear = {g for members in match.ambiguous + match.refused for g in members}
+    webmim: set = set()
+    for gid, offer in offers.items():
+        if not gid.startswith(prefix):
+            key = loose_of_offer(offer)
+            if key is not None:
+                webmim.add(key + (bool(offer.xl),))
+    ads = {loose_of_key(k) for k in published_keys} | {loose_of_key(k) for g, _i, k, _at in retired if not str(g).startswith(prefix)}
+    ads.discard(None)
+    for gid in mine:
+        if gid in out or gid in published:
+            continue
+        offer = ev.ok[gid].offer
+        ident, key = match.identities.get(gid), loose_of_offer(offer)
+        if allow and gid not in allow:
+            out[gid] = "tochki_not_allowed"
+        elif ident is None or key is None or gid in match.doubtful or gid in unclear:
+            out[gid] = "tochki_unclear"
+        elif gid in grouped:
+            if mode != "merge":
+                out[gid] = "tochki_pair"
+        elif key + (bool(offer.xl),) in webmim or key in ads:
+            out[gid] = "tochki_twin"
+    return out
+
+
 def for_feed(conn, offers: Mapping[str, Offer], account_id: Optional[int] = None, now=None, unavailable=()) -> MatchResult:
     """The pairs the feed merges (the owner's synonyms, 4tochki ranked last), with the remembered ones (not the ones the owner forgot, not for
     a supplier unavailable now);

@@ -102,19 +102,48 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
     suffix, prefix = connections.feed_style(conn, account["id"])
     foreign = _foreign_addresses(conn, account) if mode == "generated" else frozenset()
     own = _own_photos(conn, account)
+    id_code = dict(_bound_codes(mirror_feed.adopted_maps(conn, account["id"])[0], getattr(parsed, "offers", {}) or {}, eff.min_stock,
+                                store.load_published(conn, account["id"])),
+                   **(id_codes or {}))       # Ids that do not carry their code (alias scheme, inherited Ids): from the account's bindings, so `feed-check` reads them too
+    tochki = _tochki_context(conn, account, ads, id_code, getattr(parsed, "offers", {}) or {}, folder, source)
     ctx = feed_check.Context(
         mode=mode, template_tags=template or frozenset(t for ad in ads for t in (c.tag for c in ad)), reference=ref or {},
         stocks={code: int(getattr(o, "stock", 0) or 0) for code, o in (getattr(parsed, "offers", {}) or {}).items()},
         min_stock=eff.min_stock, phone=identity["phone"] if identity["phone_source"] == "cabinet" else "",
         other_ids=frozenset(others), pack4=bool(getattr(eff, "pack4", False)), photo_prefix=prefix if mode == "generated" and not mirror_feed.adopted_maps(conn, account["id"])[1] else "",
         previous_count=len(_ids_of(folder / "avito_feed.xml")), held=frozenset(str(h) for h in held),
-        id_code=dict(_bound_codes(mirror_feed.adopted_maps(conn, account["id"])[0], getattr(parsed, "offers", {}) or {}, eff.min_stock,
-                                  store.load_published(conn, account["id"])),
-                     **(id_codes or {})),       # Ids that do not carry their code (alias scheme, inherited Ids): from the account's bindings, so `feed-check` reads them too
+        id_code=id_code,
         owner_phone="" if account["id"] == connections.PRIMARY_ACCOUNT else feed_check._phone(active_settings(conn).contact_phone),
         foreign_addresses=foreign, allowed_photos=own.allowed if own is not None else frozenset(),
-        known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem)
+        known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem, **tochki)
     return feed_check.check_feed(ads, ctx)
+
+
+def _tochki_context(conn, account, ads, id_code, offers, folder, source) -> dict:
+    """What the 4tochki rules of the check need: nothing when 4tochki is not set up or the feed has none of it (the check is as before)."""
+    from . import tire_match, tochki_feed
+    sid = tochki_feed.config(conn)["supplier_id"]
+    if not sid:
+        return {}
+    prefix = "s%d-" % sid
+    codes = {(a.findtext("Id") or ""): id_code.get(a.findtext("Id") or "") or feed_check._code(a.findtext("Id") or "") for a in ads}
+    if not any(c.startswith(prefix) or i.startswith(prefix) for i, c in codes.items()):
+        return {"tochki_prefix": prefix, "tochki_trial": tochki_feed.trial(conn, account["id"]) is not None}
+    synonyms = store.load_model_synonyms(conn)
+    tire_ids = {}
+    for code in set(codes.values()):
+        ident = tire_match.identity(offers[code], synonyms) if code in offers else None
+        if ident is not None:
+            tire_ids[code] = tire_match.identity_text(ident)
+    live = {}
+    if source != "published":
+        try:
+            live = {a.findtext("Id"): (a.findtext("Model") or "") for a in ET.parse(str(folder / "avito_feed.xml")).getroot().findall("Ad")
+                    if a.findtext("Id")}
+        except (OSError, ET.ParseError):
+            live = {}
+    return {"tochki_prefix": prefix, "tochki_trial": tochki_feed.trial(conn, account["id"]) is not None, "tire_ids": tire_ids,
+            "live_models": live}
 
 
 def _inputs_key(account_id: int) -> str:

@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime, timedelta
 
-from test_tochki_feed_unchanged import SNAPSHOT, build, fixed_clock, prepare  # noqa: F401  (fixed_clock: the golden day here too)
+from test_tochki_feed_unchanged import SNAPSHOT, TRIAL_1, build, fixed_clock, prepare  # noqa: F401  (fixed_clock: the golden day here too)
 from test_tochki_panel import app_with, catalog_items, row
 from tires_sync import connections, store, tochki_feed
 from tires_sync.panel import service
@@ -206,7 +206,7 @@ def _panel_feeds_on(tmp_path) -> dict:
     from werkzeug.security import generate_password_hash
     from tires_sync.panel import create_app
     from tires_sync.panel.routes_drafts import publish_now
-    prepare(tmp_path, feed_switch=True)
+    prepare(tmp_path, feed_switch=True, trial=TRIAL_1)
     app = create_app({"TESTING": True, "SECRET_KEY": "s", "PASSWORD_HASH": generate_password_hash("pw", method="pbkdf2:sha256:1000"),
                       "DB_PATH": str(tmp_path / "t.db"), "UNLOAD_PATH": str(tmp_path / "unload.xml"), "REFERENCE_PATH": str(tmp_path / "reference.txt"),
                       "FEED_ROOT": str(tmp_path / "feed"), "NOW": lambda: datetime(2026, 10, 21, 0, 0, 0)})
@@ -229,11 +229,11 @@ def test_with_the_switch_on_the_panels_publication_builds_the_feed_of_the_cycle(
     (tmp_path / "panel").mkdir()
     SNAPSHOT["fetched_at"] = fresh()
     try:
-        cycle = build(tmp_path / "cycle", feed_switch=True)
+        cycle = build(tmp_path / "cycle", feed_switch=True, trial=TRIAL_1)
         panel = _panel_feeds_on(tmp_path / "panel")
     finally:
         SNAPSHOT["fetched_at"] = "2026-10-14T09:30:00"
     assert set(panel) == set(cycle) == {"Основной", "Партнёр-2"}
-    assert "<Id>s2-TCH900</Id>" in panel["Основной"] and "<Id>s2-TCH900_a2</Id>" in panel["Партнёр-2"]
+    assert "<Id>s2-TCH900</Id>" in panel["Основной"] and "s2-" not in panel["Партнёр-2"]          # the trial: account 1 only
     for name in cycle:
         assert panel[name] == cycle[name], name

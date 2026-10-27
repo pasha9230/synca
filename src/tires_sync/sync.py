@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import re
 import xml.etree.ElementTree as ET
 
@@ -85,10 +86,16 @@ def _pending_item(d: Decision, ev, rendered, rendered4) -> dict:
 
 
 def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date, now=None, removed_before: int = 0,
-                   cross_supplier: Optional[bool] = None):
+                   cross_supplier: Optional[bool] = None, tochki_trial=None):
     """What the cycle would do with every position of one account: (published now, evaluation, decisions). Writes nothing.
     `now` (Moscow time) turns on the wait for the morning refill of the supplier's catalog (see decide.CART_REFILL_HOUR).
-    `cross_supplier`: one tire at two suppliers is one ad (tire_match); None reads the switch `tire_match.feed` (off by default)."""
+    `cross_supplier`: one tire at two suppliers is one ad (tire_match); None reads the switch `tire_match.feed` (off by default).
+    `tochki_trial`: the 4tochki trial of this account (tochki_feed.trial); None reads it, False: none. Out of the trial the 4tochki
+    positions are not seen at all; in it the new ones meet the strict entry (tire_match.tochki_entry) and `merge` turns the merge on."""
+    from . import tochki_feed
+    tochki = tochki_feed.config(conn)["supplier_id"]
+    trial = tochki_feed.trial(conn, acct) if tochki_trial is None else (tochki_trial or None)
+    parsed = tochki_feed.for_account(parsed, tochki, trial)
     published = store.load_published(conn, acct)
     if not parsed.offers and published:
         raise SupplierDataError("no offers parsed for territory %s while %d items are published" % (
@@ -123,10 +130,36 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
             other_reissued = mirror_feed.reissued_own(conn, other["id"])
             foreign |= {_final_id(code, bound, other_suffix, other_reissued, other["id"]) for code in store.load_published(conn, other["id"])}
     from . import tire_match
+    merge = tire_match.switch_on(conn) if cross_supplier is None else cross_supplier
+    trial_merge = cross_supplier is None and not merge and trial is not None and trial["mode"] == "merge"
     cross = (tire_match.for_feed(conn, parsed.offers, acct, now, getattr(parsed, "unavailable", ()))
-             if (tire_match.switch_on(conn) if cross_supplier is None else cross_supplier) else None)
+             if merge or trial_merge else None)
+    if trial_merge:                                                       # the trial merges WebMIM row 1 and 4tochki only (owner, question 8)
+        cross = tire_match.only_webmim_and(cross, tochki)
+    retired = store.load_retired(conn, acct, today)
+    if trial is not None:                                                 # one tire, one ad: a new 4tochki position goes in only as a tire of its own
+        match = cross if cross is not None else tire_match.pairs(
+            parsed.offers, store.load_model_synonyms(conn), tochki, not_pairs=frozenset(store.not_tire_pairs(conn)))
+        prefix = "s%d-" % tochki
+        saved = [store.get_snapshot(conn, g, acct) for g in published if g not in parsed.offers and not g.startswith(prefix)]
+        keys = [same_tire.identity_of_ad(text) for text in saved if text]
+        mode = trial["mode"] if cross is not None else "no_twin"           # no merge in this plan: a pair would be two ads
+        for gid, why in tire_match.tochki_entry(ev, match, parsed.offers, published, tochki, mode, [k for k in keys if k],
+                                                retired, trial["allow"]).items():
+            ev.ok.pop(gid, None)
+            ev.problems.pop(gid, None)
+            ev.excluded[gid] = why
     ev.inherit = same_tire.dedupe(ev, published, settings.min_stock, live_id_of, first_seen_of,
-                                  lambda code: store.get_snapshot(conn, code, acct), store.load_retired(conn, acct, today), foreign, cross=cross)
+                                  lambda code: store.get_snapshot(conn, code, acct), retired, foreign, cross=cross)
+    if trial is not None and cross is not None:                           # a 4tochki position that goes on under a WebMIM ad: its «Артикул»
+        group_of = cross.group_of()                                       # and «Страна» lines from WebMIM (owner, question 4)
+        for kept in ev.inherit:
+            cand = ev.ok.get(kept)
+            twin = next((g for g in group_of.get(kept, ()) if not g.startswith("s%d-" % tochki) and g in parsed.offers), None)
+            if cand is not None and twin is not None and kept.startswith("s%d-" % tochki):
+                other = parsed.offers[twin]
+                ev.ok[kept] = dataclasses.replace(cand, offer=dataclasses.replace(
+                    cand.offer, code=cand.offer.code or other.code, country=cand.offer.country or other.country))
     ev.match = cross                                                      # the cycle remembers its pairs and changes of supplier (run_cycle)
     for code in list(aliases):                                            # a code that takes the Id of an older ad does not need its own alias
         if code in ev.inherit:
@@ -216,9 +249,11 @@ def next_title_basis(old: Dict[str, list], titles: Dict[str, str], ads, names: D
 def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, today: date, description_template=None,
               id_suffix: str = "", image_prefix: str = "", id_map=None, image_map=None, contact_name: str = "", live_titles=None,
               alias_packs: bool = False, title_template: Optional[str] = None, photo_version: str = "", basis=None, title_guard=None,
-              own_photos=None):
+              own_photos=None, live_images=None):
     """The ads of one account's feed from its decisions: (ads, invalid, final decisions, rendered, rendered 4-packs). Writes nothing.
-    A position whose ad does not build is skipped, or held on its snapshot, or taken off when the wait is over."""
+    A position whose ad does not build is skipped, or held on its snapshot, or taken off when the wait is over.
+    `live_images`: Id -> the photo links of the ad Avito reads now (live_images_of): a 4tochki position that goes on under the Id of
+    another position's ad keeps that ad's photos (owner 2026-10-27)."""
     ads = []
     invalid: Dict[str, List[str]] = {}
     final = []
@@ -226,6 +261,13 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
     rendered4: Dict[str, object] = {}
     owners: List[tuple] = []                                              # (ad, code of the position): which position stands behind which Id
     old_models = store.load_old_model_names(conn)                         # {old_model}: only a template that has it uses this
+    from . import tochki_feed
+    tochki = tochki_feed.config(conn)["supplier_id"]
+    tochki_prefix = "s%d-" % tochki if tochki else None
+
+    def no_pack(code):                                                    # no set of four of a 4tochki position in the trial (plan §4з)
+        return bool(tochki_prefix) and code.startswith(tochki_prefix)
+    model_photos = ModelPhotos(conn, parsed.offers, tochki_prefix)
     for d in ds.decisions:
         if d.action not in (Action.PUBLISH, Action.UPDATE, Action.KEEP, Action.HOLD):
             final.append(d)
@@ -240,7 +282,7 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
                 ads.append(ad)
                 owners.append((ad, d.goods_id))
                 rendered[d.goods_id] = ad
-                if settings.pack4_for(ev.ok[d.goods_id].offer) and ev.ok[d.goods_id].offer.stock >= 4:
+                if settings.pack4_for(ev.ok[d.goods_id].offer) and ev.ok[d.goods_id].offer.stock >= 4 and not no_pack(d.goods_id):
                     twin = render_ad(
                         ev.ok[d.goods_id], d.price, d.point, settings, today, template=description_template, pack=4, title_template=title_template,
                         old_models=old_models)
@@ -267,7 +309,7 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         owners.append((held_ad, d.goods_id))
         offer = parsed.offers.get(d.goods_id)
         # a set of four is not offered for a position that waits for the morning, nor when it is known that fewer than four are left
-        no_four = d.reason.startswith("cart_wait:") or (offer is not None and offer.stock < 4)
+        no_four = d.reason.startswith("cart_wait:") or (offer is not None and offer.stock < 4) or no_pack(d.goods_id)
         twin = None if no_four else (
             store.get_snapshot4(conn, d.goods_id, acct) if settings.pack4 and (offer is None or settings.pack4_for(offer)) else None)
         if twin:
@@ -335,28 +377,44 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             elif ad.find("Title").text != live_titles[node.text]:
                 renames.append((ad, live_titles[node.text]))   # the supplier renamed the tire: the fresh title (owner, 2026-10-19), unless too many;
                 # also a live title that still shows the supplier's age note («… старше в наличии»): the fresh one has none (owner, 2026-10-25)
+        photo_code = set_code = code                         # the position whose photos the ad shows, the one whose own set it leads with
+        if tochki_prefix and owner.startswith(tochki_prefix) and not ALIAS_ID.match(node.text):
+            id_code = re.sub(r"-x\d+$", "", node.text.split("_")[0])
+            if id_code != owner:                             # it goes on under the Id of another position's ad: that ad's photos stay
+                photo_code = set_code = id_code
+                if (live_images or {}).get(node.text):
+                    _images_node(ad)
+                    _set_images(ad, live_images[node.text])
+                    continue
+            else:                                            # a 4tochki ad of its own: the WebMIM picture of the same model, if any
+                photo_code = model_photos.code_for(parsed.offers.get(owner)) or code
         image = ad.find("Images/Image")
+        if image is None and photo_code != code and (image_prefix or photo_code in image_map or getattr(parsed.offers.get(photo_code), "image", "")):
+            image = _images_node(ad).find("Image")
         if image is None and kept is not None and photo_cache.cached(kept, code) is not None:
             # hotfix 2026-10-21: the supplier emptied the picture of a position whose photo we keep: the ad keeps the same link of the
             # account (Avito sees no change); with no kept photo there is no Images and the check «photo» stops the account, as before
             image = ET.SubElement(ET.SubElement(ad, "Images"), "Image", url="")
             from_cache += 1
         if image is not None:
-            if code in image_map:
-                image.set("url", image_map[code])
+            if photo_code in image_map:
+                image.set("url", image_map[photo_code])
             elif image_prefix:
-                url = "%s%s.jpg" % (image_prefix, code)
+                url = "%s%s.jpg" % (image_prefix, photo_code)
                 query = []
                 if stamp or alias_packs:                       # a renewed or aliased ad is a new ad: its photo link is new too (same picture, its own address)
                     query.append("v=" + node.text)
                 if photo_version:                              # the account changed the look of its photos: a new address, so Avito fetches them again
                     query.append("s=" + photo_version)
                 image.set("url", url + ("?" + "&".join(query) if query else ""))
+            elif photo_code != code and getattr(parsed.offers.get(photo_code), "image", ""):
+                image.set("url", parsed.offers[photo_code].image)
             # own photos on: our approved frames first, this account's own files; off: the one link (a saved ad loses earlier own photos too)
-            offer = parsed.offers.get(code)
+            offer = parsed.offers.get(set_code)
             fallback = image.get("url")
             if is_library_link(fallback):                      # a saved ad led with our frame and no account link replaced it: the supplier's photo
-                fallback = offer.image if offer is not None and offer.image else None
+                source = parsed.offers.get(photo_code)
+                fallback = source.image if source is not None and source.image else None
             _set_images(ad, image_urls(own_photos, offer, pack, fallback))
     if from_cache:
         logging.getLogger("tires_sync.sync").warning("фото из кэша: %d позиций (поставщик убрал картинку)", from_cache)
@@ -367,6 +425,62 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
     if title_guard is not None:
         title_guard["held"] = len(renames) if len(renames) > limit else 0
     return ads, invalid, final, rendered, rendered4, owners
+
+
+class ModelPhotos:
+    """The WebMIM position whose picture a 4tochki ad of its own shows (owner 2026-10-27): one of the same model (brand and main name, the
+    owner's synonyms), with a picture, the smallest code; none: the ad shows the 4tochki picture. Built on the first question."""
+
+    def __init__(self, conn, offers, tochki_prefix):
+        self.conn, self.offers, self.prefix, self.index = conn, offers, tochki_prefix, None
+
+    def _model(self, offer, synonyms):
+        from .tire_match import brand_form, model_form
+        brand = brand_form(offer.brand_raw or offer.brand_key)
+        main = model_form(offer.model_raw, offer.brand_raw or offer.brand_key)
+        return (brand, synonyms.get((brand, main), main)) if brand and main else None
+
+    def code_for(self, offer) -> Optional[str]:
+        if offer is None or not self.prefix:
+            return None
+        if self.index is None:
+            self.synonyms = store.load_model_synonyms(self.conn)
+            self.index = {}
+            for gid in sorted(self.offers):
+                other = self.offers[gid]
+                if gid.startswith(self.prefix) or not other.image:
+                    continue
+                key = self._model(other, self.synonyms)
+                if key is not None:
+                    self.index.setdefault(key, gid)
+        key = self._model(offer, self.synonyms)
+        return self.index.get(key) if key is not None else None
+
+
+def _images_node(ad):
+    """The ad's Images with at least one Image (made empty when the ad has none)."""
+    images = ad.find("Images")
+    if images is None:
+        images = ET.SubElement(ad, "Images")
+    if images.find("Image") is None:
+        ET.SubElement(images, "Image", url="")
+    return images
+
+
+def live_images_of(out_dir) -> Dict[str, List[str]]:
+    """Id -> the photo links of the ads of the feed that Avito is reading now (as live_titles_of)."""
+    if out_dir is None or Path(out_dir).name not in ("next", "new"):
+        return {}
+    try:
+        root = ET.parse(str(Path(out_dir).parent / "avito_feed.xml")).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    out = {}
+    for a in root.findall("Ad"):
+        urls = [i.get("url") for i in a.findall("Images/Image") if i.get("url")]
+        if a.findtext("Id") and urls:
+            out[a.findtext("Id")] = urls
+    return out
 
 
 def _set_images(ad, urls: List[str]) -> None:
@@ -430,7 +544,7 @@ def run_cycle(
         conn, parsed, ev, published, ds, settings, acct, today, description_template, id_suffix, image_prefix, id_map, image_map,
         contact_name, titles, alias_packs=bool(account_id is not None and mirror_feed.alias_scheme(conn, acct)),
         title_template=title_template or None, photo_version=photo_version or "", basis=basis, title_guard=title_guard,
-        own_photos=own_photos)
+        own_photos=own_photos, live_images=live_images_of(out_dir))
     id_codes = {a.findtext("Id"): code for a, code in owners if a.findtext("Id")}
     if ev.aliases and account_id is not None:                              # an alias is remembered for the positions that are in the feed (not for the whole catalog)
         mirror_feed.bind_ids(conn, acct, {c: ev.aliases[c] for _a, c in owners if c in ev.aliases},
