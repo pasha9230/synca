@@ -256,3 +256,15 @@ def test_a_profile_name_with_a_double_space_is_still_the_profile_name(tmp_path):
     fake.add("c1", "Д  М", [("in", "Здравствуйте"), ("in", "Меня зовут Олег")])
     chats.sync_account(conn, fake, account, NOW)
     assert deals.process_all(conn, NOW)["names"] == 1 and orders.get_card(conn, card_id)["client_name"] == "Олег"
+
+
+@pytest.mark.parametrize("text", ["Муж Сергей 89001234567", "Жена Ольга +7 900 123 45 67", "Сын Артём 89001234567", "Мастер Иван 89001234567",
+                                  "Моё имя указано в профиле", "Меня зовут так же, как в профиле", "Имя - любое", "имя: неважно"])
+def test_kin_roles_and_remarks_are_not_names(text):
+    assert name(("in", text)) == ""
+
+
+def test_a_garbage_marker_does_not_hide_a_real_name_told_later():
+    assert name(("in", "Моё имя указано в профиле"), ("in", "Иван 89001234567")) == "Иван"
+    assert name(("in", "меня зовут иван")) == "Иван" and name(("in", "Мое имя Иванов")) == "Иванов"
+    assert name(("in", "Настя 89001234567")) == "Настя"

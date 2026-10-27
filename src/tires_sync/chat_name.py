@@ -32,6 +32,8 @@ STOP = frozenset("""
 ikon nokian michelin bridgestone continental pirelli goodyear dunlop yokohama hankook kumho cordiant viatti toyo nexen gislaved
 maxxis kama кама нокиан мишлен бриджстоун континенталь пирелли гудйир данлоп йокогама ханкук кумхо кордиант виатти тойо нексен
 hello hi thanks thank yes no ok okay
+муж жена сын дочь брат сестра отец мама папа мастер водитель менеджер сосед бог богу
+указано указан указана так же любое любой неважно профиле профиль
 """.split())
 
 
@@ -60,7 +62,7 @@ FIRST_NAMES = frozenset("""
 альберт арсен арман ашот гарик гайк армен демид захар зиновий игнат иннокентий
 ираклий кузьма лука макар мирон назар нестор никифор осип прохор радик савелий
 самуил тарас трофим устин фаддей харитон эльмир
-""".split())
+ влад настя ксюша саня серёга серега тёма тема даня валя галя люба эдик магомед али тигран карен самвел рашид алишер фарид рамиль роберт рафаэль""".split())
 _FOLDED = frozenset(n.replace("ё", "е") for n in FIRST_NAMES)
 
 
@@ -106,7 +108,7 @@ def _explicit(text: str) -> Optional[str]:
     for found in EXPLICIT.finditer(text):
         words = _words_after(text, found.end())
         name = _clean(words)
-        if name:
+        if name and (words[0][:1].isupper() or _is_first_name(words[0].split("-")[0])):      # «имя - любое»: a lower-case word is a name only if known
             return name
     return None
 
