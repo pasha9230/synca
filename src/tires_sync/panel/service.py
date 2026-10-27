@@ -1120,12 +1120,31 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
     }
 
 
+def tochki_off_state(conn, supplier_id: int, unload_path: str):
+    """None: not the 4tochki row, or its switch «в фид» is on (its positions are the panel's own set). Else "ready" (a snapshot with
+    positions: the settings lists show them, for choosing brands and percents in advance) or "missing". Only the settings lists read this;
+    the set that builds the feeds (`suppliers.load_all_parsed`, `panel.data.load_merged`) still ignores 4tochki with the switch off."""
+    from .. import tochki_feed
+    cfg = tochki_feed.config(conn)
+    if cfg["feed"] or not cfg["supplier_id"] or supplier_id != cfg["supplier_id"]:
+        return None
+    loaded = tochki_feed.load_snapshot(unload_path, supplier_id)
+    return "ready" if loaded is not None and loaded[0].offers else "missing"
+
+
 def _supplier_parsed(conn, supplier_id: int, unload_path: str):
     """(positions, load time) for the settings pages of one supplier: the panel's set, or the raw parse of a secondary WebMIM unload the
-    cycle holds as old (`data.stale_unload`), whose lists stay shown and settable (their load time marks them «только просмотр»)."""
+    cycle holds as old (`data.stale_unload`), whose lists stay shown and settable (their load time marks them «только просмотр»); for the
+    4tochki row with its switch off, the last snapshot (see `tochki_off_state`), so that brands can be chosen before the feed is on."""
+    from .. import tochki_feed
     from ..settings_store import active_settings
     from .data import load_merged, stale_unload
     settings = active_settings(conn)
+    cfg = tochki_feed.config(conn)
+    if not cfg["feed"] and cfg["supplier_id"] == supplier_id:            # 4tochki before its switch: its lists come from the last snapshot
+        loaded = tochki_feed.load_snapshot(unload_path, supplier_id)     # read once: the answer is this object or nothing
+        if loaded is not None and loaded[0].offers:
+            return loaded[0], None
     held = stale_unload(conn, settings, unload_path, supplier_id)
     if held is not None:
         return held

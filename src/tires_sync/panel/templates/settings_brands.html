@@ -3,5 +3,5 @@
 {% block title %}Бренды и наценки · Tires Sync{% endblock %}
 {% block content %}
 {% set tab = "brands" %}{% include "_settings_head.html" %}
-{% for pt in pricing_tables %}{% with supplier=pt.supplier, rows=pt.rows, stale=pt.stale, multi=pricing_tables|length > 1 %}{% include "_pricing.html" %}{% endwith %}{% endfor %}
+{% for pt in pricing_tables %}{% with supplier=pt.supplier, rows=pt.rows, stale=pt.stale, tochki_off=pt.tochki_off, multi=pricing_tables|length > 1 %}{% include "_pricing.html" %}{% endwith %}{% endfor %}
 {% endblock %}

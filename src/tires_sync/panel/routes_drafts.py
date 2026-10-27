@@ -190,7 +190,8 @@ def register(app) -> None:
         conn = get_conn()
         return render_template("settings_brands.html", raw=get_active(conn)[1], pricing_tables=[
             {"supplier": sp, "rows": service.pricing_table(conn, sp["id"], app.config["UNLOAD_PATH"], load_reference(app.config["REFERENCE_PATH"])),
-             "stale": service.supplier_stale_text(conn, sp["id"], app.config["UNLOAD_PATH"])}
+             "stale": service.supplier_stale_text(conn, sp["id"], app.config["UNLOAD_PATH"]),
+             "tochki_off": service.tochki_off_state(conn, sp["id"], app.config["UNLOAD_PATH"])}
             for sp in connections.list_suppliers(conn)])
 
     @app.route("/settings/brands/card")
