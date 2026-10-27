@@ -16,13 +16,18 @@ def owner_exclusion(brand_key: str, diameter: int, excluded_brands, excluded_siz
     return None
 
 
+def is_aged(offer: Offer) -> bool:
+    """«старше 3-х/5-ти лет» in the supplier's name or year: the one test behind the old_production exclusion."""
+    return "старше" in offer.name.lower() or "старше" in offer.mnf_year.lower()
+
+
 def exclusion_reason(offer: Offer, settings: Settings) -> Optional[str]:
     owner = owner_exclusion(offer.brand_key, offer.diameter, settings.excluded_brands, settings.excluded_sizes)
     if owner:
         return owner
     if offer.car_type.upper() in ("C", "LT"):
         return "commercial"
-    if "старше" in offer.name.lower() or "старше" in offer.mnf_year.lower():
+    if is_aged(offer):
         return "old_production"
     if offer.diameter < settings.min_diameter:
         return "diameter"

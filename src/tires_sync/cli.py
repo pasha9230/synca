@@ -167,6 +167,10 @@ def _build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--feed-root", required=True)
     fc.add_argument("--published", action="store_true", help="проверить опубликованный фид, а не черновик")
     fc.add_argument("--account", type=int, default=0, help="номер аккаунта; без него все")
+    oc = sub.add_parser("overrides-clear-aged", help="снять ручное «вкл» у всех позиций «старше N лет» (исключение «старше» снова работает); без --apply только показывает список")
+    oc.add_argument("--db", required=True)
+    oc.add_argument("--unload", required=True)
+    oc.add_argument("--apply", action="store_true", help="записать новую версию настроек (автор cli); без него ничего не пишется")
     mr = sub.add_parser("match-report", help="одна шина у разных поставщиков (tire_match): пары, сомнительные, что изменилось бы в фидах при включении склейки; ничего не меняет")
     mr.add_argument("--db", required=True)
     mr.add_argument("--unload", required=True)
@@ -1099,6 +1103,30 @@ def _cmd_feed_check(args) -> int:
             print("   … и ещё %d" % (len(findings) - 40))
         worst = max(worst, 3 if bad else 0)
     return worst
+
+
+def _cmd_overrides_clear_aged(args) -> int:
+    from . import overrides_clear
+    conn = store.connect(args.db)
+    version, raw = get_active(conn)
+    parsed, _, notes = load_all_parsed(conn, active_settings(conn), Path(args.unload))
+    for note in notes:
+        print(note)
+    found = overrides_clear.find_aged_on(conn, parsed.offers, raw.get("overrides", {}))
+    print("код | название | остаток | в фиде сейчас")
+    for gid, offer in found:
+        where = overrides_clear.in_feed_now(conn, gid)
+        print("%s | %s | %d | %s" % (gid, offer.name, offer.stock, "в фиде: " + ", ".join(where) if where else "не в фиде"))
+    print("Всего: %d" % len(found))
+    if not found:
+        return 0
+    print("Что будет: ручное вкл снимется (не станет «выкл»), исключение «старше» сработает, позиции в фиде снимутся со следующим циклом.")
+    if not args.apply:
+        print("Ничего не записано. Чтобы снять, добавьте --apply.")
+        return 0
+    new = overrides_clear.apply_clear(conn, found, version, _now())
+    print("Готово: новая версия настроек №%d (было №%d), снято: %d." % (new, version, len(found)))
+    return 0
 
 
 def _cmd_match_synonym_add(args) -> int:
@@ -2506,6 +2534,8 @@ def main(argv=None) -> int:
             return _cmd_ids_unrenew(args)
         if args.command == "feed-check":
             return _cmd_feed_check(args)
+        if args.command == "overrides-clear-aged":
+            return _cmd_overrides_clear_aged(args)
         if args.command == "match-report":
             return _cmd_match_report(args)
         if args.command == "match-pair-forget":
