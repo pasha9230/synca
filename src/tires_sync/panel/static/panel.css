@@ -713,3 +713,4 @@ button.owin-stage:focus-visible{outline:0;box-shadow:var(--ring)}
   .entity-list td::before{content:attr(data-label);color:var(--gray-500);text-align:left}
   .entity-list td[colspan]::before,.entity-list td.entity-row-actions::before{content:none}
 }
+.table tr.is-off input.input,.table tr.is-off .check,.table tr.is-off td a:not(.badge){color:var(--gray-500)}

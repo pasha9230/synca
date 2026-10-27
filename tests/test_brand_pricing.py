@@ -140,7 +140,7 @@ def test_settings_row_has_a_publish_checkbox_per_season(tmp_path):
     app, client, tok, conn = panel(tmp_path)
     html = client.get("/settings/brands").get_data(as_text=True)
     assert re.search(r'name="r\d+_winter_on" checked', html) and 'name="r0_summer_on"' in html and re.search(r'name="r\d+_winter_form"', html)
-    assert "Снять весь бренд" in html and "Вернуть весь бренд" in html
+    assert "Снять с фида" in html and "Добавить в фид" in html       # IKON is in the feed, LAUFENN is not
 
 
 def test_row_form_switches_a_season_on_and_off(tmp_path):
@@ -229,7 +229,7 @@ def test_the_confirmation_screen_leads_back_to_the_page_where_you_were_working(t
 def test_controls_of_a_brand_row_name_the_brand_for_screen_readers(tmp_path):
     app, client, tok, conn = panel(tmp_path)
     html = client.get("/settings/brands").get_data(as_text=True)
-    assert 'aria-label="IKON TYRES, зима: публиковать"' in html and 'aria-label="Снять весь бренд IKON TYRES"' in html
+    assert 'aria-label="IKON TYRES, зима: публиковать"' in html and 'aria-label="Снять бренд IKON TYRES с фида"' in html
     assert 'aria-label="Применить только для бренда IKON TYRES"' in html and 'aria-current="page"' in html
 
 
@@ -314,3 +314,76 @@ def test_an_untouched_table_changes_nothing_and_a_foreign_brand_is_refused(tmp_p
     assert staging.summary(conn)["count"] == 0 and "нет бренда" in client.get("/settings/brands").get_data(as_text=True)
     post(client, "/settings/pricing", tok, scope="table", supplier="1")
     assert "Нечего применять" in client.get("/settings/brands").get_data(as_text=True)
+
+
+# --- one toggle per brand row: «Снять с фида» / «Добавить в фид», removed rows greyed ---------------------------------
+
+def _row_of(html, brand):
+    rows = re.findall(r"<tr[^>]*>.*?</tr>", html, re.S)
+    return next(r for r in rows if 'value="%s"' % brand in r and "_brand" in r)
+
+
+def test_brand_row_has_one_toggle_that_follows_the_state(tmp_path):
+    app, client, tok, conn = panel(tmp_path)
+    html = client.get("/settings/brands").get_data(as_text=True)
+    row = _row_of(html, "IKON TYRES")
+    assert "Снять с фида" in row and "Добавить в фид" not in row
+    assert 'aria-label="Снять бренд IKON TYRES с фида"' in row
+    assert "is-off" not in row.split(">", 1)[0]
+    assert "Вернуть бренд" not in html and ">Снять бренд<" not in html
+    post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="off")
+    html = client.get("/settings/brands").get_data(as_text=True)
+    row = _row_of(html, "IKON TYRES")
+    assert "Добавить в фид" in row and "Снять с фида" not in row
+    assert 'aria-label="Добавить бренд IKON TYRES в фид"' in row
+    assert "is-off" in row.split(">", 1)[0]
+    laufenn = _row_of(html, "LAUFENN")                                    # never switched on: removed from the start
+    assert "is-off" in laufenn.split(">", 1)[0] and "Добавить в фид" in laufenn
+    assert " disabled " in laufenn and " disabled " not in row               # no percents anywhere: nothing to add yet
+
+
+def test_toggle_buttons_post_exactly_what_the_old_buttons_posted(tmp_path):
+    app, client, tok, conn = panel(tmp_path)
+    html = client.get("/settings/brands").get_data(as_text=True)
+    row = _row_of(html, "IKON TYRES")
+    form_id = re.search(r'form="(ba-1-\d+)"', row).group(1)
+    assert re.search(r'name="enabled" value="off"', row)
+    assert re.search(r'<form id="%s" method="post" action="/settings/pricing"' % form_id, html)
+    assert 'name="scope" value="brand_all"' in html.split('id="%s"' % form_id, 1)[1][:400]
+    post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="off")
+    row = _row_of(client.get("/settings/brands").get_data(as_text=True), "IKON TYRES")
+    assert re.search(r'name="enabled" value="on"', row) and 'form="%s"' % form_id in row
+
+
+def test_partner_sees_removed_brand_grey_with_a_label_and_no_button(tmp_path):
+    from tires_sync import users
+    app, client, tok, conn = panel(tmp_path)
+    post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="off")
+    users.add_user(conn, "partner1", "длинный-пароль-1", T, role="partner")
+    viewer = app.test_client()
+    with viewer.session_transaction() as session:
+        session["user"], session["epoch"], session["csrf"] = "partner1", store.get_session_epoch(conn, "partner1"), "tok"
+    page = viewer.get("/settings/brands")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    row = _row_of(html, "IKON TYRES")
+    assert "is-off" in row.split(">", 1)[0] and "снят с фида" in row
+    assert "Добавить в фид" not in html and "Снять с фида" not in html
+    denied = viewer.post("/settings/pricing", data={"csrf": "tok", "scope": "brand_all", "supplier": "1", "brand": "LAUFENN", "enabled": "off"})
+    assert denied.status_code == 403
+
+
+def test_returning_a_removed_brand_puts_it_back_and_the_button_flips_again(tmp_path):
+    app, client, tok, conn = panel(tmp_path)
+    post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="off")
+    post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="on")
+    row = _row_of(client.get("/settings/brands").get_data(as_text=True), "IKON TYRES")
+    assert "Снять с фида" in row and "is-off" not in row.split(">", 1)[0]
+
+
+def test_partly_switched_on_brand_is_not_grey(tmp_path):
+    app, client, tok, conn = panel(tmp_path)
+    post(client, "/settings/pricing", tok, scope="brand", supplier="1", brand="IKON TYRES",
+         winter_form="1", summer_form="1", summer_small="-1", summer_large="-1", summer_on="on")      # winter off, summer on
+    row = _row_of(client.get("/settings/brands").get_data(as_text=True), "IKON TYRES")
+    assert "Снять с фида" in row and "is-off" not in row.split(">", 1)[0]
