@@ -187,3 +187,20 @@ def test_a_folded_chat_row_of_several_messages_is_accepted_whole(tmp_path):
     assert later in ids
     client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
     assert open_ids(conn) == []
+
+
+def test_a_point_manager_accepts_a_yellow_row_of_its_order_and_a_handoff_blocks_only_what_is_above_it(tmp_path):
+    app, client, tok, conn = setup(tmp_path)
+    from tires_sync import order_manager as mgr
+    mine = points.save_point(conn, {"name": "Юнона", "manager_name": "А", "channel": "panel"})
+    a = card(conn, "Свой")
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (mine, a))
+    hand = event(conn, a, "handoff", mgr.ASK + " Иван", level="yellow")
+    yellow = event(conn, a, "reserve", "Оповещение о конце резерва")
+    pt = other_user(app, conn, "yun", role="point", point_id=mine)
+    pt.post("/alerts/accept-all", data={"csrf": "tok2", "ids": [yellow]})
+    assert yellow not in open_ids(conn, "yun")                                    # no block for a point: it never sees the handoff row
+    # the staff: the green «Заказ создан» below the handoff goes, the yellow above it stays
+    ids, _ = shown(client)
+    client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
+    assert open_ids(conn) == sorted([hand, yellow])
