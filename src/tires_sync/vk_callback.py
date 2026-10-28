@@ -60,15 +60,31 @@ def _message(data: dict, group: str) -> Optional[dict]:
             "transcript": transcript if voice == "done" else "", "voice_link": link}
 
 
-def _act(conn, data: dict, group: str, event_id: str, now: datetime, channel: Callable, box=None, tg_http: Transport = urllib_transport) -> None:
+def claim(conn, message_id: str, peer: str, source: str, now: datetime) -> bool:
+    """The bot takes the message `message_id` («vk-<id of VK>»): True only the first time, whichever way it came (Callback, the backstop of
+    vk_catchup), so a message is acted on once. Taken in one statement: of two processes, one acts."""
+    taken = conn.execute("INSERT OR IGNORE INTO vk_message (message_id, peer, at, source) VALUES (?,?,?,?)",
+                         (str(message_id), str(peer), now.isoformat(timespec="seconds"), source)).rowcount == 1
+    conn.execute("DELETE FROM vk_message WHERE at < ?", ((now - timedelta(days=KEEP_DAYS)).isoformat(timespec="seconds"),))
+    conn.commit()
+    return taken
+
+
+def _act(conn, data: dict, group: str, event_id: str, now: datetime, channel: Callable, box=None, tg_http: Transport = urllib_transport,
+         source: str = "callback") -> bool:
     """A message of a manager goes to the bot; its answer goes back (signed «(бот) »). A number the panel does not know is told to the
-    partner in Telegram (`box`: the keys). Never raises: the event is recorded whatever happens here."""
+    partner in Telegram (`box`: the keys). Never raises: the event is recorded whatever happens here. True: the message was the bot's to act
+    on (taken now, not before by another way); `source`: which way it came."""
     msg = _message(data, group)
     if msg is None:
-        return
+        return False
     local = (now + timedelta(hours=3)).isoformat(timespec="seconds")                   # the journal of the orders keeps panel time (Moscow)
     log = logging.getLogger("tires_sync.vk")
+    taken = False
     try:
+        taken = claim(conn, "vk-" + (msg["id"] or event_id), msg["from"], source, now)
+        if not taken:                                                                 # came the other way already (vk_catchup)
+            return False
         send, deliver, notify = channel(conn, local)
         binding = bool(order_manager.BIND_CODE.match(str(msg["text"] or "").strip().upper())) and order_manager._point_of(conn, msg["from"]) is None
         answer = order_manager.dispatch(conn, "vk-" + (msg["id"] or event_id), msg["from"], msg["text"], msg["reply_no"], local, deliver, notify,
@@ -76,7 +92,7 @@ def _act(conn, data: dict, group: str, event_id: str, now: datetime, channel: Ca
     except Exception:
         conn.rollback()
         log.exception("the message of VK event %s could not be handled", event_id)
-        return
+        return taken
     try:
         panel = points.panel_point_of(conn, msg["from"]) if answer else None
         if panel is not None:                                                         # the owner 2026-10-23: the command is done, the answer
@@ -105,6 +121,7 @@ def _act(conn, data: dict, group: str, event_id: str, now: datetime, channel: Ca
     except Exception:
         conn.rollback()
         log.exception("the look at the handed-over clients failed after VK event %s", event_id)
+    return True
 
 
 NO_KEY = "ключ сообщества не сохранён или не читается (Подключения → ВК)"

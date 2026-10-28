@@ -6,38 +6,19 @@ import threading
 
 from flask import flash, redirect, render_template, request
 
-from .. import chats, connections, order_notify, store, vk_callback, vk_send
-from ..avito import AvitoClient
+from .. import connections, store, vk_callback, vk_catchup
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
 from .common import author, get_conn, login_required, now, now_iso
 from .routes_connections import NO_KEY, _save_secrets
 
-BOT = "бот ВК"
-
 
 def channel(app, conn, local: str):
-    """What the bot needs to act on a manager's message: (send to a manager in VK, deliver to a client in Avito, alert about an order).
-    Each is built from the saved keys; a missing key is a refusal at the moment of use. `local`: the panel time of the message (Moscow).
-    Needs no request: it also runs after the answer to VK has gone."""
-    box = app.config.get("SECRET_BOX")
-    vk_http = app.config.get("VK_HTTP") or urllib_transport
-    sender = vk_send.sender_for(conn, box, http=vk_http)
-
-    def deliver(chat_row, text, token):
-        chat = chats.get_chat(conn, chat_row)
-        if box is None or chat is None:
-            raise chats.ChatError("Мастер-ключ недоступен: ключи Авито не расшифровать.")
-        client_id = connections.get_secret(conn, box, "avito", chat["account_id"], "client_id")
-        client_secret = connections.get_secret(conn, box, "avito", chat["account_id"], "client_secret")
-        if not client_id or not client_secret:
-            raise chats.ChatError("У аккаунта не заданы ключи Авито.")
-        client = AvitoClient(client_id, client_secret, http=app.config.get("AVITO_HTTP") or urllib_transport, allow_write=True)
-        chats.send_reply(conn, client, chat_row, text, token, local, BOT)
-
-    def notify(card, text):
-        return order_notify.deliver(conn, box, card, text, local, tg_http=app.config.get("TG_HTTP") or urllib_transport, vk_http=vk_http)
-    return sender, deliver, notify
+    """What the bot needs to act on a manager's message (vk_catchup.channel), with the keys and the transports of the panel. Needs no request:
+    it also runs after the answer to VK has gone."""
+    config = app.config
+    return vk_catchup.channel(conn, local, config.get("SECRET_BOX"), vk_http=config.get("VK_HTTP") or urllib_transport,
+                              avito_http=config.get("AVITO_HTTP") or urllib_transport, tg_http=config.get("TG_HTTP") or urllib_transport)
 
 
 def after_answer(app, job) -> None:
