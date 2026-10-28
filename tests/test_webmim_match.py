@@ -64,29 +64,85 @@ def order_row(conn, order_id):
 
 # ---- the snapshot ---------------------------------------------------------------------------------------------------------------------
 
-def test_the_pages_are_read_newest_first_until_the_window_and_every_call_is_a_get(tmp_path):
+def test_every_page_of_the_count_is_read_and_the_window_is_applied_after_and_every_call_is_a_get(tmp_path):
     conn = db(tmp_path)
     client, http = api(page([wm(3, 103, "19.10.26 10:00:00"), wm(2, 102, "15.10.26 10:00:00")], 3),
                        page([wm(1, 101, "01.08.26 10:00:00"), wm(0, 100, "01.07.26 10:00:00")], 3),
-                       items(("A", 4, 4000)), items(("B", 2, 3000)))
+                       page([wm(9, 109, "16.10.26 10:00:00")], 3),
+                       items(("A", 4, 4000)), items(("C", 1, 100)), items(("B", 2, 3000)))
     counts = webmim_match.sync(conn, client, "test", NOW, TODAY, days=60, sleep=no_sleep)
-    assert counts == {"pages": 2, "orders": 2, "new": 2, "changed": 0, "items": 2, "undated": 0}           # page 3 is not read: page 2 is past the window
-    assert [c[0] for c in http.calls] == ["GET"] * 5
+    assert counts == {"pages": 3, "pages_total": 3, "orders": 3, "new": 3, "changed": 0, "items": 3, "undated": 0}
+    assert [c[0] for c in http.calls] == ["GET"] * 7
     paths = [c[1].split("webmim.example")[1] for c in http.calls]
-    assert paths[1:3] == ["/api/v2/orders?page=1&per-page=50", "/api/v2/orders?page=2&per-page=50"]
-    assert paths[3:] == ["/api/v2/orders/3/items?page=1&per-page=100", "/api/v2/orders/2/items?page=1&per-page=100"]
-    assert order_row(conn, "3") == ("103", "20", 16000.0, 1) and order_row(conn, "1") is None   # older than 60 days: not kept
+    assert paths[1:4] == ["/api/v2/orders?page=%d&per-page=50" % n for n in (1, 2, 3)]    # page 2 past the window does not stop the reading
+    assert order_row(conn, "3") == ("103", "20", 16000.0, 1) and order_row(conn, "9") == ("109", "20", 100.0, 1)
+    assert order_row(conn, "1") is None                                                   # older than 60 days: not kept
 
 
-def test_oldest_first_is_read_from_the_last_page_backwards(tmp_path):
+@pytest.mark.parametrize("newest_on_last", [False, True])
+def test_pages_unsorted_by_the_creation_date_are_all_read(tmp_path, newest_on_last):
     conn = db(tmp_path)
-    client, http = api(page([wm(1, 101, "01.07.26 10:00:00"), wm(2, 102, "02.07.26 10:00:00")], 3),
-                       page([wm(5, 105, "18.10.26 10:00:00"), wm(6, 106, "19.10.26 10:00:00")], 3),
-                       page([wm(3, 103, "01.08.26 10:00:00"), wm(4, 104, "10.10.26 10:00:00")], 3),
-                       items(), items(), items())
+    rows = [[wm(100 + p, 1000 + p, "%02d.10.26 10:00:00" % (p + 1)), wm(200 + p, 2000 + p, "01.06.26 10:00:00")] for p in range(1, 6)]
+    rows = rows[::-1] if newest_on_last else rows                                         # every page: one order of the window, one long before it
+    client, http = api(*[page(r, 5) for r in rows], *[items() for _ in range(5)])
+    sleeps = []
+    counts = webmim_match.sync(conn, client, "test", NOW, TODAY, sleep=sleeps.append)
+    assert counts["pages"] == 5 and counts["pages_total"] == 5 and counts["orders"] == 5
+    assert {r[0] for r in conn.execute("SELECT id FROM webmim_order")} == {str(100 + p) for p in range(1, 6)}
+    assert len(sleeps) == len(http.calls) - 2 and set(sleeps) == {webmim_match.PAUSE}   # a pause before every request after the first page
+
+
+@pytest.mark.parametrize("ascending", [False, True])
+def test_more_pages_than_the_cap_read_the_newest_ones(tmp_path, monkeypatch, ascending):
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 3)
+    conn = db(tmp_path)
+    dated = {n: [wm(n, 100 + n, "%02d.10.26 10:00:00" % (20 - n))] for n in range(1, 6)}    # order n made on 20-n.10: 1 the newest, 5 the oldest
+    on_page = {n: dated[6 - n] if ascending else dated[n] for n in range(1, 6)}
+    want = [1, 5, 4] if ascending else [1, 5, 2]                                          # the last page tells the direction: it is one of the 3
+    client, http = api(*[page(on_page[n], 5) for n in want], *[items() for _ in range(3)])
     counts = webmim_match.sync(conn, client, "test", NOW, TODAY, sleep=no_sleep)
-    assert [c[1].split("page=")[1][0] for c in http.calls[1:4]] == ["1", "3", "2"]
-    assert counts["orders"] == 3 and {r[0] for r in conn.execute("SELECT id FROM webmim_order")} == {"4", "5", "6"}
+    assert [int(c[1].split("page=")[1].split("&")[0]) for c in http.calls[1:4]] == want
+    assert counts["pages"] == 3 and counts["pages_total"] == 5
+    assert {r[0] for r in conn.execute("SELECT id FROM webmim_order")} == {"1", "2", "5"}           # the two newest, and the probe of the other end
+
+
+def test_without_the_count_the_pages_stop_at_the_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(webmim_match, "PER_PAGE", 1)
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 3)
+    conn = db(tmp_path)
+    client, http = api(*[(200, [wm(n, 100 + n, "18.10.26 10:00:00")]) for n in range(1, 4)], items(), items(), items())
+    counts = webmim_match.sync(conn, client, "test", NOW, TODAY, sleep=no_sleep)
+    assert counts["pages"] == 3 and counts["pages_total"] == 0 and counts["orders"] == 3
+
+
+def test_a_changed_status_on_a_far_page_is_refreshed_with_its_positions(tmp_path):
+    conn = db(tmp_path)
+    rows = [[wm(1, 101, "19.10.26 10:00:00")], [wm(2, 102, "01.06.26 10:00:00")], [wm(3, 103, "18.10.26 10:00:00", text="создан", status="10")]]
+    client, _ = api(*[page(r, 3) for r in rows], items(("A", 1, 10)), items(("B", 4, 4000)))
+    webmim_match.sync(conn, client, "test", NOW, TODAY, sleep=no_sleep)
+    rows[2] = [wm(3, 103, "18.10.26 10:00:00", text="отгружено", status="70")]
+    client, _ = api(*[page(r, 3) for r in rows], items(("B", 2, 4000)))
+    counts = webmim_match.sync(conn, client, "test", "2026-10-20T13:00:00", TODAY, sleep=no_sleep)
+    assert counts["changed"] == 1 and counts["items"] == 1 and order_row(conn, "3") == ("103", "70", 8000.0, 1)
+
+
+def test_the_line_says_pages_read_of_pages_in_all(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    box = SecretBox(Fernet.generate_key())
+    connections.set_config(conn, "webmim_orders", 0, {"server": "test", "login": "api-bot", "auth": "login"}, NOW, "owner")
+    connections.set_secret(conn, box, "webmim_orders", 0, "password", "pw-SECRET-1", NOW, "owner")
+    conn.commit()
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 2)
+    http = ScriptedHttp(TOKEN, page([wm(7, 107, "18.10.26 10:00:00")], 4), page([wm(8, 108, "01.06.26 10:00:00")], 4),
+                        page([wm(9, 109, "17.10.26 10:00:00")], 4), items())
+    status, line = webmim_match.run(conn, box, http, NOW, TODAY, sleep=no_sleep)
+    assert status == "read" and "страниц 2 из 4" in line and "не все страницы" in line, line
+    http = ScriptedHttp(TOKEN, page([wm(7, 107, "18.10.26 10:00:00")], 1))
+    assert "страниц 1 из 1," in webmim_match.run(conn, box, http, NOW, TODAY, sleep=no_sleep)[1]
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 40)
+    http = ScriptedHttp(TOKEN, page([wm(7, 107, "18.10.26 10:00:00")], 3), page([], 3))
+    line = webmim_match.run(conn, box, http, NOW, TODAY, sleep=no_sleep)[1]
+    assert "страниц 2 из 3" in line and "предел" not in line and "пустая страница" in line, line
 
 
 def test_an_unchanged_order_is_only_touched_and_a_changed_one_reads_its_positions_again(tmp_path):
@@ -437,3 +493,26 @@ def test_review_2_leftovers_no_purchase_a_lost_stage_a_long_id_a_busy_base(tmp_p
     orders.ensure_pipeline(other, NOW)
     target = card(other)
     assert post(client, "/orders/%d/webmim/link" % target, tok, order="71").status_code == 302
+
+
+def test_the_page_says_what_to_do_orders_the_sections_by_action_and_hides_the_drafts(panel):
+    app, conn = panel
+    snap(conn, (wm(41, 441, "07.10.26 10:00:00", phone="89111112233"), [("A", 4, 4000)]),
+         (wm(42, 442, "08.10.26 10:00:00", phone="89225556677"), []),
+         (wm(43, 443, "08.10.26 11:00:00", text="Не оформлен"), []), (wm(44, 444, "08.10.26 12:00:00", text="не  оформлен"), []))
+    open_card = card(conn, at="2026-10-07T09:00:00", goods=[("A", 4)])
+    lost_card = card(conn, at="2026-10-07T09:00:00", webmim_number="5258323")
+    data = webmim_match.reconcile(conn, TODAY)
+    assert [o["id"] for o in data["lonely"]] == ["42", "41"] and [o["id"] for o in data["drafts"]] == ["44", "43"]
+    client = app.test_client()
+    login(client)
+    html = client.get("/orders/webmim").get_data(as_text=True)
+    assert "data-webmim-howto" in html and "Что делать" in html
+    heads = [html.index(t) for t in ("1. Найти пару (1)", "2. Номер есть, но WebMIM его не отдаёт (1)", "3. Заказы WebMIM без заказа в панели (2)")]
+    assert heads == sorted(heads)
+    assert 'data-unpaired="%d"' % open_card in html and 'data-webmim-hint="41"' in html and "Это он" in html
+    assert 'data-not-found="%d"' % lost_card in html and "Сверить номер в карточке" in html
+    assert 'data-lonely="42"' in html and 'href="/orders?v=list&amp;q=9225556677"' in html
+    drafts = html.index("data-webmim-drafts")
+    assert "показать черновики (2)" in html and "<details" in html[drafts - 40:drafts] and " open" not in html[drafts - 40:drafts + 40]
+    assert html.index('data-draft="43"') > drafts and 'data-lonely="43"' not in html

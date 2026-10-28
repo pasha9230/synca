@@ -104,8 +104,48 @@ def _items(rows: list) -> Tuple[List[dict], Optional[float]]:
     return out, (round(total, 2) if priced or not out else None)
 
 
+def _newest(rows) -> str:
+    return max((parse_date(r.get("createDate")) for r in rows if isinstance(r, dict)), default="")
+
+
+def _every_page(client, sleep: Callable[[float], None], counts: dict):
+    """Every page of GET /api/v2/orders up to its count of pages (at most MAX_PAGES); the window by the date is applied by the caller, row by row:
+    the order of the rows is not described and on the live server is not by the creation date (2026-10-28: a stop at the first old order read
+    2 pages of many). Above MAX_PAGES the newest pages are read: the newest date of the first page against the last tells which end that is.
+    Without the count of pages: forward until a short page. A PAUSE before every request after the first; an empty page ends the reading."""
+    first, pages = client.orders_page(1, PER_PAGE)
+    counts["pages_total"] = pages
+    yield first
+    if not pages:
+        page, rows = 1, first
+        while len(rows) >= PER_PAGE and page < MAX_PAGES:
+            page += 1
+            sleep(PAUSE)
+            rows, _ = client.orders_page(page, PER_PAGE)
+            yield rows
+        return
+    if not first:
+        return
+    order = list(range(2, min(pages, MAX_PAGES) + 1))
+    if pages > MAX_PAGES:
+        sleep(PAUSE)
+        last, _ = client.orders_page(pages, PER_PAGE)
+        yield last
+        if _newest(last) > _newest(first):                       # the newest at the end: backwards from the page before the last
+            order = list(range(pages - 1, pages - MAX_PAGES + 1, -1))
+        else:
+            order = list(range(2, MAX_PAGES))
+    for page in order:
+        sleep(PAUSE)
+        rows, _ = client.orders_page(page, PER_PAGE)
+        yield rows
+        if not rows:
+            return
+
+
 def _pages(client, sleep: Callable[[float], None], cutoff: str):
-    """The pages of GET /api/v2/orders from the newest towards the cutoff. The order is by the creation date, its direction is not described:
+    """«Оформить в WebMIM» only (webmim_create._ours; the snapshot reads _every_page, see there why it does not stop at the cutoff).
+    The pages of GET /api/v2/orders from the newest towards the cutoff. The order is by the creation date, its direction is not described:
     the first page tells it (its first and last dates), else the last page is compared with the first. Stops at the first page reaching past
     the cutoff, at an empty page, at MAX_PAGES. Without the count of pages: forward until a short page."""
     first, pages = client.orders_page(1, PER_PAGE)
@@ -151,9 +191,9 @@ def sync(conn, client, server: str, now: str, today: date, days: int = DAYS, sle
     cutoff = (today - timedelta(days=days)).isoformat()
     conn.commit()                                              # no write of an earlier step is held while WebMIM answers
     known = dict(conn.execute("SELECT id, fingerprint FROM webmim_order WHERE server = ?", (server,)).fetchall())
-    counts = {"pages": 0, "orders": 0, "new": 0, "changed": 0, "items": 0, "undated": 0}
+    counts = {"pages": 0, "pages_total": 0, "orders": 0, "new": 0, "changed": 0, "items": 0, "undated": 0}
     try:
-        for rows in _pages(client, sleep, cutoff):
+        for rows in _every_page(client, sleep, counts):
             counts["pages"] += 1
             for raw in rows:
                 order = _order(raw)
@@ -374,6 +414,11 @@ def card_block(conn, card: dict, with_hints: bool = True) -> dict:
     return out
 
 
+def draft(order: dict) -> bool:
+    """A WebMIM order «не оформлен»: a basket nobody placed, it wants no pair (the page hides it behind «показать черновики»)."""
+    return " ".join(str(order.get("status_text") or "").lower().split()) == "не оформлен"
+
+
 def reconcile(conn, today: date, days: int = DAYS) -> dict:
     """The page «Сверка с WebMIM»: the panel's orders of the window without a pair (with suggestions), with a number not in the snapshot,
     the WebMIM orders of the window nobody is paired with, those paired twice. Cancelled orders and deals from a point's stock want no pair."""
@@ -400,8 +445,9 @@ def reconcile(conn, today: date, days: int = DAYS) -> dict:
             continue
         card["hints"] = hints(card, goods.get(card["id"], []), snap, busy) if server == "prod" else []
         unpaired.append(card)
+    alone = [o for o in snap if o["id"] not in busy and o["create_date"] >= start]
     return {"server": webmim_orders.SERVER_NAMES[server], "seen_at": seen_at(conn, server), "days": days, "paired": len(busy),
-            "unpaired": unpaired, "not_found": not_found, "lonely": [o for o in snap if o["id"] not in busy and o["create_date"] >= start],
+            "unpaired": unpaired, "not_found": not_found, "lonely": [o for o in alone if not draft(o)], "drafts": [o for o in alone if draft(o)],
             "shared": [{"order": by_id[k], "cards": v} for k, v in shared(conn, snap).items()], "total": len(snap), "test": server != "prod"}
 
 
@@ -461,8 +507,13 @@ def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callabl
         return "failed", "снимок WebMIM (%s) прерван: %s" % (server, err)
     except OSError as err:
         return "failed", "снимок WebMIM (%s) прерван: сервер недоступен (%s)" % (server, type(err).__name__)
-    line = "снимок WebMIM (%s, %d дн.): страниц %d, заказов %d, новых %d, изменилось %d, позиции прочитаны у %d" % (
-        server, days, counts["pages"], counts["orders"], counts["new"], counts["changed"], counts["items"])
+    pages = "%d из %d" % (counts["pages"], counts["pages_total"]) if counts["pages_total"] else "%d (сколько всего, WebMIM не сказал)" % counts["pages"]
+    line = "снимок WebMIM (%s, %d дн.): страниц %s, заказов %d, новых %d, изменилось %d, позиции прочитаны у %d" % (
+        server, days, pages, counts["orders"], counts["new"], counts["changed"], counts["items"])
+    if counts["pages_total"] > MAX_PAGES:
+        line += "; прочитаны не все страницы (предел %d), самые новые" % MAX_PAGES
+    elif counts["pages"] < counts["pages_total"]:
+        line += "; чтение остановила пустая страница"
     if counts["orders"] and counts["undated"] == counts["orders"]:
         return "failed", line + "; ни у одного заказа не разобрана дата создания: формат WebMIM другой, сверка не работает"
     return "read", line

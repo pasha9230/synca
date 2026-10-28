@@ -1,32 +1,48 @@
 {% extends "base.html" %}
 {% from "_ui.html" import icon %}
 {% block title %}Сверка с WebMIM · Заказы · Tires Sync{% endblock %}
+{% macro lonely_table(rows, kind) %}<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Номер</th><th>Создан</th><th>Статус</th><th>Покупатель</th><th>Внешний номер</th>{% if has_right("money") %}<th class="num">Сумма</th>{% endif %}<th>Что сделать</th></tr></thead><tbody>
+{% for o in rows %}<tr data-{{ kind }}="{{ o.id }}"><td>№{{ o.number or o.id }}</td><td class="small">{{ o.create_date|dt if o.create_date else "—" }}</td><td class="small">{{ o.status_text or o.status_code or "—" }}</td>
+<td class="small">{{ o.customer_name or "—" }}{% if o.customer_phone_norm %}<div class="muted">{{ o.customer_phone_norm|phone }}</div>{% endif %}</td><td class="small">{{ o.external_number or "—" }}</td>{% if has_right("money") %}<td class="num">{{ o.sum|money if o.sum is not none else "—" }}</td>{% endif %}
+<td class="small">{% if o.customer_phone_norm %}<a class="btn btn--secondary btn--xs" href="/orders?v=list&amp;q={{ o.customer_phone_norm }}">Найти в панели по телефону</a>{% else %}<span class="muted">если это наш заказ — впишите №{{ o.number or o.id }} в его карточку</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="{{ 7 if has_right('money') else 6 }}" class="muted">Таких нет.</td></tr>{% endfor %}</tbody></table></div>{% endmacro %}
 {% block content %}
 <header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Сверка с WebMIM</span></div><h1>Сверка с WebMIM</h1>
 <p class="sub">{{ r.server }} · {% if r.seen_at %}снимок {{ r.seen_at|short_dt_utc }}{% else %}снимка ещё нет: панель читает заказы WebMIM раз в час{% endif %} · окно {{ r.days }} дн. ·
-заказов WebMIM в снимке {{ r.total }}, сопоставлено {{ r.paired }}. В WebMIM панель ничего не пишет; номер в заказ панели попадает только по кнопке «Это он».</p>
+заказов WebMIM в снимке {{ r.total }}, сопоставлено {{ r.paired }}.</p>
 {% if r.test %}<p class="small text-err" data-webmim-test>Выбран тестовый сервер WebMIM: его заказы не наши, поэтому подсказок и кнопки «Это он» нет. Сервер меняется в «Подключения → WebMIM → Заказы в WebMIM».</p>{% endif %}</div></header>
-{% if r.shared %}<section class="card" id="shared" style="margin-bottom:var(--s-4)"><div class="card-head"><h3 class="text-err">Один заказ WebMIM у нескольких заказов панели ({{ r.shared|length }})</h3></div>
+
+<section class="card" id="howto" style="margin-bottom:var(--s-4)"><div class="card-body small" data-webmim-howto>
+<p><b>Что здесь.</b> Раз в час панель читает заказы WebMIM (только читает, в WebMIM ничего не пишет) и ищет каждому заказу панели его пару в WebMIM — по номеру WebMIM из карточки.
+Пара нужна, чтобы панель видела статус и позиции заказа у поставщика.</p>
+<p><b>Что делать, сверху вниз.</b> 1) «Найти пару»: у заказа панели нет номера WebMIM — если подсказка верна, нажмите «Это он» (номер запишется в карточку), иначе откройте заказ и впишите номер сами.
+2) «Номер есть, но WebMIM его не отдаёт»: откройте карточку и сверьте номер. 3) «Заказы WebMIM без заказа в панели»: если это наш заказ — найдите его в панели и впишите номер. Черновики «не оформлен» спрятаны: пара им не нужна.</p>
+</div></section>
+
+{% if r.shared %}<section class="card" id="shared" style="margin-bottom:var(--s-4)"><div class="card-head"><h3 class="text-err">Один заказ WebMIM у нескольких заказов панели ({{ r.shared|length }})</h3><span class="sub">оставьте номер только в одной карточке</span></div>
 <div class="card-body"><ul class="small">{% for s in r.shared %}<li data-shared="{{ s.order.id }}">№{{ s.order.number or s.order.id }}: {% for cid in s.cards %}<a href="/orders/{{ cid }}">№{{ cid }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul></div></section>{% endif %}
 
-<section class="card" id="unpaired"><div class="card-head"><h3>Заказы панели без пары ({{ r.unpaired|length }})</h3><span class="sub">созданы за окно, кроме отменённых и сделок из наличия точки</span></div>
-<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Этап</th><th>Подсказки WebMIM</th></tr></thead><tbody>
+<section class="card" id="unpaired"><div class="card-head"><h3>1. Найти пару ({{ r.unpaired|length }})</h3><span class="sub">заказы панели без номера WebMIM, созданы за окно; отменённые и сделки из наличия точки не нужны</span></div>
+<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Этап</th><th>Похожие заказы WebMIM и что сделать</th></tr></thead><tbody>
 {% for c in r.unpaired %}<tr data-unpaired="{{ c.id }}"><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}{% if c.client_phone %}<div class="small muted">{{ c.client_phone|phone }}</div>{% endif %}</td>
 <td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.stage }}</td><td>
 {% for h in c.hints %}{% set o = h.order %}<div class="row" style="gap:var(--s-2);flex-wrap:wrap" data-webmim-hint="{{ o.id }}"><b>№{{ o.number or o.id }}</b><span class="badge badge--neutral">{{ h.score }}%</span>
 <span class="small">{{ o.status_text }}{% if o.create_date %} · {{ o.create_date|dt }}{% endif %}{% if o.customer_name %} · {{ o.customer_name }}{% endif %}</span><span class="small muted">{{ h.why|join(", ") }}</span>
 {% if can_post("order_webmim_link") %}<form method="post" action="/orders/{{ c.id }}/webmim/link" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="order" value="{{ o.id }}"><input type="hidden" name="back" value="webmim"><button class="btn btn--secondary btn--xs">Это он</button></form>{% endif %}</div>
-{% else %}<span class="small muted">похожих нет</span>{% endfor %}</td></tr>
+{% else %}<span class="small muted">похожих нет — </span><a class="small" href="/orders/{{ c.id }}">открыть заказ и вписать номер WebMIM</a>{% endfor %}</td></tr>
 {% else %}<tr><td colspan="5" class="muted">Все заказы окна сопоставлены.</td></tr>{% endfor %}</tbody></table></div></section>
 
-{% if r.not_found %}<section class="card" id="not-found" style="margin-top:var(--s-4)"><div class="card-head"><h3>Номер WebMIM есть, но в снимке его нет ({{ r.not_found|length }})</h3><span class="sub">проверьте номер в карточке</span></div>
-<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Номер / ID WebMIM в карточке</th></tr></thead><tbody>
-{% for c in r.not_found %}<tr><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}</td><td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.webmim_number or "—" }} / {{ c.webmim_id or "—" }}</td></tr>{% endfor %}
-</tbody></table></div></section>{% endif %}
+<section class="card" id="not-found" style="margin-top:var(--s-4)"><div class="card-head"><h3>2. Номер есть, но WebMIM его не отдаёт ({{ r.not_found|length }})</h3>
+<span class="sub">в карточке номер WebMIM, а в прочитанных заказах WebMIM его нет: опечатка в номере, заказ с другого аккаунта WebMIM или старше {{ r.days }} дн.</span></div>
+<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Номер / ID WebMIM в карточке</th><th>Что сделать</th></tr></thead><tbody>
+{% for c in r.not_found %}<tr data-not-found="{{ c.id }}"><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}</td><td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.webmim_number or "—" }} / {{ c.webmim_id or "—" }}</td>
+<td><a class="btn btn--secondary btn--xs" href="/orders/{{ c.id }}">Сверить номер в карточке</a></td></tr>
+{% else %}<tr><td colspan="5" class="muted">Таких нет.</td></tr>{% endfor %}
+</tbody></table></div></section>
 
-<section class="card" id="lonely" style="margin-top:var(--s-4)"><div class="card-head"><h3>Заказы WebMIM без пары ({{ r.lonely|length }})</h3></div>
-<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Номер</th><th>Создан</th><th>Статус</th><th>Покупатель</th><th>Внешний номер</th>{% if has_right("money") %}<th class="num">Сумма</th>{% endif %}</tr></thead><tbody>
-{% for o in r.lonely %}<tr data-lonely="{{ o.id }}"><td>№{{ o.number or o.id }}</td><td class="small">{{ o.create_date|dt if o.create_date else "—" }}</td><td class="small">{{ o.status_text or o.status_code or "—" }}</td>
-<td class="small">{{ o.customer_name or "—" }}</td><td class="small">{{ o.external_number or "—" }}</td>{% if has_right("money") %}<td class="num">{{ o.sum|money if o.sum is not none else "—" }}</td>{% endif %}</tr>
-{% else %}<tr><td colspan="{{ 6 if has_right('money') else 5 }}" class="muted">Таких нет.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="card" id="lonely" style="margin-top:var(--s-4)"><div class="card-head"><h3>3. Заказы WebMIM без заказа в панели ({{ r.lonely|length }})</h3><span class="sub">ни один заказ панели не ссылается на них</span></div>
+{{ lonely_table(r.lonely, "lonely") }}
+{% if r.drafts %}<div class="card-body"><details class="collapse" id="drafts" data-webmim-drafts><summary>{{ icon("chev", "chev") }}показать черновики ({{ r.drafts|length }})</summary>
+<p class="small muted" style="padding:0 var(--s-4)">Заказы WebMIM со статусом «не оформлен»: корзины, которые никто не отправил. Пара им не нужна.</p>
+{{ lonely_table(r.drafts, "draft") }}</details></div>{% endif %}</section>
 {% endblock %}
