@@ -108,7 +108,7 @@ def _newest(rows) -> str:
     return max((parse_date(r.get("createDate")) for r in rows if isinstance(r, dict)), default="")
 
 
-def _pages(client, sleep: Callable[[float], None], counts: dict):
+def _every_page(client, sleep: Callable[[float], None], counts: dict):
     """Every page of GET /api/v2/orders up to its count of pages (at most MAX_PAGES); the window by the date is applied by the caller, row by row:
     the order of the rows is not described and on the live server is not by the creation date (2026-10-28: a stop at the first old order read
     2 pages of many). Above MAX_PAGES the newest pages are read: the newest date of the first page against the last tells which end that is.
@@ -143,6 +143,45 @@ def _pages(client, sleep: Callable[[float], None], counts: dict):
             return
 
 
+def _pages(client, sleep: Callable[[float], None], cutoff: str):
+    """«Оформить в WebMIM» only (webmim_create._ours; the snapshot reads _every_page, see there why it does not stop at the cutoff).
+    The pages of GET /api/v2/orders from the newest towards the cutoff. The order is by the creation date, its direction is not described:
+    the first page tells it (its first and last dates), else the last page is compared with the first. Stops at the first page reaching past
+    the cutoff, at an empty page, at MAX_PAGES. Without the count of pages: forward until a short page."""
+    first, pages = client.orders_page(1, PER_PAGE)
+    if not pages:                                              # the count is not said: forward until a short page, all of it (the direction
+        yield first                                            # cannot be trusted to stop at the cutoff)
+        page, rows = 1, first
+        while len(rows) >= PER_PAGE and page < MAX_PAGES:
+            page += 1
+            sleep(PAUSE)
+            rows, _ = client.orders_page(page, PER_PAGE)
+            yield rows
+        return
+    dates = [d for d in (parse_date(r.get("createDate")) if isinstance(r, dict) else "" for r in first) if d]
+    newest_first = None
+    if len(dates) >= 2 and dates[0] != dates[-1]:
+        newest_first = dates[0] > dates[-1]
+    cached = {1: first}
+    if newest_first is None and pages > 1:
+        sleep(PAUSE)
+        last, _ = client.orders_page(pages, PER_PAGE)
+        cached[pages] = last
+        tail = [d for d in (parse_date(r.get("createDate")) if isinstance(r, dict) else "" for r in last) if d]
+        newest_first = bool(dates and tail and dates[0] > tail[0])
+    order = range(1, pages + 1) if newest_first or pages == 1 else range(pages, 0, -1)
+    for read, page in enumerate(order):
+        if read >= MAX_PAGES:
+            return
+        rows = cached.get(page)
+        if rows is None:
+            sleep(PAUSE)
+            rows, _ = client.orders_page(page, PER_PAGE)
+        yield rows
+        if not rows or any(parse_date(r.get("createDate")) and parse_date(r.get("createDate")) < cutoff for r in rows if isinstance(r, dict)):
+            return
+
+
 def sync(conn, client, server: str, now: str, today: date, days: int = DAYS, sleep: Callable[[float], None] = time.sleep) -> dict:
     """Read the WebMIM orders of the last `days` days into webmim_order (GET only). New and changed orders get their positions read again.
     What was read before a failure is kept; the failure (OrdersError, OSError) goes on to the caller. A reading is repeated once after a
@@ -154,7 +193,7 @@ def sync(conn, client, server: str, now: str, today: date, days: int = DAYS, sle
     known = dict(conn.execute("SELECT id, fingerprint FROM webmim_order WHERE server = ?", (server,)).fetchall())
     counts = {"pages": 0, "pages_total": 0, "orders": 0, "new": 0, "changed": 0, "items": 0, "undated": 0}
     try:
-        for rows in _pages(client, sleep, counts):
+        for rows in _every_page(client, sleep, counts):
             counts["pages"] += 1
             for raw in rows:
                 order = _order(raw)
