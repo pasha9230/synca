@@ -1045,8 +1045,11 @@ def _cmd_vk_catchup(args) -> int:
     mode = "dry" if args.dry_run else ("seed" if args.seed else "act")
     done = vk_catchup.run(conn, box, datetime.utcnow().replace(microsecond=0), lambda db, local: vk_catchup.channel(db, local, box, _http(), _http(), _http()),
                           tg_http=_http(), vk_http=_http(), mode=mode)
+    if done["no_key"]:                                                    # without the key Telegram is out of reach too: systemd tells it
+        print("ошибка: сообщество ВК настроено, но ключ сообщества не сохранён или не читается (мастер-ключ?): переписка не читается", file=sys.stderr)
+        return 1
     if not done["set_up"]:
-        print("ВК не настроен (нет сообщества или ключа): переписка не читается")
+        print("ВК не настроен (нет сообщества): переписка не читается")
         return 0
     if mode == "dry":
         for line in done["would"]:

@@ -264,9 +264,9 @@ def test_a_lasting_failure_of_the_backstop_is_told_once_a_day(tmp_path, monkeypa
         raise vk_catchup.vk_send.VkError("ВК не дал переписку (код 15): Access denied")
     for minutes in (0, 10, 20):
         catchup(app, conn, broken, now=RUN + timedelta(minutes=minutes))
-    assert said == [vk_catchup.DOWN % "ВК не отдаёт переписку ни одной точки"]
+    assert said == [vk_catchup.DOWN % "переписка ни одной точки не прочитана"]
     got = vk_catchup.run(conn, None, RUN + timedelta(days=1), lambda db, local: None)              # the community is set up, the key unreadable
-    assert got["set_up"] is False and said[-1] == vk_catchup.DOWN % "ключ сообщества не сохранён или не читается" and len(said) == 2
+    assert got["set_up"] is False and got["no_key"] is True and said[-1] == vk_catchup.DOWN % "ключ сообщества не сохранён или не читается" and len(said) == 2
 
 
 def test_the_command_has_a_dry_run_and_a_seed_that_never_act(tmp_path, monkeypatch, capsys):
@@ -274,9 +274,18 @@ def test_the_command_has_a_dry_run_and_a_seed_that_never_act(tmp_path, monkeypat
     store.connect(db).close()
     seen = []
     monkeypatch.setattr(vk_catchup, "run", lambda conn, box, now, channel, **kw: seen.append(kw["mode"]) or
-                        {"set_up": True, "points": 1, "picked": 0, "errors": 0, "would": [{"peer": PEER, "message_id": "7", "text": "приехал"}]})
+                        {"set_up": True, "no_key": False, "points": 1, "picked": 0, "errors": 0, "would": [{"peer": PEER, "message_id": "7", "text": "приехал"}]})
     assert cli.main(["vk-catchup", "--db", str(db), "--key-file", "", "--dry-run"]) == 0
     assert "было бы подобрано: точка 555, сообщение 7: приехал" in capsys.readouterr().out
     assert cli.main(["vk-catchup", "--db", str(db), "--key-file", "", "--seed"]) == 0
     assert cli.main(["vk-catchup", "--db", str(db), "--key-file", ""]) == 0
     assert seen == ["dry", "seed", "act"]
+
+
+def test_the_command_fails_when_the_community_is_set_up_but_its_key_cannot_be_read(tmp_path, capsys):
+    db = tmp_path / "s.db"
+    conn = store.connect(db)
+    vk_catchup.connections.set_config(conn, "vk", 0, {"group_id": GROUP, "confirmation": "x"}, "2026-10-13T09:00:00", "o")
+    conn.close()
+    assert cli.main(["vk-catchup", "--db", str(db), "--key-file", ""]) == 1                 # systemd's OnFailure tells the owner
+    assert "ключ сообщества" in capsys.readouterr().err

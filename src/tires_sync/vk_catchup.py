@@ -146,10 +146,10 @@ def run(conn, box, now: datetime, channel: Callable, history: Optional[Callable]
     """One look at the conversations of the points. `now`: UTC, as the panel's; `channel(conn, local)` as vk_callback.handle's;
     `history(peer, offset, count)` (tests) — else messages.getHistory with the community's key. `mode`: "act"; "dry" lists in "would" what
     would be picked and changes nothing; "seed" marks the newest message of each conversation as looked at and acts on none (the first start,
-    when the day before must not be redone). Returns {"set_up", "points", "picked", "errors", "would"}. A failure of one point is a warning
+    when the day before must not be redone). Returns {"set_up", "points", "picked", "errors", "would", "no_key"}. A failure of one point is a warning
     and its mark stays (the next run reads it again); a backstop that cannot work at all is told to the owner once a day."""
     log = logging.getLogger("tires_sync.vk")
-    done = {"set_up": False, "points": 0, "picked": 0, "errors": 0, "would": []}
+    done = {"set_up": False, "points": 0, "picked": 0, "errors": 0, "would": [], "no_key": False}
     group = str(connections.get_config(conn, "vk", 0).get("group_id") or "")
     if not group:
         return done
@@ -159,6 +159,7 @@ def run(conn, box, now: datetime, channel: Callable, history: Optional[Callable]
         except SecretKeyError:
             token = ""
         if not token:
+            done["no_key"] = True                                                     # set up, yet the key is not there or not readable
             if mode == "act":
                 _tell_down(conn, box, now, "ключ сообщества не сохранён или не читается")
             return done
@@ -203,7 +204,7 @@ def run(conn, box, now: datetime, channel: Callable, history: Optional[Callable]
                 break
             store.set_state(conn, key, str(raw_id))
     if mode == "act" and done["points"] and done["errors"] >= done["points"]:
-        _tell_down(conn, box, now, "ВК не отдаёт переписку ни одной точки")
+        _tell_down(conn, box, now, "переписка ни одной точки не прочитана")
     if done["picked"]:
         _tell_owner(conn, box, now, done["picked"])
     return done
