@@ -379,6 +379,10 @@ CREATE TABLE IF NOT EXISTS vk_event (
     id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, at TEXT NOT NULL, type TEXT NOT NULL,
     group_id TEXT NOT NULL, payload TEXT NOT NULL
 );
+-- a message of VK the bot took, once whichever way it came (vk_callback.claim): Callback or the backstop of vk_catchup
+CREATE TABLE IF NOT EXISTS vk_message (
+    message_id TEXT PRIMARY KEY, peer TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS share_link (
     id INTEGER PRIMARY KEY AUTOINCREMENT, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, created_by TEXT NOT NULL,
     expires_at TEXT NOT NULL, revoked_at TEXT, show_price INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '',

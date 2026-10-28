@@ -222,6 +222,8 @@ _MORE_TEXTS = {
     "feed_update_failed": _feed_failed,
     "vk_answer_failed": lambda d: "ВКонтакте: ответ клиенту не отправлен%s: %s" % (
         " (точка «%s»)" % d["point"] if d.get("point") else "", _q(d.get("reason"))),
+    "vk_catchup": lambda d: "ВКонтакте: сообщение подобрано без уведомления%s, сообщение №%s" % (
+        " (точка «%s»)" % d["point"] if d.get("point") else "", _q(d.get("message_id"))),
     "call_listened": lambda d: "Прослушана запись звонка №%s" % _q(d.get("call")),
     "callback": lambda d: "Задача перезвонить №%s: %s, до %s, ответственный %s" % (
         _q(d.get("task")), "клиент №%s" % d["client"] if d.get("client") else ("заказ №%s" % d["order"] if d.get("order") else "чат Ч-%s" % _q(d.get("chat"))),

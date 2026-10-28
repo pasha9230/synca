@@ -152,6 +152,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ot = sub.add_parser("orders-tick", help="часовая проверка заказов: задачи по правилам «завис на этапе» и оповещение ответственному об окончании резерва на точке (клиентам ничего не отправляет)")
     ot.add_argument("--db", required=True)
     ot.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    vc = sub.add_parser("vk-catchup", help="подборщик ВК: прочитать переписку с точками и выполнить их сообщения, о которых ВК не прислал уведомление (не старше суток, каждое один раз); для таймера каждые 10–15 минут")
+    vc.add_argument("--db", required=True)
+    vc.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    vm = vc.add_mutually_exclusive_group()
+    vm.add_argument("--dry-run", action="store_true", help="только показать, что было бы подобрано (ничего не выполняется и не отправляется)")
+    vm.add_argument("--seed", action="store_true", help="запомнить, где сейчас кончается переписка каждой точки, ничего не выполняя (первое включение без прошлых суток)")
     ws = sub.add_parser("webmim-orders-sync", help="прочитать заказы WebMIM за последние дни в снимок для сверки с заказами панели (только чтение: в WebMIM ничего не создаётся и не меняется)")
     ws.add_argument("--db", required=True)
     ws.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
@@ -1028,6 +1034,35 @@ def _webmim_snapshot(conn, key_file, days: int = 60) -> bool:
         conn.rollback()
         print("предупреждение: снимок WebMIM не прочитан (%s)" % type(err).__name__, file=sys.stderr)
         return False
+
+
+def _cmd_vk_catchup(args) -> int:
+    """The backstop of VK's Callback (vk_catchup.run). A failure of VK is a warning, never a failure of the timer (it runs every 10–15
+    minutes: a lasting failure would be an alert each time)."""
+    from . import vk_catchup
+    conn = store.connect(args.db)
+    box = load_box(args.key_file) if args.key_file else None
+    mode = "dry" if args.dry_run else ("seed" if args.seed else "act")
+    done = vk_catchup.run(conn, box, datetime.utcnow().replace(microsecond=0), lambda db, local: vk_catchup.channel(db, local, box, _http(), _http(), _http()),
+                          tg_http=_http(), vk_http=_http(), mode=mode)
+    if done["no_key"]:                                                    # without the key Telegram is out of reach too: systemd tells it
+        print("ошибка: сообщество ВК настроено, но ключ сообщества не сохранён или не читается (мастер-ключ?): переписка не читается", file=sys.stderr)
+        return 1
+    if not done["set_up"]:
+        print("ВК не настроен (нет сообщества): переписка не читается")
+        return 0
+    if mode == "dry":
+        for line in done["would"]:
+            print("было бы подобрано: точка %s, сообщение %s: %s" % (line["peer"], line["message_id"], line["text"][:120]))
+        print("ВК (проверка без действий): точек %d, было бы подобрано %d, ошибок %d" % (done["points"], len(done["would"]), done["errors"]))
+        return 0
+    if mode == "seed":
+        print("ВК: место в переписке запомнено для точек: %d, ошибок %d (прошлое не выполняется)" % (done["points"] - done["errors"], done["errors"]))
+        return 0
+    print("ВК: точек %d, подобрано сообщений без уведомления %d, ошибок %d" % (done["points"], done["picked"], done["errors"]))
+    if done["errors"]:
+        print("предупреждение: часть переписки ВК не прочитана, подробности выше в журнале", file=sys.stderr)
+    return 0
 
 
 def _cmd_webmim_orders_sync(args) -> int:
@@ -2571,6 +2606,8 @@ def main(argv=None) -> int:
             return _cmd_clients_link(args)
         if args.command == "orders-tick":
             return _cmd_orders_tick(args)
+        if args.command == "vk-catchup":
+            return _cmd_vk_catchup(args)
         if args.command == "webmim-orders-sync":
             return _cmd_webmim_orders_sync(args)
         if args.command == "old-model-import":
