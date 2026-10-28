@@ -155,6 +155,9 @@ def _build_parser() -> argparse.ArgumentParser:
     vc = sub.add_parser("vk-catchup", help="подборщик ВК: прочитать переписку с точками и выполнить их сообщения, о которых ВК не прислал уведомление (не старше суток, каждое один раз); для таймера каждые 10–15 минут")
     vc.add_argument("--db", required=True)
     vc.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    vm = vc.add_mutually_exclusive_group()
+    vm.add_argument("--dry-run", action="store_true", help="только показать, что было бы подобрано (ничего не выполняется и не отправляется)")
+    vm.add_argument("--seed", action="store_true", help="запомнить, где сейчас кончается переписка каждой точки, ничего не выполняя (первое включение без прошлых суток)")
     ws = sub.add_parser("webmim-orders-sync", help="прочитать заказы WebMIM за последние дни в снимок для сверки с заказами панели (только чтение: в WebMIM ничего не создаётся и не меняется)")
     ws.add_argument("--db", required=True)
     ws.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
@@ -1039,10 +1042,19 @@ def _cmd_vk_catchup(args) -> int:
     from . import vk_catchup
     conn = store.connect(args.db)
     box = load_box(args.key_file) if args.key_file else None
+    mode = "dry" if args.dry_run else ("seed" if args.seed else "act")
     done = vk_catchup.run(conn, box, datetime.utcnow().replace(microsecond=0), lambda db, local: vk_catchup.channel(db, local, box, _http(), _http(), _http()),
-                          tg_http=_http(), vk_http=_http())
+                          tg_http=_http(), vk_http=_http(), mode=mode)
     if not done["set_up"]:
         print("ВК не настроен (нет сообщества или ключа): переписка не читается")
+        return 0
+    if mode == "dry":
+        for line in done["would"]:
+            print("было бы подобрано: точка %s, сообщение %s: %s" % (line["peer"], line["message_id"], line["text"][:120]))
+        print("ВК (проверка без действий): точек %d, было бы подобрано %d, ошибок %d" % (done["points"], len(done["would"]), done["errors"]))
+        return 0
+    if mode == "seed":
+        print("ВК: место в переписке запомнено для точек: %d, ошибок %d (прошлое не выполняется)" % (done["points"] - done["errors"], done["errors"]))
         return 0
     print("ВК: точек %d, подобрано сообщений без уведомления %d, ошибок %d" % (done["points"], done["picked"], done["errors"]))
     if done["errors"]:

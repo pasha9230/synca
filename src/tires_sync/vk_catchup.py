@@ -22,10 +22,12 @@ PAGE = 200                                        # the most VK gives at once
 MAX_PAGES = 5
 CURSOR_KEY = "vk_catchup_last_%s"                 # app_state per peer: the id of the last message looked at
 DAY_KEY = "vk_catchup_told"                       # app_state: the day (UTC) the owner was told
+DOWN_KEY = "vk_catchup_down_told"                 # app_state: the day (UTC) the owner was told the backstop itself does not work
 SOURCE = "catchup"
 JOURNAL_LINE = "ВК: сообщение подобрано без уведомления"
 MISSED = ("Tires Sync: ВК не прислал боту уведомление о сообщениях точек (%d), бот подобрал их сам из переписки. "
           "Какие — в журнале действий: «%s».")
+DOWN = "Tires Sync: подборщик ВК не работает: %s. Сообщения точек, о которых ВК не уведомил, не подбираются."
 BOT = "бот ВК"
 
 
@@ -127,6 +129,8 @@ def _new_messages(history: Callable, peer: str, after: int, floor: datetime) -> 
         oldest = items[-1] if items else None
         if len(items) < PAGE or oldest is None or _id(oldest) <= after or (_when(oldest) or floor) <= floor:
             break
+    else:
+        logging.getLogger("tires_sync.vk").warning("ВК: у %s больше %d новых сообщений, старшие не прочитаны", peer, MAX_PAGES * PAGE)
     return sorted({_id(m): m for m in found}.values(), key=_id)
 
 
@@ -138,23 +142,27 @@ def _is_points(msg: dict, peer: str) -> bool:
 
 
 def run(conn, box, now: datetime, channel: Callable, history: Optional[Callable] = None, tg_http: Transport = urllib_transport,
-        vk_http: Transport = urllib_transport) -> dict:
+        vk_http: Transport = urllib_transport, mode: str = "act") -> dict:
     """One look at the conversations of the points. `now`: UTC, as the panel's; `channel(conn, local)` as vk_callback.handle's;
-    `history(peer, offset, count)` (tests) — else messages.getHistory with the community's key. Returns what was done:
-    {"set_up", "points", "picked", "errors"}. A failure of one point is a warning and its mark stays (the next run reads it again)."""
+    `history(peer, offset, count)` (tests) — else messages.getHistory with the community's key. `mode`: "act"; "dry" lists in "would" what
+    would be picked and changes nothing; "seed" marks the newest message of each conversation as looked at and acts on none (the first start,
+    when the day before must not be redone). Returns {"set_up", "points", "picked", "errors", "would"}. A failure of one point is a warning
+    and its mark stays (the next run reads it again); a backstop that cannot work at all is told to the owner once a day."""
     log = logging.getLogger("tires_sync.vk")
-    done = {"set_up": False, "points": 0, "picked": 0, "errors": 0}
+    done = {"set_up": False, "points": 0, "picked": 0, "errors": 0, "would": []}
     group = str(connections.get_config(conn, "vk", 0).get("group_id") or "")
+    if not group:
+        return done
     if history is None:
         try:
-            token = connections.get_secret(conn, box, "vk", 0, "token") if box is not None and group else ""
+            token = connections.get_secret(conn, box, "vk", 0, "token") if box is not None else ""
         except SecretKeyError:
             token = ""
         if not token:
+            if mode == "act":
+                _tell_down(conn, box, now, "ключ сообщества не сохранён или не читается")
             return done
         history = history_for(token, group, vk_http)
-    if not group:
-        return done
     done["set_up"] = True
     floor, settle = now - LOOK_BACK, now - SETTLE
     for peer in _peers(conn):
@@ -165,17 +173,27 @@ def run(conn, box, now: datetime, channel: Callable, history: Optional[Callable]
         except ValueError:
             after = 0
         try:
-            messages = _new_messages(history, peer, after, floor)
+            messages = history(peer, 0, 1) if mode == "seed" else _new_messages(history, peer, after, floor)
         except Exception as err:                                                     # noqa: BLE001 — one point, never the others
             conn.rollback()
             done["errors"] += 1
             log.warning("ВК: переписка с %s не прочитана: %s", peer, err)
+            continue
+        if mode == "seed":
+            newest = max([_id(m) for m in messages] + [after])
+            if newest > after:
+                store.set_state(conn, key, str(newest))
             continue
         for msg in messages:
             when, raw_id = _when(msg), _id(msg)
             if when is None or when > settle:                                         # Callback may still bring it: the next run
                 break
             try:
+                if mode == "dry":
+                    parsed = _would(conn, msg, raw_id, peer, group, floor)
+                    if parsed is not None:
+                        done["would"].append({"peer": peer, "message_id": str(raw_id), "text": parsed["text"]})
+                    continue
                 if _take(conn, box, msg, raw_id, peer, group, now, floor, channel, tg_http):
                     done["picked"] += 1
             except Exception:                                                         # noqa: BLE001 — the mark stays before it
@@ -184,27 +202,40 @@ def run(conn, box, now: datetime, channel: Callable, history: Optional[Callable]
                 log.exception("ВК: сообщение %s от %s не обработано подборщиком", raw_id, peer)
                 break
             store.set_state(conn, key, str(raw_id))
+    if mode == "act" and done["points"] and done["errors"] >= done["points"]:
+        _tell_down(conn, box, now, "ВК не отдаёт переписку ни одной точки")
     if done["picked"]:
         _tell_owner(conn, box, now, done["picked"])
     return done
 
 
-def _take(conn, box, msg: dict, raw_id: int, peer: str, group: str, now: datetime, floor: datetime, channel: Callable, tg_http: Transport) -> bool:
-    """One message of the conversation: acted on when it is the point's own and the bot does not have it yet. True: picked up here."""
+def _would(conn, msg: dict, raw_id: int, peer: str, group: str, floor: datetime) -> Optional[dict]:
+    """The message as the bot would get it (vk_callback._message) when it is the point's own and the bot does not have it yet, else None."""
     if not raw_id or not _is_points(msg, peer):
-        return False
-    data = {"type": "message_new", "group_id": int(group) if group.isdigit() else group, "source": SOURCE, "object": {"message": msg}}
-    parsed = vk_callback._message(data, group)
+        return None
+    parsed = vk_callback._message({"type": "message_new", "group_id": group, "object": {"message": msg}}, group)
     if parsed is None or not (parsed["text"].strip() or parsed["voice"]):                # a photo, a sticker: nothing for the bot
+        return None
+    if _came_by_callback(conn, "vk-%d" % raw_id, raw_id, group, floor - timedelta(days=1)):
+        return None
+    return parsed
+
+
+def _take(conn, box, msg: dict, raw_id: int, peer: str, group: str, now: datetime, floor: datetime, channel: Callable, tg_http: Transport) -> bool:
+    """One message of the conversation: acted on when it is the point's own and the bot does not have it yet. True: picked up here.
+    Raises when the message could not even be taken (a busy base): its mark stays, the next run tries again."""
+    parsed = _would(conn, msg, raw_id, peer, group, floor)
+    if parsed is None:
         return False
     message_id = "vk-%d" % raw_id
-    if _came_by_callback(conn, message_id, raw_id, group, floor - timedelta(days=1)):
-        return False
+    data = {"type": "message_new", "group_id": int(group) if group.isdigit() else group, "source": SOURCE, "object": {"message": msg}}
     event_id = "%s-%d" % (SOURCE, raw_id)
     conn.execute("INSERT OR IGNORE INTO vk_event (event_id, at, type, group_id, payload) VALUES (?,?,?,?,?)",     # «Входящие» sees a cut work
                  (event_id, now.isoformat(timespec="seconds"), "message_new", group, json.dumps(dict(data, event_id=event_id), ensure_ascii=False)[:vk_callback.MAX_PAYLOAD]))
     conn.commit()
     if not vk_callback._act(conn, data, group, event_id, now, channel, box, tg_http, source=SOURCE):
+        if not conn.execute("SELECT 1 FROM vk_message WHERE message_id = ?", (message_id,)).fetchone():
+            raise RuntimeError("the message %s could not be taken" % message_id)                 # nobody has it: never step over it
         return False
     point = order_manager._point_of(conn, peer)
     store.write_audit(conn, now.isoformat(timespec="seconds"), "system", "vk_catchup",
@@ -212,6 +243,20 @@ def _take(conn, box, msg: dict, raw_id: int, peer: str, group: str, now: datetim
                        "message": parsed["text"][:200]})
     logging.getLogger("tires_sync.vk").warning("%s: точка %s, сообщение %s", JOURNAL_LINE, peer, raw_id)
     return True
+
+
+def _tell_down(conn, box, now: datetime, why: str) -> None:
+    """The backstop cannot work (no key, VK refuses every conversation): the owner hears it once a day. Never raises."""
+    day = now.date().isoformat()
+    try:
+        if store.get_state(conn, DOWN_KEY) == day:
+            return
+        from . import cli                                                             # the alerts of the owner live with the commands
+        if cli._alert(conn, box, DOWN % why):
+            store.set_state(conn, DOWN_KEY, day)
+    except Exception:                                                                 # noqa: BLE001
+        conn.rollback()
+        logging.getLogger("tires_sync.vk").exception("the owner could not be told that the backstop of VK does not work")
 
 
 def _tell_owner(conn, box, now: datetime, count: int) -> None:

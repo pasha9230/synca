@@ -205,3 +205,78 @@ def test_the_command_prints_what_it_did_and_needs_no_vk_when_not_set_up(tmp_path
     store.connect(db).close()
     assert cli.main(["vk-catchup", "--db", str(db), "--key-file", ""]) == 0
     assert "ВК" in capsys.readouterr().out
+
+
+def test_a_dry_run_lists_what_it_would_pick_and_does_nothing(tmp_path, monkeypatch):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    monkeypatch.setattr(cli, "_alert", lambda *a, **kw: pytest.fail("a dry run tells nobody"))
+    history = FakeHistory([item(101, "Приехали", reply=bot_line()), item(102, "Приехал", sender="-" + GROUP, out=1)])
+    got = vk_catchup.run(conn, None, RUN, lambda db, local: routes_vk.channel(app, db, local), history=history, mode="dry")
+    assert got["picked"] == 0 and [(w["peer"], w["message_id"], w["text"]) for w in got["would"]] == [(PEER, "101", "Приехали")]
+    assert to_client(app) == [] and to_points(app) == [] and orders.get_card(conn, card)["stage"]["code"] == "moving"
+    assert not store.get_state(conn, vk_catchup.CURSOR_KEY % PEER)
+    assert conn.execute("SELECT COUNT(*) FROM vk_message").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM vk_event").fetchone()[0] == 0
+
+
+def test_a_seed_marks_where_the_conversation_ends_and_acts_on_nothing_before(tmp_path, monkeypatch):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    monkeypatch.setattr(cli, "_alert", lambda *a, **kw: True)
+    history = FakeHistory([item(101, "Приехал 5000100", minutes_ago=60), item(102, "Приехал 5000100", minutes_ago=1)])
+    got = vk_catchup.run(conn, None, RUN, lambda db, local: routes_vk.channel(app, db, local), history=history, mode="seed")
+    assert got["picked"] == 0 and store.get_state(conn, vk_catchup.CURSOR_KEY % PEER) == "102"      # the newest, young or not
+    assert catchup(app, conn, history)["picked"] == 0 and to_client(app) == []
+    history.by_peer[PEER].append(item(103, "Приехал 5000100", minutes_ago=10))
+    assert catchup(app, conn, history)["picked"] == 1
+
+
+def test_the_vk_page_shows_only_the_events_of_callback(tmp_path, monkeypatch):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    monkeypatch.setattr(cli, "_alert", lambda *a, **kw: True)
+    catchup(app, conn, FakeHistory([item(101, "спасибо")]))
+    assert conn.execute("SELECT COUNT(*) FROM vk_event WHERE event_id = 'catchup-101'").fetchone()[0] == 1
+    assert vk_callback.recent(conn) == []                                            # a dead Callback never looks alive
+
+
+def test_a_busy_base_at_the_mark_keeps_the_message_for_the_next_run(tmp_path, monkeypatch):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    monkeypatch.setattr(cli, "_alert", lambda *a, **kw: True)
+    real, calls = vk_callback.claim, []
+
+    def busy_once(*a, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise store.sqlite3.OperationalError("database is locked")
+        return real(*a, **kw)
+    monkeypatch.setattr(vk_callback, "claim", busy_once)
+    history = FakeHistory([item(101, "Приехал 5000100")])
+    got = catchup(app, conn, history)
+    assert got["picked"] == 0 and got["errors"] == 1 and not store.get_state(conn, vk_catchup.CURSOR_KEY % PEER)
+    assert catchup(app, conn, history)["picked"] == 1 and len(to_client(app)) == 1
+
+
+def test_a_lasting_failure_of_the_backstop_is_told_once_a_day(tmp_path, monkeypatch):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    said = []
+    monkeypatch.setattr(cli, "_alert", lambda conn, box, text, **kw: said.append(text) or True)
+
+    def broken(peer, offset, count):
+        raise vk_catchup.vk_send.VkError("ВК не дал переписку (код 15): Access denied")
+    for minutes in (0, 10, 20):
+        catchup(app, conn, broken, now=RUN + timedelta(minutes=minutes))
+    assert said == [vk_catchup.DOWN % "ВК не отдаёт переписку ни одной точки"]
+    got = vk_catchup.run(conn, None, RUN + timedelta(days=1), lambda db, local: None)              # the community is set up, the key unreadable
+    assert got["set_up"] is False and said[-1] == vk_catchup.DOWN % "ключ сообщества не сохранён или не читается" and len(said) == 2
+
+
+def test_the_command_has_a_dry_run_and_a_seed_that_never_act(tmp_path, monkeypatch, capsys):
+    db = tmp_path / "s.db"
+    store.connect(db).close()
+    seen = []
+    monkeypatch.setattr(vk_catchup, "run", lambda conn, box, now, channel, **kw: seen.append(kw["mode"]) or
+                        {"set_up": True, "points": 1, "picked": 0, "errors": 0, "would": [{"peer": PEER, "message_id": "7", "text": "приехал"}]})
+    assert cli.main(["vk-catchup", "--db", str(db), "--key-file", "", "--dry-run"]) == 0
+    assert "было бы подобрано: точка 555, сообщение 7: приехал" in capsys.readouterr().out
+    assert cli.main(["vk-catchup", "--db", str(db), "--key-file", "", "--seed"]) == 0
+    assert cli.main(["vk-catchup", "--db", str(db), "--key-file", ""]) == 0
+    assert seen == ["dry", "seed", "act"]

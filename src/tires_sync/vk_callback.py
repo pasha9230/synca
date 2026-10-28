@@ -35,7 +35,8 @@ def _same(a: str, b: str) -> bool:
 
 
 def recent(conn, limit: int = 10) -> list:
-    return [{"at": r[0], "type": r[1]} for r in conn.execute("SELECT at, type FROM vk_event ORDER BY id DESC LIMIT ?", (limit,))]
+    return [{"at": r[0], "type": r[1]} for r in conn.execute("SELECT at, type FROM vk_event WHERE event_id NOT LIKE 'catchup-%' ORDER BY id DESC LIMIT ?",
+                                                                       (limit,))]                 # the backstop's (vk_catchup): not Callback's
 
 
 def _message(data: dict, group: str) -> Optional[dict]:
