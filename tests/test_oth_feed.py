@@ -193,3 +193,62 @@ def test_a_set_of_four_stays_on_four_pieces_on_oth_and_an_alias_account_is_marke
     alias = mirror_feed.alias_id(2, "101")
     second = ads_of(public(tmp_path, 2))
     assert {alias, alias + "-x4"} <= set(second) and description(public(tmp_path, 2), alias).startswith(LINE + "\n")
+
+
+def passed(capsys) -> str:
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "не пройдена" not in text, text
+    return text
+
+
+def test_another_lot_of_the_same_tire_takes_the_id_and_the_ad_goes_on_with_the_line(tmp_path, capsys):
+    """101 is on OTH and falls below the threshold; 107 is the same tire with stock: it takes the Id of 101 (same_tire). One ad under that Id,
+    never two (a repeated Id stops the account): 101 is not held, 107 goes on under its Id with «Шины в наличии»."""
+    from tests.test_stock_pass import rows
+    prepared(tmp_path)
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "101")
+    lots = rows(dict(NNOMMODIF="101", NREST="2"), *(dict(NNOMMODIF=str(n)) for n in range(102, 106)), dict(NNOMMODIF="107", SLOAD="95"))
+    capsys.readouterr()
+    assert run(tmp_path, lots) == 0
+    passed(capsys)
+    for acct, suffix in ((1, ""), (2, "_a2")):
+        ids = [a.findtext("Id") for a in ET.fromstring(public(tmp_path, acct)).findall("Ad")]
+        assert ids.count("101" + suffix) == 1 and not any(i.startswith("107") for i in ids)
+        assert description(public(tmp_path, acct), "101" + suffix).startswith(LINE + "\n")
+        assert "107" in published(tmp_path, acct) and "101" not in published(tmp_path, acct)
+
+
+def test_a_long_stay_on_oth_keeps_the_ad_alive_on_avito(tmp_path, capsys):
+    """A held ad is the saved one: its DateEnd is renewed, or after some weeks on OTH Avito would close it."""
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "101")
+    conn = store.connect(tmp_path / "t.db")
+    old = store.get_snapshot(conn, "101", 1)
+    conn.execute("UPDATE published_state SET snapshot = ? WHERE goods_id = '101'",
+                 (old.replace(ET.fromstring(old).findtext("DateEnd"), "2026-09-01"),))
+    conn.commit()
+    conn.close()
+    assert run(tmp_path, AFTER) == 0
+    passed(capsys)
+    ad = ET.fromstring(ads_of(public(tmp_path))["101"])
+    assert ad.findtext("DateEnd") > date.today().isoformat() and ad.findtext("DateEnd") == ET.fromstring(ads_of(public(tmp_path))["103"]).findtext("DateEnd")
+
+
+def test_a_tire_type_the_owner_left_out_of_the_account_takes_a_position_on_oth_off_there(tmp_path, capsys):
+    from tires_sync import connections
+    from tests.test_stock_pass import rows
+    studs = rows(dict(NNOMMODIF="101", SMODIFNAME="IKON 205/55/16 T 95 Test Model Ш."), *(dict(NNOMMODIF=str(n)) for n in range(102, 106)))
+    prepared(tmp_path)
+    assert run(tmp_path, studs) == 0
+    on_oth(tmp_path, "101")
+    conn = store.connect(tmp_path / "t.db")
+    connections.set_excluded_types(conn, 1, ["Зимние шипованные"], "2026-10-29T11:00:00", "o")
+    conn.close()
+    capsys.readouterr()
+    assert run(tmp_path, studs) == 0
+    passed(capsys)
+    assert "101" not in ads_of(public(tmp_path, 1)) and "101" not in published(tmp_path, 1)
+    assert description(public(tmp_path, 2), "101_a2").startswith(LINE + "\n")         # the other account has the type: there it stays

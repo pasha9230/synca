@@ -116,7 +116,7 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
         owner_phone="" if account["id"] == connections.PRIMARY_ACCOUNT else feed_check._phone(active_settings(conn).contact_phone),
         foreign_addresses=foreign, allowed_photos=own.allowed if own is not None else frozenset(),
         known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem,
-        oth=frozenset(oth_stock.pieces(conn)) if mode == "generated" else frozenset(), **tochki)   # read here, not from the cycle's decisions
+        oth=frozenset(oth_stock.pieces(conn)), **tochki)   # read here, not from the cycle's decisions (a mirror's new positions too)
     return feed_check.check_feed(ads, ctx)
 
 
@@ -307,6 +307,7 @@ def run_for_accounts(
             if left_out and parsed is not None:                      # tire types the owner left out of this account: as if the supplier did not have them
                 account_parsed = copy.copy(parsed)
                 account_parsed.offers = {k: v for k, v in parsed.offers.items() if feed_tire_type(v) not in left_out}
+                account_parsed.left_out = frozenset(set(parsed.offers) - set(account_parsed.offers))   # a setting: OTH does not keep them
             lately = pass_removals_lately(conn, account["id"])
             report = run_cycle(
                 xml_bytes, connections.effective_settings(conn, account["id"], settings), ref, conn, today, out_dir=out_dir,
@@ -417,6 +418,7 @@ def stock_pass(conn, parsed, ref, today: date, feed_root, settings: Optional[Set
             if left_out:                                                   # as the cycle sees the account (run_for_accounts)
                 account_parsed = copy.copy(parsed)
                 account_parsed.offers = {k: v for k, v in parsed.offers.items() if feed_tire_type(v) not in left_out}
+                account_parsed.left_out = frozenset(set(parsed.offers) - set(account_parsed.offers))   # a setting: OTH does not keep them
             # the guard over the last hour: every removal of it (the passes' and the hourly cycle's) counts with this pass's own
             published, ev, ds = plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now,
                                                 removed_before=_removed_lately(conn, account["id"]))

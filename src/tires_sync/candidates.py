@@ -30,6 +30,7 @@ class Evaluation:
     aliases: Dict[str, str] = field(default_factory=dict)      # code -> its alias Id (accounts with the alias scheme); built each cycle, saved only for published codes
     inherit: Dict[str, str] = field(default_factory=dict)      # code -> the Id of the oldest ad of the same tire (see same_tire.py)
     match: Optional[object] = None                             # tire_match.MatchResult the cycle merged by (the switch on); None: off
+    oth: Dict[str, int] = field(default_factory=dict)          # code -> pieces on «На ОТХ» for this account (sync.plan_decisions): kept, «Шины в наличии»
 
 
 def evaluate(

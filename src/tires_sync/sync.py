@@ -19,7 +19,7 @@ from .candidates import evaluate
 from .catalog import suggest
 from .decide import decide, hold_decision
 from .feed import (
-    AGE_NOTE, AGE_WORD, ad_from_text, ad_to_text, assemble_feed, check_feed, compose_title, render_ad, validate_ad, write_atomic,
+    AGE_NOTE, AGE_WORD, ad_from_text, ad_to_text, assemble_feed, check_feed, compose_title, render_ad, stable_date_end, validate_ad, write_atomic,
 )
 from .models import Action, Decision, Settings
 from .photo_library import image_urls, is_library_link
@@ -73,6 +73,12 @@ def _takes_mark(ad_id: str, code: str, acct=None) -> bool:
 ALIAS_ID = re.compile(r"k[0-9a-z]{11}(-x\d+)?(_r\d{8})?$")                         # an Id of the alias scheme: nothing to take a code from, already final
 
 
+def _renew_date_end(ad, settings: Settings, today: date) -> None:
+    node = ad.find("DateEnd")
+    if node is not None:
+        node.text = stable_date_end(today, settings.date_end_days, settings.date_end_renew_days).isoformat()
+
+
 def _snapshot_text(ad) -> str:
     """The ad as it is saved for later holds: without the line «Шины в наличии» of «На ОТХ», which belongs to the cycle that adds it."""
     from . import oth_stock
@@ -105,6 +111,7 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     `tochki_trial`: the 4tochki trial of this account (tochki_feed.trial); None reads it, False: none. Out of the trial the 4tochki
     positions are not seen at all; in it the new ones meet the strict entry (tire_match.tochki_entry) and `merge` turns the merge on."""
     from . import tochki_feed
+    left_out = frozenset(getattr(parsed, "left_out", ()) or ())          # codes of tire types the owner left out of this account (cycle)
     tochki = tochki_feed.config(conn)["supplier_id"]
     trial = tochki_feed.trial(conn, acct) if tochki_trial is None else (tochki_trial or None)
     parsed = tochki_feed.for_account(parsed, tochki, trial)
@@ -204,8 +211,15 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     live_bound = frozenset(c for c, i in bound_now.items()
                            if not (mirror_feed.alias_scheme(conn, acct) and i == mirror_feed.alias_id(acct, c)))   # a plain alias says nothing about being live
     from . import oth_stock
+    oth = {code: n for code, n in oth_stock.pieces(conn).items() if code not in left_out}   # a type left out: the owner's setting takes it off
+    taken_by = {ad_id: code for code, ad_id in ev.inherit.items()}
+    for code in sorted(oth):
+        taker = taken_by.get(live_id_of(code))
+        if taker is not None and taker != code:                           # another lot of the same tire takes its Id (same_tire): one ad under
+            oth[taker] = oth.get(taker, 0) + oth.pop(code)                # the Id, never two; that lot goes on with the line
+    ev.oth = oth
     ds = decide(ev, published, store.load_suppressed(conn, acct), known_points, settings, today, now=now, already_live=live_bound,
-                removed_before=removed_before, oth=oth_stock.pieces(conn))
+                removed_before=removed_before, oth=oth)
     return published, ev, ds
 
 
@@ -299,7 +313,7 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         return bool(tochki_prefix) and code.startswith(tochki_prefix)
     model_photos = ModelPhotos(conn, parsed.offers, tochki_prefix)
     from . import oth_stock
-    on_oth = oth_stock.pieces(conn)                                       # our tires at a point: «Шины в наличии» first (the owner 2026-10-29)
+    on_oth = getattr(ev, "oth", None) or {}                               # our tires at a point: «Шины в наличии» first (the owner 2026-10-29)
     for d in ds.decisions:
         if d.action not in (Action.PUBLISH, Action.UPDATE, Action.KEEP, Action.HOLD):
             final.append(d)
@@ -337,17 +351,21 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             final.append(d)
             continue
         held_ad = ad_from_text(snapshot)
+        if d.reason.startswith("oth:"):                                   # held for weeks maybe: the saved DateEnd would close the ad on Avito
+            _renew_date_end(held_ad, settings, today)
         ads.append(held_ad)
         owners.append((held_ad, d.goods_id))
         offer = parsed.offers.get(d.goods_id)
         # a set of four is not offered for a position that waits for the morning, nor when it is known that fewer than four are left
         no_four = d.reason.startswith("cart_wait:") or (offer is not None and offer.stock < 4) or no_pack(d.goods_id)
-        if d.reason.startswith("oth:"):                                   # held for «На ОТХ»: the set of four stands on our own pieces
-            no_four = on_oth.get(d.goods_id, 0) < 4 or no_pack(d.goods_id)
+        if d.reason.startswith("oth:"):                                   # held for «На ОТХ»: the set of four on our own pieces or the supplier's
+            no_four = (on_oth.get(d.goods_id, 0) < 4 and (offer is None or offer.stock < 4)) or no_pack(d.goods_id)
         twin = None if no_four else (
             store.get_snapshot4(conn, d.goods_id, acct) if settings.pack4 and (offer is None or settings.pack4_for(offer)) else None)
         if twin:
             twin_ad = ad_from_text(twin)
+            if d.reason.startswith("oth:"):
+                _renew_date_end(twin_ad, settings, today)
             ads.append(twin_ad)
             owners.append((twin_ad, d.goods_id))
         final.append(d)
@@ -465,8 +483,9 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         title_guard["held"] = len(renames) if len(renames) > limit else 0
     for ad, code in owners:                                               # the saved ad (snapshot) is kept without the line: _snapshot_text
         node = ad.find("Description")
+        own = published.get(code) is not None and published[code].location == "own"     # the ads of our own point: as they are
         if node is not None:
-            node.text = oth_stock.add_line(node.text) if code in on_oth else oth_stock.drop_line(node.text)
+            node.text = oth_stock.add_line(node.text) if code in on_oth and not own else oth_stock.drop_line(node.text)
     return ads, invalid, final, rendered, rendered4, owners
 
 
