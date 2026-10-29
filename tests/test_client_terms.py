@@ -333,3 +333,5 @@ def test_the_conditions_of_an_invitation_are_kept_for_a_client_only(tmp_path):
     assert not conn.execute("SELECT 1 FROM client_terms WHERE subject = 'watcher'").fetchone()
     with pytest.raises(ct.TermsError):
         users.create_invite(conn, "client", None, "", NOW, "owner", '{"small": 999, "large": null, "brands": null}')
+    users.create_invite(conn, "viewer", None, "", NOW, "owner", ct.invite_terms("5", "", "inherit", []))   # the module keeps it a client's only
+    assert conn.execute("SELECT client_terms FROM panel_invite WHERE role = 'viewer'").fetchall() == [("",), ("",)]
