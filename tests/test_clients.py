@@ -161,8 +161,7 @@ def test_the_card_the_list_and_the_money_right(tmp_path, monkeypatch):
     client = app.test_client()
     with client.session_transaction() as s:
         s["user"], s["epoch"] = "pointman", store.get_session_epoch(conn, "pointman")
-    page = client.get("/clients")                                                              # «CRM» of a point: its own part (2026-10-26)
-    assert page.status_code == 200 and "Иван Петров" not in page.get_data(as_text=True)
+    assert client.get("/clients").status_code == 403                                           # no «CRM» for a point (the owner 2026-10-29)
     assert client.get("/clients/%d" % client_id).status_code == 403
 
 
@@ -173,7 +172,8 @@ def test_the_old_code_reads_a_base_with_clients(conn, tmp_path):
     assert {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'client%'")} == {
         "client", "client_phone", "client_peer", "client_order", "client_chat", "client_call",      # client_call: the calls (2026-10-23)
         "client_tag", "client_pair_skip",                                                          # CRM (2026-10-23): the tags, «не тот же»
-        "client_inquiry"}                                                                          # the status of the inquiry (2026-10-23)
+        "client_inquiry",                                                                          # the status of the inquiry (2026-10-23)
+        "client_terms", "client_brand"}                                    # the conditions of the role «Клиент» (a buyer, 2026-10-29), not of CRM
 
 
 def test_a_new_phone_of_a_linked_order_goes_to_its_client_unless_another_has_it(conn):

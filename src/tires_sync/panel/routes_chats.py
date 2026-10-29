@@ -245,7 +245,7 @@ def register(app) -> None:
         if opened is not None and all(c["id"] != chat_row for c in rows):   # answered, read, closed: it stays in its place, not in «Всего»
             rows = sorted(rows + [opened], key=lambda c: place[c["id"]])
             kept = opened["kept"] = not fits                              # «вне фильтра» on its row only when it is out of the state
-        names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
+        names = {} if mine else {a["id"]: a["name"] for a in connections.list_accounts(conn)}   # a point never sees an account's name (2026-10-29)
         wanted = [c["id"] for c in rows] + ([chat_row] if chat_row is not None else [])
         starts = dict(pending)                                            # «Ждут ответа» read them already: only the others are read
         starts.update(chats.wait_starts(conn, [r for r in wanted if r not in asked]))        # the auto-answer is no answer
@@ -293,6 +293,9 @@ def register(app) -> None:
                         ours = {r[0] for r in conn.execute("SELECT id FROM order_card WHERE point_id = ?", (own_point(),))}
                         deal["earlier"] = [i for i in deal["earlier"] if i in ours]
                     deal["gaps"] = orders.gaps_to_place(conn, deal)
+                    if mine:                                                     # never an account's name (the owner 2026-10-29)
+                        deal["comment"] = orders.without_account_names(conn, deal["comment"])
+                        deal["tags"] = [t for t in deal["tags"] if t.lower() not in orders.account_tags(conn)]
                 except orders.OrderError:
                     deal = None
         def link(f, a):
@@ -620,6 +623,8 @@ def register(app) -> None:
         try:
             _card_id, answer = mgr.hand_over(conn, point, {"kind": "chat", "chat_row": chat_row}, form["phone"], mgr.handoff_fields(form),
                                              request.form.get("token"), author(), local_iso(), notify)
+            from .. import point_log
+            point_log.record(conn, local_iso(), author(), point, "handoff", _card_id, "из чата")              # «История точки»
             flash(answer, "ok")
         except orders.OrderError as err:
             flash(str(err))
@@ -652,10 +657,17 @@ def register(app) -> None:
                 raise orders.OrderError("У чата нет заказа или этап выбран неверно.")
             if own_point() is not None and orders.get_card(conn, chat["order_id"])["point_id"] != own_point():
                 raise orders.OrderError("Этап заказа №%d меняет владелец: заказ не вашей точки." % chat["order_id"])
+            from .routes_orders import ask_oth, oth_offer
+            asked = oth_offer(conn, orders.get_card(conn, chat["order_id"]), stage_id)
+            if asked is not None:                                          # «Шины остаются на точке — на ОТХ?»: the order's card asks (2026-10-29)
+                return ask_oth(chat["order_id"], asked)
             stamp = local_iso()
             moved = orders.move_card(conn, chat["order_id"], stage_id, stamp, author())
             if moved:
                 offer_send(conn, chat["order_id"], stamp)
+                if own_point() is not None:                                # «История точки»
+                    from .. import point_log
+                    point_log.record(conn, stamp, author(), own_point(), "move", chat["order_id"], "этап «%s» (из чата)" % orders.get_stage(conn, stage_id)["name"])
             flash("Заказ №%d перенесён в «%s»." % (chat["order_id"], orders.get_stage(conn, stage_id)["name"]) if moved
                   else "Заказ №%d уже на этом этапе." % chat["order_id"])
         except orders.OrderError as err:

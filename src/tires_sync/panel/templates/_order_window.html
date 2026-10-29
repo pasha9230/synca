@@ -16,7 +16,8 @@
 <button class="sr-only" tabindex="-1" aria-hidden="true">Сохранить</button>{% endif %}{# the first button is the one Enter presses: Enter in a field saves, it never moves the card #}
 <div class="owin-head">
 {% call entity_ui.head(entity if card else {"type": "order", "kind": "", "title": "Новый заказ"}, id="ow-title", title_class="owin-title", extra="owin-top") %}
-{% if card and c.stage.kind == "open" %}{% set next_stage = stages|selectattr("kind", "in", ["open", "won"])|selectattr("position", "gt", c.stage.position)|first %}{% endif %}
+{% if card and c.stage.code == "return_given" %}{% set next_stage = stages|selectattr("code", "equalto", "return")|first %}{# the tyres went back: the amount closes it in «Возврат» #}
+{% elif card and c.stage.kind == "open" %}{% set next_stage = stages|selectattr("kind", "in", ["open", "won"])|rejectattr("code", "equalto", "return_given")|selectattr("position", "gt", c.stage.position)|first %}{% endif %}{# «Возврат передан» is the point's act МХ-3, never a click of the window #}
 {# one button to the next stage of the flow (review 2026-10-21, 2.5): like a chip of the strip, it saves the window, then moves #}
 {% if next_stage and not ro %}<button class="btn btn--primary btn--sm owin-next" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ next_stage.id }}" title="Сохранить окно и перенести заказ на этап «{{ next_stage.name }}»">Перевести в «{{ next_stage.name }}» {{ icon("arrow-right", "i-sm") }}</button>{% endif %}
 {% if card and (not ro or can_delete or (c.stage.code not in ("cancel", "return") and can_post("order_move"))) %}<details class="menu owin-menu"><summary>Ещё ⋯</summary><div class="menu-list">

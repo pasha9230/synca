@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 from datetime import date, timedelta
+from typing import Optional
 
 from flask import abort, flash, jsonify, redirect, render_template, request, session
 
@@ -14,6 +15,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
+from .. import order_oth, point_log
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
@@ -67,7 +69,7 @@ def _ajax() -> bool:
 
 def _responsible_options(app, conn, current: str = "") -> list:
     """Who can answer for an order: the owner and the panel users (and a name already on the card, so that it is not lost)."""
-    logins = [app.config["AUTHOR"]] + [u["login"] for u in panel_users.list_users(conn)]
+    logins = [app.config["AUTHOR"]] + [u["login"] for u in panel_users.list_users(conn) if u["role"] != "client"]     # a client is not staff
     if current and current not in logins:
         logins.append(current)
     return [{"login": login, "label": login + (" (владелец)" if login == app.config["AUTHOR"] else "")} for login in dict.fromkeys(logins)]
@@ -339,6 +341,37 @@ def _with_stubs(events: list, chats_shown: list) -> list:
     return out
 
 
+OTH_OFFER = ("cancel", "refused")                 # a refusal of an order at the point: the tyres stay there (the owner 2026-10-29)
+OTH_QUESTION = "Шины остаются на точке — перевести на «На ОТХ»?"
+
+
+def no_account_tags(conn, tags):
+    """The tags a manager of a point sees: never the name of an Avito account (chat_deals._account_tag puts it on the orders of the chats and
+    the calls; the owner 2026-10-29: a point never sees an account's name). Everybody else: the tags as they are."""
+    if own_point() is None:
+        return tags
+    names = orders.account_tags(conn)
+    return [t for t in tags if t.lower() not in names]
+
+
+def oth_offer(conn, card: dict, stage_id) -> Optional[dict]:
+    """The stage of «Отмена» or «Отказ/невыкуп» chosen for an order on «Товар на точке» before the person answered the question: the move
+    waits and the card asks it (the owner 2026-10-29); None: move as asked. The answer comes as the field oth_answer (yes / no)."""
+    if card["stage"]["code"] != "at_point" or request.form.get("oth_answer") in ("yes", "no"):
+        return None
+    stage = next((s for s in orders.list_stages(conn) if s["id"] == stage_id), None)
+    return stage if stage is not None and stage["code"] in OTH_OFFER else None
+
+
+def ask_oth(card_id: int, stage: dict):
+    """Keep the move asked for (and its reason) for the question of the card; the board is told where the question is."""
+    session["oth_offer"] = {"card": card_id, "stage_id": stage["id"], "cancel_reason": str(request.form.get("cancel_reason") or "").strip()[:300]}
+    where = "/orders/%d#oth-offer" % card_id
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=False, message=OTH_QUESTION, go=where)
+    return redirect(where)
+
+
 def card_or_404(conn, card_id):
     try:
         return orders.get_card(conn, card_id)
@@ -426,11 +459,20 @@ def register(app) -> None:
         point, tag, query = own_point() or _int(request.args.get("p")), request.args.get("t", "").strip()[:30], request.args.get("q", "").strip()[:80]
         data = orders.board(conn, local_now(), point_id=point, tag=tag, query=query,          # a manager of a point: only the point (common.own_point),
                             with_sums=own_point() is None)                                       # and no sums (the owner 2026-10-26)
+        only = _int(request.args.get("s"))                     # one stage (the stages of «Рабочее место» lead here, the owner 2026-10-29)
+        if only is not None and any(col["stage"]["id"] == only for col in data["columns"]):
+            data = dict(data, columns=[col for col in data["columns"] if col["stage"]["id"] == only])
+        else:
+            only = None
+        if own_point():                                                   # the tags with an account's name are not the point's to see
+            for col in data["columns"]:
+                for c in col["cards"]:
+                    c["tags"] = no_account_tags(conn, c["tags"])
         rows = sorted(({"card": c, "stage": col["stage"]} for col in data["columns"] for c in col["cards"]), key=lambda r: -r["card"]["id"])
         labels = orders.origin_labels(conn, own_point(), [r["card"]["id"] for r in rows]) if own_point() else {}   # not from the point's account
         return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
-                               dots=_dots(conn), rows=rows, total_cards=sum(col["count"] for col in data["columns"]),
+                               dots=_dots(conn), rows=rows, total_cards=sum(col["count"] for col in data["columns"]), only_stage=only,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
 
     @app.route("/orders/export.xlsx")
@@ -587,9 +629,16 @@ def register(app) -> None:
     @login_required
     def order_move(card_id):
         conn = get_conn()
-        card_or_404(conn, card_id)
         stage_id = _int(request.form.get("stage_id"))
         changes = {} if own_point() else {k: v for k, v in request.form.items() if k in orders.EDITABLE}     # a point manager only moves
+        card = card_or_404(conn, card_id)
+        asked = oth_offer(conn, card, stage_id) if stage_id is not None else None
+        if asked is not None:
+            return ask_oth(card_id, asked)
+        if request.form.get("oth_answer") in ("yes", "no"):                # the answer to the question: its reason goes with the move, for a point too
+            session.pop("oth_offer", None)
+            if request.form.get("cancel_reason"):
+                changes["cancel_reason"] = str(request.form.get("cancel_reason"))[:300]
         send = None
         try:
             if stage_id is None:
@@ -597,6 +646,8 @@ def register(app) -> None:
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
+            if moved and own_point() is not None:                         # «История точки»: the point moved its order on the board
+                point_log.record(conn, stamp, author(), own_point(), "move", card_id, "этап «%s»" % orders.get_stage(conn, stage_id)["name"])
             if moved and _ajax():                                         # the board draws the same window from the answer
                 try:
                     send = board_offer(conn, card_id, stamp) if own_point() is None else None      # a point sees no messages
@@ -612,6 +663,30 @@ def register(app) -> None:
         flash(message, "message" if ok else "error")
         return redirect("/orders/%d" % card_id)
 
+    def _oth_ask(conn, card: dict):
+        """The question «Шины остаются на точке» kept by ask_oth for this order, while it still stands on «Товар на точке»."""
+        asked = session.get("oth_offer") or {}
+        if asked.get("card") != card["id"] or card["stage"]["code"] != "at_point":
+            return None
+        stages = {s["id"]: s for s in orders.list_stages(conn)}
+        target, oth = stages.get(asked.get("stage_id")), next((s for s in stages.values() if s["code"] == "oth"), None)
+        if target is None or oth is None:
+            return None
+        return {"target": target, "oth": oth, "cancel_reason": asked.get("cancel_reason", ""), "question": OTH_QUESTION}
+
+    @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
+    @login_required
+    def order_oth_agreed(card_id):
+        """«Согласовано с поставщиком» for an order on «На ОТХ» (the owner and the partner): the date of the return, the point sees it."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        try:
+            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author())
+            flash("Возврат согласован: точка передаст шины поставщику %s.%s и подпишет акт МХ-3." % (day[8:10], day[5:7]), "ok")
+        except order_oth.OthError as err:
+            flash(str(err), "error")
+        return redirect("/orders/%d" % card_id)
+
     @app.route("/orders/<int:card_id>")
     @login_required
     def order_card_page(card_id):
@@ -622,6 +697,8 @@ def register(app) -> None:
         """The page of an order. `typed`: what the window sent and could not be saved; the window shows it again, with the error."""
         card_id = card["id"]
         values = dict(card, **typed) if typed else card
+        if own_point() is not None:                                      # the comment of an order made from a call named the account (2026-10-29)
+            values = dict(values, comment=orders.without_account_names(conn, values.get("comment")))
         stored = orders._row(conn, card_id)
         shown = json.dumps({k: stored[k] for k in orders.EDITABLE}, ensure_ascii=False)     # what the window shows, to save only what is changed on it
         engine.refresh_tasks(conn, card_id, local_iso())
@@ -649,13 +726,14 @@ def register(app) -> None:
                 events = [e for e in events if not orders.client_words(e)]
             if origin or len(links) < len(linked):                       # not the point's own order: what was written to the client is named only
                 events = [engine.for_point(e) for e in events]
+            events = [dict(e, text=orders.without_account_names(conn, e["text"])) for e in events]   # never an account's name (2026-10-29)
             if chat_ref and not chat_ref[1] and chat_ref[0] not in {"/chats/%d" % ch["id"] for ch in links}:
                 chat_ref = None                                          # «Открыть чат» of the field: a chat of another account
             if bind:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
-            c=card, entity=orders.card_view(card), v=values, was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
+            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]), oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),
@@ -742,6 +820,9 @@ def register(app) -> None:
                 flash("Заказ не перенесён: позиция не добавлена.", "error")
             return card_page(conn, card_or_404(conn, card_id), typed_row)
         if "stage_id" in request.form:                                    # a stage of the window: the fields are saved first, then the move
+            asked = oth_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
+            if asked is not None:                                         # the fields are saved (the reason too); the move asks first
+                return ask_oth(card_id, asked)
             try:
                 stage_id = _int(request.form.get("stage_id"))
                 if stage_id is None:

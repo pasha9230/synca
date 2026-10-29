@@ -103,7 +103,7 @@
       ring();
       if (fresh) fresh.hidden = false;
       added.slice(0, MAX_SHOWN).forEach(tell);
-      if (added.length > MAX_SHOWN) tell({key: "more", title: "Ещё " + (added.length - MAX_SHOWN), text: "Новое на «Моей точке»", href: "/my-point"});
+      if (added.length > MAX_SHOWN) tell({key: "more", title: "Ещё " + (added.length - MAX_SHOWN), text: "Новое на «Рабочем месте»", href: "/my-point"});
     }).catch(function () { /* no connection: the bell shows it; the next look tries again */ });
   }
 

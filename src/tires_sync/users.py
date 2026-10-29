@@ -88,6 +88,8 @@ def remove_user(conn, login: str, now: str) -> None:
     if conn.execute("DELETE FROM panel_user WHERE login = ?", (login,)).rowcount == 0:
         raise UserError("Пользователя «%s» нет." % login)
     conn.execute("DELETE FROM panel_user_role WHERE login = ?", (login,))
+    conn.execute("DELETE FROM client_terms WHERE subject = ?", (login,))           # a client's own conditions ('*' is the role's, never a login)
+    conn.execute("DELETE FROM client_brand WHERE subject = ?", (login,))
     store.write_audit(conn, now, "server", "user_removed", {"login": login})
     store.bump_session_epoch(conn, login)
 
@@ -114,10 +116,11 @@ def verify(conn, login: str, password: str) -> Optional[str]:
 # ---- roles and rights -------------------------------------------------------------------------------------------------------------
 
 NONE, VIEW, EDIT = 0, 1, 2
-ROLES = {"owner": "Владелец", "partner": "Партнёр", "chats": "Менеджер чатов", "point": "Менеджер точки", "viewer": "Наблюдатель"}
+ROLES = {"owner": "Владелец", "partner": "Партнёр", "chats": "Менеджер чатов", "point": "Менеджер точки", "viewer": "Наблюдатель",
+         "client": "Клиент"}
 SECTIONS = {"home": "Главная", "orders": "Заказы", "chats": "Чаты", "calls": "Звонки", "clients": "CRM", "alerts": "Уведомления", "catalog": "Товар и фид",
             "analytics": "Аналитика (деньги)", "setup": "Настройка", "users": "Пользователи", "self": "Свой пароль",
-            "mypoint": "Моя точка"}
+            "mypoint": "Рабочее место", "shop": "Каталог для клиента"}
 RIGHTS = {"money": "видеть закупку и прибыль", "delete": "удалять", "bulk": "массово закрывать", "publish": "публиковать и обновлять фид",
           "send": "отправлять клиенту", "connections": "менять подключения и ключи", "supplier": "оформлять заказ у поставщика",
           "listen": "слушать записи звонков"}
@@ -129,16 +132,20 @@ RIGHTS = {"money": "видеть закупку и прибыль", "delete": "�
 # «Звонки»: the recordings are for the operator, the admins and the owners; the manager of a point hears the calls of the point's account
 # only; the observer sees the list and never the recordings (the owner 2026-10-21, the lead 2026-10-23).
 # «CRM» of a point: looks only, at its own part of a client (the orders of the point, the chats and the calls of its account, their sums; the
-# owner 2026-10-26); panel/common.own_client opens the card, clients.*_for_point select the part.
+# owner 2026-10-26); the owner 2026-10-29: the point has no CRM at all (the order's card, the chats and the calls show no link to a client).
+# «Рабочее место» (mypoint) is the point's start page; «История точки» is in «Пользователи»: the owner and the partner only.
+# The client (a buyer, the owner 2026-10-29): «Каталог для клиента» (shop) with the own prices and the own password, nothing else
+# (panel/common.CLIENT_PAGES); no other role has «shop»: the owner looks at a client's catalog through a preview in «Пользователи».
 MATRIX: Dict[str, dict] = {
-    "owner": {"sections": {s: EDIT for s in SECTIONS}, "rights": set(RIGHTS)},
+    "owner": {"sections": {s: EDIT for s in SECTIONS if s != "shop"}, "rights": set(RIGHTS)},
     "partner": {"sections": dict(home=VIEW, orders=EDIT, chats=EDIT, calls=EDIT, clients=EDIT, alerts=EDIT, catalog=VIEW, analytics=VIEW, setup=VIEW, users=VIEW,
                                  self=EDIT, mypoint=EDIT),
                 "rights": {"money", "delete", "bulk", "send", "supplier", "listen"}},
     "chats": {"sections": dict(home=VIEW, orders=EDIT, chats=EDIT, calls=EDIT, clients=EDIT, alerts=EDIT, catalog=VIEW, self=EDIT),
               "rights": {"send", "listen"}},
-    "point": {"sections": dict(orders=EDIT, chats=EDIT, calls=EDIT, clients=VIEW, alerts=EDIT, self=EDIT, mypoint=EDIT), "rights": {"send", "listen"}},
+    "point": {"sections": dict(orders=EDIT, chats=EDIT, calls=EDIT, alerts=EDIT, self=EDIT, mypoint=EDIT), "rights": {"send", "listen"}},
     "viewer": {"sections": dict(home=VIEW, orders=VIEW, chats=VIEW, calls=VIEW, clients=VIEW, alerts=EDIT, catalog=VIEW, self=EDIT), "rights": set()},
+    "client": {"sections": dict(shop=VIEW, self=EDIT), "rights": set()},
 }
 INVITE_HOURS = 48
 NAME_MAX = 60

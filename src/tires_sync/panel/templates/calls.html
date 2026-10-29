@@ -13,7 +13,7 @@
 <section class="card"><div class="card-body" style="overflow-x:auto"><table class="table calls-table"><thead><tr><th>Когда</th><th>Аккаунт / точка</th><th>Клиент</th><th>Итог</th><th>Запись</th><th></th></tr></thead><tbody>
 {% set inq = inquiry_calls(rows|map(attribute="id")|list) %}{% for c in rows %}<tr id="call-{{ c.id }}"{% if not c.answered %} class="is-missed"{% endif %}>
 <td data-label="Когда"><time title="{{ c.call_at|dt }}">{{ c.call_at|dt }}</time></td>
-<td data-label="Аккаунт">{{ c.account_name }}{% if c.point_name %} · {{ c.point_name }}{% endif %}</td>
+<td data-label="Аккаунт">{{ c.account_name }}{% if c.account_name and c.point_name %} · {% endif %}{{ c.point_name or "" }}</td>
 <td data-label="Клиент">{% if c.client_id and clients_link %}<a href="/clients/{{ c.client_id }}">{{ c.buyer_phone|phone }}</a>{% else %}{{ c.buyer_phone|phone if c.buyer_phone else "номер скрыт" }}{% endif %}{% if c.client_name %} · {{ c.client_name }}{% endif %} {{ inq_ui.badge(inq.get(c.id)) }}
 {# the client's chat and order (the owner 2026-10-23); the point gets those of its account and its point only (calls.client_links); the call's own order is in the last cell #}
 {% set cl = links.get(c.client_id) %}{% set go_chat = chat_links and cl and cl.chat %}{% set go_order = order_links and cl and cl.order and cl.order != c.order_id %}{% if go_chat or go_order %}<div class="row" style="gap:var(--s-1);margin-top:var(--s-1)">{% if go_chat %}<a class="btn btn--secondary btn--xs" href="/chats/{{ cl.chat }}">Чат</a>{% endif %}{% if go_order %}<a class="btn btn--secondary btn--xs" href="/orders/{{ cl.order }}">Заказ №{{ cl.order }}</a>{% endif %}</div>{% endif %}</td>

@@ -66,6 +66,8 @@ def register(app) -> None:
         rows = [] if no_account else calls.list_calls(conn, account_id=account_id, missed=missed, since=since, phone=phone)
         for row in rows:
             row["may_listen"] = may_listen(row)
+            if mine:                                                     # a point never sees an account's name (the owner 2026-10-29)
+                row["account_name"] = ""
         handed = mgr.handed_calls(conn, [row["id"] for row in rows])
         links = calls.client_links(conn, [row["client_id"] for row in rows], account_id=account_id if mine else None, point_id=own_point())
         handoff = None
@@ -119,6 +121,8 @@ def register(app) -> None:
         try:
             _card_id, answer = mgr.hand_over(conn, point, {"kind": "call", "call_id": call_row}, form["phone"], mgr.handoff_fields(form),
                                              request.form.get("token"), author(), local_iso(), notify)
+            from .. import point_log
+            point_log.record(conn, local_iso(), author(), point, "handoff", _card_id, "из звонка")             # «История точки»
             flash(answer, "ok")
         except orders.OrderError as err:
             flash(str(err))
