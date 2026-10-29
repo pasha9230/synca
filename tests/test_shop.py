@@ -466,3 +466,21 @@ def test_a_turned_phone_photo_stands_up_and_a_transparent_palette_is_on_white():
     out = io.BytesIO()
     palette.save(out, "PNG", transparency=0)
     assert color_of(shop_photos.clean(out.getvalue())) == (255, 255, 255)
+
+
+def test_the_frame_of_the_client_is_for_a_phone_too_and_the_staff_css_is_untouched(tmp_path):
+    from pathlib import Path
+    app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1")])
+    html = page(client)
+    assert '<body class="shop">' in html and "/static/shop.css" in html and 'class="shop-top"' in html
+    static = Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static"
+    css = (static / "shop.css").read_text(encoding="utf-8")
+    assert "body.shop{min-width:0}" in css and "@media (max-width:720px)" in css
+    bare = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    selectors = [sel.strip() for block in re.findall(r"([^{}]+)\{[^{}]*\}", re.sub(r"@media[^{]*\{", "", bare)) for sel in block.split(",")]
+    assert selectors and all(re.match(r"(body)?\.shop", sel) for sel in selectors), [s for s in selectors if not re.match(r"(body)?\.shop", s)]
+    assert "min-width:1280px" in (static / "panel.css").read_text(encoding="utf-8")       # the staff pages stay as they are
+    assert client.get("/static/shop.css").status_code == 200
+    assert "Зима · шип" in html                                               # 4tochki T1: winter, studded
+    assert "Ikon Tyres Test Model 205/55 R16" not in html                     # the supplier's name is not repeated
+    assert all('id="f-%s"' % n in html and 'for="f-%s"' % n in html for n in ("size", "q", "s", "t", "wh"))
