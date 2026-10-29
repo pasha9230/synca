@@ -20,7 +20,7 @@
 {% elif s.supplier == "tochki" %}
 {% if not s.blocked %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="supplier-window">Заказать в 4 Точки</button>
 {% else %}<button type="button" class="btn btn--primary btn--sm" disabled>Заказать в 4 Точки</button><span class="small muted">Исправьте строки с ✗: кнопка откроется.</span>{% endif %}
-{% else %}<span class="small muted">Кнопки заказа нет: {% if s.supplier == "mixed" %}позиции разных поставщиков, оформите их отдельными заказами{% else %}в заказе нет позиций{% endif %}.</span>{% endif %}
+{% else %}<span class="small muted">Кнопки заказа нет: {% if s.supplier == "mixed" %}позиции разных поставщиков, оформите их отдельными заказами{% elif s.supplier == "other" %}позиции поставщика без заказа из панели, оформите вручную{% else %}в заказе нет позиций{% endif %}.</span>{% endif %}
 <a class="small ml-auto" href="/orders/{{ c.id }}?check=1#supplier">Проверить снова</a>
 </div>
 <p class="small muted">Можно и вручную: оформите заказ в кабинете поставщика и переведите заказ на «Заказ оформлен» с номером.</p>
@@ -29,16 +29,16 @@
 <div class="modal-backdrop send-window" id="supplier-window" role="dialog" aria-modal="true" aria-labelledby="supplier-window-h"><div class="modal">
 <div class="modal-head"><h3 id="supplier-window-h">{% if s.supplier == "webmim" %}Подтверждение заказа в МИМ{% else %}Заказ в 4 Точки (вручную){% endif %} · №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack" data-supplier-window>
-{% if s.late %}<p class="small text-warn" data-supplier-late>{{ "Заказ на сегодня нужно передать в работу до 16:00 (предупреждение WebMIM)." }} Сейчас позже: лучше перенести дату на завтра.</p>{% endif %}
+{% if s.late %}<p class="small text-warn" data-supplier-late>{{ s.late_text }} Сейчас позже: лучше перенести дату на завтра.</p>{% endif %}
 {% if s.supplier == "webmim" %}
 <p class="small">Уйдёт в WebMIM ({{ b.server }}).</p>
 <table class="table small"><thead><tr><th>Позиция</th><th>Код</th><th class="num">Кол-во</th>{% if has_right("money") %}<th class="num">Закупка за 1 шт</th>{% endif %}</tr></thead><tbody>
 {% for i in c['items'] if i.qty|int > 0 %}<tr><td>{{ i.name }}</td><td class="mono">{{ i.goods_id }}</td><td class="num">{{ i.qty }}</td>{% if has_right("money") %}<td class="num">{{ i.supplier_price|money }}</td>{% endif %}</tr>{% endfor %}</tbody></table>
 <dl class="supplier-fields">
-<dt>Вид оплаты</dt><dd>безнал</dd><dt>Признак оплаты</dt><dd>Отсрочка</dd><dt>Способ</dt><dd>Доставка</dd>
+<dt>Вид оплаты</dt><dd>{{ f.kind }}</dd><dt>Признак оплаты</dt><dd>{{ f.terms }}</dd><dt>Способ</dt><dd>{{ f.shipment }}</dd>
 <dt>Адрес</dt><dd>адрес WebMIM {{ f.address_id }} (точка «{{ f.point }}»)</dd><dt>Дата доставки</dt><dd>{{ f.date[8:10] }}.{{ f.date[5:7] }}.{{ f.date[:4] }}</dd>
 <dt>Время работы клиента</dt><dd>{{ f.time }}</dd><dt>Контактное лицо</dt><dd>{{ f.person }}</dd><dt>Контактный телефон</dt><dd>{{ f.phone }}</dd>
-<dt>Примечание для поставщика</dt><dd>{{ f.note }}</dd><dt>Номер в вашей системе</dt><dd>{{ f.external }}</dd></dl>
+<dt>Примечание для поставщика</dt><dd>{{ f.note }}</dd><dt>Номер в вашей системе</dt><dd>{{ f.external }}</dd><dt>Заметка для себя</dt><dd>{{ f.self_note }}</dd></dl>
 <p class="small muted">Заказ на более раннем этапе перейдёт в «Заказ оформлен». Когда заказ будет создан полностью, сообщения об оформлении уйдут сами: клиенту в чат Авито и менеджеру точки в ВК, если хватает данных. Сообщение подождёт в задачах заказа, если не хватает данных (например, номера перемещения) или нет чата Авито (у точки — ВК); не уйдёт второй раз, если уже отправлено, и не уйдёт, если его пропустили вручную.{% if b.test %} Это тестовый сервер: у поставщика ничего не заказывается, но номер тестового заказа впишется в карточку и может уйти в сообщениях. Ушедшее сообщение не удалить; поля WebMIM в карточке после проверки можно очистить.{% endif %}</p>
 <form method="post" action="/orders/{{ c.id }}/webmim/create" data-once data-supplier-go class="row" style="gap:var(--s-3)"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="seen" value="{{ s.fingerprint }}">
 <button type="button" class="btn btn--secondary btn--sm" data-close-modal>Отмена</button><button class="btn btn--primary btn--sm ml-auto">Подтвердить</button></form>

@@ -32,7 +32,8 @@ def number_of(conn, card_id) -> str:
 
 
 def supplier_of(conn, card: dict) -> str:
-    """«webmim» (every position of WebMIM), «tochki» (every one of 4 Точки), «mixed» (both, or another supplier), «» (no position)."""
+    """«webmim» (every position of WebMIM), «tochki» (every one of 4 Точки), «other» (of one other supplier), «mixed» (of several),
+    «» (no position)."""
     items = [i for i in card.get("items") or [] if int(i["qty"] or 0) > 0]
     if not items:
         return ""
@@ -41,7 +42,7 @@ def supplier_of(conn, card: dict) -> str:
     for item in items:
         sid = suppliers.supplier_of_id(str(item["goods_id"]))
         kinds.add("tochki" if tochki and sid == tochki else "webmim" if sid == 1 and not str(item.get("brand_key") or "").startswith("S") else "other")
-    return kinds.pop() if len(kinds) == 1 and "other" not in kinds else "mixed"
+    return kinds.pop() if len(kinds) == 1 else "mixed"
 
 
 def _stock_lines(card: dict, parsed) -> Tuple[List[str], List[str]]:
@@ -106,7 +107,9 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
         return None
     today = datetime.fromisoformat(now).date()
     kind = supplier_of(conn, card)
-    found = webmim_create.checks(conn, card, today) if kind != "tochki" else _tochki_checks(conn, card, today)
+    state = webmim_create.get_state(conn, card["id"])
+    lost = bool(state and not state["webmim_id"] and state["state"] in ("unknown", "running"))       # as _claim: it looks for the order first
+    found = webmim_create.checks(conn, card, today, "lost" if lost else "new") if kind != "tochki" else _tochki_checks(conn, card, today)
     if kind == "mixed":
         found.append(("territory", "В заказе позиции разных поставщиков: оформите их отдельными заказами."))
     bad = {}
@@ -134,7 +137,7 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
         lines.append({"key": key, "label": label, "state": state, "texts": bad.get(key) or warn.get(key) or [good[key]]})
     blocked = bool(found) or kind not in ("webmim", "tochki")
     out = {"supplier": kind, "lines": lines, "blocked": blocked, "late": late, "fields": None, "fingerprint": "", "tochki_text": "",
-           "tomorrow": (today + timedelta(days=1)).isoformat()}
+           "tomorrow": (today + timedelta(days=1)).isoformat(), "late_text": LATE_TEXT}
     if not blocked:
         out["fields"] = webmim_create.fields(conn, card)
         out["fingerprint"] = webmim_create.fingerprint(conn, card)

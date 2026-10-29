@@ -212,3 +212,21 @@ def test_the_others_see_no_block_and_are_refused(panel):
         assert "Заказ поставщику" not in html and "tochki/placed" not in html
         assert client.post("/orders/%d/tochki/placed" % mine, data={"csrf": "tok", "number": "X"}).status_code == 403
     assert order_supplier.number_of(conn, mine) == ""
+
+
+def test_a_lost_answer_is_checked_as_the_press_checks_it(tmp_path):
+    """Д5: after a lost answer a past date does not stop the press (it looks for the order first): «Сверка» agrees."""
+    conn = db(tmp_path)
+    mine = card(conn, delivery_date="2026-10-22")
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
+                 "VALUES (?, 'test', 'unknown', ?, ?, 'owner', '', '', ?)", (mine, NOW, NOW, NOW))
+    conn.commit()
+    view = order_supplier.view(conn, orders.get_card(conn, mine), unload(), NOW)
+    assert lines(view)["date"][0] != "bad" and not view["blocked"]
+
+
+def test_one_other_supplier_is_not_called_several(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn, goods=(("s5-X1", 4),), brand="S5:x")
+    view = order_supplier.view(conn, orders.get_card(conn, mine), unload(), NOW)
+    assert view["supplier"] == "other" and view["blocked"] and "разных поставщиков" not in " ".join(t for l in view["lines"] for t in l["texts"])

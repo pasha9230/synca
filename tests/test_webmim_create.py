@@ -1082,3 +1082,93 @@ def test_late_is_today_after_sixteen(now, day, expected):
 
 def test_the_live_server_stays_closed_to_the_button():
     assert webmim_create.CREATE_SERVERS == ("test",)
+
+
+# ---- review round 1 (2026-10-30, webmim-ui) ---------------------------------------------------------------------------------------------
+
+def lost_mark(conn, mine):
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
+                 "VALUES (?, 'test', 'unknown', ?, ?, 'owner', '', '', ?)", (mine, NOW, NOW, NOW))
+    conn.commit()
+
+
+@pytest.mark.parametrize("lost", [False, True])
+def test_a_list_longer_than_the_pages_read_makes_nothing(tmp_path, monkeypatch, lost):
+    """Д1: more pages than MAX_PAGES — our number may be on a page not read: nothing is made (a lost answer stays «unknown»)."""
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 2)
+    conn = db(tmp_path)
+    mine = card(conn)
+    if lost:
+        lost_mark(conn, mine)
+    fake = FakeWebmim()
+    for n in range(150):
+        fake.add_order("other-%d" % n)
+    result = place(conn, mine, fake)
+    assert not fake.posts("/api/v2/orders") and not result["ok"]
+    assert result["state"] == ("unknown" if lost else "refused") and "не все страницы" in result["text"]
+
+
+class UncountedWebmim(FakeWebmim):
+    """WebMIM that does not say the count of pages."""
+
+    def __call__(self, method, url, headers, body):
+        status, extra, data = super().__call__(method, url, headers, body)
+        return status, {k: v for k, v in extra.items() if k != "X-Pagination-Page-Count"}, data
+
+
+def test_a_list_without_its_count_read_to_the_last_full_page_makes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 2)
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = UncountedWebmim()
+    for n in range(150):
+        fake.add_order("other-%d" % n)
+    result = place(conn, mine, fake)
+    assert not fake.posts("/api/v2/orders") and result["state"] == "refused" and "не все страницы" in result["text"]
+    fake = UncountedWebmim()                                                            # a short last page: the whole list was read
+    for n in range(60):
+        fake.add_order("other-%d" % n)
+    assert place(conn, mine, fake)["ok"]
+
+
+class RepeatingWebmim(FakeWebmim):
+    """The list shifted while it was read: the same order on two pages."""
+
+    def _answer(self, method, path, query, payload):
+        status, data, extra = super()._answer(method, path, query, payload)
+        if path == "/api/v2/orders" and method == "GET" and query.get("page") == "2":
+            data = data + [o for o in self.orders if o["externalNumber"] == self.mine]
+        return status, data, extra
+
+
+def test_the_same_order_read_twice_is_one(tmp_path):
+    """Д3: a row read twice (the pages shifted) is one order: the lost order is found, not «several»."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    lost_mark(conn, mine)
+    fake = RepeatingWebmim()
+    fake.mine = str(mine)
+    fake.add_order(str(mine))
+    for n in range(60):
+        fake.add_order("other-%d" % n)
+    result = place(conn, mine, fake)
+    assert result["ok"] and not fake.posts("/api/v2/orders") and orders._row(conn, mine)["webmim_id"] == "1001"
+
+
+def test_a_new_press_without_the_window_is_refused(tmp_path):
+    """Д4: the page's press of a new order carries the window's fingerprint; an empty one (an old page, a hand request) is refused."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = FakeWebmim()
+    with pytest.raises(orders.OrderError) as err:
+        webmim_create.place(conn, mine, client_of(fake), "test", NOW, TODAY, "owner", sleep=lambda _s: None, seen="")
+    assert "окно подтверждения" in str(err.value) and fake.calls == []
+
+
+def test_the_fingerprint_knows_the_server(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn)
+    before = webmim_create.fingerprint(conn, orders.get_card(conn, mine))
+    connections.set_config(conn, "webmim_orders", 0, {"server": "prod", "login": "api-bot"}, NOW, "owner")
+    conn.commit()
+    assert webmim_create.fingerprint(conn, orders.get_card(conn, mine)) != before

@@ -991,8 +991,8 @@ def register(app) -> None:
             if server in webmim_create.CREATE_SERVERS and app.config.get("SECRET_BOX") is not None:
                 client = webmim_match.client_for(conn, app.config["SECRET_BOX"], app.config.get("WEBMIM_HTTP") or urllib_transport, server)
             try:
-                seen = request.form.get("seen")                          # the window «Подтверждение»: what it showed must still be the order
-                result = webmim_create.place(conn, card_id, client, server, local_iso(), local_now().date(), author(), seen=seen or None)
+                seen = request.form.get("seen", "")                      # the window «Подтверждение»: what it showed must still be the order
+                result = webmim_create.place(conn, card_id, client, server, local_iso(), local_now().date(), author(), seen=seen)
             finally:
                 if client is not None:
                     client.close()
