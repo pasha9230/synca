@@ -32,6 +32,8 @@ def base(tmp_path):
     item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (card,)).fetchone()[0]       # the rows of «На ОТХ» (хвост З16)
     conn.execute("INSERT INTO order_oth_client (order_id, client_id, how, linked_at, detached_at, detached_by) VALUES (?, 1, 'chat', ?, ?, 'o')", (card, NOW, NOW))
     conn.execute("INSERT INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, 4, ?, 'o')", (item, card, NOW))
+    conn.execute("INSERT INTO order_item_oth (item_id, order_id, from_item, from_order, qty, at, author, undone_at) VALUES (?, ?, 999, 999, 4, ?, 'o', ?)",
+                 (item, card, NOW, NOW))                                         # «Взять с ОТХ» given back: holds nothing, goes with the order
     conn.commit()
     return conn, fake, account, chats.get_chat(conn, chat["id"]), card
 

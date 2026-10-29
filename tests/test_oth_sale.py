@@ -645,3 +645,40 @@ def test_the_move_to_the_point_puts_today_as_the_delivery_date_when_there_is_non
     post(owner, "/orders/%d/oth-at-point" % cid, tok)
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == "at_point" and card["delivery_date"] == card["entered_at"][:10]
+
+
+# ---- the bin and the users (lane 2026-10-30-minor) -------------------------------------------------------------------------------------
+
+def test_the_bin_refuses_an_order_holding_or_giving_tyres_of_oth_by_itself(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    for card_id in (cid, old):
+        with pytest.raises(orders.OrderError, match="ОТХ"):
+            trash.delete_order(conn, card_id, LATER, "o")                         # no only_if: the bin checks it itself
+    assert orders.get_card(conn, cid)["items"] and orders.get_card(conn, old)
+
+
+def test_a_restored_order_keeps_where_its_tyres_came_from(tmp_path):
+    """An order that holds nothing any more (its tyres given back) may go to the bin: its rows of order_item_oth go and come back with it."""
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    oth_sale.untake(conn, cid, orders.get_card(conn, cid)["items"][0]["id"], LATER, "o")
+    links = conn.execute("SELECT * FROM order_item_oth WHERE order_id = ?", (cid,)).fetchall()
+    assert links and links[0][-1]                                                 # given back: undone_at
+    record = trash.delete_order(conn, cid, LATER, "o")
+    assert conn.execute("SELECT COUNT(*) FROM order_item_oth WHERE order_id = ?", (cid,)).fetchone()[0] == 0
+    trash.restore_order(conn, record, LATER, "o")
+    assert conn.execute("SELECT * FROM order_item_oth WHERE order_id = ?", (cid,)).fetchall() == links
+
+
+def test_a_removed_user_leaves_no_settings_of_their_own(tmp_path):
+    from tires_sync import user_prefs
+    conn = db(tmp_path)
+    users.add_user(conn, "anna2", "длинный-пароль-1", T, role="chats")
+    user_prefs.put(conn, "anna2", "orders_list", {"order": ["Дата"], "hidden": []}, T)
+    users.remove_user(conn, "anna2", T)
+    assert conn.execute("SELECT COUNT(*) FROM user_pref WHERE login = 'anna2'").fetchone()[0] == 0

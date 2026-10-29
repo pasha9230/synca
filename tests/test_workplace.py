@@ -466,3 +466,33 @@ def test_a_press_brings_back_to_the_tab_it_came_from(tmp_path):
     r = mine.post("/my-point/%d/arrived" % card, data={"csrf": "tok", "token": token}, headers={"Referer": "http://localhost/my-point?tab=moving"})
     assert r.status_code == 302 and r.headers["Location"].endswith("/my-point?tab=moving")
     assert 'name="tab" value="moving"' in page                                               # the search keeps the tab too
+
+
+def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_are_on_oth_again(tmp_path):
+    from tires_sync import oth_stock
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    oth = _on_oth(conn, pid, webmim="700502")
+    mine = manager(app, conn, pid)
+    goods = orders.get_card(conn, oth)["items"][0]["goods_id"]
+    assert goods in oth_stock.pieces(conn)
+    assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))             # nothing agreed yet
+    post(client, "/orders/%d/oth-agreed" % oth, "tok")
+    assert goods not in oth_stock.pieces(conn) and 'data-return="%d"' % oth in _text(mine.get("/my-point"))
+    assert "Отменить согласование" in _text(client.get("/orders/%d" % oth))
+    assert post(mine, "/orders/%d/oth-unagree" % oth, "tok").status_code == 403             # the point never cancels it
+    assert order_oth.return_plan(conn, oth) is not None
+    assert post(client, "/orders/%d/oth-unagree" % oth, "tok").status_code == 302
+    assert order_oth.return_plan(conn, oth) is None and goods in oth_stock.pieces(conn)     # «Шины в наличии» comes back in the cycle
+    assert 'data-return="%d"' % oth not in _text(mine.get("/my-point"))
+    assert any("Согласование возврата с поставщиком отменено" in e["text"] for e in orders.list_events(conn, oth))
+    assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_return_unagreed'").fetchone()[0] == 1
+    assert not order_oth.unagree(conn, orders.get_card(conn, oth), NOW, "o")                # twice: nothing more
+
+
+def test_no_cancel_once_the_act_is_signed(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    oth = _on_oth(conn, pid, webmim="700503")
+    post(client, "/orders/%d/oth-agreed" % oth, "tok")
+    assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "point")
+    assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))
+    assert not order_oth.unagree(conn, orders.get_card(conn, oth), NOW, "o") and order_oth.return_plan(conn, oth)["signed_at"]

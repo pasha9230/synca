@@ -740,6 +740,18 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
+    @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
+    @login_required
+    def order_oth_unagree(card_id):
+        """«Отменить согласование» of the return of «На ОТХ» (the owner and the partner), until the point signs the act МХ-3."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        if order_oth.unagree(conn, card, local_iso(), author()):
+            flash("Согласование отменено: шины снова на ОТХ, точка возврат не видит.", "ok")
+        else:
+            flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
+        return redirect("/orders/%d" % card_id)
+
     @app.route("/orders/<int:card_id>")
     @login_required
     def order_card_page(card_id):
