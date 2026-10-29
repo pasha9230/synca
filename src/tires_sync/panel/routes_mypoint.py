@@ -260,9 +260,10 @@ FOUND_MAX = 20
 
 
 def _found(conn, query: str, point_id: int) -> list:
-    """The search line: the orders of this point only, by the number of the order, of the transfer or the phone (the top bar's own search,
-    search._orders, narrowed to the point)."""
-    scope = search.Scope(frozenset({"orders"}), point=point_id)
+    """The search line: the orders of this point only, by the number of the order, of the transfer, the phone or the client's name (in the
+    order, in its chat of the point's account) — the top bar's own search, search._orders, narrowed to the point."""
+    row = conn.execute("SELECT avito_account_id FROM point WHERE id = ?", (point_id,)).fetchone()
+    scope = search.Scope(frozenset({"orders"}), point=point_id, account=row[0] if row else None)
     groups = search.run(conn, query, scope, local_now(), limit=FOUND_MAX)["groups"]
     return groups[0]["items"] if groups else []
 

@@ -296,3 +296,28 @@ def test_our_own_number_typed_into_an_order_is_not_the_clients_phone_for_the_poi
     conn.commit()
     m = w["manager"]
     assert [g for g in m.get("/search.json", query_string={"q": own}).get_json()["groups"] if g["key"] == "clients"] == []
+
+
+# ---- 8. the client's name in the search of a point (the owner 2026-10-29) ---------------------------------------------------------
+
+def _order_urls(client, q, page=False):
+    if page:
+        return set("/orders/%s" % n for n in re.findall(r'<a class="mp-name" href="/orders/(\d+)"', _text(client.get("/my-point", query_string={"q": q}))))
+    found = client.get("/search.json", query_string={"q": q}).get_json()
+    return {i["url"] for g in found["groups"] if g["key"] == "orders" for i in g["items"]}
+
+
+@pytest.mark.parametrize("page", [False, True])
+def test_the_name_finds_the_own_order_in_any_case_and_never_another_points(w, page):
+    m, conn = w["manager"], w["conn"]
+    for q in ("общий", "ОБЩИЙ", "Общ"):
+        assert _order_urls(m, q, page) == {"/orders/%d" % w["order_a"]}, q                 # point Б's «Общий» never
+    assert _order_urls(m, "чужой иван", page) == set() and _order_urls(m, "Иван", page) == set()
+    assert _order_urls(m, "чат-руставели", page) == {"/orders/%d" % w["order_a"]}          # the name of the order's chat of its account
+    _chat(conn, w["acc_b"], "pq", "Иной Аккаунтович", w["order_a"])                        # a chat of another account bound to its order
+    conn.commit()
+    assert _order_urls(m, "аккаунтович", page) == set()                                    # its name is not the point's to search
+    owner = w["app"].test_client()
+    login(owner)
+    assert _order_urls(owner, "аккаунтович") == {"/orders/%d" % w["order_a"]}               # the owner finds it
+    assert _order_urls(owner, "общий") == {"/orders/%d" % w[k] for k in ("order_a", "order_b", "order_b2")}
