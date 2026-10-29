@@ -21,8 +21,10 @@ def is_aged(offer: Offer) -> bool:
     return "старше" in offer.name.lower() or "старше" in offer.mnf_year.lower()
 
 
-def exclusion_reason(offer: Offer, settings: Settings) -> Optional[str]:
-    owner = owner_exclusion(offer.brand_key, offer.diameter, settings.excluded_brands, settings.excluded_sizes)
+def exclusion_reason(offer: Offer, settings: Settings, on_oth: bool = False) -> Optional[str]:
+    """`on_oth`: the position lies on «На ОТХ» (oth_stock): an excluded brand and a season switched off give way, the owner 2026-10-29 —
+    the tires are at the point already; every other reason stays."""
+    owner = owner_exclusion(offer.brand_key, offer.diameter, () if on_oth else settings.excluded_brands, settings.excluded_sizes)
     if owner:
         return owner
     if offer.car_type.upper() in ("C", "LT"):
@@ -31,7 +33,7 @@ def exclusion_reason(offer: Offer, settings: Settings) -> Optional[str]:
         return "old_production"
     if offer.diameter < settings.min_diameter:
         return "diameter"
-    if (offer.brand_key, offer.season) in settings.enabled:
+    if (offer.brand_key, offer.season) in settings.enabled or (on_oth and offer.season is not Season.UNKNOWN):
         return None
     if offer.season is Season.UNKNOWN and any(b == offer.brand_key for b, _ in settings.enabled):
         return "unknown_season"

@@ -58,6 +58,7 @@ class Context:
     tochki_prefix: str = ""                             # «s<N>-» of the 4tochki positions ("" = 4tochki not set up: nothing of it is judged)
     tochki_trial: bool = False                          # the account is in the 4tochki trial (tochki_feed.trial)
     tire_ids: Dict[str, str] = field(default_factory=dict)      # code -> its tire (tire_match.identity_text), for the codes of the feed
+    oth: FrozenSet[str] = frozenset()                   # positions on «На ОТХ» (oth_stock.pieces): our own tires at a point, not judged by stock
     live_models: Dict[str, str] = field(default_factory=dict)   # Id -> Model of the ad Avito reads now (the published file)
 
 
@@ -143,7 +144,9 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
         if ctx.tochki_prefix:
             _tochki_rules(ad, ad_id, code_of(ad_id), bool(pack), ctx, twins, code_of, add)
         stock = ctx.stocks.get(code_of(ad_id))
-        if code_of(ad_id) in ctx.held:
+        if code_of(ad_id) in ctx.oth:
+            pass                                                # our tires at a point (the owner 2026-10-29): kept whatever the supplier has
+        elif code_of(ad_id) in ctx.held:
             known = stock if stock is not None else ctx.known_stocks.get(code_of(ad_id))
             if known is not None and known < ctx.min_stock:     # held (the guard, a broken row): the unload says it fell below the threshold
                 add("held_low_stock", ad_id, "остаток %d, порог %d" % (known, ctx.min_stock))
