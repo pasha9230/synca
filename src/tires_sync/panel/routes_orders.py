@@ -777,7 +777,8 @@ def register(app) -> None:
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
-            oth_taken=oth_sale.taken(conn, card_id), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
+            oth_taken={i: dict(t, drop=oth_sale.can_drop(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),
@@ -1029,8 +1030,12 @@ def register(app) -> None:
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
         try:
-            pieces = oth_sale.untake(conn, card_id, item_id, local_iso(), author())
-            flash("Возвращено на ОТХ: %d шт. Если шины нужны у поставщика, добавьте позицию заново." % pieces)
+            if request.form.get("drop"):                                   # «Убрать без возврата»: the old order cannot take them back
+                pieces = oth_sale.drop(conn, card_id, item_id, local_iso(), author())
+                flash("Убрано из заказа: %d шт. Шины на точке — учтите их вручную." % pieces)
+            else:
+                pieces = oth_sale.untake(conn, card_id, item_id, local_iso(), author())
+                flash("Возвращено на ОТХ: %d шт. Если шины нужны у поставщика, добавьте позицию заново." % pieces)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "items")
@@ -1134,7 +1139,7 @@ def register(app) -> None:
         card = card_or_404(conn, card_id)
         try:
             trash.delete_order(conn, card_id, local_iso(), author(),          # the tyres taken from «На ОТХ» are not lost with the order
-                               only_if=lambda c, _card: oth_sale.holds_text(oth_sale.holds(c, card_id)) if oth_sale.holds(c, card_id) else None)
+                               only_if=lambda c, _card: oth_sale.why_not_delete(c, card_id))
         except orders.OrderError as err:
             flash(str(err))
             return back(card_id)

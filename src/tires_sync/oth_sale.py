@@ -53,13 +53,23 @@ def given(conn, card_id) -> Set[int]:
     return {r[0] for r in conn.execute("SELECT DISTINCT from_item FROM order_item_oth WHERE from_order = ?", (card_id,))}
 
 
+def first_order(conn, item_id) -> Optional[int]:
+    """The order the tyres of a position «с ОТХ» were bought for: along a chain (A → B → C) to its first order."""
+    found, seen = None, set()
+    row = conn.execute("SELECT from_item, from_order FROM order_item_oth WHERE item_id = ?", (item_id,)).fetchone()
+    while row is not None and row[0] not in seen:
+        seen.add(row[0])
+        found = row[1]
+        row = conn.execute("SELECT from_item, from_order FROM order_item_oth WHERE item_id = ?", (row[0],)).fetchone()
+    return found
+
+
 def from_number(conn, card_id) -> Dict[int, str]:
-    """Item id of a position «с ОТХ» → the WebMIM number of the order its tyres came from (the Google table)."""
+    """Item id of a position «с ОТХ» → the WebMIM number of the order its tyres were bought by (the Google table; the first of a chain)."""
     out = {}
-    for item_id, number, webmim_id in conn.execute(
-            "SELECT t.item_id, c.webmim_number, c.webmim_id FROM order_item_oth t JOIN order_card c ON c.id = t.from_order "
-            "WHERE t.order_id = ? AND t." + _LIVE, (card_id,)):
-        out[item_id] = number or webmim_id or ""
+    for item_id in taken(conn, card_id):
+        row = conn.execute("SELECT webmim_number, webmim_id FROM order_card WHERE id = ?", (first_order(conn, item_id),)).fetchone()
+        out[item_id] = (row[0] or row[1] or "") if row else ""
     return out
 
 
@@ -71,8 +81,27 @@ def holds(conn, card_id) -> List[int]:
 
 
 def holds_text(found: List[int]) -> str:
-    return ("В заказе шины с ОТХ (заказ %s): сначала нажмите «Вернуть на ОТХ» у этих позиций или переведите заказ в «На ОТХ»."
-            % ", ".join("№%d" % n for n in found))
+    return ("В заказе шины с ОТХ (заказ %s): они лежат на точке и не должны потеряться. До «Заказ оформлен» нажмите «Вернуть на ОТХ» у этих "
+            "позиций; после — переведите заказ в «На ОТХ» (отказ клиента) или в «Выполнено»." % ", ".join("№%d" % n for n in found))
+
+
+def gives(conn, card_id) -> List[int]:
+    """The orders holding tyres this order gave from «На ОТХ» (positions «с ОТХ» with pieces): the order may not be deleted then —
+    «Вернуть на ОТХ» would have nowhere to put them."""
+    return sorted({r[0] for r in conn.execute(
+        "SELECT t.order_id FROM order_item_oth t JOIN order_item i ON i.id = t.item_id WHERE t.from_order = ? AND t." + _LIVE + " AND i.qty >= 1",
+        (card_id,))})
+
+
+def why_not_delete(conn, card_id) -> Optional[str]:
+    """Why the order may not be deleted: it holds tyres taken from «На ОТХ», or gave some still held."""
+    held, gave = holds(conn, card_id), gives(conn, card_id)
+    if held:
+        return holds_text(held)
+    if gave:
+        return ("Шины этого заказа взяты с ОТХ в заказ %s: удалить его нельзя (им некуда будет вернуться). Переведите заказ в «Отмена»."
+                % ", ".join("№%d" % n for n in gave))
+    return None
 
 
 def why_not(conn, card: dict) -> Optional[str]:
@@ -130,6 +159,13 @@ def find_hint(conn, goods_ids) -> Dict[str, str]:
     return {g: "на ОТХ: " + ", ".join("%s %d шт" % (p, n) for p, n in sorted(places.items())) for g, places in found.items()}
 
 
+def _stage(conn, code: str) -> dict:
+    found = next((s for s in orders.list_stages(conn) if s["code"] == code), None)
+    if found is None:
+        raise OthSaleError("В воронке нет этапа «%s»: взять и вернуть шины с ОТХ нельзя." % {"cancel": "Отмена", "oth": "На ОТХ"}[code])
+    return found
+
+
 def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     """«Взять с ОТХ»: the supplier's position `line_id` of the order gives up to its pieces to tyres of the position `from_item` lying on «На ОТХ».
     One transaction (the old order emptied is moved to «Отмена» in it). Returns the pieces taken; OthSaleError says why nothing was."""
@@ -150,6 +186,13 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     pieces = min(int(source["qty"]), int(line["qty"]))
     old = orders.get_card(conn, source["order_id"])
     item = next(i for i in old["items"] if i["id"] == source["item_id"])
+    cancel = _stage(conn, "cancel")
+    if not card["point_id"]:                                        # the order's point is the one the tyres lie at (its time, its checks)
+        try:
+            orders.update_card(conn, card_id, {"point_id": source["point_id"]}, now, author, commit=False)
+        except orders.OrderError:
+            conn.rollback()
+            raise
     # the limit in the statement itself: a take a moment ago in another tab never lets the pieces go below the ones marked returned
     if conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ? AND qty - ? >= COALESCE((SELECT qty FROM oth_return WHERE item_id = ?), 0) "
                     "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth') "
@@ -157,21 +200,23 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
                     (pieces, item["id"], pieces, item["id"])).rowcount != 1:
         conn.rollback()
         raise OthSaleError("Столько шин на ОТХ уже нет: их только что взяли в другой вкладке. Обновите страницу.")
+    # the supplier's position as it was read: a second press a moment ago (another worker) changed it — nothing more is taken
     if pieces >= int(line["qty"]):
-        conn.execute("DELETE FROM order_item WHERE id = ?", (line["id"],))
+        gone = conn.execute("DELETE FROM order_item WHERE id = ? AND order_id = ? AND qty = ?", (line["id"], card_id, line["qty"])).rowcount
     else:
-        conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ?", (pieces, line["id"]))
+        gone = conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ? AND order_id = ? AND qty = ?",
+                            (pieces, line["id"], card_id, line["qty"])).rowcount
+    if gone != 1:
+        conn.rollback()
+        raise OthSaleError("Позицию только что изменили (второе нажатие или другая вкладка): ничего не взято. Обновите страницу.")
     cur = conn.execute(
         "INSERT INTO order_item (order_id, goods_id, code, name, brand_key, season, diameter, territory, qty, supplier_price, sale_unit, terms, "
         "fee_pct, promo_pct, purchase_manual) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
         (card_id, line["goods_id"], line["code"] or item["code"], line["name"], line["brand_key"], line["season"], line["diameter"], line["territory"],
-         pieces, float(item["supplier_price"]), float(line["sale_unit"]), json.dumps(line["terms"] or {}, ensure_ascii=False), float(line["fee_pct"]),
+         pieces, float(item["supplier_price"]), float(line["sale_unit"]), json.dumps(item["terms"] or {}, ensure_ascii=False), float(line["fee_pct"]),
          float(line["promo_pct"])))
     conn.execute("INSERT INTO order_item_oth (item_id, order_id, from_item, from_order, qty, at, author) VALUES (?,?,?,?,?,?,?)",
                  (cur.lastrowid, card_id, item["id"], old["id"], pieces, now, author))
-    if not card["point_id"]:
-        conn.execute("UPDATE order_card SET point_id = ?, updated_at = ? WHERE id = ?", (source["point_id"], now, card_id))
-        orders.add_event(conn, card_id, now, author, "field", "Точка: %s — там лежат шины с ОТХ" % _point_name(source))
     orders.add_event(conn, card_id, now, author, "item", "Взято с ОТХ (заказ №%d, %s): %s × %d" % (old["id"], _point_name(source), line["name"], pieces))
     orders.add_event(conn, old["id"], now, author, "item", "Передано с ОТХ в заказ №%d: %s × %d" % (card_id, item["name"], pieces))
     _audit(conn, now, author, "oth_take", {"order": int(card_id), "item": cur.lastrowid, "from_order": old["id"], "from_item": item["id"], "qty": pieces})
@@ -179,7 +224,6 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     if left > 0:
         conn.commit()
         return pieces
-    cancel = next(s for s in orders.list_stages(conn) if s["code"] == "cancel")
     try:
         moved = orders.move_card(conn, old["id"], cancel["id"], now, author, changes={"cancel_reason": TAKEN_REASON % card_id}, fire_rules=False,
                                  journal=False)
@@ -201,11 +245,15 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     if why:
         raise OthSaleError(why.replace("Брать с ОТХ", "Вернуть на ОТХ"))
     line = next(i for i in card["items"] if i["id"] == int(item_id))
+    if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (link["from_order"],)).fetchone():
+        raise OthSaleError("По заказу №%d согласован возврат поставщику: шины в него не вернуть (акт МХ-3 разойдётся). Уберите позицию "
+                           "кнопкой «Убрать без возврата», если шины не нужны." % link["from_order"])
     old = conn.execute("SELECT c.id, s.code, c.cancel_reason FROM order_item i JOIN order_card c ON c.id = i.order_id JOIN order_stage s ON s.id = c.stage_id "
                        "WHERE i.id = ? AND c.id = ?", (link["from_item"], link["from_order"])).fetchone()
     reopen = old is not None and old[1] == "cancel" and str(old[2]).startswith(TAKEN_REASON.split("%")[0])
     if old is None or (old[1] != "oth" and not reopen):
-        raise OthSaleError("Заказ №%d ушёл с ОТХ: вернуть шины в него нельзя. Удалите позицию вручную, если шины не нужны." % link["from_order"])
+        raise OthSaleError("Заказ №%d ушёл с ОТХ: вернуть шины в него нельзя. Уберите позицию кнопкой «Убрать без возврата», если шины не "
+                           "нужны." % link["from_order"])
     pieces = int(line["qty"])
     conn.execute("UPDATE order_item SET qty = qty + ? WHERE id = ?", (pieces, link["from_item"]))
     conn.execute("DELETE FROM order_item WHERE id = ?", (line["id"],))
@@ -218,7 +266,7 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     if not reopen:
         conn.commit()
         return pieces
-    oth = next(s for s in orders.list_stages(conn) if s["code"] == "oth")
+    oth = _stage(conn, "oth")
     try:
         moved = orders.move_card(conn, link["from_order"], oth["id"], now, author, fire_rules=False, journal=False)
     except orders.OrderError as err:
@@ -228,9 +276,48 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     return pieces
 
 
-def note_sales(conn, card: dict, ids: List[int]) -> None:
-    """The sales just written for the order (one per position, in the order of card["items"]): those of the positions «с ОТХ» are kept. No commit."""
+def can_drop(conn, card_id, item_id) -> bool:
+    """«Убрать без возврата» is offered: the old order cannot take the tyres back (it left «На ОТХ», its return is agreed, it is gone)."""
+    link = taken(conn, card_id).get(int(item_id))
+    if link is None:
+        return False
+    if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (link["from_order"],)).fetchone():
+        return True
+    old = conn.execute("SELECT s.code, c.cancel_reason FROM order_item i JOIN order_card c ON c.id = i.order_id JOIN order_stage s ON s.id = c.stage_id "
+                       "WHERE i.id = ? AND c.id = ?", (link["from_item"], link["from_order"])).fetchone()
+    return old is None or not (old[0] == "oth" or (old[0] == "cancel" and str(old[1]).startswith(TAKEN_REASON.split("%")[0])))
+
+
+def drop(conn, card_id, item_id, now: str, author: str) -> int:
+    """«Убрать без возврата»: the position «с ОТХ» leaves the order when its old order can no longer take the tyres back (can_drop) —
+    the order is never left holding a position it can neither change nor give back. The tyres are still at the point: said in both
+    journals for the responsible. Returns the pieces."""
+    card = orders.get_card(conn, card_id)
+    why = why_not(conn, card)
+    if why:
+        raise OthSaleError(why.replace("Брать с ОТХ", "Убрать шины с ОТХ"))
+    if not can_drop(conn, card_id, item_id):
+        raise OthSaleError("Эти шины можно вернуть на ОТХ: нажмите «Вернуть на ОТХ».")
+    link = taken(conn, card_id)[int(item_id)]
+    line = next(i for i in card["items"] if i["id"] == int(item_id))
+    if conn.execute("UPDATE order_item_oth SET undone_at = ? WHERE item_id = ? AND " + _LIVE, (now, line["id"])).rowcount != 1:
+        conn.rollback()
+        raise OthSaleError("Позицию только что убрали в другой вкладке. Обновите страницу.")
+    conn.execute("DELETE FROM order_item WHERE id = ?", (line["id"],))
+    text = "Шины с ОТХ убраны без возврата (заказ №%d уже не может их принять): %s × %d — они на точке, учтите их вручную." % (
+        link["from_order"], line["name"], line["qty"])
+    orders.add_event(conn, card_id, now, author, "item", text, level="yellow")
+    if conn.execute("SELECT 1 FROM order_card WHERE id = ?", (link["from_order"],)).fetchone():
+        orders.add_event(conn, link["from_order"], now, author, "item", "Шины, переданные в заказ №%d, убраны из него без возврата: %s × %d — "
+                         "они на точке, учтите их вручную." % (card_id, line["name"], line["qty"]), level="yellow")
+    _audit(conn, now, author, "oth_drop", {"order": int(card_id), "item": line["id"], "from_order": link["from_order"], "qty": int(line["qty"])})
+    conn.commit()
+    return int(line["qty"])
+
+
+def note_sales(conn, card: dict, items: List[dict], ids: List[int]) -> None:
+    """The sales just written for `items` of the order (one per position, in their order): those of the positions «с ОТХ» are kept. No commit."""
     mine = taken_ids(conn, card["id"])
-    for item, sale_id in zip(card["items"], ids):
+    for item, sale_id in zip(items, ids):
         if item["id"] in mine:
             conn.execute("UPDATE order_item_oth SET sale_id = ? WHERE item_id = ?", (sale_id, item["id"]))

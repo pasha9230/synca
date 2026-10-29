@@ -388,3 +388,118 @@ def test_a_manager_of_a_point_cannot_take_from_oth(tmp_path):
     assert items(conn, cid) == [("1", 2, BUY_NOW, False)] and oth_stock.by_point(conn) == {("1", point_id(conn)): 4}
     from tires_sync.panel import common
     assert "order_oth_take" not in common.POINT_PAGES and "order_oth_untake" not in common.POINT_PAGES
+
+
+# ---- the review of 2026-10-29 -----------------------------------------------------------------------------------------------------------
+
+def test_the_old_position_and_the_old_order_are_not_deleted_while_their_tyres_are_held(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    item = orders.get_card(conn, old)["items"][0]["id"]
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    with pytest.raises(orders.OrderError, match="взяты с ОТХ в заказ №%d" % cid):
+        orders.remove_item(conn, item, LATER, "o")
+    assert "взяты с ОТХ в заказ №%d" % cid in oth_sale.why_not_delete(conn, old)
+    with pytest.raises(orders.OrderError, match="удалить его нельзя"):
+        trash.delete_order(conn, old, LATER, "o", only_if=lambda c, _card: oth_sale.why_not_delete(c, old))
+
+
+def test_a_position_the_old_order_cannot_take_back_is_dropped_never_stuck(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    cid = new_order(conn, qty=1)
+    take(conn, cid)
+    item = orders.get_card(conn, cid)["items"][0]["id"]
+    assert not oth_sale.can_drop(conn, cid, item)
+    with pytest.raises(orders.OrderError, match="можно вернуть"):
+        oth_sale.drop(conn, cid, item, LATER, "o")
+    orders.move_card(conn, old, stage(conn, "at_point"), LATER, "o")                 # its client came back for the rest
+    assert oth_sale.can_drop(conn, cid, item)
+    assert oth_sale.drop(conn, cid, item, LATER, "o") == 1
+    assert orders.get_card(conn, cid)["items"] == [] and [i["qty"] for i in orders.get_card(conn, old)["items"]] == [3]
+    assert any("убраны без возврата" in e["text"] and e["level"] == "yellow" for e in orders.list_events(conn, cid))
+    assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_drop'").fetchone()[0] == 1
+
+
+def test_nothing_goes_back_into_an_agreed_return_it_is_dropped_instead(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    cid = new_order(conn, qty=1)
+    take(conn, cid)
+    conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date) VALUES (?,?,?,?)", (old, T, "o", "2026-10-29"))
+    conn.commit()
+    item = orders.get_card(conn, cid)["items"][0]["id"]
+    with pytest.raises(orders.OrderError, match="согласован возврат"):
+        oth_sale.untake(conn, cid, item, LATER, "o")
+    assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [3] and oth_sale.can_drop(conn, cid, item)
+
+
+def test_a_second_press_that_read_before_the_first_was_saved_takes_nothing(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    stale_card, stale_rows, line_id = orders.get_card(conn, cid), oth_stock._rows(conn), line(conn, cid)["id"]
+    from_item = offer(conn, cid)["from_item"]
+    take(conn, cid)
+    real = orders.get_card
+    monkeypatch.setattr(orders, "get_card", lambda c, i: stale_card if i == cid else real(c, i))
+    monkeypatch.setattr(oth_stock, "_rows", lambda _c: stale_rows)
+    with pytest.raises(orders.OrderError, match="только что изменили"):
+        oth_sale.take(conn, cid, line_id, from_item, LATER, "o")
+    monkeypatch.undo()
+    assert items(conn, cid) == [("1", 2, BUY_OLD, True)] and [i["qty"] for i in orders.get_card(conn, old)["items"]] == [2]
+
+
+def test_an_emptied_position_does_not_stop_the_sale_of_the_rest(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    orders.add_item(conn, old, goods_id="2", name="Шина 2", brand_key="nokian", season="winter", diameter=16, territory="1", qty=2, sale_unit=5000,
+                    supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=T, author="o")
+    cid = new_order(conn, qty=4)
+    take(conn, cid)
+    assert code(conn, old) == "oth" and sorted(i["qty"] for i in orders.get_card(conn, old)["items"]) == [0, 2]
+    orders.move_card(conn, old, stage(conn, "at_point"), LATER, "o")
+    orders.move_card(conn, old, stage(conn, "done"), LATER, "o")
+    ids = orders.record_sales(conn, old, "2026-10-29", LATER, "o", "2026-10-29")
+    assert len(ids) == 1 and conn.execute("SELECT goods_id, pieces FROM sale WHERE id = ?", (ids[0],)).fetchone() == ("2", 2)
+
+
+def test_the_terms_of_the_supplier_are_the_old_orders_with_its_purchase(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    conn.execute("UPDATE order_item SET terms = ? WHERE order_id = ?", ('{"discount_pct": 7}', old))
+    conn.commit()
+    cid = new_order(conn, qty=2)
+    conn.execute("UPDATE order_item SET terms = ?, fee_pct = 9 WHERE order_id = ?", ('{"discount_pct": 2}', cid))
+    conn.commit()
+    take(conn, cid)
+    got = orders.get_card(conn, cid)["items"][0]
+    assert got["terms"] == {"discount_pct": 7} and got["fee_pct"] == 9                # the purchase side is the old order's, the sale side the new one's
+
+
+def test_along_a_chain_the_table_names_the_webmim_order_of_the_first(tmp_path):
+    conn = db(tmp_path)
+    first = card_at(conn, "oth", T)
+    second = new_order(conn, qty=4)
+    take(conn, second)
+    for step in ("placed", "moving", "oth"):
+        orders.move_card(conn, second, stage(conn, step), LATER, "o")
+    third = new_order(conn, qty=4)
+    assert offer(conn, third)["from_order"] == second
+    take(conn, third)
+    assert code(conn, second) == "cancel"
+    item = orders.get_card(conn, third)["items"][0]["id"]
+    assert oth_sale.first_order(conn, item) == first
+    assert oth_sale.from_number(conn, third) == {item: orders.get_card(conn, first)["webmim_number"]}
+
+
+def test_the_card_offers_no_give_back_once_the_order_is_placed(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    assert "Вернуть на ОТХ" in owner.get("/orders/%d" % cid).get_data(as_text=True)
+    orders.move_card(conn, cid, stage(conn, "placed"), LATER, "o")
+    html = owner.get("/orders/%d" % cid).get_data(as_text=True)
+    assert "с ОТХ · заказ" in html and "Вернуть на ОТХ" not in html and "Убрать без возврата" not in html
