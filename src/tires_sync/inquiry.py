@@ -542,8 +542,8 @@ def _who_called(conn, task: dict) -> tuple:
 
 
 def callers(conn, owner_login: str) -> set:
-    """Who may get a «Перезвонить»: the active people of the panel who work the orders (not a point, not an observer), and the owner."""
-    return {u["login"] for u in users.list_users(conn) if u["active"] and u["role"] not in ("point", "viewer")} | {owner_login}
+    """Who may get a «Перезвонить»: the active people of the panel who work the orders (not a point, not an observer, not a client), and the owner."""
+    return {u["login"] for u in users.list_users(conn) if u["active"] and u["role"] not in ("point", "viewer", "client")} | {owner_login}
 
 
 def due_rows(conn, login: str, now: str, owner_login: str, panel_logins: set) -> List[dict]:

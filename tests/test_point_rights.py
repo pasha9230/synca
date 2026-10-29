@@ -40,7 +40,7 @@ def bind(w):
 
 
 def test_the_matrix_partner_looks_at_everything_point_has_sales_of_its_own():
-    assert all(users.level("partner", s) >= users.VIEW for s in users.SECTIONS)
+    assert all(users.level("partner", s) >= users.VIEW for s in users.SECTIONS if s != "shop")   # «Каталог для клиента»: the client's only
     assert users.level("partner", "setup") == users.level("partner", "users") == users.VIEW and not users.has_right("partner", "connections")
     assert users.level("point", "chats") >= users.VIEW and users.level("point", "alerts") >= users.VIEW
     for section in ("home", "catalog", "analytics", "setup", "users"):

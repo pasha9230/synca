@@ -162,6 +162,16 @@ CREATE TABLE IF NOT EXISTS panel_invite (
     token_hash TEXT PRIMARY KEY, role TEXT NOT NULL, point_id INTEGER, display_name TEXT NOT NULL DEFAULT '', created TEXT NOT NULL,
     expires TEXT NOT NULL, created_by TEXT NOT NULL, used_at TEXT, used_by TEXT, revoked_at TEXT
 );
+-- the conditions of a client (a buyer; the owner 2026-10-29): subject '*' is the role's (the default), else a login. The price is the purchase
+-- + the % of the brand by the diameter (pct_small up to R17, pct_large from R18); NULL: the role's. client_brand is the set of brands
+-- (brands_mode 'own'; '*' always 'own') and the % of a brand (NULL: the subject's general one)
+CREATE TABLE IF NOT EXISTS client_terms (
+    subject TEXT PRIMARY KEY, pct_small REAL, pct_large REAL, brands_mode TEXT NOT NULL DEFAULT 'inherit',
+    updated TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS client_brand (
+    subject TEXT NOT NULL, brand_key TEXT NOT NULL, pct_small REAL, pct_large REAL, PRIMARY KEY (subject, brand_key)
+);
 CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS login_attempt (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL, at TEXT NOT NULL
@@ -544,6 +554,10 @@ def _migrate(conn) -> None:
         conn.commit()
     for column in ("active_at", "looked_at"):                         # the inquiry: the last word of either side; the last look at its orders
         _add_column(conn, "client_inquiry", column, "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "panel_invite", "client_terms", "TEXT NOT NULL DEFAULT ''")     # the conditions a client's invitation puts in the profile (JSON)
+    if not conn.execute("SELECT 1 FROM client_terms WHERE subject = '*'").fetchone():          # the role's conditions: empty (no price, no brand)
+        conn.execute("INSERT OR IGNORE INTO client_terms (subject, brands_mode) VALUES ('*', 'own')")
+        conn.commit()
 
 
 BUSY_SECONDS = 15.0          # how long a connection waits for another one's write before «database is locked»
