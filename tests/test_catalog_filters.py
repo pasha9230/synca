@@ -66,7 +66,8 @@ def test_whole_sizes_are_read_as_in_the_client_catalog_and_go_with_the_fields(tm
     assert get("?size=205/55R16+225/45R18") == ["C2", "C5", "C6"]
     assert get("?size=205/55/16+195/60+r17") == ["C2", "C3", "C6"]
     assert get("?size=205/55R16+225/45R18&w=225") == ["C5"]                  # both: the fields and the sizes
-    assert get("?size=чепуха") == ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]  # nothing understood: no filter
+    assert get("?size=чепуха") == ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]  # nothing understood: no filter, and the page says so
+    assert "Не понял: 225" in owner.get("/catalog?size=225+45+17").get_data(as_text=True)
     assert 'name="size" value="205/55R16 225/45R18"' in owner.get("/catalog?size=205/55R16+225/45R18").get_data(as_text=True)
 
 
@@ -131,3 +132,42 @@ def test_only_the_owner_sees_the_brands_of_the_feed_and_a_point_or_a_client_neve
     assert as_user(app, conn, "point1", "point", point_id=pid).get("/catalog").status_code == 403
     assert as_user(app, conn, "client1", "client").get("/catalog").status_code == 403
     assert staging.summary(conn)["draft_id"] is None
+
+
+def test_a_brand_of_the_second_supplier_goes_off_and_back_with_its_own_key(tmp_path):
+    """The brand keys of a supplier 2+ carry «S2:»: «Снять» sends the bare brand to its supplier, «Вернуть» the whole key (the review 2026-10-30)."""
+    from datetime import datetime
+    from test_multi_supplier_cycle import ONE, files, prepared
+    from test_panel_stale_ux import app_of
+    from test_panel_tails4 import second
+    prepared(tmp_path).close()
+    files(tmp_path, ONE)
+    second(tmp_path, dict(NNOMMODIF="5"), fetched=datetime.utcnow().isoformat(timespec="seconds"))
+    client = app_of(tmp_path).test_client()
+    tok = login(client)
+    conn = store.connect(tmp_path / "t.db")
+    page = client.get("/catalog").get_data(as_text=True)
+    off = re.search(r'<button[^>]*form="brand-feed-2" name="brand" value="([^"]+)" data-brand-off="S2:([^"]+)"', page)
+    assert off and off.group(1) == off.group(2) and 'id="brand-feed-2" method="post" action="/connections/suppliers/2/excluded"' in page
+    r = post(client, "/connections/suppliers/2/excluded", tok, brand=off.group(1), next="/catalog?sup=2")
+    assert r.headers["Location"].endswith("/catalog?sup=2")
+    key = "S2:" + off.group(2)
+    assert staging.summary(conn)["changes"]["excluded_brands"] == [key]
+    page = client.get("/catalog?sup=2").get_data(as_text=True)
+    assert 'form="brand-feed-2" name="remove" value="%s" data-brand-on="%s"' % (key, key) in page
+    post(client, "/connections/suppliers/2/excluded", tok, remove=key, next="/catalog")
+    assert staging.summary(conn)["draft_id"] is None
+
+
+def test_the_brand_and_size_filters_apply_to_a_position_the_supplier_took_away(tmp_path):
+    from helpers import make_offer
+    from tires_sync import catalog_archive
+    from tires_sync.webmim import ParseResult
+    app, owner, tok, conn = setup(tmp_path)
+    gone = make_offer(goods_id="900", code="G9", name="LAUFENN 175/70/13 Old", name_orig="LAUFENN 175/70/13 Old", brand_key="LAUFENN",
+                      model_raw="Old", width=175, height=70, diameter=13)
+    catalog_archive.record(conn, ParseResult(offers={"900": gone, "901": make_offer(goods_id="901", code="K")}), "2026-10-01T10:00:00")
+    catalog_archive.record(conn, ParseResult(offers={"901": make_offer(goods_id="901", code="K")}), "2026-10-05T10:00:00")
+    text = lambda q: owner.get("/catalog" + q).get_data(as_text=True).split('id="items"')[1]
+    assert ">G9<" in text("?b=LAUFENN") and ">G9<" not in text("?xb=LAUFENN") and ">G9<" not in text("?b=IKON+TYRES")
+    assert ">G9<" in text("?size=175/70R13") and ">G9<" not in text("?size=205/55R16")

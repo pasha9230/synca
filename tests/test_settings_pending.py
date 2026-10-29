@@ -105,7 +105,10 @@ def test_apply_from_the_bar_keeps_every_check_of_the_confirmation(tmp_path):
     r = post(client, "/draft/%d/confirm" % pending["draft"], tok, rev=old, understand="on", next="/settings/exclusions")
     assert r.headers["Location"].endswith("/draft/%d" % pending["draft"]) and len(published(conn)) == 5
     fresh = client.get("/settings/pending").get_json()
-    r = post(client, "/draft/%d/confirm" % fresh["draft"], tok, rev=fresh["rev"], understand="on", next="/settings/exclusions")
+    r = post(client, "/draft/%d/confirm" % fresh["draft"], tok, rev=fresh["rev"], understand="on", agreed_gone="3", next="/settings/exclusions")
+    assert r.headers["Location"].endswith("/draft/%d" % fresh["draft"]) and len(published(conn)) == 5     # the tick was for 3, now 4 go
+    r = post(client, "/draft/%d/confirm" % fresh["draft"], tok, rev=fresh["rev"], understand="on", agreed_gone=str(fresh["guard"]["gone"]),
+             next="/settings/exclusions")
     assert r.headers["Location"].endswith("/settings/exclusions") and len(published(conn)) == 1
     assert client.get("/draft/%d" % pending["draft"]).status_code in (200, 404)
 

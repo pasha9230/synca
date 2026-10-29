@@ -337,6 +337,9 @@ def register(app) -> None:
             return redirect("/draft/%d" % draft_id)
         if request.form.get("rev") != review["rev"]:
             return again("Черновик изменился после просмотра: проверьте итог ещё раз и подтвердите заново.")
+        agreed = request.form.get("agreed_gone", "")
+        if review["guard"]["over"] and agreed and agreed != str(review["guard"]["gone"]):    # the bar's tick was for another number
+            return again("Число снимаемых объявлений изменилось: исчезнет %d. Проверьте и подтвердите заново." % review["guard"]["gone"])
         if review["guard"]["over"] and request.form.get("understand") != "on":
             return again("Подтвердите снятие: исчезнет %d объявлений, это больше порога защиты (%d). Отметьте «Я понимаю»." % (
                 review["guard"]["gone"], review["guard"]["limit"]))
