@@ -379,3 +379,54 @@ def test_the_history_of_a_quiet_point_is_not_lost_behind_the_others(tmp_path):
     assert [r["kind"] for r in point_log.history(conn, pid)] == ["issued"]
     assert "«Бета»" in __import__("tires_sync.panel.texts", fromlist=["x"]).audit_text(
         {"action": "point_action", "detail": {"point": pid, "name": "Бета", "kind": "issued", "order": card}})
+
+
+# ---- the tabs of «Рабочее место» and the compact card (the owner 2026-10-29) ---------------------------------------------------------
+
+def _tab_counts(page):
+    return {k: int(v) for k, v in re.findall(r'data-tab-count="(\w+)">(\d+)</b>', page)}
+
+
+def _listed(page):
+    block = page[page.index('id="mp-orders-h"'):]
+    return set(int(n) for n in re.findall(r'id="order-(\d+)"', block))
+
+
+def test_the_tabs_count_and_list_the_points_orders(tmp_path):
+    from tires_sync.panel import routes_mypoint
+    app, client, tok, conn, pid, card = ready(tmp_path)                                    # card: moving
+    placed = _card(conn, pid, webmim="700300", code="placed")
+    ending = _card(conn, pid, webmim="700400", code="at_point")
+    later = _card(conn, pid, webmim="700500", code="at_point")
+    oth = _on_oth(conn, pid, webmim="700600")
+    _card(conn, _other(conn), webmim="700700", code="at_point")                          # another point's: nowhere
+    with app.test_request_context():
+        today = routes_mypoint.local_iso()[:10]
+    orders.update_card(conn, ending, {"reserve_until": today}, NOW, "o")
+    orders.update_card(conn, later, {"reserve_until": "2099-01-01"}, NOW, "o")
+    conn.commit()
+    mine = manager(app, conn, pid)
+    page = _text(mine.get("/my-point"))
+    assert _tab_counts(page) == {"all": 4, "moving": 1, "here": 2, "ending": 1, "asked": 0, "return": 1}
+    assert _listed(page) == {card, placed, ending, later}                                    # «Все»: as the page always showed
+    for tab, wanted in (("moving", {card}), ("here", {ending, later}), ("ending", {ending}), ("asked", set()), ("return", {oth})):
+        shown = _text(mine.get("/my-point?tab=%s" % tab))
+        assert _listed(shown) == wanted, tab
+        assert 'data-tab="%s" aria-current="page"' % tab in shown, tab                       # the tab is kept in the address
+    assert _listed(_text(mine.get("/my-point?tab=nonsense"))) == {card, placed, ending, later}
+
+
+def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    orders.update_card(conn, card, dict(transfer_number="26R-1447431"), NOW, "o")
+    bare = _card(conn, pid, webmim="700200", code="at_point")
+    page = _text(manager(app, conn, pid).get("/my-point"))
+    for order_id in (card, bare):
+        article = re.search(r'<article class="mp-card[^"]*" id="order-%d".*?</article>' % order_id, page, re.S).group(0)
+        top, more = article.split('<details class="mp-more">')
+        assert "№ " in top and "mp-tel" in top and 'href="tel:+79001112233"' in top and "Татьяна" in top
+        assert "/my-point/%d/issued" % order_id in top                                          # the buttons: never folded
+        assert "<summary>Подробнее</summary>" in more and "Nokian Hakkapeliitta 10" in more and "Nokian Hakkapeliitta 10" not in top
+    first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)
+    assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[0])
+    assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split("<details")[0]

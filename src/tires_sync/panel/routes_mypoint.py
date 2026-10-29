@@ -250,6 +250,27 @@ def _hand_over(conn, point: dict, back: str):
     return (answer or "Не получилось принять клиента. Напишите владельцу."), form
 
 
+# «Рабочее место» (the owner 2026-10-29): the tabs of the point's orders, each with its count; an order may be in two of them.
+TABS = {"all": "Все", "moving": "Едут", "here": "На точке", "ending": "Резерв истекает", "asked": "Ждут ответа", "return": "На возврат"}
+
+
+def _in_tab(row: dict, tab: str) -> bool:
+    """«Все»: what lies at the point and is on its way (as the page always showed); «Едут»: «Перемещение на точку»; «На точке»; «Резерв
+    истекает»: at the point with the last day of the reservation today or tomorrow, or past (the term is a day, reserve_until); «Ждут
+    ответа»: the question «Клиент забрал?» of the last day still open (order_reserve.question_open); «На возврат»: «На ОТХ» (with an
+    agreed return not signed yet among them)."""
+    code = row["card"]["stage"]["code"]
+    return {"all": not row["oth"], "moving": code == "moving", "here": row["here"], "ending": row["ends"], "asked": row["asked"],
+            "return": row["oth"]}[tab]
+
+
+def _oth_cards(conn, point_id) -> list:
+    """The point's orders on «На ОТХ»: the tyres the client refused lie at the point (tab «На возврат»)."""
+    return [orders.get_card(conn, r[0]) for r in conn.execute(
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'oth' ORDER BY c.entered_at, c.id",
+        (point_id,))]
+
+
 def _stages(conn, point_id) -> list:
     """«Этапы заказов»: every stage of the owner's pipeline, in its order and colour, with the number of this point's orders on it."""
     data = orders.board(conn, local_now(), point_id=point_id, with_sums=False)
@@ -303,14 +324,17 @@ def register(app) -> None:
         now = local_iso()
         today = now[:10]
         cards = []
-        for card in (_cards(conn, point_id) if point_id is not None else []):
+        tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat()
+        for card in ((_cards(conn, point_id) + _oth_cards(conn, point_id)) if point_id is not None else []):
             until = card["reserve_until"] or ""
             delivery = card["delivery_date"] or ""
-            cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": card["stage"]["code"] == "at_point",
+            code = card["stage"]["code"]
+            cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": code == "at_point", "oth": code == "oth",
                           "tokens": {action: secrets.token_hex(12) for action in ACTIONS},          # every button is its own press
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
-                          "ends": bool(until) and until <= today, "delivery": _short_date(delivery), "text": vk_text(conn, card, now),
-                          "asked": reserve.question_open(conn, card, now)})
+                          "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery),
+                          "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
+                          "order_date": templates._order_date(conn, card, now)})
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over
@@ -323,11 +347,12 @@ def register(app) -> None:
                 points.mark_seen(conn, point_id, max(n["at"] for n in notes))
             except Exception:                                                    # noqa: BLE001  (a busy base: the page still opens)
                 conn.rollback()
-        here = [r for r in cards if r["here"]]
-        counts = {"coming": len(cards) - len(here), "here": len(here), "ending": sum(1 for r in here if r["ends"]),
-                  "asked": sum(1 for r in cards if r["asked"])}
+        tab = request.args.get("tab", "")
+        tab = tab if tab in TABS else "all"
+        shown = [r for r in cards if _in_tab(r, tab)]
+        counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
-        return render_template("mypoint.html", point=point, cards=cards, counts=counts, questions=[r for r in cards if r["asked"]],
+        return render_template("mypoint.html", point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, questions=[r for r in cards if r["asked"]],
                                notes=notes, choose=own_point() is None, handed=handed, seasons=mgr.SEASONS, bonus=bonus,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form,

@@ -321,3 +321,28 @@ def test_the_name_finds_the_own_order_in_any_case_and_never_another_points(w, pa
     login(owner)
     assert _order_urls(owner, "аккаунтович") == {"/orders/%d" % w["order_a"]}               # the owner finds it
     assert _order_urls(owner, "общий") == {"/orders/%d" % w[k] for k in ("order_a", "order_b", "order_b2")}
+
+
+def test_a_point_without_an_account_finds_no_name_of_a_chat(w):
+    conn = w["conn"]
+    conn.execute("UPDATE point SET avito_account_id = NULL WHERE id = ?", (w["pa"],))
+    conn.commit()
+    assert _order_urls(w["manager"], "чат-руставели") == set() and _order_urls(w["manager"], "чат-руставели", True) == set()
+    assert _order_urls(w["manager"], "общий", True) == {"/orders/%d" % w["order_a"]}         # the order's own name still
+
+
+# ---- 9. a point never sees the name of an Avito account (the owner 2026-10-29) -------------------------------------------------------
+
+def test_no_page_of_a_point_names_an_avito_account(w):
+    conn, m = w["conn"], w["manager"]
+    orders.update_card(conn, w["order_a"], {"tags": "Аккаунт-Руставели,зима"}, NOW, "o")      # the tag chat_deals._account_tag puts on
+    conn.commit()
+    pages = {url: _text(m.get(url)) for url in ("/orders/%d" % w["order_a"], "/orders", "/orders?v=list", "/my-point", "/my-point?tab=all",
+                                                "/search?q=Общий", "/chats/%d" % w["chat_a"], "/chats", "/calls", "/alerts")}
+    for url, page in pages.items():
+        assert "Аккаунт-Руставели" not in page and "Аккаунт-Юнона" not in page, url
+    assert "зима" in pages["/orders/%d" % w["order_a"]]                                      # the other tags stay
+    owner = w["app"].test_client()
+    login(owner)
+    assert "Аккаунт-Руставели" in _text(owner.get("/chats/%d" % w["chat_a"])) and "Аккаунт-Руставели" in _text(owner.get("/orders/%d" % w["order_a"]))
+    assert "Аккаунт-Руставели" in _text(owner.get("/calls"))

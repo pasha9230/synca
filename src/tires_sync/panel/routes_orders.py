@@ -345,6 +345,15 @@ OTH_OFFER = ("cancel", "refused")                 # a refusal of an order at the
 OTH_QUESTION = "Шины остаются на точке — перевести на «На ОТХ»?"
 
 
+def no_account_tags(conn, tags):
+    """The tags a manager of a point sees: never the name of an Avito account (chat_deals._account_tag puts it on the orders of the chats and
+    the calls; the owner 2026-10-29: a point never sees an account's name). Everybody else: the tags as they are."""
+    if own_point() is None:
+        return tags
+    names = {" ".join(str(a["name"]).split()).lower() for a in connections.list_accounts(conn)}
+    return [t for t in tags if t.lower() not in names]
+
+
 def oth_offer(conn, card: dict, stage_id) -> Optional[dict]:
     """The stage of «Отмена» or «Отказ/невыкуп» chosen for an order on «Товар на точке» before the person answered the question: the move
     waits and the card asks it (the owner 2026-10-29); None: move as asked. The answer comes as the field oth_answer (yes / no)."""
@@ -455,6 +464,10 @@ def register(app) -> None:
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["id"] == only])
         else:
             only = None
+        if own_point():                                                   # the tags with an account's name are not the point's to see
+            for col in data["columns"]:
+                for c in col["cards"]:
+                    c["tags"] = no_account_tags(conn, c["tags"])
         rows = sorted(({"card": c, "stage": col["stage"]} for col in data["columns"] for c in col["cards"]), key=lambda r: -r["card"]["id"])
         labels = orders.origin_labels(conn, own_point(), [r["card"]["id"] for r in rows]) if own_point() else {}   # not from the point's account
         return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels,
@@ -711,13 +724,14 @@ def register(app) -> None:
                 events = [e for e in events if not orders.client_words(e)]
             if origin or len(links) < len(linked):                       # not the point's own order: what was written to the client is named only
                 events = [engine.for_point(e) for e in events]
+            events = [dict(e, text=orders.without_account_names(conn, e["text"])) for e in events]   # never an account's name (2026-10-29)
             if chat_ref and not chat_ref[1] and chat_ref[0] not in {"/chats/%d" % ch["id"] for ch in links}:
                 chat_ref = None                                          # «Открыть чат» of the field: a chat of another account
             if bind:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
-            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]), oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
+            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]), oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),

@@ -245,7 +245,7 @@ def register(app) -> None:
         if opened is not None and all(c["id"] != chat_row for c in rows):   # answered, read, closed: it stays in its place, not in «Всего»
             rows = sorted(rows + [opened], key=lambda c: place[c["id"]])
             kept = opened["kept"] = not fits                              # «вне фильтра» on its row only when it is out of the state
-        names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
+        names = {} if mine else {a["id"]: a["name"] for a in connections.list_accounts(conn)}   # a point never sees an account's name (2026-10-29)
         wanted = [c["id"] for c in rows] + ([chat_row] if chat_row is not None else [])
         starts = dict(pending)                                            # «Ждут ответа» read them already: only the others are read
         starts.update(chats.wait_starts(conn, [r for r in wanted if r not in asked]))        # the auto-answer is no answer

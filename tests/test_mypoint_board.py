@@ -38,7 +38,8 @@ def asked(conn, card, when=MORNING):
 
 
 def counter(page, name):
-    found = re.search(r'data-counter="%s"[^>]*>.*?<b[^>]*>(\d+)</b>' % name, page, re.S)
+    """The count of a tab of «Рабочее место» (the owner 2026-10-29: the counters became the tabs)."""
+    found = re.search(r'data-tab-count="%s">(\d+)</b>' % name, page, re.S)
     assert found, name
     return int(found.group(1))
 
@@ -58,7 +59,8 @@ def test_the_counters_say_what_lies_comes_ends_and_waits(tmp_path, clock):
     other = points.save_point(conn, dict(name="Гамма", channel="vk", vk_peer_id="777"))
     _card(conn, other, webmim="700700")                                                      # another point's: counted nowhere
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
-    assert (counter(page, "coming"), counter(page, "here"), counter(page, "ending"), counter(page, "asked")) == (2, 3, 2, 1)
+    assert (counter(page, "moving"), counter(page, "here"), counter(page, "ending"), counter(page, "asked")) == (1, 3, 2, 1)   # «Едут»: moving
+    assert counter(page, "all") == 5                                                        # «Все»: the placed one too
     assert placed
 
 

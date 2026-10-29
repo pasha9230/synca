@@ -93,7 +93,7 @@ def test_origin_labels_name_the_account_an_order_came_from(w):
     conn = w["conn"]
     labels = orders.origin_labels(conn, w["rust"], [w["mine"], w["away"], w["bare"]])
     assert w["mine"] not in labels                                                              # a chat of the point's account
-    assert labels[w["away"]] == {"account": w["main_name"], "text": w["main_name"], "hint": orders.ORIGIN_HINT}
+    assert labels[w["away"]] == {"account": "", "text": orders.ORIGIN_OTHER, "hint": orders.ORIGIN_HINT}   # never the name (2026-10-29)
     assert labels[w["bare"]] == {"account": "", "text": "Без аккаунта", "hint": orders.ORIGIN_HINT}
     chat_of(conn, w["rust_acc"], w["away"], "c-away-own")                                       # a chat of the point's account too: its own
     assert w["away"] not in orders.origin_labels(conn, w["rust"], [w["away"]])
@@ -105,16 +105,18 @@ def test_a_point_sees_the_label_on_the_card_the_board_and_my_point_its_own_order
     manager, _ = person(w["app"], "point", w["rust"])
     for url in ("/orders", "/orders?v=list", "/my-point"):                              # the three orders of the point are on each page
         page = text(manager, url)
-        assert ">%s</span>" % w["main_name"] in page and ">Без аккаунта</span>" in page, url
+        assert orders.ORIGIN_OTHER in page and "Без аккаунта" in page and w["main_name"] not in page, url    # no account's name (2026-10-29)
         assert page.count(LABEL) == 2, url                                                  # «Свой клиент» has none
-    assert ">%s</span>" % w["main_name"] in text(manager, "/orders/%d" % w["away"]) and orders.ORIGIN_HINT in text(manager, "/orders/%d" % w["away"])
+    away = text(manager, "/orders/%d" % w["away"])
+    assert ">%s</span>" % orders.ORIGIN_OTHER in away and orders.ORIGIN_HINT in away and w["main_name"] not in away
     assert ">Без аккаунта</span>" in text(manager, "/orders/%d" % w["bare"])
     assert LABEL not in text(manager, "/orders/%d" % w["mine"])
 
 
 def test_a_point_without_an_avito_account_sees_every_order_labelled(w):
     manager, _ = person(w["app"], "point", w["rust"])                     # not bound: the point has no account of its own
-    assert 'data-origin>Альфа</span>' in text(manager, "/orders/%d" % w["mine"])
+    page = text(manager, "/orders/%d" % w["mine"])
+    assert 'data-origin>%s</span>' % orders.ORIGIN_OTHER in page and 'data-origin>Альфа</span>' not in page   # never the account's name
 
 
 def test_the_other_roles_see_no_label(w):

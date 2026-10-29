@@ -921,7 +921,21 @@ def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item
 
 
 ORIGIN_NO_ACCOUNT = "Без аккаунта"
+ORIGIN_OTHER = "Не с аккаунта точки"         # the owner 2026-10-29: the point never sees an account's name (it was the name, 2026-10-22)
 ORIGIN_HINT = "Заказ не с аккаунта Авито вашей точки: только принять и выдать"
+
+
+ACCOUNT_SHOWN = "аккаунт Авито"
+
+
+def without_account_names(conn, text: str) -> str:
+    """A text a manager of a point reads (the journal of the order, a row of the bell) with the names of the Avito accounts put out (the
+    owner 2026-10-29: a point never sees an account's name); case does not matter."""
+    text = str(text or "")
+    for (name,) in conn.execute("SELECT name FROM account WHERE name != '' ORDER BY LENGTH(name) DESC"):
+        if name.lower() in text.lower():
+            text = re.sub(re.escape(name), ACCOUNT_SHOWN, text, flags=re.I)
+    return text
 
 
 def origin_labels(conn, point_id, card_ids) -> Dict[int, dict]:
@@ -944,8 +958,7 @@ def origin_labels(conn, point_id, card_ids) -> Dict[int, dict]:
         found = chats_of.get(card_id, [])
         if own is not None and any(account == own for account, _ in found):
             continue
-        name = found[0][1] if found else ""
-        labels[card_id] = {"account": name, "text": name or ORIGIN_NO_ACCOUNT, "hint": ORIGIN_HINT}
+        labels[card_id] = {"account": "", "text": ORIGIN_OTHER if found else ORIGIN_NO_ACCOUNT, "hint": ORIGIN_HINT}   # never the account's name
     return labels
 
 

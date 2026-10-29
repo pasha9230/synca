@@ -66,6 +66,8 @@ def register(app) -> None:
         rows = [] if no_account else calls.list_calls(conn, account_id=account_id, missed=missed, since=since, phone=phone)
         for row in rows:
             row["may_listen"] = may_listen(row)
+            if mine:                                                     # a point never sees an account's name (the owner 2026-10-29)
+                row["account_name"] = ""
         handed = mgr.handed_calls(conn, [row["id"] for row in rows])
         links = calls.client_links(conn, [row["client_id"] for row in rows], account_id=account_id if mine else None, point_id=own_point())
         handoff = None
