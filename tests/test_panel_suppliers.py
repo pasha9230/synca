@@ -51,7 +51,8 @@ def test_supplier_tab_filters_positions_and_brand_prefix_is_hidden(tmp_path):
     assert ">A1<" in first and ">B1<" not in first
     second = page(client, "?sup=2")
     assert ">B1<" in second and ">A1<" not in second
-    assert "S2:" not in second and '>IKON TYRES<' in second
+    # the text a person reads never shows the prefix; since 2026-10-30 the brand filter carries the brand's key in its form values (machine)
+    assert "S2:" not in re.sub(r"<[^>]+>", " ", second) and '>IKON TYRES<' in second
     assert 'sup=2' in second  # the tab stays selected in links and forms
 
 
