@@ -19,44 +19,24 @@ def test_the_default_pipeline_is_seeded_once_in_the_owners_order(tmp_path):
     conn = db(tmp_path)
     orders.ensure_pipeline(conn, NOW)                                           # a second call changes nothing
     stages = orders.list_stages(conn)
-    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "oth", "return_given", "done", "cancel", "refused", "return"]   # «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Отказ/невыкуп» after «Отмена» (2026-10-23); «Возврат передан» after «На ОТХ» (2026-10-29)
+    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "oth", "return_given", "done", "cancel", "return"]   # «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Возврат передан» after «На ОТХ» (2026-10-29); «Отмена» and «Отказ/невыкуп» are one stage (2026-10-29, test_cancel_merge)
     assert [s["name"] for s in stages][:4] == ["Новый заказ", "Переговоры", "Ожидает наличие", "Заказ оформлен"]
     assert {s["code"]: s["kind"] for s in stages}["done"] == "won" and {s["code"]: s["kind"] for s in stages}["cancel"] == "lost"
     assert [s["position"] for s in stages] == list(range(len(orders.DEFAULT_STAGES)))
 
 
-def test_the_refused_stage_is_added_once_to_an_old_pipeline_after_cancel_and_kept_as_a_system_stage(tmp_path):
-    """«Отказ/невыкуп» (the owner 2026-10-23, п. 14): a closed stage of its own, apart from «Отмена»; an old pipeline gets it once, the
-    owner's own stages keep their order around it."""
-    conn = store.connect(str(tmp_path / "old.db"))
-    for position, (code, name, color, kind) in enumerate(c for c in orders.DEFAULT_STAGES if c[0] != "refused"):
-        conn.execute("INSERT INTO order_stage (code, name, color, position, kind) VALUES (?,?,?,?,?)", (code, name, color, position, kind))
-    conn.commit()
-    mine = orders.add_stage(conn, "Ждём клиента", "#7F56D9", "open", "", 0)
-    orders.ensure_pipeline(conn, NOW)
-    orders.ensure_pipeline(conn, NOW)
-    stages = orders.list_stages(conn)
-    codes = [s["code"] for s in stages]
-    assert codes.count("refused") == 1 and codes[codes.index("cancel") + 1] == "refused" and stages[-1]["id"] == mine
-    assert [s["position"] for s in stages] == list(range(len(stages)))
-    refused = next(s for s in stages if s["code"] == "refused")
-    assert refused["name"] == "Отказ/невыкуп" and refused["kind"] == "lost"
-    with pytest.raises(orders.OrderError, match="Системный"):
-        orders.delete_stage(conn, refused["id"])
-
-
-def test_a_card_at_the_point_moves_to_refused_without_new_data_and_not_with_a_sale(tmp_path):
+def test_a_card_moves_to_cancel_with_a_reason_and_not_with_a_sale(tmp_path):
+    """(Was «Отказ/невыкуп» without new data; the owner 2026-10-29: one stage «Отмена / невыкуп», its reason is needed.)"""
     conn = db(tmp_path)
-    refused = next(s for s in orders.list_stages(conn) if s["code"] == "refused")
+    cancel = next(s for s in orders.list_stages(conn) if s["code"] == "cancel")
     card_id = orders.create_card(conn, {"client_name": "Иван"}, NOW, "owner")
-    assert orders.move_card(conn, card_id, refused["id"], NOW, "owner") is True               # no reason, no data of the placing needed
-    assert orders.get_card(conn, card_id)["stage"]["name"] == "Отказ/невыкуп"
+    assert orders.move_card(conn, card_id, cancel["id"], NOW, "owner", {"cancel_reason": "не выкупил"}) is True
+    assert orders.get_card(conn, card_id)["stage"]["name"] == "Отмена / невыкуп"
     other = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "owner")
     conn.execute("UPDATE order_card SET sale_ids = '[7]' WHERE id = ?", (other,))
     conn.commit()
     with pytest.raises(orders.OrderError, match="продажа"):
-        orders.move_card(conn, other, refused["id"], NOW, "owner")
-
+        orders.move_card(conn, other, cancel["id"], NOW, "owner", {"cancel_reason": "не выкупил"})
 
 def test_stages_can_be_added_renamed_moved_and_only_empty_user_stages_deleted(tmp_path):
     conn = db(tmp_path)

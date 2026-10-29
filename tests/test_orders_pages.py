@@ -384,7 +384,7 @@ def test_the_card_shows_the_stages_the_summary_and_hides_the_rare_actions_in_the
     cancel = [s for s in orders.list_stages(conn) if s["code"] == "cancel"][0]["id"]
     post(client, "/orders/%d/move" % cid, tok, stage_id=str(cancel), cancel_reason="передумал")
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
-    assert '<span class="owin-stage is-stopped" aria-current="step">Отмена · 0 дн.</span>' in page and "is-done" not in page and 'id="finish-window"' not in page
+    assert '<span class="owin-stage is-stopped" aria-current="step">Отмена / невыкуп · 0 дн.</span>' in page and "is-done" not in page and 'id="finish-window"' not in page
 
 
 def test_special_terms_and_the_receipt_show_on_the_collapsed_extra_fields(tmp_path):

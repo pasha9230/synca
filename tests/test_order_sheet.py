@@ -167,7 +167,7 @@ def test_a_row_per_position_with_every_column(table):
 
 
 @pytest.mark.parametrize("code, kind, letter", [("placed", "webmim", ""), ("at_point", "webmim", ""), ("done", "webmim", "Р"), ("done", "stock", "Б"),
-                                                ("cancel", "webmim", "О"), ("refused", "webmim", "О"), ("return", "webmim", "О"), ("oth", "webmim", "О")])
+                                                ("cancel", "webmim", "О"), ("return", "webmim", "О"), ("oth", "webmim", "О")])
 def test_realization_follows_the_legend(table, code, kind, letter):
     conn, box, fake = table
     mine = placed(conn, deal_kind=kind)

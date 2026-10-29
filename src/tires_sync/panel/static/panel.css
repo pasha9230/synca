@@ -512,6 +512,7 @@ a.menu-item{text-decoration:none}
 .feed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s-2)}
 .feed li{padding:var(--s-2) var(--s-3);background:var(--gray-50);border-radius:var(--r-md);font-size:var(--fs-sm);overflow-wrap:anywhere;min-width:0}
 .feed li.is-note{background:var(--warn-50);border:1px solid var(--warn-200)}
+.feed li.is-red{background:var(--err-50);border:1px solid var(--err-200);color:var(--err-700)}
 .feed time{color:var(--gray-500);margin-right:var(--s-2)}
 @media (max-width:1100px){.ocard-layout{grid-template-columns:1fr}}
 
@@ -717,7 +718,8 @@ button.owin-stage:focus-visible{outline:0;box-shadow:var(--ring)}
 /* «Список» of «Заказы» as the Google table (orders_list) */
 .orders-list-head{padding:var(--s-3) var(--s-5);gap:var(--s-3);align-items:center}
 .orders-sheet td,.orders-sheet th{white-space:nowrap}
-.orders-sheet tr.is-link{cursor:pointer}
+.orders-sheet tr.is-link,[data-href].is-link{cursor:pointer}
+tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray-50)}
 .orders-sheet tr.is-link:hover td{background:var(--gray-50)}
 .orders-sheet tfoot td{border-top:2px solid var(--gray-200)}
 .orders-total-line{padding:var(--s-2) var(--s-5)}

@@ -333,12 +333,12 @@ def test_a_refusal_at_the_point_asks_first_and_yes_goes_to_oth_with_the_reason(t
 def test_no_to_the_question_moves_as_before_with_the_reason(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     here = _card(conn, pid, webmim="700200", code="at_point")
-    r = client.post("/orders/%d/move" % here, data={"csrf": "tok", "stage_id": str(_stage(conn, "refused")), "cancel_reason": "не выкупил"},
+    r = client.post("/orders/%d/move" % here, data={"csrf": "tok", "stage_id": str(_stage(conn, "cancel")), "cancel_reason": "не выкупил"},
                     headers={"X-Requested-With": "fetch"})                                     # the board's drag
     assert r.get_json() == {"ok": False, "message": "Шины остаются на точке — перевести на «На ОТХ»?", "go": "/orders/%d#oth-offer" % here}
-    post(client, "/orders/%d/move" % here, "tok", stage_id=str(_stage(conn, "refused")), oth_answer="no", cancel_reason="не выкупил")
+    post(client, "/orders/%d/move" % here, "tok", stage_id=str(_stage(conn, "cancel")), oth_answer="no", cancel_reason="не выкупил")
     got = orders.get_card(conn, here)
-    assert got["stage"]["code"] == "refused" and got["cancel_reason"] == "не выкупил"
+    assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == "не выкупил"
 
 
 def test_an_order_not_at_the_point_is_cancelled_without_the_question(tmp_path):

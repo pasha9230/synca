@@ -1174,7 +1174,7 @@
 })();
 
 (function () {
-  // «Список» of «Заказы»: a click anywhere on a row opens the order (a link, a button or selected text keeps its own way);
+  // «Список» of «Заказы» (and every row / card with data-href): a click anywhere on a row opens the order (a link, a button or selected text keeps its own way);
   // «Колонки»: ↑ and ↓ move a column in the form (the order of its fields is the order saved).
   document.addEventListener("click", function (e) {
     var t = e.target;
@@ -1187,7 +1187,7 @@
       move.focus();
       return;
     }
-    var row = t.closest("tr[data-href]");
+    var row = t.closest("[data-href]");                 // every list of orders: a row or a card of an order (the owner 2026-10-29)
     if (!row || t.closest("a,button,input,label,select") || String(window.getSelection ? window.getSelection() : "")) return;
     if (e.ctrlKey || e.metaKey) window.open(row.getAttribute("data-href"), "_blank");
     else window.location.href = row.getAttribute("data-href");

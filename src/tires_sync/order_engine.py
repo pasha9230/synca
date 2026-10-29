@@ -130,6 +130,7 @@ def fire_stale(conn, now: str) -> int:
 
 
 PLACED_RULE = -2                                                   # the «rule» number of the messages after «Оформить в WebMIM» (order_placed)
+ARRIVED_RULE = -3                                                  # «можно забирать» that did not go by itself (order_manager._tell_arrived)
 PLACED_SKIP = "подготовлено после оформления в WebMIM"
 SENT_SKIP = "это сообщение по заказу уже отправлено"
 PANEL_SKIP = "точка работает в панели: в ВК ей не пишем, заказ виден на её «Моей точке»"
@@ -242,7 +243,10 @@ SENT_TO_CLIENT = "отправлено клиенту"
 
 
 def audience(conn, task: dict) -> str:
-    """Who a message task is for: the audience of its template («client», «manager»); empty for another task or a template gone."""
+    """Who a message task is for: the audience of its template («client», «manager»); empty for another task or a template gone.
+    «Можно забирать» that waited (ARRIVED_RULE) is the client's always, with the owner's template or with the sample."""
+    if task["kind"] == "message" and task.get("rule_id") == ARRIVED_RULE:
+        return "client"
     if task["kind"] != "message" or not str(task["arg"]).isdigit():
         return ""
     try:

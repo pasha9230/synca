@@ -19,6 +19,10 @@ def _webmim(conn, pid, number, code="moving"):
     return card
 
 
+def _stage_id(conn, code):
+    return conn.execute("SELECT id FROM order_stage WHERE code = ?", (code,)).fetchone()[0]
+
+
 def _code(conn, card):
     return orders.get_card(conn, card)["stage"]["code"]
 
@@ -125,10 +129,13 @@ def _with_amount(conn, card, amount=16000):
     orders.update_card(conn, card, {"return_amount": amount}, NOW, "o")
 
 
-@pytest.mark.parametrize("code", ["at_point", "oth", "refused"])
+@pytest.mark.parametrize("code", ["at_point", "oth", "cancel"])
 def test_a_return_with_the_amount_moves_the_order_to_return_and_fills_the_kind_and_the_reason(tmp_path, code):
+    """«cancel» with the reason «не выкупил» was «Отказ/невыкуп» before the merge (the owner 2026-10-29)."""
     conn, pid, _ = setup(tmp_path)
-    card = _webmim(conn, pid, 5259052, code)
+    card = _webmim(conn, pid, 5259052, "at_point" if code == "cancel" else code)
+    if code == "cancel":
+        orders.move_card(conn, card, _stage_id(conn, "cancel"), NOW, "o", {"cancel_reason": orders.NOT_BOUGHT})
     _with_amount(conn, card)
     answer = mgr.dispatch(conn, "r", "111", "№5259052 возврат отдал", None, NOW)
     got = orders.get_card(conn, card)
@@ -215,3 +222,13 @@ def test_the_owner_confirms_a_disputed_return(tmp_path):
 
 def test_the_hint_asks_for_a_reply_or_a_number():
     assert "Лучше всего — ответом на сообщение о заказе или с номером заказа" in mgr.HINT
+
+
+def test_a_return_of_an_order_cancelled_not_for_not_buying_is_a_question(tmp_path):
+    """«Отмена / невыкуп» with another reason: the tyres never came to the point, «возврат отдал» does not fit."""
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5259053, "at_point")
+    orders.move_card(conn, card, _stage_id(conn, "cancel"), NOW, "o", {"cancel_reason": "отменил клиент"})
+    _with_amount(conn, card)
+    mgr.dispatch(conn, "r", "111", "№5259053 возврат отдал", None, NOW)
+    assert orders.get_card(conn, card)["stage"]["code"] == "cancel"

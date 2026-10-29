@@ -39,7 +39,7 @@ def test_a_second_order_on_the_same_phone_typed_otherwise_is_refused_with_the_nu
 
 def test_closed_orders_another_phone_and_orders_without_a_phone_are_not_affected(tmp_path):
     conn = db(tmp_path)
-    for code in ("done", "cancel", "refused", "return"):
+    for code in ("done", "cancel", "return"):
         card = orders.create_card(conn, dict(client_phone="+79001112233"), NOW, "o")
         conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, code), card))
         conn.commit()

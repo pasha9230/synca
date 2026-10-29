@@ -210,9 +210,9 @@ def test_no_late_yes_or_another_message_between_issues_nothing(tmp_path):
 def test_yes_after_the_order_moved_issues_nothing(tmp_path):
     conn, cid, deliver = two(tmp_path)
     say(conn, "выдала", deliver, at(12))
-    orders.move_card(conn, cid, stage(conn, "refused"), at(12, 5), "o")
+    orders.move_card(conn, cid, stage(conn, "cancel"), at(12, 5), "o", {"cancel_reason": "не выкупил"})
     assert say(conn, "да", deliver, at(12, 6), "m2").startswith("Заказ №5200001 уже изменился, ничего не сделано")
-    assert orders.get_card(conn, cid)["stage"]["code"] == "refused"
+    assert orders.get_card(conn, cid)["stage"]["code"] == "cancel"
 
 
 def test_several_orders_are_listed_and_yes_does_nothing(tmp_path):
@@ -251,7 +251,7 @@ def test_the_owners_old_text_kept_word_for_word_is_replaced_and_a_changed_one_is
 def test_yes_after_the_owner_dealt_with_the_message_issues_nothing(tmp_path):
     conn, cid, deliver = two(tmp_path)
     other = card_at(conn, "at_point", "2026-10-15T10:00:00")
-    orders.move_card(conn, other, stage(conn, "refused"), at(11), "o")                 # not the point's to issue: one order is asked about
+    orders.move_card(conn, other, stage(conn, "cancel"), at(11), "o", {"cancel_reason": "не выкупил"})   # not the point's to issue: one order is asked about
     say(conn, "выдал", deliver, at(12))
     [line] = [m for m in mgr.list_inbox(conn) if m["dispute"]]
     orders.move_card(conn, other, stage(conn, "at_point"), at(12, 1), "o")

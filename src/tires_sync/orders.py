@@ -31,8 +31,11 @@ DEFAULT_STAGES = (
     ("new", "Новый заказ", "#7F56D9", "open"), ("talk", "Переговоры", "#2E90FA", "open"), ("wait", "Ожидает наличие", "#0BA5EC", "open"),
     ("placed", "Заказ оформлен", "#F79009", "open"), ("moving", "Перемещение на точку", "#EF6820", "open"),
     ("at_point", "Товар на точке", "#17B26A", "open"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "Возврат передан", "#DC6803", "open"),
-    ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена", "#D92D20", "lost"), ("refused", "Отказ/невыкуп", "#C01048", "lost"),
-    ("return", "Возврат", "#B54708", "closed"))
+    ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена / невыкуп", "#D92D20", "lost"), ("return", "Возврат", "#B54708", "closed"))
+# «Отмена» and «Отказ/невыкуп» are one stage with the reason (the owner 2026-10-29); the reason is a text of cancel_reason
+CANCEL_KINDS = ("отменил клиент", "не выкупил", "другое")
+NOT_BOUGHT = "не выкупил"
+OLD_CANCEL_NAME = "Отмена"                      # the name of «cancel» before the merge: renamed only while the owner kept it
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 STAGE_FIELDS = "id, code, name, color, position, kind, hint, limit_hours"
 
@@ -63,7 +66,7 @@ def ensure_pipeline(conn, now: str) -> None:
             conn.execute("INSERT INTO order_stage (code, name, color, position, kind) VALUES (?,?,?,?,?)", (code, name, color, position, kind))
         conn.commit()
     _ensure_wait_stage(conn)
-    _ensure_refused_stage(conn)
+    _merge_refused_stage(conn, now)
     _ensure_return_given_stage(conn)
 
 
@@ -81,20 +84,60 @@ def _ensure_wait_stage(conn) -> None:
     conn.commit()
 
 
-def _ensure_refused_stage(conn) -> None:
-    """A pipeline made before «Отказ/невыкуп» existed (the owner 2026-10-23: the client did not buy out what was brought, apart from
-    «Отмена») gets it once, right after «Отмена» (one statement, like «Ожидает наличие»: two requests at once add one; a system stage)."""
-    if conn.execute("SELECT 1 FROM order_stage WHERE code = 'refused'").fetchone():
+def _merge_refused_stage(conn, now: str) -> None:
+    """«Отказ/невыкуп» (code refused) joins «Отмена» (the owner 2026-10-29: one stage «Отмена / невыкуп» with the reason). Once, in one IMMEDIATE
+    transaction (a second request finds nothing to do): its orders go to «cancel» with the reason «не выкупил» (a reason of their own stays after
+    it), their time on the stage kept, a record in each journal; its tasks, the commands and the moves of rules pointing to it point to «cancel»;
+    its own rules come over switched off (a message of «невыкуп» must not go on an ordinary cancel; the owner switches them on); the stage goes.
+    «cancel» is renamed «Отмена / невыкуп» only while it is still called «Отмена». A pipeline without «cancel»: «refused» becomes it."""
+    if not conn.execute("SELECT 1 FROM order_stage WHERE code = 'refused'").fetchone():
         return
-    cancel = conn.execute("SELECT position FROM order_stage WHERE code = 'cancel'").fetchone()
-    at = (cancel[0] + 1) if cancel else (conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM order_stage").fetchone()[0])
-    code, name, color, kind = next(d for d in DEFAULT_STAGES if d[0] == "refused")
-    cur = conn.execute("INSERT INTO order_stage (code, name, color, position, kind) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM order_stage WHERE code = 'refused')",
-                       (code, name, color, at, kind))
-    if cur.rowcount == 1:                                       # the owner's own stages have no code: «code != …» alone would skip them
-        conn.execute("UPDATE order_stage SET position = position + 1 WHERE position >= ? AND (code IS NULL OR code != 'refused')", (at,))
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        refused = conn.execute("SELECT id FROM order_stage WHERE code = 'refused'").fetchone()
+        if refused is None:                                     # another request merged it meanwhile
+            conn.rollback()
+            return
+        old = refused[0]
+        cancel = conn.execute("SELECT id, name FROM order_stage WHERE code = 'cancel'").fetchone()
+        name = next(d[1] for d in DEFAULT_STAGES if d[0] == "cancel")
+        if cancel is None:
+            conn.execute("UPDATE order_stage SET code = 'cancel', name = ? WHERE id = ?", (name, old))
+            conn.commit()
+            return
+        new = cancel[0]
+        for card_id, reason in conn.execute("SELECT id, cancel_reason FROM order_card WHERE stage_id = ?", (old,)).fetchall():
+            text = NOT_BOUGHT + (": " + reason if reason and reason.strip() != NOT_BOUGHT else "")
+            conn.execute("UPDATE order_card SET stage_id = ?, cancel_reason = ? WHERE id = ?", (new, text[:300], card_id))
+            add_event(conn, card_id, now, "система", "stage", "Этап «Отказ/невыкуп» объединён с отменой: заказ в «%s», причина «%s»."
+                      % (name if cancel[1] == OLD_CANCEL_NAME else cancel[1], text[:300]), level="grey")
+        conn.execute("UPDATE order_task SET stage_id = ? WHERE stage_id = ?", (new, old))
+        conn.execute("UPDATE order_rule SET arg = ? WHERE action = 'move' AND arg = ?", (str(new), str(old)))
+        conn.execute("UPDATE order_rule SET stage_id = ?, enabled = 0 WHERE stage_id = ?", (new, old))
+        conn.execute("UPDATE order_command SET to_stage_id = ? WHERE to_stage_id = ?", (new, old))
+        conn.execute("DELETE FROM order_command WHERE stage_id = ? AND word IN (SELECT word FROM order_command WHERE stage_id = ?)", (old, new))
+        conn.execute("UPDATE order_command SET stage_id = ? WHERE stage_id = ?", (new, old))
+        conn.execute("DELETE FROM order_stage WHERE id = ?", (old,))
+        if cancel[1] == OLD_CANCEL_NAME:
+            conn.execute("UPDATE order_stage SET name = ? WHERE id = ?", (name, new))
+        for position, sid in enumerate(r[0] for r in conn.execute("SELECT id FROM order_stage ORDER BY position, id").fetchall()):
+            conn.execute("UPDATE order_stage SET position = ? WHERE id = ?", (position, sid))
+    except Exception:
+        conn.rollback()
+        raise
     conn.commit()
 
+
+def cancel_reason_of(kind, text) -> str:
+    """The reason of «Отмена / невыкуп» from its choice and its text: «отменил клиент», «не выкупил» (the text after them, if any),
+    «другое: …» (the text is needed). OrderError for a choice not of CANCEL_KINDS or «другое» without a text."""
+    kind, text = str(kind or "").strip(), " ".join(str(text or "").split())
+    if kind not in CANCEL_KINDS:
+        raise OrderError("Причина отмены: отменил клиент, не выкупил или другое.")
+    if kind == "другое" and not text:
+        raise OrderError("Причина отмены «другое»: напишите, что случилось.")
+    return (kind + (": " + text if text else ""))[:300]
 
 RETURN_GIVEN = "return_given"
 

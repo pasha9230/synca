@@ -273,7 +273,7 @@ def test_an_unknown_arrived_of_a_cancelled_order_that_cannot_be_checked_closes_i
     assert line["status"] == "new" and line["message_id"].startswith(token + "-")
     assert settle(conn, sender, at(61)) == {"unknown": 1} and sender.sent == []
     [line] = lines(conn)
-    assert line["status"] == "answered" and line["answer"] == "Итог: проверить нельзя; заказ в «Отмена» — писать клиенту не нужно."
+    assert line["status"] == "answered" and line["answer"] == "Итог: проверить нельзя; заказ в «Отмена / невыкуп» — писать клиенту не нужно."
     assert order_manager.new_count(conn) == 0
 
 

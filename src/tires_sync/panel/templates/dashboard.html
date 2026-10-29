@@ -27,7 +27,7 @@
 </section>
 <section class="card"><div class="card-head"><h3>Мои дела на сегодня</h3><span class="sub">{{ mine.orders_total }} заказ(ов), {{ mine.chats_total }} чат(ов) ждут ответа</span></div>
 {% if mine.orders or mine.chats %}<ul class="checklist">
-{% for o in mine.orders %}<li><span>{% if o.overdue %}<span class="badge badge--err badge--dot">Просрочен</span>{% else %}<span class="badge badge--neutral">{{ o.stage }}</span>{% endif %}</span>
+{% for o in mine.orders %}<li data-href="/orders/{{ o.id }}" class="is-link"><span>{% if o.overdue %}<span class="badge badge--err badge--dot">Просрочен</span>{% else %}<span class="badge badge--neutral">{{ o.stage }}</span>{% endif %}</span>
 <div><div class="cl-title">Заказ №{{ o.id }} · {{ o.client }}</div><div class="cl-text">{{ o.stage }} · {{ o.hours|round|int }} ч на этапе</div></div><a class="btn btn--secondary btn--sm" href="/orders/{{ o.id }}">Открыть</a></li>{% endfor %}
 {% for c in mine.chats %}<li><span><span class="badge badge--warn badge--dot">Ждёт {{ c.minutes }} мин</span></span>
 <div><div class="cl-title">Чат · {{ c.peer_name or "клиент" }}</div><div class="cl-text">клиент ждёт ответа</div></div><a class="btn btn--secondary btn--sm" href="/chats/{{ c.id }}">Ответить</a></li>{% endfor %}

@@ -509,6 +509,54 @@ def set_contact_name(conn, account_id: int, name: str, now: str, author: str) ->
     set_config(conn, "avito", account_id, config, now, author)
 
 
+def get_responsible(conn, account_id: int) -> str:
+    """«Ответственный» of the account (the owner 2026-10-29): who answers for its new orders (a chat, a call, by hand); '' = as before."""
+    return str(get_config(conn, "avito", account_id).get("responsible") or "")
+
+
+def set_responsible(conn, account_id: int, login: str, staff: List[str], now: str, author: str) -> None:
+    """Save «Ответственный» of the account: one of `staff` (the people of the panel, never a client nor a point) or '' (none)."""
+    login = str(login or "").strip()
+    if login and login not in staff:
+        raise ValueError("Ответственный: выберите сотрудника из списка (не клиента и не точку).")
+    config = get_config(conn, "avito", account_id)
+    if login:
+        config["responsible"] = login
+    else:
+        config.pop("responsible", None)
+    set_config(conn, "avito", account_id, config, now, author)
+
+
+def _usable_responsible(conn, login: str) -> bool:
+    """A person of the panel who still may answer for orders: not switched off, not a client, not a point (the shared owner is not a row)."""
+    row = conn.execute("SELECT r.role, r.active FROM panel_user u LEFT JOIN panel_user_role r ON r.login = u.login WHERE u.login = ?", (login,)).fetchone()
+    if row is None:
+        return True
+    role, active = row[0] or "owner", 1 if row[1] is None else row[1]
+    return bool(active) and role not in ("client", "point")
+
+
+def account_responsible(conn, account_id) -> str:
+    """The responsible of the account for a new order ('' none, or the person is switched off / became a client or a point)."""
+    if account_id is None:
+        return ""
+    login = get_responsible(conn, int(account_id))
+    return login if login and _usable_responsible(conn, login) else ""
+
+
+def responsible_accounts(conn, login: str) -> List[int]:
+    """The accounts whose «Ответственный» is `login` (the default of «Чаты», the owner 2026-10-29)."""
+    return [a["id"] for a in list_accounts(conn) if login and get_responsible(conn, a["id"]) == login]
+
+
+def chats_default_account(conn, login: str) -> Optional[int]:
+    """The account «Чаты» opens with for `login` when none is asked: the one with chats whose «Ответственный» the person is; several or none:
+    None (all of them, as before)."""
+    enabled = {a["id"] for a in list_accounts(conn) if a["chats_enabled"]}
+    found = [a for a in responsible_accounts(conn, login) if a in enabled]
+    return found[0] if len(found) == 1 else None
+
+
 def pin_phone(conn, account_id: int, phone: str, now: str, author: str) -> None:
     """The owner chooses which of the cabinet's numbers goes into the ads; a later connection check does not replace it. An empty value unpins."""
     config = get_config(conn, "avito", account_id)

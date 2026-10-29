@@ -1,0 +1,125 @@
+"""«Отмена» and «Отказ/невыкуп» are one stage «Отмена / невыкуп» with the reason (the owner 2026-10-29): the merge of an old pipeline by the
+code of the pipeline (orders._merge_refused_stage), the reason chosen on the card, the question «на ОТХ?», the point's «возврат отдал»."""
+from __future__ import annotations
+
+import pytest
+
+from tires_sync import order_sheet, orders, store
+
+NOW = "2026-10-29T12:00:00"
+LATER = "2026-10-30T09:00:00"
+OLD = (("new", "Новый заказ", "#7F56D9", "open"), ("at_point", "Товар на точке", "#17B26A", "open"), ("oth", "На ОТХ", "#667085", "open"),
+       ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена", "#D92D20", "lost"), ("refused", "Отказ/невыкуп", "#C01048", "lost"),
+       ("return", "Возврат", "#B54708", "closed"))
+
+
+def old_db(tmp_path, cancel_name="Отмена"):
+    """A base of the pipeline before the merge: «Отмена» and «Отказ/невыкуп» apart, orders on both."""
+    conn = store.connect(str(tmp_path / "old.db"))
+    for position, (code, name, color, kind) in enumerate(OLD):
+        conn.execute("INSERT INTO order_stage (code, name, color, position, kind) VALUES (?,?,?,?,?)",
+                     (code, cancel_name if code == "cancel" else name, color, position, kind))
+    conn.commit()
+    return conn
+
+
+def sid(conn, code):
+    row = conn.execute("SELECT id FROM order_stage WHERE code = ?", (code,)).fetchone()
+    return row[0] if row else None
+
+
+def put(conn, code, reason="", entered="2026-10-20T10:00:00"):
+    card = orders.create_card(conn, {"client_name": "Иван", "cancel_reason": reason}, NOW, "owner")
+    conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ? WHERE id = ?", (sid(conn, code), entered, card))
+    conn.commit()
+    return card
+
+
+def test_the_orders_of_refused_go_to_the_one_stage_with_the_reason(tmp_path):
+    conn = old_db(tmp_path)
+    a, b, c = put(conn, "refused"), put(conn, "refused", "клиент не пришёл"), put(conn, "cancel", "передумал")
+    refused = sid(conn, "refused")
+    orders.ensure_pipeline(conn, LATER)
+    assert sid(conn, "refused") is None and conn.execute("SELECT COUNT(*) FROM order_stage WHERE id = ?", (refused,)).fetchone()[0] == 0
+    cancel = orders.get_stage(conn, sid(conn, "cancel"))
+    assert cancel["name"] == "Отмена / невыкуп" and cancel["kind"] == "lost"
+    for card, reason in ((a, "не выкупил"), (b, "не выкупил: клиент не пришёл"), (c, "передумал")):
+        got = orders.get_card(conn, card)
+        assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == reason
+    assert orders.get_card(conn, a)["entered_at"] == "2026-10-20T10:00:00"                 # the time on the stage is kept
+    assert any("объединён" in e["text"] and "не выкупил" in e["text"] for e in orders.list_events(conn, a))
+    assert not any("объединён" in e["text"] for e in orders.list_events(conn, c))
+    stages = orders.list_stages(conn)
+    assert [s["position"] for s in stages] == list(range(len(stages)))
+    orders.ensure_pipeline(conn, LATER)                                                     # again: nothing more
+    assert len([e for e in orders.list_events(conn, a) if "объединён" in e["text"]]) == 1
+    assert sid(conn, "refused") is None
+
+
+def test_the_reports_count_the_merged_orders_as_before(tmp_path):
+    """The Google table «Реализация»: «О» for both before and after; the analytics count kind «lost» — the stage stays «lost»."""
+    conn = old_db(tmp_path)
+    card = put(conn, "refused")
+    before = order_sheet.realization(orders.get_card(conn, card))
+    orders.ensure_pipeline(conn, LATER)
+    after = orders.get_card(conn, card)
+    assert before == order_sheet.realization(after) == order_sheet.REFUSED and after["stage"]["kind"] == "lost"
+
+
+def test_the_rules_of_refused_come_switched_off_and_the_pointers_follow(tmp_path):
+    conn = old_db(tmp_path)
+    refused, cancel = sid(conn, "refused"), sid(conn, "cancel")
+    conn.execute("INSERT INTO order_rule (stage_id, trigger, action, arg, enabled) VALUES (?, 'enter', 'task', 'позвонить', 1)", (refused,))
+    conn.execute("INSERT INTO order_rule (stage_id, trigger, action, arg, enabled) VALUES (?, 'enter', 'move', ?, 1)", (sid(conn, "at_point"), str(refused)))
+    conn.execute("INSERT INTO order_command (stage_id, word, to_stage_id) VALUES (?, 'вернул', ?)", (refused, sid(conn, "return")))
+    conn.execute("INSERT INTO order_command (stage_id, word, to_stage_id) VALUES (?, 'вернул', ?)", (cancel, sid(conn, "return")))
+    conn.execute("INSERT INTO order_command (stage_id, word, to_stage_id) VALUES (?, 'не пришёл', ?)", (sid(conn, "at_point"), refused))
+    card = put(conn, "refused")
+    conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, stage_id, status, title, created_at) VALUES (?, 1, 'x', 'task', ?, 'pending', 't', ?)",
+                 (card, refused, NOW))
+    conn.commit()
+    orders.ensure_pipeline(conn, LATER)
+    assert conn.execute("SELECT stage_id, enabled FROM order_rule WHERE action = 'task'").fetchone() == (cancel, 0)      # never fires by itself
+    assert conn.execute("SELECT arg FROM order_rule WHERE action = 'move'").fetchone()[0] == str(cancel)
+    assert conn.execute("SELECT COUNT(*) FROM order_command WHERE stage_id = ? AND word = 'вернул'", (cancel,)).fetchone()[0] == 1
+    assert conn.execute("SELECT to_stage_id FROM order_command WHERE word = 'не пришёл'").fetchone()[0] == cancel
+    assert conn.execute("SELECT COUNT(*) FROM order_command WHERE stage_id = ? OR to_stage_id = ?", (refused, refused)).fetchone()[0] == 0
+    assert conn.execute("SELECT stage_id FROM order_task WHERE order_id = ?", (card,)).fetchone()[0] == cancel
+
+
+def test_the_owners_own_name_of_cancel_is_kept(tmp_path):
+    conn = old_db(tmp_path, cancel_name="Отказ клиента")
+    card = put(conn, "refused")
+    orders.ensure_pipeline(conn, LATER)
+    assert orders.get_stage(conn, sid(conn, "cancel"))["name"] == "Отказ клиента"
+    assert any("«Отказ клиента»" in e["text"] for e in orders.list_events(conn, card))
+
+
+def test_a_pipeline_without_cancel_gets_refused_as_it(tmp_path):
+    conn = store.connect(str(tmp_path / "x.db"))
+    conn.execute("INSERT INTO order_stage (code, name, color, position, kind) VALUES ('new', 'Новый заказ', '#7F56D9', 0, 'open')")
+    conn.execute("INSERT INTO order_stage (code, name, color, position, kind) VALUES ('refused', 'Отказ/невыкуп', '#C01048', 1, 'lost')")
+    conn.commit()
+    orders.ensure_pipeline(conn, LATER)
+    assert sid(conn, "refused") is None and orders.get_stage(conn, sid(conn, "cancel"))["name"] == "Отмена / невыкуп"
+
+
+def test_a_new_pipeline_has_one_stage_of_cancel(tmp_path):
+    conn = store.connect(str(tmp_path / "x.db"))
+    orders.ensure_pipeline(conn, NOW)
+    codes = [s["code"] for s in orders.list_stages(conn)]
+    assert "refused" not in codes and codes.count("cancel") == 1
+
+
+@pytest.mark.parametrize("kind, text, reason", [
+    ("отменил клиент", "", "отменил клиент"), ("не выкупил", " не пришёл  за шинами ", "не выкупил: не пришёл за шинами"),
+    ("другое", "нашёл дешевле", "другое: нашёл дешевле"),
+])
+def test_the_reason_is_its_choice_and_its_text(kind, text, reason):
+    assert orders.cancel_reason_of(kind, text) == reason
+
+
+@pytest.mark.parametrize("kind, text", [("", ""), ("потерялся", "x"), ("другое", "  ")])
+def test_a_reason_without_its_choice_or_other_without_a_text_is_refused(kind, text):
+    with pytest.raises(orders.OrderError):
+        orders.cancel_reason_of(kind, text)
