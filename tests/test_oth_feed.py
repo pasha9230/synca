@@ -407,3 +407,20 @@ def test_a_season_switched_off_does_not_keep_a_position_on_oth_off_avito(tmp_pat
     assert run(tmp_path, unload) == 0
     passed(capsys)
     assert description(public(tmp_path), "106").startswith(AT_BETA + "\n") and shown(description(public(tmp_path), "106")) == 5
+
+
+def test_a_former_id_that_another_ad_has_now_is_never_published_twice(tmp_path, capsys):
+    from tires_sync import mirror_feed
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    assert run(tmp_path, AFTER) == 0                                     # 102 off: its Id «102» is remembered
+    conn = connect(tmp_path)
+    mirror_feed.bind_ids(conn, 1, {"103": "102"}, "2026-10-29T11:00:00", "test")   # another tire's ad has that Id now
+    conn.close()
+    assert run(tmp_path, AFTER) == 0
+    on_oth(tmp_path, "102")
+    capsys.readouterr()
+    assert run(tmp_path, AFTER) == 0
+    passed(capsys)
+    ids = [a.findtext("Id") for a in ET.fromstring(public(tmp_path)).findall("Ad")]
+    assert ids.count("102") == 1 and "102" not in published(tmp_path) and not description(public(tmp_path), "102").startswith(LINE)
