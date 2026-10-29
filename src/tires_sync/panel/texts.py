@@ -184,6 +184,23 @@ def _split_text(d: dict) -> str:
     return "Из клиента №%s выделен клиент №%s (%s)" % (_q(d.get("from")), _q(d.get("to")), what)
 
 
+def _client_terms_text(d: dict) -> str:
+    """«Условия клиента ivan: до R17 10 → 12 %, бренды +2 −1»; the role's conditions are «роли «Клиент»». Only %s and brand keys."""
+    pct = lambda v: "—" if v is None else "%g" % v if isinstance(v, (int, float)) else _q(v)
+    was, now = d.get("from") or {}, d.get("to") or {}
+    parts = ["%s %s → %s %%" % (label, pct(was.get(k)), pct(now.get(k))) for k, label in (("small", "до R17"), ("large", "с R18"))
+             if was.get(k) != now.get(k)]
+    if was.get("mode") != now.get("mode"):
+        parts.append("бренды %s" % ("свой список" if now.get("mode") == "own" else "как у роли"))
+    added, removed = d.get("brands_added") or [], d.get("brands_removed") or []
+    if added or removed:
+        parts.append("бренды +%d −%d" % (len(added), len(removed)))
+    if d.get("brand_pct"):
+        parts.append("%% брендов изменён: %d" % len(d["brand_pct"]))
+    who = "роли «Клиент»" if d.get("subject") == "*" else "клиента %s" % _q(d.get("subject"))
+    return "Условия %s: %s" % (who, ", ".join(parts) or "без изменений")
+
+
 # The journal of actions (owner's word 2026-10-25, run «match2»): every action the code writes has its text. No secret, no address of a
 # subscription, no text of a client, no login typed at a failed sign-in (it may be a password typed in the wrong field) is shown.
 _MORE_TEXTS = {
@@ -198,6 +215,7 @@ _MORE_TEXTS = {
     "user_password": lambda d: ("Пользователь %s сменил свой пароль" if d.get("self") else "Пароль пользователя %s изменён") % _q(d.get("login")),
     "invite_created": lambda d: "Создано приглашение: %s, действует до %s" % (_role(d.get("role")), _q(d.get("expires"))),
     "invite_revoked": lambda d: "Приглашение №%s отозвано" % _q(d.get("id")),
+    "client_terms_changed": lambda d: _client_terms_text(d),
     "supplier_created": lambda d: "Добавлен поставщик «%s»" % _q(d.get("name")),
     "account_chats_send": lambda d: "Отправка сообщений из панели, %s: %s" % (_acc(d), _on(d.get("enabled"), "включена", "выключена")),
     "account_modes": lambda d: "Режимы, %s: чаты %s, фид %s" % (_acc(d), _on(d.get("chats"), "вкл.", "выкл."), _on(d.get("feed"), "вкл.", "выкл.")),

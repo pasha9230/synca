@@ -27,8 +27,8 @@ def _offers(app, conn):
     return view
 
 
-def _visible(app, conn, offers):
-    return cc.visible(conn, current_user()["login"], offers, tochki_feed.config(conn)["supplier_id"],
+def _visible(app, conn, offers, login=None):
+    return cc.visible(conn, login or current_user()["login"], offers, tochki_feed.config(conn)["supplier_id"],
                       load_reference(app.config["REFERENCE_PATH"]), store.load_brand_map(conn))
 
 
@@ -47,30 +47,34 @@ def _goods_of(view, token: str):
     return found[1].get(token)
 
 
+def catalog(app, conn, login: str, base: str, photos: bool) -> dict:
+    """What the catalog page of the client `login` shows (the client's own /shop, and the owner's preview «глазами клиента» at `base`):
+    the same rows, filters and prices. `photos=False`: no photo links (the owner's preview; /shop/photo is the client's own)."""
+    items = _visible(app, conn, _offers(app, conn).offers.values(), login)
+    f = cc.filters_of(request.args, {i.brand for i in items})
+    found = cc.apply(items, f)
+    total = len(found)
+    pages = max(1, -(-total // cc.PAGE))
+    page = min(f.page, pages)
+    shots = _photos(app, conn) if photos else None
+    rows = [cc.row(i, "/shop/photo/%s" % cc.photo_token(app.secret_key, i.offer.goods_id) if shots and shots.ready(i.offer) else None)
+            for i in found[(page - 1) * cc.PAGE: page * cc.PAGE]]
+    keep = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS and k not in ("o", "r", "p")]
+    sort_links = {}
+    for key in cc.SORTS:
+        flip = f.sort == key and not f.descending
+        sort_links[key] = base + "?" + urlencode(keep + [("o", key)] + ([("r", "1")] if flip else []))
+    here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS and k != "p"]
+    shown = sorted({1, pages} | set(range(max(1, page - 4), min(pages, page + 4) + 1)))       # a window of pages, not hundreds
+    pager = {n: base + "?" + urlencode(here + [("p", n)]) for n in shown} if pages > 1 else {}
+    return dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
+                seasons=cc.SEASONS, empty=not items, base=base)
+
+
 def register(app) -> None:
     @app.route("/shop")
     def shop_page():
-        conn = get_conn()
-        items = _visible(app, conn, _offers(app, conn).offers.values())
-        f = cc.filters_of(request.args, {i.brand for i in items})
-        found = cc.apply(items, f)
-        total = len(found)
-        pages = max(1, -(-total // cc.PAGE))
-        page = min(f.page, pages)
-        photos = _photos(app, conn)
-        rows = [cc.row(i, "/shop/photo/%s" % cc.photo_token(app.secret_key, i.offer.goods_id) if photos.ready(i.offer) else None)
-                for i in found[(page - 1) * cc.PAGE: page * cc.PAGE]]
-        keep = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS and k not in ("o", "r", "p")]
-        sort_links = {}
-        for key in cc.SORTS:
-            flip = f.sort == key and not f.descending
-            sort_links[key] = "/shop?" + urlencode(keep + [("o", key)] + ([("r", "1")] if flip else []))
-        here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS and k != "p"]
-        shown = sorted({1, pages} | set(range(max(1, page - 4), min(pages, page + 4) + 1)))       # a window of pages, not hundreds
-        pager = {n: "/shop?" + urlencode(here + [("p", n)]) for n in shown} if pages > 1 else {}
-        response = make_response(render_template(
-            "shop.html", rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links,
-            pager=pager, seasons=cc.SEASONS, empty=not items))
+        response = make_response(render_template("shop.html", **catalog(app, get_conn(), current_user()["login"], "/shop", photos=True)))
         response.headers["Cache-Control"] = "private, no-store"
         return response
 

@@ -1,0 +1,8 @@
+{# The owner's preview of a client's catalog: the same rows as the client's /shop (client_catalog with the client's conditions), no photos #}
+{% extends "base.html" %}
+{% block title %}Каталог глазами {{ login }} · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Каталог глазами клиента {{ login }}{% if info.display_name %} · {{ info.display_name }}{% endif %}</h1>
+<p class="sub">Ровно то, что клиент видит у себя: его бренды, его цены, «Склад 1/2». Фото здесь не показываются. <a href="/users/clients/{{ login }}">← Условия клиента</a></p></div></header>
+{% include "_shop_catalog.html" %}
+{% endblock %}
