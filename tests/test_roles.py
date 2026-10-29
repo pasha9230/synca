@@ -374,3 +374,186 @@ def test_moving_a_card_still_saves_the_fields_for_the_other_roles(tmp_path):
     post(owner, "/orders/%d/move" % card_id, tok, stage_id=str(target), client_phone="+79001112233", comment="позвонить вечером")
     card = orders.get_card(conn, card_id)
     assert card["stage_id"] == target and card["client_phone"] == "+79001112233" and card["comment"] == "позвонить вечером"
+
+
+# --- the client (a buyer): «Каталог для клиента» and the own password, nothing else (the owner 2026-10-29) ---------------------------
+
+def _sample_url(rule) -> str:
+    """The address of a rule with sample values: the check refuses before the view, so the values never matter."""
+    return re.sub(r"<(?:(\w+)(?:\([^)]*\))?:)?(\w+)>", lambda m: "1" if m.group(1) in ("int", "float") else "x", rule.rule)
+
+
+def _walk(app, client, skip):
+    """(method, url, endpoint, status) of every rule of the panel outside `skip`, on GET and on POST (with the right csrf) where it takes them."""
+    seen = []
+    adapter = app.url_map.bind("localhost")
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint in skip:
+            continue
+        url = _sample_url(rule)
+        for method in ("GET", "POST"):
+            if method in rule.methods:
+                assert adapter.match(url, method)[0] == rule.endpoint, (url, method)      # the sample address reaches this very page
+                got = client.get(url) if method == "GET" else client.post(url, data={"csrf": "tok"})
+                seen.append((method, url, rule.endpoint, got.status_code))
+    return seen
+
+
+def test_the_client_gets_403_on_every_page_but_the_own_catalog_and_password(tmp_path):
+    app = make_app(tmp_path)
+    client, _ = person(app, "client")
+    seen = _walk(app, client, common.OPEN | common.CLIENT_PAGES | {"index"})
+    assert len({e for _, _, e, _ in seen}) == len({r.endpoint for r in app.url_map.iter_rules()} - common.OPEN - common.CLIENT_PAGES - {"index"})
+    assert [s for s in seen if s[3] != 403] == []
+    home = client.get("/")
+    assert home.status_code == 302 and home.headers["Location"].endswith("/shop")
+    for url in ("/search?q=Michelin", "/search.json?q=Michelin"):
+        assert client.get(url).status_code == 403, url
+    assert client.get("/shop").status_code == 200 and client.get("/account/password").status_code == 200
+
+
+def test_the_pages_of_the_client_have_nothing_of_the_staff_panel(tmp_path):
+    app = make_app(tmp_path)
+    client, _ = person(app, "client")
+    for url, code in (("/shop", 200), ("/account/password", 200), ("/orders", 403), ("/no-such-page", 404)):
+        page = client.get(url)
+        html = page.get_data(as_text=True)
+        assert page.status_code == code, url
+        for mark in ("topsearch", 'action="/search"', "bell", "sb-link", "sb-count", "notify.js", "topbar.js", "app.js", 'href="/orders"', 'href="/catalog"'):
+            assert mark not in html, (url, mark)
+    assert "Каталог скоро" in client.get("/shop").get_data(as_text=True)
+
+
+def test_the_forms_of_the_client_are_only_the_own_password():
+    from flask import Flask, g
+    with Flask(__name__).test_request_context("/"):
+        g.user_info = {"login": "client1", "role": "client", "point_id": None, "display_name": ""}
+        allowed = {e for e in common.SECTION_OF if common.can_post(e)}
+    assert allowed == {"account_password_page", "account_password"}            # one address: the page and its form
+
+
+def test_the_client_catalog_is_the_clients_only(tmp_path):
+    app = make_app(tmp_path)
+    for role in ("partner", "chats", "viewer"):
+        assert users.level(role, "shop") == users.NONE, role
+        other, _ = person(app, role)
+        assert other.get("/shop").status_code == 403, role
+    owner = app.test_client()
+    login(owner)
+    assert owner.get("/shop").status_code == 403                    # the owner looks at a client's catalog through a preview (build 4)
+    assert users.MATRIX["client"] == {"sections": {"shop": users.VIEW, "self": users.EDIT}, "rights": set()}
+
+
+def test_switching_the_client_off_and_changing_the_role_act_at_once(tmp_path):
+    app = make_app(tmp_path)
+    client, conn = person(app, "client", login_="buyer")
+    assert client.get("/shop").status_code == 200 and client.get("/orders").status_code == 403
+    users.set_role(conn, "buyer", "viewer", None, "", NOW, "owner")
+    assert client.get("/shop").status_code == 403 and client.get("/orders").status_code == 200
+    users.set_role(conn, "buyer", "client", None, "", NOW, "owner")
+    assert client.get("/shop").status_code == 200 and client.get("/orders").status_code == 403
+    users.set_active(conn, "buyer", False, NOW, "owner")
+    assert client.get("/shop").status_code == 302 and client.get("/account/password").status_code == 302
+    fresh = app.test_client()
+    assert fresh.post("/login", data={"csrf": _csrf(fresh), "login": "buyer", "password": PASSWORD}).status_code == 401
+
+
+def test_a_role_missing_from_the_matrix_is_refused_everywhere(tmp_path):
+    """The revert: a client on the old code (no «client» in MATRIX) sees nothing but the open pages."""
+    app = make_app(tmp_path)
+    client, conn = person(app, "viewer", login_="ghost")
+    conn.execute("UPDATE panel_user_role SET role = 'no-such-role' WHERE login = 'ghost'")
+    conn.commit()
+    seen = _walk(app, client, common.OPEN)
+    assert seen and [s for s in seen if s[3] != 403] == []
+
+
+def test_the_point_of_a_client_invitation_is_ignored(tmp_path):
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    pid = points.save_point(conn, {"name": "Гамма", "manager_name": "А", "channel": "vk"})
+    token = users.create_invite(conn, "client", pid, "ООО Шины", NOW, "owner")
+    assert users.find_invite(conn, token, NOW)["point_id"] is None
+    users.accept_invite(conn, token, "buyer", PASSWORD, NOW)
+    assert users.get_role(conn, "buyer") == {"role": "client", "active": True, "point_id": None, "display_name": "ООО Шины"}
+    users.add_user(conn, "buyer2", PASSWORD, NOW, role="client", point_id=pid)
+    assert users.get_role(conn, "buyer2")["point_id"] is None
+
+
+def test_the_tables_of_the_client_conditions_and_their_cleanup(tmp_path):
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    store.connect(app.config["DB_PATH"]).close()                                             # the migration twice: nothing doubles
+    assert conn.execute("SELECT subject, pct_small, pct_large, brands_mode FROM client_terms").fetchall() == [("*", None, None, "own")]
+    assert {r[1] for r in conn.execute("PRAGMA table_info(client_brand)")} == {"subject", "brand_key", "pct_small", "pct_large"}
+    assert "client_terms" in {r[1] for r in conn.execute("PRAGMA table_info(panel_invite)")}
+    users.add_user(conn, "buyer", PASSWORD, NOW, role="client")
+    conn.execute("INSERT INTO client_terms (subject, pct_small, pct_large) VALUES ('buyer', 10, 12)")
+    conn.execute("INSERT INTO client_brand (subject, brand_key, pct_small) VALUES ('buyer', 'MICHELIN', 8), ('*', 'MICHELIN', NULL)")
+    users.remove_user(conn, "buyer", NOW)
+    assert conn.execute("SELECT subject FROM client_terms").fetchall() == [("*",)]
+    assert conn.execute("SELECT subject FROM client_brand").fetchall() == [("*",)]
+
+
+def test_the_owner_page_shows_a_client_and_an_unknown_role_of_an_invitation(tmp_path):
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    users.add_user(conn, "buyer", PASSWORD, NOW, role="client")
+    users.create_invite(conn, "viewer", None, "", NOW, "owner")
+    conn.execute("UPDATE panel_invite SET role = 'no-such-role'")                           # a role of a newer build after a revert
+    conn.commit()
+    owner = app.test_client()
+    login(owner)
+    page = owner.get("/users")
+    html = page.get_data(as_text=True)
+    assert page.status_code == 200 and "no-such-role" in html
+    invite_form = html[html.index('action="/users/invite"'):]
+    assert 'value="client"' not in invite_form.split("</form>")[0]                        # build 1: a client is made on the server only
+
+
+def test_a_client_is_never_one_who_answers_for_an_order_a_callback_or_a_telegram_chat(tmp_path):
+    """Review of build 1: the lists of the staff take the panel users; a client is not staff (nothing of an order goes to it)."""
+    from tires_sync import inquiry
+    from tires_sync.panel.routes_orders import _responsible_options
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    users.add_user(conn, "buyer", PASSWORD, NOW, role="client")
+    users.add_user(conn, "olya", PASSWORD, NOW, role="chats")
+    assert [o["login"] for o in _responsible_options(app, conn)] == [app.config["AUTHOR"], "olya"]
+    assert "buyer" in [o["login"] for o in _responsible_options(app, conn, "buyer")]     # a name already on a card is not lost
+    assert inquiry.callers(conn, "owner") == {"owner", "olya"}
+    owner = app.test_client()
+    tok = login(owner)
+    post(owner, "/connections/telegram/user-chat", tok, login="buyer", chat_id="12345")
+    from tires_sync import order_notify
+    assert "buyer" not in order_notify.user_chats(conn_of(app))
+
+
+def test_the_open_pages_draw_no_staff_frame_for_a_signed_in_client(tmp_path):
+    app = make_app(tmp_path)
+    client, _ = person(app, "client")
+    for page, code, title in ((client.get("/invite/not-a-token"), 404, "Приглашение"),
+                              (client.post("/login", data={"csrf": "tok", "login": "client1", "password": "не-тот-пароль-1"}), 401, "Вход")):
+        html = page.get_data(as_text=True)
+        assert page.status_code == code and "<title>" + title in html, (code, html[:300])
+        for mark in ("topsearch", "topbar.js", "app.js", "sb-link", "bell"):
+            assert mark not in html, (page.status_code, mark)
+
+
+def test_a_staff_member_made_a_client_gets_nothing_of_an_order_in_telegram(tmp_path):
+    """Review 2 of build 1: the chat of a person turned into a client stays, the order's alerts never go there; the owner can clear it."""
+    from tires_sync import order_notify
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    users.add_user(conn, "olya", PASSWORD, NOW, role="chats")
+    order_notify.set_user_chat(conn, "olya", "777", NOW, "owner")
+    assert order_notify.route(conn, {"responsible": "olya", "id": None})["to"] == "777"
+    users.set_role(conn, "olya", "client", None, "", NOW, "owner")
+    got = order_notify.route(conn, {"responsible": "olya", "id": None})
+    assert got["channel"] != "telegram" and got["to"] != "777"
+    assert "Telegram: ни у кого нет чата" in order_notify.tell_people(conn, None, ["olya"], "заказ")
+    owner = app.test_client()
+    tok = login(owner)
+    assert "olya" in owner.get("/connections/telegram").get_data(as_text=True)               # the stale chat is shown, to be cleared
+    post(owner, "/connections/telegram/user-chat", tok, login="olya", chat_id="")
+    assert "olya" not in order_notify.user_chats(conn_of(app))

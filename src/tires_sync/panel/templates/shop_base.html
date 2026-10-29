@@ -1,0 +1,28 @@
+{# The frame of a client: nothing of the staff panel (menu, search, bell, counters, scripts); every new item of base.html stays out of here #}
+{% from "_ui.html" import icon %}
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Каталог{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
+</head>
+<body>
+{% if session.get("user") %}
+<header class="topbar"><a class="sb-logo" href="/shop"><span class="sb-logo-mark">{{ icon("tire") }}</span>Каталог</a>
+<a class="ml-auto" href="/account/password">Свой пароль</a>
+<form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form>
+</header>
+<main class="main"><div class="page">
+<div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' or kind.startswith('field:') else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' or kind.startswith('field:') %} role="alert"{% endif %}><div class="flash-text">{{ message }}</div></div>{% endfor %}</div>
+{% block content %}{% endblock %}
+</div></main>
+{% else %}
+<main class="auth"><div class="auth-card">
+{% block auth %}{% endblock %}
+</div></main>
+{% endif %}
+</body>
+</html>
