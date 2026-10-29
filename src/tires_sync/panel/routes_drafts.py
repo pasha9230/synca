@@ -136,7 +136,7 @@ def register(app) -> None:
     app.jinja_env.globals["plural"] = service.plural
     # the pages whose bar «Не применено: N» applies the working draft in place (the owner 2026-10-29); the other pages keep «Посмотреть и применить»
     app.jinja_env.globals["SETTINGS_BAR_PAGES"] = ("settings_page", "settings_brands_page", "settings_brand_card", "settings_exclusions_page",
-                                                   "economics_terms")
+                                                   "economics_terms", "catalog")      # the catalog: its brands go off and on the feed there too
 
     @app.route("/brands")
     @login_required
@@ -337,6 +337,9 @@ def register(app) -> None:
             return redirect("/draft/%d" % draft_id)
         if request.form.get("rev") != review["rev"]:
             return again("Черновик изменился после просмотра: проверьте итог ещё раз и подтвердите заново.")
+        agreed = request.form.get("agreed_gone", "")
+        if review["guard"]["over"] and agreed and agreed != str(review["guard"]["gone"]):    # the bar's tick was for another number
+            return again("Число снимаемых объявлений изменилось: исчезнет %d. Проверьте и подтвердите заново." % review["guard"]["gone"])
         if review["guard"]["over"] and request.form.get("understand") != "on":
             return again("Подтвердите снятие: исчезнет %d объявлений, это больше порога защиты (%d). Отметьте «Я понимаю»." % (
                 review["guard"]["gone"], review["guard"]["limit"]))

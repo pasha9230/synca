@@ -18,7 +18,7 @@ from .. import user_prefs
 
 # endpoint: (the keys of its choice, those that do not count as «a filter is on» (the view, the sort, the page), the keys a point never keeps)
 PAGES = {
-    "catalog": ("w h d q s t st o r sup n p", "o r n p", ""),
+    "catalog": ("w h d size q s t st b xb o r sup n p", "o r n p", ""),
     "chats_page": ("f acc q", "", "acc"),
     "orders_page": ("v p t q s page", "v page", "p"),
     "orders_report": ("from to pt", "", ""),

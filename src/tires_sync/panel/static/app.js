@@ -159,6 +159,9 @@
       document.querySelectorAll("[data-pend-title]").forEach(function (el) { el.textContent = "Неподтверждённых изменений: " + n; });
       var bar = document.getElementById("pendbar");
       if (bar) bar.hidden = !n;
+      var apply = document.querySelector("[data-pending-apply]");
+      if (apply && !n) apply.disabled = true;                         // nothing to apply: the draft of the form is gone
+      if (n && window.tiresPending) window.tiresPending();             // the bar of the settings pages: the line and the draft anew
     }
     function swap(old, url) {
       return fetch(url, {credentials: "same-origin"}).then(function (r) {
@@ -1200,26 +1203,40 @@
     var t = Math.abs(n) % 100, u = t % 10;
     return t >= 11 && t <= 14 ? many : u === 1 ? one : u >= 2 && u <= 4 ? few : many;
   }
-  if (bar) {
+  function refreshPending() {
     fetch(bar.getAttribute("data-pending-url"), { headers: { "X-Requested-With": "fetch" }, credentials: "same-origin" })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then(function (d) {
-        if (!d.open) return;
+        var apply = bar.querySelector("[data-pending-apply]");
+        if (!d.open) { if (apply) apply.disabled = true; return; }
+        var form = bar.querySelector("[data-pending-form]");
+        if (form) form.setAttribute("action", "/draft/" + d.draft + "/confirm");
+        if (apply) apply.disabled = false;
         bar.querySelector("[data-pending-n]").textContent = d.count;               // the draft the line describes: its own number
         bar.querySelector("[data-pending-title]").textContent = "Не применено: " + d.count + " " + plural(d.count, "правка", "правки", "правок");
         bar.querySelector("[data-pending-line]").textContent = d.line + " Пока вы не нажмёте «Применить», фид не меняется.";
         var rev = bar.querySelector("[data-pending-rev]");
+        var changed = rev && rev.value !== d.rev;
         if (rev) rev.value = d.rev;
+        if (changed) {                       // another draft than the one agreed to: a tick given for the old one is no consent to this one
+          bar.querySelectorAll("[data-pending-checks] input[type=checkbox]").forEach(function (box) { box.checked = false; });
+        }
         var checks = bar.querySelector("[data-pending-checks]");
         if (!checks) return;
         var understand = checks.querySelector("[data-check-understand]"), strong = checks.querySelector("[data-check-strong]");
+        understand.hidden = !d.guard.over;
+        strong.hidden = !d.strong;
+        var agreed = bar.querySelector("[data-pending-gone]");
+        if (agreed) agreed.value = d.guard.over ? d.guard.gone : "";     // the number the tick is given for: the server checks it is still so
         if (d.guard.over) {
-          understand.hidden = false;
           checks.querySelector("[data-understand-text]").textContent = "Я понимаю: исчезнет " + d.guard.gone + " объявлений (порог защиты " + d.guard.limit + ")";
         }
-        if (d.strong) strong.hidden = false;
         checks.hidden = !(d.guard.over || d.strong);
       })
       .catch(function () { bar.querySelector("[data-pending-line]").textContent = "Не удалось посчитать, что изменится: откройте «Подробнее»."; });
+  }
+  if (bar) {
+    window.tiresPending = refreshPending;
+    if (!bar.hidden) refreshPending();
   }
 })();

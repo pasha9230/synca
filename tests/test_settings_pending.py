@@ -83,7 +83,7 @@ def test_the_line_of_the_bar_is_what_the_application_does_to_the_feed_and_apply_
     assert len(set(after) - set(before)) == 1 and len(set(before) - set(after)) == 1
     assert len([g for g in set(before) & set(after) if before[g] != after[g]]) == 4
     shown = client.get("/settings/brands").get_data(as_text=True)
-    assert "Настройки применены." in shown and "Фид обновлён для Авито" in shown and "data-settings-bar" not in shown
+    assert "Настройки применены." in shown and "Фид обновлён для Авито" in shown and 'id="pendbar" hidden data-settings-bar' in shown
     assert staging.summary(conn)["draft_id"] is None
 
 
@@ -105,7 +105,10 @@ def test_apply_from_the_bar_keeps_every_check_of_the_confirmation(tmp_path):
     r = post(client, "/draft/%d/confirm" % pending["draft"], tok, rev=old, understand="on", next="/settings/exclusions")
     assert r.headers["Location"].endswith("/draft/%d" % pending["draft"]) and len(published(conn)) == 5
     fresh = client.get("/settings/pending").get_json()
-    r = post(client, "/draft/%d/confirm" % fresh["draft"], tok, rev=fresh["rev"], understand="on", next="/settings/exclusions")
+    r = post(client, "/draft/%d/confirm" % fresh["draft"], tok, rev=fresh["rev"], understand="on", agreed_gone="3", next="/settings/exclusions")
+    assert r.headers["Location"].endswith("/draft/%d" % fresh["draft"]) and len(published(conn)) == 5     # the tick was for 3, now 4 go
+    r = post(client, "/draft/%d/confirm" % fresh["draft"], tok, rev=fresh["rev"], understand="on", agreed_gone=str(fresh["guard"]["gone"]),
+             next="/settings/exclusions")
     assert r.headers["Location"].endswith("/settings/exclusions") and len(published(conn)) == 1
     assert client.get("/draft/%d" % pending["draft"]).status_code in (200, 404)
 
@@ -116,7 +119,7 @@ def test_cancel_of_the_bar_drops_the_whole_draft_and_stays_on_the_page(tmp_path)
     post(client, "/connections/suppliers/1/excluded-sizes", tok, diameter="16")   # «Исключаемые радиусы»
     r = post(client, "/catalog/cancel", tok, next="/settings")
     assert r.headers["Location"].endswith("/settings") and staging.summary(conn)["draft_id"] is None
-    assert "data-settings-bar" not in client.get("/settings").get_data(as_text=True)
+    assert 'id="pendbar" hidden data-settings-bar' in client.get("/settings").get_data(as_text=True)
 
 
 def test_the_pending_count_of_a_point_or_a_viewer_is_closed(tmp_path):

@@ -405,17 +405,23 @@ def supplier_mark(supplier_id: int, tochki_supplier_id) -> dict:
     return SUPPLIER_MARKS["t4" if tochki_supplier_id and supplier_id == tochki_supplier_id else "mim"]
 
 
-def filter_offers(parsed, width=None, height=None, diameter=None, season=None, studs=None, supplier=None):
-    """Keep only goods of the chosen size; None means any. A size may be one number or several (any of them)."""
+def filter_offers(parsed, width=None, height=None, diameter=None, season=None, studs=None, supplier=None, sizes=None, brands=None,
+                  without=None):
+    """Keep only goods of the chosen size; None means any. A size may be one number or several (any of them). `sizes`: whole sizes
+    (width, height, diameter), any of them; `brands`: only these brand keys, `without`: not these (the view of the catalog only)."""
     width, height, diameter = (None if v is None else ({v} if isinstance(v, int) else set(v)) or None
                                for v in (width, height, diameter))
-    if width is None and height is None and diameter is None and season is None and studs is None and supplier is None:
+    sizes, brands, without = (set(v) if v else None for v in (sizes, brands, without))
+    if width is None and height is None and diameter is None and season is None and studs is None and supplier is None \
+            and sizes is None and brands is None and without is None:
         return parsed
     return _Filtered({
         gid: o for gid, o in parsed.offers.items()
         if (width is None or o.width in width) and (height is None or o.height in height)
         and (diameter is None or o.diameter in diameter) and (season is None or o.season.value == season)
-        and (studs is None or o.studded == (studs == "studded")) and (supplier is None or supplier_of(o) == supplier)}, getattr(parsed, "issues", {}))
+        and (studs is None or o.studded == (studs == "studded")) and (supplier is None or supplier_of(o) == supplier)
+        and (sizes is None or (o.width, o.height, o.diameter) in sizes)
+        and (brands is None or o.brand_key in brands) and (without is None or o.brand_key not in without)}, getattr(parsed, "issues", {}))
 
 
 def size_options(parsed) -> dict:
