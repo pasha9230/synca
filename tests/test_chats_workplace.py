@@ -236,8 +236,8 @@ SEND_CODE = {"send_reply": "67a2e20061cd2c7d", "send_image": "246067c5cbb76d35",
              "_mark": "d70d75c8ce7b5088", "_alert_not_sent": "74efc5b821020db2", "_retry_refused": "fb82d89ea741b009",
              "_check_unknown": "3aed91f55d552351", "settle_sends": "c527b46d7c743787", "_lost_is_there": "a5c7e7ea4c1266ec",
              "_claim_by_sync": "12aa42afe40970a8", "_same_text": "3f655b3cb9d97bfe", "_since": "6194713c717a8ee2",
-             "_others": "2a2ad9a520585a3f", "_retry_late": "322e8e40b2498e09", "_stopped": "252620f625d49f18", "_halt": "bba4642d8e4cd798",
-             "_close_task": "d2a8bb9dfb018951",
+             "_others": "2a2ad9a520585a3f", "_retry_late": "322e8e40b2498e09", "_stopped": "0a9114786c620566", "_halt": "bba4642d8e4cd798",
+             "_close_task": "eed7fc901b07293a",
              "_inbox_done": "0d5006e110a24a0b", "_again_said": "1f6b922254a554a8", "_failed_is_there": "f9de17b3a9f270aa",
              "_inbox_close": "480dcd9ae2041726"}       # run8, lane stuck-sending: a mark «sending» older than 5 minutes is resolved (tests/test_stuck_sending.py)
 # 2026-10-24 reliability, lane rel-core (RED, reviewed): send_reply asks the cabinet's id before the send; its failure is «failed», not «unknown»
