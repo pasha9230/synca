@@ -339,8 +339,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return dispute(point, "слово «%s» не подходит к этапу «%s»" % (word, card["stage"]["name"]),
                        CANCELLED % label(card) if code == "cancel" else
                        "Для заказа №%s на этапе «%s» такая команда не нужна; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
-    return finish(*apply(conn, card, command["to_stage_id"], "менеджер %s" % point["name"], now, deliver,
-                         orders.NOT_BOUGHT + " (команда точки)" if command.get("id") and orders.merged_command(conn, command["id"]) else ""))
+    return finish(*apply(conn, card, command["to_stage_id"], "менеджер %s" % point["name"], now, deliver, merged_reason(conn, command)))
 
 
 # ---- «выдал» without a number and not a reply (the owner 2026-10-26): the point's one order is asked about, several are listed; nothing
@@ -483,6 +482,12 @@ def _issue_yes_no(conn, done, said, asked, card_id, taken, late, point, now: str
 
 def _stage_id(conn, code) -> Optional[int]:
     return next((s["id"] for s in orders.list_stages(conn) if s["code"] == code), None)
+
+
+def merged_reason(conn, command: Optional[dict]) -> str:
+    """The reason a word of the point gives on its move into «Отмена / невыкуп»: «не выкупил» for a word that led to «Отказ/невыкуп» before
+    the merge (it lets «возврат отдал» through), '' (apply: «команда точки») for any other."""
+    return orders.NOT_BOUGHT + " (команда точки)" if command and command.get("id") and orders.merged_command(conn, command["id"]) else ""
 
 
 def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional[Deliver], reason: str = "") -> Tuple[str, str]:
@@ -944,7 +949,8 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
             outcome = "уже на «%s»%s" % (card["stage"]["name"], "; клиенту %s" % ("отправлено" if sent else "не отправлено") if note else "")
             reply = ("Заказ №%s — отмечено: %s. %s" % (label(card), ARRIVED if target == "at_point" else ISSUED, note)).strip()
         else:
-            outcome, reply = apply(conn, card, _stage_id(conn, target) if target else command["to_stage_id"], who, now, deliver)
+            outcome, reply = apply(conn, card, _stage_id(conn, target) if target else command["to_stage_id"], who, now, deliver,
+                                   merged_reason(conn, None if target else command))
             if outcome.startswith("не "):
                 raise OrderError(reply)
     except Exception:

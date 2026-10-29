@@ -176,3 +176,17 @@ def test_the_reason_is_read_without_case_for_a_return(tmp_path):
     conn = old_db(tmp_path)
     card = put(conn, "cancel", "Не выкупил")
     assert mgr._return_from(orders.get_card(conn, card))
+
+
+def test_the_reason_of_a_word_is_the_same_by_the_point_and_by_the_owners_confirmation(tmp_path):
+    """N1: the owner's «Подтвердить» of a disputed word gives the same reason as the point's own command."""
+    from tires_sync import order_manager as mgr
+    conn = old_db(tmp_path)
+    conn.execute("INSERT INTO order_command (stage_id, word, to_stage_id) VALUES (?, 'не забрал', ?)", (sid(conn, "at_point"), sid(conn, "refused")))
+    conn.commit()
+    orders.ensure_pipeline(conn, LATER)
+    command = conn.execute("SELECT id, to_stage_id FROM order_command WHERE word = 'не забрал'").fetchone()
+    assert mgr.merged_reason(conn, {"id": command[0], "to_stage_id": command[1]}) == "не выкупил (команда точки)"
+    assert mgr.merged_reason(conn, {"to_stage_id": command[1]}) == "" and mgr.merged_reason(conn, None) == ""
+    source = open(mgr.__file__, encoding="utf-8").read()
+    assert source.count("merged_reason(conn, ") == 3                                       # _command and confirm both pass it

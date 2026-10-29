@@ -426,8 +426,10 @@ def task_token(task: dict) -> str:
 
 def task_of_token(conn, token) -> Optional[dict]:
     """The message task whose send mark `token` is (task_token), or None: another mark, or the task is gone."""
-    if str(token or "").startswith("arrived-"):
-        row = conn.execute("SELECT %s FROM order_task WHERE rule_id = ? AND entered_at = ?" % TASK_FIELDS, (ARRIVED_RULE, str(token))).fetchone()
+    arrived = re.fullmatch(r"arrived-(\d+)-\d*", str(token or ""))
+    if arrived:                                                    # the order is in the mark: the UNIQUE index (order, rule, entered_at) finds it
+        row = conn.execute("SELECT %s FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?" % TASK_FIELDS,
+                           (int(arrived.group(1)), ARRIVED_RULE, str(token))).fetchone()
         return _task(row) if row else None
     found = re.fullmatch(r"task-(\d+)-(\d*)", str(token or ""))
     if not found:
