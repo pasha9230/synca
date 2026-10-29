@@ -17,7 +17,7 @@ from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
 from .. import order_oth, point_log
-from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
+from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
 from .routes_main import context
@@ -795,11 +795,51 @@ def register(app) -> None:
                 a["id"] for a in connections.list_accounts(conn) if a["chats_enabled"] and a["chats_send"]}],
             exact_title=order_wait.TITLE_EXACT, webmim=webmim_match.card_block(conn, card, with_hints=own_point() is None),
             webmim_cost=order_report.order_webmim(conn, card_id) if has_right("money") else None,                # the purchase is money
-            webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn)) if can_post("order_webmim_create") else None), status, {
+            webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn)) if can_post("order_webmim_create") else None,
+            supplier=supplier_view(conn, card) if can_post("order_webmim_create") and own_point() is None else None,
+            supplier_number=order_supplier.number_of(conn, card_id)), status, {
             "Cache-Control": "no-store"}            # «Назад» reads the order again: the positions a press added are shown (хвост З6)
 
     def back(card_id, part=""):
         return redirect("/orders/%d%s" % (card_id, "#" + part if part else ""))
+
+    def supplier_view(conn, card):
+        """«Заказ поставщику» (order_supplier.view) against the suppliers' last unload; an unload that cannot be read leaves the lines of
+        the stock and the price warning, never the page broken."""
+        try:
+            _conn, _settings, parsed, _ref = context(app)
+        except Exception:
+            log.exception("the unload for «Сверка» of order %s", card["id"])
+            parsed = None
+        return order_supplier.view(conn, card, parsed, local_iso())
+
+    @app.route("/orders/<int:card_id>/tochki/placed", methods=["POST"])
+    @login_required
+    def order_tochki_placed(card_id):
+        """«Оформил вручную» of «Заказать в 4 Точки»: the number of the order of 4 Точки, then «Заказ оформлен» by the ordinary move."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        try:
+            line, refused = order_supplier.mark_tochki(conn, card_id, request.form.get("number", ""), local_iso(), author())
+            flash("Номер заказа 4 Точек записан." + (" " + line if line else ""), "ok")
+            if refused:
+                flash(refused, "error")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return back(card_id, "supplier")
+
+    @app.route("/orders/<int:card_id>/delivery/tomorrow", methods=["POST"])
+    @login_required
+    def order_delivery_tomorrow(card_id):
+        """«Перенести на завтра» of «Сверка» (WebMIM: an order for today goes to work before 16:00)."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        try:
+            day = order_supplier.tomorrow(conn, card_id, local_iso(), author())
+            flash("Дата доставки перенесена на %s." % day, "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return back(card_id, "supplier")
 
     @app.route("/orders/<int:card_id>/save", methods=["POST"])
     @login_required
@@ -951,7 +991,8 @@ def register(app) -> None:
             if server in webmim_create.CREATE_SERVERS and app.config.get("SECRET_BOX") is not None:
                 client = webmim_match.client_for(conn, app.config["SECRET_BOX"], app.config.get("WEBMIM_HTTP") or urllib_transport, server)
             try:
-                result = webmim_create.place(conn, card_id, client, server, local_iso(), local_now().date(), author())
+                seen = request.form.get("seen", "")                      # the window «Подтверждение»: what it showed must still be the order
+                result = webmim_create.place(conn, card_id, client, server, local_iso(), local_now().date(), author(), seen=seen)
             finally:
                 if client is not None:
                     client.close()

@@ -1,6 +1,7 @@
 {# the block «WebMIM» of the order's page (webmim_match.card_block): the paired WebMIM order or the suggestions with «Это он».
    The sum and the prices of WebMIM are the purchase: only with the right «money». The manager of a point: the paired order only.
-   webmim_create (webmim_create.button): «Оформить в WebMIM» and its last result, for the right «supplier» only. #}
+   webmim_create (webmim_create.button): «Досоздать в WebMIM» and the last result, for the right «supplier» only; the first press is «Заказать
+   в МИМ» of «Заказ поставщику» (_order_supplier.html, its window «Подтверждение»). #}
 {% set w = webmim %}{% set point_view = current_user().role == "point" %}
 {% if w and (w.order or not point_view) %}
 {% call entity_ui.section("WebMIM", id="webmim", sub=w.server ~ (" · снимок " ~ (w.seen_at|short_dt_utc) if w.seen_at else " · снимка ещё нет")) %}<div class="card-body stack" data-webmim>
@@ -30,7 +31,7 @@
 {% set b = webmim_create %}{% if b %}<div class="stack" data-webmim-create>
 {% if b.state and b.state.state == "running" %}<p class="small" data-webmim-create-running>Оформляется в WebMIM (нажал {{ b.state.author }}, {{ b.state.started_at|short_dt }}): обновите страницу через минуту.</p>
 {% elif b.state and b.state.result %}<p class="small{% if b.state.state != 'done' %} text-err{% endif %}">{{ b.state.result }}</p>{% endif %}
-{% if b.label %}{% if b.live %}<div class="row" style="gap:var(--s-3);flex-wrap:wrap"><form method="post" action="/orders/{{ c.id }}/webmim/create" data-once
+{% if b.label and b.label.startswith("Досоздать") %}{% if b.live %}<div class="row" style="gap:var(--s-3);flex-wrap:wrap"><form method="post" action="/orders/{{ c.id }}/webmim/create" data-once
  data-confirm-title="{{ b.label }}?" data-confirm="Заказ будет создан в WebMIM ({{ b.server }}) с позициями этого заказа: доставка на адрес точки, оплата со счёта кабинета. Заказ на более раннем этапе перейдёт в «Заказ оформлен». Когда заказ будет создан полностью, сообщения об оформлении уйдут сами: клиенту в чат Авито и менеджеру точки в ВК, если хватает данных. Сообщение подождёт в задачах заказа, если не хватает данных (например, номера перемещения) или нет чата Авито (у точки — ВК); не уйдёт второй раз, если уже отправлено, и не уйдёт, если его пропустили вручную.{% if b.test %} Это тестовый сервер: у поставщика ничего не заказывается, но номер тестового заказа впишется в карточку и может уйти в сообщениях. Ушедшее сообщение не удалить; поля WebMIM в карточке после проверки можно очистить.{% endif %}" data-confirm-ok="{{ b.label }}">
 <input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">{{ b.label }}</button></form>
 <span class="small muted">{{ b.server }}</span></div>

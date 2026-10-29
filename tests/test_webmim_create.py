@@ -3,6 +3,7 @@ the rights, and a test order kept away from the live reconciliation. A fake WebM
 from __future__ import annotations
 
 import json
+import re
 import socket
 import urllib.error
 import urllib.parse
@@ -149,9 +150,11 @@ def test_the_order_and_its_positions_are_made_and_written_to_the_order(tmp_path)
     result = place(conn, mine, fake)
     assert result["state"] == "done" and result["ok"]
     sent = fake.posts("/api/v2/orders")[0][2]
-    assert sent == {"orderDate": "24.10.26", "paymentType": 3, "paymentTerms": 1, "shipmentType": 1, "deliveryAddressId": "77",
-                    "deliveryTime": "10:00-18:00", "deliveryPerson": "Алексей", "deliveryPhone": "+7(911)222-33-44", "externalNumber": str(mine),
-                    "customerName": "Иван", "customerPhone": "+7(911)111-22-33", "noteForSelf": "Tires Sync, заказ №%d" % mine}
+    # the owner 2026-10-29, as he fills the form by hand: «безнал», «Отсрочка», «Доставка», contact «Админ», the point's phone and time,
+    # «Грузим на ОТХ»; no data of the client
+    assert sent == {"orderDate": "24.10.26", "paymentType": 3, "paymentTerms": 2, "shipmentType": 1, "deliveryAddressId": "77",
+                    "deliveryTime": "10:00-18:00", "deliveryPerson": "Админ", "deliveryPhone": "+7(911)222-33-44", "externalNumber": str(mine),
+                    "noteForSupplier": "Грузим на ОТХ", "noteForSelf": "Tires Sync, заказ №%d" % mine}
     assert [c[2] for c in fake.posts("/items")] == [{"goodsId": "111", "territoryId": TERRITORY, "stockType": 0, "quantity": 5},
                                                      {"goodsId": "222", "territoryId": TERRITORY, "stockType": 0, "quantity": 2}]
     row = orders._row(conn, mine)
@@ -161,8 +164,8 @@ def test_the_order_and_its_positions_are_made_and_written_to_the_order(tmp_path)
     assert not [c for c in fake.calls if "approve" in c[1]]
     assert all(c[1].startswith("/api/v2/") for c in fake.calls)
     text = " | ".join(events(conn, mine))
-    assert "безнал (id 3)" in text and "Предоплата (id 1)" in text and "№5001" in text and "тестовый" in text.lower()
-    assert "безнал (id 3)" in result["text"] and "Предоплата (id 1)" in result["text"]
+    assert "безнал (id 3)" in text and "Отсрочка (id 2)" in text and "№5001" in text and "тестовый" in text.lower()
+    assert "безнал (id 3)" in result["text"] and "Отсрочка (id 2)" in result["text"]
     state = webmim_create.get_state(conn, mine)
     assert state["server"] == "test" and state["state"] == "done" and state["webmim_id"] == "1001"
 
@@ -271,17 +274,30 @@ def test_the_order_time_goes_before_the_points_default(tmp_path):
     assert fake.posts("/api/v2/orders")[0][2]["deliveryTime"] == "после 15:00"
 
 
-def test_a_single_payment_type_is_taken_whatever_its_name(tmp_path):
+def test_a_single_payment_type_is_not_taken_unless_it_is_beznal(tmp_path):
+    """The owner 2026-10-29: «безнал» only; the only type of the dictionary is no longer taken whatever its name."""
     conn = db(tmp_path)
     mine = card(conn)
     fake = FakeWebmim(payment_types={"44430634001": "Оплата со счёта"})
+    result = place(conn, mine, fake)
+    assert result["state"] == "refused" and "Оплата со счёта" in result["text"] and not fake.posts()
+    fake = FakeWebmim(payment_types={"44430634001": "Безнал"})
     place(conn, mine, fake)
     assert fake.posts("/api/v2/orders")[0][2]["paymentType"] == 44430634001
 
 
+def test_the_card_time_is_kept_and_the_points_time_is_taken_without_it(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn, point_id=point(conn, name="Янино", default_time="09:00-17:00"))
+    data = webmim_create.fields(conn, orders.get_card(conn, mine))
+    assert (data["time"], data["person"], data["phone"], data["note"]) == ("09:00-17:00", "Админ", "+7(911)222-33-44", "Грузим на ОТХ")
+
+
 @pytest.mark.parametrize("kind, value, words", [
-    ("payment_types", {"2": "физ.лицо", "5": "наличные"}, "Тип оплаты"),
-    ("terms", {"2": "Отсрочка"}, "Условия оплаты"),
+    ("payment_types", {"2": "физ.лицо", "5": "наличные"}, "Вид оплаты"),
+    ("payment_types", {"5": "наличные"}, "Вид оплаты"),
+    ("terms", {"1": "Предоплата"}, "Признак оплаты"),
+    ("terms", {"1": "Предоплата", "2": "Отсрочка платежа"}, "Признак оплаты"),
     ("shipments", {"2": "Самовывоз"}, "доставка"),
 ])
 def test_a_dictionary_without_the_wanted_value_refuses_with_its_values(tmp_path, kind, value, words):
@@ -676,12 +692,10 @@ def test_the_client_is_made_for_the_server_the_button_checked(tmp_path):
     (lambda conn: card(conn, brand="S2:cordiant"), "другого поставщика"),
     (lambda conn: card(conn, territory=""), "территори"),
     (lambda conn: card(conn, point_id=None), "точк"),
-    (lambda conn: card(conn, point_id=point(conn, name="Без менеджера", manager_name="")), "менеджер"),
-    (lambda conn: card(conn, point_id=point(conn, name="Телефон", manager_phone="+44 20 7946 0958")), "телефон менеджера"),
+    (lambda conn: card(conn, point_id=point(conn, name="Телефон", manager_phone="+44 20 7946 0958")), "телефон не российский"),
     (lambda conn: card(conn, delivery_date=""), "дат"),
     (lambda conn: card(conn, delivery_date="2026-10-22"), "прошл"),
     (lambda conn: card(conn, point_id=point(conn, name="Без времени", default_time="")), "время"),
-    (lambda conn: card(conn, client_phone="", client_name="Иван"), "телефон клиента"),
 ])
 def test_a_check_before_refuses_and_nothing_goes_to_webmim(tmp_path, make, words):
     conn = db(tmp_path)
@@ -857,14 +871,18 @@ def test_the_owner_and_the_partner_press_the_button_on_the_card(panel):
                 session["user"], session["epoch"], session["csrf"] = "owner", 0, "tok"
                 session["pw"] = shared_mark_of(client.application)
         html = client.get("/orders/%d" % mine).get_data(as_text=True)
-        assert "Оформить в тестовом WebMIM" in html and 'action="/orders/%d/webmim/create"' % mine in html and "номер тестового заказа впишется" in html
+        # the owner 2026-10-29: «Заказать в МИМ» opens the window «Подтверждение»; «Подтвердить» posts what the window showed
+        assert "Заказать в МИМ</button>" in html and "Подтверждение заказа в МИМ" in html and "номер тестового заказа впишется" in html
+        assert 'action="/orders/%d/webmim/create"' % mine in html and "Оформить в тестовом WebMIM" not in html
         assert "сообщения об оформлении уйдут сами" in html and "сообщения не меняются" not in html
         # review L2 (2026-10-23): every case the message does not go, no template name, nothing that reads as «a sent message can be wiped»
         for words in ("перейдёт в «Заказ оформлен»", "менеджеру точки в ВК", "номера перемещения", "нет чата Авито", "уже отправлено",
                       "пропустили вручную", "Ушедшее сообщение не удалить"):
             assert words in html
         assert "«Клиенту: заказ оформлен»" not in html and "сотрите" not in html
-        response = post(client, "/orders/%d/webmim/create" % mine, "tok")
+        seen = re.search(r'name="seen" value="([0-9a-f]+)"', html).group(1)
+        assert seen == webmim_create.fingerprint(conn, orders.get_card(conn, mine))
+        response = post(client, "/orders/%d/webmim/create" % mine, "tok", seen=seen)
         assert response.status_code == 302
         html = client.get("/orders/%d" % mine).get_data(as_text=True)
         assert "Оформлен в WebMIM" in html and "безнал (id 3)" in html
@@ -982,3 +1000,177 @@ def test_why_names_the_pause_and_the_code_of_a_timeout():
     assert webmim_create._why(webmim_orders.OrdersError("gateway", status=504)) == "время ожидания ответа вышло (код 504)"
     assert webmim_create._why(TimeoutError()) == "время ожидания ответа вышло"
     assert webmim_create._why(OSError("refused")) == "нет ответа сети"
+
+
+def test_no_manager_name_nor_client_phone_is_needed(tmp_path):
+    """The owner 2026-10-29: the contact is «Админ» and the point's phone; the client's data does not go to WebMIM."""
+    conn = db(tmp_path)
+    mine = card(conn, point_id=point(conn, name="Без менеджера", manager_name=""), client_phone="", client_name="Иван")
+    fake = FakeWebmim()
+    assert place(conn, mine, fake)["ok"]
+    sent = fake.posts("/api/v2/orders")[0][2]
+    assert "customerName" not in sent and "customerPhone" not in sent and sent["deliveryPerson"] == "Админ"
+
+
+class ShuffledWebmim(FakeWebmim):
+    """WebMIM whose list is not by date (the live server 2026-10-28): the first page has an order older than the search's days."""
+
+    def _answer(self, method, path, query, payload):
+        if path == "/api/v2/orders" and method == "GET":
+            page, per = int(query.get("page", 1)), int(query.get("per-page", 50))
+            rows = list(self.orders)                                                  # the oldest first, then newer, then older again
+            pages = max(1, -(-len(rows) // per))
+            return 200, rows[(page - 1) * per: page * per], {"X-Pagination-Page-Count": str(pages)}
+        return super()._answer(method, path, query, payload)
+
+
+def test_an_order_on_a_far_page_after_an_old_one_is_found_and_not_made_twice(tmp_path):
+    """The search for our number reads every page (webmim_match._every_page), not up to the first old order: an earlier press's order on
+    page 3 after an old page is found; nothing is made again (the condition of the live server, the owner 2026-10-29)."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = ShuffledWebmim()
+    fake.add_order("new-0", created="23.10.26 10:00:00")                             # page 1: «the newest first» by its ends, an old order
+    for n in range(49):                                                              # in it (a reading up to the first old order stops here)
+        fake.add_order("old-%d" % n, created="01.09.26 10:00:00")
+    for n in range(50):
+        fake.add_order("new-%d" % (n + 1), created="23.10.26 10:00:00")              # page 2: new
+    for n in range(10):
+        fake.add_order("older-%d" % n, created="02.09.26 10:00:00")                  # page 3: ours among old ones
+    ours = fake.add_order(str(mine), created="23.10.26 11:00:00")
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
+                 "VALUES (?, 'test', 'unknown', ?, ?, 'owner', '', '', ?)", (mine, NOW, NOW, NOW))
+    conn.commit()
+    result = place(conn, mine, fake)
+    assert not fake.posts("/api/v2/orders") and result["ok"]
+    assert orders._row(conn, mine)["webmim_id"] == str(ours["id"])
+
+
+def test_a_new_order_with_our_number_on_a_far_page_stops_the_button(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = ShuffledWebmim()
+    fake.add_order("new-0", created="23.10.26 10:00:00")
+    for n in range(49):
+        fake.add_order("old-%d" % n, created="01.09.26 10:00:00")
+    fake.add_order(str(mine), created="23.10.26 09:00:00")                           # page 2, after the old page 1
+    result = place(conn, mine, fake)
+    assert result["state"] == "refused" and "уже есть заказ" in result["text"] and not fake.posts("/api/v2/orders")
+
+
+def test_the_window_fingerprint_must_match_the_order(tmp_path):
+    """«Подтвердить» carries the fingerprint of what the window showed; the order changed meanwhile: refused, WebMIM is not asked."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    seen = webmim_create.fingerprint(conn, orders.get_card(conn, mine))
+    orders.update_card(conn, mine, {"delivery_time": "после 12"}, NOW, "owner")
+    fake = FakeWebmim()
+    with pytest.raises(orders.OrderError) as err:
+        webmim_create.place(conn, mine, client_of(fake), "test", NOW, TODAY, "owner", sleep=lambda _s: None, seen=seen)
+    assert "изменились" in str(err.value) and fake.calls == [] and webmim_create.get_state(conn, mine) is None
+    seen = webmim_create.fingerprint(conn, orders.get_card(conn, mine))
+    result = webmim_create.place(conn, mine, client_of(fake), "test", NOW, TODAY, "owner", sleep=lambda _s: None, seen=seen)
+    assert result["ok"] and fake.posts("/api/v2/orders")[0][2]["deliveryTime"] == "после 12"
+
+
+@pytest.mark.parametrize("now, day, expected", [
+    ("2026-10-23T16:00:00", "2026-10-23", True), ("2026-10-23T15:59:00", "2026-10-23", False), ("2026-10-23T18:00:00", "2026-10-24", False),
+])
+def test_late_is_today_after_sixteen(now, day, expected):
+    assert webmim_create.late({"delivery_date": day}, now) is expected
+
+
+def test_the_live_server_stays_closed_to_the_button():
+    assert webmim_create.CREATE_SERVERS == ("test",)
+
+
+# ---- review round 1 (2026-10-30, webmim-ui) ---------------------------------------------------------------------------------------------
+
+def lost_mark(conn, mine):
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
+                 "VALUES (?, 'test', 'unknown', ?, ?, 'owner', '', '', ?)", (mine, NOW, NOW, NOW))
+    conn.commit()
+
+
+@pytest.mark.parametrize("lost", [False, True])
+def test_a_list_longer_than_the_pages_read_makes_nothing(tmp_path, monkeypatch, lost):
+    """Д1: more pages than MAX_PAGES — our number may be on a page not read: nothing is made (a lost answer stays «unknown»)."""
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 2)
+    conn = db(tmp_path)
+    mine = card(conn)
+    if lost:
+        lost_mark(conn, mine)
+    fake = FakeWebmim()
+    for n in range(150):
+        fake.add_order("other-%d" % n)
+    result = place(conn, mine, fake)
+    assert not fake.posts("/api/v2/orders") and not result["ok"]
+    assert result["state"] == ("unknown" if lost else "refused") and "не все страницы" in result["text"]
+    assert "оформите вручную" in result["text"] and "недоступен" not in result["text"]
+    assert len([c for c in fake.calls if c[1] == "/api/v2/orders"]) == 1                # the count of pages is known from the first one
+
+
+class UncountedWebmim(FakeWebmim):
+    """WebMIM that does not say the count of pages."""
+
+    def __call__(self, method, url, headers, body):
+        status, extra, data = super().__call__(method, url, headers, body)
+        return status, {k: v for k, v in extra.items() if k != "X-Pagination-Page-Count"}, data
+
+
+def test_a_list_without_its_count_read_to_the_last_full_page_makes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 2)
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = UncountedWebmim()
+    for n in range(150):
+        fake.add_order("other-%d" % n)
+    result = place(conn, mine, fake)
+    assert not fake.posts("/api/v2/orders") and result["state"] == "refused" and "не все страницы" in result["text"]
+    fake = UncountedWebmim()                                                            # a short last page: the whole list was read
+    for n in range(60):
+        fake.add_order("other-%d" % n)
+    assert place(conn, mine, fake)["ok"]
+
+
+class RepeatingWebmim(FakeWebmim):
+    """The list shifted while it was read: the same order on two pages."""
+
+    def _answer(self, method, path, query, payload):
+        status, data, extra = super()._answer(method, path, query, payload)
+        if path == "/api/v2/orders" and method == "GET" and query.get("page") == "2":
+            data = data + [o for o in self.orders if o["externalNumber"] == self.mine]
+        return status, data, extra
+
+
+def test_the_same_order_read_twice_is_one(tmp_path):
+    """Д3: a row read twice (the pages shifted) is one order: the lost order is found, not «several»."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    lost_mark(conn, mine)
+    fake = RepeatingWebmim()
+    fake.mine = str(mine)
+    fake.add_order(str(mine))
+    for n in range(60):
+        fake.add_order("other-%d" % n)
+    result = place(conn, mine, fake)
+    assert result["ok"] and not fake.posts("/api/v2/orders") and orders._row(conn, mine)["webmim_id"] == "1001"
+
+
+def test_a_new_press_without_the_window_is_refused(tmp_path):
+    """Д4: the page's press of a new order carries the window's fingerprint; an empty one (an old page, a hand request) is refused."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = FakeWebmim()
+    with pytest.raises(orders.OrderError) as err:
+        webmim_create.place(conn, mine, client_of(fake), "test", NOW, TODAY, "owner", sleep=lambda _s: None, seen="")
+    assert "окно подтверждения" in str(err.value) and fake.calls == []
+
+
+def test_the_fingerprint_knows_the_server(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn)
+    before = webmim_create.fingerprint(conn, orders.get_card(conn, mine))
+    connections.set_config(conn, "webmim_orders", 0, {"server": "prod", "login": "api-bot"}, NOW, "owner")
+    conn.commit()
+    assert webmim_create.fingerprint(conn, orders.get_card(conn, mine)) != before

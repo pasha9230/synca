@@ -526,6 +526,7 @@ def _migrate(conn) -> None:
                         ("reserve_until", "TEXT NOT NULL DEFAULT ''"), ("special_terms", "TEXT NOT NULL DEFAULT ''"),
                         ("special_amount", "REAL NOT NULL DEFAULT 0"), ("receipt_needed", "INTEGER NOT NULL DEFAULT 0")):
         _add_column(conn, "order_card", column, ddl)
+    _add_column(conn, "order_card", "supplier_number", "TEXT NOT NULL DEFAULT ''")   # the number of the order of 4 Точки, «Оформил вручную» (order_supplier)
     _add_column(conn, "order_item", "code", "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "order_item", "purchase_manual", "INTEGER NOT NULL DEFAULT 0")   # 1: the purchase was typed by hand, WebMIM does not overwrite it
     _add_column(conn, "account", "chats_enabled", "INTEGER NOT NULL DEFAULT 0")
