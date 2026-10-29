@@ -17,8 +17,10 @@
 <aside class="sidebar">
 <div class="sb-logo"><span class="sb-logo-mark">{{ icon("tire") }}</span>Tires Sync</div>
 {% set path = request.path %}
-{% if can("mypoint") %}<nav class="sb-group">
-<a class="sb-link{% if path.startswith('/my-point') %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
+{# «Рабочее место» in the menu: the point only (the owner 2026-10-29); the owner and the partner open /my-point by its address #}
+{% set point_menu = current_user().role == "point" %}
+{% if point_menu or can("users") %}<nav class="sb-group">
+{% if point_menu %}<a class="sb-link{% if path.startswith('/my-point') %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>{% endif %}
 {% if can("users") %}<a class="sb-link{% if path.startswith('/points/history') %} is-active{% endif %}" href="/points/history">{{ icon("clock") }}История точек</a>{% endif %}
 </nav>{% endif %}
 {% if can("home") %}<nav class="sb-group">

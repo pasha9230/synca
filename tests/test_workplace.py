@@ -245,6 +245,18 @@ def test_the_history_shows_the_points_actions_to_the_owner_and_the_partner_only(
     assert 'href="/points/history"' in _text(client.get("/my-point"))
 
 
+
+def test_the_menu_has_the_workplace_for_a_point_only_and_the_history_for_the_owner_and_the_partner(tmp_path):
+    """The owner 2026-10-29: «Рабочее место» in the menu is the point's; the owner and the partner keep «История точек» and /my-point."""
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    partner, _ = person(app, "partner")
+    for who in (client, partner):
+        page = _text(who.get("/orders"))
+        assert 'href="/my-point"' not in page and "Рабочее место</a>" not in page and 'href="/points/history"' in page
+        assert who.get("/my-point").status_code == 200
+    page = _text(manager(app, conn, pid).get("/orders"))
+    assert 'href="/my-point"' in page and "Рабочее место</a>" in page and 'href="/points/history"' not in page and "История точек" not in page
+
 def test_a_move_on_the_board_by_the_point_is_in_the_history(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
