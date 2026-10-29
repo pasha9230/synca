@@ -159,6 +159,8 @@
       document.querySelectorAll("[data-pend-title]").forEach(function (el) { el.textContent = "Неподтверждённых изменений: " + n; });
       var bar = document.getElementById("pendbar");
       if (bar) bar.hidden = !n;
+      var apply = document.querySelector("[data-pending-apply]");
+      if (apply && !n) apply.disabled = true;                         // nothing to apply: the draft of the form is gone
       if (n && window.tiresPending) window.tiresPending();             // the bar of the settings pages: the line and the draft anew
     }
     function swap(old, url) {

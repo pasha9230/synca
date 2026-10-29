@@ -81,6 +81,7 @@ def test_several_brands_and_brands_left_out_are_the_view_only(tmp_path):
     assert 'name="b" value="LAUFENN" checked' in page and 'name="xb" value="LAUFENN" aria' in page
     sort = re.search(r'href="(/catalog\?[^"]*o=price[^"]*)"', page).group(1)       # the links of the page keep every brand
     assert sort.count("b=") == 2
+    assert 'data-brand-off="FOO"' not in owner.get("/catalog?b=FOO").get_data(as_text=True)   # a brand of the address is no row of «Бренды в фиде»
     assert staging.summary(conn)["draft_id"] is None                                  # nothing in the draft: the feed is not touched
 
 

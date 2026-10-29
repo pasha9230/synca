@@ -274,9 +274,10 @@ def register(app) -> None:
         def label(key):                                                   # one brand at two suppliers: two rows, named apart
             match = re.match(r"^S(\d+):(.*)$", key)
             return match.group(2) + " · " + names.get(int(match.group(1)), match.group(1)) if match and len(names) > 1 else re.sub(r"^S\d+:", "", key)
+        shown = dict(counts)
         for key in view["brands"] + view["without"]:                          # a brand chosen that has only gone or held positions: kept in the form
-            counts.setdefault(key, 0)
-        brand_choices = sorted(({"key": k, "label": label(k), "count": n} for k, n in counts.items()), key=lambda c: (c["label"].casefold(), c["key"]))
+            shown.setdefault(key, 0)
+        brand_choices = sorted(({"key": k, "label": label(k), "count": n} for k, n in shown.items()), key=lambda c: (c["label"].casefold(), c["key"]))
         return render_template(
             "catalog.html", size={k: " ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
             size_text=(args.get("size") or "")[:client_catalog.MAX_TEXT], size_unknown=view["unknown"], brand_choices=brand_choices, chosen_brands=view["brands"],
