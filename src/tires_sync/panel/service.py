@@ -707,6 +707,7 @@ def catalog_item_view(conn, settings, parsed, ref, goods_id, today, money: bool,
               "unit": {"text": r[4], "fmt": "money"}, "created": {"text": r[5], "fmt": "dt"}} for r in rows]
     return {"type": "item", "kind": "Позиция", "ref": p["code"] or goods_id, "title": p["name"],
             "status": {"text": OUT_OF_STOCK_TEXT if out else p["reason"], "tone": "ok" if p["state"] == "feed" else "warn"}, "out_of_stock": out,
+            "out_note": p["reason"][len(OUT_OF_STOCK_TEXT):].strip(" ()") if out and p["reason"].startswith(OUT_OF_STOCK_TEXT) else "",
             "crumbs": [{"label": "Каталог", "href": "/catalog"}, {"label": p["code"] or goods_id}],
             "goods_id": goods_id, "image": p["image"], "built": p["built"], "reason": p["reason"], "price_note": p["price_note"],
             "ad_title": p["fields"]["Title"], "description": p["fields"]["Description"],
