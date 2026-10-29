@@ -70,9 +70,11 @@ def decide(
     now: Optional[datetime] = None,
     already_live=frozenset(),
     removed_before: int = 0,
+    oth=None,
 ) -> DecisionSet:
     """`now` (Moscow time) switches on the wait for the morning refill; without it positions that left are taken off at once.
-    `removed_before`: ads of the account the light stock passes took off within the last hour; the guard counts them with this run's."""
+    `removed_before`: ads of the account the light stock passes took off within the last hour; the guard counts them with this run's.
+    `oth`: goods_id -> pieces on «На ОТХ» (oth_stock.pieces): a published one is not taken off for the supplier (HOLD «oth:<reason>»)."""
     decisions: List[Decision] = []
     queue: List[Candidate] = []
 
@@ -117,6 +119,14 @@ def decide(
                 queue.append(cand)
             else:
                 decisions.append(Decision(gid, Action.SKIP, "low_stock"))
+
+    if oth:
+        # The owner 2026-10-29: the tires of a refused order lie at our point; while the order stays in «На ОТХ» its ad stays, on the saved ad
+        # and its last price, whatever the supplier has. The owner's own switches (SETTINGS_DRIVEN) still take it off.
+        decisions = [Decision(d.goods_id, Action.HOLD, "oth:" + d.reason, published[d.goods_id].price, published[d.goods_id].point,
+                              first_hold=published[d.goods_id].first_hold or today)
+                     if d.action is Action.REMOVE and d.goods_id in oth and d.reason not in SETTINGS_DRIVEN and d.goods_id in published else d
+                     for d in decisions]
 
     tripped = False
     removals = [d for d in decisions if d.action is Action.REMOVE and d.reason not in SETTINGS_DRIVEN]

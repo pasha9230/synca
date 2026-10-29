@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
-from . import connections, feed_check, mirror_feed, photo_library, store
+from . import connections, feed_check, mirror_feed, oth_stock, photo_library, store
 from .decide import SETTINGS_DRIVEN
 from .models import Action, Settings
 from .publishing import expected_for
@@ -115,7 +115,8 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
         id_code=id_code,
         owner_phone="" if account["id"] == connections.PRIMARY_ACCOUNT else feed_check._phone(active_settings(conn).contact_phone),
         foreign_addresses=foreign, allowed_photos=own.allowed if own is not None else frozenset(),
-        known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem, **tochki)
+        known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem,
+        oth=frozenset(oth_stock.pieces(conn)) if mode == "generated" else frozenset(), **tochki)   # read here, not from the cycle's decisions
     return feed_check.check_feed(ads, ctx)
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import dataclasses
 import re
 import xml.etree.ElementTree as ET
@@ -72,16 +73,27 @@ def _takes_mark(ad_id: str, code: str, acct=None) -> bool:
 ALIAS_ID = re.compile(r"k[0-9a-z]{11}(-x\d+)?(_r\d{8})?$")                         # an Id of the alias scheme: nothing to take a code from, already final
 
 
+def _snapshot_text(ad) -> str:
+    """The ad as it is saved for later holds: without the line «Шины в наличии» of «На ОТХ», which belongs to the cycle that adds it."""
+    from . import oth_stock
+    node = ad.find("Description")
+    if node is None or oth_stock.drop_line(node.text or "") == (node.text or ""):
+        return ad_to_text(ad)
+    clean = copy.deepcopy(ad)
+    clean.find("Description").text = oth_stock.drop_line(node.text)
+    return ad_to_text(clean)
+
+
 def _pending_item(d: Decision, ev, rendered, rendered4) -> dict:
     item = {"goods_id": d.goods_id, "action": d.action.value, "price": d.price, "point": d.point,
             "suppressed": d.suppressed, "first_hold": d.first_hold.isoformat() if d.first_hold else None, "reason": d.reason}
     if d.action in (Action.PUBLISH, Action.UPDATE):
         item["base_price"] = ev.ok[d.goods_id].offer.base_price
-        item["snapshot"] = ad_to_text(rendered[d.goods_id])
+        item["snapshot"] = _snapshot_text(rendered[d.goods_id])
         if d.goods_id in rendered4:
-            item["snapshot4"] = ad_to_text(rendered4[d.goods_id])
+            item["snapshot4"] = _snapshot_text(rendered4[d.goods_id])
     elif d.action is Action.KEEP and d.goods_id in rendered4:
-        item["snapshot4"] = ad_to_text(rendered4[d.goods_id])
+        item["snapshot4"] = _snapshot_text(rendered4[d.goods_id])
     return item
 
 
@@ -191,8 +203,9 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     bound_now = mirror_feed.adopted_maps(conn, acct)[0]
     live_bound = frozenset(c for c, i in bound_now.items()
                            if not (mirror_feed.alias_scheme(conn, acct) and i == mirror_feed.alias_id(acct, c)))   # a plain alias says nothing about being live
+    from . import oth_stock
     ds = decide(ev, published, store.load_suppressed(conn, acct), known_points, settings, today, now=now, already_live=live_bound,
-                removed_before=removed_before)
+                removed_before=removed_before, oth=oth_stock.pieces(conn))
     return published, ev, ds
 
 
@@ -285,6 +298,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
     def no_pack(code):                                                    # no set of four of a 4tochki position in the trial (plan §4з)
         return bool(tochki_prefix) and code.startswith(tochki_prefix)
     model_photos = ModelPhotos(conn, parsed.offers, tochki_prefix)
+    from . import oth_stock
+    on_oth = oth_stock.pieces(conn)                                       # our tires at a point: «Шины в наличии» first (the owner 2026-10-29)
     for d in ds.decisions:
         if d.action not in (Action.PUBLISH, Action.UPDATE, Action.KEEP, Action.HOLD):
             final.append(d)
@@ -327,6 +342,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         offer = parsed.offers.get(d.goods_id)
         # a set of four is not offered for a position that waits for the morning, nor when it is known that fewer than four are left
         no_four = d.reason.startswith("cart_wait:") or (offer is not None and offer.stock < 4) or no_pack(d.goods_id)
+        if d.reason.startswith("oth:"):                                   # held for «На ОТХ»: the set of four stands on our own pieces
+            no_four = on_oth.get(d.goods_id, 0) < 4 or no_pack(d.goods_id)
         twin = None if no_four else (
             store.get_snapshot4(conn, d.goods_id, acct) if settings.pack4 and (offer is None or settings.pack4_for(offer)) else None)
         if twin:
@@ -446,6 +463,10 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             ad.find("Title").text = title
     if title_guard is not None:
         title_guard["held"] = len(renames) if len(renames) > limit else 0
+    for ad, code in owners:                                               # the saved ad (snapshot) is kept without the line: _snapshot_text
+        node = ad.find("Description")
+        if node is not None:
+            node.text = oth_stock.add_line(node.text) if code in on_oth else oth_stock.drop_line(node.text)
     return ads, invalid, final, rendered, rendered4, owners
 
 
