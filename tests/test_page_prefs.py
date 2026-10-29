@@ -46,7 +46,7 @@ def as_user(app, conn, login_, role, point_id=None):
 def test_every_remembered_page_is_a_page_of_the_panel(tmp_path):
     app, _, _ = setup(tmp_path)
     assert set(page_prefs.PAGES) <= set(app.view_functions)
-    assert {e for pages in page_prefs.TABS.values() for e in pages} <= set(app.view_functions)
+    assert {e for group in page_prefs.TABS.values() for pages in group for e in pages} <= set(app.view_functions)
 
 
 def test_the_catalog_filters_survive_a_reload_and_a_walk_to_another_page(tmp_path):
@@ -105,10 +105,10 @@ def test_the_orders_view_and_its_page_are_kept_and_a_point_never_keeps_another_p
 def test_a_script_request_and_a_one_off_address_are_not_touched(tmp_path):
     app, owner, conn = setup(tmp_path)
     owner.get("/catalog?d=13", headers=CAT)
-    r = owner.get("/catalog", headers={"X-Requested-With": "fetch"})
-    assert r.status_code == 200
+    r = owner.get("/catalog", headers=dict(CAT, **{"X-Requested-With": "fetch"}))     # a script: neither restored nor forgotten
+    assert r.status_code == 200 and user_prefs.get(conn, "owner", "f.catalog") == {"d": ["13"]}
     owner.get("/chats?f=unread", headers=on("/chats"))
-    assert owner.get("/chats/12345").status_code != 302 or "f=unread" not in owner.get("/chats/12345").headers.get("Location", "")
+    assert "Location" not in owner.get("/chats/12345").headers                  # one chat opened by its address: never sent elsewhere
     assert user_prefs.get(conn, "owner", "f.chats_page") == {"f": ["unread"]}
 
 
@@ -139,3 +139,37 @@ def test_a_page_without_a_saved_choice_opens_with_its_default(tmp_path, monkeypa
     monkeypatch.setattr(page_prefs, "default", lambda conn, login, endpoint: {"acc": ["7"]} if endpoint == "chats_page" else {})
     r = owner.get("/chats", headers=on("/"))
     assert r.status_code == 302 and r.headers["Location"].endswith("/chats?acc=7")
+
+
+def test_a_page_coming_back_after_its_own_form_post_keeps_the_saved_filters(tmp_path):
+    """POST → redirect to the bare address of the list (a saved rate, an import, a rollback): the browser sends the list page as the Referer,
+    which must not read as «Сбросить» of the page (the review 2026-10-30)."""
+    app, owner, conn = setup(tmp_path)
+    owner.get("/orders/report?from=2026-10-01&to=2026-10-07", headers=on("/orders/report"))
+    saved = {"from": ["2026-10-01"], "to": ["2026-10-07"]}
+    assert user_prefs.get(conn, "owner", "f.orders_report") == saved
+    r = owner.post("/orders/report/rates", data={"csrf": "tok", "what": "labels", "owner_label": "А", "partner_label": "Б"},
+                   headers=on("/orders/report?from=2026-10-01&to=2026-10-07"))
+    assert r.status_code == 302 and r.headers["Location"].endswith("/orders/report")
+    back = owner.get("/orders/report", headers=on("/orders/report?from=2026-10-01&to=2026-10-07"))
+    assert back.status_code == 302 and "from=2026-10-01" in back.headers["Location"]
+    assert user_prefs.get(conn, "owner", "f.orders_report") == saved
+    assert owner.get("/orders/report", headers=on("/orders/report?from=2026-10-01")).status_code == 200      # «Сбросить» of the page still clears
+    assert user_prefs.get(conn, "owner", "f.orders_report") is None
+
+
+def test_the_tab_general_of_a_brand_card_opens_general(tmp_path):
+    app, owner, conn = setup(tmp_path)
+    owner.get("/settings/brands")
+    r = owner.get("/settings", headers=on("/settings/brands/card?supplier=1&brand=IKON%20TYRES"))
+    assert r.status_code == 200
+
+
+def test_a_one_off_view_offers_the_saved_filters_and_its_reset_keeps_them(tmp_path):
+    app, owner, conn = setup(tmp_path)
+    owner.get("/orders?v=list&q=Иван", headers=on("/orders"))
+    html = owner.get("/orders?v=list&s=3", headers=on("/my-point")).get_data(as_text=True)
+    assert "data-filter-on" in html and "/orders?saved=1" in html and "/orders?reset=1" not in html
+    r = owner.get("/orders?saved=1", headers=on("/orders?v=list&s=3"))
+    assert r.status_code == 302 and "q=" in r.headers["Location"]
+    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "q": ["Иван"]}

@@ -139,3 +139,48 @@ def test_the_line_counts_come_from_the_same_review_as_the_page_of_the_draft(tmp_
     assert 'name="rev" value="%s"' % pending["rev"] in draft
     assert service.pending_line({"preview": type("P", (), {"appear": [1, 2], "disappear": [], "price_changes": [1]})()}) == \
         "В фиде: войдёт 2, выйдет 0, цены изменятся у 1."
+
+
+def test_a_second_tab_of_the_form_general_does_not_silently_undo_a_change_waiting_in_the_draft(tmp_path):
+    """Two tabs (or the owner and the partner) on «Общие»: the form sends every field, the older one must not put back what the other changed
+    meanwhile (the review 2026-10-30): it is refused, nothing is lost."""
+    app, client, tok, conn, _ = setup(tmp_path)
+    old_tab = client.get("/settings").get_data(as_text=True)
+    rev = re.search(r'name="draft_rev" value="([0-9a-f]*)"', old_tab).group(1)
+    active = get_active(conn)[1]
+    post(client, "/settings/draft", tok, min_stock="3", draft_rev=rev)              # the other tab
+    assert staging.summary(conn)["changes"] == {"min_stock": 3}
+    r = post(client, "/settings/draft", tok, min_stock=str(active["min_stock"]), portion_limit="77", draft_rev=rev)   # the old tab
+    assert r.headers["Location"].endswith("/settings")
+    assert staging.summary(conn)["changes"] == {"min_stock": 3}
+    assert "изменился" in client.get("/settings").get_data(as_text=True)
+    fresh = re.search(r'name="draft_rev" value="([0-9a-f]*)"', client.get("/settings").get_data(as_text=True)).group(1)
+    post(client, "/settings/draft", tok, min_stock="3", portion_limit="77", draft_rev=fresh)
+    assert staging.summary(conn)["changes"] == {"min_stock": 3, "portion_limit": 77}
+
+
+def test_apply_from_the_bar_asks_the_strong_confirmation_of_a_percent_beyond_the_limit(tmp_path):
+    app, client, tok, conn, _ = setup(tmp_path)
+    post(client, "/settings/pricing", tok, scope="brand", supplier="1", brand="IKON TYRES", winter_small="30", winter_large="30")
+    pending = client.get("/settings/pending").get_json()
+    assert pending["strong"] and 'data-check-strong' in client.get("/settings/brands").get_data(as_text=True)
+    r = post(client, "/draft/%d/confirm" % pending["draft"], tok, rev=pending["rev"], next="/settings/brands")
+    assert r.headers["Location"].endswith("/draft/%d" % pending["draft"]) and staging.summary(conn)["draft_id"] == pending["draft"]
+    r = post(client, "/draft/%d/confirm" % pending["draft"], tok, rev=pending["rev"], strong="on", next="/settings/brands")
+    assert r.headers["Location"].endswith("/settings/brands") and staging.summary(conn)["draft_id"] is None
+
+
+def test_the_bar_counts_one_change_of_the_pack4_rules_once(tmp_path):
+    app, client, tok, conn, _ = setup(tmp_path)
+    post(client, "/settings/draft", tok, pack4_form="1", p4_add="1", p4_brand="*", p4_season="*", p4_d="16")
+    assert staging.summary(conn)["count"] == 1
+
+
+def test_a_pack4_rule_added_and_taken_back_over_the_old_bare_switch_leaves_nothing_in_the_draft(tmp_path):
+    app, client, tok, conn, _ = setup(tmp_path)
+    confirm_draft(conn, create_draft(conn, {"pack4": True}, T), T, "owner")          # the old form: the switch only, no rules
+    assert "pack4_rules" not in get_active(conn)[1]
+    post(client, "/settings/draft", tok, pack4_form="1", p4_add="1", p4_brand="*", p4_season="*", p4_d="16")
+    assert staging.summary(conn)["count"] == 1
+    post(client, "/settings/draft", tok, pack4_form="1", p4_del="*|*|16")
+    assert staging.summary(conn)["draft_id"] is None

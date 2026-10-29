@@ -75,6 +75,11 @@ def post(client, url, tok, **data):
         found = re.search(r'name="rev" value="([0-9a-f]+)"', page)
         if found:
             data["rev"] = found.group(1)
+    if url == "/settings/draft" and "draft_rev" not in data:                    # the form «Общие» is sent from the page as it was opened
+        import re
+        found = re.search(r'name="draft_rev" value="([0-9a-f]*)"', client.get("/settings").get_data(as_text=True))
+        if found:
+            data["draft_rev"] = found.group(1)
     if url == "/economics/sales/add" and "sale_token" not in data:               # a manual sale is one per opened form: open it as a person would
         import re
         page = client.get("/economics/sales/new?goods_id=%s" % data.get("goods_id", "")).get_data(as_text=True)

@@ -98,7 +98,7 @@ def _locate(conn, settings, parsed, goods_id: str, base):
             return ParseResult(offers={goods_id: offer}), ""
     offer = catalog_archive.gone_offer(conn, goods_id)
     if offer is not None:
-        return ParseResult(offers={goods_id: offer}), (catalog_archive.item_info(conn, goods_id) or {}).get("gone_since") or "?"
+        return ParseResult(offers={goods_id: offer}), (catalog_archive.item_info(conn, goods_id) or {}).get("gone_since") or ""
     return None
 
 
@@ -207,7 +207,9 @@ def register(app) -> None:
         """The position of the window «В лист ожидания»: today's unload (4tochki shown too), else a position the supplier took away."""
         _conn, _settings, parsed, _ref = context(app)
         parsed, _view_only = tochki_feed.catalog_view(conn, parsed, app.config["UNLOAD_PATH"])
-        return parsed.offers.get(goods_id) or catalog_archive.gone_offer(conn, goods_id)
+        held = next((o for o, _ in _held_offers(conn, _settings, app.config["UNLOAD_PATH"]) if o.goods_id == goods_id), None) \
+            if goods_id not in parsed.offers else None                # an old second unload: its card has the button too
+        return parsed.offers.get(goods_id) or held or catalog_archive.gone_offer(conn, goods_id)
 
     def _wait_window(conn, goods_id, values: dict, error: str, back: str, offer=None):
         offer = offer or (_wait_offer(conn, goods_id) if goods_id else None)

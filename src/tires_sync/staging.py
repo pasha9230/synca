@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import re
@@ -53,7 +54,20 @@ def _count(raw: dict, changes: dict) -> int:
             total += len(set(old) ^ set(new))
         else:
             total += len([k for k in set(old) | set(new) if old.get(k) != new.get(k)])
-    return total + len([k for k in changes if k not in TRACKED])
+    others = [k for k in changes if k not in TRACKED]
+    return total + len(others) - ("pack4" in others and "pack4_rules" in others)     # the switch follows the rules: one change
+
+
+def count_of(raw: dict, changes: dict) -> int:
+    """How many changes a draft holds over the active settings (the number of the bar «Не применено»)."""
+    return _count(raw, changes)
+
+
+def _active_value(raw: dict, key: str):
+    """The active value a pending one is compared with; the old bare switch «за 4 шт.» means the rule «every position»."""
+    if key == "pack4_rules" and "pack4_rules" not in raw:
+        return ["*|*|*"] if raw.get("pack4") else []
+    return raw.get(key)
 
 
 def summary(conn) -> dict:
@@ -65,7 +79,16 @@ def summary(conn) -> dict:
             "stale": draft["base"] != active_id, "changes": draft["changes"]}
 
 
-def _mutate(conn, fn: Callable[[dict], None], now: str) -> None:
+class DraftChangedError(ValueError):
+    """The working draft is not the one the form was made from (another tab, the partner): nothing written, the page is to be reloaded."""
+
+
+def rev(changes: dict) -> str:
+    """The mark of what a draft holds: «Применить» applies, and the form «Общие» writes over, only the changes the person looked at."""
+    return hashlib.sha1(json.dumps(changes, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def _mutate(conn, fn: Callable[[dict], None], now: str, expect: Optional[str] = None) -> None:
     conn.commit()
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -74,6 +97,9 @@ def _mutate(conn, fn: Callable[[dict], None], now: str) -> None:
         if draft is not None and draft["base"] != active_id:
             raise StaleDraftError("Рабочий черновик устарел: настройки изменились. Отмените его и повторите.")
         pending = draft["changes"] if draft else {}
+        if expect is not None and rev(pending) != expect:
+            raise DraftChangedError("Черновик изменился, пока форма была открыта (другая вкладка или другой человек): "
+                                    "ничего не записано, обновите страницу и повторите.")
         effective = {k: copy.deepcopy(_norm({**raw, **pending}, k)) for k in TRACKED}
         effective.update({k: copy.deepcopy(v) for k, v in pending.items() if k not in TRACKED})    # the other settings piled up: kept
         fn(effective)
@@ -82,7 +108,7 @@ def _mutate(conn, fn: Callable[[dict], None], now: str) -> None:
             if _norm(effective, key) != _norm(raw, key):
                 diff[key] = sorted([b, s] for b, s in effective["enabled"]) if key == "enabled" else effective[key]
         for key, value in effective.items():
-            if key not in TRACKED and value != raw.get(key):
+            if key not in TRACKED and value != _active_value(raw, key):
                 diff[key] = value
         if diff:
             settings_from_dict({**raw, **diff}, enforce_pct_limit=False)
@@ -103,9 +129,10 @@ def _mutate(conn, fn: Callable[[dict], None], now: str) -> None:
         raise
 
 
-def set_fields(conn, changes: dict, now: str) -> None:
+def set_fields(conn, changes: dict, now: str, expect: Optional[str] = None) -> None:
     """Settings of the page «Настройки» (the threshold, «за 4 шт.», the points...) into the working draft, next to every other change piled
-    up there (a value back to the active one leaves the draft). Only the keys a draft may change (settings_store._check_keys)."""
+    up there (a value back to the active one leaves the draft). Only the keys a draft may change (settings_store._check_keys). `expect`: the
+    rev of the draft the form was made from; the form sends every field, so over a changed draft it would put back what another changed."""
     from .settings_store import _check_keys
     _check_keys(changes)
     if any(key in TRACKED for key in changes):
@@ -114,7 +141,7 @@ def set_fields(conn, changes: dict, now: str) -> None:
     def fn(eff):
         eff.update(copy.deepcopy(changes))
 
-    _mutate(conn, fn, now)
+    _mutate(conn, fn, now, expect)
 
 
 def effective_raw(conn) -> dict:

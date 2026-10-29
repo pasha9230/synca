@@ -278,6 +278,7 @@ def create_app(config: dict) -> Flask:
     app.before_request(check_access)                                   # after the CSRF check: one right per page (common.SECTION_OF)
     from . import page_prefs
     app.before_request(page_prefs.remember)                            # after the right: the person's own filters of a list page
+    app.after_request(page_prefs.after_post)
 
     @app.after_request
     def security_headers(response):

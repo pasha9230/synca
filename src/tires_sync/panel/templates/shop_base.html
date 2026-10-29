@@ -18,7 +18,7 @@
 </header>
 <main class="main"><div class="page">
 <div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' or kind.startswith('field:') else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' or kind.startswith('field:') %} role="alert"{% endif %}><div class="flash-text">{{ message }}</div></div>{% endfor %}</div>
-{% set pf = page_filter() if page_filter is defined else {} %}{% if pf %}<div class="flash flash--info" data-filter-on><div class="flash-text">Фильтр включён: {{ pf.count }} · <a href="{{ pf.reset }}">Сбросить фильтры</a> <span class="muted xs">(фильтры запоминаются в вашем аккаунте)</span></div></div>{% endif %}
+{% set pf = page_filter() if page_filter is defined else {} %}{% if pf %}<div class="flash flash--info" data-filter-on><div class="flash-text">Фильтр включён: {{ pf.count }} · {% if pf.mine %}<a href="{{ pf.mine }}">Мои фильтры</a> <span class="muted xs">(открыто по ссылке; ваши сохранённые фильтры не тронуты)</span>{% else %}<a href="{{ pf.reset }}">Сбросить фильтры</a> <span class="muted xs">(фильтры запоминаются в вашем аккаунте)</span>{% endif %}</div></div>{% endif %}
 {% block content %}{% endblock %}
 </div></main>
 {% else %}

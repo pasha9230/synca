@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -49,7 +50,7 @@ def test_a_position_the_supplier_took_away_has_a_card_with_its_last_prices_and_t
     html = r.get_data(as_text=True)
     assert "data-out-of-stock" in html and "Нет в наличии</b>: нет у поставщика с 15.10.2026." in html
     assert "Последний раз в наличии" in html and "10.10.2026 10:00:00" in html
-    assert "Последняя цена продажи (за 1 шт.)" in html
+    assert "Цена продажи по последней закупке (за 1 шт.)" in html
     assert "Последняя закупка (за 1 шт.)" in html and "3 100 ₽" in html
     assert "Своя цена по аккаунтам" not in html                      # an own price is for a position of the feed only
     view = viewer(app, conn).get("/catalog/item/900").get_data(as_text=True)
@@ -70,6 +71,7 @@ def test_a_position_in_the_unload_with_stock_0_says_so_and_its_last_in_stock_day
     app, owner, conn = setup(tmp_path)
     html = owner.get("/catalog/item/2").get_data(as_text=True)
     assert "data-out-of-stock" in html and "Последний раз в наличии" in html
+    assert re.search(r"Последний раз в наличии</dt><dd><span class=\"muted\">—</span>", html)       # unknown: the archive saw it only at 0
     assert "Остаток" in html and "нет в наличии" in html
     live = owner.get("/catalog/item/1").get_data(as_text=True)
     assert "data-out-of-stock" not in live and "12 шт." in live and "Цена продажи (за 1 шт.)" in live

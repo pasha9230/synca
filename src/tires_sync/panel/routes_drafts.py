@@ -210,7 +210,10 @@ def register(app) -> None:
         try:
             changes = service.changes_from_settings_form(staging.effective_raw(conn), request.form)
             if changes:
-                staging.set_fields(conn, changes, now_iso())
+                staging.set_fields(conn, changes, now_iso(), expect=request.form.get("draft_rev", ""))
+        except staging.DraftChangedError as err:
+            flash(str(err))
+            return redirect("/settings")
         except (ValueError, StaleDraftError) as err:
             flash("Ошибка в форме: %s" % err)
             return redirect("/settings")
@@ -367,10 +370,11 @@ def register(app) -> None:
         conn = get_conn()
         staged = staging.summary(conn)
         if staged["draft_id"] is None or staged["stale"]:
-            return jsonify(open=False)
+            return jsonify(open=False, count=0)
         _, settings, parsed, ref = context(app)
         review = service.draft_review(conn, staged["draft_id"], parsed, ref, now().date(), now() + timedelta(hours=3))
         return jsonify(open=True, draft=staged["draft_id"], rev=review["rev"], line=service.pending_line(review),
+                       count=staging.count_of(get_active(conn)[1], review["draft"]["changes"]),
                        guard={"over": review["guard"]["over"], "gone": review["guard"]["gone"], "limit": review["guard"]["limit"]},
                        strong=bool(review["needs_strong"]))
 

@@ -677,7 +677,7 @@ def catalog_item_view(conn, settings, parsed, ref, goods_id, today, money: bool,
         fields = [{"label": "Код", "value": p["code"], "mono": True}, {"label": "Id поставщика", "value": goods_id, "mono": True},
                   {"label": "Остаток", "value": OUT_OF_STOCK_TEXT},
                   {"label": "Последний раз в наличии", "value": last, "fmt": "dt"},
-                  {"label": "Последняя цена продажи (за 1 шт.)", "value": p["price"], "fmt": "money"}]
+                  {"label": "Цена продажи по последней закупке (за 1 шт.)", "value": p["price"], "fmt": "money"}]
         if money:
             fields.append({"label": "Последняя закупка (за 1 шт.)", "value": offer.base_price if offer.base_price > 0 else None, "fmt": "money"})
     else:
@@ -1243,7 +1243,8 @@ def rollback_effect(conn, version_id: int, parsed, ref, today: date, now=None) -
 
 def draft_rev(changes: dict) -> str:
     """The mark of what a draft holds: «Применить» applies the changes the person looked at, not ones added since (another tab, a partner)."""
-    return hashlib.sha1(json.dumps(changes, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    from .. import staging
+    return staging.rev(changes)
 
 
 def pending_line(review: dict) -> str:
