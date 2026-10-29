@@ -2,4 +2,5 @@
 <a href="/history"{% if tab == "log" %} class="is-active" aria-current="page"{% endif %}>Журнал и версии</a>
 <a href="/history/ads"{% if tab == "ads" %} class="is-active" aria-current="page"{% endif %}>События позиций</a>
 <a href="/history/catalog"{% if tab == "catalog" %} class="is-active" aria-current="page"{% endif %}>Каталог по часам</a>
+{% if can("users") %}<a href="/history/points"{% if tab == "points" %} class="is-active" aria-current="page"{% endif %}>Точки</a>{% endif %}
 </nav>

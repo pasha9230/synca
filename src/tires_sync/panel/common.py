@@ -276,7 +276,7 @@ for _section, _endpoints in {
               "orders_templates_page", "orders_template_delete", "orders_template_samples", "orders_template_save",
               "orders_bot_answer_delete", "orders_bot_answer_toggle", "orders_bot_answer_add", "orders_report_rates"),
     "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
-              "points_history"),                       # «История точки»: the owner and the partner only (users: nobody else looks)
+              "points_history", "history_points"),     # «История → Точки» (and its old address): the owner and the partner only (users: nobody else looks)
     "self": ("account_password_page", "account_password", "orders_list_columns",     # «Колонки» of the list of orders: one's own setting
              "search", "search_json"),                  # the search of the top bar: every role; search.scope_for narrows what it finds
     "mypoint": ("mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),

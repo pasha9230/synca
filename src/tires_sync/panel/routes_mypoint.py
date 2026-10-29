@@ -451,7 +451,14 @@ def register(app) -> None:
     @app.route("/points/history")
     @login_required
     def points_history():
-        """«История точек»: what the points did, with the time and the author (the owner and the partner: section «users»)."""
+        """The old address of «История точек»: for good to the tab «Точки» of «История», with the point chosen."""
+        wanted = str(request.args.get("p") or "")
+        return redirect("/history/points" + ("?p=" + wanted if wanted.isascii() and wanted.isdigit() else ""), code=301)
+
+    @app.route("/history/points")
+    @login_required
+    def history_points():
+        """«История → Точки»: what the points did, with the time and the author (the owner and the partner: section «users»)."""
         conn = get_conn()
         known = points.list_points(conn)
         wanted = str(request.args.get("p") or "")

@@ -234,28 +234,42 @@ def test_the_history_shows_the_points_actions_to_the_owner_and_the_partner_only(
     point_log.record(conn, NOW, "delta", other, "issued", None, "чужая точка")
     rows = point_log.history(conn, pid)
     assert [(r["kind"], r["order_id"], r["author"]) for r in rows] == [("arrived", card, "gamma")]
-    page = _text(client.get("/points/history?p=%d" % pid))
+    page = _text(client.get("/history/points?p=%d" % pid))
     assert "принял заказ (приехал)" in page and "gamma" in page and "чужая точка" not in page and 'href="/orders/%d"' % card in page
-    assert "чужая точка" in _text(client.get("/points/history"))
+    assert "чужая точка" in _text(client.get("/history/points"))
     partner, _ = person(app, "partner")
-    assert partner.get("/points/history").status_code == 200
+    assert partner.get("/history/points").status_code == 200
     for role in ("chats", "viewer"):
-        assert person(app, role)[0].get("/points/history").status_code == 403, role
-    assert mine.get("/points/history").status_code == 403
-    assert 'href="/points/history"' in _text(client.get("/my-point"))
-
+        who = person(app, role)[0]
+        assert who.get("/history/points").status_code == 403 and who.get("/points/history").status_code == 403, role
+    assert mine.get("/history/points").status_code == 403 and mine.get("/points/history").status_code == 403
 
 
 def test_the_menu_has_the_workplace_for_a_point_only_and_the_history_for_the_owner_and_the_partner(tmp_path):
-    """The owner 2026-10-29: «Рабочее место» in the menu is the point's; the owner and the partner keep «История точек» and /my-point."""
+    """The owner 2026-10-29: «Рабочее место» in the menu is the point's; the owner and the partner open /my-point by its address and
+    «История точек» is the tab «Точки» of «История» (no longer in the menu)."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     partner, _ = person(app, "partner")
     for who in (client, partner):
         page = _text(who.get("/orders"))
-        assert 'href="/my-point"' not in page and "Рабочее место</a>" not in page and 'href="/points/history"' in page
+        assert 'href="/my-point"' not in page and "Рабочее место</a>" not in page and "История точек" not in page
+        assert 'href="/points/history"' not in page and 'href="/history/points"' not in page
         assert who.get("/my-point").status_code == 200
+        tabs = _text(who.get("/history/points"))
+        assert '<a href="/history/points" class="is-active" aria-current="page">Точки</a>' in tabs and 'href="/history/ads"' in tabs
     page = _text(manager(app, conn, pid).get("/orders"))
     assert 'href="/my-point"' in page and "Рабочее место</a>" in page and 'href="/points/history"' not in page and "История точек" not in page
+    chats, _ = person(app, "chats")                                       # «История» of the catalog without the right of «users»: no tab
+    assert chats.get("/history/ads").status_code == 200 and 'href="/history/points"' not in _text(chats.get("/history/ads"))
+    assert 'href="/history/points"' in _text(client.get("/history/ads"))
+
+
+def test_the_old_address_of_the_history_of_the_points_leads_to_the_tab_for_good(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    r = client.get("/points/history?p=%d" % pid)
+    assert r.status_code == 301 and r.headers["Location"].endswith("/history/points?p=%d" % pid)
+    assert client.get("/points/history").headers["Location"].endswith("/history/points")
+    assert client.get("/points/history?p=//evil.example").headers["Location"].endswith("/history/points")
 
 def test_a_move_on_the_board_by_the_point_is_in_the_history(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
