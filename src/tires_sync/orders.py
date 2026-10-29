@@ -116,7 +116,9 @@ def _merge_refused_stage(conn, now: str) -> None:
         # a move into «Отказ/невыкуп» went without a reason; into «cancel» it needs one: such a rule comes switched off (the owner looks at it)
         conn.execute("UPDATE order_rule SET arg = ?, enabled = 0 WHERE action = 'move' AND arg = ?", (str(new), str(old)))
         conn.execute("UPDATE order_rule SET stage_id = ?, enabled = 0 WHERE stage_id = ?", (new, old))
-        conn.execute("UPDATE order_command SET to_stage_id = ? WHERE to_stage_id = ?", (new, old))       # order_manager.apply gives the reason
+        for (command,) in conn.execute("SELECT id FROM order_command WHERE to_stage_id = ? AND stage_id != ?", (old, new)).fetchall():
+            conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, '1')", (MERGED_COMMAND_KEY % command,))   # order_manager: «не выкупил»
+        conn.execute("UPDATE order_command SET to_stage_id = ? WHERE to_stage_id = ?", (new, old))
         conn.execute("DELETE FROM order_command WHERE stage_id = ? AND word IN (SELECT word FROM order_command WHERE stage_id = ?)", (old, new))
         conn.execute("UPDATE order_command SET stage_id = ? WHERE stage_id = ?", (new, old))
         conn.execute("DELETE FROM order_command WHERE stage_id = ? AND to_stage_id = ?", (new, new))     # «cancel → refused»: a move to itself
@@ -133,6 +135,11 @@ def _merge_refused_stage(conn, now: str) -> None:
 
 
 MERGED_KEY = "stage_merged_%d"                  # app_state: the stage an old stage was merged into (trash.restore)
+MERGED_COMMAND_KEY = "command_was_refused_%d"     # app_state: a word of the points that led to «Отказ/невыкуп» (its move gives «не выкупил»)
+
+
+def merged_command(conn, command_id) -> bool:
+    return conn.execute("SELECT 1 FROM app_state WHERE key = ?", (MERGED_COMMAND_KEY % int(command_id),)).fetchone() is not None
 
 
 def merged_into(conn, stage_id) -> Optional[int]:

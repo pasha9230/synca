@@ -148,3 +148,36 @@ def test_one_mark_for_the_send_by_itself_by_a_press_and_after_binding(env):
     with pytest.raises((orders.OrderError, chats.ChatError)):
         engine.send_task(conn, task["id"], task["body"], deliver_by(conn, sender), LATER, "owner")   # a press in the card
     assert sender.sent == []
+
+
+
+# ---- review round 2 (2026-10-30, chats-orders) -----------------------------------------------------------------------------------------
+
+def bound_after_a_402(env):
+    conn, chat_row, card = env
+    mgr.tell_client_arrived(conn, card, None, NOW, "точка")
+    chat_deals.link_chat(conn, chat_row, card, LATER, "owner")
+
+    def refused(row, text, token):
+        conn.execute("INSERT OR REPLACE INTO chat_send_log (token, chat_row, at, author, status, message_id) VALUES (?,?,?,?, 'retry', '')",
+                     (token, row, LATER, "система"))
+        conn.commit()
+        raise chats.ChatSendRetry("Авито отказал (402), система повторит сама.")
+    mgr.arrived_after_link(conn, card, refused, LATER, "owner")
+    [task] = waiting(conn, card)
+    return conn, chat_row, card, task
+
+
+def test_the_sync_delivering_after_a_402_closes_the_waiting_task(env):
+    """R1: the minute's sync sent it again: the task of the card is done, nobody writes it by hand."""
+    conn, chat_row, card, task = bound_after_a_402(env)
+    assert task["status"] == "pending"
+    chats._close_task(conn, engine.task_token(task), task["body"], LATER, "повторно после 402")
+    assert engine.get_task(conn, task["id"])["status"] == "done"
+
+
+def test_a_skipped_task_stops_the_sync_sending_it_again(env):
+    """R2: «Пропустить» after a 402: the sync does not send «можно забирать» again."""
+    conn, chat_row, card, task = bound_after_a_402(env)
+    engine.skip_task(conn, task["id"], LATER, "owner")
+    assert chats._stopped(conn, chats.get_chat(conn, chat_row), engine.task_token(task)) == "задача пропущена"

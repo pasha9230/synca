@@ -140,14 +140,24 @@ def test_a_rule_moving_into_refused_comes_switched_off_and_a_loop_is_gone(tmp_pa
     assert conn.execute("SELECT COUNT(*) FROM order_command WHERE stage_id = to_stage_id").fetchone()[0] == 0
 
 
-def test_a_command_of_the_point_into_the_merged_stage_gives_the_reason(tmp_path):
+def test_a_command_of_the_point_into_the_merged_stage_gives_a_reason(tmp_path):
+    """A word of the point into «Отмена / невыкуп» gives a reason: «не выкупил» only for a word that led to «Отказ/невыкуп» before the merge
+    (it lets «возврат отдал» through), a neutral one for the others (the review, round 2)."""
     from tires_sync import order_manager as mgr
     conn = old_db(tmp_path)
-    card = put(conn, "at_point")
+    conn.execute("INSERT INTO order_command (stage_id, word, to_stage_id) VALUES (?, 'не забрал', ?)", (sid(conn, "at_point"), sid(conn, "refused")))
+    conn.execute("INSERT INTO order_command (stage_id, word, to_stage_id) VALUES (?, 'отменили', ?)", (sid(conn, "new"), sid(conn, "cancel")))
+    conn.commit()
+    plain, was_refused = put(conn, "at_point"), put(conn, "at_point")
     orders.ensure_pipeline(conn, LATER)
-    outcome, _answer = mgr.apply(conn, orders.get_card(conn, card), sid(conn, "cancel"), "менеджер Юнона", LATER, None)
-    got = orders.get_card(conn, card)
-    assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == "не выкупил (команда точки)", outcome
+    ids = dict(conn.execute("SELECT word, id FROM order_command").fetchall())
+    assert orders.merged_command(conn, ids["не забрал"]) and not orders.merged_command(conn, ids["отменили"])
+    outcome, _answer = mgr.apply(conn, orders.get_card(conn, plain), sid(conn, "cancel"), "менеджер Юнона", LATER, None)
+    got = orders.get_card(conn, plain)
+    assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == "команда точки", outcome
+    assert not mgr._return_from(got)
+    mgr.apply(conn, orders.get_card(conn, was_refused), sid(conn, "cancel"), "менеджер Юнона", LATER, None, orders.NOT_BOUGHT + " (команда точки)")
+    assert mgr._return_from(orders.get_card(conn, was_refused))
 
 
 def test_a_deleted_order_of_refused_comes_back_to_the_merged_stage(tmp_path):

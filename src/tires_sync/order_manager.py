@@ -339,7 +339,8 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return dispute(point, "слово «%s» не подходит к этапу «%s»" % (word, card["stage"]["name"]),
                        CANCELLED % label(card) if code == "cancel" else
                        "Для заказа №%s на этапе «%s» такая команда не нужна; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
-    return finish(*apply(conn, card, command["to_stage_id"], "менеджер %s" % point["name"], now, deliver))
+    return finish(*apply(conn, card, command["to_stage_id"], "менеджер %s" % point["name"], now, deliver,
+                         orders.NOT_BOUGHT + " (команда точки)" if command.get("id") and orders.merged_command(conn, command["id"]) else ""))
 
 
 # ---- «выдал» without a number and not a reply (the owner 2026-10-26): the point's one order is asked about, several are listed; nothing
@@ -484,13 +485,13 @@ def _stage_id(conn, code) -> Optional[int]:
     return next((s["id"] for s in orders.list_stages(conn) if s["code"] == code), None)
 
 
-def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional[Deliver]) -> Tuple[str, str]:
+def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional[Deliver], reason: str = "") -> Tuple[str, str]:
     """Move the order; on the arrival at the point the client is told at once. (outcome for the log, answer for the point)."""
     try:
         changes = None
         if orders.get_stage(conn, stage_id)["code"] == "cancel" and not str(card.get("cancel_reason") or "").strip():
-            changes = {"cancel_reason": orders.NOT_BOUGHT + " (команда точки)"}      # a word of the point into «Отмена / невыкуп» (it was
-        moved = orders.move_card(conn, card["id"], stage_id, now, who, changes)       # «Отказ/невыкуп» before the merge, 2026-10-29)
+            changes = {"cancel_reason": reason or "команда точки"}      # a word of the point into «Отмена / невыкуп» (the reason «не выкупил» only
+        moved = orders.move_card(conn, card["id"], stage_id, now, who, changes)   # for a word that led to «Отказ/невыкуп» before the merge)
     except OrderError as err:
         return "не выполнено: %s" % err, "Не получилось: %s" % err
     stage = orders.get_stage(conn, stage_id)

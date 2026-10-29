@@ -1206,6 +1206,11 @@ def _stopped(conn, chat: dict, token: str) -> str:
     else:
         own = re.match(r"(?:reserve|arrived)-(\d+)-", token)
         card_id = int(own.group(1)) if own else card_id
+        if token.startswith("arrived-"):                              # «можно забирать» that waited in the card (order_engine.task_token)
+            from . import order_engine
+            task = order_engine.task_of_token(conn, token)
+            if task is not None and task["status"] in ("skipped", "done"):
+                return "задача пропущена" if task["status"] == "skipped" else "задача уже закрыта"
     if card_id is None:
         return ""
     stage = conn.execute("SELECT s.kind, s.name, c.stage_id, c.entered_at FROM order_card c LEFT JOIN order_stage s ON s.id = c.stage_id WHERE c.id = ?",
@@ -1232,9 +1237,9 @@ def _halt(conn, chat: dict, row: dict, status: str, now: str, why: str, head: st
 
 
 def _close_task(conn, token: str, text: str, now: str, how: str) -> None:
-    """The task of a `task-…` mark is done once the sync delivered its message or found it in the chat: it is not left «ждёт». A failure here
+    """The task of a `task-…` mark (or the waiting «можно забирать» of an `arrived-…` one) is done once the sync delivered its message or found it in the chat: it is not left «ждёт». A failure here
     never touches the send."""
-    if not str(token or "").startswith("task-"):
+    if not str(token or "").startswith(("task-", "arrived-")):         # «arrived-…»: the waiting «можно забирать» of the card, if any
         return
     try:
         from . import order_engine
