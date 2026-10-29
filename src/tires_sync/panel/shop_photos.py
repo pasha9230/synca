@@ -1,7 +1,7 @@
 """The photos of the client's catalog through our server (the owner 2026-10-29, В6): the client sees /shop/photo/<our opaque name>, never
-the supplier's address, its host, a goods id or a code. Our own photo (an approved three-quarter frame of a set sent to the feed) comes
-first; else the supplier's photo: the copy /img keeps (photo_cache) or a new one (share_photos.fetch: https only, public hosts only, no
-redirects, at most 2 MB, only JPEG/PNG/WebP, a time limit). Every picture is drawn anew as a small JPEG (MAX_SIDE) without any metadata
+the supplier's address, its host, a goods id or a code. Only our own photo (an approved three-quarter frame of a set sent to the feed);
+a position without one shows a placeholder (the owner 2026-10-29: the supplier's photos carry its watermarks, so they never reach the
+client and the supplier is never asked). Every picture is drawn anew as a small JPEG (MAX_SIDE) without any metadata
 (EXIF/XMP/IPTC of the supplier or of a phone never reach the client) into its own folder `<img>/shop`: one file per position at most, so
 the folder is bounded by the catalog (about 50-150 KB a file). The pictures are made in the background, so that a page of 50 positions
 never holds the panel's few workers; the row gets its photo link once its picture is made."""
@@ -72,19 +72,14 @@ class Photos:
             " AND f.status = 'approved' JOIN photo p ON p.id = f.photo_id WHERE s.in_feed = 1") if SHA.match(sha or "") and ext in KINDS}
 
     def _source(self, offer) -> Optional[Tuple[str, str, object]]:
-        """(the name of the made picture, "file" or "url", the source): ours first, else the supplier's; None without a photo."""
+        """(the name of the made picture, "file", our photo), or None: only our own photos reach the client (the owner 2026-10-29: the
+        supplier's carry its watermarks, the client must not know the supplier). A copy of a supplier's photo made before is never served."""
         key = photo_library.set_key_for(offer)
         if key is not None:
             own = self.own.get(self.aliases.get(key.text(), key.text()))
             if own is not None and own[1].is_file():
                 return "own-" + own[0], "file", own[1]
-        code = offer.goods_id or ""
-        if not photo_cache.CODE.match(code) or code.startswith("."):
-            return None
-        kept = photo_cache.cached(self.cache, code)
-        if kept is not None:
-            return code, "file", kept
-        return (code, "url", offer.image) if offer.image else None
+        return None
 
     def path(self, offer) -> Optional[Path]:
         """The made picture of the position, or None."""
