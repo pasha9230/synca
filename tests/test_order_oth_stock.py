@@ -1,5 +1,5 @@
 """«На ОТХ» (the owner 2026-10-23): the client of a refused order is unlinked, the goods are our stock (the page «На ОТХ», a mark in the
-catalog, «Вернуть поставщику» as a mark of ours), the feed is not touched."""
+catalog, «Вернуть поставщику» as a mark of ours); the feed: tests/test_oth_feed.py."""
 from __future__ import annotations
 
 import re
@@ -237,7 +237,8 @@ def test_the_catalog_marks_the_positions_on_oth(tmp_path):
 REF = parse_reference('<Shiny>\n<make name="Ikon Tyres">\n<model name="Test Model"/>\n</make>\n</Shiny>')
 
 
-def test_goods_on_oth_change_nothing_in_the_feed(tmp_path):
+def test_goods_on_oth_change_only_the_first_line_of_their_ad_in_the_feed(tmp_path):
+    # the owner 2026-10-29: the ad of a position on «На ОТХ» starts with «Шины в наличии на <точка>» and counts our pieces too (test_oth_feed.py)
     from datetime import date
     feeds = []
     for name, with_oth in (("plain", False), ("oth", True)):
@@ -249,7 +250,9 @@ def test_goods_on_oth_change_nothing_in_the_feed(tmp_path):
             assert order_oth.goods_on_oth(conn) == {"1": 4}
         run_cycle(catalog_xml(*ROWS), make_settings(), REF, conn, date(2026, 10, 17), out_dir=folder)
         feeds.append((folder / "avito_feed.xml").read_text(encoding="utf-8"))
-    assert "<Id>1</Id>" in feeds[0] and feeds[0] == feeds[1]
+    assert "<Id>1</Id>" in feeds[0] and feeds[0].count("<Description>") == 2
+    marked = feeds[0].replace("<Description>🔥 IKON 205/55/16", "<Description>Шины в наличии на Бета\n🔥 IKON 205/55/16", 1)
+    assert feeds[1] == marked.replace("В наличии: 12 шт.", "В наличии: 16 шт.", 1) != feeds[0]      # 4 of ours on OTH and 12 of the supplier
 
 
 def test_a_closed_stage_set_by_mistake_then_an_open_one_links_the_client_again(tmp_path):

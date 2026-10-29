@@ -492,6 +492,7 @@ def _migrate(conn) -> None:
     _rebuild_with_account(conn, "suppressed", "goods_id")
     _add_column(conn, "published_state", "snapshot4", "TEXT")
     _add_column(conn, "avito_ad", "first_seen", "TEXT")
+    _add_column(conn, "retired_ad", "snapshot", "TEXT")          # the last ad, from 2026-10-29: a position that goes to «На ОТХ» comes back on it
     if conn.execute("SELECT 1 FROM avito_ad WHERE first_seen IS NULL LIMIT 1").fetchone():          # an UPDATE that changes nothing still takes the write lock
         conn.execute("UPDATE avito_ad SET first_seen = seen_at WHERE first_seen IS NULL")
         conn.commit()
@@ -702,8 +703,14 @@ def retire_ad(conn, account_id: int, goods_id: str, snapshot, at: str, ad_id: Op
         return
     if key is None or not ad_id:
         return
-    conn.execute("INSERT OR REPLACE INTO retired_ad (account_id, goods_id, ad_id, identity, removed_at) VALUES (?,?,?,?,?)",
-                 (account_id, goods_id, ad_id, json.dumps(list(key), ensure_ascii=False), at))
+    conn.execute("INSERT OR REPLACE INTO retired_ad (account_id, goods_id, ad_id, identity, removed_at, snapshot) VALUES (?,?,?,?,?,?)",
+                 (account_id, goods_id, ad_id, json.dumps(list(key), ensure_ascii=False), at, snapshot))
+
+
+def retired_ad_of(conn, account_id: int, goods_id: str):
+    """(Id, the last ad) of a position taken off this account's feed, or None: none, or taken off before the ads were kept (2026-10-29)."""
+    row = conn.execute("SELECT ad_id, snapshot FROM retired_ad WHERE account_id = ? AND goods_id = ?", (account_id, goods_id)).fetchone()
+    return (row[0], row[1]) if row and row[1] else None
 
 
 def load_retired(conn, account_id: int, today) -> list:
