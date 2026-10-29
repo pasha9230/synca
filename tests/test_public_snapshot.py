@@ -148,9 +148,16 @@ def test_check_finds_private_and_forbidden_files(tmp_path):
 
 
 def test_strict_needs_deny_file(tmp_path):
+    """Without --deny the script takes private/public-snapshot-deny.txt next to itself when it is there (the owner's Mac has it): a copy of
+    the script in a folder without that file is what «no deny file» means, wherever the test runs."""
     out, _ = build(tmp_path, PUBLIC)
-    assert check(out).returncode == 0
-    r = check(out, None, "--strict")
+    alone = tmp_path / "alone" / "scripts" / SCRIPT.name
+    alone.parent.mkdir(parents=True)
+    alone.write_bytes(SCRIPT.read_bytes())
+    assert not (tmp_path / "alone" / "private" / "public-snapshot-deny.txt").exists()
+    bare = lambda *args: subprocess.run([sys.executable, str(alone), "--check", str(out), "--no-gitleaks", *args], capture_output=True, text=True)
+    assert bare().returncode == 0
+    r = bare("--strict")
     assert r.returncode == 1 and "--deny" in r.stderr
 
 
