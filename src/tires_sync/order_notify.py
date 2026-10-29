@@ -61,7 +61,7 @@ def set_owner_login(conn, login, now: str, author: str) -> None:
 
 
 def _panel_logins(conn, owner_login: str) -> set:
-    return {owner_login} | {u["login"] for u in users.list_users(conn)}
+    return {owner_login} | {u["login"] for u in users.list_users(conn) if u["role"] != "client"}      # a client is not staff
 
 
 def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
@@ -203,9 +203,10 @@ def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg
     owner = get_owner_login(conn)
     owner_chat = str(connections.get_config(conn, "telegram", 0).get("chat_id") or "")
     mine = user_chats(conn)
+    clients = {u["login"] for u in users.list_users(conn) if u["role"] == "client"}          # a client is not staff: never its chat
     chats: Dict[str, List[str]] = {}
     for login in logins:
-        chat = owner_chat if login == owner else str(mine.get(login) or "")
+        chat = owner_chat if login == owner else ("" if login in clients else str(mine.get(login) or ""))
         if chat:
             chats.setdefault(chat, []).append(login)
     if not chats:

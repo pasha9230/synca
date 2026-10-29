@@ -280,6 +280,7 @@ for _section, _endpoints in {
     "self": ("account_password_page", "account_password", "orders_list_columns",     # «Колонки» of the list of orders: one's own setting
              "search", "search_json"),                  # the search of the top bar: every role; search.scope_for narrows what it finds
     "mypoint": ("mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
+    "shop": ("shop_page",),                     # «Каталог для клиента»: the client's only
 }.items():
     for _endpoint in _endpoints:
         SECTION_OF[_endpoint] = _section
@@ -302,6 +303,8 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file",
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
                          "calls_page", "call_record", "call_create_order", "call_handoff"})           # the calls of the point's account (own_call)
+# the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
+CLIENT_PAGES = frozenset({"shop_page", "account_password_page", "account_password"})
 # «CRM» is not the point's (the owner 2026-10-29: hidden; before, its own part of a client, 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})
@@ -336,6 +339,8 @@ def can_post(endpoint: str) -> bool:
     if section is None or users.level(role, section) < (users.VIEW if role == "point" and endpoint in VIEW_POSTS else users.EDIT):
         return False
     if role == "point" and endpoint not in POINT_PAGES:
+        return False
+    if role == "client" and endpoint not in CLIENT_PAGES:
         return False
     if section == "analytics" and not users.has_right(role, "money"):
         return False
@@ -409,6 +414,11 @@ def check_access():
     if section is None:                                   # a page nobody gave a right to: closed
         abort(403)
     role = user["role"]
+    if role == "client":                                  # before the level of the section: «self» would open the search
+        if endpoint == "index":
+            return redirect("/shop")
+        if endpoint not in CLIENT_PAGES:
+            abort(403)
     if role == "point":
         if not user["point_id"]:                          # a manager of a point without a point sees nothing
             abort(403)

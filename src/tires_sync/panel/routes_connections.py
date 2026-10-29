@@ -273,12 +273,14 @@ def register(app) -> None:
     def connections_telegram_page():
         conn = get_conn()
         box = app.config.get("SECRET_BOX")
+        chats = order_notify.user_chats(conn)
         return render_template(
             "conn_telegram.html", tabs=tabs(conn, "telegram"), box_ok=box is not None,
             telegram=connections.get_config(conn, "telegram", 0),
             telegram_secrets=connections.secret_status(conn, box, "telegram", 0),
             telegram_check=connections.get_check(conn, "telegram", 0),
-            user_chats=order_notify.user_chats(conn), panel_users=[u["login"] for u in panel_users.list_users(conn)])
+            user_chats=chats, panel_users=[u["login"] for u in panel_users.list_users(conn)
+                                           if u["role"] != "client" or u["login"] in chats])     # a client: only its stale chat, to be cleared
 
     @app.route("/connections/avito")
     @login_required
@@ -476,8 +478,9 @@ def register(app) -> None:
         conn = get_conn()
         try:
             login = request.form.get("login", "")
-            if login not in {u["login"] for u in panel_users.list_users(conn)}:
-                raise orders.OrderError("Такого пользователя панели нет.")
+            known = {u["login"]: u["role"] for u in panel_users.list_users(conn)}
+            if login not in known or (known[login] == "client" and request.form.get("chat_id", "").strip()):   # a client: only cleared
+                raise orders.OrderError("Такого пользователя панели нет." if login not in known else "Клиенту чат Telegram не привязывается.")
             order_notify.set_user_chat(conn, login, request.form.get("chat_id", ""), now_iso(), author())
             flash("Чат Telegram сохранён.")
         except orders.OrderError as err:

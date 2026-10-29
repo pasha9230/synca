@@ -70,7 +70,7 @@ def _ajax() -> bool:
 
 def _responsible_options(app, conn, current: str = "") -> list:
     """Who can answer for an order: the owner and the panel users (and a name already on the card, so that it is not lost)."""
-    logins = [app.config["AUTHOR"]] + [u["login"] for u in panel_users.list_users(conn)]
+    logins = [app.config["AUTHOR"]] + [u["login"] for u in panel_users.list_users(conn) if u["role"] != "client"]     # a client is not staff
     if current and current not in logins:
         logins.append(current)
     return [{"login": login, "label": login + (" (владелец)" if login == app.config["AUTHOR"] else "")} for login in dict.fromkeys(logins)]

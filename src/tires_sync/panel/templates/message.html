@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "shop_base.html" if current_user().role == "client" else "base.html" %}
 {% from "_ui.html" import icon %}
 {% block title %}Сообщение · Tires Sync{% endblock %}
 {% block content %}
