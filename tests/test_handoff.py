@@ -190,6 +190,8 @@ def test_the_duty_is_set_on_the_orders_settings_page(tmp_path):
     post(client, "/orders/settings/duty", tok, day2="owner", start="9", end="21", today="")
     conn = store.connect(app.config["DB_PATH"])
     assert mgr.duty_settings(conn)["week"] == {2: "owner"} and mgr.duty_settings(conn)["hours"] == [9, 21]
+    from tires_sync import users
+    users.add_user(conn, "worker2", "длинный-пароль-1", "2026-10-21T09:00:00", role="chats")     # the server takes only a person of the list
     post(client, "/orders/settings/duty", tok, day2="owner", start="9", end="21", today="worker2")
     assert mgr.on_duty(conn, "2026-10-21T12:00:00") == "worker2" and mgr.on_duty(conn, "2026-10-28T12:00:00") == "owner"
     post(client, "/orders/settings/duty", tok, start="21", end="9")
