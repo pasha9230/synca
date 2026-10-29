@@ -28,9 +28,10 @@ def below_cost(conn, settings, offers: Dict[str, object]) -> List[Tuple[dict, st
 
 def fresh_events(conn, settings, offers) -> Tuple[List[str], Dict[str, str]]:
     """The lines not told yet and the marks to keep once they are: a position is told again only after it came back above the purchase
-    (its mark goes) or its own price changed."""
+    (its mark goes) or its own price changed; a position away from today's unload keeps its mark."""
     marks = {k[len(MARK):]: v for k, v in conn.execute("SELECT key, value FROM app_state WHERE key LIKE ?", (MARK + "%",))}
-    lines, keep = [], {}
+    lines = []
+    keep = {k: v for k, v in marks.items() if k.partition(":")[2] not in offers}     # away from the unload for a while: told already
     for account, goods_id, price, base, value in below_cost(conn, settings, offers):
         key = "%d:%s" % (account["id"], goods_id)
         keep[key] = value

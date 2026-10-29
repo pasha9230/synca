@@ -529,6 +529,7 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
         suppressed_any |= store.load_suppressed(conn, acc["id"])
     brand_map = store.load_brand_map(conn)
     avito_names = {}
+    own_any = {key.partition(":")[2] for key in settings.price_overrides}       # an own price on any account («своя цена»)
     for gid, offer in parsed.offers.items():
         season_counts[offer.brand_key][offer.season.value] += 1
         if terms:
@@ -566,7 +567,7 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
             "state": state, "reason": text, "scode": code, "manual": manual,
             "problem": gid in ev.problems and ev.problems[gid][0].split(":", 1)[0] != "model_needs_mapping", "published": gid in published_any,
             "pending": base_overrides is not None and manual != base_overrides.get(override_key(gid)), "view_only": gid in view_only,
-            "own_price": gid in settings.own_prices,
+            "own_price": gid in own_any,
             "below_cost": bool(cand and gid in settings.own_prices and offer.base_price > 0 and cand.price < offer.base_price),
             "supplier_mark": supplier_mark(supplier_of(offer), capped_supplier),
             "stock_text": ">40" if capped_supplier and supplier_of(offer) == capped_supplier and offer.stock >= STOCK_CAP else str(offer.stock),
@@ -700,10 +701,32 @@ def own_price_text(value) -> str:
     return "цена %s ₽" % "{:,}".format(int(value["price"])).replace(",", " ")
 
 
-def own_price_rows(conn, general, active, offer) -> list:
+def held_by_other(conn, account_id: int, offer, key) -> Optional[str]:
+    """The code of another lot of the same tire whose ad the account carries (one tire, one ad: same_tire), when this lot has none there: its own
+    price then does not reach Avito (the own price belongs to the lot, the lead 2026-10-29). By the last published feed and the mirrored file."""
+    from ..mirror_feed import supplier_code
+    from ..same_tire import identity_of_ad
+    if key is None:
+        return None
+    gid = offer.goods_id
+    like = ("%%>%s<%%" % offer.width, "%%>%s<%%" % offer.diameter)
+    rows = [(g, text) for g, text in conn.execute(
+        "SELECT goods_id, snapshot FROM published_state WHERE account_id = ? AND snapshot LIKE ? AND snapshot LIKE ?", (account_id,) + like)]
+    rows += [(supplier_code(ad_id), text) for ad_id, text in conn.execute(
+        "SELECT ad_id, raw FROM imported_ad WHERE account_id = ? AND raw LIKE ? AND raw LIKE ?", (account_id,) + like)]
+    if any(g == gid for g, _ in rows) or conn.execute(
+            "SELECT 1 FROM published_state WHERE account_id = ? AND goods_id = ?", (account_id, gid)).fetchone():
+        return None
+    return next((g for g, text in rows if g != gid and identity_of_ad(text) == key), None)
+
+
+def own_price_rows(conn, general, active, offer, ref=None, offers=None) -> list:
     """One row per feed account for the card of a position: the price now (with the working draft), by the brand, the own price and whether it is
-    below the purchase. `general`: the settings with the draft, `active`: without it (a row whose own price is not applied yet is «pending")."""
+    below the purchase. `general`: the settings with the draft, `active`: without it (a row whose own price is not applied yet is «pending").
+    `held_by`: another lot of the same tire carries the account's ad (held_by_other), {goods_id, code}."""
     from ..pricing import position_price
+    from ..same_tire import identity
+    tire = identity(_unbuilt_candidate(conn, general, ref, offer)[0]) if ref is not None else None
     rows = []
     for account in connections.list_feed_accounts(conn):
         eff = connections.effective_settings(conn, account["id"], general)
@@ -714,7 +737,10 @@ def own_price_rows(conn, general, active, offer) -> list:
         rows.append({"account_id": account["id"], "account": account["name"], "price": price, "brand_price": brand,
                      "own": {own[0]: own[1]} if own else None, "own_text": own_price_text({own[0]: own[1]}) if own else "",
                      "below": bool(own and price is not None and offer.base_price > 0 and price < offer.base_price),
-                     "pending": own != was})
+                     "pending": own != was, "held_by": None})
+        other = held_by_other(conn, account["id"], offer, tire)
+        if other is not None:
+            rows[-1]["held_by"] = {"goods_id": other, "code": getattr((offers or {}).get(other), "code", "") or other}
     return rows
 
 
@@ -745,6 +771,42 @@ def own_price_lines(conn, raw: dict, changes: dict, offers, old, new) -> list:
             text += " (позиции нет в выгрузке)"
         lines.append(text + " (%s)" % own_price_text(after.get(key)))
     return lines
+
+
+OWN_JUMP = 0.30            # a fixed own price this far from the feed's price (either way) is asked once more (the lead 2026-10-29)
+
+
+def own_price_risky(conn, raw: dict, changes: dict, offers, old) -> list:
+    """The fixed own prices of a draft to confirm once more (a typo, 699 for 6990): below the purchase, or more than OWN_JUMP away from the price
+    the account's feed has now (its last published one, else the price by today's settings). Nothing is changed nor limited: only asked."""
+    from ..pricing import own_price, position_price
+    if "price_overrides" not in changes:
+        return []
+    before, after = raw.get("price_overrides") or {}, changes.get("price_overrides") or {}
+    names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
+    out = []
+    for key in sorted(after):
+        value = after[key]
+        if before.get(key) == value or "price" not in value:
+            continue
+        account_id, _, goods_id = key.partition(":")
+        account_id = int(account_id)
+        offer = (offers or {}).get(goods_id)
+        if offer is None:
+            continue
+        price = own_price(offer.base_price, ("price", value["price"]))
+        row = conn.execute("SELECT price FROM published_state WHERE account_id = ? AND goods_id = ?", (account_id, goods_id)).fetchone()
+        was = row[0] if row and row[0] else position_price(offer, connections.effective_settings(conn, account_id, old))
+        why = []
+        if offer.base_price > 0 and price < offer.base_price:
+            why.append("ниже закупки")
+        if was and abs(price / was - 1) > OWN_JUMP:
+            why.append("отличается от цены фида на %+d %%" % round((price / was - 1) * 100))
+        if why:
+            out.append("%s · %s (%s): было %s → станет %s, закупка %s — %s" % (
+                names.get(account_id, "аккаунт %d" % account_id), offer.name_orig or offer.name, offer.code, _rub(was), _rub(price),
+                _rub(offer.base_price if offer.base_price > 0 else None), ", ".join(why)))
+    return out
 
 
 def _rub(value) -> str:
@@ -1152,6 +1214,7 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
     old = settings_from_dict(raw, enforce_pct_limit=False)
     new = settings_from_dict(merged, enforce_pct_limit=False)
     preview = account_preview(conn, parsed, ref, old, new, today, now)
+    own_risky = own_price_risky(conn, raw, draft["changes"], parsed.offers, old)
     old_enabled = {tuple(item) for item in raw["enabled"]}
     new_enabled = {tuple(item) for item in merged["enabled"]}
     names = {gid: offer.name_orig or offer.name for gid, offer in parsed.offers.items()}
@@ -1182,7 +1245,9 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
         "price_more": max(0, len(price_rows) - 20),
         "diff": {key: {"old": raw.get(key), "new": value} for key, value in draft["changes"].items()},
         "preview": preview,
-        "needs_strong": needs_strong_confirmation(raw, draft["changes"]),
+        "own_risky": own_risky,
+        "pct_strong": needs_strong_confirmation(raw, draft["changes"]),
+        "needs_strong": needs_strong_confirmation(raw, draft["changes"]) or bool(own_risky),
         "stale": draft["base_version"] != active_id,
     }
 

@@ -535,7 +535,11 @@ def _alert_own_below_cost(conn, box, settings, offers) -> None:
     """Own sale prices that the supplier's purchase price went above: one message for the new ones; the prices are kept (the owner 2026-10-29).
     The marks are kept only once the message went through, so a refused one is told by the next cycle."""
     from . import own_price
-    lines, keep = own_price.fresh_events(conn, settings, offers)
+    try:
+        lines, keep = own_price.fresh_events(conn, settings, offers)
+    except Exception as err:                                         # a side notice: never stops the publishing of the feeds
+        print("проверка «своя цена ниже закупки» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
+        return
     if lines:
         shown = "\n".join(lines[:20]) + ("\nи ещё %d" % (len(lines) - 20) if len(lines) > 20 else "")
         if not _alert(conn, box, "Tires Sync: своя цена ниже закупки (%d). Цены оставлены как вы поставили; поменять — в карточке позиции "

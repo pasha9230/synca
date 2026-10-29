@@ -263,3 +263,88 @@ def test_an_own_price_of_the_owner_never_changes_the_price_in_the_clients_shop(t
     _confirm(conn, strong=True)
     assert set(active_settings(conn).price_overrides) == {"%d:%s" % (a, g) for a in accounts for g in ("77001", "77002")}
     assert prices(page(client)) == before
+
+
+def test_a_broken_below_cost_check_never_stops_the_cycle(tmp_path, monkeypatch, capsys):
+    from tires_sync import cli
+    conn, _ = _db(tmp_path)
+
+    def broken(*args):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(own_price, "fresh_events", broken)
+    cli._alert_own_below_cost(conn, None, make_settings(), {})                                        # no exception: publishing goes on
+    assert "boom" in capsys.readouterr().err
+
+
+def test_a_position_away_from_the_unload_for_a_while_is_not_told_again(tmp_path):
+    conn, (first, _) = _db(tmp_path)
+    general = settings_from_dict(settings_dict(price_overrides={"%d:100" % first: {"price": 4000}}))
+    offers = {"100": make_offer()}
+    own_price.remember(conn, own_price.fresh_events(conn, general, offers)[1])
+    own_price.remember(conn, own_price.fresh_events(conn, general, {})[1])                            # ушла из выгрузки на цикл
+    assert own_price.fresh_events(conn, general, offers)[0] == []                                      # вернулась той же — молчим
+
+
+def test_the_catalog_marks_an_own_price_set_on_any_account(tmp_path):
+    app, conn, (first, second) = _app(tmp_path)
+    client = app.test_client()
+    tok = login(client)
+    post(client, "/catalog/item/100/own-price", tok, kind="pct", value="5", a=[str(second)], action="save")
+    assert "своя цена</span>" in client.get("/catalog").get_data(as_text=True)
+
+
+def test_the_card_says_when_another_lot_of_the_same_tire_carries_the_ad(tmp_path):
+    from tires_sync import same_tire
+    from tires_sync.panel import service
+    from tires_sync.panel.data import load_merged, load_reference
+    app, conn, (first, second) = _app(tmp_path)
+    settings = active_settings(conn)
+    parsed = load_merged(conn, settings, app.config["UNLOAD_PATH"])
+    ref = load_reference(app.config["REFERENCE_PATH"])
+    key = same_tire.identity(service._unbuilt_candidate(conn, settings, ref, parsed.offers["100"])[0])
+    tags = ("Brand", "Model", "TireSectionWidth", "TireAspectRatio", "RimDiameter", "TireType", "LoadIndex", "SpeedIndex")
+    ad = "<Ad><Id>OTHER1</Id>%s<RunFlat>Нет</RunFlat></Ad>" % "".join("<%s>%s</%s>" % (t, v, t) for t, v in zip(tags, key))
+    conn.execute("INSERT INTO published_state (account_id, goods_id, price, base_price, point, snapshot) VALUES (?,?,?,?,?,?)",
+                 (second, "OTHER1", 5000, 4000.0, "P1", ad))
+    conn.commit()
+    client = app.test_client()
+    login(client)
+    page = client.get("/catalog/item/100").get_data(as_text=True)
+    assert page.count("Объявление держит другая партия") == 1 and "Шина-Колесо: объявление держит другая партия" in page
+    assert 'href="/catalog/item/OTHER1"' in page
+    conn.execute("INSERT INTO published_state (account_id, goods_id, price, base_price, point, snapshot) VALUES (?,?,?,?,?,?)",
+                 (second, "100", 5000, 4000.0, "P1", ad))
+    conn.commit()
+    assert "держит другая партия" not in client.get("/catalog/item/100").get_data(as_text=True)      # своё объявление есть — пометки нет
+
+
+@pytest.mark.parametrize("value, asked", [("4000", True), ("6990", True), ("3000", True), ("5200", False), ("6200", False)])
+def test_a_fixed_price_below_the_purchase_or_far_from_the_feed_is_asked_once_more(tmp_path, value, asked):
+    """Purchase 5 000, feed price by the brand 4 810: 4 000 is below the purchase, 6 990 is +45 %, 3 000 both; 5 200 and 6 200 neither."""
+    app, conn, (first, _) = _app(tmp_path)
+    client = app.test_client()
+    tok = login(client)
+    post(client, "/catalog/item/100/own-price", tok, kind="price", value=value, a=[str(first)], action="save")
+    draft_id = staging.summary(conn)["draft_id"]
+    page = client.get("/draft/%d" % draft_id).get_data(as_text=True)
+    assert ("Подтверждаю значения вне диапазона" in page) == asked
+    if asked:
+        assert "закупка 5 000 ₽" in page and "было 4 810 ₽" in page
+    post(client, "/draft/%d/confirm" % draft_id, tok)                                                  # без отметки
+    assert (active_settings(conn).price_overrides == {}) == asked
+    if asked:
+        post(client, "/draft/%d/confirm" % draft_id, tok, strong="on")
+        assert active_settings(conn).price_overrides == {"%d:100" % first: ("price", int(value))}
+
+
+def test_the_feeds_price_is_the_published_one_when_there_is_one(tmp_path):
+    from tires_sync.panel import service
+    app, conn, (first, _) = _app(tmp_path)
+    conn.execute("INSERT INTO published_state (account_id, goods_id, price, base_price, point, snapshot) VALUES (?,?,?,?,?,?)",
+                 (first, "100", 9000, 5000.0, "P1", "<Ad/>"))
+    conn.commit()
+    raw = get_active(conn)[1]
+    offers = {"100": make_offer()}
+    changes = {"price_overrides": {"%d:100" % first: {"price": 6990}}}
+    lines = service.own_price_risky(conn, raw, changes, offers, settings_from_dict(raw))
+    assert lines == []                                                                                  # 6 990 к 9 000 — −22 %

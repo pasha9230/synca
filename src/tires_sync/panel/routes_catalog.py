@@ -331,7 +331,8 @@ def register(app) -> None:
             abort(404)
         if has_right("money"):                                       # the own prices: the owner and the partner see them, the owner sets them
             general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)
-            data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id])
+            data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id],
+                                                        ref, parsed.offers)
             data["purchase"] = parsed.offers[goods_id].base_price
         if wait is None and request.args.get("wait") and can_post("catalog_wait"):
             wait = _wait_window(conn, goods_id, {}, "", _item_path(goods_id), parsed.offers.get(goods_id))
