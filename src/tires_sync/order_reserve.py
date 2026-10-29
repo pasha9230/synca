@@ -12,7 +12,7 @@ responsible. The state of the question is one row of app_state per stay at the p
 The owner 2026-10-26: an order without a WebMIM number on that day asks the responsible once per order for the number (`_ask_number`, the
 same alert as the end of the reservation: a point account's order goes to its point), also when no message to the client can go; the
 client's text then has no «№…» (`_client_body`).
-The lead 2026-10-26: a point on «Панель» is asked on its «Моя точка» instead of VK (the same state «asked», then the same answers and silence).
+The lead 2026-10-26: a point on «Панель» is asked on its «Рабочее место» instead of VK (the same state «asked», then the same answers and silence).
 The owner 2026-10-26: an order the point gave back to the supplier in this stay («Возврат», order_manager.returned) stays «На точке» until the
 manager fills the amount; nobody is asked about it, the client gets no reminder and no yellow record is left (`_returned`).
 """
@@ -167,11 +167,11 @@ def ask_point(conn, card: dict, point_send: Optional[PointSend], now: str) -> st
         why = "ВК не настроен: нет ключа сообщества"
     number = order_manager.label(card)
     text = ASK % (number, ", ".join(w for w in (card["client_name"], order_manager.short(card)) if w) or "без позиций", number, number)
-    if point and point.get("channel") == PANEL:                 # the lead 2026-10-26: a point in the panel is asked on «Моя точка» (question_open)
+    if point and point.get("channel") == PANEL:                 # the lead 2026-10-26: a point in the panel is asked on «Рабочее место» (question_open)
         if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, "asked|" + now)).rowcount != 1:
             conn.commit()
             return ""
-        orders.add_event(conn, card["id"], now, "система", "reserve", "Точке «%s» задан вопрос в «Моей точке»: «Клиент забрал заказ №%s?» %s"
+        orders.add_event(conn, card["id"], now, "система", "reserve", "Точке «%s» задан вопрос на «Рабочем месте»: «Клиент забрал заказ №%s?» %s"
                          % (point["name"], number, marker), level="grey")
         conn.commit()
         return "asked"
@@ -251,7 +251,7 @@ def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.D
 
 
 def question_open(conn, card: dict, now: str) -> bool:
-    """«Моя точка» shows the question of the last day («Клиент забрал?») while the point can still answer it as in VK: asked in this stay at
+    """«Рабочее место» shows the question of the last day («Клиент забрал?») while the point can still answer it as in VK: asked in this stay at
     the point, the reservation still ends on the day it was asked, and that day's working hours are not over. It only reads: the answers
     (`here`, «выдал») and the tick move the question."""
     if (card.get("stage") or {}).get("code") != "at_point":

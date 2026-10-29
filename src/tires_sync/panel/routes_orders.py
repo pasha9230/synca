@@ -1508,10 +1508,10 @@ def register(app) -> None:
         if not (str(item["sender"]).isascii() and str(item["sender"]).isdigit()):          # a line of the panel itself: nobody to write to
             return ""
         point = points.panel_point_of(conn, item["sender"])
-        if point is not None:                                                             # the owner 2026-10-23: never in VK, on «Моя точка»
+        if point is not None:                                                             # the owner 2026-10-23: never in VK, on «Рабочее место»
             if text:
                 points.add_note(conn, point["id"], "answer", text, local_iso(), asked=item["text"])
-            return "Точка «%s» работает в панели: ответ показан на её «Моей точке», в ВК не отправлен." % item["point"]
+            return "Точка «%s» работает в панели: ответ показан на её «Рабочем месте», в ВК не отправлен." % item["point"]
         send = inbox_channel(app, conn, local_iso())[0]
         if send is None:
             return "В ВК не ушло: ключ сообщества не сохранён (Подключения → ВК). Отправьте менеджеру вручную."

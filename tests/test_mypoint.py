@@ -1,4 +1,4 @@
-"""«Моя точка»: the phone page of a point's manager. Its buttons do what the VK commands do (the same result, the same records), the point
+"""«Рабочее место»: the phone page of a point's manager. Its buttons do what the VK commands do (the same result, the same records), the point
 is taken in the query, and the client hears «можно забирать» once per arrival."""
 from __future__ import annotations
 
@@ -284,7 +284,7 @@ def test_the_form_hands_the_client_over_as_the_vk_command(tmp_path):
     assert card["stage"]["code"] == "from_point" and card["source"] == "pvz" and card["responsible"] == "worker2"
     assert "Передано, ответственный — Партнёр. Заказ №%d." % order_id in page
     assert [e["text"] for e in orders.list_events(conn, order_id) if e["kind"] == "handoff"] == [          # the same record, its source named
-        e["text"].replace("(команда ВК)", "(«Моя точка»)") for e in orders.list_events(vk_conn, _vk_order) if e["kind"] == "handoff"]
+        e["text"].replace("(команда ВК)", "(«Рабочее место»)") for e in orders.list_events(vk_conn, _vk_order) if e["kind"] == "handoff"]
     assert to_client(app) == []                                                              # nothing goes to the client
 
 
@@ -398,7 +398,7 @@ def test_the_order_says_who_handed_the_client_over_from_the_page(tmp_path):
     _t, _r = hand_over(client, "+7 900 222-33-44", "", p=pid)                                # the owner, for the point
     [(order_id, *_rest)] = handed(conn)
     notes = [(e["author"], e["text"]) for e in orders.list_events(conn, order_id) if e["kind"] == "note"]
-    assert notes and notes[0][1].startswith("Клиент передан через «Моя точка»") and notes[0][0] != "менеджер Бета"
+    assert notes and notes[0][1].startswith("Клиент передан через «Рабочее место»") and notes[0][0] != "менеджер Бета"
 
 
 def test_the_owner_hands_over_only_to_the_point_on_the_form(tmp_path):

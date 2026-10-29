@@ -1,4 +1,4 @@
-"""«Моя точка»: a second order for a phone that has an open order is refused with that order named (the owner 2026-10-27; it was a warning
+"""«Рабочее место»: a second order for a phone that has an open order is refused with that order named (the owner 2026-10-27; it was a warning
 with «Всё равно создать» since 2026-10-25)."""
 from __future__ import annotations
 

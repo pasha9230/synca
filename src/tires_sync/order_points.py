@@ -209,7 +209,7 @@ def bind_vk(conn, code: str, sender) -> dict:
     return get_point(conn, row[0])
 
 
-# ---- a point in the panel (channel «panel»): what the bot would have written to its VK is kept for its «Моя точка» ------------------------
+# ---- a point in the panel (channel «panel»): what the bot would have written to its VK is kept for its «Рабочее место» ------------------------
 
 def in_panel(point: Optional[dict]) -> bool:
     return bool(point) and point.get("channel") == PANEL
@@ -273,7 +273,7 @@ def _seen_key(point_id) -> str:
 
 
 def mark_seen(conn, point_id, up_to: str) -> None:
-    """A person of the point opened its «Моя точка»: every note up to the newest one shown (`up_to`) is seen (the sound of notify.js is not
+    """A person of the point opened its «Рабочее место»: every note up to the newest one shown (`up_to`) is seen (the sound of notify.js is not
     a look). The mark never goes back."""
     conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)",
                  (_seen_key(point_id), str(up_to)))
@@ -301,7 +301,7 @@ def unseen_alerts(conn, point_id, since: str) -> List[dict]:
 
 
 def opened_order(conn, point_id, order_id, since: str) -> bool:
-    """A person of the point opened the order's card since `since` (the bell leads there, not to «Моя точка»): its alert is seen too."""
+    """A person of the point opened the order's card since `since` (the bell leads there, not to «Рабочее место»): its alert is seen too."""
     return bool(order_id) and conn.execute(
         "SELECT 1 FROM order_event_seen s JOIN panel_user_role r ON r.login = s.login WHERE s.order_id = ? AND s.at >= ? "
         "AND r.role = 'point' AND r.point_id = ? LIMIT 1", (int(order_id), str(since or ""), int(point_id))).fetchone() is not None

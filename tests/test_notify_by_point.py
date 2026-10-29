@@ -89,7 +89,7 @@ def test_the_partner_who_answers_for_a_point_account_order_gets_no_telegram_eith
 
 def test_a_point_user_who_answers_for_its_own_account_order_gets_it_from_the_point_not_in_telegram(tmp_path):
     """Changed on purpose (the owner 2026-10-26, plan answer 8: no Telegram for a point, the bell with the sound is enough): it was the
-    user's Telegram; now the point's own way (its VK here, «Моя точка» in the panel), even with a chat saved for the user."""
+    user's Telegram; now the point's own way (its VK here, «Рабочее место» in the panel), even with a chat saved for the user."""
     conn, box = env(tmp_path)
     pid = point(conn)
     users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
@@ -131,7 +131,7 @@ def test_with_no_way_to_the_point_the_alert_stays_on_its_page_and_the_owner_is_n
     assert tg.calls == [] and "владельц" not in told.replace("владельцу не пишется", "")
     assert [n["text"] for n in points.unseen_alerts(conn, pid, "")] == ["Конец резерва"]
     journal = [e["text"] for e in orders.list_events(conn, mine["id"])]
-    assert any("Гамма" in t and "Моя точка" in t for t in journal)
+    assert any("Гамма" in t and "Рабочем месте" in t for t in journal)
 
 
 def test_a_refusal_of_the_point_vk_leaves_it_on_the_point_page_not_with_the_owner(tmp_path):
@@ -325,7 +325,7 @@ def test_the_safety_net_marks_a_point_account_note_so_that_it_is_not_looked_at_a
 # ---- lane 3: the safety net never tells the owner what the point already opened ---------------------------------------------------------
 
 def unseen_order_alert(tmp_path):
-    """An alert of an own-account order (it may go to the owner) left on the «Моя точка» of a point in the panel at NOW."""
+    """An alert of an own-account order (it may go to the owner) left on the «Рабочее место» of a point in the panel at NOW."""
     conn, box = env(tmp_path)
     pid = point(conn, channel="panel")
     users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
@@ -338,7 +338,7 @@ def unseen_order_alert(tmp_path):
 
 def test_the_safety_net_tells_the_owner_nothing_of_an_order_the_point_opened(tmp_path):
     conn, box, pid, ours = unseen_order_alert(tmp_path)
-    order_alerts.mark_seen(conn, "gamma1", ours["id"], "2026-10-15T12:05:00")          # the bell → the order's card, not «Моя точка»
+    order_alerts.mark_seen(conn, "gamma1", ours["id"], "2026-10-15T12:05:00")          # the bell → the order's card, not «Рабочее место»
     conn.commit()
     tg = ScriptedHttp(TG_OK)
     assert order_notify.escalate_unseen(conn, box, "2026-10-15T12:30:00", tg_http=tg) == 0
