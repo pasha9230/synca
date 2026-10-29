@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}История точек · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>История точек</h1><p class="sub">Что делали точки: приняли, выдали, передали клиента, отменили передачу, вернули, подписали акт МХ-3, сменили этап. Кнопки «Рабочего места», доска заказов и команды ВК.</p></div></header>
+<form method="get" action="/points/history" class="filters filters--flat"><div class="field" style="width:240px"><span class="label">Точка</span><select class="select" name="p"><option value="">Все точки</option>{% for p in points %}<option value="{{ p.id }}"{% if p.id == point_id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+<button class="btn btn--secondary" style="height:40px">Показать</button></form>
+<section class="card"><div class="table-wrap"><table class="table table--plain">
+<thead><tr><th>Когда</th><th>Точка</th><th>Кто</th><th>Действие</th><th>Заказ</th><th>Подробно</th></tr></thead>
+<tbody>{% for r in rows %}<tr data-history-kind="{{ r.kind }}"><td>{{ r.at|short_dt }}</td><td>{{ r.point }}</td><td>{{ r.author }}</td><td>{{ r.name }}</td><td>{% if r.order_id %}<a href="/orders/{{ r.order_id }}">№{{ r.order_id }}</a>{% else %}—{% endif %}</td><td class="small muted">{{ r.text }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">Действий точек пока нет.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

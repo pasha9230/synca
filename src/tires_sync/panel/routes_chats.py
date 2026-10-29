@@ -620,6 +620,8 @@ def register(app) -> None:
         try:
             _card_id, answer = mgr.hand_over(conn, point, {"kind": "chat", "chat_row": chat_row}, form["phone"], mgr.handoff_fields(form),
                                              request.form.get("token"), author(), local_iso(), notify)
+            from .. import point_log
+            point_log.record(conn, local_iso(), author(), point, "handoff", _card_id, "из чата")              # «История точки»
             flash(answer, "ok")
         except orders.OrderError as err:
             flash(str(err))
@@ -652,10 +654,17 @@ def register(app) -> None:
                 raise orders.OrderError("У чата нет заказа или этап выбран неверно.")
             if own_point() is not None and orders.get_card(conn, chat["order_id"])["point_id"] != own_point():
                 raise orders.OrderError("Этап заказа №%d меняет владелец: заказ не вашей точки." % chat["order_id"])
+            from .routes_orders import ask_oth, oth_offer
+            asked = oth_offer(conn, orders.get_card(conn, chat["order_id"]), stage_id)
+            if asked is not None:                                          # «Шины остаются на точке — на ОТХ?»: the order's card asks (2026-10-29)
+                return ask_oth(chat["order_id"], asked)
             stamp = local_iso()
             moved = orders.move_card(conn, chat["order_id"], stage_id, stamp, author())
             if moved:
                 offer_send(conn, chat["order_id"], stamp)
+                if own_point() is not None:                                # «История точки»
+                    from .. import point_log
+                    point_log.record(conn, stamp, author(), own_point(), "move", chat["order_id"], "этап «%s» (из чата)" % orders.get_stage(conn, stage_id)["name"])
             flash("Заказ №%d перенесён в «%s»." % (chat["order_id"], orders.get_stage(conn, stage_id)["name"]) if moved
                   else "Заказ №%d уже на этом этапе." % chat["order_id"])
         except orders.OrderError as err:

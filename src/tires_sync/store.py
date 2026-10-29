@@ -134,6 +134,10 @@ CREATE TABLE IF NOT EXISTS order_oth_client (order_id INTEGER PRIMARY KEY, clien
     linked_at TEXT NOT NULL DEFAULT '', detached_at TEXT NOT NULL, detached_by TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS oth_return (item_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, qty INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS oth_return_order ON oth_return (order_id);
+-- the return of the goods of «На ОТХ» to the supplier (the owner 2026-10-29): agreed with the supplier for an odd date (the owner, the
+-- partner), then the point signs the paper act МХ-3 and gives the tyres (order_oth.agree / sign_act)
+CREATE TABLE IF NOT EXISTS oth_return_plan (order_id INTEGER PRIMARY KEY, agreed_at TEXT NOT NULL, agreed_by TEXT NOT NULL, return_date TEXT NOT NULL,
+    signed_at TEXT, signed_by TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS client_chat (chat_row INTEGER PRIMARY KEY, client_id INTEGER NOT NULL, how TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS client_chat_client ON client_chat (client_id);
 CREATE TABLE IF NOT EXISTS avito_call (

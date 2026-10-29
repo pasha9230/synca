@@ -45,7 +45,7 @@ def test_the_matrix_partner_looks_at_everything_point_has_sales_of_its_own():
     assert users.level("point", "chats") >= users.VIEW and users.level("point", "alerts") >= users.VIEW
     for section in ("home", "catalog", "analytics", "setup", "users"):
         assert users.level("point", section) == users.NONE, section
-    assert users.level("point", "clients") == users.VIEW              # «CRM»: looks at its own part only (the owner 2026-10-26, test_point_isolation)
+    assert users.level("point", "clients") == users.NONE              # «CRM»: none (the owner 2026-10-29; its own part since 2026-10-26 before)
     assert users.has_right("point", "send") and not users.has_right("point", "delete") and not users.has_right("point", "bulk")   # the owner: they answer
 
 

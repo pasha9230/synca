@@ -119,6 +119,8 @@ def register(app) -> None:
         try:
             _card_id, answer = mgr.hand_over(conn, point, {"kind": "call", "call_id": call_row}, form["phone"], mgr.handoff_fields(form),
                                              request.form.get("token"), author(), local_iso(), notify)
+            from .. import point_log
+            point_log.record(conn, local_iso(), author(), point, "handoff", _card_id, "из звонка")             # «История точки»
             flash(answer, "ok")
         except orders.OrderError as err:
             flash(str(err))

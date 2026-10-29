@@ -546,6 +546,7 @@
       fetch("/orders/" + card.dataset.card + "/move", {method: "POST", body: data, credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
         .then(function (r) { return r.json(); })
         .then(function (res) {
+          if (!res.ok && res.go) { window.location.href = res.go; return; }     // «Шины остаются на точке?»: the card asks (2026-10-29)
           if (!res.ok) { say(res.message); return; }
           if (res.send && window.tiresSendWindow) { window.tiresSendWindow(res.send, board.dataset.csrf); return; }   // the board reloads when it closes
           window.location.reload();

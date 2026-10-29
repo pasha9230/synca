@@ -73,16 +73,19 @@ def test_the_scope_of_every_role():
     assert search.scope_for("partner") == search.Scope(frozenset(full), money=True)
     assert search.scope_for("chats") == search.Scope(frozenset(full), money=False)
     assert search.scope_for("viewer") == search.Scope(frozenset(full), money=False)
-    assert search.scope_for("point", 3, 9) == search.Scope(frozenset({"orders", "chats", "clients"}), point=3, account=9, money=False)
-    assert search.scope_for("point", 3, None) == search.Scope(frozenset({"orders", "clients"}), point=3, money=False)      # no account: no chat
+    assert search.scope_for("point", 3, 9) == search.Scope(frozenset({"orders", "chats"}), point=3, account=9, money=False)   # no CRM (2026-10-29)
+    assert search.scope_for("point", 3, None) == search.Scope(frozenset({"orders"}), point=3, money=False)      # no account: no chat
     assert search.scope_for("point", None, 9).groups == frozenset()                                             # no point: nothing
     assert search.scope_for("nobody").groups == frozenset()
 
 
 def test_the_point_never_searches_the_positions_even_with_the_catalog_and_its_clients_are_its_own_part(monkeypatch):
-    """The positions are not split by point: were the role ever given the catalog, the search still keeps out of it. The clients: since
-    2026-10-26 the point has its own part of them in «CRM» (clients.list_clients_for_point; tests/test_point_isolation.py)."""
+    """The positions are not split by point: were the role ever given the catalog, the search still keeps out of it. The clients: the point
+    has no «CRM» (the owner 2026-10-29); were it given back, the search finds its own part only (clients.list_clients_for_point)."""
     wider = dict(users.MATRIX["point"], sections=dict(users.MATRIX["point"]["sections"], catalog=users.VIEW))
+    monkeypatch.setitem(users.MATRIX, "point", wider)
+    assert search.scope_for("point", 3, 9).groups == frozenset({"orders", "chats"})
+    wider = dict(users.MATRIX["point"], sections=dict(users.MATRIX["point"]["sections"], catalog=users.VIEW, clients=users.VIEW))
     monkeypatch.setitem(users.MATRIX, "point", wider)
     assert search.scope_for("point", 3, 9).groups == frozenset({"orders", "chats", "clients"})
 
@@ -99,7 +102,7 @@ def test_every_role_opens_the_search_and_sees_the_field(w):
         assert 'id="topsearch"' in page and "/static/topbar.js" in page, role
     keys = {role: set(find(client, "клиент")) for role, client in people.items()}
     assert keys["owner"] == keys["partner"] == keys["chats"] == keys["viewer"] == {"orders", "clients"}
-    assert keys["point"] == {"orders", "clients"}                                   # its own clients (2026-10-26)
+    assert keys["point"] == {"orders"}                                              # no «CRM» (the owner 2026-10-29)
 
 
 def test_the_point_finds_its_own_order_never_another_points(w):
@@ -150,7 +153,8 @@ def test_a_section_the_role_has_not_is_never_searched(w, monkeypatch):
         raise AssertionError("searched a section the role has not")
     monkeypatch.setattr(search.clients, "list_clients", never)
     monkeypatch.setattr(routes_search, "context", never)
-    assert set(find(manager, "клиент")) == {"orders", "clients"}           # its own part of the clients (clients.list_clients_for_point)
+    monkeypatch.setattr(search.clients, "list_clients_for_point", never)       # no «CRM» (the owner 2026-10-29): not searched at all
+    assert set(find(manager, "клиент")) == {"orders"}
     assert set(find(manager, "laufenn")) <= {"orders", "chats"}
     assert manager.get("/search?q=laufenn").status_code == 200
 

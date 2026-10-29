@@ -19,10 +19,10 @@ def test_the_default_pipeline_is_seeded_once_in_the_owners_order(tmp_path):
     conn = db(tmp_path)
     orders.ensure_pipeline(conn, NOW)                                           # a second call changes nothing
     stages = orders.list_stages(conn)
-    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "oth", "done", "cancel", "refused", "return"]   # «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Отказ/невыкуп» after «Отмена» (2026-10-23)
+    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "oth", "return_given", "done", "cancel", "refused", "return"]   # «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Отказ/невыкуп» after «Отмена» (2026-10-23); «Возврат передан» after «На ОТХ» (2026-10-29)
     assert [s["name"] for s in stages][:4] == ["Новый заказ", "Переговоры", "Ожидает наличие", "Заказ оформлен"]
     assert {s["code"]: s["kind"] for s in stages}["done"] == "won" and {s["code"]: s["kind"] for s in stages}["cancel"] == "lost"
-    assert [s["position"] for s in stages] == list(range(11))
+    assert [s["position"] for s in stages] == list(range(len(orders.DEFAULT_STAGES)))
 
 
 def test_the_refused_stage_is_added_once_to_an_old_pipeline_after_cancel_and_kept_as_a_system_stage(tmp_path):

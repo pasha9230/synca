@@ -1,4 +1,8 @@
+{% extends "base.html" %}
 {% from "_ui.html" import icon %}
+{% block title %}Рабочее место · Tires Sync{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}">{% endblock %}
+{% block content %}
 {% macro card(row) %}{% set c = row.card %}
 <article class="mp-card{% if row.here %} mp-card--here{% endif %}" id="order-{{ c.id }}" data-order="{{ c.id }}">
 <div class="mp-card-head"><span class="mp-no">№ {{ row.label }}</span>{% if row.origin %}<span class="badge badge--warn" data-origin title="{{ row.origin.hint }}">{{ row.origin.text }}</span>{% endif %}<span class="badge {{ 'badge--ok' if row.here else 'badge--warn' }}">{{ "на точке" if row.here else "едет на точку" }}</span></div>
@@ -6,6 +10,9 @@
 {% if not row.here %}<dl class="mp-facts"><div><dt>Перемещение</dt><dd>{{ c.transfer_number or "номер ещё не вписан" }}</dd></div>{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}
 <div class="mp-client"><span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% if row.tel %}<a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a>{% endif %}</div>
 {% if row.until %}<div class="mp-until{% if row.late %} mp-until--late{% endif %}">Хранение до {{ row.until }}{% if row.late %} — срок прошёл{% endif %}</div>{% endif %}
+{% if oth_ask.get(c.id) %}<div class="flash flash--info" id="oth-{{ c.id }}" role="alert" data-oth-offer="{{ c.id }}"><div class="flash-text stack"><b>Шины остаются на точке — перевести на «На ОТХ»?</b><span class="mp-sub">«Нет» — заказ остаётся на точке, менеджер свяжется с клиентом.</span>
+<div class="mp-actions"><form method="post" action="/my-point/{{ c.id }}/to_oth" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.to_oth }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--primary mp-btn">Да, на «На ОТХ»</button></form>
+<a class="btn btn--secondary mp-btn" href="/my-point{% if choose %}?p={{ point.id }}{% endif %}">Нет</a></div></div></div>{% endif %}
 <div class="mp-actions">
 {% if not row.here %}<form method="post" action="/my-point/{{ c.id }}/arrived" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.arrived }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--primary mp-btn">Приехал</button></form>
 <form method="post" action="/my-point/{{ c.id }}/issued" data-once data-confirm-title="Выдать заказ № {{ row.label }}?" data-confirm="Заказ ещё не отмечен на точке. {{ ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' }} забирает заказ; он закроется." data-confirm-ok="Выдал"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens.issued }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--secondary mp-btn">Выдал</button></form>
@@ -26,26 +33,27 @@
 </div>
 </article>
 {% endmacro %}
-<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Моя точка · Tires Sync</title>
-<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}">
-</head>
-<body class="mp">
+{% set pq = ("&p=%d"|format(point.id)) if choose and point else "" %}
+<div class="mp-wrap">
 <header class="mp-head">
-<div class="mp-title"><h1>{{ point.name if point else "Моя точка" }}</h1><span class="mp-sub">Заказы на точке и те, что едут к вам</span></div>
-<nav class="mp-links">{% if user.role != "point" %}<a href="/">Панель</a>{% endif %}<a href="/account/password">Пароль</a><form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="mp-link-btn">Выйти</button></form></nav>
+<div class="mp-title"><h1>Рабочее место{% if point %} · {{ point.name }}{% endif %}</h1><span class="mp-sub">Заказы на точке и те, что едут к вам</span></div>
 </header>
 {% if choose and points %}<form method="get" action="/my-point" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
-<div class="mp-msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' %} role="alert"{% endif %}><div class="flash-text">{{ message }}</div></div>{% endfor %}</div>
 {% if user.role == "point" %}<div class="mp-notify" data-notify-box><button type="button" class="btn btn--secondary btn--sm" data-notify-enable hidden>Включить уведомления</button><span class="mp-sub" data-notify-state></span>
 <div class="mp-fresh" data-notify-fresh hidden><span>Есть новое.</span> <a class="btn btn--primary btn--sm" href="/my-point">Обновить</a></div></div>{% endif %}
-<main class="mp-list">
+{% if point %}<form method="get" action="/my-point" class="mp-search" role="search"><label class="field"><span class="label">Найти заказ точки</span><span class="mp-search-row"><input class="input" type="search" name="q" maxlength="80" value="{{ query }}" placeholder="Номер заказа, перемещения или телефон" autocomplete="off"><button class="btn btn--secondary">Найти</button></span></label>{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}</form>
+{% if found is not none %}<section class="mp-handoff mp-found" aria-labelledby="mp-found-h"><h2 id="mp-found-h">Найдено{% if found %} <span class="mp-count">{{ found|length }}</span>{% endif %}</h2>
+{% if found %}<ul class="mp-handed-list">{% for f in found %}<li class="mp-handed-item"><div class="mp-handed-who"><a class="mp-name" href="{{ f.url }}">{{ f.title }}</a><span class="mp-sub">{{ f.subtitle }}</span></div></li>{% endfor %}</ul>
+{% else %}<p class="mp-hint">Среди заказов точки ничего не нашлось.</p>{% endif %}<a class="mp-sub" href="/my-point{% if choose %}?p={{ point.id }}{% endif %}">Очистить поиск</a></section>{% endif %}
+<section class="mp-handoff mp-stages" aria-labelledby="mp-stages-h"><h2 id="mp-stages-h">Этапы заказов</h2>
+<ul class="mp-stage-list">{% for s in stages %}<li><a class="mp-stage{% if not s.count %} mp-stage--empty{% endif %}" href="/orders?v=list&amp;s={{ s.stage.id }}{{ pq }}" data-stage-count="{{ s.stage.id }}"><span class="dot" style="background:{{ s.stage.color }}"></span><span class="mp-stage-name">{{ s.stage.name }}</span><b>{{ s.count }}</b></a></li>{% endfor %}</ul></section>
+{% if returns %}<section class="mp-handoff mp-returns" aria-labelledby="mp-returns-h"><h2 id="mp-returns-h">Возврат поставщику <span class="mp-count">{{ returns|length }}</span></h2>
+{% for r in returns %}{% set c = r.card %}<article class="mp-card mp-card--return" data-return="{{ c.id }}"><div class="mp-card-head"><span class="mp-no">№ {{ r.label }}</span><span class="badge {{ 'badge--err' if r.late else 'badge--warn' }}">Возврат {{ r.date }}</span></div>
+<div class="mp-client"><span class="mp-name">{{ c.items_text or "шины с ОТХ" }}</span></div>
+<div class="flash flash--err mp-act" role="note"><div class="flash-text"><b>Подпишите акт МХ-3</b> при передаче шин поставщику (бумажный акт).</div></div>
+<div class="mp-actions"><form method="post" action="/my-point/{{ c.id }}/act_signed" data-once data-confirm-title="Акт МХ-3 подписан, шины отданы?" data-confirm="Заказ № {{ r.label }} перейдёт в «Возврат передан», менеджер заполнит сумму возврата." data-confirm-ok="Подписал и отдал"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ r.token }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--primary mp-btn">Подписал акт и отдал</button></form></div></article>{% endfor %}</section>{% endif %}
+{% endif %}
+<div class="mp-list">
 {% if notes %}<section class="mp-handoff mp-notes" aria-labelledby="mp-notes-h"><h2 id="mp-notes-h">Для точки</h2>
 <ul class="mp-handed-list">{% for n in notes %}<li class="mp-handed-item"><div class="mp-handed-who"><span class="mp-sub">{{ n.kind_name }} · {{ n.at|short_dt }}{% if n.asked %} · на «{{ n.asked }}»{% endif %}</span><span class="mp-note-text">{{ n.text }}</span></div></li>{% endfor %}</ul>
 <p class="mp-hint">Точка работает в панели: бот не пишет в ВК, его ответы и оповещения — здесь.</p></section>{% endif %}
@@ -74,11 +82,10 @@
 </section>{% endif %}
 {% if handed %}<section class="mp-handoff mp-handed" aria-labelledby="mp-handed-h"><h2 id="mp-handed-h">Переданные клиенты</h2>
 <ul class="mp-handed-list">{% for h in handed %}<li class="mp-handed-item"><div class="mp-handed-who"><span class="mp-name">{{ (h.phone|phone) if h.phone else (h.client or "клиент из чата") }}</span><span class="mp-sub">№ {{ h.label }} · {{ h.at|short_dt }}{% if h.source %} · {{ h.source }}{% endif %}</span>{% if h.need %}<span class="mp-sub">{{ h.need }}</span>{% endif %}</div>
-<span class="badge {{ {'': 'badge--neutral', 'taken': 'badge--warn', 'placed': 'badge--warn', 'done': 'badge--ok', 'refused': 'badge--err'}[h.status] }}" data-status="{{ h.status or 'new' }}">{{ h.status_name }}</span></li>{% endfor %}</ul>
+<span class="badge {{ {'': 'badge--neutral', 'taken': 'badge--warn', 'placed': 'badge--warn', 'done': 'badge--ok', 'refused': 'badge--err', 'cancelled': 'badge--neutral'}[h.status] }}" data-status="{{ h.status or 'new' }}">{{ h.status_name }}</span>
+{% if h.cancellable %}<form method="post" action="/my-point/handoff/{{ h.id }}/cancel" class="inline" data-once data-confirm-title="Отменить передачу клиента?" data-confirm="Заказ № {{ h.label }} уйдёт в «Отмена», менеджеру придёт сообщение. Клиенту ничего не отправится." data-confirm-ok="Отменить передачу"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--danger-outline btn--sm" data-handoff-cancel="{{ h.id }}">Отменить передачу</button></form>{% endif %}</li>{% endfor %}</ul>
 {% if bonus %}<p class="mp-hint">За выданный заказ переданного клиента точке +{{ bonus|money }} сверх обычной выплаты.</p>{% endif %}</section>{% endif %}
-</main>
-<script src="{{ url_for('static', filename='app.js') }}"></script>
-<script src="{{ url_for('static', filename='mypoint.js') }}"></script>
-{% if user.role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}"></script>{% endif %}
-</body>
-</html>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='mypoint.js') }}"></script>{% endblock %}

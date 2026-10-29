@@ -76,16 +76,17 @@ def _orders(conn, p: dict, scope: Scope, limit: int) -> list:
     first = {}
     for order_id, name, qty in conn.execute("SELECT order_id, name, qty FROM order_item ORDER BY id"):
         first.setdefault(order_id, "%s × %d" % (name, qty))
-    sql, args = ("SELECT o.id, o.client_name, o.client_phone, o.webmim_number, s.name FROM order_card o JOIN order_stage s ON s.id = o.stage_id",
-                 ())
+    sql, args = ("SELECT o.id, o.client_name, o.client_phone, o.webmim_number, s.name, o.transfer_number FROM order_card o "
+                 "JOIN order_stage s ON s.id = o.stage_id", ())
     if scope.point is not None:
         sql, args = sql + " WHERE o.point_id = ?", (scope.point,)
     found = []
-    for cid, name, phone, number, stage in conn.execute(sql + " ORDER BY o.id DESC", args):
-        if not orders.board_matches(wanted, cid, name, phone, first.get(cid, ""), number or ""):
+    for cid, name, phone, number, stage, transfer in conn.execute(sql + " ORDER BY o.id DESC", args):
+        if not orders.board_matches(wanted, cid, name, phone, first.get(cid, ""), number or "", transfer or ""):
             continue
         found.append({"type": "order", "title": "Заказ №%d · %s" % (cid, name or phone or "Без имени"),
-                      "subtitle": " · ".join(x for x in (stage, first.get(cid, "")) if x), "url": "/orders/%d" % cid})
+                      "subtitle": " · ".join(x for x in (stage, "перемещение %s" % transfer if transfer else "", first.get(cid, "")) if x),
+                      "url": "/orders/%d" % cid})
         if len(found) > limit:
             break
     return found

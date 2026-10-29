@@ -1,6 +1,6 @@
 """The managers of the points work in the panel (the owner 2026-10-26): what a point sees is its own and nothing of another point or another
-Avito account — by the address, through the JSON of the search and the feeds, in its CRM (a client shared between two accounts is shown
-with the point's own part only: the orders of the point, the chats and the calls of its account, its sums), no money on the board, the
+Avito account — by the address, through the JSON of the search and the feeds; no CRM at all (the owner 2026-10-29; until then its own part
+of a client, 2026-10-26), no money on the board, the
 invitation of a point leads to «Моя точка» and an invitation for a point that is gone is refused."""
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ def test_a_point_opens_nothing_of_another_point_by_the_address(w):
 
 def test_the_own_things_open(w):
     m = w["manager"]
-    for url in ("/orders/%d" % w["order_a"], "/chats/%d" % w["chat_a"], "/clients/%d" % w["shared"], "/clients/%d" % w["caller"], "/clients"):
+    for url in ("/orders/%d" % w["order_a"], "/chats/%d" % w["chat_a"], "/my-point"):
         assert m.get(url).status_code == 200, url
 
 
@@ -141,12 +141,10 @@ def test_the_search_by_number_finds_the_own_order_and_never_the_foreign_one(w):
     assert "/orders/%d" % w["order_a"] in repr(own)
 
 
-def test_the_search_finds_the_own_clients_only(w):
-    found = w["manager"].get("/search.json", query_string={"q": PHONE_SHARED}).get_json()
-    clients_found = [g for g in found["groups"] if g["key"] == "clients"]
-    assert clients_found and {i["url"] for i in clients_found[0]["items"]} == {"/clients/%d" % w["shared"]}
-    assert "заказов: 1 · чатов: 1" in clients_found[0]["items"][0]["subtitle"]           # the point's own counts, never the client's all
-    assert w["manager"].get("/search.json", query_string={"q": PHONE_B_ONLY}).get_json()["groups"] == []       # a phone point Б knows
+def test_the_search_finds_no_client_for_a_point(w):
+    for q in (PHONE_SHARED, PHONE_B_ONLY, "Общий"):
+        found = w["manager"].get("/search.json", query_string={"q": q}).get_json()
+        assert [g for g in found["groups"] if g["key"] == "clients"] == [], q                 # no «CRM» (the owner 2026-10-29)
 
 
 def test_the_feeds_and_the_file_are_the_points_own_whatever_p_says(w):
@@ -165,34 +163,15 @@ def test_the_feeds_and_the_file_are_the_points_own_whatever_p_says(w):
         assert ids == {w["order_a"]}
 
 
-# ---- 3. the CRM of a point --------------------------------------------------------------------------------------------------------
+# ---- 3. no CRM for a point (the owner 2026-10-29) ------------------------------------------------------------------------------------
 
-def test_the_crm_list_of_a_point_has_its_own_clients_only(w):
-    page = _text(w["manager"].get("/clients"))
-    assert "/clients/%d\"" % w["shared"] in page and "/clients/%d\"" % w["caller"] in page
-    assert "/clients/%d\"" % w["foreign"] not in page and "Чужой" not in page
-    assert PHONE_B_ONLY[-4:] not in page and "/clients/duplicates" not in page
-    for q in (PHONE_B_ONLY, "Чужой", PHONE_FOREIGN):
-        assert "/clients/%d\"" % w["foreign"] not in _text(w["manager"].get("/clients", query_string={"q": q})), q
-        assert "/clients/%d\"" % w["shared"] not in _text(w["manager"].get("/clients", query_string={"q": PHONE_B_ONLY}))
-    assert "/clients/%d\"" % w["shared"] in _text(w["manager"].get("/clients", query_string={"q": PHONE_SHARED}))
-
-
-def test_the_shared_client_shows_the_points_part_only(w):
-    w["conn"].execute("UPDATE avito_call SET order_id = ?, point_id = ? WHERE id = ?", (w["order_b"], w["pb"], w["call_a"]))   # its own call,
-    w["conn"].commit()                                                                                           # put to point Б's order
-    page = _text(w["manager"].get("/clients/%d" % w["shared"]))
-    # its own: the name, the phone, the order of the point with the client's prices and the sum, the chat and the call of its account
-    assert "Общий" in page and "Nokian Своя-шина" in page and "/orders/%d" % w["order_a"] in page and "Ч-%d" % w["chat_a"] in page
-    assert "20%s000%s₽" % (NBSP, NBSP) in page                                               # «Куплено на»: the point's own sale
-    assert "+7 900 111-11-11" in page or "900 111" in page or PHONE_SHARED[2:5] in page
-    # nothing of point Б, of account Юнона, of the joins, of the duplicates, no purchase price, no editing
-    for foreign in ("Шина-Юноны", "/orders/%d\"" % w["order_b"], "№%d<" % w["order_b"], "/orders/%d\"" % w["order_b2"], "Ч-%d" % w["chat_b"],
-                    "Чат-Юноны", "Аккаунт-Юнона", "Юнона", "15%s554" % NBSP, "35%s554" % NBSP, "222-22", "Склеенные", "Склеить", "Разъединить",
-                    "Возможно, тот же клиент", "/save", "/tag", "/merge", "/split-", "Закупка", "3%s100" % NBSP, "Присоединён"):
-        assert foreign not in page, foreign
-    calls = re.search(r"Звонки.*", page, re.S).group(0)
-    assert calls.count("Аккаунт-Руставели") + calls.count("Руставели") >= 1 and "Аккаунт-Юнона" not in calls
+def test_a_point_has_no_crm_its_own_clients_included(w):
+    m = w["manager"]
+    for url in ("/clients", "/clients?q=%s" % PHONE_SHARED, "/clients/%d" % w["shared"], "/clients/%d" % w["caller"], "/clients/%d" % w["foreign"],
+                "/clients/duplicates"):
+        assert m.get(url).status_code == 403, url
+    for page in (_text(m.get("/orders/%d" % w["order_a"])), _text(m.get("/chats/%d" % w["chat_a"])), _text(m.get("/my-point"))):
+        assert 'href="/clients' not in page                                                   # no link to a client card, no menu item
 
 
 def test_the_owner_still_sees_the_whole_client(w):
@@ -209,16 +188,6 @@ def test_a_client_of_another_point_merged_away_or_missing_is_not_opened(w):
     assert gone is None or gone["id"] == w["shared"]
     merged = conn.execute("SELECT id FROM client WHERE merged_into = ?", (w["shared"],)).fetchone()[0]
     assert m.get("/clients/%d" % merged).status_code == 403
-
-
-def test_a_point_without_an_avito_account_sees_the_clients_of_its_orders_only(w):
-    conn = w["conn"]
-    conn.execute("UPDATE point SET avito_account_id = NULL WHERE id = ?", (w["pa"],))
-    conn.commit()
-    m = w["manager"]
-    assert m.get("/clients/%d" % w["caller"]).status_code == 403                          # known by a call of the account only
-    page = _text(m.get("/clients/%d" % w["shared"]))
-    assert "/orders/%d" % w["order_a"] in page and "Ч-%d" % w["chat_a"] not in page
 
 
 # ---- 4. money -------------------------------------------------------------------------------------------------------------------
@@ -248,8 +217,7 @@ def test_an_order_of_another_account_is_the_points_when_it_names_the_point(w):
     assert m.get("/orders/%d" % named).status_code == 200 and "С основного" in _text(m.get("/orders"))
     assert m.get("/orders/%d" % unnamed).status_code == 403 and "Без точки" not in _text(m.get("/orders"))     # postponed (п. 5): unchanged
     assert m.get("/chats/%d" % chat).status_code == 403                                   # the chat of the other account stays closed
-    page = _text(m.get("/clients/%d" % clients.client_of_order(conn, named)["id"]))
-    assert "/orders/%d" % named in page and "Ч-%d" % chat not in page
+    assert m.get("/clients/%d" % clients.client_of_order(conn, named)["id"]).status_code == 403          # no CRM (the owner 2026-10-29)
 
 
 # ---- 6. the invitation ------------------------------------------------------------------------------------------------------------
@@ -298,8 +266,7 @@ def test_an_invitation_or_a_role_for_a_point_that_is_not_there_is_refused(w):
 # ---- 7. the matrix ----------------------------------------------------------------------------------------------------------------
 
 def test_the_point_role_matrix(w):
-    assert users.level("point", "clients") == users.VIEW
-    for section in ("home", "catalog", "analytics", "setup", "users"):
+    for section in ("home", "clients", "catalog", "analytics", "setup", "users"):
         assert users.level("point", section) == users.NONE, section
     for right in ("money", "delete", "bulk", "publish", "connections", "supplier"):
         assert not users.has_right("point", right), right
@@ -317,7 +284,7 @@ def test_the_points_card_never_reads_the_whole_clients_journal_inquiries_or_tags
         raise AssertionError("read the whole client")
     for name in ("inquiries", "client_events", "tags_of", "handed"):
         monkeypatch.setattr(clients, name, never)
-    assert w["manager"].get("/clients/%d" % w["shared"]).status_code == 200
+    assert w["manager"].get("/clients/%d" % w["shared"]).status_code == 403            # no CRM at all now (the owner 2026-10-29)
 
 
 def test_our_own_number_typed_into_an_order_is_not_the_clients_phone_for_the_point(w):
@@ -328,8 +295,4 @@ def test_our_own_number_typed_into_an_order_is_not_the_clients_phone_for_the_poi
         conn.execute("INSERT INTO client_order (client_id, order_id, how, at) VALUES (?,?,'manual',?)", (w["shared"], card, NOW))   # by hand
     conn.commit()
     m = w["manager"]
-    pages = [_text(m.get("/clients")), _text(m.get("/clients/%d" % w["shared"]))]
-    assert "Свой по нашему номеру" in pages[1] or "/orders/%d\"" % card in pages[1]
-    for page in pages:
-        assert "666-00-66" not in page and "6660066" not in re.sub(r"\D", "", page)
     assert [g for g in m.get("/search.json", query_string={"q": own}).get_json()["groups"] if g["key"] == "clients"] == []

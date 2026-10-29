@@ -30,7 +30,7 @@ KIND_NAMES = {"open": "обычный", "won": "успешный", "lost": "от
 DEFAULT_STAGES = (
     ("new", "Новый заказ", "#7F56D9", "open"), ("talk", "Переговоры", "#2E90FA", "open"), ("wait", "Ожидает наличие", "#0BA5EC", "open"),
     ("placed", "Заказ оформлен", "#F79009", "open"), ("moving", "Перемещение на точку", "#EF6820", "open"),
-    ("at_point", "Товар на точке", "#17B26A", "open"), ("oth", "На ОТХ", "#667085", "open"),
+    ("at_point", "Товар на точке", "#17B26A", "open"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "Возврат передан", "#DC6803", "open"),
     ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена", "#D92D20", "lost"), ("refused", "Отказ/невыкуп", "#C01048", "lost"),
     ("return", "Возврат", "#B54708", "closed"))
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -64,6 +64,7 @@ def ensure_pipeline(conn, now: str) -> None:
         conn.commit()
     _ensure_wait_stage(conn)
     _ensure_refused_stage(conn)
+    _ensure_return_given_stage(conn)
 
 
 def _ensure_wait_stage(conn) -> None:
@@ -92,6 +93,25 @@ def _ensure_refused_stage(conn) -> None:
                        (code, name, color, at, kind))
     if cur.rowcount == 1:                                       # the owner's own stages have no code: «code != …» alone would skip them
         conn.execute("UPDATE order_stage SET position = position + 1 WHERE position >= ? AND (code IS NULL OR code != 'refused')", (at,))
+    conn.commit()
+
+
+RETURN_GIVEN = "return_given"
+
+
+def _ensure_return_given_stage(conn) -> None:
+    """A pipeline made before «Возврат передан» existed (the owner 2026-10-29: the point signed the act МХ-3 and gave the tyres of «На ОТХ»
+    back to the supplier) gets it once, right after «На ОТХ» (one statement, like «Ожидает наличие»). An open stage: the money of the return
+    is not back yet; the manager closes the order in «Возврат» with the amount."""
+    if conn.execute("SELECT 1 FROM order_stage WHERE code = ?", (RETURN_GIVEN,)).fetchone():
+        return
+    oth = conn.execute("SELECT position FROM order_stage WHERE code = 'oth'").fetchone()
+    at = (oth[0] + 1) if oth else (conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM order_stage").fetchone()[0])
+    code, name, color, kind = next(d for d in DEFAULT_STAGES if d[0] == RETURN_GIVEN)
+    cur = conn.execute("INSERT INTO order_stage (code, name, color, position, kind) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM order_stage WHERE code = ?)",
+                       (code, name, color, at, kind, code))
+    if cur.rowcount == 1:                                       # the owner's own stages have no code: «code != …» alone would skip them
+        conn.execute("UPDATE order_stage SET position = position + 1 WHERE position >= ? AND (code IS NULL OR code != ?)", (at, code))
     conn.commit()
 
 
@@ -711,7 +731,7 @@ def _needs_placed(stage: dict, placed: Optional[dict]) -> bool:
     """«Заказ оформлен» and every stage after it need the data of placing; so does a user stage that stands after it."""
     if stage["code"] in PLACED_CODES:
         return True
-    if stage["code"] in ("new", "talk", "wait", "cancel", "refused", "return", FROM_POINT[0]):
+    if stage["code"] in ("new", "talk", "wait", "cancel", "refused", "return", RETURN_GIVEN, FROM_POINT[0]):
         return False
     return placed is not None and stage["position"] >= placed["position"]
 
@@ -844,7 +864,7 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     from_oth = card["stage"].get("code") == "oth"
     after_oth = from_oth or (card["stage"].get("kind") != "open" and conn.execute(          # «На ОТХ», then a finished stage, then open again
         "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND text LIKE 'На ОТХ: срок продажи до %' LIMIT 1", (card_id,)).fetchone())
-    if stage["code"] != "oth":                                                  # the client of the phone, after the stage's own linking:
+    if stage["code"] not in ("oth", RETURN_GIVEN):                              # the client of the phone, after the stage's own linking:
         unlinked = bool(after_oth) and conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (card_id,)).fetchone() is None
         if (phoned or unlinked) if stage["kind"] == "open" else (phoned and not from_oth):
             _attach_client(conn, card_id, now, author)                          # a new phone, or one typed on «На ОТХ» (review of З15);
@@ -880,21 +900,24 @@ def board_query(query: str) -> tuple:
     return needle, digits, int(found.group(1)) if found else None, phone
 
 
-def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item: str, webmim_number: str = "") -> bool:
+def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item: str, webmim_number: str = "", transfer_number: str = "") -> bool:
     """The order fits the search of the board (board_query): a number finds that order, the order with that number of WebMIM (or a phone with
-    those digits), not every order with the digit; words find the client's name or the first position; three digits and more find the
-    phone; a whole phone (the last ten digits) finds it written in any way."""
+    those digits, or a transfer number ending in them, four and more), not every order with the digit; words find the client's name or the
+    first position, six characters and more the transfer number as typed («26R-004417», the owner 2026-10-29: never every «26R» of the year); three digits and more find the phone; a whole phone
+    (the last ten digits) finds it written in any way."""
     needle, digits, number, phone10 = wanted
     if not needle:
         return True
     phone_digits = re.sub(r"\D", "", phone)
     if phone10 and phone10 in phone_digits:
         return True
+    transfer = transfer_number.lower().strip()
     if number is not None:                       # nine digits at most: a WebMIM number of ten and more is read as a phone (they are of seven)
         return (card_id == number or (len(digits) >= 4 and digits in phone_digits)
-                or bool(webmim_number and re.sub(r"\D", "", webmim_number) == digits))
+                or bool(webmim_number and re.sub(r"\D", "", webmim_number) == digits)
+                or bool(transfer and len(digits) >= 4 and re.sub(r"\D", "", transfer).endswith(digits)))
     hay = " ".join([name.lower(), first_item.lower()])
-    return needle in hay or (len(digits) >= 3 and digits in phone_digits)
+    return needle in hay or (len(digits) >= 3 and digits in phone_digits) or (len(needle) >= 6 and needle in transfer)
 
 
 ORIGIN_NO_ACCOUNT = "Без аккаунта"

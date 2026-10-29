@@ -91,6 +91,14 @@ def audit_text(entry: dict) -> str:
         return "ОТХ: заказ №%s, позиция возвращена поставщику (%s шт.)" % (d.get("order", "?"), d.get("qty", "?"))
     if action == "oth_return_undo":
         return "ОТХ: заказ №%s, отметка «возвращено поставщику» снята%s" % (d.get("order", "?"), " (%s шт.)" % d["qty"] if d.get("qty") else "")
+    if action == "oth_return_agreed":
+        return "ОТХ: заказ №%s, возврат согласован с поставщиком на %s" % (d.get("order", "?"), d.get("date", "?"))
+    if action == "oth_act_signed":
+        return "ОТХ: заказ №%s, точка подписала акт МХ-3 и отдала шины поставщику" % d.get("order", "?")
+    if action == "point_action":
+        from .. import point_log
+        return "Точка %s: %s%s" % ("«%s»" % d["name"] if d.get("name") else "№%s" % d.get("point", "?"), point_log.NAMES.get(d.get("kind", ""), d.get("kind") or "действие"),
+                                    ", заказ №%s" % d["order"] if d.get("order") else "")
     if action == "share_labels":
         to = d.get("to") if isinstance(d.get("to"), dict) else {}
         return "Подписи долей в отчёте по заказам: «%s» и «%s»" % (to.get("owner") or "по умолчанию", to.get("partner") or "по умолчанию")

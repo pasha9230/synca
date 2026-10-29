@@ -6,7 +6,7 @@ import re
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, session
 
-from .. import order_alerts, order_engine, order_manager as mgr, order_reserve as reserve, orders, store
+from .. import order_alerts, order_engine, order_manager as mgr, order_oth, order_reserve as reserve, orders, store
 from .common import can, get_conn, login_required, own_point, point_account
 from .routes_orders import from_panel, local_iso
 
@@ -30,7 +30,7 @@ def grouped(conn, login: str) -> list:
         sorted(ids) + [account, account])} if ids else set()
     chats_of = {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id = ?", (account,))} if account is not None else set()
     foreign = quiet | set(orders.origin_labels(conn, point, ours))     # not the point's own order: the client's texts named only (as in the card)
-    rows = [r for r in rows if not is_handoff(r) and not is_return_ask(r)]   # «Клиент хочет заказать шины…» is for the staff: the point sees it on
+    rows = [r for r in rows if not is_handoff(r) and not is_return_ask(r) and not is_handoff_cancel(r)]   # «Клиент хочет заказать шины…» is for the staff: the point sees it on
                                                                   # «Моя точка»; «заполните сумму возврата» too: the point has its green row
     rows = [order_engine.for_point(r) if r["order_id"] in foreign else r
             for r in rows if (r["order_id"] in ours and not (r["order_id"] in quiet and orders.client_words(r))
@@ -97,7 +97,12 @@ def is_return_ask(row: dict) -> bool:
     """The yellow «заполните сумму возврата» (or «не заполнено — …») of a return the point pressed (order_manager.returned): it asks the
     manager; the point has its green «возврат отмечен, ждёт суммы» (point_rows) instead (the owner 2026-10-27)."""
     text = str(row.get("text") or "")
-    return row.get("kind") == "point" and (text == mgr.RETURN_ASK or text.startswith(mgr.RETURN_GAPS.split("%s")[0]))
+    return row.get("kind") == "point" and (text in (mgr.RETURN_ASK, order_oth.SIGNED_ASK) or text.startswith(mgr.RETURN_GAPS.split("%s")[0]))
+
+
+def is_handoff_cancel(row: dict) -> bool:
+    """The yellow «Точка … отменила передачу клиента» (order_manager.cancel_handoff): for the person who would take it, never the point's bell."""
+    return row.get("kind") == "handoff" and mgr.CANCELLED_MARK in str(row.get("text") or "")
 
 
 def may_take() -> bool:
