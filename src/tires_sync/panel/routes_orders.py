@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import order_oth, oth_sale, point_log
+from .. import order_notify, order_oth, order_reserve as reserve_store, oth_sale, point_log
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
@@ -777,7 +777,8 @@ def register(app) -> None:
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
-            oth_taken={i: dict(t, drop=oth_sale.can_drop(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
             oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
@@ -1030,15 +1031,39 @@ def register(app) -> None:
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
         try:
-            if request.form.get("drop"):                                   # «Убрать без возврата»: the old order cannot take them back
-                pieces = oth_sale.drop(conn, card_id, item_id, local_iso(), author())
-                flash("Убрано из заказа: %d шт. Шины на точке — учтите их вручную." % pieces)
-            else:
-                pieces = oth_sale.untake(conn, card_id, item_id, local_iso(), author())
-                flash("Возвращено на ОТХ: %d шт. Если шины нужны у поставщика, добавьте позицию заново." % pieces)
+            pieces = oth_sale.untake(conn, card_id, item_id, local_iso(), author())
+            flash("Возвращено на ОТХ: %d шт. Если шины нужны у поставщика, добавьте позицию заново." % pieces)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "items")
+
+    @app.route("/orders/<int:card_id>/oth-at-point", methods=["POST"])
+    @login_required
+    def order_oth_at_point(card_id):
+        """«Шины уже на точке — перевести на «Товар на точке»» (the owner 2026-10-30): every tyre is taken from «На ОТХ», so the order goes
+        past «Заказ оформлен» and «Перемещение» (no WebMIM) by the ordinary move with the rules of the stage (the reservation of three days);
+        the client hears the message of the arrival as after the point's «приехал», the point its own text (order_notify.tell_point)."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        if not oth_sale.all_from_oth(conn, card):
+            flash("Перевести сразу на «Товар на точке» можно, когда все шины заказа взяты с ОТХ и заказ ещё не оформлен.", "error")
+            return back(card_id)
+        stage = next((s for s in orders.list_stages(conn) if s["code"] == "at_point"), None)
+        now = local_iso()
+        try:
+            if stage is None or not orders.move_card(conn, card_id, stage["id"], now, author()):
+                flash("Заказ уже перевели: обновите страницу.", "error")
+                return back(card_id)
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return back(card_id)
+        card = orders.get_card(conn, card_id)
+        body = None if card["webmim_number"] else reserve_store.NUMBER.sub("", manager.template_body(conn, templates.ARRIVED_SAMPLE))
+        sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author(), body=body)
+        told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, oth_sale.point_text(conn, card, now), now,
+                                       vk_http=app.config.get("VK_HTTP") or urllib_transport)
+        flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")
+        return back(card_id)
 
     @app.route("/orders/<int:card_id>/items/<int:item_id>/update", methods=["POST"])
     @login_required

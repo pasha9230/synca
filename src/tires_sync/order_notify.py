@@ -132,9 +132,10 @@ def _event(conn, card_id, now: str, text: str) -> None:
 
 
 def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_http: Transport = urllib_transport,
-            vk_http: Transport = urllib_transport, owner_login: Optional[str] = None) -> str:
-    """Write the alert; never raises. Returns «отправлено …» or «не отправлено …» (the owner is told in the second case when possible)."""
-    way = route(conn, card, owner_login)
+            vk_http: Transport = urllib_transport, owner_login: Optional[str] = None, way: Optional[dict] = None) -> str:
+    """Write the alert; never raises. Returns «отправлено …» or «не отправлено …» (the owner is told in the second case when possible).
+    `way`: where it goes, when not to the responsible (tell_point)."""
+    way = way or route(conn, card, owner_login)
     failure = way["why"] if way["channel"] == "owner" else ""
     if way["channel"] == "telegram":
         key = "order|%s|%s|%s" % (card["id"], way["to"], text)
@@ -185,6 +186,15 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
         told = "; владельцу написать не удалось"
     _event(conn, card["id"], now, "Оповещение не отправлено: %s%s" % (failure, told))
     return "не отправлено: %s%s" % (failure, told)
+
+
+def tell_point(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_http: Transport = urllib_transport,
+               vk_http: Transport = urllib_transport) -> str:
+    """Write to the point of the order itself (its «Моя точка» or its VK, as deliver writes a point), not to the responsible; never raises.
+    No way to the point: the owner is told, as by deliver."""
+    point = card.get("point")
+    way = _point_route(point) if point else {"channel": "owner", "to": "", "why": "у заказа нет точки"}
+    return deliver(conn, box, card, text, now, tg_http=tg_http, vk_http=vk_http, way=way)
 
 
 def missing_order_people(conn) -> List[str]:

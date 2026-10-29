@@ -59,3 +59,12 @@ def test_the_point_sees_no_term_for_an_order_on_oth_even_with_an_old_date(tmp_pa
     conn.commit()
     page = manager(app, conn, pid).get("/my-point", query_string={"tab": "return"}).get_data(as_text=True)
     assert "700501" in page and "Хранение до 01.01" not in page and "срок прошёл" not in page
+
+
+def test_the_templates_give_no_reservation_date_for_an_order_on_oth(tmp_path):
+    from tires_sync import order_templates
+    conn = db(tmp_path)
+    cid = card_at(conn, "oth", "2026-10-17T10:00:00")
+    conn.execute("UPDATE order_card SET reserve_until = '2026-10-24' WHERE id = ?", (cid,))
+    conn.commit()
+    assert order_templates.values(conn, orders.get_card(conn, cid), "2026-10-30T10:00:00")["hold_until"] == ""

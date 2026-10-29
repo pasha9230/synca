@@ -638,15 +638,16 @@ def send_to_client(conn, card: dict, body: str, token: str, deliver: Optional[De
         return "failed", "сбой отправки: %s" % (str(err)[:200] or err.__class__.__name__), copy
 
 
-def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str) -> Tuple[bool, str]:
+def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """The point says the goods came: «можно забирать» to the client (_tell_arrived) and «Поступили шины» for the bell (note_arrival), once per
-    stay at the point each. Every «приехал» of a point comes here (the command, the button of «Моя точка», the owner's confirmation)."""
-    sent, note = _tell_arrived(conn, card_id, deliver, now, who)
+    stay at the point each. Every «приехал» of a point comes here (the command, the button of «Моя точка», the owner's confirmation), and
+    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}», it has none)."""
+    sent, note = _tell_arrived(conn, card_id, deliver, now, who, body)
     note_arrival(conn, card_id, who, now, sent)
     return sent, note
 
 
-def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str) -> Tuple[bool, str]:
+def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """«Можно забирать» to the client of the order, once per arrival (the send token is the order and the moment it reached the point).
     Never raises: when it does not go, a red record in the journal and a line in «Входящие» tell the owner to send it by hand. The line's id
     begins with the send token: the sync closes it once it delivered the message (chats._inbox_done, tails5)."""
@@ -657,7 +658,7 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str)
     except Exception as err:
         status, why, copy = "failed", "сбой отправки: %s" % (str(err)[:200] or err.__class__.__name__), ""
     else:
-        status, why, copy = send_to_client(conn, card, _arrived_body(conn), token, deliver, now)
+        status, why, copy = send_to_client(conn, card, body or _arrived_body(conn), token, deliver, now)
     if status == "sent":
         return True, "Клиенту отправлено сообщение «можно забирать»."
     by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."
