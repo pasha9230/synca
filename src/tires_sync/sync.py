@@ -256,7 +256,8 @@ def _off_by_the_owner(code: str, text: Optional[str], settings: Settings, left_o
     the manual «выкл», a radius below the minimum, a tire type left out of the account; `aged_too` (an ad to bring back): the supplier's age
     note too — as in the unload, a published aged one is held, an aged one is not published again. An excluded size needs the supplier's
     brand key, which the ad has not: not judged here."""
-    if settings.overrides.get(override_key(code)) == "off":
+    manual = settings.overrides.get(override_key(code))
+    if manual == "off":
         return True
     try:
         ad = ET.fromstring(text) if text else None
@@ -265,8 +266,10 @@ def _off_by_the_owner(code: str, text: Optional[str], settings: Settings, left_o
     if ad is None:
         return False
     diameter = (ad.findtext("RimDiameter") or "").strip()
-    return ((diameter.isdigit() and int(diameter) < settings.min_diameter) or (ad.findtext("TireType") or "").strip() in left_out_types
-            or (aged_too and bool(AGE_WORD.search(ad.findtext("Title") or ""))))
+    forced = manual == "on"                                               # the manual «вкл» lifts the radius and the age, as in candidates
+    return ((not forced and diameter.isdigit() and int(diameter) < settings.min_diameter)
+            or (ad.findtext("TireType") or "").strip() in left_out_types
+            or (aged_too and not forced and bool(AGE_WORD.search(ad.findtext("Title") or ""))))
 
 
 STOCK_REMOVALS = ("low_stock", "absent_from_supplier", "stale:", "cart_wait:", "oth:")   # an ad taken off for these comes back for OTH
@@ -314,30 +317,44 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
             except (ET.ParseError, ValueError):
                 continue
             retired[code] = (found[0], found[1], price)
-    tire_of = {}                                                          # the ads that stay in the feed: in the unload, published or enough
-    for code in ev.ok:
-        if code in published or ev.ok[code].offer.stock >= min_stock or code in oth:
-            key = same_tire.identity(ev.ok[code])
-            if key is not None:
-                tire_of[code] = key
+    taken = {c for c in published if taken_by.get(live_id_of(c)) not in (None, c)}     # its Id goes to another lot in this step
+
+    def tire(code):
+        if code in ev.ok:
+            return same_tire.identity(ev.ok[code])
+        if code in before_dedupe:                                         # a lot same_tire hid
+            return same_tire.identity(before_dedupe[code])
+        if code in retired:
+            return same_tire.identity_of_ad(retired[code][1])
+        return same_tire.identity_of_ad(store.get_snapshot(conn, code, acct) or "") if code in published else None
+    news = [c for c in sorted(oth) if c not in published and c not in ev.inherit]   # a lot under an older Id is that ad already
+    groups: Dict[tuple, list] = {}
+    for code in news:
+        key = tire(code)
+        if key is not None:
+            groups.setdefault(key, [])
+    if groups:
+        for code in sorted(set(published) | set(ev.ok) | set(news)):
+            key = tire(code)
+            if key in groups:
+                groups[key].append(code)
+    for key, members in groups.items():
+        # One tire, one ad (the owner's rule): the ad that carries OTH is a published one that no setting takes off and whose Id stays
+        # (on OTH it stays in the feed), else the lot that goes in on its stock, else the first lot on OTH that can go in.
+        published_ok = [c for c in members if c in published and c not in ev.excluded and c not in taken]
+        stocked = [c for c in members if c not in published and c in ev.ok and ev.ok[c].offer.stock >= min_stock]   # it goes in anyway
+        own = [c for c in members if c in news and (c in ev.ok or c in retired)]
+        carrier = (published_ok or stocked or own or [None])[0]
+        for code in members:
+            if code in news and code in oth and code != carrier and carrier is not None:
+                hand_over(code, carrier)
+                retired.pop(code, None)
     live_ids = {live_id_of(p): p for p in published}
-    for code in sorted(c for c in oth if c not in published and c not in ev.inherit):     # a lot that goes on under an older Id is that ad
-        own = same_tire.identity(ev.ok[code]) if code in ev.ok else (
-            same_tire.identity_of_ad(retired[code][1]) if code in retired else
-            same_tire.identity(before_dedupe[code]) if code in before_dedupe else None)     # a lot same_tire hid
-        holders = sorted((c not in published, ev.ok[c].offer.stock < min_stock, c) for c in tire_of
-                         if c != code and own is not None and tire_of[c] == own
-                         and (c in published or ev.ok[c].offer.stock >= min_stock or c < code))   # of two lots on OTH the first one
-        holder = holders[0][2] if holders else None                      # a published ad first, then one with enough stock
+    for code in [c for c in news if c in oth and c not in published]:
         if code not in ev.ok and code not in retired:
-            if holder is not None:
-                hand_over(code, holder)
-            continue
+            continue                                                      # nothing to publish it from (hidden as same_tire and no carrier)
         ad_id = retired[code][0] if code in retired else live_id_of(code)
-        if holder is not None:
-            hand_over(code, holder)                                       # the same tire is on Avito (or goes on) under another code
-            retired.pop(code, None)
-        elif (live_ids.get(ad_id) not in (None, code)) or ad_id in set(ev.inherit.values()) or ad_id in foreign:
+        if (live_ids.get(ad_id) not in (None, code)) or ad_id in set(ev.inherit.values()) or ad_id in foreign:
             oth.pop(code)                                                 # its Id is another ad's now: never two ads under one Id
             points.pop(code, None)
             retired.pop(code, None)

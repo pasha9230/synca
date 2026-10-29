@@ -506,3 +506,64 @@ def test_a_4tochki_position_on_oth_never_shows_more_than_40():
     assert oth_count("s2-A", {"s2-A": 4}, ev, parsed, "s2-") == 40                # the owner 2026-10-27: an ad of 4tochki says at most 40
     assert oth_count("100", {"100": 4}, Evaluation(), parsed, "s2-") == 45       # WebMIM: ours plus the supplier's
     assert oth_count("200", {"200": 4}, Evaluation(), parsed, "s2-") == 4        # gone from the unload: ours only
+
+
+def test_of_two_lots_on_oth_the_one_with_stock_carries_the_line(tmp_path, capsys):
+    """107 (1 at the supplier) and 108 (5) are one tire, both on OTH, neither on Avito: one ad, 108's (it goes in on its stock)."""
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "107", "108", qty=4)
+    lots = rows(*(dict(NNOMMODIF=str(n)) for n in range(101, 106)), dict(NNOMMODIF="107", SLOAD="120", NREST="1"),
+                dict(NNOMMODIF="108", SLOAD="120", NREST="5"))
+    capsys.readouterr()
+    assert run(tmp_path, lots) == 0
+    passed(capsys)
+    ads = ads_of(public(tmp_path))
+    assert "108" in ads and "107" not in ads and description(public(tmp_path), "108").startswith(AT_BETA + "\n")
+
+
+def test_a_published_ad_held_for_a_broken_row_carries_the_line_of_its_tire(tmp_path, capsys):
+    """101 is published and its row is broken (held); 107, the same tire, lies on OTH and is not on Avito: 101 carries the line."""
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "107")
+    lots = rows(dict(NNOMMODIF="101", NPRICE_DELAYED="0"), *(dict(NNOMMODIF=str(n)) for n in range(102, 106)),
+                dict(NNOMMODIF="107", SLOAD="95", NREST="1"))
+    capsys.readouterr()
+    assert run(tmp_path, lots) == 0
+    passed(capsys)
+    ids = [a.findtext("Id") for a in ET.fromstring(public(tmp_path)).findall("Ad")]
+    assert ids.count("101") == 1 and not any(i.startswith("107") for i in ids)
+    assert description(public(tmp_path), "101").startswith(AT_BETA + "\n")
+
+
+def test_the_check_of_a_mirror_knows_the_new_position_that_carries_oth(tmp_path):
+    from tires_sync import cycle, mirror_feed, publishing
+    from tires_sync.catalog import parse_reference
+    from tires_sync.settings_store import init_settings
+    from helpers import catalog_xml, commodity_xml, settings_dict
+    ref = parse_reference('<Shiny>\n<make name="Ikon Tyres">\n<model name="Test Model"/>\n</make>\n</Shiny>')
+    conn = connect(tmp_path)
+    init_settings(conn, settings_dict(), "2026-10-29T09:00:00")
+    from tires_sync import connections
+    account = connections.create_account(conn, "Чужой", "2026-10-29T09:00:00", "o")
+    mirror_feed.import_feed(conn, account, b"<Ads><Ad><Id>100_20260801</Id><Price>4000</Price><Title>T</Title><Description>D</Description></Ad></Ads>",
+                            "2026-10-29T09:00:00")
+    connections.set_live(conn, account, True, "2026-10-29T09:00:00", "o")
+    conn.commit()
+
+    def unload(rest_200, extra=()):
+        return catalog_xml(commodity_xml(NNOMMODIF="100"), commodity_xml(NNOMMODIF="200", SWIDTH="215", SHEIGHT="60", SLOAD="95", NREST=rest_200),
+                           *extra)
+    cycle.run_for_accounts(conn, unload("10"), ref, date(2026, 10, 29), tmp_path / "feed")
+    assert publishing.publish_live_accounts(conn, tmp_path / "feed")[0]["ok"]
+    conn.close()
+    on_oth(tmp_path, "300")
+    conn = connect(tmp_path)
+    lot = commodity_xml(NNOMMODIF="300", SWIDTH="215", SHEIGHT="60", SLOAD="95", NREST="1")    # the same tire as 200
+    results = cycle.run_for_accounts(conn, unload("2", (lot,)), ref, date(2026, 10, 29), tmp_path / "feed")
+    assert [r.ok for r in results] == [True], results
+    token = connections.get_account(conn, account)["feed_token"]
+    ads = {a.findtext("Id"): a for a in ET.parse(tmp_path / "feed" / token / "next" / "avito_feed.xml").getroot()}
+    assert "200" in ads and "300" not in ads and ads["200"].findtext("Description").startswith(AT_BETA + "\n")
+    conn.close()

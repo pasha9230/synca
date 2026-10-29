@@ -232,12 +232,12 @@ def _new_positions(conn, account, eff, xml_bytes, ref, today, feed_root, parsed,
     rest.left_out_types = frozenset(left_out)
     out_dir = Path(feed_root) / account["feed_token"] / "new"
     suffix, prefix = connections.feed_style(conn, account["id"])
-    run_cycle(xml_bytes, eff, ref, conn, today, out_dir=out_dir, description_template=account["description_template"], id_suffix=suffix, image_prefix=prefix,
-              account_id=account["id"], record_seen=False, expected_removals=expected, parsed=rest, input_sha=input_sha, now=now,
-              check_size=False, own_photos=_own_photos(conn, account))
+    report = run_cycle(xml_bytes, eff, ref, conn, today, out_dir=out_dir, description_template=account["description_template"], id_suffix=suffix,
+                       image_prefix=prefix, account_id=account["id"], record_seen=False, expected_removals=expected, parsed=rest, input_sha=input_sha,
+                       now=now, check_size=False, own_photos=_own_photos(conn, account))
     ads = list(ET.parse(out_dir / "avito_feed.xml").getroot().findall("Ad"))
     mirror_feed.match_shape(conn, account["id"], ads)
-    return ads
+    return ads, report.oth                                                    # the codes on OTH of the new positions: the mirror's check knows them
 
 
 def run_for_accounts(
@@ -286,6 +286,7 @@ def run_for_accounts(
                 prices = mirror_feed.prices_for(conn, account["id"], getattr(parsed, "offers", {}) or {}, eff) if parsed is not None else {}
                 runflat = mirror_feed.runflat_for(conn, account["id"], getattr(parsed, "offers", {}) or {}) if parsed is not None else {}
                 extra: list = []
+                extra_oth: FrozenSet[str] = frozenset()
                 note = ""
                 try:
                     models = mirror_feed.models_for(conn, account["id"], ref) if ref else {}
@@ -294,7 +295,7 @@ def run_for_accounts(
                     note = "модели не проверены (%s: %s)" % (type(err).__name__, err)
                 if parsed is not None:
                     try:
-                        extra = _new_positions(conn, account, eff, xml_bytes or b"", ref, today, feed_root, parsed, input_sha, now, expected)
+                        extra, extra_oth = _new_positions(conn, account, eff, xml_bytes or b"", ref, today, feed_root, parsed, input_sha, now, expected)
                         mirror_feed.apply_reissued_own(conn, account["id"], extra)
                     except Exception as err:                               # the file's ads must reach Avito even if the new positions did not build
                         note = (note + "; " if note else "") + "новые позиции не добавлены (%s: %s)" % (type(err).__name__, err)
@@ -307,7 +308,7 @@ def run_for_accounts(
                 if extra and store.has_pending(conn, account["id"]):
                     store.rebind_pending(conn, account["id"], (Path(feed_root) / account["feed_token"] / "next" / "avito_feed.xml").read_bytes())
                 results.append(_verdict(AccountResult(account["id"], account["name"], True, note, {}, count),
-                                        gate(conn, account, "mirror", eff, parsed, ref, feed_root, today)))
+                                        gate(conn, account, "mirror", eff, parsed, ref, feed_root, today, oth=extra_oth)))
             except Exception as err:
                 results.append(AccountResult(account["id"], account["name"], False, "%s: %s" % (type(err).__name__, err)))
             continue
