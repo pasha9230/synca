@@ -450,3 +450,19 @@ def test_the_links_carry_only_the_filters_and_a_window_of_pages(tmp_path):
     html = page(client, "/shop?evil=%3Cscript%3E&q=Test&p=2")
     assert "evil" not in html and "script" not in html.lower().replace("<script", "")
     assert 'href="/shop?q=Test&amp;p=1"' in html
+
+
+def test_a_turned_phone_photo_stands_up_and_a_transparent_palette_is_on_white():
+    from PIL import Image
+    image = Image.new("RGB", (400, 200), (0, 0, 255))
+    exif = Image.Exif()
+    exif[0x0112] = 6                                                           # «turn 90°»: the picture is shown 200 × 400
+    out = io.BytesIO()
+    image.save(out, "JPEG", exif=exif.tobytes())
+    with Image.open(io.BytesIO(shop_photos.clean(out.getvalue()))) as made:
+        assert made.size == (200, 400)
+    palette = Image.new("P", (50, 50), 0)
+    palette.putpalette([0, 0, 0] * 256)
+    out = io.BytesIO()
+    palette.save(out, "PNG", transparency=0)
+    assert color_of(shop_photos.clean(out.getvalue())) == (255, 255, 255)

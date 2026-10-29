@@ -22,7 +22,8 @@ from .. import photo_cache, photo_library, share_photos
 KINDS = photo_cache.KINDS
 SHA = re.compile(r"^[0-9a-f]{64}$")
 MAX_SIDE = 800                 # the client sees a small picture: the longer side, px
-MAX_PIXELS = 40_000_000        # a bigger source is not decoded at all
+MAX_PIXELS = 40_000_000        # a bigger JPEG is not decoded at all (a JPEG is decoded already reduced, `draft`)
+MAX_PIXELS_FULL = 20_000_000   # PNG and WebP are decoded whole: a lower bound keeps the memory of a worker small
 QUALITY = 85
 FAIL_SECONDS = 3600            # a picture that could not be made is not tried again for an hour
 MAX_PENDING = 200              # pictures waiting at once (one process); more are asked for again by a later page
@@ -38,12 +39,13 @@ _pool: Optional[ThreadPoolExecutor] = None
 def clean(data: bytes) -> bytes:
     """The picture drawn anew: JPEG, at most MAX_SIDE, no metadata of any kind. Raises PhotoError for anything that is not a picture."""
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
         with Image.open(io.BytesIO(data)) as image:
-            if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > MAX_PIXELS:
+            if image.format not in ("JPEG", "PNG", "WEBP") or \
+                    image.width * image.height > (MAX_PIXELS if image.format == "JPEG" else MAX_PIXELS_FULL):
                 raise share_photos.PhotoError("не картинка")
             image.draft("RGB", (MAX_SIDE, MAX_SIDE))
-            image = image.convert("RGBA")
+            image = ImageOps.exif_transpose(image).convert("RGBA")      # a phone's turn is applied before its EXIF is dropped
             image.thumbnail((MAX_SIDE, MAX_SIDE))
             flat = Image.new("RGB", image.size, (255, 255, 255))
             flat.paste(image, mask=image.getchannel("A"))
