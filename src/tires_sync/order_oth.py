@@ -24,9 +24,11 @@ def _audit(conn, now: str, author: str, action: str, detail: dict) -> None:
 
 
 def detach(conn, card: dict, now: str, author: str) -> Optional[int]:
-    """The order has entered «На ОТХ»: its client (if any) is unlinked and kept aside; the marks «возвращено» of an earlier stay are dropped.
+    """The order has entered «На ОТХ»: its client (if any) is unlinked and kept aside; the marks «возвращено» and the agreed return of an
+    earlier stay are dropped.
     Returns the client unlinked. No commit: saved with the move."""
     conn.execute("DELETE FROM oth_return WHERE order_id = ?", (card["id"],))
+    conn.execute("DELETE FROM oth_return_plan WHERE order_id = ?", (card["id"],))     # a return agreed in an earlier stay is not this one's
     row = conn.execute("SELECT client_id, how, at FROM client_order WHERE order_id = ?", (card["id"],)).fetchone()
     if row is None:
         return None
@@ -60,7 +62,7 @@ def reattach(conn, card_id, now: str, author: str) -> Optional[int]:
 def leave(conn, card: dict, stage: dict, now: str, author: str) -> None:
     """A move of the order (orders.move_card): an unlinked order that goes into an open stage gives the client back — straight from «На ОТХ»
     or after a closed stage set by mistake (no other way to link it again); a closed stage keeps it unlinked."""
-    if stage["code"] != "oth" and stage["kind"] == "open":
+    if stage["code"] not in ("oth", orders.RETURN_GIVEN) and stage["kind"] == "open":      # «Возврат передан»: the goods went back, no client
         reattach(conn, card["id"], now, author)
 
 
@@ -153,3 +155,78 @@ def unmark_returned(conn, item_id, now: str, author: str, qty=None) -> None:
         item["name"], pieces, " (возвращено %d из %d)" % (rest, item["ordered"]) if rest else ""))
     _audit(conn, now, author, "oth_return_undo", {"order": item["order_id"], "item": item["item_id"], "qty": pieces, "returned": rest})
     conn.commit()
+
+
+# ---- the return to the supplier with the act МХ-3 (the owner 2026-10-29) ------------------------------------------------------------
+# The owner or the partner agrees the return with the supplier in the order's card («Согласовано с поставщиком»): the panel names the
+# nearest odd date — today when the day is odd (the agreement is made in the morning, the supplier comes on the odd days: waiting for the
+# next odd day would lose two), else tomorrow (the day after an even one is always odd, the 1st of a month included). The point sees
+# «Возврат <дата>» and «Подпишите акт МХ-3» on «Рабочее место» (the act is paper: the panel makes nothing of it) and presses «Подписал акт и
+# отдал»: the order goes to «Возврат передан» and the responsible finishes it in «Возврат» with the amount. Nothing goes to WebMIM nor to
+# the client.
+
+ACT = "акт МХ-3"
+SIGNED_LINE = "Точка «%s»: %s подписан, шины отданы поставщику (возврат с ОТХ)."
+SIGNED_ASK = "Точка отдала шины с ОТХ поставщику по акту МХ-3: заполните сумму возврата и переведите заказ в «Возврат»."
+
+
+def return_date(today) -> str:
+    """The nearest odd date from `today` (a date), ISO."""
+    from datetime import timedelta
+    return (today if today.day % 2 else today + timedelta(days=1)).isoformat()
+
+
+def return_plan(conn, order_id) -> Optional[dict]:
+    row = conn.execute("SELECT agreed_at, agreed_by, return_date, signed_at, signed_by FROM oth_return_plan WHERE order_id = ?", (order_id,)).fetchone()
+    return None if row is None else dict(zip(("agreed_at", "agreed_by", "return_date", "signed_at", "signed_by"), row))
+
+
+def agree(conn, card: dict, today, now: str, author: str) -> str:
+    """«Согласовано с поставщиком» for an order on «На ОТХ»: the date of the return (return_date). Once: a second press changes nothing and
+    says the date. Returns the date (ISO)."""
+    if card["stage"]["code"] != "oth":
+        raise OthError("Согласовать возврат можно только для заказа на этапе «На ОТХ».")
+    day = return_date(today)
+    if conn.execute("INSERT OR IGNORE INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date) VALUES (?,?,?,?)",
+                    (card["id"], now, author, day)).rowcount != 1:
+        conn.rollback()
+        return return_plan(conn, card["id"])["return_date"]
+    orders.add_event(conn, card["id"], now, author, "field", "Возврат с ОТХ согласован с поставщиком: передать на возврат %s (%s)." % (
+        "%s.%s" % (day[8:10], day[5:7]), ACT))
+    _audit(conn, now, author, "oth_return_agreed", {"order": int(card["id"]), "date": day})
+    conn.commit()
+    return day
+
+
+def to_return(conn, point_id) -> List[dict]:
+    """The orders of the point on «На ОТХ» agreed for the return and not yet given: (card, plan), the earliest date first."""
+    rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id JOIN oth_return_plan r ON r.order_id = c.id "
+                        "WHERE c.point_id = ? AND s.code = 'oth' AND r.signed_at IS NULL ORDER BY r.return_date, c.id", (point_id,)).fetchall()
+    return [{"card": orders.get_card(conn, r[0]), "plan": return_plan(conn, r[0])} for r in rows]
+
+
+def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> bool:
+    """«Подписал акт и отдал»: the plan is marked signed (one statement: a second press, another tab, signs nothing more) and the order goes
+    from «На ОТХ» to «Возврат передан» with a yellow record for the responsible. False: nothing to sign (no agreement, signed already, the
+    order left «На ОТХ»)."""
+    if card["stage"]["code"] != "oth":
+        return False
+    if conn.execute("UPDATE oth_return_plan SET signed_at = ?, signed_by = ? WHERE order_id = ? AND signed_at IS NULL",
+                    (now, author, card["id"])).rowcount != 1:
+        conn.rollback()
+        return False
+    stage = next(s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN)
+    try:
+        moved = orders.move_card(conn, card["id"], stage["id"], now, author)          # commits the mark with the move
+    except orders.OrderError:
+        conn.rollback()
+        raise
+    if not moved:                                                                     # moved meanwhile: the mark is undone
+        conn.execute("UPDATE oth_return_plan SET signed_at = NULL, signed_by = '' WHERE order_id = ?", (card["id"],))
+        conn.commit()
+        return False
+    orders.add_event(conn, card["id"], now, author, "point", SIGNED_LINE % (point_name, ACT))
+    orders.add_event(conn, card["id"], now, author, "point", SIGNED_ASK, level="yellow")
+    _audit(conn, now, author, "oth_act_signed", {"order": int(card["id"])})
+    conn.commit()
+    return True

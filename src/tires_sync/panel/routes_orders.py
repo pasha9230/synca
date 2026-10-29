@@ -14,6 +14,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
+from .. import order_oth, point_log
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
@@ -426,11 +427,16 @@ def register(app) -> None:
         point, tag, query = own_point() or _int(request.args.get("p")), request.args.get("t", "").strip()[:30], request.args.get("q", "").strip()[:80]
         data = orders.board(conn, local_now(), point_id=point, tag=tag, query=query,          # a manager of a point: only the point (common.own_point),
                             with_sums=own_point() is None)                                       # and no sums (the owner 2026-10-26)
+        only = _int(request.args.get("s"))                     # one stage (the stages of «Рабочее место» lead here, the owner 2026-10-29)
+        if only is not None and any(col["stage"]["id"] == only for col in data["columns"]):
+            data = dict(data, columns=[col for col in data["columns"] if col["stage"]["id"] == only])
+        else:
+            only = None
         rows = sorted(({"card": c, "stage": col["stage"]} for col in data["columns"] for c in col["cards"]), key=lambda r: -r["card"]["id"])
         labels = orders.origin_labels(conn, own_point(), [r["card"]["id"] for r in rows]) if own_point() else {}   # not from the point's account
         return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
-                               dots=_dots(conn), rows=rows, total_cards=sum(col["count"] for col in data["columns"]),
+                               dots=_dots(conn), rows=rows, total_cards=sum(col["count"] for col in data["columns"]), only_stage=only,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
 
     @app.route("/orders/export.xlsx")
@@ -597,6 +603,8 @@ def register(app) -> None:
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
+            if moved and own_point() is not None:                         # «История точки»: the point moved its order on the board
+                point_log.record(conn, stamp, author(), own_point(), "move", card_id, "этап «%s»" % orders.get_stage(conn, stage_id)["name"])
             if moved and _ajax():                                         # the board draws the same window from the answer
                 try:
                     send = board_offer(conn, card_id, stamp) if own_point() is None else None      # a point sees no messages
@@ -610,6 +618,19 @@ def register(app) -> None:
         if _ajax():
             return jsonify(ok=ok, message=message, send=send)
         flash(message, "message" if ok else "error")
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
+    @login_required
+    def order_oth_agreed(card_id):
+        """«Согласовано с поставщиком» for an order on «На ОТХ» (the owner and the partner): the date of the return, the point sees it."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        try:
+            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author())
+            flash("Возврат согласован: точка передаст шины поставщику %s.%s и подпишет акт МХ-3." % (day[8:10], day[5:7]), "ok")
+        except order_oth.OthError as err:
+            flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
     @app.route("/orders/<int:card_id>")
@@ -655,7 +676,7 @@ def register(app) -> None:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
-            c=card, entity=orders.card_view(card), v=values, was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
+            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]), was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),

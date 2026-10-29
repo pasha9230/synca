@@ -1498,21 +1498,70 @@ def _called_back(conn, order_id: int, phone: str, created: str) -> bool:
     return False
 
 
-POINT_STATUS = {"": "передан, ждёт", "taken": "взяли в работу", "placed": "оформлен заказ", "done": "выдан", "refused": "отказ"}
+POINT_STATUS = {"": "передан, ждёт", "taken": "взяли в работу", "placed": "оформлен заказ", "done": "выдан", "refused": "отказ",
+                "cancelled": "отменён точкой"}
+CANCELLED_BY = "отменено точкой"                   # the mark in order_handoff_source.taken_by: the handoff was cancelled, nobody may take it
+CANCEL_REASON = "Точка отменила передачу клиента"
+
+
+def cancellable(conn, order_id, point_id) -> bool:
+    """The point may cancel its handoff (the owner 2026-10-29) while the manager has not taken it: the order was made by the handoff of this
+    point (an early order of a chat handed over is not: it was there before), it stands on «Передано с точки» and nobody took it."""
+    row = conn.execute("SELECT h.created_at, c.created_at, g.code, s.taken_at FROM order_handoff h JOIN order_card c ON c.id = h.order_id "
+                       "JOIN order_stage g ON g.id = c.stage_id LEFT JOIN order_handoff_source s ON s.order_id = h.order_id "
+                       "WHERE h.order_id = ? AND h.point_id = ?", (order_id, point_id)).fetchone()
+    return row is not None and row[0] == row[1] and row[2] == orders.FROM_POINT[0] and row[3] is None
+
+
+def cancel_handoff(conn, order_id, point: dict, who: str, now: str, notify: Optional[Notify] = None) -> str:
+    """«Отменить передачу»: the order of the handoff goes to «Отмена» and the person who would take it is told, in the panel (a yellow record
+    of the order) and through the channel of the handoff itself (_tell_staff). The mark that nobody may take it any more and the move are one
+    transaction: a manager taking the client at the same moment either takes it first (then it is not cancelled) or takes nothing.
+    Returns the answer for the point; raises OrderError when it cannot be cancelled. The client hears nothing."""
+    if not cancellable(conn, order_id, point["id"]):
+        raise OrderError("Передачу уже не отменить: клиента взяли в работу, заказ перенесли или он не из этой передачи.")
+    cancel = next((s for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
+    if cancel is None:
+        raise OrderError("В воронке нет этапа «Отмена»: напишите владельцу.")
+    conn.execute("INSERT OR IGNORE INTO order_handoff_source (order_id, kind) VALUES (?, '')", (order_id,))      # a handoff made before the source was kept
+    if conn.execute("UPDATE order_handoff_source SET taken_at = ?, taken_by = ?, taken_how = 'отмена' WHERE order_id = ? AND taken_at IS NULL",
+                    (now, CANCELLED_BY, order_id)).rowcount != 1:
+        conn.rollback()
+        raise OrderError("Клиента только что взяли в работу: передачу уже не отменить.")
+    author = "менеджер %s (%s)" % (point["name"], who)
+    try:
+        moved = orders.move_card(conn, order_id, cancel["id"], now, author, changes={"cancel_reason": CANCEL_REASON}, fire_rules=False)
+    except OrderError:
+        conn.rollback()
+        raise
+    if not moved:
+        conn.execute("UPDATE order_handoff_source SET taken_at = NULL, taken_by = '', taken_how = '' WHERE order_id = ? AND taken_by = ?",
+                     (order_id, CANCELLED_BY))
+        conn.commit()
+        raise OrderError("Заказ только что перенесли: передачу уже не отменить.")
+    text = "Точка «%s» отменила передачу клиента (%s): заказ №%d переведён в «Отмена», брать в работу не нужно." % (point["name"], who, order_id)
+    orders.add_event(conn, order_id, now, author, "handoff", text, level="yellow")
+    conn.execute("INSERT OR IGNORE INTO order_handoff_status (order_id, status, at, outcome) VALUES (?, 'cancelled', ?, '')", (order_id, now))
+    conn.commit()
+    _tell_staff(conn, orders.get_card(conn, order_id), "Заказ №%d: %s" % (order_id, text), notify)
+    return "Передача отменена: заказ №%d в «Отмена», менеджеру сообщено." % order_id
 
 
 def point_handoffs(conn, point_id, since: str, limit: int = 50) -> List[dict]:
     """The clients this point handed over since `since`, newest first, with what became of them (the point's «Моя точка»)."""
     placed = next((s for s in orders.list_stages(conn) if s["code"] == "placed"), None)
     found = []
-    for order_id, phone, need, created, kind, taken in conn.execute(
-            "SELECT h.order_id, h.phone, h.need, h.created_at, COALESCE(s.kind, ''), s.taken_at FROM order_handoff h "
+    for order_id, phone, need, created, kind, taken, taken_by in conn.execute(
+            "SELECT h.order_id, h.phone, h.need, h.created_at, COALESCE(s.kind, ''), s.taken_at, COALESCE(s.taken_by, '') FROM order_handoff h "
             "JOIN order_card c ON c.id = h.order_id LEFT JOIN order_handoff_source s ON s.order_id = h.order_id "
             "WHERE h.point_id = ? AND h.created_at >= ? ORDER BY h.created_at DESC, h.order_id DESC LIMIT ?", (point_id, since, limit)).fetchall():
         card = orders.get_card(conn, order_id)
         status = _status_of(card, placed, bool(taken))
+        if taken_by == CANCELLED_BY and card["stage"]["code"] == "cancel":
+            status = "cancelled"
         found.append({"id": order_id, "label": label(card), "phone": phone, "client": card["client_name"], "need": need, "at": created,
-                      "source": SOURCE_NAMES.get(kind, ""), "status": status, "status_name": POINT_STATUS[status]})
+                      "source": SOURCE_NAMES.get(kind, ""), "status": status, "status_name": POINT_STATUS[status],
+                      "cancellable": not status and cancellable(conn, order_id, point_id)})
     return found
 
 

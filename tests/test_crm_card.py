@@ -374,7 +374,7 @@ def test_the_menu_has_crm_and_the_lane_of_the_inquiries_has_its_place(tmp_path, 
     pid = conn.execute("INSERT INTO point (name) VALUES ('Бета')").lastrowid
     conn.commit()
     point = _as(app, conn, "pointman", "point", point_id=pid)
-    assert 'href="/clients"' in point.get("/orders").get_data(as_text=True)                   # the menu of the panel («Моя точка» has its own)
+    assert 'href="/clients"' not in point.get("/orders").get_data(as_text=True)               # a point has no «CRM» (the owner 2026-10-29)
     app.jinja_env.loader = ChoiceLoader([DictLoader({"_client_inquiry.html": "[статус {{ inquiry_client_id }} {{ inquiry_place }}]"}), app.jinja_env.loader])
     assert "[статус %d card]" % a in owner.get("/clients/%d" % a).get_data(as_text=True)
     assert "[статус %d list]" % a in owner.get("/clients").get_data(as_text=True)

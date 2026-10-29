@@ -26,12 +26,13 @@
 {% if data.summary.sum_open is not none %}<div class="tile"><span class="tile-label">Сумма в работе</span><span class="tile-value">{{ data.summary.sum_open|money }}</span><span class="tile-sub">по ценам продажи</span></div>{% endif %}{# a point: no sums (orders.board) #}
 </div>
 <form method="get" action="/orders" class="filters filters--flat">
-<input type="hidden" name="v" value="{{ view }}">
+<input type="hidden" name="v" value="{{ view }}">{% if only_stage %}<input type="hidden" name="s" value="{{ only_stage }}">{% endif %}
 <div class="field" style="width:260px"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, номер"></div></div>
 <div class="field" style="width:200px"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for p in points %}<option value="{{ p.id }}"{% if point == p.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
 <div class="field" style="width:160px"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}"></div>
 <button class="btn btn--secondary" style="height:40px">Показать</button><a class="btn btn--link-gray" style="height:40px" href="/orders?v={{ view }}">Сбросить</a>
 </form>
+{% if only_stage %}<p class="small" data-only-stage="{{ only_stage }}">Только этап «{{ data.columns[0].stage.name }}» · <a href="/orders?v={{ view }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}">все этапы</a></p>{% endif %}
 <div class="flash flash--err" id="board-msg" hidden>{{ icon("alert") }}<div class="flash-text"></div></div>
 {% if total_cards == 0 and not query and not tag and not point %}
 <div class="flash flash--info" style="margin-bottom:var(--s-4)">{{ icon("info") }}<div class="flash-text"><b>Заказов пока нет.</b> Создайте первый, когда клиент написал вам на Авито: поле «Быстрое добавление» в первой колонке или кнопка «Новый заказ».</div></div>

@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='bell.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='topbar.css') }}">
+{% block head %}{% endblock %}
 </head>
 <body>
 {% if session.get("user") %}
@@ -16,6 +17,10 @@
 <aside class="sidebar">
 <div class="sb-logo"><span class="sb-logo-mark">{{ icon("tire") }}</span>Tires Sync</div>
 {% set path = request.path %}
+{% if can("mypoint") %}<nav class="sb-group">
+<a class="sb-link{% if path.startswith('/my-point') %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
+{% if can("users") %}<a class="sb-link{% if path.startswith('/points/history') %} is-active{% endif %}" href="/points/history">{{ icon("clock") }}История точек</a>{% endif %}
+</nav>{% endif %}
 {% if can("home") %}<nav class="sb-group">
 <a class="sb-link{% if path == '/' %} is-active{% endif %}" href="/">{{ icon("home") }}Главная</a>
 </nav>{% endif %}
@@ -89,5 +94,6 @@
 {% if session.get("user") and can("alerts") %}<script src="{{ url_for('static', filename='bell.js') }}"></script>{% endif %}
 {% if session.get("user") and current_user().role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}"></script>{% endif %}
 {% if session.get("user") %}<script src="{{ url_for('static', filename='topbar.js') }}"></script>{% endif %}
+{% block scripts %}{% endblock %}
 </body>
 </html>

@@ -232,7 +232,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_oth_agreed", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -275,10 +275,11 @@ for _section, _endpoints in {
               "orders_rule_add", "orders_stage_delete", "orders_stage_shift", "orders_stage_update", "orders_stage_add",
               "orders_templates_page", "orders_template_delete", "orders_template_samples", "orders_template_save",
               "orders_bot_answer_delete", "orders_bot_answer_toggle", "orders_bot_answer_add", "orders_report_rates"),
-    "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke"),
+    "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
+              "points_history"),                       # «История точки»: the owner and the partner only (users: nobody else looks)
     "self": ("account_password_page", "account_password",
              "search", "search_json"),                  # the search of the top bar: every role; search.scope_for narrows what it finds
-    "mypoint": ("mypoint_page", "mypoint_action", "mypoint_feed"),
+    "mypoint": ("mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
 }.items():
     for _endpoint in _endpoints:
         SECTION_OF[_endpoint] = _section
@@ -288,18 +289,20 @@ NEEDS = {"order_delete": "delete", "chat_delete": "delete", "deleted_restore": "
          "draft_confirm": "publish", "feed_update_confirm": "publish", "pairs_forget": "publish", "pairs_not_pair": "publish", "feed_update_fetch": "publish", "history_rollback": "publish",
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",
          "order_sale_reverse": "delete", "order_webmim_create": "supplier",
+         "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
          "share_create": "send"}
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})
 # the manager of a point: the orders of the point only (the board, the file and the cards of the point)
 POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file", "order_move", "order_note", "account_password_page",
-                         "account_password", "mypoint_page", "mypoint_action", "mypoint_feed", "search", "search_json",   # the search: the point's own (search.scope_for)
+                         "account_password", "mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
+                         "search", "search_json",   # the search: the point's own (search.scope_for)
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
-                         "calls_page", "call_record", "call_create_order", "call_handoff",            # the calls of the point's account (own_call)
-                         "clients_page", "client_page"})          # «CRM»: looks at its own part of a client only (own_client; the owner 2026-10-26)
+                         "calls_page", "call_record", "call_create_order", "call_handoff"})           # the calls of the point's account (own_call)
+# «CRM» is not the point's (the owner 2026-10-29: hidden; before, its own part of a client, 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})
 
@@ -410,7 +413,7 @@ def check_access():
         if not user["point_id"]:                          # a manager of a point without a point sees nothing
             abort(403)
         if endpoint == "index":
-            return redirect("/my-point")                  # «Моя точка» is the point's start page (the board of its orders stays open)
+            return redirect("/my-point")                  # «Рабочее место» is the point's start page (the board of its orders stays open)
         args = request.view_args or {}
         if endpoint not in POINT_PAGES or ("card_id" in args and _card_point(args["card_id"]) != user["point_id"]) \
                 or ("chat_row" in args and not own_chat(args["chat_row"])) or ("event_id" in args and not own_event(args["event_id"])) \
