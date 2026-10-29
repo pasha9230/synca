@@ -210,13 +210,14 @@ def key(card_id: int, item_id: int) -> str:
 
 def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
     """The rows of the order now: mark → {column: value}. Numbers are numbers, days are «YYYY-MM-DD» (the script makes them dates)."""
-    card = orders.get_card(conn, card_id)
-    sent, profits = _sent(conn, card_id), _profits(conn, card)
-    common = {"Дата": _day(placed_at), "№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
-              "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
-              "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": card["stage"]["name"], "Реализация": realization(card),
-              "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
-              "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]}
+    return card_rows(conn, orders.get_card(conn, card_id), placed_at, _sent(conn, card_id))
+
+
+def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] = None) -> Dict[str, dict]:
+    """rows_of of a card already read; the list of «Заказы» (orders_list) shows the same values. `sent` None: the columns of the
+    notifications are empty (not looked up)."""
+    card_id, profits = card["id"], _profits(conn, card)
+    common = common_of(conn, card, placed_at, sent)
     out = {}
     for item in card["items"]:
         qty, buy, sell = int(item["qty"]), round(float(item["supplier_price"]), 2), round(float(item["sale_unit"]), 2)
@@ -226,6 +227,16 @@ def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
             "Сумма MIM": round(buy * qty, 2), "Цена продажи": sell, "Сумма продажи": round(sell * qty, 2),
             "Прибыль ₽": profit[0] if profit else "", "Прибыль %": profit[1] if profit else ""})
     return out
+
+
+def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] = None) -> dict:
+    """The columns of a row that are the order's, not the position's (card_rows)."""
+    sent = sent or {}
+    return {"Дата": _day(placed_at), "№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
+            "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
+            "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": card["stage"]["name"], "Реализация": realization(card),
+            "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
+            "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]}
 
 
 def changes(now_rows: Dict[str, dict], written: Dict[str, dict]) -> List[dict]:

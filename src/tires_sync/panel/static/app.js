@@ -1172,3 +1172,24 @@
     form.querySelectorAll('input[type=checkbox][name="' + box.getAttribute("data-check-all") + '"]').forEach(function (x) { x.checked = box.checked; });
   });
 })();
+
+(function () {
+  // «Список» of «Заказы»: a click anywhere on a row opens the order (a link, a button or selected text keeps its own way);
+  // «Колонки»: ↑ and ↓ move a column in the form (the order of its fields is the order saved).
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t.closest) return;
+    var move = t.closest("[data-col-up],[data-col-down]");
+    if (move) {
+      var li = move.closest("[data-col]");
+      var other = move.hasAttribute("data-col-up") ? li.previousElementSibling : li.nextElementSibling;
+      if (other) li.parentNode.insertBefore(li, move.hasAttribute("data-col-up") ? other : other.nextElementSibling);
+      move.focus();
+      return;
+    }
+    var row = t.closest("tr[data-href]");
+    if (!row || t.closest("a,button,input,label,select") || String(window.getSelection ? window.getSelection() : "")) return;
+    if (e.ctrlKey || e.metaKey) window.open(row.getAttribute("data-href"), "_blank");
+    else window.location.href = row.getAttribute("data-href");
+  });
+})();
