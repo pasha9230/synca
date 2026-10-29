@@ -79,3 +79,9 @@ def test_a_part_never_ends_with_a_header_alone():
         assert all(len(p) <= notify.TELEGRAM_LIMIT for p in parts)
         assert not any(p.endswith(first) or p.endswith(second) for p in parts)
         assert "\n".join(parts).count("z" * 50) == 1
+
+
+def test_a_line_longer_than_a_message_is_cut_to_fit_its_part():
+    header = "в кабинете Авито №1 «А»: ручных объявлений: 3"
+    parts = cli._manual_parts([(header, ["a" * 3000, "b" * 5000, "c" * 10])])
+    assert all(len(p) <= notify.TELEGRAM_LIMIT for p in parts) and parts[-1].endswith("c" * 10)

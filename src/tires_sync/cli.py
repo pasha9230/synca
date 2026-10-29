@@ -1660,7 +1660,7 @@ def _manual_parts(groups, limit: int = notify.TELEGRAM_LIMIT) -> list:
     def put(line: str, header: str) -> None:
         if len("\n".join(parts[-1] + [line])) > budget:
             parts.append([header + " (дальше)"] if header and line != header else [])
-        parts[-1].append(line[:budget])
+        parts[-1].append(line[:budget - len("\n".join(parts[-1])) - 1])  # a line longer than a message is cut to its part, never past the limit
 
     for header, lines in groups:
         if lines and len("\n".join(parts[-1] + [header, lines[0]])) > budget:   # a header never ends a part alone
