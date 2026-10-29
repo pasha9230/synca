@@ -224,7 +224,7 @@ def test_a_position_the_supplier_took_away_stays_in_the_catalog_with_stock_zero_
     assert "op\" value=\"on:900" not in page and "goods_id=900" not in page                          # nothing can be sold, ordered or added from it
 
 
-def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_gone_row_has_no_checkbox_or_preview(tmp_path):
+def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_gone_row_has_no_checkbox_but_a_preview(tmp_path):
     from helpers import make_offer
     from panel_helpers import make_app
     from tires_sync import catalog_archive, store
@@ -242,4 +242,5 @@ def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_
     page = client.get("/catalog").get_data(as_text=True)
     assert page.count(">C1<") == 1 and page.count(">GONE1<") == 1
     gone_row = page.split(">GONE1<")[1].split("</tr>")[0]
-    assert 'name="g"' not in page.split(">GONE1<")[0].rsplit("<tr", 1)[1] and "data-preview" not in gone_row
+    # the owner 2026-10-29: every position has a card and «Просмотр», a gone one too (it was without; no checkbox still: nothing to switch)
+    assert 'name="g"' not in page.split(">GONE1<")[0].rsplit("<tr", 1)[1] and 'data-preview="900"' in page.split(">GONE1<")[0].rsplit("<tr", 1)[1]

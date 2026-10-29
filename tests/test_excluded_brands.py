@@ -127,7 +127,7 @@ def test_bulk_exclusion_takes_off_many_brands_in_one_pass_and_puts_them_into_one
     app, client, tok, conn = panel(tmp_path)
     listed = ["IKON TYRES", "LAUFENN", "НЕИЗВЕСТНЫЙ"]
     r = post(client, "/connections/suppliers/1/excluded-bulk", tok, excluded=["IKON TYRES", "LAUFENN"], listed=listed)
-    assert r.status_code == 302 and "/draft/" in r.headers["Location"]
+    assert r.status_code == 302 and r.headers["Location"].endswith("/settings/exclusions#excluded-1")  # the owner 2026-10-29: the change stays on its page (it waits in the draft); it went straight to /draft/N
     assert staging.summary(conn)["changes"]["excluded_brands"] == ["IKON TYRES", "LAUFENN"]
     html = client.get("/settings/exclusions").get_data(as_text=True)
     assert "не подтверждено" in html.split("Исключаемые бренды")[1]
@@ -311,8 +311,9 @@ def test_the_return_page_cannot_be_hijacked(tmp_path, referer):
 def test_settings_form_returns_to_settings_after_confirming(tmp_path):
     app, client, tok, conn = panel(tmp_path)
     r = post(client, "/settings/draft", tok, min_stock="5")
-    draft = r.headers["Location"]
-    assert draft.startswith("/draft/") or "/draft/" in draft
+    assert r.headers["Location"].endswith("/settings")  # the owner 2026-10-29: the change stays on its page (it waits in the draft); it went straight to /draft/N
+    draft = client.get("/catalog/review", headers={"Referer": "http://localhost/settings"}).headers["Location"]     # «Подробнее» of the bar
+    assert "/draft/" in draft
     done = post(client, draft + "/confirm", tok)
     assert done.headers["Location"].endswith("/settings")
 

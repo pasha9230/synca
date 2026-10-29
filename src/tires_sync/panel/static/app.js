@@ -1192,4 +1192,34 @@
     if (e.ctrlKey || e.metaKey) window.open(row.getAttribute("data-href"), "_blank");
     else window.location.href = row.getAttribute("data-href");
   });
+
+  // Полоса «Не применено: N» страниц настроек: что изменится в фиде (тот же расчёт, что у страницы черновика) и нужные подтверждения.
+  // «Применить» отправляет ровно тот черновик, что описан строкой (rev); без скрипта кнопка работает, подтверждения спросит страница черновика.
+  var bar = document.querySelector("[data-settings-bar]");
+  function plural(n, one, few, many) {
+    var t = Math.abs(n) % 100, u = t % 10;
+    return t >= 11 && t <= 14 ? many : u === 1 ? one : u >= 2 && u <= 4 ? few : many;
+  }
+  if (bar) {
+    fetch(bar.getAttribute("data-pending-url"), { headers: { "X-Requested-With": "fetch" }, credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) {
+        if (!d.open) return;
+        bar.querySelector("[data-pending-n]").textContent = d.count;               // the draft the line describes: its own number
+        bar.querySelector("[data-pending-title]").textContent = "Не применено: " + d.count + " " + plural(d.count, "правка", "правки", "правок");
+        bar.querySelector("[data-pending-line]").textContent = d.line + " Пока вы не нажмёте «Применить», фид не меняется.";
+        var rev = bar.querySelector("[data-pending-rev]");
+        if (rev) rev.value = d.rev;
+        var checks = bar.querySelector("[data-pending-checks]");
+        if (!checks) return;
+        var understand = checks.querySelector("[data-check-understand]"), strong = checks.querySelector("[data-check-strong]");
+        if (d.guard.over) {
+          understand.hidden = false;
+          checks.querySelector("[data-understand-text]").textContent = "Я понимаю: исчезнет " + d.guard.gone + " объявлений (порог защиты " + d.guard.limit + ")";
+        }
+        if (d.strong) strong.hidden = false;
+        checks.hidden = !(d.guard.over || d.strong);
+      })
+      .catch(function () { bar.querySelector("[data-pending-line]").textContent = "Не удалось посчитать, что изменится: откройте «Подробнее»."; });
+  }
 })();

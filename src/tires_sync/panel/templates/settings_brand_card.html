@@ -22,7 +22,7 @@
 <div class="pct-row">
 <label class="field"><span class="label">до R17, %</span><input class="input input--sm input--num{% if sc.pending %} is-pend{% endif %}" name="{{ sname }}_small" value="{{ sc.small }}" inputmode="decimal" placeholder="−3.8"></label>
 <label class="field"><span class="label">от R18, %</span><input class="input input--sm input--num{% if sc.pending %} is-pend{% endif %}" name="{{ sname }}_large" value="{{ sc.large }}" inputmode="decimal" placeholder="−4.3"></label></div>
-<div class="row"><label class="check"><input type="checkbox" name="{{ sname }}_on"{% if sc.enabled %} checked{% endif %}>Публиковать</label><button class="btn btn--secondary btn--xs ml-auto">Применить</button></div>
+<div class="row"><label class="check"><input type="checkbox" name="{{ sname }}_on"{% if sc.enabled %} checked{% endif %}>Публиковать</label><button class="btn btn--secondary btn--xs ml-auto">В черновик</button></div>
 {% if can_post("settings_pricing") %}</form>{% else %}</fieldset>{% endif %}{% endfor %}
 </div>
 </div>

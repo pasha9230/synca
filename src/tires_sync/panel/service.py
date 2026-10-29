@@ -623,14 +623,22 @@ def flat_items(groups, sort: str = "brand", descending: bool = False) -> list:
     return items
 
 
-def catalog_preview(conn, settings, parsed, ref, goods_id, today):
-    """The ad of one position as it would be built right now (first Avito account's addresses and description)."""
+OUT_OF_STOCK_TEXT = "нет в наличии"
+
+
+def catalog_preview(conn, settings, parsed, ref, goods_id, today, gone_since=""):
+    """The ad of one position as it would be built right now (first Avito account's addresses and description). `parsed` holds the position:
+    the panel's set, or the one position the catalog shows from elsewhere (4tochki before its switch, an old unload, the archive: `gone_since`
+    the day the supplier took it away)."""
     from ..feed import render_ad
     offer = parsed.offers.get(goods_id)
     if offer is None:
         return None
     ev = evaluation(conn, settings, parsed, ref)
     state, reason, _code = _offer_status(goods_id, offer, ev, settings)
+    if gone_since or offer.stock <= 0:                   # nothing to sell: the card says so first (the owner 2026-10-29)
+        day = gone_since[:10]
+        state, reason = "no", OUT_OF_STOCK_TEXT + (" (нет у поставщика с %s.%s.%s)" % (day[8:10], day[5:7], day[:4]) if day else "")
     accounts = connections.list_feed_accounts(conn)
     account = accounts[0] if accounts else None
     eff = connections.effective_settings(conn, account["id"], settings) if account else settings
@@ -651,22 +659,35 @@ def catalog_preview(conn, settings, parsed, ref, goods_id, today):
     return data
 
 
-def catalog_item_view(conn, settings, parsed, ref, goods_id, today, money: bool, orders: bool):
+def catalog_item_view(conn, settings, parsed, ref, goods_id, today, money: bool, orders: bool, gone_since=""):
     """The page of one position in the one look of the cards (_entity.html), a dict ready to be JSON; None when the supplier has no such position.
     The ad as catalog_preview builds it, the stock, the sale price, the ads of the accounts (their last published feeds) and the orders with it.
-    `money`: the purchase price is in it (the right «money»), `orders`: the orders are (the person may open them)."""
+    `money`: the purchase price is in it (the right «money»), `orders`: the orders are (the person may open them). A position without stock
+    (`gone_since`: taken away by the supplier) says «нет в наличии», its last known prices and when it was last in stock (catalog_archive)."""
+    from .. import catalog_archive
     from ..feed import ad_from_text
-    p = catalog_preview(conn, settings, parsed, ref, goods_id, today)
+    p = catalog_preview(conn, settings, parsed, ref, goods_id, today, gone_since)
     if p is None:
         return None
     offer = parsed.offers[goods_id]
-    fields = [{"label": "Код", "value": p["code"], "mono": True}, {"label": "Id поставщика", "value": goods_id, "mono": True},
-              {"label": "Остаток", "value": "%d шт." % p["stock"]},
-              {"label": "Цена продажи (за 1 шт.)", "value": p["price"], "fmt": "money"}]
-    if p["pack"]:
-        fields.append({"label": "Комплект за 4 шт.", "value": p["pack"]["price"], "fmt": "money"})
-    if money:
-        fields.append({"label": "Закупка (за 1 шт.)", "value": offer.base_price if offer.base_price > 0 else None, "fmt": "money"})
+    out = bool(gone_since) or offer.stock <= 0
+    if out:
+        info = catalog_archive.item_info(conn, goods_id)
+        last = info["last_seen"] if info and info["last_stock"] > 0 else None     # the archive keeps the last time it was seen with its stock
+        fields = [{"label": "Код", "value": p["code"], "mono": True}, {"label": "Id поставщика", "value": goods_id, "mono": True},
+                  {"label": "Остаток", "value": OUT_OF_STOCK_TEXT},
+                  {"label": "Последний раз в наличии", "value": last, "fmt": "dt"},
+                  {"label": "Цена продажи по последней закупке (за 1 шт.)", "value": p["price"], "fmt": "money"}]
+        if money:
+            fields.append({"label": "Последняя закупка (за 1 шт.)", "value": offer.base_price if offer.base_price > 0 else None, "fmt": "money"})
+    else:
+        fields = [{"label": "Код", "value": p["code"], "mono": True}, {"label": "Id поставщика", "value": goods_id, "mono": True},
+                  {"label": "Остаток", "value": "%d шт." % p["stock"]},
+                  {"label": "Цена продажи (за 1 шт.)", "value": p["price"], "fmt": "money"}]
+        if p["pack"]:
+            fields.append({"label": "Комплект за 4 шт.", "value": p["pack"]["price"], "fmt": "money"})
+        if money:
+            fields.append({"label": "Закупка (за 1 шт.)", "value": offer.base_price if offer.base_price > 0 else None, "fmt": "money"})
     fields += [{"label": "Бренд, модель", "value": ", ".join(x for x in (p["fields"]["Brand"], p["fields"]["Model"]) if x)},
                {"label": "Размер", "value": "%s/%s R%s" % (offer.width, offer.height, offer.diameter)},
                {"label": "Тип шин", "value": p["fields"]["TireType"]}, {"label": "Адрес в объявлении", "value": p["address"], "wide": True}]
@@ -685,7 +706,8 @@ def catalog_item_view(conn, settings, parsed, ref, goods_id, today, money: bool,
     found = [{"ref": {"text": "№%d" % r[0], "href": "/orders/%d" % r[0]}, "client": r[1], "stage": r[2], "qty": r[3],
               "unit": {"text": r[4], "fmt": "money"}, "created": {"text": r[5], "fmt": "dt"}} for r in rows]
     return {"type": "item", "kind": "Позиция", "ref": p["code"] or goods_id, "title": p["name"],
-            "status": {"text": p["reason"], "tone": "ok" if p["state"] == "feed" else "warn"},
+            "status": {"text": OUT_OF_STOCK_TEXT if out else p["reason"], "tone": "ok" if p["state"] == "feed" else "warn"}, "out_of_stock": out,
+            "out_note": p["reason"][len(OUT_OF_STOCK_TEXT):].strip(" ()") if out and p["reason"].startswith(OUT_OF_STOCK_TEXT) else "",
             "crumbs": [{"label": "Каталог", "href": "/catalog"}, {"label": p["code"] or goods_id}],
             "goods_id": goods_id, "image": p["image"], "built": p["built"], "reason": p["reason"], "price_note": p["price_note"],
             "ad_title": p["fields"]["Title"], "description": p["fields"]["Description"],
@@ -1219,6 +1241,19 @@ def rollback_effect(conn, version_id: int, parsed, ref, today: date, now=None) -
             "over": gone > 0 and gone > limit}
 
 
+def draft_rev(changes: dict) -> str:
+    """The mark of what a draft holds: «Применить» applies the changes the person looked at, not ones added since (another tab, a partner)."""
+    from .. import staging
+    return staging.rev(changes)
+
+
+def pending_line(review: dict) -> str:
+    """One line of what «Применить» changes in the feed, from the same review as the page /draft/N: «войдёт 12, выйдет 3, цены изменятся у 40»."""
+    preview = review["preview"]
+    return "В фиде: войдёт %d, выйдет %d, цены изменятся у %d." % (
+        len(preview.appear), len(preview.disappear), len(preview.price_changes))
+
+
 def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dict:
     draft = get_draft(conn, draft_id)
     active_id, raw = get_active(conn)
@@ -1242,9 +1277,8 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
         brands[parsed.offers[gid].brand_key if gid in parsed.offers else "?"]["appear"] += 1
     for gid in preview.disappear:
         brands[parsed.offers[gid].brand_key if gid in parsed.offers else "?"]["disappear"] += 1
-    rev = hashlib.sha1(json.dumps(draft["changes"], ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return {
-        "rev": rev,
+        "rev": draft_rev(draft["changes"]),
         "guard": {"over": gone_total > 0 and gone_total > limit, "limit": limit, "gone": gone_total,
                   "gone_ads": ads_gone(preview.disappear, parsed.offers, old, new)},
         "by_brand": [dict(brand=b, **v) for b, v in sorted(brands.items())],

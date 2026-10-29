@@ -11,6 +11,7 @@ from ..config import settings_from_dict
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
 from .data import load_merged, stale_unload
+from ..webmim import ParseResult
 from ..settings_store import active_settings
 from .routes_main import context
 from .routes_orders import local_iso
@@ -82,6 +83,23 @@ def _held_offers(conn, settings, base) -> list:
         if held is not None:
             out += [(offer, held[1]) for offer in held[0].offers.values()]
     return out
+
+
+def _locate(conn, settings, parsed, goods_id: str, base):
+    """Where the card of a position is built from: (positions holding it, the day the supplier took it away or "") or None. Every position the
+    catalog lists has a card and «Просмотр» (the owner 2026-10-29): the panel's set, 4tochki before its switch, an old second unload, the archive."""
+    if goods_id in parsed.offers:
+        return parsed, ""
+    view, only = tochki_feed.catalog_view(conn, parsed, base)
+    if goods_id in only:
+        return view, ""
+    for offer, _ in _held_offers(conn, settings, base):
+        if offer.goods_id == goods_id:
+            return ParseResult(offers={goods_id: offer}), ""
+    offer = catalog_archive.gone_offer(conn, goods_id)
+    if offer is not None:
+        return ParseResult(offers={goods_id: offer}), (catalog_archive.item_info(conn, goods_id) or {}).get("gone_since") or ""
+    return None
 
 
 def _held_view(conn, raw, args, season, studs, held, ref=None) -> list:
@@ -189,7 +207,9 @@ def register(app) -> None:
         """The position of the window «В лист ожидания»: today's unload (4tochki shown too), else a position the supplier took away."""
         _conn, _settings, parsed, _ref = context(app)
         parsed, _view_only = tochki_feed.catalog_view(conn, parsed, app.config["UNLOAD_PATH"])
-        return parsed.offers.get(goods_id) or catalog_archive.gone_offer(conn, goods_id)
+        held = next((o for o, _ in _held_offers(conn, _settings, app.config["UNLOAD_PATH"]) if o.goods_id == goods_id), None) \
+            if goods_id not in parsed.offers else None                # an old second unload: its card has the button too
+        return parsed.offers.get(goods_id) or held or catalog_archive.gone_offer(conn, goods_id)
 
     def _wait_window(conn, goods_id, values: dict, error: str, back: str, offer=None):
         offer = offer or (_wait_offer(conn, goods_id) if goods_id else None)
@@ -314,7 +334,8 @@ def register(app) -> None:
         staged = staging.summary(conn)
         changes = {} if staged["stale"] else staged["changes"]
         effective = _view_settings(conn, raw, changes)
-        data = service.catalog_preview(conn, effective, parsed, ref, goods_id, now().date())
+        found = _locate(conn, settings, parsed, goods_id, app.config["UNLOAD_PATH"])
+        data = service.catalog_preview(conn, effective, found[0], ref, goods_id, now().date(), found[1]) if found else None
         if data is None:
             abort(404)
         return render_template("catalog_preview.html", p=data)
@@ -326,10 +347,12 @@ def register(app) -> None:
         _, raw = get_active(conn)
         staged = staging.summary(conn)
         effective = _view_settings(conn, raw, {} if staged["stale"] else staged["changes"])
-        data = service.catalog_item_view(conn, effective, parsed, ref, goods_id, now().date(), has_right("money"), can("orders"))
+        found = _locate(conn, settings, parsed, goods_id, app.config["UNLOAD_PATH"])
+        data = service.catalog_item_view(conn, effective, found[0], ref, goods_id, now().date(), has_right("money"), can("orders"),
+                                         found[1]) if found else None
         if data is None:
             abort(404)
-        if has_right("money"):                                       # the own prices: the owner and the partner see them, the owner sets them
+        if has_right("money") and goods_id in parsed.offers:          # the own prices: the owner and the partner see them, the owner sets them (positions of the panel's set only)
             general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)
             data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id],
                                                         ref, parsed.offers)

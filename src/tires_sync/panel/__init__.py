@@ -248,8 +248,10 @@ def create_app(config: dict) -> Flask:
                         store.set_state(conn, "nav_pending_pairs", pairs)
                     except Exception:
                         pairs = "0"
+                from .service import draft_rev
                 self._data = {
                     "staged": staged["count"] if not staged["stale"] else 0, "stale": staged["stale"],
+                    "draft_id": staged["draft_id"], "rev": draft_rev(staged["changes"]),
                     "new_count": _visible_new_count(conn),
                     "pending_pairs": int(pairs) if pairs.isdigit() else 0,
                     "chat_unread": _chat_unread(conn)}
@@ -266,13 +268,17 @@ def create_app(config: dict) -> Flask:
         from flask import session
         if not session.get("user"):
             return {"nav": {}}
-        return {"nav": LazyNav()}
+        from .page_prefs import state
+        return {"nav": LazyNav(), "page_filter": state}
 
     from .. import users as _users
     _users.warm()
     app.teardown_appcontext(close_conn)
     app.before_request(check_csrf)
     app.before_request(check_access)                                   # after the CSRF check: one right per page (common.SECTION_OF)
+    from . import page_prefs
+    app.before_request(page_prefs.remember)                            # after the right: the person's own filters of a list page
+    app.after_request(page_prefs.after_post)
 
     @app.after_request
     def security_headers(response):

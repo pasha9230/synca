@@ -70,13 +70,21 @@
 <div class="stickybar stickybar--stale"><div class="grow"><div class="stickybar-title">Рабочий черновик устарел</div><div class="small muted">Настройки изменились после того, как вы начали правки. Отмените черновик и повторите изменения.</div></div>
 <form method="post" action="/catalog/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path.rstrip('?') if request.method == 'GET' and not request.path.startswith(('/draft', '/publish', '/catalog/')) else '/catalog' }}"><button class="btn btn--link-gray">Отменить всё</button></form></div>
 {% endif %}
-{% if not nav.stale and can("catalog", "edit") %}
+{% if not nav.stale and nav.staged and request.endpoint in SETTINGS_BAR_PAGES and (can_post("draft_confirm") or can("catalog", "edit")) %}
+{% set here = request.full_path.rstrip('?') %}
+<div class="stickybar" id="pendbar" data-settings-bar data-pending-url="/settings/pending"><span class="pend-count" data-pending-n>{{ nav.staged }}</span><div class="grow"><div class="stickybar-title" data-pending-title>Не применено: {{ nav.staged }} {{ plural(nav.staged, "правка", "правки", "правок") }}</div><div class="small muted" data-pending-line>Пока вы не нажмёте «Применить», фид не меняется. Считаю, что изменится…</div>
+{% if can_post("draft_confirm") %}<div class="row" style="gap:var(--s-3);flex-wrap:wrap" data-pending-checks hidden><label class="check check--danger" data-check-understand hidden><input type="checkbox" name="understand" form="settings-apply"><span data-understand-text>Я понимаю: исчезнет много объявлений</span></label><label class="check" data-check-strong hidden><input type="checkbox" name="strong" form="settings-apply">Подтверждаю значения вне диапазона</label></div>{% endif %}</div>
+{% if can("catalog", "edit") %}<form method="post" action="/catalog/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ here }}"><button class="btn btn--link-gray">Отменить</button></form>{% endif %}
+<a class="btn btn--secondary" href="/catalog/review">Подробнее</a>
+{% if can_post("draft_confirm") %}<form method="post" action="/draft/{{ nav.draft_id }}/confirm" id="settings-apply"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="rev" value="{{ nav.rev }}" data-pending-rev><input type="hidden" name="next" value="{{ here }}"><button class="btn btn--primary">Применить</button></form>{% endif %}</div>
+{% elif not nav.stale and can("catalog", "edit") %}
 <div class="stickybar" id="pendbar"{% if not nav.staged %} hidden{% endif %}><span class="pend-count" data-pend-count>{{ nav.staged }}</span><div class="grow"><div class="stickybar-title" data-pend-title>Неподтверждённых изменений: {{ nav.staged }}</div><div class="small muted">Пока вы их не подтвердите, фид не меняется</div></div>
 <form method="post" action="/catalog/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path.rstrip('?') if request.method == 'GET' and not request.path.startswith(('/draft', '/publish', '/catalog/')) else '/catalog' }}"><button class="btn btn--link-gray">Отменить всё</button></form>
 <a class="btn btn--primary" href="/catalog/review">Посмотреть и применить {{ icon("arrow-right") }}</a></div>
 {% endif %}
 <div class="page{% block page_class %}{% endblock %}">
 <div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' or kind.startswith('field:') else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' or kind.startswith('field:') %} role="alert"{% endif %}{% if kind.startswith('field:') %} data-field-error="{{ kind[6:] }}"{% endif %}>{{ icon("check" if kind == "ok" else "info") }}<div class="flash-text">{{ message }}</div><button type="button" class="close" aria-label="Закрыть">{{ icon("x") }}</button></div>{% endfor %}</div>
+{% set pf = page_filter() if page_filter is defined else {} %}{% if pf %}<div class="flash flash--info" data-filter-on><div class="flash-text">Фильтр включён: {{ pf.count }} · {% if pf.mine %}<a href="{{ pf.mine }}">Мои фильтры</a> <span class="muted xs">(открыто по ссылке; ваши сохранённые фильтры не тронуты)</span>{% else %}<a href="{{ pf.reset }}">Сбросить фильтры</a> <span class="muted xs">(фильтры запоминаются в вашем аккаунте)</span>{% endif %}</div></div>{% endif %}
 {% block content %}{% endblock %}
 </div>
 </main>
