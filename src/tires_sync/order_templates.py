@@ -12,7 +12,7 @@ VARIABLES = {
     "client_name": "Клиент", "client_phone": "Телефон", "order_no": "Номер заказа", "items": "Позиции", "total": "Сумма", "point": "Точка",
     "point_address": "Адрес точки", "manager": "Менеджер", "delivery_date": "Дата доставки", "delivery_time": "Время доставки",
     "items_full": "Позиции подробно", "webmim_number": "Номер заказа WebMIM", "transfer_number": "Номер перемещения", "hold_until": "Резерв до", "order_date": "Дата оформления",
-    "point_hours": "График точки", "point_map": "Точка на Яндекс Картах"}
+    "point_hours": "График точки", "point_map": "Точка на Яндекс Картах", "oth_orders": "Заказ, с ОТХ которого шины"}
 HOLD_DAYS = 3                                    # the point keeps the reservation three days from the arrival of the goods
 SAMPLES = (
     ("Клиенту: заказ оформлен", "client",
@@ -30,7 +30,11 @@ ARRIVED_SAMPLE = ("Клиенту: товар на точке, можно заб
 RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "client",
                   "Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — спасибо, "
                   "не обращайте внимания. Если нужно продлить ожидание, напишите нам.")
-SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE)
+# goes to the point when an order whose tyres all come from «На ОТХ» is moved straight to «Товар на точке» (oth_sale, the owner 2026-10-30)
+OTH_POINT_SAMPLE = ("Точке: шины с ОТХ отложены под клиента", "manager",
+                    "Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента: заказ №{order_no}, {client_name}, {client_phone}, {items}. "
+                    "Не продавать другим, резерв до {hold_until}.")
+SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE, OTH_POINT_SAMPLE)
 RETIRED = {RESERVE_SAMPLE[0]: ("Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "   # the owner
                                "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",)}                                       # 2026-10-23
 FIELDS = "id, name, audience, body"
@@ -129,7 +133,9 @@ def values(conn, card: dict, now=None) -> dict:
         money(float(i["sale_unit"]) * i["qty"])) for i in items)                    # a tyre of the point has no code: no line «Код»
     try:                                  # the reserve runs from the day the goods arrive at the point; before they arrive: the planned delivery day + 3
         base = card.get("reserve_until") or ""
-        if not base and card.get("delivery_date"):
+        if (card.get("stage") or {}).get("code") == "oth":
+            base = ""                                                   # «На ОТХ» keeps nothing for a client: no date (the owner 2026-10-30)
+        elif not base and card.get("delivery_date"):
             base = (date.fromisoformat(card["delivery_date"]) + timedelta(days=HOLD_DAYS)).isoformat()
         hold = date.fromisoformat(base).strftime("%d.%m.%Y") if base else ""
     except (KeyError, ValueError):
@@ -142,7 +148,22 @@ def values(conn, card: dict, now=None) -> dict:
         "point": point.get("name", ""), "point_address": address, "manager": point.get("name", ""),
         "delivery_date": _date(card.get("delivery_date", "")), "delivery_time": card.get("delivery_time", ""),
         "items_full": full, "webmim_number": card.get("webmim_number", ""), "transfer_number": card.get("transfer_number", ""), "hold_until": hold, "order_date": _order_date(conn, card, now),
-        "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or ""}
+        "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or "",
+        "oth_orders": _oth_orders(conn, card["id"])}
+
+
+def _oth_orders(conn, card_id) -> str:
+    """The orders the tyres «с ОТХ» of the order lie at the point for, by the number the point knows (order_manager.label: WebMIM's, else the
+    panel's) — the first order of a chain, the one the tyres were bought by."""
+    from .oth_sale import first_order
+    found = []
+    for (item_id,) in conn.execute("SELECT item_id FROM order_item_oth WHERE order_id = ? AND undone_at = '' ORDER BY item_id", (card_id,)):
+        first = first_order(conn, item_id)
+        row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (first,)).fetchone()
+        number = str((row[0] if row else "") or first)
+        if number not in found:
+            found.append(number)
+    return ", ".join(found)
 
 
 def render(conn, card: dict, body: str, now=None) -> Tuple[str, List[str]]:

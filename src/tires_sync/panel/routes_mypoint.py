@@ -348,7 +348,7 @@ def register(app) -> None:
         cards = []
         tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat()
         for card in ((_cards(conn, point_id) + _oth_cards(conn, point_id)) if point_id is not None else []):
-            until = card["reserve_until"] or ""
+            until = (card["reserve_until"] or "") if card["stage"]["code"] == "at_point" else ""     # «На ОТХ» has no term (2026-10-30)
             delivery = card["delivery_date"] or ""
             code = card["stage"]["code"]
             cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": code == "at_point", "oth": code == "oth",

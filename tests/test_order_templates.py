@@ -57,7 +57,7 @@ def test_a_missing_value_is_reported_and_never_left_empty(tmp_path):
 
 def test_the_owners_two_order_texts_render_for_the_client_and_the_manager(tmp_path):
     conn = db(tmp_path)
-    assert tpl.add_samples(conn) == 4 and tpl.add_samples(conn) == 0                      # the third: «можно забирать», the fourth: «срок резерва истекает»; a second press adds nothing
+    assert tpl.add_samples(conn) == 5 and tpl.add_samples(conn) == 0                      # the third: «можно забирать», the fourth: «срок резерва истекает», the fifth: «шины с ОТХ отложены» to the point; a second press adds nothing
     card_id = full_card(conn)
     conn.execute("INSERT INTO avito_address (account_id, position, name, address_id, enabled, share, address_text) VALUES (1, 0, 'Бета', '77', 1, 1, "
                  "'Санкт-Петербург, ул. Генерала Примерова, 35А')")
@@ -65,7 +65,7 @@ def test_the_owners_two_order_texts_render_for_the_client_and_the_manager(tmp_pa
     conn.commit()
     orders.update_card(conn, card_id, {"webmim_number": "5000100"}, "2026-10-12T12:00:00", "o")
     card = orders.get_card(conn, card_id)
-    client, manager, _arrived, _reserve = tpl.list_templates(conn)
+    client, manager, _arrived, _reserve, _oth_point = tpl.list_templates(conn)
     text, missing = tpl.render(conn, card, client["body"])
     assert missing == [] and text.startswith("Заказ 5000100 оформлен на перемещение.")
     assert "Товар Nokian 205/55 R16\nКод 1\nКол-во 4 шт\nЦена ед. 5 000 ₽\nСумма 20 000 ₽" in text

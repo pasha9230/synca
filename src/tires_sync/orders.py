@@ -797,7 +797,8 @@ def _fire_rules(conn, card_id, now: str, chain: tuple, of_point=None) -> None:
 
 
 RESERVE_DAYS = 3                                 # the point keeps the reservation three days from the day the goods arrive there
-OTH_DAYS = 7                                     # goods bought out and stored at the point («На ОТХ»): seven days to sell, then back to the supplier
+OTH_ENTERED = "На ОТХ: шины на точке, срока продажи нет"     # the owner 2026-10-30: whether they go back to the supplier is the owner's call
+OTH_MARKS = ("На ОТХ: срок продажи до %", OTH_ENTERED)       # the record of entering «На ОТХ», before 2026-10-30 (with a date) and since
 
 
 def _start_reserve(conn, card: dict, now: str, author: str) -> None:
@@ -813,12 +814,11 @@ def _start_reserve(conn, card: dict, now: str, author: str) -> None:
 
 
 def _start_oth(conn, card: dict, now: str, author: str) -> None:
-    """The client refused and we bought the goods out: seven days from today to sell them. Always set anew: a reservation date left from
-    «Товар на точке» says nothing about this stay. The managers can still move the date by hand afterwards. The client refused: the order
-    is no longer theirs (order_oth.detach), the goods are our stock."""
-    until = (date.fromisoformat(now[:10]) + timedelta(days=OTH_DAYS)).isoformat()
-    conn.execute("UPDATE order_card SET reserve_until = ? WHERE id = ?", (until, card["id"]))
-    add_event(conn, card["id"], now, author, "field", "На ОТХ: срок продажи до %s" % until)
+    """The client refused and we bought the goods out: they lie at the point with no time to sell them (the owner 2026-10-30: whether they
+    go back to the supplier is the owner's call). The reservation date left from «Товар на точке» says nothing about this stay: cleared.
+    The client refused: the order is no longer theirs (order_oth.detach), the goods are our stock."""
+    conn.execute("UPDATE order_card SET reserve_until = '' WHERE id = ?", (card["id"],))
+    add_event(conn, card["id"], now, author, "field", OTH_ENTERED)
     from . import order_oth
     order_oth.detach(conn, card, now, author)
 
@@ -880,14 +880,14 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         order_alerts.resolve(conn, refused, now, author)                       # the card moved: its refused moves are no longer a cause to act
     if stage["code"] == "at_point":
         if card["stage"].get("code") == "oth":
-            card = dict(card, reserve_until="")                                 # back from «На ОТХ»: its seven days are not a reservation
+            card = dict(card, reserve_until="")                                 # back from «На ОТХ»: a date of an old stay is not a reservation
         _start_reserve(conn, card, now, author)
     elif stage["code"] == "oth":
         _start_oth(conn, card, now, author)
     _leave_oth(conn, card, stage, now, author)
     from_oth = card["stage"].get("code") == "oth"
     after_oth = from_oth or (card["stage"].get("kind") != "open" and conn.execute(          # «На ОТХ», then a finished stage, then open again
-        "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND text LIKE 'На ОТХ: срок продажи до %' LIMIT 1", (card_id,)).fetchone())
+        "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND (text LIKE ? OR text = ?) LIMIT 1", (card_id,) + OTH_MARKS).fetchone())
     if stage["code"] not in ("oth", RETURN_GIVEN):                              # the client of the phone, after the stage's own linking:
         unlinked = bool(after_oth) and conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (card_id,)).fetchone() is None
         if (phoned or unlinked) if stage["kind"] == "open" else (phoned and not from_oth):

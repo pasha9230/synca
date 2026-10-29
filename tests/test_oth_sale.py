@@ -405,24 +405,35 @@ def test_the_old_position_and_the_old_order_are_not_deleted_while_their_tyres_ar
         trash.delete_order(conn, old, LATER, "o", only_if=lambda c, _card: oth_sale.why_not_delete(c, old))
 
 
-def test_a_position_the_old_order_cannot_take_back_is_dropped_never_stuck(tmp_path):
+def test_tyres_the_old_order_cannot_take_back_have_no_give_back_and_a_refusal_puts_them_on_oth(tmp_path):
+    """The owner 2026-10-30: no «Убрать без возврата»; the old order left «На ОТХ» — no «Вернуть на ОТХ», and the refused new order goes to
+    «На ОТХ» with its tyres: stock of OTH there (at the first order's purchase), held by the ad, taken by a third order."""
     conn = db(tmp_path)
     old = card_at(conn, "oth", T)
-    cid = new_order(conn, qty=1)
+    cid = new_order(conn, qty=2)
     take(conn, cid)
     item = orders.get_card(conn, cid)["items"][0]["id"]
-    assert not oth_sale.can_drop(conn, cid, item)
-    with pytest.raises(orders.OrderError, match="можно вернуть"):
-        oth_sale.drop(conn, cid, item, LATER, "o")
+    assert oth_sale.can_untake(conn, cid, item) and not hasattr(oth_sale, "drop")
     orders.move_card(conn, old, stage(conn, "at_point"), LATER, "o")                 # its client came back for the rest
-    assert oth_sale.can_drop(conn, cid, item)
-    assert oth_sale.drop(conn, cid, item, LATER, "o") == 1
-    assert orders.get_card(conn, cid)["items"] == [] and [i["qty"] for i in orders.get_card(conn, old)["items"]] == [3]
-    assert any("убраны без возврата" in e["text"] and e["level"] == "yellow" for e in orders.list_events(conn, cid))
-    assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_drop'").fetchone()[0] == 1
+    assert not oth_sale.can_untake(conn, cid, item)
+    with pytest.raises(orders.OrderError, match="ушёл с ОТХ.*переведите заказ в «На ОТХ»"):
+        oth_sale.untake(conn, cid, item, LATER, "o")
+    with pytest.raises(orders.OrderError, match="переведите заказ на «На ОТХ» или верните их"):
+        orders.move_card(conn, cid, stage(conn, "cancel"), LATER, "o", changes={"cancel_reason": "передумал"})
+    for step in ("placed", "moving", "at_point", "oth"):                              # the client of the new order refused at the point
+        orders.move_card(conn, cid, stage(conn, step), LATER, "o")
+    assert code(conn, cid) == "oth"
+    assert oth_stock.by_point(conn) == {("1", point_id(conn)): 2}                    # the new order's; the old one is a client's again
+    assert [(r["order_id"], r["qty"]) for r in oth_stock._rows(conn) if r["order_id"] == cid] == [(cid, 2)]
+    assert orders.get_card(conn, cid)["items"][0]["supplier_price"] == BUY_OLD
+    third = new_order(conn, qty=2)
+    o = next(x for x in oth_sale.offers(conn, orders.get_card(conn, third))[line(conn, third)["id"]] if x["from_order"] == cid)
+    oth_sale.take(conn, third, line(conn, third)["id"], o["from_item"], LATER, "o")
+    assert code(conn, cid) == "cancel" and items(conn, third) == [("1", 2, BUY_OLD, True)]
+    assert oth_sale.first_order(conn, orders.get_card(conn, third)["items"][0]["id"]) == old
 
 
-def test_nothing_goes_back_into_an_agreed_return_it_is_dropped_instead(tmp_path):
+def test_nothing_goes_back_into_an_agreed_return(tmp_path):
     conn = db(tmp_path)
     old = card_at(conn, "oth", T)
     cid = new_order(conn, qty=1)
@@ -430,9 +441,10 @@ def test_nothing_goes_back_into_an_agreed_return_it_is_dropped_instead(tmp_path)
     conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date) VALUES (?,?,?,?)", (old, T, "o", "2026-10-29"))
     conn.commit()
     item = orders.get_card(conn, cid)["items"][0]["id"]
+    assert not oth_sale.can_untake(conn, cid, item)
     with pytest.raises(orders.OrderError, match="согласован возврат"):
         oth_sale.untake(conn, cid, item, LATER, "o")
-    assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [3] and oth_sale.can_drop(conn, cid, item)
+    assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [3]
 
 
 def test_a_second_press_that_read_before_the_first_was_saved_takes_nothing(tmp_path, monkeypatch):
@@ -503,3 +515,133 @@ def test_the_card_offers_no_give_back_once_the_order_is_placed(tmp_path):
     orders.move_card(conn, cid, stage(conn, "placed"), LATER, "o")
     html = owner.get("/orders/%d" % cid).get_data(as_text=True)
     assert "с ОТХ · заказ" in html and "Вернуть на ОТХ" not in html and "Убрать без возврата" not in html
+
+
+# ---- «Шины уже на точке» (the owner 2026-10-30) ----------------------------------------------------------------------------------------
+
+def test_the_ad_holds_the_tyres_of_a_refused_order_that_took_them_from_oth(tmp_path):
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=4)
+    take(conn, cid)
+    for step in ("placed", "moving", "at_point", "oth"):
+        orders.move_card(conn, cid, stage(conn, step), LATER, "o")
+    assert oth_stock.pieces(conn) == {"1": 4} and oth_stock.points(conn) == {"1": ("Бета",)}
+
+
+def test_only_an_order_whose_tyres_all_come_from_oth_is_offered_the_move_to_the_point(tmp_path):
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    whole, mixed, other = new_order(conn, qty=2), new_order(conn, qty=6), new_order(conn, qty=1, goods="2")
+    assert not oth_sale.all_from_oth(conn, orders.get_card(conn, whole))
+    take(conn, whole)
+    take(conn, mixed)
+    assert oth_sale.all_from_oth(conn, orders.get_card(conn, whole))
+    assert not oth_sale.all_from_oth(conn, orders.get_card(conn, mixed)) and not oth_sale.all_from_oth(conn, orders.get_card(conn, other))
+    orders.move_card(conn, whole, stage(conn, "placed"), LATER, "o")
+    assert not oth_sale.all_from_oth(conn, orders.get_card(conn, whole))
+
+
+def test_the_point_text_names_the_old_order_the_client_and_the_reservation(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    text = oth_sale.point_text(conn, orders.get_card(conn, cid), LATER)
+    card = orders.get_card(conn, cid)
+    assert text == ("Шины с ОТХ (заказ №%s) отложены под нового клиента: заказ №%d, Пётр, %s, Nokian 205/55 R16 × 2. Не продавать другим, "
+                    "резерв до 01.11.2026." % (orders.get_card(conn, old)["webmim_number"], cid, card["client_phone"]))     # the number the point knows
+    conn.execute("INSERT INTO order_template (name, audience, body) VALUES (?, 'manager', ?)", (oth_sale_template(), "Свой текст №{order_no}"))
+    conn.commit()
+    assert oth_sale.point_text(conn, card, LATER) == "Свой текст №%d" % cid                  # the owner's template wins
+
+
+def oth_sale_template():
+    from tires_sync import order_templates
+    return order_templates.OTH_POINT_SAMPLE[0]
+
+
+def test_the_button_moves_to_the_point_past_placed_and_tells_the_client_once_and_the_point_its_text(tmp_path, monkeypatch):
+    app, owner, tok, conn = panel(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    mixed = new_order(conn, qty=6)
+    take(conn, mixed)
+    assert "Шины уже на точке" not in owner.get("/orders/%d" % mixed).get_data(as_text=True)
+    assert "Шины уже на точке — перевести на «Товар на точке»" in owner.get("/orders/%d" % cid).get_data(as_text=True)
+    from tires_sync import order_manager, order_notify
+    told_client, told_point = [], []
+    monkeypatch.setattr(order_manager, "tell_client_arrived", lambda c, card_id, deliver, now, who, body=None: (told_client.append((card_id, body)), (True, "Клиенту отправлено."))[1])
+    monkeypatch.setattr(order_notify, "tell_point", lambda c, box, card, text, now, **kw: (told_point.append(text), "показано точке")[1])
+    assert post(owner, "/orders/%d/oth-at-point" % cid, tok).status_code == 302
+    post(owner, "/orders/%d/oth-at-point" % cid, tok)                                   # a second press: nothing more
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == "at_point" and card["reserve_until"]                # the reservation of the stage, three days
+    assert [c for c, _b in told_client] == [cid] and "{webmim_number}" not in told_client[0][1] and "приехал в пункт выдачи" in told_client[0][1]
+    assert len(told_point) == 1 and told_point[0].startswith("Шины с ОТХ (заказ №") and "заказ №%d" % cid in told_point[0]
+    stages = [e["text"] for e in orders.list_events(conn, cid) if e["kind"] == "stage"]
+    assert len(stages) == 1 and "Заказ оформлен" not in stages[0]                         # straight from «Новый»: no «Заказ оформлен» and its message
+    assert not webmim_create_state(conn, cid)
+
+
+def webmim_create_state(conn, cid):
+    return conn.execute("SELECT 1 FROM webmim_create WHERE order_id = ?", (cid,)).fetchone()
+
+
+def test_a_point_cannot_press_it(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    users.add_user(conn, "point2", "длинный-пароль-1", T, role="point", point_id=point_id(conn))
+    c = app.test_client()
+    with c.session_transaction() as session:
+        session.update(user="point2", epoch=store.get_session_epoch(conn, "point2"), csrf="tok")
+    assert c.post("/orders/%d/oth-at-point" % cid, data={"csrf": "tok"}).status_code in (302, 403)
+    assert code(conn, cid) == "new"
+
+
+def test_an_order_all_from_oth_is_never_asked_for_a_webmim_number(tmp_path):
+    from tires_sync import order_reserve
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    card = orders.get_card(conn, cid)
+    told = []
+    order_reserve._ask_number(conn, card, lambda c, t: (told.append(t), "ok")[1], LATER)
+    assert told == [] and not any(order_reserve.NO_NUMBER_MARK in e["text"] for e in orders.list_events(conn, cid))
+    mixed = new_order(conn, qty=6)
+    take(conn, mixed)
+    order_reserve._ask_number(conn, orders.get_card(conn, mixed), lambda c, t: (told.append(t), "ok")[1], LATER)
+    assert len(told) == 1                                                            # its supplier's part has a WebMIM order to name
+
+
+def test_the_point_text_goes_to_the_points_own_page_for_an_order_of_its_account(tmp_path, monkeypatch):
+    from tires_sync import order_notify, order_points
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    seen = {}
+    monkeypatch.setattr(order_notify, "deliver", lambda c, box, card, text, now, **kw: (seen.update(kw["way"]), "ok")[1])
+    monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": point_id(conn)})
+    order_notify.tell_point(conn, None, orders.get_card(conn, cid), "x", LATER)
+    assert seen["own_point"] == point_id(conn)
+
+
+def test_the_move_to_the_point_puts_today_as_the_delivery_date_when_there_is_none(tmp_path, monkeypatch):
+    app, owner, tok, conn = panel(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    conn.execute("UPDATE order_card SET delivery_date = '' WHERE id = ?", (cid,))
+    conn.commit()
+    from tires_sync import order_manager, order_notify
+    monkeypatch.setattr(order_manager, "tell_client_arrived", lambda *a, **kw: (True, "ok"))
+    monkeypatch.setattr(order_notify, "tell_point", lambda *a, **kw: "ok")
+    post(owner, "/orders/%d/oth-at-point" % cid, tok)
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == "at_point" and card["delivery_date"] == card["entered_at"][:10]
