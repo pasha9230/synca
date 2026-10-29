@@ -308,7 +308,7 @@ def register(app) -> None:
             args = urlencode([kv for kv in (("f", f), ("acc", a), ("q", q)) if kv[1]])
             return "/chats" + ("?" + args if args else "")
         # two buttons (owner's word 2026-10-24): «Состояние» and «Аккаунт»; each keeps the other one and the search
-        filter_menus = [("Состояние: " + FILTERS[flt], [(label, link(k, acc), k == flt) for k, label in FILTERS.items()])]
+        filter_menus = [("Состояние: " + FILTERS[flt], [(label, link(k, acc or every), k == flt) for k, label in FILTERS.items()])]
         if not mine and (len(accounts) > 1 or acc is not None):                     # an account in the address can always be dropped; a point's is fixed
             filter_menus.append(("Аккаунт: " + ((names.get(acc) or "аккаунт №%d" % acc) if acc is not None else "Все аккаунты"),
                                  [("Все аккаунты", link(flt, every or ("all" if connections.chats_default_account(conn, author()) else None)), acc is None)]
@@ -325,7 +325,7 @@ def register(app) -> None:
         return render_template("chats.html", offer=offer, handoff=handoff, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=chats.pending_sends(conn, [current["id"]], local_iso()) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
                                accounts=accounts, stages=orders.list_stages(conn), statuses=chats.STATUSES, q=q, answerers=answerers, answer_names=dict(answerers),
                                unsearch="/chats" + ("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every)) if kv[1]]) if (flt or acc or every) else ""), every=every,
-                               query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc), ("q", q)) if kv[1]])) if (flt or acc or q) else "")
+                               query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every), ("q", q)) if kv[1]])) if (flt or acc or every or q) else "")
 
     def back(chat_row):
         return redirect("/chats/%d%s" % (chat_row, _keep_query()))

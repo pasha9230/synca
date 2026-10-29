@@ -520,18 +520,22 @@ def set_responsible(conn, account_id: int, login: str, staff: List[str], now: st
     if login and login not in staff:
         raise ValueError("Ответственный: выберите сотрудника из списка (не клиента и не точку).")
     config = get_config(conn, "avito", account_id)
+    config.pop("responsible_shared", None)
     if login:
         config["responsible"] = login
+        if conn.execute("SELECT 1 FROM panel_user WHERE login = ?", (login,)).fetchone() is None:
+            config["responsible_shared"] = True             # the shared owner of the panel (no row of panel_user)
     else:
         config.pop("responsible", None)
     set_config(conn, "avito", account_id, config, now, author)
 
 
-def _usable_responsible(conn, login: str) -> bool:
-    """A person of the panel who still may answer for orders: not switched off, not a client, not a point (the shared owner is not a row)."""
+def _usable_responsible(conn, login: str, shared: bool = False) -> bool:
+    """A person of the panel who still may answer for orders: not switched off, not a client, not a point; the shared owner (no row) only when
+    it was saved as such — a person deleted since is not given any more."""
     row = conn.execute("SELECT r.role, r.active FROM panel_user u LEFT JOIN panel_user_role r ON r.login = u.login WHERE u.login = ?", (login,)).fetchone()
     if row is None:
-        return True
+        return shared
     role, active = row[0] or "owner", 1 if row[1] is None else row[1]
     return bool(active) and role not in ("client", "point")
 
@@ -541,7 +545,8 @@ def account_responsible(conn, account_id) -> str:
     if account_id is None:
         return ""
     login = get_responsible(conn, int(account_id))
-    return login if login and _usable_responsible(conn, login) else ""
+    shared = bool(get_config(conn, "avito", int(account_id)).get("responsible_shared"))
+    return login if login and _usable_responsible(conn, login, shared) else ""
 
 
 def responsible_accounts(conn, login: str) -> List[int]:

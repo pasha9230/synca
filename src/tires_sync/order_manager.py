@@ -41,7 +41,8 @@ RETURN_FROM = ("at_point", "oth")                 # the stages where the tyres a
 
 
 def _return_from(card: dict) -> bool:
-    return card["stage"]["code"] in RETURN_FROM or (card["stage"]["code"] == "cancel" and str(card.get("cancel_reason") or "").startswith(orders.NOT_BOUGHT))
+    return card["stage"]["code"] in RETURN_FROM or (card["stage"]["code"] == "cancel"
+                                                    and str(card.get("cancel_reason") or "").strip().casefold().startswith(orders.NOT_BOUGHT))
 RETURN_REASON = "точка: шины отданы поставщику"
 RETURN_LINE = "точка: шины отданы поставщику (возврат)"
 RETURN_ASK = "Точка отдала шины поставщику (возврат): заполните сумму возврата и переведите в «Возврат»."
@@ -486,7 +487,10 @@ def _stage_id(conn, code) -> Optional[int]:
 def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional[Deliver]) -> Tuple[str, str]:
     """Move the order; on the arrival at the point the client is told at once. (outcome for the log, answer for the point)."""
     try:
-        moved = orders.move_card(conn, card["id"], stage_id, now, who)
+        changes = None
+        if orders.get_stage(conn, stage_id)["code"] == "cancel" and not str(card.get("cancel_reason") or "").strip():
+            changes = {"cancel_reason": orders.NOT_BOUGHT + " (команда точки)"}      # a word of the point into «Отмена / невыкуп» (it was
+        moved = orders.move_card(conn, card["id"], stage_id, now, who, changes)       # «Отказ/невыкуп» before the merge, 2026-10-29)
     except OrderError as err:
         return "не выполнено: %s" % err, "Не получилось: %s" % err
     stage = orders.get_stage(conn, stage_id)
@@ -668,6 +672,9 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str)
         if task is not None and task["status"] in ("running", "skipped"):
             return False, "Сообщение «можно забирать» по этому приезду %s: само не отправляется." % (
                 "уже отправляется" if task["status"] == "running" else "пропущено вручную")
+        if task is not None and _answered_by_hand(conn, token):
+            _arrived_close(conn, task, now, who, "владелец ответил во «Входящих»")
+            return True, "Сообщение «можно забирать» по этому приезду владелец уже разобрал во «Входящих»."
         status, why, copy = send_to_client(conn, card, _arrived_body(conn), token, deliver, now)
         if status == "sent" and task is not None:
             _arrived_close(conn, task, now, who)
@@ -723,11 +730,18 @@ def _arrived_wait(conn, card: dict, token: str, copy: str, why: str, now: str) -
         logging.getLogger("tires_sync.orders").exception("the waiting «можно забирать» of card %s could not be kept", card["id"])
 
 
-def _arrived_close(conn, task: dict, now: str, who: str) -> None:
-    """The arrival's message went by itself (a second «приехал» with the chat there now): its waiting task is done, never sent by hand."""
-    conn.execute("UPDATE order_task SET status = 'done', result = 'отправлено само', done_at = ? WHERE id = ? AND status IN ('pending', 'error')",
-                 (now, task["id"]))
+def _arrived_close(conn, task: dict, now: str, who: str, how: str = "отправлено само") -> None:
+    """The arrival's message went by itself (a second «приехал» with the chat there now) or a person dealt with it in «Входящие»: its waiting
+    task is done, never sent again."""
+    conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status IN ('pending', 'error')",
+                 (how, now, task["id"]))
     conn.commit()
+
+
+def _answered_by_hand(conn, token: str) -> bool:
+    """A person answered the line of «Входящие» about this arrival's message (the system's «Итог: …» answers are not a person's)."""
+    return conn.execute("SELECT 1 FROM manager_message WHERE (message_id = ? OR message_id LIKE ?) AND status = 'answered' AND answer NOT LIKE 'Итог:%'",
+                        (token, token + "-%")).fetchone() is not None
 
 
 def arrived_after_link(conn, card_id, deliver: Optional[Deliver], now: str, who: str) -> str:
@@ -742,6 +756,9 @@ def arrived_after_link(conn, card_id, deliver: Optional[Deliver], now: str, who:
         token = arrived_token(card, now)
         task = arrived_task(conn, card_id, token)
         if task is None or task["status"] not in ("pending", "error"):
+            return ""
+        if _answered_by_hand(conn, token):                         # the owner answered its line of «Входящие» (wrote to the client by hand)
+            _arrived_close(conn, task, now, who, "владелец ответил во «Входящих»")
             return ""
         if deliver is None:
             return "«Можно забирать» ждёт в «Сообщениях по заказу»: ключи Авито недоступны."

@@ -113,11 +113,14 @@ def _merge_refused_stage(conn, now: str) -> None:
             add_event(conn, card_id, now, "система", "stage", "Этап «Отказ/невыкуп» объединён с отменой: заказ в «%s», причина «%s»."
                       % (name if cancel[1] == OLD_CANCEL_NAME else cancel[1], text[:300]), level="grey")
         conn.execute("UPDATE order_task SET stage_id = ? WHERE stage_id = ?", (new, old))
-        conn.execute("UPDATE order_rule SET arg = ? WHERE action = 'move' AND arg = ?", (str(new), str(old)))
+        # a move into «Отказ/невыкуп» went without a reason; into «cancel» it needs one: such a rule comes switched off (the owner looks at it)
+        conn.execute("UPDATE order_rule SET arg = ?, enabled = 0 WHERE action = 'move' AND arg = ?", (str(new), str(old)))
         conn.execute("UPDATE order_rule SET stage_id = ?, enabled = 0 WHERE stage_id = ?", (new, old))
-        conn.execute("UPDATE order_command SET to_stage_id = ? WHERE to_stage_id = ?", (new, old))
+        conn.execute("UPDATE order_command SET to_stage_id = ? WHERE to_stage_id = ?", (new, old))       # order_manager.apply gives the reason
         conn.execute("DELETE FROM order_command WHERE stage_id = ? AND word IN (SELECT word FROM order_command WHERE stage_id = ?)", (old, new))
         conn.execute("UPDATE order_command SET stage_id = ? WHERE stage_id = ?", (new, old))
+        conn.execute("DELETE FROM order_command WHERE stage_id = ? AND to_stage_id = ?", (new, new))     # «cancel → refused»: a move to itself
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (MERGED_KEY % old, str(new)))      # trash: a deleted order of it comes back here
         conn.execute("DELETE FROM order_stage WHERE id = ?", (old,))
         if cancel[1] == OLD_CANCEL_NAME:
             conn.execute("UPDATE order_stage SET name = ? WHERE id = ?", (name, new))
@@ -127,6 +130,15 @@ def _merge_refused_stage(conn, now: str) -> None:
         conn.rollback()
         raise
     conn.commit()
+
+
+MERGED_KEY = "stage_merged_%d"                  # app_state: the stage an old stage was merged into (trash.restore)
+
+
+def merged_into(conn, stage_id) -> Optional[int]:
+    """The stage `stage_id` (gone) was merged into, or None."""
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (MERGED_KEY % int(stage_id),)).fetchone()
+    return int(row[0]) if row and str(row[0]).isdigit() else None
 
 
 def cancel_reason_of(kind, text) -> str:

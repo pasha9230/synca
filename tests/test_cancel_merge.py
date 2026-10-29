@@ -123,3 +123,46 @@ def test_the_reason_is_its_choice_and_its_text(kind, text, reason):
 def test_a_reason_without_its_choice_or_other_without_a_text_is_refused(kind, text):
     with pytest.raises(orders.OrderError):
         orders.cancel_reason_of(kind, text)
+
+
+# ---- review round 1 (2026-10-30, chats-orders) -----------------------------------------------------------------------------------------
+
+def test_a_rule_moving_into_refused_comes_switched_off_and_a_loop_is_gone(tmp_path):
+    """D3: a move into «Отказ/невыкуп» needed no reason, into «cancel» it does: the rule comes switched off; «cancel → refused» would be a move to
+    itself: its command is gone."""
+    conn = old_db(tmp_path)
+    refused, cancel = sid(conn, "refused"), sid(conn, "cancel")
+    conn.execute("INSERT INTO order_rule (stage_id, trigger, hours, action, arg, enabled) VALUES (?, 'stale', 72, 'move', ?, 1)", (sid(conn, "at_point"), str(refused)))
+    conn.execute("INSERT INTO order_command (stage_id, word, to_stage_id) VALUES (?, 'передумал', ?)", (cancel, refused))
+    conn.commit()
+    orders.ensure_pipeline(conn, LATER)
+    assert conn.execute("SELECT arg, enabled FROM order_rule WHERE action = 'move'").fetchone() == (str(cancel), 0)
+    assert conn.execute("SELECT COUNT(*) FROM order_command WHERE stage_id = to_stage_id").fetchone()[0] == 0
+
+
+def test_a_command_of_the_point_into_the_merged_stage_gives_the_reason(tmp_path):
+    from tires_sync import order_manager as mgr
+    conn = old_db(tmp_path)
+    card = put(conn, "at_point")
+    orders.ensure_pipeline(conn, LATER)
+    outcome, _answer = mgr.apply(conn, orders.get_card(conn, card), sid(conn, "cancel"), "менеджер Юнона", LATER, None)
+    got = orders.get_card(conn, card)
+    assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == "не выкупил (команда точки)", outcome
+
+
+def test_a_deleted_order_of_refused_comes_back_to_the_merged_stage(tmp_path):
+    from tires_sync import trash
+    conn = old_db(tmp_path)
+    card = put(conn, "refused")
+    record = trash.delete_order(conn, card, NOW, "owner")
+    orders.ensure_pipeline(conn, LATER)
+    trash.restore_order(conn, record, LATER, "owner")
+    got = orders.get_card(conn, card)
+    assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == "не выкупил"
+
+
+def test_the_reason_is_read_without_case_for_a_return(tmp_path):
+    from tires_sync import order_manager as mgr
+    conn = old_db(tmp_path)
+    card = put(conn, "cancel", "Не выкупил")
+    assert mgr._return_from(orders.get_card(conn, card))

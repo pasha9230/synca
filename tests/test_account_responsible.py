@@ -62,3 +62,16 @@ def test_the_chats_open_the_one_account_of_the_person(tmp_path):
     connections.set_responsible(conn, acc["yunona"], "masha", ["masha"], NOW, "owner")
     assert connections.chats_default_account(conn, "masha") is None                        # several: all, as before
     assert connections.chats_default_account(conn, "other") is None
+
+
+def test_a_deleted_person_is_not_given_but_the_shared_owner_is(tmp_path):
+    """D6: the shared owner has no row of panel_user and stays; a person deleted after being chosen is not given any more."""
+    conn, acc, pt = setup(tmp_path)
+    users.add_user(conn, "masha", "pass-word-1", NOW, role="chats")
+    connections.set_responsible(conn, acc["main"], "masha", ["masha"], NOW, "owner")
+    conn.execute("DELETE FROM panel_user_role WHERE login = 'masha'")
+    conn.execute("DELETE FROM panel_user WHERE login = 'masha'")
+    conn.commit()
+    assert connections.account_responsible(conn, acc["main"]) == ""
+    connections.set_responsible(conn, acc["main"], "owner", ["owner"], NOW, "owner")
+    assert connections.account_responsible(conn, acc["main"]) == "owner"

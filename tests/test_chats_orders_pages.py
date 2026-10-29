@@ -103,3 +103,15 @@ def test_the_rows_of_orders_open_by_a_click_anywhere(tmp_path):
     assert 'data-href="/orders/%d" class="is-link"' % card in page
     js = open(app.static_folder + "/app.js", encoding="utf-8").read()
     assert 't.closest("[data-href]")' in js
+
+
+def test_all_the_accounts_stay_chosen_through_the_filters_and_the_list(tmp_path):
+    """D4: «Все аккаунты» over the person's own account is kept by the filter of the state and by the links of the list."""
+    app, client, tok, conn, account = setup(tmp_path)
+    other = connections.create_account(conn, "Второй", NOW, "o")
+    connections.set_modes(conn, other, True, True, NOW, "o")
+    connections.set_responsible(conn, account, "owner", ["owner"], NOW, "owner")
+    page = client.get("/chats?acc=all").get_data(as_text=True)
+    state_links = re.findall(r'href="(/chats\?f=[^"]*)"', page)
+    assert state_links and all("acc=all" in h for h in state_links)
+    assert 'data-place="?acc=all"' in page

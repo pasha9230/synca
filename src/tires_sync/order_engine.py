@@ -399,7 +399,7 @@ def send_task(conn, task_id, text: str, deliver, now: str, author: str, prefer=N
     conn.commit()
     if claim.rowcount != 1:
         raise OrderError("Эта задача уже выполняется или выполнена.")
-    token = "task-%d-%s" % (task_id, "".join(ch for ch in task["created_at"] if ch.isdigit()))
+    token = task_token(task)
     earlier = conn.execute("SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent'", (token,)).fetchone()
     try:
         deliver(chat["id"], text, token)                           # an earlier press that went out is not sent again (the mark says «sent»)
@@ -416,8 +416,19 @@ def send_task(conn, task_id, text: str, deliver, now: str, author: str, prefer=N
     return chat["id"]
 
 
+def task_token(task: dict) -> str:
+    """The send mark of a message task: «task-<id>-<digits of created_at>»; «можно забирать» that waited (ARRIVED_RULE) keeps the mark of its
+    arrival («arrived-…», order_manager): one mark for the message sent by itself, by a press or after a chat is bound — never two sends."""
+    if task.get("rule_id") == ARRIVED_RULE and str(task.get("entered_at") or "").startswith("arrived-"):
+        return task["entered_at"]
+    return "task-%d-%s" % (task["id"], "".join(ch for ch in task["created_at"] if ch.isdigit()))
+
+
 def task_of_token(conn, token) -> Optional[dict]:
-    """The message task whose send mark `token` is (send_task: «task-<id>-<digits of created_at>»), or None: another mark, or the task is gone."""
+    """The message task whose send mark `token` is (task_token), or None: another mark, or the task is gone."""
+    if str(token or "").startswith("arrived-"):
+        row = conn.execute("SELECT %s FROM order_task WHERE rule_id = ? AND entered_at = ?" % TASK_FIELDS, (ARRIVED_RULE, str(token))).fetchone()
+        return _task(row) if row else None
     found = re.fullmatch(r"task-(\d+)-(\d*)", str(token or ""))
     if not found:
         return None

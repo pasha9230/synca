@@ -108,3 +108,43 @@ def test_a_message_lacking_values_waits_as_an_error_and_is_not_sent_by_itself(en
     sender = Sender()
     line = mgr.arrived_after_link(conn, card, deliver_by(conn, sender), LATER, "owner")
     assert "не отправлено" in line and sender.sent == []
+
+
+# ---- review round 1 (2026-10-30, chats-orders) -----------------------------------------------------------------------------------------
+
+def test_answered_in_the_inbox_by_hand_is_never_sent_by_itself(env):
+    """D1: the owner copied the text from «Входящие», wrote to the client and answered the line: a chat bound later sends nothing."""
+    conn, chat_row, card = env
+    mgr.tell_client_arrived(conn, card, None, NOW, "точка")
+    [line] = [r[0] for r in conn.execute("SELECT id FROM manager_message")]
+    mgr.answer(conn, line, "написал клиенту сам", LATER)
+    chat_deals.link_chat(conn, chat_row, card, LATER, "owner")
+    sender = Sender()
+    assert mgr.arrived_after_link(conn, card, deliver_by(conn, sender), LATER, "owner") == "" and sender.sent == []
+    assert waiting(conn, card)[0]["status"] == "done"
+    mgr.tell_client_arrived(conn, card, deliver_by(conn, sender), LATER, "точка")
+    assert sender.sent == []
+
+
+def test_one_mark_for_the_send_by_itself_by_a_press_and_after_binding(env):
+    """D2: the waiting task sends with the arrival's own mark: a send after binding that Avito refused (402) is not sent again by the next
+    «приехал», nor by a press in the card."""
+    conn, chat_row, card = env
+    mgr.tell_client_arrived(conn, card, None, NOW, "точка")
+    [task] = waiting(conn, card)
+    assert engine.task_token(task) == mgr.arrived_token(orders.get_card(conn, card), NOW)
+    chat_deals.link_chat(conn, chat_row, card, LATER, "owner")
+    sender = Sender()
+
+    def refused(row, text, token):
+        conn.execute("INSERT OR REPLACE INTO chat_send_log (token, chat_row, at, author, status, message_id) VALUES (?,?,?,?, 'retry', '')",
+                     (token, row, LATER, "система"))
+        conn.commit()
+        raise chats.ChatSendRetry("Авито отказал (402), система повторит сама.")
+    line = mgr.arrived_after_link(conn, card, refused, LATER, "owner")
+    assert "неизвестно" in line
+    sent, _note = mgr.tell_client_arrived(conn, card, deliver_by(conn, sender), LATER, "точка")      # the point repeats «приехал»
+    assert not sent and sender.sent == []
+    with pytest.raises((orders.OrderError, chats.ChatError)):
+        engine.send_task(conn, task["id"], task["body"], deliver_by(conn, sender), LATER, "owner")   # a press in the card
+    assert sender.sent == []
