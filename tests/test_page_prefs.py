@@ -173,3 +173,13 @@ def test_a_one_off_view_offers_the_saved_filters_and_its_reset_keeps_them(tmp_pa
     r = owner.get("/orders?saved=1", headers=on("/orders?v=list&s=3"))
     assert r.status_code == 302 and "q=" in r.headers["Location"]
     assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "q": ["Иван"]}
+
+
+def test_the_mark_of_a_form_post_is_not_taken_by_a_request_of_another_page(tmp_path):
+    app, owner, conn = setup(tmp_path)
+    owner.get("/orders/report?from=2026-10-01", headers=on("/orders/report"))
+    owner.post("/orders/report/rates", data={"csrf": "tok", "what": "labels", "owner_label": "А", "partner_label": "Б"},
+               headers=on("/orders/report?from=2026-10-01"))
+    owner.get("/catalog", headers=on("/"))                                      # another tab meanwhile
+    back = owner.get("/orders/report", headers=on("/orders/report?from=2026-10-01"))
+    assert back.status_code == 302 and "from=2026-10-01" in back.headers["Location"]

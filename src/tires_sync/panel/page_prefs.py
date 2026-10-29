@@ -80,7 +80,9 @@ def remember():
     endpoint, login = request.endpoint, session.get("user")
     if request.method != "GET" or not login or request.headers.get("X-Requested-With") == "fetch":
         return None
-    posted = session.pop(POSTED, None) if POSTED in session else None     # this GET is the redirect after a form (PRG), not a link of the page
+    posted = session.get(POSTED) == request.path                      # this GET is the redirect after a form (PRG), not a link of the page
+    if posted:
+        session.pop(POSTED)
     from .common import current_user, get_conn
     for group, (pages, members) in TABS.items():
         if endpoint in pages:
@@ -123,11 +125,12 @@ def remember():
 
 
 def after_post(response):
-    """after_request: a form sent (POST) and answered with a redirect marks the next GET as its PRG: the bare list address it goes to keeps
-    the saved filters (it is not «Сбросить» of the page, though the browser names the list page as the Referer)."""
+    """after_request: a form sent (POST) and answered with a redirect marks the address it goes to as its PRG: that bare list address keeps
+    the saved filters (it is not «Сбросить» of the page, though the browser names the list page as the Referer). The mark is the path, so
+    a GET of another tab in between does not take it."""
     if request.method == "POST" and response.status_code in (301, 302, 303) and session.get("user") \
             and request.headers.get("X-Requested-With") != "fetch":
-        session[POSTED] = 1
+        session[POSTED] = urlsplit(response.headers.get("Location", "")).path
     return response
 
 
