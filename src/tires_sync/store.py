@@ -290,6 +290,10 @@ CREATE TABLE IF NOT EXISTS sheet_order (
     seen_event INTEGER NOT NULL DEFAULT 0, failing INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', next_at TEXT NOT NULL DEFAULT '',
     claim_until TEXT NOT NULL DEFAULT ''
 );
+-- the person's own settings of the panel (user_prefs): login → key → JSON (the columns of the list of orders, later the filters).
+CREATE TABLE IF NOT EXISTS user_pref (
+    login TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (login, key)
+);
 CREATE TABLE IF NOT EXISTS photo (
     id INTEGER PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL, ext TEXT NOT NULL, width INTEGER, height INTEGER, bytes INTEGER,
     source TEXT NOT NULL, created TEXT NOT NULL
