@@ -296,6 +296,12 @@ def create_app(config: dict) -> Flask:
             "script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; "
             "frame-ancestors 'none'")
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.endpoint in ("shop_page", "shop_photo"):
+            # the client's catalog: no scripts, no picture from outside (a supplier's host is never asked by the client's browser), not kept
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; "
+                "frame-ancestors 'none'")
+            response.headers.setdefault("Cache-Control", "private, no-store")
         return response
 
     from . import routes, routes_addresses, routes_alerts, routes_catalog, routes_connections, routes_description, routes_drafts, routes_economics, routes_feedupdate, routes_history, routes_funnel, routes_chats, routes_health, routes_img, routes_main, routes_mappings, routes_mypoint, routes_order_bulk, routes_order_cleanup, routes_orders, routes_pairs, routes_agent, routes_photos, routes_points, routes_share, routes_users, routes_vk, routes_clients, routes_analytics, routes_avito_webhook, routes_search, routes_calls, routes_sheet, routes_inquiry, routes_shop

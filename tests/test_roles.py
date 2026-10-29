@@ -421,7 +421,7 @@ def test_the_pages_of_the_client_have_nothing_of_the_staff_panel(tmp_path):
         assert page.status_code == code, url
         for mark in ("topsearch", 'action="/search"', "bell", "sb-link", "sb-count", "notify.js", "topbar.js", "app.js", 'href="/orders"', 'href="/catalog"'):
             assert mark not in html, (url, mark)
-    assert "Каталог скоро" in client.get("/shop").get_data(as_text=True)
+    assert "Ассортимент ещё не настроен" in client.get("/shop").get_data(as_text=True)     # no conditions yet: the empty catalog (build 2)
 
 
 def test_the_forms_of_the_client_are_only_the_own_password():
