@@ -250,6 +250,49 @@ def _hand_over(conn, point: dict, back: str):
     return (answer or "Не получилось принять клиента. Напишите владельцу."), form
 
 
+# «Рабочее место» (the owner 2026-10-29): the tabs of the point's orders, each with its count; an order may be in two of them.
+TABS = {"all": "Все", "moving": "Едут", "here": "На точке", "ending": "Резерв истекает", "asked": "Ждут ответа", "return": "На возврат"}
+
+
+def _in_tab(row: dict, tab: str) -> bool:
+    """«Все»: what lies at the point and is on its way (as the page always showed); «Едут»: «Заказ оформлен» and «Перемещение на точку»
+    (the owner 2026-10-29); «На точке»; «Резерв
+    истекает»: at the point with the last day of the reservation today or tomorrow, or past (the term is a day, reserve_until); «Ждут
+    ответа»: the question «Клиент забрал?» of the last day still open (order_reserve.question_open); «На возврат»: «На ОТХ» (with an
+    agreed return not signed yet among them)."""
+    code = row["card"]["stage"]["code"]
+    return {"all": not row["oth"], "moving": code in ("placed", "moving"), "here": row["here"], "ending": row["ends"], "asked": row["asked"],
+            "return": row["oth"]}[tab]
+
+
+def _order_day(conn, card: dict) -> str:
+    """«от ДД.ММ.ГГГГ» of the card: the day the order last entered «Заказ оформлен», else the day it was made (never «today» by default)."""
+    placed = next((s["name"] for s in orders.list_stages(conn) if s["code"] == "placed"), None)
+    row = conn.execute("SELECT at FROM order_event WHERE order_id = ? AND kind = 'stage' AND text LIKE ? ORDER BY id DESC LIMIT 1",
+                       (card["id"], "%→ «" + (placed or "") + "»")).fetchone() if placed else None
+    day = str(row[0] if row else card["created_at"] or "")[:10]
+    try:
+        return date.fromisoformat(day).strftime("%d.%m.%Y")
+    except ValueError:
+        return ""
+
+
+def _back(point_id) -> str:
+    """Back to «Рабочее место» after a press: the point chosen (the owner, the partner) and the tab the press came from (its ?tab=)."""
+    from urllib.parse import parse_qs, urlsplit
+    came = urlsplit(request.referrer or "")
+    tab = (parse_qs(came.query).get("tab") or [""])[0] if came.path == "/my-point" and (not came.netloc or came.netloc == request.host) else ""
+    args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab in TABS and tab != "all" else [])
+    return "/my-point" + ("?" + "&".join(args) if args else "")
+
+
+def _oth_cards(conn, point_id) -> list:
+    """The point's orders on «На ОТХ»: the tyres the client refused lie at the point (tab «На возврат»)."""
+    return [orders.get_card(conn, r[0]) for r in conn.execute(
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'oth' ORDER BY c.entered_at, c.id",
+        (point_id,))]
+
+
 def _stages(conn, point_id) -> list:
     """«Этапы заказов»: every stage of the owner's pipeline, in its order and colour, with the number of this point's orders on it."""
     data = orders.board(conn, local_now(), point_id=point_id, with_sums=False)
@@ -260,9 +303,10 @@ FOUND_MAX = 20
 
 
 def _found(conn, query: str, point_id: int) -> list:
-    """The search line: the orders of this point only, by the number of the order, of the transfer or the phone (the top bar's own search,
-    search._orders, narrowed to the point)."""
-    scope = search.Scope(frozenset({"orders"}), point=point_id)
+    """The search line: the orders of this point only, by the number of the order, of the transfer, the phone or the client's name (in the
+    order, in its chat of the point's account) — the top bar's own search, search._orders, narrowed to the point."""
+    row = conn.execute("SELECT avito_account_id FROM point WHERE id = ?", (point_id,)).fetchone()
+    scope = search.Scope(frozenset({"orders"}), point=point_id, account=row[0] if row else None)
     groups = search.run(conn, query, scope, local_now(), limit=FOUND_MAX)["groups"]
     return groups[0]["items"] if groups else []
 
@@ -302,14 +346,17 @@ def register(app) -> None:
         now = local_iso()
         today = now[:10]
         cards = []
-        for card in (_cards(conn, point_id) if point_id is not None else []):
+        tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat()
+        for card in ((_cards(conn, point_id) + _oth_cards(conn, point_id)) if point_id is not None else []):
             until = card["reserve_until"] or ""
             delivery = card["delivery_date"] or ""
-            cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": card["stage"]["code"] == "at_point",
+            code = card["stage"]["code"]
+            cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": code == "at_point", "oth": code == "oth",
                           "tokens": {action: secrets.token_hex(12) for action in ACTIONS},          # every button is its own press
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
-                          "ends": bool(until) and until <= today, "delivery": _short_date(delivery), "text": vk_text(conn, card, now),
-                          "asked": reserve.question_open(conn, card, now)})
+                          "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery),
+                          "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
+                          "order_date": _order_day(conn, card)})
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over
@@ -322,11 +369,12 @@ def register(app) -> None:
                 points.mark_seen(conn, point_id, max(n["at"] for n in notes))
             except Exception:                                                    # noqa: BLE001  (a busy base: the page still opens)
                 conn.rollback()
-        here = [r for r in cards if r["here"]]
-        counts = {"coming": len(cards) - len(here), "here": len(here), "ending": sum(1 for r in here if r["ends"]),
-                  "asked": sum(1 for r in cards if r["asked"])}
+        tab = request.args.get("tab", "")
+        tab = tab if tab in TABS else "all"
+        shown = [r for r in cards if _in_tab(r, tab)]
+        counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
-        return render_template("mypoint.html", point=point, cards=cards, counts=counts, questions=[r for r in cards if r["asked"]],
+        return render_template("mypoint.html", point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, questions=[r for r in cards if r["asked"]],
                                notes=notes, choose=own_point() is None, handed=handed, seasons=mgr.SEASONS, bonus=bonus,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form,
@@ -343,7 +391,7 @@ def register(app) -> None:
         conn = get_conn()
         point_id = _point_id(conn)
         card = _own_card(conn, card_id, point_id)
-        back = "/my-point" + ("?p=%d" % point_id if own_point() is None else "")
+        back = _back(point_id)
         token = str(request.form.get("token") or "").strip()[:64]
         if not re.fullmatch(r"[0-9a-f]{24}", token):
             flash("Отметка не выполнена: обновите страницу.")
@@ -379,7 +427,7 @@ def register(app) -> None:
         conn = get_conn()
         point_id = _point_id(conn)
         _own_card(conn, card_id, point_id)
-        back = "/my-point" + ("?p=%d" % point_id if own_point() is None else "")
+        back = _back(point_id)
         try:
             point = points.get_point(conn, point_id)
         except points.PointError:

@@ -245,7 +245,7 @@ def register(app) -> None:
         if opened is not None and all(c["id"] != chat_row for c in rows):   # answered, read, closed: it stays in its place, not in «Всего»
             rows = sorted(rows + [opened], key=lambda c: place[c["id"]])
             kept = opened["kept"] = not fits                              # «вне фильтра» on its row only when it is out of the state
-        names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
+        names = {} if mine else {a["id"]: a["name"] for a in connections.list_accounts(conn)}   # a point never sees an account's name (2026-10-29)
         wanted = [c["id"] for c in rows] + ([chat_row] if chat_row is not None else [])
         starts = dict(pending)                                            # «Ждут ответа» read them already: only the others are read
         starts.update(chats.wait_starts(conn, [r for r in wanted if r not in asked]))        # the auto-answer is no answer
@@ -293,6 +293,9 @@ def register(app) -> None:
                         ours = {r[0] for r in conn.execute("SELECT id FROM order_card WHERE point_id = ?", (own_point(),))}
                         deal["earlier"] = [i for i in deal["earlier"] if i in ours]
                     deal["gaps"] = orders.gaps_to_place(conn, deal)
+                    if mine:                                                     # never an account's name (the owner 2026-10-29)
+                        deal["comment"] = orders.without_account_names(conn, deal["comment"])
+                        deal["tags"] = [t for t in deal["tags"] if t.lower() not in orders.account_tags(conn)]
                 except orders.OrderError:
                     deal = None
         def link(f, a):

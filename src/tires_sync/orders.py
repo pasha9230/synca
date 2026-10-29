@@ -921,7 +921,28 @@ def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item
 
 
 ORIGIN_NO_ACCOUNT = "Без аккаунта"
+ORIGIN_OTHER = "Не с аккаунта точки"         # the owner 2026-10-29: the point never sees an account's name (it was the name, 2026-10-22)
 ORIGIN_HINT = "Заказ не с аккаунта Авито вашей точки: только принять и выдать"
+
+
+ACCOUNT_SHOWN = "аккаунт Авито"
+
+
+def account_tags(conn) -> set:
+    """The tags chat_deals._account_tag makes of the Avito accounts' names (spaces folded, cut to MAX_TAG), in lower case."""
+    return {" ".join(str(r[0]).split())[:MAX_TAG].lower() for r in conn.execute("SELECT name FROM account WHERE name != ''")}
+
+
+def without_account_names(conn, text: str) -> str:
+    """A text a manager of a point reads (the journal of the order, a row of the bell, the comment) with the names of the Avito accounts put
+    out (the owner 2026-10-29: a point never sees an account's name): a whole word or phrase, in any case; never a piece of a word."""
+    text = str(text or "")
+    names = {" ".join(str(r[0]).split()) for r in conn.execute("SELECT name FROM account WHERE name != ''")}
+    names |= {n[:MAX_TAG].strip() for n in names}                       # the tag of a long name is cut (chat_deals._account_tag)
+    for name in sorted(names, key=len, reverse=True):
+        if len(name) >= 2 and name.lower() in text.lower():
+            text = re.sub(r"(?<!\w)%s(?!\w)" % r"\s+".join(re.escape(w) for w in name.split()), ACCOUNT_SHOWN, text, flags=re.I)
+    return text
 
 
 def origin_labels(conn, point_id, card_ids) -> Dict[int, dict]:
@@ -944,8 +965,7 @@ def origin_labels(conn, point_id, card_ids) -> Dict[int, dict]:
         found = chats_of.get(card_id, [])
         if own is not None and any(account == own for account, _ in found):
             continue
-        name = found[0][1] if found else ""
-        labels[card_id] = {"account": name, "text": name or ORIGIN_NO_ACCOUNT, "hint": ORIGIN_HINT}
+        labels[card_id] = {"account": "", "text": ORIGIN_OTHER if found else ORIGIN_NO_ACCOUNT, "hint": ORIGIN_HINT}   # never the account's name
     return labels
 
 

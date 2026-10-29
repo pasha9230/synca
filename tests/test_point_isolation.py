@@ -296,3 +296,67 @@ def test_our_own_number_typed_into_an_order_is_not_the_clients_phone_for_the_poi
     conn.commit()
     m = w["manager"]
     assert [g for g in m.get("/search.json", query_string={"q": own}).get_json()["groups"] if g["key"] == "clients"] == []
+
+
+# ---- 8. the client's name in the search of a point (the owner 2026-10-29) ---------------------------------------------------------
+
+def _order_urls(client, q, page=False):
+    if page:
+        return set("/orders/%s" % n for n in re.findall(r'<a class="mp-name" href="/orders/(\d+)"', _text(client.get("/my-point", query_string={"q": q}))))
+    found = client.get("/search.json", query_string={"q": q}).get_json()
+    return {i["url"] for g in found["groups"] if g["key"] == "orders" for i in g["items"]}
+
+
+@pytest.mark.parametrize("page", [False, True])
+def test_the_name_finds_the_own_order_in_any_case_and_never_another_points(w, page):
+    m, conn = w["manager"], w["conn"]
+    for q in ("общий", "ОБЩИЙ", "Общ"):
+        assert _order_urls(m, q, page) == {"/orders/%d" % w["order_a"]}, q                 # point Б's «Общий» never
+    assert _order_urls(m, "чужой иван", page) == set() and _order_urls(m, "Иван", page) == set()
+    assert _order_urls(m, "чат-руставели", page) == {"/orders/%d" % w["order_a"]}          # the name of the order's chat of its account
+    _chat(conn, w["acc_b"], "pq", "Иной Аккаунтович", w["order_a"])                        # a chat of another account bound to its order
+    conn.commit()
+    assert _order_urls(m, "аккаунтович", page) == set()                                    # its name is not the point's to search
+    owner = w["app"].test_client()
+    login(owner)
+    assert _order_urls(owner, "аккаунтович") == {"/orders/%d" % w["order_a"]}               # the owner finds it
+    assert _order_urls(owner, "общий") == {"/orders/%d" % w[k] for k in ("order_a", "order_b", "order_b2")}
+
+
+def test_a_point_without_an_account_finds_no_name_of_a_chat(w):
+    conn = w["conn"]
+    conn.execute("UPDATE point SET avito_account_id = NULL WHERE id = ?", (w["pa"],))
+    conn.commit()
+    assert _order_urls(w["manager"], "чат-руставели") == set() and _order_urls(w["manager"], "чат-руставели", True) == set()
+    assert _order_urls(w["manager"], "общий", True) == {"/orders/%d" % w["order_a"]}         # the order's own name still
+
+
+# ---- 9. a point never sees the name of an Avito account (the owner 2026-10-29) -------------------------------------------------------
+
+def test_no_page_of_a_point_names_an_avito_account(w):
+    conn, m = w["conn"], w["manager"]
+    orders.update_card(conn, w["order_a"], {"tags": "Аккаунт-Руставели,зима"}, NOW, "o")      # the tag chat_deals._account_tag puts on
+    conn.commit()
+    pages = {url: _text(m.get(url)) for url in ("/orders/%d" % w["order_a"], "/orders", "/orders?v=list", "/my-point", "/my-point?tab=all",
+                                                "/search?q=Общий", "/chats/%d" % w["chat_a"], "/chats", "/calls", "/alerts")}
+    for url, page in pages.items():
+        assert "Аккаунт-Руставели" not in page and "Аккаунт-Юнона" not in page, url
+    assert "зима" in pages["/orders/%d" % w["order_a"]]                                      # the other tags stay
+    owner = w["app"].test_client()
+    login(owner)
+    assert "Аккаунт-Руставели" in _text(owner.get("/chats/%d" % w["chat_a"])) and "Аккаунт-Руставели" in _text(owner.get("/orders/%d" % w["order_a"]))
+    assert "Аккаунт-Руставели" in _text(owner.get("/calls"))
+
+
+def test_the_comment_and_a_cut_tag_never_name_the_account_and_a_word_inside_another_stays(w):
+    conn, m = w["conn"], w["manager"]
+    long_name = "Шина-Колесо Санкт-Петербург Юг Север"                                       # longer than a tag: the tag is cut
+    conn.execute("UPDATE account SET name = ? WHERE id = ?", (long_name, w["acc_b"]))
+    orders.update_card(conn, w["order_a"], {"comment": "Звонок 07.10 на аккаунт «Аккаунт-Руставели» (принят). Ваши Аккаунт-Руставелиные шины",
+                                            "tags": long_name[:orders.MAX_TAG]}, NOW, "o")
+    conn.commit()
+    for url in ("/orders/%d" % w["order_a"], "/orders", "/chats/%d" % w["chat_a"]):
+        page = _text(m.get(url))
+        assert "«Аккаунт-Руставели»" not in page and long_name[:orders.MAX_TAG] not in page, url
+    assert "Аккаунт-Руставелиные" in _text(m.get("/orders/%d" % w["order_a"]))              # a piece of another word is not cut
+    assert orders.without_account_names(conn, "шины Аккаунт-Юнона") == "шины Аккаунт-Юнона"   # not an account any more: as it is

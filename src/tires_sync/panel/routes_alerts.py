@@ -35,6 +35,7 @@ def grouped(conn, login: str) -> list:
     rows = [order_engine.for_point(r) if r["order_id"] in foreign else r
             for r in rows if (r["order_id"] in ours and not (r["order_id"] in quiet and orders.client_words(r))
                               if r["order_id"] is not None else r.get("chat_row") in chats_of)]
+    rows = [dict(r, text=orders.without_account_names(conn, r.get("text"))) for r in rows]      # never an account's name (2026-10-29)
     return sorted(point_rows(conn, point, now) + rows, key=lambda r: r["at"] or "", reverse=True)
 
 

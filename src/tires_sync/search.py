@@ -76,13 +76,20 @@ def _orders(conn, p: dict, scope: Scope, limit: int) -> list:
     first = {}
     for order_id, name, qty in conn.execute("SELECT order_id, name, qty FROM order_item ORDER BY id"):
         first.setdefault(order_id, "%s × %d" % (name, qty))
+    peers = {}                                                     # the client's name in the order's Avito chat (the owner 2026-10-29); a point:
+    chat_sql, chat_args = "SELECT order_id, peer_name FROM avito_chat WHERE order_id > 0 AND peer_name != ''", ()   # the chats of its account only
+    if scope.point is not None:
+        chat_sql, chat_args = chat_sql + " AND account_id = ?", (scope.account if scope.account is not None else -1,)
+    for order_id, peer in conn.execute(chat_sql, chat_args):
+        peers[order_id] = (peers.get(order_id, "") + " " + peer).strip()
     sql, args = ("SELECT o.id, o.client_name, o.client_phone, o.webmim_number, s.name, o.transfer_number FROM order_card o "
                  "JOIN order_stage s ON s.id = o.stage_id", ())
     if scope.point is not None:
         sql, args = sql + " WHERE o.point_id = ?", (scope.point,)
     found = []
     for cid, name, phone, number, stage, transfer in conn.execute(sql + " ORDER BY o.id DESC", args):
-        if not orders.board_matches(wanted, cid, name, phone, first.get(cid, ""), number or "", transfer or ""):
+        if not orders.board_matches(wanted, cid, " ".join(x for x in (name or "", peers.get(cid, "")) if x), phone, first.get(cid, ""), number or "",
+                                    transfer or ""):          # the words in lower case by Python: «алексей» finds «Алексей» (sqlite's LOWER would not)
             continue
         found.append({"type": "order", "title": "Заказ №%d · %s" % (cid, name or phone or "Без имени"),
                       "subtitle": " · ".join(x for x in (stage, "перемещение %s" % transfer if transfer else "", first.get(cid, "")) if x),
