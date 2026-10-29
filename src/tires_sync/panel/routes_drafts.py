@@ -4,7 +4,7 @@ import json
 import re
 from datetime import timedelta
 
-from flask import abort, flash, redirect, render_template, request
+from flask import abort, flash, jsonify, redirect, render_template, request
 
 from .. import avito_upload, connections, staging, store
 from ..cycle import run_for_accounts
@@ -13,7 +13,7 @@ from ..settings_store import active_settings
 from ..transport import urllib_transport
 from .data import load_merged, load_reference
 from ..settings_store import (
-    PercentLimitError, StaleDraftError, cancel_draft, confirm_draft, create_draft, get_active,
+    PercentLimitError, StaleDraftError, cancel_draft, confirm_draft, get_active,
 )
 from .common import author, get_conn, login_required, now, now_iso, remember_page, return_page, review_or_back, safe_path
 from .routes_main import context
@@ -134,25 +134,9 @@ def _row_entries(form, prefix: str, brand: str) -> list:
 
 def register(app) -> None:
     app.jinja_env.globals["plural"] = service.plural
-
-    def make_draft(builder, back: str):
-        conn = get_conn()
-        raw = get_active(conn)[1]
-        try:
-            changes = builder(raw)
-        except ValueError as err:
-            flash("Ошибка в форме: %s" % err)
-            return redirect(back)
-        if not changes:
-            flash("Изменений нет.")
-            return redirect(back)
-        try:
-            draft_id = create_draft(conn, changes, now_iso())
-        except ValueError as err:
-            flash("Недопустимые настройки: %s" % err)
-            return redirect(back)
-        remember_page(back)
-        return redirect("/draft/%d" % draft_id)
+    # the pages whose bar «Не применено: N» applies the working draft in place (the owner 2026-10-29); the other pages keep «Посмотреть и применить»
+    app.jinja_env.globals["SETTINGS_BAR_PAGES"] = ("settings_page", "settings_brands_page", "settings_brand_card", "settings_exclusions_page",
+                                                   "economics_terms")
 
     @app.route("/brands")
     @login_required
@@ -173,7 +157,7 @@ def register(app) -> None:
             for row in connections.list_addresses(conn, account["id"]):
                 if row["name"]:
                     point_names.setdefault(str(row["address_id"]), row["name"])
-        raw = get_active(conn)[1]
+        raw = staging.effective_raw(conn)                       # the pending changes shown as they will be after «Применить»
         pack4_rules = [{"rule": r, "text": service.pack4_rule_text(r)} for r in service.pack4_rules_of(raw)]
         multi = len(suppliers_ex) > 1
         pack4_brands = [{"value": ("S%d:" % sp["supplier"]["id"] if sp["supplier"]["id"] != 1 else "") + x,
@@ -221,7 +205,19 @@ def register(app) -> None:
     @app.route("/settings/draft", methods=["POST"])
     @login_required
     def settings_draft():
-        return make_draft(lambda raw: service.changes_from_settings_form(raw, request.form), "/settings")
+        """The form «Общие» into the working draft with every other pending change (the owner 2026-10-29: changes pile up, «Применить» once)."""
+        conn = get_conn()
+        try:
+            changes = service.changes_from_settings_form(staging.effective_raw(conn), request.form)
+            if changes:
+                staging.set_fields(conn, changes, now_iso())
+        except (ValueError, StaleDraftError) as err:
+            flash("Ошибка в форме: %s" % err)
+            return redirect("/settings")
+        if not changes:
+            flash("Изменений нет.")
+            return redirect("/settings")
+        return review_or_back(conn, "/settings")
 
     @app.route("/settings/pricing", methods=["POST"])
     @login_required
@@ -321,39 +317,62 @@ def register(app) -> None:
     @app.route("/draft/<int:draft_id>/confirm", methods=["POST"])
     @login_required
     def draft_confirm(draft_id):
+        """«Применить» of the page /draft/N, or of the bar of a settings page (`next`: the page, where it comes back after the publication;
+        every check stays, a missing confirmation sends to /draft/N as before, and from there back to the page)."""
         strong = request.form.get("strong") == "on"
+        stay = safe_path(request.form.get("next", ""))
         conn, settings, parsed, ref = context(app)
         try:
             review = service.draft_review(conn, draft_id, parsed, ref, now().date(), now() + timedelta(hours=3))
         except ValueError:
             abort(404)
+
+        def again(text):
+            flash(text)
+            if stay:
+                remember_page(stay)
+            return redirect("/draft/%d" % draft_id)
         if request.form.get("rev") != review["rev"]:
-            flash("Черновик изменился после просмотра: проверьте итог ещё раз и подтвердите заново.")
-            return redirect("/draft/%d" % draft_id)
+            return again("Черновик изменился после просмотра: проверьте итог ещё раз и подтвердите заново.")
         if review["guard"]["over"] and request.form.get("understand") != "on":
-            flash("Подтвердите снятие: исчезнет %d объявлений, это больше порога защиты (%d). Отметьте «Я понимаю»." % (
+            return again("Подтвердите снятие: исчезнет %d объявлений, это больше порога защиты (%d). Отметьте «Я понимаю»." % (
                 review["guard"]["gone"], review["guard"]["limit"]))
-            return redirect("/draft/%d" % draft_id)
         if review["own_risky"] and not strong:                 # a fixed own price far from the feed's or below the purchase: asked once more
-            flash("Своя цена ниже закупки или сильно отличается от цены фида: отметьте «Подтверждаю значения вне диапазона».")
-            return redirect("/draft/%d" % draft_id)
+            return again("Своя цена ниже закупки или сильно отличается от цены фида: отметьте «Подтверждаю значения вне диапазона».")
         try:
             confirm_draft(get_conn(), draft_id, now_iso(), author(), strong=strong)
         except StaleDraftError:
-            flash("Черновик устарел: настройки уже изменены. Создайте новый.")
-            return redirect("/draft/%d" % draft_id)
+            return again("Черновик устарел: настройки уже изменены. Создайте новый.")
         except PercentLimitError as err:
-            flash("Процент %s вне допустимого диапазона: нужно усиленное подтверждение." % err.max_pct)
-            return redirect("/draft/%d" % draft_id)
+            return again("Процент %s вне допустимого диапазона: нужно усиленное подтверждение." % err.max_pct)
         except ValueError as err:
             flash(str(err))
-            return redirect(return_page())
+            return redirect(stay or return_page())
         if review["guard"]["gone"]:
             remember_expected(get_conn(), active_settings(get_conn()).version, review["guard"]["gone_ads"])
+        lines = publish_now(app)                               # a confirmed change always goes to the feed Avito reads
+        if stay:
+            return_page()                                      # forget the page the draft was opened from: we are back on it
+            flash("Настройки применены. " + (publish_summary(lines) if lines is not None else ""), "ok")
+            return redirect(stay)
         flash("Настройки применены.")
-        if publish_now(app) is not None:                       # a confirmed change always goes to the feed Avito reads
+        if lines is not None:
             return redirect("/publish/result")
         return redirect(return_page())
+
+    @app.route("/settings/pending")
+    @login_required
+    def settings_pending():
+        """What «Применить» of the bar of a settings page changes in the feed, for the bar (asked by its script: the count takes a while)."""
+        conn = get_conn()
+        staged = staging.summary(conn)
+        if staged["draft_id"] is None or staged["stale"]:
+            return jsonify(open=False)
+        _, settings, parsed, ref = context(app)
+        review = service.draft_review(conn, staged["draft_id"], parsed, ref, now().date(), now() + timedelta(hours=3))
+        return jsonify(open=True, draft=staged["draft_id"], rev=review["rev"], line=service.pending_line(review),
+                       guard={"over": review["guard"]["over"], "gone": review["guard"]["gone"], "limit": review["guard"]["limit"]},
+                       strong=bool(review["needs_strong"]))
 
     @app.route("/publish/result")
     @login_required

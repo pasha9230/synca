@@ -73,12 +73,17 @@ def _mutate(conn, fn: Callable[[dict], None], now: str) -> None:
         draft = _open_draft(conn, in_transaction=True)
         if draft is not None and draft["base"] != active_id:
             raise StaleDraftError("Рабочий черновик устарел: настройки изменились. Отмените его и повторите.")
-        effective = {k: copy.deepcopy(_norm({**raw, **(draft["changes"] if draft else {})}, k)) for k in TRACKED}
+        pending = draft["changes"] if draft else {}
+        effective = {k: copy.deepcopy(_norm({**raw, **pending}, k)) for k in TRACKED}
+        effective.update({k: copy.deepcopy(v) for k, v in pending.items() if k not in TRACKED})    # the other settings piled up: kept
         fn(effective)
         diff = {}
         for key in TRACKED:
             if _norm(effective, key) != _norm(raw, key):
                 diff[key] = sorted([b, s] for b, s in effective["enabled"]) if key == "enabled" else effective[key]
+        for key, value in effective.items():
+            if key not in TRACKED and value != raw.get(key):
+                diff[key] = value
         if diff:
             settings_from_dict({**raw, **diff}, enforce_pct_limit=False)
         dumped = json.dumps(diff, ensure_ascii=False, sort_keys=True)
@@ -96,6 +101,29 @@ def _mutate(conn, fn: Callable[[dict], None], now: str) -> None:
     except BaseException:
         conn.rollback()
         raise
+
+
+def set_fields(conn, changes: dict, now: str) -> None:
+    """Settings of the page «Настройки» (the threshold, «за 4 шт.», the points...) into the working draft, next to every other change piled
+    up there (a value back to the active one leaves the draft). Only the keys a draft may change (settings_store._check_keys)."""
+    from .settings_store import _check_keys
+    _check_keys(changes)
+    if any(key in TRACKED for key in changes):
+        raise ValueError("these settings have their own setters")
+
+    def fn(eff):
+        eff.update(copy.deepcopy(changes))
+
+    _mutate(conn, fn, now)
+
+
+def effective_raw(conn) -> dict:
+    """The active settings with the working draft on top: what the settings pages show while changes wait for «Применить»."""
+    raw = get_active(conn)[1]
+    draft = _open_draft(conn)
+    if draft is None or draft["base"] != raw["version"]:
+        return raw
+    return {**raw, **draft["changes"]}
 
 
 def set_override(conn, goods_id: str, mode: Optional[str], now: str) -> None:

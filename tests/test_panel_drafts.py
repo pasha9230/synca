@@ -1,6 +1,6 @@
 from tires_sync import store
 from tires_sync.settings_store import active_settings, get_active
-from panel_helpers import login, make_app, post
+from panel_helpers import login, make_app, post, review
 
 
 def stage_summer(client, tok, small="-3", large="-3", enabled="on", brand="IKON TYRES", season="summer"):
@@ -68,10 +68,15 @@ def test_stale_draft_is_refused_with_a_clear_message(tmp_path):
     app = make_app(tmp_path)
     client = app.test_client()
     tok = login(client)
-    post(client, "/settings/draft", tok, **{"min_stock": "6"})
-    post(client, "/settings/draft", tok, **{"min_stock": "7"})
-    post(client, "/draft/1/confirm", tok)
-    r = post(client, "/draft/2/confirm", tok)
+    from tires_sync.settings_store import confirm_draft, create_draft
+    post(client, "/settings/draft", tok, **{"min_stock": "7"})                 # the working draft (the settings pages pile changes up there)
+    draft = review(client)
+    page = client.get(draft).get_data(as_text=True)
+    conn = store.connect(app.config["DB_PATH"])
+    other = create_draft(conn, {"min_stock": 6}, "2026-10-07T11:00:00")         # the settings change elsewhere meanwhile (a command, a rollback)
+    confirm_draft(conn, other, "2026-10-07T11:00:00", "owner")
+    import re
+    r = post(client, draft + "/confirm", tok, rev=re.search(r'name="rev" value="([0-9a-f]+)"', page).group(1))
     assert "устарел" in client.get(r.headers["Location"]).get_data(as_text=True)
     assert active_settings(store.connect(app.config["DB_PATH"])).min_stock == 6
 

@@ -248,8 +248,10 @@ def create_app(config: dict) -> Flask:
                         store.set_state(conn, "nav_pending_pairs", pairs)
                     except Exception:
                         pairs = "0"
+                from .service import draft_rev
                 self._data = {
                     "staged": staged["count"] if not staged["stale"] else 0, "stale": staged["stale"],
+                    "draft_id": staged["draft_id"], "rev": draft_rev(staged["changes"]),
                     "new_count": _visible_new_count(conn),
                     "pending_pairs": int(pairs) if pairs.isdigit() else 0,
                     "chat_unread": _chat_unread(conn)}

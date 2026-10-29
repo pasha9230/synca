@@ -62,6 +62,12 @@ def login(client) -> str:
     return "tok"
 
 
+def review(client) -> str:
+    """The address of the page of the working draft (/draft/N), as «Подробнее» of the bar opens it: the changes of the settings pages pile up
+    there and the pages stay where they are (the owner 2026-10-29)."""
+    return client.get("/catalog/review").headers["Location"]
+
+
 def post(client, url, tok, **data):
     if url.startswith("/draft/") and url.endswith("/confirm") and "rev" not in data:
         import re

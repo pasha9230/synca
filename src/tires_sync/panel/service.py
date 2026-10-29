@@ -1241,6 +1241,18 @@ def rollback_effect(conn, version_id: int, parsed, ref, today: date, now=None) -
             "over": gone > 0 and gone > limit}
 
 
+def draft_rev(changes: dict) -> str:
+    """The mark of what a draft holds: «Применить» applies the changes the person looked at, not ones added since (another tab, a partner)."""
+    return hashlib.sha1(json.dumps(changes, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def pending_line(review: dict) -> str:
+    """One line of what «Применить» changes in the feed, from the same review as the page /draft/N: «войдёт 12, выйдет 3, цены изменятся у 40»."""
+    preview = review["preview"]
+    return "В фиде: войдёт %d, выйдет %d, цены изменятся у %d." % (
+        len(preview.appear), len(preview.disappear), len(preview.price_changes))
+
+
 def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dict:
     draft = get_draft(conn, draft_id)
     active_id, raw = get_active(conn)
@@ -1264,9 +1276,8 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
         brands[parsed.offers[gid].brand_key if gid in parsed.offers else "?"]["appear"] += 1
     for gid in preview.disappear:
         brands[parsed.offers[gid].brand_key if gid in parsed.offers else "?"]["disappear"] += 1
-    rev = hashlib.sha1(json.dumps(draft["changes"], ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return {
-        "rev": rev,
+        "rev": draft_rev(draft["changes"]),
         "guard": {"over": gone_total > 0 and gone_total > limit, "limit": limit, "gone": gone_total,
                   "gone_ads": ads_gone(preview.disappear, parsed.offers, old, new)},
         "by_brand": [dict(brand=b, **v) for b, v in sorted(brands.items())],
