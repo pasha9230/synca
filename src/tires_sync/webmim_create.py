@@ -1,5 +1,6 @@
 """«Оформить в WebMIM»: an order of the panel made in WebMIM by a person's button (the owner and the partner; docs/integrations/webmim-orders-api-v2.md).
-Delivery to the address of the order's point, paid from the account (the owner 2026-10-12), `externalNumber` = the order's number in the panel.
+Delivery to the address of the order's point, the fields as the owner fills WebMIM's form by hand (2026-10-29: «безнал», «Отсрочка», contact
+«Админ», the point's phone and time, «Грузим на ОТХ»; fields()), `externalNumber` = the order's number in the panel.
 No approve, no rule of a stage presses it. The first full success moves an order standing before «Заказ оформлен» there the ordinary way
 (the owner 2026-10-23: its checks, journal and rules of the stage); then the route calls order_placed.on_placed (the client's message
 «Клиенту: заказ оформлен», the owner 2026-10-23): the move first, so the hook sends the message the rule of the stage has just prepared, never a
@@ -11,11 +12,12 @@ quantity in WebMIM), only the difference goes. A part made (the order without so
 adds what lacks. The state of the presses: the table webmim_create (store.py)."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import socket
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import orders, reliability, webmim_match, webmim_orders
@@ -24,18 +26,19 @@ from .order_points import get_point
 # The servers the button may write to. The live one only by the owner's word: add "prod" here (a change of the code, reviewed and deployed),
 # after the owner has confirmed the values below against the live dictionaries.
 CREATE_SERVERS = ("test",)
-# What is taken from WebMIM's dictionaries (names, compared without case): «оплата со счёта кабинета» (the owner 2026-10-12) = the terms
-# «Предоплата» and the type «безнал» / «со счёта» (the only type, when the dictionary has one). Nothing fits: the button refuses and lists the values.
+# What is taken from WebMIM's dictionaries (names, compared without case), as the owner fills the form by hand (2026-10-29): the type «безнал»,
+# the terms «Отсрочка», the shipment «Доставка». Nothing fits: the button refuses and lists the values.
 SHIPMENT = "доставка"
-PAYMENT_TERMS = "предоплата"
-PAYMENT_TYPES = ("безнал", "со счёта", "со счета", "оплата со счёта", "оплата со счета")
+PAYMENT_TERMS = "отсрочка"
+PAYMENT_TYPES = ("безнал",)
+CONTACT = "Админ"                    # the contact person of the delivery (the owner 2026-10-29); the phone is the point's
+NOTE_FOR_SUPPLIER = "Грузим на ОТХ"  # «Примечание для поставщика», always (the owner 2026-10-29)
+LATE_HOUR = 16                       # WebMIM: an order for today goes to work before 16:00 (its own warning in the form)
 
 NO_ADDRESS = "не указан адрес доставки WebMIM"   # the refusal that lists the server's addresses (_addresses_hint)
 TEST_TAG = "тест"            # the test server makes only the orders with this tag (the team lead's R2 2026-10-23: the owner's own test orders)
 STALE = 600                 # seconds: a «running» mark older than this is of a killed worker (order_engine.RUNNING_TIMEOUT)
 BUDGET = 45.0               # seconds a press may spend on positions (nginx gives the page 60)
-SEARCH_DAYS = 3             # our number is looked for among the orders WebMIM made in so many days (the date only stops the pages: an order
-                            # without a date, or with WebMIM's clock off ours, is still found)
 STATE_NAMES = {"running": "оформляется", "unknown": "ответ WebMIM потерян", "refused": "не оформлен", "partial": "недосоздан", "done": "оформлен"}
 FIELDS = ("order_id", "server", "state", "first_at", "started_at", "author", "webmim_id", "result", "updated_at")
 
@@ -86,19 +89,41 @@ def problems(conn, card: dict, today: date, mode: str = "new") -> List[str]:
     else:
         if not point["webmim_address_id"]:
             out.append("У точки «%s» %s (Подключения → Точки)." % (point["name"], NO_ADDRESS))
-        if not point["manager_name"]:
-            out.append("У точки «%s» не указан менеджер: он контактное лицо доставки." % point["name"])
         if not webmim_phone(point["manager_phone"]):
-            out.append("У точки «%s» телефон менеджера не российский мобильный или не указан." % point["name"])
+            out.append("У точки «%s» телефон не российский мобильный или не указан: он контактный телефон доставки." % point["name"])
         if not (card.get("delivery_time") or point["default_time"]):
             out.append("Не указано время доставки (в заказе или время точки по умолчанию).")
     if not card.get("delivery_date"):
         out.append("Не указана дата доставки.")
     elif card["delivery_date"] < today.isoformat() and mode == "new":
         out.append("Дата доставки в прошлом: WebMIM не принимает заказ задним числом.")
-    if not webmim_phone(card.get("client_phone")):
-        out.append("Не указан телефон клиента (или он не российский).")
     return out
+
+
+def late(card: dict, now: str) -> bool:
+    """The delivery is today and it is LATE_HOUR or later: WebMIM's own warning (an order for today goes to work before 16:00)."""
+    try:
+        moment = datetime.fromisoformat(now)
+    except (TypeError, ValueError):
+        return False
+    return card.get("delivery_date") == moment.date().isoformat() and moment.hour >= LATE_HOUR
+
+
+def fields(conn, card: dict) -> dict:
+    """What the order of WebMIM gets from the panel, the dictionaries aside: the same for the window «Подтверждение» and for POST /orders
+    (what the person saw is what goes). The card passed problems() (a point, its address and phone, a date)."""
+    point = get_point(conn, card["point_id"])
+    return {"date": card["delivery_date"], "address_id": point["webmim_address_id"], "point": point["name"],
+            "time": (card.get("delivery_time") or point["default_time"])[:200], "person": CONTACT,
+            "phone": webmim_phone(point["manager_phone"]), "note": NOTE_FOR_SUPPLIER, "external": str(card["id"])}
+
+
+def fingerprint(conn, card: dict) -> str:
+    """The fields and the positions the window showed: a press with another one (the order changed meanwhile) is refused (_claim)."""
+    items = sorted((str(i["goods_id"]), str(i.get("territory") or ""), int(i["qty"] or 0)) for i in card.get("items") or [] if int(i["qty"] or 0) > 0)
+    data = fields(conn, card) if card.get("point_id") and get_point(conn, card["point_id"]) else {}
+    raw = repr((sorted(data.items()), items))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _tagged(card: dict) -> bool:
@@ -112,7 +137,7 @@ def _age(now: str, then: str) -> float:
         return STALE + 1
 
 
-def _claim(conn, card_id, server: str, now: str, today: date, author: str) -> Tuple[dict, str, bool]:
+def _claim(conn, card_id, server: str, now: str, today: date, author: str, seen: Optional[str] = None) -> Tuple[dict, str, bool]:
     """Take the order for this press, or raise OrderError (nothing asked of WebMIM). Returns (the card, the id of the WebMIM order the button made
     and the card still holds, whether an earlier press may have made one whose answer was lost)."""
     conn.commit()
@@ -145,6 +170,9 @@ def _claim(conn, card_id, server: str, now: str, today: date, author: str) -> Tu
         found = problems(conn, card, today, "made" if made else "lost" if lost else "new")
         if found:
             raise orders.OrderError(" ".join(found))
+        if seen is not None and not made and seen != fingerprint(conn, card):
+            raise orders.OrderError("Данные заказа изменились после открытия окна подтверждения: проверьте их снова и подтвердите ещё раз. "
+                                    "В WebMIM ничего не отправлено.")
         first_at = before["first_at"] if (lost or made) else now
         conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
                      "VALUES (?, ?, 'running', ?, ?, ?, ?, '', ?) ON CONFLICT (order_id) DO UPDATE SET server = excluded.server, "
@@ -168,14 +196,12 @@ def _finish(conn, card_id, state: str, text: str, now: str, author: str, level: 
     return {"state": state, "text": text, "ok": state == "done"}
 
 
-def _pick(values, wanted, label: str, single_ok: bool = False) -> Tuple[str, str]:
+def _pick(values, wanted, label: str) -> Tuple[str, str]:
     """(id, name) of a dictionary {id: name} whose name is one of `wanted`; refusal (OrdersRefused) with the values when none or several fit."""
     if not isinstance(values, dict) or not values:
         raise webmim_orders.OrdersRefused("%s: справочник WebMIM пуст или не разобран." % label)
     names = {str(k): str(v).strip() for k, v in values.items()}
     found = [(k, v) for k, v in names.items() if v.casefold() in wanted]
-    if not found and single_ok and len(names) == 1:
-        found = list(names.items())
     if len(found) != 1:
         listed = ", ".join("%s (id %s)" % (v, k) for k, v in names.items())
         raise webmim_orders.OrdersRefused("%s: в справочнике WebMIM %s, есть: %s." % (
@@ -210,35 +236,30 @@ def _addresses_hint(client, server: str, refusal: str) -> str:
 
 def _payload(conn, card: dict, client) -> Tuple[dict, str]:
     """(the body of POST /orders, the line of what was chosen). Reads the dictionaries; OrdersRefused when one lacks the value."""
-    point = get_point(conn, card["point_id"])
-    shipment = _pick(client.get("/api/v2/account/shipment-types"), (SHIPMENT,), "Вид отгрузки «доставка»")
-    terms = _pick(client.get("/api/v2/account/payment-terms"), (PAYMENT_TERMS,), "Условия оплаты «Предоплата»")
-    kind = _pick(client.get("/api/v2/account/payment-types"), PAYMENT_TYPES, "Тип оплаты «со счёта кабинета»", single_ok=True)
+    data = fields(conn, card)
+    shipment = _pick(client.get("/api/v2/account/shipment-types"), (SHIPMENT,), "Вид отгрузки «Доставка»")
+    terms = _pick(client.get("/api/v2/account/payment-terms"), (PAYMENT_TERMS,), "Признак оплаты «Отсрочка»")
+    kind = _pick(client.get("/api/v2/account/payment-types"), PAYMENT_TYPES, "Вид оплаты «безнал»")
     rows = addresses(client)
-    if not any(a["id"] == point["webmim_address_id"] for a in rows):
+    if not any(a["id"] == data["address_id"] for a in rows):
         raise webmim_orders.OrdersRefused("Адреса доставки %s (точка «%s») нет на этом сервере WebMIM. Доступные: %s."
-                                          % (point["webmim_address_id"], point["name"], _listed(rows)))
-    day = date.fromisoformat(card["delivery_date"])
+                                          % (data["address_id"], data["point"], _listed(rows)))
+    day = date.fromisoformat(data["date"])
     body = {"orderDate": day.strftime("%d.%m.%y"), "paymentType": _number(kind[0]), "paymentTerms": _number(terms[0]),
-            "shipmentType": _number(shipment[0]), "deliveryAddressId": point["webmim_address_id"],
-            "deliveryTime": (card.get("delivery_time") or point["default_time"])[:200], "deliveryPerson": point["manager_name"][:160],
-            "deliveryPhone": webmim_phone(point["manager_phone"]), "externalNumber": str(card["id"])}
-    if card.get("client_name"):
-        body["customerName"] = card["client_name"][:160]
-    body["customerPhone"] = webmim_phone(card["client_phone"])
-    body["noteForSelf"] = "Tires Sync, заказ №%d" % card["id"]
-    chosen = "оплата: %s (id %s), условия: %s (id %s), отгрузка: %s (id %s), адрес %s" % (
-        kind[1], kind[0], terms[1], terms[0], shipment[1], shipment[0], point["webmim_address_id"])
+            "shipmentType": _number(shipment[0]), "deliveryAddressId": data["address_id"], "deliveryTime": data["time"],
+            "deliveryPerson": data["person"], "deliveryPhone": data["phone"], "externalNumber": data["external"],
+            "noteForSupplier": data["note"], "noteForSelf": "Tires Sync, заказ №%d" % card["id"]}
+    chosen = "оплата: %s (id %s), признак оплаты: %s (id %s), отгрузка: %s (id %s), адрес %s" % (
+        kind[1], kind[0], terms[1], terms[0], shipment[1], shipment[0], data["address_id"])
     return body, chosen
 
 
 def _ours(conn, client, card: dict, now: str, sleep, out_of_time: Callable[[], bool] = lambda: False) -> List[dict]:
-    """Every order of WebMIM with our number among the pages of SEARCH_DAYS (the date stops the pages, it does not filter the match);
-    «taken»: the order is in another order of the panel."""
-    since = (datetime.fromisoformat(now) - timedelta(days=SEARCH_DAYS)).isoformat(timespec="seconds")
+    """Every order of WebMIM with our number on every page of the list (up to webmim_match.MAX_PAGES; the rows are not by the creation date,
+    so no date stops the reading); «taken»: the order is in another order of the panel."""
     taken = {r[0] for r in conn.execute("SELECT webmim_id FROM order_card WHERE webmim_id != '' AND id != ?", (card["id"],))}
     found = []
-    for rows in webmim_match._pages(client, sleep, since):
+    for rows in webmim_match._every_page(client, sleep, {}):      # every page: WebMIM's rows are not by date (2026-10-28)
         if out_of_time():                                   # the page must answer before nginx gives up (60 s)
             raise _OutOfTime()
         for row in rows:
@@ -264,12 +285,12 @@ def _write_order(conn, card_id, order: dict, now: str, author: str, line: str) -
 
 
 def place(conn, card_id, client, server: str, now: str, today: date, author: str,
-          sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> dict:
+          sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic, seen: Optional[str] = None) -> dict:
     """One press of «Оформить в WebMIM» / «Досоздать в WebMIM». Raises OrderError when nothing is asked of WebMIM (the server, a check, the mark);
     otherwise returns {"state", "text", "ok", "stage_error"}: the text is a record of the order's journal, and after the first full success
     what became of the stage (the move has its own record); a stage that did not change is `stage_error`, shown apart from the green result.
-    `client`: webmim_orders.OrdersClient of `server`."""
-    result = _press(conn, card_id, client, server, now, today, author, sleep, clock)
+    `client`: webmim_orders.OrdersClient of `server`. `seen`: the fingerprint the window «Подтверждение» showed (None: «Досоздать», no window)."""
+    result = _press(conn, card_id, client, server, now, today, author, sleep, clock, seen)
     result["stage_error"] = ""
     if result["ok"]:                                    # «done» once: a done order refuses a press (_claim)
         line, refused = _to_placed(conn, card_id, now, author)
@@ -300,13 +321,14 @@ def _to_placed(conn, card_id, now: str, author: str) -> Tuple[str, str]:
         return "", "Этап не сменился: сбой панели. Переведите заказ сами."
 
 
-def _press(conn, card_id, client, server: str, now: str, today: date, author: str, sleep: Callable[[float], None], clock: Callable[[], float]) -> dict:
+def _press(conn, card_id, client, server: str, now: str, today: date, author: str, sleep: Callable[[float], None], clock: Callable[[], float],
+           seen: Optional[str] = None) -> dict:
     if server not in CREATE_SERVERS:
         raise orders.OrderError("Выбран боевой сервер WebMIM: оформление заказа кнопкой на нём только по слову владельца.")
     if client is None:
         raise orders.OrderError("API-пользователь WebMIM не настроен (Подключения → WebMIM → Заказы в WebMIM).")
     try:
-        card, webmim_id, lost = _claim(conn, card_id, server, now, today, author)
+        card, webmim_id, lost = _claim(conn, card_id, server, now, today, author, seen)
     except orders.OrderError as err:
         raise orders.OrderError(str(err) + _addresses_hint(client, server, str(err))) from None
     where = "тестовый сервер" if server == "test" else "боевой сервер"
