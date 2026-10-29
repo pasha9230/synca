@@ -566,6 +566,8 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
             "state": state, "reason": text, "scode": code, "manual": manual,
             "problem": gid in ev.problems and ev.problems[gid][0].split(":", 1)[0] != "model_needs_mapping", "published": gid in published_any,
             "pending": base_overrides is not None and manual != base_overrides.get(override_key(gid)), "view_only": gid in view_only,
+            "own_price": gid in settings.own_prices,
+            "below_cost": bool(cand and gid in settings.own_prices and offer.base_price > 0 and cand.price < offer.base_price),
             "supplier_mark": supplier_mark(supplier_of(offer), capped_supplier),
             "stock_text": ">40" if capped_supplier and supplier_of(offer) == capped_supplier and offer.stock >= STOCK_CAP else str(offer.stock),
             "twins": twins(gid)})
@@ -689,19 +691,78 @@ def catalog_item_view(conn, settings, parsed, ref, goods_id, today, money: bool,
             "fields": fields, "ads": ads, "orders": found if orders else None}
 
 
+def own_price_text(value) -> str:
+    """{"pct": 12.5} -> «+12,5 % к закупке», {"price": 6990} -> «цена 6 990 ₽»; None -> «как у бренда»."""
+    if not value:
+        return "как у бренда"
+    if "pct" in value:
+        return ("%+g" % float(value["pct"])).replace(".", ",").replace("-", "−") + " % к закупке"
+    return "цена %s ₽" % "{:,}".format(int(value["price"])).replace(",", " ")
+
+
+def own_price_rows(conn, general, active, offer) -> list:
+    """One row per feed account for the card of a position: the price now (with the working draft), by the brand, the own price and whether it is
+    below the purchase. `general`: the settings with the draft, `active`: without it (a row whose own price is not applied yet is «pending")."""
+    from ..pricing import position_price
+    rows = []
+    for account in connections.list_feed_accounts(conn):
+        eff = connections.effective_settings(conn, account["id"], general)
+        key = "%d:%s" % (account["id"], offer.goods_id)
+        own, was = general.price_overrides.get(key), active.price_overrides.get(key)
+        price = position_price(offer, eff)
+        brand = position_price(offer, dataclasses.replace(eff, own_prices={}))
+        rows.append({"account_id": account["id"], "account": account["name"], "price": price, "brand_price": brand,
+                     "own": {own[0]: own[1]} if own else None, "own_text": own_price_text({own[0]: own[1]}) if own else "",
+                     "below": bool(own and price is not None and offer.base_price > 0 and price < offer.base_price),
+                     "pending": own != was})
+    return rows
+
+
+def own_price_lines(conn, raw: dict, changes: dict, offers, old, new) -> list:
+    """«было → стало» of the own prices of positions in a draft: the price of one tyre in each account before and after."""
+    from ..pricing import position_price
+    if "price_overrides" not in changes:
+        return []
+    before, after = raw.get("price_overrides") or {}, changes.get("price_overrides") or {}
+    names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
+    lines = []
+    for key in sorted(set(before) | set(after)):
+        if before.get(key) == after.get(key):
+            continue
+        account_id, _, goods_id = key.partition(":")
+        account_id = int(account_id)
+        offer = (offers or {}).get(goods_id)
+        label = "%s (%s)" % (offer.name_orig or offer.name, offer.code) if offer else goods_id
+        what = "Своя цена" if after.get(key) else "Как у бренда"
+        text = "%s · %s: %s" % (what, names.get(account_id, "аккаунт %d" % account_id), label)
+        if offer is not None:
+            was = position_price(offer, connections.effective_settings(conn, account_id, old))
+            now_ = position_price(offer, connections.effective_settings(conn, account_id, new))
+            text += ": %s → %s" % (_rub(was), _rub(now_))
+            if after.get(key) and now_ is not None and offer.base_price > 0 and now_ < offer.base_price:
+                text += " — ниже закупки"
+        else:
+            text += " (позиции нет в выгрузке)"
+        lines.append(text + " (%s)" % own_price_text(after.get(key)))
+    return lines
+
+
+def _rub(value) -> str:
+    return "—" if value is None else "%s ₽" % "{:,}".format(int(value)).replace(",", " ")
+
+
 def _unbuilt_candidate(conn, settings, ref, offer):
     """The ad of a position that is not in the feed, built as far as the data allows: the price is left out when there is no percent."""
     from ..candidates import Candidate
     from ..catalog import resolve_brand, resolve_model
-    from ..pricing import final_price
-    rule = settings.pricing.get((offer.brand_key, offer.season))
+    from ..pricing import position_price
     price, note = 0, None
-    if rule is None:
+    if (offer.brand_key, offer.season) not in settings.pricing and offer.goods_id not in settings.own_prices:
         note = "процент не задан"
     elif offer.base_price <= 0:
         note = "некорректная цена поставщика"
     else:
-        price = final_price(offer.base_price, rule, offer.diameter)
+        price = position_price(offer, settings)
     brand = resolve_brand(offer.brand_key, ref, store.load_brand_map(conn))
     model = resolve_model(brand, offer.model_raw, store.load_confirmed_mappings(conn), ref) if brand else None
     return Candidate(offer.goods_id, offer, price, brand or offer.brand_raw, model or offer.model_raw), note
@@ -979,7 +1040,7 @@ def describe_changes(raw: dict, changes: dict, offers=None, min_stock=None) -> l
             for rule in sorted(old_set - new_set):
                 lines.append("Вернуть размер в выгрузку: %s" % size_rule_text(rule))
             continue
-        if key in ("enabled", "pricing", "overrides"):
+        if key in ("enabled", "pricing", "overrides", "price_overrides"):
             continue
         old, new = raw.get(key), changes[key]
         if key == "point_values":
@@ -1113,7 +1174,8 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
                   "gone_ads": ads_gone(preview.disappear, parsed.offers, old, new)},
         "by_brand": [dict(brand=b, **v) for b, v in sorted(brands.items())],
         "draft": draft,
-        "lines": describe_changes(raw, draft["changes"], parsed.offers, new.min_stock),
+        "lines": own_price_lines(conn, raw, draft["changes"], parsed.offers, old, new)
+                 + describe_changes(raw, draft["changes"], parsed.offers, new.min_stock),
         "funnel": pair_funnel(parsed, ref, store.load_confirmed_mappings(conn), store.load_brand_map(conn), new,
                               sorted(new_enabled - old_enabled)),
         "price_rows": price_rows[:20],

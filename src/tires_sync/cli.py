@@ -531,6 +531,19 @@ def _alert_new_unmatched(conn, box, results) -> None:
     store.set_state(conn, "alerted_unmatched", json.dumps(sorted(current), ensure_ascii=False))
 
 
+def _alert_own_below_cost(conn, box, settings, offers) -> None:
+    """Own sale prices that the supplier's purchase price went above: one message for the new ones; the prices are kept (the owner 2026-10-29).
+    The marks are kept only once the message went through, so a refused one is told by the next cycle."""
+    from . import own_price
+    lines, keep = own_price.fresh_events(conn, settings, offers)
+    if lines:
+        shown = "\n".join(lines[:20]) + ("\nи ещё %d" % (len(lines) - 20) if len(lines) > 20 else "")
+        if not _alert(conn, box, "Tires Sync: своя цена ниже закупки (%d). Цены оставлены как вы поставили; поменять — в карточке позиции "
+                      "каталога, «Своя цена».\n%s" % (len(lines), shown), notice=True):
+            return
+    own_price.remember(conn, keep)
+
+
 def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
     """Download the unload of every supplier. The first one failing stops the cycle (as before); a secondary
     supplier failing is reported and its previous unload stays in use. Returns the problems of secondary suppliers.
@@ -761,6 +774,8 @@ def _cmd_run_cycle(args) -> int:
             _alert(conn, box, "Tires Sync: поставщик сразу переименовал шины у многих объявлений (%s). Названия на Авито оставлены прежними, "
                    "чтобы не менять их все разом. Проверьте выгрузку поставщика." % ", ".join("%s: %d" % (r.name, r.titles_held) for r in held_titles))
         _alert_new_unmatched(conn, box, results)
+        if parsed is not None and any(r.ok for r in results):
+            _alert_own_below_cost(conn, box, active_settings(conn), parsed.offers)
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0

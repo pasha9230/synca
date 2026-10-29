@@ -8,12 +8,12 @@ import re
 from typing import Callable, Optional
 
 from . import store
-from .config import settings_from_dict
+from .config import own_price_value, settings_from_dict
 from .overrides import override_key
 from .settings_store import StaleDraftError, cancel_draft, get_active
 
 KEY = "work_draft"
-TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes")
+TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes", "price_overrides")
 SEASONS = ("winter", "summer", "all")
 SEASON_RU = {"winter": "зима", "summer": "лето", "all": "всесезонные"}
 
@@ -117,6 +117,28 @@ def set_overrides(conn, goods_ids, mode: Optional[str], now: str) -> None:
                 eff["overrides"].pop(override_key(goods_id), None)
             else:
                 eff["overrides"][override_key(goods_id)] = mode
+
+    _mutate(conn, fn, now)
+
+
+def set_own_price(conn, goods_id: str, accounts, value: Optional[dict], now: str) -> None:
+    """The own price of a position in each of `accounts` (ids of feed accounts): {"pct": percent to the purchase} or {"price": sale price};
+    None takes it off («Как у бренда»). Into the working draft like every change of the catalog."""
+    goods_id = str(goods_id or "").strip()
+    ids = sorted({int(a) for a in accounts})
+    if not goods_id or not ids:
+        raise ValueError("Выберите позицию и хотя бы один аккаунт.")
+    if value is not None:
+        kind, number = own_price_value(value)
+        value = {kind: number}
+
+    def fn(eff):
+        for account_id in ids:
+            key = "%d:%s" % (account_id, goods_id)
+            if value is None:
+                eff["price_overrides"].pop(key, None)
+            else:
+                eff["price_overrides"][key] = dict(value)
 
     _mutate(conn, fn, now)
 

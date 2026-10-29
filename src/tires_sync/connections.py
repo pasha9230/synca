@@ -373,7 +373,7 @@ def _file_phone(conn, account_id: int) -> str:
 
 
 def effective_settings(conn, account_id: int, settings):
-    """General settings with this account's own addresses, phone, price delta and stock threshold."""
+    """General settings with this account's own addresses, phone, price delta, stock threshold and own prices of positions."""
     pricing = get_account_pricing(conn, account_id)
     changes = {}
     identity = get_avito_identity(conn, account_id)
@@ -392,6 +392,10 @@ def effective_settings(conn, account_id: int, settings):
             for key, rule in settings.pricing.items()}
     if pricing["min_stock"] is not None:
         changes["min_stock"] = pricing["min_stock"]
+    prefix = "%d:" % account_id
+    own = {key[len(prefix):]: value for key, value in settings.price_overrides.items() if key.startswith(prefix)}
+    if own or settings.own_prices:                                 # only this account's own prices, never another's
+        changes["own_prices"] = own
     enabled = [r for r in list_addresses(conn, account_id) if r["enabled"]]
     if enabled:
         mode, rest = get_point_config(conn, account_id)
