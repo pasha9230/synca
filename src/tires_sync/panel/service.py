@@ -701,9 +701,12 @@ def own_price_text(value) -> str:
     return "цена %s ₽" % "{:,}".format(int(value["price"])).replace(",", " ")
 
 
-def held_by_other(conn, account_id: int, offer, key) -> Optional[str]:
+def held_by_other(conn, account: dict, offer, key, offers, min_stock: int) -> Optional[str]:
     """The code of another lot of the same tire whose ad the account carries (one tire, one ad: same_tire), when this lot has none there: its own
-    price then does not reach Avito (the own price belongs to the lot, the lead 2026-10-29). By the last published feed and the mirrored file."""
+    price then does not reach Avito (the own price belongs to the lot, the lead 2026-10-29). By the last published feed and, for a mirror account
+    only, the mirrored file (an adopted account keeps the old file in the base). The other lot must be in today's unload (a held lot gone from it
+    hands its Id over next cycle), a mirrored ad also not below the threshold (else it is not published)."""
+    account_id = account["id"]
     from ..mirror_feed import supplier_code
     from ..same_tire import identity_of_ad
     if key is None:
@@ -712,12 +715,16 @@ def held_by_other(conn, account_id: int, offer, key) -> Optional[str]:
     like = ("%%>%s<%%" % offer.width, "%%>%s<%%" % offer.diameter)
     rows = [(g, text) for g, text in conn.execute(
         "SELECT goods_id, snapshot FROM published_state WHERE account_id = ? AND snapshot LIKE ? AND snapshot LIKE ?", (account_id,) + like)]
-    rows += [(supplier_code(ad_id), text) for ad_id, text in conn.execute(
-        "SELECT ad_id, raw FROM imported_ad WHERE account_id = ? AND raw LIKE ? AND raw LIKE ?", (account_id,) + like)]
-    if any(g == gid for g, _ in rows) or conn.execute(
+    mirrored = []
+    if account.get("feed_mode") == "mirror":
+        mirrored = [(supplier_code(ad_id), text) for ad_id, text in conn.execute(
+            "SELECT ad_id, raw FROM imported_ad WHERE account_id = ? AND raw LIKE ? AND raw LIKE ?", (account_id,) + like)]
+    if any(g == gid for g, _ in rows + mirrored) or conn.execute(
             "SELECT 1 FROM published_state WHERE account_id = ? AND goods_id = ?", (account_id, gid)).fetchone():
         return None
-    return next((g for g, text in rows if g != gid and identity_of_ad(text) == key), None)
+    live = [g for g, _ in rows if g in offers] + [g for g, _ in mirrored if g in offers and offers[g].stock >= min_stock]
+    texts = dict(mirrored + rows)
+    return next((g for g in live if g != gid and identity_of_ad(texts[g]) == key), None)
 
 
 def own_price_rows(conn, general, active, offer, ref=None, offers=None) -> list:
@@ -738,7 +745,7 @@ def own_price_rows(conn, general, active, offer, ref=None, offers=None) -> list:
                      "own": {own[0]: own[1]} if own else None, "own_text": own_price_text({own[0]: own[1]}) if own else "",
                      "below": bool(own and price is not None and offer.base_price > 0 and price < offer.base_price),
                      "pending": own != was, "held_by": None})
-        other = held_by_other(conn, account["id"], offer, tire)
+        other = held_by_other(conn, account, offer, tire, offers or {}, eff.min_stock)
         if other is not None:
             rows[-1]["held_by"] = {"goods_id": other, "code": getattr((offers or {}).get(other), "code", "") or other}
     return rows

@@ -531,21 +531,25 @@ def _alert_new_unmatched(conn, box, results) -> None:
     store.set_state(conn, "alerted_unmatched", json.dumps(sorted(current), ensure_ascii=False))
 
 
-def _alert_own_below_cost(conn, box, settings, offers) -> None:
+def _alert_own_below_cost(conn, box, offers, settings=None) -> None:
     """Own sale prices that the supplier's purchase price went above: one message for the new ones; the prices are kept (the owner 2026-10-29).
-    The marks are kept only once the message went through, so a refused one is told by the next cycle."""
+    The marks are kept only once the message went through, so a refused one is told by the next cycle. A side notice: whatever fails in it
+    (the settings, the marks, the message, a busy base) is printed and never stops the publishing of the feeds."""
     from . import own_price
     try:
-        lines, keep = own_price.fresh_events(conn, settings, offers)
-    except Exception as err:                                         # a side notice: never stops the publishing of the feeds
+        lines, keep = own_price.fresh_events(conn, settings if settings is not None else active_settings(conn), offers)
+        if lines:
+            shown = "\n".join(lines[:20]) + ("\nи ещё %d" % (len(lines) - 20) if len(lines) > 20 else "")
+            if not _alert(conn, box, "Tires Sync: своя цена ниже закупки (%d). Цены оставлены как вы поставили; поменять — в карточке позиции "
+                          "каталога, «Своя цена».\n%s" % (len(lines), shown), notice=True):
+                return
+        own_price.remember(conn, keep)
+    except Exception as err:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("проверка «своя цена ниже закупки» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
-        return
-    if lines:
-        shown = "\n".join(lines[:20]) + ("\nи ещё %d" % (len(lines) - 20) if len(lines) > 20 else "")
-        if not _alert(conn, box, "Tires Sync: своя цена ниже закупки (%d). Цены оставлены как вы поставили; поменять — в карточке позиции "
-                      "каталога, «Своя цена».\n%s" % (len(lines), shown), notice=True):
-            return
-    own_price.remember(conn, keep)
 
 
 def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
@@ -779,7 +783,7 @@ def _cmd_run_cycle(args) -> int:
                    "чтобы не менять их все разом. Проверьте выгрузку поставщика." % ", ".join("%s: %d" % (r.name, r.titles_held) for r in held_titles))
         _alert_new_unmatched(conn, box, results)
         if parsed is not None and any(r.ok for r in results):
-            _alert_own_below_cost(conn, box, active_settings(conn), parsed.offers)
+            _alert_own_below_cost(conn, box, parsed.offers)
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0
