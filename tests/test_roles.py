@@ -532,7 +532,28 @@ def test_a_client_is_never_one_who_answers_for_an_order_a_callback_or_a_telegram
 def test_the_open_pages_draw_no_staff_frame_for_a_signed_in_client(tmp_path):
     app = make_app(tmp_path)
     client, _ = person(app, "client")
-    for page in (client.get("/invite/not-a-token"), client.post("/login", data={"csrf": "tok", "login": "client1", "password": "не-тот-пароль-1"})):
+    for page, code, title in ((client.get("/invite/not-a-token"), 404, "Приглашение"),
+                              (client.post("/login", data={"csrf": "tok", "login": "client1", "password": "не-тот-пароль-1"}), 401, "Вход")):
         html = page.get_data(as_text=True)
+        assert page.status_code == code and "<title>" + title in html, (code, html[:300])
         for mark in ("topsearch", "topbar.js", "app.js", "sb-link", "bell"):
             assert mark not in html, (page.status_code, mark)
+
+
+def test_a_staff_member_made_a_client_gets_nothing_of_an_order_in_telegram(tmp_path):
+    """Review 2 of build 1: the chat of a person turned into a client stays, the order's alerts never go there; the owner can clear it."""
+    from tires_sync import order_notify
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    users.add_user(conn, "olya", PASSWORD, NOW, role="chats")
+    order_notify.set_user_chat(conn, "olya", "777", NOW, "owner")
+    assert order_notify.route(conn, {"responsible": "olya", "id": None})["to"] == "777"
+    users.set_role(conn, "olya", "client", None, "", NOW, "owner")
+    got = order_notify.route(conn, {"responsible": "olya", "id": None})
+    assert got["channel"] != "telegram" and got["to"] != "777"
+    assert "Telegram: ни у кого нет чата" in order_notify.tell_people(conn, None, ["olya"], "заказ")
+    owner = app.test_client()
+    tok = login(owner)
+    assert "olya" in owner.get("/connections/telegram").get_data(as_text=True)               # the stale chat is shown, to be cleared
+    post(owner, "/connections/telegram/user-chat", tok, login="olya", chat_id="")
+    assert "olya" not in order_notify.user_chats(conn_of(app))
