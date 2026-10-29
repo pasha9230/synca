@@ -293,6 +293,9 @@ def register(app) -> None:
                         ours = {r[0] for r in conn.execute("SELECT id FROM order_card WHERE point_id = ?", (own_point(),))}
                         deal["earlier"] = [i for i in deal["earlier"] if i in ours]
                     deal["gaps"] = orders.gaps_to_place(conn, deal)
+                    if mine:                                                     # never an account's name (the owner 2026-10-29)
+                        deal["comment"] = orders.without_account_names(conn, deal["comment"])
+                        deal["tags"] = [t for t in deal["tags"] if t.lower() not in orders.account_tags(conn)]
                 except orders.OrderError:
                     deal = None
         def link(f, a):

@@ -255,13 +255,35 @@ TABS = {"all": "Все", "moving": "Едут", "here": "На точке", "endin
 
 
 def _in_tab(row: dict, tab: str) -> bool:
-    """«Все»: what lies at the point and is on its way (as the page always showed); «Едут»: «Перемещение на точку»; «На точке»; «Резерв
+    """«Все»: what lies at the point and is on its way (as the page always showed); «Едут»: «Заказ оформлен» and «Перемещение на точку»
+    (the owner 2026-10-29); «На точке»; «Резерв
     истекает»: at the point with the last day of the reservation today or tomorrow, or past (the term is a day, reserve_until); «Ждут
     ответа»: the question «Клиент забрал?» of the last day still open (order_reserve.question_open); «На возврат»: «На ОТХ» (with an
     agreed return not signed yet among them)."""
     code = row["card"]["stage"]["code"]
-    return {"all": not row["oth"], "moving": code == "moving", "here": row["here"], "ending": row["ends"], "asked": row["asked"],
+    return {"all": not row["oth"], "moving": code in ("placed", "moving"), "here": row["here"], "ending": row["ends"], "asked": row["asked"],
             "return": row["oth"]}[tab]
+
+
+def _order_day(conn, card: dict) -> str:
+    """«от ДД.ММ.ГГГГ» of the card: the day the order last entered «Заказ оформлен», else the day it was made (never «today» by default)."""
+    placed = next((s["name"] for s in orders.list_stages(conn) if s["code"] == "placed"), None)
+    row = conn.execute("SELECT at FROM order_event WHERE order_id = ? AND kind = 'stage' AND text LIKE ? ORDER BY id DESC LIMIT 1",
+                       (card["id"], "%→ «" + (placed or "") + "»")).fetchone() if placed else None
+    day = str(row[0] if row else card["created_at"] or "")[:10]
+    try:
+        return date.fromisoformat(day).strftime("%d.%m.%Y")
+    except ValueError:
+        return ""
+
+
+def _back(point_id) -> str:
+    """Back to «Рабочее место» after a press: the point chosen (the owner, the partner) and the tab the press came from (its ?tab=)."""
+    from urllib.parse import parse_qs, urlsplit
+    came = urlsplit(request.referrer or "")
+    tab = (parse_qs(came.query).get("tab") or [""])[0] if came.path == "/my-point" and (not came.netloc or came.netloc == request.host) else ""
+    args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab in TABS and tab != "all" else [])
+    return "/my-point" + ("?" + "&".join(args) if args else "")
 
 
 def _oth_cards(conn, point_id) -> list:
@@ -334,7 +356,7 @@ def register(app) -> None:
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery),
                           "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
-                          "order_date": templates._order_date(conn, card, now)})
+                          "order_date": _order_day(conn, card)})
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over
@@ -369,7 +391,7 @@ def register(app) -> None:
         conn = get_conn()
         point_id = _point_id(conn)
         card = _own_card(conn, card_id, point_id)
-        back = "/my-point" + ("?p=%d" % point_id if own_point() is None else "")
+        back = _back(point_id)
         token = str(request.form.get("token") or "").strip()[:64]
         if not re.fullmatch(r"[0-9a-f]{24}", token):
             flash("Отметка не выполнена: обновите страницу.")
@@ -405,7 +427,7 @@ def register(app) -> None:
         conn = get_conn()
         point_id = _point_id(conn)
         _own_card(conn, card_id, point_id)
-        back = "/my-point" + ("?p=%d" % point_id if own_point() is None else "")
+        back = _back(point_id)
         try:
             point = points.get_point(conn, point_id)
         except points.PointError:

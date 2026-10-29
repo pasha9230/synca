@@ -59,7 +59,7 @@ def test_the_counters_say_what_lies_comes_ends_and_waits(tmp_path, clock):
     other = points.save_point(conn, dict(name="Гамма", channel="vk", vk_peer_id="777"))
     _card(conn, other, webmim="700700")                                                      # another point's: counted nowhere
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
-    assert (counter(page, "moving"), counter(page, "here"), counter(page, "ending"), counter(page, "asked")) == (1, 3, 2, 1)   # «Едут»: moving
+    assert (counter(page, "moving"), counter(page, "here"), counter(page, "ending"), counter(page, "asked")) == (2, 3, 2, 1)   # «Едут»: placed, moving
     assert counter(page, "all") == 5                                                        # «Все»: the placed one too
     assert placed
 

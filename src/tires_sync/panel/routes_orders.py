@@ -350,7 +350,7 @@ def no_account_tags(conn, tags):
     the calls; the owner 2026-10-29: a point never sees an account's name). Everybody else: the tags as they are."""
     if own_point() is None:
         return tags
-    names = {" ".join(str(a["name"]).split()).lower() for a in connections.list_accounts(conn)}
+    names = orders.account_tags(conn)
     return [t for t in tags if t.lower() not in names]
 
 
@@ -697,6 +697,8 @@ def register(app) -> None:
         """The page of an order. `typed`: what the window sent and could not be saved; the window shows it again, with the error."""
         card_id = card["id"]
         values = dict(card, **typed) if typed else card
+        if own_point() is not None:                                      # the comment of an order made from a call named the account (2026-10-29)
+            values = dict(values, comment=orders.without_account_names(conn, values.get("comment")))
         stored = orders._row(conn, card_id)
         shown = json.dumps({k: stored[k] for k in orders.EDITABLE}, ensure_ascii=False)     # what the window shows, to save only what is changed on it
         engine.refresh_tasks(conn, card_id, local_iso())

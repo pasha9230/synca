@@ -407,9 +407,9 @@ def test_the_tabs_count_and_list_the_points_orders(tmp_path):
     conn.commit()
     mine = manager(app, conn, pid)
     page = _text(mine.get("/my-point"))
-    assert _tab_counts(page) == {"all": 4, "moving": 1, "here": 2, "ending": 1, "asked": 0, "return": 1}
+    assert _tab_counts(page) == {"all": 4, "moving": 2, "here": 2, "ending": 1, "asked": 0, "return": 1}     # «Едут»: placed and moving
     assert _listed(page) == {card, placed, ending, later}                                    # «Все»: as the page always showed
-    for tab, wanted in (("moving", {card}), ("here", {ending, later}), ("ending", {ending}), ("asked", set()), ("return", {oth})):
+    for tab, wanted in (("moving", {card, placed}), ("here", {ending, later}), ("ending", {ending}), ("asked", set()), ("return", {oth})):
         shown = _text(mine.get("/my-point?tab=%s" % tab))
         assert _listed(shown) == wanted, tab
         assert 'data-tab="%s" aria-current="page"' % tab in shown, tab                       # the tab is kept in the address
@@ -430,3 +430,13 @@ def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tm
     first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)
     assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[0])
     assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split("<details")[0]
+
+
+def test_a_press_brings_back_to_the_tab_it_came_from(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    mine = manager(app, conn, pid)
+    page = _text(mine.get("/my-point?tab=moving"))
+    token = re.search(r'action="/my-point/%d/arrived".*?name="token" value="([0-9a-f]+)"' % card, page, re.S).group(1)
+    r = mine.post("/my-point/%d/arrived" % card, data={"csrf": "tok", "token": token}, headers={"Referer": "http://localhost/my-point?tab=moving"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/my-point?tab=moving")
+    assert 'name="tab" value="moving"' in page                                               # the search keeps the tab too

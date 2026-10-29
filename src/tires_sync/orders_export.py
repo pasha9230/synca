@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-from . import connections, orders
+from . import orders
 
 HEAD = ["№ заказа", "Создан", "Этап", "Клиент", "Телефон", "Точка", "Ответственный", "Источник", "Теги", "Позиции", "Штук", "Сумма, ₽",
         "Дата доставки", "Номер заказа WebMIM", "Статус WebMIM", "Комментарий", "Чат Авито"]
@@ -45,14 +45,17 @@ def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = "Заказы"
-    hidden = frozenset() if money else frozenset(" ".join(str(a["name"]).split()).lower() for a in connections.list_accounts(conn))
+    hidden = frozenset() if money else frozenset(orders.account_tags(conn))
     # the file of a point: no tag with an account's name (the owner 2026-10-29)
     keep = [i for i, name in enumerate(HEAD) if money or name not in MONEY]
     sheet.append([HEAD[i] for i in keep])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     for card_id in ids:
-        values = [_row(orders.get_card(conn, card_id), hidden)[i] for i in keep]
+        card = orders.get_card(conn, card_id)
+        if not money:                                                    # a point: the comment without an account's name either
+            card = dict(card, comment=orders.without_account_names(conn, card["comment"]))
+        values = [_row(card, hidden)[i] for i in keep]
         sheet.append([None] * len(values))
         for column, value in enumerate(values, start=1):
             cell = sheet.cell(row=sheet.max_row, column=column)

@@ -346,3 +346,17 @@ def test_no_page_of_a_point_names_an_avito_account(w):
     login(owner)
     assert "Аккаунт-Руставели" in _text(owner.get("/chats/%d" % w["chat_a"])) and "Аккаунт-Руставели" in _text(owner.get("/orders/%d" % w["order_a"]))
     assert "Аккаунт-Руставели" in _text(owner.get("/calls"))
+
+
+def test_the_comment_and_a_cut_tag_never_name_the_account_and_a_word_inside_another_stays(w):
+    conn, m = w["conn"], w["manager"]
+    long_name = "Шина-Колесо Санкт-Петербург Юг Север"                                       # longer than a tag: the tag is cut
+    conn.execute("UPDATE account SET name = ? WHERE id = ?", (long_name, w["acc_b"]))
+    orders.update_card(conn, w["order_a"], {"comment": "Звонок 07.10 на аккаунт «Аккаунт-Руставели» (принят). Ваши Аккаунт-Руставелиные шины",
+                                            "tags": long_name[:orders.MAX_TAG]}, NOW, "o")
+    conn.commit()
+    for url in ("/orders/%d" % w["order_a"], "/orders", "/chats/%d" % w["chat_a"]):
+        page = _text(m.get(url))
+        assert "«Аккаунт-Руставели»" not in page and long_name[:orders.MAX_TAG] not in page, url
+    assert "Аккаунт-Руставелиные" in _text(m.get("/orders/%d" % w["order_a"]))              # a piece of another word is not cut
+    assert orders.without_account_names(conn, "шины Аккаунт-Юнона") == "шины Аккаунт-Юнона"   # not an account any more: as it is

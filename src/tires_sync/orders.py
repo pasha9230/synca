@@ -928,13 +928,20 @@ ORIGIN_HINT = "Заказ не с аккаунта Авито вашей точ�
 ACCOUNT_SHOWN = "аккаунт Авито"
 
 
+def account_tags(conn) -> set:
+    """The tags chat_deals._account_tag makes of the Avito accounts' names (spaces folded, cut to MAX_TAG), in lower case."""
+    return {" ".join(str(r[0]).split())[:MAX_TAG].lower() for r in conn.execute("SELECT name FROM account WHERE name != ''")}
+
+
 def without_account_names(conn, text: str) -> str:
-    """A text a manager of a point reads (the journal of the order, a row of the bell) with the names of the Avito accounts put out (the
-    owner 2026-10-29: a point never sees an account's name); case does not matter."""
+    """A text a manager of a point reads (the journal of the order, a row of the bell, the comment) with the names of the Avito accounts put
+    out (the owner 2026-10-29: a point never sees an account's name): a whole word or phrase, in any case; never a piece of a word."""
     text = str(text or "")
-    for (name,) in conn.execute("SELECT name FROM account WHERE name != '' ORDER BY LENGTH(name) DESC"):
-        if name.lower() in text.lower():
-            text = re.sub(re.escape(name), ACCOUNT_SHOWN, text, flags=re.I)
+    names = {" ".join(str(r[0]).split()) for r in conn.execute("SELECT name FROM account WHERE name != ''")}
+    names |= {n[:MAX_TAG].strip() for n in names}                       # the tag of a long name is cut (chat_deals._account_tag)
+    for name in sorted(names, key=len, reverse=True):
+        if len(name) >= 2 and name.lower() in text.lower():
+            text = re.sub(r"(?<!\w)%s(?!\w)" % r"\s+".join(re.escape(w) for w in name.split()), ACCOUNT_SHOWN, text, flags=re.I)
     return text
 
 
