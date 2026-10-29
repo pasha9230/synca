@@ -1,0 +1,57 @@
+{# «Заказ поставщику» of the order's page (order_supplier.view; the owner 2026-10-29): «Сверка» line by line (app.js 5e shows the lines one by
+   one, «проверяется…» → ✓ / ✗), then «Заказать в МИМ» (the window «Подтверждение»: what goes to WebMIM, webmim_create.fields; «Подтвердить»
+   posts the fingerprint of what it showed) or «Заказать в 4 Точки» (the text for the cabinet of 4 Точки and «Оформил вручную»).
+   For the right «supplier» only, never for a point. #}
+{% set s = supplier %}{% if s %}
+{% set b = webmim_create %}{% set mim_ready = s.supplier == "webmim" and b and b.live and b.label and b.label.startswith("Оформить") and not (b.state and b.state.state == "running") %}
+{% call entity_ui.section("Заказ поставщику", id="supplier", sub="сверка перед заказом") %}<div class="card-body stack" data-supplier>
+<ul class="supplier-check" data-supplier-check aria-live="polite">
+{% for l in s.lines %}<li class="supplier-line is-{{ l.state }}" data-state="{{ l.state }}"><span class="supplier-mark" aria-hidden="true">{% if l.state == "ok" %}✓{% elif l.state == "warn" %}!{% else %}✗{% endif %}</span>
+<span class="supplier-label">{{ l.label }}</span><span class="supplier-text">{% for t in l.texts %}{{ t }}{% if not loop.last %}; {% endif %}{% endfor %}</span>
+<span class="sr-only">{% if l.state == "ok" %}в порядке{% elif l.state == "warn" %}предупреждение{% else %}не в порядке{% endif %}</span></li>{% endfor %}
+</ul>
+{% if s.late and can_post("order_delivery_tomorrow") %}<form method="post" action="/orders/{{ c.id }}/delivery/tomorrow" data-once class="row" style="gap:var(--s-3);flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<span class="small text-warn">Сейчас после 16:00: заказ на сегодня WebMIM может не успеть передать в работу.</span><button class="btn btn--secondary btn--xs">Перенести на завтра</button></form>{% endif %}
+<div class="row" style="gap:var(--s-3);flex-wrap:wrap" data-supplier-actions>
+{% if s.supplier == "webmim" %}
+{% if mim_ready and not s.blocked %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="supplier-window">Заказать в МИМ</button>
+{% else %}<button type="button" class="btn btn--primary btn--sm" disabled>Заказать в МИМ</button>{% endif %}
+<span class="small muted">{% if s.blocked %}Исправьте строки с ✗: кнопка откроется.{% elif not b %}На тестовом сервере WebMIM оформляются только заказы с тегом «тест».{% elif not b.live %}Выбран боевой сервер WebMIM: оформление кнопкой только по слову владельца.{% elif b.state and b.state.state == "running" %}Заказ уже оформляется в WebMIM: обновите страницу через минуту.{% elif b.test %}{{ b.server }}{% endif %}</span>
+{% elif s.supplier == "tochki" %}
+{% if not s.blocked %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="supplier-window">Заказать в 4 Точки</button>
+{% else %}<button type="button" class="btn btn--primary btn--sm" disabled>Заказать в 4 Точки</button><span class="small muted">Исправьте строки с ✗: кнопка откроется.</span>{% endif %}
+{% else %}<span class="small muted">Кнопки заказа нет: {% if s.supplier == "mixed" %}позиции разных поставщиков, оформите их отдельными заказами{% else %}в заказе нет позиций{% endif %}.</span>{% endif %}
+<a class="small ml-auto" href="/orders/{{ c.id }}?check=1#supplier">Проверить снова</a>
+</div>
+<p class="small muted">Можно и вручную: оформите заказ в кабинете поставщика и переведите заказ на «Заказ оформлен» с номером.</p>
+</div>{% endcall %}
+{% if not s.blocked and (mim_ready or s.supplier == "tochki") %}{% set f = s.fields %}
+<div class="modal-backdrop send-window" id="supplier-window" role="dialog" aria-modal="true" aria-labelledby="supplier-window-h"><div class="modal">
+<div class="modal-head"><h3 id="supplier-window-h">{% if s.supplier == "webmim" %}Подтверждение заказа в МИМ{% else %}Заказ в 4 Точки (вручную){% endif %} · №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
+<div class="modal-body stack" data-supplier-window>
+{% if s.late %}<p class="small text-warn" data-supplier-late>{{ "Заказ на сегодня нужно передать в работу до 16:00 (предупреждение WebMIM)." }} Сейчас позже: лучше перенести дату на завтра.</p>{% endif %}
+{% if s.supplier == "webmim" %}
+<p class="small">Уйдёт в WebMIM ({{ b.server }}).</p>
+<table class="table small"><thead><tr><th>Позиция</th><th>Код</th><th class="num">Кол-во</th>{% if has_right("money") %}<th class="num">Закупка за 1 шт</th>{% endif %}</tr></thead><tbody>
+{% for i in c['items'] if i.qty|int > 0 %}<tr><td>{{ i.name }}</td><td class="mono">{{ i.goods_id }}</td><td class="num">{{ i.qty }}</td>{% if has_right("money") %}<td class="num">{{ i.supplier_price|money }}</td>{% endif %}</tr>{% endfor %}</tbody></table>
+<dl class="supplier-fields">
+<dt>Вид оплаты</dt><dd>безнал</dd><dt>Признак оплаты</dt><dd>Отсрочка</dd><dt>Способ</dt><dd>Доставка</dd>
+<dt>Адрес</dt><dd>адрес WebMIM {{ f.address_id }} (точка «{{ f.point }}»)</dd><dt>Дата доставки</dt><dd>{{ f.date[8:10] }}.{{ f.date[5:7] }}.{{ f.date[:4] }}</dd>
+<dt>Время работы клиента</dt><dd>{{ f.time }}</dd><dt>Контактное лицо</dt><dd>{{ f.person }}</dd><dt>Контактный телефон</dt><dd>{{ f.phone }}</dd>
+<dt>Примечание для поставщика</dt><dd>{{ f.note }}</dd><dt>Номер в вашей системе</dt><dd>{{ f.external }}</dd></dl>
+<p class="small muted">Заказ на более раннем этапе перейдёт в «Заказ оформлен». Когда заказ будет создан полностью, сообщения об оформлении уйдут сами: клиенту в чат Авито и менеджеру точки в ВК, если хватает данных. Сообщение подождёт в задачах заказа, если не хватает данных (например, номера перемещения) или нет чата Авито (у точки — ВК); не уйдёт второй раз, если уже отправлено, и не уйдёт, если его пропустили вручную.{% if b.test %} Это тестовый сервер: у поставщика ничего не заказывается, но номер тестового заказа впишется в карточку и может уйти в сообщениях. Ушедшее сообщение не удалить; поля WebMIM в карточке после проверки можно очистить.{% endif %}</p>
+<form method="post" action="/orders/{{ c.id }}/webmim/create" data-once data-supplier-go class="row" style="gap:var(--s-3)"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="seen" value="{{ s.fingerprint }}">
+<button type="button" class="btn btn--secondary btn--sm" data-close-modal>Отмена</button><button class="btn btn--primary btn--sm ml-auto">Подтвердить</button></form>
+<div class="supplier-busy" data-supplier-busy hidden role="status"><span class="supplier-spin" aria-hidden="true"></span>Оформляем заказ в WebMIM… Не закрывайте страницу.</div>
+{% else %}
+<p class="small">По API 4 Точек заказ не создаётся: скопируйте текст и оформите заказ в кабинете 4 Точек, затем впишите его номер.</p>
+<textarea class="textarea mono" id="tochki-text" rows="{{ s.tochki_text.count('\n') + 2 }}" readonly aria-label="Текст заказа для 4 Точек">{{ s.tochki_text }}</textarea>
+<div><button type="button" class="btn btn--secondary btn--sm" data-copy="#tochki-text">Скопировать</button></div>
+{% if can_post("order_tochki_placed") %}<form method="post" action="/orders/{{ c.id }}/tochki/placed" data-once class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Номер заказа 4 Точек</span><input class="input" name="number" maxlength="40" required></label>
+<p class="small muted">Заказ на более раннем этапе перейдёт в «Заказ оформлен» обычным переводом.</p>
+<div class="row" style="gap:var(--s-3)"><button type="button" class="btn btn--secondary btn--sm" data-close-modal>Отмена</button><button class="btn btn--primary btn--sm ml-auto">Оформил вручную</button></div></form>{% endif %}
+{% endif %}
+</div></div></div>
+{% endif %}
+{% elif supplier_number %}<p class="small" data-supplier-number>Заказ 4 Точек №{{ supplier_number }} (оформлен вручную).</p>{% endif %}

@@ -21,7 +21,7 @@ from datetime import date, datetime
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import orders, reliability, webmim_match, webmim_orders
-from .order_points import get_point
+from .order_points import PointError, get_point
 
 # The servers the button may write to. The live one only by the owner's word: add "prod" here (a change of the code, reviewed and deployed),
 # after the owner has confirmed the values below against the live dictionaries.
@@ -65,40 +65,44 @@ def _goods_ok(goods_id: str) -> bool:
 def problems(conn, card: dict, today: date, mode: str = "new") -> List[str]:
     """What keeps the order from WebMIM, before WebMIM is asked (the order's own data). `mode`: «new»; «lost» (an earlier press may have made it:
     a date passed since is no reason not to look for it); «made» (the order is in WebMIM: only the positions to add are checked)."""
+    return [text for _key, text in checks(conn, card, today, mode)]
+
+
+def checks(conn, card: dict, today: date, mode: str = "new") -> List[Tuple[str, str]]:
+    """problems() with the line of «Сверка» each one belongs to (order_supplier): items, territory, point, address, phone, time, date."""
     out = []
     if card.get("deal_kind") == "stock":
-        return ["Сделка из наличия точки: заказ в WebMIM для неё не нужен."]
+        return [("items", "Сделка из наличия точки: заказ в WebMIM для неё не нужен.")]
     items = [i for i in card.get("items") or [] if int(i["qty"] or 0) > 0]
     if not items:
-        out.append("В заказе нет позиций с количеством.")
+        out.append(("items", "В заказе нет позиций с количеством."))
     for item in items:
         if str(item.get("brand_key") or "").startswith("S") and ":" in str(item.get("brand_key") or ""):
-            out.append("Позиция «%s» другого поставщика: в WebMIM её не заказать." % item["name"])
+            out.append(("items", "Позиция «%s» другого поставщика: в WebMIM её не заказать." % item["name"]))
         elif not _goods_ok(str(item["goods_id"])):
-            out.append("У позиции «%s» нет кода WebMIM." % item["name"])
+            out.append(("items", "У позиции «%s» нет кода WebMIM." % item["name"]))
     territories = {str(i.get("territory") or "") for i in items}
     if "" in territories:
-        out.append("У позиции не указана территория WebMIM: добавьте позицию заново из выгрузки.")
+        out.append(("territory", "У позиции не указана территория WebMIM: добавьте позицию заново из выгрузки."))
     elif len(territories) > 1:
-        out.append("Позиции с разных территорий WebMIM: оформите их отдельными заказами.")
+        out.append(("territory", "Позиции с разных территорий WebMIM: оформите их отдельными заказами."))
     if mode == "made":
         return out
     point = get_point(conn, card["point_id"]) if card.get("point_id") else None
     if point is None:
-        out.append("Не выбрана точка выдачи.")
+        out.append(("point", "Не выбрана точка выдачи."))
     else:
         if not point["webmim_address_id"]:
-            out.append("У точки «%s» %s (Подключения → Точки)." % (point["name"], NO_ADDRESS))
+            out.append(("address", "У точки «%s» %s (Подключения → Точки)." % (point["name"], NO_ADDRESS)))
         if not webmim_phone(point["manager_phone"]):
-            out.append("У точки «%s» телефон не российский мобильный или не указан: он контактный телефон доставки." % point["name"])
+            out.append(("phone", "У точки «%s» телефон не российский мобильный или не указан: он контактный телефон доставки." % point["name"]))
         if not (card.get("delivery_time") or point["default_time"]):
-            out.append("Не указано время доставки (в заказе или время точки по умолчанию).")
+            out.append(("time", "Не указано время доставки (в заказе или время точки по умолчанию)."))
     if not card.get("delivery_date"):
-        out.append("Не указана дата доставки.")
+        out.append(("date", "Не указана дата доставки."))
     elif card["delivery_date"] < today.isoformat() and mode == "new":
-        out.append("Дата доставки в прошлом: WebMIM не принимает заказ задним числом.")
+        out.append(("date", "Дата доставки в прошлом: WebMIM не принимает заказ задним числом."))
     return out
-
 
 def late(card: dict, now: str) -> bool:
     """The delivery is today and it is LATE_HOUR or later: WebMIM's own warning (an order for today goes to work before 16:00)."""
@@ -121,7 +125,10 @@ def fields(conn, card: dict) -> dict:
 def fingerprint(conn, card: dict) -> str:
     """The fields and the positions the window showed: a press with another one (the order changed meanwhile) is refused (_claim)."""
     items = sorted((str(i["goods_id"]), str(i.get("territory") or ""), int(i["qty"] or 0)) for i in card.get("items") or [] if int(i["qty"] or 0) > 0)
-    data = fields(conn, card) if card.get("point_id") and get_point(conn, card["point_id"]) else {}
+    try:
+        data = fields(conn, card) if card.get("point_id") else {}
+    except PointError:                                                  # the point is gone: problems() refuses the press anyway
+        data = {}
     raw = repr((sorted(data.items()), items))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 

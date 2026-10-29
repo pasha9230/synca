@@ -239,6 +239,7 @@ for _section, _endpoints in {
                "orders_inbox_confirm", "order_item_find", "order_new_page", "order_new", "orders_bulk_page", "orders_bulk_check",
                "orders_bulk_run", "orders_bulk_undo_page", "orders_bulk_undo_run", "orders_cleanup_page", "orders_cleanup_run",
                "deleted_page", "deleted_restore", "orders_webmim_page", "order_webmim_link", "order_webmim_create",
+               "order_tochki_placed", "order_delivery_tomorrow",           # «Заказ поставщику» (order_supplier)
                "catalog_wait"),                                    # «В лист ожидания» of the catalog makes an order: the right of a new order
     "chats": ("chats_page", "chat_assign", "chat_items_add", "chat_create_deal", "chat_delete", "chat_link", "chat_send", "chat_send_image", "chat_stage", "chat_status",
               "chat_unlink", "chat_wait", "chat_handoff", "chats_merge", "chats_refresh", "share_create", "share_list", "share_price", "share_revoke",
@@ -291,7 +292,7 @@ NEEDS = {"catalog_own_price": "money", "order_delete": "delete", "chat_delete": 
          "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "chats_merge": "bulk",
          "draft_confirm": "publish", "feed_update_confirm": "publish", "pairs_forget": "publish", "pairs_not_pair": "publish", "feed_update_fetch": "publish", "history_rollback": "publish",
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",
-         "order_sale_reverse": "delete", "order_webmim_create": "supplier",
+         "order_sale_reverse": "delete", "order_webmim_create": "supplier", "order_tochki_placed": "supplier",
          "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
          "share_create": "send"}

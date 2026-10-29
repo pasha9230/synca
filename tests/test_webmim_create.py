@@ -3,6 +3,7 @@ the rights, and a test order kept away from the live reconciliation. A fake WebM
 from __future__ import annotations
 
 import json
+import re
 import socket
 import urllib.error
 import urllib.parse
@@ -870,14 +871,18 @@ def test_the_owner_and_the_partner_press_the_button_on_the_card(panel):
                 session["user"], session["epoch"], session["csrf"] = "owner", 0, "tok"
                 session["pw"] = shared_mark_of(client.application)
         html = client.get("/orders/%d" % mine).get_data(as_text=True)
-        assert "Оформить в тестовом WebMIM" in html and 'action="/orders/%d/webmim/create"' % mine in html and "номер тестового заказа впишется" in html
+        # the owner 2026-10-29: «Заказать в МИМ» opens the window «Подтверждение»; «Подтвердить» posts what the window showed
+        assert "Заказать в МИМ</button>" in html and "Подтверждение заказа в МИМ" in html and "номер тестового заказа впишется" in html
+        assert 'action="/orders/%d/webmim/create"' % mine in html and "Оформить в тестовом WebMIM" not in html
         assert "сообщения об оформлении уйдут сами" in html and "сообщения не меняются" not in html
         # review L2 (2026-10-23): every case the message does not go, no template name, nothing that reads as «a sent message can be wiped»
         for words in ("перейдёт в «Заказ оформлен»", "менеджеру точки в ВК", "номера перемещения", "нет чата Авито", "уже отправлено",
                       "пропустили вручную", "Ушедшее сообщение не удалить"):
             assert words in html
         assert "«Клиенту: заказ оформлен»" not in html and "сотрите" not in html
-        response = post(client, "/orders/%d/webmim/create" % mine, "tok")
+        seen = re.search(r'name="seen" value="([0-9a-f]+)"', html).group(1)
+        assert seen == webmim_create.fingerprint(conn, orders.get_card(conn, mine))
+        response = post(client, "/orders/%d/webmim/create" % mine, "tok", seen=seen)
         assert response.status_code == 302
         html = client.get("/orders/%d" % mine).get_data(as_text=True)
         assert "Оформлен в WebMIM" in html and "безнал (id 3)" in html

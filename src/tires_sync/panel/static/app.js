@@ -346,6 +346,27 @@
     askConfirm(form, e.submitter);
   }, true);
 
+  // 5e) «Заказ поставщику» (_order_supplier.html): строки сверки появляются по очереди — «проверяется…», затем ✓ / ! / ✗ (итог посчитан
+  //     сервером, без JS он виден сразу; при «меньше движения» — тоже сразу). «Подтвердить» показывает «Оформляем…» до ответа страницы.
+  document.querySelectorAll("[data-supplier-check]").forEach(function (list) {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    var lines = list.querySelectorAll(".supplier-line"), actions = document.querySelector("[data-supplier-actions]");
+    lines.forEach(function (li) { li.classList.add("is-checking"); });
+    if (actions) actions.classList.add("is-checking");
+    lines.forEach(function (li, n) {
+      setTimeout(function () {
+        li.classList.remove("is-checking");
+        if (n === lines.length - 1 && actions) actions.classList.remove("is-checking");
+      }, 250 * (n + 1));
+    });
+  });
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form.matches || !form.matches("form[data-supplier-go]") || form.dataset.sent) return;
+    var busy = form.parentNode.querySelector("[data-supplier-busy]");
+    if (busy) { busy.hidden = false; form.hidden = true; }
+  });
+
   // 6) Форма с data-once отправляется один раз: кнопка гаснет после нажатия
   document.addEventListener("submit", function (e) {
     var form = e.target;
