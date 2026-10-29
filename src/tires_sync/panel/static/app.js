@@ -760,7 +760,7 @@
         var li = document.createElement("li"), name = document.createElement("span"), meta = document.createElement("span"), cost = document.createElement("span");
         li.setAttribute("role", "option");
         name.className = "s-name"; name.textContent = it.point ? "«" + it.name + "»" : it.name;
-        meta.className = "s-meta"; meta.textContent = it.point ? "шина с точки, нет в выгрузке WebMIM" : it.size + " · остаток " + it.stock + " · код " + it.goods_id;
+        meta.className = "s-meta"; meta.textContent = it.point ? "шина с точки, нет в выгрузке WebMIM" : it.size + " · остаток " + it.stock + " · код " + it.goods_id + (it.oth ? " · " + it.oth : "");
         cost.className = "s-price"; cost.textContent = it.point ? "впишите цену" : (it.price != null ? Math.round(it.price).toLocaleString("ru-RU") + " ₽" : "нет цены");
         li.appendChild(name); li.appendChild(meta); li.appendChild(cost);
         li.addEventListener("mousedown", function (e) { e.preventDefault(); pick(i); });

@@ -405,10 +405,12 @@ def card_block(conn, card: dict, with_hints: bool = True) -> dict:
     out = {"server": webmim_orders.SERVER_NAMES[server], "seen_at": seen_at(conn, server), "order": order, "differences": [], "hints": [], "purchase": {},
            "test": server != "prod", "test_order": test_order,
            "not_found": bool(order is None and not test_order and (card.get("webmim_number") or card.get("webmim_id")))}
-    items = [{"goods_id": str(i["goods_id"]), "name": i["name"], "qty": i["qty"]} for i in card.get("items") or []]
+    from . import oth_sale
+    ordered = oth_sale.supplier_items(conn, card) if card.get("id") is not None else card.get("items") or []     # «с ОТХ»: not WebMIM's
+    items = [{"goods_id": str(i["goods_id"]), "name": i["name"], "qty": i["qty"]} for i in ordered]
     if order is not None:
         out["differences"] = differences(items, order)
-        out["purchase"] = purchase_check(card.get("items") or [], order)
+        out["purchase"] = purchase_check(ordered, order)
     elif with_hints and server == "prod" and not out["not_found"] and not test_order and card.get("deal_kind") != "stock":
         out["hints"] = hints(card, items, snap, taken(conn, snap))
     return out
