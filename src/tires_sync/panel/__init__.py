@@ -266,13 +266,16 @@ def create_app(config: dict) -> Flask:
         from flask import session
         if not session.get("user"):
             return {"nav": {}}
-        return {"nav": LazyNav()}
+        from .page_prefs import state
+        return {"nav": LazyNav(), "page_filter": state}
 
     from .. import users as _users
     _users.warm()
     app.teardown_appcontext(close_conn)
     app.before_request(check_csrf)
     app.before_request(check_access)                                   # after the CSRF check: one right per page (common.SECTION_OF)
+    from . import page_prefs
+    app.before_request(page_prefs.remember)                            # after the right: the person's own filters of a list page
 
     @app.after_request
     def security_headers(response):
