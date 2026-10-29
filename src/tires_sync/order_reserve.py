@@ -111,6 +111,9 @@ def _ask_number(conn, card: dict, notify: Notify, now: str) -> None:
     """No WebMIM number on the day of the reminder: the responsible is asked for it once per order (the record of the journal is the mark)."""
     if card.get("webmim_number") or _done(conn, card["id"], NO_NUMBER_MARK):
         return
+    from . import oth_sale
+    if oth_sale.taken_ids(conn, card["id"]) and not [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]:
+        return                                                  # every tyre taken from «На ОТХ»: no WebMIM order, never a number to ask for
     text = ASK_NUMBER % (card["id"], card["client_name"] or card["client_phone"] or "клиент")
     orders.add_event(conn, card["id"], now, "система", "reserve", "Менеджеру: «%s»: %s %s" % (text, notify(card, text), NO_NUMBER_MARK),
                      level="yellow")

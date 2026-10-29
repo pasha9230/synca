@@ -149,8 +149,21 @@ def values(conn, card: dict, now=None) -> dict:
         "delivery_date": _date(card.get("delivery_date", "")), "delivery_time": card.get("delivery_time", ""),
         "items_full": full, "webmim_number": card.get("webmim_number", ""), "transfer_number": card.get("transfer_number", ""), "hold_until": hold, "order_date": _order_date(conn, card, now),
         "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or "",
-        "oth_orders": ", ".join(str(n) for n in sorted({r[0] for r in conn.execute(
-            "SELECT from_order FROM order_item_oth WHERE order_id = ? AND undone_at = ''", (card["id"],))}))}
+        "oth_orders": _oth_orders(conn, card["id"])}
+
+
+def _oth_orders(conn, card_id) -> str:
+    """The orders the tyres «с ОТХ» of the order lie at the point for, by the number the point knows (order_manager.label: WebMIM's, else the
+    panel's) — the first order of a chain, the one the tyres were bought by."""
+    from .oth_sale import first_order
+    found = []
+    for (item_id,) in conn.execute("SELECT item_id FROM order_item_oth WHERE order_id = ? AND undone_at = '' ORDER BY item_id", (card_id,)):
+        first = first_order(conn, item_id)
+        row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (first,)).fetchone()
+        number = str((row[0] if row else "") or first)
+        if number not in found:
+            found.append(number)
+    return ", ".join(found)
 
 
 def render(conn, card: dict, body: str, now=None) -> Tuple[str, List[str]]:

@@ -550,8 +550,8 @@ def test_the_point_text_names_the_old_order_the_client_and_the_reservation(tmp_p
     orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
     text = oth_sale.point_text(conn, orders.get_card(conn, cid), LATER)
     card = orders.get_card(conn, cid)
-    assert text == ("Шины с ОТХ (заказ №%d) отложены под нового клиента: заказ №%d, Пётр, %s, Nokian 205/55 R16 × 2. Не продавать другим, "
-                    "резерв до 01.11.2026." % (old, cid, card["client_phone"]))
+    assert text == ("Шины с ОТХ (заказ №%s) отложены под нового клиента: заказ №%d, Пётр, %s, Nokian 205/55 R16 × 2. Не продавать другим, "
+                    "резерв до 01.11.2026." % (orders.get_card(conn, old)["webmim_number"], cid, card["client_phone"]))     # the number the point knows
     conn.execute("INSERT INTO order_template (name, audience, body) VALUES (?, 'manager', ?)", (oth_sale_template(), "Свой текст №{order_no}"))
     conn.commit()
     assert oth_sale.point_text(conn, card, LATER) == "Свой текст №%d" % cid                  # the owner's template wins
@@ -601,3 +601,32 @@ def test_a_point_cannot_press_it(tmp_path):
         session.update(user="point2", epoch=store.get_session_epoch(conn, "point2"), csrf="tok")
     assert c.post("/orders/%d/oth-at-point" % cid, data={"csrf": "tok"}).status_code in (302, 403)
     assert code(conn, cid) == "new"
+
+
+def test_an_order_all_from_oth_is_never_asked_for_a_webmim_number(tmp_path):
+    from tires_sync import order_reserve
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    card = orders.get_card(conn, cid)
+    told = []
+    order_reserve._ask_number(conn, card, lambda c, t: (told.append(t), "ok")[1], LATER)
+    assert told == [] and not any(order_reserve.NO_NUMBER_MARK in e["text"] for e in orders.list_events(conn, cid))
+    mixed = new_order(conn, qty=6)
+    take(conn, mixed)
+    order_reserve._ask_number(conn, orders.get_card(conn, mixed), lambda c, t: (told.append(t), "ok")[1], LATER)
+    assert len(told) == 1                                                            # its supplier's part has a WebMIM order to name
+
+
+def test_the_point_text_goes_to_the_points_own_page_for_an_order_of_its_account(tmp_path, monkeypatch):
+    from tires_sync import order_notify, order_points
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    seen = {}
+    monkeypatch.setattr(order_notify, "deliver", lambda c, box, card, text, now, **kw: (seen.update(kw["way"]), "ok")[1])
+    monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": point_id(conn)})
+    order_notify.tell_point(conn, None, orders.get_card(conn, cid), "x", LATER)
+    assert seen["own_point"] == point_id(conn)

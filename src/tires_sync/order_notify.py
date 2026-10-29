@@ -194,6 +194,9 @@ def tell_point(conn, box: Optional[SecretBox], card: dict, text: str, now: str, 
     No way to the point: the owner is told, as by deliver."""
     point = card.get("point")
     way = _point_route(point) if point else {"channel": "owner", "to": "", "why": "у заказа нет точки"}
+    own = points.of_account(conn, card["id"]) if point else None
+    if own is not None:                                            # an order of the point's account: left on its «Моя точка», never the owner
+        way = dict(way, own_point=own["id"])
     return deliver(conn, box, card, text, now, tg_http=tg_http, vk_http=vk_http, way=way)
 
 
