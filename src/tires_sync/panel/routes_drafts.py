@@ -136,7 +136,7 @@ def register(app) -> None:
     app.jinja_env.globals["plural"] = service.plural
     # the pages whose bar «Не применено: N» applies the working draft in place (the owner 2026-10-29); the other pages keep «Посмотреть и применить»
     app.jinja_env.globals["SETTINGS_BAR_PAGES"] = ("settings_page", "settings_brands_page", "settings_brand_card", "settings_exclusions_page",
-                                                   "economics_terms")
+                                                   "economics_terms", "catalog")      # the catalog: its brands go off and on the feed there too
 
     @app.route("/brands")
     @login_required

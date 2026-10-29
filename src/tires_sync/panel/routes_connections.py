@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from ..webmim_client import WebmimClient, WebmimError
 from .. import reliability, share_photos, tochki_feed, webmim_orders
 from ..tochki_client import TochkiClient, TochkiError
 from .routes_addresses import build_form
-from .common import author, get_conn, login_required, now_iso, review_or_back
+from .common import author, get_conn, login_required, now_iso, review_or_back, safe_path
 
 WEBMIM_DEFAULTS = {"base_url": "https://mimtest.svrauto.ru", "mode": "login", "login": ""}
 
@@ -90,6 +91,9 @@ def register(app) -> None:
         conn = get_conn()
         _supplier_or_404(supplier_id)
         back = "/settings/exclusions#excluded-%d" % supplier_id
+        asked = safe_path(request.form.get("next", ""))
+        if urlsplit(asked).path == "/catalog":                     # «Бренды в фиде» of the catalog: the same change, back to the catalog
+            back = asked
         try:
             if request.form.get("remove"):
                 sid, brand = _split(request.form["remove"])

@@ -183,7 +183,9 @@ def test_confirmed_exclusion_disappears_from_the_catalog(tmp_path):
     d = staging.summary(conn)["draft_id"]
     post(client, "/draft/%d/confirm" % d, tok)
     assert get_active(conn)[1]["excluded_brands"] == ["IKON TYRES"]
-    assert "IKON TYRES" not in client.get("/catalog").get_data(as_text=True)
+    page = client.get("/catalog").get_data(as_text=True)
+    assert "IKON TYRES" not in page.split('id="items"')[1]                  # its positions are gone from the list
+    assert 'data-brand-on="IKON TYRES"' in page                             # «Бренды в фиде» of the owner offers it back (2026-10-30)
     assert "Test Model" not in client.get("/catalog/rows?brand=IKON+TYRES").get_data(as_text=True)
 
 

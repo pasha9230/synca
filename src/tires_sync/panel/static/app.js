@@ -159,6 +159,7 @@
       document.querySelectorAll("[data-pend-title]").forEach(function (el) { el.textContent = "Неподтверждённых изменений: " + n; });
       var bar = document.getElementById("pendbar");
       if (bar) bar.hidden = !n;
+      if (n && window.tiresPending) window.tiresPending();             // the bar of the settings pages: the line and the draft anew
     }
     function swap(old, url) {
       return fetch(url, {credentials: "same-origin"}).then(function (r) {
@@ -1200,11 +1201,13 @@
     var t = Math.abs(n) % 100, u = t % 10;
     return t >= 11 && t <= 14 ? many : u === 1 ? one : u >= 2 && u <= 4 ? few : many;
   }
-  if (bar) {
+  function refreshPending() {
     fetch(bar.getAttribute("data-pending-url"), { headers: { "X-Requested-With": "fetch" }, credentials: "same-origin" })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then(function (d) {
         if (!d.open) return;
+        var form = bar.querySelector("[data-pending-form]");
+        if (form) form.setAttribute("action", "/draft/" + d.draft + "/confirm");
         bar.querySelector("[data-pending-n]").textContent = d.count;               // the draft the line describes: its own number
         bar.querySelector("[data-pending-title]").textContent = "Не применено: " + d.count + " " + plural(d.count, "правка", "правки", "правок");
         bar.querySelector("[data-pending-line]").textContent = d.line + " Пока вы не нажмёте «Применить», фид не меняется.";
@@ -1221,5 +1224,9 @@
         checks.hidden = !(d.guard.over || d.strong);
       })
       .catch(function () { bar.querySelector("[data-pending-line]").textContent = "Не удалось посчитать, что изменится: откройте «Подробнее»."; });
+  }
+  if (bar) {
+    window.tiresPending = refreshPending;
+    if (!bar.hidden) refreshPending();
   }
 })();
