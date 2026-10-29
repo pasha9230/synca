@@ -508,7 +508,7 @@ def test_the_owner_page_shows_a_client_and_an_unknown_role_of_an_invitation(tmp_
     html = page.get_data(as_text=True)
     assert page.status_code == 200 and "no-such-role" in html
     invite_form = html[html.index('action="/users/invite"'):]
-    assert 'value="client"' not in invite_form.split("</form>")[0]                        # build 1: a client is made on the server only
+    assert 'value="client"' in invite_form.split("</form>")[0]                            # builds 3-4: a client is invited with conditions
 
 
 def test_a_client_is_never_one_who_answers_for_an_order_a_callback_or_a_telegram_chat(tmp_path):

@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import store
+from . import client_terms, store
 
 RESERVED = frozenset({"owner", "server", "system", "cli"})      # names of the shared password and of server-side actions in the journal
 LOGIN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
@@ -56,7 +56,8 @@ def _check_password(password: str) -> None:
 
 
 def add_user(conn, login: str, password: str, now: str, role: str = "owner", point_id: Optional[int] = None, display_name: str = "",
-             author: str = "server") -> str:
+             author: str = "server", commit: bool = True) -> str:
+    """`commit=False`: inside the caller's transaction (accept_invite writes the user and a client's conditions at once)."""
     login = normalize(login)
     _check_role(None, role, point_id)
     if not LOGIN.match(login):
@@ -69,7 +70,7 @@ def add_user(conn, login: str, password: str, now: str, role: str = "owner", poi
     conn.execute("INSERT INTO panel_user VALUES (?,?,?)", (login, _hash(password), now))
     conn.execute("INSERT OR REPLACE INTO panel_user_role (login, role, active, point_id, display_name, updated, updated_by) VALUES (?,?,1,?,?,?,?)",
                  (login, role, point_id if role == "point" else None, _name(display_name), now, author))
-    store.write_audit(conn, now, author, "user_added", {"login": login, "role": role})
+    client_terms.audit(conn, now, author, "user_added", {"login": login, "role": role}, commit)
     return login
 
 
@@ -232,30 +233,40 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_invite(conn, role: str, point_id, display_name: str, now: str, author: str) -> str:
-    """A one-time link for 48 hours; only its hash is kept. Returns the token (shown once, the panel sends nothing)."""
+def create_invite(conn, role: str, point_id, display_name: str, now: str, author: str, terms: str = "") -> str:
+    """A one-time link for 48 hours; only its hash is kept. Returns the token (shown once, the panel sends nothing). `terms`: a client's
+    conditions as client_terms.invite_terms made them (checked there); kept for a client's invitation only."""
     _check_role(conn, role, point_id)
+    terms = terms if role == "client" else ""
+    if terms:
+        client_terms.from_invite(terms)
     token = secrets.token_urlsafe(32)
     expires = (datetime.fromisoformat(now) + timedelta(hours=INVITE_HOURS)).isoformat(timespec="seconds")
-    conn.execute("INSERT INTO panel_invite (token_hash, role, point_id, display_name, created, expires, created_by) VALUES (?,?,?,?,?,?,?)",
-                 (_token_hash(token), role, point_id if role == "point" else None, _name(display_name), now, expires, author))
+    conn.execute("INSERT INTO panel_invite (token_hash, role, point_id, display_name, created, expires, created_by, client_terms) "
+                 "VALUES (?,?,?,?,?,?,?,?)", (_token_hash(token), role, point_id if role == "point" else None, _name(display_name), now, expires,
+                                              author, terms))
     store.write_audit(conn, now, author, "invite_created", {"role": role, "expires": expires})
     return token
 
 
 def find_invite(conn, token: str, now: str) -> Optional[dict]:
     """The invitation if the link is still good (not used, not revoked, not expired)."""
-    row = conn.execute("SELECT role, point_id, display_name, expires FROM panel_invite WHERE token_hash = ? AND used_at IS NULL "
+    row = conn.execute("SELECT role, point_id, display_name, expires, client_terms FROM panel_invite WHERE token_hash = ? AND used_at IS NULL "
                        "AND revoked_at IS NULL AND expires > ?", (_token_hash(str(token or "")), now)).fetchone()
-    return None if row is None else {"role": row[0], "point_id": row[1], "display_name": row[2], "expires": row[3]}
+    return None if row is None else {"role": row[0], "point_id": row[1], "display_name": row[2], "expires": row[3], "client_terms": row[4]}
 
 
 def accept_invite(conn, token: str, login: str, password: str, now: str) -> str:
-    """The person sets their own login and password. The link works once: the claim is atomic."""
+    """The person sets their own login and password. The link works once: the claim is atomic. One transaction: the claim, the user and
+    a client's conditions (client_terms); a failure of any step rolls everything back (the link stays good, no user, no conditions)."""
     invite = find_invite(conn, token, now)
     if invite is None:
         raise UserError("Ссылка недействительна: она уже использована, отозвана или истекла.")
     _check_role(conn, invite["role"], invite["point_id"])            # the point was deleted after the invitation: refused, the link stays
+    try:
+        terms = client_terms.from_invite(invite["client_terms"]) if invite["role"] == "client" else None
+    except client_terms.TermsError as err:
+        raise UserError(str(err)) from err
     login = normalize(login)
     if not LOGIN.match(login) or login in RESERVED or exists(conn, login):
         raise UserError("Логин занят или не подходит: 2–32 символа, латинские буквы, цифры, точка, дефис, подчёркивание.")
@@ -266,20 +277,35 @@ def accept_invite(conn, token: str, login: str, password: str, now: str) -> str:
         conn.rollback()
         raise UserError("Ссылка недействительна: она уже использована, отозвана или истекла.")
     try:
-        return add_user(conn, login, password, now, role=invite["role"], point_id=invite["point_id"], display_name=invite["display_name"],
-                        author=login)
+        add_user(conn, login, password, now, role=invite["role"], point_id=invite["point_id"], display_name=invite["display_name"],
+                 author=login, commit=False)
+        if terms is not None:
+            client_terms.save(conn, login, terms["small"], terms["large"], terms["mode"], terms["brands"], now, login, commit=False)
+        conn.commit()
+        return login
     except sqlite3.IntegrityError:                        # the same login taken by another invitation a moment ago
         conn.rollback()
         raise UserError("Логин занят: выберите другой.")
+    except client_terms.TermsError as err:
+        conn.rollback()
+        raise UserError(str(err)) from err
     except Exception:
         conn.rollback()
         raise
 
 
 def list_invites(conn, now: str) -> List[dict]:
-    rows = conn.execute("SELECT rowid, role, point_id, display_name, created, expires, created_by FROM panel_invite "
+    rows = conn.execute("SELECT rowid, role, point_id, display_name, created, expires, created_by, client_terms FROM panel_invite "
                         "WHERE used_at IS NULL AND revoked_at IS NULL AND expires > ? ORDER BY created DESC", (now,))
-    return [dict(zip(("id", "role", "point_id", "display_name", "created", "expires", "created_by"), r)) for r in rows]
+    out = []
+    for r in rows:
+        item = dict(zip(("id", "role", "point_id", "display_name", "created", "expires", "created_by"), r[:7]))
+        try:
+            item["terms"] = client_terms.from_invite(r[7]) if r[1] == "client" else None
+        except client_terms.TermsError:
+            item["terms"] = None
+        out.append(item)
+    return out
 
 
 def revoke_invite(conn, invite_id: int, now: str, author: str) -> None:

@@ -2,7 +2,8 @@
 {% from "_ui.html" import icon %}
 {% block title %}Пользователи · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Пользователи</h1><p class="sub">Кто входит в панель и что видит. Общий пароль владельца из настроек сервера остаётся аварийным входом.</p></div></header>
+<header class="page-head"><div><h1>Пользователи</h1><p class="sub">Кто входит в панель и что видит. Общий пароль владельца из настроек сервера остаётся аварийным входом.</p></div>
+<a class="btn btn--secondary" href="/client-terms">Условия клиентов</a></header>
 {% if link %}<section class="card card-body" style="margin-bottom:var(--s-4)"><h2>Ссылка-приглашение</h2>
 <p class="muted">Скопируйте и отправьте человеку сами: панель её никуда не отправляет и больше не покажет. Действует 48 часов, один раз.</p>
 <input class="input" readonly value="{{ link }}"></section>{% endif %}
@@ -20,14 +21,25 @@
 {% else %}<tr><td colspan="6" class="muted">Пользователей пока нет: пригласите первого ниже.</td></tr>{% endfor %}
 </tbody></table></div></section>
 <section class="card card-body" style="margin-top:var(--s-4)"><h2>Пригласить</h2>
-<p class="small muted">Ссылка одноразовая и живёт 48 часов; человек сам задаёт логин и пароль. Менеджеру точки выберите точку: он увидит только её заказы, чаты и звонки её аккаунта Авито и начнёт с «Моей точки».</p>
+<p class="small muted">Ссылка одноразовая и живёт 48 часов; человек сам задаёт логин и пароль. Менеджеру точки выберите точку: он увидит только её заказы, чаты и звонки её аккаунта Авито и начнёт с «Моей точки». Клиенту (оптовому покупателю) задайте условия ниже: они лягут в его профиль, когда он примет приглашение.</p>
 {% if can_post("users_invite") %}<form method="post" action="/users/invite" class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
-<label class="field"><span class="label">Имя</span><input class="input" name="display_name" placeholder="например, Алексей"></label>
-<label class="field"><span class="label">Роль</span><select class="select" name="role">{% for key, label in roles.items() if key != "client" %}<option value="{{ key }}"{% if key == "viewer" %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Имя или компания</span><input class="input" name="display_name" placeholder="например, Алексей"></label>
+<label class="field"><span class="label">Роль</span><select class="select" name="role">{% for key, label in roles.items() %}<option value="{{ key }}"{% if key == "viewer" %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
 <label class="field"><span class="label">Точка (для менеджера точки)</span><select class="select" name="point_id"><option value="">—</option>{% for pid, name in points.items() %}<option value="{{ pid }}">{{ name }}</option>{% endfor %}</select></label>
+<details class="field" style="flex-basis:100%"><summary class="strong">Условия клиента (только для роли «Клиент»)</summary>
+<div class="stack" style="padding-top:var(--s-3)"><div class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">
+<label class="field"><span class="label">% до R17</span><input class="input input--num" name="c_small" inputmode="decimal" placeholder="как у роли" style="max-width:140px"></label>
+<label class="field"><span class="label">% с R18</span><input class="input input--num" name="c_large" inputmode="decimal" placeholder="как у роли" style="max-width:140px"></label>
+<fieldset class="field" style="border:0;padding:0;margin:0"><span class="label">Бренды</span>
+<label class="check"><input type="radio" name="c_mode" value="inherit" checked> как у роли</label>
+<label class="check"><input type="radio" name="c_mode" value="own"> свой список (отметьте ниже)</label></fieldset></div>
+<input class="input" type="search" data-brand-filter="invite-brands" placeholder="Найти бренд" aria-label="Найти бренд" style="max-width:260px">
+<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px;max-height:320px;overflow:auto"><table class="table" id="invite-brands"><tbody>
+{% for key, label in invite_brands %}<tr data-name="{{ (label ~ ' ' ~ key)|lower }}"><td><label class="check"><input type="checkbox" name="c_brand" value="{{ key }}"><span>{{ label }}</span></label></td></tr>{% else %}<tr><td class="muted">Брендов нет: выгрузки ещё не загружены.</td></tr>{% endfor %}
+</tbody></table></div><p class="small muted">Пусто — как у роли «Клиент». Свои % брендов задаются после, в «Условия клиентов».</p></div></details>
 <button class="btn btn--primary">Создать ссылку</button>{% if can_post("users_invite") %}</form>{% else %}</fieldset>{% endif %}
 {% if invites %}<table class="table" style="margin-top:var(--s-3)"><thead><tr><th>Роль</th><th>Имя</th><th>Действует до</th><th>Кто создал</th><th></th></tr></thead><tbody>
-{% for i in invites %}<tr><td>{{ roles.get(i.role, i.role) }}{% if i.point_id %} · {{ points.get(i.point_id, "точка №%s" % i.point_id) }}{% endif %}</td><td>{{ i.display_name }}</td><td>{{ i.expires|dt_utc }}</td><td>{{ i.created_by }}</td>
+{% for i in invites %}<tr><td>{{ roles.get(i.role, i.role) }}{% if i.point_id %} · {{ points.get(i.point_id, "точка №%s" % i.point_id) }}{% endif %}</td><td>{{ i.display_name }}{% if i.terms %}<div class="small muted">{{ describe(i.terms)|join(" · ") }}</div>{% endif %}</td><td>{{ i.expires|dt_utc }}</td><td>{{ i.created_by }}</td>
 <td>{% if can_post("users_invite_revoke") %}<form method="post" action="/users/invites/{{ i.id }}/revoke" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--danger-outline btn--sm">Отозвать</button>{% if can_post("users_invite_revoke") %}</form>{% else %}</fieldset>{% endif %}</td></tr>{% endfor %}
 </tbody></table>{% endif %}</section>
 <section class="card" style="margin-top:var(--s-4)"><div class="card-body" style="overflow-x:auto"><h2>Что видит каждая роль</h2>

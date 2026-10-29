@@ -310,6 +310,10 @@ def _build_parser() -> argparse.ArgumentParser:
             up.add_argument("--login", required=True)
         if name in ("user-add", "user-passwd"):
             up.add_argument("--password-stdin", action="store_true", help="прочитать пароль из стандартного ввода (иначе спросит скрытно)")
+        if name == "user-add":
+            up.add_argument("--role", default="owner", choices=sorted(users.ROLES), help="роль (по умолчанию owner; client — клиент-закупщик)")
+            up.add_argument("--point-id", type=int, default=None, help="точка, для роли point")
+            up.add_argument("--name", default="", help="имя или компания, как в панели")
     cl = sub.add_parser("clients-link", help="связать старые заказы и чаты с клиентами по телефону и собеседнику Авито: без --confirm только отчёт")
     cl.add_argument("--db", required=True)
     cl.add_argument("--confirm", action="store_true", help="записать (сделайте копию базы до этого); без него ничего не пишется")
@@ -2482,8 +2486,9 @@ def _cmd_users(args) -> int:
             print("%s  (создан %s)" % (user["login"], user["created"]))
         return 0
     if args.command == "user-add":
-        login = users.add_user(conn, args.login, _read_password(args), _now())
-        print("пользователь «%s» добавлен" % login)
+        users._check_role(conn, args.role, args.point_id)                     # a point of a manager of a point is there
+        login = users.add_user(conn, args.login, _read_password(args), _now(), role=args.role, point_id=args.point_id, display_name=args.name)
+        print("пользователь «%s» добавлен, роль %s" % (login, users.ROLES[args.role]))
     elif args.command == "user-passwd":
         users.set_password(conn, args.login, _read_password(args), _now())
         print("пароль изменён, открытые сессии пользователя закрыты")

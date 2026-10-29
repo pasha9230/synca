@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from flask import flash, redirect, render_template, request, session
 
-from .. import order_points as points, store, users
+from .. import client_terms, order_points as points, store, users
 from .common import author, current_user, get_conn, login_blocked, login_failed, now_iso
 
 
@@ -25,17 +25,25 @@ def register(app) -> None:
 
     @app.route("/users")
     def users_page():
+        from .routes_client_terms import brand_choices
         conn = get_conn()
         return render_template("users.html", users_list=users.list_users(conn), invites=users.list_invites(conn, now_iso()),
                                points={p["id"]: p["name"] for p in points.list_points(conn)}, roles=users.ROLES, sections=users.SECTIONS,
-                               rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None))
+                               rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None),
+                               invite_brands=brand_choices(app, conn, client_terms.read(conn, client_terms.ROLE)["brands"]),
+                               describe=client_terms.describe)
 
     @app.route("/users/invite", methods=["POST"])
     def users_invite():
         conn = get_conn()
+        role, f = request.form.get("role", ""), request.form
         try:
-            token = users.create_invite(conn, request.form.get("role", ""), _point(request.form.get("point_id")), request.form.get("display_name", ""),
-                                        now_iso(), author())
+            terms = client_terms.invite_terms(f.get("c_small", ""), f.get("c_large", ""), f.get("c_mode", "inherit"),
+                                              f.getlist("c_brand")) if role == "client" else ""
+            token = users.create_invite(conn, role, _point(f.get("point_id")), f.get("display_name", ""), now_iso(), author(), terms)
+        except client_terms.TermsError as err:
+            flash(str(err), "field:" + err.field if err.field else "error")
+            return redirect("/users")
         except users.UserError as err:
             flash(str(err))
             return redirect("/users")

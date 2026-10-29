@@ -6,7 +6,6 @@ from __future__ import annotations
 import io
 import json
 import re
-from datetime import datetime
 
 import pytest
 
@@ -102,7 +101,7 @@ def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), brands=(("IKON TYRE
     if tochki:
         sid = connections.create_supplier(conn, "4Точки", NOW, "o")
         connections.set_config(conn, "tochki", 0, {"login": "api-user", "supplier_id": sid, "feed": False}, NOW, "o")
-        (tmp_path / "tochki-snapshot.json").write_text(json.dumps({"version": 1, "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
+        (tmp_path / "tochki-snapshot.json").write_text(json.dumps({"version": 1, "fetched_at": "2026-10-07T11:00:00",   # an hour before the app's clock
                                                                    "warehouse_id": 7, "items": list(tochki)}), encoding="utf-8")
     users.add_user(conn, "buyer", "длинный-пароль-1", NOW, role="client")
     conn.execute("UPDATE client_terms SET pct_small = ?, pct_large = ? WHERE subject = '*'", role)
@@ -325,14 +324,41 @@ def tokens(html):
     return TOKEN_RE.findall(html)
 
 
+def own_photo(app, conn, goods_id, data=None):
+    """Our own photo (an approved three-quarter frame of a set sent to the feed) for the position `goods_id`; returns its sha."""
+    from pathlib import Path
+    from tires_sync import photo_library
+    import hashlib
+    data = data or OWN_JPEG
+    offer = load_merged(conn, active_settings(conn), app.config["UNLOAD_PATH"]).offers[goods_id]
+    key = photo_library.set_key_for(offer).text()
+    sha = hashlib.sha256(data).hexdigest()
+    root = Path(app.config["PHOTOS_ROOT"])
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ("%s.jpg" % sha)).write_bytes(data)
+    pid = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM photo").fetchone()[0]
+    conn.execute("INSERT INTO photo (id, sha256, ext, source, created) VALUES (?, ?, 'jpg', 'gen', ?)", (pid, sha, NOW))
+    conn.execute("INSERT INTO photo_set (key, brand_key, model_key, season, studded, size_class, state, in_feed) "
+                 "VALUES (?, 'ikon tyres', 'x', 'winter', 0, 'r15_18', 'ready', 1)", (key, ))
+    conn.execute("INSERT INTO set_frame (set_key, kind, photo_id, status, created) VALUES (?, 'three_quarter', ?, 'approved', ?)", (key, pid, NOW))
+    conn.commit()
+    return sha
+
+
+def cc_tochki_gid(app, conn):
+    from tires_sync.panel.routes_shop import _offers
+    with app.test_request_context():
+        return next(g for g in _offers(app, conn).offers if g.startswith("s"))
+
+
 def test_the_photo_comes_through_our_server_under_an_opaque_name(tmp_path):
     app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1")])
-    assert tokens(page(client)) == []                                          # not copied yet: no link, the copies are asked for
+    own_photo(app, conn, "77001", JPEG)                                       # our photo, with marks in its metadata
+    assert tokens(page(client)) == []                                          # not drawn yet: no link
     shop_photos.drain()
-    assert sorted(FETCHED) == sorted(["https://cdn.supplier-one.test/p/77001.jpg", "https://cdn.supplier-one.test/p/77002.jpg",
-                                      "https://img.4tochki.test/T1.jpg"])
     found = tokens(page(client))
-    assert len(found) == 3
+    ours = {cc.photo_token(app.secret_key, g) for g in ("77001", "77002")}     # one set of ours: both sizes of the model
+    assert set(found) == ours and cc.photo_token(app.secret_key, cc_tochki_gid(app, conn)) not in found   # 4tochki's: a placeholder
     for token in found:
         response = client.get("/shop/photo/" + token)
         data = response.get_data()
@@ -344,8 +370,7 @@ def test_the_photo_comes_through_our_server_under_an_opaque_name(tmp_path):
         text = " ".join("%s: %s" % kv for kv in response.headers.items()).lower()
         for leak in ("supplier-one", "4tochki", "77001", "77002", "t1.jpg", "s%d-" % sid):
             assert leak not in text, leak
-    assert len(FETCHED) == 3                                                   # served from our disk, not fetched again
-
+    assert FETCHED == []                                                       # no supplier is ever asked
 
 def test_the_photo_of_a_position_out_of_the_set_or_any_address_is_never_served(tmp_path):
     app, client, conn, sid = make_shop(tmp_path)
@@ -366,6 +391,7 @@ def test_the_photo_of_a_position_out_of_the_set_or_any_address_is_never_served(t
 
 def test_the_photo_is_the_clients_only(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
+    own_photo(app, conn, "77001")
     page(client)
     shop_photos.drain()
     token = cc.photo_token(app.secret_key, "77001")
@@ -378,20 +404,7 @@ def test_the_photo_is_the_clients_only(tmp_path):
 
 def test_our_own_photo_comes_first(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
-    from pathlib import Path
-    from tires_sync import photo_library
-    import hashlib
-    offer = load_merged(conn, active_settings(conn), app.config["UNLOAD_PATH"]).offers["77001"]
-    key = photo_library.set_key_for(offer).text()
-    sha = hashlib.sha256(OWN_JPEG).hexdigest()
-    root = Path(app.config["PHOTOS_ROOT"])
-    root.mkdir(parents=True, exist_ok=True)
-    (root / ("%s.jpg" % sha)).write_bytes(OWN_JPEG)
-    conn.execute("INSERT INTO photo (id, sha256, ext, source, created) VALUES (1, ?, 'jpg', 'gen', ?)", (sha, NOW))
-    conn.execute("INSERT INTO photo_set (key, brand_key, model_key, season, studded, size_class, state, in_feed) "
-                 "VALUES (?, 'ikon tyres', 'x', 'winter', 0, 'r15_18', 'ready', 1)", (key, ))
-    conn.execute("INSERT INTO set_frame (set_key, kind, photo_id, status, created) VALUES (?, 'three_quarter', 1, 'approved', ?)", (key, NOW))
-    conn.commit()
+    sha = own_photo(app, conn, "77001")
     html = page(client)
     token = cc.photo_token(app.secret_key, "77001")
     assert token not in tokens(html)                                           # being made
@@ -405,18 +418,17 @@ def test_our_own_photo_comes_first(tmp_path):
     assert sha not in html                                                     # our library's name is not shown either
 
 
-def test_a_photo_that_does_not_copy_is_a_stub_and_not_asked_again_at_once(tmp_path):
-    rows = (wm(NNOMMODIF="77001", NPRICE_DELAYED="12345", SPICTURE="https://cdn.supplier-one.test/broken.jpg"),)
-    app, client, conn, _ = make_shop(tmp_path, rows=rows)
+def test_a_position_without_our_photo_is_a_stub_and_the_supplier_is_never_asked(tmp_path):
+    """The owner 2026-10-29: the supplier's photos carry its watermarks, the client must not know the supplier: only our own photos."""
+    app, client, conn, _ = make_shop(tmp_path, tochki=[tochki_row("T1")])
     page(client)
     shop_photos.drain()
     html = page(client)
     shop_photos.drain()
-    assert tokens(html) == [] and "нет фото" in html and len(FETCHED) == 1
-    assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, "77001")).status_code == 404
-    shop_photos.drain()
-    assert len(FETCHED) == 1
-
+    assert tokens(html) == [] and html.count("нет фото") == 3 and FETCHED == []
+    for gid in ("77001", "77002"):
+        assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, gid)).status_code == 404
+    assert FETCHED == []
 
 def test_no_season_label_of_unknown_and_the_search_fields_have_no_code():
     item = cc.Visible(make_offer(code="ART123", name="IKON ART123 205/55/16", name_orig="", season=Season.UNKNOWN), 100, 1, "ikon tyres", "Ikon")
@@ -425,18 +437,19 @@ def test_no_season_label_of_unknown_and_the_search_fields_have_no_code():
     assert not any("art123" in f or "100" == f for f in cc._search_fields(item)[0])
 
 
-def test_the_copy_kept_for_img_is_drawn_anew_too_and_not_fetched_again(tmp_path):
+def test_a_supplier_s_copy_kept_for_img_or_made_before_is_never_served(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
     from tires_sync import photo_cache
     kept = photo_cache.root(app.config["DB_PATH"], app.config.get("IMG_ROOT"))
-    kept.mkdir(parents=True, exist_ok=True)
-    (kept / "77001.png").write_bytes(picture((0, 0, 255), kind="PNG"))
-    page(client)
+    (kept / "shop").mkdir(parents=True, exist_ok=True)
+    (kept / "77001.png").write_bytes(picture((0, 0, 255), kind="PNG"))         # the copy /img keeps
+    (kept / "shop" / "77002.jpg").write_bytes(JPEG)                            # a supplier's picture drawn by the build before
+    html = page(client)
     shop_photos.drain()
-    data = client.get("/shop/photo/" + cc.photo_token(app.secret_key, "77001")).get_data()
-    assert color_of(data)[2] > 200 and b"4tochki" not in data
-    assert "https://cdn.supplier-one.test/p/77001.jpg" not in FETCHED
-
+    assert tokens(page(client)) == [] and tokens(html) == []
+    for gid in ("77001", "77002"):
+        assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, gid)).status_code == 404
+    assert FETCHED == []
 
 def test_a_huge_or_false_picture_is_refused():
     with pytest.raises(share_photos.PhotoError):
@@ -484,3 +497,27 @@ def test_the_frame_of_the_client_is_for_a_phone_too_and_the_staff_css_is_untouch
     assert "Зима · шип" in html                                               # 4tochki T1: winter, studded
     assert "Ikon Tyres Test Model 205/55 R16" not in html                     # the supplier's name is not repeated
     assert all('id="f-%s"' % n in html and 'for="f-%s"' % n in html for n in ("size", "q", "s", "t", "wh"))
+
+
+@pytest.mark.parametrize("fetched, shown", [("2026-10-07T07:00:00", True), ("2026-10-07T06:00:00", True), ("2026-10-07T05:59:00", False),
+                                            ("2026-10-07T09:00:00+03:00", True), ("2026-10-07T08:59:00+03:00", False), ("2026-10-07T12:09:00", True),
+                                            ("2026-10-07T15:00:00", False), ("", False), ("not a time", False)])
+def test_an_old_snapshot_of_4tochki_hides_the_second_warehouse_and_warns_once(tmp_path, fetched, shown):
+    """The owner 2026-10-29: the hourly cycle refreshes the snapshot in a feed or not; one older than 6 hours (the app's clock is
+    2026-10-07 12:00 UTC) means the refresh fails: «Склад 2» is not shown, the journal says it once per snapshot."""
+    app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1")])
+    path = tmp_path / "tochki-snapshot.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["fetched_at"] = fetched
+    path.write_text(json.dumps(data), encoding="utf-8")
+    html = page(client)
+    page(client)
+    warned = conn.execute("SELECT author, detail FROM audit WHERE action = 'shop_tochki_stale'").fetchall()
+    assert len(warned) == (0 if shown else 1) and all(a == "system" for a, _ in warned)
+    owner = app.test_client()
+    login(owner)
+    preview = page(owner, "/client-terms/c/buyer/preview")
+    rows_of = lambda text: text[text.index("Найдено "):]
+    assert ("«Склад 2» скрыт" in preview) is not shown
+    assert ("Склад 2</td>" in rows_of(preview)) is shown and ("Склад 2</td>" in rows_of(html)) is shown
+    assert "скрыт" not in html and "4 Точ" not in html                                  # the client is never told why
