@@ -2,7 +2,8 @@
 stands in «На ОТХ», the ad of that position, in every account of ours, starts with «Шины в наличии на <точка>», shows the pieces on OTH plus
 the supplier's stock, is not taken off for the supplier's stock and is published again if it is not on Avito (decide, sync.plan_decisions);
 an excluded brand or a season switched off do not stop it (candidates.evaluate). When the order leaves the stage, or the whole position is
-marked «возвращено поставщику», the next cycle applies the usual rules. Orders at a test point give nothing. Only reads the orders."""
+marked «возвращено поставщику», or its return is agreed with the supplier, the next cycle applies the usual rules. Orders at a test point
+give nothing. Only reads the orders."""
 from __future__ import annotations
 
 import json
@@ -29,14 +30,18 @@ def _test_points(conn) -> frozenset:
 
 
 def _rows(conn) -> list:
-    """The positions still ours on «На ОТХ» (order_oth.stock), without the test points and the tyres of a point that have no code."""
+    """The positions still ours on «На ОТХ» (order_oth.stock), without the test points, the tyres of a point that have no code and the orders
+    whose return is agreed with the supplier (order_oth.agree, the owner 2026-10-29: they leave the ad at once, before the act МХ-3; an
+    agreement cancelled — its row gone — counts them again)."""
     from . import order_oth, orders
     try:
         rows = order_oth.stock(conn)["stock"]
         test = _test_points(conn)
+        agreed = {r[0] for r in conn.execute("SELECT order_id FROM oth_return_plan")}
     except sqlite3.OperationalError:                      # a base without the orders' tables
         return []
-    return [r for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test and int(r["qty"]) > 0]
+    return [r for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test and int(r["qty"]) > 0
+            and r["order_id"] not in agreed]
 
 
 def by_point(conn) -> Dict[Tuple[str, int], int]:

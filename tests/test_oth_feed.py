@@ -567,3 +567,31 @@ def test_the_check_of_a_mirror_knows_the_new_position_that_carries_oth(tmp_path)
     ads = {a.findtext("Id"): a for a in ET.parse(tmp_path / "feed" / token / "next" / "avito_feed.xml").getroot()}
     assert "200" in ads and "300" not in ads and ads["200"].findtext("Description").startswith(AT_BETA + "\n")
     conn.close()
+
+
+def test_a_return_agreed_with_the_supplier_takes_the_tires_out_of_the_ad_at_once_and_a_cancelled_one_brings_them_back(tmp_path, capsys):
+    """The owner 2026-10-29: «Согласовано с поставщиком» (order_oth.agree) — the tires are no longer ours to sell, before the act МХ-3."""
+    from tires_sync import order_oth
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    cid = on_oth(tmp_path, "101")
+    conn = connect(tmp_path)
+    try:
+        order_oth.agree(conn, orders.get_card(conn, cid), date(2026, 10, 29), "2026-10-29T11:00:00", "o")
+        assert oth_stock.pieces(conn) == {} and oth_stock.by_point(conn) == {} and oth_stock.points(conn) == {}
+    finally:
+        conn.close()
+    capsys.readouterr()
+    assert run(tmp_path, AFTER) == 0                                     # 101 fell to 2: taken off as any other, no line
+    passed(capsys)
+    assert "101" not in ads_of(public(tmp_path)) and events(tmp_path) == [("101", "removed", "low_stock"), ("102", "removed", "absent_from_supplier")]
+    conn = connect(tmp_path)
+    try:
+        conn.execute("DELETE FROM oth_return_plan WHERE order_id = ?", (cid,))   # the agreement cancelled before the act
+        conn.commit()
+        assert oth_stock.pieces(conn) == {"101": 4}
+    finally:
+        conn.close()
+    assert run(tmp_path, AFTER) == 0                                     # ours again: it comes back under its Id, with the line
+    passed(capsys)
+    assert description(public(tmp_path), "101").startswith(AT_BETA + "\n")
