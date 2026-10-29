@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hmac
 import re
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from flask import Response, abort, current_app, make_response, render_template, request
@@ -13,7 +14,8 @@ from flask import Response, abort, current_app, make_response, render_template, 
 from .. import photo_cache, store, tochki_feed
 from ..settings_store import active_settings
 from . import client_catalog as cc, shop_photos
-from .common import current_user, get_conn
+from ..suppliers import supplier_of_id
+from .common import current_user, get_conn, now
 from .data import load_merged, load_reference
 
 TOKEN = re.compile(r"^[0-9a-f]{32}$")
@@ -27,7 +29,38 @@ def _offers(app, conn):
     return view
 
 
+TOCHKI_MAX_AGE = timedelta(hours=6)           # «Склад 2» older than this is not shown to a client (the owner 2026-10-29)
+STALE_KEY = "shop_tochki_stale_warned"         # the snapshot already written in the journal as stale: once per snapshot
+
+
+def tochki_stale(app, conn) -> bool:
+    """The 4tochki snapshot is older than TOCHKI_MAX_AGE (or its time is unknown): the hourly cycle refreshes it, in a feed or not
+    (cli._load_tochki); an old one means the refresh fails. The first request that sees it writes a warning in the journal."""
+    sid = tochki_feed.config(conn)["supplier_id"]
+    if not sid:
+        return False
+    loaded = tochki_feed.load_snapshot(app.config["UNLOAD_PATH"], sid)
+    if loaded is None:
+        return False                                  # no snapshot: no position of «Склад 2» at all
+    stamp = str(loaded[1].get("fetched_at") or "")
+    try:
+        fetched = datetime.fromisoformat(stamp)
+        if fetched.tzinfo is not None:                # the load writes UTC without a zone; one with a zone is compared in UTC
+            fetched = fetched.astimezone(timezone.utc).replace(tzinfo=None)
+    except ValueError:
+        fetched = None
+    if fetched is not None and now() - fetched <= TOCHKI_MAX_AGE:
+        return False
+    if (conn.execute("SELECT value FROM app_state WHERE key = ?", (STALE_KEY,)).fetchone() or [None])[0] != stamp:
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (STALE_KEY, stamp))
+        store.write_audit(conn, now().isoformat(timespec="seconds"), "system", "shop_tochki_stale", {"fetched_at": stamp})
+    return True
+
+
 def _visible(app, conn, offers, login: str):
+    sid = tochki_feed.config(conn)["supplier_id"]
+    if sid and tochki_stale(app, conn):               # an old snapshot: «Склад 2» is hidden, never sold from stale stock
+        offers = [o for o in offers if supplier_of_id(o.goods_id) != sid]
     return cc.visible(conn, login, offers, tochki_feed.config(conn)["supplier_id"],
                       load_reference(app.config["REFERENCE_PATH"]), store.load_brand_map(conn))
 
@@ -70,7 +103,7 @@ def catalog(app, conn, login: str, base: str, photos: bool) -> dict:
     shown = sorted({1, pages} | set(range(max(1, page - 4), min(pages, page + 4) + 1)))       # a window of pages, not hundreds
     pager = {n: base + "?" + urlencode(here + [("p", n)]) for n in shown} if pages > 1 else {}
     return dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
-                seasons=cc.SEASONS, empty=not items, base=base)
+                seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn))
 
 
 def register(app) -> None:

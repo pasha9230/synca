@@ -216,6 +216,7 @@ _MORE_TEXTS = {
     "invite_created": lambda d: "Создано приглашение: %s, действует до %s" % (_role(d.get("role")), _q(d.get("expires"))),
     "invite_revoked": lambda d: "Приглашение №%s отозвано" % _q(d.get("id")),
     "client_terms_changed": lambda d: _client_terms_text(d),
+    "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),
     "supplier_created": lambda d: "Добавлен поставщик «%s»" % _q(d.get("name")),
     "account_chats_send": lambda d: "Отправка сообщений из панели, %s: %s" % (_acc(d), _on(d.get("enabled"), "включена", "выключена")),
     "account_modes": lambda d: "Режимы, %s: чаты %s, фид %s" % (_acc(d), _on(d.get("chats"), "вкл.", "выкл."), _on(d.get("feed"), "вкл.", "выкл.")),

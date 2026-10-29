@@ -498,3 +498,26 @@ def test_the_frame_of_the_client_is_for_a_phone_too_and_the_staff_css_is_untouch
     assert "Зима · шип" in html                                               # 4tochki T1: winter, studded
     assert "Ikon Tyres Test Model 205/55 R16" not in html                     # the supplier's name is not repeated
     assert all('id="f-%s"' % n in html and 'for="f-%s"' % n in html for n in ("size", "q", "s", "t", "wh"))
+
+
+@pytest.mark.parametrize("fetched, shown", [("2026-10-07T07:00:00", True), ("2026-10-07T06:00:00", True), ("2026-10-07T05:59:00", False),
+                                            ("2026-10-07T09:00:00+03:00", True), ("2026-10-07T08:59:00+03:00", False), ("", False), ("not a time", False)])
+def test_an_old_snapshot_of_4tochki_hides_the_second_warehouse_and_warns_once(tmp_path, fetched, shown):
+    """The owner 2026-10-29: the hourly cycle refreshes the snapshot in a feed or not; one older than 6 hours (the app's clock is
+    2026-10-07 12:00 UTC) means the refresh fails: «Склад 2» is not shown, the journal says it once per snapshot."""
+    app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1")])
+    path = tmp_path / "tochki-snapshot.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["fetched_at"] = fetched
+    path.write_text(json.dumps(data), encoding="utf-8")
+    html = page(client)
+    page(client)
+    warned = conn.execute("SELECT author, detail FROM audit WHERE action = 'shop_tochki_stale'").fetchall()
+    assert len(warned) == (0 if shown else 1) and all(a == "system" for a, _ in warned)
+    owner = app.test_client()
+    login(owner)
+    preview = page(owner, "/client-terms/c/buyer/preview")
+    rows_of = lambda text: text[text.index("Найдено "):]
+    assert ("«Склад 2» скрыт" in preview) is not shown
+    assert ("Склад 2</td>" in rows_of(preview)) is shown and ("Склад 2</td>" in rows_of(html)) is shown
+    assert "скрыт" not in html and "4 Точ" not in html                                  # the client is never told why
