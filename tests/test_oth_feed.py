@@ -424,3 +424,85 @@ def test_a_former_id_that_another_ad_has_now_is_never_published_twice(tmp_path, 
     passed(capsys)
     ids = [a.findtext("Id") for a in ET.fromstring(public(tmp_path)).findall("Ad")]
     assert ids.count("102") == 1 and "102" not in published(tmp_path) and not description(public(tmp_path), "102").startswith(LINE)
+
+
+def switch_off(tmp_path, code):
+    from tires_sync import settings_store
+    conn = connect(tmp_path)
+    try:
+        draft = settings_store.create_draft(conn, {"overrides": {override_key(code): "off"}}, "2026-10-29T11:00:00")
+        settings_store.confirm_draft(conn, draft, "2026-10-29T11:00:00", "o", strong=True)
+    finally:
+        conn.close()
+
+
+def test_the_published_ad_that_carries_a_lot_on_oth_is_known_to_the_check_whatever_its_stock(tmp_path, capsys):
+    """107 lies on OTH and is not on Avito; 101, the same tire, is published: 101 carries the line. Both have 2 at the supplier: the check
+    must know 101 as OTH (the base knows only 107), or the whole account stops."""
+    prepared(tmp_path)
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "107")
+    lots = rows(dict(NNOMMODIF="101", NREST="2"), *(dict(NNOMMODIF=str(n)) for n in range(102, 106)),
+                dict(NNOMMODIF="107", SLOAD="95", NREST="2"))
+    capsys.readouterr()
+    assert run(tmp_path, lots) == 0
+    passed(capsys)
+    for acct, suffix in ((1, ""), (2, "_a2")):
+        ids = [a.findtext("Id") for a in ET.fromstring(public(tmp_path, acct)).findall("Ad")]
+        assert ids.count("101" + suffix) == 1 and not any(i.startswith("107") for i in ids)
+        assert description(public(tmp_path, acct), "101" + suffix).startswith(AT_BETA + "\n")
+    assert run(tmp_path, lots, "--stock-only") == 0                      # the light pass: the same check
+    passed(capsys)
+    assert "101" in ads_of(public(tmp_path, 1))
+
+
+def test_the_manual_off_takes_off_a_position_on_oth_gone_from_the_unload_and_keeps_it_off(tmp_path, capsys):
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "102")
+    switch_off(tmp_path, "102")
+    capsys.readouterr()
+    assert run(tmp_path, AFTER) == 0                                     # 102 is gone and switched off by hand: off, not held
+    passed(capsys)
+    assert "102" not in ads_of(public(tmp_path)) and "102" not in published(tmp_path)
+
+
+def test_an_ad_taken_off_by_a_setting_of_the_owner_does_not_come_back_for_oth(tmp_path, capsys):
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    switch_off(tmp_path, "102")
+    assert run(tmp_path, FIVE) == 0                                      # taken off by hand: its last ad is kept in retired_ad
+    from tires_sync import settings_store
+    conn = connect(tmp_path)
+    draft = settings_store.create_draft(conn, {"overrides": {}}, "2026-10-29T11:30:00")
+    settings_store.confirm_draft(conn, draft, "2026-10-29T11:30:00", "o", strong=True)
+    assert store.retired_ad_of(conn, 1, "102") is not None
+    conn.close()
+    on_oth(tmp_path, "102")
+    capsys.readouterr()
+    assert run(tmp_path, AFTER) == 0                                     # gone from the unload now: it was off by a setting, it stays off
+    passed(capsys)
+    assert "102" not in ads_of(public(tmp_path))
+
+
+def test_two_lots_of_one_tire_on_oth_give_one_ad(tmp_path, capsys):
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "107", "108", qty=4)
+    lots = rows(*(dict(NNOMMODIF=str(n)) for n in range(101, 106)), dict(NNOMMODIF="107", SLOAD="120", NREST="1"),
+                dict(NNOMMODIF="108", SLOAD="120", NREST="2"))
+    capsys.readouterr()
+    assert run(tmp_path, lots) == 0
+    passed(capsys)
+    ads = ads_of(public(tmp_path))
+    assert "107" in ads and "108" not in ads and shown(description(public(tmp_path), "107")) == 4 + 4 + 1     # both lots on OTH and the stock of the position of the ad
+
+
+def test_a_4tochki_position_on_oth_never_shows_more_than_40():
+    from types import SimpleNamespace
+    from tires_sync.sync import oth_count
+    parsed = SimpleNamespace(offers={"s2-A": make_offer(goods_id="s2-A", stock=41), "100": make_offer(stock=41)})
+    ev = Evaluation(ok={"s2-A": Candidate("s2-A", make_offer(goods_id="s2-A", stock=40), 4810, "Ikon Tyres", "Test Model")})
+    assert oth_count("s2-A", {"s2-A": 4}, ev, parsed, "s2-") == 40                # the owner 2026-10-27: an ad of 4tochki says at most 40
+    assert oth_count("100", {"100": 4}, Evaluation(), parsed, "s2-") == 45       # WebMIM: ours plus the supplier's
+    assert oth_count("200", {"200": 4}, Evaluation(), parsed, "s2-") == 4        # gone from the unload: ours only

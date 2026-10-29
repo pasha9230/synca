@@ -21,9 +21,6 @@ def is_aged(offer: Offer) -> bool:
     return "старше" in offer.name.lower() or "старше" in offer.mnf_year.lower()
 
 
-OTH_GIVES_WAY = frozenset({"brand_excluded", "not_enabled"})
-
-
 def exclusion_reason(offer: Offer, settings: Settings, on_oth: bool = False) -> Optional[str]:
     """`on_oth`: the position lies on «На ОТХ» (oth_stock): an excluded brand and a season switched off give way, the owner 2026-10-29 —
     the tires are at the point already; every other reason stays."""

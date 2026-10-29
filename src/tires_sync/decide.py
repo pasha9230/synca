@@ -141,7 +141,9 @@ def decide(
         # and its last price, whatever the supplier has. The owner's own switches (SETTINGS_DRIVEN) still take it off.
         decisions = [Decision(d.goods_id, Action.HOLD, "oth:" + d.reason, published[d.goods_id].price, published[d.goods_id].point,
                               first_hold=published[d.goods_id].first_hold or today)
-                     if d.action is Action.REMOVE and d.goods_id in oth and d.reason not in SETTINGS_DRIVEN and d.goods_id in published else d
+                     if d.action is Action.REMOVE and d.goods_id in oth and d.reason not in SETTINGS_DRIVEN and d.goods_id in published
+                     else Decision(d.goods_id, Action.HOLD, "oth:" + d.reason, d.price, d.point, first_hold=d.first_hold)
+                     if d.action is Action.HOLD and d.goods_id in oth and not d.reason.startswith("oth:") else d     # a broken row: held as OTH
                      for d in decisions]
 
     tripped = False

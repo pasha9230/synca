@@ -81,7 +81,7 @@ def _bound_codes(bound_ids: dict, offers: dict, min_stock: int = 0, published=()
     return out
 
 
-def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), source: str = "next", id_codes=None) -> list:
+def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), source: str = "next", id_codes=None, oth=None) -> list:
     """The findings of the check of this account's draft feed (`next/avito_feed.xml`). Empty list when the draft cannot be read: the build
     itself reports that. The rules are in feed_check_rules.json (docs/feed-check-rules.md)."""
     folder = Path(feed_root) / account["feed_token"]
@@ -116,7 +116,9 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
         owner_phone="" if account["id"] == connections.PRIMARY_ACCOUNT else feed_check._phone(active_settings(conn).contact_phone),
         foreign_addresses=foreign, allowed_photos=own.allowed if own is not None else frozenset(),
         known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem,
-        oth=frozenset(oth_stock.pieces(conn)), **tochki)   # read here, not from the cycle's decisions (a mirror's new positions too)
+        oth=frozenset(oth_stock.pieces(conn)) | frozenset(oth if oth is not None else _saved_oth(conn, account["id"])), **tochki)
+    # the positions on OTH read from the base (a mirror's new positions too), and the codes the cycle handed them over to (another lot
+    # of the same tire under their Id): known to the cycle, saved for `feed-check`
     return feed_check.check_feed(ads, ctx)
 
 
@@ -158,12 +160,20 @@ def _sha_of(path) -> str:
         return ""
 
 
-def save_check_inputs(conn, account_id: int, feed_path, held, id_codes) -> None:
-    """Remember what the cycle gave the check of this draft (the held positions, the Ids that do not carry their code), with the draft's
-    fingerprint: `feed-check` then judges the same file by the same rules as the cycle did (check_inputs)."""
+def save_check_inputs(conn, account_id: int, feed_path, held, id_codes, oth=()) -> None:
+    """Remember what the cycle gave the check of this draft (the held positions, the Ids that do not carry their code, the codes on OTH),
+    with the draft's fingerprint: `feed-check` then judges the same file by the same rules as the cycle did (check_inputs)."""
     store.set_state(conn, _inputs_key(account_id), json.dumps({
         "sha": _sha_of(feed_path), "held": sorted({str(h) for h in held}),
-        "id_codes": dict(id_codes or {})}, ensure_ascii=False))     # all of them: an Id read as its own code overrides a binding to another
+        "id_codes": dict(id_codes or {}), "oth": sorted({str(c) for c in oth})}, ensure_ascii=False))     # all of them: an Id read as its own code overrides a binding to another
+
+
+def _saved_oth(conn, account_id: int) -> FrozenSet[str]:
+    """The codes on OTH the last cycle (or light pass) of the account gave its check: for `feed-check` outside the cycle."""
+    try:
+        return frozenset(json.loads(store.get_state(conn, _inputs_key(account_id)) or "{}").get("oth") or ())
+    except (ValueError, TypeError, AttributeError):
+        return frozenset()
 
 
 def check_inputs(conn, account, feed_root, source: str = "next") -> Tuple[FrozenSet[str], Dict[str, str]]:
@@ -218,6 +228,8 @@ def _new_positions(conn, account, eff, xml_bytes, ref, today, feed_root, parsed,
     left_out = set(connections.get_excluded_types(conn, account["id"]))
     rest.offers = {k: v for k, v in parsed.offers.items()
                    if k not in codes and feed_tire_type(v) not in left_out}
+    rest.left_out = frozenset(set(parsed.offers) - set(rest.offers)) | frozenset(codes)    # the file's ads are not the new positions' OTH
+    rest.left_out_types = frozenset(left_out)
     out_dir = Path(feed_root) / account["feed_token"] / "new"
     suffix, prefix = connections.feed_style(conn, account["id"])
     run_cycle(xml_bytes, eff, ref, conn, today, out_dir=out_dir, description_template=account["description_template"], id_suffix=suffix, image_prefix=prefix,
@@ -308,6 +320,7 @@ def run_for_accounts(
                 account_parsed = copy.copy(parsed)
                 account_parsed.offers = {k: v for k, v in parsed.offers.items() if feed_tire_type(v) not in left_out}
                 account_parsed.left_out = frozenset(set(parsed.offers) - set(account_parsed.offers))   # a setting: OTH does not keep them
+                account_parsed.left_out_types = frozenset(left_out)
             lately = pass_removals_lately(conn, account["id"])
             report = run_cycle(
                 xml_bytes, connections.effective_settings(conn, account["id"], settings), ref, conn, today, out_dir=out_dir,
@@ -327,11 +340,11 @@ def run_for_accounts(
                                          if d.action is Action.HOLD and d.reason.startswith("guard:")), lately)
             held = [d.goods_id for d in report.decisions if d.action is Action.HOLD]
             try:
-                save_check_inputs(conn, account["id"], out_dir / "avito_feed.xml", held, report.id_codes)
+                save_check_inputs(conn, account["id"], out_dir / "avito_feed.xml", held, report.id_codes, report.oth)
             except Exception as err:                                 # only `feed-check` reads it: it never stops the account's publication
                 result.error = "запись для feed-check не сохранена (%s: %s)" % (type(err).__name__, err)
             results.append(_verdict(result, gate(conn, account, "generated", connections.effective_settings(conn, account["id"], settings),
-                                                 parsed, ref, feed_root, today, held=held, id_codes=report.id_codes)))
+                                                 parsed, ref, feed_root, today, held=held, id_codes=report.id_codes, oth=report.oth)))
         except Exception as err:
             results.append(AccountResult(account["id"], account["name"], False, "%s: %s" % (type(err).__name__, err)))
     return results
@@ -419,6 +432,7 @@ def stock_pass(conn, parsed, ref, today: date, feed_root, settings: Optional[Set
                 account_parsed = copy.copy(parsed)
                 account_parsed.offers = {k: v for k, v in parsed.offers.items() if feed_tire_type(v) not in left_out}
                 account_parsed.left_out = frozenset(set(parsed.offers) - set(account_parsed.offers))   # a setting: OTH does not keep them
+                account_parsed.left_out_types = frozenset(left_out)
             # the guard over the last hour: every removal of it (the passes' and the hourly cycle's) counts with this pass's own
             published, ev, ds = plan_decisions(conn, account_parsed, ref, eff, account["id"], today, now=now,
                                                 removed_before=_removed_lately(conn, account["id"]))
@@ -465,9 +479,10 @@ def stock_pass(conn, parsed, ref, today: date, feed_root, settings: Optional[Set
             # what stays in the file as the last cycle left it (held, or to be taken off by the hourly cycle for another reason) is not judged by stock
             held = set(held_before) | {d.goods_id for d in ds.decisions
                                        if d.action is Action.HOLD or (d.action is Action.REMOVE and d.goods_id not in found)}
-            save_check_inputs(conn, account["id"], draft, held, id_codes)
+            save_check_inputs(conn, account["id"], draft, held, id_codes, ev.oth)
             result.removed, result.feed_count = tuple(sorted(found)), len(kept)
-            results.append(_verdict(result, gate(conn, account, "generated", eff, parsed, ref, feed_root, today, held=held, id_codes=id_codes)))
+            results.append(_verdict(result, gate(conn, account, "generated", eff, parsed, ref, feed_root, today, held=held, id_codes=id_codes,
+                                                 oth=ev.oth)))
         except Exception as err:
             result.ok, result.error, result.broken = False, "%s: %s" % (type(err).__name__, err), True
             results.append(result)
