@@ -714,3 +714,15 @@ button.owin-stage:focus-visible{outline:0;box-shadow:var(--ring)}
   .entity-list td[colspan]::before,.entity-list td.entity-row-actions::before{content:none}
 }
 .table tr.is-off input.input,.table tr.is-off .check,.table tr.is-off td a:not(.badge){color:var(--gray-500)}
+/* «Список» of «Заказы» as the Google table (orders_list) */
+.orders-list-head{padding:var(--s-3) var(--s-5);gap:var(--s-3);align-items:center}
+.orders-sheet td,.orders-sheet th{white-space:nowrap}
+.orders-sheet tr.is-link{cursor:pointer}
+.orders-sheet tr.is-link:hover td{background:var(--gray-50)}
+.orders-sheet tfoot td{border-top:2px solid var(--gray-200)}
+.orders-total-line{padding:var(--s-2) var(--s-5)}
+.cols-menu .menu-list{right:0;left:auto;min-width:280px;max-height:70vh;overflow:auto;padding:var(--s-3)}
+.cols-list{list-style:none;margin:0 0 var(--s-3);padding:0}
+.cols-list li{display:flex;align-items:center;gap:var(--s-2);padding:2px 0}
+.cols-list label{flex:1;display:flex;gap:var(--s-2);align-items:center}
+.cols-move .btn{min-width:36px;min-height:32px}
