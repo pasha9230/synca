@@ -6,7 +6,6 @@ from __future__ import annotations
 import io
 import json
 import re
-from datetime import datetime
 
 import pytest
 
@@ -102,7 +101,7 @@ def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), brands=(("IKON TYRE
     if tochki:
         sid = connections.create_supplier(conn, "4Точки", NOW, "o")
         connections.set_config(conn, "tochki", 0, {"login": "api-user", "supplier_id": sid, "feed": False}, NOW, "o")
-        (tmp_path / "tochki-snapshot.json").write_text(json.dumps({"version": 1, "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
+        (tmp_path / "tochki-snapshot.json").write_text(json.dumps({"version": 1, "fetched_at": "2026-10-07T11:00:00",   # an hour before the app's clock
                                                                    "warehouse_id": 7, "items": list(tochki)}), encoding="utf-8")
     users.add_user(conn, "buyer", "длинный-пароль-1", NOW, role="client")
     conn.execute("UPDATE client_terms SET pct_small = ?, pct_large = ? WHERE subject = '*'", role)
@@ -501,7 +500,8 @@ def test_the_frame_of_the_client_is_for_a_phone_too_and_the_staff_css_is_untouch
 
 
 @pytest.mark.parametrize("fetched, shown", [("2026-10-07T07:00:00", True), ("2026-10-07T06:00:00", True), ("2026-10-07T05:59:00", False),
-                                            ("2026-10-07T09:00:00+03:00", True), ("2026-10-07T08:59:00+03:00", False), ("", False), ("not a time", False)])
+                                            ("2026-10-07T09:00:00+03:00", True), ("2026-10-07T08:59:00+03:00", False), ("2026-10-07T12:09:00", True),
+                                            ("2026-10-07T15:00:00", False), ("", False), ("not a time", False)])
 def test_an_old_snapshot_of_4tochki_hides_the_second_warehouse_and_warns_once(tmp_path, fetched, shown):
     """The owner 2026-10-29: the hourly cycle refreshes the snapshot in a feed or not; one older than 6 hours (the app's clock is
     2026-10-07 12:00 UTC) means the refresh fails: «Склад 2» is not shown, the journal says it once per snapshot."""

@@ -112,7 +112,9 @@ def _ask(folder: Path, source, fetch) -> None:
 def _make(folder: Path, source, fetch) -> None:
     name, kind, where = source
     try:
-        data = Path(where).read_bytes() if kind == "file" else fetch(where)[0]
+        if kind != "file":                                    # only our own files: nothing is ever fetched from a supplier
+            return
+        data = Path(where).read_bytes()
         picture = clean(data)
         folder.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(folder), prefix=name + ".", suffix=".part")

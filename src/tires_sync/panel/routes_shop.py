@@ -30,6 +30,7 @@ def _offers(app, conn):
 
 
 TOCHKI_MAX_AGE = timedelta(hours=6)           # «Склад 2» older than this is not shown to a client (the owner 2026-10-29)
+FUTURE_SLACK = timedelta(minutes=10)           # a load time further ahead than this (a clock gone wrong) counts as unknown
 STALE_KEY = "shop_tochki_stale_warned"         # the snapshot already written in the journal as stale: once per snapshot
 
 
@@ -49,10 +50,11 @@ def tochki_stale(app, conn) -> bool:
             fetched = fetched.astimezone(timezone.utc).replace(tzinfo=None)
     except ValueError:
         fetched = None
-    if fetched is not None and now() - fetched <= TOCHKI_MAX_AGE:
+    if fetched is not None and timedelta(0) - FUTURE_SLACK <= now() - fetched <= TOCHKI_MAX_AGE:      # a time ahead of ours: unknown
         return False
-    if (conn.execute("SELECT value FROM app_state WHERE key = ?", (STALE_KEY,)).fetchone() or [None])[0] != stamp:
-        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (STALE_KEY, stamp))
+    marked = conn.execute("INSERT INTO app_state VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value "
+                          "WHERE value != excluded.value", (STALE_KEY, stamp)).rowcount          # two requests at once: one record
+    if marked == 1:
         store.write_audit(conn, now().isoformat(timespec="seconds"), "system", "shop_tochki_stale", {"fetched_at": stamp})
     return True
 
