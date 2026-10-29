@@ -1051,7 +1051,8 @@ def register(app) -> None:
         stage = next((s for s in orders.list_stages(conn) if s["code"] == "at_point"), None)
         now = local_iso()
         try:
-            if stage is None or not orders.move_card(conn, card_id, stage["id"], now, author()):
+            changes = {} if card["delivery_date"] else {"delivery_date": now[:10]}    # the tyres are at the point: today, nobody is asked (the lead 2026-10-30)
+            if stage is None or not orders.move_card(conn, card_id, stage["id"], now, author(), changes=changes):
                 flash("Заказ уже перевели: обновите страницу.", "error")
                 return back(card_id)
         except orders.OrderError as err:

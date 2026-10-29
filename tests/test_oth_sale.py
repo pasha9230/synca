@@ -630,3 +630,18 @@ def test_the_point_text_goes_to_the_points_own_page_for_an_order_of_its_account(
     monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": point_id(conn)})
     order_notify.tell_point(conn, None, orders.get_card(conn, cid), "x", LATER)
     assert seen["own_point"] == point_id(conn)
+
+
+def test_the_move_to_the_point_puts_today_as_the_delivery_date_when_there_is_none(tmp_path, monkeypatch):
+    app, owner, tok, conn = panel(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    conn.execute("UPDATE order_card SET delivery_date = '' WHERE id = ?", (cid,))
+    conn.commit()
+    from tires_sync import order_manager, order_notify
+    monkeypatch.setattr(order_manager, "tell_client_arrived", lambda *a, **kw: (True, "ok"))
+    monkeypatch.setattr(order_notify, "tell_point", lambda *a, **kw: "ok")
+    post(owner, "/orders/%d/oth-at-point" % cid, tok)
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == "at_point" and card["delivery_date"] == card["entered_at"][:10]
