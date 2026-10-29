@@ -15,7 +15,7 @@ from . import order_points as points
 ACTION = "point_action"
 NAMES = {"arrived": "принял заказ (приехал)", "issued": "выдал заказ", "no_show": "клиент не пришёл", "returned": "отдал на возврат",
          "reserve_issued": "выдал (ответ на резерв)", "reserve_here": "на точке (ответ на резерв)", "handoff": "передал клиента",
-         "handoff_cancel": "отменил передачу", "act_signed": "подписал акт МХ-3 и отдал", "move": "сменил этап", "vk": "команда ВК"}
+         "handoff_cancel": "отменил передачу", "act_signed": "подписал акт МХ-3 и отдал", "to_oth": "оставил шины на ОТХ", "move": "сменил этап", "vk": "команда ВК"}
 SHOWN = 300
 
 
@@ -23,7 +23,7 @@ def record(conn, now: str, author: str, point_id, action: str, order_id: Optiona
     """One action of a point; committed on its own (store.write_audit's way). Never raises."""
     try:
         conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, author, ACTION, json.dumps(
-            {"point": int(point_id), "kind": action, "order": int(order_id) if order_id else None, "text": str(text or "")[:300]},
+            {"point": int(point_id), "name": _name(conn, point_id), "kind": action, "order": int(order_id) if order_id else None, "text": str(text or "")[:300]},
             ensure_ascii=False)))
         conn.commit()
     except Exception:                                                     # noqa: BLE001 - the action is done; only its record is lost
@@ -31,12 +31,20 @@ def record(conn, now: str, author: str, point_id, action: str, order_id: Optiona
         logging.getLogger("tires_sync.panel").exception("the action %s of point %s was not written to its history", action, point_id)
 
 
+def _name(conn, point_id) -> str:
+    row = conn.execute("SELECT name FROM point WHERE id = ?", (point_id,)).fetchone()
+    return row[0] if row else ""
+
+
 def history(conn, point_id: Optional[int] = None, limit: int = SHOWN) -> List[dict]:
     """The actions of the points (of one point when `point_id` is given), newest first: {"at", "author", "point_id", "point", "kind",
     "name", "order_id", "text"}."""
     names = {p["id"]: p["name"] for p in points.list_points(conn)}
     found = []
-    for at, author, detail in conn.execute("SELECT at, author, detail FROM audit WHERE action = ? ORDER BY id DESC LIMIT ?", (ACTION, limit * 4)):
+    sql, args = "SELECT at, author, detail FROM audit WHERE action = ?", [ACTION]
+    if point_id is not None:                                              # the record starts with its point (record): a quiet point's old ones too
+        sql, args = sql + " AND detail LIKE ?", args + ['{"point": %d,%%' % int(point_id)]
+    for at, author, detail in conn.execute(sql + " ORDER BY id DESC LIMIT ?", args + [limit]):
         try:
             d = json.loads(detail)
             pid = int(d["point"])

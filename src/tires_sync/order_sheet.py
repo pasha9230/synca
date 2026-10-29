@@ -133,7 +133,7 @@ def realization(card: dict) -> str:
     code = card["stage"].get("code")
     if code == "done":
         return FROM_STOCK if card["deal_kind"] == "stock" else REALIZED
-    return REFUSED if code in ("cancel", "refused", "return", "oth") else ""
+    return REFUSED if code in ("cancel", "refused", "return", "oth", orders.RETURN_GIVEN) else ""      # «Возврат передан»: the tyres of «На ОТХ» went back
 
 
 def _invoice_day(conn, card: dict) -> str:

@@ -1502,6 +1502,7 @@ POINT_STATUS = {"": "передан, ждёт", "taken": "взяли в рабо
                 "cancelled": "отменён точкой"}
 CANCELLED_BY = "отменено точкой"                   # the mark in order_handoff_source.taken_by: the handoff was cancelled, nobody may take it
 CANCEL_REASON = "Точка отменила передачу клиента"
+CANCELLED_MARK = "отменила передачу клиента"       # in the yellow record of the cancel (routes_alerts keeps it off the point's bell)
 
 
 def cancellable(conn, order_id, point_id) -> bool:
@@ -1515,8 +1516,8 @@ def cancellable(conn, order_id, point_id) -> bool:
 
 def cancel_handoff(conn, order_id, point: dict, who: str, now: str, notify: Optional[Notify] = None) -> str:
     """«Отменить передачу»: the order of the handoff goes to «Отмена» and the person who would take it is told, in the panel (a yellow record
-    of the order) and through the channel of the handoff itself (_tell_staff). The mark that nobody may take it any more and the move are one
-    transaction: a manager taking the client at the same moment either takes it first (then it is not cancelled) or takes nothing.
+    of the order) and through the channel of the handoff itself (_tell_staff). The mark that nobody may take it any more, the record and the
+    move are one transaction: a manager taking the client at the same moment either takes it first (then it is not cancelled) or takes nothing.
     Returns the answer for the point; raises OrderError when it cannot be cancelled. The client hears nothing."""
     if not cancellable(conn, order_id, point["id"]):
         raise OrderError("Передачу уже не отменить: клиента взяли в работу, заказ перенесли или он не из этой передачи.")
@@ -1524,25 +1525,23 @@ def cancel_handoff(conn, order_id, point: dict, who: str, now: str, notify: Opti
     if cancel is None:
         raise OrderError("В воронке нет этапа «Отмена»: напишите владельцу.")
     conn.execute("INSERT OR IGNORE INTO order_handoff_source (order_id, kind) VALUES (?, '')", (order_id,))      # a handoff made before the source was kept
-    if conn.execute("UPDATE order_handoff_source SET taken_at = ?, taken_by = ?, taken_how = 'отмена' WHERE order_id = ? AND taken_at IS NULL",
-                    (now, CANCELLED_BY, order_id)).rowcount != 1:
+    if conn.execute("UPDATE order_handoff_source SET taken_at = ?, taken_by = ?, taken_how = 'отмена' WHERE order_id = ? AND taken_at IS NULL "
+                    "AND EXISTS (SELECT 1 FROM order_card c JOIN order_stage g ON g.id = c.stage_id WHERE c.id = ? AND g.code = ?)",
+                    (now, CANCELLED_BY, order_id, order_id, orders.FROM_POINT[0])).rowcount != 1:     # taken or moved a moment ago
         conn.rollback()
-        raise OrderError("Клиента только что взяли в работу: передачу уже не отменить.")
+        raise OrderError("Клиента только что взяли в работу или перенесли: передачу уже не отменить.")
     author = "менеджер %s (%s)" % (point["name"], who)
+    text = "Точка «%s» %s (%s): заказ №%d переведён в «Отмена», брать в работу не нужно." % (point["name"], CANCELLED_MARK, who, order_id)
+    orders.add_event(conn, order_id, now, author, "handoff", text, level="yellow")          # saved with the move (move_card commits it all)
+    conn.execute("INSERT OR IGNORE INTO order_handoff_status (order_id, status, at, outcome) VALUES (?, 'cancelled', ?, '')", (order_id, now))
     try:
         moved = orders.move_card(conn, order_id, cancel["id"], now, author, changes={"cancel_reason": CANCEL_REASON}, fire_rules=False)
     except OrderError:
         conn.rollback()
         raise
-    if not moved:
-        conn.execute("UPDATE order_handoff_source SET taken_at = NULL, taken_by = '', taken_how = '' WHERE order_id = ? AND taken_by = ?",
-                     (order_id, CANCELLED_BY))
-        conn.commit()
+    if not moved:                                                 # moved meanwhile: move_card rolled the mark and the record back
+        conn.rollback()
         raise OrderError("Заказ только что перенесли: передачу уже не отменить.")
-    text = "Точка «%s» отменила передачу клиента (%s): заказ №%d переведён в «Отмена», брать в работу не нужно." % (point["name"], who, order_id)
-    orders.add_event(conn, order_id, now, author, "handoff", text, level="yellow")
-    conn.execute("INSERT OR IGNORE INTO order_handoff_status (order_id, status, at, outcome) VALUES (?, 'cancelled', ?, '')", (order_id, now))
-    conn.commit()
     _tell_staff(conn, orders.get_card(conn, order_id), "Заказ №%d: %s" % (order_id, text), notify)
     return "Передача отменена: заказ №%d в «Отмена», менеджеру сообщено." % order_id
 

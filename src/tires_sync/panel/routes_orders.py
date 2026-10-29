@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 from datetime import date, timedelta
+from typing import Optional
 
 from flask import abort, flash, jsonify, redirect, render_template, request, session
 
@@ -340,6 +341,28 @@ def _with_stubs(events: list, chats_shown: list) -> list:
     return out
 
 
+OTH_OFFER = ("cancel", "refused")                 # a refusal of an order at the point: the tyres stay there (the owner 2026-10-29)
+OTH_QUESTION = "Шины остаются на точке — перевести на «На ОТХ»?"
+
+
+def oth_offer(conn, card: dict, stage_id) -> Optional[dict]:
+    """The stage of «Отмена» or «Отказ/невыкуп» chosen for an order on «Товар на точке» before the person answered the question: the move
+    waits and the card asks it (the owner 2026-10-29); None: move as asked. The answer comes as the field oth_answer (yes / no)."""
+    if card["stage"]["code"] != "at_point" or request.form.get("oth_answer") in ("yes", "no"):
+        return None
+    stage = next((s for s in orders.list_stages(conn) if s["id"] == stage_id), None)
+    return stage if stage is not None and stage["code"] in OTH_OFFER else None
+
+
+def ask_oth(card_id: int, stage: dict):
+    """Keep the move asked for (and its reason) for the question of the card; the board is told where the question is."""
+    session["oth_offer"] = {"card": card_id, "stage_id": stage["id"], "cancel_reason": str(request.form.get("cancel_reason") or "").strip()[:300]}
+    where = "/orders/%d#oth-offer" % card_id
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=False, message=OTH_QUESTION, go=where)
+    return redirect(where)
+
+
 def card_or_404(conn, card_id):
     try:
         return orders.get_card(conn, card_id)
@@ -593,9 +616,16 @@ def register(app) -> None:
     @login_required
     def order_move(card_id):
         conn = get_conn()
-        card_or_404(conn, card_id)
         stage_id = _int(request.form.get("stage_id"))
         changes = {} if own_point() else {k: v for k, v in request.form.items() if k in orders.EDITABLE}     # a point manager only moves
+        card = card_or_404(conn, card_id)
+        asked = oth_offer(conn, card, stage_id) if stage_id is not None else None
+        if asked is not None:
+            return ask_oth(card_id, asked)
+        if request.form.get("oth_answer") in ("yes", "no"):                # the answer to the question: its reason goes with the move, for a point too
+            session.pop("oth_offer", None)
+            if request.form.get("cancel_reason"):
+                changes["cancel_reason"] = str(request.form.get("cancel_reason"))[:300]
         send = None
         try:
             if stage_id is None:
@@ -619,6 +649,17 @@ def register(app) -> None:
             return jsonify(ok=ok, message=message, send=send)
         flash(message, "message" if ok else "error")
         return redirect("/orders/%d" % card_id)
+
+    def _oth_ask(conn, card: dict):
+        """The question «Шины остаются на точке» kept by ask_oth for this order, while it still stands on «Товар на точке»."""
+        asked = session.get("oth_offer") or {}
+        if asked.get("card") != card["id"] or card["stage"]["code"] != "at_point":
+            return None
+        stages = {s["id"]: s for s in orders.list_stages(conn)}
+        target, oth = stages.get(asked.get("stage_id")), next((s for s in stages.values() if s["code"] == "oth"), None)
+        if target is None or oth is None:
+            return None
+        return {"target": target, "oth": oth, "cancel_reason": asked.get("cancel_reason", ""), "question": OTH_QUESTION}
 
     @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
     @login_required
@@ -676,7 +717,7 @@ def register(app) -> None:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
-            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]), was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
+            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]), oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"], known_tags=_known_tags(conn), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),
@@ -763,6 +804,9 @@ def register(app) -> None:
                 flash("Заказ не перенесён: позиция не добавлена.", "error")
             return card_page(conn, card_or_404(conn, card_id), typed_row)
         if "stage_id" in request.form:                                    # a stage of the window: the fields are saved first, then the move
+            asked = oth_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
+            if asked is not None:                                         # the fields are saved (the reason too); the move asks first
+                return ask_oth(card_id, asked)
             try:
                 stage_id = _int(request.form.get("stage_id"))
                 if stage_id is None:

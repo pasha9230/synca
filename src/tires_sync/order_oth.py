@@ -186,6 +186,8 @@ def agree(conn, card: dict, today, now: str, author: str) -> str:
     says the date. Returns the date (ISO)."""
     if card["stage"]["code"] != "oth":
         raise OthError("Согласовать возврат можно только для заказа на этапе «На ОТХ».")
+    if not card["point_id"]:
+        raise OthError("У заказа не указана точка: некому подписать акт МХ-3. Укажите точку в заказе.")
     day = return_date(today)
     if conn.execute("INSERT OR IGNORE INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date) VALUES (?,?,?,?)",
                     (card["id"], now, author, day)).rowcount != 1:
@@ -207,26 +209,25 @@ def to_return(conn, point_id) -> List[dict]:
 
 def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> bool:
     """«Подписал акт и отдал»: the plan is marked signed (one statement: a second press, another tab, signs nothing more) and the order goes
-    from «На ОТХ» to «Возврат передан» with a yellow record for the responsible. False: nothing to sign (no agreement, signed already, the
+    from «На ОТХ» to «Возврат передан» with a yellow record for the responsible, in one transaction. False: nothing to sign (no agreement, signed already, the
     order left «На ОТХ»)."""
     if card["stage"]["code"] != "oth":
         return False
+    orders._ensure_return_given_stage(conn)                                           # a pipeline nobody opened since the stage came
+    stage = next(s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN)
     if conn.execute("UPDATE oth_return_plan SET signed_at = ?, signed_by = ? WHERE order_id = ? AND signed_at IS NULL",
                     (now, author, card["id"])).rowcount != 1:
         conn.rollback()
         return False
-    stage = next(s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN)
+    orders.add_event(conn, card["id"], now, author, "point", SIGNED_LINE % (point_name, ACT))     # saved with the move (move_card commits it all)
+    orders.add_event(conn, card["id"], now, author, "point", SIGNED_ASK, level="yellow")
+    _audit(conn, now, author, "oth_act_signed", {"order": int(card["id"])})
     try:
-        moved = orders.move_card(conn, card["id"], stage["id"], now, author)          # commits the mark with the move
+        moved = orders.move_card(conn, card["id"], stage["id"], now, author)
     except orders.OrderError:
         conn.rollback()
         raise
-    if not moved:                                                                     # moved meanwhile: the mark is undone
-        conn.execute("UPDATE oth_return_plan SET signed_at = NULL, signed_by = '' WHERE order_id = ?", (card["id"],))
-        conn.commit()
+    if not moved:                                                                     # moved meanwhile: move_card rolled it all back
+        conn.rollback()
         return False
-    orders.add_event(conn, card["id"], now, author, "point", SIGNED_LINE % (point_name, ACT))
-    orders.add_event(conn, card["id"], now, author, "point", SIGNED_ASK, level="yellow")
-    _audit(conn, now, author, "oth_act_signed", {"order": int(card["id"])})
-    conn.commit()
     return True

@@ -285,3 +285,97 @@ def test_a_take_between_the_check_and_the_cancel_wins(tmp_path, monkeypatch):
     got = orders.get_card(conn, order_id)
     assert got["stage"]["code"] == "from_point"
     assert conn.execute("SELECT taken_by FROM order_handoff_source WHERE order_id = ?", (order_id,)).fetchone()[0] == "worker2"
+
+
+# ---- 8. a refusal of an order at the point: «Шины остаются на точке — на ОТХ?» (the owner 2026-10-29) -------------------------------
+
+def test_a_refusal_at_the_point_asks_first_and_yes_goes_to_oth_with_the_reason(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    here = _card(conn, pid, webmim="700200", code="at_point")
+    r = post(client, "/orders/%d/move" % here, "tok", stage_id=str(_stage(conn, "cancel")), cancel_reason="клиент передумал")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/orders/%d#oth-offer" % here)
+    assert orders.get_card(conn, here)["stage"]["code"] == "at_point"                       # nothing moved yet
+    page = _text(client.get("/orders/%d" % here))
+    assert "Шины остаются на точке — перевести на «На ОТХ»?" in page and "клиент передумал" in page
+    post(client, "/orders/%d/move" % here, "tok", stage_id=str(_stage(conn, "oth")), oth_answer="yes", cancel_reason="клиент передумал")
+    got = orders.get_card(conn, here)
+    assert got["stage"]["code"] == "oth" and got["cancel_reason"] == "клиент передумал"
+    assert "Шины остаются на точке" not in _text(client.get("/orders/%d" % here))
+    assert here in {r["order_id"] for r in order_oth.stock(conn)["stock"]}                  # how the feed lane reads «на ОТХ»: stage oth + items
+
+
+def test_no_to_the_question_moves_as_before_with_the_reason(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    here = _card(conn, pid, webmim="700200", code="at_point")
+    r = client.post("/orders/%d/move" % here, data={"csrf": "tok", "stage_id": str(_stage(conn, "refused")), "cancel_reason": "не выкупил"},
+                    headers={"X-Requested-With": "fetch"})                                     # the board's drag
+    assert r.get_json() == {"ok": False, "message": "Шины остаются на точке — перевести на «На ОТХ»?", "go": "/orders/%d#oth-offer" % here}
+    post(client, "/orders/%d/move" % here, "tok", stage_id=str(_stage(conn, "refused")), oth_answer="no", cancel_reason="не выкупил")
+    got = orders.get_card(conn, here)
+    assert got["stage"]["code"] == "refused" and got["cancel_reason"] == "не выкупил"
+
+
+def test_an_order_not_at_the_point_is_cancelled_without_the_question(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)                                    # card: «Перемещение на точку»
+    post(client, "/orders/%d/move" % card, "tok", stage_id=str(_stage(conn, "cancel")), cancel_reason="передумал")
+    assert orders.get_card(conn, card)["stage"]["code"] == "cancel"
+    post(client, "/orders/%d/save" % card, "tok", stage_id=str(_stage(conn, "new")))       # (back to work: a window move is not asked either)
+    assert "Шины остаются на точке" not in _text(client.get("/orders/%d" % card))
+
+
+def test_the_window_asks_too_and_the_reason_typed_is_kept(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    here = _card(conn, pid, webmim="700200", code="at_point")
+    r = post(client, "/orders/%d/save" % here, "tok", stage_id=str(_stage(conn, "cancel")), cancel_reason="дорого")
+    assert r.headers["Location"].endswith("#oth-offer") and orders.get_card(conn, here)["stage"]["code"] == "at_point"
+    assert orders.get_card(conn, here)["cancel_reason"] == "дорого"                          # the window's fields are saved
+
+
+def test_the_point_after_no_show_is_asked_and_moves_the_order_to_oth(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    here = _card(conn, pid, webmim="700200", code="at_point")
+    mine = manager(app, conn, pid)
+    page = _text(mine.get("/my-point"))
+    assert 'action="/my-point/%d/to_oth"' % here not in page                                 # only after «Клиент не пришёл»
+    bad = re.search(r'action="/my-point/%d/no_show".*?name="token" value="([0-9a-f]+)"' % here, page, re.S).group(1)
+    r = post(mine, "/my-point/%d/to_oth" % here, "tok", token=bad[::-1])                      # no «не пришёл» yet: refused
+    assert orders.get_card(conn, here)["stage"]["code"] == "at_point"
+    r = post(mine, "/my-point/%d/no_show" % here, "tok", token=bad)
+    assert "oth=%d" % here in r.headers["Location"]
+    page = _text(mine.get(r.headers["Location"]))
+    assert 'data-oth-offer="%d"' % here in page and "Шины остаются на точке — перевести на «На ОТХ»?" in page
+    assert 'data-oth-offer' not in _text(mine.get("/my-point"))                              # «Нет»: the page without the question
+    token = re.search(r'action="/my-point/%d/to_oth".*?name="token" value="([0-9a-f]+)"' % here, page, re.S).group(1)
+    post(mine, "/my-point/%d/to_oth" % here, "tok", token=token)
+    got = orders.get_card(conn, here)
+    assert got["stage"]["code"] == "oth" and got["cancel_reason"] == "Клиент не пришёл"
+    assert point_log.history(conn, pid)[0]["kind"] == "to_oth"
+
+
+# ---- review fixes -------------------------------------------------------------------------------------------------------------------
+
+def test_the_sheet_says_refused_for_a_return_given_and_the_point_bell_stays_quiet(tmp_path):
+    from tires_sync import order_sheet
+    from tires_sync.panel import routes_alerts
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    oth = _on_oth(conn, pid)
+    order_oth.agree(conn, orders.get_card(conn, oth), date(2026, 10, 28), NOW, "owner")
+    order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "gamma")
+    assert order_sheet.realization(orders.get_card(conn, oth)) == order_sheet.REFUSED
+    assert routes_alerts.is_return_ask({"kind": "point", "text": order_oth.SIGNED_ASK})
+    mine, order_id = _handed_over(app, conn, pid, login_="gamma3")
+    post(mine, "/my-point/handoff/%d/cancel" % order_id, "tok")
+    other = manager(app, conn, pid, login_="gamma4")                                         # another user of the same point
+    feed = other.get("/my-point/feed").get_json()["items"]
+    assert not any("отменила передачу" in i["text"] or "заполните сумму" in i["text"] for i in feed)
+
+
+def test_the_history_of_a_quiet_point_is_not_lost_behind_the_others(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    other = _other(conn)
+    point_log.record(conn, "2026-10-01T10:00:00", "gamma", pid, "issued", card)
+    for n in range(point_log.SHOWN * 2):
+        point_log.record(conn, NOW, "delta", other, "arrived", None)
+    assert [r["kind"] for r in point_log.history(conn, pid)] == ["issued"]
+    assert "«Бета»" in __import__("tires_sync.panel.texts", fromlist=["x"]).audit_text(
+        {"action": "point_action", "detail": {"point": pid, "name": "Бета", "kind": "issued", "order": card}})

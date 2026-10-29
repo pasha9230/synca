@@ -901,9 +901,9 @@ def board_query(query: str) -> tuple:
 
 
 def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item: str, webmim_number: str = "", transfer_number: str = "") -> bool:
-    """The order fits the search of the board (board_query): a number finds that order, the order with that number of WebMIM (or a phone or
-    a transfer number with those digits, four and more), not every order with the digit; words find the client's name or the first position, three
-    characters and more the transfer number as typed («26R-…», the owner 2026-10-29); three digits and more find the phone; a whole phone
+    """The order fits the search of the board (board_query): a number finds that order, the order with that number of WebMIM (or a phone with
+    those digits, or a transfer number ending in them, four and more), not every order with the digit; words find the client's name or the
+    first position, six characters and more the transfer number as typed («26R-004417», the owner 2026-10-29: never every «26R» of the year); three digits and more find the phone; a whole phone
     (the last ten digits) finds it written in any way."""
     needle, digits, number, phone10 = wanted
     if not needle:
@@ -915,9 +915,9 @@ def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item
     if number is not None:                       # nine digits at most: a WebMIM number of ten and more is read as a phone (they are of seven)
         return (card_id == number or (len(digits) >= 4 and digits in phone_digits)
                 or bool(webmim_number and re.sub(r"\D", "", webmim_number) == digits)
-                or bool(transfer and len(digits) >= 4 and digits in re.sub(r"\D", "", transfer)))
+                or bool(transfer and len(digits) >= 4 and re.sub(r"\D", "", transfer).endswith(digits)))
     hay = " ".join([name.lower(), first_item.lower()])
-    return needle in hay or (len(digits) >= 3 and digits in phone_digits) or (len(needle) >= 3 and needle in transfer)
+    return needle in hay or (len(digits) >= 3 and digits in phone_digits) or (len(needle) >= 6 and needle in transfer)
 
 
 ORIGIN_NO_ACCOUNT = "Без аккаунта"

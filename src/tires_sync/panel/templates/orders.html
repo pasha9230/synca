@@ -32,7 +32,7 @@
 <div class="field" style="width:160px"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}"></div>
 <button class="btn btn--secondary" style="height:40px">Показать</button><a class="btn btn--link-gray" style="height:40px" href="/orders?v={{ view }}">Сбросить</a>
 </form>
-{% if only_stage %}<p class="small" data-only-stage="{{ only_stage }}">Только этап «{{ data.columns[0].stage.name }}» · <a href="/orders?v={{ view }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}">все этапы</a></p>{% endif %}
+{% if only_stage %}<p class="small" data-only-stage="{{ only_stage }}">Только этап «{{ data.columns[0].stage.name }}» · <a href="/orders?v={{ view }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}{% if point and not current_user().point_id %}&amp;p={{ point }}{% endif %}{% if tag %}&amp;t={{ tag|urlencode }}{% endif %}">все этапы</a></p>{% endif %}
 <div class="flash flash--err" id="board-msg" hidden>{{ icon("alert") }}<div class="flash-text"></div></div>
 {% if total_cards == 0 and not query and not tag and not point %}
 <div class="flash flash--info" style="margin-bottom:var(--s-4)">{{ icon("info") }}<div class="flash-text"><b>Заказов пока нет.</b> Создайте первый, когда клиент написал вам на Авито: поле «Быстрое добавление» в первой колонке или кнопка «Новый заказ».</div></div>

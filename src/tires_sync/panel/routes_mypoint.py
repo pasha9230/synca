@@ -28,7 +28,9 @@ from .routes_orders import local_iso, local_now
 STAGES = ("placed", "moving", "at_point")          # placed (the panel may not say «on the way» yet), on the way to the point, at the point
 ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "no_show": mgr.NO_SHOW, "returned": mgr.RETURN,
            "reserve_issued": "выдал", "reserve_here": mgr.HERE,         # the two answers to «Клиент забрал?» (the question of the reservation)
-           "act_signed": "акт МХ-3 подписан"}                           # «Подписал акт и отдал»: the return of «На ОТХ» (order_oth.sign_act)
+           "act_signed": "акт МХ-3 подписан",                           # «Подписал акт и отдал»: the return of «На ОТХ» (order_oth.sign_act)
+           "to_oth": "на ОТХ"}                                          # after «Клиент не пришёл»: the tyres stay at the point (the owner 2026-10-29)
+NO_SHOW_REASON = "Клиент не пришёл"
 BUILTIN = {"arrived": (mgr.ARRIVE_FROM, "at_point"), "issued": (mgr.ISSUE_FROM, "done")}
 
 
@@ -114,6 +116,18 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify):
             return "не выполнено: заказ уже изменили", "Заказ №%s уже изменили: обновите страницу." % mgr.label(card), False
         return ("заказ перенесён на «Возврат передан»", "Заказ №%s: акт МХ-3 подписан, шины отданы. Менеджер заполнит сумму возврата." % mgr.label(card),
                 True)
+    if action == "to_oth":                                                      # «Шины остаются на точке — на ОТХ?» after «Клиент не пришёл»
+        if code != "at_point" or not no_show_now(conn, card):
+            return _not_here(card, "на ОТХ") if code != "at_point" else (
+                "не подходит: клиент не отмечен «не пришёл»", "Заказ №%s: сначала отметьте «Клиент не пришёл»." % mgr.label(card), False)
+        oth = next(s for s in orders.list_stages(conn) if s["code"] == "oth")
+        try:
+            moved = orders.move_card(conn, card["id"], oth["id"], now, who, changes={} if card["cancel_reason"] else {"cancel_reason": NO_SHOW_REASON})
+        except orders.OrderError as err:
+            return "не выполнено: %s" % err, "Не получилось: %s" % err, False
+        if not moved:
+            return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % mgr.label(card), False
+        return "заказ перенесён на «%s»" % oth["name"], "Заказ №%s на «%s»: шины остаются на точке нашим товаром." % (mgr.label(card), oth["name"]), True
     if action == "reserve_issued":                                              # «Выдан» to the question is «выдал»
         action = "issued"
     if action == "returned":                                                    # the VK «возврат отдал»; the button is on the orders at the point only
@@ -145,6 +159,12 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify):
     stage_id = next(s["id"] for s in orders.list_stages(conn) if s["code"] == target)
     outcome, answer = mgr.apply(conn, card, stage_id, who, now, deliver)
     return outcome, answer, not outcome.startswith("не ")
+
+
+def no_show_now(conn, card: dict) -> bool:
+    """«Клиент не пришёл» was marked in this stay at the point (mgr.no_show's red record after the arrival)."""
+    return conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'point' AND text LIKE 'Клиент не пришёл за заказом%' AND at >= ? LIMIT 1",
+                        (card["id"], card["entered_at"] or "")).fetchone() is not None
 
 
 NEED_MAX = 500
@@ -247,6 +267,13 @@ def _found(conn, query: str, point_id: int) -> list:
     return groups[0]["items"] if groups else []
 
 
+def _oth_ask(conn, cards: list) -> dict:
+    """?oth=<order>: the order just marked «Клиент не пришёл», still at the point: its card asks «Шины остаются на точке — на ОТХ?»."""
+    wanted = str(request.args.get("oth") or "")
+    row = next((r for r in cards if wanted.isdigit() and r["card"]["id"] == int(wanted) and r["here"]), None)
+    return {row["card"]["id"]: True} if row is not None and no_show_now(conn, row["card"]) else {}
+
+
 def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
@@ -305,7 +332,8 @@ def register(app) -> None:
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form,
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=_found(conn, query, point_id) if query and point_id is not None else None,
-                               returns=_returns(conn, point_id) if point_id is not None else []), 400 if error else 200
+                               returns=_returns(conn, point_id) if point_id is not None else [],
+                               oth_ask=_oth_ask(conn, cards)), 400 if error else 200
 
     @app.route("/my-point/<int:card_id>/<action>", methods=["POST"])
     @login_required
@@ -340,6 +368,8 @@ def register(app) -> None:
         if ok and not outcome.startswith("уже"):                               # «История точки»: what was done, not a repeat
             point_log.record(conn, now, author(), point_id, action, card["id"], outcome)
         flash(answer, "info" if ok else "error")
+        if action == "no_show" and ok:                                         # the question «Шины остаются на точке — на ОТХ?» (2026-10-29)
+            return redirect(back + ("&" if "?" in back else "?") + "oth=%d#oth-%d" % (card["id"], card["id"]))
         return redirect(back)
 
     @app.route("/my-point/handoff/<int:card_id>/cancel", methods=["POST"])

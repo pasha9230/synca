@@ -97,7 +97,7 @@ def audit_text(entry: dict) -> str:
         return "ОТХ: заказ №%s, точка подписала акт МХ-3 и отдала шины поставщику" % d.get("order", "?")
     if action == "point_action":
         from .. import point_log
-        return "Точка №%s: %s%s" % (d.get("point", "?"), point_log.NAMES.get(d.get("kind", ""), d.get("kind") or "действие"),
+        return "Точка %s: %s%s" % ("«%s»" % d["name"] if d.get("name") else "№%s" % d.get("point", "?"), point_log.NAMES.get(d.get("kind", ""), d.get("kind") or "действие"),
                                     ", заказ №%s" % d["order"] if d.get("order") else "")
     if action == "share_labels":
         to = d.get("to") if isinstance(d.get("to"), dict) else {}
