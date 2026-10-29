@@ -268,3 +268,20 @@ def test_a_new_stay_on_oth_needs_a_new_agreement_and_the_window_never_skips_the_
     order_oth.agree(conn, orders.get_card(conn, oth), date(2026, 10, 28), NOW, "owner")
     assert post(stranger, "/my-point/%d/act_signed" % oth, "tok", token="a" * 24).status_code in (403, 404)
     assert orders.get_card(conn, oth)["stage"]["code"] == "oth"
+
+
+def test_a_take_between_the_check_and_the_cancel_wins(tmp_path, monkeypatch):
+    """The manager takes the client after cancellable() said yes: the one-statement mark refuses the cancel, the order stays."""
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    _mine, order_id = _handed_over(app, conn, pid)
+    conn.execute("UPDATE order_handoff_source SET taken_at = ?, taken_by = 'worker2' WHERE order_id = ?", (NOW, order_id))
+    conn.commit()
+    monkeypatch.setattr(mgr, "cancellable", lambda *a: True)
+    try:
+        mgr.cancel_handoff(conn, order_id, points.get_point(conn, pid), "gamma", NOW)
+        raise AssertionError("cancelled a taken client")
+    except orders.OrderError as err:
+        assert "взяли" in str(err)
+    got = orders.get_card(conn, order_id)
+    assert got["stage"]["code"] == "from_point"
+    assert conn.execute("SELECT taken_by FROM order_handoff_source WHERE order_id = ?", (order_id,)).fetchone()[0] == "worker2"
