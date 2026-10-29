@@ -249,3 +249,17 @@ def test_the_client_catalog_never_takes_the_owners_own_prices():
         pytest.skip("клиентского каталога ещё нет в этой ветке")
     text = source.read_text(encoding="utf-8")
     assert "position_price" not in text and "own_prices" not in text and "price_overrides" not in text
+
+
+def test_an_own_price_of_the_owner_never_changes_the_price_in_the_clients_shop(tmp_path):
+    """The client's catalog (/shop) prices from the purchase by the client's terms (the lead 2026-10-29): the owner's own price stays out."""
+    from test_shop import make_shop, page, prices
+    app, client, conn, _ = make_shop(tmp_path)
+    accounts = [connections.create_account(conn, name, NOW, "owner") for name in ("Основной", "Шина-Колесо")]
+    before = prices(page(client))
+    assert before
+    staging.set_own_price(conn, "77001", accounts, {"price": 999}, NOW)
+    staging.set_own_price(conn, "77002", accounts, {"pct": -40}, NOW)
+    _confirm(conn, strong=True)
+    assert set(active_settings(conn).price_overrides) == {"%d:%s" % (a, g) for a in accounts for g in ("77001", "77002")}
+    assert prices(page(client)) == before
