@@ -1,0 +1,64 @@
+/* The frame of a client (shop_base.html), over panel.css: the staff panel is for a computer only (body min-width 1280), a client's
+   catalog is for a phone too. Everything here is under body.shop: nothing of the staff pages changes. */
+body.shop{min-width:0}
+.shop .main{overflow:visible}
+.shop .page{padding:var(--s-5) var(--s-6) var(--s-10);gap:var(--s-5);margin:0 auto}
+.shop-top{display:flex;align-items:center;gap:var(--s-4);padding:var(--s-3) var(--s-6);background:var(--gray-0);border-bottom:1px solid var(--gray-200)}
+.shop-top .sb-logo{padding:0;font-size:var(--fs-lg)}
+.shop-top-right{margin-left:auto;display:flex;align-items:center;gap:var(--s-3);white-space:nowrap}
+.shop-top-right form{margin:0}
+
+/* filters */
+.shop-filters{align-items:flex-start}
+.shop-filters .f-size{min-width:260px}
+.shop-filters .f-search{width:240px}
+.shop-filters .f-brands{flex-basis:100%}
+.shop-filters details{border:1px solid var(--gray-200);border-radius:var(--r-md);padding:var(--s-2) var(--s-3);background:var(--gray-0)}
+.shop-filters details+details{margin-top:var(--s-2)}
+.shop-filters summary{cursor:pointer;font-size:var(--fs-sm);color:var(--gray-700);font-weight:500}
+.shop-ticks{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--s-2) var(--s-4);padding-top:var(--s-3)}
+.shop-ticks .check{display:flex;align-items:center;gap:var(--s-2);font-size:var(--fs-sm);min-width:0}
+.shop-actions{display:flex;gap:var(--s-2);align-items:center;white-space:nowrap;align-self:flex-end}
+.shop-unknown{color:var(--err-600);font-size:var(--fs-xs)}
+.shop .auth{padding:var(--s-4)}
+.shop .auth-card{width:100%;max-width:380px}
+
+/* the table */
+.shop-table td{vertical-align:middle}
+.shop-table .c-tire b{color:var(--gray-900)}
+.shop-table .c-tire .muted{font-size:var(--fs-xs)}
+.shop-table .c-size,.shop-table .c-season,.shop-table .c-wh,.shop-table .c-stock,.shop-table .c-price{white-space:nowrap}
+.shop-table .c-price b{font-size:var(--fs-md)}
+
+/* a phone: the filters in a column, the rows as cards */
+@media (max-width:720px){
+  .shop .page{padding:var(--s-3) var(--s-3) var(--s-8);gap:var(--s-3)}
+  .shop-top{padding:var(--s-3)}
+  .shop-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-2);padding:var(--s-3)}
+  .shop-filters .field,.shop-filters .f-size,.shop-filters .f-search{width:100%;min-width:0}
+  .shop-filters .f-size,.shop-filters .f-search,.shop-filters .f-brands,.shop-actions{grid-column:1/-1}
+  .shop-filters .select{padding-left:10px;padding-right:26px;background-position:right 6px center}
+  .shop-actions{align-self:stretch}
+  .shop-actions .btn{flex:1}
+  .shop-ticks{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .shop .toolbar{padding:var(--s-3)}
+  .shop .table-wrap{overflow:visible}
+  .shop-table,.shop-table tbody{display:block}
+  .shop-table thead{display:none}
+  .shop-table tr{display:grid;grid-template-columns:48px minmax(0,1fr) auto;grid-template-areas:"photo tire price" "photo size stock" "photo season wh";
+    column-gap:var(--s-3);row-gap:2px;padding:var(--s-3);border-bottom:1px solid var(--gray-200)}
+  .shop-table td{display:block;padding:0;border:0;min-width:0;height:auto}
+  .shop-table .c-photo{grid-area:photo}
+  .shop-table .c-photo .thumb{width:48px;height:48px}
+  .shop-table .c-tire{grid-area:tire}
+  .shop-table .c-size{grid-area:size;color:var(--gray-900)}
+  .shop-table .c-season{grid-area:season;color:var(--gray-500);font-size:var(--fs-sm)}
+  .shop-table .c-origin{display:none}
+  .shop-table .c-wh{grid-area:wh;text-align:right;color:var(--gray-500);font-size:var(--fs-sm)}
+  .shop-table .c-stock{grid-area:stock;text-align:right;font-size:var(--fs-sm)}
+  .shop-table .c-price{grid-area:price;text-align:right}
+  .shop-table .c-price b{font-size:var(--fs-lg)}
+  .shop .pager{padding:var(--s-3)}
+  .shop .empty{padding:var(--s-8) var(--s-4)}
+  .shop .empty h3,.shop .empty p{overflow-wrap:anywhere}
+}
