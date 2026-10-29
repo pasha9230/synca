@@ -227,7 +227,8 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> bool:
     except orders.OrderError:
         conn.rollback()
         raise
-    if not moved:                                                                     # moved meanwhile: move_card rolled it all back
+    if not moved:                                                                     # moved meanwhile: move_card rolled it all back (an order
+        # already on the target would be committed instead: the check of «На ОТХ» above keeps it from there)
         conn.rollback()
         return False
     return True

@@ -1539,7 +1539,8 @@ def cancel_handoff(conn, order_id, point: dict, who: str, now: str, notify: Opti
     except OrderError:
         conn.rollback()
         raise
-    if not moved:                                                 # moved meanwhile: move_card rolled the mark and the record back
+    if not moved:                                                 # moved meanwhile: move_card rolled the mark and the record back (it commits
+        # instead when the order already stands on the target stage: the UPDATE above makes sure it is on «Передано с точки», never «Отмена»)
         conn.rollback()
         raise OrderError("Заказ только что перенесли: передачу уже не отменить.")
     _tell_staff(conn, orders.get_card(conn, order_id), "Заказ №%d: %s" % (order_id, text), notify)
