@@ -324,26 +324,27 @@ def test_the_card_says_when_another_lot_of_the_same_tire_carries_the_ad(tmp_path
     app, conn, (first, second) = _app(tmp_path)
     _publish(conn, second, "101", _same_tire_ad(app, conn, "101"))                                    # 101 в выгрузке, та же шина
     page = _card(app)
-    assert page.count("Объявление держит другая партия") == 1 and "Шина-Колесо: объявление держит другая партия" in page
-    assert 'href="/catalog/item/101"' in page
+    assert page.count("Эта цена не попадёт на Авито.") == 1 and "(Шина-Колесо)" in page
+    assert "берёт цену с другой позиции: код TS1, склад WebMIM." in page                             # код позиции 101 в выгрузке теста
+    assert 'href="/catalog/item/101">Открыть позицию TS1</a>' in page and "партия" not in page
     _publish(conn, second, "100", _same_tire_ad(app, conn, "100"))
-    assert "держит другая партия" not in _card(app)                                                    # своё объявление есть — пометки нет
+    assert "Эта цена не попадёт на Авито" not in _card(app)                                                    # своё объявление есть — пометки нет
 
 
 def test_a_holder_gone_from_the_unload_is_no_holder(tmp_path):
     app, conn, (first, second) = _app(tmp_path)
     _publish(conn, second, "GONE1", _same_tire_ad(app, conn, "GONE1"))                                # удерживаемая, нет в выгрузке
-    assert "держит другая партия" not in _card(app)
+    assert "Эта цена не попадёт на Авито" not in _card(app)
 
 
 def test_a_mirrored_ad_counts_only_while_the_account_is_a_mirror(tmp_path):
     app, conn, (first, second) = _app(tmp_path)
     ad = _same_tire_ad(app, conn, "101_1")
     mirror_feed.import_feed(conn, second, ('<Ads formatVersion="3" target="Avito.ru">%s</Ads>' % ad).encode(), NOW)
-    assert "Шина-Колесо: объявление держит другая партия" in _card(app)
+    assert "Эта цена не попадёт на Авито." in _card(app)
     conn.execute("UPDATE account SET feed_mode = 'generated' WHERE id = ?", (second,))                # перевод на нашу сборку: файл остался в базе
     conn.commit()
-    assert "держит другая партия" not in _card(app)
+    assert "Эта цена не попадёт на Авито" not in _card(app)
 
 
 @pytest.mark.parametrize("value, asked", [("4000", True), ("6990", True), ("3000", True), ("5200", False), ("6200", False)])

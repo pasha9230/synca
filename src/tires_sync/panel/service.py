@@ -733,7 +733,9 @@ def own_price_rows(conn, general, active, offer, ref=None, offers=None) -> list:
     `held_by`: another lot of the same tire carries the account's ad (held_by_other), {goods_id, code}."""
     from ..pricing import position_price
     from ..same_tire import identity
+    from .. import tochki_feed
     tire = identity(_unbuilt_candidate(conn, general, ref, offer)[0]) if ref is not None else None
+    tochki = tochki_feed.config(conn)["supplier_id"]
     rows = []
     for account in connections.list_feed_accounts(conn):
         eff = connections.effective_settings(conn, account["id"], general)
@@ -747,7 +749,10 @@ def own_price_rows(conn, general, active, offer, ref=None, offers=None) -> list:
                      "pending": own != was, "held_by": None})
         other = held_by_other(conn, account, offer, tire, offers or {}, eff.min_stock)
         if other is not None:
-            rows[-1]["held_by"] = {"goods_id": other, "code": getattr((offers or {}).get(other), "code", "") or other}
+            holder = (offers or {}).get(other)
+            mark = supplier_mark(supplier_of(holder), tochki) if holder is not None else None
+            rows[-1]["held_by"] = {"goods_id": other, "code": getattr(holder, "code", "") or other,
+                                   "where": "склад " + mark["title"].replace("Поставщик: ", "") if mark else ""}
     return rows
 
 
