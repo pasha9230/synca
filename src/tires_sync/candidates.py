@@ -31,6 +31,8 @@ class Evaluation:
     inherit: Dict[str, str] = field(default_factory=dict)      # code -> the Id of the oldest ad of the same tire (see same_tire.py)
     match: Optional[object] = None                             # tire_match.MatchResult the cycle merged by (the switch on); None: off
     oth: Dict[str, int] = field(default_factory=dict)          # code -> pieces on «На ОТХ» for this account (sync.plan_decisions): kept, «Шины в наличии»
+    oth_points: Dict[str, Tuple[str, ...]] = field(default_factory=dict)   # code -> the names of its points on OTH (the first line)
+    oth_retired: Dict[str, Tuple[str, str, int]] = field(default_factory=dict)   # code -> (former Id, saved ad, price): published again from it
 
 
 def evaluate(
@@ -40,13 +42,15 @@ def evaluate(
     ref: Dict[str, FrozenSet[str]],
     confirmed: Dict[Tuple[str, str], str],
     brand_map: Optional[Dict[str, str]] = None,
+    oth: FrozenSet[str] = frozenset(),
 ) -> Evaluation:
+    """`oth`: the codes on «На ОТХ» (oth_stock): their excluded brand or season switched off does not keep them out (filters)."""
     ev = Evaluation()
     for gid, items in issues.items():
         ev.problems[gid] = list(items)
     for gid, offer in offers.items():
         ev.stocks[gid] = offer.stock
-        reason = exclusion_reason(offer, settings)
+        reason = exclusion_reason(offer, settings, on_oth=gid in oth)
         manual = settings.overrides.get(override_key(gid))
         if manual == "off":
             ev.excluded[gid] = "manual_off"

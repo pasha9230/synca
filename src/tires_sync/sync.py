@@ -79,6 +79,13 @@ def _renew_date_end(ad, settings: Settings, today: date) -> None:
         node.text = stable_date_end(today, settings.date_end_days, settings.date_end_renew_days).isoformat()
 
 
+def _show_count(ad, count: int) -> None:
+    from . import oth_stock
+    node = ad.find("Description")
+    if node is not None:
+        node.text = oth_stock.with_count(node.text or "", count)
+
+
 def _snapshot_text(ad) -> str:
     """The ad as it is saved for later holds: without the line «Шины в наличии» of «На ОТХ», which belongs to the cycle that adds it."""
     from . import oth_stock
@@ -94,7 +101,7 @@ def _pending_item(d: Decision, ev, rendered, rendered4) -> dict:
     item = {"goods_id": d.goods_id, "action": d.action.value, "price": d.price, "point": d.point,
             "suppressed": d.suppressed, "first_hold": d.first_hold.isoformat() if d.first_hold else None, "reason": d.reason}
     if d.action in (Action.PUBLISH, Action.UPDATE):
-        item["base_price"] = ev.ok[d.goods_id].offer.base_price
+        item["base_price"] = ev.ok[d.goods_id].offer.base_price if d.goods_id in ev.ok else 0.0   # an ad back from retired_ad: not known
         item["snapshot"] = _snapshot_text(rendered[d.goods_id])
         if d.goods_id in rendered4:
             item["snapshot4"] = _snapshot_text(rendered4[d.goods_id])
@@ -119,8 +126,10 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     if not parsed.offers and published:
         raise SupplierDataError("no offers parsed for territory %s while %d items are published" % (
             settings.territory_rn, len(published)))
+    from . import oth_stock
+    on_oth = {code: n for code, n in oth_stock.pieces(conn).items() if code not in left_out}   # a type left out: the owner's setting takes it off
     ev = evaluate(parsed.offers, parsed.issues, settings, ref, store.load_confirmed_mappings(conn),
-                  store.load_brand_map(conn))
+                  store.load_brand_map(conn), oth=frozenset(on_oth))
     for gid, stock in getattr(parsed, "stocks", {}).items():                # a broken row or a stale supplier: a known fall below the threshold takes it off
         ev.stocks.setdefault(gid, stock)
     for gid in published:
@@ -210,17 +219,68 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     bound_now = mirror_feed.adopted_maps(conn, acct)[0]
     live_bound = frozenset(c for c, i in bound_now.items()
                            if not (mirror_feed.alias_scheme(conn, acct) and i == mirror_feed.alias_id(acct, c)))   # a plain alias says nothing about being live
-    from . import oth_stock
-    oth = {code: n for code, n in oth_stock.pieces(conn).items() if code not in left_out}   # a type left out: the owner's setting takes it off
+    _oth_for_account(conn, ev, published, acct, on_oth, oth_stock.points(conn), live_id_of, foreign, settings.min_stock)
+    ds = decide(ev, published, store.load_suppressed(conn, acct), known_points, settings, today, now=now, already_live=live_bound,
+                removed_before=removed_before, oth=ev.oth, oth_retired={code: r[2] for code, r in ev.oth_retired.items()})
+    return published, ev, ds
+
+
+def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], names, live_id_of, foreign, min_stock: int) -> None:
+    """ev.oth, ev.oth_points, ev.oth_retired of one account (the owner 2026-10-29): the positions on «На ОТХ» whose ad is kept, built or
+    brought back, with the pieces and points of the first line. One tire, one ad: when its ad is under another code (a lot that took its Id,
+    or the same tire published under another code), that code carries the line and nothing is published for this one; an Id another ad or
+    account has now is never published again. A position gone from the unload and taken off comes back on its last ad (retired_ad), if kept."""
+    from . import same_tire
+    if not on_oth:
+        return                                                            # nothing on OTH: nothing read
+    oth = dict(on_oth)
+    points = {code: tuple(names.get(code, ())) for code in oth}
+
+    def hand_over(code, taker):
+        oth[taker] = oth.get(taker, 0) + oth.pop(code)
+        points[taker] = tuple(sorted(set(points.get(taker, ())) | set(points.pop(code, ()))))
+
     taken_by = {ad_id: code for code, ad_id in ev.inherit.items()}
     for code in sorted(oth):
         taker = taken_by.get(live_id_of(code))
-        if taker is not None and taker != code:                           # another lot of the same tire takes its Id (same_tire): one ad under
-            oth[taker] = oth.get(taker, 0) + oth.pop(code)                # the Id, never two; that lot goes on with the line
-    ev.oth = oth
-    ds = decide(ev, published, store.load_suppressed(conn, acct), known_points, settings, today, now=now, already_live=live_bound,
-                removed_before=removed_before, oth=oth)
-    return published, ev, ds
+        if taker is not None and taker != code:                           # another lot of the same tire takes its Id (same_tire)
+            hand_over(code, taker)
+    retired: Dict[str, tuple] = {}
+    for code in sorted(c for c in oth if c not in published and c not in ev.ok and c not in ev.excluded and c not in ev.problems):
+        found = store.retired_ad_of(conn, acct, code)
+        if found:
+            try:
+                price = int((ET.fromstring(found[1]).findtext("Price") or "").strip())
+            except (ET.ParseError, ValueError):
+                continue
+            retired[code] = (found[0], found[1], price)
+    tire_of = {}
+    for code in set(published) | set(ev.ok):
+        key = same_tire.identity(ev.ok[code]) if code in ev.ok else same_tire.identity_of_ad(store.get_snapshot(conn, code, acct) or "")
+        if key is not None:
+            tire_of[code] = key
+    live_ids = {live_id_of(p): p for p in published}
+    for code in sorted(c for c in oth if c not in published and c not in ev.inherit):     # a lot that goes on under an older Id is that ad
+        own = same_tire.identity(ev.ok[code]) if code in ev.ok else (
+            same_tire.identity_of_ad(retired[code][1]) if code in retired else None)
+        if code not in ev.ok and code not in retired:
+            holder = next((c for c in sorted(tire_of) if c != code and c in published and tire_of[c] == own), None) if own else None
+            if holder is not None or ev.excluded.get(code) == "same_tire":
+                holder = holder or next((c for c in sorted(tire_of) if c != code and tire_of[c] == own and c in ev.ok), None)
+                if holder is not None:
+                    hand_over(code, holder)
+            continue
+        holder = next((c for c in sorted(tire_of) if c != code and own is not None and tire_of[c] == own
+                       and (c in published or ev.ok[c].offer.stock >= min_stock)), None)
+        ad_id = retired[code][0] if code in retired else live_id_of(code)
+        if holder is not None:
+            hand_over(code, holder)                                       # the same tire is on Avito (or goes on) under another code
+            retired.pop(code, None)
+        elif (live_ids.get(ad_id) not in (None, code)) or ad_id in set(ev.inherit.values()) or ad_id in foreign:
+            oth.pop(code)                                                 # its Id is another ad's now: never two ads under one Id
+            points.pop(code, None)
+            retired.pop(code, None)
+    ev.oth, ev.oth_points, ev.oth_retired = oth, points, retired
 
 
 def live_titles_of(out_dir) -> Dict[str, str]:
@@ -314,23 +374,41 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
     model_photos = ModelPhotos(conn, parsed.offers, tochki_prefix)
     from . import oth_stock
     on_oth = getattr(ev, "oth", None) or {}                               # our tires at a point: «Шины в наличии» first (the owner 2026-10-29)
+
+    def shown(code):                                                      # «В наличии»: ours on OTH plus the supplier's
+        offer = parsed.offers.get(code)
+        return on_oth.get(code, 0) + max(int(offer.stock), 0) if offer is not None else on_oth.get(code, 0)
     for d in ds.decisions:
         if d.action not in (Action.PUBLISH, Action.UPDATE, Action.KEEP, Action.HOLD):
             final.append(d)
             continue
+        if d.action is Action.PUBLISH and d.reason == "oth:retired":     # gone from the unload, taken off: its last ad, under its former Id
+            ad_id, text, _price = ev.oth_retired[d.goods_id]
+            ad = ad_from_text(text)
+            ad.find("Id").text = ad_id
+            _renew_date_end(ad, settings, today)
+            _show_count(ad, shown(d.goods_id))
+            ads.append(ad)
+            owners.append((ad, d.goods_id))
+            rendered[d.goods_id] = ad
+            final.append(d)
+            continue
         pub = published.get(d.goods_id)
         use_snapshot = d.action is Action.HOLD or (pub is not None and pub.location == "own")
+        cand = ev.ok.get(d.goods_id)
+        if cand is not None and d.goods_id in on_oth and not use_snapshot:
+            cand = dataclasses.replace(cand, offer=dataclasses.replace(cand.offer, stock=shown(d.goods_id)))
         if not use_snapshot:
-            ad = render_ad(ev.ok[d.goods_id], d.price, d.point, settings, today, template=description_template, title_template=title_template,
+            ad = render_ad(cand, d.price, d.point, settings, today, template=description_template, title_template=title_template,
                            old_models=old_models)
             errors = validate_ad(ad)                                       # judged on the fresh ad: a kept title never hides a broken one
             if not errors:
                 ads.append(ad)
                 owners.append((ad, d.goods_id))
                 rendered[d.goods_id] = ad
-                if settings.pack4_for(ev.ok[d.goods_id].offer) and ev.ok[d.goods_id].offer.stock >= 4 and not no_pack(d.goods_id):
+                if settings.pack4_for(cand.offer) and cand.offer.stock >= 4 and not no_pack(d.goods_id):
                     twin = render_ad(
-                        ev.ok[d.goods_id], d.price, d.point, settings, today, template=description_template, pack=4, title_template=title_template,
+                        cand, d.price, d.point, settings, today, template=description_template, pack=4, title_template=title_template,
                         old_models=old_models)
                     ads.append(twin)
                     owners.append((twin, d.goods_id))
@@ -353,19 +431,21 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         held_ad = ad_from_text(snapshot)
         if d.reason.startswith("oth:"):                                   # held for weeks maybe: the saved DateEnd would close the ad on Avito
             _renew_date_end(held_ad, settings, today)
+            _show_count(held_ad, shown(d.goods_id))
         ads.append(held_ad)
         owners.append((held_ad, d.goods_id))
         offer = parsed.offers.get(d.goods_id)
         # a set of four is not offered for a position that waits for the morning, nor when it is known that fewer than four are left
         no_four = d.reason.startswith("cart_wait:") or (offer is not None and offer.stock < 4) or no_pack(d.goods_id)
         if d.reason.startswith("oth:"):                                   # held for «На ОТХ»: the set of four on our own pieces or the supplier's
-            no_four = (on_oth.get(d.goods_id, 0) < 4 and (offer is None or offer.stock < 4)) or no_pack(d.goods_id)
+            no_four = shown(d.goods_id) < 4 or no_pack(d.goods_id)
         twin = None if no_four else (
             store.get_snapshot4(conn, d.goods_id, acct) if settings.pack4 and (offer is None or settings.pack4_for(offer)) else None)
         if twin:
             twin_ad = ad_from_text(twin)
             if d.reason.startswith("oth:"):
                 _renew_date_end(twin_ad, settings, today)
+                _show_count(twin_ad, shown(d.goods_id))
             ads.append(twin_ad)
             owners.append((twin_ad, d.goods_id))
         final.append(d)
@@ -485,7 +565,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         node = ad.find("Description")
         own = published.get(code) is not None and published[code].location == "own"     # the ads of our own point: as they are
         if node is not None:
-            node.text = oth_stock.add_line(node.text) if code in on_oth and not own else oth_stock.drop_line(node.text)
+            node.text = (oth_stock.add_line(node.text, ev.oth_points.get(code, ())) if code in on_oth and not own
+                         else oth_stock.drop_line(node.text))
     return ads, invalid, final, rendered, rendered4, owners
 
 
