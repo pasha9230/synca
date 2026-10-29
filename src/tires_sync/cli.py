@@ -1614,9 +1614,7 @@ def _prebind_report(conn, box, feed_root, applied) -> None:
         account, binds = entry[0], entry[1]
         if len(entry) > 2 and entry[2]:                                # the manual ads of the cabinet changed: told once, when they change
             ads = mirror_feed.manual_ads(conn, account["id"])
-            manual.append("аккаунт «%s»: ручных объявлений в кабинете: %d" % (account["name"], len(ads)))
-            manual += ["   %s «%s»%s" % (a["avito_id"], a["title"], " (живо вне нашего файла, Id %s)" % a["ad_id"] if a.get("ad_id") else "") for a in ads[:10]]
-            manual += ["   и ещё %d" % (len(ads) - 10)] if len(ads) > 10 else []
+            manual.append((_cabinet_header(conn, account, len(ads)), [_manual_line(a) for a in ads]))     # the whole list (owner, 2026-10-29)
         try:
             now_ids = {a.findtext("Id") for a in ET.parse(str(Path(feed_root) / account["feed_token"] / "next" / "avito_feed.xml")).getroot().findall("Ad")}
         except (OSError, ET.ParseError):
@@ -1632,9 +1630,53 @@ def _prebind_report(conn, box, feed_root, applied) -> None:
     if bad:
         print("предупреждение: привязка не применилась в фиде (другое правило задало Id), нужен разбор:\n" + "\n".join(bad), file=sys.stderr)
     if manual:
-        print("\n".join(manual))
-        _alert(conn, box, "Tires Sync: в кабинете есть объявления, сделанные вручную. Их система не снимает, а та же шина из фида рядом с ними "
-               "в этом аккаунте не публикуется (чтобы не было «Повторного размещения»).\n" + "\n".join(manual), notice=True)
+        parts = _manual_parts(manual)
+        print("\n".join(parts))
+        for part in parts:                                            # each part on its own: Telegram cuts a longer message
+            _alert(conn, box, part, notice=True)
+
+
+MANUAL_HEAD = ("Tires Sync: в кабинете есть объявления, сделанные вручную. Их система не снимает, а та же шина из фида рядом с ними "
+               "в этом аккаунте не публикуется (чтобы не было «Повторного размещения»).")
+MANUAL_MORE = "Tires Sync: объявления, сделанные вручную (продолжение %d из %d)"
+AVITO_AD_URL = "https://www.avito.ru/%s"
+
+
+def _cabinet_header(conn, account, count: int) -> str:
+    """The cabinet named plainly: its number and name here, and the Avito profile when the cabinet was read (owner, 2026-10-29)."""
+    profile = connections.get_avito_identity(conn, account["id"]).get("id")
+    return "в кабинете Авито №%s «%s»%s: ручных объявлений: %d" % (account["id"], account["name"],
+                                                                   " (профиль Авито %s)" % profile if profile else "", count)
+
+
+def _manual_line(ad: dict) -> str:
+    """Telegram gets plain text (no parse mode): the link stands on its own in the line, Telegram makes it clickable."""
+    return "   %s «%s» %s%s" % (ad["avito_id"], ad["title"], AVITO_AD_URL % ad["avito_id"],
+                              " (живо вне нашего файла, Id %s)" % ad["ad_id"] if ad.get("ad_id") else "")
+
+
+def _manual_parts(groups, limit: int = notify.TELEGRAM_LIMIT) -> list:
+    """[(header, lines)] as messages of at most `limit` characters, cut only between lines. A part that goes on with a cabinet's list
+    repeats its header, so each part says which cabinet it is about; the parts are marked «(1 из N)», «(продолжение 2 из N)»."""
+    budget = limit - len(MANUAL_MORE % (999, 999)) - 2                  # room for the mark, whatever N comes out
+    parts: list = [[MANUAL_HEAD]]
+
+    def put(line: str, header: str) -> None:
+        if len("\n".join(parts[-1] + [line])) > budget:
+            parts.append([header + " (дальше)"] if header and line != header else [])
+        parts[-1].append(line[:budget - len("\n".join(parts[-1])) - 1])  # a line longer than a message is cut to its part, never past the limit
+
+    for header, lines in groups:
+        if lines and len("\n".join(parts[-1] + [header, lines[0]])) > budget:   # a header never ends a part alone
+            parts.append([])
+        put(header, header)
+        for line in lines:
+            put(line, header)
+    total = len(parts)
+    if total == 1:
+        return ["\n".join(parts[0])]
+    return ["\n".join([(MANUAL_HEAD + " (1 из %d)" % total) if n == 1 else MANUAL_MORE % (n, total)] + (part[1:] if n == 1 else part))
+            for n, part in enumerate(parts, 1)]
 
 
 def _heal_account(conn, account, client, feed_root, confirm: bool, renew: bool = False) -> dict:
