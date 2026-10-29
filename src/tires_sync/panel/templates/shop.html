@@ -1,5 +1,48 @@
+{# the client's catalog: only `rows` of client_catalog.FIELDS and the state of the filters; no offer, no goods id, no supplier, no script #}
 {% extends "shop_base.html" %}
 {% block title %}Каталог{% endblock %}
 {% block content %}
-<div class="card"><div class="empty"><h3>Каталог скоро</h3><p>Здесь появятся шины с вашими ценами.</p></div></div>
+{% if empty %}
+<div class="card"><div class="empty"><h3>Ассортимент ещё не настроен</h3><p>Как только менеджер откроет вам бренды, здесь появятся шины с вашими ценами.</p></div></div>
+{% else %}
+<section class="card">
+<form method="get" action="/shop" class="filters">
+<input type="hidden" name="o" value="{{ f.sort }}">{% if f.descending %}<input type="hidden" name="r" value="1">{% endif %}
+<div class="field" style="min-width:260px"><span class="label">Размеры через пробел</span><input class="input" name="size" value="{{ f.size_text }}" maxlength="120" placeholder="205/55R16 195/65R15" title="Например: 205/55R16 195/65R15 или 205/55/16">
+{% if f.unknown %}<span class="xs" style="color:var(--red-600)">Не понял: {{ f.unknown|join(" ") }}</span>{% endif %}</div>
+<div class="field" style="width:240px"><span class="label">Поиск</span><input class="input" name="q" value="{{ f.query }}" maxlength="120" placeholder="Бренд, модель, название"></div>
+<div class="field"><span class="label">Сезон</span><select class="select" name="s"><option value="">Все</option>{% for key, label in seasons.items() %}<option value="{{ key }}"{% if f.season == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+<div class="field"><span class="label">Шипы</span><select class="select" name="t"><option value="">Все</option><option value="studded"{% if f.studs == "studded" %} selected{% endif %}>Шипы</option><option value="friction"{% if f.studs == "friction" %} selected{% endif %}>Без шипов</option></select></div>
+<div class="field"><span class="label">Склад</span><select class="select" name="wh"><option value="">Все</option><option value="1"{% if f.warehouse == 1 %} selected{% endif %}>Склад 1</option><option value="2"{% if f.warehouse == 2 %} selected{% endif %}>Склад 2</option></select></div>
+<details class="field"{% if f.brands %} open{% endif %}><summary class="label">Бренды{% if f.brands %} ({{ f.brands|length }}){% endif %}</summary>
+{% for key, label in brands %}<label class="check"><input type="checkbox" name="b" value="{{ key }}"{% if key in f.brands %} checked{% endif %}> {{ label }}</label>{% endfor %}</details>
+<details class="field"{% if f.without %} open{% endif %}><summary class="label">Кроме брендов{% if f.without %} ({{ f.without|length }}){% endif %}</summary>
+{% for key, label in brands %}<label class="check"><input type="checkbox" name="xb" value="{{ key }}"{% if key in f.without %} checked{% endif %}> {{ label }}</label>{% endfor %}</details>
+<button class="btn btn--secondary" style="height:40px">Показать</button>
+<a class="btn btn--link-gray" style="height:40px" href="/shop">Сбросить</a>
+</form>
+</section>
+<section class="card">
+<div class="toolbar"><span class="small muted">Сортировка:</span>
+<div class="sortbar">{% for key, label in (("brand", "Бренд"), ("size", "Размер"), ("price", "Цена"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div>
+<span class="small muted ml-auto">Найдено {{ total }}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %}</span></div>
+{% if rows %}<div class="table-wrap"><table class="table table--items">
+<thead><tr><th class="w-thumb"></th><th>Бренд</th><th class="t-namecol">Название</th><th>Размер</th><th>Сезон</th><th>Индексы</th><th>Страна, год</th><th>Склад</th><th class="num">Остаток</th><th class="num">Цена за шт.</th></tr></thead>
+<tbody>{% for r in rows %}
+<tr>
+<td class="w-thumb">{% if r.photo %}<img class="thumb" src="{{ r.photo }}" alt="" width="36" height="36" loading="lazy">{% else %}<div class="thumb">нет фото</div>{% endif %}</td>
+<td class="strong" style="white-space:nowrap">{{ r.brand }}</td>
+<td class="t-namecol"><div class="t-name"><span title="{{ r.name }}">{{ r.name }}</span>{% if r.runflat %} <span class="badge badge--neutral">RunFlat</span>{% endif %}</div>{% if r.model %}<span class="xs muted">{{ r.model }}</span>{% endif %}</td>
+<td style="white-space:nowrap">{{ r.size }}</td>
+<td>{{ r.season }}{% if r.studs %}, шипы{% endif %}</td>
+<td>{{ r.load }}{{ r.speed }}</td>
+<td>{{ r.country }}{% if r.country and r.year %}, {% endif %}{{ r.year }}</td>
+<td style="white-space:nowrap">{{ r.warehouse }}</td>
+<td class="num">{{ r.stock }} шт.</td>
+<td class="num"><b class="strong">{{ r.price|money }}</b></td>
+</tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty"><h3>Ничего не найдено</h3><p>Измените или сбросьте фильтры.</p></div>{% endif %}
+{% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
+</section>
+{% endif %}
 {% endblock %}
