@@ -76,6 +76,14 @@ def _responsible_options(app, conn, current: str = "") -> list:
     return [{"login": login, "label": login + (" (владелец)" if login == app.config["AUTHOR"] else "")} for login in dict.fromkeys(logins)]
 
 
+def check_responsible(app, conn, login, current: str = "") -> None:
+    """The person sent as responsible (or on duty) must be one of the list the form offers (the owner, the staff, the one already set):
+    a forged POST never names a client (a buyer) or anybody else. Empty is «nobody»."""
+    login = str(login or "").strip()
+    if login and login not in {o["login"] for o in _responsible_options(app, conn, current)}:
+        raise orders.OrderError("Ответственный: выберите из списка сотрудников.")
+
+
 SEND_ALL_SECONDS = 15                              # «Отправить все»: a next message starts only this soon after the press, so a press is at
                                                    # most 15 s + one send (gunicorn and nginx cut a request at 120 s; one send alone as before)
 MAX_NEW_ROWS = 20                                  # positions in the window of a new order; more are added in the card
@@ -642,6 +650,7 @@ def register(app) -> None:
         try:
             if len(rows) > MAX_NEW_ROWS:
                 raise orders.OrderError("В новом заказе не больше %d позиций: остальные добавьте в карточке." % MAX_NEW_ROWS)
+            check_responsible(app, conn, fields.get("responsible"))
             items, account = [], window_account(conn, fields) if rows else None
             for row in rows:                                              # every position is checked before anything is written
                 args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock", account,
@@ -683,6 +692,7 @@ def register(app) -> None:
         try:
             if stage_id is None:
                 raise orders.OrderError("Этап выбран неверно.")
+            check_responsible(app, conn, changes.get("responsible"), card["responsible"])
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
@@ -809,6 +819,7 @@ def register(app) -> None:
         typed_row = {"row_" + k: request.form.get(k, "").strip() for k in ("goods_id", "query", "qty", "sale_unit", "sale_auto")}
         typed_row = typed_row if typed_row["row_query"] else {}
         try:
+            check_responsible(app, conn, changes.get("responsible"), card["responsible"])
             changed = orders.update_card(conn, card_id, changes, local_iso(), author())
         except orders.OrderError as err:
             flash(str(err), error_kind(conn, changes))
@@ -1155,8 +1166,10 @@ def register(app) -> None:
     @app.route("/orders/settings/responsible", methods=["POST"])
     @login_required
     def orders_default_responsible():
+        conn = get_conn()
         try:
-            orders.set_default_responsible(get_conn(), request.form.get("responsible", ""))
+            check_responsible(app, conn, request.form.get("responsible", ""), orders.default_responsible(conn))
+            orders.set_default_responsible(conn, request.form.get("responsible", ""))
             flash("Ответственный по умолчанию сохранён.", "ok")
         except orders.OrderError as err:
             flash(str(err))
@@ -1166,9 +1179,13 @@ def register(app) -> None:
     @login_required
     def orders_duty():
         """Who gets the clients the points hand over: a person per day of the week, a change for today, the working hours."""
-        f = request.form
+        f, conn = request.form, get_conn()
         try:
-            manager.set_duty(get_conn(), {d: f.get("day%d" % d, "") for d in range(7)}, (_int(f.get("start")) or 0, _int(f.get("end")) or 0),
+            was = manager.duty_settings(conn)
+            for d in range(7):
+                check_responsible(app, conn, f.get("day%d" % d, ""), was["week"].get(d, ""))
+            check_responsible(app, conn, f.get("today", ""), was["today"].get("login", ""))
+            manager.set_duty(conn, {d: f.get("day%d" % d, "") for d in range(7)}, (_int(f.get("start")) or 0, _int(f.get("end")) or 0),
                              f.get("today", ""), local_now().date().isoformat())
             flash("Дежурные сохранены.")
         except (orders.OrderError, ValueError) as err:
