@@ -27,8 +27,8 @@ def _offers(app, conn):
     return view
 
 
-def _visible(app, conn, offers, login=None):
-    return cc.visible(conn, login or current_user()["login"], offers, tochki_feed.config(conn)["supplier_id"],
+def _visible(app, conn, offers, login: str):
+    return cc.visible(conn, login, offers, tochki_feed.config(conn)["supplier_id"],
                       load_reference(app.config["REFERENCE_PATH"]), store.load_brand_map(conn))
 
 
@@ -50,6 +50,8 @@ def _goods_of(view, token: str):
 def catalog(app, conn, login: str, base: str, photos: bool) -> dict:
     """What the catalog page of the client `login` shows (the client's own /shop, and the owner's preview «глазами клиента» at `base`):
     the same rows, filters and prices. `photos=False`: no photo links (the owner's preview; /shop/photo is the client's own)."""
+    if not login:
+        raise ValueError("the catalog of nobody")                 # never the person signed in by default
     items = _visible(app, conn, _offers(app, conn).offers.values(), login)
     f = cc.filters_of(request.args, {i.brand for i in items})
     found = cc.apply(items, f)
@@ -86,7 +88,7 @@ def register(app) -> None:
         view = _offers(app, conn)
         gid = _goods_of(view, token)
         offer = view.offers.get(gid) if gid is not None and hmac.compare_digest(cc.photo_token(app.secret_key, gid), token) else None
-        if offer is None or not _visible(app, conn, [offer]):              # only a position of the client's own set
+        if offer is None or not _visible(app, conn, [offer], current_user()["login"]):              # only a position of the client's own set
             abort(404)
         photos = _photos(app, conn)
         path = photos.path(offer)

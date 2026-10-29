@@ -63,3 +63,6 @@ def test_user_add_takes_a_role(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(PASSWORD + "\n"))
     assert cli.main(["user-add", "--login", "anna", "--password-stdin", "--db", str(db)]) == 0
     assert users.get_role(conn, "anna")["role"] == "owner"
+    monkeypatch.setattr("sys.stdin", io.StringIO(PASSWORD + "\n"))
+    assert cli.main(["user-add", "--login", "pt", "--password-stdin", "--role", "point", "--point-id", "99", "--db", str(db)]) == 2
+    assert not users.exists(conn, "pt")                                                 # no such point

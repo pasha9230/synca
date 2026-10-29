@@ -86,14 +86,14 @@ def test_the_role_conditions_change_every_client_without_their_own_and_a_profile
     assert sorted(prices(page(buyer))) == sorted(prices(page(b2))) == [13580, 65190]    # 12345 × 1.10, 54321 × 1.20
     assert sorted(prices(page(b3))) == [16050, 65190]                                   # 12345 × 1.30
     owner, tok = owner_of(app)
-    data = form_of(page(owner, "/users/clients"), "/users/clients/role")
+    data = form_of(page(owner, "/client-terms"), "/client-terms/role")
     data.update(small=["50"], large=["20"])
-    assert send(owner, "/users/clients/role", tok, data).status_code == 302
+    assert send(owner, "/client-terms/role", tok, data).status_code == 302
     assert sorted(prices(page(buyer))) == sorted(prices(page(b2))) == [18520, 65190]    # 12345 × 1.50: every client without their own
     assert sorted(prices(page(b3))) == [16050, 65190]                                   # the own % is stronger
-    data = form_of(page(owner, "/users/clients/buyer2"), "/users/clients/buyer2")
+    data = form_of(page(owner, "/client-terms/c/buyer2"), "/client-terms/c/buyer2")
     data.update(small=["0"], large=[""])
-    assert send(owner, "/users/clients/buyer2", tok, data).status_code == 302
+    assert send(owner, "/client-terms/c/buyer2", tok, data).status_code == 302
     assert sorted(prices(page(b2))) == [12350, 65190]                                   # buyer2 alone: 0 % up to R17 set by hand
     assert sorted(prices(page(buyer))) == [18520, 65190] and sorted(prices(page(b3))) == [16050, 65190]
 
@@ -101,29 +101,31 @@ def test_the_role_conditions_change_every_client_without_their_own_and_a_profile
 def test_the_brands_of_the_role_and_a_client_s_own_list_and_the_brand_pct(tmp_path):
     app, buyer, conn, _ = make_shop(tmp_path, role=(10, 20))
     owner, tok = owner_of(app)
-    html = page(owner, "/users/clients")
-    data = form_of(html, "/users/clients/role")
+    html = page(owner, "/client-terms")
+    data = form_of(html, "/client-terms/role")
     assert set(data["bk"]) >= {"ikon tyres", "laufenn"}
     set_brand(data, "laufenn", on=True, small="5")
-    assert send(owner, "/users/clients/role", tok, data).status_code == 302
+    assert send(owner, "/client-terms/role", tok, data).status_code == 302
     assert ct.read(conn, ct.ROLE)["brands"] == {"ikon tyres": (None, None), "laufenn": (5.0, None)}
     assert 3500 in prices(page(buyer))                                                  # 3333 × 1.05 → 3500 (the brand's % over the general)
     users.add_user(conn, "buyer2", PASSWORD, NOW, role="client")
-    data = form_of(page(owner, "/users/clients/buyer2"), "/users/clients/buyer2")
+    data = form_of(page(owner, "/client-terms/c/buyer2"), "/client-terms/c/buyer2")
     data["mode"] = ["own"]
     set_brand(data, "ikon tyres", on=False)
     set_brand(data, "laufenn", on=True)
-    assert send(owner, "/users/clients/buyer2", tok, data).status_code == 302
+    assert send(owner, "/client-terms/c/buyer2", tok, data).status_code == 302
     b2 = as_user(app, conn, "buyer2")
     assert prices(page(b2)) == [3500]                                                   # its own list: Laufenn only, the role's % of it
     assert len(prices(page(buyer))) == 3
-    data = form_of(page(owner, "/users/clients/buyer2"), "/users/clients/buyer2")
+    data = form_of(page(owner, "/client-terms/c/buyer2"), "/client-terms/c/buyer2")
     data["mode"] = ["inherit"]
     set_brand(data, "laufenn", small="10")
     set_brand(data, "ikon tyres", on=True)                                              # a tick does not act «как у роли»: not kept
-    assert send(owner, "/users/clients/buyer2", tok, data).status_code == 302
+    assert send(owner, "/client-terms/c/buyer2", tok, data).status_code == 302
     assert ct.read(conn, "buyer2") == {"small": None, "large": None, "mode": "inherit", "brands": {"laufenn": (10.0, None)}}
     assert sorted(prices(page(b2))) == [3670, 13580, 65190]                             # the role's set, its own % of Laufenn
+    data = form_of(page(owner, "/client-terms/c/buyer2"), "/client-terms/c/buyer2")      # «как у роли»: the ticks are the role's set
+    assert sorted(data["bk"][int(k[3:])] for k in data if k.startswith("on_")) == ["ikon tyres", "laufenn"]
 
 
 def test_a_brand_key_is_kept_bare_and_a_subject_s_rows_are_written_whole(tmp_path):
@@ -143,20 +145,20 @@ def test_a_brand_key_is_kept_bare_and_a_subject_s_rows_are_written_whole(tmp_pat
     assert not conn.execute("SELECT 1 FROM client_terms WHERE subject IN ('olya', 'owner2')").fetchone()
 
 
-@pytest.mark.parametrize("value", ["-1", "300.01", "301", "abc", "1.234", "1e2", "10%", " 5 5", "nan", "inf", "+5"])
+@pytest.mark.parametrize("value", ["-1", "300.01", "301", "abc", "1.234", "1e2", "10%", " 5 5", "nan", "inf", "+5", "١٢"])
 def test_a_wrong_pct_is_refused_under_its_field_and_nothing_is_written(tmp_path, value):
     app, buyer, conn, _ = make_shop(tmp_path, role=(10, 20))
     owner, tok = owner_of(app)
-    data = form_of(page(owner, "/users/clients"), "/users/clients/role")
+    data = form_of(page(owner, "/client-terms"), "/client-terms/role")
     data["small"] = [value]
-    response = send(owner, "/users/clients/role", tok, data)
+    response = send(owner, "/client-terms/role", tok, data)
     html = response.get_data(as_text=True)
     assert response.status_code == 400 and 'data-field-error="small"' in html and "от 0 до 300" in html
     assert 'name="small" value="%s"' % value in html                                     # what was typed comes back
     assert ct.read(conn, ct.ROLE)["small"] == 10.0
-    data = form_of(page(owner, "/users/clients"), "/users/clients/role")
+    data = form_of(page(owner, "/client-terms"), "/client-terms/role")
     set_brand(data, "ikon tyres", large=value)
-    response = send(owner, "/users/clients/role", tok, data)
+    response = send(owner, "/client-terms/role", tok, data)
     i = data["bk"].index("ikon tyres")
     assert response.status_code == 400 and 'data-field-error="l_%d"' % i in response.get_data(as_text=True)
     assert ct.read(conn, ct.ROLE)["brands"]["ikon tyres"] == (None, None)
@@ -171,20 +173,20 @@ def test_the_pct_that_is_taken(value, pct):
 def test_the_journal_has_the_author_and_the_changes_and_no_password(tmp_path):
     app, buyer, conn, _ = make_shop(tmp_path, role=(10, 20))
     owner, tok = owner_of(app)
-    data = form_of(page(owner, "/users/clients/buyer"), "/users/clients/buyer")
+    data = form_of(page(owner, "/client-terms/c/buyer"), "/client-terms/c/buyer")
     data.update(small=["12"], mode=["own"])
     set_brand(data, "ikon tyres", on=True, large="7")
-    assert send(owner, "/users/clients/buyer", tok, data).status_code == 302
+    assert send(owner, "/client-terms/c/buyer", tok, data).status_code == 302
     rows = conn.execute("SELECT author, detail FROM audit WHERE action = 'client_terms_changed'").fetchall()
     assert len(rows) == 1 and rows[0][0] == app.config["AUTHOR"]
     detail = json.loads(rows[0][1])
     assert detail["subject"] == "buyer" and detail["from"]["small"] is None and detail["to"] == {"small": 12.0, "large": None, "mode": "own"}
-    assert detail["brands_added"] == ["ikon tyres"]
+    assert detail["brands_added"] == ["ikon tyres"] and detail["brand_pct"] == {"ikon tyres": [None, 7.0]}   # a new brand's % too
     everything = " ".join(r[0] for r in conn.execute("SELECT detail FROM audit"))
     assert PASSWORD not in everything and "pbkdf2" not in everything
     from tires_sync.panel import texts
     assert texts.audit_text({"action": "client_terms_changed", "detail": detail}) == \
-        "Условия клиента buyer: до R17 — → 12 %, бренды свой список, бренды +1 −0"
+        "Условия клиента buyer: до R17 — → 12 %, бренды свой список, бренды +1 −0, свой % у брендов: 1"
 
 
 # --- rights ----------------------------------------------------------------------------------------------------------------------------
@@ -197,25 +199,25 @@ def test_nobody_but_the_owner_changes_the_conditions(tmp_path, role):
     if role != "client":
         users.add_user(conn, "who", PASSWORD, NOW, role=role, point_id=pid)
     other = as_user(app, conn, "buyer" if role == "client" else "who")
-    for url, data in (("/users/clients/role", {"small": "0", "large": "0"}), ("/users/clients/buyer", {"small": "0", "mode": "inherit"}),
+    for url, data in (("/client-terms/role", {"small": "0", "large": "0"}), ("/client-terms/c/buyer", {"small": "0", "mode": "inherit"}),
                       ("/users/invite", {"role": "client", "c_small": "0", "c_mode": "inherit"})):
         assert other.post(url, data=dict(data, csrf="tok")).status_code == 403, url
     assert ct.read(conn, ct.ROLE)["small"] == 10.0 and ct.read(conn, "buyer")["small"] is None
     assert not conn.execute("SELECT 1 FROM panel_invite").fetchone()
-    reads = [other.get(u).status_code for u in ("/users/clients", "/users/clients/buyer", "/users/clients/buyer/preview")]
+    reads = [other.get(u).status_code for u in ("/client-terms", "/client-terms/c/buyer", "/client-terms/c/buyer/preview")]
     assert reads == ([200, 200, 200] if role == "partner" else [403, 403, 403])          # the partner looks (section «users»: смотреть)
     if role == "partner":
-        html = other.get("/users/clients").get_data(as_text=True)
-        assert 'action="/users/clients/role"' not in html and "ro-form" in html
+        html = other.get("/client-terms").get_data(as_text=True)
+        assert 'action="/client-terms/role"' not in html and "ro-form" in html
 
 
 def test_the_pages_of_a_login_that_is_not_a_client_are_404(tmp_path):
     app, buyer, conn, _ = make_shop(tmp_path)
     users.add_user(conn, "olya", PASSWORD, NOW, role="chats")
     owner, tok = owner_of(app)
-    for url in ("/users/clients/olya", "/users/clients/olya/preview", "/users/clients/nobody", "/users/clients/nobody/preview"):
+    for url in ("/client-terms/c/olya", "/client-terms/c/olya/preview", "/client-terms/c/nobody", "/client-terms/c/nobody/preview"):
         assert owner.get(url).status_code == 404, url
-    assert owner.post("/users/clients/olya", data={"csrf": tok, "small": "1", "mode": "inherit"}).status_code == 404
+    assert owner.post("/client-terms/c/olya", data={"csrf": tok, "small": "1", "mode": "inherit"}).status_code == 404
     assert not conn.execute("SELECT 1 FROM client_terms WHERE subject = 'olya'").fetchone()
 
 
@@ -226,17 +228,17 @@ def test_the_preview_is_the_client_s_own_catalog_and_not_the_client_s_to_open(tm
     users.add_user(conn, "buyer2", PASSWORD, NOW, role="client")
     ct.save(conn, "buyer2", 30, 30, "inherit", {}, NOW, "owner")
     owner, tok = owner_of(app)
-    preview = owner.get("/users/clients/buyer/preview")
+    preview = owner.get("/client-terms/c/buyer/preview")
     assert preview.status_code == 200 and "no-store" in preview.headers["Cache-Control"]
     html = preview.get_data(as_text=True)
     assert sorted(prices(html)) == sorted(prices(page(buyer)))
-    assert sorted(prices(page(owner, "/users/clients/buyer2/preview"))) == sorted(prices(page(as_user(app, conn, "buyer2"))))
+    assert sorted(prices(page(owner, "/client-terms/c/buyer2/preview"))) == sorted(prices(page(as_user(app, conn, "buyer2"))))
     assert "Склад 2" in html and "/shop/photo/" not in html
     for secret in ("12 345", "12345", "SECRETCODE", "77001", "cdn.supplier-one.test", "img.4tochki.test"):
         assert secret not in html[html.index("Найдено"):], secret
-    filtered = page(owner, "/users/clients/buyer/preview?size=245/45R18")                # the filters and their links stay on the preview
-    assert prices(filtered) == [65190] and 'action="/users/clients/buyer/preview"' in filtered and 'action="/shop"' not in filtered
-    for url in ("/users/clients/buyer/preview", "/users/clients/buyer2/preview", "/users/clients", "/users/clients/buyer"):
+    filtered = page(owner, "/client-terms/c/buyer/preview?size=245/45R18")                # the filters and their links stay on the preview
+    assert prices(filtered) == [65190] and 'action="/client-terms/c/buyer/preview"' in filtered and 'action="/shop"' not in filtered
+    for url in ("/client-terms/c/buyer/preview", "/client-terms/c/buyer2/preview", "/client-terms", "/client-terms/c/buyer"):
         assert buyer.get(url).status_code == 403, url
 
 
@@ -335,3 +337,25 @@ def test_the_conditions_of_an_invitation_are_kept_for_a_client_only(tmp_path):
         users.create_invite(conn, "client", None, "", NOW, "owner", '{"small": 999, "large": null, "brands": null}')
     users.create_invite(conn, "viewer", None, "", NOW, "owner", ct.invite_terms("5", "", "inherit", []))   # the module keeps it a client's only
     assert conn.execute("SELECT client_terms FROM panel_invite WHERE role = 'viewer'").fetchall() == [("",), ("",)]
+
+
+@pytest.mark.parametrize("name", ["clients", "role", "active", "preview"])
+def test_a_login_never_takes_the_address_of_the_conditions(tmp_path, name):
+    """Review: the conditions lived under /users/clients/…, so /users/<login>/role of a user «clients» was the role's conditions (written
+    empty) and a client «role» saved over the role's: now under /client-terms, apart from /users/<login>/…"""
+    app, buyer, conn, _ = make_shop(tmp_path, role=(10, 20))
+    users.add_user(conn, name, PASSWORD, NOW, role="viewer")
+    owner, tok = owner_of(app)
+    assert owner.post("/users/%s/role" % name, data={"csrf": tok, "role": "chats", "display_name": "Оля"}).status_code == 302
+    assert users.get_role(conn, name)["role"] == "chats"
+    assert owner.post("/users/%s/active" % name, data={"csrf": tok, "active": "0"}).status_code == 302
+    assert not users.get_role(conn, name)["active"]
+    assert ct.read(conn, ct.ROLE)["small"] == 10.0 and ct.read(conn, ct.ROLE)["brands"] == {"ikon tyres": (None, None)}
+    assert not conn.execute("SELECT 1 FROM audit WHERE action = 'client_terms_changed'").fetchone()
+    users.set_role(conn, name, "client", None, "", NOW, "owner")
+    html = page(owner, "/client-terms/c/%s" % name)
+    assert 'action="/client-terms/c/%s"' % name in html
+    data = form_of(html, "/client-terms/c/%s" % name)
+    data.update(small=["40"], mode=["own"])
+    assert send(owner, "/client-terms/c/%s" % name, tok, data).status_code == 302
+    assert ct.read(conn, name)["small"] == 40.0 and ct.read(conn, ct.ROLE)["small"] == 10.0

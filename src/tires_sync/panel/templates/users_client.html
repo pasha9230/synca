@@ -4,10 +4,10 @@
 {% set mode = typed.get("mode", own.mode) if typed else own.mode %}
 <header class="page-head"><div><h1>Условия клиента {{ login }}{% if info.display_name %} · {{ info.display_name }}{% endif %}</h1>
 <p class="sub">Свои условия сильнее условий роли. Пусто — как у роли (сейчас у роли: до R17 {{ fmt(role.small) or "не задано" }}, с R18 {{ fmt(role.large) or "не задано" }} %).
-<a href="/users/clients">← Условия клиентов</a> · <a href="/users/clients/{{ login }}/preview">Каталог глазами клиента</a></p></div></header>
+<a href="/client-terms">← Условия клиентов</a> · <a href="/client-terms/c/{{ login }}/preview">Каталог глазами клиента</a></p></div></header>
 <section class="card card-body stack">
 {% set ro = not can_post("users_client_save") %}
-{% if not ro %}<form method="post" action="/users/clients/{{ login }}" class="stack">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% if not ro %}<form method="post" action="/client-terms/c/{{ login }}" class="stack">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <div class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">
 <label class="field"><span class="label">Общий % до R17</span><input class="input input--num" name="small" value="{{ typed.get('small', '') if typed else fmt(own.small) }}" inputmode="decimal" placeholder="как у роли" style="max-width:140px"></label>
 <label class="field"><span class="label">Общий % с R18</span><input class="input input--num" name="large" value="{{ typed.get('large', '') if typed else fmt(own.large) }}" inputmode="decimal" placeholder="как у роли" style="max-width:140px"></label>

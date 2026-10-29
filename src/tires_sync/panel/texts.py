@@ -187,16 +187,16 @@ def _split_text(d: dict) -> str:
 def _client_terms_text(d: dict) -> str:
     """«Условия клиента ivan: до R17 10 → 12 %, бренды +2 −1»; the role's conditions are «роли «Клиент»». Only %s and brand keys."""
     pct = lambda v: "—" if v is None else "%g" % v if isinstance(v, (int, float)) else _q(v)
-    was, now = d.get("from") or {}, d.get("to") or {}
+    was, now = (x if isinstance(x, dict) else {} for x in (d.get("from"), d.get("to")))
     parts = ["%s %s → %s %%" % (label, pct(was.get(k)), pct(now.get(k))) for k, label in (("small", "до R17"), ("large", "с R18"))
              if was.get(k) != now.get(k)]
     if was.get("mode") != now.get("mode"):
         parts.append("бренды %s" % ("свой список" if now.get("mode") == "own" else "как у роли"))
-    added, removed = d.get("brands_added") or [], d.get("brands_removed") or []
+    added, removed, pcts = (x if isinstance(x, (list, dict)) else [] for x in (d.get("brands_added"), d.get("brands_removed"), d.get("brand_pct")))
     if added or removed:
         parts.append("бренды +%d −%d" % (len(added), len(removed)))
-    if d.get("brand_pct"):
-        parts.append("%% брендов изменён: %d" % len(d["brand_pct"]))
+    if pcts:
+        parts.append("свой %% у брендов: %d" % len(pcts))
     who = "роли «Клиент»" if d.get("subject") == "*" else "клиента %s" % _q(d.get("subject"))
     return "Условия %s: %s" % (who, ", ".join(parts) or "без изменений")
 

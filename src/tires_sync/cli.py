@@ -2463,6 +2463,7 @@ def _cmd_users(args) -> int:
             print("%s  (создан %s)" % (user["login"], user["created"]))
         return 0
     if args.command == "user-add":
+        users._check_role(conn, args.role, args.point_id)                     # a point of a manager of a point is there
         login = users.add_user(conn, args.login, _read_password(args), _now(), role=args.role, point_id=args.point_id, display_name=args.name)
         print("пользователь «%s» добавлен, роль %s" % (login, users.ROLES[args.role]))
     elif args.command == "user-passwd":

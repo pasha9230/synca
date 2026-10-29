@@ -17,7 +17,7 @@ ROLE = "*"
 PCT_MAX = 300
 MAX_BRANDS = 2000
 MODES = ("inherit", "own")
-PCT = re.compile(r"^\d{1,3}(?:\.\d{1,2})?$")
+PCT = re.compile(r"^[0-9]{1,3}(?:\.[0-9]{1,2})?$")           # ASCII digits only (\d takes other scripts too)
 PCT_TEXT = "Наценка: число от 0 до 300, не больше двух знаков после запятой."
 
 Pct = Tuple[Optional[float], Optional[float]]
@@ -101,7 +101,7 @@ def save(conn, subject: str, small, large, mode: str, brands, now: str, author: 
               "from": {"small": old["small"], "large": old["large"], "mode": old["mode"]},
               "to": {"small": small, "large": large, "mode": mode},
               "brands_added": sorted(set(rows) - set(old["brands"])), "brands_removed": sorted(set(old["brands"]) - set(rows)),
-              "brand_pct": {k: list(v) for k, v in sorted(rows.items()) if old["brands"].get(k) != v and k in old["brands"]}}
+              "brand_pct": {k: list(v) for k, v in sorted(rows.items()) if old["brands"].get(k, (None, None)) != v}}   # new or changed %s
     audit(conn, now, author, "client_terms_changed", detail, commit)
     return detail
 

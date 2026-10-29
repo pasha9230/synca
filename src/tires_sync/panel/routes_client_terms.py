@@ -77,11 +77,11 @@ def register(app) -> None:
         return render_template("users_clients.html", role=role, rows=_typed_rows(typed, choices) if typed else _rows(choices, role["brands"]),
                                typed=typed, clients=clients, describe=ct.describe, fmt=_fmt), status
 
-    @app.route("/users/clients")
+    @app.route("/client-terms")
     def users_clients_page():
         return role_page(get_conn())
 
-    @app.route("/users/clients/role", methods=["POST"])
+    @app.route("/client-terms/role", methods=["POST"])
     def users_clients_role_save():
         conn = get_conn()
         try:
@@ -90,7 +90,7 @@ def register(app) -> None:
             flash(str(err), "field:" + err.field if err.field else "error")
             return role_page(conn, 400, request.form)
         flash("Условия роли «Клиент» сохранены: действуют для всех клиентов без своих условий.", "ok")
-        return redirect("/users/clients")
+        return redirect("/client-terms")
 
     def client_page(conn, login, status=200, typed=None):
         own, role = ct.read(conn, login), ct.read(conn, ct.ROLE)
@@ -98,15 +98,17 @@ def register(app) -> None:
         rows = _typed_rows(typed, choices) if typed else _rows(choices, own["brands"])
         for r in rows:                                                # what the role gives, beside the client's own
             r["role_on"], r["role_pct"] = r["key"] in role["brands"], role["brands"].get(r["key"], (None, None))
+            if not typed and own["mode"] != "own":
+                r["on"] = r["role_on"]                                # «как у роли»: the ticks show the role's set (a switch to own starts from it)
         return render_template("users_client.html", login=login, info=users.get_role(conn, login), own=own, role=role, rows=rows, typed=typed,
                                fmt=_fmt), status
 
-    @app.route("/users/clients/<login>")
+    @app.route("/client-terms/c/<login>")
     def users_client_page(login):
         conn = get_conn()
         return client_page(conn, _client_or_404(conn, login))
 
-    @app.route("/users/clients/<login>", methods=["POST"])
+    @app.route("/client-terms/c/<login>", methods=["POST"])
     def users_client_save(login):
         conn = get_conn()
         login = _client_or_404(conn, login)
@@ -116,14 +118,14 @@ def register(app) -> None:
             flash(str(err), "field:" + err.field if err.field else "error")
             return client_page(conn, login, 400, request.form)
         flash("Условия клиента %s сохранены." % login, "ok")
-        return redirect("/users/clients/" + login)
+        return redirect("/client-terms/c/" + login)
 
-    @app.route("/users/clients/<login>/preview")
+    @app.route("/client-terms/c/<login>/preview")
     def users_client_preview(login):
         """«Каталог глазами клиента»: the very rows of the client's /shop (client_catalog with the client's conditions), without photos."""
         conn = get_conn()
         login = _client_or_404(conn, login)
-        page = routes_shop.catalog(app, conn, login, "/users/clients/%s/preview" % login, photos=False)
+        page = routes_shop.catalog(app, conn, login, "/client-terms/c/%s/preview" % login, photos=False)
         response = make_response(render_template("users_client_preview.html", login=login, info=users.get_role(conn, login), **page))
         response.headers["Cache-Control"] = "private, no-store"
         return response
