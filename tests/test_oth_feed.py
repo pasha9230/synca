@@ -119,7 +119,8 @@ def test_the_cycle_keeps_and_marks_the_positions_on_oth_in_every_account_and_let
     before = {1: ads_of(public(tmp_path, 1)), 2: ads_of(public(tmp_path, 2))}
     cid = on_oth(tmp_path, "101", "102")
     assert run(tmp_path, AFTER) == 0                                     # 101 fell to 2, 102 left the unload
-    capsys.readouterr()
+    out = capsys.readouterr()
+    assert "held_low_stock" not in out.out + out.err and "stock:" not in out.out + out.err    # the check knows them: not even a warning
     for acct, suffix in ((1, ""), (2, "_a2")):
         data = public(tmp_path, acct)
         assert {"101" + suffix, "102" + suffix} <= set(ads_of(data))
@@ -148,11 +149,12 @@ def test_a_stocked_position_on_oth_gets_the_line_and_loses_it_when_the_order_lea
     prepared(tmp_path, accounts=("A",))
     assert run(tmp_path, FIVE) == 0
     cid = on_oth(tmp_path, "103")
-    assert run(tmp_path, FIVE) == 0
+    before = snapshot(tmp_path, "103")
+    assert run(tmp_path, AFTER) == 0                                     # 103 has a new price: its ad is built again and saved
     assert description(public(tmp_path), "103").startswith(LINE + "\n")
-    assert LINE not in (snapshot(tmp_path, "103") or "")
+    assert snapshot(tmp_path, "103") != before and LINE not in snapshot(tmp_path, "103")
     move(tmp_path, cid, "at_point")                                      # the client came back
-    assert run(tmp_path, FIVE) == 0
+    assert run(tmp_path, AFTER) == 0
     assert LINE not in description(public(tmp_path), "103")
 
 
