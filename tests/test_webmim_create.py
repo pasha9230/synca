@@ -1106,6 +1106,8 @@ def test_a_list_longer_than_the_pages_read_makes_nothing(tmp_path, monkeypatch, 
     result = place(conn, mine, fake)
     assert not fake.posts("/api/v2/orders") and not result["ok"]
     assert result["state"] == ("unknown" if lost else "refused") and "не все страницы" in result["text"]
+    assert "оформите вручную" in result["text"] and "недоступен" not in result["text"]
+    assert len([c for c in fake.calls if c[1] == "/api/v2/orders"]) == 1                # the count of pages is known from the first one
 
 
 class UncountedWebmim(FakeWebmim):

@@ -275,6 +275,8 @@ def _ours(conn, client, card: dict, now: str, sleep, out_of_time: Callable[[], b
     taken = {r[0] for r in conn.execute("SELECT webmim_id FROM order_card WHERE webmim_id != '' AND id != ?", (card["id"],))}
     found, counts, read, last = {}, {}, 0, 0
     for rows in webmim_match._every_page(client, sleep, counts):  # every page: WebMIM's rows are not by date (2026-10-28)
+        if (counts.get("pages_total") or 0) > webmim_match.MAX_PAGES:
+            raise _Incomplete()                             # known from the first page: no need to read the rest
         if out_of_time():                                   # the page must answer before nginx gives up (60 s)
             raise _OutOfTime()
         read, last = read + 1, len(rows)
@@ -387,7 +389,11 @@ def _press(conn, card_id, client, server: str, now: str, today: date, author: st
                                    now, author, "red")
                 webmim_id, created = order["id"], True
             return _positions(conn, card, client, webmim_id, where, chosen, now, author, start, clock)
-        except (OSError, webmim_orders.OrdersError, _OutOfTime, _Incomplete) as err:
+        except _Incomplete as err:                           # before any order is made (webmim_id is empty): a repeat does not help
+            return _finish(conn, card_id, "unknown" if lost else "refused", "Заказ в WebMIM не создан: %s. Сверьте в кабинете WebMIM по номеру "
+                           "панели %d и оформите вручную%s." % (_why(err), card_id, " (итог прошлого нажатия неизвестен: заказ мог создаться)" if lost else ""),
+                           now, author, "red")
+        except (OSError, webmim_orders.OrdersError, _OutOfTime) as err:
             if webmim_id:
                 return _finish(conn, card_id, "partial", "Заказ WebMIM недосоздан (%s). Нажмите «Досоздать в WebMIM»: панель прочитает, что уже есть "
                                "в заказе WebMIM, и добавит только недостающее." % _why(err), now, author, "red")
