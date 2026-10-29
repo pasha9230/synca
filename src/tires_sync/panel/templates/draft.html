@@ -8,7 +8,7 @@
 <h1>Черновик № {{ r.draft.id }}</h1><p class="sub">Проверьте, что изменится. Пока вы не нажмёте «Подтвердить», настройки и фид остаются прежними.</p></div>
 <div class="actions"><span class="badge badge--brand badge--dot" style="align-self:center;font-size:13px;padding:4px 12px">{{ draft_status(r.draft.status) }}</span></div></header>
 {% if r.stale %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Черновик устарел: настройки уже изменены. Создайте новый.</div></div>{% endif %}
-{% if r.needs_strong %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">Есть процент вне допустимого диапазона: нужно усиленное подтверждение.</div></div>{% endif %}
+{% if r.needs_strong %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{% if r.pct_strong %}Есть процент вне допустимого диапазона: нужно усиленное подтверждение.{% endif %}{% if r.own_risky %}{% if r.pct_strong %}<br>{% endif %}Своя цена ниже закупки или отличается от цены фида больше чем на 30 %: проверьте, нет ли опечатки, и подтвердите ещё раз.<ul style="margin:4px 0 0">{% for line in r.own_risky %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}</div></div>{% endif %}
 <section class="summary summary--{{ tone }}">
 <div class="summary-strip"></div>
 <div class="summary-body">

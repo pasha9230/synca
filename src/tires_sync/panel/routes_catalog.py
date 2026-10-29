@@ -329,9 +329,43 @@ def register(app) -> None:
         data = service.catalog_item_view(conn, effective, parsed, ref, goods_id, now().date(), has_right("money"), can("orders"))
         if data is None:
             abort(404)
+        if has_right("money"):                                       # the own prices: the owner and the partner see them, the owner sets them
+            general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)
+            data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id],
+                                                        ref, parsed.offers)
+            data["purchase"] = parsed.offers[goods_id].base_price
         if wait is None and request.args.get("wait") and can_post("catalog_wait"):
             wait = _wait_window(conn, goods_id, {}, "", _item_path(goods_id), parsed.offers.get(goods_id))
         return render_template("catalog_item.html", entity=data, wait=wait, wait_url=_item_path(goods_id) + "?wait=1")
+
+    @app.route("/catalog/item/<goods_id>/own-price", methods=["POST"])
+    @login_required
+    def catalog_own_price(goods_id):
+        """The own price of a position in the accounts ticked: into the working draft (applied with «Применить» like every change). The owner only
+        (the section «catalog» to change it and the right «money»; common.SECTION_OF, NEEDS)."""
+        conn = get_conn()
+        form = request.form
+        feed = {a["id"] for a in connections.list_feed_accounts(conn)}
+        try:
+            accounts = [int(a) for a in form.getlist("a") if str(a).isdigit()]
+            if not accounts or any(a not in feed for a in accounts):
+                raise ValueError("Отметьте аккаунты, где поставить цену.")
+            if form.get("action") == "clear":
+                value = None
+            else:
+                kind = form.get("kind")
+                text = str(form.get("value") or "").replace(" ", "").replace("\u00a0", "").replace(",", ".").replace("−", "-")
+                if kind not in ("pct", "price") or not re.fullmatch(r"[+\-]?\d+(\.\d+)?", text):
+                    raise ValueError("Введите процент к закупке или цену продажи числом.")
+                value = {"pct": float(text)} if kind == "pct" else {"price": float(text)}
+            if value is not None and goods_id not in context(app)[2].offers:          # «Как у бренда» also for a position gone
+                raise ValueError("Такой позиции нет в выгрузке.")
+            staging.set_own_price(conn, goods_id, accounts, value, now_iso())
+        except (StaleDraftError, ValueError) as err:
+            flash(str(err))
+            return redirect(_item_path(goods_id))
+        flash(("Своя цена" if value else "«Как у бренда»") + " в черновике: подтвердите изменения, чтобы они попали в фид.")
+        return redirect(_item_path(goods_id))
 
     @app.route("/catalog/item/<goods_id>")
     @login_required

@@ -57,6 +57,7 @@ def settings_from_dict(raw: dict, enforce_pct_limit: bool = True) -> Settings:
         overrides=_overrides(raw.get("overrides")),
         excluded_brands=_excluded(raw.get("excluded_brands")),
         excluded_sizes=_excluded_sizes(raw.get("excluded_sizes")),
+        price_overrides=price_overrides(raw.get("price_overrides")),
     )
     _validate(settings, enforce_pct_limit)
     return settings
@@ -94,6 +95,36 @@ def _overrides(raw) -> dict:
     if not isinstance(raw, dict) or any(v not in VALID for v in raw.values()):
         raise ValueError("overrides: допустимы только значения on и off")
     return {str(k): v for k, v in raw.items()}
+
+
+_OWN_KEY = re.compile(r"^[1-9][0-9]*:[^\s:][^\s]*$")
+OWN_PCT_RANGE = (-50.0, 300.0)
+OWN_PRICE_MAX = 1000000
+
+
+def own_price_value(value) -> tuple:
+    """("pct", float) or ("price", int) of one own price as the settings keep it: {"pct": 12.5} or {"price": 6990}."""
+    if not isinstance(value, dict) or len(value) != 1:
+        raise ValueError("price_overrides: нужен ровно один вид цены: pct или price")
+    (kind, number), = value.items()
+    if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+        raise ValueError("price_overrides: нужно число")
+    if kind == "pct":
+        if not OWN_PCT_RANGE[0] <= number <= OWN_PCT_RANGE[1]:
+            raise ValueError("Процент к закупке: от %g до %g." % OWN_PCT_RANGE)
+        return "pct", float(number)
+    if kind == "price":
+        if number != int(number) or not 1 <= number <= OWN_PRICE_MAX:
+            raise ValueError("Цена продажи: целое число от 1 до %d ₽." % OWN_PRICE_MAX)
+        return "price", int(number)
+    raise ValueError("price_overrides: вид цены pct или price")
+
+
+def price_overrides(raw) -> dict:
+    raw = raw or {}
+    if not isinstance(raw, dict) or any(not isinstance(k, str) or not _OWN_KEY.match(k) for k in raw):
+        raise ValueError("price_overrides: ключи вида «<аккаунт>:<товар>»")
+    return {k: own_price_value(v) for k, v in raw.items()}
 
 
 def load_settings(path) -> Settings:

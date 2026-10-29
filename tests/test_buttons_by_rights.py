@@ -170,6 +170,8 @@ SEEN = [
     ("/chats/{chat}", 'Только просмотр: отвечать клиентам', {"viewer"}),
     ("/catalog", 'action="/feed/update/fetch"', {"owner"}),                                             # publishing the feed (право «публиковать»)
     ("/catalog", 'action="/catalog/stage"', {"owner"}),
+    ("/catalog/item/100", 'action="/catalog/item/100/own-price"', {"owner"}),                           # своя цена позиции: только владелец (2026-10-29)
+    ("/catalog/item/100", "Своя цена по аккаунтам", {"owner", "partner"}),                                # партнёр видит, не правит
     ("/catalog", 'formaction="/shares/new"', {"owner", "partner", "chats"}),                            # a link for the client
     ("/feeds", 'href="/feed/update"', {"owner"}),
     ("/", 'href="/feed/update"', {"owner"}),

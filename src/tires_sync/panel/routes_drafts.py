@@ -334,6 +334,9 @@ def register(app) -> None:
             flash("Подтвердите снятие: исчезнет %d объявлений, это больше порога защиты (%d). Отметьте «Я понимаю»." % (
                 review["guard"]["gone"], review["guard"]["limit"]))
             return redirect("/draft/%d" % draft_id)
+        if review["own_risky"] and not strong:                 # a fixed own price far from the feed's or below the purchase: asked once more
+            flash("Своя цена ниже закупки или сильно отличается от цены фида: отметьте «Подтверждаю значения вне диапазона».")
+            return redirect("/draft/%d" % draft_id)
         try:
             confirm_draft(get_conn(), draft_id, now_iso(), author(), strong=strong)
         except StaleDraftError:

@@ -18,7 +18,7 @@ from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 from . import photo_library, store
 from .catalog import normalize_model, resolve_brand
 from .feed import sale_terms, stable_date_end
-from .pricing import final_price
+from .pricing import position_price
 
 MAX_BYTES = 20_000_000
 MAX_ADS = 5000
@@ -507,7 +507,8 @@ def pack_count(ad_id: str) -> int:
 
 
 def prices_for(conn, account_id: int, offers: Dict[str, object], settings) -> Dict[str, int]:
-    """The price of every stored ad that the supplier has, by the pricing rule of the account (a pack costs its count of pieces).
+    """The price of every stored ad that the supplier has, by the account's own price of the position, else its pricing rule (a pack costs its
+    count of pieces).
     An ad without a rule or with a bad supplier price gets no entry and keeps the price it has."""
     out: Dict[str, int] = {}
     for ad_id in stored_ids(conn, account_id):
@@ -515,10 +516,10 @@ def prices_for(conn, account_id: int, offers: Dict[str, object], settings) -> Di
         base = getattr(offer, "base_price", 0)
         if offer is None or not base or base <= 0:
             continue
-        rule = settings.pricing.get((offer.brand_key, offer.season))
-        if rule is None:
+        price = position_price(offer, settings)                              # the account's own price of the position first
+        if price is None:
             continue
-        out[ad_id] = final_price(base, rule, offer.diameter) * pack_count(ad_id)
+        out[ad_id] = price * pack_count(ad_id)
     return out
 
 

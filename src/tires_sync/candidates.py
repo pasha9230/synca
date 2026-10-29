@@ -7,7 +7,7 @@ from .catalog import resolve_brand, resolve_model
 from .filters import exclusion_reason
 from .models import Offer, Settings
 from .overrides import FORCEABLE, override_key
-from .pricing import final_price
+from .pricing import position_price
 
 
 @dataclass(frozen=True)
@@ -67,13 +67,12 @@ def evaluate(
             continue
         problems: List[str] = []
         price = 0
-        rule = settings.pricing.get((offer.brand_key, offer.season))
-        if rule is None:
+        if (offer.brand_key, offer.season) not in settings.pricing and gid not in settings.own_prices:
             problems.append("no_pricing_rule")
         elif offer.base_price <= 0:
             problems.append("bad_price:%s" % offer.base_price)
         else:
-            price = final_price(offer.base_price, rule, offer.diameter)
+            price = position_price(offer, settings)                          # its own price in this account first, else the brand's
         avito_brand = resolve_brand(offer.brand_key, ref, brand_map)
         avito_model = None
         if avito_brand is None:

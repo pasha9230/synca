@@ -75,6 +75,8 @@ class Settings:
     pack4_rules: FrozenSet[str] = frozenset()  # "<бренд или *>|<сезон или *>|<радиус или *>": для каких позиций делать комплект
     excluded_sizes: FrozenSet[str] = frozenset()  # "<ключ бренда или *>|<радиус>": бренд (или все бренды поставщика) в этом радиусе не выгружается
     excluded_brands: FrozenSet[str] = frozenset()  # ключи брендов (S<N>: у доп. поставщиков), которые не уходят в выгрузку
+    price_overrides: Dict[str, Tuple[str, float]] = field(default_factory=dict)  # своя цена позиции: "<аккаунт>:<товар>" -> ("pct", % к закупке) | ("price", цена)
+    own_prices: Dict[str, Tuple[str, float]] = field(default_factory=dict)  # свои цены одного аккаунта по товару: заполняет только connections.effective_settings
 
     def pack4_for(self, offer) -> bool:
         """Does the second «за 4 шт.» ad apply to this position? Switch on without rules (old settings) means all."""
