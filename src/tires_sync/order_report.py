@@ -181,8 +181,11 @@ def build(conn, start: str, end: str, point: str = "") -> dict:
 def _counted(conn, rows: List[dict]) -> List[dict]:
     """The sales as the analytics counts them: those of the orders from WEBMIM_FROM on at WebMIM's price where there is one (the one rule of
     the report and of the order's page)."""
+    from . import oth_sale
+    from_oth = oth_sale.sale_ids(conn)                     # the tyres taken from «На ОТХ»: at the old order's purchase, as written
+
     def takes(r):
-        return r["source"] == "order" and r["day"] >= WEBMIM_FROM
+        return r["source"] == "order" and r["day"] >= WEBMIM_FROM and r.get("id") not in from_oth
     prices = webmim_prices(conn, {_order_id(r["note"]) for r in rows if takes(r)} - {None})
     return [_at_webmim(r, prices.get(_order_id(r["note"]), {}).get(str(r["goods_id"]))) if takes(r) else r for r in rows]
 

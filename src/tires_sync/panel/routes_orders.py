@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import order_oth, point_log
+from .. import order_oth, oth_sale, point_log
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
@@ -430,6 +430,9 @@ def register(app) -> None:
         query = request.args.get("q", "").strip()
         account = window_account(conn, request.args) if len(query) >= 2 else None
         items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account) if len(query) >= 2 else []
+        if items and own_point() is None:                                      # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
+            marks = oth_sale.find_hint(conn, [it["goods_id"] for it in items])
+            items = [dict(it, oth=marks[str(it["goods_id"])]) if str(it["goods_id"]) in marks else it for it in items]
         if len(query) >= 2 and request.args.get("deal") == "stock":           # a deal of the point's stock: its tyre may be one the unload has not
             items.append({"goods_id": orders.POINT_GOODS, "name": " ".join(query.split())[:200], "point": True})
         return jsonify({"items": items})
@@ -773,7 +776,8 @@ def register(app) -> None:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
-            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]), oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
+            c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
+            oth_taken=oth_sale.taken(conn, card_id), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),
@@ -1001,6 +1005,36 @@ def register(app) -> None:
             flash(str(err))
         return back(card_id, "items")
 
+    @app.route("/orders/<int:card_id>/items/<int:item_id>/oth-take", methods=["POST"])
+    @login_required
+    def order_oth_take(card_id, item_id):
+        """«Взять с ОТХ»: the supplier's position gives its pieces to the tyres of an order on «На ОТХ» at the order's point (oth_sale)."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        if item_id not in {i["id"] for i in card["items"]}:
+            abort(404)
+        try:
+            pieces = oth_sale.take(conn, card_id, item_id, _int(request.form.get("from_item")) or 0, local_iso(), author())
+            flash("Взято с ОТХ: %d шт. В WebMIM оформится только недостающее." % pieces)
+        except orders.OrderError as err:
+            flash(str(err))
+        return back(card_id, "items")
+
+    @app.route("/orders/<int:card_id>/items/<int:item_id>/oth-untake", methods=["POST"])
+    @login_required
+    def order_oth_untake(card_id, item_id):
+        """«Вернуть на ОТХ»: the position «с ОТХ» goes back to its old order."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        if item_id not in {i["id"] for i in card["items"]}:
+            abort(404)
+        try:
+            pieces = oth_sale.untake(conn, card_id, item_id, local_iso(), author())
+            flash("Возвращено на ОТХ: %d шт. Если шины нужны у поставщика, добавьте позицию заново." % pieces)
+        except orders.OrderError as err:
+            flash(str(err))
+        return back(card_id, "items")
+
     @app.route("/orders/<int:card_id>/items/<int:item_id>/update", methods=["POST"])
     @login_required
     def order_item_update(card_id, item_id):
@@ -1099,7 +1133,8 @@ def register(app) -> None:
         conn = get_conn()
         card = card_or_404(conn, card_id)
         try:
-            trash.delete_order(conn, card_id, local_iso(), author())
+            trash.delete_order(conn, card_id, local_iso(), author(),          # the tyres taken from «На ОТХ» are not lost with the order
+                               only_if=lambda c, _card: oth_sale.holds_text(oth_sale.holds(c, card_id)) if oth_sale.holds(c, card_id) else None)
         except orders.OrderError as err:
             flash(str(err))
             return back(card_id)

@@ -676,6 +676,8 @@ def update_item(conn, item_id, qty, sale_unit, now: str, author: str, supplier_p
     old = _item_row(conn, item_id)
     _no_sale(conn, old["order_id"])
     qty = _qty(qty)
+    if qty != int(old["qty"]) and _from_oth(conn, item_id):
+        raise OrderError("Это шины с ОТХ: их количество не меняется. Нажмите «Вернуть на ОТХ» и возьмите снова сколько нужно.")
     sale = _number(sale_unit, "Цена продажи", 0, 1_000_000, low_open=True)
     price = None if supplier_price is None else _number(supplier_price, "Закупка за 1 шт", 0, 10_000_000, low_open=True)
     conn.execute("UPDATE order_item SET qty = ?, sale_unit = ? WHERE id = ?", (qty, sale, item_id))
@@ -710,9 +712,16 @@ def refresh_purchase(conn, card_id, prices: Dict[str, float], source: str, now: 
 PURCHASE_SOURCES = {"unload": "выгрузка поставщика", "webmim_api": "API WebMIM", "manual": "вручную"}
 
 
+def _from_oth(conn, item_id) -> bool:
+    """A position «с ОТХ» (oth_sale): its pieces belong to an old order, only «Вернуть на ОТХ» gives them back."""
+    return conn.execute("SELECT 1 FROM order_item_oth WHERE item_id = ? AND undone_at = ''", (item_id,)).fetchone() is not None
+
+
 def remove_item(conn, item_id, now: str, author: str) -> None:
     old = _item_row(conn, item_id)
     _no_sale(conn, old["order_id"])
+    if _from_oth(conn, item_id):
+        raise OrderError("Это шины с ОТХ: нажмите «Вернуть на ОТХ», и они вернутся в свой заказ.")
     before = _stage_gaps(conn, old["order_id"])
     conn.execute("DELETE FROM order_item WHERE id = ?", (item_id,))
     add_event(conn, old["order_id"], now, author, "item", "Удалено: %s" % old["name"])
@@ -844,6 +853,11 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         raise _refuse_move(conn, card_id, now, author, "Чтобы перейти в «%s», заполните: %s." % (stage["name"], ", ".join(gaps)), journal)
     if card["sale_ids"] and stage["kind"] not in ("won", "closed"):
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
+    if stage["kind"] == "lost":
+        from . import oth_sale
+        held = oth_sale.holds(conn, card_id)                                    # the tyres taken from «На ОТХ» would be lost with the order
+        if held:
+            raise _refuse_move(conn, card_id, now, author, oth_sale.holds_text(held), journal)
     keep_sale = "" if stage["kind"] in ("won", "closed") else " AND sale_ids = '[]'"         # the same rule in SQL: a sale recorded a moment ago counts
     cur = conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ?, updated_at = ? WHERE id = ? AND stage_id = ?" + keep_sale,
                        (stage["id"], now, now, card_id, card["stage_id"]))
@@ -1058,6 +1072,8 @@ def record_sales(conn, card_id, day: str, now: str, author: str, today: str) -> 
         conn.commit()
         raise OrderError(str(err)) if isinstance(err, ValueError) else err
     conn.execute("UPDATE order_card SET sale_ids = ?, updated_at = ? WHERE id = ?", (json.dumps(ids), now, card_id))
+    from . import oth_sale
+    oth_sale.note_sales(conn, card, ids)                          # the sales of the tyres taken from «На ОТХ»: at the old order's purchase
     add_event(conn, card_id, now, author, "sale", "Записана продажа: %d поз." % len(ids))
     conn.commit()
     return ids
