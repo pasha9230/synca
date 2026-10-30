@@ -1055,6 +1055,7 @@ def _cmd_orders_tick(args) -> int:
     made = order_engine.fire_stale(conn, moscow_now().isoformat(timespec="seconds"))
     print("новых задач по правилам «завис на этапе»: %d" % made)
     _reserve_alerts(conn, args.key_file)
+    _arrived_alerts(conn, args.key_file)
     _daily_summary(conn, args.key_file)
     _webmim_snapshot(conn, args.key_file)
     _google_sheet(conn, args.key_file)
@@ -1137,6 +1138,24 @@ def _daily_summary(conn, key_file) -> None:
     except Exception as err:      # noqa: BLE001
         conn.rollback()
         print("предупреждение: утренняя сводка не отправлена (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
+
+
+def _arrived_alerts(conn, key_file) -> None:
+    """«Приехал, а клиенту не сообщили» (order_arrived): the responsible and the owner, once a day per order; a 402 of «no messenger API» the
+    owner once a day per account. Nothing goes to a client. A failure is only a warning."""
+    try:
+        from . import order_arrived, order_notify
+        box = load_box(key_file) if key_file else None
+        now = moscow_now().isoformat(timespec="seconds")
+        tell = lambda logins, text: order_notify.tell_people(conn, box, logins, text, tg_http=_http(), now=now)
+        made = order_arrived.check(conn, now, tell)
+        lines = order_arrived.api_refusals(conn, now)
+        if lines:
+            tell([order_notify.get_owner_login(conn)], "Tires Sync: " + "\n".join(lines))
+        print("приехал, а клиенту не сообщили: %d; аккаунтов без API мессенджера: %d" % (made, len(lines)))
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: «клиенту не сообщили» не проверено (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
 def _reserve_alerts(conn, key_file) -> None:

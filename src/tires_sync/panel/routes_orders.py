@@ -762,6 +762,14 @@ def register(app) -> None:
         flash(message, "message" if ok else "error")
         return redirect("/orders/%d" % card_id)
 
+    def _arrived_untold(conn, card: dict):
+        """The reason the client of an order on «Товар на точке» was not told «можно забирать» (order_arrived), for the line of the card; None."""
+        from .. import order_arrived
+        if card["stage"]["code"] != "at_point" or own_point() is not None:
+            return None
+        now = local_iso()
+        return None if order_arrived.told(conn, card, now) else order_arrived.reason(conn, card, now)
+
     def _oth_ask(conn, card: dict):
         """The question «Шины остаются на точке» kept by ask_oth for this order, while it still stands on «Товар на точке»."""
         asked = session.get("oth_offer") or {}
@@ -842,6 +850,19 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
+    @app.route("/orders/<int:card_id>/arrived-message", methods=["POST"])
+    @login_required
+    def order_arrived_message(card_id):
+        """«Клиенту не сообщили, что шины на точке» (order_arrived): the message «можно забирать» waits in «Сообщения по заказу» and the window
+        opens; nothing is sent before «Отправить» there."""
+        from .. import order_arrived
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if not order_arrived.prepare(conn, card_id, local_iso(), author()):
+            flash("Заказ уже не на «Товар на точке».", "error")
+            return redirect("/orders/%d" % card_id)
+        return redirect("/orders/%d?messages=1#messages" % card_id)
+
     @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
     @login_required
     def order_oth_unagree(card_id):
@@ -906,6 +927,7 @@ def register(app) -> None:
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id), merge_unordered=order_merge_store.unordered(conn, card),
