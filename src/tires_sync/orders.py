@@ -296,7 +296,7 @@ def chat_link(value):
 
 
 RETURN_KINDS = {"client": "клиент вернул нам", "supplier": "возврат поставщику"}
-SOURCES = {"avito": "Авито", "repeat": "Повторное обращение", "pvz": "Передал ПВЗ"}
+SOURCES = {"avito": "Авито", "repeat": "Повторное обращение", "pvz": "Передал ПВЗ", "shop": "Каталог клиента"}     # shop: the client's cart (shop_cart)
 DEAL_KINDS = {"webmim": "Через WebMIM (перемещение)", "stock": "Из наличия точки"}
 POINT_GOODS = "point"            # the code of a tyre of the point's stock the unload has not (a deal «stock» only); its purchase 0 = not given yet
 MARKS = {"settled_point_at": "Расчёт с точкой", "codes_written_off_at": "Списание кодов маркировки", "settled_supplier_at": "Расчёты с поставщиком"}
@@ -381,7 +381,7 @@ def _clean(key: str, value, conn):
     if key == "source":
         text = str(value or "")
         if text and text not in SOURCES:
-            raise OrderError("Откуда: Авито, повторное обращение или передал ПВЗ.")
+            raise OrderError("Откуда: Авито, повторное обращение, передал ПВЗ или каталог клиента.")
         return text
     if key == "deal_kind":
         text = str(value or "webmim")
@@ -476,10 +476,11 @@ def _default_time(conn, clean: dict, current_time: str, current_point=None) -> N
 
 
 def create_card(conn, fields: dict, now: str, author: str, require_contact: bool = True, commit: bool = True, stage: Optional[dict] = None,
-                scope_point: Optional[int] = None) -> int:
+                scope_point: Optional[int] = None, many_open: bool = False) -> int:
     """A new card on the first stage (or on `stage`). `commit=False` writes it without saving and without the rules of the stage: the caller saves and fires them.
     Refused (OpenOrderExists) while the client's phone has an open order of the same point or of no point (open_order_conflict);
-    `scope_point`: the point the order is made for when the caller sets it after (a call, a chat of a point's account)."""
+    `scope_point`: the point the order is made for when the caller sets it after (a call, a chat of a point's account).
+    `many_open`: the rule does not hold (an order of the client's catalog: a buyer makes several, the owner 2026-10-30)."""
     clean = {k: _clean(k, v, conn) for k, v in fields.items() if k in EDITABLE}
     if require_contact and not any(clean.get(k) for k in ("client_name", "client_phone", "avito_chat")):
         raise OrderError("Укажите хотя бы имя, телефон или чат клиента.")
@@ -494,7 +495,7 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
         "INSERT INTO order_card (stage_id, %s, created_at, created_by, entered_at, updated_at) VALUES (?, %s, ?, ?, ?, ?)" % (
             ", ".join(keys), ", ".join("?" for _ in keys)),
         [stage["id"]] + [base[k] for k in keys] + [now, author, now, now])
-    busy = open_order_conflict(conn, base["client_phone"], base["point_id"] or scope_point, besides=cur.lastrowid)
+    busy = None if many_open else open_order_conflict(conn, base["client_phone"], base["point_id"] or scope_point, besides=cur.lastrowid)
     if busy is not None:                                      # asked after the insert: the write holds the lock, so two tabs at once make one order
         if commit:
             conn.rollback()                                   # the caller saves nothing of it; with commit=False the caller rolls back
@@ -1084,7 +1085,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number "
                         "FROM order_card ORDER BY id DESC").fetchall()
     from . import oth_sale
-    stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке»
+    stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке» (open stages only)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
             continue
@@ -1101,7 +1102,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
-                                      "delivery_date": delivery, "in_stock": cid in stocked, "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
+                                      "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
                                       "tags": tag_names})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)

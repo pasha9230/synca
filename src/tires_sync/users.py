@@ -147,7 +147,7 @@ MATRIX: Dict[str, dict] = {
               "rights": {"send", "listen"}},
     "point": {"sections": dict(orders=EDIT, chats=EDIT, calls=EDIT, alerts=EDIT, self=EDIT, mypoint=EDIT), "rights": {"send", "listen"}},
     "viewer": {"sections": dict(home=VIEW, orders=VIEW, chats=VIEW, calls=VIEW, clients=VIEW, alerts=EDIT, catalog=VIEW, self=EDIT), "rights": set()},
-    "client": {"sections": dict(shop=VIEW, self=EDIT), "rights": set()},
+    "client": {"sections": dict(shop=EDIT, self=EDIT), "rights": set()},          # EDIT: the own cart and orders (the owner 2026-10-30)
 }
 INVITE_HOURS = 48
 NAME_MAX = 60

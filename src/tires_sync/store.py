@@ -313,6 +313,15 @@ CREATE TABLE IF NOT EXISTS sheet_order (
 CREATE TABLE IF NOT EXISTS user_pref (
     login TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (login, key)
 );
+-- the client's cart (shop_cart.py, the owner 2026-10-30): only what and how many; the price and the stock are taken anew at the checkout
+CREATE TABLE IF NOT EXISTS shop_cart (
+    login TEXT NOT NULL, goods_id TEXT NOT NULL, qty INTEGER NOT NULL, added_at TEXT NOT NULL, PRIMARY KEY (login, goods_id)
+);
+-- the client's own contacts for the orders (asked at the first order, kept for the next)
+CREATE TABLE IF NOT EXISTS client_profile (login TEXT PRIMARY KEY, phone TEXT NOT NULL, address TEXT NOT NULL, updated_at TEXT NOT NULL);
+-- the orders a client placed from the catalog: «Мои заказы» shows only these, of this login
+CREATE TABLE IF NOT EXISTS shop_order (order_id INTEGER PRIMARY KEY, login TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS shop_order_login ON shop_order (login);
 CREATE TABLE IF NOT EXISTS photo (
     id INTEGER PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL, ext TEXT NOT NULL, width INTEGER, height INTEGER, bytes INTEGER,
     source TEXT NOT NULL, created TEXT NOT NULL

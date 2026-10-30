@@ -283,6 +283,7 @@ for _section, _endpoints in {
               "orders_templates_page", "orders_template_delete", "orders_template_samples", "orders_template_save",
               "orders_bot_answer_delete", "orders_bot_answer_toggle", "orders_bot_answer_add", "orders_report_rates"),
     "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
+              "users_shop_responsible",                 # «Ответственный за заказы клиентов» (shop_cart.RESPONSIBLE_KEY)
               "users_clients_page", "users_clients_role_save", "users_client_page", "users_client_save",     # the conditions of the clients
               "users_client_preview",                   # «Каталог глазами клиента»
               "points_history", "history_points"),     # «История → Точки» (and its old address): the owner and the partner only (users: nobody else looks)
@@ -291,7 +292,8 @@ for _section, _endpoints in {
              "search", "search_json",                   # the search of the top bar: every role; search.scope_for narrows what it finds
              "tour_done", "tour_again"),                # «Обзор» (panel/tour.py): one's own mark «пройден», every role
     "mypoint": ("mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
-    "shop": ("shop_page", "shop_photo"),        # «Каталог для клиента»: the client's only (its photos through our server)
+    "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
+             "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"),   # its cart, its orders
 }.items():
     for _endpoint in _endpoints:
         SECTION_OF[_endpoint] = _section
@@ -316,7 +318,8 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
                          "calls_page", "call_record", "call_create_order", "call_handoff"})           # the calls of the point's account (own_call)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
-CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again"})
+CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again",
+                          "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"})
 # «CRM» is not the point's (the owner 2026-10-29: hidden; before, its own part of a client, 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})

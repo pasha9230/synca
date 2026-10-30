@@ -1,0 +1,14 @@
+{# one order of the client (shop_cart.my_order): the status for the client, the positions at the client's price #}
+{% extends "shop_base.html" %}
+{% block title %}Заказ № {{ order.id }}{% endblock %}
+{% block content %}
+<section class="card">
+<div class="card-head"><h3>Заказ № {{ order.id }}</h3><span class="ml-auto shop-status">{{ order.status }}</span></div>
+<div class="card-body small muted">Оформлен {{ order.created_at|short_dt }}. Менеджер свяжется с вами, чтобы подтвердить заказ.</div>
+<div class="table-wrap"><table class="table">
+<thead><tr><th>Шина</th><th class="num">Цена за шт.</th><th class="num">Кол-во</th><th class="num">Сумма</th></tr></thead>
+<tbody>{% for i in order["items"] %}<tr><td>{{ i.name }}</td><td class="num">{{ i.price|money }}</td><td class="num">{{ i.qty }}</td><td class="num">{{ (i.qty * i.price)|money }}</td></tr>{% endfor %}</tbody>
+<tfoot><tr><td colspan="3"><b>Итого</b></td><td class="num"><b>{{ order.total|money }}</b></td></tr></tfoot></table></div>
+<div class="card-body"><a href="/shop/orders">Все мои заказы</a></div>
+</section>
+{% endblock %}

@@ -225,6 +225,8 @@ _MORE_TEXTS = {
     "user_password": lambda d: ("Пользователь %s сменил свой пароль" if d.get("self") else "Пароль пользователя %s изменён") % _q(d.get("login")),
     "invite_created": lambda d: "Создано приглашение: %s, действует до %s" % (_role(d.get("role")), _q(d.get("expires"))),
     "invite_revoked": lambda d: "Приглашение №%s отозвано" % _q(d.get("id")),
+    "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
+    else "Ответственный за заказы клиентов не выбран: по умолчанию",
     "client_terms_changed": lambda d: _client_terms_text(d),
     "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),
     "supplier_created": lambda d: "Добавлен поставщик «%s»" % _q(d.get("name")),
