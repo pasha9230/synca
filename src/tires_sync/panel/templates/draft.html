@@ -8,7 +8,7 @@
 <h1>Черновик № {{ r.draft.id }}</h1><p class="sub">Проверьте, что изменится. Пока вы не нажмёте «Подтвердить», настройки и фид остаются прежними.</p></div>
 <div class="actions"><span class="badge badge--brand badge--dot" style="align-self:center;font-size:13px;padding:4px 12px">{{ draft_status(r.draft.status) }}</span></div></header>
 {% if r.stale %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Черновик устарел: настройки уже изменены. Создайте новый.</div></div>{% endif %}
-{% if r.needs_strong %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{% if r.pct_strong %}Есть процент вне допустимого диапазона: нужно усиленное подтверждение.{% endif %}{% if r.own_risky %}{% if r.pct_strong %}<br>{% endif %}Своя цена ниже закупки или отличается от цены фида больше чем на 30 %: проверьте, нет ли опечатки, и подтвердите ещё раз.<ul style="margin:4px 0 0">{% for line in r.own_risky %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}</div></div>{% endif %}
+{% if r.needs_strong %}<div class="flash flash--err">{{ icon("alert") }}<div class="flash-text">{% if r.pct_strong %}Есть процент вне допустимого диапазона: нужно усиленное подтверждение.{% endif %}{% if r.own_risky %}{% if r.pct_strong %}<br>{% endif %}Своя цена ниже закупки или отличается от цены фида больше чем на 30 %: проверьте, нет ли опечатки, и подтвердите ещё раз.{% if r.own_table %} Таких: {{ r.own_risky|length }} {{ plural(r.own_risky|length, "строка", "строки", "строк") }} — они первыми в таблице «Своя цена» ниже.{% else %}<ul style="margin:4px 0 0">{% for line in r.own_risky %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}{% endif %}</div></div>{% endif %}
 <section class="summary summary--{{ tone }}">
 <div class="summary-strip"></div>
 <div class="summary-body">
@@ -26,6 +26,18 @@
 </section>
 <div class="grid-main-side">
 <div class="stack-lg">
+{# «Своя цена» of many positions (a press of «Своя цена выбранным», the owner 2026-10-30): a summary, then a row per account × position, the
+   risky ones first; OWN_TABLE_SHOWN rows, the rest under «Показать все». #}
+{% if r.own_table %}{% set t = r.own_table %}{% set m = t.summary %}<section class="card" data-own-summary>
+<div class="card-head"><h3>Своя цена</h3><span class="sub">{{ m.positions }} {{ plural(m.positions, "позиция", "позиции", "позиций") }} × {{ m.accounts|length }} {{ plural(m.accounts|length, "аккаунт", "аккаунта", "аккаунтов") }}: {{ m.accounts|join(", ") }}</span></div>
+<div class="card-body stack small">
+<p><b>{{ m.rules|join("; ") }}</b>. Процент считается к закупке позиции.</p>
+<p>Цена вырастет: {{ m.up }} · снизится: {{ m.down }} · не изменится: {{ m.same }}{% if m.avg is not none %} · в среднем {{ ("%+.1f %%"|format(m.avg)).replace(".", ",").replace("-", "−") }}{% endif %}{% if m.gone %} · нет в выгрузке: {{ m.gone }}{% endif %}</p>
+{% if m.below or m.far %}<p class="text-err"><b>ниже закупки: {{ m.below }}</b> · дальше 30 % от цены сейчас: {{ m.far }} — такие строки сверху.</p>{% endif %}
+<table class="table"><thead><tr><th>Позиция</th><th>Аккаунт</th><th>Своя цена</th><th class="num">Закупка</th><th class="num">Было</th><th class="num">Станет</th><th class="num">Изменение</th></tr></thead>
+<tbody>{% for o in t.rows[:t.shown] %}<tr data-own-row{% if o.below or o.far %} class="is-risky"{% endif %}><td>{{ o.name }}{% if o.code %} <span class="muted mono">{{ o.code }}</span>{% endif %}{% if o.gone %} <span class="muted">(нет в выгрузке)</span>{% endif %}</td><td>{{ o.account }}</td><td>{{ o.rule }}</td><td class="num">{{ o.base|money if o.base else "—" }}</td><td class="num">{{ o.was|money if o.was else "—" }}</td><td class="num">{{ o.now|money if o.now else "—" }}</td><td class="num">{% if o.diff is not none %}{{ ("%+.1f %%"|format(o.diff)).replace(".", ",").replace("-", "−") }}{% endif %}{% if o.below %} <span class="badge badge--err">ниже закупки</span>{% endif %}{% if o.far %} <span class="badge badge--warn">больше 30 %</span>{% endif %}</td></tr>{% endfor %}</tbody></table>
+{% if t.rows|length > t.shown %}<details><summary>Показать все {{ t.rows|length }}</summary><table class="table"><tbody>{% for o in t.rows[t.shown:] %}<tr data-own-row{% if o.below or o.far %} class="is-risky"{% endif %}><td>{{ o.name }}{% if o.code %} <span class="muted mono">{{ o.code }}</span>{% endif %}{% if o.gone %} <span class="muted">(нет в выгрузке)</span>{% endif %}</td><td>{{ o.account }}</td><td>{{ o.rule }}</td><td class="num">{{ o.base|money if o.base else "—" }}</td><td class="num">{{ o.was|money if o.was else "—" }}</td><td class="num">{{ o.now|money if o.now else "—" }}</td><td class="num">{% if o.diff is not none %}{{ ("%+.1f %%"|format(o.diff)).replace(".", ",").replace("-", "−") }}{% endif %}{% if o.below %} <span class="badge badge--err">ниже закупки</span>{% endif %}{% if o.far %} <span class="badge badge--warn">больше 30 %</span>{% endif %}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
+</div></section>{% endif %}
 <section class="card">
 <div class="card-head"><h3>Что меняется</h3><span class="sub">{{ r.lines|length }} {{ plural(r.lines|length, "изменение", "изменения", "изменений") }}</span></div>
 <ul class="changes">{% for line in r.lines %}<li><span>{{ line }}</span></li>{% else %}<li class="muted">Изменений нет.</li>{% endfor %}</ul>

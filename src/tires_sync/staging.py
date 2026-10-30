@@ -198,6 +198,36 @@ def set_own_price(conn, goods_id: str, accounts, value: Optional[dict], now: str
     _mutate(conn, fn, now)
 
 
+def set_own_prices(conn, goods_ids, accounts, value: Optional[dict], now: str, redo: bool = False) -> dict:
+    """The own price of many positions at once (the owner 2026-10-30: ticked in the catalog or all of a filter), one change of the working draft:
+    `value` {"pct": percent to the purchase} or None («Как у бренда»). A position that has its own price in an account now (applied or in the
+    draft) keeps it unless `redo`. {"set": keys written, "kept": keys left as they were}."""
+    ids = sorted({int(a) for a in accounts})
+    goods = sorted({str(g).strip() for g in goods_ids if str(g or "").strip()})
+    if not goods or not ids:
+        raise ValueError("Выберите позиции и хотя бы один аккаунт.")
+    if value is not None:
+        kind, number = own_price_value(value)
+        value = {kind: number}
+    done = {"set": 0, "kept": 0}
+
+    def fn(eff):
+        prices = eff["price_overrides"]
+        for account_id in ids:
+            for goods_id in goods:
+                key = "%d:%s" % (account_id, goods_id)
+                if value is None:
+                    done["set"] += prices.pop(key, None) is not None
+                elif key in prices and not redo:
+                    done["kept"] += 1
+                else:
+                    prices[key] = dict(value)
+                    done["set"] += 1
+
+    _mutate(conn, fn, now)
+    return done
+
+
 def _pct(value, name):
     if value is None or isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError("Процент %s: нужно конечное число." % name)
