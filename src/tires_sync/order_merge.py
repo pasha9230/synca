@@ -97,12 +97,6 @@ def placed_ids(conn, card_id) -> Set[int]:
     return {i for i, row in items_of(conn, card_id).items() if row["placed"]}
 
 
-def given_to(conn, card_id) -> Dict[int, int]:
-    """The positions of a source that gave their tyres to an active merge: item id → the new order."""
-    return {r[0]: r[1] for r in conn.execute("SELECT i.from_item, m.into_order FROM order_merge_item i JOIN order_merge m ON m.id = i.merge_id "
-                                             "WHERE i.from_order = ? AND " + _ACTIVE, (card_id,))}
-
-
 def ever(conn, card_id) -> Set[int]:
     """The positions of the order a merge ever gave or took (also undone): their rows of the Google table follow the order (order_sheet)."""
     return {r[0] for r in conn.execute("SELECT from_item FROM order_merge_item WHERE from_order = ? UNION "
