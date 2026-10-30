@@ -9,7 +9,7 @@
     var field = form.querySelector("[name=value]");
     if (!out || !field) return;
     out.classList.remove("text-err");
-    var text = (field.value || "").replace(/[\s  ₽]/g, "").replace(",", ".").replace("−", "-");
+    var text = (field.value || "").replace(/[\s  ₽]/g, "").replace(",", ".").replace(/[−–]/, "-");
     var radio = form.querySelector("[name=kind]:checked");
     var kind = radio ? radio.value : (/%$/.test(text) ? "pct" : "price");
     if (!radio) text = text.replace(/%$/, "");
@@ -19,7 +19,8 @@
     var value = kind === "pct" ? purchase * (1 + n / 100) : n;
     if (kind === "pct" && purchase <= 0) { out.textContent = "закупка неизвестна"; return; }
     var final = Math.ceil(Math.round(value * 1e6) / 1e7) * 10;      // up to tens, as the server (float dust below a millionth dropped)
-    var below = purchase > 0 && final < purchase;
+    var cost = parseFloat(form.getAttribute("data-cost")) || purchase;   // «ниже закупки» as the server asks it: today's supplier price
+    var below = cost > 0 && final < cost;
     out.textContent = (kind === "pct" ? rub(Math.round(value)) : rub(n)) + " → " + rub(final) + " в фиде" + (below ? " — ниже закупки" : "");
     out.classList.toggle("text-err", below);
   }

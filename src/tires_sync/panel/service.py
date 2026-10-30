@@ -787,6 +787,36 @@ def own_price_rows(conn, general, active, offer, ref=None, offers=None) -> list:
     return rows
 
 
+def account_correction(conn, account_id: int, brand_key: str) -> float:
+    """The points an account adds to the percent of a brand: its delta plus its own markup of the brand, never past ten either way (as
+    connections.effective_settings puts it on the brand's percent)."""
+    delta = connections.get_account_pricing(conn, account_id)["delta"] + \
+        connections.get_brand_deltas(conn, account_id).get(connections._clean_brand(brand_key), 0.0)
+    return round(max(-10.0, min(10.0, delta)), 4)
+
+
+def base_own_prices(conn, offer, value: dict) -> dict:
+    """One base own price of a position (the cell «Наша цена» of the catalog, the owner 2026-10-30: «менять базовую цену») as the own price of
+    each feed account: the first account (the catalog's price) takes it as typed, every other one with its correction over the first one's,
+    as a brand's percent gets it. A percent: + the points; a sale price: + the purchase (the anchor of price_guard, the base the feed counts
+    from) × the points. The own price itself still replaces the account's corrections (pricing.position_price): the shift is written now.
+    {account_id: {"pct": x} | {"price": n}}."""
+    from .. import price_guard
+    accounts = connections.list_feed_accounts(conn)
+    if not accounts:
+        return {}
+    base, _why = price_guard.base_for(price_guard.load(conn), offer.goods_id, float(offer.base_price))
+    first = account_correction(conn, accounts[0]["id"], offer.brand_key)
+    out = {}
+    for account in accounts:
+        shift = account_correction(conn, account["id"], offer.brand_key) - first
+        if "pct" in value:
+            out[account["id"]] = {"pct": round(float(value["pct"]) + shift, 4)}
+        else:
+            out[account["id"]] = {"price": int(round(value["price"] + max(base, 0.0) * shift / 100))}
+    return out
+
+
 def own_price_lines(conn, raw: dict, changes: dict, offers, old, new) -> list:
     """«было → стало» of the own prices of positions in a draft: the price of one tyre in each account before and after."""
     from ..pricing import position_price

@@ -9,7 +9,7 @@ from flask import abort, current_app, flash, jsonify, redirect, render_template,
 from werkzeug.datastructures import MultiDict
 
 from .. import catalog_archive, connections, market, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
-from ..config import settings_from_dict
+from ..config import own_price_value, settings_from_dict
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
 from .data import load_merged, stale_unload
@@ -50,29 +50,22 @@ def _state(conn) -> dict:
     return {"staged": 0 if staged["stale"] else staged["count"], "stale": staged["stale"], "review_url": "/catalog/review"}
 
 
-def _view_settings(conn, raw, changes, account_id=None):
-    """Settings as an account sees them (its own price delta, stock threshold and own prices): what the catalog shows. `account_id`: the
-    account chosen in the catalog («Цены аккаунта»), else the first."""
+def _view_settings(conn, raw, changes):
+    """Settings as the first account sees them (its own price delta and stock threshold): what the catalog shows."""
     effective = settings_from_dict({**raw, **changes}, enforce_pct_limit=False)
-    account = _view_account(conn, account_id)
-    return connections.effective_settings(conn, account["id"], effective) if account else effective
-
-
-def _view_account(conn, account_id=None):
-    """The feed account whose prices the catalog shows: the one asked for, else the first; None when there is none."""
     accounts = connections.list_feed_accounts(conn)
-    return next((a for a in accounts if a["id"] == account_id), accounts[0] if accounts else None)
+    return connections.effective_settings(conn, accounts[0]["id"], effective) if accounts else effective
 
 
 def _own_value(text: str) -> dict:
     """What the cell «Наша цена» was given (the owner 2026-10-30): «6990» a sale price in ₽, «+5 %» / «−5 %» / «5%» a percent to the
     purchase, as the own price of the card."""
-    text = str(text or "").replace(" ", "").replace("\u00a0", "").replace("\u202f", "").replace(",", ".").replace("−", "-").replace("₽", "")
+    text = str(text or "").replace(" ", "").replace("\u00a0", "").replace("\u202f", "").replace(",", ".").replace("−", "-").replace("–", "-").replace("₽", "")
     if text.endswith("%"):
         number = text[:-1]
-        if re.fullmatch(r"[+\-]?\d+(\.\d+)?", number):
-            return {"pct": float(number)}
-    elif re.fullmatch(r"\d+", text):
+        if re.fullmatch(r"[+\-]?[0-9]+(\.[0-9]+)?", number):
+            return {"pct": float(number) + 0.0}                        # «−0 %» is 0
+    elif re.fullmatch(r"[0-9]+", text):
         return {"price": int(text)}
     raise ValueError("Введите цену в рублях (6990) или процент к закупке (+5 % или −5 %).")
 
@@ -280,8 +273,7 @@ def register(app) -> None:
         _, raw = get_active(conn)
         staged = staging.summary(conn)
         changes = {} if staged["stale"] else staged["changes"]
-        view_account = _view_account(conn, _num(args, "acc"))           # «Цены аккаунта»: whose «Наша цена» the table shows and the cell sets
-        effective = _view_settings(conn, raw, changes, view_account["id"] if view_account else None)
+        effective = _view_settings(conn, raw, changes)
         season = args.get("s") if args.get("s") in ("summer", "winter") else None
         studs = args.get("t") if args.get("t") in ("studded", "friction") else None
         status = args.get("st") if args.get("st") in ("feed", "no", "nopair", "problem", "gone") else "all"
@@ -321,12 +313,14 @@ def register(app) -> None:
         shown = items[(page - 1) * size: page * size]
         if not has_right("money"):                                    # the supplier's price is a purchase price: not even in the HTML
             shown = [dict(i, supplier_price=None, purchase=None) for i in shown]
-        if view_account is not None:                                  # the own price of the account shown: the cell «Наша цена»
+        accounts = connections.list_feed_accounts(conn)
+        if accounts:                                                  # the cell «Наша цена»: the base own price, the first account's (base_own_prices)
             now_own, was_own = {**raw, **changes}.get("price_overrides") or {}, raw.get("price_overrides") or {}
             for i in shown:
-                key = "%d:%s" % (view_account["id"], i["goods_id"])
-                own = now_own.get(key)
-                i.update(own_here=own, own_text=service.own_price_text(own) if own else "", own_pending=own != was_own.get(key))
+                keys = ["%d:%s" % (a["id"], i["goods_id"]) for a in accounts]
+                own = now_own.get(keys[0])
+                i.update(own_here=own, own_text=service.own_price_text(own) if own else "",
+                         own_pending=any(now_own.get(k) != was_own.get(k) for k in keys))
         on_oth = order_oth.goods_on_oth(conn)                        # our own tyres of refused orders: a mark only, the feed is not touched
         shown = [dict(i, oth=on_oth.get(i["goods_id"])) for i in shown]
         if market_on:
@@ -334,7 +328,7 @@ def register(app) -> None:
         return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids, held_shown=held_shown,
                     all_ids=[i["goods_id"] for i in items],                # every position of the filter, every page («все по фильтру»)
                     market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
-                    view_account=view_account, page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
+                    page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
                     studs=studs or "", status=status, sort=sort, descending=descending)
 
     def table_context(args, next_url=None):
@@ -354,7 +348,6 @@ def register(app) -> None:
                  table_url="/catalog/table?" + urlencode(_pairs(args)),
                  filter_query=urlencode(_pairs(args, ("p", "n", "o", "r"))),     # what «все по фильтру» takes again when pressed
                  feed_accounts=connections.list_feed_accounts(b["conn"]) if can_post("catalog_own_price_bulk") else [],
-                 view_accounts=connections.list_feed_accounts(b["conn"]),
                  page_url=("/catalog?" + urlencode(_pairs(args))).rstrip("?"),     # where the cell «Наша цена» comes back to
                  bulk_limit=BULK_PRICE_LIMIT, bulk_pct_max=BULK_PCT_MAX, filter_fp=_ids_fp(b["all_ids"]),
                  wait_url="/catalog?" + urlencode(_pairs(args) + [("wait", "")]))     # + the position: the page opens with its window
@@ -590,31 +583,45 @@ def register(app) -> None:
     @app.route("/catalog/own-price/inline", methods=["POST"])
     @login_required
     def catalog_own_price_inline():
-        """The own price from the cell «Наша цена» of the catalog (the owner 2026-10-30): the account the catalog shows, plus the others ticked
-        («то же на …»); a sale price or a percent to the purchase, or «Сбросить». The same working draft as the card (staging.set_own_price,
-        applied with «Применить» and its confirmations); whom: as the card (common.NEEDS)."""
+        """The base own price from the cell «Наша цена» of the catalog (the owner 2026-10-30: «менять базовую цену»): one edit for every feed
+        account, each with its correction over the first one's (service.base_own_prices), or «Сбросить» on all of them. The same working draft
+        as the card (staging.set_own_price, applied with «Применить» and its confirmations); whom: as the card (common.NEEDS)."""
         conn = get_conn()
         form = request.form
         back = _back()
         goods_id = str(form.get("g") or "").strip()
-        feed = {a["id"] for a in connections.list_feed_accounts(conn)}
+        accounts = connections.list_feed_accounts(conn)
         try:
-            accounts = [int(a) for a in [form.get("acc", "")] + form.getlist("a") if str(a).isdigit()]
-            if not goods_id or not str(form.get("acc", "")).isdigit() or any(a not in feed for a in accounts):
-                raise ValueError("Не понял, на каком аккаунте поставить цену: обновите страницу.")
-            value = None if form.get("do") == "clear" else _own_value(form.get("value"))     # «do», not «action»: that name hides form.action
-            if value is not None and goods_id not in context(app)[2].offers:
-                raise ValueError("Такой позиции нет в выгрузке.")
-            staging.set_own_price(conn, goods_id, accounts, value, now_iso())
+            if not goods_id or not accounts:
+                raise ValueError("Не понял, какую позицию менять: обновите страницу.")
+            offer = context(app)[2].offers.get(goods_id)
+            if form.get("do") == "clear":                                 # «do», not «action»: that name hides form.action
+                value, each = None, {}
+            else:
+                value = _own_value(form.get("value"))
+                if offer is None:
+                    raise ValueError("Такой позиции нет в выгрузке.")
+                each = service.base_own_prices(conn, offer, value)
+                for own in each.values():                                 # every account's value checked before any is written
+                    own_price_value(own)
+            if value is None:
+                staging.set_own_price(conn, goods_id, [a["id"] for a in accounts], None, now_iso())
+            else:
+                for own in {json.dumps(v, sort_keys=True) for v in each.values()}:
+                    staging.set_own_price(conn, goods_id, [a for a, v in each.items() if json.dumps(v, sort_keys=True) == own],
+                                          json.loads(own), now_iso())
         except (StaleDraftError, ValueError) as err:
             if _in_place():
                 return jsonify(ok=False, message=str(err), **_state(conn))
             flash(str(err))
             return redirect(back)
-        names = {a["id"]: a["name"] for a in connections.list_feed_accounts(conn)}
-        message = "%s · %s: %s. Пока это черновик: подтвердите изменения, чтобы они попали в фид." % (
-            "Своя цена " + service.own_price_text(value) if value else "Своя цена сброшена (как у бренда)", _names(conn, [goods_id])[0],
-            ", ".join(names[a] for a in sorted(set(accounts))))
+        if value is None:
+            message = "Своя цена сброшена на всех аккаунтах (как у бренда): %s." % _names(conn, [goods_id])[0]
+        else:
+            names = {a["id"]: connections.display_name(conn, a["id"]) for a in accounts}
+            message = "Своя цена %s · %s (%s)." % (service.own_price_text(value), _names(conn, [goods_id])[0],
+                                                  "; ".join("%s: %s" % (names[a], service.own_price_text(v)) for a, v in each.items()))
+        message += " Пока это черновик: подтвердите изменения, чтобы они попали в фид."
         if _in_place():
             return jsonify(ok=True, message=message, **_state(conn))
         flash(message)
