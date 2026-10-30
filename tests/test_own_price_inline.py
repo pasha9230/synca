@@ -217,7 +217,7 @@ def test_the_percent_hint_counts_from_the_anchor_of_the_supplier_price(tmp_path)
     conn.commit()
     client, _ = _owner(app)
     page = client.get("/catalog").get_data(as_text=True)
-    purchases = re.findall(r'data-purchase="([^"]+)">(?:(?!</form>).)*?<input type="hidden" name="g" value="(\w+)"', page, re.S)
+    purchases = re.findall(r'data-purchase="([^"]+)"[^>]*>(?:(?!</form>).)*?<input type="hidden" name="g" value="(\w+)"', page, re.S)
     assert ("6000.0", "100") in purchases and ("5000.0", "101") in purchases
 
 
@@ -236,3 +236,56 @@ def test_an_en_dash_is_a_minus_and_minus_zero_is_zero(tmp_path, value, own):
     _inline(client, tok, value)
     got = _changes(conn)["%d:100" % first]
     assert got == own and str(got["pct"]) != "-0.0"
+
+
+def test_the_cell_lists_every_account_with_its_shift_for_the_line_of_prices(tmp_path):
+    """Under the field: «Шины СПб 6 990 · Шина-Колесо 7 140 · Третий 6 840» — the names and the points the page counts it from."""
+    import html
+    import json
+    app, conn, _ = _three(tmp_path)
+    client, _ = _owner(app)
+    page = client.get("/catalog").get_data(as_text=True)
+    form = page.split(ROW_G, 1)[0].rsplit("<form", 1)[1]
+    shifts = json.loads(html.unescape(re.search(r'data-shifts="([^"]+)"', form).group(1)))
+    assert shifts == [["Основной", 0], ["Шина-Колесо", 3.0], ["Третий", -3.0]] and "data-own-each" in page
+
+
+def test_one_account_has_no_line_of_prices(tmp_path):
+    app, conn, (first, second) = _app(tmp_path)
+    conn.execute("UPDATE account SET feed_enabled = 0 WHERE id = ?", (second,))
+    conn.commit()
+    client, _ = _owner(app)
+    page = client.get("/catalog").get_data(as_text=True)
+    assert _cell_form(page) and "data-shifts" not in page and "data-own-each" not in page
+
+
+# --- по ревью ----------------------------------------------------------------------------------------------------------------------
+
+def test_different_values_by_account_are_one_change_of_the_draft(tmp_path, monkeypatch):
+    """All the accounts or none: one write of the draft, never one per value (an «Применить» in between would split them)."""
+    app, conn, _ = _three(tmp_path)
+    client, tok = _owner(app)
+    calls = []
+    real = staging._mutate
+    monkeypatch.setattr(staging, "_mutate", lambda *a, **k: calls.append(1) or real(*a, **k))
+    _inline(client, tok, "+5 %")
+    assert len(calls) == 1 and len(_changes(conn)) == 3
+
+
+def test_a_shift_out_of_bounds_names_the_account_and_its_value(tmp_path):
+    app, conn, _ = _three(tmp_path)
+    client, tok = _owner(app)
+    message = _inline(client, tok, "−49 %", **{"X-Requested-With": "fetch"}).get_json()["message"]
+    assert "Третий" in message and "−52 %" in message
+
+
+def test_an_own_price_put_on_another_account_only_is_not_called_a_reset_and_can_be_reset(tmp_path):
+    app, conn, (first, second) = _app(tmp_path)
+    client, tok = _owner(app)
+    staging.set_own_price(conn, "100", [second], {"pct": 5}, NOW)                                    # из карточки, только второму
+    page = client.get("/catalog").get_data(as_text=True)
+    row = page.split(ROW_G, 1)[1].split("</tr>", 1)[0]
+    assert "сброс не применён" not in row and "своя цена</span>" in row and "не применено" in row
+    assert "Сбросить</button>" in row.split("</form>", 1)[0]
+    _inline(client, tok, action="clear")
+    assert staging.summary(conn)["draft_id"] is None

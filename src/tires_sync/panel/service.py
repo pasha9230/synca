@@ -795,25 +795,30 @@ def account_correction(conn, account_id: int, brand_key: str) -> float:
     return round(max(-10.0, min(10.0, delta)), 4)
 
 
+def account_shifts(conn, brand_key: str, accounts=None) -> list:
+    """[(account, the points over the first feed account's correction)] for a brand, the first one 0: how the base own price of the catalog's
+    cell is shifted for every account (base_own_prices), and the cell's line of the prices by account."""
+    accounts = connections.list_feed_accounts(conn) if accounts is None else accounts
+    if not accounts:
+        return []
+    first = account_correction(conn, accounts[0]["id"], brand_key)
+    return [(a, round(account_correction(conn, a["id"], brand_key) - first, 4)) for a in accounts]
+
+
 def base_own_prices(conn, offer, value: dict) -> dict:
     """One base own price of a position (the cell «Наша цена» of the catalog, the owner 2026-10-30: «менять базовую цену») as the own price of
     each feed account: the first account (the catalog's price) takes it as typed, every other one with its correction over the first one's,
     as a brand's percent gets it. A percent: + the points; a sale price: + the purchase (the anchor of price_guard, the base the feed counts
-    from) × the points. The own price itself still replaces the account's corrections (pricing.position_price): the shift is written now.
-    {account_id: {"pct": x} | {"price": n}}."""
+    from) × the points, to the ruble (half up, as the cell's line). The own price itself still replaces the account's corrections
+    (pricing.position_price): the shift is written now. {account_id: {"pct": x} | {"price": n}}."""
     from .. import price_guard
-    accounts = connections.list_feed_accounts(conn)
-    if not accounts:
-        return {}
     base, _why = price_guard.base_for(price_guard.load(conn), offer.goods_id, float(offer.base_price))
-    first = account_correction(conn, accounts[0]["id"], offer.brand_key)
     out = {}
-    for account in accounts:
-        shift = account_correction(conn, account["id"], offer.brand_key) - first
+    for account, shift in account_shifts(conn, offer.brand_key):
         if "pct" in value:
             out[account["id"]] = {"pct": round(float(value["pct"]) + shift, 4)}
         else:
-            out[account["id"]] = {"price": int(round(value["price"] + max(base, 0.0) * shift / 100))}
+            out[account["id"]] = {"price": int(math.floor(value["price"] + max(base, 0.0) * shift / 100 + 0.5))}
     return out
 
 

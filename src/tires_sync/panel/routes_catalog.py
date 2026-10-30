@@ -319,8 +319,16 @@ def register(app) -> None:
             for i in shown:
                 keys = ["%d:%s" % (a["id"], i["goods_id"]) for a in accounts]
                 own = now_own.get(keys[0])
-                i.update(own_here=own, own_text=service.own_price_text(own) if own else "",
-                         own_pending=any(now_own.get(k) != was_own.get(k) for k in keys))
+                i.update(own_here=own, own_text=service.own_price_text(own) if own else "", own_some=any(now_own.get(k) for k in keys),
+                         own_pending=any(now_own.get(k) != was_own.get(k) for k in keys),
+                         own_cleared=any(was_own.get(k) and not now_own.get(k) for k in keys))
+            if len(accounts) > 1 and can_post("catalog_own_price_inline"):   # the cell's line «Шины СПб 6 990 · Шина-Колесо 7 130»
+                shifts = {}
+                for i in shown:
+                    if i.get("brand", "") not in shifts:
+                        shifts[i.get("brand", "")] = json.dumps([[connections.display_name(conn, a["id"]), shift]
+                                                         for a, shift in service.account_shifts(conn, i.get("brand", ""), accounts)], ensure_ascii=False)
+                    i["own_shifts"] = shifts[i.get("brand", "")]
         on_oth = order_oth.goods_on_oth(conn)                        # our own tyres of refused orders: a mark only, the feed is not touched
         shown = [dict(i, oth=on_oth.get(i["goods_id"])) for i in shown]
         if market_on:
@@ -602,14 +610,16 @@ def register(app) -> None:
                 if offer is None:
                     raise ValueError("Такой позиции нет в выгрузке.")
                 each = service.base_own_prices(conn, offer, value)
-                for own in each.values():                                 # every account's value checked before any is written
-                    own_price_value(own)
+                for account in accounts:                                  # a shift past the bounds: said with the account and its value
+                    try:
+                        own_price_value(each[account["id"]])
+                    except ValueError as err:
+                        raise ValueError("%s: со своей поправкой выходит %s. %s" % (
+                            connections.display_name(conn, account["id"]), service.own_price_text(each[account["id"]]), err))
             if value is None:
                 staging.set_own_price(conn, goods_id, [a["id"] for a in accounts], None, now_iso())
             else:
-                for own in {json.dumps(v, sort_keys=True) for v in each.values()}:
-                    staging.set_own_price(conn, goods_id, [a for a, v in each.items() if json.dumps(v, sort_keys=True) == own],
-                                          json.loads(own), now_iso())
+                staging.set_own_price_each(conn, goods_id, each, now_iso())     # one change: all the accounts or none
         except (StaleDraftError, ValueError) as err:
             if _in_place():
                 return jsonify(ok=False, message=str(err), **_state(conn))

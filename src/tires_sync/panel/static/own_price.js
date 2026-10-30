@@ -9,6 +9,8 @@
     var field = form.querySelector("[name=value]");
     if (!out || !field) return;
     out.classList.remove("text-err");
+    var each = form.querySelector("[data-own-each]");
+    if (each) each.textContent = "";
     var text = (field.value || "").replace(/[\s  ₽]/g, "").replace(",", ".").replace(/[−–]/, "-");
     var radio = form.querySelector("[name=kind]:checked");
     var kind = radio ? radio.value : (/%$/.test(text) ? "pct" : "price");
@@ -23,6 +25,14 @@
     var below = cost > 0 && final < cost;
     out.textContent = (kind === "pct" ? rub(Math.round(value)) : rub(n)) + " → " + rub(final) + " в фиде" + (below ? " — ниже закупки" : "");
     out.classList.toggle("text-err", below);
+    if (each) {                                                        // the cell: what goes into each account's feed (its correction on top)
+      var shifts = [];
+      try { shifts = JSON.parse(form.getAttribute("data-shifts") || "[]"); } catch (err) { shifts = []; }
+      each.textContent = shifts.map(function (s) {
+        var v = kind === "pct" ? purchase * (1 + (n + s[1]) / 100) : Math.floor(n + purchase * s[1] / 100 + 0.5);
+        return s[0] + " " + rub(Math.ceil(Math.round(v * 1e6) / 1e7) * 10);
+      }).join(" · ");
+    }
   }
   function onEvent(e) {
     var form = e.target.closest && e.target.closest("[data-own-price]");
