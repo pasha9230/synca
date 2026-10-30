@@ -21,7 +21,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
 
-from .. import order_manager as mgr, order_oth, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_manager as mgr, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_orders import local_iso, local_now
 
@@ -322,7 +322,8 @@ def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
     return [{"card": r["card"], "label": mgr.label(r["card"]), "date": _short_date(r["plan"]["return_date"]),
-             "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12)} for r in order_oth.to_return(conn, point_id)]
+             "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"])}
+            for r in order_oth.to_return(conn, point_id)]
 
 
 def register(app) -> None:
@@ -354,9 +355,9 @@ def register(app) -> None:
             cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": code == "at_point", "oth": code == "oth",
                           "tokens": {action: secrets.token_hex(12) for action in ACTIONS},          # every button is its own press
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
-                          "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery),
+                          "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
-                          "order_date": _order_day(conn, card)})
+                          "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"])})     # «Шины с ОТХ, заказ №…»
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over

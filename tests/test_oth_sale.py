@@ -632,7 +632,8 @@ def test_the_point_text_goes_to_the_points_own_page_for_an_order_of_its_account(
     assert seen["own_point"] == point_id(conn)
 
 
-def test_the_move_to_the_point_puts_today_as_the_delivery_date_when_there_is_none(tmp_path, monkeypatch):
+def test_the_move_to_the_point_puts_no_delivery_date_when_there_is_none(tmp_path, monkeypatch):
+    """The owner 2026-10-30: the tyres are at the point — no date is made up, «Товар в наличии на точке» is shown (test_oth_fixes)."""
     app, owner, tok, conn = panel(tmp_path)
     card_at(conn, "oth", T)
     cid = new_order(conn, qty=2)
@@ -644,7 +645,7 @@ def test_the_move_to_the_point_puts_today_as_the_delivery_date_when_there_is_non
     monkeypatch.setattr(order_notify, "tell_point", lambda *a, **kw: "ok")
     post(owner, "/orders/%d/oth-at-point" % cid, tok)
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == "at_point" and card["delivery_date"] == card["entered_at"][:10]
+    assert card["stage"]["code"] == "at_point" and card["delivery_date"] == "" and card["in_stock"]
 
 
 # ---- the bin and the users (lane 2026-10-30-minor) -------------------------------------------------------------------------------------

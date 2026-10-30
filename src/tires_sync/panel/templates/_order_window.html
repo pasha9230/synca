@@ -67,7 +67,7 @@
 
 <h2 class="owin-sec">Доставка и WebMIM</h2>
 <div class="owin-grid">
-<label class="field"><span class="label">Дата доставки</span><input class="input" type="date" name="delivery_date" value="{{ v.delivery_date or '' }}"></label>
+<label class="field"><span class="label">Дата доставки</span><input class="input" type="date" name="delivery_date" value="{{ v.delivery_date or '' }}">{% if card and c.in_stock and not v.delivery_date %}<span class="small muted" data-in-stock>Товар в наличии на точке</span>{% endif %}</label>
 <label class="field"><span class="label">Время доставки</span><input class="input" name="delivery_time" value="{{ v.delivery_time or '' }}" maxlength="60" placeholder="после 18"></label>
 <label class="field"><span class="label">Номер заказа WebMIM</span><input class="input mono" name="webmim_number" value="{{ v.webmim_number or '' }}" maxlength="60" placeholder="1234567"></label>
 <label class="field"><span class="label">Номер перемещения</span><input class="input mono" name="transfer_number" value="{{ v.transfer_number or '' }}" maxlength="40" placeholder="26R-…"></label>

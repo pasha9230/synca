@@ -77,6 +77,20 @@ def from_number(conn, card_id) -> Dict[int, str]:
     return out
 
 
+IN_STOCK = "Товар в наличии на точке"     # in place of the date of delivery of an order whose tyres all lie at the point (the owner 2026-10-30)
+_IN_STOCK_SQL = ("SELECT i.order_id FROM order_item i LEFT JOIN order_item_oth t ON t.item_id = i.id AND t." + _LIVE + " WHERE i.qty >= 1 %s "
+                 "GROUP BY i.order_id HAVING COUNT(t.item_id) = COUNT(*)")
+
+
+def in_stock_ids(conn, card_ids=None) -> Set[int]:
+    """The orders whose every tyre is taken from «На ОТХ» (at least one): the tyres lie at the point, so no date of delivery is needed nor
+    made up — IN_STOCK is shown where it would be. `card_ids` None: every order."""
+    if card_ids is None:
+        return {r[0] for r in conn.execute(_IN_STOCK_SQL % "")}
+    ids = [int(c) for c in card_ids]
+    return {r[0] for r in conn.execute(_IN_STOCK_SQL % ("AND i.order_id IN (%s)" % ",".join("?" * len(ids))), ids)} if ids else set()
+
+
 def holds(conn, card_id) -> List[int]:
     """The old orders whose tyres the order holds now (positions «с ОТХ» with pieces): the order may not be cancelled or deleted with them."""
     return sorted({r[0] for r in conn.execute(

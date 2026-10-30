@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import List, Tuple
 
 from .orders import POINT_GOODS, OrderError
+from .oth_sale import IN_STOCK
 
 AUDIENCES = {"client": "клиенту", "manager": "менеджеру"}
 VARIABLES = {
@@ -146,7 +147,7 @@ def values(conn, card: dict, now=None) -> dict:
         "client_name": card.get("client_name", ""), "client_phone": card.get("client_phone", ""), "order_no": str(card["id"]),
         "items": "; ".join("%s × %d" % (i["name"], i["qty"]) for i in items), "total": money(total) if items else "",
         "point": point.get("name", ""), "point_address": address, "manager": point.get("name", ""),
-        "delivery_date": _date(card.get("delivery_date", "")), "delivery_time": card.get("delivery_time", ""),
+        "delivery_date": _date(card.get("delivery_date", "")) or (IN_STOCK if card.get("in_stock") else ""), "delivery_time": card.get("delivery_time", ""),
         "items_full": full, "webmim_number": card.get("webmim_number", ""), "transfer_number": card.get("transfer_number", ""), "hold_until": hold, "order_date": _order_date(conn, card, now),
         "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or "",
         "oth_orders": _oth_orders(conn, card["id"])}

@@ -545,6 +545,8 @@ def get_card(conn, card_id) -> dict:
     from . import order_wait
     card["wants"] = order_wait.list_wants(conn, card_id)
     card["responsible"] = card["responsible"] or card["created_by"]            # whoever made the card answers for it until another manager is named
+    from . import oth_sale
+    card["in_stock"] = int(card_id) in oth_sale.in_stock_ids(conn, [card_id])   # every tyre taken from «На ОТХ»: no date of delivery (2026-10-30)
     return card
 
 
@@ -824,7 +826,7 @@ def missing_for(card: dict, stage: dict, placed: Optional[dict] = None) -> List[
             gaps.append("позиции")
         if not card["point_id"]:
             gaps.append("точка")
-        if not card["delivery_date"]:
+        if not card["delivery_date"] and not card.get("in_stock"):       # the tyres lie at the point already (oth_sale.IN_STOCK)
             gaps.append("дата доставки")
         if not card["client_phone"]:
             gaps.append("телефон клиента")
@@ -1077,6 +1079,8 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     summary = {"open": 0, "overdue": 0, "new_today": 0, "sum_open": 0.0}
     rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number "
                         "FROM order_card ORDER BY id DESC").fetchall()
+    from . import oth_sale
+    stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке»
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
             continue
@@ -1093,7 +1097,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
-                                      "delivery_date": delivery, "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
+                                      "delivery_date": delivery, "in_stock": cid in stocked, "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
                                       "tags": tag_names})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)

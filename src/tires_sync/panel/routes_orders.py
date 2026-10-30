@@ -767,11 +767,15 @@ def register(app) -> None:
     @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
     @login_required
     def order_oth_unagree(card_id):
-        """«Отменить согласование» of the return of «На ОТХ» (the owner and the partner), until the point signs the act МХ-3."""
+        """«Отменить согласование» of the return of «На ОТХ» (the owner and the partner), until the point signs the act МХ-3. The point is told
+        (the owner 2026-10-30) by the way of its other order messages (order_notify.tell_point)."""
         conn = get_conn()
         card = card_or_404(conn, card_id)
-        if order_oth.unagree(conn, card, local_iso(), author()):
-            flash("Согласование отменено: шины снова на ОТХ, точка возврат не видит.", "ok")
+        now = local_iso()
+        if order_oth.unagree(conn, card, now, author()):
+            told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, order_oth.UNAGREED_POINT % manager.label(card), now,
+                                           vk_http=app.config.get("VK_HTTP") or urllib_transport)
+            flash("Согласование отменено: шины снова на ОТХ, точка возврат не видит. Точке: %s." % told, "ok")
         else:
             flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
         return redirect("/orders/%d" % card_id)
@@ -1140,8 +1144,8 @@ def register(app) -> None:
         stage = next((s for s in orders.list_stages(conn) if s["code"] == "at_point"), None)
         now = local_iso()
         try:
-            changes = {} if card["delivery_date"] else {"delivery_date": now[:10]}    # the tyres are at the point: today, nobody is asked (the lead 2026-10-30)
-            if stage is None or not orders.move_card(conn, card_id, stage["id"], now, author(), changes=changes):
+            # no date of delivery is put: the tyres are at the point, «Товар в наличии на точке» is shown instead (the owner 2026-10-30)
+            if stage is None or not orders.move_card(conn, card_id, stage["id"], now, author()):
                 flash("Заказ уже перевели: обновите страницу.", "error")
                 return back(card_id)
         except orders.OrderError as err:

@@ -215,6 +215,24 @@ def unagree(conn, card: dict, now: str, author: str) -> bool:
     return True
 
 
+UNAGREED_POINT = "Возврат по заказу №%s поставщику отменён, шины остаются на точке"     # to the point after «Отменить согласование» (2026-10-30)
+
+
+def act_orders(conn, order_id) -> str:
+    """The WebMIM orders the act МХ-3 of a return is likely made by (the owner 2026-10-30: the supplier's driver brings it for the order the
+    tyres were bought by): those of the positions of the order taken from «На ОТХ» (oth_sale, the first order of a chain). '' for an
+    ordinary order on OTH. A first order without a WebMIM number is named by the panel's."""
+    from .oth_sale import first_order, taken
+    found = []
+    for item_id in sorted(taken(conn, order_id)):
+        first = first_order(conn, item_id)
+        row = conn.execute("SELECT webmim_number, webmim_id FROM order_card WHERE id = ?", (first,)).fetchone()
+        number = str((row[0] or row[1]) if row else "") or "%s (номер панели)" % first
+        if number not in found:
+            found.append(number)
+    return ", ".join(found)
+
+
 def to_return(conn, point_id) -> List[dict]:
     """The orders of the point on «На ОТХ» agreed for the return and not yet given: (card, plan), the earliest date first."""
     rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id JOIN oth_return_plan r ON r.order_id = c.id "
