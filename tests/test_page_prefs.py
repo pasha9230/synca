@@ -94,7 +94,7 @@ def test_the_filters_of_one_person_are_never_anothers(tmp_path):
 def test_the_orders_view_and_its_page_are_kept_and_a_point_never_keeps_another_point(tmp_path):
     app, owner, conn = setup(tmp_path)
     owner.get("/orders?v=list&q=Иван&page=2", headers=on("/orders"))
-    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "q": ["Иван"], "page": ["2"]}
+    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "page": ["2"]}          # the text of the search: never kept (2026-10-30)
     assert "v=list" in owner.get("/orders").headers["Location"]
     pid = points.save_point(conn, {"name": "Юнона", "manager_name": "А", "channel": "panel"})
     manager = as_user(app, conn, "point1", "point", point_id=pid)
@@ -124,13 +124,13 @@ def test_settings_open_the_tab_last_looked_at_and_the_tabs_move_freely(tmp_path)
 
 def test_a_link_with_its_own_parameters_from_elsewhere_opens_exactly_them_and_keeps_the_saved_choice(tmp_path):
     app, owner, conn = setup(tmp_path)
-    owner.get("/orders?v=list&q=Иван", headers=on("/orders"))
+    owner.get("/orders?v=list&t=опт", headers=on("/orders"))
     r = owner.get("/orders?v=list&s=3", headers=on("/my-point"))               # a tile of another page: its one-off view
     assert r.status_code == 200 and "data-filter-on" in r.get_data(as_text=True)
-    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "q": ["Иван"]}
+    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "t": ["опт"]}
     assert owner.get("/orders?v=list&s=3").status_code == 200                    # a bookmark with its parameters: the same
-    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "q": ["Иван"]}
-    assert "q=" in owner.get("/orders", headers=on("/")).headers["Location"]    # the bare address: the saved choice
+    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "t": ["опт"]}
+    assert "t=" in owner.get("/orders", headers=on("/")).headers["Location"]    # the bare address: the saved choice
 
 
 def test_a_page_without_a_saved_choice_opens_with_its_default(tmp_path, monkeypatch):
@@ -167,12 +167,12 @@ def test_the_tab_general_of_a_brand_card_opens_general(tmp_path):
 
 def test_a_one_off_view_offers_the_saved_filters_and_its_reset_keeps_them(tmp_path):
     app, owner, conn = setup(tmp_path)
-    owner.get("/orders?v=list&q=Иван", headers=on("/orders"))
+    owner.get("/orders?v=list&t=опт", headers=on("/orders"))
     html = owner.get("/orders?v=list&s=3", headers=on("/my-point")).get_data(as_text=True)
     assert "data-filter-on" in html and "/orders?saved=1" in html and "/orders?reset=1" not in html
     r = owner.get("/orders?saved=1", headers=on("/orders?v=list&s=3"))
-    assert r.status_code == 302 and "q=" in r.headers["Location"]
-    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "q": ["Иван"]}
+    assert r.status_code == 302 and "t=" in r.headers["Location"]
+    assert user_prefs.get(conn, "owner", "f.orders_page") == {"v": ["list"], "t": ["опт"]}
 
 
 def test_the_mark_of_a_form_post_is_not_taken_by_a_request_of_another_page(tmp_path):
@@ -183,3 +183,17 @@ def test_the_mark_of_a_form_post_is_not_taken_by_a_request_of_another_page(tmp_p
     owner.get("/catalog", headers=on("/"))                                      # another tab meanwhile
     back = owner.get("/orders/report", headers=on("/orders/report?from=2026-10-01"))
     assert back.status_code == 302 and "from=2026-10-01" in back.headers["Location"]
+
+
+def test_the_text_of_a_search_is_never_kept_the_rest_is(tmp_path):
+    """The owner 2026-10-30: a search typed once does not come back on the next visit; the other choices of the page do."""
+    app, owner, conn = setup(tmp_path)
+    for path, query, kept in (("/orders", "v=list&q=Иван", {"v": ["list"]}), ("/chats", "f=unread&q=Иван", {"f": ["unread"]}),
+                              ("/catalog", "d=13&q=Ikon", {"d": ["13"]})):
+        owner.get(path + "?" + query, headers=on(path))
+        endpoint = {"/orders": "orders_page", "/chats": "chats_page", "/catalog": "catalog"}[path]
+        assert user_prefs.get(conn, "owner", "f." + endpoint) == kept, path
+        r = owner.get(path, headers={"Referer": "http://localhost/"})
+        assert r.status_code == 302 and "q=" not in r.headers["Location"], path
+    user_prefs.put(conn, "owner", "f.orders_page", {"v": ["list"], "q": ["старый"]}, T)       # kept before the change: not brought back
+    assert "q=" not in owner.get("/orders", headers={"Referer": "http://localhost/"}).headers["Location"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
@@ -57,6 +58,7 @@ def _view_settings(conn, raw, changes):
 
 
 PAGE_SIZES = (10, 50, 100, 200, 500)
+MARKET_SHOWN = False             # «Рынок» of the catalog (the owner 2026-10-30: not before the parser itself): the column, «Дороже рынка», «Конкуренты»
 BULK_PRICE_LIMIT = 1000          # positions of one press of «Своя цена выбранным» (the owner 2026-10-30)
 BULK_PCT_MAX = 50                # a markup or a markdown of one press, % to the purchase (the owner 2026-10-30)
 
@@ -131,6 +133,39 @@ def _locate(conn, settings, parsed, goods_id: str, base):
     if offer is not None:
         return ParseResult(offers={goods_id: offer}), (catalog_archive.item_info(conn, goods_id) or {}).get("gone_since") or ""
     return None
+
+
+def orphan_rules(app, conn) -> list:
+    """«Ручные правила без позиции» of «Настройки → Исключения» (the owner 2026-10-30; it was a block of the catalog): the manual rules
+    (on/off, applied or in the draft) of positions the supplier lists no more, with what the archive knows of each — the last name, since when
+    the supplier has it not — and who set it and when (the confirm of the settings that brought it in). A position of an old second unload
+    held for viewing is still there: not listed."""
+    from ..catalog_archive import gone_offer, item_info
+    from ..suppliers import supplier_of_id                              # the key is always «1:<code>» (override_key): the code names its supplier
+    _conn, settings, parsed, _ref = context(app)
+    effective = settings_from_dict(staging.effective_raw(conn), enforce_pct_limit=False)
+    held = {o.goods_id for o, _ in _held_offers(conn, settings, app.config["UNLOAD_PATH"])}
+    suppliers = {str(s["id"]): s["name"] for s in connections.list_suppliers(conn)}
+    confirms = [(at, who, json.loads(detail or "{}").get("changes", {}).get("overrides")) for at, who, detail in conn.execute(
+        "SELECT at, author, detail FROM audit WHERE action = 'settings_confirm' ORDER BY id")]
+    out = []
+    for key, mode in sorted(effective.overrides.items()):
+        supplier, _, goods_id = key.partition(":") if ":" in key else ("1", "", key)
+        if goods_id in parsed.offers or goods_id in held:
+            continue
+        gone, info = gone_offer(conn, goods_id), item_info(conn, goods_id)
+        set_at = set_by = ""
+        before = None
+        for at, who, rules in confirms:                                 # the confirm that brought the rule as it is now
+            if not isinstance(rules, dict):
+                continue
+            if rules.get(key) == mode and before != mode:
+                set_at, set_by = at, who
+            before = rules.get(key)
+        out.append({"goods_id": goods_id, "mode": mode, "name": (gone.name_orig or gone.name) if gone else "",
+                    "supplier": suppliers.get(str(supplier_of_id(goods_id)), "поставщик %s" % supplier_of_id(goods_id)), "gone_since": (info or {}).get("gone_since") or "",
+                    "set_at": set_at, "set_by": set_by, "pending": key not in (settings.overrides or {})})
+    return out
 
 
 def _held_view(conn, raw, args, season, studs, held, ref=None) -> list:
@@ -211,7 +246,7 @@ def register(app) -> None:
             items = [i for i in items if i["scode"] == "model_needs_mapping"]
         elif status == "problem":
             items = [i for i in items if i["problem"]]
-        market_on = has_right("money")                                # the competitors' prices: the owner's, as the purchase (market.py)
+        market_on = MARKET_SHOWN and has_right("money")               # the competitors' prices: the owner's, as the purchase (market.py)
         snaps = market.latest(conn) if market_on else {}
         market_over = market_on and args.get("mk") == "over"
         if market_over:                                               # «Дороже рынка»: our price above the median of enough data
@@ -247,7 +282,6 @@ def register(app) -> None:
         pager = {p: "/catalog?" + urlencode(keep + [("p", p)]) for p in range(1, b["pages"] + 1)} if b["pages"] > 1 else {}
         b.update(links=links, pager=pager, size_links=size_links, next_url=next_url or request.full_path.rstrip("?"), sup=_num(args, "sup"),
                  show_marks=_num(args, "sup") is None and len(connections.list_suppliers(b["conn"])) > 1,
-                 orphans=[o for o in service.orphan_overrides(b["effective"], b["parsed"]) if o["goods_id"] not in b["held_ids"]],   # held: still there
                  table_url="/catalog/table?" + urlencode(_pairs(args)),
                  filter_query=urlencode(_pairs(args, ("p", "n", "o", "r"))),     # what «все по фильтру» takes again when pressed
                  feed_accounts=connections.list_feed_accounts(b["conn"]) if can_post("catalog_own_price_bulk") else [],
@@ -445,7 +479,7 @@ def register(app) -> None:
             data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id],
                                                         ref, parsed.offers)
             data["purchase"] = parsed.offers[goods_id].base_price
-        if has_right("money"):                                        # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
+        if MARKET_SHOWN and has_right("money"):                       # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
             snapshot = market.latest(conn, [goods_id]).get(goods_id)
             data["market"] = {"snapshot": snapshot, "listings": market.listings_of(conn, snapshot["id"]) if snapshot else [],
                               "at": market.moscow(snapshot["run_at"]) if snapshot else ""}

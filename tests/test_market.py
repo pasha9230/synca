@@ -109,10 +109,19 @@ def test_the_place_of_our_price():
 
 # ---- the base and the intake ----------------------------------------------------------------------------------------------------------
 
-def setup(tmp_path):
+@pytest.fixture(autouse=True)
+def market_shown(monkeypatch):
+    """«Рынок» is hidden and its intake off by default (the owner 2026-10-30): these tests look at the stage 0 switched on."""
+    from tires_sync.panel import routes_catalog
+    monkeypatch.setattr(routes_catalog, "MARKET_SHOWN", True)
+
+
+def setup(tmp_path, on=True):
     from datetime import datetime
     app = make_app(tmp_path, NOW=lambda: datetime(2026, 10, 31, 8, 0, 0))
     conn = store.connect(app.config["DB_PATH"])
+    if on:
+        store.set_state(conn, routes_market.STOP_KEY, "0")
     account = connections.create_account(conn, "Главный", "2026-10-30T10:00:00", "o")
     store.upsert_published(conn, PublishedItem("100", 4810, 5000.0, "P1"), "<Ad/>", account)
     store.upsert_published(conn, PublishedItem("102-x4", 4810, 5000.0, "P1"), "<Ad/>", account)
@@ -373,3 +382,16 @@ def test_the_time_of_a_run_comes_with_its_offset_and_moscow_without_it_is_refuse
     send(app, token, body([raw(1, 5000)], status="blocked", note="капча"))
     item = client.get("/catalog/item/100").get_data(as_text=True).split("Конкуренты")[1]
     assert "Прогон 31.10.2026 10:40" in item and "прогон остановлен: капча" in item
+
+
+def test_the_market_is_hidden_and_its_intake_off_by_default(tmp_path, monkeypatch):
+    from tires_sync.panel import routes_catalog
+    monkeypatch.setattr(routes_catalog, "MARKET_SHOWN", False)
+    app, conn, account = setup(tmp_path, on=False)
+    token = routes_market.issue_token(conn)
+    assert send(app, token, body([raw(1, 5000)])).status_code == 503                          # nothing taken until switched on
+    client = app.test_client()
+    login(client)
+    page = client.get("/catalog").get_data(as_text=True)
+    assert "Рынок" not in page and "Дороже рынка" not in page and "data-market-parser" not in page and "Парсер цен" not in page
+    assert "Конкуренты" not in client.get("/catalog/item/100").get_data(as_text=True)

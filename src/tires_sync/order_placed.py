@@ -24,6 +24,8 @@ POINT_TEMPLATE = "Менеджеру: заказ оформлен"
 RULE = engine.PLACED_RULE                            # the «rule» number of these system tasks (order_wait has 0 and −1); a rule of a stage
                                                      # met with the same template later makes its own task «skipped» (order_engine._make_task)
 AUTHOR = "после оформления в WebMIM"
+MERGED = ("Сообщения «заказ оформлен» клиенту и точке не отправлены: заказ объединён, клиент и точка уже знают. Отправить можно вручную "
+          "из шаблонов.")                       # a merged order already told: information, not an error (the lead 2026-10-30)
 IN_PANEL = "работает в панели: "                     # the line of a point in the panel (the panel shows it as information, not an error)
 WAITING = "Сообщение ждёт в окне «Сообщения по заказу» карточки: отправьте его оттуда."
 Deliver = Callable[[int, str, str], None]            # (chat row, text, token): chats.send_reply of the chat's account; raises when it did not go
@@ -39,8 +41,7 @@ def on_placed(conn, card_id, webmim_id: str, now: str, author: str, deliver: Opt
     (order_merge.told_placed): the client and the point heard it, nothing is sent; a grey line says so (the lead 2026-10-30)."""
     from . import order_merge
     if order_merge.told_placed(conn, card_id):
-        line = ("Сообщения «заказ оформлен» клиенту и точке не отправлены: заказ объединён, клиент и точка уже знают. Отправить можно вручную "
-                "из шаблонов.")
+        line = MERGED
         try:
             orders.add_event(conn, card_id, now, author, "notify", line, level="grey")
             conn.commit()

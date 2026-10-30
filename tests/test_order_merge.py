@@ -244,8 +244,7 @@ def test_the_table_keeps_the_old_rows_and_adds_the_new_ones_with_their_webmim_nu
     rows = order_sheet.rows_of(conn, new, NOW)
     assert sorted((r["№ заказа MIM"], r["Перемещение MIM"], r["Кол-во"]) for r in rows.values()) == sorted(
         [(label_a, _card(conn, a)["transfer_number"], 4), (label_b, "П-77", 2)])
-    plain = order_sheet.rows_of(conn, new_order(conn, qty=1, goods="8"), NOW)        # «Примечание» is the owner's (2026-10-30): nothing of the
-    assert {r["Примечание"] for r in rows.values()} == {r["Примечание"] for r in plain.values()}       # merge, as in any row
+    assert all("Примечание" not in r for r in rows.values())                        # «Примечание» is the owner's (2026-10-30): never sent
     for src in (a, b):
         now_rows = order_sheet.rows_of(conn, src, T)
         ops = order_sheet.changes(now_rows, written[src], order_sheet.followed(conn, src))
