@@ -25,6 +25,7 @@
 <label><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}><span class="spike" title="Шипы"><span>ш</span></span>Шипы</label>
 <label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div></div>
 <div class="field" style="width:140px"><span class="label">Статус</span><select class="select" name="st"><option value=""{% if status == "all" %} selected{% endif %}>Все</option><option value="feed"{% if status == "feed" %} selected{% endif %}>В фиде</option><option value="no"{% if status == "no" %} selected{% endif %}>Не в фиде</option><option value="nopair"{% if status == "nopair" %} selected{% endif %}>Нет пары</option><option value="problem"{% if status == "problem" %} selected{% endif %}>Проблемы</option><option value="gone"{% if status == "gone" %} selected{% endif %}>Нет у поставщика</option></select></div>
+{% if view_accounts|length > 1 %}<div class="field" style="width:180px"><span class="label">Цены аккаунта</span><select class="select" name="acc" title="Для какого аккаунта показывать «Нашу цену»{% if can_post('catalog_own_price_inline') %} и ставить свою цену в этой графе{% endif %}. Фид не меняется" data-view-account>{% for a in view_accounts %}<option value="{{ a.id }}"{% if view_account and a.id == view_account.id %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></div>{% endif %}
 {% if market_on %}<div class="field" style="width:160px"><span class="label">Рынок</span><select class="select" name="mk"><option value="">Все</option><option value="over"{% if market_over %} selected{% endif %}>Дороже рынка</option></select></div>{% endif %}
 <div class="field"><span class="label">Бренды</span><details class="brand-pick" data-no-autosubmit><summary class="select">{% if chosen_brands %}{{ chosen_brands|length }} {{ plural(chosen_brands|length, "бренд", "бренда", "брендов") }}{% else %}Все{% endif %}{% if without_brands %} · кроме {{ without_brands|length }}{% endif %}</summary>
 <div class="brand-pick-body"><div class="row small muted"><span class="grow">Бренд</span><span>Показать</span><span>Кроме</span></div>
@@ -77,5 +78,6 @@
 <button form="bulk" formaction="/catalog/own-price/bulk" name="action" value="save" class="btn btn--primary">В черновик</button></div>
 </div></div>{% endif %}
 {% if wait %}{% include "_catalog_wait.html" %}{% endif %}
+{% if can_post("catalog_own_price_inline") %}<script src="{{ url_for('static', filename='own_price.js') }}"></script>{% endif %}
 <div class="modal-backdrop" id="pv"><div class="modal"><div class="modal-head"><h3>Предпросмотр объявления</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div><div class="modal-body" id="pvbody"></div><div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Закрыть</button></div></div></div>
 {% endblock %}

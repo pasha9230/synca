@@ -752,3 +752,9 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
 .brand-pick summary{list-style:none;cursor:pointer;min-width:140px}
 .brand-pick-body{position:absolute;z-index:30;top:44px;left:0;min-width:320px;max-height:380px;overflow:auto;padding:10px 12px;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-lg);box-shadow:var(--sh-lg)}
 .brand-pick-body .row{gap:var(--s-3);align-items:center;padding:3px 0}
+/* «Наша цена» of the catalog: the owner's own price right in the cell (the owner 2026-10-30) */
+.own-cell{display:inline-block}
+.own-cell>summary{list-style:none;cursor:pointer;border-bottom:1px dashed var(--gray-400)}
+.own-cell>summary::-webkit-details-marker{display:none}
+.own-cell[open]{display:block}
+.own-cell-form{margin-top:var(--s-2);width:240px;padding:var(--s-3);text-align:left;white-space:normal;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-lg);box-shadow:var(--sh-lg)}

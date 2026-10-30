@@ -50,11 +50,31 @@ def _state(conn) -> dict:
     return {"staged": 0 if staged["stale"] else staged["count"], "stale": staged["stale"], "review_url": "/catalog/review"}
 
 
-def _view_settings(conn, raw, changes):
-    """Settings as the first account sees them (its own price delta and stock threshold): what the catalog shows."""
+def _view_settings(conn, raw, changes, account_id=None):
+    """Settings as an account sees them (its own price delta, stock threshold and own prices): what the catalog shows. `account_id`: the
+    account chosen in the catalog («Цены аккаунта»), else the first."""
     effective = settings_from_dict({**raw, **changes}, enforce_pct_limit=False)
+    account = _view_account(conn, account_id)
+    return connections.effective_settings(conn, account["id"], effective) if account else effective
+
+
+def _view_account(conn, account_id=None):
+    """The feed account whose prices the catalog shows: the one asked for, else the first; None when there is none."""
     accounts = connections.list_feed_accounts(conn)
-    return connections.effective_settings(conn, accounts[0]["id"], effective) if accounts else effective
+    return next((a for a in accounts if a["id"] == account_id), accounts[0] if accounts else None)
+
+
+def _own_value(text: str) -> dict:
+    """What the cell «Наша цена» was given (the owner 2026-10-30): «6990» a sale price in ₽, «+5 %» / «−5 %» / «5%» a percent to the
+    purchase, as the own price of the card."""
+    text = str(text or "").replace(" ", "").replace("\u00a0", "").replace("\u202f", "").replace(",", ".").replace("−", "-").replace("₽", "")
+    if text.endswith("%"):
+        number = text[:-1]
+        if re.fullmatch(r"[+\-]?\d+(\.\d+)?", number):
+            return {"pct": float(number)}
+    elif re.fullmatch(r"\d+", text):
+        return {"price": int(text)}
+    raise ValueError("Введите цену в рублях (6990) или процент к закупке (+5 % или −5 %).")
 
 
 PAGE_SIZES = (10, 50, 100, 200, 500)
@@ -260,7 +280,8 @@ def register(app) -> None:
         _, raw = get_active(conn)
         staged = staging.summary(conn)
         changes = {} if staged["stale"] else staged["changes"]
-        effective = _view_settings(conn, raw, changes)
+        view_account = _view_account(conn, _num(args, "acc"))           # «Цены аккаунта»: whose «Наша цена» the table shows and the cell sets
+        effective = _view_settings(conn, raw, changes, view_account["id"] if view_account else None)
         season = args.get("s") if args.get("s") in ("summer", "winter") else None
         studs = args.get("t") if args.get("t") in ("studded", "friction") else None
         status = args.get("st") if args.get("st") in ("feed", "no", "nopair", "problem", "gone") else "all"
@@ -299,7 +320,13 @@ def register(app) -> None:
         page = min(max(_num(args, "p") or 1, 1), pages)
         shown = items[(page - 1) * size: page * size]
         if not has_right("money"):                                    # the supplier's price is a purchase price: not even in the HTML
-            shown = [dict(i, supplier_price=None) for i in shown]
+            shown = [dict(i, supplier_price=None, purchase=None) for i in shown]
+        if view_account is not None:                                  # the own price of the account shown: the cell «Наша цена»
+            now_own, was_own = {**raw, **changes}.get("price_overrides") or {}, raw.get("price_overrides") or {}
+            for i in shown:
+                key = "%d:%s" % (view_account["id"], i["goods_id"])
+                own = now_own.get(key)
+                i.update(own_here=own, own_text=service.own_price_text(own) if own else "", own_pending=own != was_own.get(key))
         on_oth = order_oth.goods_on_oth(conn)                        # our own tyres of refused orders: a mark only, the feed is not touched
         shown = [dict(i, oth=on_oth.get(i["goods_id"])) for i in shown]
         if market_on:
@@ -307,7 +334,7 @@ def register(app) -> None:
         return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids, held_shown=held_shown,
                     all_ids=[i["goods_id"] for i in items],                # every position of the filter, every page («все по фильтру»)
                     market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
-                    page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
+                    view_account=view_account, page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
                     studs=studs or "", status=status, sort=sort, descending=descending)
 
     def table_context(args, next_url=None):
@@ -327,6 +354,8 @@ def register(app) -> None:
                  table_url="/catalog/table?" + urlencode(_pairs(args)),
                  filter_query=urlencode(_pairs(args, ("p", "n", "o", "r"))),     # what «все по фильтру» takes again when pressed
                  feed_accounts=connections.list_feed_accounts(b["conn"]) if can_post("catalog_own_price_bulk") else [],
+                 view_accounts=connections.list_feed_accounts(b["conn"]),
+                 page_url=("/catalog?" + urlencode(_pairs(args))).rstrip("?"),     # where the cell «Наша цена» comes back to
                  bulk_limit=BULK_PRICE_LIMIT, bulk_pct_max=BULK_PCT_MAX, filter_fp=_ids_fp(b["all_ids"]),
                  wait_url="/catalog?" + urlencode(_pairs(args) + [("wait", "")]))     # + the position: the page opens with its window
         return b
@@ -557,6 +586,39 @@ def register(app) -> None:
             return redirect(_item_path(goods_id))
         flash(("Своя цена" if value else "«Как у бренда»") + " в черновике: подтвердите изменения, чтобы они попали в фид.")
         return redirect(_item_path(goods_id))
+
+    @app.route("/catalog/own-price/inline", methods=["POST"])
+    @login_required
+    def catalog_own_price_inline():
+        """The own price from the cell «Наша цена» of the catalog (the owner 2026-10-30): the account the catalog shows, plus the others ticked
+        («то же на …»); a sale price or a percent to the purchase, or «Сбросить». The same working draft as the card (staging.set_own_price,
+        applied with «Применить» and its confirmations); whom: as the card (common.NEEDS)."""
+        conn = get_conn()
+        form = request.form
+        back = _back()
+        goods_id = str(form.get("g") or "").strip()
+        feed = {a["id"] for a in connections.list_feed_accounts(conn)}
+        try:
+            accounts = [int(a) for a in [form.get("acc", "")] + form.getlist("a") if str(a).isdigit()]
+            if not goods_id or not str(form.get("acc", "")).isdigit() or any(a not in feed for a in accounts):
+                raise ValueError("Не понял, на каком аккаунте поставить цену: обновите страницу.")
+            value = None if form.get("do") == "clear" else _own_value(form.get("value"))     # «do», not «action»: that name hides form.action
+            if value is not None and goods_id not in context(app)[2].offers:
+                raise ValueError("Такой позиции нет в выгрузке.")
+            staging.set_own_price(conn, goods_id, accounts, value, now_iso())
+        except (StaleDraftError, ValueError) as err:
+            if _in_place():
+                return jsonify(ok=False, message=str(err), **_state(conn))
+            flash(str(err))
+            return redirect(back)
+        names = {a["id"]: a["name"] for a in connections.list_feed_accounts(conn)}
+        message = "%s · %s: %s. Пока это черновик: подтвердите изменения, чтобы они попали в фид." % (
+            "Своя цена " + service.own_price_text(value) if value else "Своя цена сброшена (как у бренда)", _names(conn, [goods_id])[0],
+            ", ".join(names[a] for a in sorted(set(accounts))))
+        if _in_place():
+            return jsonify(ok=True, message=message, **_state(conn))
+        flash(message)
+        return redirect(back)
 
     @app.route("/catalog/own-price/bulk", methods=["POST"])
     @login_required

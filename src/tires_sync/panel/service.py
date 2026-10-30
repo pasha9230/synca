@@ -577,6 +577,7 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
             "pending": base_overrides is not None and manual != base_overrides.get(override_key(gid)), "view_only": gid in view_only,
             "own_price": gid in own_any,
             "below_cost": bool(cand and gid in settings.own_prices and offer.base_price > 0 and cand.price < offer.base_price),
+            "purchase": ev.held[gid][0] if gid in ev.held else offer.base_price,     # what a percent is counted from: the anchor (price_guard)
             "supplier_mark": supplier_mark(supplier_of(offer), capped_supplier),
             "stock_text": ">40" if capped_supplier and supplier_of(offer) == capped_supplier and offer.stock >= STOCK_CAP else str(offer.stock),
             "twins": twins(gid)})
