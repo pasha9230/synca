@@ -45,7 +45,7 @@ def test_catalog_rows_have_checkboxes_and_a_bulk_bar(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     html = client.get("/catalog").get_data(as_text=True)
     assert 'name="g" value="1" form="bulk"' in html
-    assert 'id="bulk"' in html and "Снять выбранные" in html and "Добавить вручную выбранные" in html and "Отменить ручное решение у выбранных" in html
+    assert 'id="bulk"' in html and "Снять выбранные" in html and "Добавить вручную выбранные" in html and "Вернуть выбранные по правилам" in html
     assert 'data-preview="1"' in html
 
 
@@ -74,7 +74,8 @@ def test_catalog_is_one_table_paged_by_a_hundred_and_served_as_a_fragment(tmp_pa
     app, client, tok, conn = setup(tmp_path)
     html = client.get("/catalog").get_data(as_text=True)
     table = html.split('id="items"')[1]                 # the brand filter and «Бренды в фиде» above it fold (<details>); the table never does
-    assert ">C1<" in html and 'id="items"' in html and "lazymodels" not in html and "<details" not in table
+    assert ">C1<" in html and 'id="items"' in html and "lazymodels" not in html
+    assert not re.findall(r'<details(?! class="own-cell")', table)       # only the owner's price cell opens (inline-price 2026-10-30): no row folds
     from tires_sync.panel import routes_catalog
     routes_catalog.PAGE_SIZE = 2
     try:
