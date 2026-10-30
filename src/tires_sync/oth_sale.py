@@ -277,7 +277,7 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
         raise OthSaleError("По заказу №%d согласован возврат поставщику (акт МХ-3): шины новому клиенту не передать." % old_id)
     rows = [r for r in oth_stock._rows(conn) if r["order_id"] == old_id]
     if not rows:
-        raise OthSaleError("На ОТХ по заказу №%d не осталось шин: они возвращены поставщику или это шины точки без кода." % old_id)
+        raise OthSaleError("На ОТХ по заказу №%d нет шин, которые можно передать (возвращены поставщику, шина точки или тестовая точка)." % old_id)
     items = {i["id"]: i for i in old["items"]}
     lines = [dict(goods_id=r["goods_id"], code=items[r["item_id"]]["code"], name=items[r["item_id"]]["name"], brand_key=items[r["item_id"]]["brand_key"],
                   season=items[r["item_id"]]["season"], diameter=items[r["item_id"]]["diameter"], territory=items[r["item_id"]]["territory"],
@@ -288,18 +288,32 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
     except orders.OpenOrderExists as err:
         raise OthSaleError("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, err.order_id)) from None
     orders.add_event(conn, new, now, author, "field", "Заказ создан для нового клиента шин с ОТХ заказа №%d." % old_id)
+    _audit(conn, now, author, "oth_new_client", {"order": new, "from_order": int(old_id)})
     conn.commit()
-    for r in rows:
-        line = next((i for i in orders.get_card(conn, new)["items"] if i["goods_id"] == r["goods_id"] and int(i["qty"]) >= 1
-                     and i["id"] not in taken_ids(conn, new)), None)
-        try:
-            if line is None:
-                raise OthSaleError("позиция не нашлась")
-            take(conn, new, line["id"], r["item_id"], now, author)
-        except orders.OrderError as err:
-            raise OthSaleError("Новый заказ №%d создан, но шины с ОТХ взять не удалось (%s): откройте его и возьмите их кнопкой «Взять с ОТХ»."
-                               % (new, err)) from None
+    made = [i["id"] for i in orders.get_card(conn, new)["items"]]          # the positions in the order of the rows (create_card_with_items)
+    try:
+        for r, line_id in zip(rows, made):
+            if take(conn, new, line_id, r["item_id"], now, author) != int(r["qty"]):     # some taken a moment ago in another tab
+                raise OthSaleError("на ОТХ осталось меньше шин, чем было")
+    except orders.OrderError as err:
+        _undo_new(conn, new, now, author)
+        raise OthSaleError("Шины новому клиенту не переданы (%s): обновите страницу и попробуйте снова." % err) from None
     return new
+
+
+def _undo_new(conn, new: int, now: str, author: str) -> None:
+    """A take of to_new_client failed: what it took goes back to OTH and the new order goes to «Удалённые» (it never was the client's). A
+    failure of that is left as a red record of the new order."""
+    from . import trash
+    try:
+        for item_id in list(taken(conn, new)):
+            untake(conn, new, item_id, now, author)
+        trash.delete_order(conn, new, now, author)
+    except Exception as err:                                            # noqa: BLE001
+        conn.rollback()
+        orders.add_event(conn, new, now, author, "field", "Шины с ОТХ взяты не полностью (%s): проверьте заказ, не оформляйте его в WebMIM." % err,
+                         level="red")
+        conn.commit()
 
 
 def untake(conn, card_id, item_id, now: str, author: str) -> int:

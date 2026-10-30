@@ -754,9 +754,9 @@ def register(app) -> None:
         asked = oth_offer(conn, card, stage_id) if stage_id is not None else None
         if asked is not None:
             return ask_oth(card_id, asked, reason)
-        back = back_offer(conn, card, stage_id) if stage_id is not None else None
-        if back is not None:                                               # from «На ОТХ» to the point: a new client or the same?
-            return ask_back(card_id, back)
+        going_back = back_offer(conn, card, stage_id) if stage_id is not None else None
+        if going_back is not None:                                         # from «На ОТХ» to the point: a new client or the same?
+            return ask_back(card_id, going_back)
         if request.form.get("oth_answer") in ("yes", "no"):                # the answer to the question: its reason goes with the move, for a point too
             session.pop("oth_offer", None)
             if reason is None and request.form.get("cancel_reason"):
@@ -1072,9 +1072,9 @@ def register(app) -> None:
             asked = oth_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
             if asked is not None:                                         # the fields are saved (the reason too); the move asks first
                 return ask_oth(card_id, asked)
-            back = back_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
-            if back is not None:                                          # the fields are saved; a new client or the same asks first
-                return ask_back(card_id, back)
+            going_back = back_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
+            if going_back is not None:                                    # the fields are saved; a new client or the same asks first
+                return ask_back(card_id, going_back)
             try:
                 stage_id = _int(request.form.get("stage_id"))
                 if stage_id is None:
@@ -1293,7 +1293,12 @@ def register(app) -> None:
             session.pop("oth_back", None)
             try:
                 stage = next(s for s in orders.list_stages(conn) if s["code"] == "at_point")
-                flash("Заказ перенесён: тот же клиент." if orders.move_card(conn, card_id, stage["id"], local_iso(), author()) else "Заказ уже перевели.")
+                stamp = local_iso()
+                if orders.move_card(conn, card_id, stage["id"], stamp, author()):
+                    flash("Заказ перенесён: тот же клиент.")
+                    offer_send(conn, card_id, stamp)                       # the messages of the stage, as any move of the card
+                else:
+                    flash("Заказ уже перевели.")
             except (orders.OrderError, StopIteration) as err:
                 flash(str(err) or "Нет этапа «Товар на точке».", "error")
             return back(card_id)
@@ -1303,7 +1308,13 @@ def register(app) -> None:
             flash(str(err), "error")
             return redirect("/orders/%d#oth-back" % card_id)
         session.pop("oth_back", None)
-        oth_to_point(conn, new)
+        left = orders.get_card(conn, card_id)
+        if left["stage"]["code"] == "oth":                                 # a tyre of the point, pieces given back: the old order stays
+            flash("Заказ №%d остался на «На ОТХ»: в нём остались шины, которые не переходят (шина точки или возвращённые поставщику)." % card_id, "error")
+        if oth_sale.all_from_oth(conn, orders.get_card(conn, new)):
+            oth_to_point(conn, new)
+        else:
+            flash("Новый заказ №%d не переведён на «Товар на точке»: не все его шины взяты с ОТХ." % new, "error")
         return redirect("/orders/%d" % new)
 
     @app.route("/orders/<int:card_id>/items/<int:item_id>/update", methods=["POST"])
