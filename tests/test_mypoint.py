@@ -28,8 +28,16 @@ def token(page, card, action):
     return found.group(1)
 
 
+TABS = ("here", "moving", "oth", "return")             # «Рабочее место» has no «Все» (the owner 2026-10-30): a card is on its own tab
+
+
+def workplace(client, p=None):
+    """Every order tab of «Рабочее место» as one text (a card lies on one of them)."""
+    return "".join(client.get("/my-point?tab=%s" % t + ("&p=%d" % p if p else "")).get_data(as_text=True) for t in TABS)
+
+
 def press(client, card, action, tok="tok", p=None, again=None):
-    page = client.get("/my-point" + ("?p=%d" % p if p else "")).get_data(as_text=True)
+    page = workplace(client, p)
     data = dict(token=again or token(page, card, action))
     if p:
         data["p"] = str(p)
@@ -58,7 +66,7 @@ def test_the_manager_sees_the_orders_of_the_own_point_only_with_phone_items_and_
     orders.update_card(conn, theirs, dict(client_name="Чужой Клиент", client_phone="+7 911 000 00 00"), "2026-10-13T12:00:00", "o")
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point?p=%d" % other).get_data(as_text=True)                      # asking for another point gives the own one
+    page = workplace(mine, other)                                                         # asking for another point gives the own one
     assert "Бета" in page and "5000100" in page and "700200" in page
     assert "700100" not in page and "Чужой Клиент" not in page and "+7 911" not in page
     assert 'href="tel:+79001112233"' in page and "Nokian Hakkapeliitta 10" in page and "Кол-во 4 шт" in page    # the VK text (owner 2026-10-26)
@@ -84,7 +92,7 @@ def test_the_owner_picks_a_point_and_other_roles_have_no_page(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     other = points.save_point(conn, dict(name="Гамма", channel="vk", vk_peer_id="777"))
     _card(conn, other, webmim="700100")
-    page = client.get("/my-point?p=%d" % other).get_data(as_text=True)
+    page = workplace(client, other)
     assert "700100" in page and "5000100" not in page and '<option value="%d" selected>Гамма' % other in page
     for role in ("chats", "viewer"):
         users.add_user(conn, role, PASSWORD, "2026-10-13T12:00:00", role=role)
@@ -193,7 +201,7 @@ def test_a_mark_that_does_not_fit_the_stage_changes_nothing(tmp_path):
     assert orders.get_card(conn, card)["stage"]["code"] == "moving" and to_client(app) == []
     assert not [e for e in orders.list_events(conn, card) if e["level"] == "red"]
     assert post(mine, "/my-point/%d/explode" % card, "tok", token="d" * 24).status_code == 404
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = workplace(mine)
     assert post(mine, "/my-point/%d/arrived" % card, "tok", token="not-a-token").status_code == 302
     assert orders.get_card(conn, card)["stage"]["code"] == "moving" and "5000100" in page
 
@@ -202,7 +210,7 @@ def test_the_vk_command_then_the_button_tell_the_client_once(tmp_path):
     """Team lead's check: a press on the page and the same command from VK on one order never give the client two «можно забирать»."""
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = workplace(mine)
     stale = token(page, card, "arrived")                                                   # the page was open before the VK command
     hook(app, conn, "приехал 5000100", event="vk-first")
     assert len(to_client(app)) == 1 and orders.get_card(conn, card)["stage"]["code"] == "at_point"
@@ -248,13 +256,13 @@ def test_a_manager_of_a_deleted_point_gets_no_page_and_no_error(tmp_path):
 # --- «Передать клиента» (lane 4B2): the VK command «клиент <телефон> <что нужно>» as a form -------------------------------------------
 
 def handoff_token(page):
-    found = re.search(r'<form method="post" action="/my-point" class="mp-handoff-form"[^>]*>.*?name="token" value="([0-9a-f]+)"', page, re.S)
+    found = re.search(r'<form method="post" action="/my-point(?:/handed)?" class="mp-handoff-form"[^>]*>.*?name="token" value="([0-9a-f]+)"', page, re.S)
     assert found, "no handoff form"
     return found.group(1)
 
 
 def hand_over(client, phone, need, tok_=None, p=None):
-    page = client.get("/my-point" + ("?p=%d" % p if p else "")).get_data(as_text=True)
+    page = client.get("/my-point/handed" + ("?p=%d" % p if p else "")).get_data(as_text=True)          # the form is on its own tab
     data = dict(token=tok_ or handoff_token(page), phone=phone, need=need)
     if p:
         data["p"] = str(p)
@@ -323,7 +331,7 @@ def test_a_point_without_vk_hands_over_from_the_page_too(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     loose = points.save_point(conn, dict(name="Без ВК", channel="telegram"))
     mine = manager(app, conn, loose, login_="loose")
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point/handed").get_data(as_text=True)
     assert "Передать клиента" in page and "mp-handoff-form" in page and "привязана к ВК" not in page
     r = post(mine, "/my-point", "tok", token="f" * 24, phone="+7 900 222-33-44", need="")
     assert r.status_code == 302 and len(handed(conn)) == 1
@@ -331,8 +339,8 @@ def test_a_point_without_vk_hands_over_from_the_page_too(tmp_path):
 
 def test_the_phone_field_and_the_dictation_button(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
-    page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
-    form = re.search(r'<form method="post" action="/my-point" class="mp-handoff-form".*?</form>', page, re.S).group(0)
+    page = manager(app, conn, pid).get("/my-point/handed").get_data(as_text=True)
+    form = re.search(r'<form method="post" action="/my-point(?:/handed)?" class="mp-handoff-form".*?</form>', page, re.S).group(0)
     assert 'type="tel" name="phone" required' in form and 'maxlength="500"' in form
     assert re.search(r"<button[^>]*data-dictate[^>]*hidden", form) and "mypoint.js" in page and "<script>" not in page
 
@@ -403,7 +411,7 @@ def test_the_order_says_who_handed_the_client_over_from_the_page(tmp_path):
 
 def test_the_owner_hands_over_only_to_the_point_on_the_form(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
-    page = client.get("/my-point?p=%d" % pid).get_data(as_text=True)
+    page = client.get("/my-point/handed?p=%d" % pid).get_data(as_text=True)
     for p in ("999", ""):                                                                     # the point is gone, or no point in the form
         r = post(client, "/my-point", "tok", token=handoff_token(page), phone="+7 900 222-33-44", need="", **({"p": p} if p else {}))
         assert r.status_code == 400 and "Точка не выбрана" in r.get_data(as_text=True), p

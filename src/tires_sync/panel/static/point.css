@@ -1,0 +1,126 @@
+/* «Рабочее место», the new design (the owner 2026-10-30, the prototype docs/ux/prototype-2026-10-30: renderPointMobile, pmCard, renderMypoint):
+   the colours and sizes of Ant Design, only inside .pt (the rest of the panel keeps its own). A phone (≤ 760 px): no menu nor top bar,
+   the tabs at the bottom of the screen, buttons of 48 px; a computer: the same order, the tabs on top. No script of its own. */
+.pt{
+  --pt-primary:#1677ff;--pt-primary-hover:#4096ff;--pt-primary-bg:#e6f4ff;--pt-primary-border:#91caff;
+  --pt-success:#389e0d;--pt-warning:#faad14;--pt-warning-text:#d46b08;--pt-error:#ff4d4f;--pt-error-text:#cf1322;
+  --pt-bg-layout:#f5f5f5;--pt-bg:#ffffff;--pt-fill:rgba(0,0,0,.02);--pt-fill-2:rgba(0,0,0,.06);
+  --pt-border:#d9d9d9;--pt-border-2:#f0f0f0;
+  --pt-text:rgba(0,0,0,.88);--pt-text-2:rgba(0,0,0,.65);--pt-text-3:rgba(0,0,0,.45);
+  --pt-radius:6px;--pt-radius-lg:8px;--pt-radius-card:12px;
+  --pt-font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif;
+  font-family:var(--pt-font);color:var(--pt-text);font-size:14px;line-height:1.5715;max-width:880px
+}
+.pt h1,.pt h2,.pt h3{font-family:var(--pt-font);color:var(--pt-text)}
+.pt a{color:var(--pt-primary)}
+
+/* the top: the point, the title, «Передать», the menu of the point's other pages (a phone) */
+.pt-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:16px}
+.pt-top .mp-title{flex:1;min-width:0}
+.pt-top .mp-title h1{font-size:20px;font-weight:600;line-height:28px;margin:0}
+.pt-top .mp-sub{color:var(--pt-text-3);font-size:13px;margin:0}
+.pt-top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.pt-menu{position:relative;display:none}
+.pt-menu > summary{list-style:none;cursor:pointer}
+.pt-menu > summary::-webkit-details-marker{display:none}
+.pt-menu-list{position:absolute;right:0;top:44px;z-index:40;min-width:200px;background:var(--pt-bg);border-radius:var(--pt-radius-lg);
+  box-shadow:0 6px 16px 0 rgba(0,0,0,.08),0 3px 6px -4px rgba(0,0,0,.12),0 9px 28px 8px rgba(0,0,0,.05);padding:4px;display:flex;flex-direction:column}
+.pt-menu-list a,.pt-menu-out{display:block;width:100%;text-align:left;padding:10px 12px;border:0;background:none;font:inherit;border-radius:var(--pt-radius);color:var(--pt-text);text-decoration:none;cursor:pointer}
+.pt-menu-list a:hover,.pt-menu-out:hover{background:var(--pt-fill-2)}
+
+/* buttons: Ant Design default / primary; big ones under a finger */
+.pt .btn{font-family:var(--pt-font);border-radius:var(--pt-radius);box-shadow:none}
+.pt .btn--primary{background:var(--pt-primary);border-color:var(--pt-primary);color:#fff}
+.pt .btn--primary:hover{background:var(--pt-primary-hover);border-color:var(--pt-primary-hover)}
+.pt .btn--secondary{background:var(--pt-bg);border:1px solid var(--pt-border);color:var(--pt-text)}
+.pt .btn--secondary:hover{border-color:var(--pt-primary-hover);color:var(--pt-primary-hover)}
+.pt .btn--danger-outline{background:var(--pt-bg);border:1px solid var(--pt-border);color:var(--pt-text)}
+.pt .btn--danger-outline:hover{border-color:var(--pt-error);color:var(--pt-error)}
+.pt .mp-btn{height:48px;font-size:16px;border-radius:var(--pt-radius-lg);width:100%}
+.pt .input,.pt .select,.pt textarea{border-radius:var(--pt-radius);border-color:var(--pt-border);font-family:var(--pt-font)}
+
+/* the search */
+.pt .mp-search{margin-bottom:16px}
+.pt .mp-search .label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.pt .mp-search .input{height:40px;font-size:16px}
+
+/* the plaque of the act МХ-3 (over every tab while tyres wait for the supplier) */
+.pt .mp-returns{background:none;border:0;box-shadow:none;padding:0;margin-bottom:16px}
+.pt .mp-returns h2{display:none}
+.pt .mp-card.mp-card--return{border:1px solid color-mix(in srgb,var(--pt-warning) 55%,#fff);background:color-mix(in srgb,var(--pt-warning) 10%,#fff);border-radius:var(--pt-radius-lg)}
+.pt .mp-card--return .flash{background:none;border:0;padding:0;box-shadow:none}
+.pt .mp-card--return .mp-hint{color:var(--pt-text-2)}
+
+/* the tabs: on top on a computer, at the bottom of the screen on a phone */
+.pt .mp-tabs{display:flex;gap:4px;border-bottom:1px solid var(--pt-border-2);margin-bottom:16px;flex-wrap:nowrap;overflow-x:auto}
+.pt .mp-tab{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:8px 12px;color:var(--pt-text-2);white-space:nowrap;font-size:14px}
+.pt .mp-tab:hover{color:var(--pt-primary)}
+.pt .mp-tab.is-active{background:none;color:var(--pt-primary);border-bottom-color:var(--pt-primary)}
+.pt .mp-tab b{font-size:12px;font-weight:400;min-width:20px;height:20px;line-height:20px;padding:0 6px;border-radius:10px;background:var(--pt-fill-2);color:var(--pt-text-2);text-align:center}
+.pt .mp-tab--hot b{background:var(--pt-error);color:#fff}
+
+/* a card */
+.pt .mp-block > h2{font-size:14px;font-weight:400;color:var(--pt-text-3)}
+.pt .mp-card{background:var(--pt-bg);border:1px solid var(--pt-border-2);border-radius:var(--pt-radius-card);box-shadow:none;padding:12px 16px;gap:8px}
+.pt .mp-card--here,.pt .mp-card--ask{border-left:1px solid var(--pt-border-2)}
+.pt .mp-card-head{justify-content:flex-start;gap:8px}
+.pt .mp-no{font-size:16px;font-weight:600}
+.pt .mp-card-head .badge{height:22px;line-height:20px;padding:0 7px;border-radius:4px;font-size:12px;font-weight:400}
+.pt .mp-card-head .badge--ok{color:var(--pt-success);background:color-mix(in srgb,var(--pt-success) 9%,#fff);border:1px solid color-mix(in srgb,var(--pt-success) 32%,#fff)}
+.pt .mp-card-head .badge--warn{color:var(--pt-warning-text);background:color-mix(in srgb,var(--pt-warning-text) 9%,#fff);border:1px solid color-mix(in srgb,var(--pt-warning-text) 32%,#fff)}
+.pt .mp-client{flex-direction:column;align-items:flex-start;gap:2px}
+.pt .mp-name{font-size:14px;font-weight:500}
+.pt .mp-tel{display:inline-flex;align-items:center;gap:6px;font-size:16px;font-weight:500;color:var(--pt-primary)}
+.pt .mp-transfer,.pt .mp-sub{color:var(--pt-text-3);font-size:12px}
+.pt .mp-now{display:block;font-size:13px;color:var(--pt-text-2);background:var(--pt-fill);border-radius:var(--pt-radius);padding:6px 8px;margin:0}
+.pt .mp-ask{display:flex;flex-direction:column;gap:8px;padding:8px 12px;border-radius:var(--pt-radius-lg);
+  border:1px solid color-mix(in srgb,var(--pt-warning) 55%,#fff);background:color-mix(in srgb,var(--pt-warning) 10%,#fff)}
+.pt .mp-ask b{font-weight:600}
+.pt .mp-actions{flex-direction:row;gap:8px;margin-top:0}
+.pt .mp-actions form{flex:1 1 0;min-width:0}
+.pt .mp-actions > a.mp-btn{flex:1 1 0}
+.pt .mp-more{border-top:1px solid var(--pt-border-2);padding-top:8px}
+.pt .mp-more summary{color:var(--pt-text-2);font-size:13px}
+.pt .mp-more .mp-btn{color:var(--pt-error-text)}
+.pt .mp-more-body .mp-text{font-size:13px;color:var(--pt-text-2)}
+
+/* «Переданные клиенты» */
+.pt .mp-handoff{background:var(--pt-bg);border:1px solid var(--pt-border-2);border-radius:var(--pt-radius-card);box-shadow:none}
+.pt .mp-handoff h2{font-size:16px;font-weight:600}
+.pt .mp-handoff-form .input{height:44px;font-size:16px}
+.pt .mp-handoff-form textarea.input{height:auto}
+
+/* a phone: the whole screen is the point's, the tabs at the bottom */
+@media (max-width:760px){
+  body.pt-ui .sidebar,body.pt-ui .topbar{display:none}
+  body.pt-ui .app{display:block}
+  body.pt-ui .main,body.pt-ui .page{padding:0;margin:0;min-width:0;max-width:none;overflow:visible}
+  body.pt-ui .msgs{margin:8px 16px 0}
+  body.pt-ui{min-width:0;background:var(--pt-bg-layout, #f5f5f5)}
+  .pt{max-width:none;padding:0 0 84px}
+  .pt-top{background:var(--pt-bg);border-bottom:1px solid var(--pt-border-2);padding:8px 16px;margin:0 0 12px}
+  .pt-menu{display:block}
+  .pt-top{flex-wrap:wrap;row-gap:8px}
+  .pt-top .mp-title{flex:1 1 100%}
+  .pt-top .mp-title h1{font-size:18px;line-height:24px}
+  .pt-top-actions{flex:1 1 100%;justify-content:flex-start}
+  .pt > :not(.pt-top):not(.mp-tabs){margin-left:16px;margin-right:16px}
+  .pt .mp-tabs{position:fixed;left:0;right:0;bottom:0;z-index:30;margin:0;background:var(--pt-bg);border-top:1px solid var(--pt-border-2);border-bottom:0;
+    display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;padding-bottom:env(safe-area-inset-bottom)}
+  .pt .mp-tab{flex-direction:column;justify-content:center;gap:2px;min-height:60px;padding:6px 2px;font-size:11px;line-height:13px;white-space:normal;text-align:center;border-bottom:0;border-top:2px solid transparent}
+  .pt .mp-tab.is-active{border-top-color:var(--pt-primary)}
+}
+
+/* a computer: compact buttons in a row, as the prototype's desktop (desktop-5-mypoint) */
+@media (min-width:761px){
+  .pt .mp-actions{justify-content:flex-start}
+  .pt .mp-actions form,.pt .mp-actions > a.mp-btn{flex:0 0 auto}
+  .pt .mp-btn{width:auto;min-width:150px;height:40px;font-size:14px;padding:0 16px}
+  .pt .mp-card--return .mp-actions form{flex:0 0 auto}
+}
+
+/* the card (the owner 2026-10-30): the tyres first, the client under them; «Переданные клиенты»: «← Заказы» on a phone only */
+.pt .mp-tyres{font-weight:500;color:var(--pt-text)}
+.pt .mp-client .mp-name{font-weight:400;color:var(--pt-text-2)}
+.pt-back{display:none}
+@media (max-width:760px){.pt-back{display:inline-flex}}

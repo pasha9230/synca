@@ -11,7 +11,7 @@ PHONE = "8 (900) 111-22-33"                      # the card of ready() has «+7 
 
 
 def send(client, phone, need="", tok_=None, force=False, p=None):
-    page = client.get("/my-point").get_data(as_text=True)
+    page = client.get("/my-point/handed").get_data(as_text=True)
     data = dict(token=tok_ or handoff_token(page), phone=phone, need=need)
     if force:
         data["force"] = force if isinstance(force, str) else "+79001112233"
@@ -26,7 +26,7 @@ def test_an_open_order_of_the_phone_refuses_and_nothing_is_made(tmp_path):
     _t, r = send(mine, PHONE, "второй комплект 205/55 R16")
     page = r.get_data(as_text=True)
     assert r.status_code == 200 and 'id="mp-dup"' in page
-    assert "У клиента уже есть открытый заказ № 5000100 от 13.10 — откройте его." in page and 'href="#order-%d"' % card in page
+    assert "У клиента уже есть открытый заказ № 5000100 от 13.10 — откройте его." in page and 'href="/my-point?tab=moving#order-%d"' % card in page          # its card on its tab
     assert "второй комплект 205/55 R16</textarea>" in page and 'value="%s"' % PHONE in page          # the form is not lost
     assert handed(conn) == [] and conn.execute("SELECT COUNT(*) FROM order_command_log").fetchone()[0] == 0
 
@@ -42,7 +42,7 @@ def test_the_force_of_an_old_page_makes_no_order(tmp_path):
 def test_a_stale_second_tab_is_refused_when_the_first_tab_made_the_order(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
-    stale = handoff_token(mine.get("/my-point").get_data(as_text=True))
+    stale = handoff_token(mine.get("/my-point/handed").get_data(as_text=True))
     send(mine, "+7 900 222-33-44", "зима")                                                    # the first tab hands the client over
     _t, r = send(mine, "8 900 222 33 44", "ещё", tok_=stale)
     assert r.status_code == 200 and "уже есть открытый заказ" in r.get_data(as_text=True) and len(handed(conn)) == 1
