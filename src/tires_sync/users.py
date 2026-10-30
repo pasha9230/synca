@@ -176,6 +176,33 @@ def _name(text) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()[:NAME_MAX]
 
 
+MAIN_NAME_KEY = "main_display_name"      # app_state: the name of the owner's main login (the shared password; not a panel user)
+
+
+def main_name(conn) -> str:
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (MAIN_NAME_KEY,)).fetchone()
+    return _name(row[0]) if row else ""
+
+
+def set_main_name(conn, name: str, now: str, author: str) -> None:
+    """The name the owner's main login is shown by (the owner 2026-10-30: «Пользователи → Имя основного входа»); empty: its login."""
+    conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (MAIN_NAME_KEY, _name(name)))
+    store.write_audit(conn, now, author, "main_display_name", {"name": _name(name)})
+    conn.commit()
+
+
+def person_name(conn, login: str, main_login: str = "") -> str:
+    """How a person is shown (the journal, the history, the responsible, «Рабочее место»): the display name of the panel user; the owner's
+    main login (`main_login`, the panel's AUTHOR) by main_name; else the login."""
+    login = str(login or "")
+    if not login:
+        return ""
+    shown = get_role(conn, login)["display_name"]
+    if not shown and main_login and login == main_login:
+        shown = main_name(conn)
+    return shown or login
+
+
 def get_role(conn, login: str) -> dict:
     """{"role", "active", "point_id", "display_name"} of a panel user; a user made before the roles is an active owner."""
     row = conn.execute("SELECT role, active, point_id, display_name FROM panel_user_role WHERE login = ?", (normalize(login),)).fetchone()

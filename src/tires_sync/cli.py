@@ -1599,7 +1599,7 @@ def _prebind_accounts(conn, box, feed_root, results, parsed=None, client_for=Non
             conn.rollback()
             print("предупреждение: привязка Id до публикации не выполнена (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
             if isinstance(err, PictureNotTrusted):                        # not a passing slowness of Avito: it stays until a human looks
-                _alert(conn, box, "Tires Sync: аккаунт «%s»: %s." % (account["name"], err), notice=True)
+                _alert(conn, box, "Tires Sync: аккаунт «%s»: %s." % (connections.display_name(conn, account["id"]), err), notice=True)
             continue
         if binds or moved:                                             # a bare change of the manual ads: built again, nothing to report as bound
             applied.append((account, binds, bool(moved)))
@@ -1620,9 +1620,10 @@ def _prebind_report(conn, box, feed_root, applied) -> None:
         except (OSError, ET.ParseError):
             now_ids = set()
         done = [e for e in binds if e["orphan"] in now_ids]
-        bad += ["аккаунт «%s»: %s -> позиция %s" % (account["name"], e["orphan"], e["code"]) for e in binds if e["orphan"] not in now_ids]
+        shown = connections.display_name(conn, account["id"])         # the cabinet's own name: these lines go to Telegram (2026-10-30)
+        bad += ["аккаунт «%s»: %s -> позиция %s" % (shown, e["orphan"], e["code"]) for e in binds if e["orphan"] not in now_ids]
         if done:
-            lines.append("аккаунт «%s»: привязано до публикации: %d" % (account["name"], len(done)))
+            lines.append("аккаунт «%s»: привязано до публикации: %d" % (shown, len(done)))
             lines += ["   %s «%s» -> позиция %s" % (e["orphan"], e["title"], e["code"]) for e in done[:10]]
     if lines:
         print("\n".join(lines))
@@ -1645,7 +1646,7 @@ AVITO_AD_URL = "https://www.avito.ru/%s"
 def _cabinet_header(conn, account, count: int) -> str:
     """The cabinet named plainly: its number and name here, and the Avito profile when the cabinet was read (owner, 2026-10-29)."""
     profile = connections.get_avito_identity(conn, account["id"]).get("id")
-    return "в кабинете Авито №%s «%s»%s: ручных объявлений: %d" % (account["id"], account["name"],
+    return "в кабинете Авито №%s «%s»%s: ручных объявлений: %d" % (account["id"], connections.display_name(conn, account["id"]),
                                                                    " (профиль Авито %s)" % profile if profile else "", count)
 
 

@@ -89,7 +89,7 @@ def _answerers(conn) -> list:
     from flask import current_app
     from .. import users
     owner = current_app.config["AUTHOR"]
-    found = [(owner, "Владелец")]
+    found = [(owner, users.person_name(conn, owner, owner) if users.person_name(conn, owner, owner) != owner else "Владелец")]
     for u in users.list_users(conn):
         if u["active"] and u["role"] in ANSWERING_ROLES and u["login"] != owner:
             found.append((u["login"], u["display_name"] or u["login"]))

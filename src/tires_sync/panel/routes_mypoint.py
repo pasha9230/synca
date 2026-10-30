@@ -172,8 +172,9 @@ HANDED_DAYS = 14                                   # «Переданные кл
 
 
 def _who(conn, login: str) -> str:
-    """The name of a panel user for the manager of a point: the display name, else the login."""
-    return (users.get_role(conn, login)["display_name"] if login else "") or login or "не назначен"
+    """The name of a panel user for the manager of a point: the display name (the owner's main login: «Имя основного входа»), else the login."""
+    from flask import current_app
+    return users.person_name(conn, login, current_app.config["AUTHOR"]) or "не назначен"
 
 
 def _dup_view(conn, busy: dict, point_id: int) -> dict:

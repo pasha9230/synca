@@ -168,7 +168,7 @@ def test_avito_check_never_calls_a_write_method(tmp_path):
     assert http.calls[2][1].endswith("/autoload/v2/profile")
     html = apage(client)
     assert "профиль автозагрузки доступен" in html and "ID 80000001" in html and "Шины СПб" in html
-    assert 'href="/connections/avito/1" class="is-active">ID 80000001 · Шины СПб<' in html
+    assert 'href="/connections/avito/1" class="is-active">Шины СПб · ID 80000001<' in html
 
 
 def boom(*args):

@@ -31,13 +31,21 @@ def register(app) -> None:
                                points={p["id"]: p["name"] for p in points.list_points(conn)}, roles=users.ROLES, sections=users.SECTIONS,
                                rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None),
                                invite_brands=brand_choices(app, conn, client_terms.read(conn, client_terms.ROLE)["brands"]),
-                               describe=client_terms.describe, shop_resp=_shop_resp(conn))
+                               describe=client_terms.describe, shop_resp=_shop_resp(conn), main_name=users.main_name(conn),
+                               main_login=app.config["AUTHOR"])
 
     def _shop_resp(conn):
         """«Ответственный за заказы клиентов»: the owner's choice, who gets them now, the staff to choose from."""
         from .. import shop_cart
         staff = [u for u in users.list_users(conn) if u["active"] and u["role"] not in ("client", "point")]
         return {"chosen": shop_cart.responsible_setting(conn), "now": shop_cart.responsible(conn), "staff": staff}
+
+    @app.route("/users/main-name", methods=["POST"])
+    def users_main_name():
+        """«Имя основного входа»: how the owner's shared login is shown (the journal, the history, the responsible); the owner only."""
+        users.set_main_name(get_conn(), request.form.get("name", ""), now_iso(), author())
+        flash("Имя основного входа сохранено.", "ok")
+        return redirect("/users")
 
     @app.route("/users/shop-responsible", methods=["POST"])
     def users_shop_responsible():

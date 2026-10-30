@@ -53,9 +53,10 @@ def _save_secrets(app, kind, owner_id, pairs) -> None:
 
 
 def _tab_label(conn, account_id: int) -> str:
+    """The cabinet's name and, beside it, its Avito number (the connections need it to tell the cabinets apart)."""
     label = connections.display_name(conn, account_id)
-    name = connections.get_avito_identity(conn, account_id)["name"]
-    return "%s · %s" % (label, name) if name else label
+    number = connections.get_avito_identity(conn, account_id)["id"]
+    return "%s · ID %s" % (label, number) if number and label != "ID %s" % number else label
 
 
 def register(app) -> None:

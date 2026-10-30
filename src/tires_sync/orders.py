@@ -1032,6 +1032,8 @@ def without_account_names(conn, text: str) -> str:
     text = str(text or "")
     names = {" ".join(str(r[0]).split()) for r in conn.execute("SELECT name FROM account WHERE name != ''")}
     names |= {n[:MAX_TAG].strip() for n in names}                       # the tag of a long name is cut (chat_deals._account_tag)
+    from . import connections
+    names |= connections.avito_names(conn)                               # the cabinet's own name, as the panel shows it (2026-10-30)
     for name in sorted(names, key=len, reverse=True):
         if len(name) >= 2 and name.lower() in text.lower():
             text = re.sub(r"(?<!\w)%s(?!\w)" % r"\s+".join(re.escape(w) for w in name.split()), ACCOUNT_SHOWN, text, flags=re.I)

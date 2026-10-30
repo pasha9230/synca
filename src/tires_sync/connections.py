@@ -686,12 +686,28 @@ def card_view(conn, account: dict) -> dict:
 
 
 def display_name(conn, account_id: int) -> str:
-    """How an account is shown in the panel: its Avito id once known, otherwise the name given on creation."""
+    """How an account is shown: the name of its Avito cabinet once read (the owner 2026-10-30: «Шины СПб», not «ID …»), else the name given on
+    creation, else its Avito id. The number, where a page needs it, stands beside the name (routes_connections._tab_label)."""
     identity = get_avito_identity(conn, account_id)
-    if identity["id"]:
-        return "ID %s" % identity["id"]
+    if identity["name"] and str(identity["name"]).strip():
+        return " ".join(str(identity["name"]).split())
     account = get_account(conn, account_id)
-    return account["name"] if account else str(account_id)
+    if account and account["name"]:
+        return account["name"]
+    return "ID %s" % identity["id"] if identity["id"] else str(account_id)
+
+
+def avito_names(conn) -> set:
+    """The names of the Avito cabinets read (display_name shows them): a point never reads them (orders.without_account_names)."""
+    out = set()
+    for (config,) in conn.execute("SELECT config FROM connection WHERE kind = 'avito'"):
+        try:
+            name = json.loads(config or "{}").get("avito_name")
+        except ValueError:
+            continue
+        if name and str(name).strip():
+            out.add(" ".join(str(name).split()))
+    return out
 
 
 def get_config(conn, kind: str, owner_id: int) -> dict:

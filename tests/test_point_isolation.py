@@ -352,6 +352,8 @@ def test_the_comment_and_a_cut_tag_never_name_the_account_and_a_word_inside_anot
     conn, m = w["conn"], w["manager"]
     long_name = "Шина-Колесо Санкт-Петербург Юг Север"                                       # longer than a tag: the tag is cut
     conn.execute("UPDATE account SET name = ? WHERE id = ?", (long_name, w["acc_b"]))
+    identity = connections.get_avito_identity(conn, w["acc_b"])                         # the cabinet's own name is the account's name too
+    connections.set_avito_identity(conn, w["acc_b"], identity["id"], long_name)          # (2026-10-30): renamed with it
     orders.update_card(conn, w["order_a"], {"comment": "Звонок 07.10 на аккаунт «Аккаунт-Руставели» (принят). Ваши Аккаунт-Руставелиные шины",
                                             "tags": long_name[:orders.MAX_TAG]}, NOW, "o")
     conn.commit()

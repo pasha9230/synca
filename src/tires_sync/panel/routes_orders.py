@@ -73,7 +73,8 @@ def _responsible_options(app, conn, current: str = "") -> list:
     logins = [app.config["AUTHOR"]] + [u["login"] for u in panel_users.list_users(conn) if u["role"] != "client"]     # a client is not staff
     if current and current not in logins:
         logins.append(current)
-    return [{"login": login, "label": login + (" (владелец)" if login == app.config["AUTHOR"] else "")} for login in dict.fromkeys(logins)]
+    return [{"login": login, "label": panel_users.person_name(conn, login, app.config["AUTHOR"]) + (" (владелец)" if login == app.config["AUTHOR"] else "")}
+            for login in dict.fromkeys(logins)]
 
 
 def check_responsible(app, conn, login, current: str = "") -> None:
