@@ -11,7 +11,7 @@ PHONE = "8 (900) 111-22-33"                      # the card of ready() has «+7 
 
 
 def send(client, phone, need="", tok_=None, force=False, p=None):
-    page = client.get("/my-point").get_data(as_text=True)
+    page = client.get("/my-point?tab=handed").get_data(as_text=True)
     data = dict(token=tok_ or handoff_token(page), phone=phone, need=need)
     if force:
         data["force"] = force if isinstance(force, str) else "+79001112233"
@@ -42,7 +42,7 @@ def test_the_force_of_an_old_page_makes_no_order(tmp_path):
 def test_a_stale_second_tab_is_refused_when_the_first_tab_made_the_order(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
-    stale = handoff_token(mine.get("/my-point").get_data(as_text=True))
+    stale = handoff_token(mine.get("/my-point?tab=handed").get_data(as_text=True))
     send(mine, "+7 900 222-33-44", "зима")                                                    # the first tab hands the client over
     _t, r = send(mine, "8 900 222 33 44", "ещё", tok_=stale)
     assert r.status_code == 200 and "уже есть открытый заказ" in r.get_data(as_text=True) and len(handed(conn)) == 1

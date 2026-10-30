@@ -214,18 +214,18 @@ def test_the_mark_is_taken_for_the_point_and_stops_the_fifteen_minutes(tmp_path)
 def test_the_point_sees_what_became_of_its_clients_and_the_bonus(w):
     conn = w["conn"]
     hand(w, phone="89001112233", size="205/55 R16")
-    page = w["manager"].get("/my-point").get_data(as_text=True)
+    page = w["manager"].get("/my-point?tab=handed").get_data(as_text=True)                 # «Переданные клиенты»: its own tab (2026-10-30)
     assert "Переданные клиенты" in page and "+7 900 111-22-33" in page and "передан, ждёт" in page
     order = handed(conn)[0]["order"]
     orders.move_card(conn, order, next(s["id"] for s in orders.list_stages(conn) if s["code"] == "cancel"), NOW, "o", {"cancel_reason": "нет"})
-    assert "отказ" in w["manager"].get("/my-point").get_data(as_text=True)
+    assert "отказ" in w["manager"].get("/my-point?tab=handed").get_data(as_text=True)
     other, _ = person(w["app"], "point", w["gamma"], login_="gamma1")
-    assert "+7 900 111-22-33" not in other.get("/my-point").get_data(as_text=True)
+    assert "+7 900 111-22-33" not in other.get("/my-point?tab=handed").get_data(as_text=True)
 
 
 def test_the_form_of_my_point_takes_the_season_size_and_brand(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
-    page = client.get("/my-point?p=%d" % pid).get_data(as_text=True)
+    page = client.get("/my-point?tab=handed&p=%d" % pid).get_data(as_text=True)
     form_token = re.search(r'name="token" value="([0-9a-f]{24})"', page).group(1)
     post(client, "/my-point", tok, p=str(pid), token=form_token, phone="89002223344", need="4 шт", size="185/65 R15", season="winter_soft", brand="Kumho")
     [h] = handed(conn)

@@ -65,7 +65,11 @@ def test_opening_my_point_by_its_person_puts_the_alerts_out(tmp_path):
     login(owner)
     owner.get("/my-point?p=%d" % pid)                                              # the owner looking is not the point looking
     assert len(points.unseen_alerts(conn, pid, "2026-10-01")) == 1
-    assert manager(app, conn, pid).get("/my-point").status_code == 200
+    point = manager(app, conn, pid)
+    assert point.get("/my-point").status_code == 200                                  # a look at the page is not a look at the alert:
+    assert len(points.unseen_alerts(conn, pid, "2026-10-01")) == 1                     # the alerts are a line, opened on ?notes=1 (2026-10-30)
+    assert "Оповещения: 1" in point.get("/my-point").get_data(as_text=True)
+    assert point.get("/my-point?notes=1").status_code == 200
     assert points.unseen_alerts(conn, pid, "2026-10-01") == []
     assert points.seen_at(conn, pid) == NOW                                          # up to the newest note shown, not the clock
     points.mark_seen(conn, pid, "2026-10-01T00:00:00")

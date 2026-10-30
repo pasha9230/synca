@@ -59,14 +59,11 @@ def test_the_counters_say_what_lies_comes_ends_and_waits(tmp_path, clock):
     other = points.save_point(conn, dict(name="Гамма", channel="vk", vk_peer_id="777"))
     _card(conn, other, webmim="700700")                                                      # another point's: counted nowhere
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
-    assert (counter(page, "moving"), counter(page, "here"), counter(page, "ending"), counter(page, "asked")) == (2, 3, 2, 1)   # «Едут»: placed, moving
-    assert counter(page, "all") == 5                                                        # «Все»: the placed one too
+    assert (counter(page, "moving"), counter(page, "here"), counter(page, "oth"), counter(page, "return")) == (2, 3, 0, 0)   # «Едут»: placed, moving
+    for gone in ("all", "ending", "asked"):                                                 # no «Все», «Резерв истекает», «Ждут ответа» (the owner 2026-10-30)
+        assert 'data-tab="%s"' % gone not in page
+    assert "mp-tab--hot" in page.split('data-tab="here"')[0].rsplit("<a", 1)[-1]            # the question waits on «На точке»
     assert placed
-
-
-def order_of(page, *cards):
-    """The cards in the order the page lists them."""
-    return sorted(cards, key=lambda c: page.index('id="order-%d"' % c))
 
 
 def test_one_list_newest_first_by_the_events_that_matter_to_the_point(tmp_path, clock):
@@ -76,8 +73,10 @@ def test_one_list_newest_first_by_the_events_that_matter_to_the_point(tmp_path, 
     lying = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
 
-    def listed():
-        return order_of(mine.get("/my-point").get_data(as_text=True), card, lying)
+    def listed():                                                                           # the one list the tabs are cut from (no «Все» to show it whole)
+        mine.get("/my-point")
+        ids = [c["id"] for c in routes_mypoint._cards(conn, pid)]
+        return sorted((card, lying), key=ids.index)
 
     orders.move_card(conn, lying, _stage(conn, "moving"), "2026-10-14T08:00:00", "o")
     orders.move_card(conn, lying, _stage(conn, "at_point"), "2026-10-14T09:00:00", "o")      # arrived at the point
@@ -111,14 +110,14 @@ def test_a_question_to_a_point_in_the_panel_raises_the_order_too(tmp_path, clock
     conn.execute("UPDATE point SET channel = 'panel'")
     conn.commit()
     assert reserve.ask_point(conn, orders.get_card(conn, lying), None, "2026-10-15T11:00:00") == "asked"
-    page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
-    assert order_of(page, card, lying) == [lying, card]
+    ids = [c["id"] for c in routes_mypoint._cards(conn, pid)]
+    assert sorted((card, lying), key=ids.index) == [lying, card]
 
 
 def test_the_card_says_what_the_vk_message_says_with_the_clients_prices(tmp_path, clock):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=moving").get_data(as_text=True)
     text = tpl.render(conn, orders.get_card(conn, card), tpl.SAMPLES[1][2], MORNING)[0]
     assert "Цена ед. 5 000 ₽" in text and "Сумма 20 000 ₽" in text
     shown = re.search(r'<div class="mp-text"[^>]*>(.*?)</div>', page, re.S).group(1)
@@ -129,7 +128,7 @@ def test_the_card_says_what_the_vk_message_says_with_the_clients_prices(tmp_path
         tpl.add_template(conn, "Менеджеру: заказ оформлен", "manager", "Особый текст {webmim_number} для {client_name}")
     else:
         tpl.update_template(conn, template[0], "Менеджеру: заказ оформлен", "manager", "Особый текст {webmim_number} для {client_name}")
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=moving").get_data(as_text=True)
     assert "Особый текст 5000100 для Татьяна" in page                                      # the owner's edit of the template is on the page
     assert 'href="tel:+79001112233"' in page and "едет на точку" in page
 
@@ -182,7 +181,8 @@ def test_return_and_answers_on_another_points_order_are_refused(tmp_path, clock)
 # --- «Клиент забрал?» --------------------------------------------------------------------------------------------------------------------
 
 def question(page):
-    found = re.search(r'<section class="mp-questions".*?</section>', page, re.S)
+    """The question «Клиент забрал?»: a yellow line of its card on «На точке» (the owner 2026-10-30; before, a block «Ждут ответа»)."""
+    found = re.search(r'<article class="mp-card[^"]*" id="order-\d+" data-order="\d+" data-question=.*?</article>', page, re.S)
     return found.group(0) if found else ""
 
 
@@ -190,7 +190,7 @@ def test_no_question_before_the_bot_asked(tmp_path, clock):
     app, client, tok, conn, pid, card = ready(tmp_path)
     at_point(conn, card)
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
-    assert question(page) == "" and counter(page, "asked") == 0
+    assert question(page) == "" and "mp-tab--hot" not in page
 
 
 def test_the_question_is_on_top_and_here_tells_the_client_once_as_in_vk(tmp_path, clock):
@@ -201,7 +201,7 @@ def test_the_question_is_on_top_and_here_tells_the_client_once_as_in_vk(tmp_path
     page = mine.get("/my-point").get_data(as_text=True)
     block = question(page)
     assert "Клиент забрал заказ № 5000100?" in block and "Татьяна" in block
-    assert page.index('class="mp-questions"') < page.index('id="order-%d"' % card)
+    assert 'class="mp-ask"' in block and re.findall(r'<article class="mp-card[^"]*" id="order-(\d+)"', page)[0] == str(card)   # first
     assert '/my-point/%d/reserve_issued' % card in block and '/my-point/%d/reserve_here' % card in block
     clock["now"] = DAY + "T12:00:00"
     first, page = press(mine, card, "reserve_here")
@@ -225,7 +225,7 @@ def test_an_answer_in_vk_first_closes_the_question_on_the_page(tmp_path, clock):
     stale = token(mine.get("/my-point").get_data(as_text=True), card, "reserve_here")
     reserve.here(conn, orders.get_card(conn, card), "менеджер Бета", DAY + "T11:30:00", lambda *a, **k: ("sent", "", ""))
     page = mine.get("/my-point").get_data(as_text=True)
-    assert question(page) == "" and counter(page, "asked") == 0
+    assert question(page) == "" and "mp-tab--hot" not in page
     r = post(mine, "/my-point/%d/reserve_here" % card, "tok", token=stale)
     assert "уже отмечен" in mine.get(r.headers["Location"]).get_data(as_text=True) and to_client(app) == []
 
