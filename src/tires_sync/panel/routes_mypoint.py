@@ -7,7 +7,8 @@ commands (order_manager.apply, no_show, tell_client_arrived) with the same check
 «можно забирать» on the arrival only, once per arrival. The point is taken in the query (the manager's own; the owner and the partner pick
 one), never in the template. «Передать клиента» (a POST to the page itself) is order_manager.handoff, the function of the VK command
 «клиент <телефон> <что нужно>»: an order on «Передано с точки» for the person on duty; nothing goes to the client; the point needs no VK for
-it. «Для точки» shows what the bot did not write to a point in the panel (order_points.notes). /my-point/feed is what notify.js asks every
+it. «Оповещения» (a line under the search, the list on ?notes=1) shows the alerts the bot did not write to a point in the panel
+(order_points.notes); the bot's answers to the clients are not shown to the point (the owner 2026-10-30). /my-point/feed is what notify.js asks every
 half a minute for the sound and the browser's notification: the orders of the point, its notes and the rows of its bell (one source with it).
 The owner 2026-10-26: counters at the top; one list, newest first by the order's last event that matters to the point (_cards); the card's text is
 the VK message «Менеджеру: заказ оформлен» (its template, with the client's prices: the point takes the cash; never the purchase); «Возврат» on an order at the point is
@@ -251,18 +252,24 @@ def _hand_over(conn, point: dict, back: str):
 
 
 # «Рабочее место» (the owner 2026-10-29): the tabs of the point's orders, each with its count; an order may be in two of them.
-TABS = {"all": "Все", "moving": "Едут", "here": "На точке", "ending": "Резерв истекает", "asked": "Ждут ответа", "return": "На возврат"}
+# the tabs of «Рабочее место» (the owner 2026-10-30, the new design: a list of the point's work, no «Все», «Резерв истекает» nor «Ждут ответа»;
+# the question «Клиент забрал?» is a line of its card on «На точке», first); an old address (all, ending, asked, …) opens DEFAULT_TAB
+TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "return": "На возврат", "handed": "Переданные клиенты"}
+DEFAULT_TAB = "here"
+ALERTS_READ = 500                                  # the notes read to find the point's newest alerts among the bot's answers (two weeks kept)
 
 
 def _in_tab(row: dict, tab: str) -> bool:
-    """«Все»: what lies at the point and is on its way (as the page always showed); «Едут»: «Заказ оформлен» and «Перемещение на точку»
-    (the owner 2026-10-29); «На точке»; «Резерв
-    истекает»: at the point with the last day of the reservation today or tomorrow, or past (the term is a day, reserve_until); «Ждут
-    ответа»: the question «Клиент забрал?» of the last day still open (order_reserve.question_open); «На возврат»: «На ОТХ» (with an
-    agreed return not signed yet among them)."""
+    """«Едут»: «Заказ оформлен» and «Перемещение на точку» (the owner 2026-10-29); «На точке»: «Товар на точке», waiting for the client; «На ОТХ»:
+    our tyres at the point (the owner 2026-10-30); «На возврат»: an «На ОТХ» whose return is agreed and the act МХ-3 not signed yet;
+    «Переданные клиенты» holds no order card (the form and the clients handed over)."""
     code = row["card"]["stage"]["code"]
-    return {"all": not row["oth"], "moving": code in ("placed", "moving"), "here": row["here"], "ending": row["ends"], "asked": row["asked"],
-            "return": row["oth"]}[tab]
+    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": row["oth"] and not row.get("returning"),
+            "return": bool(row.get("returning")), "handed": False}[tab]
+
+
+def _tab_of(row: dict) -> str:
+    return next((t for t in TABS if _in_tab(row, t)), "")
 
 
 def _order_day(conn, card: dict) -> str:
@@ -282,7 +289,7 @@ def _back(point_id) -> str:
     from urllib.parse import parse_qs, urlsplit
     came = urlsplit(request.referrer or "")
     tab = (parse_qs(came.query).get("tab") or [""])[0] if came.path == "/my-point" and (not came.netloc or came.netloc == request.host) else ""
-    args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab in TABS and tab != "all" else [])
+    args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab in TABS and tab != DEFAULT_TAB else [])
     return "/my-point" + ("?" + "&".join(args) if args else "")
 
 
@@ -340,7 +347,7 @@ def register(app) -> None:
         if request.method == "POST":
             if point is None:
                 abort(404)
-            done = _hand_over(conn, point, "/my-point" + ("?p=%d" % point_id if own_point() is None else ""))
+            done = _hand_over(conn, point, "/my-point?tab=handed" + ("&p=%d" % point_id if own_point() is None else ""))
             if not isinstance(done, tuple):
                 return done
             error, form = done
@@ -364,24 +371,42 @@ def register(app) -> None:
         since = (date.fromisoformat(today) - timedelta(days=HANDED_DAYS)).isoformat()
         handed = mgr.point_handoffs(conn, point_id, since) if point_id is not None else []
         bonus = order_report.rate_on(order_report.list_rates(conn), "handoff_fee", today)
-        notes = points.notes(conn, point_id) if points.in_panel(point) else []         # back on «ВК»: the old notes are not shown
-        if own_point() is not None and notes:                                   # a person of the point looked: the alerts shown are seen (the safety net)
+        # «Оповещения: N новых» (the owner 2026-10-30): the alerts of the point only (the bot's answers to the clients are not the point's to read),
+        # folded into a line under the search; ?notes=1 opens the list, and only that opening marks them seen (the safety net of order_notify:
+        # an alert nobody of the point opened goes to the owner) — never the mere look at the page. Back on «ВК»: none shown.
+        alerts = [n for n in points.notes(conn, point_id, limit=ALERTS_READ) if n["kind"] == "alert"][:points.NOTES_SHOWN] if points.in_panel(point) else []
+        seen = points.seen_at(conn, point_id) if point_id is not None else ""
+        alerts_new = sum(1 for n in alerts if str(n["at"]) > seen)
+        alerts_open = request.args.get("notes") == "1" and bool(alerts)
+        if alerts_open and own_point() is not None:                             # a person of the point opened the list: the alerts shown are seen
             try:
-                points.mark_seen(conn, point_id, max(n["at"] for n in notes))
+                points.mark_seen(conn, point_id, max(n["at"] for n in alerts))
             except Exception:                                                    # noqa: BLE001  (a busy base: the page still opens)
                 conn.rollback()
-        tab = request.args.get("tab", "")
-        tab = tab if tab in TABS else "all"
-        shown = [r for r in cards if _in_tab(r, tab)]
+        returns = _returns(conn, point_id) if point_id is not None else []
+        returning = {r["card"]["id"] for r in returns}
+        for row in cards:
+            row["returning"] = row["card"]["id"] in returning
+        tab = "handed" if error or form else request.args.get("tab", "")              # a refused handoff comes back to its form
+        tab = tab if tab in TABS else DEFAULT_TAB
+        shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not r["asked"])     # «Клиент забрал?» first (sorted keeps the order)
         counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
+        counts["handed"] = len(handed)
+        hot = {"here": any(r["asked"] for r in cards), "return": bool(counts["return"])}           # the tabs that wait for the point
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
-        return render_template("mypoint.html", point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, questions=[r for r in cards if r["asked"]],
-                               notes=notes, choose=own_point() is None, handed=handed, seasons=mgr.SEASONS, bonus=bonus,
+        found = _found(conn, query, point_id) if query and point_id is not None else None
+        if found:                                                                # the search looks at every order of the point: say its tab
+            tab_of = {r["card"]["id"]: _tab_of(r) for r in cards}
+            for f in found:
+                oid = int(f["url"].rsplit("/", 1)[-1]) if f.get("url", "").rsplit("/", 1)[-1].isdigit() else None
+                f["tab"] = tab_of.get(oid, "")
+        return render_template("mypoint.html", point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot,
+                               alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None, handed=handed, seasons=mgr.SEASONS, bonus=bonus,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form,
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
-                               found=_found(conn, query, point_id) if query and point_id is not None else None,
-                               returns=_returns(conn, point_id) if point_id is not None else [],
+                               found=found,
+                               returns=returns,
                                oth_ask=_oth_ask(conn, cards)), 400 if error else 200
 
     @app.route("/my-point/<int:card_id>/<action>", methods=["POST"])
@@ -486,8 +511,9 @@ def register(app) -> None:
             point = points.get_point(conn, point_id)
         except points.PointError:                                               # the manager's point was deleted: nothing to show
             abort(403)
-        items += [{"key": "note-%s" % n["id"], "title": n["kind_name"], "text": n["text"][:200], "href": "/my-point"}
-                  for n in (points.notes(conn, point_id) if points.in_panel(point) else [])]
+        items += [{"key": "note-%s" % n["id"], "title": n["kind_name"], "text": n["text"][:200], "href": "/my-point?notes=1"}
+                  for n in ([n for n in points.notes(conn, point_id, limit=ALERTS_READ) if n["kind"] == "alert"][:points.NOTES_SHOWN]
+                            if points.in_panel(point) else [])]     # the bot's answers: not the point's (2026-10-30)
         if own_point() is not None:                                             # the bell of the manager of the point: only theirs (routes_alerts)
             items += [{"key": "alert-%s-%s" % (r["id"], r["more"]), "title": "Чат без заказа" if r.get("chat_row") else "Заказ №%d" % r["order_id"],
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]

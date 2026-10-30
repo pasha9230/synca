@@ -12,6 +12,14 @@ from test_vk_commands import NOW, _card, _stage, ready
 from tires_sync import order_manager as mgr, order_oth, order_points as points, orders, point_log
 
 
+TABS = ("here", "moving", "oth", "return")
+
+
+def _all(client):
+    """Every order tab of «Рабочее место» as one text: no «Все» (the owner 2026-10-30), an order lies on its own tab."""
+    return "".join(_text(client.get("/my-point?tab=" + t)) for t in TABS)
+
+
 def _text(r):
     return r.get_data(as_text=True)
 
@@ -105,7 +113,7 @@ def test_the_point_cancels_its_handoff_not_taken_and_the_manager_is_told(tmp_pat
     from tires_sync.panel import routes_vk
     monkeypatch.setattr(routes_vk, "channel", lambda *a: (None, None, lambda c, text: told.append((c["id"], c["responsible"], text)) or "отправлено"))
     mine, order_id = _handed_over(app, conn, pid)
-    page = _text(mine.get("/my-point"))
+    page = _text(mine.get("/my-point?tab=handed"))                                          # «Переданные клиенты»: its own tab (2026-10-30)
     assert 'data-handoff-cancel="%d"' % order_id in page
     r = post(mine, "/my-point/handoff/%d/cancel" % order_id, "tok")
     assert r.status_code == 302
@@ -113,7 +121,7 @@ def test_the_point_cancels_its_handoff_not_taken_and_the_manager_is_told(tmp_pat
     assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == mgr.CANCEL_REASON
     assert any(e["level"] == "yellow" and "отменила передачу клиента" in e["text"] for e in orders.list_events(conn, order_id))
     assert told[0][0] == told[-1][0] == order_id and told[-1][1] == told[0][1] and "отменила передачу" in told[-1][2]   # whom the handoff told
-    page = _text(mine.get("/my-point"))
+    page = _text(mine.get("/my-point?tab=handed"))
     assert 'data-status="cancelled"' in page and "отменён точкой" in page and 'data-handoff-cancel="%d"' % order_id not in page
     assert mgr.take(conn, order_id, "открыл", "worker2", NOW) is False                       # nobody takes a cancelled client
     before = len(told)
@@ -126,7 +134,7 @@ def test_a_taken_handoff_or_another_points_cannot_be_cancelled(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine, order_id = _handed_over(app, conn, pid)
     assert mgr.take(conn, order_id, "открыл заказ", "worker2", NOW)
-    assert 'data-handoff-cancel="%d"' % order_id not in _text(mine.get("/my-point"))
+    assert 'data-handoff-cancel="%d"' % order_id not in _text(mine.get("/my-point?tab=handed"))
     post(mine, "/my-point/handoff/%d/cancel" % order_id, "tok")
     assert orders.get_card(conn, order_id)["stage"]["code"] == "from_point"
     stranger = manager(app, conn, _other(conn), login_="delta")
@@ -190,7 +198,7 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (oth,)).fetchone() is None     # the refused client stays unlinked
     assert 'data-return="%d"' % oth not in _text(mine.get("/my-point"))
     assert "Акт МХ-3 подписан" in _text(client.get("/orders/%d" % oth))
-    again = re.search(r'name="token" value="([0-9a-f]+)"', _text(mine.get("/my-point"))).group(1)
+    again = re.search(r'name="token" value="([0-9a-f]+)"', _all(mine)).group(1)
     post(mine, "/my-point/%d/act_signed" % oth, "tok", token=again)                        # a press of an old page: nothing more
     assert sum(e["text"] == order_oth.SIGNED_ASK for e in orders.list_events(conn, oth)) == 1
     assert [r["kind"] for r in point_log.history(conn, pid)][0] == "act_signed"
@@ -228,7 +236,7 @@ def test_the_history_shows_the_points_actions_to_the_owner_and_the_partner_only(
     app, client, tok, conn, pid, card = ready(tmp_path)
     other = _other(conn)
     mine = manager(app, conn, pid)
-    page = _text(mine.get("/my-point"))
+    page = _all(mine)
     token = re.search(r'action="/my-point/%d/arrived".*?name="token" value="([0-9a-f]+)"' % card, page, re.S).group(1)
     post(mine, "/my-point/%d/arrived" % card, "tok", token=token)
     point_log.record(conn, NOW, "delta", other, "issued", None, "чужая точка")
@@ -433,29 +441,30 @@ def test_the_tabs_count_and_list_the_points_orders(tmp_path):
     conn.commit()
     mine = manager(app, conn, pid)
     page = _text(mine.get("/my-point"))
-    assert _tab_counts(page) == {"all": 4, "moving": 2, "here": 2, "ending": 1, "asked": 0, "return": 1}     # «Едут»: placed and moving
-    assert _listed(page) == {card, placed, ending, later}                                    # «Все»: as the page always showed
-    for tab, wanted in (("moving", {card, placed}), ("here", {ending, later}), ("ending", {ending}), ("asked", set()), ("return", {oth})):
+    assert _tab_counts(page) == {"moving": 2, "here": 2, "oth": 1, "return": 0, "handed": 0}     # «Едут»: placed and moving (the owner 2026-10-30)
+    assert _listed(page) == {ending, later}                                                  # «На точке» opens first
+    for tab, wanted in (("moving", {card, placed}), ("here", {ending, later}), ("oth", {oth})):
         shown = _text(mine.get("/my-point?tab=%s" % tab))
         assert _listed(shown) == wanted, tab
         assert 'data-tab="%s" aria-current="page"' % tab in shown, tab                       # the tab is kept in the address
-    assert _listed(_text(mine.get("/my-point?tab=nonsense"))) == {card, placed, ending, later}
+    for old in ("nonsense", "all", "ending", "asked"):                                      # an old address: «На точке»
+        assert _listed(_text(mine.get("/my-point?tab=" + old))) == {ending, later}, old
 
 
 def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     orders.update_card(conn, card, dict(transfer_number="26R-1447431"), NOW, "o")
     bare = _card(conn, pid, webmim="700200", code="at_point")
-    page = _text(manager(app, conn, pid).get("/my-point"))
+    page = _all(manager(app, conn, pid))
     for order_id in (card, bare):
         article = re.search(r'<article class="mp-card[^"]*" id="order-%d".*?</article>' % order_id, page, re.S).group(0)
         top, more = article.split('<details class="mp-more">')
         assert "№ " in top and "mp-tel" in top and 'href="tel:+79001112233"' in top and "Татьяна" in top
-        assert "/my-point/%d/issued" % order_id in top                                          # the buttons: never folded
+        assert "/my-point/%d/issued" % order_id in top                                          # the buttons: never folded («Возврат» is: 2026-10-30)
         assert "<summary>Подробнее</summary>" in more and "Nokian Hakkapeliitta 10" in more and "Nokian Hakkapeliitta 10" not in top
-    first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)
-    assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[0])
-    assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split("<details")[0]
+    first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)            # the transfer is under «Подробнее» (the prototype, 2026-10-30)
+    assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[1])
+    assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split("<details")[1]
 
 
 def test_a_press_brings_back_to_the_tab_it_came_from(tmp_path):

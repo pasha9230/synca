@@ -195,7 +195,7 @@ def test_the_point_page_refuses_with_a_link_and_offers_no_way_around(tmp_path):
     from test_vk_commands import ready
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
-    token = handoff_token(mine.get("/my-point").get_data(as_text=True))
+    token = handoff_token(mine.get("/my-point?tab=handed").get_data(as_text=True))
     r = post(mine, "/my-point", "tok", token=token, phone="8 (900) 111-22-33", need="второй комплект")
     page = r.get_data(as_text=True)
     assert r.status_code == 200 and 'id="mp-dup"' in page and "У клиента уже есть открытый заказ № 5000100" in page

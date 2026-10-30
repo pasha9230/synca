@@ -139,11 +139,12 @@ def test_every_step_of_the_point_lights_an_element_of_its_workplace(tmp_path):
     oth = _on_oth(conn, pid)
     assert post(owner, "/orders/%d/oth-agreed" % oth, "tok").status_code == 302            # a return with the act МХ-3 on the page
     assert order_oth.return_plan(conn, oth)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")                    # a card on «На точке», the tab the page opens on
     mine = manager(app, conn, pid)
     html = text(mine.get("/my-point"))
     steps = tour.steps_for("point")
-    assert shown(html) == [s["title"] for s in steps] == ["Рабочее место", "Вкладки", "Поиск", "Карточка заказа", "Возврат поставщику",
-                                                          tour.AGAIN["title"]]
+    assert shown(html) == [s["title"] for s in steps] == ["Рабочее место", "Вкладки", "Поиск", "Передать клиента", "Карточка заказа",
+                                                          "Возврат поставщику", tour.AGAIN["title"]]
     for s in steps:
         assert len(select(html, s["sel"])) == 1, s["sel"]
     assert "МХ-3" in next(s for s in steps if s["sel"] == ".mp-returns")["text"]
@@ -244,7 +245,7 @@ def test_a_new_point_gets_no_step_about_a_card_or_a_return_it_does_not_have(tmp_
     orders.move_card(conn, card, _stage(conn, "done"), NOW, "o")            # nothing on the way, nothing to give back
     mine = manager(app, conn, pid)
     html = text(mine.get("/my-point"))
-    assert shown(html) == ["Рабочее место", "Вкладки", "Поиск", tour.AGAIN["title"]]
+    assert shown(html) == ["Рабочее место", "Вкладки", "Поиск", "Передать клиента", tour.AGAIN["title"]]
     for s in tour.steps_for("point"):
         if s["title"] in shown(html):
             assert len(select(html, s["sel"])) == 1, s["sel"]

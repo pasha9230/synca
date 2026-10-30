@@ -149,7 +149,7 @@ def test_my_point_shows_at_the_point_and_coming_with_what_the_message_to_the_man
     orders.update_card(conn, card, dict(transfer_number="26R-922352", delivery_time="до 18:00"), NOW, "o")
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = "".join(mine.get("/my-point?tab=" + t).get_data(as_text=True) for t in ("moving", "here"))     # each on its own tab (2026-10-30)
     coming, lying = (re.search(r'<article[^>]*id="order-%d".*?</article>' % c, page, re.S).group(0) for c in (card, here))   # one list (owner 2026-10-26)
     assert "едет на точку" in coming and "на точке" in lying and "700200" in lying
     assert "26R-922352" in coming and "15.10, до 18:00" in coming and "Nokian Hakkapeliitta 10" in coming and "Кол-во 4 шт" in coming
@@ -173,15 +173,17 @@ def test_the_feed_has_the_own_orders_notes_and_bell_only(tmp_path):
     other = points.save_point(conn, dict(name="Гамма", channel="vk", vk_peer_id="777"))
     theirs = _card(conn, other, webmim="700100")
     to_panel(conn, pid)
-    points.add_note(conn, pid, "answer", "Готово", NOW)
-    points.add_note(conn, other, "answer", "Чужое", NOW)
+    points.add_note(conn, pid, "alert", "Готово", NOW)
+    points.add_note(conn, other, "alert", "Чужое", NOW)
+    points.add_note(conn, pid, "answer", "Ответ бота клиенту", NOW)                           # the bot's answers are not the point's (2026-10-30)
     mine = manager(app, conn, pid)
     data = mine.get("/my-point/feed?p=%d" % other).get_json()
     keys = [it["key"] for it in data["items"]]
     assert "order-%d" % card in keys and "order-%d" % theirs not in keys
     assert any(it["text"] == "Готово" for it in data["items"]) and not any(it["text"] == "Чужое" for it in data["items"])
-    page = mine.get("/my-point").get_data(as_text=True)
-    assert "Для точки" in page and "Готово" in page and "Чужое" not in page
+    assert not any(it["text"] == "Ответ бота клиенту" for it in data["items"])
+    page = mine.get("/my-point?notes=1").get_data(as_text=True)
+    assert "Оповещения" in page and "Готово" in page and "Чужое" not in page and "Ответ бота клиенту" not in page
 
 
 def test_a_point_without_vk_hands_a_client_over_from_its_page(tmp_path):
@@ -189,7 +191,7 @@ def test_a_point_without_vk_hands_a_client_over_from_its_page(tmp_path):
     conn.execute("UPDATE point SET vk_peer_id = '', channel = 'panel' WHERE id = ?", (pid,))
     conn.commit()
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=handed").get_data(as_text=True)
     token = re.search(r'action="/my-point" class="mp-handoff-form".*?name="token" value="([0-9a-f]+)"', page, re.S).group(1)
     r = post(mine, "/my-point", "tok", token=token, phone="+7 900 222-33-44", need="зима")
     assert r.status_code == 302
@@ -241,11 +243,11 @@ def test_an_alert_that_cannot_be_kept_for_the_point_never_raises(tmp_path, monke
 
 def test_the_notes_are_shown_only_while_the_point_works_in_the_panel(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
-    points.add_note(conn, pid, "answer", "Готово", NOW)
+    points.add_note(conn, pid, "alert", "Готово", NOW)
     mine = manager(app, conn, pid)
-    assert "Для точки" not in mine.get("/my-point").get_data(as_text=True)                  # back on «ВК»: the old notes are not shown
+    assert "Оповещения:" not in mine.get("/my-point").get_data(as_text=True)                # back on «ВК»: the old notes are not shown
     to_panel(conn, pid)
-    assert "Для точки" in mine.get("/my-point").get_data(as_text=True)
+    assert "Оповещения: 1" in mine.get("/my-point").get_data(as_text=True)
 
 
 def test_the_feed_names_whose_it_is_for_the_memory_of_the_browser(tmp_path):

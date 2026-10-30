@@ -59,7 +59,7 @@ def test_the_owner_confirms_a_doubtful_issued_of_a_moving_order(tmp_path):
 def test_my_point_shows_issued_for_an_order_on_its_way_and_closes_it(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=moving").get_data(as_text=True)                     # «Едут» (the owner 2026-10-30: no «Все»)
     assert "/my-point/%d/arrived" % card in page and "/my-point/%d/issued" % card in page
     assert "/my-point/%d/no_show" % card not in page                                        # «не пришёл» only at the point
     _t, page = press(mine, card, "issued")

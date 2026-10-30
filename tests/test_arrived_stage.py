@@ -49,7 +49,7 @@ def test_arrived_on_a_new_order_is_doubtful_and_says_it_is_not_placed(tmp_path):
 def test_the_button_of_my_point_shows_and_marks_a_placed_order(tmp_path):
     app, client, tok, conn, pid, card = placed(tmp_path, SENT)
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=moving").get_data(as_text=True)                     # «Едут» (the owner 2026-10-30: no «Все»)
     assert "/my-point/%d/arrived" % card in page
     _tok, page = press(mine, card, "arrived")
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and len(to_client(app)) == 1

@@ -104,7 +104,8 @@ def test_a_point_sees_the_label_on_the_card_the_board_and_my_point_its_own_order
     bind(w)
     manager, _ = person(w["app"], "point", w["rust"])
     for url in ("/orders", "/orders?v=list", "/my-point"):                              # the three orders of the point are on each page
-        page = text(manager, url)
+        page = text(manager, url) if url != "/my-point" else "".join(                   # «Рабочее место»: each order on its own tab (2026-10-30)
+            text(manager, "/my-point?tab=" + t) for t in ("here", "moving", "oth", "return"))
         assert orders.ORIGIN_OTHER in page and "Без аккаунта" in page and w["main_name"] not in page, url    # no account's name (2026-10-29)
         assert page.count(LABEL) == 2, url                                                  # «Свой клиент» has none
     away = text(manager, "/orders/%d" % w["away"])
