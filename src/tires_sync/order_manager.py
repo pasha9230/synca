@@ -216,7 +216,8 @@ def find_named(conn, number) -> List[int]:
     panel's own number of any order."""
     found = find_orders(conn, number)
     if len(found) != 1 and conn.execute("SELECT 1 FROM order_card WHERE id = ?", (number,)).fetchone():
-        found = [number]
+        from .order_merge import moved_into
+        found = [moved_into(conn, number) or number]                # a source of a merge: its merged order (этап 2)
     return found
 
 
@@ -331,6 +332,18 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                        "Под №%d несколько заказов: владелец уточнит." % number)
     card = orders.get_card(conn, found[0])
     state["order_id"] = card["id"]
+    from .order_merge import parts
+    merged = parts(conn, card["id"])
+    numbers = list(dict.fromkeys(p["webmim"] for p in merged if p["webmim"]))      # the WebMIM orders the tyres come by
+    if len(numbers) > 1 and str(number) != label(card) and str(number) in numbers:
+        # an old number of one source of a merge with several WebMIM orders: one part may have come (the lead 2026-10-30) — the owner confirms
+        rest = ", ".join(n for n in numbers if n != str(number))
+        why = "%s заказ %s — это часть объединённого №%s (%s %s)" % (
+            word or "команда", number, label(card), "ещё ждём" if BUILTIN.get(word, ((), None))[1] == "at_point" else "в нём также", rest)
+        answer = dispute(point, why, "Заказ №%s — часть объединённого заказа №%s: владелец подтвердит." % (number, label(card)))
+        conn.execute("UPDATE manager_message SET text = ? WHERE message_id = ?", (("%s\n%s" % (str(text or "").strip(), why))[:MAX_TEXT], state["message_id"]))
+        conn.commit()
+        return answer
     if card["point_id"] is None:                       # the owner 2026-10-22: an order of no point is not the points' to see, nor another point's
         answer = finish("заказ без точки: не выполнено", "Заказ №%s пока не назначен вашей точке — уточните у менеджера." % label(card))
         try:

@@ -75,3 +75,63 @@ def test_the_number_of_a_source_for_reference_still_names_it(tmp_path):
     other = new_order(conn, qty=2, goods="2")
     new = _merge(conn, [other, sold], code="new")
     assert mgr.find_orders(conn, sold) == [sold] and mgr.find_orders(conn, other) == [new]     # its sale and tyres stayed its own
+
+
+# ---- the review of 2026-10-30 ----------------------------------------------------------------------------------------------------------------
+
+from tests.test_order_reserve import POINT_VK                               # noqa: E402  (Бета's manager in VK)
+
+
+def test_an_old_number_of_a_merge_of_several_webmim_orders_waits_for_the_owner(tmp_path):
+    conn = db(tmp_path)
+    a, b, new = _merged(conn)
+    na, nb = _card(conn, a)["webmim_number"], _card(conn, b)["webmim_number"]
+    answer = mgr.handle_command(conn, "m1", POINT_VK, "приехал %s" % na, None, NOW)
+    assert "часть объединённого" in answer and _card(conn, new)["stage"]["code"] == "moving"          # nothing moved, nothing sent
+    text = conn.execute("SELECT text FROM manager_message WHERE message_id = 'm1'").fetchone()[0]
+    assert "приехал заказ %s — это часть объединённого №%s (ещё ждём %s)" % (na, new, nb) in text
+
+
+def test_an_old_number_of_a_merge_of_one_webmim_order_acts_at_once(tmp_path):
+    from test_oth_sale import new_order
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    other = new_order(conn, qty=1, goods="3")                                     # no WebMIM order: one number only
+    new = _merge(conn, [a, other])
+    mgr.handle_command(conn, "m2", POINT_VK, "приехал %s" % _card(conn, a)["webmim_number"], None, NOW)
+    assert _card(conn, new)["stage"]["code"] == "at_point"
+
+
+def test_the_merged_order_keeps_the_source_and_the_responsible_and_the_funnel_counts_it_at_the_first_day(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    conn.execute("UPDATE order_card SET source = 'avito', responsible = 'zaman', created_at = '2026-09-20T10:00:00' WHERE id = ?", (a,))
+    conn.commit()
+    b = _second(conn)
+    new = _merge(conn, [a, b])
+    card = _card(conn, new)
+    assert (card["source"], card["responsible"]) == ("avito", "zaman")
+    assert analytics.funnel(conn, "2026-09-01", "2026-09-30")["total"]["orders"] == 1      # counted on the day of its first source
+    assert analytics.funnel(conn, "2026-10-01", "2026-10-31")["total"]["orders"] == 0
+
+
+def test_the_panels_old_number_in_a_line_of_the_bot_leads_to_the_merged_order(tmp_path):
+    from test_oth_sale import new_order
+    conn = db(tmp_path)
+    a = new_order(conn, qty=1, goods="3")                                        # known by the panel's number
+    b = new_order(conn, qty=1, goods="4")
+    conn.execute("UPDATE order_card SET webmim_number = '777' WHERE id = ?", (b,))
+    conn.commit()
+    new = _merge(conn, [a, b], code="new")
+    conn.execute("UPDATE order_card SET webmim_number = '888' WHERE id = ?", (a,))   # it got a WebMIM number later: the line has the panel's
+    conn.commit()
+    assert mgr.find_named(conn, a) == [new]
+
+
+def test_arrived_keeps_the_number_while_tyres_of_the_supplier_are_not_ordered(tmp_path):
+    from test_oth_sale import new_order
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    other = new_order(conn, qty=1, goods="3")
+    new = _merge(conn, [a, other], code="placed")
+    assert mgr._oth_arrived_body(conn, _card(conn, new)) is None                   # a part still to order: the template as it is
