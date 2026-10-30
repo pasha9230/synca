@@ -1,9 +1,10 @@
 {# The owner's preview of a client's catalog: the same rows as the client's /shop (client_catalog with the client's conditions), no photos #}
 {% extends "base.html" %}
 {% block title %}Каталог глазами {{ login }} · Tires Sync{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='shop.css') }}">{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Каталог глазами клиента {{ login }}{% if info.display_name %} · {{ info.display_name }}{% endif %}</h1>
-<p class="sub">Ровно то, что клиент видит у себя: его бренды, его цены, «Склад 1/2». Фото здесь не показываются. <a href="/client-terms/c/{{ login }}">← Условия клиента</a></p></div></header>
+<p class="sub">Ровно то, что клиент видит у себя: все бренды поставщиков, его цены, «Склад 1/2». Фото здесь не показываются. <a href="/client-terms/c/{{ login }}">← Условия клиента</a></p></div></header>
 {% if tochki_hidden %}<p class="badge badge--warn">«Склад 2» скрыт у клиентов: снимок 4 Точек старше 6 часов (загрузка не проходит — «Подключения → 4 точки» — или часовой цикл не доходит до конца — журнал)</p>{% endif %}
 {% include "_shop_catalog.html" %}
 {% endblock %}

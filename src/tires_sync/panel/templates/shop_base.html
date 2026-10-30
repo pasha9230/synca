@@ -13,14 +13,17 @@
 </head>
 <body class="shop">
 {% if session.get("user") %}
-<header class="shop-top"><a class="sb-logo" href="/shop"><span class="sb-logo-mark">{{ icon("tire") }}</span>Каталог</a>
-<div class="shop-top-right"><form method="post" action="/tour/again" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="tour-again" data-tour="again" aria-label="Пройти обзор заново"><span class="tour-again-long">Пройти обзор заново</span><span class="tour-again-short">Обзор</span></button></form>
-<a href="/account/password">Свой пароль</a>
-<form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form></div>
+{% set p = request.path %}{% set me = current_user() %}
+<header class="shop-top"><div class="shop-top-in"><a class="shop-logo" href="/shop"><span class="shop-logo-mark">{{ icon("tire") }}</span>Шины</a>
+{# the sections (the owner 2026-10-30, the prototype renderClientDesk): on a computer in the header, on a phone at the bottom (shop.css) #}
+<nav class="shop-nav" aria-label="Разделы" data-tour="shop-nav">
+<a href="/shop"{% if p == "/shop" %} class="is-active" aria-current="page"{% endif %}>{{ icon("tire") }}<span>Каталог</span></a>
+<a href="/shop/cart"{% if p.startswith("/shop/cart") %} class="is-active" aria-current="page"{% endif %} data-tour="cart">{{ icon("box-down") }}<span>Корзина</span>{% if cart_count %} <b class="shop-count">{{ cart_count }}</b>{% endif %}</a>
+<a href="/shop/orders"{% if p.startswith("/shop/orders") %} class="is-active" aria-current="page"{% endif %}>{{ icon("clipboard") }}<span>Мои заказы</span></a>
+<a href="/shop/profile"{% if p.startswith("/shop/profile") or p.startswith("/account") %} class="is-active" aria-current="page"{% endif %}>{{ icon("users") }}<span>Профиль</span></a></nav>
+<div class="shop-top-right">{% if me.display_name %}<span class="shop-me">{{ me.display_name }}</span>{% endif %}<form method="post" action="/tour/again" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="tour-again" data-tour="again" aria-label="Пройти обзор заново"><span class="tour-again-long">Пройти обзор заново</span><span class="tour-again-short">Обзор</span></button></form>
+<form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form></div></div>
 </header>
-{% set p = request.path %}<nav class="shop-nav" aria-label="Разделы" data-tour="shop-nav"><a href="/shop"{% if p == "/shop" %} class="is-active" aria-current="page"{% endif %}>Каталог</a>
-<a href="/shop/cart"{% if p.startswith("/shop/cart") %} class="is-active" aria-current="page"{% endif %} data-tour="cart">Корзина{% if cart_count %} <b class="shop-count">{{ cart_count }}</b>{% endif %}</a>
-<a href="/shop/orders"{% if p.startswith("/shop/orders") %} class="is-active" aria-current="page"{% endif %}>Мои заказы</a></nav>
 <main class="main"><div class="page">
 <div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' or kind.startswith('field:') else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' or kind.startswith('field:') %} role="alert"{% endif %}><div class="flash-text">{{ message }}</div></div>{% endfor %}</div>
 {% set pf = page_filter() if page_filter is defined else {} %}{% if pf %}<div class="flash flash--info" data-filter-on><div class="flash-text">Фильтр включён: {{ pf.count }} · {% if pf.mine %}<a href="{{ pf.mine }}">Мои фильтры</a> <span class="muted xs">(открыто по ссылке; ваши сохранённые фильтры не тронуты)</span>{% else %}<a href="{{ pf.reset }}">Сбросить фильтры</a> <span class="muted xs">(фильтры запоминаются в вашем аккаунте)</span>{% endif %}</div></div>{% endif %}

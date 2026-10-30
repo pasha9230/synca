@@ -294,7 +294,8 @@ for _section, _endpoints in {
              "tour_done", "tour_again"),                # «Обзор» (panel/tour.py): one's own mark «пройден», every role
     "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
-             "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"),   # its cart, its orders
+             "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",   # its cart, its orders,
+             "shop_profile_page", "shop_profile_save"),                                                              # its profile
 }.items():
     for _endpoint in _endpoints:
         SECTION_OF[_endpoint] = _section
@@ -325,7 +326,8 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
 CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again",
-                          "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"})
+                          "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
+                          "shop_profile_page", "shop_profile_save"})
 # «CRM» is not the point's (the owner 2026-10-29: hidden; before, its own part of a client, 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})

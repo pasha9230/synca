@@ -1,11 +1,14 @@
-{# the client's cart (routes_shop._cart_view): the price and the stock of today, the contacts kept, the checkout; forms only, no script #}
+{# the client's cart (routes_shop._cart_view): the price and the stock of today, the contacts kept, the checkout; forms only, no script.
+   The new design (the owner 2026-10-30, the prototype): the positions at the left, the total and «Оформление» at the right #}
 {% extends "shop_base.html" %}
 {% block title %}Корзина{% endblock %}
 {% block content %}
+<h1 class="shop-h1">Корзина</h1>
 {% if error %}<div class="flash flash--err" role="alert"><div class="flash-text">{{ error }}</div></div>{% endif %}
-<section class="card">
-<div class="card-head"><h3>Корзина</h3>{% if rows %}<span class="ml-auto shop-total">Итого: <b>{{ total|money }}</b></span>{% endif %}</div>
-{% if rows %}<div class="table-wrap"><table class="table shop-cart-table">
+{% if rows %}{% set v = form or {} %}
+<div class="shop-two">
+<section class="card shop-cart-box">
+<div class="table-wrap"><table class="table shop-cart-table">
 <thead><tr><th>Шина</th><th>Склад</th><th class="num">Цена за шт.</th><th>Количество</th><th class="num">Сумма</th></tr></thead>
 <tbody>{% for r in rows %}<tr>
 <td class="c-name">{{ r.name }}{% if not r.ok %} <span class="badge badge--err">нет в наличии</span>{% endif %}</td>
@@ -15,24 +18,23 @@
 {% if r.ok %}<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="0" max="100" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--secondary btn--sm">Изменить</button>{% endif %}
 <button class="btn btn--link-gray btn--sm" name="drop" value="1">Убрать</button></form></td>
 <td class="num c-sum">{{ r.sum|money if r.ok else "—" }}</td></tr>{% endfor %}</tbody></table></div>
-{% else %}<div class="empty"><h3>Корзина пуста</h3><p>Добавьте шины из <a href="/shop">каталога</a>.</p></div>{% endif %}
 </section>
-{% if rows %}{% set v = form or {} %}
-<section class="card card-body">
-<h3>Оформить заказ</h3>
+<section class="card shop-checkout">
+<h2>Оформление</h2>
+<dl class="shop-sum"><dt>Позиций</dt><dd>{{ rows|selectattr("ok")|list|length }}</dd><dt>Шин</dt><dd>{{ rows|selectattr("ok")|sum(attribute="qty") }}</dd><dt class="shop-total">Итого</dt><dd class="shop-total"><b>{{ total|money }}</b></dd></dl>
 <form method="post" action="/shop/checkout" class="stack" data-tour="checkout"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="total" value="{{ total }}">
-<div class="row" style="gap:var(--s-3);flex-wrap:wrap;align-items:flex-end">
-<label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="phone" required inputmode="tel" autocomplete="tel" maxlength="40" placeholder="+7 900 000-00-00" value="{{ v.get('phone', profile.phone) }}"></label>
-<label class="field" style="flex:1;min-width:240px"><span class="label">Ваш адрес</span><input class="input" name="address" required minlength="5" maxlength="300" autocomplete="street-address" placeholder="Город, улица, дом" value="{{ v.get('address', profile.address) }}"></label>
-</div>
-{% if not profile.phone %}<p class="small muted">Телефон и адрес нужны при первом заказе: мы их запомним и подставим в следующий раз.</p>{% endif %}
-<fieldset class="field shop-way" style="border:0;padding:0;margin:0"><legend class="label">Как получить</legend>
-{% if points %}<label class="radio"><input type="radio" name="way" value="point"{% if v.get('way') == 'point' %} checked{% endif %} required><span>Самовывоз с точки</span></label>
-<div class="shop-points">{% for p in points %}<label class="radio"><input type="radio" name="point_id" value="{{ p.id }}"{% if v.get('point_id') == p.id|string %} checked{% endif %}><span><b>{{ p.name }}</b>{% if p.address %} · {{ p.address }}{% endif %}{% if p.hours %} · {{ p.hours }}{% endif %}</span></label>{% endfor %}</div>{% endif %}
-<label class="radio"><input type="radio" name="way" value="delivery"{% if v.get('way') == 'delivery' %} checked{% endif %} required><span>Доставка по адресу выше</span></label>
+<fieldset class="field shop-way"><legend class="label">Как получить</legend>
+{% if points %}<label class="shop-radio-card"><input type="radio" name="way" value="point"{% if v.get('way') == 'point' %} checked{% endif %} required><span><b>Забрать на точке</b></span></label>
+<div class="shop-points">{% for p in points %}<label class="shop-radio-card"><input type="radio" name="point_id" value="{{ p.id }}"{% if v.get('point_id') == p.id|string %} checked{% endif %}><span><b>{{ p.name }}</b>{% if p.address %}<span class="muted">{{ p.address }}</span>{% endif %}{% if p.hours %}<span class="muted">{{ p.hours }}</span>{% endif %}</span></label>{% endfor %}</div>{% endif %}
+<label class="shop-radio-card"><input type="radio" name="way" value="delivery"{% if v.get('way') == 'delivery' %} checked{% endif %} required><span><b>Доставка</b><span class="muted">по адресу ниже</span></span></label>
 </fieldset>
-<label class="field"><span class="label">Комментарий (по желанию)</span><textarea class="input" name="comment" rows="3" maxlength="1500" placeholder="например: нужно к пятнице">{{ v.get('comment', '') }}</textarea></label>
-<div><button class="btn btn--primary">Оформить заказ на {{ total|money }}</button></div>
-<p class="small muted">Цену и наличие проверим ещё раз при оформлении. Менеджер свяжется с вами, чтобы подтвердить заказ.</p>
-</form></section>{% endif %}
+<label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="phone" required inputmode="tel" autocomplete="tel" maxlength="40" placeholder="+7 900 000-00-00" value="{{ v.get('phone', profile.phone) }}"></label>
+<label class="field"><span class="label">Ваш адрес</span><input class="input" name="address" required minlength="5" maxlength="300" autocomplete="street-address" placeholder="Город, улица, дом" value="{{ v.get('address', profile.address) }}"></label>
+{% if not profile.phone %}<p class="small muted">Телефон и адрес нужны при первом заказе: мы их запомним, потом они меняются в «Профиле».</p>{% endif %}
+<label class="field"><span class="label">Комментарий (по желанию)</span><textarea class="input" name="comment" rows="3" maxlength="1500" placeholder="Например: нужно к пятнице">{{ v.get('comment', '') }}</textarea></label>
+<button class="btn btn--primary shop-xl">Оформить заказ на {{ total|money }}</button>
+<p class="small muted">Цену и наличие проверим ещё раз при оформлении. Менеджер подтвердит наличие и свяжется с вами.</p>
+</form></section>
+</div>
+{% else %}<section class="card"><div class="empty"><h3>Корзина пуста</h3><p>Выберите шины в <a href="/shop">каталоге</a>.</p></div></section>{% endif %}
 {% endblock %}

@@ -1,14 +1,28 @@
-{# one order of the client (shop_cart.my_order): the status for the client, the positions at the client's price #}
+{# one order of the client (shop_cart.my_order): the status for the client as stages (the prototype's vsteps), the positions at the
+   client's price #}
 {% extends "shop_base.html" %}
 {% block title %}Заказ № {{ order.id }}{% endblock %}
 {% block content %}
-<section class="card">
-<div class="card-head"><h3>Заказ № {{ order.id }}</h3><span class="ml-auto shop-status">{{ order.status }}</span></div>
-<div class="card-body small muted">Оформлен {{ order.created_at|short_dt }}. Менеджер свяжется с вами, чтобы подтвердить заказ.</div>
+{% set flow = [("Принят", "Менеджер проверяет наличие и подтвердит заказ."), ("Оформлен", "Шины заказаны со склада."), ("В пути", "Шины в пути."),
+               ("Готов к выдаче", "Можно забирать."), ("Выполнен", "Шины получены.")] %}
+{% set names = flow|map(attribute=0)|list %}
+{% set at = names.index(order.status) if order.status in names else -1 %}
+<div class="shop-back"><a href="/shop/orders">{{ icon("arrow-left") }}Все мои заказы</a></div>
+<h1 class="shop-h1">Заказ № {{ order.id }} <span class="shop-status shop-st-{{ {'Принят': 'blue', 'Оформлен': 'cyan', 'В пути': 'orange', 'Готов к выдаче': 'green', 'Отменён': 'red'}.get(order.status, 'gray') }}">{{ order.status }}</span></h1>
+<div class="shop-two">
+<section class="card card-body">
+<h2>Шины</h2>
 <div class="table-wrap"><table class="table">
 <thead><tr><th>Шина</th><th class="num">Цена за шт.</th><th class="num">Кол-во</th><th class="num">Сумма</th></tr></thead>
 <tbody>{% for i in order["items"] %}<tr><td>{{ i.name }}</td><td class="num">{{ i.price|money }}</td><td class="num">{{ i.qty }}</td><td class="num">{{ (i.qty * i.price)|money }}</td></tr>{% endfor %}</tbody>
 <tfoot><tr><td colspan="3"><b>Итого</b></td><td class="num"><b>{{ order.total|money }}</b></td></tr></tfoot></table></div>
-<div class="card-body"><a href="/shop/orders">Все мои заказы</a></div>
+<p class="small muted">Оформлен {{ order.created_at|short_dt }}. Менеджер свяжется с вами, чтобы подтвердить заказ.</p>
 </section>
+<section class="card card-body">
+<h2>Этапы</h2>
+<ol class="shop-steps">{% if order.status == "Отменён" %}<li class="is-done"><b>Принят</b></li><li class="is-err is-cur"><b>Отменён</b></li>
+{% elif at < 0 %}<li class="is-cur"><b>{{ order.status }}</b></li>
+{% else %}{% for name, hint in flow %}<li class="{{ 'is-done' if loop.index0 < at else ('is-cur' if loop.index0 == at else '') }}"{% if loop.index0 == at %} aria-current="step"{% endif %}><b>{{ name }}</b>{% if loop.index0 == at %}<span class="muted">{{ hint }}</span>{% endif %}</li>{% endfor %}{% endif %}</ol>
+</section>
+</div>
 {% endblock %}

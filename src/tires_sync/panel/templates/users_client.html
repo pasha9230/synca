@@ -13,7 +13,7 @@
 <label class="field"><span class="label">Общий % с R18</span><input class="input input--num" name="large" value="{{ typed.get('large', '') if typed else fmt(own.large) }}" inputmode="decimal" placeholder="как у роли" style="max-width:140px"></label>
 <fieldset class="field" style="border:0;padding:0;margin:0"><span class="label">Бренды</span>
 <label class="check"><input type="radio" name="mode" value="inherit"{% if mode != "own" %} checked{% endif %}> как у роли (галочки ниже не действуют, действуют только свои % брендов)</label>
-<label class="check"><input type="radio" name="mode" value="own"{% if mode == "own" %} checked{% endif %}> свой список (клиент видит только отмеченные)</label></fieldset>
+<label class="check"><input type="radio" name="mode" value="own"{% if mode == "own" %} checked{% endif %}> свой список (свои % для отмеченных брендов)</label></fieldset>
 <button class="btn btn--primary">Сохранить</button></div>
 {% with rows = rows, table_id = "client-brands", with_role = true %}{% include "_client_brands.html" %}{% endwith %}
 <div class="row"><button class="btn btn--primary">Сохранить</button></div>

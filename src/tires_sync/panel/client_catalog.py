@@ -28,7 +28,7 @@ STOCK_MANY = "40+"                    # 4tochki sends 41 for «more than 40» (t
 SEASONS = {"summer": "Лето", "winter": "Зима", "all": "Всесезонные"}
 SORTS = ("brand", "size", "price", "stock")
 PAGE = 50
-PARAMS = ("size", "q", "s", "t", "wh", "b", "xb", "o", "r", "p")     # the only parameters the links of the page carry on
+PARAMS = ("size", "q", "s", "t", "wh", "b", "xb", "o", "r", "p", "v")     # the only parameters the links of the page carry on
 MAX_TEXT = 120                        # the length of a text filter (the size line, the search)
 MAX_SIZES = 20
 MAX_BRANDS = 60                       # the brands ticked in one filter
@@ -46,7 +46,8 @@ Pct = Tuple[Optional[float], Optional[float]]                       # (up to R17
 
 @dataclass(frozen=True)
 class Terms:
-    brands: FrozenSet[str]          # the bare keys of the brands the client sees (the profile's own set, else the role's)
+    brands: FrozenSet[str]          # the bare keys of the brands of the profile's own set, else the role's: their own % only — the client sees
+                                    # every brand the suppliers have (the owner 2026-10-30), not this set
     steps: Tuple[Tuple[Dict[str, Pct], Pct], ...]   # (the % of brands, the general %): the profile's, then the role's
 
 
@@ -73,11 +74,12 @@ def _pct(value) -> Optional[float]:
 
 
 def client_price(terms: Terms, offer) -> Optional[int]:
-    """The client's price of a position, or None (out of the set, no %, no purchase): such a position is never shown. The first % set
-    acts (the owner 2026-10-29: the profile's own over the role's): the profile's % of the brand, the profile's general %, the role's %
-    of the brand, the role's general %. A broken first one hides the position (it never falls to the next one)."""
+    """The client's price of a position, or None (no %, no purchase): such a position is never shown. Every brand of the suppliers
+    (the owner 2026-10-30: not only the set; the feed's exclusions do not act on the client). The first % set acts (the owner
+    2026-10-29: the profile's own over the role's): the profile's % of the brand, the profile's general %, the role's % of the brand,
+    the role's general % (up to R17 / from R18) — a brand without its own %. A broken first one hides the position."""
     brand = bare_brand(offer.brand_key)
-    if brand not in terms.brands or not offer.base_price or offer.base_price <= 0 or not math.isfinite(offer.base_price):
+    if not offer.base_price or offer.base_price <= 0 or not math.isfinite(offer.base_price):
         return None
     column = 0 if offer.diameter <= 17 else 1
     found = None
@@ -97,6 +99,11 @@ def photo_token(secret, goods_id: str) -> str:
     return hmac.new(key, b"shop-photo:" + goods_id.encode(), hashlib.sha256).hexdigest()[:32]
 
 
+def priced(terms: Terms) -> bool:
+    """Some % is set for the client (a general one or a brand's): else the catalog is not set up yet («Ассортимент ещё не настроен»)."""
+    return any(v is not None for brands, general in terms.steps for v in list(general) + [p for pair in brands.values() for p in pair])
+
+
 @dataclass(frozen=True)
 class Visible:
     """A position the client may see: the offer stays here (the server side), only `row` goes to the template."""
@@ -108,15 +115,16 @@ class Visible:
 
 
 def visible(conn, login: str, offers, tochki_sid, ref=None, brand_map=None) -> List[Visible]:
-    """Every position the client may see, before the filters: of the client's brands (the first step), with stock and a price."""
+    """Every position the client may see, before the filters: of any brand of the suppliers (WebMIM and 4 Точки; the owner 2026-10-30),
+    with stock and a price."""
     terms = terms_of(conn, login)
-    if not terms.brands:
+    if not priced(terms):
         return []
     labels: Dict[str, str] = {}
     out = []
     for offer in offers:
         brand = bare_brand(offer.brand_key)
-        if brand not in terms.brands or offer.stock <= 0:
+        if offer.stock <= 0 or not brand:                               # a tyre with no brand: never a tick without a name
             continue
         price = client_price(terms, offer)
         if price is None:
@@ -167,7 +175,7 @@ class Filters:
 
 
 def filters_of(args, known_brands) -> Filters:
-    """The GET parameters, parsed on the server with limits; a brand not of the client's set is dropped (it is never searched for)."""
+    """The GET parameters, parsed on the server with limits; a brand the client sees no position of is dropped (never searched for)."""
     size_text = (args.get("size") or "")[:MAX_TEXT]
     sizes, unknown = parse_sizes(size_text)
     pick = lambda name: [b for b in dict.fromkeys(bare_brand(v) for v in args.getlist(name)[:MAX_BRANDS]) if b in known_brands]

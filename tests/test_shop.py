@@ -141,7 +141,7 @@ def test_the_page_has_nothing_of_the_supplier_nor_the_purchase_nor_our_retail_pr
     html = page(client)
     shop_photos.drain()
     html += page(client)
-    assert sorted(prices(html)) == sorted([13580, 65190, 7710] * 2)            # 12345×1.10, 54321×1.20 (R18), 7001×1.10: up to tens
+    assert sorted(prices(html)) == sorted([13580, 65190, 7710, 3670] * 2)      # 12345×1.10, 54321×1.20 (R18), 7001×1.10, Laufenn 3333×1.10
     lowered = html.lower()
     for leak in ["12345", "12 345", "12 345", "54321", "54 321", "54 321", "7001", "7 001", "7 001", "secretcode", "77001",
                  "77002", "s%d-t1" % sid, "supplier-one", "4tochki", "webmim", "4 точки", "4точки", "mim", "4т", "/img/"] + \
@@ -165,16 +165,15 @@ def test_the_row_has_exactly_the_white_list_of_fields(tmp_path):
     assert rows["Склад 1205/55 R16"]["stock"] == "12" and rows["Склад 1205/55 R16"]["price"] == 13580
 
 
-def test_a_brand_out_of_the_set_is_never_found_nor_listed(tmp_path):
+def test_every_brand_of_the_suppliers_is_shown_and_a_brand_without_its_own_pct_has_the_roles_general(tmp_path):
+    """The owner 2026-10-30: every brand the suppliers have (WebMIM and 4 Точки), not only the set; a brand without its own % is priced
+    by the general % of the role «Клиент» (up to R17 / from R18). Laufenn is in no set: 3333 × 1.10."""
     app, client, conn, _ = make_shop(tmp_path)
-    for url in ("/shop", "/shop?q=Laufenn", "/shop?q=G+Fit", "/shop?b=laufenn", "/shop?b=LAUFENN", "/shop?size=195/65R15",
-                "/shop?xb=ikon+tyres", "/shop?q=SECRETCODE3"):
+    for url in ("/shop", "/shop?q=Laufenn", "/shop?q=G+Fit", "/shop?b=laufenn", "/shop?b=LAUFENN", "/shop?size=195/65R15"):
         html = page(client, url)
-        shown = listing(html).lower()
-        assert "laufenn" not in shown and "лауфенн" not in shown and "3333" not in html and "g fit" not in shown, url
-        assert 'value="laufenn"' not in html.replace('name="q" value="laufenn"', ""), url    # not in the brand ticks
-        assert 3670 not in prices(html), url                                  # 3333×1.10
-    assert "Найдено 0" in page(client, "/shop?q=Laufenn") and "Найдено 0" in page(client, "/shop?b=laufenn&size=195/65R15")
+        assert "laufenn" in listing(html).lower() and 3670 in prices(html), url
+    assert 'value="laufenn"' in page(client)                                  # in the brand ticks
+    assert 3670 not in prices(page(client, "/shop?xb=laufenn"))               # «кроме брендов» works for it
     assert "Найдено 0" in page(client, "/shop?q=SECRETCODE1")                 # the supplier's article is not searched
     assert "Найдено 0" in page(client, "/shop?q=77001")                       # nor the goods id
 
@@ -182,11 +181,11 @@ def test_a_brand_out_of_the_set_is_never_found_nor_listed(tmp_path):
 def test_no_purchase_no_stock_or_no_markup_hides_the_position(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
     html = page(client)
-    assert "Найдено 2" in html                                                 # 77004 (purchase 0) and 77005 (stock 0) are not shown
+    assert "Найдено 3" in html                                                 # 77004 (purchase 0) and 77005 (stock 0) are not shown
     conn.execute("UPDATE client_terms SET pct_large = NULL WHERE subject = '*'")
     conn.commit()
     html = page(client)
-    assert "Найдено 1" in html and prices(html) == [13580]                     # R18 without a % is hidden, never at the purchase
+    assert "Найдено 2" in html and sorted(prices(html)) == [3670, 13580]       # R18 without a % is hidden, never at the purchase
     conn.execute("UPDATE client_terms SET pct_small = NULL WHERE subject = '*'")
     conn.commit()
     html = page(client)
@@ -248,7 +247,8 @@ def test_the_profile_over_the_role_the_brand_over_the_general_and_nothing_means_
     assert price(conn, base_price=1000, diameter=16, brand_key="CORDIANT") == 1120
     assert price(conn, base_price=1000, diameter=16) == 1180                                       # brands_mode 'inherit': the role's set
     conn.execute("UPDATE client_terms SET brands_mode = 'own' WHERE subject = 'buyer'")
-    assert price(conn, base_price=1000, diameter=16) is None                                       # an own set without IKON: hidden
+    assert price(conn, base_price=1000, diameter=16) == 1180                                       # an own set without IKON: shown at
+                                                                                                    # the general % (the owner 2026-10-30)
     assert price(conn, base_price=1000, diameter=16, brand_key="CORDIANT") == 1120
     conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL")
     conn.execute("UPDATE client_brand SET pct_small = NULL, pct_large = NULL")
@@ -425,7 +425,7 @@ def test_a_position_without_our_photo_is_a_stub_and_the_supplier_is_never_asked(
     shop_photos.drain()
     html = page(client)
     shop_photos.drain()
-    assert tokens(html) == [] and html.count("нет фото") == 3 and FETCHED == []
+    assert tokens(html) == [] and html.count("нет фото") == 4 and FETCHED == []     # Laufenn too: every brand (2026-10-30)
     for gid in ("77001", "77002"):
         assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, gid)).status_code == 404
     assert FETCHED == []

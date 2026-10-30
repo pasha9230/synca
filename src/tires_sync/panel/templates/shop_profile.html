@@ -1,0 +1,28 @@
+{# «Профиль» of a client (the owner 2026-10-30, the prototype clProfile): the name, the phone and the address of delivery (the next
+   checkout offers them), the password (/account/password, back here) #}
+{% extends "shop_base.html" %}
+{% block title %}Профиль{% endblock %}
+{% block content %}
+{% set v = form or {} %}
+<h1 class="shop-h1">Профиль</h1>
+<div class="shop-narrow">
+{% if error %}<div class="flash flash--err" role="alert"><div class="flash-text">{{ error }}</div></div>{% endif %}
+<section class="card card-body shop-me-card"><span class="shop-avatar">{{ (name or "?")[:1]|upper }}</span><div><b>{{ name or current_user().login }}</b><span class="muted">{{ profile.phone|phone if profile.phone else "телефон не указан" }}</span></div></section>
+<section class="card card-body">
+<h2>Контакты</h2>
+<form method="post" action="/shop/profile" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Название или имя</span><input class="input" name="name" required maxlength="60" value="{{ v.get('name', name) }}"></label>
+<label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="phone" required inputmode="tel" autocomplete="tel" maxlength="40" placeholder="+7 900 000-00-00" value="{{ v.get('phone', profile.phone) }}"><span class="hint">Менеджер звонит по нему, если нужно уточнить заказ.</span></label>
+<label class="field"><span class="label">Адрес доставки</span><input class="input" name="address" required minlength="5" maxlength="300" autocomplete="street-address" placeholder="Город, улица, дом" value="{{ v.get('address', profile.address) }}"><span class="hint">Подставится в заказ с доставкой.</span></label>
+<div><button class="btn btn--primary">Сохранить</button></div>
+</form></section>
+<section class="card card-body" id="password">
+<h2>Пароль</h2>
+<form method="post" action="/account/password" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Текущий пароль</span><input class="input" type="password" name="old" required autocomplete="current-password"></label>
+<label class="field"><span class="label">Новый пароль</span><input class="input" type="password" name="new" required minlength="10" autocomplete="new-password"><span class="hint">Не короче 10 знаков.</span></label>
+<label class="field"><span class="label">Повторите новый</span><input class="input" type="password" name="new2" required minlength="10" autocomplete="new-password"></label>
+<div><button class="btn btn--secondary">Сменить пароль</button></div>
+</form></section>
+</div>
+{% endblock %}

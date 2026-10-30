@@ -1,32 +1,48 @@
 {# the client's catalog (/shop and the owner's preview at `base`): only `rows` of client_catalog.FIELDS and the state of the filters;
-   `cart` (the client's own page): «В корзину» by the row's opaque `key` #}
+   `cart` (the client's own page): «В корзину» by the row's opaque `key`. The new design (the owner 2026-10-30, the prototype
+   renderClientDesk): the filters at the left (a phone: a sheet from the bottom, a checkbox and its label — no script, the CSP of /shop),
+   the sort, «Таблица» / «Плитка» (`view`, a link) and the rows at the right. #}
 {% if empty %}
-<div class="card"><div class="empty"><h3>Ассортимент ещё не настроен</h3><p>Как только менеджер откроет вам бренды, здесь появятся шины с вашими ценами.</p></div></div>
+<div class="card"><div class="empty"><h3>Ассортимент ещё не настроен</h3><p>Как только менеджер откроет вам каталог, здесь появятся шины с вашими ценами.</p></div></div>
 {% else %}
-<section class="card">
+{% set picked = (f.brands|length) + (f.without|length) + (1 if f.size_text else 0) + (1 if f.query else 0) + (1 if f.season else 0) + (1 if f.studs else 0) + (1 if f.warehouse else 0) %}
+<div class="shop-cat">
+<input type="checkbox" id="shop-ft" class="shop-ft-toggle" aria-label="Фильтры">
+<aside class="shop-side" aria-label="Фильтры">
 <form method="get" action="{{ base }}" class="filters shop-filters">
-<input type="hidden" name="o" value="{{ f.sort }}">{% if f.descending %}<input type="hidden" name="r" value="1">{% endif %}
+<input type="hidden" name="o" value="{{ f.sort }}">{% if f.descending %}<input type="hidden" name="r" value="1">{% endif %}{% if view == "tiles" %}<input type="hidden" name="v" value="tiles">{% endif %}
+<div class="shop-side-head"><b>Фильтры</b><label for="shop-ft" class="shop-ft-close" aria-label="Закрыть фильтры">{{ icon("x") }}</label></div>
+<div class="field f-search"><label class="label" for="f-q">Поиск</label><input class="input" id="f-q" name="q" value="{{ f.query }}" maxlength="120" placeholder="Бренд, модель"></div>
 <div class="field f-size"><label class="label" for="f-size">Размеры через пробел</label><input class="input" id="f-size" name="size" value="{{ f.size_text }}" maxlength="120" placeholder="205/55R16 195/65R15" title="Например: 205/55R16 195/65R15 или 205/55/16">
 {% if f.unknown %}<span class="shop-unknown">Не понял: {{ f.unknown|join(" ") }}</span>{% endif %}</div>
-<div class="field f-search"><label class="label" for="f-q">Поиск</label><input class="input" id="f-q" name="q" value="{{ f.query }}" maxlength="120" placeholder="Бренд, модель"></div>
+<div class="shop-three">
 <div class="field"><label class="label" for="f-s">Сезон</label><select class="select" id="f-s" name="s"><option value="">Все</option>{% for key, label in seasons.items() %}<option value="{{ key }}"{% if f.season == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
 <div class="field"><label class="label" for="f-t">Шипы</label><select class="select" id="f-t" name="t"><option value="">Все</option><option value="studded"{% if f.studs == "studded" %} selected{% endif %}>Шипы</option><option value="friction"{% if f.studs == "friction" %} selected{% endif %}>Без шипов</option></select></div>
 <div class="field"><label class="label" for="f-wh">Склад</label><select class="select" id="f-wh" name="wh"><option value="">Все</option><option value="1"{% if f.warehouse == 1 %} selected{% endif %}>Склад 1</option><option value="2"{% if f.warehouse == 2 %} selected{% endif %}>Склад 2</option></select></div>
-<div class="shop-actions"><button class="btn btn--secondary">Показать</button><a class="btn btn--link-gray" href="{{ base }}">Сбросить</a></div>
-<div class="field f-brands">
-<details{% if f.brands %} open{% endif %}><summary>Бренды{% if f.brands %} · выбрано {{ f.brands|length }}{% endif %}</summary><div class="shop-ticks">
-{% for key, label in brands %}<label class="check"><input type="checkbox" name="b" value="{{ key }}"{% if key in f.brands %} checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div></details>
-<details{% if f.without %} open{% endif %}><summary>Кроме брендов{% if f.without %} · {{ f.without|length }}{% endif %}</summary><div class="shop-ticks">
-{% for key, label in brands %}<label class="check"><input type="checkbox" name="xb" value="{{ key }}"{% if key in f.without %} checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div></details>
 </div>
+<fieldset class="shop-blist-box f-brands"><legend class="label">Бренды{% if f.brands %} · выбрано {{ f.brands|length }}{% endif %}</legend><div class="shop-blist">
+{% for key, label in brands %}<label class="check"><input type="checkbox" name="b" value="{{ key }}"{% if key in f.brands %} checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div></fieldset>
+<fieldset class="shop-blist-box shop-blist-box--x"><legend class="label">Кроме брендов{% if f.without %} · {{ f.without|length }}{% endif %}</legend><div class="shop-blist">
+{% for key, label in brands %}<label class="check"><input type="checkbox" name="xb" value="{{ key }}"{% if key in f.without %} checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div></fieldset>
+<div class="shop-actions"><button class="btn btn--primary">Показать</button><a class="btn btn--secondary" href="{{ base }}{% if view == 'tiles' %}?v=tiles{% endif %}">Сбросить</a></div>
 </form>
-</section>
-<section class="card" data-tour="catalog">
-<div class="toolbar"><span class="small muted">Сортировка:</span>
-<div class="sortbar">{% for key, label in (("brand", "Бренд"), ("size", "Размер"), ("price", "Цена"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div>
-<span class="small muted ml-auto">Найдено {{ total }}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %}</span></div>
-{% if rows %}<div class="table-wrap"><table class="table shop-table">
-<thead><tr><th class="w-thumb"></th><th>Шина</th><th>Размер</th><th>Сезон</th><th>Страна, год</th><th>Склад</th><th class="num">Остаток</th><th class="num">Цена за шт.</th>{% if cart %}<th class="c-buy"></th>{% endif %}</tr></thead>
+</aside>
+<section class="shop-results" data-tour="catalog">
+<div class="shop-tools"><div class="shop-tools-title"><h1>Каталог</h1><span class="muted">Найдено {{ total }}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
+<label for="shop-ft" class="btn btn--secondary shop-ft-open">{{ icon("sliders") }}Фильтры{% if picked %} <b class="shop-count">{{ picked }}</b>{% endif %}</label>
+<div class="shop-sort"><span class="muted">Сортировка:</span><div class="sortbar">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div></div>
+<div class="shop-seg" role="group" aria-label="Вид"><a href="{{ view_links.table }}"{% if view != "tiles" %} class="is-active" aria-current="true"{% endif %}>Таблица</a><a href="{{ view_links.tiles }}"{% if view == "tiles" %} class="is-active" aria-current="true"{% endif %}>Плитка</a></div></div>
+{% macro buy(r) %}<form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
+<input class="input input--num" type="number" name="qty" value="4" min="1" max="100" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--primary btn--sm">{{ "Ещё" if r.in_cart else "В корзину" }}</button></form>{% if r.in_cart %}<span class="shop-in-cart">в корзине: {{ r.in_cart }} шт.</span>{% endif %}{% endmacro %}
+{% if rows and view == "tiles" %}<div class="shop-tiles">{% for r in rows %}<article class="shop-tile">
+<div class="shop-tile-ph">{% if r.photo %}<img src="{{ r.photo }}" alt="" loading="lazy">{% else %}<span class="thumb">нет фото</span>{% endif %}</div>
+<div class="shop-tile-name"><b>{{ r.brand }}</b> {{ r.model or r.name }}</div>
+<div class="shop-tile-meta">{{ r.size }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} · RunFlat{% endif %}</div>
+<div class="shop-tile-meta"><span class="shop-tag">{{ r.season or "—" }}{% if r.studs %} · шип{% endif %}</span> <span class="muted">{{ r.warehouse }} · {{ r.stock }} шт.</span></div>
+<div class="shop-tile-price"><b class="strong">{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
+{% if cart %}{{ buy(r) }}{% endif %}</article>{% endfor %}</div>
+{% elif rows %}<div class="table-wrap"><table class="table shop-table">
+<thead><tr><th class="w-thumb"></th><th>Шина</th><th>Размер</th><th>Сезон</th><th>Страна, год</th><th>Склад</th><th class="num">Остаток</th><th class="num">Цена за шт.</th>{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
 <tbody>{% for r in rows %}
 <tr{% if cart %} class="has-buy"{% endif %}>
 <td class="c-photo w-thumb">{% if r.photo %}<img class="thumb" src="{{ r.photo }}" alt="" width="36" height="36" loading="lazy">{% else %}<div class="thumb">нет фото</div>{% endif %}</td>
@@ -37,10 +53,10 @@
 <td class="c-wh">{{ r.warehouse }}</td>
 <td class="c-stock num">{{ r.stock }} шт.</td>
 <td class="c-price num"><b class="strong">{{ r.price|money }}</b></td>
-{% if cart %}<td class="c-buy"><form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
-<input class="input input--num" type="number" name="qty" value="4" min="1" max="100" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--secondary btn--sm">В корзину</button></form></td>{% endif %}
+{% if cart %}<td class="c-buy">{{ buy(r) }}</td>{% endif %}
 </tr>{% endfor %}</tbody></table></div>
 {% else %}<div class="empty"><h3>Ничего не найдено</h3><p>Измените или сбросьте фильтры.</p></div>{% endif %}
 {% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
 </section>
+</div>
 {% endif %}

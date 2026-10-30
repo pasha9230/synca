@@ -433,7 +433,8 @@ def test_the_forms_of_the_client_are_only_the_own_password():
     # one address: the page and its form; and the mark of «Обзор» (the owner 2026-10-30, panel/tour.py): the client's own «пройден»
     # and the own cart and orders (the owner 2026-10-30, shop_cart.py): «shop» is EDIT, so its pages count too (the GET ones send nothing)
     assert allowed == {"account_password_page", "account_password", "tour_done", "tour_again", "shop_page", "shop_photo", "shop_cart_add",
-                       "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"}
+                       "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
+                       "shop_profile_page", "shop_profile_save"}                              # its own «Профиль» (the owner 2026-10-30)
 
 
 def test_the_client_catalog_is_the_clients_only(tmp_path):

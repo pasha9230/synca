@@ -133,16 +133,17 @@ def register(app) -> None:
     @app.route("/account/password", methods=["POST"])
     def account_password():
         login = current_user()["login"]
+        back = "/shop/profile#password" if current_user()["role"] == "client" else "/account/password"    # the client: its «Профиль»
         if login == app.config["AUTHOR"]:
             flash("Общий пароль владельца меняется на сервере (panel.env), не здесь.")
-            return redirect("/account/password")
+            return redirect(back)
         if request.form.get("new", "") != request.form.get("new2", ""):
             flash("Новые пароли не совпали.", "field:new2")
-            return redirect("/account/password")
+            return redirect(back)
         conn = get_conn()
         if login_blocked(conn):                                       # a stolen session never guesses the current password
             flash("Слишком много попыток. Подождите и повторите.", "field:old")
-            return redirect("/account/password")
+            return redirect(back)
         try:
             users.change_own_password(conn, login, request.form.get("old", ""), request.form.get("new", ""), now_iso())
         except users.UserError as err:
@@ -150,7 +151,7 @@ def register(app) -> None:
             if wrong:
                 login_failed(conn)
             flash(str(err), {"login": "error", "password": "field:new"}.get(_user_field(str(err)), "field:old" if wrong else "error"))
-            return redirect("/account/password")
+            return redirect(back)
         session["epoch"] = store.get_session_epoch(conn, login)          # this session stays, the others end
         flash("Пароль сменён. Остальные открытые входы закрыты.", "ok")
-        return redirect("/")
+        return redirect("/shop/profile" if current_user()["role"] == "client" else "/")

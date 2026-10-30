@@ -101,17 +101,22 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False) 
     rows = [cc.row(i, "/shop/photo/%s" % cc.photo_token(app.secret_key, i.offer.goods_id) if shots and shots.ready(i.offer) else None)
             for i in found[(page - 1) * cc.PAGE: page * cc.PAGE]]
     if cart:
-        rows = [dict(r, key=cc.photo_token(app.secret_key, i.offer.goods_id)) for r, i in zip(rows, found[(page - 1) * cc.PAGE: page * cc.PAGE])]
+        have = shop_cart.cart(conn, login)
+        rows = [dict(r, key=cc.photo_token(app.secret_key, i.offer.goods_id), in_cart=have.get(i.offer.goods_id, 0))
+                for r, i in zip(rows, found[(page - 1) * cc.PAGE: page * cc.PAGE])]
     keep = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS and k not in ("o", "r", "p")]
     sort_links = {}
     for key in cc.SORTS:
         flip = f.sort == key and not f.descending
         sort_links[key] = base + "?" + urlencode(keep + [("o", key)] + ([("r", "1")] if flip else []))
     here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS and k != "p"]
+    view = "tiles" if request.args.get("v") == "tiles" else "table"            # «Таблица» / «Плитка» (the prototype), a link, no script
+    plain = [(k, v) for k, v in here if k != "v"]
+    view_links = {"table": base + ("?" + urlencode(plain) if plain else ""), "tiles": base + "?" + urlencode(plain + [("v", "tiles")])}
     shown = sorted({1, pages} | set(range(max(1, page - 4), min(pages, page + 4) + 1)))       # a window of pages, not hundreds
     pager = {n: base + "?" + urlencode(here + [("p", n)]) for n in shown} if pages > 1 else {}
     return dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
-                seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart)
+                seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart, view=view, view_links=view_links)
 
 
 def _page(template: str, conn, login: str, **values):
@@ -268,6 +273,31 @@ def register(app) -> None:
         if order is None:
             abort(404)                                          # another client's, not of the catalog, or no such: the same answer
         return _page("shop_order.html", conn, login, order=order)
+
+    @app.route("/shop/profile")
+    def shop_profile_page():
+        conn, login = get_conn(), current_user()["login"]
+        return _page("shop_profile.html", conn, login, profile=shop_cart.profile(conn, login), name=users.get_role(conn, login)["display_name"],
+                     form={}, error=None)
+
+    @app.route("/shop/profile", methods=["POST"])
+    def shop_profile_save():
+        """«Профиль» (the owner 2026-10-30): the name, the phone and the address of delivery; the password is /account/password's."""
+        conn, login = get_conn(), current_user()["login"]
+        f = request.form
+        try:
+            stamp = local_iso()
+            shop_cart.clean_contacts(f.get("phone", ""), f.get("address", ""))   # all checked first: a refusal changes nothing (the review)
+            if not " ".join(f.get("name", "").split()):
+                raise users.UserError("Название или имя: впишите его.")
+            if " ".join(f.get("name", "").split()) != users.get_role(conn, login)["display_name"]:
+                users.set_own_name(conn, login, f.get("name", ""), stamp)
+            shop_cart.save_profile(conn, login, f.get("phone", ""), f.get("address", ""), stamp)
+        except (shop_cart.CartError, users.UserError) as err:
+            return _page("shop_profile.html", conn, login, profile=shop_cart.profile(conn, login), name=users.get_role(conn, login)["display_name"],
+                         form=f, error=str(err)), 400
+        flash("Профиль сохранён.", "ok")
+        return redirect("/shop/profile")
 
     @app.route("/shop/photo/<token>")
     def shop_photo(token):

@@ -215,6 +215,18 @@ def is_active(conn, login: str) -> bool:
     return get_role(conn, login)["active"]
 
 
+def set_own_name(conn, login: str, name: str, now: str) -> None:
+    """A client names itself in «Профиль» (the owner 2026-10-30): the name of its orders; nothing else of the user changes."""
+    name = _name(name)
+    if not name:
+        raise UserError("Название или имя: впишите его.")
+    if get_role(conn, login)["role"] != "client":
+        raise UserError("Имя меняет владелец.")
+    conn.execute("UPDATE panel_user_role SET display_name = ?, updated = ?, updated_by = ? WHERE login = ?", (name, now, normalize(login), normalize(login)))
+    store.write_audit(conn, now, normalize(login), "client_own_name", {"login": normalize(login)})
+    conn.commit()
+
+
 def set_role(conn, login: str, role: str, point_id, display_name: str, now: str, author: str) -> None:
     login = normalize(login)
     if not exists(conn, login):

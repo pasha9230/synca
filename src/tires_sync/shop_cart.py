@@ -125,6 +125,17 @@ def profile(conn, login: str) -> dict:
     return {"phone": row[0], "address": row[1]} if row else {"phone": "", "address": ""}
 
 
+def save_profile(conn, login: str, phone, address, now: str) -> dict:
+    """«Профиль» of the client (the owner 2026-10-30): the phone and the address of delivery, checked as at the checkout; the next
+    checkout offers them."""
+    contacts = clean_contacts(phone, address)
+    conn.execute("INSERT INTO client_profile (login, phone, address, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (login) DO UPDATE SET "
+                 "phone = excluded.phone, address = excluded.address, updated_at = excluded.updated_at",
+                 (login, contacts["phone"], contacts["address"], now))
+    conn.commit()
+    return contacts
+
+
 def clean_contacts(phone, address) -> dict:
     """The phone and the address of a checkout: both are needed (the owner 2026-10-30); CartError with the field otherwise."""
     tel = connections.normalize_phone(phone)

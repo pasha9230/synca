@@ -77,12 +77,13 @@ def test_the_catalog_puts_a_tyre_in_the_cart_by_its_opaque_key_and_never_above_t
     assert 'href="/shop/cart"' in cart and '<b class="shop-count">1</b>' in cart
 
 
-def test_a_key_of_no_position_or_out_of_the_set_puts_nothing(tmp_path):
+def test_a_key_of_no_position_or_without_a_price_puts_nothing(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path)
     assert add(client, "0" * 32).status_code == 302 and shop_cart.cart(conn, "buyer") == {}
     from tires_sync.panel import client_catalog as cc
-    laufenn = cc.photo_token(app.secret_key, "77003")                                 # a brand the client is not given
-    add(client, laufenn)
+    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL WHERE subject = '*'")   # Laufenn: no % of its own nor general
+    conn.commit()
+    add(client, cc.photo_token(app.secret_key, "77003"))
     assert shop_cart.cart(conn, "buyer") == {}
 
 
@@ -157,7 +158,8 @@ def test_the_price_is_taken_anew_at_the_checkout_and_a_tyre_no_longer_sold_stops
     card = orders.get_card(conn, int(r.headers["Location"].rsplit("/", 1)[1]))
     assert [i["sale_unit"] for i in card["items"]] == [14820]                         # 12345 + 20 %, rounded to 10 as the catalog
     add(client, ks[1])
-    conn.execute("DELETE FROM client_brand")                                          # the brand taken away: nothing is sold
+    conn.execute("DELETE FROM client_brand")                                          # no % for anything left: nothing is sold
+    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL WHERE subject = '*'")
     conn.commit()
     r = checkout(client)
     assert r.status_code == 400 and "нет в наличии" in r.get_data(as_text=True)

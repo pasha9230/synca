@@ -83,19 +83,19 @@ def test_the_role_conditions_change_every_client_without_their_own_and_a_profile
     users.add_user(conn, "buyer3", PASSWORD, NOW, role="client")
     ct.save(conn, "buyer3", 30, None, "inherit", {}, NOW, "owner")                      # buyer3: its own % up to R17
     b2, b3 = as_user(app, conn, "buyer2"), as_user(app, conn, "buyer3")
-    assert sorted(prices(page(buyer))) == sorted(prices(page(b2))) == [13580, 65190]    # 12345 × 1.10, 54321 × 1.20
-    assert sorted(prices(page(b3))) == [16050, 65190]                                   # 12345 × 1.30
+    assert sorted(prices(page(buyer))) == sorted(prices(page(b2))) == [3670, 13580, 65190]   # 3333 and 12345 × 1.10, 54321 × 1.20 (every
+    assert sorted(prices(page(b3))) == [4340, 16050, 65190]                                  # brand, 2026-10-30); 12345 × 1.30
     owner, tok = owner_of(app)
     data = form_of(page(owner, "/client-terms"), "/client-terms/role")
     data.update(small=["50"], large=["20"])
     assert send(owner, "/client-terms/role", tok, data).status_code == 302
-    assert sorted(prices(page(buyer))) == sorted(prices(page(b2))) == [18520, 65190]    # 12345 × 1.50: every client without their own
-    assert sorted(prices(page(b3))) == [16050, 65190]                                   # the own % is stronger
+    assert sorted(prices(page(buyer))) == sorted(prices(page(b2))) == [5000, 18520, 65190]  # × 1.50: every client without their own
+    assert sorted(prices(page(b3))) == [4340, 16050, 65190]                                 # the own % is stronger
     data = form_of(page(owner, "/client-terms/c/buyer2"), "/client-terms/c/buyer2")
     data.update(small=["0"], large=[""])
     assert send(owner, "/client-terms/c/buyer2", tok, data).status_code == 302
-    assert sorted(prices(page(b2))) == [12350, 65190]                                   # buyer2 alone: 0 % up to R17 set by hand
-    assert sorted(prices(page(buyer))) == [18520, 65190] and sorted(prices(page(b3))) == [16050, 65190]
+    assert sorted(prices(page(b2))) == [3340, 12350, 65190]                             # buyer2 alone: 0 % up to R17 set by hand
+    assert sorted(prices(page(buyer))) == [5000, 18520, 65190] and sorted(prices(page(b3))) == [4340, 16050, 65190]
 
 
 def test_the_brands_of_the_role_and_a_client_s_own_list_and_the_brand_pct(tmp_path):
@@ -115,7 +115,7 @@ def test_the_brands_of_the_role_and_a_client_s_own_list_and_the_brand_pct(tmp_pa
     set_brand(data, "laufenn", on=True)
     assert send(owner, "/client-terms/c/buyer2", tok, data).status_code == 302
     b2 = as_user(app, conn, "buyer2")
-    assert prices(page(b2)) == [3500]                                                   # its own list: Laufenn only, the role's % of it
+    assert sorted(prices(page(b2))) == [3500, 13580, 65190]                             # its own list gives % only: every brand (2026-10-30)
     assert len(prices(page(buyer))) == 3
     data = form_of(page(owner, "/client-terms/c/buyer2"), "/client-terms/c/buyer2")
     data["mode"] = ["inherit"]
@@ -273,7 +273,7 @@ def test_an_invitation_with_conditions_puts_them_in_the_profile(tmp_path):
     assert users.get_role(conn, "shina")["role"] == "client" and users.get_role(conn, "shina")["display_name"] == "ООО Шины"
     assert ct.read(conn, "shina") == {"small": 12.5, "large": None, "mode": "own", "brands": {"laufenn": (None, None)}}
     shina = as_user(app, conn, "shina")
-    assert prices(page(shina)) == [3750]                                                # 3333 × 1.125 → 3750, Laufenn only
+    assert sorted(prices(page(shina))) == [3750, 13890, 65190]                          # × 1.125 up to R17; R18: the role's 20 % (every brand)
     assert accept(app, path, "shina2").status_code == 404                               # one time
     plain = invite(app, owner, tok, c_small="", c_large="")
     assert accept(app, plain, "shina3").status_code == 302
