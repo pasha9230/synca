@@ -97,6 +97,19 @@ def placed_ids(conn, card_id) -> Set[int]:
     return {i for i, row in items_of(conn, card_id).items() if row["placed"]}
 
 
+def unordered(conn, card: dict) -> List[int]:
+    """The positions of a merged order on «Заказ оформлен» or later that nobody ordered yet: they came from sources not placed, and the new order
+    has no number of its own (the owner 2026-10-30: the card marks them and «Что делать сейчас» asks to order them; ordered once, the order has
+    its number). [] for any other order, a deal of the point's stock, or before «Заказ оформлен»."""
+    if not is_target(conn, card["id"]) or card.get("deal_kind") == "stock" or _placed(conn, card["id"]):
+        return []
+    placed = orders._placed_stage(conn)
+    if placed is None or not orders._needs_placed(card["stage"], placed):
+        return []
+    from . import oth_sale
+    return [i["id"] for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]
+
+
 def ever(conn, card_id) -> Set[int]:
     """The positions of the order a merge ever gave or took (also undone): their rows of the Google table follow the order (order_sheet)."""
     return {r[0] for r in conn.execute("SELECT from_item FROM order_merge_item WHERE from_order = ? UNION "
@@ -322,11 +335,10 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
         gaps = orders.missing_for(card, stage, placed)
         if gaps:
             raise MergeError("Чтобы поставить новый заказ на «%s», не хватает: %s." % (stage["name"], ", ".join(gaps)))
-        from . import oth_sale
-        if (placed is not None and base["deal_kind"] != "stock" and orders._needs_placed(stage, placed)        # a deal of the point's stock
-                and [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]):                     # orders nothing
-            raise MergeError("Шины заказов %s ещё не заказаны у поставщика: поставьте новый заказ на этап до «%s» и закажите их." % (
-                ", ".join("№%s" % _label(c) for c in moving if not _placed(conn, c["id"]) and c["stage"]["code"] != "oth"), placed["name"]))
+        lacking = unordered(conn, card)                                 # placed or later with tyres not ordered: marked, ordered from the card
+        if lacking:                                                     # (the owner 2026-10-30), nothing is sent
+            orders.add_event(conn, new, now, author, "merge", "Не заказано у поставщика: %d поз. — закажите из карточки («Заказ поставщику»)."
+                             % len(lacking), level="grey")
         if orders._needs_placed(stage, placed):
             from . import order_sheet
             order_sheet.enroll(conn, new, now)                          # its rows go to the Google table, the sources' rows stay

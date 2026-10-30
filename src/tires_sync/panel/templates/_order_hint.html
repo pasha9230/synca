@@ -7,6 +7,7 @@
 {% if hint_folded("stage") %}<div class="row small muted ocard-hint is-folded" style="gap:var(--s-2);align-items:center" data-stage-hint="folded"><span>Что делать сейчас · этап «{{ c.stage.name }}»</span>{{ fold_form }}<input type="hidden" name="fold" value="0"><button class="btn btn--secondary btn--xs">Развернуть</button></form></div>
 {% else %}<section class="card entity-sec ocard-hint" id="hint" data-stage-hint="{{ c.stage.code }}"><div class="card-head"><h3>Что делать сейчас</h3><span class="sub">этап «{{ c.stage.name }}»</span>{{ fold_form }}<input type="hidden" name="fold" value="1"><button class="btn btn--secondary btn--xs">Свернуть</button></form></div>
 <div class="card-body stack small">
+{% if merge_unordered %}<p data-merge-unordered><b>Закажите у поставщика: {{ merge_unordered|length }} поз.</b> Остальные шины уже заказаны в исходных заказах. <a class="btn btn--primary btn--sm" href="#supplier">Заказать в МИМ / 4 Точки</a></p>{% endif %}
 <ol class="ocard-hint-steps" style="margin:0;padding-left:1.4em">{% for s in h.steps %}<li>{{ s }}</li>{% endfor %}</ol>
 {% if h.auto %}<div><b>Панель сама:</b><ul style="margin:var(--s-1) 0 0;padding-left:1.4em">{% for a in h.auto %}<li>{{ a }}</li>{% endfor %}</ul></div>{% endif %}
 </div></section>{% endif %}

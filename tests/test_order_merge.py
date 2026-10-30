@@ -420,14 +420,31 @@ def test_a_source_placed_in_part_is_not_merged(tmp_path):
         _merge(conn, [a, b])
 
 
-def test_tyres_not_ordered_yet_keep_the_purchase_webmim_gives_and_hold_the_new_order_before_placed(tmp_path):
+def test_tyres_not_ordered_yet_keep_the_purchase_webmim_gives(tmp_path):
     conn = db(tmp_path)
     cid = new_order(conn, qty=2, goods="2")
     other = new_order(conn, qty=1, goods="3")
-    with pytest.raises(orders.OrderError, match="ещё не заказаны"):
-        _merge(conn, [cid, other], code="moving")
     new = _merge(conn, [cid, other], code="new")
     assert [r[0] for r in conn.execute("SELECT purchase_manual FROM order_item WHERE order_id = ?", (new,))] == [0, 0]
+    assert order_merge.unordered(conn, _card(conn, new)) == []                       # before «Заказ оформлен»: the usual «Оформить»
+
+
+def test_a_merge_on_placed_with_a_tyre_not_ordered_marks_it_and_orders_only_it(tmp_path):
+    """The owner 2026-10-30: no refusal; the position is marked, «Что делать сейчас» asks to order it, «Заказать в МИМ» takes it only."""
+    app, owner, tok, conn = panel(tmp_path)
+    a = card_at(conn, "moving", T)                                                 # placed: its tyres are ordered under its number
+    cid = new_order(conn, qty=1, goods="3")                                        # not placed
+    new = _merge(conn, [a, cid], code="placed")
+    card = _card(conn, new)
+    lacking = order_merge.unordered(conn, card)
+    assert [i["goods_id"] for i in card["items"] if i["id"] in lacking] == ["3"]
+    assert [i["goods_id"] for i in oth_sale.supplier_items(conn, card)] == ["3"]     # what WebMIM / 4 Точки are asked for
+    page = owner.get("/orders/%d" % new).get_data(as_text=True)
+    assert "не заказано у поставщика" in page and "Закажите у поставщика: 1 поз." in page
+    assert conn.execute("SELECT COUNT(*) FROM order_task WHERE order_id = ?", (new,)).fetchone()[0] == 0      # nothing sent
+    conn.execute("UPDATE order_card SET webmim_number = '888' WHERE id = ?", (new,))   # ordered: the order has its number now
+    conn.commit()
+    assert order_merge.unordered(conn, _card(conn, new)) == []
 
 
 def test_the_reservation_goes_on_and_the_point_and_the_client_are_not_asked_again_today(tmp_path):
