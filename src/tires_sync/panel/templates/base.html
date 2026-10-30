@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='bell.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='topbar.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='tour.css') }}">
 {% block head %}{% endblock %}
 </head>
 <body>
@@ -55,7 +56,8 @@
 </nav>{% endif %}
 {% set me = current_user() %}
 <div class="sb-foot">{{ icon("lock", "i-sm") }}<a href="/account/password" title="Свой пароль">{{ me.display_name or (me.login if me.login != config.AUTHOR else "Владелец") }}</a>
-<form method="post" action="/logout" class="inline ml-auto"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form>
+<form method="post" action="/tour/again" class="inline ml-auto"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Пройти обзор заново" aria-label="Пройти обзор заново" data-tour="again">{{ icon("info") }}</button></form>
+<form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form>
 </div>
 </aside>
 <main class="main">
@@ -89,6 +91,7 @@
 </div>
 </main>
 </div>
+{% include "_tour.html" %}
 {% else %}
 <main class="auth">
 <div class="auth-card">
@@ -102,7 +105,8 @@
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% if session.get("user") and can("alerts") %}<script src="{{ url_for('static', filename='bell.js') }}"></script>{% endif %}
 {% if session.get("user") and current_user().role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}"></script>{% endif %}
-{% if session.get("user") %}<script src="{{ url_for('static', filename='topbar.js') }}"></script>{% endif %}
+{% if session.get("user") %}<script src="{{ url_for('static', filename='topbar.js') }}"></script>
+<script src="{{ url_for('static', filename='tour.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -288,7 +288,8 @@ for _section, _endpoints in {
               "points_history", "history_points"),     # «История → Точки» (and its old address): the owner and the partner only (users: nobody else looks)
     "self": ("account_password_page", "account_password", "orders_list_columns",     # «Колонки» of the list of orders: one's own setting
              "orders_hint_fold",                        # «Что делать сейчас» folded: one's own setting
-             "search", "search_json"),                  # the search of the top bar: every role; search.scope_for narrows what it finds
+             "search", "search_json",                   # the search of the top bar: every role; search.scope_for narrows what it finds
+             "tour_done", "tour_again"),                # «Обзор» (panel/tour.py): one's own mark «пройден», every role
     "mypoint": ("mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
     "shop": ("shop_page", "shop_photo"),        # «Каталог для клиента»: the client's only (its photos through our server)
 }.items():
@@ -308,14 +309,14 @@ NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" an
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})
 # the manager of a point: the orders of the point only (the board, the file and the cards of the point)
 POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
-                         "account_password", "mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
+                         "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                          "search", "search_json",   # the search: the point's own (search.scope_for)
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
                          "calls_page", "call_record", "call_create_order", "call_handoff"})           # the calls of the point's account (own_call)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
-CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password"})
+CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again"})
 # «CRM» is not the point's (the owner 2026-10-29: hidden; before, its own part of a client, 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})

@@ -17,7 +17,7 @@
 {% if can("catalog") %}<a class="tile" href="/feeds"><span class="tile-label">Объявления в фидах</span><span class="tile-value">{{ d.feeds|sum(attribute="ads") }}</span><span class="tile-sub">аккаунтов с фидом: {{ d.feeds|length }}</span></a>{% endif %}
 </div>
 <div class="stack-lg" style="margin-bottom:var(--s-5)">
-<section class="card">
+<section class="card" data-tour="attention">
 <div class="card-head"><h3>Требует внимания</h3>{% set attn = extra + (d.attention if can("catalog") else []) %}{% if attn %}<span class="ml-auto badge badge--warn">{{ attn|length }}</span>{% endif %}</div>
 {% if attn %}<ul class="checklist">
 {% for a in attn %}<li><span><span class="badge badge--{{ 'err' if a.level == 'bad' else 'warn' }} badge--dot">{{ "Нужно сделать" if a.level == "bad" else "Проверьте" }}</span></span>

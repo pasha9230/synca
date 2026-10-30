@@ -20,7 +20,7 @@
 </div>
 </form>
 </section>
-<section class="card">
+<section class="card" data-tour="catalog">
 <div class="toolbar"><span class="small muted">Сортировка:</span>
 <div class="sortbar">{% for key, label in (("brand", "Бренд"), ("size", "Размер"), ("price", "Цена"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div>
 <span class="small muted ml-auto">Найдено {{ total }}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %}</span></div>

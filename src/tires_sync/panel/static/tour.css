@@ -1,0 +1,16 @@
+/* «Обзор» (_tour.html, panel/tour.py): the window of the step; the light of the element is in the page's own <style>. Without a script the
+   window stands at the bottom right; tour.js puts it next to the element. Under a modal window (50) and the toasts (60). */
+.tour-radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.tour-pop{display:none;position:fixed;right:var(--s-6);bottom:var(--s-6);z-index:45;width:360px;max-width:calc(100vw - 32px);padding:var(--s-4) var(--s-5);background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-xl);box-shadow:var(--sh-xl);color:var(--gray-900)}
+.tour-radio:checked+.tour-pop{display:block}
+.tour-radio:focus-visible+.tour-pop{box-shadow:var(--sh-xl),var(--ring)}
+.tour-pop.is-placed{right:auto;bottom:auto}
+.tour-step{color:var(--primary-700);font-size:var(--fs-xs);font-weight:600}
+.tour-title{margin:4px 0 6px;font-size:var(--fs-lg)}
+.tour-text{margin:0 0 var(--s-4);color:var(--gray-700);font-size:var(--fs-sm);line-height:var(--lh)}
+.tour-actions{display:flex;align-items:center;gap:var(--s-2)}
+.tour-skip{margin-right:auto}
+.tour-actions label{cursor:pointer}
+.tour-again{background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;text-decoration:underline}
+.tour-again-short{display:none}
+@media (max-width:720px){.tour-pop{left:16px;right:16px;bottom:16px;width:auto}.tour-again-long{display:none}.tour-again-short{display:inline}}

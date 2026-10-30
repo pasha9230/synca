@@ -429,7 +429,8 @@ def test_the_forms_of_the_client_are_only_the_own_password():
     with Flask(__name__).test_request_context("/"):
         g.user_info = {"login": "client1", "role": "client", "point_id": None, "display_name": ""}
         allowed = {e for e in common.SECTION_OF if common.can_post(e)}
-    assert allowed == {"account_password_page", "account_password"}            # one address: the page and its form
+    # one address: the page and its form; and the mark of «Обзор» (the owner 2026-10-30, panel/tour.py): the client's own «пройден»
+    assert allowed == {"account_password_page", "account_password", "tour_done", "tour_again"}
 
 
 def test_the_client_catalog_is_the_clients_only(tmp_path):
