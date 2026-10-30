@@ -59,10 +59,13 @@ def test_a_row_is_what_goes_to_the_google_table(panel):
     mine = card(conn, goods=(("111", 4), ("222", 2)), comment="Хочу сегодня")
     orders.update_card(conn, mine, {"webmim_number": "1234567", "transfer_number": "26R-922352"}, NOW, "owner")
     sold(conn, mine)
-    expected = list(sheet.rows_of(conn, mine, NOW).values())
+    expected = list(sheet.card_rows(conn, orders.get_card(conn, mine), "").values())
     got = orders_list.rows(conn, [mine], True)
     assert [r["order"] for r in got] == [mine, mine]
     assert [r["values"] for r in got] == [{c: e[c] for c in orders_list.COLUMNS} for e in expected]
+    table = list(sheet.rows_of(conn, mine, NOW).values())                        # the table: the same values, but no «Дата» nor «Примечание»
+    assert [{c: t[c] for c in sheet.SENT if c != "Телефон"} for t in table] == [{c: e[c] for c in sheet.SENT if c != "Телефон"} for e in expected]
+    assert table[0]["Телефон"] == sheet.sheet_phone(orders.get_card(conn, mine)["client_phone"])      # and the phone as 89… (2026-10-30)
     assert all(isinstance(r["values"]["Прибыль ₽"], float) for r in got)                       # the sale is written: the analytics' profit
     html = client.get("/orders?v=list").get_data(as_text=True)
     assert 'data-href="/orders/%d"' % mine in html and "26R-922352" in html and "Шина 222" in html

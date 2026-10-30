@@ -42,6 +42,7 @@ PAGES = {
 # (the tabs, the other pages under the same head of tabs: their links to a tab are moves inside the place too)
 TABS = {"settings": (("settings_page", "settings_brands_page", "settings_exclusions_page"), ("settings_brand_card",))}
 VALUE_MAX = 200
+SEARCH = ("q",)          # the text of a search is never kept (the owner 2026-10-30): the rest of the choice is, as before
 
 
 def _key(endpoint: str) -> str:
@@ -69,6 +70,8 @@ def _chosen(endpoint: str, role: str) -> dict:
     """The page's own parameters of this address, empty values left out: {key: [values]}."""
     out = {}
     for key in _keys(endpoint, role):
+        if key in SEARCH:
+            continue
         values = [v[:VALUE_MAX] for v in request.args.getlist(key) if v.strip()][:50]
         if values:
             out[key] = values
@@ -145,7 +148,7 @@ def _forget(conn, login: str, endpoint: str) -> None:
 def _saved(conn, login: str, endpoint: str, role: str) -> dict:
     saved = user_prefs.get(conn, login, _key(endpoint), {})
     keys = _keys(endpoint, role)
-    return {k: v for k, v in saved.items() if k in keys and isinstance(v, list)} if isinstance(saved, dict) else {}
+    return {k: v for k, v in saved.items() if k in keys and k not in SEARCH and isinstance(v, list)} if isinstance(saved, dict) else {}
 
 
 def _saved_url(conn, login: str, endpoint: str, role: str) -> str:

@@ -71,7 +71,7 @@ def register(app) -> None:
         return render_template("conn_sheet.html", tabs=tabs, box_ok=box is not None, sheet=order_sheet.settings(conn),
                                sheet_secrets=connections.secret_status(conn, box, order_sheet.KIND, 0),
                                sheet_check=connections.get_check(conn, order_sheet.KIND, 0), sheet_status=order_sheet.status(conn),
-                               columns=order_sheet.COLUMNS, sheet_name=order_sheet.SHEET)
+                               columns=order_sheet.ASKED, sheet_name=order_sheet.SHEET)
 
     def save():
         conn = get_conn()

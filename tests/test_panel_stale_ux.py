@@ -186,7 +186,7 @@ def test_a_manual_rule_on_a_held_position_is_not_a_rule_without_a_position(tmp_p
     conn.close()
     client = app_of(tmp_path).test_client()
     login(client)
-    html = client.get("/catalog").get_data(as_text=True)
+    html = client.get("/settings/exclusions").get_data(as_text=True)              # moved from the catalog (the owner 2026-10-30)
     orphans = html[html.index("Ручные правила без позиции"):]
     assert "s2-77" in orphans and "s2-5" not in orphans
 

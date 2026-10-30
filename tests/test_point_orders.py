@@ -217,22 +217,30 @@ def test_the_point_edits_the_client_the_date_and_the_comment_of_its_own_sale(w):
     assert card["point_id"] == w["alfa"] and not card["webmim_number"] and card["deal_kind"] == "stock"     # nothing else of the order
 
 
-def test_the_point_adds_a_tyre_from_the_catalog_with_its_price_and_changes_the_price(w):
+def test_the_point_types_its_own_tyre_changes_it_and_removes_it_and_the_sum_follows(w):
     m, conn = w["made"], w["conn"]
-    found = w["point"].get("/orders/items/find?order=%d&q=205/55" % m["stock_new"]).get_json()["items"]
-    real = [it for it in found if not it.get("point")]
-    assert real and all(set(it) <= {"goods_id", "name", "size", "stock", "price"} for it in real)            # no supplier, no purchase
-    w["point"].post("/orders/%d/items/add" % m["stock_new"], data={"csrf": "tok", "goods_id": real[0]["goods_id"], "query": real[0]["name"], "qty": "4"})
-    items = orders.get_card(conn, m["stock_new"])["items"]
-    assert len(items) == 1 and items[0]["qty"] == 4
-    w["point"].post("/orders/%d/items/%d/update" % (m["stock_new"], items[0]["id"]), data={"csrf": "tok", "qty": "2", "sale_unit": "5100",
-                                                                                          "supplier_price": "1"})
-    item = orders.get_card(conn, m["stock_new"])["items"][0]
-    assert (item["qty"], item["sale_unit"]) == (2, 5100) and item["supplier_price"] != 1                    # the purchase is not the point's
     page = _page(w["point"], "/orders/%d" % m["stock_new"])
-    assert "data-buy" not in page and "Закупка" not in page
+    block = page[page.index("data-point-sale"):page.index("</section>", page.index("data-point-sale"))]
+    assert "data-point-tyre" in block and "data-item-find" not in block                    # typed, no catalog (the owner 2026-10-31)
+    w["point"].post("/orders/%d/items/add" % m["stock_new"], data={"csrf": "tok", "name": "Nokian Hakka 10 205/55 R16", "qty": "4",
+                                                                    "sale_unit": "5000", "goods_id": "101"})
+    [item] = orders.get_card(conn, m["stock_new"])["items"]
+    assert (item["goods_id"], item["name"], item["qty"], item["sale_unit"], item["supplier_price"]) == (orders.POINT_GOODS, "Nokian Hakka 10 205/55 R16", 4, 5000, 0)
+    assert "20 000" in _page(w["point"], "/orders/%d" % m["stock_new"]).replace("\xa0", " ")
+    w["point"].post("/orders/%d/items/%d/update" % (m["stock_new"], item["id"]), data={"csrf": "tok", "qty": "2", "sale_unit": "5100",
+                                                                                      "supplier_price": "1"})
+    item = orders.get_card(conn, m["stock_new"])["items"][0]
+    assert (item["qty"], item["sale_unit"], item["supplier_price"]) == (2, 5100, 0)                # the purchase is not the point's
+    page = _page(w["point"], "/orders/%d" % m["stock_new"])
+    assert "data-buy" not in page and "Закупка" not in page and "10 200" in page.replace("\xa0", " ")
     w["point"].post("/orders/%d/items/%d/delete" % (m["stock_new"], item["id"]), data={"csrf": "tok"})
     assert orders.get_card(conn, m["stock_new"])["items"] == []
+
+
+def test_the_point_has_no_catalog_nor_its_suggestions(w):
+    assert w["point"].get("/catalog").status_code == 403
+    assert w["point"].get("/orders/items/find?order=%d&q=205/55" % w["made"]["stock_new"]).status_code == 403
+    assert 'href="/catalog"' not in _page(w["point"], "/orders")
 
 
 @pytest.mark.parametrize("which", ["ours", "stock_webmim", "other_point"])
@@ -289,14 +297,14 @@ def test_the_point_phone_of_its_sale_joins_no_client_of_the_crm(w):
     assert clients.client_of_order(conn, m["stock_new"]) is None
 
 
-def test_a_tyre_of_the_point_only_in_a_stock_deal(w):
+def test_a_typed_tyre_makes_a_sale_of_the_account_one_of_the_points_stock_and_a_refusal_changes_nothing(w):
     m, conn = w["made"], w["conn"]
-    w["point"].post("/orders/%d/items/add" % m["account"], data={"csrf": "tok", "goods_id": orders.POINT_GOODS, "query": "Шина с полки", "qty": "1"})
-    assert orders.get_card(conn, m["account"])["items"] == []
-    w["point"].post("/orders/%d/items/add" % m["stock_new"], data={"csrf": "tok", "goods_id": orders.POINT_GOODS, "query": "Шина с полки",
-                                                                    "qty": "1", "sale_unit": "3000"})
-    assert [i["goods_id"] for i in orders.get_card(conn, m["stock_new"])["items"]] == [orders.POINT_GOODS]
-
+    assert orders._row(conn, m["account"])["deal_kind"] != "stock"
+    w["point"].post("/orders/%d/items/add" % m["account"], data={"csrf": "tok", "name": "Шина с полки", "qty": "1"})       # no price
+    assert orders.get_card(conn, m["account"])["items"] == [] and orders._row(conn, m["account"])["deal_kind"] != "stock"
+    w["point"].post("/orders/%d/items/add" % m["account"], data={"csrf": "tok", "name": "Шина с полки", "qty": "1", "sale_unit": "3000"})
+    assert [i["goods_id"] for i in orders.get_card(conn, m["account"])["items"]] == [orders.POINT_GOODS]
+    assert orders._row(conn, m["account"])["deal_kind"] == "stock" and m["account"] in points.own_sales(conn, w["alfa"])
 
 def test_the_sale_block_never_names_the_account_and_keeps_the_comment_it_did_not_change(w):
     m, conn = w["made"], w["conn"]
@@ -309,3 +317,19 @@ def test_the_sale_block_never_names_the_account_and_keeps_the_comment_it_did_not
     w["point"].post("/orders/%d/point-sale" % m["stock_new"], data={"csrf": "tok", "client_name": "Новое имя", "comment": shown})
     row = orders._row(conn, m["stock_new"])
     assert row["client_name"] == "Новое имя" and row["comment"] == "Звонок на «Акк точки»"
+
+
+def test_the_points_move_of_its_own_sale_sends_no_can_pick_up(w, monkeypatch):
+    from tires_sync import order_manager
+    m, s, conn = w["made"], w["stages"], w["conn"]
+    called = []
+    monkeypatch.setattr(order_manager, "tell_client_arrived", lambda *a, **k: called.append(a) or (False, ""))
+    conn.execute("UPDATE order_card SET client_phone = '+79001112233', delivery_date = '2026-11-02' WHERE id = ?", (m["stock_new"],))
+    conn.execute("INSERT INTO order_item (order_id, goods_id, name, qty, supplier_price, sale_unit) VALUES (?, 'point', 'Шина', 4, 0, 1500)",
+                 (m["stock_new"],))
+    conn.commit()
+    for code in ("placed", "done"):
+        w["point"].post("/orders/%d/move" % m["stock_new"], data={"csrf": "tok", "stage_id": s[code]})
+        assert orders.get_card(conn, m["stock_new"])["stage"]["code"] == code
+    w["point"].post("/orders/%d/move" % m["stock_new"], data={"csrf": "tok", "stage_id": s["at_point"]})     # not the point's for its sale
+    assert orders.get_card(conn, m["stock_new"])["stage"]["code"] == "done" and called == []

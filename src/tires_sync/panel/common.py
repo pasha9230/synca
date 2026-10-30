@@ -238,7 +238,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_point_sale", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -304,6 +304,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "draft_confirm": "publish", "feed_update_confirm": "publish", "pairs_forget": "publish", "pairs_not_pair": "publish", "feed_update_fetch": "publish", "history_rollback": "publish",
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",
          "order_sale_reverse": "delete", "order_webmim_create": "supplier", "order_tochki_placed": "supplier",
+         "order_arrived_message": "send",                 # it prepares a message to the client: who may send them (review 2026-10-30)
          "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
          "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
@@ -314,14 +315,14 @@ NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" an
 # the point's own sale (the owner 2026-10-30, order_points.own_sales): the point edits the client, the date, the comment and the positions
 # with their prices — of its own sale only (check_access); our orders (WebMIM), another point's and the purchase stay closed
 POINT_SALE_PAGES = frozenset({"order_point_sale", "order_item_add", "order_item_update", "order_item_delete"})
-POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
+POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
                          "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                          "search", "search_json",   # the search: the point's own (search.scope_for)
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
-                         "calls_page", "call_record", "call_create_order", "call_handoff",           # the calls of the point's account (own_call)
-                         "order_item_find"} | frozenset(POINT_SALE_PAGES))
+                         "calls_page", "call_record", "call_create_order", "call_handoff"}           # the calls of the point's account (own_call)
+                        | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
 CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again",
                           "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"})

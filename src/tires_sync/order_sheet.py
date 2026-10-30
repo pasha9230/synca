@@ -27,6 +27,10 @@ SHEET = "Заказы"
 COLUMNS = ("Дата", "№ заказа MIM", "Перемещение MIM", "Дата счета", "Артикул", "Наименование", "Кол-во", "Цена MIM", "Сумма MIM",
            "Цена продажи", "Сумма продажи", "Имя", "Телефон", "ПВЗ", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту", "Примечание")
+OWNERS = ("Дата", "Примечание")             # never filled (the owner 2026-10-30): «Примечание» is the people's, «Дата» stays empty
+SENT = tuple(c for c in COLUMNS if c not in OWNERS)            # what a new row is written with (a sheet without «Примечание» still takes it)
+ASKED = tuple(c for c in COLUMNS if c != "Примечание")         # what «Проверить» asks for: «Дата» holds the hidden mark of each row (the
+                                                               # script's KEY_COLUMN): without it no row is found nor written
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
 FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
@@ -93,6 +97,28 @@ def enroll(conn, card_id: int, now: str) -> None:
     """The order is placed: it joins the table if the table is on. In the caller's transaction; once (a second placing keeps the first)."""
     if enabled(conn):
         conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (int(card_id), now))
+
+
+OPEN_STAGES = ("placed", "moving", "at_point", "oth", "return_given")      # «Заказ оформлен» … «На ОТХ», «Возврат передан»: not closed
+
+
+def open_unlisted(conn) -> List[dict]:
+    """The open orders (OPEN_STAGES) the table does not have: placed before it was switched on (the owner 2026-10-30). Oldest first."""
+    rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s) AND c.id NOT IN "
+                        "(SELECT order_id FROM sheet_order) ORDER BY c.id" % ",".join("?" * len(OPEN_STAGES)), OPEN_STAGES).fetchall()
+    return [orders.get_card(conn, r[0]) for r in rows]
+
+
+def enroll_open(conn, now: str) -> List[int]:
+    """`python -m tires_sync sheet-enroll --open`: the open orders placed before the table was on join its queue (the next send writes
+    their rows; a row only ever added, the owner's cells never touched). Nothing when the table is off. Returns the orders put in."""
+    if not enabled(conn):
+        raise SheetError("Google-таблица выключена: включите её в «Подключения → Google-таблица».")
+    found = [c["id"] for c in open_unlisted(conn)]
+    for card_id in found:
+        enroll(conn, card_id, now)
+    conn.commit()
+    return found
 
 
 def _due(conn, now: str, full: bool) -> List[int]:
@@ -209,9 +235,20 @@ def key(card_id: int, item_id: int) -> str:
     return "tires:%d:%d" % (int(card_id), int(item_id))
 
 
+def sheet_phone(phone) -> str:
+    """The phone as the table keeps it (the owner 2026-10-30): 8 and ten digits, no spaces nor +7 — 89111280606."""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == 11 and digits[0] in "78":
+        return "8" + digits[1:]
+    return "8" + digits if len(digits) == 10 else digits
+
+
 def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
-    """The rows of the order now: mark → {column: value}. Numbers are numbers, days are «YYYY-MM-DD» (the script makes them dates)."""
-    return card_rows(conn, orders.get_card(conn, card_id), placed_at, _sent(conn, card_id))
+    """The rows of the order now, as they go to the table: mark → {column of SENT: value}. Numbers are numbers, days are «YYYY-MM-DD» (the
+    script makes them dates); the phone is sheet_phone. «Список» of the panel shows card_rows (the comment, the panel's phone)."""
+    card = orders.get_card(conn, card_id)
+    phone = sheet_phone(card["client_phone"])
+    return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone}) for mark, row in card_rows(conn, card, placed_at, _sent(conn, card_id)).items()}
 
 
 def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] = None) -> Dict[str, dict]:
@@ -267,7 +304,7 @@ def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=()) -> L
     for mark, fields in now_rows.items():
         before = written.get(mark)
         if before is None:
-            out.append({"key": mark, "create": True, "fields": {c: fields[c] for c in COLUMNS}})
+            out.append({"key": mark, "create": True, "fields": {c: fields[c] for c in SENT}})
         elif not before.get("_missing"):
             diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
             if diff:
@@ -310,7 +347,7 @@ def check(conn, box, http: Transport) -> str:
     secret = _secret(conn, box, s)
     if not secret:
         raise SheetError("Секрет не задан для этого адреса: впишите его." if connections.get_secret(conn, box, KIND, 0, "secret") else "Секрет не задан.")
-    answer = call(http, s["url"], {"secret": secret, "sheet": SHEET, "ping": True, "columns": list(COLUMNS)})
+    answer = call(http, s["url"], {"secret": secret, "sheet": SHEET, "ping": True, "columns": list(ASKED)})
     missing = [str(c) for c in answer.get("missing") or []]
     if missing:
         raise SheetError("На листе «%s» нет колонок: %s." % (SHEET, ", ".join(missing)))

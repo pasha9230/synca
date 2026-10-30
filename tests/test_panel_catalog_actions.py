@@ -95,4 +95,28 @@ def test_stale_working_draft_blocks_staging_and_warns(tmp_path):
 def test_manual_rules_without_a_position_are_listed(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     confirm_draft(conn, create_draft(conn, {"overrides": {"1:999": "on"}}, T), T, "owner")
-    assert "Ручные правила без позиции" in page(client) and "999" in page(client)
+    rules = client.get("/settings/exclusions").get_data(as_text=True)            # «Настройки → Исключения» (the owner 2026-10-30)
+    assert "Ручные правила без позиции (1)" in rules and 'data-orphan="999"' in rules
+    assert "Ручные правила без позиции" not in page(client)
+
+
+def test_a_rule_without_a_position_says_its_tyre_when_it_went_who_set_it_and_goes_by_the_draft(tmp_path):
+    app, client, tok, conn = setup(tmp_path)
+    conn.execute("INSERT INTO catalog_item (goods_id, supplier_id, data, first_seen, last_seen, gone_since) VALUES ('999', 1, ?, ?, ?, ?)",
+                 (_offer_json(), "2026-10-01T10:00:00", "2026-10-20T10:00:00", "2026-10-21T09:00:00"))
+    confirm_draft(conn, create_draft(conn, {"overrides": {"1:999": "on", "1:998": "off"}}, T), T, "pavel")
+    rules = client.get("/settings/exclusions").get_data(as_text=True)
+    row = rules[rules.index('data-orphan="999"'):].split("</tr>")[0]
+    assert "Старая шина" in row and "добавлено вручную" in row and "21.10" in row and "pavel" in row and "для всех аккаунтов" in row
+    assert "снято вручную" in rules[rules.index('data-orphan="998"'):].split("</tr>")[0]
+    assert '<details class="card" id="orphans"' in rules and "<details class=\"card\" id=\"orphans\" open" not in rules      # folded
+    post(client, "/catalog/stage", tok, op="clear:999", next="/settings/exclusions#orphans")
+    assert "1:999" not in staging.summary(conn)["changes"]["overrides"]          # into the working draft, as from the catalog
+    post(client, "/catalog/stage", tok, bulk="clear", g=["999", "998"], next="/settings/exclusions#orphans")
+    assert staging.summary(conn)["changes"]["overrides"] == {}
+
+
+def _offer_json():
+    from helpers import make_offer
+    from tires_sync.catalog_archive import _dump
+    return _dump(make_offer(goods_id="999", name="Старая шина", name_orig="Старая шина"))
