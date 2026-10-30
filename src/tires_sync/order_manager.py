@@ -254,6 +254,51 @@ def handle_command(conn, message_id, sender, text, reply_order_no, now: str, del
         return finish("ошибка при выполнении команды", "Не получилось выполнить команду. Напишите владельцу.")
 
 
+def handle_many(conn, message_id, sender, text, numbers: List[int], now: str, deliver: Optional[Deliver] = None, notify: Optional[Notify] = None) -> str:
+    """The word of a point with several lines of the bot forwarded (30.10, Янино: «Приехали» + two «Заказ … оформлен»): one command per
+    order, as if the point answered each line (the same checks; «можно забирать» once per arrival; a number unknown or of another point waits
+    in «Входящие», the others go on). The journal has a line per order («<message>#<number>») and the message's own («пакет: …»), so a repeat
+    of the event, vk_catchup and the sweep see it handled. The answer lists every order."""
+    numbers, over = numbers[:MAX_BATCH], numbers[MAX_BATCH:]
+    claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,NULL,'обрабатывается')",
+                           (str(message_id), now, str(sender), _batch_word(_word(text), numbers)))      # a cut batch: note_stuck names its orders
+    conn.commit()
+    if claimed.rowcount != 1:
+        return "Это сообщение уже обработано."
+    answers, outcomes = [], []
+    for number in numbers:
+        part = "%s#%d" % (message_id, number)
+        answers.append(handle_command(conn, part, sender, text, number, now, deliver, notify))
+        row = conn.execute("SELECT outcome FROM order_command_log WHERE message_id = ?", (part,)).fetchone()
+        outcomes.append("№%d: %s" % (number, row[0] if row else "не записано"))
+    answers = _numbered(answers, numbers)
+    if over:                                                            # never dropped without a word: the point writes them again
+        left = ", ".join("№%d" % n for n in over)
+        answers.append("Больше %d заказов в одном сообщении: не разобраны: %s. Напишите их отдельным сообщением." % (MAX_BATCH, left))
+        outcomes.append("не разобраны (больше %d): %s" % (MAX_BATCH, left))
+    conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?",
+                 (("пакет: %d %s; " % (len(numbers), _orders_word(len(numbers))) + "; ".join(outcomes))[:1000], str(message_id)))
+    conn.commit()
+    return "\n".join(a for a in answers if a)
+
+
+MAX_BATCH = 10                                     # the orders of one message acted on; the rest are named in the answer
+
+
+def _batch_word(word: str, numbers: List[int]) -> str:
+    """The word of a batch with its orders («приехали (пакет: №5284060, №5287827)»): note_stuck names them when the work is cut."""
+    return "%s (пакет: %s)" % (word, ", ".join("№%d" % n for n in numbers))
+
+
+def _numbered(answers: List[str], numbers: List[int]) -> List[str]:
+    """An answer of a batch that does not say its order («Не получилось…») gets «№…: » before it."""
+    return [a if not a or str(n) in a else "№%d: %s" % (n, a) for a, n in zip(answers, numbers)]
+
+
+def _orders_word(n: int) -> str:
+    return "заказ" if n % 10 == 1 and n % 100 != 11 else "заказа" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "заказов"
+
+
 def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: str, deliver, notify) -> str:
     point = _point_of(conn, sender)
     if point is None:
@@ -1061,7 +1106,7 @@ def bind(conn, code: str, sender) -> str:
 
 
 def dispatch(conn, message_id, sender, text, reply_order_no, now: str, deliver: Optional[Deliver] = None, notify: Optional[Notify] = None,
-             voice: str = "", transcript: str = "", voice_link: str = "") -> str:
+             voice: str = "", transcript: str = "", voice_link: str = "", reply_nos=()) -> str:
     """The entry point for a channel: a binding code binds the sender to its point, a command word acts on an order, anything else is a question
     for the owner. A voice without VK's transcript is a question too (the owner 2026-10-21: never an order); `voice_link` is its record."""
     code = str(text or "").strip().upper()
@@ -1094,6 +1139,12 @@ def dispatch(conn, message_id, sender, text, reply_order_no, now: str, deliver: 
         return reply
     if voice == "done" and not str(text or "").strip():                 # any other voice is a question for the owner, with its transcript
         return handle_message(conn, message_id, sender, "(голосовое) %s" % transcript, now)
+    if len(reply_nos) > 1 and is_command(conn, text):                  # the word with several of the bot's lines forwarded
+        written = order_number(text)
+        if not written:
+            return handle_many(conn, message_id, sender, text, list(reply_nos), now, deliver, notify)
+        reply_order_no = written if written in reply_nos else reply_nos[0]       # a number of its own: that order; one not forwarded:
+                                                                                  # «в ответе №…, в тексте №…» waits for the owner
     if is_command(conn, text) and (reply_order_no or order_number(text) or len(_command_text(text).split()) <= 3):    # a long text without a number is a question
         return handle_command(conn, message_id, sender, text, reply_order_no, now, deliver, notify)
     reply = handle_message(conn, message_id, sender, text, now)
