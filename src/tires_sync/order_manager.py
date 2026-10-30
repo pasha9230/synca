@@ -198,7 +198,8 @@ def find_orders(conn, number) -> List[int]:
                     if re.sub(r"[\s№#]", "", r[1]).isdigit() and int(re.sub(r"[\s№#]", "", r[1])) == number})
     if number not in found and conn.execute("SELECT 1 FROM order_card WHERE id = ? AND webmim_number = ''", (number,)).fetchone():
         found.append(number)                                     # an order with a WebMIM number is known to the points by that one only
-    return found
+    from .order_merge import moved_into
+    return sorted({moved_into(conn, i) or i for i in found})     # a source of a merge: its merged order (order_merge, этап 2)
 
 
 COMMUNITY_LINE = re.compile(r"^\W*(?:\(бот\)\s*)?заказ\s*№?\s*(\d{1,9})(?!\d)", re.I)     # the bot signs its lines «(бот) » (signed)
@@ -215,7 +216,8 @@ def find_named(conn, number) -> List[int]:
     panel's own number of any order."""
     found = find_orders(conn, number)
     if len(found) != 1 and conn.execute("SELECT 1 FROM order_card WHERE id = ?", (number,)).fetchone():
-        found = [number]
+        from .order_merge import moved_into
+        found = [moved_into(conn, number) or number]                # a source of a merge: its merged order (этап 2)
     return found
 
 
@@ -342,6 +344,20 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return answer
     if card["point_id"] != point["id"]:
         return dispute(point, "заказ другой точки", "Заказ №%s не на вашей точке; сообщение передано владельцу." % label(card))
+    from .order_merge import parts
+    merged = parts(conn, card["id"])
+    if merged and str(number) != label(card) and str(number) in {p["number"] for p in merged} | {str(p["order_id"]) for p in merged}:
+        # an old number of a source of a merge (the owner 2026-10-30): its tyres are at the point already, in the merged order — «приехал» is
+        # no arrival (nothing moves, the client hears nothing); any other word the owner confirms in «Входящие»
+        here = card["stage"]["code"] in ("at_point", "oth") or card["stage"]["kind"] in ("won", "closed")
+        if BUILTIN.get(word, ((), None))[1] == "at_point" and here:
+            return finish("старый номер исходного объединения: шины уже на точке",
+                          "Шины заказа №%s уже на точке, они в объединённом заказе №%s." % (number, label(card)))
+        why = "%s заказ %s — это часть объединённого №%s (этап «%s»)" % (word or "команда", number, label(card), card["stage"]["name"])
+        answer = dispute(point, why, "Заказ №%s — часть объединённого заказа №%s: владелец подтвердит." % (number, label(card)))
+        conn.execute("UPDATE manager_message SET text = ? WHERE message_id = ?", (("%s\n%s" % (str(text or "").strip(), why))[:MAX_TEXT], state["message_id"]))
+        conn.commit()
+        return answer
     code = card["stage"]["code"]
     if word == HERE:                                   # the client hears «срок резерва истекает» only when the bot asked (order_reserve.here)
         from . import order_reserve
@@ -812,9 +828,9 @@ def _oth_arrived_body(conn, card: dict) -> Optional[str]:
     """«Можно забирать» of an order whose tyres all come from «На ОТХ» (oth_sale) and that has no WebMIM number (it was never ordered):
     the template without «№{webmim_number}», as the reminder of the reservation writes it (order_reserve._client_body); None for any other
     order (its template as it is)."""
-    from . import order_reserve, oth_sale
-    if card.get("webmim_number") or not oth_sale.taken_ids(conn, card["id"]):
-        return None
+    from . import order_merge, order_reserve, oth_sale
+    if card.get("webmim_number") or not (oth_sale.taken_ids(conn, card["id"]) or order_merge.placed_ids(conn, card["id"])):
+        return None                                                  # a merged order of placed sources has no number of its own either
     if [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]:
         return None
     return order_reserve.NUMBER.sub("", _arrived_body(conn))
@@ -1770,11 +1786,11 @@ def point_handoffs(conn, point_id, since: str, limit: int = 50) -> List[dict]:
             "SELECT h.order_id, h.phone, h.need, h.created_at, COALESCE(s.kind, ''), s.taken_at, COALESCE(s.taken_by, '') FROM order_handoff h "
             "JOIN order_card c ON c.id = h.order_id LEFT JOIN order_handoff_source s ON s.order_id = h.order_id "
             "WHERE h.point_id = ? AND h.created_at >= ? ORDER BY h.created_at DESC, h.order_id DESC LIMIT ?", (point_id, since, limit)).fetchall():
-        card = orders.get_card(conn, order_id)
+        card, into = _handed_card(conn, order_id)
         status = _status_of(card, placed, bool(taken))
         if taken_by == CANCELLED_BY and card["stage"]["code"] == "cancel":
             status = "cancelled"
-        found.append({"id": order_id, "label": label(card), "phone": phone, "client": card["client_name"], "need": need, "at": created,
+        found.append({"id": order_id, "label": label(orders.get_card(conn, order_id)) + (" → №%s" % label(card) if into else ""), "phone": phone, "client": card["client_name"], "need": need, "at": created,
                       "source": SOURCE_NAMES.get(kind, ""), "status": status, "status_name": POINT_STATUS[status],
                       "cancellable": not status and cancellable(conn, order_id, point_id)})
     return found
@@ -1798,6 +1814,13 @@ def _tell_staff(conn, card: dict, text: str, notify: Optional[Notify]) -> None:
     if notify is None:
         return
     notify(staff_card(conn, card), text)                          # never raises
+
+
+def _handed_card(conn, order_id) -> Tuple[dict, bool]:
+    """The order a handed client's fate is read from: the merged one when its tyres moved there (order_merge, этап 2), else its own."""
+    from .order_merge import moved_into
+    into = moved_into(conn, order_id)
+    return orders.get_card(conn, into or order_id), bool(into)
 
 
 def _status_of(card: dict, placed: Optional[dict], taken: bool = False) -> str:
@@ -1828,7 +1851,7 @@ def handoff_tick(conn, now: str, *, notify: Optional[Notify] = None) -> dict:
                         "ORDER BY h.order_id").fetchall()                       # a deleted order is gone from order_card; a finished one is not looked at
     for order_id, phone, created, overdue, taken in rows:
         try:
-            card = orders.get_card(conn, order_id)
+            card = _handed_card(conn, order_id)[0]                # a source of a merge: the merged order's fate, never «отказ»
             if not taken and card["stage"]["code"] == orders.FROM_POINT[0] and _called_back(conn, order_id, phone, created):
                 taken = True                                      # the client talked with the owner or the partner: taken before the 15 minutes count
             status = _status_of(card, placed, bool(taken))

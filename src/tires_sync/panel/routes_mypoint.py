@@ -22,7 +22,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
 
-from .. import order_manager as mgr, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_manager as mgr, order_merge, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_orders import local_iso, local_now
 
@@ -386,7 +386,8 @@ def register(app) -> None:
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
-                          "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"])})     # «Шины с ОТХ, заказ №…»
+                          "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
+                          "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"]))})     # «Шины с ОТХ, заказ №…»
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over

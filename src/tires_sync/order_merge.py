@@ -61,6 +61,39 @@ def into(conn, order_id) -> Optional[int]:
     return row[0] if row else None
 
 
+def moved_into(conn, order_id) -> Optional[int]:
+    """The merged order the tyres of a source moved to (an active merge, the source not «справочно»), or None: the order a point's old number,
+    a handed client and the funnel follow (этап 2)."""
+    row = conn.execute("SELECT m.into_order FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? AND s.ref = 0 AND "
+                       + _ACTIVE, (order_id,)).fetchone()
+    return row[0] if row else None
+
+
+def parts(conn, into_order) -> List[dict]:
+    """The sources whose tyres moved into the merged order: [{order_id, number}] (the number the point knows), in the order picked."""
+    found = _active(conn, into_order)
+    if found is None:
+        return []
+    out = []
+    for (order_id,) in conn.execute("SELECT order_id FROM order_merge_source WHERE merge_id = ? AND ref = 0 ORDER BY position", (found["id"],)).fetchall():
+        row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (order_id,)).fetchone()
+        out.append({"order_id": order_id, "number": str((row[0] if row else "") or order_id), "webmim": str((row[0] if row else "") or "")})
+    return out
+
+
+def first_created(conn) -> Dict[int, str]:
+    """Merged order → the earliest creation of its sources whose tyres moved: the day the funnel counts it by (the lead 2026-10-30)."""
+    return {r[0]: r[1] for r in conn.execute(
+        "SELECT m.into_order, MIN(c.created_at) FROM order_merge m JOIN order_merge_source s ON s.merge_id = m.id JOIN order_card c ON c.id = s.order_id "
+        "WHERE s.ref = 0 AND " + _ACTIVE + " GROUP BY m.into_order")}
+
+
+def moved_sources(conn) -> Set[int]:
+    """The sources of the active merges whose tyres moved: they are counted in their merged order (analytics.funnel)."""
+    return {r[0] for r in conn.execute("SELECT s.order_id FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.ref = 0 AND "
+                                       + _ACTIVE)}
+
+
 def is_ref(conn, order_id) -> bool:
     """The order takes part in an active merge «справочно» (nothing of it moved)."""
     return conn.execute("SELECT 1 FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? AND s.ref = 1 AND "
@@ -311,7 +344,9 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
         start = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event").fetchone()[0]
         logins = {r[0] for r in conn.execute("SELECT login FROM panel_user")}
         fields = {"client_name": name, "point_id": plan["point_id"], "delivery_date": base["delivery_date"], "delivery_time": base["delivery_time"],
-                  "transfer_number": base["transfer_number"], "deal_kind": base["deal_kind"]}
+                  "transfer_number": base["transfer_number"], "deal_kind": base["deal_kind"],
+                  "source": base["source"] if base["source"] in orders.SOURCES else "",      # an old value is never refused
+                  "responsible": orders._row(conn, base["id"])["responsible"]}       # the source's own, not «created_by» in its place
         new = orders.create_card(conn, fields, now, author, require_contact=False, commit=False, stage=stage)   # no rule, no message
         merge_id = conn.execute("INSERT INTO order_merge (into_order, at, author) VALUES (?,?,?)", (new, now, author)).lastrowid
         cancel = next((s for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
