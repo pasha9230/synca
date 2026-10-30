@@ -325,3 +325,22 @@ def test_the_ads_of_a_mirrored_account_are_asked_too(tmp_path):
     offers = parse_unload(rows(dict(NNOMMODIF="101", NPRICE_DELAYED="3850")), "T1").offers
     price_guard.record_mirror(conn, offers, ["101"], NOW)
     assert price_guard.load(conn)["anchors"]["101"]["pending"] == 3850.0
+
+
+def test_a_busy_base_never_stops_the_mirrored_feed(tmp_path, monkeypatch):
+    """The review of 2026-10-30: the questions of a mirrored account are a side record; a failure of it leaves the feed built."""
+    import sqlite3
+    from test_feed_mirror import _Offer, ad, feed, setup
+    from tires_sync import cycle
+    conn, account = setup(tmp_path)
+    mirror_feed.import_feed(conn, account, feed(ad("100_1"), ad("200_1")), NOW)
+
+    class Parsed:
+        offers = {"100": _Offer(10)}
+        issues = {}
+
+    def busy(*a, **kw):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(price_guard, "record_mirror", busy)
+    results = cycle.run_for_accounts(conn, b"<x/>", {}, date(2026, 10, 13), tmp_path / "feed", parsed=Parsed(), input_sha="s", now=None)
+    assert [(r.ok, r.feed_count) for r in results] == [(True, 1)]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import sqlite3
+import sys
 import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -286,9 +288,13 @@ def run_for_accounts(
                 prices = mirror_feed.prices_for(conn, account["id"], getattr(parsed, "offers", {}) or {}, eff) if parsed is not None else {}
                 if parsed is not None:                                          # its held falls are asked too (price_guard)
                     from . import price_guard
-                    price_guard.record_mirror(conn, parsed.offers, {mirror_feed.supplier_code(i) for i in mirror_feed.stored_ids(conn, account["id"])},
-                                              store.moscow_iso())
-                    conn.commit()
+                    try:                                                        # a busy base never stops the mirrored feed
+                        price_guard.record_mirror(conn, getattr(parsed, "offers", {}) or {},
+                                                  {mirror_feed.supplier_code(i) for i in mirror_feed.stored_ids(conn, account["id"])}, store.moscow_iso())
+                        conn.commit()
+                    except sqlite3.Error as err:
+                        conn.rollback()
+                        print("цены поставщика (зеркало %s): вопросы не записаны: %s" % (account["id"], err), file=sys.stderr)
                 runflat = mirror_feed.runflat_for(conn, account["id"], getattr(parsed, "offers", {}) or {}) if parsed is not None else {}
                 extra: list = []
                 extra_oth: FrozenSet[str] = frozenset()
