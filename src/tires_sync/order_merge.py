@@ -346,7 +346,7 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
         fields = {"client_name": name, "point_id": plan["point_id"], "delivery_date": base["delivery_date"], "delivery_time": base["delivery_time"],
                   "transfer_number": base["transfer_number"], "deal_kind": base["deal_kind"],
                   "source": base["source"] if base["source"] in orders.SOURCES else "",      # an old value is never refused
-                  "responsible": orders._row(conn, base["id"])["responsible"]}       # the source's own, not «created_by» in its place                     # where it came from and who answers: the funnel's slices (этап 2)
+                  "responsible": orders._row(conn, base["id"])["responsible"]}       # the source's own, not «created_by» in its place
         new = orders.create_card(conn, fields, now, author, require_contact=False, commit=False, stage=stage)   # no rule, no message
         merge_id = conn.execute("INSERT INTO order_merge (into_order, at, author) VALUES (?,?,?)", (new, now, author)).lastrowid
         cancel = next((s for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
