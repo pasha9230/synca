@@ -1,7 +1,7 @@
 """Своя цена прямо в графе «Наша цена» каталога (решение владельца 2026-10-30: «лучше давай будем менять базовую цену»): клик по цене →
 поле «6990» (₽) или «+5 %» / «−5 %» (к закупке); одна правка на все наши аккаунты с фидом: первый (цена графы) получает её как есть,
 остальные — со своей поправкой относительно первого (п. п. аккаунта + наценка бренда аккаунта), как процент бренда. В тот же черновик, что
-карточка; «Сбросить» на всех; метка «своя»; ниже закупки или дальше 30 % от цены фида — усиленное подтверждение при «Применить».
+карточка; «К цене бренда» на всех; метка «своя»; ниже закупки или дальше 30 % от цены фида — усиленное подтверждение при «Применить».
 Только владелец."""
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def test_the_owner_sees_the_cell_form_one_for_all_accounts(tmp_path):
     assert _cell_form(page) and "Своя цена, все аккаунты" in page and "со своей поправкой" in page
     assert 'name="acc"' not in page and "Цены аккаунта" not in page                                   # переключателя аккаунтов нет
     cell = page.split(ROW_G, 1)[1].split("</form>", 1)[0]
-    assert "Сбросить</button>" not in cell and 'name="a"' not in cell                                 # своей цены нет — нечего сбрасывать
+    assert "К цене бренда</button>" not in cell and 'name="a"' not in cell                                 # своей цены нет — нечего сбрасывать
 
 
 @pytest.mark.parametrize("role", ["partner", "chats", "viewer"])
@@ -148,7 +148,7 @@ def test_the_cell_shows_the_mark_the_value_and_the_reset_and_the_price(tmp_path)
     _inline(client, tok, "7200")
     page = client.get("/catalog").get_data(as_text=True)
     form = page.split(ROW_G, 1)[1].split("</form>", 1)[0]
-    assert 'value="7200"' in form and "Сбросить</button>" in form
+    assert 'value="7200"' in form and "К цене бренда</button>" in form
     row = page.split(ROW_G, 1)[1].split("</tr>", 1)[0]
     summary = page.split(ROW_G, 1)[0].rsplit("<summary", 1)[1]
     assert "7\xa0200" in summary and "data-own-mark" in row and "не применено" in row                # цена первого аккаунта, уже с черновиком
@@ -286,6 +286,6 @@ def test_an_own_price_put_on_another_account_only_is_not_called_a_reset_and_can_
     page = client.get("/catalog").get_data(as_text=True)
     row = page.split(ROW_G, 1)[1].split("</tr>", 1)[0]
     assert "сброс не применён" not in row and "своя цена</span>" in row and "не применено" in row
-    assert "Сбросить</button>" in row.split("</form>", 1)[0]
+    assert "К цене бренда</button>" in row.split("</form>", 1)[0]
     _inline(client, tok, action="clear")
     assert staging.summary(conn)["draft_id"] is None

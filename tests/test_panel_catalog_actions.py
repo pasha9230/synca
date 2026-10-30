@@ -35,6 +35,19 @@ def test_position_buttons_exist_for_each_state(tmp_path):
     assert 'value="clear:1"' in page(client)
 
 
+def test_the_undo_button_says_what_it_undoes(tmp_path):
+    """The owner 2026-10-31: no bare «Сбросить» in «Действия»: added by hand → «Снять ручные правила», taken off → «Вернуть в фид»."""
+    app, client, tok, conn = setup(tmp_path)
+    post(client, "/catalog/stage", tok, op="off:1")
+    post(client, "/catalog/stage", tok, op="on:2")
+    html = page(client)
+    off = html.split('value="clear:1"', 1)[1].split("</button>", 1)[0]
+    on = html.split('value="clear:2"', 1)[1].split("</button>", 1)[0]
+    assert "Вернуть в фид" in off and "Ручное снятие отменится" in off
+    assert "Снять ручные правила" in on and "Позиция пойдёт по правилам фида" in on
+    assert "Вернуть выбранные по правилам" in html and ">Сбросить</button>" not in html
+
+
 def test_taking_a_position_off_is_staged_and_applies_only_after_confirmation(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     r = post(client, "/catalog/stage", tok, op="off:1", next="/catalog?q=ikon")

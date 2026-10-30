@@ -51,7 +51,7 @@
 <b><span data-count>0</span> выбрано</b><span class="sep"></span>
 {% if can_post("catalog_stage") %}<button name="bulk" value="off" class="btn btn--danger-outline btn--sm">Снять выбранные</button>
 <button name="bulk" value="on" class="btn btn--secondary btn--sm">Добавить вручную выбранные</button>
-<button name="bulk" value="clear" class="btn btn--secondary btn--sm">Отменить ручное решение у выбранных</button>{% endif %}
+<button name="bulk" value="clear" class="btn btn--secondary btn--sm" title="Ручные добавления и снятия у выбранных отменятся: позиции снова пойдут по правилам фида">Вернуть выбранные по правилам</button>{% endif %}
 {% if feed_accounts %}<button type="button" class="btn btn--secondary btn--sm" data-open-modal="bulk-price">Своя цена выбранным…</button>{% endif %}
 {% if can_post("share_new") %}<button type="submit" formaction="/shares/new" class="btn btn--primary btn--sm" title="Страница для клиента: фото, название, характеристики и цена продажи">{{ icon("send", "i-sm") }}Ссылка для клиента</button>{% endif %}
 <button type="button" id="bulk-clear" class="btn btn--ghost btn--sm">Снять выделение</button>
