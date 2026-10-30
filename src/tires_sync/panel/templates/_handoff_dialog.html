@@ -8,7 +8,7 @@
 <form method="post" action="{{ h.action }}" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ h.token }}">{% if h.back %}<input type="hidden" name="back" value="{{ h.back }}">{% endif %}
 <div class="modal-head"><h3 id="handoff-h">Клиент хочет шины под заказ?</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack">
-<p class="small muted">Клиента возьмёт в работу дежурный менеджер: найдёт шины у поставщика и предложит. Что с клиентом — увидите на «Моей точке».{% if h.done %} <b>Этот клиент уже передан, заказ №{{ h.done }}.</b>{% endif %}</p>
+<p class="small muted">Клиента возьмёт в работу дежурный менеджер: найдёт шины у поставщика и предложит. Что с клиентом — увидите на «Рабочем месте».{% if h.done %} <b>Этот клиент уже передан, заказ №{{ h.done }}.</b>{% endif %}</p>
 <label class="field"><span class="label">Телефон клиента</span><input class="input" type="tel" name="phone" inputmode="tel" autocomplete="off" placeholder="+7 900 111-22-33" value="{{ f.phone or '' }}"><span class="small muted">Если телефона нет — передадим чат.</span></label>
 <div class="grid-2"><label class="field"><span class="label">Типоразмер</span><input class="input" name="size" maxlength="40" placeholder="205/55 R16" value="{{ f.size or '' }}"></label>
 <label class="field"><span class="label">Бренд</span><input class="input" name="brand" maxlength="60" placeholder="любой" value="{{ f.brand or '' }}"></label></div>

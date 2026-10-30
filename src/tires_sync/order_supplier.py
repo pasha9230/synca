@@ -4,7 +4,8 @@ Nothing here asks a supplier: the lines are of the panel's own data and of the s
 
 The lines that keep «Заказать в МИМ» shut are exactly the refusals of webmim_create.checks (one function, the button and the lines never
 disagree); the stock and the price of the unload only warn (the unload is hours old, WebMIM itself answers for its stock; prices are never
-changed here). 4 Точки has no API order (the owner 2026-10-29): the window gives the text for its cabinet, and «Оформил вручную» keeps the
+changed here). The positions «с ОТХ» (oth_sale: our tyres taken from «На ОТХ», at the point already) are shown apart as «уже на
+точке» and never go to a supplier; all of them «с ОТХ» — no order is needed. 4 Точки has no API order (the owner 2026-10-29): the window gives the text for its cabinet, and «Оформил вручную» keeps the
 number of the order of 4 Точки (order_card.supplier_number) and moves the order to «Заказ оформлен» the ordinary way, as a person's move
 (the rules of the stage as they are; no message of webmim's on_placed)."""
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 
-from . import orders, suppliers, tochki_feed, webmim_create
+from . import orders, oth_sale, suppliers, tochki_feed, webmim_create
 from .order_points import get_point
 
 OK, WARN, BAD = "ok", "warn", "bad"
@@ -34,7 +35,7 @@ def number_of(conn, card_id) -> str:
 def supplier_of(conn, card: dict) -> str:
     """«webmim» (every position of WebMIM), «tochki» (every one of 4 Точки), «other» (of one other supplier), «mixed» (of several),
     «» (no position)."""
-    items = [i for i in card.get("items") or [] if int(i["qty"] or 0) > 0]
+    items = [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"] or 0) > 0]     # the tyres «с ОТХ» are at the point already
     if not items:
         return ""
     tochki = tochki_feed.config(conn)["supplier_id"]
@@ -106,6 +107,12 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
     if card["stage"]["kind"] != "open":
         return None
     today = datetime.fromisoformat(now).date()
+    own = oth_sale.supplier_items(conn, card)                  # what the supplier is asked for; the tyres «с ОТХ» are at the point already
+    oth = [{"name": i["name"], "qty": int(i["qty"])} for i in card.get("items") or [] if i not in own and int(i["qty"] or 0) > 0]
+    if oth and not any(int(i["qty"] or 0) > 0 for i in own):
+        return {"supplier": "", "all_oth": True, "oth": oth, "lines": [], "blocked": True, "late": False, "fields": None, "fingerprint": "",
+                "tochki_text": "", "items": [], "late_text": LATE_TEXT}
+    mine = dict(card, items=own)
     kind = supplier_of(conn, card)
     state = webmim_create.get_state(conn, card["id"])
     lost = bool(state and not state["webmim_id"] and state["state"] in ("unknown", "running"))       # as _claim: it looks for the order first
@@ -115,13 +122,13 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
     bad = {}
     for key, text in found:
         bad.setdefault(KEY_LINE.get(key, "items"), []).append(text)
-    stock, price = _stock_lines(card, parsed)
+    stock, price = _stock_lines(mine, parsed)
     late = webmim_create.late(card, now) and "date" not in bad
     gaps = orders.gaps_to_place(conn, card)
     warn = {"items": stock, "price": price, "date": [LATE_TEXT] if late else [],
             "stage": ["После оформления этап не сменится сам: нет %s." % ", ".join(gaps)] if gaps else []}
     point = get_point(conn, card["point_id"]) if card.get("point_id") and "point" not in bad else None
-    good = {"items": "позиций %d, все есть в выгрузке" % sum(1 for i in card["items"] if int(i["qty"] or 0) > 0),
+    good = {"items": "позиций %d, все есть в выгрузке" % sum(1 for i in own if int(i["qty"] or 0) > 0),
             "price": "совпадает с выгрузкой", "territory": "МИМ" if kind == "webmim" else "4 Точки" if kind == "tochki" else "",
             "point": ("«%s», адрес WebMIM %s" % (point["name"], point["webmim_address_id"]) if kind == "webmim" else
                       "«%s», %s" % (point["name"], point["address"])) if point else "",
@@ -137,7 +144,8 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
         lines.append({"key": key, "label": label, "state": state, "texts": bad.get(key) or warn.get(key) or [good[key]]})
     blocked = bool(found) or kind not in ("webmim", "tochki")
     out = {"supplier": kind, "lines": lines, "blocked": blocked, "late": late, "fields": None, "fingerprint": "", "tochki_text": "",
-           "tomorrow": (today + timedelta(days=1)).isoformat(), "late_text": LATE_TEXT}
+           "tomorrow": (today + timedelta(days=1)).isoformat(), "late_text": LATE_TEXT, "all_oth": False, "oth": oth,
+           "items": [i for i in own if int(i["qty"] or 0) > 0]}
     if not blocked:
         out["fields"] = webmim_create.fields(conn, card)
         out["fingerprint"] = webmim_create.fingerprint(conn, card)
@@ -156,7 +164,7 @@ def tochki_text(conn, card: dict) -> str:
     point = get_point(conn, card["point_id"])
     day = date.fromisoformat(card["delivery_date"]).strftime("%d.%m.%Y")
     lines = ["Заказ панели №%d" % card["id"], "Позиции:"]
-    for n, item in enumerate((i for i in card["items"] if int(i["qty"] or 0) > 0), 1):
+    for n, item in enumerate((i for i in oth_sale.supplier_items(conn, card) if int(i["qty"] or 0) > 0), 1):       # never the tyres «с ОТХ»
         lines.append("%d. %s — код %s — %d шт" % (n, item["name"], _code(item), int(item["qty"])))
     lines += ["Способ: доставка", "Адрес: %s (точка «%s»)" % (point["address"], point["name"]), "Дата доставки: %s" % day,
               "Время работы клиента: %s" % (card.get("delivery_time") or point["default_time"]),

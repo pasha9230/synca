@@ -97,7 +97,7 @@ def _act(conn, data: dict, group: str, event_id: str, now: datetime, channel: Ca
     try:
         panel = points.panel_point_of(conn, msg["from"]) if answer else None
         if panel is not None:                                                         # the owner 2026-10-23: the command is done, the answer
-            if answer != order_manager.HINT:                                          # is on «Моя точка», never in VK (the hint of the VK
+            if answer != order_manager.HINT:                                          # is on «Рабочее место», never in VK (the hint of the VK
                 points.add_note(conn, panel["id"], "answer", answer, local, asked=msg["text"] or msg["transcript"])     # keyboard: not at all)
             if not binding:                                                           # the answer to the binding code: in VK too (the lead
                 answer = ""                                                           # 2026-10-23), the manager waits for it there

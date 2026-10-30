@@ -230,3 +230,58 @@ def test_one_other_supplier_is_not_called_several(tmp_path):
     mine = card(conn, goods=(("s5-X1", 4),), brand="S5:x")
     view = order_supplier.view(conn, orders.get_card(conn, mine), unload(), NOW)
     assert view["supplier"] == "other" and view["blocked"] and "разных поставщиков" not in " ".join(t for l in view["lines"] for t in l["texts"])
+
+
+# ---- with «Продажа с ОТХ» (2026-10-30): the tyres «с ОТХ» are at the point already and never go to a supplier -----------------------------
+
+def mixed(conn):
+    """2 tyres «с ОТХ» (of an older order on «На ОТХ») + 2 of the supplier, of the same goods."""
+    from order_fixtures import free_phone
+    from tires_sync import oth_sale
+    old = card(conn, goods=(("111", 2),), tags="")
+    for step in ("placed", "moving", "oth"):
+        orders.move_card(conn, old, next(s["id"] for s in orders.list_stages(conn) if s["code"] == step), NOW, "o")
+    cid = card(conn, goods=(("111", 4),), client_phone=free_phone(conn, "+7 (911) 999-22-44"))
+    data = orders.get_card(conn, cid)
+    first = data["items"][0]
+    oth_sale.take(conn, cid, first["id"], oth_sale.offers(conn, data)[first["id"]][0]["from_item"], NOW, "o")
+    return cid
+
+
+def test_a_mixed_order_sends_only_the_suppliers_two(tmp_path):
+    conn = db(tmp_path)
+    cid = mixed(conn)
+    data = orders.get_card(conn, cid)
+    assert sorted(int(i["qty"]) for i in data["items"]) == [2, 2]
+    view = order_supplier.view(conn, data, unload(**{"111": (10, 4000)}), NOW)
+    assert view["oth"] == [{"name": "Шина 111", "qty": 2}] and [int(i["qty"]) for i in view["items"]] == [2]
+    assert "позиций 1" in lines(view)["items"][1] and not view["blocked"]
+    fake = FakeWebmim()
+    result = webmim_create.place(conn, cid, client_of(fake), "test", NOW, TODAY, "owner", sleep=lambda _s: None, seen=view["fingerprint"])
+    assert result["ok"] and [(c[2]["goodsId"], c[2]["quantity"]) for c in fake.posts("/items")] == [("111", 2)]
+
+
+def test_the_window_shows_the_tyres_at_the_point_apart(panel):
+    app, conn, fake = panel
+    cid = mixed(conn)
+    orders.update_card(conn, cid, {"delivery_date": "2026-10-08"}, NOW, "owner")
+    html = owner_client(app).get("/orders/%d" % cid).get_data(as_text=True)
+    assert "Уже на точке (с ОТХ), поставщику не уходит" in html and "data-supplier-window-oth" in html
+    rows = re.findall(r'<td class="mono">111</td><td class="num">(\d+)</td>', html)
+    assert rows == ["2"]                                                                   # the window lists only the supplier's two
+
+
+def test_all_from_oth_needs_no_order(tmp_path):
+    from order_fixtures import free_phone
+    from tires_sync import oth_sale
+    conn = db(tmp_path)
+    old = card(conn, goods=(("111", 4),), tags="")
+    for step in ("placed", "moving", "oth"):
+        orders.move_card(conn, old, next(s["id"] for s in orders.list_stages(conn) if s["code"] == step), NOW, "o")
+    cid = card(conn, goods=(("111", 4),), client_phone=free_phone(conn, "+7 (911) 999-22-55"))
+    data = orders.get_card(conn, cid)
+    first = data["items"][0]
+    oth_sale.take(conn, cid, first["id"], oth_sale.offers(conn, data)[first["id"]][0]["from_item"], NOW, "o")
+    view = order_supplier.view(conn, orders.get_card(conn, cid), unload(), NOW)
+    assert view["all_oth"] and view["blocked"] and view["oth"] == [{"name": "Шина 111", "qty": 4}]
+    assert webmim_create.problems(conn, orders.get_card(conn, cid), TODAY) == [webmim_create.ALL_OTH]

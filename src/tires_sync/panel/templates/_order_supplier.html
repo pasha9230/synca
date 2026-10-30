@@ -5,7 +5,9 @@
 {% set s = supplier %}{% if s %}
 {% set b = webmim_create %}{% set mim_ready = s.supplier == "webmim" and b and b.live and b.label and b.label.startswith("Оформить") and not (b.state and b.state.state == "running") %}
 {% call entity_ui.section("Заказ поставщику", id="supplier", sub="сверка перед заказом") %}<div class="card-body stack" data-supplier>
-<ul class="supplier-check" data-supplier-check aria-live="polite">
+{% if s.all_oth %}<p class="small" data-supplier-all-oth>Заказ поставщику не нужен: все позиции взяты с ОТХ, шины уже на точке.</p>{% endif %}
+{% if s.oth %}<div class="small" data-supplier-oth><b>Уже на точке (с ОТХ), поставщику не уходит:</b> {% for o in s.oth %}{{ o.name }} — {{ o.qty }} шт{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}
+{% if not s.all_oth %}<ul class="supplier-check" data-supplier-check aria-live="polite">
 {% for l in s.lines %}<li class="supplier-line is-{{ l.state }}" data-state="{{ l.state }}"><span class="supplier-mark" aria-hidden="true">{% if l.state == "ok" %}✓{% elif l.state == "warn" %}!{% else %}✗{% endif %}</span>
 <span class="supplier-label">{{ l.label }}</span><span class="supplier-text">{% for t in l.texts %}{{ t }}{% if not loop.last %}; {% endif %}{% endfor %}</span>
 <span class="sr-only">{% if l.state == "ok" %}в порядке{% elif l.state == "warn" %}предупреждение{% else %}не в порядке{% endif %}</span></li>{% endfor %}
@@ -23,6 +25,7 @@
 {% else %}<span class="small muted">Кнопки заказа нет: {% if s.supplier == "mixed" %}позиции разных поставщиков, оформите их отдельными заказами{% elif s.supplier == "other" %}позиции поставщика без заказа из панели, оформите вручную{% else %}в заказе нет позиций{% endif %}.</span>{% endif %}
 <a class="small ml-auto" href="/orders/{{ c.id }}?check=1#supplier">Проверить снова</a>
 </div>
+{% endif %}
 <p class="small muted">Можно и вручную: оформите заказ в кабинете поставщика и переведите заказ на «Заказ оформлен» с номером.</p>
 </div>{% endcall %}
 {% if not s.blocked and (mim_ready or s.supplier == "tochki") %}{% set f = s.fields %}
@@ -32,8 +35,9 @@
 {% if s.late %}<p class="small text-warn" data-supplier-late>{{ s.late_text }} Сейчас позже: лучше перенести дату на завтра.</p>{% endif %}
 {% if s.supplier == "webmim" %}
 <p class="small">Уйдёт в WebMIM ({{ b.server }}).</p>
+{% if s.oth %}<p class="small" data-supplier-window-oth>Уже на точке (с ОТХ), поставщику не уходит: {% for o in s.oth %}{{ o.name }} — {{ o.qty }} шт{% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
 <table class="table small"><thead><tr><th>Позиция</th><th>Код</th><th class="num">Кол-во</th>{% if has_right("money") %}<th class="num">Закупка за 1 шт</th>{% endif %}</tr></thead><tbody>
-{% for i in c['items'] if i.qty|int > 0 %}<tr><td>{{ i.name }}</td><td class="mono">{{ i.goods_id }}</td><td class="num">{{ i.qty }}</td>{% if has_right("money") %}<td class="num">{{ i.supplier_price|money }}</td>{% endif %}</tr>{% endfor %}</tbody></table>
+{% for i in s['items'] %}<tr><td>{{ i.name }}</td><td class="mono">{{ i.goods_id }}</td><td class="num">{{ i.qty }}</td>{% if has_right("money") %}<td class="num">{{ i.supplier_price|money }}</td>{% endif %}</tr>{% endfor %}</tbody></table>
 <dl class="supplier-fields">
 <dt>Вид оплаты</dt><dd>{{ f.kind }}</dd><dt>Признак оплаты</dt><dd>{{ f.terms }}</dd><dt>Способ</dt><dd>{{ f.shipment }}</dd>
 <dt>Адрес</dt><dd>адрес WebMIM {{ f.address_id }} (точка «{{ f.point }}»)</dd><dt>Дата доставки</dt><dd>{{ f.date[8:10] }}.{{ f.date[5:7] }}.{{ f.date[:4] }}</dd>

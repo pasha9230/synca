@@ -93,8 +93,14 @@ def audit_text(entry: dict) -> str:
         return "ОТХ: заказ №%s, отметка «возвращено поставщику» снята%s" % (d.get("order", "?"), " (%s шт.)" % d["qty"] if d.get("qty") else "")
     if action == "oth_return_agreed":
         return "ОТХ: заказ №%s, возврат согласован с поставщиком на %s" % (d.get("order", "?"), d.get("date", "?"))
+    if action == "oth_return_unagreed":
+        return "ОТХ: заказ №%s, согласование возврата с поставщиком отменено" % d.get("order", "?")
     if action == "oth_act_signed":
         return "ОТХ: заказ №%s, точка подписала акт МХ-3 и отдала шины поставщику" % d.get("order", "?")
+    if action == "oth_take":
+        return "ОТХ: заказ №%s взял %s шт. с ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
+    if action == "oth_untake":
+        return "ОТХ: заказ №%s вернул %s шт. на ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
     if action == "point_action":
         from .. import point_log
         return "Точка %s: %s%s" % ("«%s»" % d["name"] if d.get("name") else "№%s" % d.get("point", "?"), point_log.NAMES.get(d.get("kind", ""), d.get("kind") or "действие"),

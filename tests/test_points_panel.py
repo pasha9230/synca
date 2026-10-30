@@ -1,6 +1,6 @@
 """A point that works in the panel (channel «panel», the owner 2026-10-23: «Точки работают в панели, ВК — запасной»): the bot writes nothing
 to its VK — neither «Менеджеру: заказ оформлен» (after WebMIM or by the button), nor alerts, nor answers; its VK commands are still done;
-what it would have heard is on its «Моя точка», which is its start page with «На точке» and «Едут к нам» and asks /my-point/feed for the
+what it would have heard is on its «Рабочее место», which is its start page with «На точке» and «Едут к нам» and asks /my-point/feed for the
 sound and the browser's notification. A point on «ВК» is as before. Fakes only: nothing leaves the tests."""
 from __future__ import annotations
 
@@ -131,7 +131,7 @@ def test_the_owners_answer_in_the_inbox_to_a_point_in_the_panel_is_on_its_page(t
     hook(app, conn, "Подскажите, когда завоз?")
     [item] = mgr.list_inbox(conn)
     page = client.post("/orders/inbox/%d/answer" % item["id"], data={"csrf": tok, "text": "Завтра утром"}, follow_redirects=True).get_data(as_text=True)
-    assert to_points(app) == [] and "ответ показан на её «Моей точке»" in page
+    assert to_points(app) == [] and "ответ показан на её «Рабочем месте»" in page
     assert [(n["text"], n["asked"]) for n in points.notes(conn, pid)] == [("Завтра утром", "Подскажите, когда завоз?")]
 
 
@@ -142,7 +142,7 @@ def test_a_point_on_vk_is_answered_in_vk_as_before(tmp_path):
     assert peer == PEER and answer.startswith("(бот) Заказ №5000100 — отмечено") and points.notes(conn, pid) == []
 
 
-# ---- «Моя точка» ------------------------------------------------------------------------------------------------------------------------
+# ---- «Рабочее место» ------------------------------------------------------------------------------------------------------------------------
 
 def test_my_point_shows_at_the_point_and_coming_with_what_the_message_to_the_manager_said(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)

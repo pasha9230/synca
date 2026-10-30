@@ -20,7 +20,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 
-from . import connections, order_engine as engine, order_report, orders, sales as sales_store, store
+from . import connections, order_engine as engine, order_report, orders, oth_sale, sales as sales_store, store
 
 KIND = "gsheet"
 SHEET = "Заказы"
@@ -29,6 +29,7 @@ COLUMNS = ("Дата", "№ заказа MIM", "Перемещение MIM", "Д
            "Уведомление точке", "Уведомление клиенту", "Примечание")
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
+FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
 CHECK = ("Артикул",)                                         # written once: the script finds the row by its mark and checks it is still there
 RECENT_DAYS = 45                                               # the hourly look: the orders placed so recently (and every failing one)
 URL = re.compile(r"^https://script\.google\.com/(?:macros|a/macros/[a-z0-9.-]{1,100})/s/[A-Za-z0-9_-]{10,200}/exec$")   # a/macros/<domain>: Workspace
@@ -218,11 +219,18 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
     notifications are empty (not looked up)."""
     card_id, profits = card["id"], _profits(conn, card)
     common = common_of(conn, card, placed_at, sent)
+    from_oth = oth_sale.from_number(conn, card_id)                 # the positions taken from «На ОТХ»: «Б», the WebMIM order they came from
     out = {}
     for item in card["items"]:
         qty, buy, sell = int(item["qty"]), round(float(item["supplier_price"]), 2), round(float(item["sale_unit"]), 2)
         profit = profits.get(item["id"])
-        out[key(card_id, item["id"])] = dict(common, **{
+        row = common
+        if item["id"] in from_oth:
+            source = conn.execute("SELECT from_order FROM order_item_oth WHERE item_id = ?", (item["id"],)).fetchone()[0]
+            row = dict(common, **{"№ заказа MIM": from_oth[item["id"]], "Примечание": " ".join(
+                ("с ОТХ, заказ №%d. %s" % (source, common["Примечание"] or "")).split()),
+                "Реализация": FROM_STOCK if common["Реализация"] == REALIZED else common["Реализация"]})
+        out[key(card_id, item["id"])] = dict(row, **{
             "Артикул": item["code"] or item["goods_id"], "Наименование": item["name"], "Кол-во": qty, "Цена MIM": buy,
             "Сумма MIM": round(buy * qty, 2), "Цена продажи": sell, "Сумма продажи": round(sell * qty, 2),
             "Прибыль ₽": profit[0] if profit else "", "Прибыль %": profit[1] if profit else ""})
@@ -239,17 +247,18 @@ def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
             "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]}
 
 
-def changes(now_rows: Dict[str, dict], written: Dict[str, dict]) -> List[dict]:
+def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=()) -> List[dict]:
     """What to send: a new position with every column (`create`), a written one with the columns of UPDATED that changed and the cells
     of CHECK as written (the script writes nothing into a row that no longer has them). A row the script did not find (the owner deleted or
-    rewrote it) is not made again."""
+    rewrote it) is not made again. `follow`: the rows whose quantity follows the order too (FOLLOWED: a position that gave tyres from «На ОТХ»
+    to a new order, the owner 2026-10-29)."""
     out = []
     for mark, fields in now_rows.items():
         before = written.get(mark)
         if before is None:
             out.append({"key": mark, "create": True, "fields": {c: fields[c] for c in COLUMNS}})
         elif not before.get("_missing"):
-            diff = {c: fields[c] for c in UPDATED if before.get(c) != fields[c]}
+            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
             if diff:
                 out.append({"key": mark, "create": False, "fields": diff, "check": {c: before.get(c, "") for c in CHECK}})
     return out
@@ -332,7 +341,7 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     placed_at, written, failing = row[0], json.loads(row[1] or "{}"), row[2]
     seen = _last_event(conn, card_id)                                      # before the rows: a change made while Google answers is looked at again
     current = rows_of(conn, card_id, placed_at)
-    ops = changes(current, written)
+    ops = changes(current, written, {key(card_id, i) for i in oth_sale.given(conn, card_id)})
     gone = [m for m in written if m not in current and not written[m].get("_gone")]
     for m in gone:
         written[m]["_gone"] = True

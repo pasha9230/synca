@@ -31,7 +31,7 @@ def grouped(conn, login: str) -> list:
     chats_of = {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id = ?", (account,))} if account is not None else set()
     foreign = quiet | set(orders.origin_labels(conn, point, ours))     # not the point's own order: the client's texts named only (as in the card)
     rows = [r for r in rows if not is_handoff(r) and not is_return_ask(r) and not is_handoff_cancel(r)]   # «Клиент хочет заказать шины…» is for the staff: the point sees it on
-                                                                  # «Моя точка»; «заполните сумму возврата» too: the point has its green row
+                                                                  # «Рабочее место»; «заполните сумму возврата» too: the point has its green row
     rows = [order_engine.for_point(r) if r["order_id"] in foreign else r
             for r in rows if (r["order_id"] in ours and not (r["order_id"] in quiet and orders.client_words(r))
                               if r["order_id"] is not None else r.get("chat_row") in chats_of)]
@@ -61,7 +61,7 @@ def point_rows(conn, point_id, now: str) -> list:
         asked = (store.get_state(conn, reserve.ASK_KEY % (card_id, stay)) or "").split("|", 1)[-1]
         found.append({"id": "question-%d-%s" % (card_id, stay), "order_id": card_id, "at": asked,
                       "author": "", "kind": "question", "level": "yellow", "more": 0, "title": "Клиент забрал заказ № %s?" % mgr.label(card),
-                      "text": "Ответьте на «Моей точке»: «Выдан» или «На точке».", "href": "/my-point"})
+                      "text": "Ответьте на «Рабочем месте»: «Выдан» или «На точке».", "href": "/my-point"})
     return found
 
 

@@ -20,7 +20,7 @@ import time
 from datetime import date, datetime
 from typing import Callable, Dict, List, Optional, Tuple
 
-from . import orders, reliability, webmim_match, webmim_orders
+from . import orders, oth_sale, reliability, webmim_match, webmim_orders
 from .order_points import PointError, get_point
 
 # The servers the button may write to. The live one only by the owner's word: add "prod" here (a change of the code, reviewed and deployed),
@@ -35,7 +35,8 @@ CONTACT = "Админ"                    # the contact person of the delivery (
 NOTE_FOR_SUPPLIER = "Грузим на ОТХ"  # «Примечание для поставщика», always (the owner 2026-10-29)
 LATE_HOUR = 16                       # WebMIM: an order for today goes to work before 16:00 (its own warning in the form)
 
-NO_ADDRESS = "не указан адрес доставки WebMIM"   # the refusal that lists the server's addresses (_addresses_hint)
+NO_ADDRESS = "не указан адрес доставки WebMIM"
+ALL_OTH = "Все позиции взяты с ОТХ: заказ в WebMIM не нужен."   # the refusal that lists the server's addresses (_addresses_hint)
 TEST_TAG = "тест"            # the test server makes only the orders with this tag (the team lead's R2 2026-10-23: the owner's own test orders)
 STALE = 600                 # seconds: a «running» mark older than this is of a killed worker (order_engine.RUNNING_TIMEOUT)
 BUDGET = 45.0               # seconds a press may spend on positions (nginx gives the page 60)
@@ -73,7 +74,9 @@ def checks(conn, card: dict, today: date, mode: str = "new") -> List[Tuple[str, 
     out = []
     if card.get("deal_kind") == "stock":
         return [("items", "Сделка из наличия точки: заказ в WebMIM для неё не нужен.")]
-    items = [i for i in card.get("items") or [] if int(i["qty"] or 0) > 0]
+    items = [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"] or 0) > 0]      # the tyres taken from «На ОТХ» are ours already
+    if not items and any(int(i["qty"] or 0) > 0 for i in card.get("items") or []):
+        return [("items", ALL_OTH)]
     if not items:
         out.append(("items", "В заказе нет позиций с количеством."))
     for item in items:
@@ -126,7 +129,8 @@ def fields(conn, card: dict) -> dict:
 
 def fingerprint(conn, card: dict) -> str:
     """The fields and the positions the window showed: a press with another one (the order changed meanwhile) is refused (_claim)."""
-    items = sorted((str(i["goods_id"]), str(i.get("territory") or ""), int(i["qty"] or 0)) for i in card.get("items") or [] if int(i["qty"] or 0) > 0)
+    items = sorted((str(i["goods_id"]), str(i.get("territory") or ""), int(i["qty"] or 0))      # what goes to WebMIM: never the tyres «с ОТХ»
+                   for i in oth_sale.supplier_items(conn, card) if int(i["qty"] or 0) > 0)
     try:
         data = fields(conn, card) if card.get("point_id") else {}
     except PointError:                                                  # the point is gone: problems() refuses the press anyway
@@ -457,7 +461,7 @@ def _positions(conn, card: dict, client, webmim_id: str, where: str, chosen: str
     wanted: Dict[str, int] = {}
     names: Dict[str, str] = {}
     territory = ""
-    for item in card["items"]:
+    for item in oth_sale.supplier_items(conn, card):              # only what lacks: the positions «с ОТХ» are never ordered
         if int(item["qty"] or 0) > 0:
             goods = str(item["goods_id"])
             wanted[goods] = wanted.get(goods, 0) + int(item["qty"])

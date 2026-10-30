@@ -4,7 +4,7 @@
 {% block content %}
 {% include "_conn_tabs.html" %}
 <section class="card">
-<div class="card-head"><h3>Точки самовывоза</h3><span class="sub">Менеджер точки получает сообщения о заказах в ВК или работает в панели («Моя точка»). Канал выбирается для каждой точки отдельно.</span></div>
+<div class="card-head"><h3>Точки самовывоза</h3><span class="sub">Менеджер точки получает сообщения о заказах в ВК или работает в панели («Рабочее место»). Канал выбирается для каждой точки отдельно.</span></div>
 <div class="card-body stack" data-webmim-addresses style="border-bottom:1px solid var(--gray-200)">
 {% if webmim %}{% if webmim.rows is not none %}<span class="small">Адреса доставки на сервере «{{ webmim.server }}» — впишите идентификатор в поле «Адрес доставки в WebMIM» точки:</span>
 {% if webmim.rows %}<table class="table small"><thead><tr><th>Идентификатор</th><th>Адрес</th></tr></thead><tbody>{% for a in webmim.rows %}<tr><td class="mono">{{ a.id }}</td><td>{{ a.address }}</td></tr>{% endfor %}</tbody></table>
@@ -22,7 +22,7 @@
 </div>
 <div class="grid-2">
 <label class="field"><span class="label">Телефон менеджера</span><input class="input" type="tel" inputmode="tel" name="manager_phone" value="{{ r.manager_phone }}" maxlength="30" placeholder="+7 900 111-22-33"></label>
-<label class="field"><span class="label">Канал связи</span><select class="select" name="channel">{% for key, label in channels.items() %}<option value="{{ key }}"{% if r.channel == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="hint">«Панель»: бот в ВК этой точке ничего не пишет — заказы, ответы и оповещения на её «Моей точке»; команды из ВК принимаются. «ВК» — как раньше.</span></label>
+<label class="field"><span class="label">Канал связи</span><select class="select" name="channel">{% for key, label in channels.items() %}<option value="{{ key }}"{% if r.channel == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="hint">«Панель»: бот в ВК этой точке ничего не пишет — заказы, ответы и оповещения на её «Рабочем месте»; команды из ВК принимаются. «ВК» — как раньше.</span></label>
 {% set acc = r.avito_account_id %}<label class="field"><span class="label">Аккаунт Авито точки</span><select class="select" name="avito_account_id"><option value="">не выбран (менеджер точки не видит чатов)</option>{% for a in accounts %}<option value="{{ a.id }}"{% if acc == a.id %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select><span class="hint">Менеджер точки видит в «Чатах» только чаты этого аккаунта.</span></label>
 </div>
 <div class="grid-2">

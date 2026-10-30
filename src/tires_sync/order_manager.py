@@ -638,15 +638,16 @@ def send_to_client(conn, card: dict, body: str, token: str, deliver: Optional[De
         return "failed", "сбой отправки: %s" % (str(err)[:200] or err.__class__.__name__), copy
 
 
-def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str) -> Tuple[bool, str]:
+def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """The point says the goods came: «можно забирать» to the client (_tell_arrived) and «Поступили шины» for the bell (note_arrival), once per
-    stay at the point each. Every «приехал» of a point comes here (the command, the button of «Моя точка», the owner's confirmation)."""
-    sent, note = _tell_arrived(conn, card_id, deliver, now, who)
+    stay at the point each. Every «приехал» of a point comes here (the command, the button of «Рабочее место», the owner's confirmation), and
+    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}», it has none)."""
+    sent, note = _tell_arrived(conn, card_id, deliver, now, who, body)
     note_arrival(conn, card_id, who, now, sent)
     return sent, note
 
 
-def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str) -> Tuple[bool, str]:
+def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """«Можно забирать» to the client of the order, once per arrival (the send token is the order and the moment it reached the point).
     Never raises: when it does not go, a red record in the journal and a line in «Входящие» tell the owner to send it by hand. The line's id
     begins with the send token: the sync closes it once it delivered the message (chats._inbox_done, tails5)."""
@@ -657,7 +658,7 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str)
     except Exception as err:
         status, why, copy = "failed", "сбой отправки: %s" % (str(err)[:200] or err.__class__.__name__), ""
     else:
-        status, why, copy = send_to_client(conn, card, _arrived_body(conn), token, deliver, now)
+        status, why, copy = send_to_client(conn, card, body or _arrived_body(conn), token, deliver, now)
     if status == "sent":
         return True, "Клиенту отправлено сообщение «можно забирать»."
     by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."
@@ -874,7 +875,7 @@ def note_stuck(conn, now: str, before: str) -> int:
     return made
 
 
-PANEL_SENDER = "панель: "                          # the sender of a handoff from «Моя точка» without VK: «панель: <логин>»
+PANEL_SENDER = "панель: "                          # the sender of a handoff from «Рабочее место» without VK: «панель: <логин>»
 
 
 def _handoff_point_of(conn, message_id):
@@ -884,7 +885,7 @@ def _handoff_point_of(conn, message_id):
 
 
 def _panel_point_of(conn, sender):
-    """The point of the panel login a command came from (a handoff from «Моя точка» of a point without VK), or None."""
+    """The point of the panel login a command came from (a handoff from «Рабочее место» of a point without VK), or None."""
     if not str(sender).startswith(PANEL_SENDER):
         return None
     row = conn.execute("SELECT p.id, p.name FROM panel_user_role r JOIN point p ON p.id = r.point_id WHERE r.login = ?",
@@ -1036,7 +1037,7 @@ def waiting(conn, sender, now: str) -> bool:
 # ---- clients handed over by the points («клиент <телефон> <что нужно>») ---------------------------------------------------------------
 # The owner's decisions 2026-10-21: the client goes to the person on duty that day (the owner / the partner, changed by hand for a day); 15 minutes of
 # working time to take it, then a red record. The point gets in VK only the confirmation of the handoff (the owner 2026-10-23, it replaces the
-# statuses of 2026-10-21); what became of its client it sees on «Моя точка».
+# statuses of 2026-10-21); what became of its client it sees on «Рабочее место».
 # Nothing here is sent to a client: only to the point that handed the client over and to the person on duty.
 
 HANDOFF = re.compile(r"^\W*клиент(?:ка)?[\s:,.\-\u2013\u2014]+((\+7|8|7)?[\s()-]*\d{3}[\s()-]*\d{3}[\s-]*\d{2}[\s-]*\d{2})(?!\d)(.*)$",
@@ -1165,7 +1166,7 @@ def handoff(conn, message_id, sender, handed: Optional[dict], voice: str, now: s
             point: Optional[dict] = None) -> str:
     """A client handed over by a point: an order on «Передано с точки» for the person on duty, who is told in the order and in Telegram.
     The message is claimed first: a repeat of the event makes nothing. `handed` may carry what the client wants (size, season, brand,
-    comment: handoff_fields); `source`: "vk" or "page" («Моя точка»). `point`: the page's own point (it needs no VK), else the sender's."""
+    comment: handoff_fields); `source`: "vk" or "page" («Рабочее место»). `point`: the page's own point (it needs no VK), else the sender's."""
     point = {"id": point["id"], "name": point["name"]} if point else _point_of(conn, sender)
     claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,'клиент',NULL,'обрабатывается')",
                            (str(message_id), now, str(sender)))
@@ -1211,13 +1212,13 @@ def handoff(conn, message_id, sender, handed: Optional[dict], voice: str, now: s
 
 
 # ---- «Передать под заказ» (the owner 2026-10-23, п. 6, 7, 20–24): the same handoff from a chat of the point's account, a call (the calls
-# lane gives its id), «Моя точка» or VK, with what the client wants. The person on duty sees «Клиент хочет заказать шины…» in «Уведомления»;
+# lane gives its id), «Рабочее место» or VK, with what the client wants. The person on duty sees «Клиент хочет заказать шины…» in «Уведомления»;
 # «взяли в работу» is a mark of the handoff (opened the alert or the order, answered in the chat, called, or by hand), the stage stays.
 
 ASK = "Клиент хочет заказать шины, нужно проверить и предложить."      # the words of the alert (the owner 2026-10-23, п. 20)
 HANDOFF_TAG = "передан точкой"
 SEASONS = {"winter_studded": ("winter", "yes", "зима, шипы"), "winter_soft": ("winter", "no", "зима, без шипов"), "summer": ("summer", "", "лето")}
-SOURCE_NAMES = {"vk": "команда ВК", "page": "«Моя точка»", "chat": "чат Авито", "call": "звонок"}
+SOURCE_NAMES = {"vk": "команда ВК", "page": "«Рабочее место»", "chat": "чат Авито", "call": "звонок"}
 EARLY_STAGES = ("new", "talk", "wait")                 # an order of the point's chat still this early is handed over itself, not doubled
 WANT_QTY = 4
 
@@ -1387,7 +1388,7 @@ def hand_over(conn, point_id: int, source: dict, phone: str, fields: dict, token
     orders._fire_rules(conn, card_id, now, ())
     _add_want(conn, card_id, fields, now, author)
     _tell_staff(conn, orders.get_card(conn, card_id), "Новый клиент с точки «%s», заказ №%d.\n%s" % (point["name"], card_id, text), notify)
-    return card_id, ("Клиент передан, заказ №%d: %s. Что с ним стало — на «Моей точке»." % (
+    return card_id, ("Клиент передан, заказ №%d: %s. Что с ним стало — на «Рабочем месте»." % (
         card_id, "этот заказ теперь у дежурного менеджера" if card is not None else "клиента возьмёт дежурный менеджер"))
 
 
@@ -1438,7 +1439,7 @@ def chat_phone(conn, chat_row) -> str:
 def take(conn, order_id, how: str, who: str, now: str) -> bool:
     """«Взяли в работу» for a handed-over client (the lead 2026-10-23: a mark of the handoff and a record, no move of the stage): once, only
     while the order is still on «Передано с точки» (a later stage is «взяли» by itself). The caller makes sure `who` is not the point.
-    True when it is taken now; the point sees it on «Моя точка»."""
+    True when it is taken now; the point sees it on «Рабочее место»."""
     if not conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (order_id,)).fetchone():
         return False
     row = conn.execute("SELECT g.code FROM order_card c JOIN order_stage g ON g.id = c.stage_id WHERE c.id = ?", (order_id,)).fetchone()
@@ -1548,7 +1549,7 @@ def cancel_handoff(conn, order_id, point: dict, who: str, now: str, notify: Opti
 
 
 def point_handoffs(conn, point_id, since: str, limit: int = 50) -> List[dict]:
-    """The clients this point handed over since `since`, newest first, with what became of them (the point's «Моя точка»)."""
+    """The clients this point handed over since `since`, newest first, with what became of them (the point's «Рабочее место»)."""
     placed = next((s for s in orders.list_stages(conn) if s["code"] == "placed"), None)
     found = []
     for order_id, phone, need, created, kind, taken, taken_by in conn.execute(
@@ -1567,7 +1568,7 @@ def point_handoffs(conn, point_id, since: str, limit: int = 50) -> List[dict]:
 
 def staff_card(conn, card: dict) -> dict:
     """The card for an alert that is for the staff and never for the point: the person who answers for it; when nobody in the panel does,
-    the owner. order_notify would write to the point's VK (or its «Моя точка») for an order of the point's account (to_staff skips that)
+    the owner. order_notify would write to the point's VK (or its «Рабочее место») for an order of the point's account (to_staff skips that)
     or for a card whose responsible is not in the panel, and to the point's own user who answers for it (a deal the point made)."""
     from . import order_notify, users
     card = dict(card, to_staff=True)

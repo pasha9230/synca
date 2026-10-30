@@ -138,6 +138,12 @@ CREATE INDEX IF NOT EXISTS oth_return_order ON oth_return (order_id);
 -- partner), then the point signs the paper act МХ-3 and gives the tyres (order_oth.agree / sign_act)
 CREATE TABLE IF NOT EXISTS oth_return_plan (order_id INTEGER PRIMARY KEY, agreed_at TEXT NOT NULL, agreed_by TEXT NOT NULL, return_date TEXT NOT NULL,
     signed_at TEXT, signed_by TEXT NOT NULL DEFAULT '');
+-- «Взять с ОТХ» (oth_sale, the owner 2026-10-29): the position item_id of a new order is `qty` tyres taken from the position from_item of the
+-- order from_order standing on «На ОТХ» (its quantity was lowered by them). sale_id: its sale once written (counted at the purchase of the old
+-- order, never at WebMIM's price of the new one). undone_at: given back by «Вернуть на ОТХ» (the row stays: the Google table follows it).
+CREATE TABLE IF NOT EXISTS order_item_oth (item_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, from_item INTEGER NOT NULL, from_order INTEGER NOT NULL,
+    qty INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, sale_id INTEGER, undone_at TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS order_item_oth_from ON order_item_oth (from_order);
 CREATE TABLE IF NOT EXISTS client_chat (chat_row INTEGER PRIMARY KEY, client_id INTEGER NOT NULL, how TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS client_chat_client ON client_chat (client_id);
 CREATE TABLE IF NOT EXISTS avito_call (
