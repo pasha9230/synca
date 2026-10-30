@@ -101,7 +101,17 @@ def test_a_webmim_ad_goes_on_under_its_id_with_4tochki_stock_and_price_and_keeps
     assert not [i for i in second if "TCH1" in i]                                            # never a second Id of the tire
     assert ad.findtext("Title") == live.findtext("Title") and images(ad) == images(live) == ["https://example.test/ci7.jpg"]
     assert ad.findtext("Model") == live.findtext("Model") == "Character Ice 7"
-    assert ad.findtext("Price") == "3680"                                                    # 3500 + 5 %, the rule of S2:IKON
+    # price_guard (the owner 2026-10-30, answer 4): the tire that takes the ad keeps its anchor — 4000 of WebMIM × the rule of S2:IKON (+5 %),
+    # not 3500 + 5 %, until the owner accepts the fall
+    assert ad.findtext("Price") == "4200"
+    from tires_sync import price_guard
+    conn = store.connect(tmp_path / "t.db")
+    assert price_guard.load(conn)["anchors"]["s2-TCH1"]["pending"] == 3500.0
+    price_guard.accept(conn, ["s2-TCH1"], NOW, "owner")
+    conn.close()
+    second = by_id(cycle_and_publish(tmp_path, args)["Основной"])
+    ad = second["100"]
+    assert ad.findtext("Price") == "3680"                                                    # accepted: 3500 + 5 %, the rule of S2:IKON
     text = ad.findtext("Description")
     assert "В наличии: 40 шт." in text and "Артикул: CI7" in text and "Страна происхождения бренда: Корея" in text
     conn = store.connect(tmp_path / "t.db")

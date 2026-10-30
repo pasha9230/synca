@@ -305,3 +305,23 @@ def test_a_fall_of_a_position_not_on_avito_asks_nothing(tmp_path):
     at(tmp_path, 5000)
     cycle(tmp_path, rows(dict(NNOMMODIF="101", NPRICE_DELAYED="3850", NREST="1")))   # below the threshold: no ad
     assert anchor(tmp_path)["pending"] == 0 and anchor(tmp_path)["base_price"] == 5000.0
+
+
+def test_a_fall_again_after_the_question_was_over_is_told_again(tmp_path, monkeypatch):
+    from tires_sync import cli
+    monkeypatch.setattr(cli, "_alert", lambda *a, **kw: False)
+    conn = prepared(tmp_path)
+    at(tmp_path, 5000)
+    at(tmp_path, 4500)
+    price_guard.told(conn, price_guard.news(conn))
+    at(tmp_path, 4900)                                                           # back within 5 %: the question is over
+    at(tmp_path, 4500)                                                           # the same fall a week later
+    assert price_guard.news(conn)["drops"] == ["Ikon Tyres: 1 поз. −10 %"]
+
+
+def test_the_ads_of_a_mirrored_account_are_asked_too(tmp_path):
+    conn = prepared(tmp_path)
+    at(tmp_path, 5000)
+    offers = parse_unload(rows(dict(NNOMMODIF="101", NPRICE_DELAYED="3850")), "T1").offers
+    price_guard.record_mirror(conn, offers, ["101"], NOW)
+    assert price_guard.load(conn)["anchors"]["101"]["pending"] == 3850.0

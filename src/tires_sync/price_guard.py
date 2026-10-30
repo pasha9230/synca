@@ -120,7 +120,23 @@ def record(conn, offers: Dict[str, object], now: str, ev=None, live: Optional[se
                 conn.execute("UPDATE price_anchor SET pending = ?, pending_since = CASE WHEN pending > 0 THEN pending_since ELSE ? END, kept = 0, "
                              "kept_at = '', kept_by = '', brand = ? WHERE goods_id = ?", (price, now, brand, gid))
         elif float(row["pending"] or 0) or float(row["kept"] or 0):     # back within 5 %: the question is over
-            conn.execute("UPDATE price_anchor SET pending = 0, pending_since = '', kept = 0, kept_at = '', kept_by = '' WHERE goods_id = ?", (gid,))
+            conn.execute("UPDATE price_anchor SET pending = 0, pending_since = '', kept = 0, kept_at = '', kept_by = '', told = '' WHERE goods_id = ?",
+                         (gid,))                                        # a fall again later is told again (review 2026-10-30)
+
+
+class _Held:
+    def __init__(self, held):
+        self.held, self.inherit = held, {}
+
+
+def record_mirror(conn, offers: Dict[str, object], codes: Iterable[str], now: str) -> None:
+    """The ads of a mirrored account (mirror_feed.prices_for holds their price too): a fall of their positions is asked as of the feeds we
+    build (review 2026-10-30: never held quietly). No commit."""
+    guard = load(conn)
+    mine = {c: offers[c] for c in codes if c in offers}
+    held = {c: base_for(guard, c, float(getattr(o, "base_price", 0) or 0)) for c, o in mine.items()}
+    held = {c: v for c, v in held.items() if v[1]}
+    record(conn, mine, now, _Held(held), set(held))
 
 
 # ---- the owner's decision ----------------------------------------------------------------------------------------------------------------
@@ -149,7 +165,7 @@ def accept(conn, goods_ids: Iterable[str], now: str, author: str) -> int:
     done = []
     for gid in dict.fromkeys(str(g) for g in goods_ids):
         if conn.execute("UPDATE price_anchor SET prev = base_price, base_price = CASE WHEN pending > 0 THEN pending ELSE kept END, set_at = ?, "
-                        "how = 'accepted', pending = 0, pending_since = '', kept = 0, kept_at = '', kept_by = '' WHERE goods_id = ? AND (pending > 0 OR kept > 0)",
+                        "how = 'accepted', pending = 0, pending_since = '', kept = 0, kept_at = '', kept_by = '', told = '' WHERE goods_id = ? AND (pending > 0 OR kept > 0)",
                         (now, gid)).rowcount == 1:                      # also one kept before: the owner changed the mind
             done.append(gid)
     if done:

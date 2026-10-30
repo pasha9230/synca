@@ -284,6 +284,11 @@ def run_for_accounts(
                 skip = mirror_feed.unavailable(conn, account["id"], getattr(parsed, "offers", {}) or {}, eff.min_stock) if parsed is not None else {}
                 skip = dict(skip, **mirror_feed.excluded_by_type(conn, account["id"], connections.get_excluded_types(conn, account["id"])))
                 prices = mirror_feed.prices_for(conn, account["id"], getattr(parsed, "offers", {}) or {}, eff) if parsed is not None else {}
+                if parsed is not None:                                          # its held falls are asked too (price_guard)
+                    from . import price_guard
+                    price_guard.record_mirror(conn, parsed.offers, {mirror_feed.supplier_code(i) for i in mirror_feed.stored_ids(conn, account["id"])},
+                                              store.moscow_iso())
+                    conn.commit()
                 runflat = mirror_feed.runflat_for(conn, account["id"], getattr(parsed, "offers", {}) or {}) if parsed is not None else {}
                 extra: list = []
                 extra_oth: FrozenSet[str] = frozenset()
