@@ -152,6 +152,10 @@ def _build_parser() -> argparse.ArgumentParser:
     ot = sub.add_parser("orders-tick", help="часовая проверка заказов: задачи по правилам «завис на этапе» и оповещение ответственному об окончании резерва на точке (клиентам ничего не отправляет)")
     ot.add_argument("--db", required=True)
     ot.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    se = sub.add_parser("sheet-enroll", help="поставить в очередь Google-таблицы открытые заказы, оформленные до её включения (строки только добавляются; запуск вручную)")
+    se.add_argument("--db", required=True)
+    se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «Возврат передан»")
+    se.add_argument("--dry-run", action="store_true", help="только показать список, ничего не ставить в очередь")
     vc = sub.add_parser("vk-catchup", help="подборщик ВК: прочитать переписку с точками и выполнить их сообщения, о которых ВК не прислал уведомление (не старше суток, каждое один раз); для таймера каждые 10–15 минут")
     vc.add_argument("--db", required=True)
     vc.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
@@ -782,7 +786,8 @@ def _cmd_run_cycle(args) -> int:
             applied = _prebind_accounts(conn, box, args.feed_root, results, parsed=parsed)           # new codes take the Id of the live ad of their tire...
             if applied:                                                                              # ...and the feeds are built again before anything is published
                 results = run_for_accounts(conn, None, ref, date.today(), args.feed_root, parsed=parsed, input_sha=input_sha, now=moscow_now())
-                _prebind_report(conn, box, args.feed_root, applied)
+                _prebind_report(conn, box, args.feed_root, applied, offers=getattr(parsed, "offers", None),
+                                unavailable=getattr(parsed, "unavailable", frozenset()))
         if parsed is not None:
             _queue_photo_sets(args.db, parsed, ref, active_settings(conn))
         for r in results:
@@ -1055,9 +1060,30 @@ def _cmd_orders_tick(args) -> int:
     made = order_engine.fire_stale(conn, moscow_now().isoformat(timespec="seconds"))
     print("новых задач по правилам «завис на этапе»: %d" % made)
     _reserve_alerts(conn, args.key_file)
+    _arrived_alerts(conn, args.key_file)
     _daily_summary(conn, args.key_file)
     _webmim_snapshot(conn, args.key_file)
     _google_sheet(conn, args.key_file)
+    return 0
+
+
+def _cmd_sheet_enroll(args) -> int:
+    """sheet-enroll --open: the open orders placed before the Google table was switched on go into its queue (the hourly orders-tick or the
+    next request sends them). --dry-run lists them only. Run by hand after a copy of the base (the owner 2026-10-30)."""
+    from . import order_sheet
+    conn = store.connect(args.db)
+    found = order_sheet.open_unlisted(conn)
+    for card in found:
+        print("№%d · %s · %s" % (card["id"], card["stage"]["name"], card["client_name"] or "без имени"))
+    if args.dry_run:
+        print("открытых заказов не в таблице: %d (ничего не поставлено в очередь)" % len(found))
+        return 0
+    try:
+        done = order_sheet.enroll_open(conn, moscow_now().isoformat(timespec="seconds"))
+    except order_sheet.SheetError as err:
+        print("ошибка: %s" % err, file=sys.stderr)
+        return 1
+    print("в очередь Google-таблицы: %d заказов; строки запишет ближайшая отправка (orders-tick)" % len(done))
     return 0
 
 
@@ -1137,6 +1163,24 @@ def _daily_summary(conn, key_file) -> None:
     except Exception as err:      # noqa: BLE001
         conn.rollback()
         print("предупреждение: утренняя сводка не отправлена (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
+
+
+def _arrived_alerts(conn, key_file) -> None:
+    """«Приехал, а клиенту не сообщили» (order_arrived): the responsible and the owner, once a day per order; a 402 of «no messenger API» the
+    owner once a day per account. Nothing goes to a client. A failure is only a warning."""
+    try:
+        from . import order_arrived, order_notify
+        box = load_box(key_file) if key_file else None
+        now = moscow_now().isoformat(timespec="seconds")
+        tell = lambda logins, text: order_notify.tell_people(conn, box, logins, text, tg_http=_http(), now=now)
+        made = order_arrived.check(conn, now, tell, lambda card, text: order_notify.tell_point(conn, box, card, text, now, tg_http=_http(), vk_http=_http()))
+        lines = order_arrived.api_refusals(conn, now)
+        if lines:
+            tell([order_notify.get_owner_login(conn)], "Tires Sync: " + "\n".join(lines))
+        print("приехал, а клиенту не сообщили: %d; аккаунтов без API мессенджера: %d" % (made, len(lines)))
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: «клиенту не сообщили» не проверено (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
 def _reserve_alerts(conn, key_file) -> None:
@@ -1635,14 +1679,23 @@ def _prebind_accounts(conn, box, feed_root, results, parsed=None, client_for=Non
     return applied
 
 
-def _prebind_report(conn, box, feed_root, applied) -> None:
-    """After the feeds were built again: what came of the bindings. Only what is really in the new feed is called bound; the rest is a warning."""
-    lines, bad, manual = [], [], []
+def _prebind_report(conn, box, feed_root, applied, offers=None, unavailable=frozenset()) -> None:
+    """After the feeds were built again: what came of the bindings. Only what is really in the new feed is called bound; the rest is a warning.
+    `offers` (the unload of the cycle): a manual ad of a code the supplier has not and «На ОТХ» has not is marked «снимите вручную»; never
+    one of a supplier not used this cycle (`unavailable`: its positions are held, not gone)."""
+    lines, bad, manual = [], [], {}
+    on_oth = None
     for entry in applied:
         account, binds = entry[0], entry[1]
         if len(entry) > 2 and entry[2]:                                # the manual ads of the cabinet changed: told once, when they change
             ads = mirror_feed.manual_ads(conn, account["id"])
-            manual.append((_cabinet_header(conn, account, len(ads)), [_manual_line(a) for a in ads]))     # the whole list (owner, 2026-10-29)
+            if offers is not None and on_oth is None:
+                from . import order_oth
+                on_oth = order_oth.goods_on_oth(conn)
+            gone = [a for a in ads if _gone_everywhere(a, offers, on_oth, unavailable)]
+            listed = [_manual_line(a, gone=True) for a in gone] + [_manual_line(a) for a in ads if a not in gone]     # the ones to take off first
+            whom = connections.account_responsible(conn, account["id"])   # the cabinet's responsible gets its list (the owner 2026-10-30)
+            manual.setdefault(whom, []).append((_cabinet_header(conn, account, len(ads)), listed))     # the whole list (owner, 2026-10-29)
         try:
             now_ids = {a.findtext("Id") for a in ET.parse(str(Path(feed_root) / account["feed_token"] / "next" / "avito_feed.xml")).getroot().findall("Ad")}
         except (OSError, ET.ParseError):
@@ -1658,11 +1711,43 @@ def _prebind_report(conn, box, feed_root, applied) -> None:
         _alert(conn, box, "Tires Sync: шины, которые поставщик вернул под новым кодом, привязаны к живым объявлениям до публикации (дубли не создаются).\n" + "\n".join(lines), notice=True)
     if bad:
         print("предупреждение: привязка не применилась в фиде (другое правило задало Id), нужен разбор:\n" + "\n".join(bad), file=sys.stderr)
-    if manual:
-        parts = _manual_parts(manual)
+    from . import order_notify
+    owner_login = order_notify.get_owner_login(conn) if manual else ""
+    for whom, groups in manual.items():
+        parts = _manual_parts(groups)
         print("\n".join(parts))
+        person = _person_telegram(conn, box, whom) if whom and whom != owner_login else None
         for part in parts:                                            # each part on its own: Telegram cuts a longer message
+            if person is not None:
+                try:
+                    person(part)
+                    store.write_audit(conn, _now(), "system", "notice", {"text": part, "to": whom})
+                    continue
+                except Exception as err:                               # noqa: BLE001  (the person's chat failed: the owner gets it)
+                    print("предупреждение: Telegram «%s» не принял сообщение (%s), отправлено владельцу" % (whom, type(err).__name__), file=sys.stderr)
             _alert(conn, box, part, notice=True)
+
+
+def _gone_everywhere(ad: dict, offers, on_oth, unavailable=frozenset()) -> bool:
+    """A manual ad of a code (an ad switched on by hand under an Id of a file) the supplier has not and «На ОТХ» has not: nothing to sell.
+    A supplier not used this cycle (`unavailable`) says nothing of its codes."""
+    from .suppliers import supplier_of_id
+    code = ad.get("code")
+    return (bool(code) and offers is not None and supplier_of_id(code) not in (unavailable or ()) and code not in offers
+            and not (on_oth or {}).get(code))
+
+
+def _person_telegram(conn, box, login: str):
+    """A function that sends text to the person's own Telegram chat (order_notify.user_chats) by the owner's bot; None without one."""
+    from . import order_notify
+    chat = order_notify.user_chats(conn).get(login) if login else None
+    if not chat or box is None:
+        return None
+    try:
+        token = connections.get_secret(conn, box, "telegram", 0, "bot_token")
+    except SecretKeyError:
+        return None
+    return (lambda text: notify.send_message(token, chat, text, http=_http())) if token else None
 
 
 MANUAL_HEAD = ("Tires Sync: в кабинете есть объявления, сделанные вручную. Их система не снимает, а та же шина из фида рядом с ними "
@@ -1678,10 +1763,13 @@ def _cabinet_header(conn, account, count: int) -> str:
                                                                    " (профиль Авито %s)" % profile if profile else "", count)
 
 
-def _manual_line(ad: dict) -> str:
+MANUAL_GONE = " — нет у поставщика — снимите вручную"
+
+
+def _manual_line(ad: dict, gone: bool = False) -> str:
     """Telegram gets plain text (no parse mode): the link stands on its own in the line, Telegram makes it clickable."""
-    return "   %s «%s» %s%s" % (ad["avito_id"], ad["title"], AVITO_AD_URL % ad["avito_id"],
-                              " (живо вне нашего файла, Id %s)" % ad["ad_id"] if ad.get("ad_id") else "")
+    return "   %s «%s» %s%s%s" % (ad["avito_id"], ad["title"], AVITO_AD_URL % ad["avito_id"],
+                                " (живо вне нашего файла, Id %s)" % ad["ad_id"] if ad.get("ad_id") else "", MANUAL_GONE if gone else "")
 
 
 def _manual_parts(groups, limit: int = notify.TELEGRAM_LIMIT) -> list:
@@ -2705,6 +2793,8 @@ def main(argv=None) -> int:
             return _cmd_clients_link(args)
         if args.command == "orders-tick":
             return _cmd_orders_tick(args)
+        if args.command == "sheet-enroll":
+            return _cmd_sheet_enroll(args)
         if args.command == "vk-catchup":
             return _cmd_vk_catchup(args)
         if args.command == "webmim-orders-sync":

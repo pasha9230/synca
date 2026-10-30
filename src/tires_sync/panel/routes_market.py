@@ -41,7 +41,8 @@ def authorized(conn) -> bool:
 
 
 def stopped(conn) -> bool:
-    return store.get_state(conn, STOP_KEY) == "1"
+    """The intake is off unless switched on (the owner 2026-10-30: «Рынок» waits for the parser itself; its page is hidden)."""
+    return store.get_state(conn, STOP_KEY) != "0"
 
 
 def _our_codes(conn) -> set:

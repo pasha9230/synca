@@ -238,7 +238,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -304,6 +304,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "draft_confirm": "publish", "feed_update_confirm": "publish", "pairs_forget": "publish", "pairs_not_pair": "publish", "feed_update_fetch": "publish", "history_rollback": "publish",
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",
          "order_sale_reverse": "delete", "order_webmim_create": "supplier", "order_tochki_placed": "supplier",
+         "order_arrived_message": "send",                 # it prepares a message to the client: who may send them (review 2026-10-30)
          "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
          "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
@@ -311,7 +312,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})
 # the manager of a point: the orders of the point only (the board, the file and the cards of the point)
-POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
+POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
                          "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                          "search", "search_json",   # the search: the point's own (search.scope_for)
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts

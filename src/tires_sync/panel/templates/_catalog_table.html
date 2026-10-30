@@ -25,6 +25,3 @@
 {% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
 {% else %}<div class="empty"><div class="empty-icon">{{ icon("search") }}</div><h3>Ничего не найдено</h3><p>Измените фильтры или сбросьте их.</p><a class="btn btn--link-gray" href="/catalog{% if sup %}?sup={{ sup }}{% endif %}">Сбросить фильтры</a></div>{% endif %}
 </section>
-{% if orphans %}<section class="card"><div class="card-head"><h3>Ручные правила без позиции</h3></div><div class="card-body">
-<p class="muted small">Поставщик убрал эти позиции из выгрузки. Объявления уже сняты автоматически, правило осталось: уберите его, если оно больше не нужно.</p>
-<ul class="changes">{% for o in orphans %}<li><span class="verb">{{ o.goods_id }}</span><span>{{ "добавлено вручную" if o.mode == "on" else "снято вами" }}</span>{% if can_post("catalog_stage") %}<button class="btn btn--danger-outline btn--xs ml-auto" form="stage" name="op" value="clear:{{ o.goods_id }}">Убрать правило</button>{% endif %}</li>{% endfor %}</ul></div></section>{% endif %}

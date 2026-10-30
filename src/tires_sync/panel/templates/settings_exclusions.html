@@ -4,4 +4,15 @@
 {% block content %}
 {% set tab = "exclusions" %}{% include "_settings_head.html" %}
 {% for sp in suppliers_ex %}{% with supplier=sp.supplier, ex=sp.ex, multi=suppliers_ex|length > 1 %}{% include "_exclusions.html" %}{% endwith %}{% endfor %}
+{# «Ручные правила без позиции» (the owner 2026-10-30; it was a block of the catalog): folded, the number in its head; «Убрать правило» and
+   «Убрать все» go into the working draft as before (/catalog/stage), back here #}
+{% if orphans %}<details class="card" id="orphans" style="margin-top:var(--s-4)" data-orphans><summary class="card-head"><h3>Ручные правила без позиции ({{ orphans|length }})</h3>{{ icon("chev", "ml-auto") }}</summary>
+<div class="card-body stack"><p class="small muted">Позиции, которых у поставщика больше нет, а ручное правило осталось. Правило действует для всех аккаунтов; уберите его, если позиция не вернётся. Всё уходит в черновик, как в каталоге.</p>
+<table class="table small"><thead><tr><th>Код</th><th>Шина</th><th>Правило</th><th>Пропала у поставщика</th><th>Поставил</th>{% if can_post("catalog_stage") %}<th></th>{% endif %}</tr></thead><tbody>
+{% for o in orphans %}<tr data-orphan="{{ o.goods_id }}"><td class="mono">{{ o.goods_id }}</td><td>{{ o.name or "—" }}<div class="muted">{{ o.supplier }} · для всех аккаунтов</div></td>
+<td>{{ "добавлено вручную" if o.mode == "on" else "снято вручную" }}{% if o.pending %} <span class="badge badge--warn">в черновике</span>{% endif %}</td>
+<td>{{ o.gone_since|dt if o.gone_since else "—" }}</td><td>{% if o.set_at %}{{ author_label(o.set_by) }} · {{ o.set_at|dt_utc }}{% else %}—{% endif %}</td>
+{% if can_post("catalog_stage") %}<td><form method="post" action="/catalog/stage"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="/settings/exclusions#orphans"><button class="btn btn--danger-outline btn--xs" name="op" value="clear:{{ o.goods_id }}">Убрать правило</button></form></td>{% endif %}</tr>{% endfor %}</tbody></table>
+{% if can_post("catalog_stage") and orphans|length > 1 %}<form method="post" action="/catalog/stage" data-confirm-title="Убрать все ручные правила без позиции?" data-confirm="{{ orphans|length }} правил уйдут в черновик; применятся после «Применить»." data-confirm-ok="Убрать все"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="/settings/exclusions#orphans">{% for o in orphans %}<input type="hidden" name="g" value="{{ o.goods_id }}">{% endfor %}<button class="btn btn--danger-outline btn--sm" name="bulk" value="clear">Убрать все</button></form>{% endif %}
+</div></details>{% endif %}
 {% endblock %}

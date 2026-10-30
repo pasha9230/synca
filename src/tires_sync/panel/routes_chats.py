@@ -678,8 +678,14 @@ def register(app) -> None:
             if back_to is not None:                                        # from «На ОТХ» to the point: a new client or the same (2026-10-30)
                 return ask_back(chat["order_id"], back_to)
             stamp = local_iso()
+            before = orders.get_card(conn, chat["order_id"])
             moved = orders.move_card(conn, chat["order_id"], stage_id, stamp, author())
             if moved:
+                from .. import order_manager                               # «Товар на точке» from the chat: «можно забирать» (2026-10-30)
+                arrived = order_manager.arrived_by_move(conn, before, lambda row, text, token: chats.send_reply(
+                    conn, _writer(conn, chats.get_chat(conn, row)), row, text, token, stamp, author()), stamp, author())
+                if arrived:
+                    flash(arrived)
                 offer_send(conn, chat["order_id"], stamp)
                 if own_point() is not None:                                # «История точки»
                     from .. import point_log
