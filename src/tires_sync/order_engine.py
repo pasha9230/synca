@@ -130,6 +130,7 @@ def fire_stale(conn, now: str) -> int:
 
 
 PLACED_RULE = -2                                                   # the «rule» number of the messages after «Оформить в WebMIM» (order_placed)
+ARRIVED_RULE = -3                                                  # «можно забирать» that did not go by itself (order_manager._tell_arrived)
 PLACED_SKIP = "подготовлено после оформления в WebMIM"
 SENT_SKIP = "это сообщение по заказу уже отправлено"
 PANEL_SKIP = "точка работает в панели: в ВК ей не пишем, заказ виден на её «Моей точке»"
@@ -242,7 +243,10 @@ SENT_TO_CLIENT = "отправлено клиенту"
 
 
 def audience(conn, task: dict) -> str:
-    """Who a message task is for: the audience of its template («client», «manager»); empty for another task or a template gone."""
+    """Who a message task is for: the audience of its template («client», «manager»); empty for another task or a template gone.
+    «Можно забирать» that waited (ARRIVED_RULE) is the client's always, with the owner's template or with the sample."""
+    if task["kind"] == "message" and task.get("rule_id") == ARRIVED_RULE:
+        return "client"
     if task["kind"] != "message" or not str(task["arg"]).isdigit():
         return ""
     try:
@@ -395,7 +399,7 @@ def send_task(conn, task_id, text: str, deliver, now: str, author: str, prefer=N
     conn.commit()
     if claim.rowcount != 1:
         raise OrderError("Эта задача уже выполняется или выполнена.")
-    token = "task-%d-%s" % (task_id, "".join(ch for ch in task["created_at"] if ch.isdigit()))
+    token = task_token(task)
     earlier = conn.execute("SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent'", (token,)).fetchone()
     try:
         deliver(chat["id"], text, token)                           # an earlier press that went out is not sent again (the mark says «sent»)
@@ -412,8 +416,21 @@ def send_task(conn, task_id, text: str, deliver, now: str, author: str, prefer=N
     return chat["id"]
 
 
+def task_token(task: dict) -> str:
+    """The send mark of a message task: «task-<id>-<digits of created_at>»; «можно забирать» that waited (ARRIVED_RULE) keeps the mark of its
+    arrival («arrived-…», order_manager): one mark for the message sent by itself, by a press or after a chat is bound — never two sends."""
+    if task.get("rule_id") == ARRIVED_RULE and str(task.get("entered_at") or "").startswith("arrived-"):
+        return task["entered_at"]
+    return "task-%d-%s" % (task["id"], "".join(ch for ch in task["created_at"] if ch.isdigit()))
+
+
 def task_of_token(conn, token) -> Optional[dict]:
-    """The message task whose send mark `token` is (send_task: «task-<id>-<digits of created_at>»), or None: another mark, or the task is gone."""
+    """The message task whose send mark `token` is (task_token), or None: another mark, or the task is gone."""
+    arrived = re.fullmatch(r"arrived-(\d+)-\d*", str(token or ""))
+    if arrived:                                                    # the order is in the mark: the UNIQUE index (order, rule, entered_at) finds it
+        row = conn.execute("SELECT %s FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?" % TASK_FIELDS,
+                           (int(arrived.group(1)), ARRIVED_RULE, str(token))).fetchone()
+        return _task(row) if row else None
     found = re.fullmatch(r"task-(\d+)-(\d*)", str(token or ""))
     if not found:
         return None

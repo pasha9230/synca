@@ -306,6 +306,7 @@ def register(app) -> None:
                 check=connections.get_check(conn, "avito", account_id), form=build_form(conn, account_id),
                 pricing=connections.get_account_pricing(conn, account_id), own_photos=connections.account_own_photos(conn, account_id), exclude_types=connections.get_excluded_types(conn, account_id),
                 contact_name=connections.get_contact_name(conn, account_id),
+                responsible=connections.get_responsible(conn, account_id), staff=staff(conn),
                 brand_delta_text="\n".join("%s: %s" % (k, ("%g" % v)) for k, v in sorted(connections.get_brand_deltas(conn, account_id).items())),
                 title_template=connections.get_title_template(conn, account_id), photo_base=connections.get_photo_base(conn, account_id),
                 title_fields=feed_module.TITLE_FIELDS, photo_style=connections.get_photo_style(conn, account_id),
@@ -575,6 +576,24 @@ def register(app) -> None:
         except ValueError as err:
             flash(str(err))
         return redirect("/connections/avito/%d" % account_id)
+
+    def staff(conn) -> list:
+        """Who may answer for the orders of an account: the owner and the active people of the panel, never a client nor a point."""
+        return list(dict.fromkeys([app.config["AUTHOR"]] + [u["login"] for u in panel_users.list_users(conn)
+                                                              if u["active"] and u["role"] not in ("client", "point")]))
+
+    @app.route("/connections/accounts/<int:account_id>/responsible", methods=["POST"])
+    @login_required
+    def account_responsible(account_id):
+        """«Ответственный» of the account (the owner 2026-10-29): its new orders get this person; the old ones stay as they are."""
+        _account_or_404(account_id)
+        conn = get_conn()
+        try:
+            connections.set_responsible(conn, account_id, request.form.get("responsible", ""), staff(conn), now_iso(), author())
+            flash("Ответственный аккаунта сохранён: его получат новые заказы аккаунта, старые не меняются.")
+        except ValueError as err:
+            flash(str(err))
+        return redirect("/connections/avito/%d#responsible" % account_id)
 
     @app.route("/connections/accounts/<int:account_id>/contact-name", methods=["POST"])
     @login_required

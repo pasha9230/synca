@@ -77,7 +77,7 @@ def test_closed_stages_are_folded_columns_and_open_ones_are_not(tmp_path, monkey
             assert '<span class="col-name">%s</span>' % s["name"] in col.group(3)
         else:
             assert "data-fold-toggle" not in col.group(3)
-    assert {c for c, s in stages.items() if s["kind"] != "open"} == {"done", "cancel", "refused", "return"}
+    assert {c for c, s in stages.items() if s["kind"] != "open"} == {"done", "cancel", "return"}
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     assert '[data-fold-toggle]' in js and 'classList.toggle("is-folded")' in js and '"aria-expanded"' in js
     css = (STATIC / "panel.css").read_text(encoding="utf-8")

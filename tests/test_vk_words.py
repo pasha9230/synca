@@ -185,8 +185,8 @@ def test_a_command_about_a_cancelled_order_tells_the_point_it_is_cancelled(tmp_p
     assert mgr.dispatch(conn, "c3", "111", "выдали", 5259052, NOW) == "Заказ №5259052 отменён"
     assert orders.get_card(conn, card)["stage"]["code"] == "cancel"
     reasons = [m["dispute"] for m in reversed(mgr.list_inbox(conn))]
-    assert reasons == ["слово «приехал» не подходит к этапу «Отмена»", "«клиент не пришёл», а заказ на этапе «Отмена»",
-                       "слово «выдали» не подходит к этапу «Отмена»"]
+    assert reasons == ["слово «приехал» не подходит к этапу «Отмена / невыкуп»", "«клиент не пришёл», а заказ на этапе «Отмена / невыкуп»",
+                       "слово «выдали» не подходит к этапу «Отмена / невыкуп»"]
     back = _cancelled(conn, pid, 5259054)                                                           # the owner's own word of «Отмена» works as before
     rules.add_command(conn, stage(conn, "cancel"), "вернули", stage(conn, "placed"))
     assert not mgr.dispatch(conn, "c5", "111", "вернули 5259054", None, NOW).startswith("Заказ №5259054 отменён")

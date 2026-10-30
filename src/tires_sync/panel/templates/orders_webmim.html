@@ -24,7 +24,7 @@
 
 <section class="card" id="unpaired"><div class="card-head"><h3>1. Найти пару ({{ r.unpaired|length }})</h3><span class="sub">заказы панели без номера WebMIM, созданы за окно; отменённые и сделки из наличия точки не нужны</span></div>
 <div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Этап</th><th>Похожие заказы WebMIM и что сделать</th></tr></thead><tbody>
-{% for c in r.unpaired %}<tr data-unpaired="{{ c.id }}"><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}{% if c.client_phone %}<div class="small muted">{{ c.client_phone|phone }}</div>{% endif %}</td>
+{% for c in r.unpaired %}<tr data-unpaired="{{ c.id }}" data-href="/orders/{{ c.id }}" class="is-link"><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}{% if c.client_phone %}<div class="small muted">{{ c.client_phone|phone }}</div>{% endif %}</td>
 <td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.stage }}</td><td>
 {% for h in c.hints %}{% set o = h.order %}<div class="row" style="gap:var(--s-2);flex-wrap:wrap" data-webmim-hint="{{ o.id }}"><b>№{{ o.number or o.id }}</b><span class="badge badge--neutral">{{ h.score }}%</span>
 <span class="small">{{ o.status_text }}{% if o.create_date %} · {{ o.create_date|dt }}{% endif %}{% if o.customer_name %} · {{ o.customer_name }}{% endif %}</span><span class="small muted">{{ h.why|join(", ") }}</span>
@@ -35,7 +35,7 @@
 <section class="card" id="not-found" style="margin-top:var(--s-4)"><div class="card-head"><h3>2. Номер есть, но WebMIM его не отдаёт ({{ r.not_found|length }})</h3>
 <span class="sub">в карточке номер WebMIM, а в прочитанных заказах WebMIM его нет: опечатка в номере, заказ с другого аккаунта WebMIM или старше {{ r.days }} дн.</span></div>
 <div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Заказ</th><th>Клиент</th><th>Создан</th><th>Номер / ID WebMIM в карточке</th><th>Что сделать</th></tr></thead><tbody>
-{% for c in r.not_found %}<tr data-not-found="{{ c.id }}"><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}</td><td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.webmim_number or "—" }} / {{ c.webmim_id or "—" }}</td>
+{% for c in r.not_found %}<tr data-not-found="{{ c.id }}" data-href="/orders/{{ c.id }}" class="is-link"><td><a href="/orders/{{ c.id }}">№{{ c.id }}</a></td><td>{{ c.client_name or "без имени" }}</td><td class="small">{{ c.created_at|short_dt }}</td><td class="small">{{ c.webmim_number or "—" }} / {{ c.webmim_id or "—" }}</td>
 <td><a class="btn btn--secondary btn--xs" href="/orders/{{ c.id }}">Сверить номер в карточке</a></td></tr>
 {% else %}<tr><td colspan="5" class="muted">Таких нет.</td></tr>{% endfor %}
 </tbody></table></div></section>

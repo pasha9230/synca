@@ -36,7 +36,13 @@ NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её
 # the owner 2026-10-25: «Возврат отдал», «отдал на возврат», «отправлен(о) на возврат», «отправили на возврат» — the tyres went back to the
 # supplier. No typo is guessed («лтправлен» stays a question). The client is never written to.
 RETURN, RETURNED = "возврат отдал", "шины отданы на возврат"   # the command is a phrase only: a bare «возврат» is not it
-RETURN_FROM = ("at_point", "oth", "refused")      # the stages where the tyres are at the point (the lead 2026-10-26)
+RETURN_FROM = ("at_point", "oth")                 # the stages where the tyres are at the point (the lead 2026-10-26), and «Отмена / невыкуп»
+                                                  # with the reason «не выкупил» (it was «Отказ/невыкуп» before the merge, the owner 2026-10-29)
+
+
+def _return_from(card: dict) -> bool:
+    return card["stage"]["code"] in RETURN_FROM or (card["stage"]["code"] == "cancel"
+                                                    and str(card.get("cancel_reason") or "").strip().casefold().startswith(orders.NOT_BOUGHT))
 RETURN_REASON = "точка: шины отданы поставщику"
 RETURN_LINE = "точка: шины отданы поставщику (возврат)"
 RETURN_ASK = "Точка отдала шины поставщику (возврат): заполните сумму возврата и переведите в «Возврат»."
@@ -312,7 +318,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     if word == RETURN:
         if code == "return":
             return finish("уже отмечено", "Заказ №%s уже отмечен: %s." % (label(card), RETURNED))
-        if code not in RETURN_FROM:
+        if not _return_from(card):
             return dispute(point, "«%s», а заказ на этапе «%s»" % (RETURN, card["stage"]["name"]),
                            CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
@@ -333,7 +339,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return dispute(point, "слово «%s» не подходит к этапу «%s»" % (word, card["stage"]["name"]),
                        CANCELLED % label(card) if code == "cancel" else
                        "Для заказа №%s на этапе «%s» такая команда не нужна; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
-    return finish(*apply(conn, card, command["to_stage_id"], "менеджер %s" % point["name"], now, deliver))
+    return finish(*apply(conn, card, command["to_stage_id"], "менеджер %s" % point["name"], now, deliver, merged_reason(conn, command)))
 
 
 # ---- «выдал» without a number and not a reply (the owner 2026-10-26): the point's one order is asked about, several are listed; nothing
@@ -478,10 +484,19 @@ def _stage_id(conn, code) -> Optional[int]:
     return next((s["id"] for s in orders.list_stages(conn) if s["code"] == code), None)
 
 
-def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional[Deliver]) -> Tuple[str, str]:
+def merged_reason(conn, command: Optional[dict]) -> str:
+    """The reason a word of the point gives on its move into «Отмена / невыкуп»: «не выкупил» for a word that led to «Отказ/невыкуп» before
+    the merge (it lets «возврат отдал» through), '' (apply: «команда точки») for any other."""
+    return orders.NOT_BOUGHT + " (команда точки)" if command and command.get("id") and orders.merged_command(conn, command["id"]) else ""
+
+
+def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional[Deliver], reason: str = "") -> Tuple[str, str]:
     """Move the order; on the arrival at the point the client is told at once. (outcome for the log, answer for the point)."""
     try:
-        moved = orders.move_card(conn, card["id"], stage_id, now, who)
+        changes = None
+        if orders.get_stage(conn, stage_id)["code"] == "cancel" and not str(card.get("cancel_reason") or "").strip():
+            changes = {"cancel_reason": reason or "команда точки"}      # a word of the point into «Отмена / невыкуп» (the reason «не выкупил» only
+        moved = orders.move_card(conn, card["id"], stage_id, now, who, changes)   # for a word that led to «Отказ/невыкуп» before the merge)
     except OrderError as err:
         return "не выполнено: %s" % err, "Не получилось: %s" % err
     stage = orders.get_stage(conn, stage_id)
@@ -653,11 +668,24 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str)
     token = ""
     try:
         card = orders.get_card(conn, card_id)
-        token = "arrived-%d-%s" % (card_id, re.sub(r"\D", "", card["entered_at"] or now))
+        token = arrived_token(card, now)
     except Exception as err:
         status, why, copy = "failed", "сбой отправки: %s" % (str(err)[:200] or err.__class__.__name__), ""
     else:
+        task = arrived_task(conn, card_id, token)
+        if task is not None and task["status"] == "done":          # this arrival's message went already (by hand or by itself): never again
+            return True, "Клиенту сообщение «можно забирать» по этому приезду уже отправлено."
+        if task is not None and task["status"] in ("running", "skipped"):
+            return False, "Сообщение «можно забирать» по этому приезду %s: само не отправляется." % (
+                "уже отправляется" if task["status"] == "running" else "пропущено вручную")
+        if task is not None and _answered_by_hand(conn, token):
+            _arrived_close(conn, task, now, who, "владелец ответил во «Входящих»")
+            return True, "Сообщение «можно забирать» по этому приезду владелец уже разобрал во «Входящих»."
         status, why, copy = send_to_client(conn, card, _arrived_body(conn), token, deliver, now)
+        if status == "sent" and task is not None:
+            _arrived_close(conn, task, now, who)
+        elif status == "failed":
+            _arrived_wait(conn, card, token, copy, why, now)
     if status == "sent":
         return True, "Клиенту отправлено сообщение «можно забирать»."
     by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."
@@ -678,6 +706,86 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str)
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the failed «можно забирать» of card %s could not be noted", card_id)
     return False, "Клиенту сообщение не отправлено: владелец разберётся."
+
+
+def arrived_token(card: dict, now: str) -> str:
+    """The send mark of «можно забирать» of one arrival: the order and the moment it reached the point."""
+    return "arrived-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or now))
+
+
+def arrived_task(conn, card_id, token: str) -> Optional[dict]:
+    """The message task «можно забирать» of this arrival (made when it did not go by itself), or None."""
+    from . import order_engine as engine
+    row = conn.execute("SELECT id FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, engine.ARRIVED_RULE, token)).fetchone()
+    return engine.get_task(conn, row[0]) if row else None
+
+
+def _arrived_wait(conn, card: dict, token: str, copy: str, why: str, now: str) -> None:
+    """«Можно забирать» did not go (no chat, no keys, a value lacking): it waits as a message of the order (the owner 2026-10-29: the text in the
+    card, «Скопировать», «Отправлено вручную»); a chat bound later sends it once (arrived_after_link). Never raises."""
+    from . import order_engine as engine
+    try:
+        template = conn.execute("SELECT id FROM order_template WHERE name = ? AND audience = 'client' ORDER BY id LIMIT 1", (ARRIVED_TEMPLATE,)).fetchone()
+        conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                     "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     (card["id"], engine.ARRIVED_RULE, token, "message", str(template[0]) if template else "", card["stage_id"],
+                      "pending" if copy else "error", ARRIVED_TEMPLATE, copy, "" if copy else "Не отправлено само: %s." % why, now))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the waiting «можно забирать» of card %s could not be kept", card["id"])
+
+
+def _arrived_close(conn, task: dict, now: str, who: str, how: str = "отправлено само") -> None:
+    """The arrival's message went by itself (a second «приехал» with the chat there now) or a person dealt with it in «Входящие»: its waiting
+    task is done, never sent again."""
+    conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status IN ('pending', 'error')",
+                 (how, now, task["id"]))
+    conn.commit()
+
+
+def _answered_by_hand(conn, token: str) -> bool:
+    """A person answered the line of «Входящие» about this arrival's message (the system's «Итог: …» answers are not a person's)."""
+    return conn.execute("SELECT 1 FROM manager_message WHERE (message_id = ? OR message_id LIKE ?) AND status = 'answered' AND answer NOT LIKE 'Итог:%'",
+                        (token, token + "-%")).fetchone() is not None
+
+
+def arrived_after_link(conn, card_id, deliver: Optional[Deliver], now: str, who: str) -> str:
+    """A chat was bound to the order while it stands on «Товар на точке» and its «можно забирать» of this arrival waits: it is sent once, by itself
+    (the owner 2026-10-29). The task is taken first (order_engine.send_task: pending → running), so a second binding, a person's press or the
+    sync never send it again; done by hand, skipped or sent already — nothing. Returns a line for the person ('' when nothing waited). Never raises."""
+    from . import order_engine as engine
+    try:
+        card = orders.get_card(conn, card_id)
+        if card["stage"]["code"] != "at_point":
+            return ""
+        token = arrived_token(card, now)
+        task = arrived_task(conn, card_id, token)
+        if task is None or task["status"] not in ("pending", "error"):
+            return ""
+        if _answered_by_hand(conn, token):                         # the owner answered its line of «Входящие» (wrote to the client by hand)
+            _arrived_close(conn, task, now, who, "владелец ответил во «Входящих»")
+            return ""
+        if deliver is None:
+            return "«Можно забирать» ждёт в «Сообщениях по заказу»: ключи Авито недоступны."
+        chat_row = engine.send_task(conn, task["id"], task["body"], deliver, now, who)
+        try:
+            chats._inbox_done(conn, token, now, "отправлено само после привязки чата")    # the line «отправьте вручную» of «Входящие» is answered
+        except Exception:
+            conn.rollback()
+        return "Клиенту отправлено «можно забирать» в чат Ч-%d (сообщение ждало привязки чата)." % chat_row
+    except chats.ChatSendUnknown:                                  # it may have reached the client (a 402 the sync repeats, a lost answer)
+        conn.rollback()
+        return "«Можно забирать»: неизвестно, ушло ли. Проверьте чат Авито заказа, повторно не отправляйте."
+    except (OrderError, chats.ChatError) as err:
+        conn.rollback()
+        orders.add_event(conn, card_id, now, who, "chat", "Сообщение клиенту не отправлено («%s»): %s" % (ARRIVED_TEMPLATE, str(err)[:300]), level="red")
+        conn.commit()
+        return "Клиенту «можно забирать» не отправлено: %s Оно ждёт в «Сообщениях по заказу»." % str(err)[:300]
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("«можно забирать» after binding a chat to card %s", card_id)
+        return "«Можно забирать» не отправлено: сбой панели. Оно ждёт в «Сообщениях по заказу»."
 
 
 def signed(text: str) -> str:
@@ -818,7 +926,7 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
     word, who, code = item["word"], "%s (подтверждение из «Входящих»)" % author, card["stage"]["code"]
     sources, target = BUILTIN.get(word, ((), None))
     command = None if word in (NO_SHOW, RETURN) or target else rules.find_command(conn, card["stage_id"], word)
-    fits = (code == "at_point") if word == NO_SHOW else (code in RETURN_FROM) if word == RETURN else \
+    fits = (code == "at_point") if word == NO_SHOW else _return_from(card) if word == RETURN else \
         ((code in sources or code == target) if target else command is not None)
     if not fits:
         raise OrderError("Команда «%s» не подходит к заказу №%s на этапе «%s»: переведите заказ вручную и ответьте точке."
@@ -841,7 +949,8 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
             outcome = "уже на «%s»%s" % (card["stage"]["name"], "; клиенту %s" % ("отправлено" if sent else "не отправлено") if note else "")
             reply = ("Заказ №%s — отмечено: %s. %s" % (label(card), ARRIVED if target == "at_point" else ISSUED, note)).strip()
         else:
-            outcome, reply = apply(conn, card, _stage_id(conn, target) if target else command["to_stage_id"], who, now, deliver)
+            outcome, reply = apply(conn, card, _stage_id(conn, target) if target else command["to_stage_id"], who, now, deliver,
+                                   merged_reason(conn, None if target else command))
             if outcome.startswith("не "):
                 raise OrderError(reply)
     except Exception:

@@ -198,7 +198,7 @@ def test_the_alert_of_an_earlier_try_is_answered_when_the_sync_finds_the_new_pre
 
 # --- 3: a send the sync stopped for a closed order answers its caller's line ------------------------------------------------------------
 
-STOPPED = "Итог: система больше не повторяет: заказ в «Отмена» — писать клиенту не нужно."
+STOPPED = "Итог: система больше не повторяет: заказ в «Отмена / невыкуп» — писать клиенту не нужно."
 
 
 def test_a_402_of_an_arrived_whose_order_was_cancelled_answers_its_line(env, monkeypatch):

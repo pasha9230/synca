@@ -205,11 +205,15 @@ def messages_link(card_id) -> str:
     return "/orders/%d?messages=1#messages" % card_id
 
 
-def bind_chat(conn, card_id, chat_row, how: str, move: bool = False) -> None:
-    """A person binds a chat to the order (the field «Чат Авито», the chat found by the phone, «Перепривязать сюда»); said by a flash."""
+def bind_chat(conn, card_id, chat_row, how: str, move: bool = False, deliver=None) -> None:
+    """A person binds a chat to the order (the field «Чат Авито», the chat found by the phone, «Перепривязать сюда»); said by a flash.
+    `deliver` (routes' avito_deliver): «можно забирать» that waited for a chat goes once by itself (order_manager.arrived_after_link)."""
     result = deals.bind_chat(conn, card_id, chat_row, how, local_iso(), author(), move=move)
     if result["state"] == "linked":
         flash("Чат %s привязан к заказу: сообщения клиенту уйдут в него по кнопке «Отправить»." % deals.ref(chat_row), "ok")
+        line = manager.arrived_after_link(conn, card_id, deliver, local_iso(), author())
+        if line:
+            flash(line, "ok" if line.startswith("Клиенту отправлено") else "error")
         offer_waiting(conn, card_id)
     elif result["state"] == "other":
         flash("Чат %s уже в заказе №%s: он не перенесён. Перенести можно кнопкой «Перепривязать сюда»." % (deals.ref(chat_row), result["order"]))
@@ -350,7 +354,7 @@ def _with_stubs(events: list, chats_shown: list) -> list:
     return out
 
 
-OTH_OFFER = ("cancel", "refused")                 # a refusal of an order at the point: the tyres stay there (the owner 2026-10-29)
+OTH_OFFER = ("cancel",)                           # «Отмена / невыкуп» of an order at the point: the tyres stay there (the owner 2026-10-29)
 OTH_QUESTION = "Шины остаются на точке — перевести на «На ОТХ»?"
 
 
@@ -364,7 +368,7 @@ def no_account_tags(conn, tags):
 
 
 def oth_offer(conn, card: dict, stage_id) -> Optional[dict]:
-    """The stage of «Отмена» or «Отказ/невыкуп» chosen for an order on «Товар на точке» before the person answered the question: the move
+    """The stage «Отмена / невыкуп» chosen for an order on «Товар на точке» before the person answered the question: the move
     waits and the card asks it (the owner 2026-10-29); None: move as asked. The answer comes as the field oth_answer (yes / no)."""
     if card["stage"]["code"] != "at_point" or request.form.get("oth_answer") in ("yes", "no"):
         return None
@@ -372,9 +376,10 @@ def oth_offer(conn, card: dict, stage_id) -> Optional[dict]:
     return stage if stage is not None and stage["code"] in OTH_OFFER else None
 
 
-def ask_oth(card_id: int, stage: dict):
+def ask_oth(card_id: int, stage: dict, reason: Optional[str] = None):
     """Keep the move asked for (and its reason) for the question of the card; the board is told where the question is."""
-    session["oth_offer"] = {"card": card_id, "stage_id": stage["id"], "cancel_reason": str(request.form.get("cancel_reason") or "").strip()[:300]}
+    reason = str(request.form.get("cancel_reason") or "").strip()[:300] if reason is None else reason
+    session["oth_offer"] = {"card": card_id, "stage_id": stage["id"], "cancel_reason": reason}
     where = "/orders/%d#oth-offer" % card_id
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(ok=False, message=OTH_QUESTION, go=where)
@@ -420,6 +425,16 @@ def register(app) -> None:
         if str(sale_unit or "").strip() and str(sale_unit).strip() != str(sale_auto or "").strip():
             args["sale_unit"] = sale_unit
         return args, by_text
+
+    def account_default(conn, fields) -> str:
+        """The responsible of a new order made by hand: the one of the account of its chat («Чат Авито», the owner 2026-10-29) unless the
+        person picked somebody else than the prefilled self; else as typed."""
+        typed = str(fields.get("responsible") or "").strip()
+        if typed and typed != author():
+            return typed
+        chat_row = deals.chat_of_field(conn, fields.get("avito_chat")) if fields.get("avito_chat") else None
+        chat = chats_store.get_chat(conn, chat_row) if chat_row else None
+        return (connections.account_responsible(conn, chat["account_id"]) if chat else "") or typed
 
     def window_account(conn, values, card_id=None):
         """The Avito account that prices the positions of a window (order_offers.account_for): the order's (`card_id`, or `order` of the
@@ -651,6 +666,7 @@ def register(app) -> None:
             if len(rows) > MAX_NEW_ROWS:
                 raise orders.OrderError("В новом заказе не больше %d позиций: остальные добавьте в карточке." % MAX_NEW_ROWS)
             check_responsible(app, conn, fields.get("responsible"))
+            fields["responsible"] = account_default(conn, fields)
             items, account = [], window_account(conn, fields) if rows else None
             for row in rows:                                              # every position is checked before anything is written
                 args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock", account,
@@ -670,7 +686,7 @@ def register(app) -> None:
             flash("Добавлено по тексту: %s." % "; ".join(found))
         named = deals.chat_of_field(conn, fields.get("avito_chat")) if can("chats", "edit") and fields.get("avito_chat") else None
         if named is not None:
-            bind_chat(conn, card_id, named, "field")                     # the chat of the client is bound before the window offers the message
+            bind_chat(conn, card_id, named, "field", deliver=avito_deliver(conn, local_iso()))   # the chat is bound before the window offers the message
         offer_send(conn, card_id, stamp)                                  # the rules of the first stage made a message: «Отправить клиенту?» at once
         return redirect("/orders/%d" % card_id)
 
@@ -681,12 +697,20 @@ def register(app) -> None:
         stage_id = _int(request.form.get("stage_id"))
         changes = {} if own_point() else {k: v for k, v in request.form.items() if k in orders.EDITABLE}     # a point manager only moves
         card = card_or_404(conn, card_id)
+        reason = None
+        if "cancel_kind" in request.form:                                  # «Отмена / невыкуп»: the choice of the reason and its text
+            try:
+                reason = orders.cancel_reason_of(request.form.get("cancel_kind"), request.form.get("cancel_reason"))
+            except orders.OrderError as err:
+                flash(str(err), "error")
+                return back(card_id)
+            changes["cancel_reason"] = reason
         asked = oth_offer(conn, card, stage_id) if stage_id is not None else None
         if asked is not None:
-            return ask_oth(card_id, asked)
+            return ask_oth(card_id, asked, reason)
         if request.form.get("oth_answer") in ("yes", "no"):                # the answer to the question: its reason goes with the move, for a point too
             session.pop("oth_offer", None)
-            if request.form.get("cancel_reason"):
+            if reason is None and request.form.get("cancel_reason"):
                 changes["cancel_reason"] = str(request.form.get("cancel_reason"))[:300]
         send = None
         try:
@@ -835,13 +859,14 @@ def register(app) -> None:
                 if deals.unbind_chat(conn, card_id, unlink, local_iso(), author()):
                     flash("Чат %s отвязан от заказа." % deals.ref(unlink), "ok")
             elif moved is not None:
-                bind_chat(conn, card_id, moved, "field", move=True)
+                bind_chat(conn, card_id, moved, "field", move=True, deliver=avito_deliver(conn, local_iso()))
             elif offered is not None:
-                bind_chat(conn, card_id, offered, "field" if offered == deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"]) else "phone")
+                bind_chat(conn, card_id, offered, "field" if offered == deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"]) else "phone",
+                          deliver=avito_deliver(conn, local_iso()))
             elif "avito_chat" in changed:
                 named = deals.chat_of_field(conn, orders._row(conn, card_id)["avito_chat"])
                 if named is not None:
-                    bind_chat(conn, card_id, named, "field")
+                    bind_chat(conn, card_id, named, "field", deliver=avito_deliver(conn, local_iso()))
         refused = None
         if typed_row:
             try:

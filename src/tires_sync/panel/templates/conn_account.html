@@ -12,6 +12,13 @@
 <div class="card-head"><h3>Какие шины не публиковать</h3><span class="sub">Отмеченные типы не попадают в фид этого аккаунта (объявления Авито снимет при ближайшей публикации)</span></div>
 <div class="card-body stack">{% for t in tire_types %}<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="exclude_types" value="{{ t }}"{% if t in a.exclude_types %} checked{% endif %}> {{ t }}</label>{% endfor %}</div>
 <div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>{% if can_post("account_exclude_types") %}</form>{% else %}</fieldset>{% endif %}</section>
+<section class="card" id="responsible">
+{% if can_post("account_responsible") %}<form method="post" action="/connections/accounts/{{ a.id }}/responsible">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Ответственный</h3><span class="sub">Новые заказы этого аккаунта (из чата, звонка, вручную по его чату) сразу получают этого сотрудника; в заказе его можно сменить. Старые заказы не меняются. В «Чатах» аккаунт открывается у него по умолчанию.</span></div>
+<div class="card-body"><select class="select" name="responsible" aria-label="Ответственный аккаунта"><option value="">— не выбран (как раньше) —</option>
+{% for login in a.staff %}<option value="{{ login }}"{% if login == a.responsible %} selected{% endif %}>{{ login }}</option>{% endfor %}
+{% if a.responsible and a.responsible not in a.staff %}<option value="{{ a.responsible }}" selected>{{ a.responsible }} (не сотрудник)</option>{% endif %}</select></div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>{% if can_post("account_responsible") %}</form>{% else %}</fieldset>{% endif %}</section>
 <section class="card" id="contact-name">
 {% if can_post("account_contact_name") %}<form method="post" action="/connections/accounts/{{ a.id }}/contact-name">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <div class="card-head"><h3>Имя контактного лица</h3><span class="sub">Попадает в каждое объявление этого аккаунта (ManagerName). Пусто: имя не передаётся, Авито берёт контакт из кабинета. Если в кабинете номер оформлен как сотрудник, впишите имя точно как там</span></div>

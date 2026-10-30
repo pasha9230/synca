@@ -147,7 +147,7 @@ def test_a_402_of_a_task_that_is_gone_is_not_sent_again(env):
     assert settle(conn, sender, at(61)) == {"stopped": 1} and sender.sent == []
 
 
-@pytest.mark.parametrize("code, name", [("cancel", "Отмена"), ("refused", "Отказ/невыкуп"), ("return", "Возврат")])
+@pytest.mark.parametrize("code, name", [("cancel", "Отмена / невыкуп"), ("return", "Возврат")])
 def test_a_402_of_a_task_of_a_closed_order_is_not_sent_again(env, code, name):
     conn, chat_row, card = env
     task_id = make_task(conn, card)

@@ -38,7 +38,7 @@
 </tbody></table></div>{% endcall %}{% endif %}
 {% if not narrow %}{% call entity_ui.section("Обращения", sub="первое и повторные: звонок, сообщение или заказ после перерыва от %d ч" % GAP) %}{{ entity_ui.listing([{"key": "n", "label": "№"}, {"key": "when", "label": "Когда"}, {"key": "via", "label": "Как"}, {"key": "ref", "label": ""}], entity.inquiries, "Обращений нет.") }}{% endcall %}{% endif %}
 {% call entity_ui.section("Заказы и покупки", sub="цены продажи; купил — этап «успешный»") %}<div class="entity-list"><table class="table"><thead><tr><th>№</th><th>Создан</th><th>Что</th><th class="num">Сумма</th><th>Точка</th><th>Этап</th>{% if split %}<th></th>{% endif %}</tr></thead><tbody>
-{% for p in entity.purchases %}<tr><td data-label="№"><a href="/orders/{{ p.id }}">№{{ p.id }}</a></td><td data-label="Создан"><time>{{ p.created|dt }}</time></td>
+{% for p in entity.purchases %}<tr data-href="/orders/{{ p.id }}" class="is-link"><td data-label="№"><a href="/orders/{{ p.id }}">№{{ p.id }}</a></td><td data-label="Создан"><time>{{ p.created|dt }}</time></td>
 <td data-label="Что">{% if p["items"] %}<ul class="crm-items">{% for i in p["items"] %}<li>{{ i.name }}{% if i.size %} · <b>{{ i.size }}</b>{% endif %} · {{ i.qty }} шт × {{ i.unit|money }} = {{ i.sum|money }}</li>{% endfor %}</ul>{% else %}<span class="muted">позиций нет</span>{% endif %}</td>
 <td data-label="Сумма" class="num">{{ p.total|money if p["items"] else "—" }}</td><td data-label="Точка">{{ p.point or "—" }}</td>
 <td data-label="Этап">{% if p.won %}<span class="badge badge--ok">{{ p.stage }}</span>{% elif p.lost %}<span class="badge badge--err">{{ p.stage }}</span>{% else %}{{ p.stage }}{% endif %}</td>

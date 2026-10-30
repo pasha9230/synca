@@ -186,7 +186,7 @@ def test_an_unknown_send_of_a_task_of_a_cancelled_order_with_other_messages_does
     sender.history = [out("m-other", "Другое", created=NOW_TS + 30)]
     assert settle(conn, sender, at(61)) == {"unknown": 1} and sender.sent == []
     [said] = [e for e in events(conn, card) if "проверить нельзя" in e[0]]
-    assert said[1] == "yellow" and "Заказ в «Отмена» — писать клиенту не нужно." in said[0] and "вручную" not in said[0]
+    assert said[1] == "yellow" and "Заказ в «Отмена / невыкуп» — писать клиенту не нужно." in said[0] and "вручную" not in said[0]
 
 
 def test_an_unknown_reply_written_in_the_chat_that_cannot_be_checked_still_asks_to_look_and_write(env):

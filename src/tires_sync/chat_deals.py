@@ -11,7 +11,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
-from . import chat_name, chats as chats_store, clients, order_points as points_store, order_wait, orders, store
+from . import chat_name, chats as chats_store, clients, connections, order_points as points_store, order_wait, orders, store
 from .orders import OrderError
 
 log = logging.getLogger("tires_sync.chats")
@@ -361,7 +361,8 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         if named and own_point and named[0]["id"] != own_point:            # the manager of a point makes the order of the own point, never another's
             named = None
         fields = {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito", "comment": comment.strip(), "tags": tags,
-                  "responsible": (of_account and point_responsible(conn, of_account["id"])) or orders.default_responsible(conn),   # a point's account: its manager
+                  "responsible": (connections.account_responsible(conn, chat["account_id"])                # the account's (the owner 2026-10-29)
+                                  or (of_account and point_responsible(conn, of_account["id"])) or orders.default_responsible(conn)),   # a point's account: its manager
                   "delivery_date": next_day(now) if delivery else ""}
         if named:
             fields["point_id"] = named[0]["id"]

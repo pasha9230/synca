@@ -6,7 +6,9 @@
 <div class="modal-head"><h3 id="finish-window-h">Отмена или возврат · заказ №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack">
 <form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids.cancel }}">
-<label class="field"><span class="label">Причина отмены</span><input class="input" name="cancel_reason" maxlength="300" placeholder="Например: клиент передумал"></label>
+<fieldset class="field" data-cancel-kinds><legend class="label">Причина</legend><div class="row" style="gap:var(--s-3);flex-wrap:wrap">
+<label><input type="radio" name="cancel_kind" value="отменил клиент" required> отменил клиент</label><label><input type="radio" name="cancel_kind" value="не выкупил"> не выкупил</label><label><input type="radio" name="cancel_kind" value="другое"> другое</label></div></fieldset>
+<label class="field"><span class="label">Подробнее (для «другое» — обязательно)</span><input class="input" name="cancel_reason" maxlength="280" placeholder="Например: нашёл дешевле"></label>
 <div><button class="btn btn--danger-outline btn--sm">Отменить заказ</button></div></form>
 <hr>
 <form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids['return'] }}">

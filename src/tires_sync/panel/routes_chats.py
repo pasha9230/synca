@@ -195,6 +195,12 @@ def register(app) -> None:
         mine = own_point() is not None                                    # the manager of a point: the chats of the point's account only (in the query)
         if mine:
             acc = point_account()
+        every = None                                                      # «acc=all»: all the accounts though the person has an account of their own
+        if not mine and acc is None:
+            default = connections.chats_default_account(conn, author())   # the account the person answers for (the owner 2026-10-29)
+            if default is not None:
+                every = "all" if request.args.get("acc") == "all" else None
+                acc = default if every is None else None
         q = " ".join(request.args.get("q", "").split())[:SEARCH_MAX]
         moment = local_now().replace(tzinfo=None)
         answerers = _answerers(conn)
@@ -302,10 +308,11 @@ def register(app) -> None:
             args = urlencode([kv for kv in (("f", f), ("acc", a), ("q", q)) if kv[1]])
             return "/chats" + ("?" + args if args else "")
         # two buttons (owner's word 2026-10-24): «Состояние» and «Аккаунт»; each keeps the other one and the search
-        filter_menus = [("Состояние: " + FILTERS[flt], [(label, link(k, acc), k == flt) for k, label in FILTERS.items()])]
+        filter_menus = [("Состояние: " + FILTERS[flt], [(label, link(k, acc or every), k == flt) for k, label in FILTERS.items()])]
         if not mine and (len(accounts) > 1 or acc is not None):                     # an account in the address can always be dropped; a point's is fixed
             filter_menus.append(("Аккаунт: " + ((names.get(acc) or "аккаунт №%d" % acc) if acc is not None else "Все аккаунты"),
-                                 [("Все аккаунты", link(flt, None), acc is None)] + [(a["name"], link(flt, a["id"]), a["id"] == acc) for a in accounts]))
+                                 [("Все аккаунты", link(flt, every or ("all" if connections.chats_default_account(conn, author()) else None)), acc is None)]
+                                 + [(a["name"], link(flt, a["id"]), a["id"] == acc) for a in accounts]))
         handoff = None
         if current and mine and current["account_id"] == point_account() and not chat_of_other_point(current["id"]):   # what the POST allows
             typed = session.pop("handoff_%d" % current["id"], None)
@@ -317,8 +324,8 @@ def register(app) -> None:
         offer = send_offer(conn, deal["id"], chat_row) if deal else None
         return render_template("chats.html", offer=offer, handoff=handoff, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=chats.pending_sends(conn, [current["id"]], local_iso()) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
                                accounts=accounts, stages=orders.list_stages(conn), statuses=chats.STATUSES, q=q, answerers=answerers, answer_names=dict(answerers),
-                               unsearch="/chats" + ("?" + urlencode([kv for kv in (("f", flt), ("acc", acc)) if kv[1]]) if (flt or acc) else ""),
-                               query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc), ("q", q)) if kv[1]])) if (flt or acc or q) else "")
+                               unsearch="/chats" + ("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every)) if kv[1]]) if (flt or acc or every) else ""), every=every,
+                               query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every), ("q", q)) if kv[1]])) if (flt or acc or every or q) else "")
 
     def back(chat_row):
         return redirect("/chats/%d%s" % (chat_row, _keep_query()))
@@ -575,6 +582,12 @@ def register(app) -> None:
                 raise orders.OrderError("Заказ №%d не вашей точки: привязать к нему чат нельзя." % order_id)
             deals.link_chat(conn, chat_row, order_id, local_iso(), author())
             flash("Чат привязан к заказу №%d." % order_id, "ok")
+
+            def deliver(row, body, token):
+                chats.send_reply(conn, _writer(conn, chats.get_chat(conn, row)), row, body, token, local_iso(), author())
+            line = mgr.arrived_after_link(conn, order_id, deliver, local_iso(), author())   # «можно забирать» that waited for a chat: once
+            if line:
+                flash(line, "ok" if line.startswith("Клиенту отправлено") else "error")
         except orders.OrderError as err:
             flash(str(err))
         return back(chat_row)

@@ -96,7 +96,13 @@ def restore_order(conn, record_id, now: str, author: str) -> int:
         if conn.execute("SELECT 1 FROM order_card WHERE id = ?", (card["id"],)).fetchone():
             raise OrderError("Заказ №%d уже есть." % card["id"])
         notes, moved_to = [], None
-        if not conn.execute("SELECT 1 FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone():
+        merged = orders.merged_into(conn, card["stage_id"]) if not conn.execute("SELECT 1 FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone() else None
+        if merged is not None and conn.execute("SELECT 1 FROM order_stage WHERE id = ?", (merged,)).fetchone():
+            card["stage_id"] = merged                                           # «Отказ/невыкуп» joined «Отмена / невыкуп» meanwhile (2026-10-29)
+            if not str(card.get("cancel_reason") or "").strip():
+                card["cancel_reason"] = orders.NOT_BOUGHT
+            notes.append("этап «Отказ/невыкуп» объединён с отменой, заказ в «%s»" % orders.get_stage(conn, merged)["name"])
+        elif not conn.execute("SELECT 1 FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone():
             stage = moved_to = orders._first_stage(conn)                        # its stage was deleted meanwhile: back on the first one
             card["stage_id"], card["entered_at"] = stage["id"], now
             notes.append("этап удалён, заказ на этапе «%s»" % stage["name"])

@@ -73,7 +73,7 @@
 {% call entity_ui.section("Лента событий") %}
 {% if can_post("order_note") %}<form method="post" action="/orders/{{ c.id }}/note" class="card-body row" style="gap:var(--s-2)">{{ csrf }}
 <textarea class="textarea grow" name="text" rows="1" maxlength="2000" placeholder="Заметка по заказу" aria-label="Заметка"></textarea><button class="btn btn--secondary btn--sm">Добавить</button></form>{% endif %}
-<ul class="feed card-body">{% for e in events %}<li class="{{ 'is-note' if e.kind == 'note' else '' }}"><time title="{{ e.at|dt }}">{{ e.at|short_dt }}</time><b>{{ author_label(e.author) }}</b> · {{ e.text }}{% if e.avito_link %} <a class="btn btn--secondary btn--xs" href="{{ e.avito_link }}" target="_blank" rel="noopener noreferrer">Открыть чат в Авито</a>{% endif %}</li>{% endfor %}</ul>
+<ul class="feed card-body">{% for e in events %}<li class="{{ 'is-note' if e.kind == 'note' else '' }}{{ ' is-red' if e.level == 'red' else '' }}"{% if e.level == 'red' %} data-red{% endif %}><time title="{{ e.at|dt }}">{{ e.at|short_dt }}</time><b>{{ author_label(e.author) }}</b> · {{ e.text }}{% if e.avito_link %} <a class="btn btn--secondary btn--xs" href="{{ e.avito_link }}" target="_blank" rel="noopener noreferrer">Открыть чат в Авито</a>{% endif %}</li>{% endfor %}</ul>
 {% endcall %}
 </div>
 </div>
