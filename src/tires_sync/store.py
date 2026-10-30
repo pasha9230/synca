@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS economics_snapshot (
 -- price_guard (the owner 2026-10-30): the last accepted supplier's price of a position; a fall of 5 % and more waits (pending) for the owner
 CREATE TABLE IF NOT EXISTS price_anchor (goods_id TEXT PRIMARY KEY, base_price REAL NOT NULL, set_at TEXT NOT NULL, how TEXT NOT NULL,
     prev REAL NOT NULL DEFAULT 0, pending REAL NOT NULL DEFAULT 0, pending_since TEXT NOT NULL DEFAULT '', kept REAL NOT NULL DEFAULT 0,
-    kept_at TEXT NOT NULL DEFAULT '', kept_by TEXT NOT NULL DEFAULT '', told TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '');
+    kept_at TEXT NOT NULL DEFAULT '', kept_by TEXT NOT NULL DEFAULT '', told TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '',
+    told_rise TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS published_state (
     account_id INTEGER NOT NULL DEFAULT 1, goods_id TEXT NOT NULL, price INTEGER NOT NULL, base_price REAL NOT NULL,
     point TEXT NOT NULL, location TEXT NOT NULL DEFAULT 'supplier', first_hold TEXT, snapshot TEXT NOT NULL,

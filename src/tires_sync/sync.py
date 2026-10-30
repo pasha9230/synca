@@ -774,7 +774,8 @@ def run_cycle(
         tire_match.record(conn, acct, ev.match, store.moscow_iso())
     if account_id is not None:                                            # the anchors of the supplier's prices (price_guard), saved with the cycle
         from . import price_guard
-        price_guard.record(conn, parsed.offers, store.moscow_iso(), ev)
+        live = {d.goods_id for d in ds.decisions if d.action.value in ("publish", "update", "keep", "hold")}
+        price_guard.record(conn, parsed.offers, store.moscow_iso(), ev, live)
         conn.commit()
     live = live_titles_of(out_dir)
     titles = dict(mirror_feed.bound_titles(conn, acct), **live)

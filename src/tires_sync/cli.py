@@ -814,7 +814,8 @@ def _cmd_run_cycle(args) -> int:
         _alert_new_unmatched(conn, box, results)
         if parsed is not None and any(r.ok for r in results):
             _alert_own_below_cost(conn, box, parsed.offers)
-            _alert_price_guard(conn, box)
+            if args.publish:                                        # «наша цена поднята / оставлена»: true only of a published feed
+                _alert_price_guard(conn, box)
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0

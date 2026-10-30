@@ -135,13 +135,16 @@ def test_the_anchor_outlives_the_ad(tmp_path):
     assert our(tmp_path) == price(5000)
 
 
-def test_the_first_run_takes_the_anchor_from_the_published_purchase(tmp_path):
+def test_the_first_run_changes_no_price(tmp_path):
+    """The review of 2026-10-30: an old purchase of another account must never lift a price on the day of the deploy — the anchor of the
+    first sight is the price of today."""
     conn = prepared(tmp_path)
     at(tmp_path, 5000)
     conn.execute("DELETE FROM price_anchor")                                     # as before this feature
+    conn.execute("UPDATE published_state SET base_price = 6000")                 # a purchase of long ago (a KEEP never rewrote it)
     conn.commit()
-    at(tmp_path, 3850)
-    assert our(tmp_path) == price(5000) and anchor(tmp_path)["base_price"] == 5000.0
+    at(tmp_path, 5000)
+    assert our(tmp_path) == price(5000) and anchor(tmp_path)["base_price"] == 5000.0 and anchor(tmp_path)["pending"] == 0
 
 
 def test_a_change_of_the_markup_at_the_same_purchase_is_never_held(tmp_path):
@@ -244,3 +247,61 @@ def test_the_cycle_sends_the_summary_once_with_the_link(tmp_path, monkeypatch):
     assert len(sent) == 1 and "Ikon Tyres: 1 поз. −23 %" in sent[0] and "https://panel.test/prices/changes" in sent[0]
     at(tmp_path, 3850)
     assert len(sent) == 1                                                        # said once
+
+
+def test_a_tire_seen_before_takes_the_anchor_of_the_ad_it_takes_over_two_cycles(tmp_path):
+    """The review of 2026-10-30: B (4 Точки) had its own first anchor long before it took A's ad."""
+    conn = prepared(tmp_path)
+    at(tmp_path, 5000)
+    conn.execute("INSERT INTO price_anchor (goods_id, base_price, set_at, how) VALUES ('s2-55', 3850, ?, 'first')", (NOW,))
+    conn.commit()
+
+    class Ev:
+        inherit = {"s2-55": "101"}
+        held = {"s2-55": (5000.0, 3850.0, "held")}
+    guard = price_guard.load(conn)
+    assert price_guard.base_for(guard, "s2-55", 3850.0, inherited="101") == (5000.0, "held")
+    offers = {"s2-55": type("O", (), {"base_price": 3850.0, "brand_raw": "Ikon Tyres"})()}
+    price_guard.record(conn, offers, NOW, Ev())
+    got = price_guard.load(conn)["anchors"]["s2-55"]
+    assert (got["base_price"], got["how"], got["pending"]) == (5000.0, "inherited", 3850.0)
+    price_guard.accept(conn, ["s2-55"], NOW, "owner")
+    assert price_guard.base_for(price_guard.load(conn), "s2-55", 3850.0, inherited="101") == (3850.0, "")    # accepted: its own now
+
+
+def test_a_kept_price_can_be_accepted_later(tmp_path):
+    conn = prepared(tmp_path)
+    at(tmp_path, 5000)
+    at(tmp_path, 3850)
+    price_guard.keep(conn, ["101"], NOW, "owner")
+    assert price_guard.accept(conn, ["101"], NOW, "owner") == 1
+    at(tmp_path, 3850)
+    assert our(tmp_path) == price(3850)
+
+
+def test_a_rise_is_told_once_even_after_a_fall_and_a_fall_again_only_further(tmp_path, monkeypatch):
+    from tires_sync import cli
+    monkeypatch.setattr(cli, "_alert", lambda *a, **kw: False)
+    conn = prepared(tmp_path)
+    at(tmp_path, 5000)
+    at(tmp_path, 5500)                                                           # +10 %
+    found = price_guard.news(conn)
+    assert found["rises"] and not found["drops"]
+    price_guard.told(conn, found)
+    at(tmp_path, 5000)                                                           # −9 % from 5500: waits
+    found = price_guard.news(conn)
+    assert found["drops"] and not found["rises"]                                 # the rise is not told again
+    price_guard.told(conn, found)
+    at(tmp_path, 4990)                                                           # a wiggle: quiet
+    assert price_guard.news(conn)["drops"] == []
+    at(tmp_path, 4700)                                                           # 6 % further down: told again
+    assert price_guard.news(conn)["drops"]
+    price_guard.keep(conn, ["101"], NOW, "owner")
+    assert price_guard.news(conn)["rises"] == []
+
+
+def test_a_fall_of_a_position_not_on_avito_asks_nothing(tmp_path):
+    prepared(tmp_path)
+    at(tmp_path, 5000)
+    cycle(tmp_path, rows(dict(NNOMMODIF="101", NPRICE_DELAYED="3850", NREST="1")))   # below the threshold: no ad
+    assert anchor(tmp_path)["pending"] == 0 and anchor(tmp_path)["base_price"] == 5000.0

@@ -6,8 +6,9 @@ held, not the sale price) until the owner presses «Принять» (the anchor
 the price falls 5 % further). A rise of 5 % and more moves the anchor at once and is told; within 5 % the price goes as before and the anchor
 stays, so that small falls add up. The feed only: the client's catalog and the orders count from the supplier's price of today.
 
-The anchor is kept apart from the published state: it outlives an ad taken off. With no anchor yet (the first run) the highest purchase the
-ad was published at stands for it; a tire that changes supplier (one ad, same_tire) keeps the anchor of the position whose ad it takes.
+The anchor is kept apart from the published state: it outlives an ad taken off. With no anchor yet (the first run, a new position) the
+anchor is the price of today (the first run changes no price: the review of 2026-10-30); a tire that changes supplier (one ad, same_tire)
+takes the anchor of the position whose ad it takes, once.
 Reading (load, base_for, apply) writes nothing: the previews use it; the cycle records (record)."""
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ import json
 from typing import Dict, Iterable, List, Optional, Tuple
 
 PCT = 5.0                                   # the owner 2026-10-30: ±5 % and more
-FIELDS = ("goods_id", "base_price", "set_at", "how", "prev", "pending", "pending_since", "kept", "kept_at", "kept_by", "told", "brand")
+FIELDS = ("goods_id", "base_price", "set_at", "how", "prev", "pending", "pending_since", "kept", "kept_at", "kept_by", "told", "brand", "told_rise")
 WAITS = "в ближайший цикл (до часа)"
 
 
@@ -30,21 +31,19 @@ def _high(base: float) -> float:
 
 
 def load(conn) -> dict:
-    """{"anchors": goods_id → row, "published": goods_id → the highest purchase an ad of it is published at}: one read of each."""
-    anchors = {r[0]: dict(zip(FIELDS, r)) for r in conn.execute("SELECT %s FROM price_anchor" % ", ".join(FIELDS))}
-    published = {r[0]: float(r[1]) for r in conn.execute("SELECT goods_id, MAX(base_price) FROM published_state WHERE base_price > 0 GROUP BY goods_id")}
-    return {"anchors": anchors, "published": published}
+    """{"anchors": goods_id → row}: one read."""
+    return {"anchors": {r[0]: dict(zip(FIELDS, r)) for r in conn.execute("SELECT %s FROM price_anchor" % ", ".join(FIELDS))}}
 
 
 def _anchor_of(guard: dict, gid: str, inherited: Optional[str] = None) -> Tuple[float, Optional[dict]]:
-    for code in (gid, inherited):
-        if not code:
-            continue
-        row = guard["anchors"].get(code)
-        if row is not None and float(row["base_price"]) > 0:
-            return float(row["base_price"]), (row if code == gid else None)
-        if guard["published"].get(code):
-            return guard["published"][code], None
+    """The anchor of `gid`: its own, unless it takes the ad of `inherited` and has only the anchor of its first sight (review 2026-10-30:
+    a tire of 4 Точки seen long before it takes the WebMIM ad is still judged by that ad's anchor)."""
+    row = guard["anchors"].get(gid)
+    other = guard["anchors"].get(inherited) if inherited else None
+    if other is not None and float(other["base_price"]) > 0 and (row is None or row["how"] == "first"):
+        return float(other["base_price"]), row
+    if row is not None and float(row["base_price"]) > 0:
+        return float(row["base_price"]), row
     return 0.0, None
 
 
@@ -82,36 +81,41 @@ def apply(guard: dict, ev, settings) -> None:
             ev.held[gid] = (base, current, why)
 
 
-def record(conn, offers: Dict[str, object], now: str, ev=None) -> None:
-    """After the cycle's plan (sync.run_cycle): the anchors of new positions, the rises, the falls waiting and the questions over. No commit:
-    saved with the cycle's own state."""
+def record(conn, offers: Dict[str, object], now: str, ev=None, live: Optional[set] = None) -> None:
+    """After the cycle's plan (sync.run_cycle): the anchors of new positions, the rises, the falls waiting and the questions over. A fall is
+    asked only of a position held in this account's feed (`live`: the codes the feed keeps or puts on Avito). No commit: saved with the
+    cycle's own state."""
     guard = load(conn)
+    held = {g for g in (getattr(ev, "held", None) or {}) if live is None or g in live}
     for gid, offer in offers.items():
         price = float(getattr(offer, "base_price", 0) or 0)
         if price <= 0:
             continue
         brand = getattr(offer, "brand_raw", "") or getattr(offer, "brand_key", "")
         row = guard["anchors"].get(gid)
-        if row is None:
-            anchor, _ = _anchor_of(guard, gid, _inherited(ev, gid) if ev is not None else None)
-            if anchor > 0 and price <= _low(anchor):
-                conn.execute("INSERT INTO price_anchor (goods_id, base_price, set_at, how, pending, pending_since, brand) VALUES (?,?,?,?,?,?,?)",
-                             (gid, anchor, now, "first", price, now, brand))
-            elif anchor > 0 and price >= _high(anchor):
-                conn.execute("INSERT INTO price_anchor (goods_id, base_price, set_at, how, prev, brand) VALUES (?,?,?,?,?,?)",
-                             (gid, price, now, "rise", anchor, brand))
+        inherited = _inherited(ev, gid) if ev is not None else None
+        other = guard["anchors"].get(inherited) if inherited else None
+        if other is not None and float(other["base_price"]) > 0 and (row is None or row["how"] == "first"):
+            if row is None:                                             # takes the ad of another position: its anchor, once
+                conn.execute("INSERT INTO price_anchor (goods_id, base_price, set_at, how, brand) VALUES (?,?,?,'inherited',?)",
+                             (gid, float(other["base_price"]), now, brand))
             else:
-                conn.execute("INSERT INTO price_anchor (goods_id, base_price, set_at, how, brand) VALUES (?,?,?,?,?)",
-                             (gid, anchor or price, now, "first", brand))
+                conn.execute("UPDATE price_anchor SET base_price = ?, set_at = ?, how = 'inherited' WHERE goods_id = ?",
+                             (float(other["base_price"]), now, gid))
+            row = dict(row or {"pending": 0, "kept": 0, "told": "", "told_rise": ""}, base_price=float(other["base_price"]), how="inherited")
+        elif row is None:                                               # first seen (also the first run): the price of today
+            conn.execute("INSERT INTO price_anchor (goods_id, base_price, set_at, how, brand) VALUES (?,?,?,'first',?)", (gid, price, now, brand))
             continue
         anchor = float(row["base_price"])
         if price >= _high(anchor):
             conn.execute("UPDATE price_anchor SET base_price = ?, prev = ?, set_at = ?, how = 'rise', pending = 0, pending_since = '', kept = 0, "
-                         "kept_at = '', kept_by = '', told = '', brand = ? WHERE goods_id = ?", (price, anchor, now, brand, gid))
+                         "kept_at = '', kept_by = '', told = '', told_rise = '', brand = ? WHERE goods_id = ?", (price, anchor, now, brand, gid))
         elif price <= _low(anchor):
             kept = float(row["kept"] or 0)
             if kept > 0 and price > _low(kept):
                 continue                                                # «Оставить прежнюю»: quiet until it falls 5 % further
+            if gid not in held:                                         # not on Avito in this account: no question (another account may ask)
+                continue
             if float(row["pending"] or 0) != price:
                 conn.execute("UPDATE price_anchor SET pending = ?, pending_since = CASE WHEN pending > 0 THEN pending_since ELSE ? END, kept = 0, "
                              "kept_at = '', kept_by = '', brand = ? WHERE goods_id = ?", (price, now, brand, gid))
@@ -144,8 +148,9 @@ def accept(conn, goods_ids: Iterable[str], now: str, author: str) -> int:
     """«Принять»: the anchor becomes the price waiting; the feed follows in the next cycle. Returns how many."""
     done = []
     for gid in dict.fromkeys(str(g) for g in goods_ids):
-        if conn.execute("UPDATE price_anchor SET prev = base_price, base_price = pending, set_at = ?, how = 'accepted', pending = 0, pending_since = '', "
-                        "kept = 0, kept_at = '', kept_by = '' WHERE goods_id = ? AND pending > 0", (now, gid)).rowcount == 1:
+        if conn.execute("UPDATE price_anchor SET prev = base_price, base_price = CASE WHEN pending > 0 THEN pending ELSE kept END, set_at = ?, "
+                        "how = 'accepted', pending = 0, pending_since = '', kept = 0, kept_at = '', kept_by = '' WHERE goods_id = ? AND (pending > 0 OR kept > 0)",
+                        (now, gid)).rowcount == 1:                      # also one kept before: the owner changed the mind
             done.append(gid)
     if done:
         _audit(conn, now, author, "price_guard_accept", {"goods": done})
@@ -181,21 +186,22 @@ def news(conn) -> dict:
     for row in conn.execute("SELECT %s FROM price_anchor WHERE (pending > 0) OR (how = 'rise' AND prev > 0)" % ", ".join(FIELDS)).fetchall():
         r = dict(zip(FIELDS, row))
         if float(r["pending"] or 0) > 0:
-            mark = "drop:%g" % float(r["pending"])
-            if r["told"] != mark:
+            said = float(r["told"][5:]) if str(r["told"]).startswith("drop:") else 0.0
+            if not said or float(r["pending"]) <= _low(said):           # told once; again only 5 % further down
                 drops.append(dict(r, pct=(float(r["pending"]) / float(r["base_price"]) - 1) * 100))
-                marks.append((r["goods_id"], mark))
-        else:
+                marks.append((r["goods_id"], "told", "drop:%g" % float(r["pending"])))
+        if r["how"] == "rise" and float(r["prev"] or 0) > 0:
             mark = "rise:%g" % float(r["base_price"])
-            if r["told"] != mark:
+            if r["told_rise"] != mark:
                 rises.append(dict(r, pct=(float(r["base_price"]) / float(r["prev"]) - 1) * 100))
-                marks.append((r["goods_id"], mark))
+                marks.append((r["goods_id"], "told_rise", mark))
     return {"drops": _by_brand(drops, "−"), "rises": _by_brand(rises, "+"), "marks": marks}
 
 
 def told(conn, found: dict) -> None:
     """The summary went: its changes are not said again."""
-    conn.executemany("UPDATE price_anchor SET told = ? WHERE goods_id = ?", [(mark, gid) for gid, mark in found["marks"]])
+    for gid, column, mark in found["marks"]:
+        conn.execute("UPDATE price_anchor SET %s = ? WHERE goods_id = ?" % ("told_rise" if column == "told_rise" else "told"), (mark, gid))
     conn.commit()
 
 
