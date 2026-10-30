@@ -758,3 +758,6 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
 .own-cell>summary::-webkit-details-marker{display:none}
 .own-cell[open]{display:block}
 .own-cell-form{margin-top:var(--s-2);width:240px;padding:var(--s-3);text-align:left;white-space:normal;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-lg);box-shadow:var(--sh-lg)}
+/* the draft's «Своя цена»: the whole width, the position in one line on a wide screen (the owner 2026-10-31) */
+.t-own .t-own-name{min-width:420px}
+@media (min-width:1400px){.t-own td:first-child{white-space:nowrap}}
