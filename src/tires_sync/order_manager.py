@@ -349,10 +349,11 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     if merged and str(number) != label(card) and str(number) in {p["number"] for p in merged} | {str(p["order_id"]) for p in merged}:
         # an old number of a source of a merge (the owner 2026-10-30): its tyres are at the point already, in the merged order — «приехал» is
         # no arrival (nothing moves, the client hears nothing); any other word the owner confirms in «Входящие»
-        if BUILTIN.get(word, ((), None))[1] == "at_point":
+        here = card["stage"]["code"] in ("at_point", "oth") or card["stage"]["kind"] in ("won", "closed")
+        if BUILTIN.get(word, ((), None))[1] == "at_point" and here:
             return finish("старый номер исходного объединения: шины уже на точке",
                           "Шины заказа №%s уже на точке, они в объединённом заказе №%s." % (number, label(card)))
-        why = "%s заказ %s — это часть объединённого №%s" % (word or "команда", number, label(card))
+        why = "%s заказ %s — это часть объединённого №%s (этап «%s»)" % (word or "команда", number, label(card), card["stage"]["name"])
         answer = dispute(point, why, "Заказ №%s — часть объединённого заказа №%s: владелец подтвердит." % (number, label(card)))
         conn.execute("UPDATE manager_message SET text = ? WHERE message_id = ?", (("%s\n%s" % (str(text or "").strip(), why))[:MAX_TEXT], state["message_id"]))
         conn.commit()

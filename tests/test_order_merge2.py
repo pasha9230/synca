@@ -85,12 +85,24 @@ from tests.test_order_reserve import POINT_VK                               # no
 def test_arrived_by_an_old_number_of_a_source_is_no_arrival(tmp_path):
     """The owner 2026-10-30: the tyres of the sources are at the point already, in the merged order; only the tyres ordered for it travel."""
     conn = db(tmp_path)
-    a, b, new = _merged(conn)
+    a = card_at(conn, "at_point", T)
+    b = _second(conn, "at_point")
+    new = _merge(conn, [a, b], code="at_point")
     na = _card(conn, a)["webmim_number"]
     answer = mgr.handle_command(conn, "m1", POINT_VK, "приехал %s" % na, None, NOW)
     assert answer == "Шины заказа №%s уже на точке, они в объединённом заказе №%s." % (na, new)
-    assert _card(conn, new)["stage"]["code"] == "moving"                           # nothing moved, nothing sent
-    assert conn.execute("SELECT COUNT(*) FROM manager_message").fetchone()[0] == 0
+    assert _card(conn, new)["stage"]["code"] == "at_point" and conn.execute("SELECT COUNT(*) FROM manager_message").fetchone()[0] == 0
+
+
+def test_arrived_by_an_old_number_while_the_merged_order_is_not_at_the_point_waits_for_the_owner(tmp_path):
+    """The review of 2026-10-30: never «уже на точке» for an order that is not there — the arrival goes to the owner, nothing moves."""
+    conn = db(tmp_path)
+    a, b, new = _merged(conn)
+    na = _card(conn, a)["webmim_number"]
+    answer = mgr.handle_command(conn, "m4", POINT_VK, "приехал %s" % na, None, NOW)
+    assert "часть объединённого" in answer and _card(conn, new)["stage"]["code"] == "moving"
+    text = conn.execute("SELECT text FROM manager_message WHERE message_id = 'm4'").fetchone()[0]
+    assert "приехал заказ %s — это часть объединённого №%s (этап «" % (na, new) in text
 
 
 def test_returned_by_an_old_number_waits_for_the_owner(tmp_path):
