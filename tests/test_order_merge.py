@@ -363,3 +363,84 @@ def test_the_reconciliation_wants_no_pair_for_a_merged_order_of_placed_sources_o
     mixed = _merge(conn, [c, d], code="new")
     unpaired = {r["id"] for r in webmim_match.reconcile(conn, date(2026, 10, 30))["unpaired"]}
     assert new not in unpaired and mixed in unpaired
+
+
+# ---- the review of 2026-10-30 -----------------------------------------------------------------------------------------------------------
+
+def test_no_unmerge_once_the_new_order_is_on_oth(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    new = _merge(conn, [a, b])
+    for step in ("at_point", "oth"):                                               # the new client refused: the tyres are our stock
+        orders.move_card(conn, new, stage(conn, step), LATEST, "o")
+    assert "На ОТХ" in order_merge.why_not_unmerge(conn, new)
+
+
+def test_no_unmerge_when_a_position_of_a_source_was_changed_or_deleted(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    new = _merge(conn, [a, b])
+    home = _card(conn, a)["items"][0]["id"]
+    conn.execute("UPDATE order_item SET qty = 2 WHERE id = ?", (home,))           # a hand POST on the cancelled source
+    conn.commit()
+    assert "изменили" in order_merge.why_not_unmerge(conn, new)
+    conn.execute("DELETE FROM order_item WHERE id = ?", (home,))
+    conn.commit()
+    assert "изменили" in order_merge.why_not_unmerge(conn, new)
+    with pytest.raises(orders.OrderError):
+        order_merge.unmerge(conn, new, LATEST, "o")
+    assert _qty(conn, b) == [("2", 0)]                                             # nothing given back of a refused unmerge
+
+
+def test_tyres_ordered_by_a_placed_source_are_never_replaced_by_tyres_of_oth(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    new = _merge(conn, [a, b], code="new")
+    card_at(conn, "oth", T)                                                        # the same tyre lies on OTH at the point
+    card = _card(conn, new)
+    assert oth_sale.offers(conn, card) == {}
+    line = next(i for i in card["items"] if i["goods_id"] == "1")
+    stock = next(r for r in oth_stock._rows(conn))
+    with pytest.raises(orders.OrderError):
+        oth_sale.take(conn, new, line["id"], stock["item_id"], LATEST, "o")
+
+
+def test_a_source_placed_in_part_is_not_merged(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, updated_at) VALUES (?, 'prod', 'partial', ?, ?, 'o', ?)",
+                 (b, T, T, T))
+    conn.commit()
+    with pytest.raises(orders.OrderError, match="не полностью"):
+        _merge(conn, [a, b])
+
+
+def test_tyres_not_ordered_yet_keep_the_purchase_webmim_gives_and_hold_the_new_order_before_placed(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=2, goods="2")
+    other = new_order(conn, qty=1, goods="3")
+    with pytest.raises(orders.OrderError, match="ещё не заказаны"):
+        _merge(conn, [cid, other], code="moving")
+    new = _merge(conn, [cid, other], code="new")
+    assert [r[0] for r in conn.execute("SELECT purchase_manual FROM order_item WHERE order_id = ?", (new,))] == [0, 0]
+
+
+def test_the_reservation_goes_on_and_the_point_and_the_client_are_not_asked_again_today(tmp_path):
+    from tires_sync import order_reserve, store
+    conn = db(tmp_path)
+    a = card_at(conn, "at_point", T)
+    b = _second(conn, "at_point")
+    conn.execute("UPDATE order_card SET reserve_until = ? WHERE id IN (?, ?)", (NOW[:10], a, b))
+    conn.commit()
+    card = _card(conn, a)
+    store.set_state(conn, order_reserve._ask_key(card), "asked|" + T)
+    orders.add_event(conn, a, T, "система", "reserve", "Клиенту отправлено [резерв:клиенту:%s]" % card["entered_at"])
+    conn.commit()
+    new = _merge(conn, [a, b], code="at_point")
+    got = _card(conn, new)
+    assert got["reserve_until"] == NOW[:10] and order_reserve.was_asked(conn, got)
+    assert order_reserve._done(conn, new, "[резерв:клиенту:%s]" % got["entered_at"])

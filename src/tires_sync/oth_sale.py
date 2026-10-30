@@ -150,8 +150,9 @@ def _point_name(row) -> str:
 def offers(conn, card: dict) -> Dict[int, List[dict]]:
     """Position of the supplier → the tyres of it lying on «На ОТХ» (oth_stock: no test point, no agreed return), other orders only:
     [{from_item, from_order, point_id, point, qty, take, why}]. `take`: the pieces the button takes; `why`: why it cannot (another point,
-    the order already in WebMIM) — shown, the button is not."""
-    mine = taken_ids(conn, card["id"])
+    the order already in WebMIM) — shown, the button is not. A position of a placed source of a merge (order_merge) is ordered already: none."""
+    from .order_merge import placed_ids
+    mine = taken_ids(conn, card["id"]) | placed_ids(conn, card["id"])
     lines = [i for i in card["items"] if i["id"] not in mine and i["goods_id"] != orders.POINT_GOODS and int(i["qty"]) >= 1]
     if not lines:
         return {}
@@ -198,7 +199,8 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     if why:
         raise OthSaleError(why)
     line = next((i for i in card["items"] if i["id"] == int(line_id)), None)
-    if line is None or line["id"] in taken_ids(conn, card_id):
+    from .order_merge import placed_ids
+    if line is None or line["id"] in taken_ids(conn, card_id) or line["id"] in placed_ids(conn, card_id):
         raise OthSaleError("Такой позиции поставщика в заказе нет: обновите страницу.")
     source = next((r for r in oth_stock._rows(conn) if r["item_id"] == int(from_item)), None)
     if source is None:

@@ -48,6 +48,12 @@ def into(conn, order_id) -> Optional[int]:
     return row[0] if row else None
 
 
+def is_ref(conn, order_id) -> bool:
+    """The order takes part in an active merge «справочно» (nothing of it moved)."""
+    return conn.execute("SELECT 1 FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? AND s.ref = 1 AND "
+                        + _ACTIVE, (order_id,)).fetchone() is not None
+
+
 def _active(conn, into_order) -> Optional[dict]:
     row = conn.execute("SELECT id, at, author FROM order_merge m WHERE into_order = ? AND " + _ACTIVE, (into_order,)).fetchone()
     return None if row is None else {"id": row[0], "at": row[1], "author": row[2]}
@@ -140,6 +146,8 @@ def _why_not_source(conn, card: dict) -> Optional[str]:
     state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card["id"],)).fetchone()
     if state and state[0] in ("running", "unknown"):
         return "Заказ №%s сейчас оформляется в WebMIM: дождитесь итога." % label
+    if state and state[0] not in ("refused", "done"):                   # «partial»: part of it is not in WebMIM yet («Досоздать»)
+        return "Заказ №%s оформлен в WebMIM не полностью: сначала досоздайте его." % label
     if card["stage"]["code"] == "oth":
         if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (card["id"],)).fetchone():
             return "По заказу №%s согласован возврат поставщику: объединить его нельзя." % label
@@ -155,6 +163,7 @@ def _why_not_source(conn, card: dict) -> Optional[str]:
 def _items_in(conn, source: dict, new: int, merge_id: int, now: str, author: str) -> None:
     """The tyres of a source go to the new order (see the module)."""
     oth = source["stage"]["code"] == "oth"
+    placed = _placed(conn, source["id"])                                # its tyres are ordered: their purchase is that order's
     for item in source["items"]:
         pieces = int(item["qty"])
         if pieces < 1:
@@ -163,10 +172,10 @@ def _items_in(conn, source: dict, new: int, merge_id: int, now: str, author: str
             raise MergeError("Позиции заказа №%s только что изменили: ничего не объединено. Обновите страницу." % _label(source))
         cur = conn.execute(
             "INSERT INTO order_item (order_id, goods_id, code, name, brand_key, season, diameter, territory, qty, supplier_price, sale_unit, terms, "
-            "fee_pct, promo_pct, purchase_manual) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+            "fee_pct, promo_pct, purchase_manual) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (new, item["goods_id"], item["code"], item["name"], item["brand_key"], item["season"], item["diameter"], item["territory"], pieces,
              float(item["supplier_price"]), float(item["sale_unit"]), json.dumps(item["terms"] or {}, ensure_ascii=False), float(item["fee_pct"]),
-             float(item["promo_pct"])))
+             float(item["promo_pct"]), 1 if oth or placed or item["purchase_manual"] else 0))     # not ordered yet: WebMIM gives its purchase
         conn.execute("INSERT INTO order_merge_item (item_id, merge_id, from_item, from_order, qty, oth) VALUES (?,?,?,?,?,?)",
                      (cur.lastrowid, merge_id, item["id"], source["id"], pieces, 1 if oth else 0))
         if oth:                                                         # «с ОТХ» as a take: the stock, the chain, «Б» of the table
@@ -194,6 +203,28 @@ def _copy_history(conn, source: dict, new: int, logins: Set[str]) -> None:
     if source["transfer_number"]:
         orders.add_event(conn, new, source["updated_at"] or source["created_at"], source["created_by"], "merge",
                          AUTHOR_COPY % (label, "Перемещение: %s" % source["transfer_number"]), level="grey")
+
+
+def _begin(conn) -> None:
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")                                     # the check and the change under one write lock (two tabs, a sale meanwhile)
+
+
+def _carry_reserve(conn, held: List[dict], new: int, now: str) -> None:
+    """The reservation of a source goes on in the new order: the point asked and the client told in that stay are not asked and told again
+    today (order_reserve keys them by the order and its arrival at the point; the new order arrived «now»)."""
+    import re
+    from . import order_reserve
+    stay = re.sub(r"\D", "", now)
+    for card in held:
+        asked = conn.execute("SELECT value FROM app_state WHERE key = ?",
+                             (order_reserve.ASK_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")),)).fetchone()
+        if asked:
+            conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (order_reserve.ASK_KEY % (new, stay), asked[0]))
+        if order_reserve._done(conn, card["id"], "[резерв:клиенту:%s]" % (card["entered_at"] or "")):
+            orders.add_event(conn, new, now, "система", "reserve", "Клиенту уже сообщено о сроке резерва в заказе №%s [резерв:клиенту:%s]" % (
+                _label(card), now), level="grey")
 
 
 def _client_of(conn, order_id) -> Optional[int]:
@@ -230,19 +261,20 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
     """The merge (see the module), one transaction. The client: of the order `client_from` (one of `ids`), else the one typed. The date and
     the time of the delivery, the transfer and the main chat: of the chosen client's order (the owner 2026-10-30), else of the first source
     whose tyres move. Returns the new order."""
-    plan = check(conn, ids, stage_id)
-    cards, moving, stage = plan["cards"], plan["moving"], plan["stage"]
-    if client_from not in (None, ""):
-        chosen = next((c for c in cards if c["id"] == int(client_from)), None)
-        if chosen is None:
-            raise MergeError("Клиента выбирают из объединяемых заказов или вписывают нового.")
-        name, phone, client = chosen["client_name"], chosen["client_phone"], _client_of(conn, chosen["id"])
-        base = chosen if not _ref(chosen) else moving[0]
-    else:
-        chosen, name, phone, client, base = None, client_name, client_phone, None, moving[0]
-    start = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event").fetchone()[0]
-    logins = {r[0] for r in conn.execute("SELECT login FROM panel_user")}
+    _begin(conn)
     try:
+        plan = check(conn, ids, stage_id)                               # inside the write lock: nobody changes them between the check and the merge
+        cards, moving, stage = plan["cards"], plan["moving"], plan["stage"]
+        if client_from not in (None, ""):
+            chosen = next((c for c in cards if c["id"] == int(client_from)), None)
+            if chosen is None:
+                raise MergeError("Клиента выбирают из объединяемых заказов или вписывают нового.")
+            name, phone, client = chosen["client_name"], chosen["client_phone"], _client_of(conn, chosen["id"])
+            base = chosen if not _ref(chosen) else moving[0]
+        else:
+            chosen, name, phone, client, base = None, client_name, client_phone, None, moving[0]
+        start = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event").fetchone()[0]
+        logins = {r[0] for r in conn.execute("SELECT login FROM panel_user")}
         fields = {"client_name": name, "point_id": plan["point_id"], "delivery_date": base["delivery_date"], "delivery_time": base["delivery_time"],
                   "transfer_number": base["transfer_number"], "deal_kind": base["deal_kind"]}
         new = orders.create_card(conn, fields, now, author, require_contact=False, commit=False, stage=stage)   # no rule, no message
@@ -288,6 +320,7 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
             ahead = [c["reserve_until"] for c in moving if c["stage"]["code"] == "at_point" and c["reserve_until"] >= now[:10]]
             if ahead:
                 conn.execute("UPDATE order_card SET reserve_until = ? WHERE id = ?", (max(ahead), new))
+                _carry_reserve(conn, [c for c in moving if c["stage"]["code"] == "at_point" and c["reserve_until"] == max(ahead)], new, now)
             else:
                 orders._start_reserve(conn, orders.get_card(conn, new), now, author)
         card = orders.get_card(conn, new)
@@ -295,6 +328,10 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
         gaps = orders.missing_for(card, stage, placed)
         if gaps:
             raise MergeError("Чтобы поставить новый заказ на «%s», не хватает: %s." % (stage["name"], ", ".join(gaps)))
+        from . import oth_sale
+        if orders._needs_placed(stage, placed) and [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]:
+            raise MergeError("Шины заказов %s ещё не заказаны у поставщика: поставьте новый заказ на этап до «%s» и закажите их." % (
+                ", ".join("№%s" % _label(c) for c in moving if not _placed(conn, c["id"]) and c["stage"]["code"] != "oth"), placed["name"]))
         if orders._needs_placed(stage, placed):
             from . import order_sheet
             order_sheet.enroll(conn, new, now)                          # its rows go to the Google table, the sources' rows stay
@@ -322,16 +359,18 @@ def why_not_unmerge(conn, into_order) -> Optional[str]:
         return "По заказу записана продажа: сначала сторнируйте её, потом разъединяйте."
     if card["stage"]["kind"] in ("won", "closed") or card["stage"]["code"] == orders.RETURN_GIVEN:
         return "Заказ на этапе «%s»: разъединить нельзя." % card["stage"]["name"]
-    if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (into_order,)).fetchone():
-        return "По заказу согласован возврат поставщику: разъединить нельзя."
+    if card["stage"]["code"] == "oth":                                  # the new client refused: its tyres are our stock now (review 2026-10-30)
+        return "Заказ на «На ОТХ»: его шины теперь склад ОТХ, разъединить нельзя."
     state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (into_order,)).fetchone()
     if _placed(conn, into_order) or (state and state[0] != "refused"):
         return "Заказ уже оформлен в WebMIM или 4 Точках после объединения: разъединить нельзя."
-    for item_id, qty, oth in conn.execute("SELECT item_id, qty, oth FROM order_merge_item WHERE merge_id = ?", (found["id"],)).fetchall():
+    for item_id, from_item, from_order, qty, oth in conn.execute(
+            "SELECT item_id, from_item, from_order, qty, oth FROM order_merge_item WHERE merge_id = ?", (found["id"],)).fetchall():
         row = conn.execute("SELECT qty FROM order_item WHERE id = ? AND order_id = ?", (item_id, into_order)).fetchone()
         given_on = conn.execute("SELECT 1 FROM order_item_oth WHERE from_item = ? AND undone_at = ''", (item_id,)).fetchone()
         link = conn.execute("SELECT 1 FROM order_item_oth WHERE item_id = ? AND undone_at = ''", (item_id,)).fetchone()
-        if row is None or int(row[0]) != int(qty) or given_on or (oth and not link):
+        home = conn.execute("SELECT qty FROM order_item WHERE id = ? AND order_id = ?", (from_item, from_order)).fetchone()     # where they go back
+        if row is None or int(row[0]) != int(qty) or given_on or (oth and not link) or home is None or int(home[0]) != 0:
             return "Позиции, пришедшие из заказов, изменили (количество, удаление или передача дальше): верните как было, чтобы разъединить."
     cancel = next((s["id"] for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
     for order_id, in conn.execute("SELECT order_id FROM order_merge_source WHERE merge_id = ? AND ref = 0", (found["id"],)).fetchall():
@@ -343,21 +382,23 @@ def why_not_unmerge(conn, into_order) -> Optional[str]:
 
 def unmerge(conn, into_order, now: str, author: str) -> List[int]:
     """«Разъединить» (see the module), one transaction. Returns the sources given back. MergeError says why it cannot."""
-    why = why_not_unmerge(conn, into_order)
-    if why:
-        raise MergeError(why)
-    found = _active(conn, into_order)
-    start = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event").fetchone()[0]
-    cancel = next(s["id"] for s in orders.list_stages(conn) if s["code"] == "cancel")
-    stages = {s["id"]: s for s in orders.list_stages(conn)}
+    _begin(conn)
     try:
+        why = why_not_unmerge(conn, into_order)                         # inside the write lock: a sale or a WebMIM order meanwhile counts
+        if why:
+            raise MergeError(why)
+        found = _active(conn, into_order)
+        start = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event").fetchone()[0]
+        cancel = next(s["id"] for s in orders.list_stages(conn) if s["code"] == "cancel")
+        stages = {s["id"]: s for s in orders.list_stages(conn)}
         if conn.execute("UPDATE order_merge SET undone_at = ?, undone_by = ? WHERE id = ? AND undone_at = ''", (now, author, found["id"])).rowcount != 1:
             raise MergeError("Заказ только что разъединили в другой вкладке. Обновите страницу.")
         for item_id, from_item, qty, oth in conn.execute("SELECT item_id, from_item, qty, oth FROM order_merge_item WHERE merge_id = ?",
                                                          (found["id"],)).fetchall():
             if conn.execute("UPDATE order_item SET qty = 0 WHERE id = ? AND qty = ?", (item_id, qty)).rowcount != 1:
                 raise MergeError("Позиции только что изменили: ничего не разъединено. Обновите страницу.")
-            conn.execute("UPDATE order_item SET qty = qty + ? WHERE id = ?", (qty, from_item))
+            if conn.execute("UPDATE order_item SET qty = ? WHERE id = ? AND qty = 0", (qty, from_item)).rowcount != 1:
+                raise MergeError("Позицию исходного заказа только что изменили: ничего не разъединено. Обновите страницу.")
             if oth:
                 conn.execute("UPDATE order_item_oth SET undone_at = ? WHERE item_id = ? AND undone_at = ''", (now, item_id))
         back, labels = [], []
@@ -387,7 +428,8 @@ def unmerge(conn, into_order, now: str, author: str) -> List[int]:
                                     fire_rules=False, journal=False, commit=False):
                 raise MergeError("Заказ только что изменили: ничего не разъединено. Обновите страницу.")
         orders.add_event(conn, into_order, now, author, "merge", "Разъединён на заказы %s. Ничего не отправлено." % ", ".join(labels), level="grey")
-        conn.execute("UPDATE order_event SET level = 'grey' WHERE id > ?", (start,))
+        mine = [int(into_order)] + [r[0] for r in conn.execute("SELECT order_id FROM order_merge_source WHERE merge_id = ?", (found["id"],))]
+        conn.execute("UPDATE order_event SET level = 'grey' WHERE id > ? AND order_id IN (%s)" % ",".join("?" * len(mine)), [start] + mine)
         conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, author, "order_unmerge", json.dumps(
             {"merge": found["id"], "into": int(into_order), "orders": back}, ensure_ascii=False)))
     except Exception:

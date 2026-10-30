@@ -233,7 +233,9 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
                 "Реализация": FROM_STOCK if common["Реализация"] == REALIZED else common["Реализация"]})
         elif item["id"] in merged:                                 # its source's WebMIM order and transfer; the client is in that order too
             came = merged[item["id"]]
-            row = dict(common, **{"№ заказа MIM": came["number"], "Перемещение MIM": came["transfer"], "Примечание": " ".join(
+            source = orders.get_card(conn, came["from_order"])
+            row = dict(common, **{"№ заказа MIM": came["number"], "Перемещение MIM": came["transfer"], "Дата счета": _invoice_day(conn, source),
+                                  "Примечание": " ".join(
                 ("клиент уже есть в заказе №%s. %s" % (came["label"], common["Примечание"] or "")).split())})
         elif item["id"] in gave:                                   # the old row stays, at 0 pieces: «объединён в заказ №…»
             row = dict(common, **{"Примечание": " ".join(("объединён в заказ №%d. %s" % (gave[item["id"]], common["Примечание"] or "")).split())})

@@ -898,7 +898,7 @@ def register(app) -> None:
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
-            merge_into=order_merge_store.into(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
+            merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id),
             oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
