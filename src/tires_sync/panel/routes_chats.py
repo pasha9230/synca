@@ -670,10 +670,13 @@ def register(app) -> None:
                 raise orders.OrderError("У чата нет заказа или этап выбран неверно.")
             if own_point() is not None and orders.get_card(conn, chat["order_id"])["point_id"] != own_point():
                 raise orders.OrderError("Этап заказа №%d меняет владелец: заказ не вашей точки." % chat["order_id"])
-            from .routes_orders import ask_oth, oth_offer
+            from .routes_orders import ask_back, ask_oth, back_offer, oth_offer
             asked = oth_offer(conn, orders.get_card(conn, chat["order_id"]), stage_id)
             if asked is not None:                                          # «Шины остаются на точке — на ОТХ?»: the order's card asks (2026-10-29)
                 return ask_oth(chat["order_id"], asked)
+            back_to = back_offer(conn, orders.get_card(conn, chat["order_id"]), stage_id)
+            if back_to is not None:                                        # from «На ОТХ» to the point: a new client or the same (2026-10-30)
+                return ask_back(chat["order_id"], back_to)
             stamp = local_iso()
             moved = orders.move_card(conn, chat["order_id"], stage_id, stamp, author())
             if moved:

@@ -260,6 +260,48 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     return pieces
 
 
+def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
+    """Back from «На ОТХ» to «Товар на точке» with a new client (the owner 2026-10-30, the order 444): a new order of the same point, with the
+    tyres still ours on OTH of the old one at their sale price, takes them as «Взять с ОТХ» does (take: the first order's purchase, «с ОТХ»,
+    the old order emptied goes to «Отмена» «Шины переданы в заказ №…»). The caller puts the new order on «Товар на точке» (all from OTH).
+    Returns the new order; OthSaleError says why nothing was made."""
+    old = orders.get_card(conn, old_id)
+    if old["stage"]["code"] != "oth":
+        raise OthSaleError("Новый клиент берёт шины заказа, который стоит на «На ОТХ»: заказ на этапе «%s»." % old["stage"]["name"])
+    name, phone = " ".join(str(name or "").split())[:200], str(phone or "").strip()[:40]
+    if not phone:
+        raise OthSaleError("Укажите телефон нового клиента.")
+    if not name:
+        raise OthSaleError("Укажите имя нового клиента.")
+    if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (old_id,)).fetchone():
+        raise OthSaleError("По заказу №%d согласован возврат поставщику (акт МХ-3): шины новому клиенту не передать." % old_id)
+    rows = [r for r in oth_stock._rows(conn) if r["order_id"] == old_id]
+    if not rows:
+        raise OthSaleError("На ОТХ по заказу №%d не осталось шин: они возвращены поставщику или это шины точки без кода." % old_id)
+    items = {i["id"]: i for i in old["items"]}
+    lines = [dict(goods_id=r["goods_id"], code=items[r["item_id"]]["code"], name=items[r["item_id"]]["name"], brand_key=items[r["item_id"]]["brand_key"],
+                  season=items[r["item_id"]]["season"], diameter=items[r["item_id"]]["diameter"], territory=items[r["item_id"]]["territory"],
+                  qty=int(r["qty"]), sale_unit=items[r["item_id"]]["sale_unit"], supplier_price=items[r["item_id"]]["supplier_price"],
+                  terms=items[r["item_id"]]["terms"], fee_pct=items[r["item_id"]]["fee_pct"], promo_pct=items[r["item_id"]]["promo_pct"]) for r in rows]
+    try:
+        new = orders.create_card_with_items(conn, {"client_name": name, "client_phone": phone, "point_id": old["point_id"]}, lines, now, author)
+    except orders.OpenOrderExists as err:
+        raise OthSaleError("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, err.order_id)) from None
+    orders.add_event(conn, new, now, author, "field", "Заказ создан для нового клиента шин с ОТХ заказа №%d." % old_id)
+    conn.commit()
+    for r in rows:
+        line = next((i for i in orders.get_card(conn, new)["items"] if i["goods_id"] == r["goods_id"] and int(i["qty"]) >= 1
+                     and i["id"] not in taken_ids(conn, new)), None)
+        try:
+            if line is None:
+                raise OthSaleError("позиция не нашлась")
+            take(conn, new, line["id"], r["item_id"], now, author)
+        except orders.OrderError as err:
+            raise OthSaleError("Новый заказ №%d создан, но шины с ОТХ взять не удалось (%s): откройте его и возьмите их кнопкой «Взять с ОТХ»."
+                               % (new, err)) from None
+    return new
+
+
 def untake(conn, card_id, item_id, now: str, author: str) -> int:
     """«Вернуть на ОТХ»: the position «с ОТХ» leaves the order and its pieces go back to the old order's position; the old order closed by
     the take stands in «На ОТХ» again. Returns the pieces given back."""
