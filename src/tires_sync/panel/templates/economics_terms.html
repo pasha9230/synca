@@ -26,7 +26,7 @@
 <label class="field"><span class="label">Таблица CSV</span><input type="file" name="file" accept=".csv,text/csv"></label>
 <label class="field"><span class="label">Действует с</span><input class="input input--sm" style="width:140px" name="valid_from" value="{{ today[:8] }}01"></label>
 <button class="btn btn--secondary">{{ icon("upload") }}Загрузить</button></form>{% endif %}
-{% if can_post("economics_apply_pricing") %}<form method="post" action="/economics/terms/apply-pricing" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="day" value="{{ today }}"><button class="btn btn--secondary" title="Проценты продажи «до R17» и «выше R17» из этой таблицы попадут в «Настройки → Бренды и наценки»; перед применением вы увидите список изменений">Применить уценки к ценам</button></form>{% endif %}
+{% if can_post("economics_apply_pricing") %}<form method="post" action="/economics/terms/apply-pricing" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="day" value="{{ today }}"><button class="btn btn--secondary" title="Проценты продажи «до R17» и «выше R17» из этой таблицы попадут в «Настройки → Бренды и наценки»; они лягут в черновик настроек и применятся кнопкой «Применить»">Применить уценки к ценам</button></form>{% endif %}
 </div>
 <p class="small muted" style="padding:0 var(--s-5) var(--s-4)">Столбцы CSV: Бренд; Сезон (зима, лето, всесезонные); Диаметр (до R17 вкл., выше R17, все радиусы); Уценка; Скидка; Бонус; ЕЖ (если нет, берётся 10 %). Колонки «Сумма» и «Итого» не нужны: они считаются сами.</p>
 </section>

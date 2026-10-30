@@ -73,7 +73,8 @@ def test_preview_of_a_position_that_is_not_built_explains_why_and_unknown_is_404
 def test_catalog_is_one_table_paged_by_a_hundred_and_served_as_a_fragment(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     html = client.get("/catalog").get_data(as_text=True)
-    assert ">C1<" in html and 'id="items"' in html and "lazymodels" not in html and "<details" not in html
+    table = html.split('id="items"')[1]                 # the brand filter and «Бренды в фиде» above it fold (<details>); the table never does
+    assert ">C1<" in html and 'id="items"' in html and "lazymodels" not in html and "<details" not in table
     from tires_sync.panel import routes_catalog
     routes_catalog.PAGE_SIZE = 2
     try:

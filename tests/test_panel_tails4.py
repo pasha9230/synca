@@ -108,7 +108,8 @@ def test_the_catalog_shows_a_stale_second_unload_for_viewing_only_and_its_pages_
     second(tmp_path, dict(NNOMMODIF="5"), fetched=old())
     html = client.get("/catalog").get_data(as_text=True)
     assert client.get("/").status_code == 200
-    assert 'data-preview="s2-5"' not in html and "s2-5" not in html                  # nothing to act on the position by its id
+    # nothing to act on the position by its id; only «Просмотр» (the owner 2026-10-29: every catalog row has a card and a preview)
+    assert html.count("s2-5") == html.count('data-preview="s2-5"') == 1
     assert html.count("data-stale-unload>выгрузка устарела") == 1                    # shown, marked as an old unload
 
 

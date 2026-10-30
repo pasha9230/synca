@@ -5,16 +5,18 @@ import sqlite3
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
+from werkzeug.datastructures import MultiDict
 
 from .. import catalog_archive, connections, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
 from ..config import settings_from_dict
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
 from .data import load_merged, stale_unload
+from ..webmim import ParseResult
 from ..settings_store import active_settings
 from .routes_main import context
 from .routes_orders import local_iso
-from . import service
+from . import client_catalog, service
 
 
 def _num(args, name):
@@ -58,6 +60,28 @@ PAGE_SIZES = (10, 50, 100, 200, 500)
 PAGE_SIZE = 100
 
 
+MAX_BRANDS = 50          # as many values of one parameter as page_prefs keeps: a remembered choice is the one shown
+
+
+def _view_filters(args) -> dict:
+    """The filters of the page's view beyond the size fields: whole sizes («205/55R16 225/45R18», the client catalog's reading), the brands
+    shown and the brands left out. The view only: nothing here touches the feed."""
+    sizes, unknown = client_catalog.parse_sizes((args.get("size") or "")[:client_catalog.MAX_TEXT])
+    pick = lambda name: [b for b in dict.fromkeys(v.strip() for v in args.getlist(name)) if b][:MAX_BRANDS] if hasattr(args, "getlist") else []
+    return {"sizes": sizes, "unknown": unknown, "brands": pick("b"), "without": pick("xb")}
+
+
+def _view_only(args) -> dict:
+    """The keywords of service.filter_offers among _view_filters."""
+    return {k: v for k, v in _view_filters(args).items() if k != "unknown"}
+
+
+def _pairs(args, drop=()) -> list:
+    """The parameters of the address as (name, value) pairs, every value of a repeated one (the brands) kept, `drop` left out."""
+    items = args.items(multi=True) if hasattr(args, "getlist") else args.items()
+    return [(k, v) for k, v in items if k not in drop]
+
+
 def _page_size(args) -> int:
     n = _num(args, "n")
     return n if n in PAGE_SIZES else PAGE_SIZE
@@ -69,7 +93,7 @@ def _gone_view(conn, raw, args, season, studs, live, ref=None) -> list:
     if not known:
         return []
     shown = service.filter_offers(service.hide_excluded(service._Filtered({g: o for g, (o, _) in known.items()}, {}), raw, conn, ref),
-                                  _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs, _num(args, "sup"))
+                                  _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs, _num(args, "sup"), **_view_only(args))
     return [known[g] for g in shown.offers]
 
 
@@ -84,13 +108,30 @@ def _held_offers(conn, settings, base) -> list:
     return out
 
 
+def _locate(conn, settings, parsed, goods_id: str, base):
+    """Where the card of a position is built from: (positions holding it, the day the supplier took it away or "") or None. Every position the
+    catalog lists has a card and «Просмотр» (the owner 2026-10-29): the panel's set, 4tochki before its switch, an old second unload, the archive."""
+    if goods_id in parsed.offers:
+        return parsed, ""
+    view, only = tochki_feed.catalog_view(conn, parsed, base)
+    if goods_id in only:
+        return view, ""
+    for offer, _ in _held_offers(conn, settings, base):
+        if offer.goods_id == goods_id:
+            return ParseResult(offers={goods_id: offer}), ""
+    offer = catalog_archive.gone_offer(conn, goods_id)
+    if offer is not None:
+        return ParseResult(offers={goods_id: offer}), (catalog_archive.item_info(conn, goods_id) or {}).get("gone_since") or ""
+    return None
+
+
 def _held_view(conn, raw, args, season, studs, held, ref=None) -> list:
     """The held positions that fit the owner's exclusions, the filters of the page and its search (as the catalog's own positions)."""
     if not held:
         return []
     known = {o.goods_id: (o, at) for o, at in held}
     shown = service.filter_offers(service.hide_excluded(service._Filtered({g: o for g, (o, _) in known.items()}, {}), raw, conn, ref),
-                                  _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs, _num(args, "sup"))
+                                  _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs, _num(args, "sup"), **_view_only(args))
     terms = service.search_terms(args.get("q", ""))
     if terms:
         from ..catalog import resolve_brand
@@ -132,7 +173,7 @@ def register(app) -> None:
         parsed, view_only = tochki_feed.catalog_view(conn, parsed, app.config["UNLOAD_PATH"])      # 4tochki before its switch: shown, never published
         parsed = service.hide_excluded(parsed, raw, conn, ref)                                    # 4tochki: worked brands only
         filtered = service.filter_offers(parsed, _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs,
-                                         _num(args, "sup"))
+                                         _num(args, "sup"), **_view_only(args))
         held_all = _held_offers(conn, settings, app.config["UNLOAD_PATH"])                    # an old second unload: shown, never published
         held_ids = {o.goods_id for o, _ in held_all}
         gone = _gone_view(conn, raw, args, season, studs, set(parsed.offers) | held_ids, ref) if status in ("all", "gone") else []
@@ -165,21 +206,22 @@ def register(app) -> None:
                     studs=studs or "", status=status, sort=sort, descending=descending)
 
     def table_context(args, next_url=None):
-        args = {k: v for k, v in args.items() if k != "wait"}           # the window «В лист ожидания» is no filter of the table
+        args = MultiDict(_pairs(args, ("wait",)))                        # the window «В лист ожидания» is no filter of the table
         b = build(args)
-        base = {k: v for k, v in args.items() if k not in ("o", "r", "p")}
+        base = _pairs(args, ("o", "r", "p"))
         links = {}
         for key in service.SORT_KEYS:
             flip = b["sort"] == key and not b["descending"]
-            links[key] = "/catalog?" + urlencode(dict(base, o=key, **({"r": "1"} if flip else {})))
-        keep = {k: v for k, v in args.items() if k != "p"}
-        size_links = {n: "/catalog?" + urlencode(dict(keep, n=n)) for n in PAGE_SIZES}
-        pager = {p: "/catalog?" + urlencode(dict(keep, p=p)) for p in range(1, b["pages"] + 1)} if b["pages"] > 1 else {}
+            links[key] = "/catalog?" + urlencode(base + [("o", key)] + ([("r", "1")] if flip else []))
+        keep = _pairs(args, ("p", "n"))
+        size_links = {n: "/catalog?" + urlencode(keep + [("n", n)]) for n in PAGE_SIZES}
+        keep = _pairs(args, ("p",))
+        pager = {p: "/catalog?" + urlencode(keep + [("p", p)]) for p in range(1, b["pages"] + 1)} if b["pages"] > 1 else {}
         b.update(links=links, pager=pager, size_links=size_links, next_url=next_url or request.full_path.rstrip("?"), sup=_num(args, "sup"),
                  show_marks=_num(args, "sup") is None and len(connections.list_suppliers(b["conn"])) > 1,
                  orphans=[o for o in service.orphan_overrides(b["effective"], b["parsed"]) if o["goods_id"] not in b["held_ids"]],   # held: still there
-                 table_url="/catalog/table?" + urlencode(dict(args.items())),
-                 wait_url="/catalog?" + urlencode(dict(args, wait="")))     # + the position: the page opens with its window
+                 table_url="/catalog/table?" + urlencode(_pairs(args)),
+                 wait_url="/catalog?" + urlencode(_pairs(args) + [("wait", "")]))     # + the position: the page opens with its window
         return b
 
     def _item_path(goods_id):
@@ -189,7 +231,9 @@ def register(app) -> None:
         """The position of the window «В лист ожидания»: today's unload (4tochki shown too), else a position the supplier took away."""
         _conn, _settings, parsed, _ref = context(app)
         parsed, _view_only = tochki_feed.catalog_view(conn, parsed, app.config["UNLOAD_PATH"])
-        return parsed.offers.get(goods_id) or catalog_archive.gone_offer(conn, goods_id)
+        held = next((o for o, _ in _held_offers(conn, _settings, app.config["UNLOAD_PATH"]) if o.goods_id == goods_id), None) \
+            if goods_id not in parsed.offers else None                # an old second unload: its card has the button too
+        return parsed.offers.get(goods_id) or held or catalog_archive.gone_offer(conn, goods_id)
 
     def _wait_window(conn, goods_id, values: dict, error: str, back: str, offer=None):
         offer = offer or (_wait_offer(conn, goods_id) if goods_id else None)
@@ -201,7 +245,7 @@ def register(app) -> None:
     def catalog_page(args, wait=None, next_url=None):
         """The catalog; `wait`: the window «В лист ожидания» already made (a refused form comes back with what was typed)."""
         if "wait" in args and next_url is None:                           # the page without its window: where the window goes back to
-            next_url = ("/catalog?" + urlencode({k: v for k, v in args.items() if k != "wait"})).rstrip("?")
+            next_url = ("/catalog?" + urlencode(_pairs(args, ("wait",)))).rstrip("?")
         b = table_context(args, next_url)
         conn = b["conn"]
         if wait is None and (args.get("wait") or "").strip() and can_post("catalog_wait"):
@@ -213,17 +257,50 @@ def register(app) -> None:
         sup = _num(args, "sup")
         supplier_tabs = []
         if len(suppliers) > 1:
-            plain = {k: v for k, v in args.items() if k not in ("sup", "p", "wait")}
+            plain = _pairs(args, ("sup", "p", "wait"))
             counts = {}
             for gid in set(b["parsed"].offers) | b["held_shown"]:
                 sid = service.supplier_of_id(gid)
                 counts[sid] = counts.get(sid, 0) + 1
             supplier_tabs = [{"label": "Все", "on": sup is None, "url": "/catalog?" + urlencode(plain), "count": sum(counts.values())}] + [
-                {"label": sp["name"], "on": sup == sp["id"], "url": "/catalog?" + urlencode(dict(plain, sup=sp["id"])),
+                {"label": sp["name"], "on": sup == sp["id"], "url": "/catalog?" + urlencode(plain + [("sup", sp["id"])]),
                  "count": counts.get(sp["id"], 0)} for sp in suppliers]
+        view = _view_filters(args)
+        counts = {}
+        for offer in b["parsed"].offers.values():                            # the brands on view (after the owner's exclusions), before the filters
+            counts[offer.brand_key] = counts.get(offer.brand_key, 0) + 1
+        names = {sp["id"]: sp["name"] for sp in suppliers}
+
+        def label(key):                                                   # one brand at two suppliers: two rows, named apart
+            match = re.match(r"^S(\d+):(.*)$", key)
+            return match.group(2) + " · " + names.get(int(match.group(1)), match.group(1)) if match and len(names) > 1 else re.sub(r"^S\d+:", "", key)
+        shown = dict(counts)
+        for key in view["brands"] + view["without"]:                          # a brand chosen that has only gone or held positions: kept in the form
+            shown.setdefault(key, 0)
+        brand_choices = sorted(({"key": k, "label": label(k), "count": n} for k, n in shown.items()), key=lambda c: (c["label"].casefold(), c["key"]))
         return render_template(
-            "catalog.html", size={k: ", ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
+            "catalog.html", size={k: " ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
+            size_text=(args.get("size") or "")[:client_catalog.MAX_TEXT], size_unknown=view["unknown"], brand_choices=brand_choices, chosen_brands=view["brands"],
+            without_brands=view["without"], feed_brands=_feed_brands(conn, counts, suppliers) if can_post("connections_excluded_brand") else None,
             size_options=service.size_options(b["parsed"]), supplier_tabs=supplier_tabs, wait=wait, **b)
+
+    def _feed_brands(conn, counts, suppliers):
+        """«Бренды в фиде» of the owner: every brand on view and every brand taken off, with what one button does to it. The change is the
+        one of «Настройки → Исключения» (excluded_brands of the supplier): into the working draft, applied with «Применить» like the others."""
+        active = set(get_active(conn)[1].get("excluded_brands") or [])
+        pending = set(staging.effective_raw(conn).get("excluded_brands") or [])
+        names = {sp["id"]: sp["name"] for sp in suppliers}
+        rows = []
+        for key in sorted(set(counts) | active | pending, key=lambda k: (re.sub(r"^S\d+:", "", k).casefold(), k)):
+            match = re.match(r"^S(\d+):(.*)$", key)
+            sid, bare = (int(match.group(1)), match.group(2)) if match else (1, key)
+            if sid not in names:
+                continue
+            off = key in pending
+            state = ("снят с фида" if key in active else "снятие не применено") if off else ("возврат не применён" if key in active else "")
+            rows.append({"key": key, "bare": bare, "supplier": sid, "supplier_name": names[sid] if len(names) > 1 else "",
+                         "count": counts.get(key, 0), "off": off, "state": state})
+        return rows
 
     @app.route("/catalog")
     @login_required
@@ -256,7 +333,7 @@ def register(app) -> None:
             window = _wait_window(conn, goods_id, fields, text, back, offer)
             if on_item:
                 return item_page(goods_id, wait=window)
-            return catalog_page(dict(parse_qsl(urlsplit(back).query)), wait=window, next_url=back)
+            return catalog_page(MultiDict(parse_qsl(urlsplit(back).query)), wait=window, next_url=back)
         if made:
             flash("Клиент добавлен в лист ожидания: заказ №%d, этап «Ожидает наличие»." % card_id, "ok")
         else:
@@ -314,7 +391,8 @@ def register(app) -> None:
         staged = staging.summary(conn)
         changes = {} if staged["stale"] else staged["changes"]
         effective = _view_settings(conn, raw, changes)
-        data = service.catalog_preview(conn, effective, parsed, ref, goods_id, now().date())
+        found = _locate(conn, settings, parsed, goods_id, app.config["UNLOAD_PATH"])
+        data = service.catalog_preview(conn, effective, found[0], ref, goods_id, now().date(), found[1]) if found else None
         if data is None:
             abort(404)
         return render_template("catalog_preview.html", p=data)
@@ -326,10 +404,12 @@ def register(app) -> None:
         _, raw = get_active(conn)
         staged = staging.summary(conn)
         effective = _view_settings(conn, raw, {} if staged["stale"] else staged["changes"])
-        data = service.catalog_item_view(conn, effective, parsed, ref, goods_id, now().date(), has_right("money"), can("orders"))
+        found = _locate(conn, settings, parsed, goods_id, app.config["UNLOAD_PATH"])
+        data = service.catalog_item_view(conn, effective, found[0], ref, goods_id, now().date(), has_right("money"), can("orders"),
+                                         found[1]) if found else None
         if data is None:
             abort(404)
-        if has_right("money"):                                       # the own prices: the owner and the partner see them, the owner sets them
+        if has_right("money") and goods_id in parsed.offers:          # the own prices: the owner and the partner see them, the owner sets them (positions of the panel's set only)
             general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)
             data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id],
                                                         ref, parsed.offers)

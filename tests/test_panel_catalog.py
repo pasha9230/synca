@@ -33,7 +33,8 @@ def test_catalog_is_in_the_menu_and_groups_goods_by_brand_with_status(tmp_path):
     client = app_with(tmp_path, *ROWS)
     html = client.get("/catalog").get_data(as_text=True)
     assert 'href="/catalog"' in html
-    assert "<details" not in html and "IKON TYRES" in html and "LAUFENN" in html
+    table = html.split('id="items"')[1]                 # the brand filter and «Бренды в фиде» above it fold (<details>); the list never does
+    assert "<details" not in table and "IKON TYRES" in table and "LAUFENN" in table
     assert ">C1<" in html and ">C2<" in html
     assert "в фиде" in html and "остаток ниже порога" in html
     assert "5\u00a0000\u00a0₽" in html and "4\u00a0810\u00a0₽" in html and "<td class=\"num\">—</td>" in html
@@ -162,7 +163,7 @@ def test_size_filter_accepts_several_values_per_field(tmp_path):
     assert len(names(client.get("/catalog?w=abc").get_data(as_text=True))) == 3  # not a number: no filter
     assert len(names(client.get("/catalog?w=999").get_data(as_text=True))) == 0
     html = client.get("/catalog?w=205,215&h=55").get_data(as_text=True)
-    assert 'name="w" value="205, 215"' in html and 'name="h" value="55"' in html
+    assert 'name="w" value="205 215"' in html and 'name="h" value="55"' in html     # shown with spaces (the owner 2026-10-29: «225 205 195»)
     assert len(names(client.get("/catalog/table?w=205,215").get_data(as_text=True))) == 2
 
 
@@ -224,7 +225,7 @@ def test_a_position_the_supplier_took_away_stays_in_the_catalog_with_stock_zero_
     assert "op\" value=\"on:900" not in page and "goods_id=900" not in page                          # nothing can be sold, ordered or added from it
 
 
-def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_gone_row_has_no_checkbox_or_preview(tmp_path):
+def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_gone_row_has_no_checkbox_but_a_preview(tmp_path):
     from helpers import make_offer
     from panel_helpers import make_app
     from tires_sync import catalog_archive, store
@@ -242,4 +243,5 @@ def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_
     page = client.get("/catalog").get_data(as_text=True)
     assert page.count(">C1<") == 1 and page.count(">GONE1<") == 1
     gone_row = page.split(">GONE1<")[1].split("</tr>")[0]
-    assert 'name="g"' not in page.split(">GONE1<")[0].rsplit("<tr", 1)[1] and "data-preview" not in gone_row
+    # the owner 2026-10-29: every position has a card and «Просмотр», a gone one too (it was without; no checkbox still: nothing to switch)
+    assert 'name="g"' not in page.split(">GONE1<")[0].rsplit("<tr", 1)[1] and 'data-preview="900"' in page.split(">GONE1<")[0].rsplit("<tr", 1)[1]

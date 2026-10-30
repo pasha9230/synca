@@ -62,6 +62,12 @@ def login(client) -> str:
     return "tok"
 
 
+def review(client) -> str:
+    """The address of the page of the working draft (/draft/N), as «Подробнее» of the bar opens it: the changes of the settings pages pile up
+    there and the pages stay where they are (the owner 2026-10-29)."""
+    return client.get("/catalog/review").headers["Location"]
+
+
 def post(client, url, tok, **data):
     if url.startswith("/draft/") and url.endswith("/confirm") and "rev" not in data:
         import re
@@ -74,6 +80,12 @@ def post(client, url, tok, **data):
         found = re.search(r'name="seen" value="([0-9a-f]+)"', client.get(url[: -len("/webmim/create")]).get_data(as_text=True))
         if found:
             data["seen"] = found.group(1)
+    if url == "/settings/draft" and "draft_rev" not in data:                    # the form «Общие» is sent from the page as it was opened
+        import re
+        page = client.get("/settings", headers={"Referer": "http://localhost/settings"}).get_data(as_text=True)   # the tab itself, not the last one
+        found = re.search(r'name="draft_rev" value="([0-9a-f]*)"', page)
+        assert found, "the form «Общие» has no draft_rev"
+        data["draft_rev"] = found.group(1)
     if url == "/economics/sales/add" and "sale_token" not in data:               # a manual sale is one per opened form: open it as a person would
         import re
         page = client.get("/economics/sales/new?goods_id=%s" % data.get("goods_id", "")).get_data(as_text=True)
