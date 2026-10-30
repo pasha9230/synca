@@ -154,7 +154,7 @@ def test_every_step_of_the_client_lights_an_element_of_the_catalog(tmp_path):
     response = client.get("/shop")
     html = text(response)
     steps = tour.steps_for("client")
-    assert shown(html) == [s["title"] for s in steps] == ["Каталог", "Фильтры", "Склад 1 и Склад 2", tour.AGAIN["title"]]
+    assert shown(html) == [s["title"] for s in steps] == ["Каталог", "Фильтры", "Склад 1 и Склад 2", "Корзина и заказ", tour.AGAIN["title"]]
     for s in steps:
         assert len(select(html, s["sel"])) == 1, s["sel"]
     assert "<script" not in html and "script-src" not in response.headers["Content-Security-Policy"]     # the catalog keeps no script
@@ -259,13 +259,13 @@ def test_an_empty_catalog_shows_no_tour_and_keeps_it_for_later(tmp_path):
     assert user_prefs.get(conn, "buyer", tour.PREF) is None                 # not passed: it comes once the catalog is there
 
 
-def test_a_catalog_found_empty_keeps_its_steps_and_none_is_about_ordering(tmp_path):
+def test_a_catalog_found_empty_keeps_its_steps_and_the_cart(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
     html = text(client.get("/shop?q=nothing-like-this"))                    # nothing found: the filters and the table head are still there
-    assert shown(html) == ["Каталог", "Фильтры", "Склад 1 и Склад 2", tour.AGAIN["title"]]
+    assert shown(html) == ["Каталог", "Фильтры", "Склад 1 и Склад 2", "Корзина и заказ", tour.AGAIN["title"]]
     for s in tour.steps_for("client"):
         assert len(select(html, s["sel"])) == 1, s["sel"]
-    assert not any("заказ" in (s["title"] + s["text"]).lower() for s in tour.STEPS["client"])     # the owner 2026-10-30: with the cart
+    assert "оформите заказ" in next(s for s in tour.STEPS["client"] if s["title"] == "Корзина и заказ")["text"]   # the owner 2026-10-30: with the cart
 
 
 def test_enter_on_a_step_sends_nothing_the_radio_buttons_are_outside_the_forms(tmp_path):

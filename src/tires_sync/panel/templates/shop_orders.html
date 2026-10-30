@@ -1,0 +1,12 @@
+{# «Мои заказы» of a client (shop_cart.my_orders): number, date, the status for the client, the sum; nothing of the inside #}
+{% extends "shop_base.html" %}
+{% block title %}Мои заказы{% endblock %}
+{% block content %}
+<section class="card">
+<div class="card-head"><h3>Мои заказы</h3></div>
+{% if orders_list %}<div class="table-wrap"><table class="table">
+<thead><tr><th>Заказ</th><th>Дата</th><th>Статус</th><th class="num">Сумма</th></tr></thead>
+<tbody>{% for o in orders_list %}<tr><td><a href="/shop/orders/{{ o.id }}">№ {{ o.id }}</a></td><td>{{ o.created_at|short_dt }}</td><td class="shop-status">{{ o.status }}</td><td class="num">{{ o.total|money }}</td></tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty"><h3>Заказов пока нет</h3><p>Соберите корзину в <a href="/shop">каталоге</a> и оформите заказ.</p></div>{% endif %}
+</section>
+{% endblock %}

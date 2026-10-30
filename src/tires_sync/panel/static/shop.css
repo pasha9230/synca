@@ -62,3 +62,35 @@ body.shop{min-width:0}
   .shop .empty{padding:var(--s-8) var(--s-4)}
   .shop .empty h3,.shop .empty p{overflow-wrap:anywhere}
 }
+
+/* the cart and the orders (shop_cart.html, shop_orders.html, shop_order.html): forms of the server, no script */
+.shop-nav{display:flex;gap:var(--s-1);padding:0 var(--s-6);background:var(--gray-0);border-bottom:1px solid var(--gray-200);overflow-x:auto}
+.shop-nav a{padding:var(--s-3) var(--s-3);color:var(--gray-600);font-weight:500;text-decoration:none;border-bottom:2px solid transparent;white-space:nowrap}
+.shop-nav a.is-active{color:var(--primary-700);border-bottom-color:var(--primary-600)}
+.shop-count{display:inline-block;min-width:20px;padding:0 6px;border-radius:var(--r-full);background:var(--primary-600);color:var(--gray-0);font-size:var(--fs-xs);text-align:center}
+.shop-buy{display:flex;gap:var(--s-2);align-items:center;justify-content:flex-end;margin:0}
+.shop-buy .input{width:64px}
+.shop-cart-qty{display:flex;gap:var(--s-2);align-items:center;margin:0}
+.shop-cart-qty .input{width:72px}
+.shop-total{font-size:var(--fs-lg)}
+.shop-way{display:flex;flex-direction:column;gap:var(--s-2)}
+.shop-way .check{align-items:flex-start}
+.shop-points{display:flex;flex-direction:column;gap:var(--s-2);padding-left:var(--s-6)}
+.shop-status{font-weight:600}
+@media (max-width:720px){
+  .shop-nav{padding:0 var(--s-2)}
+  .shop-table tr.has-buy{grid-template-areas:"photo tire price" "photo size stock" "photo season wh" "buy buy buy"}
+  .shop-table .c-buy{grid-area:buy;padding-top:var(--s-2)}
+  .shop-buy{justify-content:stretch}
+  .shop-buy .btn{flex:1}
+  .shop-cart-table,.shop-cart-table tbody{display:block}
+  .shop-cart-table thead{display:none}
+  .shop-cart-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name sum" "wh price" "qty qty";column-gap:var(--s-3);
+    row-gap:2px;padding:var(--s-3);border-bottom:1px solid var(--gray-200)}
+  .shop-cart-table td{display:block;padding:0;border:0;min-width:0;height:auto}
+  .shop-cart-table .c-name{grid-area:name;color:var(--gray-900);font-weight:500}
+  .shop-cart-table .c-sum{grid-area:sum;font-weight:600}
+  .shop-cart-table .c-wh{grid-area:wh;color:var(--gray-500);font-size:var(--fs-sm)}
+  .shop-cart-table .c-price{grid-area:price;color:var(--gray-500);font-size:var(--fs-sm)}
+  .shop-cart-table .c-qty{grid-area:qty;padding-top:var(--s-2)}
+}

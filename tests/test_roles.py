@@ -430,7 +430,9 @@ def test_the_forms_of_the_client_are_only_the_own_password():
         g.user_info = {"login": "client1", "role": "client", "point_id": None, "display_name": ""}
         allowed = {e for e in common.SECTION_OF if common.can_post(e)}
     # one address: the page and its form; and the mark of «Обзор» (the owner 2026-10-30, panel/tour.py): the client's own «пройден»
-    assert allowed == {"account_password_page", "account_password", "tour_done", "tour_again"}
+    # and the own cart and orders (the owner 2026-10-30, shop_cart.py): «shop» is EDIT, so its pages count too (the GET ones send nothing)
+    assert allowed == {"account_password_page", "account_password", "tour_done", "tour_again", "shop_page", "shop_photo", "shop_cart_add",
+                       "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"}
 
 
 def test_the_client_catalog_is_the_clients_only(tmp_path):
@@ -442,7 +444,7 @@ def test_the_client_catalog_is_the_clients_only(tmp_path):
     owner = app.test_client()
     login(owner)
     assert owner.get("/shop").status_code == 403                    # the owner looks at a client's catalog through a preview (build 4)
-    assert users.MATRIX["client"] == {"sections": {"shop": users.VIEW, "self": users.EDIT}, "rights": set()}
+    assert users.MATRIX["client"] == {"sections": {"shop": users.EDIT, "self": users.EDIT}, "rights": set()}    # EDIT: the own cart (2026-10-30)
 
 
 def test_switching_the_client_off_and_changing_the_role_act_at_once(tmp_path):

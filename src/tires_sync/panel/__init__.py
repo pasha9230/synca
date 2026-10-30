@@ -302,7 +302,7 @@ def create_app(config: dict) -> Flask:
             "script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; "
             "frame-ancestors 'none'")
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        if request.endpoint in ("shop_page", "shop_photo"):
+        if request.endpoint in ("shop_page", "shop_photo", "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"):
             # the client's catalog: no scripts, no picture from outside (a supplier's host is never asked by the client's browser), not kept
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; "
