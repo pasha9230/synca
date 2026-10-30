@@ -780,10 +780,18 @@ def arrived_by_move(conn, before: dict, deliver: Optional[Deliver], now: str, wh
         card = orders.get_card(conn, before["id"])
     except OrderError:
         return ""
-    if card["stage"]["code"] != "at_point" or before["stage"]["code"] == "at_point":
+    if card["stage"]["code"] != "at_point":
         return ""
-    if before["stage"]["code"] == "oth" and (card["client_phone"], card["client_name"]) == (before["client_phone"], before["client_name"]):
-        return ""
+    new_client = (card["client_phone"], card["client_name"]) != (before["client_phone"], before["client_name"])
+    if before["stage"]["code"] not in ARRIVE_FROM and not (before["stage"]["code"] == "oth" and new_client):
+        return ""                                                       # as the point's «приехал» only (review 2026-10-30): never from
+                                                                        # «Отмена», «Выдан», «Новый», nor back from «На ОТХ» to its own client
+    if not new_client and conn.execute("SELECT 1 FROM chat_send_log WHERE token LIKE ? AND status = 'sent' LIMIT 1",
+                                       ("arrived-%d-%%" % card["id"],)).fetchone():
+        return ""                                                       # told at an earlier arrival: a move back and forth tells nobody again
+    if conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND kind = 'message' AND title = ? AND status IN ('pending', 'error') "
+                    "AND created_at >= ? LIMIT 1", (card["id"], ARRIVED_TEMPLATE, card["entered_at"] or "")).fetchone():
+        return "«%s» ждёт в «Сообщениях по заказу» (его приготовило правило этапа)." % ARRIVED_TEMPLATE      # never a second one beside it
     sent, note = tell_client_arrived(conn, card["id"], deliver, now, who)
     return note
 

@@ -270,3 +270,81 @@ def test_the_button_never_makes_a_second_message_beside_a_rules(env):
     conn.commit()
     order_arrived.prepare(conn, card, LATE, "owner")
     assert waiting(conn, card) == []
+
+
+# ---- the review of 2026-10-30, round 2 ---------------------------------------------------------------------------------------------------------
+
+def _moved(conn, card, frm, client=None):
+    """The order as it stood on `frm` before a move by hand to «Товар на точке»."""
+    before = dict(orders.get_card(conn, card))
+    before["stage"] = orders.get_stage(conn, _stage(conn, frm))
+    if client:
+        before["client_phone"], before["client_name"] = client
+    conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ? WHERE id = ?", (_stage(conn, "at_point"), LATE, card))
+    conn.commit()
+    return before
+
+
+@pytest.mark.parametrize("frm,expected", [("placed", 1), ("moving", 1), ("cancel", 0), ("done", 0), ("new", 0), ("oth", 0)])
+def test_only_as_the_points_arrived_from_placed_or_moving(tmp_path, monkeypatch, frm, expected):
+    told = []
+    monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, ""))[1])
+    app, owner, tok, conn, card = _panel_order(tmp_path)
+    mgr.arrived_by_move(conn, _moved(conn, card, frm), None, LATE, "o")
+    assert len(told) == expected
+
+
+def test_told_at_an_earlier_arrival_is_not_told_again_by_a_move(tmp_path, monkeypatch):
+    told = []
+    monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, ""))[1])
+    app, owner, tok, conn, card = _panel_order(tmp_path)
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id) VALUES (1, 'c9', ?)", (card,))
+    row = conn.execute("SELECT id FROM avito_chat WHERE chat_id = 'c9'").fetchone()[0]
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES (?, ?, ?, 'система', 'sent')", ("arrived-%d-1" % card, row, NOW))
+    conn.commit()
+    mgr.arrived_by_move(conn, _moved(conn, card, "moving"), None, LATE, "o")       # at the point, by mistake to «Перемещение», back
+    assert told == []
+
+
+def test_a_rules_message_of_the_same_template_waits_and_nothing_goes_beside_it(tmp_path, monkeypatch):
+    told = []
+    monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, ""))[1])
+    app, owner, tok, conn, card = _panel_order(tmp_path)
+    before = _moved(conn, card, "moving")
+    conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                 "VALUES (?, 99, ?, 'message', '', 0, 'pending', ?, 'x', '', ?)", (card, LATE, mgr.ARRIVED_TEMPLATE, LATE))
+    conn.commit()
+    assert "ждёт" in mgr.arrived_by_move(conn, before, None, LATE, "o") and told == []
+
+
+def test_from_oth_with_a_new_client_typed_in_the_window_is_told(tmp_path, monkeypatch):
+    from panel_helpers import post
+    told = []
+    monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, ""))[1])
+    app, owner, tok, conn, card = _panel_order(tmp_path, "oth")
+    post(owner, "/orders/%d/save" % card, tok, client_name="Пётр", client_phone="+7 900 999-88-77", stage_id=str(_stage(conn, "at_point")))
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and told == [card]
+
+
+def test_the_systems_own_texts_in_the_chat_are_not_telling(env):
+    conn, chat_row, card = env
+    from tires_sync import chat_deals
+    chat_deals.link_chat(conn, chat_row, card, NOW, "owner")
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES ('reserve-1-2', ?, ?, 'система', 'sent')", (chat_row, LATER))
+    conn.commit()
+    assert found(conn)                                                             # the reminder of the reservation is not «можно забирать»
+
+
+def test_a_point_marks_told_for_its_own_accounts_order_only(tmp_path, monkeypatch):
+    from tires_sync import order_points, users
+    app, owner, tok, conn, card = _panel_order(tmp_path, "at_point")
+    pid = orders.get_card(conn, card)["point_id"]
+    users.add_user(conn, "beta", "длинный-пароль-1", NOW, role="point", point_id=pid)
+    conn.commit()
+    point = app.test_client()
+    with point.session_transaction() as session:
+        session.update(user="beta", epoch=store.get_session_epoch(conn, "beta"), csrf="tok")
+    assert point.post("/orders/%d/arrived-told" % card, data={"csrf": "tok"}).status_code == 403
+    monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": pid})
+    assert point.post("/orders/%d/arrived-told" % card, data={"csrf": "tok"}).status_code == 302
+    assert order_arrived.told(conn, orders.get_card(conn, card), LATE)

@@ -768,8 +768,12 @@ def register(app) -> None:
     def _arrived_untold(conn, card: dict):
         """The reason the client of an order on «Товар на точке» was not told «можно забирать» (order_arrived), for the line of the card; None."""
         from .. import order_arrived
-        if card["stage"]["code"] != "at_point" or own_point() is not None:
+        if card["stage"]["code"] != "at_point":
             return None
+        if own_point() is not None:                                      # a point: only an order of its own Avito account is its to tell
+            from .. import order_points
+            if order_points.of_account(conn, card["id"]) is None:
+                return None
         now = local_iso()
         if order_arrived.told(conn, card, now):
             return None
@@ -873,9 +877,11 @@ def register(app) -> None:
     @login_required
     def order_arrived_told(card_id):
         """«Клиенту сообщили»: told another way (a call, the Avito app); the message is not sent and nobody is reminded any more."""
-        from .. import order_arrived
+        from .. import order_arrived, order_points
         conn = get_conn()
         card_or_404(conn, card_id)
+        if own_point() is not None and order_points.of_account(conn, card_id) is None:
+            abort(403)                                                    # a point tells only the orders of its own Avito account
         if order_arrived.mark_told(conn, card_id, local_iso(), author()):
             flash("Отмечено: клиенту сообщили. Сообщение «можно забирать» не отправляется.", "ok")
         else:
@@ -1088,9 +1094,8 @@ def register(app) -> None:
                 if stage_id is None:
                     raise orders.OrderError("Этап выбран неверно.")
                 stamp = local_iso()
-                before = card_or_404(conn, card_id)
                 if orders.move_card(conn, card_id, stage_id, stamp, author()):
-                    note = manager.arrived_by_move(conn, before, avito_deliver(conn, stamp), stamp, author())
+                    note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())     # as it was before the press
                     flash("Заказ перенесён." + (" " + note if note else ""))
                     offer_send(conn, card_id, stamp)
             except orders.OrderError as err:

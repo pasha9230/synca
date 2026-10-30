@@ -68,7 +68,8 @@ def told(conn, card: dict, now: str) -> bool:
                     (card["id"], mgr.ARRIVED_TEMPLATE, since)).fetchone():
         return True
     return conn.execute("SELECT 1 FROM chat_send_log l JOIN avito_chat c ON c.id = l.chat_row WHERE c.order_id = ? AND l.status = 'sent' "
-                        "AND l.at >= ? LIMIT 1", (card["id"], since)).fetchone() is not None     # any answer of ours in its chat since: told
+                        "AND l.at >= ? AND l.token NOT LIKE 'reserve-%' AND l.token NOT LIKE 'task-%' AND l.token NOT LIKE 'test-%' LIMIT 1",
+                        (card["id"], since)).fetchone() is not None    # a person's answer in its chat since (not the system's own texts): told
 
 
 def reason(conn, card: dict, now: str) -> str:
