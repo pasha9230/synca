@@ -124,7 +124,9 @@ def test_the_stage_chosen_needs_its_data_and_at_the_point_starts_a_reservation(t
     conn = db(tmp_path)
     a = card_at(conn, "at_point", T)
     b = _second(conn, "at_point")
-    reserve = max(_card(conn, a)["reserve_until"], _card(conn, b)["reserve_until"])
+    conn.execute("UPDATE order_card SET reserve_until = '2026-11-05' WHERE id = ?", (a,))      # the client asked to wait longer
+    conn.commit()
+    reserve = "2026-11-05"
     new = _merge(conn, [a, b], code="at_point")
     assert _card(conn, new)["reserve_until"] == reserve                            # the reservation of the sources, not a new one
     c = card_at(conn, "moving", T)
