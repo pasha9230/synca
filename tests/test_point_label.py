@@ -103,11 +103,12 @@ def test_origin_labels_name_the_account_an_order_came_from(w):
 def test_a_point_sees_the_label_on_the_card_the_board_and_my_point_its_own_orders_have_none(w):
     bind(w)
     manager, _ = person(w["app"], "point", w["rust"])
-    for url in ("/orders", "/orders?v=list", "/my-point"):                              # the three orders of the point are on each page
-        page = text(manager, url) if url != "/my-point" else "".join(                   # «Рабочее место»: each order on its own tab (2026-10-30)
-            text(manager, "/my-point?tab=" + t) for t in ("here", "moving", "oth", "return"))
-        assert orders.ORIGIN_OTHER in page and "Без аккаунта" in page and w["main_name"] not in page, url    # no account's name (2026-10-29)
-        assert page.count(LABEL) == 2, url                                                  # «Свой клиент» has none
+    page = "".join(text(manager, "/my-point?tab=" + t) for t in ("here", "moving", "oth", "return"))    # «Рабочее место»: our orders, each on its tab
+    assert orders.ORIGIN_OTHER in page and "Без аккаунта" in page and w["main_name"] not in page           # no account's name (2026-10-29)
+    assert page.count(LABEL) == 2                                                           # «Свой клиент» is «Заказы»'s (2026-10-30)
+    for url in ("/orders", "/orders?v=list"):                   # «Заказы» of a point: its own sales only (the owner 2026-10-30), no label
+        page = text(manager, url)
+        assert 'href="/orders/%d"' % w["mine"] in page and 'href="/orders/%d"' % w["away"] not in page and LABEL not in page, url
     away = text(manager, "/orders/%d" % w["away"])
     assert ">%s</span>" % orders.ORIGIN_OTHER in away and orders.ORIGIN_HINT in away and w["main_name"] not in away
     assert ">Без аккаунта</span>" in text(manager, "/orders/%d" % w["bare"])

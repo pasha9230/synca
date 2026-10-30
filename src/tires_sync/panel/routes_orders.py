@@ -491,7 +491,7 @@ def register(app) -> None:
         data = orders.board(conn, local_now(), point_id=point, tag=tag, query=query,          # a manager of a point: only the point (common.own_point),
                             with_sums=own_point() is None)                                       # and no sums (the owner 2026-10-26)
         only = _int(request.args.get("s"))                     # one stage (the stages of «Рабочее место» lead here, the owner 2026-10-29)
-        if only is not None and any(col["stage"]["id"] == only for col in data["columns"]):
+        if only is not None and not own_point() and any(col["stage"]["id"] == only for col in data["columns"]):    # a point: its four
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["id"] == only])
         else:
             only = None
@@ -499,6 +499,7 @@ def register(app) -> None:
             for col in data["columns"]:
                 for c in col["cards"]:
                     c["tags"] = no_account_tags(conn, c["tags"])
+            data = point_board(conn, data, own_point())                   # the point's own sales on four stages (the owner 2026-10-30)
         rows = sorted(({"card": c, "stage": col["stage"]} for col in data["columns"] for c in col["cards"]), key=lambda r: -r["card"]["id"])
         labels = orders.origin_labels(conn, own_point(), [r["card"]["id"] for r in rows]) if own_point() else {}   # not from the point's account
         table = list_table(conn, rows, only) if view == "list" else None
@@ -508,6 +509,28 @@ def register(app) -> None:
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                dots=_dots(conn), rows=rows, total_cards=sum(col["count"] for col in data["columns"]), only_stage=only,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
+
+    def point_board(conn, data: dict, point_id: int) -> dict:
+        """«Заказы» of the manager of a point (the owner 2026-10-30): the point sells its own tyres through its Avito account and orders
+        nothing from the supplier — only its own sales (order_points.own_sales; the lead's default: its account's orders or «Из наличия
+        точки», never ordered from WebMIM) on points.POINT_STAGES; a sale on another stage of the owner's is in the nearest column, its real stage
+        named on the card (`real`). Our orders brought to the point are «Рабочее место»'s. The owner's pipeline is not changed."""
+        mine = points.own_sales(conn, point_id)
+        by_code = {col["stage"]["code"]: col for col in data["columns"]}
+        columns = [dict(by_code[code], cards=[], count=0) for code in points.POINT_STAGES if code in by_code]
+        target = {col["stage"]["code"]: col for col in columns}
+        for col in data["columns"]:
+            into = target.get(points.point_column(col["stage"]))
+            if into is None:
+                continue
+            for c in col["cards"]:
+                if c["id"] in mine:
+                    into["cards"].append(dict(c, real="" if col["stage"]["code"] in target else col["stage"]["name"]))
+        for col in columns:
+            col["cards"].sort(key=lambda c: -c["id"])
+            col["count"] = len(col["cards"])
+        summary = dict(data["summary"], open=sum(c["count"] for c in columns if c["stage"]["kind"] == "open"))
+        return dict(data, columns=columns, summary=summary)
 
     def list_money() -> bool:
         """The purchase and the profit in the list: the right «money», never a manager of a point (the owner 2026-10-29)."""
@@ -741,6 +764,7 @@ def register(app) -> None:
         try:
             if stage_id is None:
                 raise orders.OrderError("Этап выбран неверно.")
+            points.check_point_move(conn, own_point(), card_id, orders.get_stage(conn, stage_id))     # its own sale: between the four only
             check_responsible(app, conn, changes.get("responsible"), card["responsible"])
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
@@ -760,6 +784,9 @@ def register(app) -> None:
         if _ajax():
             return jsonify(ok=ok, message=message, send=send)
         flash(message, "message" if ok else "error")
+        ost = request.form.get("ost")
+        if own_point() is not None and ost in points.POINT_STAGES:                 # the cards of «Заказы» on a phone: back to the stage
+            return redirect("/orders?ost=" + ost)
         return redirect("/orders/%d" % card_id)
 
     def _oth_ask(conn, card: dict):
@@ -904,6 +931,7 @@ def register(app) -> None:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         return render_template(
             "order_card.html", messages=messages, open_messages=open_messages,
+            own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),

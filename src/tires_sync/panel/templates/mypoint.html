@@ -45,6 +45,7 @@
 <header class="pt-top mp-head">
 <div class="mp-title"><h1>Рабочее место{% if point %} · {{ point.name }}{% endif %}</h1>{% if point %}<span class="mp-sub" data-tab-title>{{ tabs[tab] }}</span>{% endif %}</div>
 <div class="pt-top-actions">
+<a class="btn btn--secondary btn--sm pt-bell" href="/my-point?notes=1{% if choose and point %}&amp;p={{ point.id }}{% endif %}" aria-label="Оповещения{% if alerts_new %}: {{ alerts_new }} новых{% endif %}">{{ icon("alert", "i-sm") }}{% if alerts_new %}<b>{{ alerts_new }}</b>{% endif %}</a>
 {% if point %}<a class="btn btn--secondary btn--sm" href="/my-point/handed{% if choose %}?p={{ point.id }}{% endif %}" data-handoff-open data-tour="handoff">{{ icon("plus", "i-sm") }}Передать клиента</a>{% endif %}
 {# «Что делать сейчас» of the cards (onboarding_texts.POINT): a line in each card; folded for every card (user_pref «hint.point») #}
 <form method="post" action="/orders/hint/fold" class="mp-hints-fold pt-hints-fold"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="where" value="point"><input type="hidden" name="back" value="/my-point?{{ {'p': point.id if choose and point else '', 'tab': tab if tab != 'here' else '', 'q': query}|dictsort|selectattr(1)|list|urlencode }}"><input type="hidden" name="fold" value="{{ '0' if not hints else '1' }}"><button class="btn btn--secondary btn--sm">{{ "Свернуть подсказки" if hints else "Показать подсказки" }}</button></form>
@@ -80,10 +81,12 @@
 <section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">{{ tabs[tab] }}{% if cards %} <span class="mp-count">{{ cards|length }}</span>{% endif %}</h2>
 {% for row in cards %}{{ card(row) }}{% else %}<p class="mp-empty">Здесь сейчас нет заказов.</p>{% endfor %}</section>
 {% endif %}
+{% if choose %}{# the owner; the point has «Заказы» of its own sales on four stages (the owner 2026-10-30), our orders are here #}
 <details class="mp-handoff mp-stages"><summary><h2 id="mp-stages-h">Все этапы</h2></summary>
-<ul class="mp-stage-list">{% for s in stages %}<li><a class="mp-stage{% if not s.count %} mp-stage--empty{% endif %}" href="/orders?v=list&amp;s={{ s.stage.id }}{{ pq }}" data-stage-count="{{ s.stage.id }}"><span class="dot" style="background:{{ s.stage.color }}"></span><span class="mp-stage-name">{{ s.stage.name }}</span><b>{{ s.count }}</b></a></li>{% endfor %}</ul></details>
+<ul class="mp-stage-list">{% for s in stages %}<li><a class="mp-stage{% if not s.count %} mp-stage--empty{% endif %}" href="/orders?v=list&amp;s={{ s.stage.id }}{{ pq }}" data-stage-count="{{ s.stage.id }}"><span class="dot" style="background:{{ s.stage.color }}"></span><span class="mp-stage-name">{{ s.stage.name }}</span><b>{{ s.count }}</b></a></li>{% endfor %}</ul></details>{% endif %}
 </div>
 {% endif %}
+{% with section="mypoint" %}{% include "_point_nav.html" %}{% endwith %}
 </div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='mypoint.js') }}"></script>{% endblock %}

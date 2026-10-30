@@ -1,0 +1,9 @@
+{% from "_ui.html" import icon %}{# The sections of a point's phone (the owner 2026-10-30, the prototype's PM_SECS): «Рабочее место», «Переданные», «Заказы», «Чаты» at the
+   bottom of the screen with their counters; a computer has the menu instead (point.css shows this on a phone only). `section`: the one open. #}
+{% set n = point_nav() %}{% if n is not none %}
+<nav class="pt-nav" aria-label="Разделы точки" data-point-nav>
+<a href="/my-point" class="{{ 'is-active' if section == 'mypoint' else '' }}"{% if section == 'mypoint' %} aria-current="page"{% endif %} data-sec="mypoint">{{ icon("layers") }}<span>Рабочее место</span>{% if n.mypoint %}<b>{{ n.mypoint }}</b>{% endif %}</a>
+<a href="/my-point/handed" class="{{ 'is-active' if section == 'handed' else '' }}"{% if section == 'handed' %} aria-current="page"{% endif %} data-sec="handed">{{ icon("users") }}<span>Переданные</span>{% if n.handed %}<b>{{ n.handed }}</b>{% endif %}</a>
+{% if can("orders") %}<a href="/orders" class="{{ 'is-active' if section == 'orders' else '' }}"{% if section == 'orders' %} aria-current="page"{% endif %} data-sec="orders">{{ icon("clipboard") }}<span>Заказы</span>{% if n.orders %}<b>{{ n.orders }}</b>{% endif %}</a>{% endif %}
+{% if can("chats") %}<a href="/chats" data-sec="chats">{{ icon("chat") }}<span>Чаты</span>{% if nav.chat_unread %}<b class="is-hot">{{ nav.chat_unread }}</b>{% endif %}</a>{% endif %}
+</nav>{% endif %}

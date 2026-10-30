@@ -2,7 +2,7 @@
 {% from "_ui.html" import icon %}
 {# «Переданные клиенты» (the owner 2026-10-30; the prototype's handedTab): a section of the point's menu next to «Рабочее место» — the clients
    handed over with «Отменить передачу» first, then the form «Передать клиента» (routes_mypoint.mypoint_handed); on a phone a screen of its
-   own with «← Заказы». The same forms, tokens and texts as the tab had. #}
+   own with «← Рабочее место» (the owner; the point has the sections at the bottom). The same forms, tokens and texts as the tab had. #}
 {% block viewport %}width=device-width, initial-scale=1{% endblock %}
 {% block body_class %}pt-ui{% endblock %}
 {% block title %}Переданные клиенты · Tires Sync{% endblock %}
@@ -12,7 +12,7 @@
 {% set pq = ("?p=%d"|format(point.id)) if choose and point else "" %}
 <div class="pt mp-wrap">
 <header class="pt-top mp-head">
-<a class="btn btn--secondary btn--sm pt-back" href="/my-point{{ pq }}" data-back>← Заказы</a>
+{% if choose %}<a class="btn btn--secondary btn--sm pt-back" href="/my-point{{ pq }}" data-back>← Рабочее место</a>{% endif %}{# the point has its sections at the bottom #}
 <div class="mp-title"><h1>Переданные клиенты</h1>{% if point %}<span class="mp-sub">{{ point.name }}</span>{% endif %}</div>
 </header>
 {% if choose and points %}<form method="get" action="/my-point/handed" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
@@ -41,6 +41,7 @@
 <p class="mp-hint">Клиента возьмёт в работу дежурный менеджер; что с ним стало — выше, в списке.</p></form>
 </section>
 {% endif %}
+{% with section="handed" %}{% include "_point_nav.html" %}{% endwith %}
 </div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='mypoint.js') }}"></script>{% endblock %}

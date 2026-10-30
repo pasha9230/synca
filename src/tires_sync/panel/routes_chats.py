@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import abort, flash, jsonify, redirect, render_template, request, session
 
-from .. import catalog_archive, chat_deals as deals, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_wait, orders, store, trash
+from .. import catalog_archive, chat_deals as deals, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
@@ -322,8 +322,11 @@ def register(app) -> None:
                        "done": handed}
         can_send = bool(current) and any(a["id"] == current["account_id"] and a["chats_send"] and a["chats_enabled"] for a in connections.list_accounts(conn))
         offer = send_offer(conn, deal["id"], chat_row) if deal else None
+        stages = orders.list_stages(conn)
+        if deal and own_point() is not None and deal["id"] in points.own_sales(conn, own_point()):     # its own sale: the four (and where it is)
+            stages = [s for s in stages if s["code"] in points.POINT_STAGES or s["id"] == deal["stage_id"]]
         return render_template("chats.html", offer=offer, handoff=handoff, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=chats.pending_sends(conn, [current["id"]], local_iso()) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
-                               accounts=accounts, stages=orders.list_stages(conn), statuses=chats.STATUSES, q=q, answerers=answerers, answer_names=dict(answerers),
+                               accounts=accounts, stages=stages, statuses=chats.STATUSES, q=q, answerers=answerers, answer_names=dict(answerers),
                                unsearch="/chats" + ("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every)) if kv[1]]) if (flt or acc or every) else ""), every=every,
                                query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every), ("q", q)) if kv[1]])) if (flt or acc or every or q) else "")
 
@@ -670,6 +673,7 @@ def register(app) -> None:
                 raise orders.OrderError("У чата нет заказа или этап выбран неверно.")
             if own_point() is not None and orders.get_card(conn, chat["order_id"])["point_id"] != own_point():
                 raise orders.OrderError("Этап заказа №%d меняет владелец: заказ не вашей точки." % chat["order_id"])
+            points.check_point_move(conn, own_point(), chat["order_id"], orders.get_stage(conn, stage_id))     # its own sale: the four only
             from .routes_orders import ask_oth, oth_offer
             asked = oth_offer(conn, orders.get_card(conn, chat["order_id"]), stage_id)
             if asked is not None:                                          # «Шины остаются на точке — на ОТХ?»: the order's card asks (2026-10-29)

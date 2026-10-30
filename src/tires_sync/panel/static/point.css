@@ -105,10 +105,10 @@
   .pt-top .mp-title h1{font-size:18px;line-height:24px}
   .pt-top-actions{flex:1 1 100%;justify-content:flex-start}
   .pt > :not(.pt-top):not(.mp-tabs){margin-left:16px;margin-right:16px}
-  .pt .mp-tabs{position:fixed;left:0;right:0;bottom:0;z-index:30;margin:0;background:var(--pt-bg);border-top:1px solid var(--pt-border-2);border-bottom:0;
-    display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;padding-bottom:env(safe-area-inset-bottom)}
-  .pt .mp-tab{flex-direction:column;justify-content:center;gap:2px;min-height:60px;padding:6px 2px;font-size:11px;line-height:13px;white-space:normal;text-align:center;border-bottom:0;border-top:2px solid transparent}
-  .pt .mp-tab.is-active{border-top-color:var(--pt-primary)}
+  /* the stages of «Рабочее место» are chips on top; the sections of the point are at the bottom (the owner 2026-10-30) */
+  .pt .mp-tabs,.pt .pt-chips{border:0;gap:4px;overflow-x:auto;scrollbar-width:none;margin:0 16px 12px;padding:2px 0}
+  .pt .mp-tab,.pt .pt-chip{flex:none;border:1px solid var(--pt-border);border-radius:18px;height:36px;padding:0 10px;font-size:13px;white-space:nowrap}
+  .pt .mp-tab.is-active,.pt .pt-chip.is-active{border-color:var(--pt-primary);background:var(--pt-primary-bg);color:var(--pt-primary);font-weight:500}
 }
 
 /* a computer: compact buttons in a row, as the prototype's desktop (desktop-5-mypoint) */
@@ -119,8 +119,38 @@
   .pt .mp-card--return .mp-actions form{flex:0 0 auto}
 }
 
-/* the card (the owner 2026-10-30): the tyres first, the client under them; «Переданные клиенты»: «← Заказы» on a phone only */
+/* the card (the owner 2026-10-30): the tyres first, the client under them; «Переданные клиенты»: «← Рабочее место» on a phone only */
 .pt .mp-tyres{font-weight:500;color:var(--pt-text)}
 .pt .mp-client .mp-name{font-weight:400;color:var(--pt-text-2)}
 .pt-back{display:none}
 @media (max-width:760px){.pt-back{display:inline-flex}}
+
+
+/* the sections of a point's phone (_point_nav.html), the bell, the phone view of «Заказы»: a phone only */
+.pt-nav,.pt-bell,.pt-phone{display:none}
+.pt-chips{display:flex}
+.pt-chip{display:inline-flex;align-items:center;gap:6px;color:var(--pt-text-2);text-decoration:none;background:var(--pt-bg)}
+.pt-chip b{min-width:20px;height:20px;line-height:20px;border-radius:10px;background:var(--pt-fill-2);font-size:12px;font-weight:400;text-align:center;padding:0 5px}
+.pt-chip.is-active b{background:var(--pt-primary);color:#fff}
+.pt .pt-ocard{display:flex;flex-direction:column;gap:4px;text-decoration:none;color:inherit}
+.pt .pt-ocard .mp-card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pt .pt-ocard .mp-card-head .mp-sub{margin-left:auto}
+.pt .pt-ocard-link{display:flex;flex-direction:column;gap:4px;text-decoration:none;color:inherit}
+.pt .pt-ocard-moves{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.pt .pt-ocard-moves .btn{min-height:40px}
+@media (max-width:760px){
+  .pt-nav{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;
+    border-top:1px solid #f0f0f0;padding-bottom:env(safe-area-inset-bottom);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+  .pt-nav a{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;min-height:60px;font-size:11px;line-height:13px;
+    color:rgba(0,0,0,.45);text-decoration:none;text-align:center}
+  .pt-nav a.is-active{color:#1677ff;font-weight:500}
+  .pt-nav .i{width:22px;height:22px}
+  .pt-nav b{position:absolute;top:4px;left:calc(50% + 6px);min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;font-size:11px;
+    font-weight:400;background:rgba(0,0,0,.25);color:#fff}
+  .pt-nav b.is-hot{background:#ff4d4f}
+  .pt-bell{display:inline-flex;gap:4px;align-items:center}
+  .pt-bell b{min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;font-size:11px;background:#ff4d4f;color:#fff}
+  body.pt-orders-page .pt-desk{display:none}
+  body.pt-orders-page .pt-phone{display:block}
+  body.pt-orders-page .pt-phone .mp-card{display:flex;margin:0 16px 12px}
+}

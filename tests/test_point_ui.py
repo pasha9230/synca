@@ -132,7 +132,7 @@ def test_the_workplace_is_made_for_a_phone_and_the_rest_keeps_its_width(w):
     page = _page(w["point"])
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in page and 'class="pt-ui"' in page
     assert "point.css" in page and 'class="pt mp-wrap"' in page
-    other = _page(w["point"], "/orders")
+    other = _page(w["point"], "/chats")                                         # «Заказы» of a point has its phone too (2026-10-30, point-orders)
     assert '<meta name="viewport" content="width=1280">' in other and "pt-ui" not in other and "point.css" not in other
 
 
@@ -190,7 +190,7 @@ def test_an_oth_card_has_the_tyres_and_no_client(w):
 def test_handed_clients_is_a_section_with_the_list_first_and_the_form_below(w):
     page = _page(w["point"], "/my-point/handed")
     assert page.index('id="mp-handed-h"') < page.index('class="mp-handoff-form"') and 'action="/my-point/handed"' in page
-    assert "← Заказы" in page and 'href="/my-point"' in page
+    assert 'data-point-nav' in page and 'href="/my-point"' in page and "data-back" not in page     # the sections at the bottom (2026-10-30, point-orders)
     work = _page(w["point"])
     assert 'href="/my-point/handed"' in work and "Передать клиента" in work                     # the button of «Рабочее место» and the menu
     assert work.count('href="/my-point/handed"') >= 2
@@ -215,3 +215,10 @@ def test_the_section_is_the_points_and_the_owners_only(w, role):
     assert other.get("/my-point/handed").status_code in (302, 403)
     r = other.post("/my-point/handed", data={"csrf": "tok", "token": "a" * 24, "phone": "+7 900 222-33-44"})
     assert r.status_code in (302, 403) and w["conn"].execute("SELECT COUNT(*) FROM order_handoff").fetchone()[0] == 0
+
+
+
+def test_a_found_order_on_oth_names_no_client(w):
+    page = _page(w["point"], "/my-point?q=Клиент oth")
+    found = page[page.index('id="mp-found-h"'):].split("</section>")[0]
+    assert "/orders/%d" % w["made"]["oth"] in found and "шины на ОТХ" in found and "Клиент oth" not in found

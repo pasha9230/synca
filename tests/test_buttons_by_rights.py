@@ -44,7 +44,7 @@ def world(tmp_path, monkeypatch):
     r = post(owner, "/orders/new", tok, client_name="Иван", client_phone="+79110000000", item_goods_id=["100"], item_qty=["4"])
     assert r.status_code == 302, r.get_data(as_text=True)[:300]
     card = int(re.search(r"/orders/(\d+)$", r.headers["Location"]).group(1))
-    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (pid, card))
+    conn.execute("UPDATE order_card SET point_id = ?, deal_kind = 'stock' WHERE id = ?", (pid, card))     # the point's own sale: on its «Заказы» (2026-10-30)
     conn.commit()
     confirm_draft(conn, create_draft(conn, {"overrides": {"1:999": "on"}}, NOW), NOW, "owner")           # a manual rule without a position
     account = connections.create_account(conn, "Основной", NOW, "o")

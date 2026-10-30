@@ -3,7 +3,7 @@
    webmim_create (webmim_create.button): «Досоздать в WebMIM» and the last result, for the right «supplier» only; the first press is «Заказать
    в МИМ» of «Заказ поставщику» (_order_supplier.html, its window «Подтверждение»). #}
 {% set w = webmim %}{% set point_view = current_user().role == "point" %}
-{% if w and (w.order or not point_view) %}
+{% if w and not point_view %}{# the manager of a point: no WebMIM at all (the owner 2026-10-30: the point orders nothing from the supplier) #}
 {% call entity_ui.section("WebMIM", id="webmim", sub=w.server ~ (" · снимок " ~ (w.seen_at|short_dt_utc) if w.seen_at else " · снимка ещё нет")) %}<div class="card-body stack" data-webmim>
 {% if w.test and w.order %}<p class="small text-err">Тестовый сервер WebMIM: номер совпал с тестовым заказом, это может быть не наш заказ.</p>{% endif %}
 {% if w.order %}{% set o = w.order %}

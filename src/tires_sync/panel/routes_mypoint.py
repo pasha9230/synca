@@ -20,7 +20,7 @@ import re
 import secrets
 from datetime import date, timedelta
 
-from flask import abort, current_app, flash, jsonify, redirect, render_template, request
+from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
 from .. import order_manager as mgr, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
@@ -61,7 +61,8 @@ def _cards(conn, point_id) -> list:
         "ORDER BY MAX(c.created_at, CASE WHEN s.code = 'at_point' THEN COALESCE(c.entered_at, '') ELSE '' END, "
         "COALESCE((SELECT MAX(e.at) FROM order_event e WHERE e.order_id = c.id AND (%s)), '')) DESC, c.id DESC"
         % (",".join("?" * len(STAGES)), RAISE), (point_id,) + STAGES)]
-    return [orders.get_card(conn, card_id) for card_id in ids]
+    mine = points.own_sales(conn, point_id) if ids else set()                  # its own sales are «Заказы»'s (the owner 2026-10-30)
+    return [orders.get_card(conn, card_id) for card_id in ids if card_id not in mine]
 
 
 def _own_card(conn, card_id, point_id) -> dict:
@@ -295,10 +296,12 @@ def _back(point_id) -> str:
 
 
 def _oth_cards(conn, point_id) -> list:
-    """The point's orders on «На ОТХ»: the tyres the client refused lie at the point (tab «На возврат»)."""
-    return [orders.get_card(conn, r[0]) for r in conn.execute(
+    """The point's orders on «На ОТХ»: the tyres the client refused lie at the point (tab «На возврат»). Not its own sales («Заказы»)."""
+    ids = [r[0] for r in conn.execute(
         "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'oth' ORDER BY c.entered_at, c.id",
         (point_id,))]
+    mine = points.own_sales(conn, point_id) if ids else set()
+    return [orders.get_card(conn, card_id) for card_id in ids if card_id not in mine]
 
 
 def _stages(conn, point_id) -> list:
@@ -334,7 +337,32 @@ def _returns(conn, point_id) -> list:
             for r in order_oth.to_return(conn, point_id)]
 
 
+def nav_counts(conn, point_id) -> dict:
+    """The counters of the sections of a point's phone (the owner 2026-10-30, the prototype's PM_SECS): «Рабочее место» (what lies at the
+    point and comes, the returns), «Переданные» (the handoffs still to be taken), «Заказы» (its own sales in the column «Новый заказ»)."""
+    if point_id is None:
+        return {"mypoint": 0, "handed": 0, "orders": 0}
+    since = (date.fromisoformat(local_iso()[:10]) - timedelta(days=HANDED_DAYS)).isoformat()
+    mine = points.own_sales(conn, point_id)
+    stages = {st["id"]: st for st in orders.list_stages(conn)}
+    new = [cid for cid, sid in conn.execute("SELECT id, stage_id FROM order_card WHERE point_id = ?", (point_id,))
+           if cid in mine and points.point_column(stages[sid]) == "new"]               # as the chip «Новый заказ» counts
+    return {"mypoint": len(_cards(conn, point_id)) + len(order_oth.to_return(conn, point_id)),
+            "handed": sum(1 for h in mgr.point_handoffs(conn, point_id, since) if h["cancellable"]),
+            "orders": len(new)}
+
+
 def register(app) -> None:
+    def point_nav():
+        """The counters for the sections of the point's phone (the manager of a point only; None for the others), once per request."""
+        if own_point() is None:
+            return None
+        if "point_nav" not in g:
+            g.point_nav = nav_counts(get_conn(), own_point())
+        return g.point_nav
+
+    app.jinja_env.globals["point_nav"] = point_nav
+
     def _the_point(conn):
         point_id = _point_id(conn)
         try:
@@ -418,6 +446,8 @@ def register(app) -> None:
             for f in found:
                 oid = int(f["url"].rsplit("/", 1)[-1]) if f.get("url", "").rsplit("/", 1)[-1].isdigit() else None
                 f["tab"] = tab_of.get(oid, "")
+                if f["tab"] in ("oth", "return"):                               # our tyres at the point: the client is gone (the owner 2026-10-30)
+                    f["title"] = "Заказ №%d · шины на ОТХ" % oid
         return render_template("mypoint.html", point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
@@ -435,6 +465,9 @@ def register(app) -> None:
         point_id = _point_id(conn)
         card = _own_card(conn, card_id, point_id)
         back = _back(point_id)
+        if card_id in points.own_sales(conn, point_id):                         # its own sale is moved in «Заказы», on its four stages
+            flash("Заказ №%d — продажа точки: его этап меняется в «Заказах»." % card_id)
+            return redirect(back)
         token = str(request.form.get("token") or "").strip()[:64]
         if not re.fullmatch(r"[0-9a-f]{24}", token):
             flash("Отметка не выполнена: обновите страницу.")

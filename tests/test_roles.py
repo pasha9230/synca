@@ -169,6 +169,7 @@ def test_the_manager_of_a_point_sees_only_the_orders_of_the_point(tmp_path):
     other = points.save_point(conn, {"name": "Бета", "manager_name": "Б", "channel": "vk"})
     my_card = orders.create_card(conn, {"client_name": "Свой Клиент", "point_id": str(mine)}, NOW, "owner")
     their_card = orders.create_card(conn, {"client_name": "Чужой Клиент", "point_id": str(other)}, NOW, "owner")
+    conn.execute("UPDATE order_card SET deal_kind = 'stock'")          # the points' own sales: «Заказы» of a point shows only these (2026-10-30)
     nowhere = orders.create_card(conn, {"client_name": "Без Точки"}, NOW, "owner")
     client, _ = person(app, "point", mine)
     board = client.get("/orders?p=%d" % other).get_data(as_text=True)                      # asking for the other point gives the own one

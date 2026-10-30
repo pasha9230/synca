@@ -64,14 +64,15 @@ def test_the_stages_count_the_own_orders_and_lead_to_the_list_of_the_stage(tmp_p
     here = _card(conn, pid, webmim="700200", code="at_point")
     _card(conn, _other(conn), webmim="700300", code="at_point")                          # another point's: never counted
     mine = manager(app, conn, pid)
-    page = _text(mine.get("/my-point"))
+    assert "data-stage-count" not in _text(mine.get("/my-point"))     # a point: «Заказы» of its own sales on four stages (the owner 2026-10-30)
+    page = _text(client.get("/my-point?p=%d" % pid))                  # the owner looking at the point keeps «Все этапы»
     counts = dict(re.findall(r'data-stage-count="(\d+)"><span class="dot"[^>]*></span><span class="mp-stage-name">[^<]*</span><b>(\d+)</b>', page))
     names = [s for s in orders.list_stages(conn)]
     assert len(counts) == len(names)                                                       # every stage of the owner's pipeline
     assert counts[str(_stage(conn, "at_point"))] == "1" and counts[str(_stage(conn, "moving"))] == "1" and counts[str(_stage(conn, "new"))] == "0"
-    listed = _text(mine.get("/orders?v=list&s=%d" % _stage(conn, "at_point")))
+    listed = _text(client.get("/orders?v=list&p=%d&s=%d" % (pid, _stage(conn, "at_point"))))
     assert 'href="/orders/%d"' % here in listed and 'href="/orders/%d"' % card not in listed and "Только этап «Товар на точке»" in listed
-    assert 'href="/orders/%d"' % card in _text(mine.get("/orders?v=list&s=999"))           # an unknown stage: no filter
+    assert 'href="/orders/%d"' % card in _text(client.get("/orders?v=list&p=%d&s=999" % pid))   # an unknown stage: no filter
 
 
 # ---- 4. the search ---------------------------------------------------------------------------------------------------------------

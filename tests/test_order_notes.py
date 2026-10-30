@@ -70,6 +70,8 @@ def test_the_point_reads_no_account_name_in_the_hint(tmp_path, monkeypatch):
     app, owner, tok, conn = panel(tmp_path)
     cid = new_order(conn, qty=2)
     orders.add_note(conn, cid, "Писал с аккаунта Основной", T, "manager1")
+    conn.execute("UPDATE order_card SET point_id = ?, deal_kind = 'stock' WHERE id = ?", (point_id(conn), cid))   # a point's own sale (2026-10-30)
+    conn.commit()
     monkeypatch.setattr(orders, "without_account_names", lambda conn, text: str(text).replace("Основной", "…"))
     page = manager(app, conn, point_id(conn)).get("/orders").get_data(as_text=True)
     assert 'title="Писал с аккаунта …"' in page and "Основной" not in page

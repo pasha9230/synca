@@ -392,7 +392,7 @@ def test_the_manager_of_a_point_sees_only_the_paired_order_of_the_own_point(pane
     paired_card = card(conn, at="2026-10-07T09:00:00", goods=[("A", 4)], webmim_number="591", point_id=str(mine_point))
     open_card = card(conn, at="2026-10-07T09:00:00", goods=[("A", 4)], point_id=str(mine_point))
     point = person(app, conn, "point", mine_point)
-    assert "Заказ WebMIM №591" in point.get("/orders/%d" % paired_card).get_data(as_text=True)
+    assert "Заказ WebMIM №591" not in point.get("/orders/%d" % paired_card).get_data(as_text=True)   # no WebMIM for a point (the owner 2026-10-30)
     html = point.get("/orders/%d" % open_card).get_data(as_text=True)
     assert "data-webmim" not in html and "592" not in html
     assert point.get("/orders/webmim").status_code == 403

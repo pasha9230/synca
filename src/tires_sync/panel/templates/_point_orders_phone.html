@@ -1,0 +1,16 @@
+{% from "_ui.html" import icon %}{# «Заказы» of a point on a phone (the owner 2026-10-30, the prototype's renderPointMobile «orders»): the four stages as chips on top
+   (?ost=, «Новый заказ» first), the point's own sales of the stage as cards with the moves forward (the review: a phone has no board), the sections at the bottom. The computer keeps the board. #}
+{% set ost = request.args.get("ost") if request.args.get("ost") in ("new", "placed", "done", "cancel") else "new" %}
+<div class="pt pt-phone" data-point-orders>
+<header class="pt-top mp-head"><div class="mp-title"><h1>Заказы</h1><span class="mp-sub">Продажи точки из своего наличия</span></div>
+<div class="pt-top-actions"><a class="btn btn--secondary btn--sm" href="/my-point?notes=1" aria-label="Оповещения">{{ icon("alert", "i-sm") }}</a></div></header>
+<form method="get" action="/orders" class="mp-search" role="search"><label class="field"><span class="label">Найти заказ</span><span class="mp-search-row"><input class="input" type="search" name="q" maxlength="80" value="{{ query }}" placeholder="Номер, телефон или имя" autocomplete="off"><button class="btn btn--secondary">Найти</button></span></label><input type="hidden" name="ost" value="{{ ost }}"></form>
+<nav class="pt-chips" aria-label="Этапы">{% for col in data.columns %}<a class="pt-chip{% if col.stage.code == ost %} is-active{% endif %}" href="/orders?ost={{ col.stage.code }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}"{% if col.stage.code == ost %} aria-current="page"{% endif %} data-ost="{{ col.stage.code }}">{{ col.stage.name }}<b>{{ col.count }}</b></a>{% endfor %}</nav>
+{% for col in data.columns if col.stage.code == ost %}{% for c in col.cards %}<div class="mp-card pt-ocard" data-pcard="{{ c.id }}"><a class="pt-ocard-link" href="/orders/{{ c.id }}">
+<span class="mp-card-head"><span class="mp-no">№ {{ c.id }}</span>{% if c.real %}<span class="badge badge--neutral" data-real-stage>{{ c.real }}</span>{% endif %}<span class="mp-sub">{{ c.days }} дн.</span></span>
+<span class="mp-tyres">{{ c.items_text or "позиции не выбраны" }}</span><span class="mp-sub">{{ c.client }}</span></a>
+{% if can_post("order_move") and col.stage.kind == "open" %}<div class="pt-ocard-moves">{% for to in data.columns if to.stage.code in ("placed", "done") and to.stage.position > col.stage.position %}<form method="post" action="/orders/{{ c.id }}/move" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ to.stage.id }}"><input type="hidden" name="ost" value="{{ ost }}"><button class="btn btn--secondary btn--sm" data-move="{{ to.stage.code }}">{{ to.stage.name }}</button></form>{% endfor %}
+<a class="btn btn--link-gray btn--sm" href="/orders/{{ c.id }}#finish">Отмена / невыкуп</a></div>{% endif %}</div>
+{% else %}<p class="mp-empty">Здесь сейчас нет заказов.</p>{% endfor %}{% endfor %}
+{% with section="orders" %}{% include "_point_nav.html" %}{% endwith %}
+</div>

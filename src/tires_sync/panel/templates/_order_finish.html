@@ -10,10 +10,10 @@
 <label><input type="radio" name="cancel_kind" value="отменил клиент" required> отменил клиент</label><label><input type="radio" name="cancel_kind" value="не выкупил"> не выкупил</label><label><input type="radio" name="cancel_kind" value="другое"> другое</label></div></fieldset>
 <label class="field"><span class="label">Подробнее (для «другое» — обязательно)</span><input class="input" name="cancel_reason" maxlength="280" placeholder="Например: нашёл дешевле"></label>
 <div><button class="btn btn--danger-outline btn--sm">Отменить заказ</button></div></form>
-<hr>
+{% if not own_sale %}<hr>
 <form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids['return'] }}">
 <label class="field"><span class="label">Тип возврата</span><select class="select" name="return_kind"><option value="">Не выбран</option>{% for key, label in return_kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
 <div class="grid-2"><label class="field"><span class="label">Причина возврата</span><input class="input" name="return_reason" maxlength="300"></label>
 <label class="field"><span class="label">Сумма возврата, ₽</span><input class="input" name="return_amount" inputmode="decimal" autocomplete="off"{% for k, s in return_amount.suggest.items() %} data-suggest-{{ k }}="{{ s }}"{% endfor %} data-auto data-return-amount></label></div>
-<div><button class="btn btn--secondary btn--sm">Оформить возврат</button></div></form>
+<div><button class="btn btn--secondary btn--sm">Оформить возврат</button></div></form>{% endif %}{# a point's own sale: its four stages only (the owner 2026-10-30) #}
 </div></div></div>

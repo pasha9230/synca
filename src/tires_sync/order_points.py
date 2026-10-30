@@ -61,6 +61,37 @@ def account_orders(conn) -> set:
     return {r[0] for r in conn.execute(ACCOUNT_ORDERS % "")}
 
 
+def own_sales(conn, point_id) -> set:
+    """The point's own sales (the owner 2026-10-30: a point sells its own tyres through its Avito account, it orders nothing from the
+    supplier): an order of the point whose chats and calls are all of the point's account (account_orders) or whose deal is «Из наличия
+    точки», and that was never ordered from WebMIM (no WebMIM number nor id). Our orders brought to the point are not among them: they are
+    «Рабочее место»'s."""
+    rows = conn.execute("SELECT id, deal_kind, webmim_number, webmim_id FROM order_card WHERE point_id = ?", (point_id,)).fetchall()
+    mine = account_orders(conn) if rows else set()
+    return {r[0] for r in rows if not (r[2] or r[3]) and (r[1] == "stock" or r[0] in mine)}
+
+
+POINT_STAGES = ("new", "placed", "done", "cancel")         # «Заказы» of a point (the owner 2026-10-30): its own sales on these four
+POINT_FOLD = {"from_point": "new", "talk": "new", "wait": "new", "moving": "placed", "at_point": "placed",     # another stage of the owner's:
+              "oth": "cancel", "return_given": "cancel", "return": "cancel"}                                  # the nearest column (the lead)
+KIND_FOLD = {"open": "new", "won": "done", "lost": "cancel", "closed": "cancel"}                         # a stage the owner added himself
+MOVE_REFUSED = "Свою продажу точка переводит только между этапами «Новый заказ», «Заказ оформлен», «Выполнено» и «Отмена / невыкуп»."
+
+
+def point_column(stage: dict) -> str:
+    """The column of «Заказы» of a point where an own sale on this stage of the owner's stands."""
+    code = stage.get("code") or ""
+    return code if code in POINT_STAGES else POINT_FOLD.get(code) or KIND_FOLD.get(stage.get("kind"), "new")
+
+
+def check_point_move(conn, point_id, order_id, stage: dict) -> None:
+    """The manager of a point moves its own sale between POINT_STAGES only (the board, the order's page, the chat); our orders and the
+    owner's moves are as before. Raises orders.OrderError."""
+    if point_id is not None and stage.get("code") not in POINT_STAGES and order_id in own_sales(conn, point_id):
+        from .orders import OrderError
+        raise OrderError(MOVE_REFUSED)
+
+
 def account_chats(conn) -> set:
     """The chats of the Avito accounts of the points."""
     return {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id IN (" + POINT_ACCOUNTS + ")")}
