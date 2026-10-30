@@ -1,0 +1,26 @@
+{# «Продажа точки» (the owner 2026-10-30): the manager of a point edits its own sale (order_points.own_sales) — the client's name and phone,
+   the date, the comment, the positions from the catalog with the price of the ad (as the manager's window: app.js [data-item-find]) and
+   their prices. No supplier, no purchase; the comment as the window shows it (no account's name: `v`). Our orders (WebMIM) and another point's are never here (check_access: POINT_SALE_PAGES). #}
+<section class="card stack" id="sale" aria-labelledby="sale-h" data-point-sale style="padding:var(--s-5)">
+<h2 id="sale-h" style="margin:0">Продажа точки</h2>
+<form method="post" action="/orders/{{ c.id }}/point-sale" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="grid-2"><label class="field"><span class="label">Имя клиента</span><input class="input" name="client_name" value="{{ v.client_name or '' }}" maxlength="120"></label>
+<label class="field"><span class="label">Телефон клиента</span><input class="input" type="tel" inputmode="tel" name="client_phone" value="{{ v.client_phone or '' }}" maxlength="30" placeholder="+7 900 000-00-00"></label>
+<label class="field"><span class="label">Дата</span><input class="input" type="date" name="delivery_date" value="{{ v.delivery_date or '' }}"></label></div>
+<label class="field"><span class="label">Комментарий</span><textarea class="input" name="comment" rows="2" maxlength="1000">{{ v.comment or '' }}</textarea></label>
+<div><button class="btn btn--primary btn--sm">Сохранить</button></div></form>
+<h3 style="margin:0">Шины</h3>
+<table class="owin-items"><tbody>{% for i in c['items'] %}<tr data-sale-item="{{ i.id }}"><td class="owin-iname">{{ i.name }}</td>
+<td class="owin-iqty">{% if i.qty >= 1 %}<input class="input input--sm input--num" style="width:56px" name="qty" value="{{ i.qty }}" form="sale-item-{{ i.id }}" aria-label="Количество"> шт × <input class="input input--sm input--num" style="width:96px" name="sale_unit" value="{{ ('%.2f'|format(i.sale_unit)).rstrip('0').rstrip('.') }}" form="sale-item-{{ i.id }}" aria-label="Цена за шт." inputmode="decimal"> ₽ <button class="btn btn--secondary btn--xs" form="sale-item-{{ i.id }}">Сохранить</button>{% else %}<span class="muted">0 шт</span>{% endif %}</td>
+<td class="num owin-isum">{{ i.money.sale|money }}</td>
+<td class="owin-ix">{% if i.qty >= 1 %}<button class="icon-btn" form="sale-item-del-{{ i.id }}" title="Удалить шину" aria-label="Удалить {{ i.name }}">{{ icon("x") }}</button>{% endif %}</td></tr>
+{% else %}<tr><td class="muted">Шин пока нет.</td></tr>{% endfor %}</tbody></table>
+{% for i in c['items'] %}<form id="sale-item-{{ i.id }}" method="post" action="/orders/{{ c.id }}/items/{{ i.id }}/update"><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form><form id="sale-item-del-{{ i.id }}" method="post" action="/orders/{{ c.id }}/items/{{ i.id }}/delete" data-confirm-title="Удалить шину?" data-confirm="{{ i.name }} уйдёт из заказа." data-confirm-ok="Удалить"><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form>{% endfor %}
+<form method="post" action="/orders/{{ c.id }}/items/add" class="owin-add" data-item-row data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="field grow"><label class="label" for="sale-find">Добавить шину: код или модель</label><div class="suggest-wrap" data-item-find="/orders/items/find?order={{ c.id }}{% if c.deal_kind == 'stock' %}&amp;deal=stock{% endif %}"><input type="hidden" name="goods_id" data-find-code><input class="input" id="sale-find" name="query" placeholder="Модель, бренд или размер" autocomplete="off" data-find-text><ul class="suggest" role="listbox" hidden></ul></div></div>
+<label class="field owin-qty"><span class="label">Шт.</span><input class="input input--num" name="qty" value="4" inputmode="numeric" data-find-qty></label>
+<label class="field owin-price"><span class="label">Цена за шт.</span><input class="input input--num" name="sale_unit" placeholder="из панели" inputmode="decimal" data-find-price><input type="hidden" name="sale_auto" data-find-auto></label>
+<button class="btn btn--secondary owin-plus" title="Добавить шину">{{ icon("plus") }}<span class="sr-only">Добавить шину</span></button></form>
+<p class="hint">Начните вводить модель, бренд или размер и выберите шину из списка: подставится цена объявления, её можно поменять.{% if c.deal_kind == "stock" %} Шину, которой нет в списке, выберите последней строкой «шина с точки» и впишите цену.{% endif %}</p>
+<p class="owin-total">{% if c['items'] %}Итого: <b>{{ totals.sale|money }}</b>{% endif %}</p>
+</section>

@@ -90,6 +90,9 @@ SEND_ALL_SECONDS = 15                              # «Отправить все
 MAX_NEW_ROWS = 20                                  # positions in the window of a new order; more are added in the card
 
 
+POINT_SALE_FIELDS = ("client_name", "client_phone", "delivery_date", "comment")     # what the point edits in its own sale (the owner 2026-10-30)
+
+
 def _known_tags(conn) -> list:
     """The tags already on orders, the most used first: the suggestions of the tag field of the order window."""
     count = {}
@@ -455,7 +458,12 @@ def register(app) -> None:
         conn = get_conn()
         _conn, settings, parsed, ref = context(app)
         query = request.args.get("q", "").strip()
-        account = window_account(conn, request.args) if len(query) >= 2 else None
+        args = request.args
+        if own_point() is not None:                                            # a point: its own order prices the list, never another's chat or point
+            order = _int(args.get("order"))
+            mine = order is not None and conn.execute("SELECT 1 FROM order_card WHERE id = ? AND point_id = ?", (order, own_point())).fetchone()
+            args = {"order": order} if mine else {}
+        account = window_account(conn, args) if len(query) >= 2 else None
         items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account) if len(query) >= 2 else []
         if items and own_point() is None:                                      # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
             marks = oth_sale.find_hint(conn, [it["goods_id"] for it in items])
@@ -1199,7 +1207,7 @@ def register(app) -> None:
     def order_item_add(card_id):
         conn = get_conn()
         card_or_404(conn, card_id)
-        if "was" in request.form:                                          # «+» of the card's window sends the whole window (the owner 2026-10-26:
+        if "was" in request.form and own_point() is None:                  # «+» of the card's window sends the whole window (the owner 2026-10-26:
             return order_save(card_id, part="items")                       # «Точка» was lost): its fields are saved as by «Сохранить», with the row
         try:
             by_text = add_typed_item(conn, card_id, request.form)
@@ -1207,7 +1215,24 @@ def register(app) -> None:
                 flash("Добавлено по тексту: %s." % by_text)
         except orders.OrderError as err:
             flash(str(err))
-        return back(card_id, "items")
+        return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»
+
+    @app.route("/orders/<int:card_id>/point-sale", methods=["POST"])
+    @login_required
+    def order_point_sale(card_id):
+        """«Продажа точки» (the owner 2026-10-30): the point edits its own sale (check_access: common.POINT_SALE_PAGES) — the client's
+        name and phone, the date and the comment; the positions and their prices by /items. Nothing else of the order is the point's."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        changes = {k: request.form.get(k, "") for k in POINT_SALE_FIELDS if k in request.form}
+        if changes.get("comment") == orders.without_account_names(conn, orders._row(conn, card_id)["comment"]):
+            changes.pop("comment")                                         # shown without an account's name: unchanged, never overwritten so
+        try:
+            orders.update_card(conn, card_id, changes, local_iso(), author(), link_client=False)   # the CRM client: the manager's (the review)
+            flash("Сохранено.", "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return back(card_id, "sale")
 
     @app.route("/orders/<int:card_id>/items/<int:item_id>/oth-take", methods=["POST"])
     @login_required
@@ -1279,7 +1304,7 @@ def register(app) -> None:
             orders.update_item(conn, item_id, request.form.get("qty"), request.form.get("sale_unit"), local_iso(), author(), supplier_price=purchase or None)
         except orders.OrderError as err:
             flash(str(err))
-        return back(card_id, "items")
+        return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»
 
     @app.route("/orders/<int:card_id>/items/<int:item_id>/delete", methods=["POST"])
     @login_required
@@ -1292,7 +1317,7 @@ def register(app) -> None:
             orders.remove_item(conn, item_id, local_iso(), author())
         except orders.OrderError as err:
             flash(str(err))
-        return back(card_id, "items")
+        return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»
 
     def _want_fields(form) -> dict:
         data = {key: form.get(key, "") for key in ("brand", "model", "width", "profile", "radius", "season", "studded", "qty", "code")}

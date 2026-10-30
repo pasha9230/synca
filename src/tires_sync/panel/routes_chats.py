@@ -583,6 +583,10 @@ def register(app) -> None:
                 raise orders.OrderError("Укажите номер заказа.")
             if own_point() is not None and orders.get_card(conn, order_id)["point_id"] != own_point():
                 raise orders.OrderError("Заказ №%d не вашей точки: привязать к нему чат нельзя." % order_id)
+            row = orders._row(conn, order_id)
+            if own_point() is not None and not (row["webmim_number"] or row["webmim_id"]) and order_id not in points.own_sales(conn, own_point()):
+                # the chat of the point's account would make our order the point's own sale, its to edit (the review 2026-10-30): the manager links it
+                raise orders.OrderError("Заказ №%d ведёт менеджер: привязать к нему чат может только он." % order_id)
             deals.link_chat(conn, chat_row, order_id, local_iso(), author())
             flash("Чат привязан к заказу №%d." % order_id, "ok")
 

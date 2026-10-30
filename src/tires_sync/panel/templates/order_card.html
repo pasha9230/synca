@@ -18,6 +18,7 @@
 {% elif c.stage.code == "oth" and c.point_id and can_post("order_oth_agreed") %}<form method="post" action="/orders/{{ c.id }}/oth-agreed" class="row" style="gap:var(--s-2);align-items:center" data-once data-confirm-title="Возврат согласован с поставщиком?" data-confirm="Точка увидит дату возврата (ближайшую нечётную) и подпишет акт МХ-3." data-confirm-ok="Согласовано"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Согласовано с поставщиком</button><span class="small muted">возврат шин с ОТХ: точка получит дату и акт МХ-3</span></form>{% endif %}
 {% include "_order_merge.html" %}
 {% include "_order_hint.html" %}
+{% if own_sale %}{% include "_point_sale.html" %}{% endif %}{# the point edits its own sale here; the window stays read-only for it #}
 {% include "_order_window.html" %}
 {% if messages %}{% call entity_ui.section("Сообщения по заказу", id="messages") %}<div class="card-body row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center">
 <span>Ждут отправки: {{ messages|length }} ({% for m in messages %}{{ m.task.title }}{% if not loop.last %}; {% endif %}{% endfor %}).</span>{% if messages|selectattr("lacking")|list %}<span class="small text-err">Не хватает данных: см. в окне.</span>{% endif %}

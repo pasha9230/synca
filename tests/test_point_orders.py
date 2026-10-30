@@ -200,3 +200,112 @@ def test_a_stage_the_owner_added_stands_by_its_kind(w):
 
 def test_the_cancel_window_of_an_own_sale_has_no_return(w):
     assert "Оформить возврат" not in _page(w["point"], "/orders/%d" % w["made"]["stock_new"])
+
+
+# --- «Продажа точки»: the point edits its own sale (the owner 2026-10-30) -------------------------------------------------------------
+
+def test_the_point_edits_the_client_the_date_and_the_comment_of_its_own_sale(w):
+    m, conn = w["made"], w["conn"]
+    page = _page(w["point"], "/orders/%d" % m["stock_new"])
+    assert "data-point-sale" in page and 'action="/orders/%d/point-sale"' % m["stock_new"] in page
+    r = w["point"].post("/orders/%d/point-sale" % m["stock_new"], data={"csrf": "tok", "client_name": "Пётр", "client_phone": "+7 900 111-22-33",
+                                                                         "delivery_date": "2026-11-02", "comment": "к пятнице",
+                                                                         "point_id": "999", "webmim_number": "777", "deal_kind": "webmim"})
+    assert r.status_code == 302
+    card = orders.get_card(conn, m["stock_new"])
+    assert (card["client_name"], card["delivery_date"], card["comment"]) == ("Пётр", "2026-11-02", "к пятнице") and "900 111-22-33" in card["client_phone"]
+    assert card["point_id"] == w["alfa"] and not card["webmim_number"] and card["deal_kind"] == "stock"     # nothing else of the order
+
+
+def test_the_point_adds_a_tyre_from_the_catalog_with_its_price_and_changes_the_price(w):
+    m, conn = w["made"], w["conn"]
+    found = w["point"].get("/orders/items/find?order=%d&q=205/55" % m["stock_new"]).get_json()["items"]
+    real = [it for it in found if not it.get("point")]
+    assert real and all(set(it) <= {"goods_id", "name", "size", "stock", "price"} for it in real)            # no supplier, no purchase
+    w["point"].post("/orders/%d/items/add" % m["stock_new"], data={"csrf": "tok", "goods_id": real[0]["goods_id"], "query": real[0]["name"], "qty": "4"})
+    items = orders.get_card(conn, m["stock_new"])["items"]
+    assert len(items) == 1 and items[0]["qty"] == 4
+    w["point"].post("/orders/%d/items/%d/update" % (m["stock_new"], items[0]["id"]), data={"csrf": "tok", "qty": "2", "sale_unit": "5100",
+                                                                                          "supplier_price": "1"})
+    item = orders.get_card(conn, m["stock_new"])["items"][0]
+    assert (item["qty"], item["sale_unit"]) == (2, 5100) and item["supplier_price"] != 1                    # the purchase is not the point's
+    page = _page(w["point"], "/orders/%d" % m["stock_new"])
+    assert "data-buy" not in page and "Закупка" not in page
+    w["point"].post("/orders/%d/items/%d/delete" % (m["stock_new"], item["id"]), data={"csrf": "tok"})
+    assert orders.get_card(conn, m["stock_new"])["items"] == []
+
+
+@pytest.mark.parametrize("which", ["ours", "stock_webmim", "other_point"])
+def test_the_point_edits_no_order_but_its_own_sale(w, which):
+    m, conn = w["made"], w["conn"]
+    cid = m[which]
+    before = orders._row(conn, cid)["client_name"]
+    assert w["point"].post("/orders/%d/point-sale" % cid, data={"csrf": "tok", "client_name": "Взлом"}).status_code == 403
+    assert w["point"].post("/orders/%d/items/add" % cid, data={"csrf": "tok", "goods_id": "x", "query": "x", "qty": "1"}).status_code == 403
+    assert orders._row(conn, cid)["client_name"] == before
+    if which != "other_point":
+        assert "data-point-sale" not in _page(w["point"], "/orders/%d" % cid)
+
+
+def test_the_point_still_cannot_save_the_whole_window(w):
+    m = w["made"]
+    assert w["point"].post("/orders/%d/save" % m["stock_new"], data={"csrf": "tok", "client_name": "x"}).status_code == 403
+    r = w["point"].post("/orders/%d/items/add" % m["stock_new"], data={"csrf": "tok", "was": "1", "point_id": "999", "query": ""})
+    assert r.status_code == 302 and orders._row(w["conn"], m["stock_new"])["point_id"] == w["alfa"]       # «+» of the window: not the window's save
+
+
+def test_the_move_without_tyres_phone_or_date_is_refused_plainly(w):
+    m, s = w["made"], w["stages"]
+    r = w["point"].post("/orders/%d/move" % m["stock_new"], data={"csrf": "tok", "stage_id": s["placed"]}, follow_redirects=True)
+    assert "заполните: позиции, дата доставки, телефон клиента" in r.get_data(as_text=True)
+
+
+def test_the_point_cannot_make_our_order_its_own_sale_by_linking_its_chat(w):
+    m, conn = w["made"], w["conn"]
+    chat = conn.execute("SELECT id FROM avito_chat WHERE order_id = ?", (m["account"],)).fetchone()[0]
+    r = w["point"].post("/chats/%d/link" % chat, data={"csrf": "tok", "order_id": str(m["ours_new"])}, follow_redirects=True)
+    assert "привязать к нему чат может только он" in r.get_data(as_text=True)
+    assert m["ours_new"] not in points.own_sales(conn, w["alfa"])
+    assert w["point"].post("/orders/%d/point-sale" % m["ours_new"], data={"csrf": "tok", "client_name": "x"}).status_code == 403
+
+
+def test_the_point_cannot_reach_an_item_of_another_order_nor_ours(w):
+    m, conn = w["made"], w["conn"]
+    conn.execute("INSERT INTO order_item (order_id, goods_id, name, qty, supplier_price, sale_unit) VALUES (?, 'G1', 'Наша шина', 4, 1000, 1500)",
+                 (m["ours_new"],))
+    conn.commit()
+    item = orders.get_card(conn, m["ours_new"])["items"][0]["id"]
+    assert w["point"].post("/orders/%d/items/%d/update" % (m["stock_new"], item), data={"csrf": "tok", "qty": "1"}).status_code == 404
+    assert w["point"].post("/orders/%d/items/%d/delete" % (m["stock_new"], item), data={"csrf": "tok"}).status_code == 404
+    assert w["point"].post("/orders/%d/items/%d/update" % (m["ours_new"], item), data={"csrf": "tok", "qty": "1"}).status_code == 403
+    assert w["point"].post("/orders/%d/items/%d/delete" % (m["ours_new"], item), data={"csrf": "tok"}).status_code == 403
+    assert orders.get_card(conn, m["ours_new"])["items"][0]["qty"] == 4
+
+
+def test_the_point_phone_of_its_sale_joins_no_client_of_the_crm(w):
+    from tires_sync import clients
+    m, conn = w["made"], w["conn"]
+    w["point"].post("/orders/%d/point-sale" % m["stock_new"], data={"csrf": "tok", "client_phone": "+7 900 555-66-77"})
+    assert clients.client_of_order(conn, m["stock_new"]) is None
+
+
+def test_a_tyre_of_the_point_only_in_a_stock_deal(w):
+    m, conn = w["made"], w["conn"]
+    w["point"].post("/orders/%d/items/add" % m["account"], data={"csrf": "tok", "goods_id": orders.POINT_GOODS, "query": "Шина с полки", "qty": "1"})
+    assert orders.get_card(conn, m["account"])["items"] == []
+    w["point"].post("/orders/%d/items/add" % m["stock_new"], data={"csrf": "tok", "goods_id": orders.POINT_GOODS, "query": "Шина с полки",
+                                                                    "qty": "1", "sale_unit": "3000"})
+    assert [i["goods_id"] for i in orders.get_card(conn, m["stock_new"])["items"]] == [orders.POINT_GOODS]
+
+
+def test_the_sale_block_never_names_the_account_and_keeps_the_comment_it_did_not_change(w):
+    m, conn = w["made"], w["conn"]
+    conn.execute("UPDATE order_card SET comment = 'Звонок на «Акк точки»' WHERE id = ?", (m["stock_new"],))
+    conn.commit()
+    page = _page(w["point"], "/orders/%d" % m["stock_new"])
+    block = page[page.index("data-point-sale"):page.index("</section>", page.index("data-point-sale"))]
+    assert "Акк точки" not in block
+    shown = re.search(r'<textarea class="input" name="comment"[^>]*>([^<]*)</textarea>', block).group(1)
+    w["point"].post("/orders/%d/point-sale" % m["stock_new"], data={"csrf": "tok", "client_name": "Новое имя", "comment": shown})
+    row = orders._row(conn, m["stock_new"])
+    assert row["client_name"] == "Новое имя" and row["comment"] == "Звонок на «Акк точки»"

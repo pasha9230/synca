@@ -74,7 +74,8 @@ def world(tmp_path, monkeypatch):
 
 
 def allowed_to_post(app, role: str, path: str) -> bool:
-    """What the server says to this role posting there: the real check_access, not a copy of it."""
+    """What the server says to this role posting there: the real check_access, not a copy of it. The edits of a point's own sale
+    (common.POINT_SALE_PAGES) are checked per order: the order of the world is the point's own sale (deal_kind «stock»), so can_post agrees."""
     with app.test_request_context(path, method="POST"):
         g.user_info = {"login": role, "role": role, "point_id": 1 if role == "point" else None, "display_name": ""}
         common.session_valid, saved = (lambda: True), common.session_valid

@@ -239,7 +239,7 @@ SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
     "orders": ("orders_page", "order_card_page", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
-               "order_note", "order_sale", "order_sale_reverse", "order_save", "order_task_run", "order_task_skip", "order_task_send",
+               "order_note", "order_sale", "order_sale_reverse", "order_save", "order_point_sale", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
                "orders_inbox_confirm", "order_item_find", "order_new_page", "order_new", "orders_bulk_page", "orders_bulk_check",
@@ -311,13 +311,17 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})
 # the manager of a point: the orders of the point only (the board, the file and the cards of the point)
+# the point's own sale (the owner 2026-10-30, order_points.own_sales): the point edits the client, the date, the comment and the positions
+# with their prices — of its own sale only (check_access); our orders (WebMIM), another point's and the purchase stay closed
+POINT_SALE_PAGES = frozenset({"order_point_sale", "order_item_add", "order_item_update", "order_item_delete"})
 POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
                          "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                          "search", "search_json",   # the search: the point's own (search.scope_for)
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
-                         "calls_page", "call_record", "call_create_order", "call_handoff"})           # the calls of the point's account (own_call)
+                         "calls_page", "call_record", "call_create_order", "call_handoff",           # the calls of the point's account (own_call)
+                         "order_item_find"} | frozenset(POINT_SALE_PAGES))
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
 CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again",
                           "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"})
@@ -372,6 +376,12 @@ def own_point():
 def _card_point(card_id):
     row = get_conn().execute("SELECT point_id FROM order_card WHERE id = ?", (card_id,)).fetchone()
     return row[0] if row else None
+
+
+def _own_sale(card_id, point_id) -> bool:
+    """The order is the point's own sale (order_points.own_sales): what the point may edit."""
+    from .. import order_points
+    return card_id is not None and card_id in order_points.own_sales(get_conn(), point_id)
 
 
 def point_account():
@@ -445,7 +455,8 @@ def check_access():
                 or ("chat_row" in args and not own_chat(args["chat_row"])) or ("event_id" in args and not own_event(args["event_id"])) \
                 or ("call_row" in args and not own_call(args["call_row"])) \
                 or ("client_id" in args and not own_client(args["client_id"])) \
-                or (request.method == "POST" and "chat_row" in args and chat_of_other_point(args["chat_row"])):
+                or (request.method == "POST" and "chat_row" in args and chat_of_other_point(args["chat_row"])) \
+                or (endpoint in POINT_SALE_PAGES and not _own_sale(args.get("card_id"), user["point_id"])):
             abort(403)
     if users.level(role, section) < (users.EDIT if request.method == "POST" and not (role == "point" and endpoint in VIEW_POSTS) else users.VIEW):
         abort(403)
