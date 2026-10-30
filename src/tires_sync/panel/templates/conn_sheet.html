@@ -13,7 +13,7 @@
 <div class="row" style="gap:var(--s-2)"><input class="input grow mono" type="password" name="secret" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять" maxlength="200" data-sheet-secret>
 <button type="button" class="btn btn--secondary btn--sm" data-sheet-secret-new title="Придумать случайный секрет: впишите его же в свойства скрипта (SECRET)">Придумать</button></div>
 <span class="hint">Тот же текст, что в свойстве SECRET скрипта. Хранится зашифрованным, на странице не показывается.</span></label>
-<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="enabled" value="1"{% if sheet.enabled %} checked{% endif %}> Включено{% if sheet.enabled and sheet.since %} <span class="small muted">с {{ sheet.since|dt_utc }}: в таблицу идут заказы, оформленные с этого момента</span>{% endif %}</label>
+<label class="row" style="gap:var(--s-2)"><input type="checkbox" name="enabled" value="1"{% if sheet.enabled %} checked{% endif %}> Включено{% if sheet.enabled and sheet.since %} <span class="small muted">с {{ sheet.since|dt_utc }} по Москве: в таблицу идут заказы, оформленные с этого момента</span>{% endif %}</label>
 </div>
 <div class="card-foot"><button class="btn btn--primary">Сохранить</button>
 {% if can_post("connections_sheet_check") %}<button class="btn btn--secondary" formaction="/connections/sheet/check">{{ icon("check-circle") }}Проверить</button>{% endif %}

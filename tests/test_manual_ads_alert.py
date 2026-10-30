@@ -85,3 +85,76 @@ def test_a_line_longer_than_a_message_is_cut_to_fit_its_part():
     header = "в кабинете Авито №1 «А»: ручных объявлений: 3"
     parts = cli._manual_parts([(header, ["a" * 3000, "b" * 5000, "c" * 10])])
     assert all(len(p) <= notify.TELEGRAM_LIMIT for p in parts) and parts[-1].endswith("c" * 10)
+
+
+# ---- the owner 2026-10-30: «нет у поставщика — снимите вручную» first; the cabinet's responsible gets its own list ------------------------
+
+def test_an_ad_the_supplier_has_not_and_not_on_oth_is_marked_and_first(tmp_path, monkeypatch):
+    from tires_sync import order_oth
+    conn, account = _fresh(tmp_path)
+    mirror_feed.set_manual_ads(conn, account, [dict(avito_id=4000000001, title="Есть у поставщика", ad_id="100"),
+                                               dict(avito_id=4000000002, title="Нет нигде", ad_id="900"),
+                                               dict(avito_id=4000000003, title="Лежит на ОТХ", ad_id="901"),
+                                               dict(avito_id=4000000004, title="Сделано вручную")])
+    conn.commit()
+    monkeypatch.setattr(order_oth, "goods_on_oth", lambda conn: {"901": 2})
+    said = []
+    monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: said.append(text) or True)
+    cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, account), [], True)], offers={"100": object()})
+    text = "\n".join(said)
+    lines = [l for l in text.split("\n") if l.startswith("   ")]
+    assert lines[0].startswith("   4000000002") and "нет у поставщика — снимите вручную" in lines[0]
+    assert sum("нет у поставщика" in l for l in lines) == 1                       # on «На ОТХ», at the supplier, or no code: not marked
+
+
+def test_the_list_of_a_cabinet_goes_to_its_responsible_and_the_owners_to_the_owner(tmp_path, monkeypatch):
+    from tires_sync import order_notify, users
+    conn, first = _fresh(tmp_path)
+    second = connections.create_account(conn, "Шина-Колесо", "2026-10-14T12:00:00", "o")
+    users.add_user(conn, "zaman", "длинный-пароль-1", "2026-10-14T12:00:00", role="owner")
+    connections.set_responsible(conn, second, "zaman", ["owner", "zaman"], "2026-10-14T12:00:00", "owner")
+    order_notify.set_user_chat(conn, "zaman", "777", "2026-10-14T12:00:00", "owner")
+    conn.commit()
+    manual(conn, first, 1, title="Своя %d")
+    manual(conn, second, 1, title="Заманова %d")
+    to_owner, to_person = [], []
+    monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: to_owner.append(text) or True)
+    monkeypatch.setattr(cli, "_person_telegram", lambda conn, box, login: (lambda text: to_person.append((login, text))))
+    cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, a), [], True) for a in (first, second)])
+    assert "Своя 0" in "\n".join(to_owner) and "Заманова 0" not in "\n".join(to_owner)
+    assert [login for login, _t in to_person] == ["zaman"] and "Заманова 0" in to_person[0][1] and "Своя 0" not in to_person[0][1]
+
+
+def test_a_responsible_without_a_chat_leaves_the_list_with_the_owner(tmp_path, monkeypatch):
+    from tires_sync import users
+    conn, first = _fresh(tmp_path)
+    second = connections.create_account(conn, "Шина-Колесо", "2026-10-14T12:00:00", "o")
+    users.add_user(conn, "zaman", "длинный-пароль-1", "2026-10-14T12:00:00", role="owner")
+    connections.set_responsible(conn, second, "zaman", ["owner", "zaman"], "2026-10-14T12:00:00", "owner")
+    conn.commit()
+    manual(conn, second, 1, title="Заманова %d")
+    to_owner = []
+    monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: to_owner.append(text) or True)
+    cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, second), [], True)])
+    assert "Заманова 0" in "\n".join(to_owner)
+
+
+def _fresh(tmp_path):
+    from tires_sync import store
+    conn = store.connect(tmp_path / "fresh.db")
+    account = connections.create_account(conn, "Основной", "2026-10-14T12:00:00", "o")
+    conn.commit()
+    return conn, account
+
+
+def test_a_supplier_not_used_this_cycle_marks_none_of_its_ads(tmp_path, monkeypatch):
+    """A supplier missing from the cycle (no file, a broken one): its positions are held, not gone — nothing to take off by hand."""
+    from tires_sync import order_oth
+    conn, account = _fresh(tmp_path)
+    mirror_feed.set_manual_ads(conn, account, [dict(avito_id=4000000002, title="Второй склад", ad_id="s2-900")])
+    conn.commit()
+    monkeypatch.setattr(order_oth, "goods_on_oth", lambda conn: {})
+    said = []
+    monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: said.append(text) or True)
+    cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, account), [], True)], offers={"100": object()}, unavailable={2})
+    assert "нет у поставщика" not in "\n".join(said)

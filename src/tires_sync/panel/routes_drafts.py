@@ -200,7 +200,8 @@ def register(app) -> None:
     @login_required
     def settings_exclusions_page():
         conn = get_conn()
-        return render_template("settings_exclusions.html", raw=get_active(conn)[1], suppliers_ex=_suppliers_ex(conn))
+        from .routes_catalog import orphan_rules
+        return render_template("settings_exclusions.html", raw=get_active(conn)[1], suppliers_ex=_suppliers_ex(conn), orphans=orphan_rules(app, conn))
 
     @app.route("/settings/draft", methods=["POST"])
     @login_required

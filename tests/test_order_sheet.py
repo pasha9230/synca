@@ -157,12 +157,12 @@ def test_a_row_per_position_with_every_column(table):
     items = orders.get_card(conn, mine)["items"]
     assert list(rows) == [sheet.key(mine, i["id"]) for i in items] and len(rows) == 2
     first = rows[sheet.key(mine, items[0]["id"])]
-    assert set(first) == set(sheet.COLUMNS)
-    assert first == dict(first, **{"Дата": "2026-10-23", "№ заказа MIM": "1234567", "Перемещение MIM": "26R-922352", "Артикул": "111",
+    assert set(first) == set(sheet.SENT) and "Дата" not in first and "Примечание" not in first     # the owner's columns: never sent (2026-10-30)
+    assert first == dict(first, **{"№ заказа MIM": "1234567", "Перемещение MIM": "26R-922352", "Артикул": "111",
                                    "Наименование": "Шина 111", "Кол-во": 4, "Цена MIM": 4000.0, "Сумма MIM": 16000.0, "Цена продажи": 5000.0,
-                                   "Сумма продажи": 20000.0, "Имя": "Иван", "Телефон": "+7 911 111-22-33", "ПВЗ": "Гамма", "Этап": "Заказ оформлен",
+                                   "Сумма продажи": 20000.0, "Имя": "Иван", "Телефон": "89111112233", "ПВЗ": "Гамма", "Этап": "Заказ оформлен",
                                    "Реализация": "", "Списание": False, "Прибыль %": "", "Прибыль ₽": "", "Уведомление точке": "",
-                                   "Уведомление клиенту": "", "Примечание": "Хочу сегодня"})
+                                   "Уведомление клиенту": ""})
     assert rows[sheet.key(mine, items[1]["id"])]["Кол-во"] == 1
 
 
@@ -234,7 +234,7 @@ def test_the_first_send_makes_the_rows_and_a_second_look_sends_nothing(table):
     conn, box, fake = table
     mine = placed(conn)
     assert sheet.flush(conn, box, fake, NOW)
-    assert len(fake.rows) == 2 and all(set(r) == set(sheet.COLUMNS) for r in fake.rows.values())
+    assert len(fake.rows) == 2 and all(set(r) == set(sheet.SENT) for r in fake.rows.values())
     sent = fake.data_posts()[0]
     assert sent["secret"] == SECRET and sent["sheet"] == "Заказы" and all(r["create"] for r in sent["rows"])
     assert events(conn, mine) == ["Записано в Google-таблицу: 2 стр."]
@@ -252,7 +252,7 @@ def test_a_change_sends_only_the_columns_that_follow_the_order(table):
     update = fake.data_posts()[-1]["rows"]
     assert len(update) == 2 and not any(r["create"] for r in update) and all(set(r["fields"]) == {"Перемещение MIM", "Этап"} for r in update)
     row = next(iter(fake.rows.values()))
-    assert row["Имя"] == "Иван" and row["Примечание"] == "Хочу сегодня" and row["Этап"] == "Товар на точке" and row["Перемещение MIM"] == "26R-1"
+    assert row["Имя"] == "Иван" and "Примечание" not in row and row["Этап"] == "Товар на точке" and row["Перемещение MIM"] == "26R-1"
     assert events(conn, mine)[-1] == "Google-таблица обновлена: Перемещение MIM, Этап."
 
 
@@ -754,3 +754,73 @@ def test_the_script_on_a_fake_of_google_sheets(tmp_path):
     assert out["second"]["results"] == [{"key": "tires:2:1", "status": "created"}]
     assert out["secondAt"] == {"formula": '=IF(K2="";"";K2)', "note2": "", "note3": "tires:2:1"}                     # under the formula, not on it
     assert out["lacking"]["results"][0]["status"] == "error" and out["manualAfter"] == ["Итого"]
+
+
+# ---- the owner's answers of 2026-10-30 (evening) ------------------------------------------------------------------------------------
+
+def test_a_sheet_without_the_note_column_still_takes_the_rows_and_the_date_stays_asked(table):
+    """«Дата» and «Примечание» are never filled (the owner 2026-10-30). «Примечание» may go; «Дата» holds the hidden mark of each row (the
+    script's KEY_COLUMN): «Проверить» still asks for it."""
+    conn, box, fake = table
+    fake.columns = [c for c in sheet.COLUMNS if c != "Дата"]
+    with pytest.raises(sheet.SheetError, match="нет колонок: Дата"):
+        sheet.check(conn, box, fake)
+    fake.columns = [c for c in sheet.COLUMNS if c != "Примечание"]
+    mine = placed(conn, comment="Позвонить вечером")
+    assert sheet.check(conn, box, fake) == "Таблица отвечает: лист «Заказы», все колонки на месте."
+    assert mine in sheet.flush(conn, box, fake, NOW)
+    assert not any(r.get("status") == "error" for r in (fake.result or {}).get("results", []))
+    assert len(fake.rows) == 2 and all("Примечание" not in r and "Дата" not in r for r in fake.rows.values())
+
+
+@pytest.mark.parametrize("typed, shown", [("+7 911 128-06-06", "89111280606"), ("8 (911) 128 06 06", "89111280606"), ("", "")])
+def test_the_phone_in_the_sheet_is_eight_and_ten_digits(typed, shown):
+    assert sheet.sheet_phone(typed) == shown
+
+
+def test_the_list_of_orders_keeps_the_comment_and_its_own_phone(table):
+    """«Список» of the panel shows what it showed (the comment as «Примечание»): only what goes to Google changed."""
+    conn, box, fake = table
+    mine = placed(conn, comment="Хочу сегодня")
+    [row] = list(sheet.card_rows(conn, orders.get_card(conn, mine), NOW).values())[:1]
+    assert row["Примечание"] == "Хочу сегодня" and row["Телефон"] == "+7 911 111-22-33"
+
+
+def test_switched_on_is_shown_in_moscow_time(panel):
+    """«Включено с» is kept in UTC (the panel's clock) and shown in Moscow time (the orders are in Moscow time): 12:00 UTC → 15:00."""
+    app, conn, box, fake, client = panel
+    client.post("/connections/sheet", data={"csrf": "tok", "url": URL, "secret": SECRET, "enabled": "1"})
+    assert sheet.settings(conn)["since"] == "2026-10-07T12:00:00"
+    assert "07.10.2026 15:00:00 по Москве" in client.get("/connections/sheet").get_data(as_text=True)
+
+
+# ---- sheet-enroll --open (the owner 2026-10-30): the open orders placed before the table was on ----------------------------------------
+
+def test_the_open_orders_placed_before_the_table_join_its_queue_and_the_closed_do_not(tmp_path, capsys):
+    from tires_sync import cli
+    conn = db(tmp_path)
+    before = {code: placed(conn) for code in ("placed", "moving", "at_point", "oth", "return_given", "done", "cancel")}
+    for code, cid in before.items():
+        conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, code)["id"], cid))
+    early = card(conn)                                                                   # «Новый заказ»: not placed, not for the table
+    conn.commit()
+    path = str(tmp_path / "t.db")
+    assert cli.main(["sheet-enroll", "--db", path, "--open"]) == 1                       # the table is off: nothing
+    assert "выключена" in capsys.readouterr().err
+    turn_on(conn, SecretBox(Fernet.generate_key()))
+    assert cli.main(["sheet-enroll", "--db", path, "--open", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    wanted = [before[c] for c in ("placed", "moving", "at_point", "oth", "return_given")]
+    assert all("№%d ·" % c in out for c in wanted) and "№%d ·" % before["done"] not in out and "№%d ·" % early not in out
+    assert conn.execute("SELECT COUNT(*) FROM sheet_order").fetchone()[0] == 0           # --dry-run: nothing put in
+    assert cli.main(["sheet-enroll", "--db", path, "--open"]) == 0
+    assert sorted(r[0] for r in conn.execute("SELECT order_id FROM sheet_order")) == sorted(wanted)
+    assert cli.main(["sheet-enroll", "--db", path, "--open"]) == 0 and "в очередь Google-таблицы: 0" in capsys.readouterr().out   # twice: nothing more
+
+
+def test_the_line_of_a_merged_order_already_told_is_information_not_an_error():
+    from tires_sync import order_placed
+    from tires_sync.panel.routes_orders import placed_kind
+    assert placed_kind(order_placed.MERGED) == "info"
+    assert placed_kind("Клиенту отправлено «Клиенту: заказ оформлен»") == "ok"
+    assert placed_kind("Клиенту не отправлено «Клиенту: заказ оформлен»: нет чата") == "error"

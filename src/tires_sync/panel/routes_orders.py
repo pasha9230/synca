@@ -90,6 +90,14 @@ SEND_ALL_SECONDS = 15                              # «Отправить все
 MAX_NEW_ROWS = 20                                  # positions in the window of a new order; more are added in the card
 
 
+def placed_kind(line: str) -> str:
+    """How a line of order_placed.on_placed is shown after «Заказать в МИМ»: sent — green; a point in the panel or a merged order already told
+    — grey information; anything else (not sent, data lacking) — red."""
+    if " отправлено «" in line and "не отправлено" not in line:
+        return "ok"
+    return "info" if order_placed.IN_PANEL in line or line == order_placed.MERGED else "error"
+
+
 def _known_tags(conn) -> list:
     """The tags already on orders, the most used first: the suggestions of the tag field of the order window."""
     count = {}
@@ -1133,7 +1141,7 @@ def register(app) -> None:
                 order_sheet.enroll(conn, card_id, stamp)                  # placed in WebMIM: its rows go to the Google table (if it is on)
                 conn.commit()
                 for line in order_placed.on_placed(conn, card_id, state["webmim_id"], stamp, author(), avito_deliver(conn, stamp), vk_sender(conn)):
-                    flash(line, "ok" if " отправлено «" in line and "не отправлено" not in line else "info" if order_placed.IN_PANEL in line else "error")
+                    flash(line, placed_kind(line))
                 offer_waiting(conn, card_id)                              # what is left to send opens «Сообщения по заказу»
         except orders.OrderError as err:
             flash(str(err), "error")

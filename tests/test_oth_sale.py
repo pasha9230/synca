@@ -326,7 +326,9 @@ def test_the_table_lowers_the_old_row_and_marks_the_new_one(tmp_path):
     rows = order_sheet.rows_of(conn, cid, LATER)
     row = rows[order_sheet.key(cid, orders.get_card(conn, cid)["items"][0]["id"])]
     assert row["Реализация"] == "Б" and row["№ заказа MIM"] == orders.get_card(conn, old)["webmim_number"] and row["Цена MIM"] == BUY_OLD
-    assert row["Примечание"].startswith("с ОТХ, заказ №%d" % old) and row["Прибыль ₽"] != ""
+    assert "Примечание" not in row and row["Прибыль ₽"] != ""                          # «Примечание» never goes to the table (the owner 2026-10-30)
+    listed = order_sheet.card_rows(conn, orders.get_card(conn, cid), LATER)[order_sheet.key(cid, orders.get_card(conn, cid)["items"][0]["id"])]
+    assert listed["Примечание"].startswith("с ОТХ, заказ №%d" % old)                    # «Список» of the panel still says where the tyres came from
 
 
 def test_the_old_row_follows_a_give_back_too(tmp_path):
