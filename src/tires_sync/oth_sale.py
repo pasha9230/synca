@@ -84,9 +84,10 @@ def holds(conn, card_id) -> List[int]:
         (card_id,))})
 
 
-def holds_text(found: List[int]) -> str:
-    return ("В заказе шины с ОТХ (заказ %s): переведите заказ на «На ОТХ» или верните их («Вернуть на ОТХ» у позиций)."
-            % ", ".join("№%d" % n for n in found))
+def holds_text(found: List[int], can_return: bool = True) -> str:
+    """`can_return`: the order may still give them back (why_not: not placed yet); else «На ОТХ» is the only way (the point never has the button)."""
+    return ("В заказе шины с ОТХ (заказ %s): переведите заказ на «На ОТХ»%s." % (
+        ", ".join("№%d" % n for n in found), " или верните их («Вернуть на ОТХ» у позиций)" if can_return else ""))
 
 
 def gives(conn, card_id) -> List[int]:

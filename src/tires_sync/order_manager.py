@@ -670,6 +670,7 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str,
     try:
         card = orders.get_card(conn, card_id)
         token = arrived_token(card, now)
+        body = body or _oth_arrived_body(conn, card)
     except Exception as err:
         status, why, copy = "failed", "сбой отправки: %s" % (str(err)[:200] or err.__class__.__name__), ""
     else:
@@ -686,7 +687,7 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str,
         if status == "sent" and task is not None:
             _arrived_close(conn, task, now, who)
         elif status == "failed":
-            _arrived_wait(conn, card, token, copy, why, now)
+            _arrived_wait(conn, card, token, copy, why, now, own_text=body is not None)
     if status == "sent":
         return True, "Клиенту отправлено сообщение «можно забирать»."
     by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."
@@ -721,7 +722,19 @@ def arrived_task(conn, card_id, token: str) -> Optional[dict]:
     return engine.get_task(conn, row[0]) if row else None
 
 
-def _arrived_wait(conn, card: dict, token: str, copy: str, why: str, now: str) -> None:
+def _oth_arrived_body(conn, card: dict) -> Optional[str]:
+    """«Можно забирать» of an order whose tyres all come from «На ОТХ» (oth_sale) and that has no WebMIM number (it was never ordered):
+    the template without «№{webmim_number}», as the reminder of the reservation writes it (order_reserve._client_body); None for any other
+    order (its template as it is)."""
+    from . import order_reserve, oth_sale
+    if card.get("webmim_number") or not oth_sale.taken_ids(conn, card["id"]):
+        return None
+    if [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]:
+        return None
+    return order_reserve.NUMBER.sub("", _arrived_body(conn))
+
+
+def _arrived_wait(conn, card: dict, token: str, copy: str, why: str, now: str, own_text: bool = False) -> None:
     """«Можно забирать» did not go (no chat, no keys, a value lacking): it waits as a message of the order (the owner 2026-10-29: the text in the
     card, «Скопировать», «Отправлено вручную»); a chat bound later sends it once (arrived_after_link). Never raises."""
     from . import order_engine as engine
@@ -729,7 +742,7 @@ def _arrived_wait(conn, card: dict, token: str, copy: str, why: str, now: str) -
         template = conn.execute("SELECT id FROM order_template WHERE name = ? AND audience = 'client' ORDER BY id LIMIT 1", (ARRIVED_TEMPLATE,)).fetchone()
         conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
                      "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                     (card["id"], engine.ARRIVED_RULE, token, "message", str(template[0]) if template else "", card["stage_id"],
+                     (card["id"], engine.ARRIVED_RULE, token, "message", str(template[0]) if template and not own_text else "", card["stage_id"],
                       "pending" if copy else "error", ARRIVED_TEMPLATE, copy, "" if copy else "Не отправлено само: %s." % why, now))
         conn.commit()
     except Exception:

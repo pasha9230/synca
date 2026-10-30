@@ -929,7 +929,7 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         from . import oth_sale
         held = oth_sale.holds(conn, card_id)                                    # the tyres taken from «На ОТХ» would be lost with the order
         if held:
-            raise _refuse_move(conn, card_id, now, author, oth_sale.holds_text(held), journal)
+            raise _refuse_move(conn, card_id, now, author, oth_sale.holds_text(held, oth_sale.why_not(conn, card) is None), journal)
     keep_sale = "" if stage["kind"] in ("won", "closed") else " AND sale_ids = '[]'"         # the same rule in SQL: a sale recorded a moment ago counts
     cur = conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ?, updated_at = ? WHERE id = ? AND stage_id = ?" + keep_sale,
                        (stage["id"], now, now, card_id, card["stage_id"]))

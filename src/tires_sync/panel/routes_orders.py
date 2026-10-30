@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import order_notify, order_oth, order_reserve as reserve_store, oth_sale, point_log
+from .. import order_notify, order_oth, oth_sale, point_log
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
@@ -1148,8 +1148,7 @@ def register(app) -> None:
             flash(str(err), "error")
             return back(card_id)
         card = orders.get_card(conn, card_id)
-        body = None if card["webmim_number"] else reserve_store.NUMBER.sub("", manager.template_body(conn, templates.ARRIVED_SAMPLE))
-        sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author(), body=body)
+        sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author())     # the text without the WebMIM number: order_manager
         told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, oth_sale.point_text(conn, card, now), now,
                                        vk_http=app.config.get("VK_HTTP") or urllib_transport)
         flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")

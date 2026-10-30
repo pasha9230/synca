@@ -579,7 +579,7 @@ def test_the_button_moves_to_the_point_past_placed_and_tells_the_client_once_and
     post(owner, "/orders/%d/oth-at-point" % cid, tok)                                   # a second press: nothing more
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == "at_point" and card["reserve_until"]                # the reservation of the stage, three days
-    assert [c for c, _b in told_client] == [cid] and "{webmim_number}" not in told_client[0][1] and "приехал в пункт выдачи" in told_client[0][1]
+    assert told_client == [(cid, None)]                                              # the text without the WebMIM number: order_manager._oth_arrived_body
     assert len(told_point) == 1 and told_point[0].startswith("Шины с ОТХ (заказ №") and "заказ №%d" % cid in told_point[0]
     stages = [e["text"] for e in orders.list_events(conn, cid) if e["kind"] == "stage"]
     assert len(stages) == 1 and "Заказ оформлен" not in stages[0]                         # straight from «Новый»: no «Заказ оформлен» and its message
@@ -700,7 +700,44 @@ def test_a_refusal_at_the_point_of_an_order_with_tyres_of_oth_asks_on_oth_and_no
     assert "Шины остаются на точке" in owner.get("/orders/%d" % cid).get_data(as_text=True)
     post(owner, "/orders/%d/move" % cid, tok, stage_id=cancel, oth_answer="no", cancel_kind="не выкупил", cancel_reason="")
     assert code(conn, cid) == "at_point"                                                          # «нет»: «Отмена / невыкуп» refused
-    assert any(e["text"] == "Перевод не выполнен: В заказе шины с ОТХ (заказ №%d): переведите заказ на «На ОТХ» или верните их («Вернуть на ОТХ» у "
-               "позиций)." % old for e in orders.list_events(conn, cid))
+    assert any(e["text"] == "Перевод не выполнен: В заказе шины с ОТХ (заказ №%d): переведите заказ на «На ОТХ»." % old
+               for e in orders.list_events(conn, cid))                                       # at the point there is no «Вернуть на ОТХ» to offer
     post(owner, "/orders/%d/move" % cid, tok, stage_id=str(stage(conn, "oth")), oth_answer="yes", cancel_kind="не выкупил", cancel_reason="")
     assert code(conn, cid) == "oth" and oth_stock.by_point(conn) == {("1", point_id(conn)): 4}    # «да»: on OTH with its tyres
+
+
+
+def test_the_arrival_message_of_an_order_all_from_oth_waits_without_the_webmim_number_and_is_not_rebuilt(tmp_path):
+    """No chat when «Шины уже на точке» is pressed: «можно забирать» waits with the text without «№{webmim_number}» (the owner's template
+    there too); opening the card never rebuilds it from the template (it would lack the number); a chat bound later sends it once."""
+    from tires_sync import order_engine, order_manager, order_templates
+    conn = db(tmp_path)
+    order_templates.add_samples(conn)
+    card_at(conn, "oth", T)
+    conn.execute("UPDATE point SET address = 'СПб, Бета', hours = '10-20', map_url = 'https://yandex.ru/maps/-/x'")
+    conn.commit()
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    sent, _note = order_manager.tell_client_arrived(conn, cid, None, LATER, "o")
+    assert not sent
+    task = order_manager.arrived_task(conn, cid, order_manager.arrived_token(orders.get_card(conn, cid), LATER))
+    assert task["status"] == "pending" and "приехал в пункт выдачи" in task["body"] and "{" not in task["body"]
+    order_engine.refresh_tasks(conn, cid, LATER)                                    # the card is opened
+    again = order_manager.arrived_task(conn, cid, order_manager.arrived_token(orders.get_card(conn, cid), LATER))
+    assert (again["status"], again["body"]) == ("pending", task["body"])
+    assert order_engine.audience(conn, again) == "client"
+
+
+def test_the_point_arrived_of_an_order_all_from_oth_uses_the_text_without_the_number_too(tmp_path):
+    from tires_sync import order_manager
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    body = order_manager._oth_arrived_body(conn, orders.get_card(conn, cid))
+    assert body and "{webmim_number}" not in body
+    mixed = new_order(conn, qty=6)
+    take(conn, mixed)
+    assert order_manager._oth_arrived_body(conn, orders.get_card(conn, mixed)) is None   # its WebMIM order has a number to name
