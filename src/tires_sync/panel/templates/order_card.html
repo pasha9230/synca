@@ -9,6 +9,14 @@
 <div class="ocard-layout">
 <div class="ocard-main">
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}
+{% if back_ask %}<div class="flash flash--info" id="oth-back" role="alert" data-oth-back><div class="flash-text stack"><b>{{ back_ask.question }}</b>
+<span class="small">Заказ стоит на «На ОТХ». Новому клиенту — новый заказ этой точки: шины берутся с ОТХ, этот заказ уходит в «Отмену», клиенту уходит «можно забирать».</span>
+<form method="post" action="/orders/{{ c.id }}/oth-back" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="check"><input type="radio" name="answer" value="new" checked> Новый клиент</label>
+<div class="grid-2"><label class="field"><span class="label">Имя</span><input class="input" name="client_name" maxlength="200"></label><label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="client_phone" maxlength="40" placeholder="+7 900 000-00-00"></label></div>
+<label class="check"><input type="radio" name="answer" value="same"> Тот же клиент ({{ c.client_name or "без имени" }}) — заказ просто перейдёт на «Товар на точке»</label>
+<div><button class="btn btn--primary btn--sm">Перевести на «Товар на точке»</button></div></form></div></div>
+{% endif %}
 {% if oth_ask %}<div class="flash flash--info" id="oth-offer" role="alert" data-oth-offer><div class="flash-text stack"><b>{{ oth_ask.question }}</b>
 <span class="small">Заказ уходит в «{{ oth_ask.target.name }}». Если шины лежат на точке, их можно оставить нашим товаром на ОТХ.{% if oth_ask.cancel_reason %} Причина: {{ oth_ask.cancel_reason }}.{% endif %}</span>
 <div class="row" style="gap:var(--s-2)"><form method="post" action="/orders/{{ c.id }}/move" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ oth_ask.oth.id }}"><input type="hidden" name="oth_answer" value="yes"><input type="hidden" name="cancel_reason" value="{{ oth_ask.cancel_reason }}"><button class="btn btn--primary btn--sm">Да, на «{{ oth_ask.oth.name }}»</button></form>

@@ -65,7 +65,7 @@ def own_sales(conn, point_id) -> set:
     """The point's own sales (the owner 2026-10-30: a point sells its own tyres through its Avito account, it orders nothing from the
     supplier): an order of the point whose chats and calls are all of the point's account (account_orders) or whose deal is «Из наличия
     точки», and that was never ordered from the supplier (no WebMIM number nor id, no number of 4 Точки, not on «Заказ оформлен» or later
-    with the supplier's tyres — the review 2026-10-31). Our orders brought to the point are not among them: they are
+    with the supplier's tyres — the review 2026-10-31), nor in an active merge (a source or the merged order). Our orders brought to the point are not among them: they are
     «Рабочее место»'s."""
     from . import orders                                                # orders imports this module
     rows = conn.execute("SELECT c.id, c.deal_kind, c.webmim_number, c.webmim_id, c.supplier_number, c.stage_id, "
@@ -74,12 +74,15 @@ def own_sales(conn, point_id) -> set:
     if not rows:
         return set()
     mine, placed = account_orders(conn), orders._placed_stage(conn)
+    merged = {r[0] for r in conn.execute("SELECT s.order_id FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE m.undone_at = '' "
+                                         "UNION SELECT into_order FROM order_merge WHERE undone_at = ''")}     # a merge is the office's (2026-10-31)
     stages = {st["id"]: st for st in orders.list_stages(conn)}
 
     def ordered(stage_id, supplier_items) -> bool:                      # the supplier's tyres placed by hand without a number (4 Точки
         stage = stages.get(stage_id)                                    # before 2026-10-29): as order_merge._ordered — they are coming
         return bool(supplier_items) and stage is not None and stage["kind"] == "open" and orders._needs_placed(stage, placed)
-    return {r[0] for r in rows if not (r[2] or r[3] or r[4]) and not ordered(r[5], r[6]) and (r[1] == "stock" or r[0] in mine)}
+    return {r[0] for r in rows if not (r[2] or r[3] or r[4]) and not ordered(r[5], r[6]) and r[0] not in merged
+            and (r[1] == "stock" or r[0] in mine)}
 
 
 POINT_STAGES = ("new", "placed", "done", "cancel")         # «Заказы» of a point (the owner 2026-10-30): its own sales on these four

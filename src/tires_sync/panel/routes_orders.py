@@ -384,6 +384,8 @@ def oth_offer(conn, card: dict, stage_id) -> Optional[dict]:
     waits and the card asks it (the owner 2026-10-29); None: move as asked. The answer comes as the field oth_answer (yes / no)."""
     if card["stage"]["code"] != "at_point" or request.form.get("oth_answer") in ("yes", "no"):
         return None
+    if own_point() is not None and card["id"] in points.own_sales(conn, own_point()):
+        return None                                                        # the point's own tyres: no «На ОТХ» (it lies at the point anyway)
     stage = next((s for s in orders.list_stages(conn) if s["id"] == stage_id), None)
     return stage if stage is not None and stage["code"] in OTH_OFFER else None
 
@@ -395,6 +397,27 @@ def ask_oth(card_id: int, stage: dict, reason: Optional[str] = None):
     where = "/orders/%d#oth-offer" % card_id
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(ok=False, message=OTH_QUESTION, go=where)
+    return redirect(where)
+
+
+BACK_QUESTION = "Шины с ОТХ забирает новый клиент или тот же?"
+
+
+def back_offer(conn, card: dict, stage_id) -> Optional[dict]:
+    """«Товар на точке» chosen for an order on «На ОТХ» by the office (the owner 2026-10-30, the order 444): the move waits for the answer of
+    the card — a new client (a new order takes the tyres) or the same one (as before); None: move as asked (a point, another stage)."""
+    if card["stage"]["code"] != "oth" or own_point() is not None:
+        return None
+    stage = next((s for s in orders.list_stages(conn) if s["id"] == stage_id), None)
+    return stage if stage is not None and stage["code"] == "at_point" else None
+
+
+def ask_back(card_id: int, stage: dict):
+    """Keep the move for the question of the card; the board is told where the question is."""
+    session["oth_back"] = {"card": card_id, "stage_id": stage["id"]}
+    where = "/orders/%d#oth-back" % card_id
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=False, message=BACK_QUESTION, go=where)
     return redirect(where)
 
 
@@ -767,6 +790,9 @@ def register(app) -> None:
         asked = oth_offer(conn, card, stage_id) if stage_id is not None else None
         if asked is not None:
             return ask_oth(card_id, asked, reason)
+        going_back = back_offer(conn, card, stage_id) if stage_id is not None else None
+        if going_back is not None:                                         # from «На ОТХ» to the point: a new client or the same?
+            return ask_back(card_id, going_back)
         if request.form.get("oth_answer") in ("yes", "no"):                # the answer to the question: its reason goes with the move, for a point too
             session.pop("oth_offer", None)
             if reason is None and request.form.get("cancel_reason"):
@@ -802,6 +828,11 @@ def register(app) -> None:
         if own_point() is not None and ost in points.POINT_STAGES:                 # the cards of «Заказы» on a phone: back to the stage
             return redirect("/orders?ost=" + ost)
         return redirect("/orders/%d" % card_id)
+
+    def _back_ask(card: dict):
+        """The question «a new client or the same?» kept by ask_back for this order while it still stands on «На ОТХ» (the office only)."""
+        asked = session.get("oth_back") or {}
+        return {"question": BACK_QUESTION} if asked.get("card") == card["id"] and card["stage"]["code"] == "oth" and own_point() is None else None
 
     def _arrived_untold(conn, card: dict):
         """The reason the client of an order on «Товар на точке» was not told «можно забирать» (order_arrived), for the line of the card; None."""
@@ -991,6 +1022,7 @@ def register(app) -> None:
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
@@ -1128,6 +1160,9 @@ def register(app) -> None:
             asked = oth_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
             if asked is not None:                                         # the fields are saved (the reason too); the move asks first
                 return ask_oth(card_id, asked)
+            going_back = back_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
+            if going_back is not None:                                    # the fields are saved; a new client or the same asks first
+                return ask_back(card_id, going_back)
             try:
                 stage_id = _int(request.form.get("stage_id"))
                 if stage_id is None:
@@ -1348,22 +1383,67 @@ def register(app) -> None:
         if not oth_sale.all_from_oth(conn, card):
             flash("Перевести сразу на «Товар на точке» можно, когда все шины заказа взяты с ОТХ и заказ ещё не оформлен.", "error")
             return back(card_id)
+        oth_to_point(conn, card_id)
+        return back(card_id)
+
+    def oth_to_point(conn, card_id) -> bool:
+        """An order whose tyres all come from «На ОТХ» goes to «Товар на точке» past «Заказ оформлен» (no WebMIM): the client hears «можно
+        забирать», the point its own text; the result is flashed. False: not moved."""
         stage = next((s for s in orders.list_stages(conn) if s["code"] == "at_point"), None)
         now = local_iso()
         try:
             # no date of delivery is put: the tyres are at the point, «Товар в наличии на точке» is shown instead (the owner 2026-10-30)
             if stage is None or not orders.move_card(conn, card_id, stage["id"], now, author()):
                 flash("Заказ уже перевели: обновите страницу.", "error")
-                return back(card_id)
+                return False
         except orders.OrderError as err:
             flash(str(err), "error")
-            return back(card_id)
+            return False
         card = orders.get_card(conn, card_id)
         sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author())     # the text without the WebMIM number: order_manager
         told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, oth_sale.point_text(conn, card, now), now,
                                        vk_http=app.config.get("VK_HTTP") or urllib_transport)
         flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")
-        return back(card_id)
+        return True
+
+    @app.route("/orders/<int:card_id>/oth-back", methods=["POST"])
+    @login_required
+    def order_oth_back(card_id):
+        """The answer to «a new client or the same?» (back_offer): a new one — a new order of the point takes the tyres from OTH and goes to the
+        point (oth_sale.to_new_client, oth_to_point); the same — the old order moves as before."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        if back_offer(conn, card, next((s["id"] for s in orders.list_stages(conn) if s["code"] == "at_point"), None)) is None:
+            session.pop("oth_back", None)
+            flash("Заказ уже не на «На ОТХ».", "error")
+            return back(card_id)
+        if request.form.get("answer") == "same":
+            session.pop("oth_back", None)
+            try:
+                stage = next(s for s in orders.list_stages(conn) if s["code"] == "at_point")
+                stamp = local_iso()
+                if orders.move_card(conn, card_id, stage["id"], stamp, author()):
+                    flash("Заказ перенесён: тот же клиент.")
+                    offer_send(conn, card_id, stamp)                       # the messages of the stage, as any move of the card
+                else:
+                    flash("Заказ уже перевели.")
+            except (orders.OrderError, StopIteration) as err:
+                flash(str(err) or "Нет этапа «Товар на точке».", "error")
+            return back(card_id)
+        try:
+            new = oth_sale.to_new_client(conn, card_id, request.form.get("client_name"), request.form.get("client_phone"), local_iso(), author())
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return redirect("/orders/%d#oth-back" % card_id)
+        session.pop("oth_back", None)
+        left = orders.get_card(conn, card_id)
+        if left["stage"]["code"] == "oth":                                 # a tyre of the point, pieces given back: the old order stays
+            flash("Заказ №%d остался на «На ОТХ»: в нём остались шины, которые не переходят (шина точки или возвращённые поставщику)." % card_id, "error")
+        if oth_sale.all_from_oth(conn, orders.get_card(conn, new)):
+            oth_to_point(conn, new)
+        else:
+            flash("Новый заказ №%d не переведён на «Товар на точке»: не все его шины взяты с ОТХ." % new, "error")
+        return redirect("/orders/%d" % new)
 
     @app.route("/orders/<int:card_id>/items/<int:item_id>/update", methods=["POST"])
     @login_required

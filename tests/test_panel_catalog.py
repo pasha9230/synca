@@ -34,10 +34,12 @@ def test_catalog_is_in_the_menu_and_groups_goods_by_brand_with_status(tmp_path):
     html = client.get("/catalog").get_data(as_text=True)
     assert 'href="/catalog"' in html
     table = html.split('id="items"')[1]                 # the brand filter and «Бренды в фиде» above it fold (<details>); the list never does
-    assert "<details" not in table and "IKON TYRES" in table and "LAUFENN" in table
+    assert not re.findall(r'<details(?! class="own-cell")', table)       # only the owner's price cell opens (inline-price 2026-10-30): no brand folds
+    assert "IKON TYRES" in table and "LAUFENN" in table
     assert ">C1<" in html and ">C2<" in html
     assert "в фиде" in html and "остаток ниже порога" in html
-    assert "5\u00a0000\u00a0₽" in html and "4\u00a0810\u00a0₽" in html and "<td class=\"num\">—</td>" in html
+    assert "5\u00a0000\u00a0₽" in html and "4\u00a0810\u00a0₽" in html
+    assert re.search(r'<td class="num">(?:<details class="own-cell"[^>]*><summary[^>]*>)?—', html)   # no price: a dash (the owner's in his price cell)
     assert "сочетание не включено" in html
 
 

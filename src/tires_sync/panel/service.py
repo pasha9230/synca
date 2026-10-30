@@ -577,6 +577,7 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
             "pending": base_overrides is not None and manual != base_overrides.get(override_key(gid)), "view_only": gid in view_only,
             "own_price": gid in own_any,
             "below_cost": bool(cand and gid in settings.own_prices and offer.base_price > 0 and cand.price < offer.base_price),
+            "purchase": ev.held[gid][0] if gid in ev.held else offer.base_price,     # what a percent is counted from: the anchor (price_guard)
             "supplier_mark": supplier_mark(supplier_of(offer), capped_supplier),
             "stock_text": ">40" if capped_supplier and supplier_of(offer) == capped_supplier and offer.stock >= STOCK_CAP else str(offer.stock),
             "twins": twins(gid)})
@@ -784,6 +785,41 @@ def own_price_rows(conn, general, active, offer, ref=None, offers=None) -> list:
             rows[-1]["held_by"] = {"goods_id": other, "code": getattr(holder, "code", "") or other,
                                    "where": "склад " + mark["title"].replace("Поставщик: ", "") if mark else ""}
     return rows
+
+
+def account_correction(conn, account_id: int, brand_key: str) -> float:
+    """The points an account adds to the percent of a brand: its delta plus its own markup of the brand, never past ten either way (as
+    connections.effective_settings puts it on the brand's percent)."""
+    delta = connections.get_account_pricing(conn, account_id)["delta"] + \
+        connections.get_brand_deltas(conn, account_id).get(connections._clean_brand(brand_key), 0.0)
+    return round(max(-10.0, min(10.0, delta)), 4)
+
+
+def account_shifts(conn, brand_key: str, accounts=None) -> list:
+    """[(account, the points over the first feed account's correction)] for a brand, the first one 0: how the base own price of the catalog's
+    cell is shifted for every account (base_own_prices), and the cell's line of the prices by account."""
+    accounts = connections.list_feed_accounts(conn) if accounts is None else accounts
+    if not accounts:
+        return []
+    first = account_correction(conn, accounts[0]["id"], brand_key)
+    return [(a, round(account_correction(conn, a["id"], brand_key) - first, 4)) for a in accounts]
+
+
+def base_own_prices(conn, offer, value: dict) -> dict:
+    """One base own price of a position (the cell «Наша цена» of the catalog, the owner 2026-10-30: «менять базовую цену») as the own price of
+    each feed account: the first account (the catalog's price) takes it as typed, every other one with its correction over the first one's,
+    as a brand's percent gets it. A percent: + the points; a sale price: + the purchase (the anchor of price_guard, the base the feed counts
+    from) × the points, to the ruble (half up, as the cell's line). The own price itself still replaces the account's corrections
+    (pricing.position_price): the shift is written now. {account_id: {"pct": x} | {"price": n}}."""
+    from .. import price_guard
+    base, _why = price_guard.base_for(price_guard.load(conn), offer.goods_id, float(offer.base_price))
+    out = {}
+    for account, shift in account_shifts(conn, offer.brand_key):
+        if "pct" in value:
+            out[account["id"]] = {"pct": round(float(value["pct"]) + shift, 4)}
+        else:
+            out[account["id"]] = {"price": int(math.floor(value["price"] + max(base, 0.0) * shift / 100 + 0.5))}
+    return out
 
 
 def own_price_lines(conn, raw: dict, changes: dict, offers, old, new) -> list:

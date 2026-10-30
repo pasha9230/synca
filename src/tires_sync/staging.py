@@ -198,6 +198,23 @@ def set_own_price(conn, goods_id: str, accounts, value: Optional[dict], now: str
     _mutate(conn, fn, now)
 
 
+def set_own_price_each(conn, goods_id: str, values: dict, now: str) -> None:
+    """The own price of a position, a value of its own in each account ({account_id: {"pct": x} | {"price": n}}; the cell «Наша цена» of the
+    catalog, service.base_own_prices): one change of the working draft, all the accounts or none."""
+    goods_id = str(goods_id or "").strip()
+    if not goods_id or not values:
+        raise ValueError("Выберите позицию и хотя бы один аккаунт.")
+    clean = {}
+    for account_id, value in values.items():
+        kind, number = own_price_value(value)
+        clean["%d:%s" % (int(account_id), goods_id)] = {kind: number}
+
+    def fn(eff):
+        eff["price_overrides"].update(clean)
+
+    _mutate(conn, fn, now)
+
+
 def set_own_prices(conn, goods_ids, accounts, value: Optional[dict], now: str, redo: bool = False) -> dict:
     """The own price of many positions at once (the owner 2026-10-30: ticked in the catalog or all of a filter), one change of the working draft:
     `value` {"pct": percent to the purchase} or None («Как у бренда»). A position that has its own price in an account now (applied or in the

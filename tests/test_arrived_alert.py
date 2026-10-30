@@ -338,13 +338,21 @@ def test_a_rules_message_of_the_same_template_waits_and_nothing_goes_beside_it(t
     assert "ждёт" in mgr.arrived_by_move(conn, before, None, LATE, "o") and told == []
 
 
-def test_from_oth_with_a_new_client_typed_in_the_window_is_told(tmp_path, monkeypatch):
+def test_from_oth_with_a_new_client_is_told_once_through_the_question(tmp_path, monkeypatch):
+    """Was (arrived-alert): the window moved the order from «На ОТХ» with a new client typed and told it. Now (oth-newclient, the owner
+    2026-10-30, the order 444): the move from «На ОТХ» asks first; «Новый клиент» makes a new order at the point and it is told once."""
+    import re
     from panel_helpers import post
+    from tires_sync import order_notify
     told = []
     monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, ""))[1])
+    monkeypatch.setattr(order_notify, "tell_point", lambda *a, **kw: "показано точке")
     app, owner, tok, conn, card = _panel_order(tmp_path, "oth")
-    post(owner, "/orders/%d/save" % card, tok, client_name="Пётр", client_phone="+7 900 999-88-77", stage_id=str(_stage(conn, "at_point")))
-    assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and told == [card]
+    r = post(owner, "/orders/%d/save" % card, tok, stage_id=str(_stage(conn, "at_point")))
+    assert "#oth-back" in r.headers["Location"] and orders.get_card(conn, card)["stage"]["code"] == "oth" and told == []
+    r = post(owner, "/orders/%d/oth-back" % card, tok, answer="new", client_name="Пётр", client_phone="+7 900 999-88-77")
+    new = int(re.search(r"/orders/(\d+)", r.headers["Location"]).group(1))
+    assert new != card and orders.get_card(conn, new)["stage"]["code"] == "at_point" and told == [new]      # once, the new order
 
 
 def test_the_systems_own_texts_in_the_chat_are_not_telling(env):

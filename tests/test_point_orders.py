@@ -365,3 +365,24 @@ def test_a_typed_tyre_never_turns_a_sale_with_the_suppliers_tyres_into_the_point
                         follow_redirects=True)
     assert "заказ ведёт менеджер" in r.get_data(as_text=True)
     assert orders._row(conn, m["account"])["deal_kind"] != "stock" and len(orders.get_card(conn, m["account"])["items"]) == 1
+
+
+def test_a_merged_order_is_never_the_points_own_sale(w):
+    """Review 2026-10-31: a merge is the office's — neither its sources nor the merged order are the point's to edit or move."""
+    m, conn = w["made"], w["conn"]
+    merge = conn.execute("INSERT INTO order_merge (into_order, at, author) VALUES (?, ?, 'o')", (m["stock_new"], NOW)).lastrowid
+    conn.execute("INSERT INTO order_merge_source (merge_id, order_id, stage_id) VALUES (?, ?, ?)", (merge, m["stock_talk"], w["stages"]["talk"]))
+    conn.commit()
+    mine = points.own_sales(conn, w["alfa"])
+    assert m["stock_new"] not in mine and m["stock_talk"] not in mine and m["stock_done"] in mine
+    assert w["point"].post("/orders/%d/point-sale" % m["stock_new"], data={"csrf": "tok", "client_name": "x"}).status_code == 403
+    conn.execute("UPDATE order_merge SET undone_at = ? WHERE id = ?", (NOW, merge))                 # undone: the point's again
+    conn.commit()
+    assert {m["stock_new"], m["stock_talk"]} <= points.own_sales(conn, w["alfa"])
+
+
+def test_the_point_cancelling_its_own_sale_on_the_point_is_not_asked_about_oth(w):
+    m, s, conn = w["made"], w["stages"], w["conn"]
+    r = w["point"].post("/orders/%d/move" % m["stock_at"], data={"csrf": "tok", "stage_id": s["cancel"], "cancel_kind": "отменил клиент"})
+    assert "#oth-offer" not in r.headers["Location"]
+    assert orders.get_card(conn, m["stock_at"])["stage"]["code"] == "cancel"

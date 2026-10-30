@@ -9,7 +9,7 @@ from flask import abort, current_app, flash, jsonify, redirect, render_template,
 from werkzeug.datastructures import MultiDict
 
 from .. import catalog_archive, connections, market, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
-from ..config import settings_from_dict
+from ..config import own_price_value, settings_from_dict
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
 from .data import load_merged, stale_unload
@@ -55,6 +55,19 @@ def _view_settings(conn, raw, changes):
     effective = settings_from_dict({**raw, **changes}, enforce_pct_limit=False)
     accounts = connections.list_feed_accounts(conn)
     return connections.effective_settings(conn, accounts[0]["id"], effective) if accounts else effective
+
+
+def _own_value(text: str) -> dict:
+    """What the cell «Наша цена» was given (the owner 2026-10-30): «6990» a sale price in ₽, «+5 %» / «−5 %» / «5%» a percent to the
+    purchase, as the own price of the card."""
+    text = str(text or "").replace(" ", "").replace("\u00a0", "").replace("\u202f", "").replace(",", ".").replace("−", "-").replace("–", "-").replace("₽", "")
+    if text.endswith("%"):
+        number = text[:-1]
+        if re.fullmatch(r"[+\-]?[0-9]+(\.[0-9]+)?", number):
+            return {"pct": float(number) + 0.0}                        # «−0 %» is 0
+    elif re.fullmatch(r"[0-9]+", text):
+        return {"price": int(text)}
+    raise ValueError("Введите цену в рублях (6990) или процент к закупке (+5 % или −5 %).")
 
 
 PAGE_SIZES = (10, 50, 100, 200, 500)
@@ -299,7 +312,23 @@ def register(app) -> None:
         page = min(max(_num(args, "p") or 1, 1), pages)
         shown = items[(page - 1) * size: page * size]
         if not has_right("money"):                                    # the supplier's price is a purchase price: not even in the HTML
-            shown = [dict(i, supplier_price=None) for i in shown]
+            shown = [dict(i, supplier_price=None, purchase=None) for i in shown]
+        accounts = connections.list_feed_accounts(conn)
+        if accounts:                                                  # the cell «Наша цена»: the base own price, the first account's (base_own_prices)
+            now_own, was_own = {**raw, **changes}.get("price_overrides") or {}, raw.get("price_overrides") or {}
+            for i in shown:
+                keys = ["%d:%s" % (a["id"], i["goods_id"]) for a in accounts]
+                own = now_own.get(keys[0])
+                i.update(own_here=own, own_text=service.own_price_text(own) if own else "", own_some=any(now_own.get(k) for k in keys),
+                         own_pending=any(now_own.get(k) != was_own.get(k) for k in keys),
+                         own_cleared=any(was_own.get(k) and not now_own.get(k) for k in keys))
+            if len(accounts) > 1 and can_post("catalog_own_price_inline"):   # the cell's line «Шины СПб 6 990 · Шина-Колесо 7 130»
+                shifts = {}
+                for i in shown:
+                    if i.get("brand", "") not in shifts:
+                        shifts[i.get("brand", "")] = json.dumps([[connections.display_name(conn, a["id"]), shift]
+                                                         for a, shift in service.account_shifts(conn, i.get("brand", ""), accounts)], ensure_ascii=False)
+                    i["own_shifts"] = shifts[i.get("brand", "")]
         on_oth = order_oth.goods_on_oth(conn)                        # our own tyres of refused orders: a mark only, the feed is not touched
         shown = [dict(i, oth=on_oth.get(i["goods_id"])) for i in shown]
         if market_on:
@@ -327,6 +356,7 @@ def register(app) -> None:
                  table_url="/catalog/table?" + urlencode(_pairs(args)),
                  filter_query=urlencode(_pairs(args, ("p", "n", "o", "r"))),     # what «все по фильтру» takes again when pressed
                  feed_accounts=connections.list_feed_accounts(b["conn"]) if can_post("catalog_own_price_bulk") else [],
+                 page_url=("/catalog?" + urlencode(_pairs(args))).rstrip("?"),     # where the cell «Наша цена» comes back to
                  bulk_limit=BULK_PRICE_LIMIT, bulk_pct_max=BULK_PCT_MAX, filter_fp=_ids_fp(b["all_ids"]),
                  wait_url="/catalog?" + urlencode(_pairs(args) + [("wait", "")]))     # + the position: the page opens with its window
         return b
@@ -557,6 +587,55 @@ def register(app) -> None:
             return redirect(_item_path(goods_id))
         flash(("Своя цена" if value else "«Как у бренда»") + " в черновике: подтвердите изменения, чтобы они попали в фид.")
         return redirect(_item_path(goods_id))
+
+    @app.route("/catalog/own-price/inline", methods=["POST"])
+    @login_required
+    def catalog_own_price_inline():
+        """The base own price from the cell «Наша цена» of the catalog (the owner 2026-10-30: «менять базовую цену»): one edit for every feed
+        account, each with its correction over the first one's (service.base_own_prices), or «Сбросить» on all of them. The same working draft
+        as the card (staging.set_own_price, applied with «Применить» and its confirmations); whom: as the card (common.NEEDS)."""
+        conn = get_conn()
+        form = request.form
+        back = _back()
+        goods_id = str(form.get("g") or "").strip()
+        accounts = connections.list_feed_accounts(conn)
+        try:
+            if not goods_id or not accounts:
+                raise ValueError("Не понял, какую позицию менять: обновите страницу.")
+            offer = context(app)[2].offers.get(goods_id)
+            if form.get("do") == "clear":                                 # «do», not «action»: that name hides form.action
+                value, each = None, {}
+            else:
+                value = _own_value(form.get("value"))
+                if offer is None:
+                    raise ValueError("Такой позиции нет в выгрузке.")
+                each = service.base_own_prices(conn, offer, value)
+                for account in accounts:                                  # a shift past the bounds: said with the account and its value
+                    try:
+                        own_price_value(each[account["id"]])
+                    except ValueError as err:
+                        raise ValueError("%s: со своей поправкой выходит %s. %s" % (
+                            connections.display_name(conn, account["id"]), service.own_price_text(each[account["id"]]), err))
+            if value is None:
+                staging.set_own_price(conn, goods_id, [a["id"] for a in accounts], None, now_iso())
+            else:
+                staging.set_own_price_each(conn, goods_id, each, now_iso())     # one change: all the accounts or none
+        except (StaleDraftError, ValueError) as err:
+            if _in_place():
+                return jsonify(ok=False, message=str(err), **_state(conn))
+            flash(str(err))
+            return redirect(back)
+        if value is None:
+            message = "Своя цена сброшена на всех аккаунтах (как у бренда): %s." % _names(conn, [goods_id])[0]
+        else:
+            names = {a["id"]: connections.display_name(conn, a["id"]) for a in accounts}
+            message = "Своя цена %s · %s (%s)." % (service.own_price_text(value), _names(conn, [goods_id])[0],
+                                                  "; ".join("%s: %s" % (names[a], service.own_price_text(v)) for a, v in each.items()))
+        message += " Пока это черновик: подтвердите изменения, чтобы они попали в фид."
+        if _in_place():
+            return jsonify(ok=True, message=message, **_state(conn))
+        flash(message)
+        return redirect(back)
 
     @app.route("/catalog/own-price/bulk", methods=["POST"])
     @login_required
