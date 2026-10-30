@@ -65,3 +65,13 @@ def test_arrived_goes_without_a_webmim_number_for_a_merged_order(tmp_path):
     a, b, new = _merged(conn)
     body = mgr._oth_arrived_body(conn, _card(conn, new))
     assert body is not None and "{webmim_number}" not in body
+
+
+def test_the_number_of_a_source_for_reference_still_names_it(tmp_path):
+    from test_oth_sale import done_with_sale, new_order
+    conn = db(tmp_path)
+    sold = new_order(conn, qty=2)
+    done_with_sale(conn, sold)
+    other = new_order(conn, qty=2, goods="2")
+    new = _merge(conn, [other, sold], code="new")
+    assert mgr.find_orders(conn, sold) == [sold] and mgr.find_orders(conn, other) == [new]     # its sale and tyres stayed its own
