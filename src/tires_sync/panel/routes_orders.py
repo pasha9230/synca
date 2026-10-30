@@ -427,14 +427,17 @@ def register(app) -> None:
         return args, by_text
 
     def account_default(conn, fields) -> str:
-        """The responsible of a new order made by hand: the one of the account of its chat («Чат Авито», the owner 2026-10-29) unless the
-        person picked somebody else than the prefilled self; else as typed."""
+        """The responsible of a new order made by hand: the manager of the point of the account of its chat («Чат Авито»), else the
+        account's responsible (the owner 2026-10-29, 2026-10-30) unless the person picked somebody else than the prefilled self; else as typed."""
         typed = str(fields.get("responsible") or "").strip()
         if typed and typed != author():
             return typed
         chat_row = deals.chat_of_field(conn, fields.get("avito_chat")) if fields.get("avito_chat") else None
         chat = chats_store.get_chat(conn, chat_row) if chat_row else None
-        return (connections.account_responsible(conn, chat["account_id"]) if chat else "") or typed
+        if chat is None:
+            return typed
+        of_account = points.point_by_account(conn, chat["account_id"])
+        return deals.order_responsible(conn, chat["account_id"], of_account and of_account["id"]) or typed
 
     def window_account(conn, values, card_id=None):
         """The Avito account that prices the positions of a window (order_offers.account_for): the order's (`card_id`, or `order` of the
