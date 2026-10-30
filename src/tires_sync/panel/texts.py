@@ -101,6 +101,10 @@ def audit_text(entry: dict) -> str:
         return "Цены поставщика: принята новая цена (%d поз.)" % len(d.get("goods") or [])
     if action == "price_guard_keep":
         return "Цены поставщика: оставлена прежняя цена (%d поз.)" % len(d.get("goods") or [])
+    if action == "order_merge":
+        return "Заказы %s объединены в заказ №%s" % (", ".join("№%s" % i for i in d.get("orders") or []), d.get("into", "?"))
+    if action == "order_unmerge":
+        return "Заказ №%s разъединён: заказы %s вернулись" % (d.get("into", "?"), ", ".join("№%s" % i for i in d.get("orders") or []) or "—")
     if action == "oth_take":
         return "ОТХ: заказ №%s взял %s шт. с ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
     if action == "oth_untake":
@@ -227,6 +231,7 @@ _MORE_TEXTS = {
     "invite_revoked": lambda d: "Приглашение №%s отозвано" % _q(d.get("id")),
     "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
     else "Ответственный за заказы клиентов не выбран: по умолчанию",
+    "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",
     "client_terms_changed": lambda d: _client_terms_text(d),
     "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),
     "supplier_created": lambda d: "Добавлен поставщик «%s»" % _q(d.get("name")),

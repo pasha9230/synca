@@ -35,7 +35,18 @@ POINT = {"template": POINT_TEMPLATE, "audience": "manager", "suffix": "-point", 
 
 def on_placed(conn, card_id, webmim_id: str, now: str, author: str, deliver: Optional[Deliver], send_vk: Optional[SendVk] = None) -> List[str]:
     """Everything due once the order is placed in WebMIM; returns the lines for the result of the press (warnings among them). Never raises.
-    `send_vk` None: the key of the community is not saved, the point's message waits."""
+    `send_vk` None: the key of the community is not saved, the point's message waits. A merged order whose source was placed already
+    (order_merge.told_placed): the client and the point heard it, nothing is sent; a grey line says so (the lead 2026-10-30)."""
+    from . import order_merge
+    if order_merge.told_placed(conn, card_id):
+        line = ("Сообщения «заказ оформлен» клиенту и точке не отправлены: заказ объединён, клиент и точка уже знают. Отправить можно вручную "
+                "из шаблонов.")
+        try:
+            orders.add_event(conn, card_id, now, author, "notify", line, level="grey")
+            conn.commit()
+        except Exception:                                                # noqa: BLE001  never raises: the press itself is done
+            conn.rollback()
+        return [line]
     return [tell_client(conn, card_id, webmim_id, now, author, deliver), tell_point(conn, card_id, webmim_id, now, author, send_vk)]
 
 

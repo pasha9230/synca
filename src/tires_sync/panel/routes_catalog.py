@@ -57,6 +57,14 @@ def _view_settings(conn, raw, changes):
 
 
 PAGE_SIZES = (10, 50, 100, 200, 500)
+BULK_PRICE_LIMIT = 1000          # positions of one press of «Своя цена выбранным» (the owner 2026-10-30)
+BULK_PCT_MAX = 50                # a markup or a markdown of one press, % to the purchase (the owner 2026-10-30)
+
+
+def _ids_fp(ids) -> str:
+    """The positions a filter found, in short: «все по фильтру» takes them again only if the filter finds the very same ones."""
+    import hashlib
+    return hashlib.sha1("\n".join(sorted(ids)).encode("utf-8")).hexdigest()[:16]
 PAGE_SIZE = 100
 
 
@@ -262,6 +270,7 @@ def register(app) -> None:
         if market_on:
             shown = [dict(i, market=_market_cell(i["price"], snaps.get(i["goods_id"]))) for i in shown]
         return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids, held_shown=held_shown,
+                    all_ids=[i["goods_id"] for i in items],                # every position of the filter, every page («все по фильтру»)
                     market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
                     page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
                     studs=studs or "", status=status, sort=sort, descending=descending)
@@ -282,6 +291,9 @@ def register(app) -> None:
                  show_marks=_num(args, "sup") is None and len(connections.list_suppliers(b["conn"])) > 1,
                  orphans=[o for o in service.orphan_overrides(b["effective"], b["parsed"]) if o["goods_id"] not in b["held_ids"]],   # held: still there
                  table_url="/catalog/table?" + urlencode(_pairs(args)),
+                 filter_query=urlencode(_pairs(args, ("p", "n", "o", "r"))),     # what «все по фильтру» takes again when pressed
+                 feed_accounts=connections.list_feed_accounts(b["conn"]) if can_post("catalog_own_price_bulk") else [],
+                 bulk_limit=BULK_PRICE_LIMIT, bulk_pct_max=BULK_PCT_MAX, filter_fp=_ids_fp(b["all_ids"]),
                  wait_url="/catalog?" + urlencode(_pairs(args) + [("wait", "")]))     # + the position: the page opens with its window
         return b
 
@@ -511,6 +523,58 @@ def register(app) -> None:
             return redirect(_item_path(goods_id))
         flash(("Своя цена" if value else "«Как у бренда»") + " в черновике: подтвердите изменения, чтобы они попали в фид.")
         return redirect(_item_path(goods_id))
+
+    @app.route("/catalog/own-price/bulk", methods=["POST"])
+    @login_required
+    def catalog_own_price_bulk():
+        """«Своя цена выбранным» (the owner 2026-10-30): the positions ticked, or all the filter finds, get one markup or markdown in % to the
+        purchase in the accounts ticked, or lose their own price; into the working draft («Применить» with «было → стало»). Whom: as the own
+        price of a position (common.NEEDS). A position with its own price keeps it unless «изменить и их»; one gone from the unload is skipped."""
+        conn = get_conn()
+        form = request.form
+        back = _back()
+        feed = {a["id"] for a in connections.list_feed_accounts(conn)}
+        try:
+            accounts = [int(a) for a in form.getlist("a") if str(a).isdigit()]
+            if not accounts or any(a not in feed for a in accounts):
+                raise ValueError("Отметьте аккаунты, где поставить цену.")
+            if form.get("all") == "1":                                   # the filter again, as it stands: never more than was shown
+                found = build(MultiDict(parse_qsl(form.get("filter", ""), keep_blank_values=True)))["all_ids"]
+                if _ids_fp(found) != form.get("fp", ""):
+                    raise ValueError("По фильтру сейчас другие позиции (%d), чем были на странице: обновите страницу и повторите." % len(found))
+            else:
+                found = form.getlist("g")
+            offers = context(app)[2].offers
+            found = sorted({str(g) for g in found})
+            gone = [g for g in found if g not in offers]
+            goods = [g for g in found if g in offers]
+            if not goods:
+                raise ValueError("Среди выбранных нет позиций фида." if gone else "Отметьте позиции.")
+            if len(goods) > BULK_PRICE_LIMIT:
+                raise ValueError("Не больше %d позиций за раз: сузьте фильтр." % BULK_PRICE_LIMIT)
+            if form.get("action") == "clear":
+                value = None
+            else:
+                side = form.get("side")
+                text = str(form.get("value") or "").replace(" ", "").replace("\u00a0", "").replace(",", ".")
+                if side not in ("up", "down") or not re.fullmatch(r"\d+(\.\d+)?", text) or not 0 < float(text) <= BULK_PCT_MAX:
+                    raise ValueError("Наценка или уценка: процент к закупке больше 0 и не больше %d." % BULK_PCT_MAX)
+                value = {"pct": float(text) if side == "up" else -float(text)}
+            done = staging.set_own_prices(conn, goods, accounts, value, now_iso(), redo=form.get("redo") == "1")
+        except (StaleDraftError, ValueError) as err:
+            flash(str(err))
+            return redirect(back)
+        what = ("Своя цена %s" % service.own_price_text(value)) if value else "«Как у бренда»"
+        if done["set"]:
+            parts = ["%s в черновике: %d (позиция × аккаунт)." % (what, done["set"])]
+        else:
+            parts = ["Ничего не изменилось."]
+        if done["kept"]:
+            parts.append("Уже была своя цена, не тронуто: %d (позиция × аккаунт; «изменить и их» — чтобы поменять)." % done["kept"])
+        if gone:
+            parts.append("Пропущено, не позиции фида (нет в выгрузке или только для просмотра): %d." % len(gone))
+        flash(" ".join(parts) + (" Подтвердите изменения, чтобы они попали в фид." if done["set"] else ""))
+        return redirect(back)
 
     @app.route("/catalog/item/<goods_id>")
     @login_required

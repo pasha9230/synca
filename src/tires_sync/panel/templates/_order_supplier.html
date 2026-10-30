@@ -5,7 +5,7 @@
 {% set s = supplier %}{% if s %}
 {% set b = webmim_create %}{% set mim_ready = s.supplier == "webmim" and b and b.live and b.label and b.label.startswith("Оформить") and not (b.state and b.state.state == "running") %}
 {% call entity_ui.section("Заказ поставщику", id="supplier", sub="сверка перед заказом") %}<div class="card-body stack" data-supplier>
-{% if s.all_oth %}<p class="small" data-supplier-all-oth>Заказ поставщику не нужен: все позиции взяты с ОТХ, шины уже на точке.</p>{% endif %}
+{% if s.all_oth %}<p class="small" data-supplier-all-oth>Заказ поставщику не нужен: {{ "все позиции уже заказаны в исходных заказах или взяты с ОТХ." if merge_items else "все позиции взяты с ОТХ, шины уже на точке." }}</p>{% endif %}
 {% if s.oth %}<div class="small" data-supplier-oth><b>Уже на точке (с ОТХ), поставщику не уходит:</b> {% for o in s.oth %}{{ o.name }} — {{ o.qty }} шт{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}
 {% if not s.all_oth %}<ul class="supplier-check" data-supplier-check aria-live="polite">
 {% for l in s.lines %}<li class="supplier-line is-{{ l.state }}" data-state="{{ l.state }}"><span class="supplier-mark" aria-hidden="true">{% if l.state == "ok" %}✓{% elif l.state == "warn" %}!{% else %}✗{% endif %}</span>

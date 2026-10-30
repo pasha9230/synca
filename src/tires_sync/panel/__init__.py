@@ -215,7 +215,16 @@ def create_app(config: dict) -> Flask:
     app.jinja_env.globals["chat_client"] = chat_client
     from . import texts
     app.jinja_env.filters["pct"] = pct
-    app.jinja_env.globals.update(run_text=texts.run_text, audit_text=texts.audit_text, author_label=texts.author_label, draft_status=texts.draft_status)
+    def author_label(author_):
+        """The author of a record: the names of the server, else the person's name (users.person_name; the owner's main login by
+        «Имя основного входа», the owner 2026-10-30), else as written («система», «менеджер Альфа»)."""
+        if author_ in texts.AUTHOR_NAMES:
+            return texts.author_label(author_)
+        from .common import get_conn
+        from .. import users as _users
+        return _users.person_name(get_conn(), author_, app.config["AUTHOR"])
+
+    app.jinja_env.globals.update(run_text=texts.run_text, audit_text=texts.audit_text, author_label=author_label, draft_status=texts.draft_status)
     def _visible_new_count(conn) -> int:
         """The menu counter of new positions: only goods of brands that are on for publication."""
         from .. import new_filter, store

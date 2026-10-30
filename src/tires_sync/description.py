@@ -52,7 +52,7 @@ PLACEHOLDER_HELP = {
     "season": "сезон: зимняя, летняя или всесезонная",
     "code": "артикул производителя",
     "country": "страна происхождения бренда (из выгрузки поставщика, обычными словами: «Корея», «КНР», «США»)",
-    "made_in": "страна производства: «КНР», если в названии у поставщика в конце «CN»; иначе пусто — строка не выводится",
+    "made_in": "строка целиком: «Страна производства: КНР», если в названии у поставщика в конце «CN»; иначе пусто — строка не выводится",
     "price": "цена в рублях, целое число",
     "search": "варианты написания размера для поиска",
     "stock": "остаток у поставщика, штук (в объявление количество не передаётся, только в текст)",
@@ -75,6 +75,7 @@ BRAND_COUNTRY = {           # brand -> its country over the supplier's value: Gi
     "PACE": "КНР",          # SD-International, Shanghai
 }                           # Satoya: no reliable source, the line drops
 MADE_IN_CHINA = re.compile(r"\bCN\b\W*$")     # the supplier marks a tire made in China with «CN» at the end of the name (before its age note)
+MADE_IN_TEXT = "Страна производства: КНР"       # {made_in}: the whole line, so a template carries it as «{made_in}» alone (the owner 2026-10-30)
 OLD_MODEL_WORDS = "Прежнее название шин"      # {old_model} prints these words before the former name (owner, 2026-10-27)
 _OLD_MODEL_WORDS_BEFORE = re.compile(r"прежнее\s+название\s+шин[\W_]*$", re.IGNORECASE)     # the template line already says them itself (a colon, a dash, a quote after them is fine)
 _LATIN_TWINS = str.maketrans("aceopxyABCEHKMOPTXY", "асеорхуАВСЕНКМОРТХУ")     # the owner types some Cyrillic letters as Latin ones
@@ -117,7 +118,7 @@ def values(c: Candidate, price: int, old_model: str = "") -> Dict[str, str]:
         "model": c.avito_model, "size": "%d/%d R%d" % (o.width, o.height, o.diameter),
         "size_slash": "%d/%d/%d" % (o.width, o.height, o.diameter), "indexes": speed_load,
         "season": SEASON_WORD.get(o.season, ""), "code": o.code, "country": brand_country(c),
-        "made_in": "КНР" if MADE_IN_CHINA.search(AGE_NOTE.sub(" ", o.name_orig or "")) else "",
+        "made_in": MADE_IN_TEXT if MADE_IN_CHINA.search(AGE_NOTE.sub(" ", o.name_orig or "")) else "",     # the whole line (the owner 2026-10-30)
         "price": str(price), "search": search_variants(o.width, o.height, o.diameter), "stock": str(o.stock),
         "old_model": ("%s %s" % (OLD_MODEL_WORDS, old_model)) if old_model and not _starts_with_words(old_model) else old_model,
     }

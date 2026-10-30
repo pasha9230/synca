@@ -23,7 +23,7 @@ from .webmim import parse_unload
 @dataclass
 class AccountResult:
     account_id: int
-    name: str
+    name: str                   # connections.display_name: the cabinet's own name, as the panel and Telegram show it (2026-10-30)
     ok: bool
     error: str = ""
     counts: Dict[str, int] = field(default_factory=dict)
@@ -275,7 +275,7 @@ def run_for_accounts(
         identity = connections.get_avito_identity(conn, account["id"])
         if connections.has_avito_keys(conn, account["id"]) and identity["phone_source"] == "cabinet" and not identity["phone"]:
             results.append(AccountResult(                                            # the owner's general number is never put into another cabinet's ads
-                account["id"], account["name"], False,
+                account["id"], connections.display_name(conn, account["id"]), False,
                 "номер кабинета Авито не определён: откройте «Подключения → Авито» и нажмите «Проверить подключение»; без него фид аккаунта не собирается"))
             continue
         if account["feed_mode"] == "mirror":                                      # a feed kept by hand elsewhere: carried over as it is
@@ -318,10 +318,10 @@ def run_for_accounts(
                                                   own_photos=_own_photos(conn, account), offers=getattr(parsed, "offers", {}) or {})
                 if extra and store.has_pending(conn, account["id"]):
                     store.rebind_pending(conn, account["id"], (Path(feed_root) / account["feed_token"] / "next" / "avito_feed.xml").read_bytes())
-                results.append(_verdict(AccountResult(account["id"], account["name"], True, note, {}, count),
+                results.append(_verdict(AccountResult(account["id"], connections.display_name(conn, account["id"]), True, note, {}, count),
                                         gate(conn, account, "mirror", eff, parsed, ref, feed_root, today, oth=extra_oth)))
             except Exception as err:
-                results.append(AccountResult(account["id"], account["name"], False, "%s: %s" % (type(err).__name__, err)))
+                results.append(AccountResult(account["id"], connections.display_name(conn, account["id"]), False, "%s: %s" % (type(err).__name__, err)))
             continue
         try:
             suffix, prefix = connections.feed_style(conn, account["id"])
@@ -343,7 +343,7 @@ def run_for_accounts(
                 account_id=account["id"], record_seen=(index == 0), expected_removals=expected,
                 parsed=account_parsed, input_sha=input_sha, now=now,
                 removed_before=lately)                                 # an hour holds at most one threshold of removals, passes included
-            result = AccountResult(account["id"], account["name"], True, "", report.counts, report.feed_count,
+            result = AccountResult(account["id"], connections.display_name(conn, account["id"]), True, "", report.counts, report.feed_count,
                                    report.guard_tripped,
                                    tuple(sorted({"%s / %s" % (u["brand"], u["model"]) for u in report.unmatched})),
                                    sum(1 for d in report.decisions if d.action is Action.HOLD and d.reason.startswith("cart_wait:")
@@ -358,7 +358,7 @@ def run_for_accounts(
             results.append(_verdict(result, gate(conn, account, "generated", connections.effective_settings(conn, account["id"], settings),
                                                  parsed, ref, feed_root, today, held=held, id_codes=report.id_codes, oth=report.oth)))
         except Exception as err:
-            results.append(AccountResult(account["id"], account["name"], False, "%s: %s" % (type(err).__name__, err)))
+            results.append(AccountResult(account["id"], connections.display_name(conn, account["id"]), False, "%s: %s" % (type(err).__name__, err)))
     return results
 
 

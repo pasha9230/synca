@@ -238,7 +238,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -255,7 +255,7 @@ for _section, _endpoints in {
     "clients": ("clients_page", "client_page", "client_save", "client_merge", "client_split_order", "client_split_chat",
                 "clients_duplicates", "client_tag", "client_unmerge", "client_skip"),
     "catalog": ("price_changes_page", "price_changes", "feeds_page", "new_positions", "new_positions_seen", "mappings", "accept_confident", "confirm_brand", "export_mappings", "import_mappings",
-                "confirm_model", "save_old_model_name", "catalog", "catalog_cancel", "catalog_item_page", "catalog_market_switch", "catalog_market_token", "catalog_own_price", "catalog_preview", "catalog_stage", "catalog_table", "brands", "oth_page", "oth_return",
+                "confirm_model", "save_old_model_name", "catalog", "catalog_cancel", "catalog_item_page", "catalog_market_switch", "catalog_market_token", "catalog_own_price", "catalog_own_price_bulk", "catalog_preview", "catalog_stage", "catalog_table", "brands", "oth_page", "oth_return",
                 "pairs_page", "pairs_forget", "pairs_not_pair",    # «Пары поставщиков»: who sees the catalog sees it; «Забыть пару», «Это не пара» need «менять»
                 "feed_update_page", "feed_update_confirm", "feed_update_fetch",
                 "history_ads", "history_catalog", "photos_feed", "photos_frame_action", "photos_generate", "photos_priority", "photos_queue_switch", "photos_ref", "photos_review", "photos_switch"),
@@ -284,6 +284,7 @@ for _section, _endpoints in {
               "orders_bot_answer_delete", "orders_bot_answer_toggle", "orders_bot_answer_add", "orders_report_rates"),
     "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
               "users_shop_responsible",                 # «Ответственный за заказы клиентов» (shop_cart.RESPONSIBLE_KEY)
+              "users_main_name",                        # «Имя основного входа» (users.MAIN_NAME_KEY)
               "users_clients_page", "users_clients_role_save", "users_client_page", "users_client_save",     # the conditions of the clients
               "users_client_preview",                   # «Каталог глазами клиента»
               "points_history", "history_points"),     # «История → Точки» (and its old address): the owner and the partner only (users: nobody else looks)
@@ -298,7 +299,7 @@ for _section, _endpoints in {
     for _endpoint in _endpoints:
         SECTION_OF[_endpoint] = _section
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
-NEEDS = {"catalog_own_price": "money", "catalog_market_token": "money", "catalog_market_switch": "money", "order_delete": "delete", "chat_delete": "delete", "deleted_restore": "delete", "economics_terms_delete": "delete",
+NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catalog_market_token": "money", "catalog_market_switch": "money", "order_delete": "delete", "chat_delete": "delete", "deleted_restore": "delete", "economics_terms_delete": "delete",
          "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "chats_merge": "bulk",
          "draft_confirm": "publish", "feed_update_confirm": "publish", "pairs_forget": "publish", "pairs_not_pair": "publish", "feed_update_fetch": "publish", "history_rollback": "publish",
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",

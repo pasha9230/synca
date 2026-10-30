@@ -38,7 +38,7 @@ def fresh_events(conn, settings, offers) -> Tuple[List[str], Dict[str, str]]:
         if marks.get(key) != value:
             offer = offers[goods_id]
             lines.append("%s · %s (%s): своя цена %s, закупка %s" % (
-                account["name"], offer.name_orig or offer.name, offer.code, _rub(price), _rub(base)))
+                connections.display_name(conn, account["id"]), offer.name_orig or offer.name, offer.code, _rub(price), _rub(base)))
     return lines, keep
 
 

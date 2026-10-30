@@ -811,34 +811,94 @@ def own_price_lines(conn, raw: dict, changes: dict, offers, old, new) -> list:
                 text += " — ниже закупки"
         else:
             text += " (позиции нет в выгрузке)"
-        lines.append(text + " (%s)" % own_price_text(after.get(key)))
+        rule = own_price_text(after.get(key))
+        if after.get(key) and "pct" in after[key] and offer is not None and now_ is not None:
+            rule += " → %s" % _rub(now_)                              # the owner 2026-10-30: say the percent is to the purchase, and what it gives
+        lines.append(text + " (%s)" % rule)
     return lines
+
+
+def _own_was(conn, cache: dict, account_id: int, offer, old):
+    """The price the account's feed has now for `offer`: its last published one, else the price by `old` (the settings before the draft).
+    `cache`: the published prices and the settings of each account, read once (a press may change thousands of keys)."""
+    from ..pricing import position_price
+    if account_id not in cache:
+        cache[account_id] = (dict(conn.execute("SELECT goods_id, price FROM published_state WHERE account_id = ?", (account_id,)).fetchall()),
+                             connections.effective_settings(conn, account_id, old))
+    published, settings = cache[account_id]
+    return published.get(offer.goods_id) or position_price(offer, settings)
+
+
+OWN_TABLE_FROM = 6         # changes of own prices from which «было → стало» is a summary and a table, not a line each (the owner 2026-10-30)
+OWN_TABLE_SHOWN = 50       # rows shown before «Показать все»
+
+
+def own_price_table(conn, raw: dict, changes: dict, offers, old, new) -> Optional[dict]:
+    """«было → стало» of many own prices (a press of «Своя цена выбранным»): None below OWN_TABLE_FROM changed keys (the lines say it), else
+    {"summary": {...}, "rows": [...]} — a row per account × position, the risky ones (below the purchase, more than OWN_JUMP away) first, then
+    by the size of the change."""
+    from ..pricing import position_price
+    before, after = raw.get("price_overrides") or {}, changes.get("price_overrides") or {}
+    keys = [k for k in sorted(set(before) | set(after)) if before.get(k) != after.get(k)] if "price_overrides" in changes else []
+    if len(keys) < OWN_TABLE_FROM:
+        return None
+    names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
+    rows, settings, was_cache = [], {}, {}
+    for key in keys:
+        account_id, _, goods_id = key.partition(":")
+        account_id = int(account_id)
+        if account_id not in settings:
+            settings[account_id] = connections.effective_settings(conn, account_id, new)
+        offer = (offers or {}).get(goods_id)
+        row = {"account": names.get(account_id, "аккаунт %d" % account_id), "goods_id": goods_id, "rule": own_price_text(after.get(key)),
+               "name": (offer.name_orig or offer.name) if offer else goods_id, "code": offer.code if offer else "", "gone": offer is None,
+               "base": None, "was": None, "now": None, "diff": None, "below": False, "far": False}
+        if offer is not None:
+            was, now_ = _own_was(conn, was_cache, account_id, offer, old), position_price(offer, settings[account_id])     # «было» as own_price_risky
+            row.update(base=offer.base_price if offer.base_price > 0 else None, was=was, now=now_)
+            if was and now_:
+                row["diff"] = round((now_ / was - 1) * 100, 1)
+                row["far"] = bool(after.get(key)) and abs(now_ / was - 1) > OWN_JUMP      # as own_price_risky: a price set, not one taken off
+            row["below"] = bool(after.get(key)) and now_ is not None and offer.base_price > 0 and now_ < offer.base_price
+            if after.get(key) and "pct" in after[key] and now_ is not None:
+                row["rule"] += " → %s" % _rub(now_)
+        rows.append(row)
+    rows.sort(key=lambda r: (not (r["below"] or r["far"]), -abs(r["diff"] or 0), r["name"], r["account"]))
+    diffs = [r["diff"] for r in rows if r["diff"] is not None]
+    summary = {"positions": len({r["goods_id"] for r in rows}), "accounts": sorted({r["account"] for r in rows}), "keys": len(rows),
+               "rules": sorted({own_price_text(after.get(k)) for k in keys}),
+               "up": sum(1 for d in diffs if d > 0), "down": sum(1 for d in diffs if d < 0), "same": sum(1 for d in diffs if d == 0),
+               "avg": round(sum(diffs) / len(diffs), 1) if diffs else None, "below": sum(r["below"] for r in rows), "far": sum(r["far"] for r in rows),
+               "gone": sum(r["gone"] for r in rows)}
+    return {"summary": summary, "rows": rows, "shown": OWN_TABLE_SHOWN}
 
 
 OWN_JUMP = 0.30            # a fixed own price this far from the feed's price (either way) is asked once more (the lead 2026-10-29)
 
 
 def own_price_risky(conn, raw: dict, changes: dict, offers, old) -> list:
-    """The fixed own prices of a draft to confirm once more (a typo, 699 for 6990): below the purchase, or more than OWN_JUMP away from the price
-    the account's feed has now (its last published one, else the price by today's settings). Nothing is changed nor limited: only asked."""
-    from ..pricing import own_price, position_price
+    """The own prices of a draft to confirm once more (a typo, 699 for 6990; a markdown of many positions): a fixed price or a percent to the
+    purchase (the owner 2026-10-30) whose price is below the purchase, or more than OWN_JUMP away from the price the account's feed has now (its
+    last published one, else the price by today's settings). Nothing is changed nor limited: only asked."""
+    from ..pricing import own_price
     if "price_overrides" not in changes:
         return []
     before, after = raw.get("price_overrides") or {}, changes.get("price_overrides") or {}
     names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
-    out = []
+    out, was_cache = [], {}
     for key in sorted(after):
         value = after[key]
-        if before.get(key) == value or "price" not in value:
+        if before.get(key) == value:
             continue
         account_id, _, goods_id = key.partition(":")
         account_id = int(account_id)
         offer = (offers or {}).get(goods_id)
         if offer is None:
             continue
-        price = own_price(offer.base_price, ("price", value["price"]))
-        row = conn.execute("SELECT price FROM published_state WHERE account_id = ? AND goods_id = ?", (account_id, goods_id)).fetchone()
-        was = row[0] if row and row[0] else position_price(offer, connections.effective_settings(conn, account_id, old))
+        price = own_price(offer.base_price, ("price", value["price"]) if "price" in value else ("pct", value["pct"]))
+        if price is None:                                               # a percent of a bad purchase: no price, nothing to ask
+            continue
+        was = _own_was(conn, was_cache, account_id, offer, old)
         why = []
         if offer.base_price > 0 and price < offer.base_price:
             why.append("ниже закупки")
@@ -1270,6 +1330,7 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
     new = settings_from_dict(merged, enforce_pct_limit=False)
     preview = account_preview(conn, parsed, ref, old, new, today, now)
     own_risky = own_price_risky(conn, raw, draft["changes"], parsed.offers, old)
+    own_table = own_price_table(conn, raw, draft["changes"], parsed.offers, old, new)
     old_enabled = {tuple(item) for item in raw["enabled"]}
     new_enabled = {tuple(item) for item in merged["enabled"]}
     names = {gid: offer.name_orig or offer.name for gid, offer in parsed.offers.items()}
@@ -1291,8 +1352,12 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
                   "gone_ads": ads_gone(preview.disappear, parsed.offers, old, new)},
         "by_brand": [dict(brand=b, **v) for b, v in sorted(brands.items())],
         "draft": draft,
-        "lines": own_price_lines(conn, raw, draft["changes"], parsed.offers, old, new)
+        "lines": (own_price_lines(conn, raw, draft["changes"], parsed.offers, old, new) if own_table is None else
+                  ["Своя цена: %d %s × %d %s — сводка и таблица «Своя цена» ниже" % (
+                      own_table["summary"]["positions"], plural(own_table["summary"]["positions"], "позиция", "позиции", "позиций"),
+                      len(own_table["summary"]["accounts"]), plural(len(own_table["summary"]["accounts"]), "аккаунт", "аккаунта", "аккаунтов"))])
                  + describe_changes(raw, draft["changes"], parsed.offers, new.min_stock),
+        "own_table": own_table,
         "funnel": pair_funnel(parsed, ref, store.load_confirmed_mappings(conn), store.load_brand_map(conn), new,
                               sorted(new_enabled - old_enabled)),
         "price_rows": price_rows[:20],
