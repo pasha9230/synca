@@ -1,4 +1,5 @@
-{# the client's catalog (/shop and the owner's preview at `base`): only `rows` of client_catalog.FIELDS and the state of the filters #}
+{# the client's catalog (/shop and the owner's preview at `base`): only `rows` of client_catalog.FIELDS and the state of the filters;
+   `cart` (the client's own page): «В корзину» by the row's opaque `key` #}
 {% if empty %}
 <div class="card"><div class="empty"><h3>Ассортимент ещё не настроен</h3><p>Как только менеджер откроет вам бренды, здесь появятся шины с вашими ценами.</p></div></div>
 {% else %}
@@ -25,9 +26,9 @@
 <div class="sortbar">{% for key, label in (("brand", "Бренд"), ("size", "Размер"), ("price", "Цена"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div>
 <span class="small muted ml-auto">Найдено {{ total }}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %}</span></div>
 {% if rows %}<div class="table-wrap"><table class="table shop-table">
-<thead><tr><th class="w-thumb"></th><th>Шина</th><th>Размер</th><th>Сезон</th><th>Страна, год</th><th>Склад</th><th class="num">Остаток</th><th class="num">Цена за шт.</th></tr></thead>
+<thead><tr><th class="w-thumb"></th><th>Шина</th><th>Размер</th><th>Сезон</th><th>Страна, год</th><th>Склад</th><th class="num">Остаток</th><th class="num">Цена за шт.</th>{% if cart %}<th class="c-buy"></th>{% endif %}</tr></thead>
 <tbody>{% for r in rows %}
-<tr>
+<tr{% if cart %} class="has-buy"{% endif %}>
 <td class="c-photo w-thumb">{% if r.photo %}<img class="thumb" src="{{ r.photo }}" alt="" width="36" height="36" loading="lazy">{% else %}<div class="thumb">нет фото</div>{% endif %}</td>
 <td class="c-tire"><b>{{ r.brand }}</b> {{ r.model or r.name }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} <span class="badge badge--neutral">RunFlat</span>{% endif %}</td>
 <td class="c-size">{{ r.size }}</td>
@@ -36,6 +37,8 @@
 <td class="c-wh">{{ r.warehouse }}</td>
 <td class="c-stock num">{{ r.stock }} шт.</td>
 <td class="c-price num"><b class="strong">{{ r.price|money }}</b></td>
+{% if cart %}<td class="c-buy"><form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
+<input class="input input--num" type="number" name="qty" value="4" min="1" max="100" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--secondary btn--sm">В корзину</button></form></td>{% endif %}
 </tr>{% endfor %}</tbody></table></div>
 {% else %}<div class="empty"><h3>Ничего не найдено</h3><p>Измените или сбросьте фильтры.</p></div>{% endif %}
 {% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}

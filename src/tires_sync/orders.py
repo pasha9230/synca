@@ -296,7 +296,7 @@ def chat_link(value):
 
 
 RETURN_KINDS = {"client": "клиент вернул нам", "supplier": "возврат поставщику"}
-SOURCES = {"avito": "Авито", "repeat": "Повторное обращение", "pvz": "Передал ПВЗ"}
+SOURCES = {"avito": "Авито", "repeat": "Повторное обращение", "pvz": "Передал ПВЗ", "shop": "Каталог клиента"}     # shop: the client's cart (shop_cart)
 DEAL_KINDS = {"webmim": "Через WebMIM (перемещение)", "stock": "Из наличия точки"}
 POINT_GOODS = "point"            # the code of a tyre of the point's stock the unload has not (a deal «stock» only); its purchase 0 = not given yet
 MARKS = {"settled_point_at": "Расчёт с точкой", "codes_written_off_at": "Списание кодов маркировки", "settled_supplier_at": "Расчёты с поставщиком"}
@@ -381,7 +381,7 @@ def _clean(key: str, value, conn):
     if key == "source":
         text = str(value or "")
         if text and text not in SOURCES:
-            raise OrderError("Откуда: Авито, повторное обращение или передал ПВЗ.")
+            raise OrderError("Откуда: Авито, повторное обращение, передал ПВЗ или каталог клиента.")
         return text
     if key == "deal_kind":
         text = str(value or "webmim")
@@ -476,10 +476,11 @@ def _default_time(conn, clean: dict, current_time: str, current_point=None) -> N
 
 
 def create_card(conn, fields: dict, now: str, author: str, require_contact: bool = True, commit: bool = True, stage: Optional[dict] = None,
-                scope_point: Optional[int] = None) -> int:
+                scope_point: Optional[int] = None, many_open: bool = False) -> int:
     """A new card on the first stage (or on `stage`). `commit=False` writes it without saving and without the rules of the stage: the caller saves and fires them.
     Refused (OpenOrderExists) while the client's phone has an open order of the same point or of no point (open_order_conflict);
-    `scope_point`: the point the order is made for when the caller sets it after (a call, a chat of a point's account)."""
+    `scope_point`: the point the order is made for when the caller sets it after (a call, a chat of a point's account).
+    `many_open`: the rule does not hold (an order of the client's catalog: a buyer makes several, the owner 2026-10-30)."""
     clean = {k: _clean(k, v, conn) for k, v in fields.items() if k in EDITABLE}
     if require_contact and not any(clean.get(k) for k in ("client_name", "client_phone", "avito_chat")):
         raise OrderError("Укажите хотя бы имя, телефон или чат клиента.")
@@ -494,7 +495,7 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
         "INSERT INTO order_card (stage_id, %s, created_at, created_by, entered_at, updated_at) VALUES (?, %s, ?, ?, ?, ?)" % (
             ", ".join(keys), ", ".join("?" for _ in keys)),
         [stage["id"]] + [base[k] for k in keys] + [now, author, now, now])
-    busy = open_order_conflict(conn, base["client_phone"], base["point_id"] or scope_point, besides=cur.lastrowid)
+    busy = None if many_open else open_order_conflict(conn, base["client_phone"], base["point_id"] or scope_point, besides=cur.lastrowid)
     if busy is not None:                                      # asked after the insert: the write holds the lock, so two tabs at once make one order
         if commit:
             conn.rollback()                                   # the caller saves nothing of it; with commit=False the caller rolls back
