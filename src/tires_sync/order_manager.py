@@ -332,18 +332,6 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                        "Под №%d несколько заказов: владелец уточнит." % number)
     card = orders.get_card(conn, found[0])
     state["order_id"] = card["id"]
-    from .order_merge import parts
-    merged = parts(conn, card["id"])
-    numbers = list(dict.fromkeys(p["webmim"] for p in merged if p["webmim"]))      # the WebMIM orders the tyres come by
-    if len(numbers) > 1 and str(number) != label(card) and str(number) in numbers:
-        # an old number of one source of a merge with several WebMIM orders: one part may have come (the lead 2026-10-30) — the owner confirms
-        rest = ", ".join(n for n in numbers if n != str(number))
-        why = "%s заказ %s — это часть объединённого №%s (%s %s)" % (
-            word or "команда", number, label(card), "ещё ждём" if BUILTIN.get(word, ((), None))[1] == "at_point" else "в нём также", rest)
-        answer = dispute(point, why, "Заказ №%s — часть объединённого заказа №%s: владелец подтвердит." % (number, label(card)))
-        conn.execute("UPDATE manager_message SET text = ? WHERE message_id = ?", (("%s\n%s" % (str(text or "").strip(), why))[:MAX_TEXT], state["message_id"]))
-        conn.commit()
-        return answer
     if card["point_id"] is None:                       # the owner 2026-10-22: an order of no point is not the points' to see, nor another point's
         answer = finish("заказ без точки: не выполнено", "Заказ №%s пока не назначен вашей точке — уточните у менеджера." % label(card))
         try:
@@ -356,6 +344,19 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return answer
     if card["point_id"] != point["id"]:
         return dispute(point, "заказ другой точки", "Заказ №%s не на вашей точке; сообщение передано владельцу." % label(card))
+    from .order_merge import parts
+    merged = parts(conn, card["id"])
+    if merged and str(number) != label(card) and str(number) in {p["number"] for p in merged} | {str(p["order_id"]) for p in merged}:
+        # an old number of a source of a merge (the owner 2026-10-30): its tyres are at the point already, in the merged order — «приехал» is
+        # no arrival (nothing moves, the client hears nothing); any other word the owner confirms in «Входящие»
+        if BUILTIN.get(word, ((), None))[1] == "at_point":
+            return finish("старый номер исходного объединения: шины уже на точке",
+                          "Шины заказа №%s уже на точке, они в объединённом заказе №%s." % (number, label(card)))
+        why = "%s заказ %s — это часть объединённого №%s" % (word or "команда", number, label(card))
+        answer = dispute(point, why, "Заказ №%s — часть объединённого заказа №%s: владелец подтвердит." % (number, label(card)))
+        conn.execute("UPDATE manager_message SET text = ? WHERE message_id = ?", (("%s\n%s" % (str(text or "").strip(), why))[:MAX_TEXT], state["message_id"]))
+        conn.commit()
+        return answer
     code = card["stage"]["code"]
     if word == HERE:                                   # the client hears «срок резерва истекает» only when the bot asked (order_reserve.here)
         from . import order_reserve

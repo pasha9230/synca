@@ -82,23 +82,35 @@ def test_the_number_of_a_source_for_reference_still_names_it(tmp_path):
 from tests.test_order_reserve import POINT_VK                               # noqa: E402  (Бета's manager in VK)
 
 
-def test_an_old_number_of_a_merge_of_several_webmim_orders_waits_for_the_owner(tmp_path):
+def test_arrived_by_an_old_number_of_a_source_is_no_arrival(tmp_path):
+    """The owner 2026-10-30: the tyres of the sources are at the point already, in the merged order; only the tyres ordered for it travel."""
     conn = db(tmp_path)
     a, b, new = _merged(conn)
-    na, nb = _card(conn, a)["webmim_number"], _card(conn, b)["webmim_number"]
+    na = _card(conn, a)["webmim_number"]
     answer = mgr.handle_command(conn, "m1", POINT_VK, "приехал %s" % na, None, NOW)
-    assert "часть объединённого" in answer and _card(conn, new)["stage"]["code"] == "moving"          # nothing moved, nothing sent
-    text = conn.execute("SELECT text FROM manager_message WHERE message_id = 'm1'").fetchone()[0]
-    assert "приехал заказ %s — это часть объединённого №%s (ещё ждём %s)" % (na, new, nb) in text
+    assert answer == "Шины заказа №%s уже на точке, они в объединённом заказе №%s." % (na, new)
+    assert _card(conn, new)["stage"]["code"] == "moving"                           # nothing moved, nothing sent
+    assert conn.execute("SELECT COUNT(*) FROM manager_message").fetchone()[0] == 0
 
 
-def test_an_old_number_of_a_merge_of_one_webmim_order_acts_at_once(tmp_path):
-    from test_oth_sale import new_order
+def test_returned_by_an_old_number_waits_for_the_owner(tmp_path):
     conn = db(tmp_path)
-    a = card_at(conn, "moving", T)
-    other = new_order(conn, qty=1, goods="3")                                     # no WebMIM order: one number only
-    new = _merge(conn, [a, other])
-    mgr.handle_command(conn, "m2", POINT_VK, "приехал %s" % _card(conn, a)["webmim_number"], None, NOW)
+    a, b, new = _merged(conn)
+    for step in ("at_point",):
+        orders.move_card(conn, new, stage(conn, step), NOW, "o")
+    na = _card(conn, a)["webmim_number"]
+    answer = mgr.handle_command(conn, "m2", POINT_VK, "возврат %s" % na, None, NOW)         # «вернул», «не выкупил»: the owner confirms
+    assert "часть объединённого" in answer and _card(conn, new)["stage"]["code"] == "at_point"
+    text = conn.execute("SELECT text FROM manager_message WHERE message_id = 'm2'").fetchone()[0]
+    assert "заказ %s — это часть объединённого №%s" % (na, new) in text
+
+
+def test_arrived_by_the_merged_orders_own_number_moves_it(tmp_path):
+    conn = db(tmp_path)
+    a, b, new = _merged(conn)
+    conn.execute("UPDATE order_card SET webmim_number = '9990001' WHERE id = ?", (new,))     # the tyres ordered for it, its own number
+    conn.commit()
+    mgr.handle_command(conn, "m3", POINT_VK, "приехал 9990001", None, NOW)
     assert _card(conn, new)["stage"]["code"] == "at_point"
 
 
