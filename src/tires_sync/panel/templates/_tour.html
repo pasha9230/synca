@@ -1,0 +1,24 @@
+{# «Обзор» (panel/tour.py): the steps of the role on its start page until the person passes or skips it. Works without a script: a radio
+   button per step (the arrows move between them), outside the forms, so that Enter on it sends nothing; the light of the step's element is
+   drawn by the <style> below (the selectors are ours, checked by tour.SELECTOR) #}
+{# what of the page the steps need (tour.WHEN): the values the page was drawn with #}
+{% set steps = tour({"point": point is defined and point, "cards": cards is defined and cards, "returns": returns is defined and returns,
+                     "catalog": empty is defined and not empty}) if tour is defined else [] %}
+{% if steps %}
+<style>{% for s in steps %}
+body:has(#tour-s{{ loop.index }}:checked) {{ s.sel|safe }}{outline:3px solid var(--primary-600);outline-offset:4px;box-shadow:0 0 0 9px rgba(127,86,217,.22);border-radius:var(--r-md);scroll-margin:120px}{% endfor %}
+</style>
+<div class="tour" role="region" data-tour-root aria-label="Обзор панели">
+{% for s in steps %}<input class="tour-radio" type="radio" name="tour-step" id="tour-s{{ loop.index }}" aria-label="Шаг {{ loop.index }}: {{ s.title }}"{% if loop.first %} checked{% endif %}>
+<section class="tour-pop" role="dialog" aria-label="Обзор: {{ s.title }}" data-tour-sel="{{ s.sel }}">
+<div class="tour-step">Обзор · шаг {{ loop.index }} из {{ steps|length }}</div>
+<h3 class="tour-title">{{ s.title }}</h3>
+<p class="tour-text">{{ s.text }}</p>
+<form class="tour-actions" method="post" action="/tour/done"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.path }}">
+<button class="btn btn--link-gray btn--sm tour-skip" name="how" value="skip">Пропустить</button>
+{% if not loop.first %}<label class="btn btn--secondary btn--sm" for="tour-s{{ loop.index - 1 }}" data-tour-go>Назад</label>{% endif %}
+{% if loop.last %}<button class="btn btn--primary btn--sm" name="how" value="end">Готово</button>
+{% else %}<label class="btn btn--primary btn--sm" for="tour-s{{ loop.index + 1 }}" data-tour-go>Дальше</label>{% endif %}
+</form></section>{% endfor %}
+</div>
+{% endif %}

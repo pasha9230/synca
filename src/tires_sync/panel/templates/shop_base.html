@@ -9,11 +9,13 @@
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='shop.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='tour.css') }}">
 </head>
 <body class="shop">
 {% if session.get("user") %}
 <header class="shop-top"><a class="sb-logo" href="/shop"><span class="sb-logo-mark">{{ icon("tire") }}</span>Каталог</a>
-<div class="shop-top-right"><a href="/account/password">Свой пароль</a>
+<div class="shop-top-right"><form method="post" action="/tour/again" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="tour-again" data-tour="again" aria-label="Пройти обзор заново"><span class="tour-again-long">Пройти обзор заново</span><span class="tour-again-short">Обзор</span></button></form>
+<a href="/account/password">Свой пароль</a>
 <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form></div>
 </header>
 <main class="main"><div class="page">
@@ -21,6 +23,7 @@
 {% set pf = page_filter() if page_filter is defined else {} %}{% if pf %}<div class="flash flash--info" data-filter-on><div class="flash-text">Фильтр включён: {{ pf.count }} · {% if pf.mine %}<a href="{{ pf.mine }}">Мои фильтры</a> <span class="muted xs">(открыто по ссылке; ваши сохранённые фильтры не тронуты)</span>{% else %}<a href="{{ pf.reset }}">Сбросить фильтры</a> <span class="muted xs">(фильтры запоминаются в вашем аккаунте)</span>{% endif %}</div></div>{% endif %}
 {% block content %}{% endblock %}
 </div></main>
+{% include "_tour.html" %}
 {% else %}
 <main class="auth"><div class="auth-card">
 {% block auth %}{% endblock %}
