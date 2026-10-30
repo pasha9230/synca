@@ -738,6 +738,8 @@ def update_item(conn, item_id, qty, sale_unit, now: str, author: str, supplier_p
     old = _item_row(conn, item_id)
     _no_sale(conn, old["order_id"])
     qty = _qty(qty)
+    if qty != int(old["qty"]) and _from_oth(conn, item_id):
+        raise OrderError("Это шины с ОТХ: их количество не меняется. Нажмите «Вернуть на ОТХ» и возьмите снова сколько нужно.")
     sale = _number(sale_unit, "Цена продажи", 0, 1_000_000, low_open=True)
     price = None if supplier_price is None else _number(supplier_price, "Закупка за 1 шт", 0, 10_000_000, low_open=True)
     conn.execute("UPDATE order_item SET qty = ?, sale_unit = ? WHERE id = ?", (qty, sale, item_id))
@@ -772,9 +774,26 @@ def refresh_purchase(conn, card_id, prices: Dict[str, float], source: str, now: 
 PURCHASE_SOURCES = {"unload": "выгрузка поставщика", "webmim_api": "API WebMIM", "manual": "вручную"}
 
 
+def _from_oth(conn, item_id) -> bool:
+    """A position «с ОТХ» (oth_sale): its pieces belong to an old order, only «Вернуть на ОТХ» gives them back."""
+    return conn.execute("SELECT 1 FROM order_item_oth WHERE item_id = ? AND undone_at = ''", (item_id,)).fetchone() is not None
+
+
+def _gave_oth(conn, item_id) -> Optional[int]:
+    """The order holding tyres this position gave from «На ОТХ» (oth_sale), if any: «Вернуть на ОТХ» puts them back here."""
+    row = conn.execute("SELECT t.order_id FROM order_item_oth t JOIN order_item i ON i.id = t.item_id WHERE t.from_item = ? AND t.undone_at = '' "
+                       "AND i.qty >= 1 LIMIT 1", (item_id,)).fetchone()
+    return row[0] if row else None
+
+
 def remove_item(conn, item_id, now: str, author: str) -> None:
     old = _item_row(conn, item_id)
     _no_sale(conn, old["order_id"])
+    if _from_oth(conn, item_id):
+        raise OrderError("Это шины с ОТХ: нажмите «Вернуть на ОТХ», и они вернутся в свой заказ.")
+    holder = _gave_oth(conn, item_id)
+    if holder:
+        raise OrderError("Шины этой позиции взяты с ОТХ в заказ №%d: удалить её нельзя, им некуда будет вернуться." % holder)
     before = _stage_gaps(conn, old["order_id"])
     conn.execute("DELETE FROM order_item WHERE id = ?", (item_id,))
     add_event(conn, old["order_id"], now, author, "item", "Удалено: %s" % old["name"])
@@ -840,7 +859,8 @@ def _fire_rules(conn, card_id, now: str, chain: tuple, of_point=None) -> None:
 
 
 RESERVE_DAYS = 3                                 # the point keeps the reservation three days from the day the goods arrive there
-OTH_DAYS = 7                                     # goods bought out and stored at the point («На ОТХ»): seven days to sell, then back to the supplier
+OTH_ENTERED = "На ОТХ: шины на точке, срока продажи нет"     # the owner 2026-10-30: whether they go back to the supplier is the owner's call
+OTH_MARKS = ("На ОТХ: срок продажи до %", OTH_ENTERED)       # the record of entering «На ОТХ», before 2026-10-30 (with a date) and since
 
 
 def _start_reserve(conn, card: dict, now: str, author: str) -> None:
@@ -856,12 +876,11 @@ def _start_reserve(conn, card: dict, now: str, author: str) -> None:
 
 
 def _start_oth(conn, card: dict, now: str, author: str) -> None:
-    """The client refused and we bought the goods out: seven days from today to sell them. Always set anew: a reservation date left from
-    «Товар на точке» says nothing about this stay. The managers can still move the date by hand afterwards. The client refused: the order
-    is no longer theirs (order_oth.detach), the goods are our stock."""
-    until = (date.fromisoformat(now[:10]) + timedelta(days=OTH_DAYS)).isoformat()
-    conn.execute("UPDATE order_card SET reserve_until = ? WHERE id = ?", (until, card["id"]))
-    add_event(conn, card["id"], now, author, "field", "На ОТХ: срок продажи до %s" % until)
+    """The client refused and we bought the goods out: they lie at the point with no time to sell them (the owner 2026-10-30: whether they
+    go back to the supplier is the owner's call). The reservation date left from «Товар на точке» says nothing about this stay: cleared.
+    The client refused: the order is no longer theirs (order_oth.detach), the goods are our stock."""
+    conn.execute("UPDATE order_card SET reserve_until = '' WHERE id = ?", (card["id"],))
+    add_event(conn, card["id"], now, author, "field", OTH_ENTERED)
     from . import order_oth
     order_oth.detach(conn, card, now, author)
 
@@ -906,6 +925,11 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         raise _refuse_move(conn, card_id, now, author, "Чтобы перейти в «%s», заполните: %s." % (stage["name"], ", ".join(gaps)), journal)
     if card["sale_ids"] and stage["kind"] not in ("won", "closed"):
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
+    if stage["kind"] == "lost":
+        from . import oth_sale
+        held = oth_sale.holds(conn, card_id)                                    # the tyres taken from «На ОТХ» would be lost with the order
+        if held:
+            raise _refuse_move(conn, card_id, now, author, oth_sale.holds_text(held), journal)
     keep_sale = "" if stage["kind"] in ("won", "closed") else " AND sale_ids = '[]'"         # the same rule in SQL: a sale recorded a moment ago counts
     cur = conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ?, updated_at = ? WHERE id = ? AND stage_id = ?" + keep_sale,
                        (stage["id"], now, now, card_id, card["stage_id"]))
@@ -918,14 +942,14 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         order_alerts.resolve(conn, refused, now, author)                       # the card moved: its refused moves are no longer a cause to act
     if stage["code"] == "at_point":
         if card["stage"].get("code") == "oth":
-            card = dict(card, reserve_until="")                                 # back from «На ОТХ»: its seven days are not a reservation
+            card = dict(card, reserve_until="")                                 # back from «На ОТХ»: a date of an old stay is not a reservation
         _start_reserve(conn, card, now, author)
     elif stage["code"] == "oth":
         _start_oth(conn, card, now, author)
     _leave_oth(conn, card, stage, now, author)
     from_oth = card["stage"].get("code") == "oth"
     after_oth = from_oth or (card["stage"].get("kind") != "open" and conn.execute(          # «На ОТХ», then a finished stage, then open again
-        "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND text LIKE 'На ОТХ: срок продажи до %' LIMIT 1", (card_id,)).fetchone())
+        "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND (text LIKE ? OR text = ?) LIMIT 1", (card_id,) + OTH_MARKS).fetchone())
     if stage["code"] not in ("oth", RETURN_GIVEN):                              # the client of the phone, after the stage's own linking:
         unlinked = bool(after_oth) and conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (card_id,)).fetchone() is None
         if (phoned or unlinked) if stage["kind"] == "open" else (phoned and not from_oth):
@@ -1093,9 +1117,10 @@ def record_sales(conn, card_id, day: str, now: str, author: str, today: str) -> 
         raise OrderError("Продажу можно записать, когда заказ на успешном этапе («Выполнено»).")
     if card["sale_ids"]:
         raise OrderError("Продажа по этому заказу уже записана.")
-    if not card["items"]:
+    sold = [it for it in card["items"] if int(it["qty"]) >= 1]       # a position emptied by «Взять с ОТХ» (oth_sale) has nothing to sell
+    if not sold:
         raise OrderError("В заказе нет позиций: записывать нечего.")
-    unknown = [it["name"] for it in card["items"] if not float(it["supplier_price"]) > 0]      # a point tyre before its purchase: never a made-up profit
+    unknown = [it["name"] for it in sold if not float(it["supplier_price"]) > 0]      # a point tyre before its purchase: never a made-up profit
     if unknown:
         raise OrderError("Не указана закупка: «%s». Впишите «Закупка за 1 шт» в позиции и запишите продажу снова." % "», «".join(unknown))
     point = card["point"]["name"] if card["point"] else ""
@@ -1106,7 +1131,7 @@ def record_sales(conn, card_id, day: str, now: str, author: str, today: str) -> 
     conn.commit()
     ids: List[int] = []
     try:
-        for it in card["items"]:
+        for it in sold:
             ids.append(sales_store.add_sale(
                 conn, day=day, goods_id=it["goods_id"], brand_key=it["brand_key"] or "-", season=it["season"], diameter=it["diameter"],
                 name=it["name"], ad_kind="single", pieces=it["qty"], sale_total=float(it["sale_unit"]) * it["qty"],
@@ -1120,6 +1145,8 @@ def record_sales(conn, card_id, day: str, now: str, author: str, today: str) -> 
         conn.commit()
         raise OrderError(str(err)) if isinstance(err, ValueError) else err
     conn.execute("UPDATE order_card SET sale_ids = ?, updated_at = ? WHERE id = ?", (json.dumps(ids), now, card_id))
+    from . import oth_sale
+    oth_sale.note_sales(conn, card, sold, ids)                          # the sales of the tyres taken from «На ОТХ»: at the old order's purchase
     add_event(conn, card_id, now, author, "sale", "Записана продажа: %d поз." % len(ids))
     conn.commit()
     return ids

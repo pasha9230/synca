@@ -1,10 +1,10 @@
 """The alert to the responsible manager of an order (the waiting list): who gets it and through what.
 A panel user (the owner or a person with a login) gets it in Telegram, in the chat saved for them (the owner: the chat of the failure alerts),
-except a point user: through their point («Моя точка» or its VK), never Telegram (the owner 2026-10-26: the bell with the sound is enough);
+except a point user: through their point («Рабочее место» or its VK), never Telegram (the owner 2026-10-26: the bell with the sound is enough);
 somebody who is not in the panel (the robot, a removed user) is answered through VK by the manager of the point of the order, or, when the
-point works in the panel (channel «panel», the owner 2026-10-23), on its «Моя точка» (for the staff a grey record of the journal only);
+point works in the panel (channel «panel», the owner 2026-10-23), on its «Рабочее место» (for the staff a grey record of the journal only);
 when there is no way, the owner is told in Telegram that nobody could be written to. An order of the Avito account of a point (the owner
-2026-10-26) goes only to that point: its user who answers for it, its VK or its «Моя точка»; with no way it is left on «Моя точка», never with
+2026-10-26) goes only to that point: its user who answers for it, its VK or its «Рабочее место»; with no way it is left on «Рабочее место», never with
 the owner. Every outcome is written in the feed of the order.
 In VK the bot signs it «(бот) ». Nothing here is sent to a client."""
 from __future__ import annotations
@@ -104,9 +104,9 @@ def _users_point(conn, who: str) -> Optional[dict]:
 
 
 def _point_route(point: dict) -> dict:
-    """The way to a point: its «Моя точка» (the panel) or its VK; never the Telegram of a person of the point, even with a chat saved (the
+    """The way to a point: its «Рабочее место» (the panel) or its VK; never the Telegram of a person of the point, even with a chat saved (the
     owner 2026-10-26, plan answer 8: the bell with the sound is enough). «owner» here only means there is no way (for an order of the point's
-    account deliver then leaves it on «Моя точка», never with the owner)."""
+    account deliver then leaves it on «Рабочее место», never with the owner)."""
     if points.in_panel(point):
         return {"channel": "panel", "to": str(point["id"]), "why": point["name"]}
     if point["channel"] != "vk" or not point["vk_peer_id"]:
@@ -115,13 +115,13 @@ def _point_route(point: dict) -> dict:
 
 
 def _leave_on_point(conn, way: dict, card: dict, text: str, now: str, failure: str) -> str:
-    """An alert of a point's account order that could not go: kept on the point's «Моя точка» and in the journal; the owner is not told."""
+    """An alert of a point's account order that could not go: kept on the point's «Рабочее место» and in the journal; the owner is not told."""
     try:
         points.add_note(conn, way["own_point"], "alert", text, now, card["id"])
-        kept = "оставлено точке на «Моя точка»"
+        kept = "оставлено точке на «Рабочем месте»"
     except Exception as err:                                       # a busy base: the red record of the journal is what is left
         conn.rollback()
-        kept = "на «Моя точка» не записано (%s)" % err.__class__.__name__
+        kept = "на «Рабочем месте» не записано (%s)" % err.__class__.__name__
     _event(conn, card["id"], now, "Оповещение не отправлено: %s; %s (заказ аккаунта точки: владельцу не пишется)" % (failure, kept))
     return "не отправлено: %s; %s" % (failure, kept)
 
@@ -132,9 +132,10 @@ def _event(conn, card_id, now: str, text: str) -> None:
 
 
 def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_http: Transport = urllib_transport,
-            vk_http: Transport = urllib_transport, owner_login: Optional[str] = None) -> str:
-    """Write the alert; never raises. Returns «отправлено …» or «не отправлено …» (the owner is told in the second case when possible)."""
-    way = route(conn, card, owner_login)
+            vk_http: Transport = urllib_transport, owner_login: Optional[str] = None, way: Optional[dict] = None) -> str:
+    """Write the alert; never raises. Returns «отправлено …» or «не отправлено …» (the owner is told in the second case when possible).
+    `way`: where it goes, when not to the responsible (tell_point)."""
+    way = way or route(conn, card, owner_login)
     failure = way["why"] if way["channel"] == "owner" else ""
     if way["channel"] == "telegram":
         key = "order|%s|%s|%s" % (card["id"], way["to"], text)
@@ -161,7 +162,7 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
             return "отправлено в ВК (%s)" % way["why"]
         except vk_send.VkError as err:
             failure = "ВК → точка «%s»: %s" % (way["why"], err)
-    elif way["channel"] == "panel":                                # the point's own «Моя точка»; the staff get no alert of it (grey)
+    elif way["channel"] == "panel":                                # the point's own «Рабочее место»; the staff get no alert of it (grey)
         try:
             points.add_note(conn, int(way["to"]), "alert", text, now, card["id"])
             _event(conn, card["id"], now, "Оповещение показано точке «%s» в панели" % way["why"])
@@ -185,6 +186,18 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
         told = "; владельцу написать не удалось"
     _event(conn, card["id"], now, "Оповещение не отправлено: %s%s" % (failure, told))
     return "не отправлено: %s%s" % (failure, told)
+
+
+def tell_point(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_http: Transport = urllib_transport,
+               vk_http: Transport = urllib_transport) -> str:
+    """Write to the point of the order itself (its «Рабочее место» or its VK, as deliver writes a point), not to the responsible; never raises.
+    No way to the point: the owner is told, as by deliver."""
+    point = card.get("point")
+    way = _point_route(point) if point else {"channel": "owner", "to": "", "why": "у заказа нет точки"}
+    own = points.of_account(conn, card["id"]) if point else None
+    if own is not None:                                            # an order of the point's account: left on its «Рабочее место», never the owner
+        way = dict(way, own_point=own["id"])
+    return deliver(conn, box, card, text, now, tg_http=tg_http, vk_http=vk_http, way=way)
 
 
 def missing_order_people(conn) -> List[str]:
@@ -240,8 +253,8 @@ UNSEEN_START_KEY = "point_unseen_start"           # app_state: the notes written
 
 
 def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport = urllib_transport) -> int:
-    """The safety net of a point in the panel (the lead 2026-10-23, as the old «no VK → the owner»): an alert on its «Моя точка» that nobody of
-    the point opened within 15 minutes of working time (the hours of the handoffs) goes to the owner in Telegram, once. Opened: its «Моя точка»
+    """The safety net of a point in the panel (the lead 2026-10-23, as the old «no VK → the owner»): an alert on its «Рабочее место» that nobody of
+    the point opened within 15 minutes of working time (the hours of the handoffs) goes to the owner in Telegram, once. Opened: its «Рабочее место»
     or, since the alert, the order's card (lane 3: the owner is never told what the point already saw). Returns how many."""
     from datetime import datetime
     from . import order_manager

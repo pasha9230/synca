@@ -1,7 +1,7 @@
 """The managers of the points work in the panel (the owner 2026-10-26): what a point sees is its own and nothing of another point or another
 Avito account — by the address, through the JSON of the search and the feeds; no CRM at all (the owner 2026-10-29; until then its own part
 of a client, 2026-10-26), no money on the board, the
-invitation of a point leads to «Моя точка» and an invitation for a point that is gone is refused."""
+invitation of a point leads to «Рабочее место» and an invitation for a point that is gone is refused."""
 from __future__ import annotations
 
 import re

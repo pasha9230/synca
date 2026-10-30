@@ -145,7 +145,7 @@ def test_the_stock_lists_what_where_from_which_order_since_when_and_the_return_m
     card_at(conn, "at_point", T)                                                   # an order of a client: not ours
     rows = order_oth.stock(conn)
     assert [(r["order_id"], r["goods_id"], r["qty"], r["point"], r["since"][:10], r["until"]) for r in rows["stock"]] == [
-        (cid, "1", 4, "Бета", "2026-10-17", "2026-10-24")]
+        (cid, "1", 4, "Бета", "2026-10-17", "")]                                     # no time to sell on ОТХ (the owner 2026-10-30)
     assert order_oth.goods_on_oth(conn) == {"1": 4}
     item = rows["stock"][0]["item_id"]
     order_oth.mark_returned(conn, item, "2026-10-20T10:00:00", "o")

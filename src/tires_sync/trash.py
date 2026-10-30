@@ -10,8 +10,11 @@ from .orders import OrderError
 
 # what hangs on an order: (table, the column that points at the order)
 ORDER_TABLES = (("order_item", "order_id"), ("order_event", "order_id"), ("order_field_value", "order_id"), ("order_task", "order_id"),
-                ("order_want", "order_id"), ("order_oth_client", "order_id"), ("oth_return", "order_id"))   # «На ОТХ»: the client put aside, the
-                                                                                                          # marks «возвращено» (хвост З16)
+                ("order_want", "order_id"), ("order_oth_client", "order_id"), ("oth_return", "order_id"),   # «На ОТХ»: the client put aside, the
+                ("order_item_oth", "order_id"))                                                            # marks «возвращено» (хвост З16); the
+# positions «с ОТХ» of the order (oth_sale): deleted and restored with it, so a restored order keeps where its tyres came from (the Google
+# table, the purchase not replaced by WebMIM's price). An order holding tyres of «На ОТХ», or whose tyres another order holds, is never deleted
+# (oth_sale.why_not_delete): what goes here is only what no longer holds a tyre.
 KINDS = {"order": "Заказ", "chat": "Чат"}
 
 
@@ -64,7 +67,8 @@ def delete_order(conn, card_id, now: str, author: str, only_if=None) -> int:
         card = card[0]
         if json.loads(card["sale_ids"] or "[]"):
             raise OrderError("По заказу записана продажа: сначала сторнируйте её, потом удаляйте заказ.")
-        reason = only_if(conn, card) if only_if else None
+        from . import oth_sale
+        reason = oth_sale.why_not_delete(conn, card_id) or (only_if(conn, card) if only_if else None)   # tyres of «На ОТХ» are never lost
         if reason:
             raise OrderError(reason)
         data = {"card": card, "chats": _rows(conn, "SELECT id, order_id, unlinked FROM avito_chat WHERE order_id = ?", (card_id,))}

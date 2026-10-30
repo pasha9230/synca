@@ -1,4 +1,4 @@
-"""The tails of «Точки в панели» (the lead 2026-10-23): an alert on «Моя точка» that nobody of the point opened in 15 minutes of working time
+"""The tails of «Точки в панели» (the lead 2026-10-23): an alert on «Рабочее место» that nobody of the point opened in 15 minutes of working time
 goes to the owner in Telegram, once; the answer to a binding code goes to VK even for a point in the panel. Fakes only."""
 from __future__ import annotations
 

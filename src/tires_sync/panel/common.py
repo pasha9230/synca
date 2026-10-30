@@ -205,15 +205,19 @@ def login_required(view):
 
 
 def review_or_back(conn, back: str):
-    """After a settings change: straight to the confirmation of the pending changes (one step), or back if nothing changed."""
+    """After a settings change: back to the same page, the change waits in the working draft with the others (the owner 2026-10-29: changes
+    pile up, the bar of the page says how many and applies them at once; the page /draft/N is still there as «Подробнее»)."""
     from .. import staging
+    from .service import plural
     staged = staging.summary(conn)
     if staged["draft_id"] is not None and not staged["stale"]:
-        remember_page(back)
-        return redirect("/draft/%d" % staged["draft_id"])
-    if staged["draft_id"] is None:
+        remember_page(back)                                # «Подробнее» (/draft/N) and its «Вернуться к правке» lead back here
+        flash("В черновике, не применено: %d %s. Нажмите «Применить», когда закончите." % (
+            staged["count"], plural(staged["count"], "правка", "правки", "правок")), "ok")
+    elif staged["draft_id"] is None:
         flash("Изменений нет: настройки уже такие.")
     return redirect(back)
+
 
 
 # ---- rights: one check for every page -----------------------------------------------------------------------------------------------
@@ -232,7 +236,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_oth_agreed", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -257,7 +261,7 @@ for _section, _endpoints in {
                   "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report",
                   "orders_report_export"),
     "setup": ("draft", "draft_cancel", "draft_confirm", "catalog_review", "publish_result", "summary_toggle",      # a draft shows the markups: the owner's
-              "settings_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_exclusions_page", "settings_pricing",
+              "settings_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_pending", "settings_exclusions_page", "settings_pricing",
               "history", "history_rollback", "connections_page", "connections_add_account", "connections_account_brand_pricing",
               "connections_account_check", "account_contact_name", "account_responsible", "account_exclude_types", "connections_account_keys",
               "connections_account_live", "account_modes", "account_phone", "account_phone_source", "connections_account_photo_base",
@@ -293,6 +297,7 @@ NEEDS = {"catalog_own_price": "money", "order_delete": "delete", "chat_delete": 
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",
          "order_sale_reverse": "delete", "order_webmim_create": "supplier",
          "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
+         "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
          "share_create": "send"}
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS

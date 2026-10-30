@@ -318,7 +318,7 @@ def test_ch8_a_later_hint_is_not_given_back_by_an_earlier_failure(tmp_path):
     assert store.get_state(conn, mgr.HINT_KEY % pid) == "2026-10-21T12:40:00"
 
 
-# ---- Ч10: «Входящие» name the point of a cut handoff from «Моя точка» without VK ------------------------------------------------------
+# ---- Ч10: «Входящие» name the point of a cut handoff from «Рабочее место» without VK ------------------------------------------------------
 
 def test_ch10_a_cut_handoff_from_the_page_lands_in_the_inbox_with_its_point(tmp_path):
     from tires_sync import order_manager as mgr, order_points as points, orders, store

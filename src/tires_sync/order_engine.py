@@ -133,7 +133,7 @@ PLACED_RULE = -2                                                   # the «rule�
 ARRIVED_RULE = -3                                                  # «можно забирать» that did not go by itself (order_manager._tell_arrived)
 PLACED_SKIP = "подготовлено после оформления в WebMIM"
 SENT_SKIP = "это сообщение по заказу уже отправлено"
-PANEL_SKIP = "точка работает в панели: в ВК ей не пишем, заказ виден на её «Моей точке»"
+PANEL_SKIP = "точка работает в панели: в ВК ей не пишем, заказ виден на её «Рабочем месте»"
 RUNNING_TIMEOUT = 600                                              # seconds; a task «running» longer than this was cut off (a killed worker)
 
 
@@ -271,7 +271,7 @@ def send_target(conn, task: dict, prefer=None) -> Tuple[Optional[dict], str]:
     return next((c for c in may if c["id"] == prefer), may[0]), ""
 
 
-IN_PANEL = "Точка «%s» работает в панели: в ВК ей не пишем, заказ виден на её «Моей точке». Это сообщение можно пропустить."
+IN_PANEL = "Точка «%s» работает в панели: в ВК ей не пишем, заказ виден на её «Рабочем месте». Это сообщение можно пропустить."
 
 
 def point_target(conn, task: dict) -> Tuple[Optional[dict], str]:

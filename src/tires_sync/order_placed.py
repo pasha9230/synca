@@ -9,7 +9,7 @@ second press, «Досоздать» nor second worker make another. It goes the
 chats.send_reply, order_engine.send_point_task → vk_send: the task is taken first, the send mark is the task's own). What does not go stays a
 waiting message of the card (the window «Сообщения по заказу»), with a red record and a warning: a lacking value, no chat, no VK, a failed
 send. The template is the one of the exact name and the audience; renamed or gone, nothing is sent (no text of our own). A point that works
-in the panel (channel «panel», the owner 2026-10-23) gets nothing in VK: a grey record says so, the order is on its «Моя точка».
+in the panel (channel «panel», the owner 2026-10-23) gets nothing in VK: a grey record says so, the order is on its «Рабочее место».
 A message of the same template the order has already (the rule of the stage «Заказ оформлен» prepares it, the owner 2026-10-23): sent — not
 again; waiting — that task is sent, no second one; skipped by a person — not sent (the person chose so); lacking values — it waits."""
 from __future__ import annotations
@@ -122,8 +122,8 @@ def _tell(conn, card_id, who: dict, webmim_id: str, now: str, author: str, send)
             return _not_sent(conn, card_id, who, now, "шаблона с таким именем «%s» нет (переименован или удалён)." % who["whom"],
                              "Верните шаблону имя в «Заказы → Шаблоны» или напишите %s сами." % who["whom"])
         point = orders.get_card(conn, card_id).get("point") if who is POINT else None
-        if points.in_panel(point):                                # the owner 2026-10-23: the point sees the order on «Моя точка», nothing in VK
-            line = "Точка «%s» %s«%s» в ВК не отправляется, заказ виден на её «Моей точке»." % (point["name"], IN_PANEL, who["template"])
+        if points.in_panel(point):                                # the owner 2026-10-23: the point sees the order on «Рабочее место», nothing in VK
+            line = "Точка «%s» %s«%s» в ВК не отправляется, заказ виден на её «Рабочем месте»." % (point["name"], IN_PANEL, who["template"])
             orders.add_event(conn, card_id, now, AUTHOR, "chat", line, level="grey")
             conn.commit()
             for task in engine.list_tasks(conn, card_id, ("pending", "error")):      # the rule's own (made before the hook): nobody skips it by hand

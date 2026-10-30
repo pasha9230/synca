@@ -18,7 +18,7 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 
-from . import orders, reliability, webmim_match, webmim_orders
+from . import orders, oth_sale, reliability, webmim_match, webmim_orders
 from .order_points import get_point
 
 # The servers the button may write to. The live one only by the owner's word: add "prod" here (a change of the code, reviewed and deployed),
@@ -65,7 +65,9 @@ def problems(conn, card: dict, today: date, mode: str = "new") -> List[str]:
     out = []
     if card.get("deal_kind") == "stock":
         return ["Сделка из наличия точки: заказ в WebMIM для неё не нужен."]
-    items = [i for i in card.get("items") or [] if int(i["qty"] or 0) > 0]
+    items = [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"] or 0) > 0]      # the tyres taken from «На ОТХ» are ours already
+    if not items and any(int(i["qty"] or 0) > 0 for i in card.get("items") or []):
+        return ["Все позиции взяты с ОТХ: заказ в WebMIM не нужен."]
     if not items:
         out.append("В заказе нет позиций с количеством.")
     for item in items:
@@ -407,7 +409,7 @@ def _positions(conn, card: dict, client, webmim_id: str, where: str, chosen: str
     wanted: Dict[str, int] = {}
     names: Dict[str, str] = {}
     territory = ""
-    for item in card["items"]:
+    for item in oth_sale.supplier_items(conn, card):              # only what lacks: the positions «с ОТХ» are never ordered
         if int(item["qty"] or 0) > 0:
             goods = str(item["goods_id"])
             wanted[goods] = wanted.get(goods, 0) + int(item["qty"])

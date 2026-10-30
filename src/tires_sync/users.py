@@ -91,6 +91,7 @@ def remove_user(conn, login: str, now: str) -> None:
     conn.execute("DELETE FROM panel_user_role WHERE login = ?", (login,))
     conn.execute("DELETE FROM client_terms WHERE subject = ?", (login,))           # a client's own conditions ('*' is the role's, never a login)
     conn.execute("DELETE FROM client_brand WHERE subject = ?", (login,))
+    conn.execute("DELETE FROM user_pref WHERE login = ?", (login,))                  # the person's own settings (the columns of «Заказы»)
     store.write_audit(conn, now, "server", "user_removed", {"login": login})
     store.bump_session_epoch(conn, login)
 
@@ -132,8 +133,8 @@ RIGHTS = {"money": "видеть закупку и прибыль", "delete": "�
 # the cards, the chats and the alerts).
 # «Звонки»: the recordings are for the operator, the admins and the owners; the manager of a point hears the calls of the point's account
 # only; the observer sees the list and never the recordings (the owner 2026-10-21, the lead 2026-10-23).
-# «CRM» of a point: looks only, at its own part of a client (the orders of the point, the chats and the calls of its account, their sums; the
-# owner 2026-10-26); the owner 2026-10-29: the point has no CRM at all (the order's card, the chats and the calls show no link to a client).
+# «CRM» is not the point's (the owner 2026-10-29; before, its own part of a client, 2026-10-26): the section is not in its row below, and the
+# order's card, the chats and the calls show it no link to a client.
 # «Рабочее место» (mypoint) is the point's start page; «История точки» is in «Пользователи»: the owner and the partner only.
 # The client (a buyer, the owner 2026-10-29): «Каталог для клиента» (shop) with the own prices and the own password, nothing else
 # (panel/common.CLIENT_PAGES); no other role has «shop»: the owner looks at a client's catalog through a preview in «Пользователи».

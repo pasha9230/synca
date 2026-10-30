@@ -1,4 +1,4 @@
-/* «Моя точка»: the phone page of a point's manager (360–414 px), on the tokens of panel.css; no sidebar. */
+/* «Рабочее место»: the phone page of a point's manager (360–414 px), on the tokens of panel.css; no sidebar. */
 body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) var(--s-10);background:var(--gray-50)}
 .mp-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s-3);margin-bottom:var(--s-4)}
 .mp-title h1{font-size:var(--fs-2xl)}
