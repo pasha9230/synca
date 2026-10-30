@@ -41,6 +41,19 @@ def _placed(conn, order_id) -> bool:
     return bool(row) and any(str(v or "").strip() for v in row)
 
 
+def _ordered(conn, order_id, stage_id) -> bool:
+    """The tyres of a source are ordered from the supplier already: it has a number, or it stood on «Заказ оформлен» or later at the merge
+    (ordered by hand without a number, 4 Точки before 2026-10-29; review 2026-10-30: never ordered a second time)."""
+    if _placed(conn, order_id):
+        return True
+    placed = orders._placed_stage(conn)
+    try:
+        stage = orders.get_stage(conn, stage_id)
+    except orders.OrderError:
+        return False
+    return placed is not None and stage["kind"] == "open" and orders._needs_placed(stage, placed)
+
+
 def into(conn, order_id) -> Optional[int]:
     """The new order an order was merged into (an active merge), or None."""
     row = conn.execute("SELECT m.into_order FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? AND " + _ACTIVE,
@@ -82,13 +95,14 @@ def items_of(conn, card_id) -> Dict[int, dict]:
     """The positions of the order given by the sources of its active merge (not those through «На ОТХ»: oth_sale shows them): item id →
     {from_order, from_item, qty, number (its source's WebMIM number), label, transfer, placed}."""
     out = {}
-    for item_id, from_item, from_order, qty in conn.execute(
-            "SELECT i.item_id, i.from_item, i.from_order, i.qty FROM order_merge_item i JOIN order_merge m ON m.id = i.merge_id "
-            "WHERE m.into_order = ? AND i.oth = 0 AND " + _ACTIVE, (card_id,)).fetchall():
+    for item_id, from_item, from_order, qty, stage_id in conn.execute(
+            "SELECT i.item_id, i.from_item, i.from_order, i.qty, s.stage_id FROM order_merge_item i JOIN order_merge m ON m.id = i.merge_id "
+            "JOIN order_merge_source s ON s.merge_id = i.merge_id AND s.order_id = i.from_order WHERE m.into_order = ? AND i.oth = 0 AND " + _ACTIVE,
+            (card_id,)).fetchall():
         row = conn.execute("SELECT webmim_number, webmim_id, transfer_number, supplier_number FROM order_card WHERE id = ?", (from_order,)).fetchone()
         number, webmim_id, transfer, supplier = row if row else ("", "", "", "")
         out[item_id] = {"from_order": from_order, "from_item": from_item, "qty": qty, "number": number or webmim_id or "",
-                        "label": str(number or from_order), "transfer": transfer or "", "placed": bool(number or webmim_id or supplier)}
+                        "label": str(number or from_order), "transfer": transfer or "", "placed": _ordered(conn, from_order, stage_id)}
     return out
 
 
@@ -108,6 +122,20 @@ def unordered(conn, card: dict) -> List[int]:
         return []
     from . import oth_sale
     return [i["id"] for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]
+
+
+def told_placed(conn, card_id) -> bool:
+    """A source of the active merge into the order reached «Заказ оформлен» (or was placed): its client and its point heard «заказ оформлен»
+    already, so placing the merged order in WebMIM sends it to nobody again (order_placed.on_placed, the lead 2026-10-30)."""
+    found = _active(conn, card_id)
+    if found is None:
+        return False
+    for order_id, stage_id in conn.execute("SELECT order_id, stage_id FROM order_merge_source WHERE merge_id = ?", (found["id"],)).fetchall():
+        if _ordered(conn, order_id, stage_id) or conn.execute(
+                "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'stage' AND text LIKE ? LIMIT 1",
+                (order_id, "%→ «" + (orders._placed_stage(conn) or {}).get("name", "Заказ оформлен") + "»%")).fetchone():
+            return True
+    return False
 
 
 def ever(conn, card_id) -> Set[int]:
@@ -170,7 +198,7 @@ def _why_not_source(conn, card: dict) -> Optional[str]:
 def _items_in(conn, source: dict, new: int, merge_id: int, now: str, author: str) -> None:
     """The tyres of a source go to the new order (see the module)."""
     oth = source["stage"]["code"] == "oth"
-    placed = _placed(conn, source["id"])                                # its tyres are ordered: their purchase is that order's
+    placed = _ordered(conn, source["id"], source["stage_id"])          # its tyres are ordered: their purchase is that order's
     for item in source["items"]:
         pieces = int(item["qty"])
         if pieces < 1:

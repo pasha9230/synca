@@ -506,3 +506,46 @@ def test_no_unmerge_after_a_stay_on_oth_without_a_return_either(tmp_path):
     for step in ("at_point", "oth", "at_point"):                                   # the client came back: the tyres were our stock meanwhile
         orders.move_card(conn, new, stage(conn, step), LATEST, "o")
     assert "На ОТХ" in order_merge.why_not_unmerge(conn, new)
+
+
+def test_tyres_of_a_source_placed_without_a_number_are_never_ordered_again(tmp_path):
+    """The review of d4901f3: a source on «Заказ оформлен» or later is ordered (by hand without a number, 4 Точки before 29.10)."""
+    conn = db(tmp_path)
+    a = card_at(conn, "placed", T)
+    conn.execute("UPDATE order_card SET webmim_number = '' WHERE id = ?", (a,))
+    conn.commit()
+    cid = new_order(conn, qty=1, goods="3")
+    new = _merge(conn, [a, cid], code="placed")
+    card = _card(conn, new)
+    assert [i["goods_id"] for i in oth_sale.supplier_items(conn, card)] == ["3"]
+    assert [i["goods_id"] for i in card["items"] if i["id"] in order_merge.unordered(conn, card)] == ["3"]
+    assert {i["goods_id"]: m for i in card["items"] for m in [conn.execute(
+        "SELECT purchase_manual FROM order_item WHERE id = ?", (i["id"],)).fetchone()[0]]} == {"1": 1, "3": 0}
+
+
+def test_placing_a_merged_order_tells_nobody_again(tmp_path):
+    from tires_sync import order_placed
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    cid = new_order(conn, qty=1, goods="3")
+    new = _merge(conn, [a, cid], code="placed")
+    sent = []
+    lines = order_placed.on_placed(conn, new, "900", LATEST, "o", lambda *x: sent.append(x), lambda *x, **k: sent.append(x))
+    assert sent == [] and "не отправлены: заказ объединён" in lines[0]
+    assert any(e["level"] == "grey" and "заказ объединён" in e["text"] for e in orders.list_events(conn, new))
+    assert not order_merge.told_placed(conn, cid)                                 # a source itself is no merged order
+
+
+def test_the_order_line_is_for_who_may_order_only(tmp_path):
+    from tires_sync import users, store as store_
+    app, owner, tok, conn = panel(tmp_path)
+    a = card_at(conn, "moving", T)
+    cid = new_order(conn, qty=1, goods="3")
+    new = _merge(conn, [a, cid], code="placed")
+    assert "Закажите у поставщика" in owner.get("/orders/%d" % new).get_data(as_text=True)
+    users.add_user(conn, "chat1", "длинный-пароль-1", T, role="chats")
+    other = app.test_client()
+    with other.session_transaction() as session:
+        session.update(user="chat1", epoch=store_.get_session_epoch(conn, "chat1"), csrf="tok")
+    page = other.get("/orders/%d" % new).get_data(as_text=True)
+    assert "не заказано у поставщика" in page and "Закажите у поставщика" not in page
