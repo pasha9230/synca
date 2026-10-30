@@ -39,7 +39,8 @@ def test_every_post_route_rejects_a_missing_csrf_token(tmp_path):
     client = app.test_client()
     login(client)
     for rule in app.url_map.iter_rules():
-        if rule.rule.startswith(("/api/image-jobs", "/api/photo-copies", "/api/review-sheet")):     # the photo agent: no CSRF, a bearer token (tests/test_agent_api.py)
+        if rule.rule.startswith(("/api/image-jobs", "/api/photo-copies", "/api/review-sheet",       # the photo agent: no CSRF, a bearer token (tests/test_agent_api.py)
+                                 "/api/market-snapshots")):                                       # the prices of the competitors: the same (tests/test_market.py)
             assert "POST" not in rule.methods or client.post(concrete(rule), data={}).status_code == 403, rule.rule
         elif "POST" in rule.methods and rule.endpoint not in ("vk_hook", "avito_hook"):   # VK's callback and Avito's webhook: their own secrets (tests/test_vk_callback.py, test_avito_webhook.py)
             assert client.post(concrete(rule), data={}).status_code == 400, rule.rule

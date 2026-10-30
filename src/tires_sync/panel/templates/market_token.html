@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}Токен парсера цен · Tires Sync{% endblock %}
+{% block content %}<section class="card"><div class="card-body stack"><p><b>Новый токен парсера цен</b> (показан один раз, прежний больше не действует; повторная отправка формы выпустит ещё один):</p><p><code>{{ token }}</code></p><p class="muted small">Вставьте его в настройки парсера на Маке. Сервер сам к Авито не ходит: он только принимает снимки.</p><p><a class="btn btn--secondary" href="/catalog">В каталог</a></p></div></section>{% endblock %}

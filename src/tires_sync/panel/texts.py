@@ -229,6 +229,8 @@ _MORE_TEXTS = {
     "description_template_set": lambda d: "Шаблон описания, %s: %s" % (
         _acc(d), "по умолчанию" if d.get("default") else "свой (%s знаков)" % _count(d.get("length"))),
     "connection_config": lambda d: "Изменены настройки подключения «%s»" % _q(d.get("kind")),
+    "market_token": lambda d: "Выпущен новый токен парсера цен (прежний больше не действует)",
+    "market_switch": lambda d: "Приём снимков цен конкурентов " + ("остановлен" if d.get("stopped") else "включён"),
     "secret_cleared": lambda d: "Удалён секрет: %s" % _q(d.get("name")),
     "secrets_cleared": lambda d: "Удалены секреты подключения «%s»" % _q(d.get("kind")),
     "daily_summary": lambda d: "Ежедневная сводка %s" % _on(d.get("on"), "включена", "выключена"),

@@ -440,6 +440,23 @@ CREATE TABLE IF NOT EXISTS avito_stock (
     quantity INTEGER, status TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT '',
     before_quantity INTEGER, before_at TEXT, PRIMARY KEY (account_id, avito_id)
 );
+-- the prices of the competitors on Avito (market.py, the plan price-parser): a snapshot per position and run, the listings it was made of
+-- (no phones, no names of private sellers); the listings live 60 days, the snapshots a year. Nothing of the feed reads them.
+CREATE TABLE IF NOT EXISTS market_snapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, goods_id TEXT NOT NULL, run_at TEXT NOT NULL, slot TEXT NOT NULL DEFAULT '',
+    count INTEGER NOT NULL DEFAULT 0, min REAL, q1 REAL, median REAL, q3 REAL, max REAL, confidence REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS market_snapshot_goods ON market_snapshot (goods_id, id);
+CREATE INDEX IF NOT EXISTS market_snapshot_run ON market_snapshot (run_at);
+CREATE TABLE IF NOT EXISTS market_listing (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_id INTEGER NOT NULL, goods_id TEXT NOT NULL, run_at TEXT NOT NULL,
+    avito_id INTEGER NOT NULL, price REAL NOT NULL, lot INTEGER NOT NULL DEFAULT 1, per_unit REAL NOT NULL, title TEXT NOT NULL DEFAULT '',
+    seller TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', listed_at TEXT NOT NULL DEFAULT '', year INTEGER, in_stock INTEGER,
+    weight REAL NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS market_listing_snapshot ON market_listing (snapshot_id);
+CREATE INDEX IF NOT EXISTS market_listing_run ON market_listing (run_at);
 """
 
 

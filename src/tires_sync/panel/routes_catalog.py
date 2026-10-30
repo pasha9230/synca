@@ -7,7 +7,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
 from werkzeug.datastructures import MultiDict
 
-from .. import catalog_archive, connections, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
+from .. import catalog_archive, connections, market, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
 from ..config import settings_from_dict
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
@@ -16,7 +16,7 @@ from ..webmim import ParseResult
 from ..settings_store import active_settings
 from .routes_main import context
 from .routes_orders import local_iso
-from . import client_catalog, service
+from . import client_catalog, routes_market, service
 
 
 def _num(args, name):
@@ -155,6 +155,17 @@ def _held_item(offer, fetched, published: bool, capped_supplier) -> dict:
             "supplier_mark": service.supplier_mark(service.supplier_of(offer), capped_supplier)}
 
 
+def _market_cell(price, snapshot) -> dict:
+    """The column «Рынок» of a row: «мин / медиана» and our place; empty without a snapshot."""
+    if not snapshot:
+        return {}
+    at = market.moscow(snapshot["run_at"]) + (" (%s)" % snapshot["note"] if snapshot["note"] else "")
+    if snapshot["status"] != "ok":
+        return {"status": snapshot["status"], "text": "мало данных", "at": at}
+    return {"status": "ok", "min": snapshot["min"], "median": snapshot["median"], "count": snapshot["count"], "at": at,
+            "place": market.place(price, snapshot), "dearer": market.dearer(price, snapshot)}
+
+
 def register(app) -> None:
     from . import routes_catalog_oth                                  # «Товар и фид» → «На ОТХ»
     routes_catalog_oth.register(app)
@@ -192,6 +203,11 @@ def register(app) -> None:
             items = [i for i in items if i["scode"] == "model_needs_mapping"]
         elif status == "problem":
             items = [i for i in items if i["problem"]]
+        market_on = has_right("money")                                # the competitors' prices: the owner's, as the purchase (market.py)
+        snaps = market.latest(conn) if market_on else {}
+        market_over = market_on and args.get("mk") == "over"
+        if market_over:                                               # «Дороже рынка»: our price above the median of enough data
+            items = [i for i in items if market.dearer(i["price"], snaps.get(i["goods_id"]))]
         total = len(items)
         size = _page_size(args)
         pages = max(1, -(-total // size))
@@ -201,7 +217,10 @@ def register(app) -> None:
             shown = [dict(i, supplier_price=None) for i in shown]
         on_oth = order_oth.goods_on_oth(conn)                        # our own tyres of refused orders: a mark only, the feed is not touched
         shown = [dict(i, oth=on_oth.get(i["goods_id"])) for i in shown]
+        if market_on:
+            shown = [dict(i, market=_market_cell(i["price"], snaps.get(i["goods_id"]))) for i in shown]
         return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids, held_shown=held_shown,
+                    market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
                     page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
                     studs=studs or "", status=status, sort=sort, descending=descending)
 
@@ -414,6 +433,10 @@ def register(app) -> None:
             data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id],
                                                         ref, parsed.offers)
             data["purchase"] = parsed.offers[goods_id].base_price
+        if has_right("money"):                                        # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
+            snapshot = market.latest(conn, [goods_id]).get(goods_id)
+            data["market"] = {"snapshot": snapshot, "listings": market.listings_of(conn, snapshot["id"]) if snapshot else [],
+                              "at": market.moscow(snapshot["run_at"]) if snapshot else ""}
         if wait is None and request.args.get("wait") and can_post("catalog_wait"):
             wait = _wait_window(conn, goods_id, {}, "", _item_path(goods_id), parsed.offers.get(goods_id))
         return render_template("catalog_item.html", entity=data, wait=wait, wait_url=_item_path(goods_id) + "?wait=1")
