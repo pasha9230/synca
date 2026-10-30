@@ -213,7 +213,8 @@ def test_the_open_pages_are_exactly_these():
     assert common.OPEN == {
         "static", "login", "logout", "health", "invite_page", "account_photo", "stored_photo", "share_public", "share_photo", "vk_hook",
         "avito_hook", "agent_jobs", "agent_fail", "agent_ref", "agent_result", "agent_copy_upload", "agent_copies_todo",
-        "agent_review_sheet", "agent_work", "agent_run_done"}
+        "agent_review_sheet", "agent_work", "agent_run_done",
+        "market_intake"}                                       # the prices of the competitors from the Mac: its own bearer token (tests/test_market.py)
 
 
 def test_no_address_prefix_opens_a_page_without_a_sign_in(tmp_path):
