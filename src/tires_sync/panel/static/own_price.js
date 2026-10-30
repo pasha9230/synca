@@ -30,7 +30,7 @@
       try { shifts = JSON.parse(form.getAttribute("data-shifts") || "[]"); } catch (err) { shifts = []; }
       each.textContent = shifts.map(function (s) {
         var v = kind === "pct" ? purchase * (1 + (n + s[1]) / 100) : Math.floor(n + purchase * s[1] / 100 + 0.5);
-        return s[0] + " " + rub(Math.ceil(Math.round(v * 1e6) / 1e7) * 10);
+        return s[0] + " " + rub(Math.ceil(Math.round(v * 1e6) / 1e7) * 10).replace(/ /g, "\u00a0");   // a price never broken in two
       }).join(" · ");
     }
   }
