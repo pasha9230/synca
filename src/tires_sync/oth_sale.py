@@ -118,6 +118,9 @@ def why_not(conn, card: dict) -> Optional[str]:
         return "По заказу записана продажа."
     if card["webmim_id"] or card["webmim_number"]:
         return "Заказ уже есть в WebMIM: шины с ОТХ к нему не добавить."
+    placed = conn.execute("SELECT supplier_number FROM order_card WHERE id = ?", (card["id"],)).fetchone()
+    if placed and str(placed[0] or "").strip():                        # «Оформил вручную» of 4 Точки (order_supplier), the move may have failed
+        return "Заказ уже оформлен в 4 Точках: шины с ОТХ к нему не добавить."
     state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card["id"],)).fetchone()
     if state and state[0] != "refused":
         return "Заказ уже оформляется в WebMIM: шины с ОТХ к нему не добавить."

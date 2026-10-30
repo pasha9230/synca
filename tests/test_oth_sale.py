@@ -741,3 +741,15 @@ def test_the_point_arrived_of_an_order_all_from_oth_uses_the_text_without_the_nu
     mixed = new_order(conn, qty=6)
     take(conn, mixed)
     assert order_manager._oth_arrived_body(conn, orders.get_card(conn, mixed)) is None   # its WebMIM order has a number to name
+
+
+
+def test_an_order_placed_by_hand_at_4_tochki_takes_nothing_from_oth(tmp_path):
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    conn.execute("UPDATE order_card SET supplier_number = 'T-77' WHERE id = ?", (cid,))   # «Оформил вручную», the move to «Заказ оформлен» failed
+    conn.commit()
+    assert "4 Точках" in offer(conn, cid)["why"]
+    with pytest.raises(orders.OrderError, match="4 Точках"):
+        take(conn, cid)
