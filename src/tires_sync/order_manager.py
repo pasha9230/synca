@@ -771,6 +771,31 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str,
     return False, "Клиенту сообщение не отправлено: владелец разберётся."
 
 
+def arrived_by_move(conn, before: dict, deliver: Optional[Deliver], now: str, who: str) -> str:
+    """A person moved the order to «Товар на точке» (the board, the card, the chat): «можно забирать» goes as after the point's «приехал» (the
+    owner 2026-10-30: «впредь надо делать это автоматически»; the default of the lead of that morning, «a move by hand sends nothing», is
+    over) — once per arrival, the same checks. Not from «На ОТХ» without a new client (the old client came back to its own tyres: the point
+    tells it). A merge never comes here. Returns the line for the person ('' when nothing was due)."""
+    try:
+        card = orders.get_card(conn, before["id"])
+    except OrderError:
+        return ""
+    if card["stage"]["code"] != "at_point":
+        return ""
+    new_client = (card["client_phone"], card["client_name"]) != (before["client_phone"], before["client_name"])
+    if before["stage"]["code"] not in ARRIVE_FROM and not (before["stage"]["code"] == "oth" and new_client):
+        return ""                                                       # as the point's «приехал» only (review 2026-10-30): never from
+                                                                        # «Отмена», «Выдан», «Новый», nor back from «На ОТХ» to its own client
+    if not new_client and conn.execute("SELECT 1 FROM chat_send_log WHERE token LIKE ? AND status = 'sent' LIMIT 1",
+                                       ("arrived-%d-%%" % card["id"],)).fetchone():
+        return ""                                                       # told at an earlier arrival: a move back and forth tells nobody again
+    if conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND kind = 'message' AND title = ? AND status IN ('pending', 'error') "
+                    "AND created_at >= ? LIMIT 1", (card["id"], ARRIVED_TEMPLATE, card["entered_at"] or "")).fetchone():
+        return "«%s» ждёт в «Сообщениях по заказу» (его приготовило правило этапа)." % ARRIVED_TEMPLATE      # never a second one beside it
+    sent, note = tell_client_arrived(conn, card["id"], deliver, now, who)
+    return note
+
+
 def arrived_token(card: dict, now: str) -> str:
     """The send mark of «можно забирать» of one arrival: the order and the moment it reached the point."""
     return "arrived-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or now))

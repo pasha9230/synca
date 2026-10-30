@@ -675,8 +675,14 @@ def register(app) -> None:
             if asked is not None:                                          # «Шины остаются на точке — на ОТХ?»: the order's card asks (2026-10-29)
                 return ask_oth(chat["order_id"], asked)
             stamp = local_iso()
+            before = orders.get_card(conn, chat["order_id"])
             moved = orders.move_card(conn, chat["order_id"], stage_id, stamp, author())
             if moved:
+                from .. import order_manager                               # «Товар на точке» from the chat: «можно забирать» (2026-10-30)
+                arrived = order_manager.arrived_by_move(conn, before, lambda row, text, token: chats.send_reply(
+                    conn, _writer(conn, chats.get_chat(conn, row)), row, text, token, stamp, author()), stamp, author())
+                if arrived:
+                    flash(arrived)
                 offer_send(conn, chat["order_id"], stamp)
                 if own_point() is not None:                                # «История точки»
                     from .. import point_log

@@ -753,6 +753,9 @@ def register(app) -> None:
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
+            if moved:                                                     # «Товар на точке» by hand: «можно забирать» as «приехал» (2026-10-30)
+                note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())
+                message = (message + " " + note) if note else message
             if moved and own_point() is not None:                         # «История точки»: the point moved its order on the board
                 point_log.record(conn, stamp, author(), own_point(), "move", card_id, "этап «%s»" % orders.get_stage(conn, stage_id)["name"])
             if moved and _ajax():                                         # the board draws the same window from the answer
@@ -769,6 +772,21 @@ def register(app) -> None:
             return jsonify(ok=ok, message=message, send=send)
         flash(message, "message" if ok else "error")
         return redirect("/orders/%d" % card_id)
+
+    def _arrived_untold(conn, card: dict):
+        """The reason the client of an order on «Товар на точке» was not told «можно забирать» (order_arrived), for the line of the card; None."""
+        from .. import order_arrived
+        if card["stage"]["code"] != "at_point":
+            return None
+        if own_point() is not None:                                      # a point: only an order of its own Avito account is its to tell
+            from .. import order_points
+            if order_points.of_account(conn, card["id"]) is None:
+                return None
+        now = local_iso()
+        if order_arrived.told(conn, card, now):
+            return None
+        why = order_arrived.reason(conn, card, now)
+        return {"why": why, "advice": order_arrived.advice(why), "send": order_arrived.can_send(why)}
 
     def _oth_ask(conn, card: dict):
         """The question «Шины остаются на точке» kept by ask_oth for this order, while it still stands on «Товар на точке»."""
@@ -850,6 +868,34 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
+    @app.route("/orders/<int:card_id>/arrived-message", methods=["POST"])
+    @login_required
+    def order_arrived_message(card_id):
+        """«Клиенту не сообщили, что шины на точке» (order_arrived): the message «можно забирать» waits in «Сообщения по заказу» and the window
+        opens; nothing is sent before «Отправить» there."""
+        from .. import order_arrived
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if not order_arrived.prepare(conn, card_id, local_iso(), author()):
+            flash("Заказ уже не на «Товар на точке».", "error")
+            return redirect("/orders/%d" % card_id)
+        return redirect("/orders/%d?messages=1#messages" % card_id)
+
+    @app.route("/orders/<int:card_id>/arrived-told", methods=["POST"])
+    @login_required
+    def order_arrived_told(card_id):
+        """«Клиенту сообщили»: told another way (a call, the Avito app); the message is not sent and nobody is reminded any more."""
+        from .. import order_arrived, order_points
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if own_point() is not None and order_points.of_account(conn, card_id) is None:
+            abort(403)                                                    # a point tells only the orders of its own Avito account
+        if order_arrived.mark_told(conn, card_id, local_iso(), author()):
+            flash("Отмечено: клиенту сообщили. Сообщение «можно забирать» не отправляется.", "ok")
+        else:
+            flash("Заказ уже не на «Товар на точке».", "error")
+        return redirect("/orders/%d" % card_id)
+
     @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
     @login_required
     def order_oth_unagree(card_id):
@@ -914,6 +960,7 @@ def register(app) -> None:
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id), merge_unordered=order_merge_store.unordered(conn, card),
@@ -1056,7 +1103,8 @@ def register(app) -> None:
                     raise orders.OrderError("Этап выбран неверно.")
                 stamp = local_iso()
                 if orders.move_card(conn, card_id, stage_id, stamp, author()):
-                    flash("Заказ перенесён.")
+                    note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())     # as it was before the press
+                    flash("Заказ перенесён." + (" " + note if note else ""))
                     offer_send(conn, card_id, stamp)
             except orders.OrderError as err:
                 flash(str(err), "error")                                  # the fields stay saved; the refusal is a red record of the journal
