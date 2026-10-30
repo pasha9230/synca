@@ -729,6 +729,25 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
 .cols-list label{flex:1;display:flex;gap:var(--s-2);align-items:center}
 .cols-move .btn{min-width:36px;min-height:32px}
 
+/* «Заказ поставщику» (_order_supplier.html, app.js 5e): the lines of «Сверка» and «Оформляем…» */
+.supplier-check{list-style:none;margin:0;padding:0;display:grid;gap:var(--s-2)}
+.supplier-line{display:grid;grid-template-columns:1.5rem minmax(10rem,16rem) 1fr;gap:var(--s-2);align-items:baseline;padding:var(--s-1) 0;border-bottom:1px solid var(--gray-100);transition:opacity .2s}
+.supplier-mark{display:inline-flex;width:1.25rem;height:1.25rem;border-radius:50%;align-items:center;justify-content:center;font-size:.75rem;font-weight:700}
+.supplier-line.is-ok .supplier-mark{background:var(--ok-50);color:var(--ok-700)}
+.supplier-line.is-warn .supplier-mark{background:var(--warn-50);color:var(--warn-700)}
+.supplier-line.is-bad .supplier-mark{background:var(--err-50);color:var(--err-700)}
+.supplier-line.is-bad .supplier-text{color:var(--err-700)} .supplier-line.is-warn .supplier-text{color:var(--warn-700)}
+.supplier-line.is-checking .supplier-mark{background:none;color:transparent;border:2px solid var(--gray-300);border-top-color:var(--primary-600);animation:supplier-spin .7s linear infinite}
+.supplier-line.is-checking .supplier-text{visibility:hidden}
+.supplier-line.is-checking .supplier-label::after{content:" — проверяется…";color:var(--gray-500)}
+[data-supplier-actions].is-checking{opacity:.4;pointer-events:none}
+.supplier-fields{display:grid;grid-template-columns:minmax(9rem,14rem) 1fr;gap:var(--s-1) var(--s-3);margin:0}
+.supplier-fields dt{color:var(--gray-600)} .supplier-fields dd{margin:0;font-weight:500}
+.supplier-busy{display:flex;gap:var(--s-2);align-items:center;font-weight:500}
+.supplier-spin{width:1rem;height:1rem;border-radius:50%;border:2px solid var(--gray-300);border-top-color:var(--primary-600);animation:supplier-spin .7s linear infinite}
+@keyframes supplier-spin{to{transform:rotate(360deg)}}
+@media (max-width:640px){.supplier-line{grid-template-columns:1.5rem 1fr}.supplier-text{grid-column:2}.supplier-fields{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.supplier-line.is-checking .supplier-mark,.supplier-spin{animation:none}}
 .brand-pick{position:relative}
 .brand-pick summary{list-style:none;cursor:pointer;min-width:140px}
 .brand-pick-body{position:absolute;z-index:30;top:44px;left:0;min-width:320px;max-height:380px;overflow:auto;padding:10px 12px;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-lg);box-shadow:var(--sh-lg)}

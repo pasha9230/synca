@@ -75,6 +75,11 @@ def post(client, url, tok, **data):
         found = re.search(r'name="rev" value="([0-9a-f]+)"', page)
         if found:
             data["rev"] = found.group(1)
+    if url.endswith("/webmim/create") and "seen" not in data:                    # «Заказать в МИМ»: pressed from its window, as a person does
+        import re
+        found = re.search(r'name="seen" value="([0-9a-f]+)"', client.get(url[: -len("/webmim/create")]).get_data(as_text=True))
+        if found:
+            data["seen"] = found.group(1)
     if url == "/settings/draft" and "draft_rev" not in data:                    # the form «Общие» is sent from the page as it was opened
         import re
         page = client.get("/settings", headers={"Referer": "http://localhost/settings"}).get_data(as_text=True)   # the tab itself, not the last one

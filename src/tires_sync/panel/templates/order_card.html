@@ -49,6 +49,7 @@
 {% include "_order_want_fields.html" %}
 <div><button class="btn btn--primary btn--sm">{{ icon("plus") }}Добавить строку</button></div></form>{% endif %}
 </div></details>
+{% include "_order_supplier.html" %}
 {% include "_order_webmim.html" %}
 {% call entity_ui.section("Продажа и расчёты", id="money") %}<div class="card-body stack">
 <p class="ocard-sum">Сумма заказа <b>{{ totals.sale|money }}</b>{% if c['items'] %} · {{ c['items']|length }} поз.{% endif %}</p>
