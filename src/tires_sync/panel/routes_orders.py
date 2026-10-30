@@ -815,6 +815,9 @@ def register(app) -> None:
                                           client_from=int(chosen) if chosen.isdigit() else None,
                                           client_name=str(request.form.get("client_name") or "")[:200],
                                           client_phone=str(request.form.get("client_phone") or "")[:40])
+        except sqlite3.OperationalError:                                # the base is busy (BEGIN IMMEDIATE): nothing was done
+            flash("База занята, ничего не объединено: попробуйте ещё раз через минуту.", "error")
+            return redirect("/orders/%d/merge" % card_id)
         except orders.OrderError as err:
             flash(str(err), "error")
             return redirect("/orders/%d/merge" % card_id)
@@ -830,6 +833,8 @@ def register(app) -> None:
         try:
             back = order_merge_store.unmerge(conn, card_id, local_iso(), author())
             flash("Разъединено: заказы %s снова на своих этапах. Никому ничего не отправлено." % ", ".join("№%d" % i for i in back), "ok")
+        except sqlite3.OperationalError:
+            flash("База занята, ничего не разъединено: попробуйте ещё раз через минуту.", "error")
         except orders.OrderError as err:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)

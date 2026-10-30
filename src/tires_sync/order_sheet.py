@@ -231,12 +231,12 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
             row = dict(common, **{"№ заказа MIM": from_oth[item["id"]], "Примечание": " ".join(
                 ("с ОТХ, заказ №%d. %s" % (source, common["Примечание"] or "")).split()),
                 "Реализация": FROM_STOCK if common["Реализация"] == REALIZED else common["Реализация"]})
-        elif item["id"] in merged:                                 # its source's WebMIM order and transfer; the client is in that order too
+        elif item["id"] in merged:                                 # a placed source: its WebMIM order and transfer; the client is in it too
             came = merged[item["id"]]
-            source = orders.get_card(conn, came["from_order"])
-            row = dict(common, **{"№ заказа MIM": came["number"], "Перемещение MIM": came["transfer"], "Дата счета": _invoice_day(conn, source),
-                                  "Примечание": " ".join(
-                ("клиент уже есть в заказе №%s. %s" % (came["label"], common["Примечание"] or "")).split())})
+            own = {"№ заказа MIM": came["number"], "Перемещение MIM": came["transfer"],
+                   "Дата счета": _invoice_day(conn, orders.get_card(conn, came["from_order"]))} if came["placed"] else {}   # else the new order's
+            row = dict(common, **dict(own, **{"Примечание": " ".join(
+                ("клиент уже есть в заказе №%s. %s" % (came["label"], common["Примечание"] or "")).split())}))
         elif item["id"] in gave:                                   # the old row stays, at 0 pieces: «объединён в заказ №…»
             row = dict(common, **{"Примечание": " ".join(("объединён в заказ №%d. %s" % (gave[item["id"]], common["Примечание"] or "")).split())})
         out[key(card_id, item["id"])] = dict(row, **{

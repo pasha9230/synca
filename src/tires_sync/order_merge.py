@@ -329,7 +329,8 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
         if gaps:
             raise MergeError("Чтобы поставить новый заказ на «%s», не хватает: %s." % (stage["name"], ", ".join(gaps)))
         from . import oth_sale
-        if orders._needs_placed(stage, placed) and [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]:
+        if (placed is not None and base["deal_kind"] != "stock" and orders._needs_placed(stage, placed)        # a deal of the point's stock
+                and [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]):                     # orders nothing
             raise MergeError("Шины заказов %s ещё не заказаны у поставщика: поставьте новый заказ на этап до «%s» и закажите их." % (
                 ", ".join("№%s" % _label(c) for c in moving if not _placed(conn, c["id"]) and c["stage"]["code"] != "oth"), placed["name"]))
         if orders._needs_placed(stage, placed):
@@ -359,8 +360,11 @@ def why_not_unmerge(conn, into_order) -> Optional[str]:
         return "По заказу записана продажа: сначала сторнируйте её, потом разъединяйте."
     if card["stage"]["kind"] in ("won", "closed") or card["stage"]["code"] == orders.RETURN_GIVEN:
         return "Заказ на этапе «%s»: разъединить нельзя." % card["stage"]["name"]
-    if card["stage"]["code"] == "oth":                                  # the new client refused: its tyres are our stock now (review 2026-10-30)
-        return "Заказ на «На ОТХ»: его шины теперь склад ОТХ, разъединить нельзя."
+    if card["stage"]["code"] == "oth" or conn.execute(                  # the new client refused: its tyres became our stock, maybe given back
+            "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND (text LIKE ? OR text = ?) AND at >= ? LIMIT 1",
+            (into_order,) + orders.OTH_MARKS + (found["at"],)).fetchone() or conn.execute(
+            "SELECT 1 FROM oth_return WHERE order_id = ? AND qty > 0", (into_order,)).fetchone():
+        return "Заказ после объединения был на «На ОТХ»: его шины стали складом ОТХ, разъединить нельзя."
     state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (into_order,)).fetchone()
     if _placed(conn, into_order) or (state and state[0] != "refused"):
         return "Заказ уже оформлен в WebMIM или 4 Точках после объединения: разъединить нельзя."

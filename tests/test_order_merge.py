@@ -444,3 +444,37 @@ def test_the_reservation_goes_on_and_the_point_and_the_client_are_not_asked_agai
     got = _card(conn, new)
     assert got["reserve_until"] == NOW[:10] and order_reserve.was_asked(conn, got)
     assert order_reserve._done(conn, new, "[резерв:клиенту:%s]" % got["entered_at"])
+
+
+def test_no_unmerge_once_the_new_order_was_on_oth_even_after_it_left(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    new = _merge(conn, [a, b])
+    for step in ("at_point", "oth"):
+        orders.move_card(conn, new, stage(conn, step), LATEST, "o")
+    order_oth.mark_returned(conn, _card(conn, new)["items"][0]["id"], LATEST, "o", qty=1)
+    orders.move_card(conn, new, stage(conn, "cancel"), LATEST, "o", changes={"cancel_reason": "другое: x"})
+    assert "На ОТХ" in order_merge.why_not_unmerge(conn, new)
+
+
+def test_deals_of_the_points_stock_merge_straight_to_the_point(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = new_order(conn, qty=1, goods="9")
+    conn.execute("UPDATE order_card SET deal_kind = 'stock' WHERE id IN (?, ?)", (a, b))
+    conn.execute("UPDATE order_card SET webmim_number = '' WHERE id = ?", (a,))
+    conn.commit()
+    new = _merge(conn, [a, b], code="at_point")                                    # nothing to order: a stock deal
+    assert _card(conn, new)["stage"]["code"] == "at_point"
+
+
+def test_tyres_of_a_source_not_placed_get_the_new_orders_webmim_number_in_the_table(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=2, goods="2")
+    other = new_order(conn, qty=1, goods="3")
+    new = _merge(conn, [cid, other], code="new")
+    conn.execute("UPDATE order_card SET webmim_number = '777' WHERE id = ?", (new,))   # the new order placed in WebMIM after the merge
+    conn.commit()
+    rows = order_sheet.rows_of(conn, new, NOW)
+    assert {r["№ заказа MIM"] for r in rows.values()} == {"777"}
