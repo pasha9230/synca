@@ -21,7 +21,8 @@
 {# «Рабочее место» in the menu: the point only (the owner 2026-10-29); the owner and the partner open /my-point by its address,
    «История точек» is the tab «Точки» of «История» #}
 {% if current_user().role == "point" %}<nav class="sb-group">
-<a class="sb-link{% if path.startswith('/my-point') %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
+<a class="sb-link{% if path.startswith('/my-point') and not path.startswith('/my-point/handed') %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
+<a class="sb-link{% if path.startswith('/my-point/handed') %} is-active{% endif %}" href="/my-point/handed">{{ icon("users") }}Переданные клиенты</a>
 </nav>{% endif %}
 {% if can("home") %}<nav class="sb-group">
 <a class="sb-link{% if path == '/' %} is-active{% endif %}" href="/">{{ icon("home") }}Главная</a>

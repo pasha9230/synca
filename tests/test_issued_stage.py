@@ -60,9 +60,9 @@ def test_my_point_shows_issued_for_an_order_on_its_way_and_closes_it(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
     page = mine.get("/my-point?tab=moving").get_data(as_text=True)                     # «Едут» (the owner 2026-10-30: no «Все»)
-    assert "/my-point/%d/arrived" % card in page and "/my-point/%d/issued" % card in page
+    assert "/my-point/%d/arrived" % card in page and "/my-point/%d/issued" % card not in page    # «Едут»: «Приехал» only (the owner 2026-10-30)
     assert "/my-point/%d/no_show" % card not in page                                        # «не пришёл» only at the point
-    _t, page = press(mine, card, "issued")
+    _t, page = press(mine, card, "issued", again="b" * 24)                                   # the mark itself still closes it (as «выдал» in VK)
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and len(_past(conn, card)) == 1 and to_client(app) == []
     assert "отмечено: выдан" in page
 

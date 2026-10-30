@@ -113,7 +113,7 @@ def test_the_point_cancels_its_handoff_not_taken_and_the_manager_is_told(tmp_pat
     from tires_sync.panel import routes_vk
     monkeypatch.setattr(routes_vk, "channel", lambda *a: (None, None, lambda c, text: told.append((c["id"], c["responsible"], text)) or "отправлено"))
     mine, order_id = _handed_over(app, conn, pid)
-    page = _text(mine.get("/my-point?tab=handed"))                                          # «Переданные клиенты»: its own tab (2026-10-30)
+    page = _text(mine.get("/my-point/handed"))                                          # «Переданные клиенты»: its own tab (2026-10-30)
     assert 'data-handoff-cancel="%d"' % order_id in page
     r = post(mine, "/my-point/handoff/%d/cancel" % order_id, "tok")
     assert r.status_code == 302
@@ -121,7 +121,7 @@ def test_the_point_cancels_its_handoff_not_taken_and_the_manager_is_told(tmp_pat
     assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == mgr.CANCEL_REASON
     assert any(e["level"] == "yellow" and "отменила передачу клиента" in e["text"] for e in orders.list_events(conn, order_id))
     assert told[0][0] == told[-1][0] == order_id and told[-1][1] == told[0][1] and "отменила передачу" in told[-1][2]   # whom the handoff told
-    page = _text(mine.get("/my-point?tab=handed"))
+    page = _text(mine.get("/my-point/handed"))
     assert 'data-status="cancelled"' in page and "отменён точкой" in page and 'data-handoff-cancel="%d"' % order_id not in page
     assert mgr.take(conn, order_id, "открыл", "worker2", NOW) is False                       # nobody takes a cancelled client
     before = len(told)
@@ -134,7 +134,7 @@ def test_a_taken_handoff_or_another_points_cannot_be_cancelled(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine, order_id = _handed_over(app, conn, pid)
     assert mgr.take(conn, order_id, "открыл заказ", "worker2", NOW)
-    assert 'data-handoff-cancel="%d"' % order_id not in _text(mine.get("/my-point?tab=handed"))
+    assert 'data-handoff-cancel="%d"' % order_id not in _text(mine.get("/my-point/handed"))
     post(mine, "/my-point/handoff/%d/cancel" % order_id, "tok")
     assert orders.get_card(conn, order_id)["stage"]["code"] == "from_point"
     stranger = manager(app, conn, _other(conn), login_="delta")
@@ -441,7 +441,7 @@ def test_the_tabs_count_and_list_the_points_orders(tmp_path):
     conn.commit()
     mine = manager(app, conn, pid)
     page = _text(mine.get("/my-point"))
-    assert _tab_counts(page) == {"moving": 2, "here": 2, "oth": 1, "return": 0, "handed": 0}     # «Едут»: placed and moving (the owner 2026-10-30)
+    assert _tab_counts(page) == {"moving": 2, "here": 2, "oth": 1, "return": 0}             # «Едут»: placed and moving (the owner 2026-10-30)
     assert _listed(page) == {ending, later}                                                  # «На точке» opens first
     for tab, wanted in (("moving", {card, placed}), ("here", {ending, later}), ("oth", {oth})):
         shown = _text(mine.get("/my-point?tab=%s" % tab))
@@ -459,9 +459,10 @@ def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tm
     for order_id in (card, bare):
         article = re.search(r'<article class="mp-card[^"]*" id="order-%d".*?</article>' % order_id, page, re.S).group(0)
         top, more = article.split('<details class="mp-more">')
-        assert "№ " in top and "mp-tel" in top and 'href="tel:+79001112233"' in top and "Татьяна" in top
-        assert "/my-point/%d/issued" % order_id in top                                          # the buttons: never folded («Возврат» is: 2026-10-30)
-        assert "<summary>Подробнее</summary>" in more and "Nokian Hakkapeliitta 10" in more and "Nokian Hakkapeliitta 10" not in top
+        assert "№ " in top and "Татьяна" in top and "data-tyres" in top                        # the number, the tyres, the client (2026-10-30)
+        assert 'href="tel:+79001112233"' not in top and 'href="tel:+79001112233"' in more        # the phone under «Подробнее»
+        assert "/my-point/%d/%s" % (order_id, "arrived" if order_id == card else "issued") in top   # the buttons: never folded («Возврат» is)
+        assert "<summary>Подробнее</summary>" in more and "Кол-во 4 шт" in more
     first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)            # the transfer is under «Подробнее» (the prototype, 2026-10-30)
     assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[1])
     assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split("<details")[1]

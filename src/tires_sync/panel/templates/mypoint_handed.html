@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{# «Переданные клиенты» (the owner 2026-10-30; the prototype's handedTab): a section of the point's menu next to «Рабочее место» — the clients
+   handed over with «Отменить передачу» first, then the form «Передать клиента» (routes_mypoint.mypoint_handed); on a phone a screen of its
+   own with «← Заказы». The same forms, tokens and texts as the tab had. #}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}pt-ui{% endblock %}
+{% block title %}Переданные клиенты · Tires Sync{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endblock %}
+{% block content %}
+{% set pin %}{% if choose and point %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}{% endset %}
+{% set pq = ("?p=%d"|format(point.id)) if choose and point else "" %}
+<div class="pt mp-wrap">
+<header class="pt-top mp-head">
+<a class="btn btn--secondary btn--sm pt-back" href="/my-point{{ pq }}" data-back>← Заказы</a>
+<div class="mp-title"><h1>Переданные клиенты</h1>{% if point %}<span class="mp-sub">{{ point.name }}</span>{% endif %}</div>
+</header>
+{% if choose and points %}<form method="get" action="/my-point/handed" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
+{% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
+{% else %}
+<section class="mp-handoff mp-handed" aria-labelledby="mp-handed-h"><h2 id="mp-handed-h">Переданные клиенты</h2>
+{% if handed %}<ul class="mp-handed-list">{% for h in handed %}<li class="mp-handed-item"><div class="mp-handed-who"><span class="mp-name">{{ (h.phone|phone) if h.phone else (h.client or "клиент из чата") }}</span><span class="mp-sub">№ {{ h.label }} · {{ h.at|short_dt }}{% if h.source %} · {{ h.source }}{% endif %}</span>{% if h.need %}<span class="mp-sub">{{ h.need }}</span>{% endif %}</div>
+<span class="badge {{ {'': 'badge--neutral', 'taken': 'badge--warn', 'placed': 'badge--warn', 'done': 'badge--ok', 'refused': 'badge--err', 'cancelled': 'badge--neutral'}[h.status] }}" data-status="{{ h.status or 'new' }}">{{ h.status_name }}</span>
+{% if h.cancellable %}<form method="post" action="/my-point/handoff/{{ h.id }}/cancel" class="inline" data-once data-confirm-title="Отменить передачу клиента?" data-confirm="Заказ № {{ h.label }} уйдёт в «Отмена», менеджеру придёт сообщение. Клиенту ничего не отправится." data-confirm-ok="Отменить передачу"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--danger-outline btn--sm" data-handoff-cancel="{{ h.id }}">Отменить передачу</button></form>{% endif %}</li>{% endfor %}</ul>
+{% else %}<p class="mp-empty">За две недели никого не передавали.</p>{% endif %}
+{% if bonus %}<p class="mp-hint">За выданный заказ переданного клиента точке +{{ bonus|money }} сверх обычной выплаты.</p>{% endif %}</section>
+<section class="mp-handoff" aria-labelledby="mp-handoff-h"><h2 id="mp-handoff-h">Передать клиента</h2>
+<form method="post" action="/my-point/handed" class="mp-handoff-form" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ handoff_token }}">{{ pin }}
+<p class="mp-hint">Клиент пришёл, а нужных шин нет? Передайте его менеджеру — он подберёт и оформит заказ. Передать можно и из «Звонков».</p>
+<label class="field"><span class="label">Телефон клиента</span><input class="input" type="tel" name="phone" required inputmode="tel" autocomplete="off" placeholder="+7 900 000-00-00" value="{{ handoff_form.phone or '' }}"{% if handoff_error %} aria-invalid="true" aria-describedby="mp-handoff-err"{% endif %}></label>
+{% if handoff_error %}<p class="mp-err" id="mp-handoff-err" role="alert">{{ handoff_error }}</p>{% endif %}
+<div class="mp-handoff-row"><label class="field"><span class="label">Типоразмер</span><input class="input" name="size" maxlength="40" placeholder="205/55 R16" value="{{ handoff_form.size or '' }}"></label>
+<label class="field"><span class="label">Бренд</span><input class="input" name="brand" maxlength="60" placeholder="любой" value="{{ handoff_form.brand or '' }}"></label></div>
+<fieldset class="field"><legend class="label">Сезон</legend><div class="seg mp-seg">{% for key, s in seasons.items() %}<label><input type="radio" name="season" value="{{ key }}"{% if handoff_form.season == key %} checked{% endif %}>{{ s[2]|capitalize }}</label>{% endfor %}<label><input type="radio" name="season" value=""{% if not handoff_form.season %} checked{% endif %}>Не знаю</label></div></fieldset>
+<label class="field"><span class="label">Комментарий</span><textarea class="input mp-need" name="need" rows="3" maxlength="500" placeholder="например: 4 шт, нужно к пятнице">{{ handoff_form.need or '' }}</textarea></label>
+<button type="button" class="btn btn--secondary mp-dictate" data-dictate hidden>Надиктовать</button>
+<button class="btn btn--primary mp-btn">Передать</button>
+{% if handoff_form.dup %}<div class="flash flash--err" id="mp-dup" role="alert"><div class="flash-text">У клиента уже есть открытый заказ № {{ handoff_form.dup.label }}{% if handoff_form.dup.date %} от {{ handoff_form.dup.date }}{% endif %} — откройте его.
+{% if handoff_form.dup.href %}<a href="{{ handoff_form.dup.href }}" data-dup-open>Открыть его</a>{% endif %}
+<a href="/my-point/handed{{ pq }}" data-dup-cancel>Отмена</a></div></div>{% endif %}
+<p class="mp-hint">Клиента возьмёт в работу дежурный менеджер; что с ним стало — выше, в списке.</p></form>
+</section>
+{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='mypoint.js') }}"></script>{% endblock %}

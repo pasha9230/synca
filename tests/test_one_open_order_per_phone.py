@@ -195,11 +195,11 @@ def test_the_point_page_refuses_with_a_link_and_offers_no_way_around(tmp_path):
     from test_vk_commands import ready
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
-    token = handoff_token(mine.get("/my-point?tab=handed").get_data(as_text=True))
+    token = handoff_token(mine.get("/my-point/handed").get_data(as_text=True))
     r = post(mine, "/my-point", "tok", token=token, phone="8 (900) 111-22-33", need="второй комплект")
     page = r.get_data(as_text=True)
     assert r.status_code == 200 and 'id="mp-dup"' in page and "У клиента уже есть открытый заказ № 5000100" in page
-    assert "откройте его" in page and 'href="#order-%d"' % card in page
+    assert "откройте его" in page and '#order-%d"' % card in page and 'href="/my-point?tab=' in page
     assert "data-dup-force" not in page and "Всё равно создать" not in page
     r = post(mine, "/my-point", "tok", token=token, phone="8 (900) 111-22-33", need="x", force="+79001112233")   # an old form's «force» is ignored
     assert r.status_code == 200 and 'id="mp-dup"' in r.get_data(as_text=True) and handed(conn) == []

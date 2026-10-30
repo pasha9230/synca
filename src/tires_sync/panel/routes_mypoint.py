@@ -179,12 +179,13 @@ def _who(conn, login: str) -> str:
 
 def _dup_view(conn, busy: dict, point_id: int) -> dict:
     """What the refusal says of the open order: its number and date only (nothing of another point's order). `href`: the order's own
-    card for the owner and the partner; for a manager the anchor of the card on this page when it lies there, else no link."""
+    card for the owner and the partner; for a manager the card on «Рабочее место», on its tab (the form is on «Переданные клиенты»,
+    a page of its own: 2026-10-30), when it lies there, else no link."""
     card = orders.get_card(conn, busy["id"])
     if own_point() is None:
         href = "/orders/%d" % card["id"]
     elif busy["point_id"] == point_id and card["stage"]["code"] in STAGES:
-        href = "#order-%d" % card["id"]
+        href = "/my-point?tab=%s#order-%d" % ("here" if card["stage"]["code"] == "at_point" else "moving", card["id"])
     else:
         href = ""
     return {"label": mgr.label(card), "date": _short_date(str(busy["created_at"] or "")[:10]), "href": href}
@@ -254,18 +255,17 @@ def _hand_over(conn, point: dict, back: str):
 # «Рабочее место» (the owner 2026-10-29): the tabs of the point's orders, each with its count; an order may be in two of them.
 # the tabs of «Рабочее место» (the owner 2026-10-30, the new design: a list of the point's work, no «Все», «Резерв истекает» nor «Ждут ответа»;
 # the question «Клиент забрал?» is a line of its card on «На точке», first); an old address (all, ending, asked, …) opens DEFAULT_TAB
-TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "return": "На возврат", "handed": "Переданные клиенты"}
+TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "return": "На возврат"}     # «Переданные клиенты»: a section of its own
 DEFAULT_TAB = "here"
 ALERTS_READ = 500                                  # the notes read to find the point's newest alerts among the bot's answers (two weeks kept)
 
 
 def _in_tab(row: dict, tab: str) -> bool:
     """«Едут»: «Заказ оформлен» and «Перемещение на точку» (the owner 2026-10-29); «На точке»: «Товар на точке», waiting for the client; «На ОТХ»:
-    our tyres at the point (the owner 2026-10-30); «На возврат»: an «На ОТХ» whose return is agreed and the act МХ-3 not signed yet;
-    «Переданные клиенты» holds no order card (the form and the clients handed over)."""
+    our tyres at the point (the owner 2026-10-30); «На возврат»: an «На ОТХ» whose return is agreed and the act МХ-3 not signed yet."""
     code = row["card"]["stage"]["code"]
     return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": row["oth"] and not row.get("returning"),
-            "return": bool(row.get("returning")), "handed": False}[tab]
+            "return": bool(row.get("returning"))}[tab]
 
 
 def _tab_of(row: dict) -> str:
@@ -334,23 +334,44 @@ def _returns(conn, point_id) -> list:
 
 
 def register(app) -> None:
-    @app.route("/my-point", methods=["GET", "POST"])
-    @login_required
-    def mypoint_page():
-        conn = get_conn()
+    def _the_point(conn):
         point_id = _point_id(conn)
         try:
-            point = points.get_point(conn, point_id) if point_id is not None else None
+            return point_id, (points.get_point(conn, point_id) if point_id is not None else None)
         except points.PointError:                                               # the manager's point was deleted: nothing to show
             abort(403)
+
+    @app.route("/my-point/handed", methods=["GET", "POST"])
+    @login_required
+    def mypoint_handed():
+        """«Переданные клиенты» (the owner 2026-10-30: a section of the point's menu, not a tab): the clients handed over, «Отменить передачу»,
+        then the form «Передать клиента» (the VK command's own function, _hand_over); a refused form comes back here with what was typed."""
+        conn = get_conn()
+        point_id, point = _the_point(conn)
         error, form = "", {}
         if request.method == "POST":
             if point is None:
                 abort(404)
-            done = _hand_over(conn, point, "/my-point?tab=handed" + ("&p=%d" % point_id if own_point() is None else ""))
+            done = _hand_over(conn, point, "/my-point/handed" + ("?p=%d" % point_id if own_point() is None else ""))
             if not isinstance(done, tuple):
                 return done
             error, form = done
+        since = (date.fromisoformat(local_iso()[:10]) - timedelta(days=HANDED_DAYS)).isoformat()
+        return render_template("mypoint_handed.html", point=point, choose=own_point() is None, user=current_user(),
+                               points=points.list_points(conn) if own_point() is None else [],
+                               handed=mgr.point_handoffs(conn, point_id, since) if point_id is not None else [], seasons=mgr.SEASONS,
+                               bonus=order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10]),
+                               handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form), 400 if error else 200
+
+    @app.route("/my-point", methods=["GET", "POST"])
+    @login_required
+    def mypoint_page():
+        if request.method == "POST":                                            # the form of an old page: «Переданные клиенты» takes it
+            return mypoint_handed()
+        conn = get_conn()
+        point_id, point = _the_point(conn)
+        if request.args.get("tab") == "handed":                                 # an old address of the tab: its section
+            return redirect("/my-point/handed" + ("?p=%d" % point_id if own_point() is None and point_id is not None else ""))
         now = local_iso()
         today = now[:10]
         cards = []
@@ -368,9 +389,6 @@ def register(app) -> None:
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over
-        since = (date.fromisoformat(today) - timedelta(days=HANDED_DAYS)).isoformat()
-        handed = mgr.point_handoffs(conn, point_id, since) if point_id is not None else []
-        bonus = order_report.rate_on(order_report.list_rates(conn), "handoff_fee", today)
         # «Оповещения: N новых» (the owner 2026-10-30): the alerts of the point only (the bot's answers to the clients are not the point's to read),
         # folded into a line under the search; ?notes=1 opens the list, and only that opening marks them seen (the safety net of order_notify:
         # an alert nobody of the point opened goes to the owner) — never the mere look at the page. Back on «ВК»: none shown.
@@ -387,11 +405,10 @@ def register(app) -> None:
         returning = {r["card"]["id"] for r in returns}
         for row in cards:
             row["returning"] = row["card"]["id"] in returning
-        tab = "handed" if error or form else request.args.get("tab", "")              # a refused handoff comes back to its form
+        tab = request.args.get("tab", "")
         tab = tab if tab in TABS else DEFAULT_TAB
         shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not r["asked"])     # «Клиент забрал?» first (sorted keeps the order)
         counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
-        counts["handed"] = len(handed)
         hot = {"here": any(r["asked"] for r in cards), "return": bool(counts["return"])}           # the tabs that wait for the point
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
         found = _found(conn, query, point_id) if query and point_id is not None else None
@@ -401,13 +418,12 @@ def register(app) -> None:
                 oid = int(f["url"].rsplit("/", 1)[-1]) if f.get("url", "").rsplit("/", 1)[-1].isdigit() else None
                 f["tab"] = tab_of.get(oid, "")
         return render_template("mypoint.html", point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot,
-                               alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None, handed=handed, seasons=mgr.SEASONS, bonus=bonus,
+                               alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
-                               handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form,
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns,
-                               oth_ask=_oth_ask(conn, cards)), 400 if error else 200
+                               oth_ask=_oth_ask(conn, cards))
 
     @app.route("/my-point/<int:card_id>/<action>", methods=["POST"])
     @login_required
@@ -453,7 +469,7 @@ def register(app) -> None:
         conn = get_conn()
         point_id = _point_id(conn)
         _own_card(conn, card_id, point_id)
-        back = _back(point_id)
+        back = "/my-point/handed" + ("?p=%d" % point_id if own_point() is None else "")     # back to «Переданные клиенты»
         try:
             point = points.get_point(conn, point_id)
         except points.PointError:

@@ -291,7 +291,7 @@ for _section, _endpoints in {
              "orders_hint_fold",                        # «Что делать сейчас» folded: one's own setting
              "search", "search_json",                   # the search of the top bar: every role; search.scope_for narrows what it finds
              "tour_done", "tour_again"),                # «Обзор» (panel/tour.py): one's own mark «пройден», every role
-    "mypoint": ("mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
+    "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
              "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page"),   # its cart, its orders
 }.items():
@@ -311,7 +311,7 @@ NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" an
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})
 # the manager of a point: the orders of the point only (the board, the file and the cards of the point)
 POINT_PAGES = frozenset({"orders_page", "order_card_page", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
-                         "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
+                         "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                          "search", "search_json",   # the search: the point's own (search.scope_for)
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",

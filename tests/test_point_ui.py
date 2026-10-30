@@ -53,8 +53,8 @@ def _cards(page):
 def test_the_five_tabs_and_the_default_one(w):
     page = _page(w["point"])
     names = re.findall(r'data-tab="([a-z]+)"', page)
-    assert names == ["moving", "here", "oth", "return", "handed"]
-    assert ">Едут<" in page and ">На точке<" in page and ">На ОТХ<" in page and ">На возврат<" in page and ">Переданные клиенты<" in page
+    assert names == ["moving", "here", "oth", "return"]                                      # «Переданные клиенты»: a section of its own
+    assert ">Едут<" in page and ">На точке<" in page and ">На ОТХ<" in page and ">На возврат<" in page
     assert _active(page) == "here" and _cards(page) == [w["made"]["at_point"]]
     for old in ("all", "ending", "asked", "nonsense"):
         assert _active(_page(w["point"], "/my-point?tab=" + old)) == "here", old
@@ -66,8 +66,8 @@ def test_each_tab_holds_its_own_orders(w):
     assert _cards(oth) == [w["made"]["oth"]] and "На ОТХ с" in oth and "срока продажи нет" in oth
     assert "/my-point/%d/" % w["made"]["oth"] not in oth                                          # no press on our tyres at the point
     assert _cards(_page(w["point"], "/my-point?tab=return")) == [] and "Возвратов поставщику сейчас нет" in _page(w["point"], "/my-point?tab=return")
-    handed = _page(w["point"], "/my-point?tab=handed")
-    assert _cards(handed) == [] and 'class="mp-handoff-form"' in handed and "Переданные клиенты" in handed
+    r = w["point"].get("/my-point?tab=handed")                                                # the old tab: its section
+    assert r.status_code == 302 and r.headers["Location"].endswith("/my-point/handed")
 
 
 def test_an_agreed_return_goes_from_oth_to_the_return_tab(w):
@@ -158,5 +158,60 @@ def test_a_client_handed_over_from_a_call_is_in_the_list_with_its_cancel(setup):
     calls_page = point.get("/calls").get_data(as_text=True)
     assert ">Передать клиента</button>" in calls_page and "Передать под заказ</button>" not in calls_page
     assert hand_call(point, row, phone="+7 911 333-00-00").status_code == 302
-    page = point.get("/my-point?tab=handed").get_data(as_text=True)
+    page = point.get("/my-point/handed").get_data(as_text=True)
     assert "+7 911 333-00-00" in page and "Отменить передачу" in page
+
+
+
+# --- the card and «Переданные клиенты» (the owner 2026-10-30, second round) ---------------------------------------------------------
+
+def test_the_card_is_the_webmim_number_the_tyres_and_the_client_and_the_phone_is_under_more(w):
+    conn = w["conn"]
+    orders.update_card(conn, w["made"]["at_point"], {"webmim_number": "5287827"}, NOW, "o")
+    conn.commit()
+    page = _page(w["point"])
+    card = page[page.index('id="order-%d"' % w["made"]["at_point"]):].split("</article>")[0]
+    top, more = card.split('<details class="mp-more">')
+    assert "№ 5287827" in top and "data-tyres" in top and "Клиент at_point" in top
+    assert top.index("data-tyres") < top.index("Клиент at_point")                                 # the tyres first
+    assert 'href="tel:' not in top and "Телефон клиента" in more and 'href="tel:+79001110001"' in more
+    moving = _page(w["point"], "/my-point?tab=moving")
+    mcard = moving[moving.index('id="order-%d"' % w["made"]["moving"]):].split("</article>")[0]
+    assert "№ панель %d" % w["made"]["moving"] in mcard                                           # no WebMIM number: the panel's
+    assert "/my-point/%d/arrived" % w["made"]["moving"] in mcard and "/my-point/%d/issued" % w["made"]["moving"] not in mcard   # one button
+
+
+def test_an_oth_card_has_the_tyres_and_no_client(w):
+    page = _page(w["point"], "/my-point?tab=oth")
+    card = page[page.index('id="order-%d"' % w["made"]["oth"]):].split("</article>")[0]
+    assert "data-tyres" in card and "Клиент oth" not in card and 'href="tel:' not in card
+
+
+def test_handed_clients_is_a_section_with_the_list_first_and_the_form_below(w):
+    page = _page(w["point"], "/my-point/handed")
+    assert page.index('id="mp-handed-h"') < page.index('class="mp-handoff-form"') and 'action="/my-point/handed"' in page
+    assert "← Заказы" in page and 'href="/my-point"' in page
+    work = _page(w["point"])
+    assert 'href="/my-point/handed"' in work and "Передать клиента" in work                     # the button of «Рабочее место» and the menu
+    assert work.count('href="/my-point/handed"') >= 2
+
+
+
+def test_the_form_of_the_section_posts_to_it_and_a_refusal_comes_back_there_with_what_was_typed(w):
+    from panel_helpers import post
+    page = _page(w["point"], "/my-point/handed")
+    token = re.search(r'action="/my-point/handed" class="mp-handoff-form".*?name="token" value="([0-9a-f]+)"', page, re.S).group(1)
+    r = post(w["point"], "/my-point/handed", "tok", token=token, phone="12", need="зима")
+    assert r.status_code == 400 and "Телефон клиента: 10 цифр" in r.get_data(as_text=True) and 'value="12"' in r.get_data(as_text=True)
+    r = post(w["point"], "/my-point/handed", "tok", token=token, phone="+7 900 222-33-44", need="зима")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/my-point/handed")
+    assert "+7 900 222-33-44" in _page(w["point"], "/my-point/handed")
+
+
+@pytest.mark.parametrize("role", ["chats", "viewer", "client"])
+def test_the_section_is_the_points_and_the_owners_only(w, role):
+    from test_roles import person
+    other, _ = person(w["app"], role)
+    assert other.get("/my-point/handed").status_code in (302, 403)
+    r = other.post("/my-point/handed", data={"csrf": "tok", "token": "a" * 24, "phone": "+7 900 222-33-44"})
+    assert r.status_code in (302, 403) and w["conn"].execute("SELECT COUNT(*) FROM order_handoff").fetchone()[0] == 0

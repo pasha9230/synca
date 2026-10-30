@@ -191,8 +191,8 @@ def test_a_point_without_vk_hands_a_client_over_from_its_page(tmp_path):
     conn.execute("UPDATE point SET vk_peer_id = '', channel = 'panel' WHERE id = ?", (pid,))
     conn.commit()
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point?tab=handed").get_data(as_text=True)
-    token = re.search(r'action="/my-point" class="mp-handoff-form".*?name="token" value="([0-9a-f]+)"', page, re.S).group(1)
+    page = mine.get("/my-point/handed").get_data(as_text=True)
+    token = re.search(r'action="/my-point(?:/handed)?" class="mp-handoff-form".*?name="token" value="([0-9a-f]+)"', page, re.S).group(1)
     r = post(mine, "/my-point", "tok", token=token, phone="+7 900 222-33-44", need="зима")
     assert r.status_code == 302
     [(order_id,)] = conn.execute("SELECT order_id FROM order_handoff WHERE point_id = ?", (pid,)).fetchall()
