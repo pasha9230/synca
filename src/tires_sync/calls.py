@@ -410,7 +410,7 @@ def run(conn, client_for, now: str, folder: Path, sleep: Callable[[float], None]
                             and (not said or datetime.fromisoformat(now) - datetime.fromisoformat(said) >= LOST_ALERT_AGAIN):
                         store.set_state(conn, lost, now)
                         alert("Tires Sync: аккаунт «%s»: Авито закрыл доступ к звонкам (коллтрекинг), новые звонки не читаются. "
-                              "Проверьте подменный номер и доступ к API в кабинете." % acc["name"])
+                              "Проверьте подменный номер и доступ к API в кабинете." % connections.display_name(conn, acc["id"]))
                     if not dry_run and store.get_state(conn, key) not in (None, "", "0"):
                         store.set_state(conn, key, "0")
                     continue

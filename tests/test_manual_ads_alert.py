@@ -29,7 +29,7 @@ def test_the_cabinet_is_named_with_its_number_name_and_profile(tmp_path, monkeyp
     said = report(conn, tmp_path, monkeypatch, account, other)
     assert len(said) == 1 and said[0][1] == {"notice": True}
     text = said[0][0]
-    assert "в кабинете Авито №%d «Основной» (профиль Авито 31415926): ручных объявлений: 1" % account in text
+    assert "в кабинете Авито №%d «Кабинет» (профиль Авито 31415926): ручных объявлений: 1" % account in text      # the cabinet's own name (2026-10-30)
     assert "в кабинете Авито №%d «Шина-Колесо»: ручных объявлений: 1" % other in text          # no profile read: no bracket
     assert "профиль Авито None" not in text
 

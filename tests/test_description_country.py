@@ -11,7 +11,8 @@ from tires_sync.description import (
 )
 from tires_sync.feed import render_ad
 
-MADE_IN_LINE = "▸ Страна производства: {made_in}"
+MADE_IN_LINE = "{made_in}"                      # the whole line (the owner 2026-10-30)
+MADE_IN = "Страна производства: КНР"
 
 
 def kumho(name_orig="Kumho 205/55/16 H 91 WI51", country="КОРЕЯ, РЕСПУБЛИКА", **kw):
@@ -24,21 +25,26 @@ def brand(avito_brand, brand_key, country=""):
     return Candidate(offer.goods_id, offer, 4810, avito_brand, "Model")
 
 
-# {made_in}: the country of production, «КНР» when the supplier's name ends with «CN» (owner, 2026-10-27)
+# {made_in}: the country of production, the whole line «Страна производства: КНР» when the supplier's name ends with «CN»
+# (owner, 2026-10-27; a whole line since 2026-10-30)
 
 def test_cn_at_the_end_of_the_suppliers_name_prints_the_made_in_line():
     text = render_description(MADE_IN_LINE, kumho("Kumho 205/55/16 H 91 WI51 CN"), 4810)
-    assert text == "▸ Страна производства: КНР"
+    assert text == MADE_IN
+
+
+def test_the_line_may_carry_its_own_mark_before_it():
+    assert render_description("▸ {made_in}", kumho("Kumho 205/55/16 H 91 WI51 CN"), 4810) == "▸ " + MADE_IN
 
 
 @pytest.mark.parametrize("name", ["Kumho 205/55/16 H 91 WI51 CN ", "Kumho 205/55/16 H 91 WI51  CN", "Kumho 205/55/16 H 91 WI51 (CN)"])
 def test_cn_word_with_spaces_or_brackets_around_it_still_counts(name):
-    assert render_description(MADE_IN_LINE, kumho(name), 4810) == "▸ Страна производства: КНР"
+    assert render_description(MADE_IN_LINE, kumho(name), 4810) == MADE_IN
 
 
 def test_cn_before_the_suppliers_age_note_still_counts():
     name = "Kumho 215/60/17 T 100 WI32 XL Ш. CN старше 3-х лет"       # the age note stands after the origin code
-    assert render_description(MADE_IN_LINE, kumho(name), 4810) == "▸ Страна производства: КНР"
+    assert render_description(MADE_IN_LINE, kumho(name), 4810) == MADE_IN
 
 
 @pytest.mark.parametrize("name", [
@@ -54,12 +60,12 @@ def test_no_cn_word_at_the_end_drops_the_made_in_line(name):
 
 def test_brand_country_stays_the_brands_own_for_a_tire_made_in_china():
     text = render_description("▸ Страна происхождения бренда: {country}\n" + MADE_IN_LINE, kumho("Kumho 205/55/16 H 91 WI51 CN"), 4810)
-    assert text == "▸ Страна происхождения бренда: Корея\n▸ Страна производства: КНР"
+    assert text == "▸ Страна происхождения бренда: Корея\n" + MADE_IN
 
 
 def test_made_in_is_a_known_placeholder_with_help_and_not_in_the_default_template():
     assert "made_in" in ALLOWED
-    assert "КНР" in PLACEHOLDER_HELP["made_in"] and "CN" in PLACEHOLDER_HELP["made_in"]
+    assert MADE_IN in PLACEHOLDER_HELP["made_in"] and "CN" in PLACEHOLDER_HELP["made_in"] and "целиком" in PLACEHOLDER_HELP["made_in"]
     assert validate_template(MADE_IN_LINE) == []
     assert "{made_in}" not in DEFAULT_TEMPLATE              # the owner adds the line to his templates himself
 

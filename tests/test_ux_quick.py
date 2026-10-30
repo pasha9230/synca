@@ -56,7 +56,7 @@ def test_account_tab_shows_the_cabinet_name_next_to_the_id(tmp_path):
     a = connections.create_account(conn, "A", T, "owner")
     connections.set_avito_identity(conn, a, 80000001, "Шины СПб")
     html = client.get("/connections/avito/1").get_data(as_text=True)
-    assert 'class="is-active">ID 80000001 · Шины СПб<' in html
+    assert 'class="is-active">Шины СПб · ID 80000001<' in html
 
 
 def test_catalog_help_is_collapsible_and_keeps_the_example_visible(tmp_path):

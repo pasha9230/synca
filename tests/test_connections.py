@@ -142,5 +142,5 @@ def test_avito_identity_is_stored_per_account_and_drives_the_display_name(tmp_pa
     assert connections.display_name(conn, a) == "Основной"
     connections.set_avito_identity(conn, a, 80000001, "Шины СПб")
     assert connections.get_avito_identity(conn, a) == {"id": 80000001, "name": "Шины СПб", "phone": "", "phone_source": "cabinet", "phones": [], "pinned": False}
-    assert connections.display_name(conn, a) == "ID 80000001"
+    assert connections.display_name(conn, a) == "Шины СПб"                  # the cabinet's own name (the owner 2026-10-30; it was «ID …»)
     assert connections.get_config(conn, "avito", a)["avito_user_id"] == 80000001
