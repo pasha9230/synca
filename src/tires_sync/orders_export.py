@@ -33,7 +33,7 @@ def _row(card: dict, hidden=frozenset()) -> list:
     return [card["id"], _created(card["created_at"]), card["stage"]["name"], card["client_name"], card["client_phone"],
             card["point"]["name"] if card["point"] else "", card["responsible"], orders.SOURCES.get(card["source"], card["source"]),
             ", ".join(t for t in card["tags"] if t.lower() not in hidden), "; ".join("%s × %d" % (i["name"], i["qty"]) for i in items), money["qty"], money["sale"],
-            card["delivery_date"] or (oth_sale.IN_STOCK if card.get("in_stock") else ""), card["webmim_number"], card["webmim_status"], card["comment"], card["avito_chat"]]
+            card["delivery_date"] or (oth_sale.IN_STOCK if card.get("in_stock") and card["stage"]["kind"] == "open" else ""), card["webmim_number"], card["webmim_status"], card["comment"], card["avito_chat"]]
 
 
 def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", money: bool = True) -> bytes:

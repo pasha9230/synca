@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import onboarding_texts, order_notify, order_oth, oth_sale, point_log, user_prefs
+from .. import onboarding_texts, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -501,7 +501,9 @@ def register(app) -> None:
         rows = sorted(({"card": c, "stage": col["stage"]} for col in data["columns"] for c in col["cards"]), key=lambda r: -r["card"]["id"])
         labels = orders.origin_labels(conn, own_point(), [r["card"]["id"] for r in rows]) if own_point() else {}   # not from the point's account
         table = list_table(conn, rows, only) if view == "list" else None
-        return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table,
+        notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
+                                   clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
+        return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                dots=_dots(conn), rows=rows, total_cards=sum(col["count"] for col in data["columns"]), only_stage=only,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
