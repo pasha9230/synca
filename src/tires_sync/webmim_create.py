@@ -35,8 +35,8 @@ CONTACT = "Админ"                    # the contact person of the delivery (
 NOTE_FOR_SUPPLIER = "Грузим на ОТХ"  # «Примечание для поставщика», always (the owner 2026-10-29)
 LATE_HOUR = 16                       # WebMIM: an order for today goes to work before 16:00 (its own warning in the form)
 
-NO_ADDRESS = "не указан адрес доставки WebMIM"
-ALL_OTH = "Все позиции взяты с ОТХ: заказ в WebMIM не нужен."   # the refusal that lists the server's addresses (_addresses_hint)
+NO_ADDRESS = "не указан адрес доставки WebMIM"   # the refusal that lists the server's addresses (_addresses_hint)
+ALL_OTH = "Все позиции взяты с ОТХ: заказ в WebMIM не нужен."   # oth_sale: the tyres «с ОТХ» are at the point already
 TEST_TAG = "тест"            # the test server makes only the orders with this tag (the team lead's R2 2026-10-23: the owner's own test orders)
 STALE = 600                 # seconds: a «running» mark older than this is of a killed worker (order_engine.RUNNING_TIMEOUT)
 BUDGET = 45.0               # seconds a press may spend on positions (nginx gives the page 60)

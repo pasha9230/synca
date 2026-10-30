@@ -285,3 +285,22 @@ def test_all_from_oth_needs_no_order(tmp_path):
     view = order_supplier.view(conn, orders.get_card(conn, cid), unload(), NOW)
     assert view["all_oth"] and view["blocked"] and view["oth"] == [{"name": "Шина 111", "qty": 4}]
     assert webmim_create.problems(conn, orders.get_card(conn, cid), TODAY) == [webmim_create.ALL_OTH]
+
+
+def test_taken_from_oth_after_the_window_was_opened_is_refused(tmp_path):
+    """The window was open, then «Взять с ОТХ» changed what goes to WebMIM: «Подтвердить» with the old fingerprint is refused, nothing asked."""
+    from order_fixtures import free_phone
+    from tires_sync import oth_sale
+    conn = db(tmp_path)
+    old = card(conn, goods=(("111", 2),), tags="")
+    for step in ("placed", "moving", "oth"):
+        orders.move_card(conn, old, next(s["id"] for s in orders.list_stages(conn) if s["code"] == step), NOW, "o")
+    cid = card(conn, goods=(("111", 4),), client_phone=free_phone(conn, "+7 (911) 999-22-66"))
+    seen = order_supplier.view(conn, orders.get_card(conn, cid), unload(), NOW)["fingerprint"]
+    data = orders.get_card(conn, cid)
+    first = data["items"][0]
+    oth_sale.take(conn, cid, first["id"], oth_sale.offers(conn, data)[first["id"]][0]["from_item"], NOW, "o")
+    fake = FakeWebmim()
+    with pytest.raises(orders.OrderError, match="изменились"):
+        webmim_create.place(conn, cid, client_of(fake), "test", NOW, TODAY, "owner", sleep=lambda _s: None, seen=seen)
+    assert fake.calls == []
