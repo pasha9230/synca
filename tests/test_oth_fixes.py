@@ -3,6 +3,8 @@ delivery is made up for tyres already at the point, the plaque of the return nam
 a cancelled return."""
 from __future__ import annotations
 
+import pytest
+
 from test_mypoint import manager
 from test_oth_sale import LATER, T, new_order, panel, point_id, stage, take
 from panel_helpers import post
@@ -90,9 +92,9 @@ def test_the_plaque_of_the_return_names_the_webmim_order_the_tyres_were_bought_b
         assert post(owner, "/orders/%d/oth-agreed" % order, tok).status_code == 302
     page = manager(app, conn, point_id(conn)).get("/my-point").get_data(as_text=True)
     plaque = page.split('data-return="%d"' % cid)[1].split("</article>")[0]
-    assert "Подпишите акт МХ-3" in plaque and "заказу WebMIM №%s" % _webmim(conn, old) in plaque
+    assert "Подпишите акт МХ-3" in plaque and "по исходному заказу №%s" % _webmim(conn, old) in plaque
     ordinary = page.split('data-return="%d"' % plain)[1].split("</article>")[0]
-    assert "Подпишите акт МХ-3" in ordinary and "WebMIM №" not in ordinary                      # an ordinary order on OTH: as before
+    assert "Подпишите акт МХ-3" in ordinary and "исходному заказу" not in ordinary                      # an ordinary order on OTH: as before
 
 
 # ---- 4. the point hears of a cancelled return ----------------------------------------------------------------------------------------
@@ -109,3 +111,35 @@ def test_the_cancelled_agreement_is_told_to_the_point_once(tmp_path, monkeypatch
     assert told == [(oth, "Возврат по заказу №%s поставщику отменён, шины остаются на точке" % _webmim(conn, oth))]
     post(owner, "/orders/%d/oth-unagree" % oth, tok)                                              # a second press: nothing more
     assert len(told) == 1
+
+
+def test_along_a_chain_the_mark_and_the_plaque_name_the_first_order_and_a_position_given_on_names_nothing(tmp_path):
+    conn = db(tmp_path)
+    first = card_at(conn, "oth", T)
+    second = new_order(conn, qty=4)
+    take(conn, second)                                                                            # first → second: all four
+    for step in ("placed", "moving", "at_point", "oth"):                                          # the client of the second refused
+        orders.move_card(conn, second, stage(conn, step), LATER, "o")
+    assert order_oth.act_orders(conn, second) == _webmim(conn, first)                             # the act: the order they were bought by
+    third = new_order(conn, qty=4)
+    take(conn, third)                                                                             # second → third: all four, second emptied
+    assert order_templates._oth_orders(conn, third) == _webmim(conn, first)
+    assert order_oth.act_orders(conn, second) == ""                                               # nothing of it is left in the second
+
+
+def test_a_supplier_position_added_to_an_order_in_stock_asks_for_the_date_again(tmp_path):
+    """The review of 2026-10-30: an order moved without a date gets a position of the supplier — it is no longer «в наличии», so the next
+    move (and WebMIM, 4 Точки, which check the date themselves) asks for the date; nothing goes on without it."""
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    conn.execute("UPDATE order_card SET delivery_date = '' WHERE id = ?", (cid,))
+    conn.commit()
+    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    orders.add_item(conn, cid, goods_id="9", name="Шина 9", brand_key="nokian", season="winter", diameter=16, territory="1", qty=1,
+                    sale_unit=6000, supplier_price=4500, terms=None, fee_pct=0, promo_pct=0, now=LATER, author="o")
+    card = orders.get_card(conn, cid)
+    assert not card["in_stock"] and order_templates.values(conn, card, LATER)["delivery_date"] == ""
+    with pytest.raises(orders.OrderError, match="дата доставки"):
+        orders.move_card(conn, cid, stage(conn, "done"), LATER, "o")

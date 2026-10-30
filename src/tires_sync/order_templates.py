@@ -158,7 +158,8 @@ def _oth_orders(conn, card_id) -> str:
     panel's) — the first order of a chain, the one the tyres were bought by."""
     from .oth_sale import first_order
     found = []
-    for (item_id,) in conn.execute("SELECT item_id FROM order_item_oth WHERE order_id = ? AND undone_at = '' ORDER BY item_id", (card_id,)):
+    for (item_id,) in conn.execute("SELECT t.item_id FROM order_item_oth t JOIN order_item i ON i.id = t.item_id WHERE t.order_id = ? "
+                                   "AND t.undone_at = '' AND i.qty >= 1 ORDER BY t.item_id", (card_id,)):     # a position given on (A → B → C) is not here
         first = first_order(conn, item_id)
         row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (first,)).fetchone()
         number = str((row[0] if row else "") or first)

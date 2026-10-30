@@ -54,7 +54,7 @@
 {% if returns %}<section class="mp-handoff mp-returns" aria-labelledby="mp-returns-h"><h2 id="mp-returns-h">Возврат поставщику <span class="mp-count">{{ returns|length }}</span></h2>
 {% for r in returns %}{% set c = r.card %}<article class="mp-card mp-card--return" data-return="{{ c.id }}"><div class="mp-card-head"><span class="mp-no">№ {{ r.label }}</span><span class="badge {{ 'badge--err' if r.late else 'badge--warn' }}">Возврат {{ r.date }}</span></div>
 <div class="mp-client"><span class="mp-name">{{ c.items_text or "шины с ОТХ" }}</span></div>
-<div class="flash flash--err mp-act" role="note"><div class="flash-text"><b>Подпишите акт МХ-3</b> при передаче шин поставщику (бумажный акт).{% if r.act_order %} Шины с ОТХ: акт, скорее всего, по заказу WebMIM №{{ r.act_order }}.{% endif %}</div></div>
+<div class="flash flash--err mp-act" role="note"><div class="flash-text"><b>Подпишите акт МХ-3</b> при передаче шин поставщику (бумажный акт).{% if r.act_order %} Шины с ОТХ: акт, скорее всего, по исходному заказу №{{ r.act_order }}.{% endif %}</div></div>
 <div class="mp-actions"><form method="post" action="/my-point/{{ c.id }}/act_signed" data-once data-confirm-title="Акт МХ-3 подписан, шины отданы?" data-confirm="Заказ № {{ r.label }} перейдёт в «Возврат передан», менеджер заполнит сумму возврата." data-confirm-ok="Подписал и отдал"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ r.token }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}<button class="btn btn--primary mp-btn">Подписал акт и отдал</button></form></div></article>{% endfor %}</section>{% endif %}
 {% endif %}
 <div class="mp-list">

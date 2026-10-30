@@ -219,18 +219,11 @@ UNAGREED_POINT = "Возврат по заказу №%s поставщику о
 
 
 def act_orders(conn, order_id) -> str:
-    """The WebMIM orders the act МХ-3 of a return is likely made by (the owner 2026-10-30: the supplier's driver brings it for the order the
-    tyres were bought by): those of the positions of the order taken from «На ОТХ» (oth_sale, the first order of a chain). '' for an
-    ordinary order on OTH. A first order without a WebMIM number is named by the panel's."""
-    from .oth_sale import first_order, taken
-    found = []
-    for item_id in sorted(taken(conn, order_id)):
-        first = first_order(conn, item_id)
-        row = conn.execute("SELECT webmim_number, webmim_id FROM order_card WHERE id = ?", (first,)).fetchone()
-        number = str((row[0] or row[1]) if row else "") or "%s (номер панели)" % first
-        if number not in found:
-            found.append(number)
-    return ", ".join(found)
+    """The orders the act МХ-3 of a return is likely made by (the owner 2026-10-30: the supplier's driver brings it for the order the tyres
+    were bought by): those of the positions of the order taken from «На ОТХ», the first order of a chain, by the number the point knows
+    (WebMIM's, else the panel's) — the same as the mark «Шины с ОТХ, заказ №…» of its card. '' for an ordinary order on OTH."""
+    from .order_templates import _oth_orders
+    return _oth_orders(conn, order_id)
 
 
 def to_return(conn, point_id) -> List[dict]:
