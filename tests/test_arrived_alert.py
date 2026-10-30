@@ -125,3 +125,23 @@ def test_the_card_shows_the_line_and_the_button(tmp_path, monkeypatch):
     r = post(owner, "/orders/%d/arrived-message" % card, tok)
     assert r.status_code == 302 and "messages=1" in r.headers["Location"]
     assert conn.execute("SELECT COUNT(*) FROM chat_send_log").fetchone()[0] == 0
+
+
+def test_a_message_skipped_by_a_person_ends_it(env):
+    conn, chat_row, card = env
+    mgr.tell_client_arrived(conn, card, None, NOW, "точка")
+    engine.skip_task(conn, waiting(conn, card)[0]["id"], LATER, "owner")            # «Пропустить»: the person decided
+    assert found(conn) == {}
+
+
+def test_another_402_is_not_the_messenger_api(env):
+    conn, chat_row, card = env
+    from tires_sync import chat_deals
+
+    class Other(Sender):
+        def send_message(self, user_id, chat_id, text):
+            raise chats.AvitoError(402, None, "Слишком много запросов")
+    chat_deals.link_chat(conn, chat_row, card, NOW, "owner")
+    mgr.tell_client_arrived(conn, card, deliver_by(conn, Other()), NOW, "точка")
+    assert found(conn) == {card: order_arrived.REFUSED_402}
+    assert order_arrived.api_refusals(conn, LATE) == []
