@@ -478,3 +478,13 @@ def test_tyres_of_a_source_not_placed_get_the_new_orders_webmim_number_in_the_ta
     conn.commit()
     rows = order_sheet.rows_of(conn, new, NOW)
     assert {r["№ заказа MIM"] for r in rows.values()} == {"777"}
+
+
+def test_no_unmerge_after_a_stay_on_oth_without_a_return_either(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    new = _merge(conn, [a, b])
+    for step in ("at_point", "oth", "at_point"):                                   # the client came back: the tyres were our stock meanwhile
+        orders.move_card(conn, new, stage(conn, step), LATEST, "o")
+    assert "На ОТХ" in order_merge.why_not_unmerge(conn, new)
