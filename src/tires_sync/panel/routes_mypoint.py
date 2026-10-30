@@ -1,4 +1,4 @@
-"""«Рабочее место» (was «Моя точка»): the start page of a point's manager (the owner 2026-10-23: the points work in the panel, VK is the spare
+"""«Рабочее место» (its old name is gone, the address /my-point stays): the start page of a point's manager (the owner 2026-10-23: the points work in the panel, VK is the spare
 channel; 2026-10-29: in the panel's own frame with the menu, the stages of the point's orders, one search line, «Отменить передачу» of a
 client not taken yet, the return of «На ОТХ» with the act МХ-3; every action goes to «История точки», point_log).
 
@@ -221,23 +221,23 @@ def _hand_over(conn, point: dict, back: str):
         from . import routes_vk
         _send, _deliver, notify = routes_vk.channel(current_app, conn, now)
     except Exception:                                                            # without the alert channel the handoff still goes; the order shows it
-        current_app.logger.exception("«Моя точка»: the alert channel for a handoff failed")
+        current_app.logger.exception("«Рабочее место»: the alert channel for a handoff failed")
         notify = None
     try:
         answer = mgr.handoff(conn, message_id, point["vk_peer_id"] or "панель: %s" % author(), dict(mgr.handoff_fields(form), phone=phone, comment=need),
                              "", now, notify, source="page", point=point)
     except Exception:                                                            # after the order was written (the alert): what counts is the order
         conn.rollback()
-        current_app.logger.exception("«Моя точка»: the handoff of %s failed", message_id)
+        current_app.logger.exception("«Рабочее место»: the handoff of %s failed", message_id)
         answer = ""
     made = conn.execute("SELECT order_id, responsible FROM order_handoff WHERE message_id = ?", (message_id,)).fetchone()
     if made is not None:
         try:
-            orders.add_event(conn, made[0], now, author(), "note", "Клиент передан через «Моя точка» (%s)." % author())
+            orders.add_event(conn, made[0], now, author(), "note", "Клиент передан через «Рабочее место» (%s)." % author())
             conn.commit()
         except Exception:
             conn.rollback()
-            current_app.logger.exception("«Моя точка»: the note of order %s failed", made[0])
+            current_app.logger.exception("«Рабочее место»: the note of order %s failed", made[0])
         point_log.record(conn, now, author(), point["id"], "handoff", made[0], "со страницы")
         flash("Передано, ответственный — %s. Заказ №%d." % (_who(conn, made[1]), made[0]), "ok")
         return redirect(back)
@@ -409,7 +409,7 @@ def register(app) -> None:
             outcome, answer, ok = act(conn, card, action, author(), now, deliver, notify)
         except Exception:                                                        # the press must not stay «обрабатывается»
             conn.rollback()
-            current_app.logger.exception("«Моя точка»: %s of order %s failed", action, card_id)
+            current_app.logger.exception("«Рабочее место»: %s of order %s failed", action, card_id)
             outcome, answer, ok = "ошибка при выполнении", "Не получилось выполнить отметку. Напишите владельцу.", False
         conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?", (outcome, "page-" + token))
         conn.commit()

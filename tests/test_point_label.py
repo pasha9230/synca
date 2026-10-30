@@ -1,6 +1,6 @@
 """The orders a point only receives and hands over (the owner 2026-10-22): the manager of a point sees the orders of the own point only —
 never one of no point, on no page — and an order of the point that did not come from the point's own Avito account carries a badge with
-the name of the Avito account it came from, «Без аккаунта» without a chat (the card, the board, «Моя точка»); the chat of another account is not shown in the
+the name of the Avito account it came from, «Без аккаунта» without a chat (the card, the board, «Рабочее место»); the chat of another account is not shown in the
 card, nor the client's words in the journal and in the alerts. The owner, the partner and the manager of the chats see everything as before."""
 from __future__ import annotations
 

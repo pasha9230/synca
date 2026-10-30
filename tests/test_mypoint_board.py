@@ -1,4 +1,4 @@
-"""«Моя точка», the owner's answers of 2026-10-26: the counters at the top, one list newest first by the order's last event, the card says
+"""«Рабочее место», the owner's answers of 2026-10-26: the counters at the top, one list newest first by the order's last event, the card says
 what the VK message «Менеджеру: заказ оформлен» says (with the client's prices: the point takes the cash), «Возврат» on the orders at the
 point does what «возврат отдал» does, and the question of the last day of the reservation («Клиент забрал?») is answered on the page with
 the same effect as in VK and never twice."""
@@ -269,7 +269,7 @@ def test_the_feed_has_one_key_per_open_question(tmp_path, clock):
 
 
 def test_a_point_in_the_panel_is_asked_on_its_page_and_its_here_tells_the_client(tmp_path, clock):
-    """The lead 2026-10-26: a point on «Панель» gets the question on «Моя точка» (no VK, no yellow «точку не спросить»); the rest as in VK."""
+    """The lead 2026-10-26: a point on «Панель» gets the question on «Рабочее место» (no VK, no yellow «точку не спросить»); the rest as in VK."""
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     conn.execute("UPDATE point SET channel = ? WHERE id = ?", (points.PANEL, pid))
     conn.commit()
@@ -278,7 +278,7 @@ def test_a_point_in_the_panel_is_asked_on_its_page_and_its_here_tells_the_client
     reserve.check(conn, MORNING, lambda c, t: "ok", lambda *a, **k: None, lambda *a, **k: sent.append(a))
     assert sent == []                                                                       # nothing goes to VK
     events = orders.list_events(conn, card)
-    assert any(e["text"].startswith("Точке «Бета» задан вопрос в «Моей точке»") and e["level"] == "grey" for e in events)
+    assert any(e["text"].startswith("Точке «Бета» задан вопрос на «Рабочем месте»") and e["level"] == "grey" for e in events)
     assert not [e for e in events if e["level"] == "yellow" and "точку не спросить" in e["text"]]
     mine = manager(app, conn, pid)
     assert "Клиент забрал заказ № 5000100?" in question(mine.get("/my-point").get_data(as_text=True))

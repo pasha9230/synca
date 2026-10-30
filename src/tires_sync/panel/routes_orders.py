@@ -740,6 +740,18 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
+    @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
+    @login_required
+    def order_oth_unagree(card_id):
+        """«Отменить согласование» of the return of «На ОТХ» (the owner and the partner), until the point signs the act МХ-3."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        if order_oth.unagree(conn, card, local_iso(), author()):
+            flash("Согласование отменено: шины снова на ОТХ, точка возврат не видит.", "ok")
+        else:
+            flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
+        return redirect("/orders/%d" % card_id)
+
     @app.route("/orders/<int:card_id>")
     @login_required
     def order_card_page(card_id):
@@ -1508,10 +1520,10 @@ def register(app) -> None:
         if not (str(item["sender"]).isascii() and str(item["sender"]).isdigit()):          # a line of the panel itself: nobody to write to
             return ""
         point = points.panel_point_of(conn, item["sender"])
-        if point is not None:                                                             # the owner 2026-10-23: never in VK, on «Моя точка»
+        if point is not None:                                                             # the owner 2026-10-23: never in VK, on «Рабочее место»
             if text:
                 points.add_note(conn, point["id"], "answer", text, local_iso(), asked=item["text"])
-            return "Точка «%s» работает в панели: ответ показан на её «Моей точке», в ВК не отправлен." % item["point"]
+            return "Точка «%s» работает в панели: ответ показан на её «Рабочем месте», в ВК не отправлен." % item["point"]
         send = inbox_channel(app, conn, local_iso())[0]
         if send is None:
             return "В ВК не ушло: ключ сообщества не сохранён (Подключения → ВК). Отправьте менеджеру вручную."

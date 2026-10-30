@@ -1,5 +1,5 @@
 """«Приехал» while the order still stands on «Заказ оформлен» (the owner 2026-10-21, order №423): the point writes when the tyres are there,
-the stage in the panel is often not moved to «Перемещение на точку» yet. The command and the button of «Моя точка» take it from both stages:
+the stage in the panel is often not moved to «Перемещение на точку» yet. The command and the button of «Рабочее место» take it from both stages:
 «Товар на точке» and «можно забирать» once, as from «Перемещение». A new order is still doubtful, with a plain answer."""
 from __future__ import annotations
 

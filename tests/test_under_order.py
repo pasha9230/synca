@@ -1,7 +1,7 @@
 """«Передать под заказ» (the owner 2026-10-23, п. 6, 7, 20–24): the manager of a point hands the client of a chat of the point's account to
 the person on duty in one window (phone, size, season, brand, comment; only the phone or the chat is needed); the staff see «Клиент хочет
 заказать шины…» and the client is «взят в работу» when they open the alert or the order, answer in the chat, or by hand — the stage stays;
-the point sees what became of the client on «Моя точка»; in VK the bot's button asks for the client in one message; the point gets +50 ₽ for
+the point sees what became of the client on «Рабочее место»; in VK the bot's button asks for the client in one message; the point gets +50 ₽ for
 an issued order of such a client from 2026-10-24."""
 from __future__ import annotations
 
@@ -155,7 +155,7 @@ def test_the_alert_leads_the_staff_to_the_chat_and_takes_the_client_the_point_do
     assert 'href="/alerts/%d/go"' % event["id"] in rows and "Взять в работу" in rows
     feed = w["owner"].get("/alerts/feed").get_json()
     assert any(i["href"] == "/alerts/%d/go" % event["id"] for i in feed["items"])
-    assert mgr.ASK not in w["manager"].get("/alerts").get_data(as_text=True)                    # the point sees its clients on «Моя точка»
+    assert mgr.ASK not in w["manager"].get("/alerts").get_data(as_text=True)                    # the point sees its clients on «Рабочее место»
     r = w["manager"].get("/alerts/%d/go" % event["id"])
     assert r.status_code == 302 and handed(conn)[0]["taken"] is None
     assert w["manager"].get("/orders/%d" % h["order"]).status_code == 200 and handed(conn)[0]["taken"] is None
@@ -209,7 +209,7 @@ def test_the_mark_is_taken_for_the_point_and_stops_the_fifteen_minutes(tmp_path)
     assert mgr.point_handoffs(conn, pid, "2026-10-01")[0]["status_name"] == "взяли в работу"
 
 
-# ---- «Моя точка» -------------------------------------------------------------------------------------------------------------------
+# ---- «Рабочее место» -------------------------------------------------------------------------------------------------------------------
 
 def test_the_point_sees_what_became_of_its_clients_and_the_bonus(w):
     conn = w["conn"]
@@ -570,7 +570,7 @@ def test_the_report_offers_a_point_paid_only_for_the_clients_it_handed_over(tmp_
         assert '<option value="Бета"' in html and '<option value="Гамма"' in html
     html = client.get("/orders/report", query_string={"from": "2026-10-01", "to": "2026-10-31", "pt": "Бета"}).get_data(as_text=True)
     assert '<option value="Бета" selected>' in html and "<td>Бета</td>" in html
-    assert "командой ВК, с «Моей точки», из чатов и звонков" in html and "той точки, которая передала клиента" in html   # хвост З9
+    assert "командой ВК, с «Рабочего места», из чатов и звонков" in html and "той точки, которая передала клиента" in html   # хвост З9
     conn.execute("INSERT INTO order_handoff (order_id, message_id, point_id, created_at) VALUES (2, 'm2', NULL, ?)", (NOW,))   # its point is gone
     conn.commit()
     _sell(conn, 2, "", "2026-10-24")                                                             # issued without a point

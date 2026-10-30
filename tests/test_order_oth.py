@@ -29,7 +29,7 @@ def test_no_alert_ever_comes_for_an_order_on_oth(tmp_path):
 
 
 def test_a_date_left_by_the_seven_days_is_never_read(tmp_path):
-    """An order that entered «На ОТХ» before 2026-10-30 keeps its date and the record «срок продажи до …»: no alert, nothing late on «Моя точка»."""
+    """An order that entered «На ОТХ» before 2026-10-30 keeps its date and the record «срок продажи до …»: no alert, nothing late on «Рабочее место»."""
     conn = db(tmp_path)
     cid = card_at(conn, "oth", "2026-10-17T10:00:00")
     conn.execute("UPDATE order_card SET reserve_until = '2026-10-24' WHERE id = ?", (cid,))
