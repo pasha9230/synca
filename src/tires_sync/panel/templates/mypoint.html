@@ -32,6 +32,7 @@
 {% if row.tel and not row.oth %}<div class="mp-facts"><span class="mp-sub">Телефон клиента</span> <a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a></div>{% endif %}
 <div class="mp-transfer" data-transfer>{% if c.transfer_number %}{{ c.transfer_number }} от {{ row.order_date }}{% else %}Перемещение: ещё нет · заказ от {{ row.order_date }}{% endif %}</div>
 {% if row.from_oth %}<div class="mp-sub" data-from-oth>Шины с ОТХ, заказ №{{ row.from_oth }}</div>{% endif %}
+{% if row.merged_from %}<div class="mp-sub" data-merged-from>Объединён из {{ row.merged_from }}</div>{% endif %}
 {% if row.origin %}<p class="mp-sub" data-origin>{{ row.origin.text }}: {{ row.origin.hint }}</p>{% endif %}
 {% if not row.oth %}<div class="mp-text">{{ row.text }}</div>{% endif %}{# «На ОТХ»: the client is gone (the owner 2026-10-30) #}
 {% if not row.here and not row.oth %}<dl class="mp-facts"><div><dt>Перемещение</dt><dd>{{ c.transfer_number or "номер ещё не вписан" }}</dd></div>{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}

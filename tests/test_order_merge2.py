@@ -1,0 +1,67 @@
+"""«Объединить заказы», этап 2 (plan docs/runs/2026-10-30-order-merge): the old numbers of the points lead to the merged order, «Рабочее место»
+says where it came from and the handed clients follow it, the funnel counts it once, no WebMIM number is asked of it and «можно забирать»
+goes without one."""
+from __future__ import annotations
+
+from test_mypoint import manager
+from test_order_merge import NOW, _card, _merge, _second
+from test_oth_sale import T, panel, point_id, stage
+from tests.test_order_reserve import card_at, db
+from tires_sync import analytics, order_manager as mgr, order_reserve, orders
+
+
+def _merged(conn):
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    return a, b, _merge(conn, [a, b])
+
+
+def test_the_old_number_of_a_source_leads_the_points_command_to_the_merged_order(tmp_path):
+    conn = db(tmp_path)
+    a, b, new = _merged(conn)
+    assert mgr.find_orders(conn, int(_card(conn, a)["webmim_number"])) == [new]
+    assert mgr.find_orders(conn, int(_card(conn, b)["webmim_number"])) == [new]
+    assert mgr.find_orders(conn, new) == [new]                                    # its own number (the panel's) still names it
+
+
+def test_the_workplace_says_where_the_merged_order_came_from(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    a, b, new = _merged(conn)
+    page = manager(app, conn, point_id(conn)).get("/my-point?tab=moving").get_data(as_text=True)      # «Едут»: the merged order is moving
+    card = page.split('id="order-%d"' % new)[1].split("</article>")[0]
+    assert "Объединён из №%s, №%s" % (_card(conn, a)["webmim_number"], _card(conn, b)["webmim_number"]) in card
+
+
+def test_a_handed_client_follows_the_merged_order(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    conn.execute("INSERT INTO order_handoff (order_id, message_id, point_id, created_at) VALUES (?, 'm1', ?, ?)", (a, point_id(conn), T))
+    conn.commit()
+    b = _second(conn)
+    new = _merge(conn, [a, b])
+    [row] = mgr.point_handoffs(conn, point_id(conn), "2026-10-01")
+    assert row["status"] == "placed" and row["label"].endswith("№%d" % new)          # not «отказ»: the client buys in the merged order
+    mgr.handoff_tick(conn, NOW)
+    assert conn.execute("SELECT status FROM order_handoff_status WHERE order_id = ?", (a,)).fetchall() == [("placed",)]
+
+
+def test_the_funnel_counts_the_merged_order_once_and_no_cancellation(tmp_path):
+    conn = db(tmp_path)
+    a, b, new = _merged(conn)
+    total = analytics.funnel(conn, "2026-10-01", "2026-10-31")["total"]
+    assert (total["orders"], total["cancelled"]) == (1, 0)
+
+
+def test_no_webmim_number_is_asked_of_a_merged_order_of_placed_sources(tmp_path):
+    conn = db(tmp_path)
+    a, b, new = _merged(conn)
+    told = []
+    order_reserve._ask_number(conn, _card(conn, new), lambda c, t: (told.append(t), "ok")[1], NOW)
+    assert told == []
+
+
+def test_arrived_goes_without_a_webmim_number_for_a_merged_order(tmp_path):
+    conn = db(tmp_path)
+    a, b, new = _merged(conn)
+    body = mgr._oth_arrived_body(conn, _card(conn, new))
+    assert body is not None and "{webmim_number}" not in body

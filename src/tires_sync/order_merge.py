@@ -61,6 +61,20 @@ def into(conn, order_id) -> Optional[int]:
     return row[0] if row else None
 
 
+def moved_into(conn, order_id) -> Optional[int]:
+    """The merged order the tyres of a source moved to (an active merge, the source not «справочно»), or None: the order a point's old number,
+    a handed client and the funnel follow (этап 2)."""
+    row = conn.execute("SELECT m.into_order FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? AND s.ref = 0 AND "
+                       + _ACTIVE, (order_id,)).fetchone()
+    return row[0] if row else None
+
+
+def moved_sources(conn) -> Set[int]:
+    """The sources of the active merges whose tyres moved: they are counted in their merged order (analytics.funnel)."""
+    return {r[0] for r in conn.execute("SELECT s.order_id FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.ref = 0 AND "
+                                       + _ACTIVE)}
+
+
 def is_ref(conn, order_id) -> bool:
     """The order takes part in an active merge «справочно» (nothing of it moved)."""
     return conn.execute("SELECT 1 FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? AND s.ref = 1 AND "

@@ -93,7 +93,9 @@ def funnel(conn, start: str, end: str, by: Optional[str] = None) -> dict:
     start, end = _period(start, end)
     if by is not None and by not in SLICES:
         raise ValueError("Разрез: один из %s." % ", ".join(SLICES))
-    cards = _cards(conn)
+    from .order_merge import moved_sources
+    moved = moved_sources(conn)                                              # the sources of a merge: counted in their merged order
+    cards = [c for c in _cards(conn) if c["id"] not in moved]
     by_id = {c["id"]: c for c in cards}
     chats = conn.execute("SELECT id, account_id, order_id, created_ts FROM avito_chat").fetchall()
     undated = sum(1 for c in chats if not chat_day(c[3]))
