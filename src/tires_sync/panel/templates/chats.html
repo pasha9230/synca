@@ -64,7 +64,7 @@
 {% set cl = chat_client(current.id, deal.id) %}<dt>Клиент</dt><dd class="strong">{{ deal.client_name or "имя не указано" }}{% if cl and can("clients") %} <a class="small chat-client-link" href="/clients/{{ cl.id }}">Карточка клиента</a>{% endif %}</dd>
 <dt>Телефон</dt><dd>{% if deal.client_phone %}<span class="kv-phone"><input class="input input--sm" id="deal-phone" value="{{ deal.client_phone|phone }}" readonly aria-label="Телефон клиента"><button type="button" class="btn btn--secondary btn--xs" data-copy="deal-phone">Копировать</button></span>{% else %}<span class="muted">не указан</span>{% endif %}</dd>
 <dt>Точка</dt><dd>{% if deal.point %}{{ deal.point.name }}{% else %}<span class="muted">не выбрана</span>{% endif %}</dd>
-<dt>Доставка</dt><dd>{% if deal.delivery_date %}{{ deal.delivery_date|day }}{% if deal.delivery_time %}, {{ deal.delivery_time }}{% endif %}{% elif deal.in_stock %}Товар в наличии на точке{% else %}<span class="muted">дата не указана</span>{% endif %}</dd>
+<dt>Доставка</dt><dd>{% if deal.delivery_date %}{{ deal.delivery_date|day }}{% if deal.delivery_time %}, {{ deal.delivery_time }}{% endif %}{% elif deal.in_stock and deal.stage.kind == "open" %}Товар в наличии на точке{% else %}<span class="muted">дата не указана</span>{% endif %}</dd>
 <dt>Позиции</dt><dd>{% for i in deal['items'] %}<div>{{ i.name }} × {{ i.qty }}</div>{% else %}<span class="muted">нет</span>{% endfor %}</dd>
 {% if deal['items'] %}<dt>Сумма</dt><dd class="strong">{{ deal.totals.sale|money }}</dd>{% endif %}
 {% if deal.comment %}<dt>Комментарий</dt><dd class="small">{{ deal.comment }}</dd>{% endif %}

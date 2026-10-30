@@ -1080,7 +1080,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number "
                         "FROM order_card ORDER BY id DESC").fetchall()
     from . import oth_sale
-    stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке»
+    stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке» (open stages only)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
             continue
@@ -1097,7 +1097,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
-                                      "delivery_date": delivery, "in_stock": cid in stocked, "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
+                                      "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
                                       "tags": tag_names})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
