@@ -40,7 +40,7 @@ def test_taking_a_position_off_is_staged_and_applies_only_after_confirmation(tmp
     r = post(client, "/catalog/stage", tok, op="off:1", next="/catalog?q=ikon")
     assert r.status_code == 302 and r.headers["Location"].endswith("/catalog?q=ikon")
     html = page(client)
-    assert "Неподтверждённых изменений: 1" in html and "снято вами" in html
+    assert "Не применено: 1 правка" in html and "снято вами" in html      # the bar of the settings pages on the catalog too (2026-10-30)
     assert active_settings(conn).overrides == {}
     review = client.get("/catalog/review")
     assert review.status_code == 302 and "/draft/" in review.headers["Location"]
@@ -61,7 +61,7 @@ def test_brand_season_switch_with_percents_and_whole_brand_buttons(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     post(client, "/settings/pricing", tok, scope="brand", supplier="1", brand="IKON TYRES",
          summer_form="1", summer_small="-2", summer_large="-2.5", summer_on="on", winter_form="1", winter_on="on")
-    assert "Неподтверждённых изменений: 2" in page(client)
+    assert "Не применено: 2 правки" in page(client)
     post(client, "/catalog/cancel", tok)
     assert 'id="pendbar" hidden' in page(client)
     post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="off")

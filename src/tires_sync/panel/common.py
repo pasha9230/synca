@@ -205,15 +205,19 @@ def login_required(view):
 
 
 def review_or_back(conn, back: str):
-    """After a settings change: straight to the confirmation of the pending changes (one step), or back if nothing changed."""
+    """After a settings change: back to the same page, the change waits in the working draft with the others (the owner 2026-10-29: changes
+    pile up, the bar of the page says how many and applies them at once; the page /draft/N is still there as «Подробнее»)."""
     from .. import staging
+    from .service import plural
     staged = staging.summary(conn)
     if staged["draft_id"] is not None and not staged["stale"]:
-        remember_page(back)
-        return redirect("/draft/%d" % staged["draft_id"])
-    if staged["draft_id"] is None:
+        remember_page(back)                                # «Подробнее» (/draft/N) and its «Вернуться к правке» lead back here
+        flash("В черновике, не применено: %d %s. Нажмите «Применить», когда закончите." % (
+            staged["count"], plural(staged["count"], "правка", "правки", "правок")), "ok")
+    elif staged["draft_id"] is None:
         flash("Изменений нет: настройки уже такие.")
     return redirect(back)
+
 
 
 # ---- rights: one check for every page -----------------------------------------------------------------------------------------------
@@ -257,7 +261,7 @@ for _section, _endpoints in {
                   "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report",
                   "orders_report_export"),
     "setup": ("draft", "draft_cancel", "draft_confirm", "catalog_review", "publish_result", "summary_toggle",      # a draft shows the markups: the owner's
-              "settings_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_exclusions_page", "settings_pricing",
+              "settings_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_pending", "settings_exclusions_page", "settings_pricing",
               "history", "history_rollback", "connections_page", "connections_add_account", "connections_account_brand_pricing",
               "connections_account_check", "account_contact_name", "account_exclude_types", "connections_account_keys",
               "connections_account_live", "account_modes", "account_phone", "account_phone_source", "connections_account_photo_base",

@@ -78,7 +78,7 @@ def test_the_settings_of_a_stale_supplier_are_still_saved(tmp_path):
     client = app_of(tmp_path).test_client()
     tok = login(client)
     r = post(client, "/settings/pricing", tok, scope="brand", supplier="2", brand="S2:IKON TYRES", winter_small="7", winter_large="8")
-    assert r.status_code == 302 and "/draft/" in r.headers["Location"]
+    assert r.status_code == 302 and r.headers["Location"].endswith("/settings/brands#pricing-2")   # the owner 2026-10-29: stays on the page
     conn = store.connect(tmp_path / "t.db")
     assert staging.summary(conn)["changes"]["pricing"]["S2:IKON TYRES|winter"] == {"pct_small": 7.0, "pct_large": 8.0}
     conn.close()
@@ -164,8 +164,9 @@ def test_the_catalog_shows_the_positions_of_a_stale_unload_for_viewing_only(tmp_
     html = client.get("/catalog").get_data(as_text=True)
     assert html.count("data-stale-unload>выгрузка устарела") == 2                  # both rows, marked
     assert "объявление держится как было" in html and "): не публикуется" in html
-    for trace in ('data-preview="s2-', 'value="s2-', ':s2-', "goods_id=s2-", "wait=s2-"):     # no preview, checkbox, stage, sale/order, wait
+    for trace in ('value="s2-', ':s2-', "goods_id=s2-", "wait=s2-"):     # no checkbox, stage, sale/order, wait
         assert trace not in html, trace
+    assert 'data-preview="s2-5"' in html and client.get("/catalog/preview/s2-5").status_code == 200   # the owner 2026-10-29: a preview for every row
     assert ':5"' in html and "goods_id=5" in html                                 # the owner's role does see the actions of own positions
     assert "нет у поставщика" not in html
     feed_only = client.get("/catalog?st=feed").get_data(as_text=True)

@@ -4,7 +4,7 @@
 {% block content %}
 {% set tab = "general" %}{% include "_settings_head.html" %}
 {% if can_post("settings_draft") %}<form method="post" action="/settings/draft" class="stack-lg">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
-<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="draft_rev" value="{{ nav.rev }}">
 <section class="card">
 <div class="card-head"><h3>Остатки и отбор</h3></div>
 <div class="card-body grid-3">
@@ -42,6 +42,6 @@
 <p class="small muted">Применяется к кабинетам, где своё распределение не задано (задаётся в Подключения → кабинет → Авито адреса).</p>
 </div>
 </section>
-<div class="row"><button class="btn btn--primary">Создать черновик {{ icon("arrow-right") }}</button><span class="small muted">Дальше экран подтверждения</span></div>
+<div class="row"><button class="btn btn--primary">В черновик</button><span class="small muted">Правки копятся в черновике; применяются кнопкой «Применить» в полосе сверху.</span></div>
 {% if can_post("settings_draft") %}</form>{% else %}</fieldset>{% endif %}
 {% endblock %}

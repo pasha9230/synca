@@ -93,7 +93,7 @@ def test_apply_pricing_sends_the_markdown_column_through_the_confirmation(tmp_pa
     terms.save_term(conn, {"brand_key": "LAUFENN", "season": "summer", "size_class": "large", "markdown_pct": -9.2, "bonus_pct": 13,
                            "valid_from": "2026-09-01"}, NOW, "owner")
     r = post(client, "/economics/terms/apply-pricing", tok, day="2026-10-09")
-    assert r.headers["Location"].endswith("/draft/1")
+    assert r.headers["Location"].endswith("/economics/terms")  # the owner 2026-10-29: the change stays on its page (it waits in the draft); it went straight to /draft/N
     pricing = staging.summary(conn)["changes"]["pricing"]
     assert pricing["LAUFENN|summer"] == {"pct_small": -8.5, "pct_large": -9.2}
     assert pricing["IKON TYRES|winter"] == {"pct_small": -3.82, "pct_large": -3.82} or "IKON TYRES|winter" in pricing

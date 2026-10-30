@@ -1,6 +1,6 @@
 {% from "_ui.html" import icon %}
 <div class="preview">
-<div class="row" style="gap:var(--s-3);align-items:center"><p class="muted small grow">{{ p.name }} · код {{ p.code }} · остаток {{ p.stock }}{% if p.account %} · аккаунт {{ p.account }}{% endif %}</p>
+<div class="row" style="gap:var(--s-3);align-items:center"><p class="muted small grow">{{ p.name }} · код {{ p.code }} · {% if p.stock > 0 %}остаток {{ p.stock }}{% else %}<b>нет в наличии</b>{% endif %}{% if p.account %} · аккаунт {{ p.account }}{% endif %}</p>
 <a class="btn btn--secondary btn--xs" href="/catalog/item/{{ p.goods_id|urlencode }}">Открыть карточку</a></div>
 {% if not p.built %}
 <div class="flash flash--warn" style="margin-top:12px">{{ icon("warn") }}<div class="flash-text">Объявление не собирается: {{ p.reason }}.</div></div>

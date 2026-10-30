@@ -10,9 +10,10 @@
 <form method="get" action="/catalog" class="filters" data-autosubmit>
 <input type="hidden" name="o" value="{{ sort }}">{% if descending %}<input type="hidden" name="r" value="1">{% endif %}{% if sup %}<input type="hidden" name="sup" value="{{ sup }}">{% endif %}{% if page_size != 100 %}<input type="hidden" name="n" value="{{ page_size }}">{% endif %}
 <div class="field"><span class="label">Размер</span><div class="ig">
-<input name="w" value="{{ size.w }}" title="Можно несколько значений ширины через запятую, например 205, 215" placeholder="Шир." aria-label="Ширина" list="dl-w" inputmode="numeric"><span class="ig-sep">/</span>
-<input name="h" value="{{ size.h }}" title="Можно несколько значений профиля через запятую, например 205, 215" placeholder="Проф." aria-label="Профиль" list="dl-h" inputmode="numeric"><span class="ig-sep">R</span>
-<input name="d" value="{{ size.d }}" title="Можно несколько значений диаметра через запятую, например 205, 215" placeholder="Диам." aria-label="Диаметр" list="dl-d" inputmode="numeric"></div></div>
+<input name="w" value="{{ size.w }}" title="Можно несколько значений через пробел, например 225 205 195: покажутся все сочетания" placeholder="Шир." aria-label="Ширина" list="dl-w" inputmode="numeric"><span class="ig-sep">/</span>
+<input name="h" value="{{ size.h }}" title="Можно несколько значений через пробел, например 55 60" placeholder="Проф." aria-label="Профиль" list="dl-h" inputmode="numeric"><span class="ig-sep">R</span>
+<input name="d" value="{{ size.d }}" title="Можно несколько значений через пробел, например 16 17" placeholder="Диам." aria-label="Диаметр" list="dl-d" inputmode="numeric"></div></div>
+<div class="field" style="width:220px"><span class="label">Размеры</span><input class="input" name="size" value="{{ size_text }}" placeholder="205/55R16 225/45R18" title="Несколько размеров целиком через пробел, как в каталоге клиента">{% if size_unknown %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}</div>
 <datalist id="dl-w">{% for v in size_options.w %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-h">{% for v in size_options.h %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-d">{% for v in size_options.d %}<option value="{{ v }}">{% endfor %}</datalist>
 <div class="field" style="width:260px"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ q }}" placeholder="Размер, название, артикул" title="Например: 205/55 R16, Ikon, часть названия или артикул"></div></div>
 <div class="field"><span class="label">Сезон</span><div class="seg">
@@ -24,10 +25,20 @@
 <label><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}><span class="spike" title="Шипы"><span>ш</span></span>Шипы</label>
 <label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div></div>
 <div class="field" style="width:140px"><span class="label">Статус</span><select class="select" name="st"><option value=""{% if status == "all" %} selected{% endif %}>Все</option><option value="feed"{% if status == "feed" %} selected{% endif %}>В фиде</option><option value="no"{% if status == "no" %} selected{% endif %}>Не в фиде</option><option value="nopair"{% if status == "nopair" %} selected{% endif %}>Нет пары</option><option value="problem"{% if status == "problem" %} selected{% endif %}>Проблемы</option><option value="gone"{% if status == "gone" %} selected{% endif %}>Нет у поставщика</option></select></div>
+<div class="field"><span class="label">Бренды</span><details class="brand-pick" data-no-autosubmit><summary class="select">{% if chosen_brands %}{{ chosen_brands|length }} {{ plural(chosen_brands|length, "бренд", "бренда", "брендов") }}{% else %}Все{% endif %}{% if without_brands %} · кроме {{ without_brands|length }}{% endif %}</summary>
+<div class="brand-pick-body"><div class="row small muted"><span class="grow">Бренд</span><span>Показать</span><span>Кроме</span></div>
+{% for c in brand_choices %}<div class="row"><span class="grow">{{ c.label }} <span class="muted xs">{{ c.count }}</span></span><label class="check" title="Показать только отмеченные бренды"><input type="checkbox" name="b" value="{{ c.key }}"{% if c.key in chosen_brands %} checked{% endif %} aria-label="Показать {{ c.label }}"></label><label class="check" title="Не показывать этот бренд"><input type="checkbox" name="xb" value="{{ c.key }}"{% if c.key in without_brands %} checked{% endif %} aria-label="Кроме {{ c.label }}"></label></div>{% endfor %}
+<button class="btn btn--secondary btn--sm">Показать</button> <span class="muted xs">Только вид каталога: фид не меняется.</span></div></details></div>
 <noscript><button class="btn btn--secondary" style="height:40px">Показать</button></noscript>
 <a class="btn btn--link-gray" style="height:40px" href="/catalog{% if sup %}?sup={{ sup }}{% endif %}">Сбросить</a>
 </form>
 </section>
+{% if feed_brands is not none %}{% for sid in feed_brands|map(attribute="supplier")|unique %}<form id="brand-feed-{{ sid }}" method="post" action="/connections/suppliers/{{ sid }}/excluded" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}"></form>{% endfor %}
+<details class="card" data-feed-brands style="margin-top:12px"><summary class="card-head"><h3>Бренды в фиде</h3><span class="muted small">Снять бренд с фида или вернуть его: как на «Настройки → Исключения». Правка ложится в черновик и применяется кнопкой «Применить» в полосе сверху.</span></summary>
+<div class="card-body"><table class="table"><thead><tr><th>Бренд</th><th class="num">Позиций</th><th>Состояние</th><th></th></tr></thead><tbody>
+{% for r in feed_brands %}<tr><td>{{ r.bare }}{% if r.supplier_name %} <span class="muted xs">· {{ r.supplier_name }}</span>{% endif %}</td><td class="num">{{ r.count }}</td><td>{% if r.state %}<span class="badge {{ 'badge--pend-soft' if 'не примен' in r.state else 'badge--neutral' }}">{{ r.state }}</span>{% endif %}</td>
+<td>{% if r.off %}<button class="btn btn--secondary btn--xs" form="brand-feed-{{ r.supplier }}" name="remove" value="{{ r.key }}" data-brand-on="{{ r.key }}">Вернуть в фид</button>{% else %}<button class="btn btn--danger-outline btn--xs" form="brand-feed-{{ r.supplier }}" name="brand" value="{{ r.bare }}" data-brand-off="{{ r.key }}">Снять с фида</button>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></details>{% endif %}
 <div id="items" data-url="{{ table_url }}">{% include "_catalog_table.html" %}</div>
 
 

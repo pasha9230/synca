@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import catalog_xml, commodity_xml, settings_dict
-from panel_helpers import login, make_app, post
+from panel_helpers import login, make_app, post, review
 from tires_sync import staging, store
 from tires_sync.settings_store import confirm_draft, get_active, init_settings
 
@@ -72,7 +72,7 @@ def test_one_brand_is_changed_alone(tmp_path):
     app, client, tok, conn = panel(tmp_path)
     r = post(client, "/settings/pricing", tok, scope="brand", supplier="1", brand="IKON TYRES",
              winter_small="-2", winter_large="-2,5", summer_small="1", summer_large="2", all_small="", all_large="")
-    assert r.status_code == 302 and r.headers["Location"].endswith("/draft/1")          # straight to the confirmation
+    assert r.status_code == 302 and r.headers["Location"].endswith("/settings/brands#pricing-1")  # the owner 2026-10-29: the change stays on its page (it waits in the draft); it went straight to /draft/N
     pricing = staging.summary(conn)["changes"]["pricing"]
     assert pricing["IKON TYRES|winter"] == {"pct_small": -2.0, "pct_large": -2.5}
     assert pricing["IKON TYRES|summer"] == {"pct_small": 1.0, "pct_large": 2.0}
@@ -222,7 +222,7 @@ def test_the_confirmation_screen_leads_back_to_the_page_where_you_were_working(t
     app, client, tok, conn = panel(tmp_path)
     r = post(client, "/settings/pricing", tok, scope="brand", supplier="1", brand="IKON TYRES", summer_form="1",
              summer_small="1", summer_large="1", summer_on="on")
-    page = client.get(r.headers["Location"]).get_data(as_text=True)
+    page = client.get(review(client)).get_data(as_text=True)                   # «Подробнее» of the bar
     assert 'href="/settings/brands#pricing-1">Бренды и наценки<' in page and "Вернуться к правке" in page
 
 
@@ -230,7 +230,7 @@ def test_controls_of_a_brand_row_name_the_brand_for_screen_readers(tmp_path):
     app, client, tok, conn = panel(tmp_path)
     html = client.get("/settings/brands").get_data(as_text=True)
     assert 'aria-label="IKON TYRES, зима: публиковать"' in html and 'aria-label="Снять бренд IKON TYRES с фида"' in html
-    assert 'aria-label="Применить только для бренда IKON TYRES"' in html and 'aria-current="page"' in html
+    assert 'aria-label="В черновик только для бренда IKON TYRES"' in html and 'aria-current="page"' in html
 
 
 # --- brand card -------------------------------------------------------------------------------------------------------
@@ -254,7 +254,7 @@ def test_a_change_made_on_the_card_returns_to_the_card(tmp_path):
     card = "/settings/brands/card?supplier=1&brand=IKON%20TYRES"
     r = post(client, "/settings/pricing", tok, scope="brand", supplier="1", brand="IKON TYRES", next=card,
              summer_form="1", summer_small="-1", summer_large="-2", summer_on="on")
-    assert r.headers["Location"].endswith("/draft/1")
+    assert r.headers["Location"].endswith(card)  # the owner 2026-10-29: the change stays on its page (it waits in the draft); it went straight to /draft/N
     assert post(client, "/draft/1/cancel", tok).headers["Location"].endswith(card)
     nothing = post(client, "/settings/pricing", tok, scope="brand_all", supplier="1", brand="IKON TYRES", enabled="on", next=card)
     assert nothing.headers["Location"].endswith(card)
@@ -285,7 +285,7 @@ def test_several_brands_and_seasons_are_chosen_in_one_submit(tmp_path):
     r = post(client, "/settings/pricing", tok, **table_form(
         r0_winter_form="1", r0_summer_form="1", r0_summer_small="-1", r0_summer_large="-2", r0_summer_on="on",   # Ikon: winter off, summer on
         r1_summer_form="1", r1_summer_small="3", r1_summer_large="3", r1_summer_on="on"))                          # Laufenn summer on
-    assert r.headers["Location"].endswith("/draft/1")
+    assert r.headers["Location"].endswith("/settings/brands#pricing-1")  # the owner 2026-10-29: the change stays on its page (it waits in the draft); it went straight to /draft/N
     enabled = {tuple(i) for i in staging.summary(conn)["changes"]["enabled"]}
     assert enabled == {("PIRELLI", "winter"), ("IKON TYRES", "summer"), ("LAUFENN", "summer")}
 

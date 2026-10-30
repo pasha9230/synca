@@ -94,6 +94,14 @@ def gone_offer(conn, goods_id: str):
         return None
 
 
+def item_info(conn, goods_id: str):
+    """What the archive knows of one position (taken away or not): its dates, the last stock and purchase price seen, or None."""
+    row = conn.execute("SELECT first_seen, last_seen, last_stock, last_price, gone_since FROM catalog_item WHERE goods_id = ?", (goods_id,)).fetchone()
+    if row is None:
+        return None
+    return {"first_seen": row[0], "last_seen": row[1], "last_stock": row[2], "last_price": row[3], "gone_since": row[4]}
+
+
 def gone_offers(conn) -> List[Tuple[Offer, dict]]:
     """The positions the supplier took away: the offer as it was (stock 0) and what is known about it."""
     out = []
