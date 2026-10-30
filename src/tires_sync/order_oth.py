@@ -203,7 +203,9 @@ def agree(conn, card: dict, today, now: str, author: str) -> str:
 def unagree(conn, card: dict, now: str, author: str) -> bool:
     """«Отменить согласование» (the owner and the partner, before the act МХ-3 is signed): the agreement goes, the tyres are our stock of OTH
     again (the ad shows «Шины в наличии» in the next cycle, oth_stock), the point no longer sees the return. One statement: a signed plan, or
-    one cancelled a moment ago, is left as it is. False: nothing to cancel."""
+    one cancelled a moment ago, is left as it is. False: nothing to cancel (or the order left «На ОТХ»)."""
+    if card["stage"]["code"] != "oth":
+        return False
     if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount != 1:
         conn.rollback()
         return False

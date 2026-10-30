@@ -496,3 +496,12 @@ def test_no_cancel_once_the_act_is_signed(tmp_path):
     assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "point")
     assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))
     assert not order_oth.unagree(conn, orders.get_card(conn, oth), NOW, "o") and order_oth.return_plan(conn, oth)["signed_at"]
+
+
+def test_no_cancel_for_an_order_that_left_oth(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    oth = _on_oth(conn, pid, webmim="700504")
+    post(client, "/orders/%d/oth-agreed" % oth, "tok")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (_stage(conn, "at_point"), oth))      # moved off by hand, the plan unsigned
+    conn.commit()
+    assert not order_oth.unagree(conn, orders.get_card(conn, oth), NOW, "o") and order_oth.return_plan(conn, oth)

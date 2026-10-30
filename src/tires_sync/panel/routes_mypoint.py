@@ -1,4 +1,4 @@
-"""«Рабочее место» (was «Рабочее место»): the start page of a point's manager (the owner 2026-10-23: the points work in the panel, VK is the spare
+"""«Рабочее место» (its old name is gone, the address /my-point stays): the start page of a point's manager (the owner 2026-10-23: the points work in the panel, VK is the spare
 channel; 2026-10-29: in the panel's own frame with the menu, the stages of the point's orders, one search line, «Отменить передачу» of a
 client not taken yet, the return of «На ОТХ» with the act МХ-3; every action goes to «История точки», point_log).
 
