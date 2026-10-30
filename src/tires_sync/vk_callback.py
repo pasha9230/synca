@@ -39,6 +39,26 @@ def recent(conn, limit: int = 10) -> list:
                                                                        (limit,))]                 # the backstop's (vk_catchup): not Callback's
 
 
+MAX_FORWARDED, FORWARD_DEPTH = 50, 3                # the numbers read from one message (order_manager.MAX_BATCH are acted on, the rest named);
+                                                    # how deep a forward inside a forward is read
+
+
+def _forwarded(items, group: str, depth: int = 1) -> list:
+    """The orders the community's forwarded lines name (30.10: a point forwards the bot's «Заказ … оформлен» with its word), in their
+    order, a forward inside a forward too; a line of anybody else names nothing."""
+    found = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("from_id", "")) == "-" + group:
+            number = order_manager.line_number(item.get("text"))
+            if number is not None:
+                found.append(number)
+        if depth < FORWARD_DEPTH:
+            found += _forwarded(item.get("fwd_messages"), group, depth + 1)
+    return found
+
+
 def _message(data: dict, group: str) -> Optional[dict]:
     """The private message of a person to the community in a `message_new` event, or None (a chat, the community itself, garbage)."""
     obj = data.get("object") if isinstance(data.get("object"), dict) else {}
@@ -48,6 +68,10 @@ def _message(data: dict, group: str) -> Optional[dict]:
         return None
     reply = msg.get("reply_message") if isinstance(msg.get("reply_message"), dict) else {}
     reply_no = order_manager.line_number(reply.get("text")) if str(reply.get("from_id", "")) == "-" + group else None    # a line of the community «Заказ …»
+    numbers = []
+    for number in ([reply_no] if reply_no is not None else []) + _forwarded(msg.get("fwd_messages"), group):
+        if number not in numbers and len(numbers) < MAX_FORWARDED:
+            numbers.append(number)
     text, voice, transcript, link = str(msg.get("text") or ""), "", "", ""
     for attachment in msg.get("attachments") if isinstance(msg.get("attachments"), list) else []:
         audio = attachment.get("audio_message") if isinstance(attachment, dict) and attachment.get("type") == "audio_message" else None
@@ -57,7 +81,8 @@ def _message(data: dict, group: str) -> Optional[dict]:
             voice = "done" if done else "pending"
             transcript = transcript if done else ""
             link = str(audio.get("link_mp3") or audio.get("link_ogg") or "")    # the record, for «Входящие» when there is no transcript
-    return {"id": str(msg.get("id") or msg.get("conversation_message_id") or ""), "from": sender, "text": text, "reply_no": reply_no, "voice": voice,
+    return {"id": str(msg.get("id") or msg.get("conversation_message_id") or ""), "from": sender, "text": text, "voice": voice,
+            "reply_no": numbers[0] if len(numbers) == 1 else None, "reply_nos": numbers,          # one: as a reply; several: each of them
             "transcript": transcript if voice == "done" else "", "voice_link": link}
 
 
@@ -89,7 +114,8 @@ def _act(conn, data: dict, group: str, event_id: str, now: datetime, channel: Ca
         send, deliver, notify = channel(conn, local)
         binding = bool(order_manager.BIND_CODE.match(str(msg["text"] or "").strip().upper())) and order_manager._point_of(conn, msg["from"]) is None
         answer = order_manager.dispatch(conn, "vk-" + (msg["id"] or event_id), msg["from"], msg["text"], msg["reply_no"], local, deliver, notify,
-                                        voice=msg["voice"], transcript=msg["transcript"], voice_link=msg["voice_link"])
+                                        voice=msg["voice"], transcript=msg["transcript"], voice_link=msg["voice_link"],
+                                        reply_nos=msg["reply_nos"])
     except Exception:
         conn.rollback()
         log.exception("the message of VK event %s could not be handled", event_id)
@@ -171,13 +197,16 @@ def _tell_missing(conn, box, message_id: str, tg_http: Transport, event_id: str,
     """The point wrote a number the panel does not know: the partner (order_notify.missing_order_people) hears it in Telegram once; how it went
     is added to the outcome of the command («Входящие»). The bell shows it by itself (order_alerts.page_rows). Never raises."""
     try:
-        found = order_manager.missing_orders(conn, message_id)
-        told = conn.execute("SELECT 1 FROM order_command_log WHERE message_id = ? AND outcome LIKE '%; Telegram%'", (message_id,)).fetchone()
-        if not found or told:                                                     # the same message once more (another event of VK): told already
-            return
-        how = order_notify.tell_people(conn, box, order_notify.missing_order_people(conn), found[0]["text"] + ".", tg_http, now=now)
-        conn.execute("UPDATE order_command_log SET outcome = outcome || ? WHERE message_id = ?", ("; " + how, message_id))
-        conn.commit()
+        parts = [r[0] for r in conn.execute("SELECT message_id FROM order_command_log WHERE message_id LIKE ? ORDER BY message_id",
+                                            (message_id + "#%",))]           # a batch of forwarded orders: each order of it (handle_many)
+        for one in [message_id] + parts:
+            found = order_manager.missing_orders(conn, one)
+            told = conn.execute("SELECT 1 FROM order_command_log WHERE message_id = ? AND outcome LIKE '%; Telegram%'", (one,)).fetchone()
+            if not found or told:                                                 # the same message once more (another event of VK): told already
+                continue
+            how = order_notify.tell_people(conn, box, order_notify.missing_order_people(conn), found[0]["text"] + ".", tg_http, now=now)
+            conn.execute("UPDATE order_command_log SET outcome = outcome || ? WHERE message_id = ?", ("; " + how, one))
+            conn.commit()
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.vk").exception("the partner could not be told of the unknown order of VK event %s", event_id)
