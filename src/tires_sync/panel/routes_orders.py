@@ -16,10 +16,10 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import order_notify, order_oth, oth_sale, point_log
+from .. import onboarding_texts, order_notify, order_oth, oth_sale, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
-from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account
+from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
 from .routes_main import context
 
 log = logging.getLogger(__name__)
@@ -543,6 +543,22 @@ def register(app) -> None:
             flash("Оставьте хотя бы одну колонку.")
         keep = {k: request.form.get(k, "").strip()[:80] for k in ("p", "t", "q", "s")}
         return redirect("/orders?" + urlencode(dict({"v": "list"}, **{k: v for k, v in keep.items() if v})))
+
+    def hint_folded(where: str) -> bool:
+        """«Что делать сейчас» folded by the person signed in (user_pref «hint.<where>»): on the order's card and on «Рабочее место»."""
+        return bool(session.get("user")) and bool(user_prefs.get(get_conn(), session["user"], onboarding_texts.PREF % where, False))
+
+    app.jinja_env.globals.update(hint_folded=hint_folded, stage_hint=onboarding_texts.stage_hint, point_hint=onboarding_texts.point_hint)
+
+    @app.route("/orders/hint/fold", methods=["POST"])
+    @login_required
+    def orders_hint_fold():
+        """«Свернуть» / «Развернуть» of «Что делать сейчас»: one's own setting, then back to the page it was pressed on."""
+        where = request.form.get("where", "")
+        back = safe_path(request.form.get("back", "")) or "/"
+        if where in onboarding_texts.PLACES:
+            user_prefs.put(get_conn(), session["user"], onboarding_texts.PREF % where, request.form.get("fold") == "1", now_iso())
+        return redirect(back)
 
     @app.route("/orders/export.xlsx")
     @login_required
