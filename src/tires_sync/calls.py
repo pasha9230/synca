@@ -342,8 +342,8 @@ def create_order(conn, call_row: int, now: str, author: str, own_point=None) -> 
                    if not (of_account or own_point) else       # an order a point sees: no account's name in it (the owner 2026-10-29)
                    "Звонок %s (%s)" % (call["call_at"].replace("T", " ")[:16], "принят" if call["answered"] else "пропущен"))
         phone = clients.usable(clients.normalize(call["buyer_phone"]), clients.own_phones(conn))         # never our own number
-        responsible = (connections.account_responsible(conn, call["account_id"])                  # the account's (the owner 2026-10-29)
-                       or chat_deals.point_responsible(conn, of_account and of_account["id"]) or orders.default_responsible(conn))
+        responsible = (chat_deals.order_responsible(conn, call["account_id"], (of_account or {}).get("id") or own_point)
+                       or orders.default_responsible(conn))
         card_id = orders.create_card(conn, {"client_name": call["client_name"], "client_phone": phone, "source": "avito", "comment": comment,
                                             "tags": chat_deals._account_tag(conn, call["account_id"]), "responsible": responsible,
                                             "delivery_date": chat_deals.next_day(now)},

@@ -51,6 +51,27 @@ def test_a_manual_order_with_the_chat_of_the_account_gets_its_responsible(tmp_pa
     assert conn.execute("SELECT responsible FROM order_card ORDER BY id DESC").fetchone()[0] == "owner"   # no chat of the account: as typed
 
 
+def test_a_manual_order_with_the_chat_of_a_points_account_gets_the_points_manager(tmp_path):
+    """The owner 2026-10-30: the manager of the point comes before the account's responsible; the person picked by hand stays."""
+    from tires_sync import order_points as points
+    app, client, tok, conn, account = setup(tmp_path)
+    point = points.save_point(conn, {"name": "Юнона", "manager_name": "А", "channel": "panel", "avito_account_id": account})
+    users.add_user(conn, "masha", "pass-word-1", NOW, role="chats")
+    users.add_user(conn, "yun", "pass-word-1", NOW, role="point", point_id=point)
+    connections.set_responsible(conn, account, "masha", ["masha"], NOW, "owner")
+    tanya = next(r for r in conn.execute("SELECT id FROM avito_chat WHERE peer_name = 'Татьяна'"))[0]
+    conn.execute("UPDATE avito_chat SET order_id = NULL WHERE id = ?", (tanya,))
+    conn.execute("DELETE FROM order_card")
+    conn.commit()
+    post(client, "/orders/new", tok, client_name="Татьяна", client_phone="+7 900 000-11-22", avito_chat="Ч-%d" % tanya, responsible="owner")
+    assert conn.execute("SELECT responsible FROM order_card ORDER BY id DESC").fetchone()[0] == "yun"
+    conn.execute("UPDATE avito_chat SET order_id = NULL WHERE id = ?", (tanya,))
+    conn.execute("DELETE FROM order_card")
+    conn.commit()
+    post(client, "/orders/new", tok, client_name="Татьяна", client_phone="+7 900 000-11-22", avito_chat="Ч-%d" % tanya, responsible="masha")
+    assert conn.execute("SELECT responsible FROM order_card ORDER BY id DESC").fetchone()[0] == "masha"   # picked by hand: as typed
+
+
 def stage_id(conn, code):
     return conn.execute("SELECT id FROM order_stage WHERE code = ?", (code,)).fetchone()[0]
 
@@ -115,3 +136,4 @@ def test_all_the_accounts_stay_chosen_through_the_filters_and_the_list(tmp_path)
     state_links = re.findall(r'href="(/chats\?f=[^"]*)"', page)
     assert state_links and all("acc=all" in h for h in state_links)
     assert 'data-place="?acc=all"' in page
+

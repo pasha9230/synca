@@ -327,6 +327,12 @@ def point_responsible(conn, point_id) -> str:
     return row[0] if row else ""
 
 
+def order_responsible(conn, account_id, point_id) -> str:
+    """Who answers for a new order of a chat or a call: the manager of its point (the point of the account, or of the manager who made it),
+    else the account's responsible (the owner 2026-10-30: «менеджеру точки принадлежит аккаунт Авито этой точки»); '' when neither."""
+    return point_responsible(conn, point_id) or connections.account_responsible(conn, account_id)
+
+
 def next_day(now: str) -> str:
     """The delivery date of a new order: the day after the day it is made (the panel's local date in `now`)."""
     return (date.fromisoformat(now[:10]) + timedelta(days=1)).isoformat()
@@ -361,8 +367,8 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         if named and own_point and named[0]["id"] != own_point:            # the manager of a point makes the order of the own point, never another's
             named = None
         fields = {"client_name": name, "client_phone": phone, "avito_chat": ref(chat_row), "source": "avito", "comment": comment.strip(), "tags": tags,
-                  "responsible": (connections.account_responsible(conn, chat["account_id"])                # the account's (the owner 2026-10-29)
-                                  or (of_account and point_responsible(conn, of_account["id"])) or orders.default_responsible(conn)),   # a point's account: its manager
+                  "responsible": (order_responsible(conn, chat["account_id"], (of_account or {}).get("id") or own_point)
+                                  or orders.default_responsible(conn)),
                   "delivery_date": next_day(now) if delivery else ""}
         if named:
             fields["point_id"] = named[0]["id"]

@@ -490,11 +490,25 @@ def merged_reason(conn, command: Optional[dict]) -> str:
     return orders.NOT_BOUGHT + " (команда точки)" if command and command.get("id") and orders.merged_command(conn, command["id"]) else ""
 
 
+def _not_bought_oth(conn, card: dict, stage_id: int, reason: str) -> Optional[int]:
+    """«На ОТХ» for the point's «не выкупил» (`reason` of merged_reason) into «Отмена / невыкуп» of an order whose tyres may be at the point
+    (the stages «выдал» is taken from) and that holds no tyres of OTH (the owner 2026-10-30: the tyres stay at the point, as after «Клиент не
+    пришёл» → «Да, на ОТХ»); None: the move stays as asked (an order with tyres of OTH is refused by move_card, as before)."""
+    if not reason.startswith(orders.NOT_BOUGHT) or card["stage"]["code"] not in ISSUE_FROM or orders.get_stage(conn, stage_id)["code"] != "cancel":
+        return None
+    from . import oth_sale
+    if oth_sale.holds(conn, card["id"]):
+        return None
+    return _stage_id(conn, "oth")
+
+
 def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional[Deliver], reason: str = "") -> Tuple[str, str]:
     """Move the order; on the arrival at the point the client is told at once. (outcome for the log, answer for the point)."""
     try:
         changes = None
-        if orders.get_stage(conn, stage_id)["code"] == "cancel" and not str(card.get("cancel_reason") or "").strip():
+        to_oth = _not_bought_oth(conn, card, stage_id, reason)
+        stage_id = to_oth or stage_id
+        if (to_oth or orders.get_stage(conn, stage_id)["code"] == "cancel") and not str(card.get("cancel_reason") or "").strip():
             changes = {"cancel_reason": reason or "команда точки"}      # a word of the point into «Отмена / невыкуп» (the reason «не выкупил» only
         moved = orders.move_card(conn, card["id"], stage_id, now, who, changes)   # for a word that led to «Отказ/невыкуп» before the merge)
     except OrderError as err:
@@ -511,6 +525,8 @@ def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional
             orders.add_event(conn, card["id"], now, who, "point", "Заказ выдан, минуя «Товар на точке» (был на этапе «%s»)" % card["stage"]["name"])
             conn.commit()
         return "заказ перенесён на «%s»" % stage["name"], "Заказ №%s — отмечено: %s (теперь на этапе «%s»)." % (label(card), ISSUED, stage["name"])
+    if to_oth:
+        return "заказ перенесён на «%s»" % stage["name"], "Заказ №%s на «%s»: шины остаются на точке нашим товаром." % (label(card), stage["name"])
     return "заказ перенесён на «%s»" % stage["name"], "Готово: заказ №%s на этапе «%s»." % (label(card), stage["name"])
 
 
