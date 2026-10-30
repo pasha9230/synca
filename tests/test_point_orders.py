@@ -333,3 +333,35 @@ def test_the_points_move_of_its_own_sale_sends_no_can_pick_up(w, monkeypatch):
         assert orders.get_card(conn, m["stock_new"])["stage"]["code"] == code
     w["point"].post("/orders/%d/move" % m["stock_new"], data={"csrf": "tok", "stage_id": s["at_point"]})     # not the point's for its sale
     assert orders.get_card(conn, m["stock_new"])["stage"]["code"] == "done" and called == []
+
+
+def _item(conn, cid, goods="G1", qty=4):
+    conn.execute("INSERT INTO order_item (order_id, goods_id, name, qty, supplier_price, sale_unit) VALUES (?, ?, 'Шина', ?, ?, 1500)",
+                 (cid, goods, qty, 0 if goods == orders.POINT_GOODS else 1000))
+    conn.commit()
+
+
+def test_an_order_placed_with_the_supplier_is_never_the_points_own_sale(w):
+    """Review 2026-10-31: the number of 4 Точки («Оформил вручную»), or «Заказ оформлен» and later with the supplier's tyres (placed by
+    hand without a number) — the tyres are coming: «Рабочее место»'s, not the point's to edit."""
+    m, conn = w["made"], w["conn"]
+    conn.execute("UPDATE order_card SET supplier_number = '4T-77' WHERE id = ?", (m["stock_new"],))
+    _item(conn, m["account"])                                                      # «Заказ оформлен» with the supplier's tyre
+    _item(conn, m["stock_done"])                                                   # «Выполнено»: closed, stays as it was
+    _item(conn, m["stock_at"], goods=orders.POINT_GOODS)                           # the point's own tyre: still its sale
+    mine = points.own_sales(conn, w["alfa"])
+    assert m["stock_new"] not in mine and m["account"] not in mine
+    assert m["stock_at"] in mine and m["stock_talk"] in mine and m["stock_done"] in mine
+    assert w["point"].post("/orders/%d/items/add" % m["account"], data={"csrf": "tok", "name": "x", "qty": "1", "sale_unit": "1"}).status_code == 403
+    assert 'id="order-%d"' % m["account"] in _page(w["point"], "/my-point?tab=moving") + _page(w["point"], "/my-point?tab=here")
+
+
+def test_a_typed_tyre_never_turns_a_sale_with_the_suppliers_tyres_into_the_points_stock(w):
+    m, conn = w["made"], w["conn"]
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (w["stages"]["new"], m["account"]))
+    _item(conn, m["account"])                                                      # the manager put the supplier's tyre, not placed yet
+    assert m["account"] in points.own_sales(conn, w["alfa"])
+    r = w["point"].post("/orders/%d/items/add" % m["account"], data={"csrf": "tok", "name": "Шина с полки", "qty": "1", "sale_unit": "3000"},
+                        follow_redirects=True)
+    assert "заказ ведёт менеджер" in r.get_data(as_text=True)
+    assert orders._row(conn, m["account"])["deal_kind"] != "stock" and len(orders.get_card(conn, m["account"])["items"]) == 1

@@ -1255,8 +1255,12 @@ def register(app) -> None:
 
     def point_tyre(conn, card_id, form):
         """A tyre the point sells from its own stock, typed: the name, the quantity, the price (order_offers.point_item_args, «шина точки
-        без кода»; no catalog, no supplier). Its own sale is «Из наличия точки»: a sale of its account still «через WebMIM» becomes one."""
+        без кода»; no catalog, no supplier). Its own sale is «Из наличия точки»: a sale of its account still «через WebMIM» becomes one —
+        unless the manager put the supplier's tyres in it (then it is his: refused)."""
         args = order_offers.point_item_args(conn, form.get("name", ""), form.get("sale_unit", ""))
+        if orders._row(conn, card_id)["deal_kind"] != "stock" and any(i["goods_id"] != orders.POINT_GOODS and i["qty"] > 0
+                                                                     for i in orders.get_card(conn, card_id)["items"]):
+            raise orders.OrderError("В заказе есть шины поставщика: заказ ведёт менеджер, шину точки в него добавить нельзя.")   # the review
         try:
             if orders._row(conn, card_id)["deal_kind"] != "stock":
                 orders.update_card(conn, card_id, {"deal_kind": "stock"}, local_iso(), author(), commit=False)
