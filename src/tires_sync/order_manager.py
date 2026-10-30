@@ -771,6 +771,23 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str,
     return False, "Клиенту сообщение не отправлено: владелец разберётся."
 
 
+def arrived_by_move(conn, before: dict, deliver: Optional[Deliver], now: str, who: str) -> str:
+    """A person moved the order to «Товар на точке» (the board, the card, the chat): «можно забирать» goes as after the point's «приехал» (the
+    owner 2026-10-30: «впредь надо делать это автоматически»; the default of the lead of that morning, «a move by hand sends nothing», is
+    over) — once per arrival, the same checks. Not from «На ОТХ» without a new client (the old client came back to its own tyres: the point
+    tells it). A merge never comes here. Returns the line for the person ('' when nothing was due)."""
+    try:
+        card = orders.get_card(conn, before["id"])
+    except OrderError:
+        return ""
+    if card["stage"]["code"] != "at_point" or before["stage"]["code"] == "at_point":
+        return ""
+    if before["stage"]["code"] == "oth" and (card["client_phone"], card["client_name"]) == (before["client_phone"], before["client_name"]):
+        return ""
+    sent, note = tell_client_arrived(conn, card["id"], deliver, now, who)
+    return note
+
+
 def arrived_token(card: dict, now: str) -> str:
     """The send mark of «можно забирать» of one arrival: the order and the moment it reached the point."""
     return "arrived-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or now))

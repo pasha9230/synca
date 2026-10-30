@@ -1148,7 +1148,7 @@ def _arrived_alerts(conn, key_file) -> None:
         box = load_box(key_file) if key_file else None
         now = moscow_now().isoformat(timespec="seconds")
         tell = lambda logins, text: order_notify.tell_people(conn, box, logins, text, tg_http=_http(), now=now)
-        made = order_arrived.check(conn, now, tell)
+        made = order_arrived.check(conn, now, tell, lambda card, text: order_notify.tell_point(conn, box, card, text, now, tg_http=_http(), vk_http=_http()))
         lines = order_arrived.api_refusals(conn, now)
         if lines:
             tell([order_notify.get_owner_login(conn)], "Tires Sync: " + "\n".join(lines))

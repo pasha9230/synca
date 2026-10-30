@@ -745,6 +745,9 @@ def register(app) -> None:
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
+            if moved:                                                     # «Товар на точке» by hand: «можно забирать» as «приехал» (2026-10-30)
+                note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())
+                message = (message + " " + note) if note else message
             if moved and own_point() is not None:                         # «История точки»: the point moved its order on the board
                 point_log.record(conn, stamp, author(), own_point(), "move", card_id, "этап «%s»" % orders.get_stage(conn, stage_id)["name"])
             if moved and _ajax():                                         # the board draws the same window from the answer
@@ -768,7 +771,10 @@ def register(app) -> None:
         if card["stage"]["code"] != "at_point" or own_point() is not None:
             return None
         now = local_iso()
-        return None if order_arrived.told(conn, card, now) else order_arrived.reason(conn, card, now)
+        if order_arrived.told(conn, card, now):
+            return None
+        why = order_arrived.reason(conn, card, now)
+        return {"why": why, "advice": order_arrived.advice(why), "send": order_arrived.can_send(why)}
 
     def _oth_ask(conn, card: dict):
         """The question «Шины остаются на точке» kept by ask_oth for this order, while it still stands on «Товар на точке»."""
@@ -862,6 +868,19 @@ def register(app) -> None:
             flash("Заказ уже не на «Товар на точке».", "error")
             return redirect("/orders/%d" % card_id)
         return redirect("/orders/%d?messages=1#messages" % card_id)
+
+    @app.route("/orders/<int:card_id>/arrived-told", methods=["POST"])
+    @login_required
+    def order_arrived_told(card_id):
+        """«Клиенту сообщили»: told another way (a call, the Avito app); the message is not sent and nobody is reminded any more."""
+        from .. import order_arrived
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if order_arrived.mark_told(conn, card_id, local_iso(), author()):
+            flash("Отмечено: клиенту сообщили. Сообщение «можно забирать» не отправляется.", "ok")
+        else:
+            flash("Заказ уже не на «Товар на точке».", "error")
+        return redirect("/orders/%d" % card_id)
 
     @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
     @login_required
@@ -1069,8 +1088,10 @@ def register(app) -> None:
                 if stage_id is None:
                     raise orders.OrderError("Этап выбран неверно.")
                 stamp = local_iso()
+                before = card_or_404(conn, card_id)
                 if orders.move_card(conn, card_id, stage_id, stamp, author()):
-                    flash("Заказ перенесён.")
+                    note = manager.arrived_by_move(conn, before, avito_deliver(conn, stamp), stamp, author())
+                    flash("Заказ перенесён." + (" " + note if note else ""))
                     offer_send(conn, card_id, stamp)
             except orders.OrderError as err:
                 flash(str(err), "error")                                  # the fields stay saved; the refusal is a red record of the journal

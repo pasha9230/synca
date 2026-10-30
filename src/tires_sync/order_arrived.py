@@ -59,10 +59,16 @@ def told(conn, card: dict, now: str) -> bool:
     task = mgr.arrived_task(conn, card["id"], token)
     if task is not None and task["status"] in ("done", "skipped"):
         return True
-    if mgr._answered_by_hand(conn, token):
+    if mgr._answered_by_hand(conn, token) or conn.execute(              # also the sync's own line «send-<mark>-…» (a 402 that ended: 473)
+            "SELECT 1 FROM manager_message WHERE message_id LIKE ? AND status = 'answered' AND answer NOT LIKE 'Итог:%' LIMIT 1",
+            ("send-" + token + "%",)).fetchone():
         return True
-    return conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND kind = 'message' AND title = ? AND status = 'done' AND created_at >= ? "
-                        "LIMIT 1", (card["id"], mgr.ARRIVED_TEMPLATE, card["entered_at"] or "")).fetchone() is not None
+    since = card["entered_at"] or ""
+    if conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND kind = 'message' AND title = ? AND status = 'done' AND done_at >= ? LIMIT 1",
+                    (card["id"], mgr.ARRIVED_TEMPLATE, since)).fetchone():
+        return True
+    return conn.execute("SELECT 1 FROM chat_send_log l JOIN avito_chat c ON c.id = l.chat_row WHERE c.order_id = ? AND l.status = 'sent' "
+                        "AND l.at >= ? LIMIT 1", (card["id"], since)).fetchone() is not None     # any answer of ours in its chat since: told
 
 
 def reason(conn, card: dict, now: str) -> str:
@@ -108,11 +114,32 @@ def _link(conn, card_id: int) -> str:
     return "%s/orders/%d" % (base, card_id) if base else "панель → Заказы → №%d" % card_id
 
 
-def check(conn, now: str, tell: Tell) -> int:
-    """The hourly look: each untold order is told the responsible and the owner (`tell(logins, text)`) and marked yellow in its journal,
-    once a day while it stays untold. Returns how many were told. Writes nothing to a client."""
-    from . import order_notify
+def can_send(why: str) -> bool:
+    """A message may be sent from the window now: not while a 402 is being repeated nor when it may have reached the client."""
+    return why not in (UNKNOWN, REFUSED_402, NO_API)
+
+
+def advice(why: str) -> str:
+    """What to do about it, in words for a person."""
+    if why == NO_API:
+        return "Напишите клиенту в приложении Авито или позвоните и отметьте «Клиенту сообщили»"
+    if not can_send(why):
+        return "Проверьте чат заказа, повторно не отправляйте"
+    return "Отправить можно из «Сообщений по заказу» или отметить «Клиенту сообщили»"
+
+
+def _staff(conn) -> set:
+    from . import users
+    return {u["login"] for u in users.list_users(conn) if u["active"] and u["role"] in ("owner", "partner", "chats")}
+
+
+def check(conn, now: str, tell: Tell, tell_point: Optional[Callable[[dict, str], object]] = None) -> int:
+    """The hourly look: each untold order is told the responsible and the owner (`tell(logins, text)`; the staff only, never a point nor
+    «система») and marked in its journal (yellow the first time), once a day while it stays untold. An order of a point's own Avito account
+    is the point's (the owner 2026-10-26): `tell_point(card, text)` only. Returns how many were told. Writes nothing to a client."""
+    from . import order_notify, order_points
     owner = order_notify.get_owner_login(conn)
+    staff = _staff(conn)
     made = 0
     for found in untold(conn, now):
         card, why = found["card"], found["reason"]
@@ -121,11 +148,16 @@ def check(conn, now: str, tell: Tell) -> int:
         if last and _hours(last, now) < REPEAT_HOURS:
             continue
         label = mgr.label(card)
-        orders.add_event(conn, card["id"], now, "система", "notify", "%s: %s. Отправить можно из «Сообщений по заказу»." % (LINE, why), level="yellow")
+        act = advice(why)
+        orders.add_event(conn, card["id"], now, "система", "notify", "%s: %s. %s." % (LINE, why, act), level="grey" if last else "yellow")
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, now))
         conn.commit()
-        logins = [x for x in dict.fromkeys([card.get("responsible") or "", owner]) if x]
-        tell(logins, "Заказ №%s: %s — %s. Отправить вручную: %s" % (label, LINE.lower(), why, _link(conn, card["id"])))
+        text = "Заказ №%s: %s — %s. %s: %s" % (label, LINE.lower(), why, act, _link(conn, card["id"]))
+        if order_points.of_account(conn, card["id"]) is not None:
+            if tell_point is not None:                                  # the point's own account: the point, never the office
+                tell_point(card, "Заказ №%s: %s — %s. Напишите клиенту в чате Авито." % (label, LINE.lower(), why))
+        else:
+            tell([x for x in dict.fromkeys([card.get("responsible") or "", owner]) if x in staff or x == owner], text)
         made += 1
     return made
 
@@ -138,7 +170,9 @@ def prepare(conn, card_id: int, now: str, author: str) -> bool:
         return False
     token = mgr.arrived_token(card, now)
     task = mgr.arrived_task(conn, card_id, token)
-    if task is not None:
+    if task is not None or conn.execute(                                # a rule of the stage prepared the same message: that one
+            "SELECT 1 FROM order_task WHERE order_id = ? AND kind = 'message' AND title = ? AND status IN ('pending', 'error') AND created_at >= ? LIMIT 1",
+            (card_id, mgr.ARRIVED_TEMPLATE, card["entered_at"] or "")).fetchone():
         return True
     from . import order_templates as templates
     own = mgr._oth_arrived_body(conn, card)
@@ -146,6 +180,25 @@ def prepare(conn, card_id: int, now: str, author: str) -> bool:
     mgr._arrived_wait(conn, card, token, "" if missing else text, ("не хватает: %s" % ", ".join(missing)) if missing else "отправьте из окна",
                       now, own_text=own is not None)
     orders.add_event(conn, card_id, now, author, "chat", "Сообщение клиенту «%s» подготовлено: отправьте его из «Сообщений по заказу»." % mgr.ARRIVED_TEMPLATE,
+                     level="grey")
+    conn.commit()
+    return True
+
+
+def mark_told(conn, card_id: int, now: str, author: str) -> bool:
+    """«Клиенту сообщили»: a person told the client another way (a call, the Avito app); the arrival's message is done, never sent. False:
+    the order is not on «Товар на точке»."""
+    card = orders.get_card(conn, card_id)
+    if card["stage"]["code"] != "at_point":
+        return False
+    token = mgr.arrived_token(card, now)
+    if mgr.arrived_task(conn, card_id, token) is None:
+        mgr._arrived_wait(conn, card, token, "", "сообщили другим способом", now)
+    task = mgr.arrived_task(conn, card_id, token)
+    if task is not None:
+        conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status IN ('pending', 'error')",
+                     ("клиенту сообщили другим способом (%s)" % author, now, task["id"]))
+    orders.add_event(conn, card_id, now, author, "chat", "Клиенту сообщили, что шины на точке, другим способом: «%s» не отправляется." % mgr.ARRIVED_TEMPLATE,
                      level="grey")
     conn.commit()
     return True

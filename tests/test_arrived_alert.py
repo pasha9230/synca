@@ -145,3 +145,128 @@ def test_another_402_is_not_the_messenger_api(env):
     mgr.tell_client_arrived(conn, card, deliver_by(conn, Other()), NOW, "точка")
     assert found(conn) == {card: order_arrived.REFUSED_402}
     assert order_arrived.api_refusals(conn, LATE) == []
+
+
+# ---- the owner 2026-10-30 evening: a move by hand sends «можно забирать» as «приехал» -------------------------------------------------------
+
+def _panel_order(tmp_path, code="moving"):
+    from panel_helpers import login, make_app
+    app = make_app(tmp_path)
+    owner = app.test_client()
+    tok = login(owner)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    from tires_sync import order_points as points
+    pid = points.save_point(conn, dict(name="Бета", manager_name="А", channel="vk", vk_peer_id="555"))
+    card = orders.create_card(conn, dict(client_name="Татьяна", client_phone="+7 900 111-22-33", webmim_number="5000777", point_id=pid,
+                                         delivery_date="2026-10-14"), NOW, "o")
+    orders.add_item(conn, card, goods_id="1", name="Nokian 205/55 R16", brand_key="nokian", season="winter", diameter=16, territory="1", qty=4,
+                    sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=NOW, author="o")
+    stage = conn.execute("SELECT id FROM order_stage WHERE code = ?", (code,)).fetchone()[0]
+    conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ? WHERE id = ?", (stage, NOW, card))
+    conn.commit()
+    return app, owner, tok, conn, card
+
+
+def _stage(conn, code):
+    return conn.execute("SELECT id FROM order_stage WHERE code = ?", (code,)).fetchone()[0]
+
+
+def test_a_move_by_hand_to_the_point_tells_the_client_as_arrived(tmp_path, monkeypatch):
+    """Was (the lead's default of 30.10 morning): a move by hand sent nothing — the orders 464, 467, 469. Now (the owner, «впредь надо делать
+    это автоматически»): as the point's «приехал», once per arrival."""
+    from panel_helpers import post
+    told = []
+    monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, "Клиенту отправлено."))[1])
+    app, owner, tok, conn, card = _panel_order(tmp_path)
+    post(owner, "/orders/%d/move" % card, tok, stage_id=str(_stage(conn, "at_point")))
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and told == [card]
+    post(owner, "/orders/%d/move" % card, tok, stage_id=str(_stage(conn, "at_point")))      # already there: nothing more
+    assert told == [card]
+
+
+def test_a_move_back_from_oth_without_a_new_client_tells_nobody_but_a_new_client_is_told(tmp_path, monkeypatch):
+    told = []
+    monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, ""))[1])
+    app, owner, tok, conn, card = _panel_order(tmp_path, "oth")
+    before = orders.get_card(conn, card)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (_stage(conn, "at_point"), card))
+    conn.commit()
+    assert mgr.arrived_by_move(conn, before, None, LATE, "o") == "" and told == []
+    conn.execute("UPDATE order_card SET client_phone = '+7 900 999-88-77', client_name = 'Пётр' WHERE id = ?", (card,))
+    conn.commit()
+    mgr.arrived_by_move(conn, before, None, LATE, "o")
+    assert told == [card]
+
+
+def test_the_chat_page_move_tells_the_client_too(tmp_path, monkeypatch):
+    from panel_helpers import post
+    told = []
+    monkeypatch.setattr(mgr, "tell_client_arrived", lambda conn, card_id, deliver, now, who, body=None: (told.append(card_id), (True, ""))[1])
+    app, owner, tok, conn, card = _panel_order(tmp_path)
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id) VALUES (1, 'c9', ?)", (card,))
+    conn.commit()
+    row = conn.execute("SELECT id FROM avito_chat WHERE chat_id = 'c9'").fetchone()[0]
+    post(owner, "/chats/%d/stage" % row, tok, stage_id=str(_stage(conn, "at_point")))
+    assert told == [card]
+
+
+# ---- the review of 2026-10-30 -----------------------------------------------------------------------------------------------------------------
+
+def test_an_answer_of_ours_in_the_chat_or_to_the_syncs_line_ends_it(env):
+    conn, chat_row, card = env
+    from tires_sync import chat_deals
+    chat_deals.link_chat(conn, chat_row, card, NOW, "owner")
+    assert found(conn)
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES ('reply-1', ?, ?, 'zaman', 'sent')", (chat_row, LATER))
+    conn.commit()
+    assert found(conn) == {}                                                       # a free answer in the order's chat: told
+    conn.execute("DELETE FROM chat_send_log")
+    token = mgr.arrived_token(orders.get_card(conn, card), LATE)
+    conn.execute("INSERT INTO manager_message (message_id, at, sender, text, status, answer) VALUES (?, ?, 'система', 'x', 'answered', 'написал сам')",
+                 ("send-%s-1" % token, LATER))
+    conn.commit()
+    assert found(conn) == {}                                                       # the sync's line after the 402s, answered by a person
+
+
+def test_told_another_way_ends_it_and_sends_nothing(env):
+    conn, chat_row, card = env
+    assert order_arrived.mark_told(conn, card, LATE, "owner")
+    assert found(conn) == {} and conn.execute("SELECT COUNT(*) FROM chat_send_log").fetchone()[0] == 0
+
+
+def test_an_order_of_a_points_account_is_told_the_point_only(env, monkeypatch):
+    conn, chat_row, card = env
+    from tires_sync import order_points
+    monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": 1})
+    staff, point = [], []
+    order_arrived.check(conn, LATE, lambda logins, text: staff.append(text), lambda c, text: point.append(text))
+    assert staff == [] and len(point) == 1 and "Напишите клиенту" in point[0]
+
+
+def test_only_the_staff_and_the_owner_are_told(env):
+    conn, chat_row, card = env
+    from tires_sync import users
+    from tires_sync import order_points as points
+    pid = points.save_point(conn, dict(name="Бета", manager_name="А", channel="vk", vk_peer_id="555"))
+    users.add_user(conn, "beta", "длинный-пароль-1", NOW, role="point", point_id=pid)
+    conn.execute("UPDATE order_card SET responsible = 'beta' WHERE id = ?", (card,))
+    conn.commit()
+    told = []
+    order_arrived.check(conn, LATE, lambda logins, text: told.append(tuple(logins)))
+    assert told == [("owner",)]                                                    # a point's login, «система»: never
+
+
+def test_no_messenger_api_asks_to_write_in_the_avito_app_and_offers_no_send(env):
+    assert order_arrived.advice(order_arrived.NO_API).startswith("Напишите клиенту в приложении Авито")
+    assert not order_arrived.can_send(order_arrived.NO_API) and not order_arrived.can_send(order_arrived.UNKNOWN)
+    assert order_arrived.can_send(order_arrived.BY_HAND)
+
+
+def test_the_button_never_makes_a_second_message_beside_a_rules(env):
+    conn, chat_row, card = env
+    conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                 "VALUES (?, 99, ?, 'message', '', 0, 'pending', ?, 'x', '', ?)", (card, NOW, mgr.ARRIVED_TEMPLATE, LATER))
+    conn.commit()
+    order_arrived.prepare(conn, card, LATE, "owner")
+    assert waiting(conn, card) == []
