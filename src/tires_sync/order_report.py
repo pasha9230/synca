@@ -111,6 +111,9 @@ def build(conn, start: str, end: str, point: str = "") -> dict:
         handed[order_id] = ("id", point_id) if point_id is not None else None
         if point_id is not None:
             names.setdefault(("id", point_id), name)
+    from .order_merge import handed as merged_handed
+    for new, source in merged_handed(conn).items():                                     # a merged order: once, if a source was handed over
+        handed.setdefault(new, handed.get(source))
     grouped: Dict[tuple, List[dict]] = {}
     for r in rows:
         if r["source"] == "order":

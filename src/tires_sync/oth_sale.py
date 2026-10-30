@@ -42,8 +42,10 @@ def taken_ids(conn, card_id) -> Set[int]:
 
 
 def supplier_items(conn, card: dict) -> List[dict]:
-    """The positions of the order that are the supplier's (not taken from «На ОТХ»): what WebMIM is asked for and checked against."""
-    mine = taken_ids(conn, card["id"])
+    """The positions of the order that are the supplier's (not taken from «На ОТХ», not given by a placed source of a merge, order_merge):
+    what WebMIM is asked for and checked against."""
+    from .order_merge import placed_ids
+    mine = taken_ids(conn, card["id"]) | placed_ids(conn, card["id"])
     return [i for i in card.get("items") or [] if i["id"] not in mine]
 
 

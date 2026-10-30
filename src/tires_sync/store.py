@@ -144,6 +144,19 @@ CREATE TABLE IF NOT EXISTS oth_return_plan (order_id INTEGER PRIMARY KEY, agreed
 CREATE TABLE IF NOT EXISTS order_item_oth (item_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, from_item INTEGER NOT NULL, from_order INTEGER NOT NULL,
     qty INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, sale_id INTEGER, undone_at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS order_item_oth_from ON order_item_oth (from_order);
+-- «Объединить заказы» (order_merge, the owner 2026-10-30): a merge of sources into a new order; each source as it stood (for «Разъединить»);
+-- each position given (oth: through order_item_oth, the source stood on «На ОТХ»)
+CREATE TABLE IF NOT EXISTS order_merge (id INTEGER PRIMARY KEY AUTOINCREMENT, into_order INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,
+    undone_at TEXT NOT NULL DEFAULT '', undone_by TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS order_merge_into ON order_merge (into_order);
+CREATE TABLE IF NOT EXISTS order_merge_source (merge_id INTEGER NOT NULL, order_id INTEGER NOT NULL, position INTEGER NOT NULL DEFAULT 0,
+    ref INTEGER NOT NULL DEFAULT 0, stage_id INTEGER NOT NULL, entered_at TEXT NOT NULL DEFAULT '', cancel_reason TEXT NOT NULL DEFAULT '',
+    reserve_until TEXT NOT NULL DEFAULT '', chats TEXT NOT NULL DEFAULT '[]', calls TEXT NOT NULL DEFAULT '[]', callbacks TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (merge_id, order_id));
+CREATE INDEX IF NOT EXISTS order_merge_source_order ON order_merge_source (order_id);
+CREATE TABLE IF NOT EXISTS order_merge_item (item_id INTEGER PRIMARY KEY, merge_id INTEGER NOT NULL, from_item INTEGER NOT NULL,
+    from_order INTEGER NOT NULL, qty INTEGER NOT NULL, oth INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS order_merge_item_from ON order_merge_item (from_order);
 CREATE TABLE IF NOT EXISTS client_chat (chat_row INTEGER PRIMARY KEY, client_id INTEGER NOT NULL, how TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS client_chat_client ON client_chat (client_id);
 CREATE TABLE IF NOT EXISTS avito_call (

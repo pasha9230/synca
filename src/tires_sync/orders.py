@@ -907,11 +907,12 @@ def _refuse_move(conn, card_id, now: str, author: str, why: str, journal: bool) 
 
 
 def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[dict] = None, chain: tuple = (), fire_rules: bool = True,
-              journal: bool = True) -> bool:
+              journal: bool = True, commit: bool = True) -> bool:
     """Move a card to a stage. The fields that come with the move are saved first; the move itself needs the stage's required data.
     `fire_rules=False` (the bulk move) leaves the rules of the new stage asleep: no task, no message for hundreds of cards at once.
     A refusal goes to the journal as a red record; not with `journal=False` (the bulk move) and not for a rule (`chain` is given only by the
-    rules: their task writes its own red «…: ошибка (…)», one record is enough)."""
+    rules: their task writes its own red «…: ошибка (…)», one record is enough). `commit=False`: in the caller's transaction (order_merge),
+    nothing saved and no rule fired; a refusal or a move made first by somebody rolls the caller's transaction back."""
     stage = get_stage(conn, stage_id)
     changed = update_card(conn, card_id, changes, now, author, commit=False, link_client=False) if changes else []   # not saved until
     card = get_card(conn, card_id)                                                                               # the move is allowed
@@ -919,7 +920,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     if card["stage_id"] == stage["id"]:
         if phoned and stage["code"] != "oth":
             _attach_client(conn, card_id, now, author)
-        conn.commit()                                                           # no move, but the fields that came are kept
+        if commit:
+            conn.commit()                                                       # no move, but the fields that came are kept
         return False
     journal = journal and not chain
     gaps = missing_for(card, stage, _placed_stage(conn))
@@ -962,6 +964,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     if _needs_placed(stage, placed) and not _needs_placed(card["stage"], placed):
         from . import order_sheet
         order_sheet.enroll(conn, card_id, now)            # placed now (not a later move of an order placed before): its rows go to the Google table
+    if not commit:                                         # in the caller's transaction (order_merge): it saves, no rule wakes
+        return True
     conn.commit()
     if fire_rules:
         _fire_rules(conn, card_id, now, chain)

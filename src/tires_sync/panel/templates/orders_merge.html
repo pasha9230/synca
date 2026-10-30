@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Объединить заказы · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Объединить заказы{% if c.point %} · {{ c.point.name }}{% endif %}</h1><p class="sub">Выбранные заказы станут одним новым заказом. Исходные уйдут в «Отмена / невыкуп» с причиной «Объединён в заказ №…». Никому ничего не отправится.</p></div>
+<div class="actions"><a class="btn btn--secondary" href="/orders/{{ c.id }}">К заказу № {{ c.id }}</a></div></header>
+<form method="post" action="/orders/{{ c.id }}/merge" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<section class="card"><div class="card-body stack">
+<h2>Заказы точки</h2>
+<p class="small muted">Только заказы одной точки. Заказ с продажей или на закрытом этапе входит справочно: его шины и продажа остаются в нём.</p>
+<table class="table"><thead><tr><th>В новый</th><th>Клиент нового</th><th>Заказ</th><th>Клиент</th><th>Этап</th><th>Позиции</th></tr></thead><tbody>
+{% for o in found %}<tr data-merge-row="{{ o.id }}"><td><input type="checkbox" name="orders" value="{{ o.id }}"{% if o.id == c.id %} checked{% endif %} aria-label="Заказ № {{ label(o) }} в новый"></td>
+<td><input type="radio" name="client_from" value="{{ o.id }}"{% if o.id == c.id %} checked{% endif %} aria-label="Клиент заказа № {{ label(o) }}"></td>
+<td><a href="/orders/{{ o.id }}">№ {{ label(o) }}</a>{% if ref[o.id] %} <span class="badge badge--neutral">справочно</span>{% endif %}</td>
+<td>{{ o.client_name or "Без имени" }}{% if o.client_phone %}<div class="small muted">{{ o.client_phone|phone }}</div>{% endif %}</td>
+<td>{{ o.stage.name }}</td><td class="small">{% for i in o['items'] if i.qty >= 1 %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}</td></tr>{% endfor %}
+</tbody></table>
+</div></section>
+<section class="card"><div class="card-body stack">
+<h2>Новый заказ</h2>
+<fieldset class="field"><legend class="label">Или новый клиент</legend><label><input type="radio" name="client_from" value="new"> Вписать нового клиента</label>
+<div class="grid-2"><label class="field"><span class="label">Имя</span><input class="input" name="client_name" maxlength="200"></label>
+<label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="client_phone" maxlength="40"></label></div></fieldset>
+<label class="field"><span class="label">Этап нового заказа</span><select class="select" name="stage_id">{% for s in stages %}<option value="{{ s.id }}"{% if s.id == c.stage_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+<p class="small muted">Дата и время доставки и номер перемещения — из заказа выбранного клиента, их можно поправить в новом заказе. Перемещения остальных видны в истории и у их позиций.</p>
+<div><button class="btn btn--primary">Объединить</button></div>
+</div></section></form>
+{% endblock %}

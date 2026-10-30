@@ -406,6 +406,9 @@ def reconcile(conn, today: date, days: int = DAYS) -> dict:
             continue
         if card["deal_kind"] == "stock" or stage["code"] == "cancel" or stage.get("kind") == "lost":
             continue
+        from . import order_merge, oth_sale
+        if order_merge.is_target(conn, card["id"]) and not oth_sale.supplier_items(conn, orders.get_card(conn, card["id"])):
+            continue                                       # a merge of placed orders: its tyres are under their sources' numbers (order_merge)
         card["hints"] = hints(card, goods.get(card["id"], []), snap, busy) if server == "prod" else []
         unpaired.append(card)
     alone = [o for o in snap if o["id"] not in busy and o["create_date"] >= start]

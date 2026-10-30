@@ -68,7 +68,9 @@ def delete_order(conn, card_id, now: str, author: str, only_if=None) -> int:
         if json.loads(card["sale_ids"] or "[]"):
             raise OrderError("По заказу записана продажа: сначала сторнируйте её, потом удаляйте заказ.")
         from . import oth_sale
-        reason = oth_sale.why_not_delete(conn, card_id) or (only_if(conn, card) if only_if else None)   # tyres of «На ОТХ» are never lost
+        from . import order_merge
+        reason = (oth_sale.why_not_delete(conn, card_id) or order_merge.why_not_delete(conn, card_id)      # tyres of «На ОТХ» are never lost,
+                  or (only_if(conn, card) if only_if else None))                                          # nor a merge «Разъединить» undoes
         if reason:
             raise OrderError(reason)
         data = {"card": card, "chats": _rows(conn, "SELECT id, order_id, unlinked FROM avito_chat WHERE order_id = ?", (card_id,))}

@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import onboarding_texts, order_notify, order_oth, oth_sale, point_log, user_prefs
+from .. import onboarding_texts, order_merge as order_merge_store, order_notify, order_oth, oth_sale, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -783,6 +783,57 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
+    @app.route("/orders/<int:card_id>/merge", methods=["GET"])
+    @login_required
+    def order_merge_page(card_id):
+        """«Объединить заказы» (the owner 2026-10-30): the orders of the card's point to pick, the client and the stage of the new order."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        rows = conn.execute("SELECT id FROM order_card WHERE " + ("point_id = ?" if card["point_id"] else "point_id IS NULL") + " ORDER BY id DESC LIMIT 80",
+                            (card["point_id"],) if card["point_id"] else ()).fetchall()
+        found = [orders.get_card(conn, r[0]) for r in rows]
+        if card_id not in {c["id"] for c in found}:
+            found.insert(0, card)
+        found = [c for c in found if not order_merge_store.into(conn, c["id"]) and not order_merge_store.is_target(conn, c["id"])]
+        stages = [s for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] not in ("oth", orders.RETURN_GIVEN)]
+        return render_template("orders_merge.html", c=card, found=found, stages=stages, ref={c["id"]: order_merge_store._ref(c) for c in found},
+                               label=manager.label)
+
+    @app.route("/orders/<int:card_id>/merge", methods=["POST"])
+    @login_required
+    def order_merge(card_id):
+        """The merge itself: one new order, the sources on «Отмена», nothing sent (order_merge.merge)."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        picked = [i for i in request.form.getlist("orders") if str(i).isdigit()]
+        stage_id = str(request.form.get("stage_id") or "")
+        chosen = str(request.form.get("client_from") or "")
+        try:
+            if not stage_id.isdigit():
+                raise orders.OrderError("Выберите этап нового заказа.")
+            new = order_merge_store.merge(conn, picked, int(stage_id), local_iso(), author(),
+                                          client_from=int(chosen) if chosen.isdigit() else None,
+                                          client_name=str(request.form.get("client_name") or "")[:200],
+                                          client_phone=str(request.form.get("client_phone") or "")[:40])
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return redirect("/orders/%d/merge" % card_id)
+        flash("Заказы объединены в заказ №%d. Никому ничего не отправлено." % new, "ok")
+        return redirect("/orders/%d" % new)
+
+    @app.route("/orders/<int:card_id>/unmerge", methods=["POST"])
+    @login_required
+    def order_unmerge(card_id):
+        """«Разъединить»: the sources come back as they were (order_merge.unmerge)."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        try:
+            back = order_merge_store.unmerge(conn, card_id, local_iso(), author())
+            flash("Разъединено: заказы %s снова на своих этапах. Никому ничего не отправлено." % ", ".join("№%d" % i for i in back), "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return redirect("/orders/%d" % card_id)
+
     @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
     @login_required
     def order_oth_unagree(card_id):
@@ -847,6 +898,9 @@ def register(app) -> None:
             "order_card.html", messages=messages, open_messages=open_messages,
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            merge_into=order_merge_store.into(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
+            merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
+            merge_items=order_merge_store.items_of(conn, card_id),
             oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
             oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},

@@ -97,6 +97,10 @@ def audit_text(entry: dict) -> str:
         return "ОТХ: заказ №%s, согласование возврата с поставщиком отменено" % d.get("order", "?")
     if action == "oth_act_signed":
         return "ОТХ: заказ №%s, точка подписала акт МХ-3 и отдала шины поставщику" % d.get("order", "?")
+    if action == "order_merge":
+        return "Заказы %s объединены в заказ №%s" % (", ".join("№%s" % i for i in d.get("orders") or []), d.get("into", "?"))
+    if action == "order_unmerge":
+        return "Заказ №%s разъединён: заказы %s вернулись" % (d.get("into", "?"), ", ".join("№%s" % i for i in d.get("orders") or []) or "—")
     if action == "oth_take":
         return "ОТХ: заказ №%s взял %s шт. с ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
     if action == "oth_untake":

@@ -20,7 +20,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 
-from . import connections, order_engine as engine, order_report, orders, oth_sale, sales as sales_store, store
+from . import connections, order_engine as engine, order_merge, order_report, orders, oth_sale, sales as sales_store, store
 
 KIND = "gsheet"
 SHEET = "Заказы"
@@ -179,7 +179,7 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     counted = {r["id"]: r for r in order_report._counted(conn, [rows[i] for i in ids])}
     rates, day = order_report.list_rates(conn), min(r["day"] for r in counted.values())
     fee = order_report.rate_on(rates, "point_fee", day)
-    if conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (card["id"],)).fetchone():
+    if conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (card["id"],)).fetchone() or card["id"] in order_merge.handed(conn):
         fee += order_report.rate_on(rates, "handoff_fee", day)
     total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
@@ -220,6 +220,7 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
     card_id, profits = card["id"], _profits(conn, card)
     common = common_of(conn, card, placed_at, sent)
     from_oth = oth_sale.from_number(conn, card_id)                 # the positions taken from «На ОТХ»: «Б», the WebMIM order they came from
+    merged, gave = order_merge.items_of(conn, card_id), order_merge.given_to(conn, card_id)     # a merge (the owner 2026-10-30)
     out = {}
     for item in card["items"]:
         qty, buy, sell = int(item["qty"]), round(float(item["supplier_price"]), 2), round(float(item["sale_unit"]), 2)
@@ -230,6 +231,12 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
             row = dict(common, **{"№ заказа MIM": from_oth[item["id"]], "Примечание": " ".join(
                 ("с ОТХ, заказ №%d. %s" % (source, common["Примечание"] or "")).split()),
                 "Реализация": FROM_STOCK if common["Реализация"] == REALIZED else common["Реализация"]})
+        elif item["id"] in merged:                                 # its source's WebMIM order and transfer; the client is in that order too
+            came = merged[item["id"]]
+            row = dict(common, **{"№ заказа MIM": came["number"], "Перемещение MIM": came["transfer"], "Примечание": " ".join(
+                ("клиент уже есть в заказе №%s. %s" % (came["label"], common["Примечание"] or "")).split())})
+        elif item["id"] in gave:                                   # the old row stays, at 0 pieces: «объединён в заказ №…»
+            row = dict(common, **{"Примечание": " ".join(("объединён в заказ №%d. %s" % (gave[item["id"]], common["Примечание"] or "")).split())})
         out[key(card_id, item["id"])] = dict(row, **{
             "Артикул": item["code"] or item["goods_id"], "Наименование": item["name"], "Кол-во": qty, "Цена MIM": buy,
             "Сумма MIM": round(buy * qty, 2), "Цена продажи": sell, "Сумма продажи": round(sell * qty, 2),
@@ -247,18 +254,26 @@ def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
             "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]}
 
 
-def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=()) -> List[dict]:
+def followed(conn, card_id: int) -> Tuple[set, set]:
+    """The rows of the order whose quantity follows it (a position that gave tyres from «На ОТХ» or to a merge, or took them by a merge,
+    order_merge) and those whose «Примечание» does too (a merge: «объединён в заказ №…», «клиент уже есть в заказе №…»)."""
+    merged = {key(card_id, i) for i in order_merge.ever(conn, card_id)}
+    return {key(card_id, i) for i in oth_sale.given(conn, card_id)} | merged, merged
+
+
+def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), notes=()) -> List[dict]:
     """What to send: a new position with every column (`create`), a written one with the columns of UPDATED that changed and the cells
     of CHECK as written (the script writes nothing into a row that no longer has them). A row the script did not find (the owner deleted or
     rewrote it) is not made again. `follow`: the rows whose quantity follows the order too (FOLLOWED: a position that gave tyres from «На ОТХ»
-    to a new order, the owner 2026-10-29)."""
+    to a new order, the owner 2026-10-29); `notes`: the rows whose «Примечание» follows too (a merge, the owner 2026-10-30)."""
     out = []
     for mark, fields in now_rows.items():
         before = written.get(mark)
         if before is None:
             out.append({"key": mark, "create": True, "fields": {c: fields[c] for c in COLUMNS}})
         elif not before.get("_missing"):
-            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
+            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) + (("Примечание",) if mark in notes else ())
+                    if before.get(c) != fields[c]}
             if diff:
                 out.append({"key": mark, "create": False, "fields": diff, "check": {c: before.get(c, "") for c in CHECK}})
     return out
@@ -341,7 +356,7 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     placed_at, written, failing = row[0], json.loads(row[1] or "{}"), row[2]
     seen = _last_event(conn, card_id)                                      # before the rows: a change made while Google answers is looked at again
     current = rows_of(conn, card_id, placed_at)
-    ops = changes(current, written, {key(card_id, i) for i in oth_sale.given(conn, card_id)})
+    ops = changes(current, written, *followed(conn, card_id))
     gone = [m for m in written if m not in current and not written[m].get("_gone")]
     for m in gone:
         written[m]["_gone"] = True
