@@ -292,6 +292,8 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
     conn.commit()
     made = [i["id"] for i in orders.get_card(conn, new)["items"]]          # the positions in the order of the rows (create_card_with_items)
     try:
+        if len(made) != len(rows):                                      # never a position left out of the takes
+            raise OthSaleError("позиции нового заказа не совпали с шинами на ОТХ")
         for r, line_id in zip(rows, made):
             if take(conn, new, line_id, r["item_id"], now, author) != int(r["qty"]):     # some taken a moment ago in another tab
                 raise OthSaleError("на ОТХ осталось меньше шин, чем было")
