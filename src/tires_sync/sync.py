@@ -230,6 +230,8 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
                 brand, model = ((ad.findtext("Brand") or "").strip(), (ad.findtext("Model") or "").strip()) if ad is not None else ("", "")
                 if brand and model and (brand, model) != (cand.avito_brand, cand.avito_model):
                     ev.ok[gid] = dataclasses.replace(cand, avito_brand=brand, avito_model=model)
+    from . import price_guard
+    price_guard.apply(price_guard.load(conn), ev, settings)              # a fall of the supplier's price of 5 % and more waits for the owner
     ev.match = cross                                                      # the cycle remembers its pairs and changes of supplier (run_cycle)
     for code in list(aliases):                                            # a code that takes the Id of an older ad does not need its own alias
         if code in ev.inherit:
@@ -770,6 +772,10 @@ def run_cycle(
     if ev.match is not None and account_id is not None:                  # the merge on: its pairs and changes of supplier are kept (only added)
         from . import tire_match
         tire_match.record(conn, acct, ev.match, store.moscow_iso())
+    if account_id is not None:                                            # the anchors of the supplier's prices (price_guard), saved with the cycle
+        from . import price_guard
+        price_guard.record(conn, parsed.offers, store.moscow_iso(), ev)
+        conn.commit()
     live = live_titles_of(out_dir)
     titles = dict(mirror_feed.bound_titles(conn, acct), **live)
     live_unread = not live and out_dir is not None and (Path(out_dir).parent / "avito_feed.xml").exists()   # a broken file: do not forget renames

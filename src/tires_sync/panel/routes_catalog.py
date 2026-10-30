@@ -167,6 +167,48 @@ def _market_cell(price, snapshot) -> dict:
 
 
 def register(app) -> None:
+    @app.route("/prices/changes", methods=["GET"])
+    @login_required
+    def price_changes_page():
+        """«Цена поставщика изменилась» (price_guard, the owner 2026-10-30): the falls of 5 % and more waiting, the owner's role only."""
+        from .. import price_guard
+        from .common import current_user
+        if current_user()["role"] != "owner":
+            abort(403)
+        conn, settings, parsed, _ref = context(app)
+        eff = connections.effective_settings(conn, connections.PRIMARY_ACCOUNT, settings)
+        from ..pricing import position_price
+        import dataclasses
+        rows = []
+        for r in price_guard.waiting(conn):
+            offer = parsed.offers.get(r["goods_id"])
+            was = position_price(dataclasses.replace(offer, base_price=float(r["base_price"])), eff) if offer is not None else None
+            will = position_price(dataclasses.replace(offer, base_price=r["now"]), eff) if offer is not None else None
+            rows.append(dict(r, name=offer.name if offer is not None else r["goods_id"], was=was, will=will))
+        return render_template("price_changes.html", rows=rows, rev=price_guard.rev(conn), waits=price_guard.WAITS)
+
+    @app.route("/prices/changes", methods=["POST"])
+    @login_required
+    def price_changes():
+        """«Принять» / «Оставить прежнюю» for the positions ticked; a page older than a change does nothing."""
+        from .. import price_guard
+        from .common import current_user
+        if current_user()["role"] != "owner":
+            abort(403)
+        conn = get_conn()
+        picked = [g for g in request.form.getlist("goods") if g][:2000]
+        action = request.form.get("action")
+        if request.form.get("rev") != price_guard.rev(conn):
+            flash("Список уже изменился: обновите страницу и отметьте снова.", "error")
+        elif not picked or action not in ("accept", "keep"):
+            flash("Отметьте позиции и выберите «Принять» или «Оставить прежнюю».", "error")
+        elif action == "accept":
+            flash("Принято: %d поз. Новая цена уйдёт на Авито %s." % (price_guard.accept(conn, picked, local_iso(), author()), price_guard.WAITS), "ok")
+        else:
+            flash("Оставлена прежняя цена: %d поз. Спросим снова, если поставщик снизит ещё на 5 %%." % price_guard.keep(conn, picked, local_iso(), author()),
+                  "ok")
+        return redirect("/prices/changes")
+
     from . import routes_catalog_oth                                  # «Товар и фид» → «На ОТХ»
     routes_catalog_oth.register(app)
 

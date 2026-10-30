@@ -56,7 +56,7 @@ class Settings:
     min_diameter: int
     portion_limit: int
     stale_days: int
-    price_jump_limit: float  # kept in saved settings, no longer used: a supplier's price change is never held
+    price_jump_limit: float  # kept in saved settings, no longer used: a fall of the supplier's price is held by price_guard (2026-10-30)
     guard_min: int
     guard_fraction: float
     allow_mass_removal: bool

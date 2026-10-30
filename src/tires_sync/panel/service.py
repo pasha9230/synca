@@ -15,8 +15,10 @@ from ..mappings import pending_mappings
 
 
 def evaluation(conn, settings, parsed, ref) -> Evaluation:
-    return evaluate(parsed.offers, parsed.issues, settings, ref, store.load_confirmed_mappings(conn),
-                    store.load_brand_map(conn))
+    from .. import price_guard
+    ev = evaluate(parsed.offers, parsed.issues, settings, ref, store.load_confirmed_mappings(conn), store.load_brand_map(conn))
+    price_guard.apply(price_guard.load(conn), ev, settings)              # the price the feed has: a fall waiting for the owner is held
+    return ev
 
 
 def _when(value) -> str:

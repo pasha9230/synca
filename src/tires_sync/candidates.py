@@ -33,6 +33,7 @@ class Evaluation:
     oth: Dict[str, int] = field(default_factory=dict)          # code -> pieces on «На ОТХ» for this account (sync.plan_decisions): kept, «Шины в наличии»
     oth_points: Dict[str, Tuple[str, ...]] = field(default_factory=dict)   # code -> the names of its points on OTH (the first line)
     oth_retired: Dict[str, Tuple[str, str, int]] = field(default_factory=dict)   # code -> (former Id, saved ad, price): published again from it
+    held: Dict[str, Tuple[float, float, str]] = field(default_factory=dict)  # code -> (anchor, supplier's price, why): priced from the anchor (price_guard)
 
 
 def evaluate(

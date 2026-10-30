@@ -556,6 +556,32 @@ def _alert_own_below_cost(conn, box, offers, settings=None) -> None:
         print("проверка «своя цена ниже закупки» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
 
 
+def _alert_price_guard(conn, box) -> None:
+    """The falls of the supplier's price held for the owner and the rises followed (price_guard, the owner 2026-10-30): one summary by brand
+    with the link to «Цена поставщика изменилась», to the owner's chat and to every other owner's own; each change once (told only once it
+    went). A side notice: whatever fails in it is printed and never stops the publishing of the feeds."""
+    from . import order_notify, price_guard, users
+    try:
+        found = price_guard.news(conn)
+        if not found["marks"]:
+            return
+        base = (os.environ.get("TIRES_PUBLIC_BASE") or store.get_state(conn, "public_base") or "").rstrip("/")
+        text = price_guard.text(found, (base + "/prices/changes") if base else "панель → Товар и фид → Цены поставщика")
+        if not _alert(conn, box, text, notice=True):
+            return
+        owner = order_notify.get_owner_login(conn)
+        others = [u["login"] for u in users.list_users(conn) if u["role"] == "owner" and u["active"] and u["login"] != owner]
+        if others:
+            order_notify.tell_people(conn, box, others, text)
+        price_guard.told(conn, found)
+    except Exception as err:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("сводка «цена поставщика изменилась» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
+
+
 def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
     """Download the unload of every supplier. The first one failing stops the cycle (as before); a secondary
     supplier failing is reported and its previous unload stays in use. Returns the problems of secondary suppliers.
@@ -788,6 +814,7 @@ def _cmd_run_cycle(args) -> int:
         _alert_new_unmatched(conn, box, results)
         if parsed is not None and any(r.ok for r in results):
             _alert_own_below_cost(conn, box, parsed.offers)
+            _alert_price_guard(conn, box)
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0

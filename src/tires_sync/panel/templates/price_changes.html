@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Цена поставщика изменилась · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Цена поставщика изменилась</h1><p class="sub">Поставщик снизил цену на 5 % и больше: наша цена на Авито оставлена прежней до вашего решения. «Принять» — новая цена уйдёт на Авито {{ waits }}. «Оставить прежнюю» — спросим снова, если поставщик снизит ещё на 5 %.</p></div></header>
+<section class="card"><div class="card-body stack">
+{% if rows %}<form method="post" action="/prices/changes" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="rev" value="{{ rev }}">
+<table class="table"><thead><tr><th></th><th>Позиция</th><th>Поставщик было → стало</th><th>Наша цена была → станет</th><th>Решение</th></tr></thead><tbody>
+{% for r in rows %}<tr data-price-row="{{ r.goods_id }}"><td><input type="checkbox" name="goods" value="{{ r.goods_id }}"{% if r.pending > 0 %} checked{% endif %} aria-label="{{ r.name }}"></td>
+<td>{{ r.name }}<div class="small muted mono">{{ r.brand }} · {{ r.goods_id }}</div></td>
+<td>{{ r.base_price|money }} → {{ r.now|money }} <span class="badge badge--warn">{{ r.pct }} %</span></td>
+<td>{% if r.was %}{{ r.was|money }} → {{ r.will|money }}{% else %}<span class="muted">позиции нет в выгрузке</span>{% endif %}</td>
+<td class="small">{% if r.pending > 0 %}ждёт решения с {{ r.pending_since|short_dt }}{% else %}оставлена прежняя ({{ r.kept_by }}, {{ r.kept_at|short_dt }}){% endif %}</td></tr>{% endfor %}
+</tbody></table>
+<div class="row" style="gap:var(--s-2)"><button class="btn btn--primary" name="action" value="accept">Принять</button><button class="btn btn--secondary" name="action" value="keep">Оставить прежнюю</button></div></form>
+{% else %}<p class="muted">Сейчас ничего не ждёт решения: цены поставщика не снижались на 5 % и больше.</p>{% endif %}
+</div></section>
+{% endblock %}

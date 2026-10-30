@@ -41,6 +41,7 @@
 <a class="sb-link{% if path.startswith('/photos') %} is-active{% endif %}" href="/photos/review">{{ icon("image") }}Генерация</a>
 <a class="sb-link{% if path.startswith('/feeds') %} is-active{% endif %}" href="/feeds">{{ icon("upload") }}Фиды</a>
 <a class="sb-link{% if path.startswith('/oth') %} is-active{% endif %}" href="/oth">{{ icon("undo") }}На ОТХ</a>
+{% if current_user().role == "owner" %}<a class="sb-link{% if path.startswith('/prices') %} is-active{% endif %}" href="/prices/changes">{{ icon("arrow-up") }}Цены поставщика</a>{% endif %}
 </nav>{% endif %}
 {% if can("home") %}<nav class="sb-group"><div class="sb-label">Аналитика</div>
 <a class="sb-link{% if path.startswith('/analytics') %} is-active{% endif %}" href="/analytics">{{ icon("arrow-up") }}Продажи и воронка</a>

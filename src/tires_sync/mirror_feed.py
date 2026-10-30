@@ -6,6 +6,7 @@ The one thing it may fix is a `Model` that Avito's reference does not have, and 
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -509,13 +510,19 @@ def pack_count(ad_id: str) -> int:
 def prices_for(conn, account_id: int, offers: Dict[str, object], settings) -> Dict[str, int]:
     """The price of every stored ad that the supplier has, by the account's own price of the position, else its pricing rule (a pack costs its
     count of pieces).
-    An ad without a rule or with a bad supplier price gets no entry and keeps the price it has."""
+    An ad without a rule or with a bad supplier price gets no entry and keeps the price it has. A fall of the supplier's price of 5 % and more
+    is priced from the anchor (price_guard), as in our own feeds."""
+    from . import price_guard
+    guard = price_guard.load(conn)
     out: Dict[str, int] = {}
     for ad_id in stored_ids(conn, account_id):
         offer = offers.get(supplier_code(ad_id))
         base = getattr(offer, "base_price", 0)
         if offer is None or not base or base <= 0:
             continue
+        held, _why = price_guard.base_for(guard, supplier_code(ad_id), float(base))
+        if held != float(base):
+            offer = dataclasses.replace(offer, base_price=held)
         price = position_price(offer, settings)                              # the account's own price of the position first
         if price is None:
             continue
