@@ -192,14 +192,30 @@ def test_a_full_success_moves_an_earlier_order_to_placed_the_ordinary_way(tmp_pa
     assert "Оформлен в WebMIM" in events(conn, mine)[1]
 
 
-@pytest.mark.parametrize("code", ["placed", "moving", "at_point", "done", "cancel"])
-def test_an_order_at_placed_or_later_or_closed_keeps_its_stage(tmp_path, code):
+@pytest.mark.parametrize("code", ["placed", "moving", "at_point"])
+def test_an_order_at_placed_or_later_keeps_its_stage(tmp_path, code):
     conn = db(tmp_path)
     mine = card(conn)
     put_on(conn, mine, code)
     result = place(conn, mine, FakeWebmim())
     assert result["ok"] and orders.get_card(conn, mine)["stage"]["code"] == code and "Этап" not in result["text"]
     assert not [e for e in events(conn, mine) if e.startswith("Этап") or e.startswith("Перевод")]
+
+
+@pytest.mark.parametrize("code", ["done", "cancel", "return"])
+def test_a_closed_order_is_refused_without_asking_webmim_and_has_no_button(tmp_path, code):
+    """The client may cancel the own order while a manager has «Заказать в МИМ» open (the review of client-ui2, 2026-10-31): a closed
+    order is never made in WebMIM; the check is _claim's, under its lock."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    put_on(conn, mine, code)
+    fake = FakeWebmim()
+    with pytest.raises(orders.OrderError, match="Заказ закрыт"):
+        place(conn, mine, fake)
+    assert fake.calls == [] and webmim_create.get_state(conn, mine) is None
+    assert orders.get_card(conn, mine)["stage"]["code"] == code
+    assert webmim_create.button(conn, orders.get_card(conn, mine), "test") is None
+    assert any("Заказ закрыт" in t for _k, t in webmim_create.checks(conn, orders.get_card(conn, mine), TODAY))
 
 
 def test_a_move_the_stage_refuses_leaves_the_order_and_says_why(tmp_path):

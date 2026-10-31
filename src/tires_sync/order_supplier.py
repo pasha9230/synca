@@ -187,7 +187,10 @@ def mark_tochki(conn, card_id, number: str, now: str, author: str) -> Tuple[str,
     before = number_of(conn, card_id)
     if before == text:
         return "", ""
-    conn.execute("UPDATE order_card SET supplier_number = ?, updated_at = ? WHERE id = ?", (text, now, card_id))
+    if conn.execute("UPDATE order_card SET supplier_number = ?, updated_at = ? WHERE id = ? AND stage_id = ?",
+                    (text, now, card_id, card["stage_id"])).rowcount != 1:       # moved since it was read (the client cancelled it): not written
+        conn.rollback()
+        raise orders.OrderError("Заказ изменился (этап), пока вписывали номер: откройте его снова. Номер 4 Точек не записан.")
     orders.add_event(conn, card_id, now, author, "field", "Номер заказа 4 Точек: %s (оформлен вручную в кабинете 4 Точек)%s"
                      % (text, ", был %s" % before if before else ""))
     conn.commit()

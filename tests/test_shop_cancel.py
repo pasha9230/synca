@@ -223,3 +223,22 @@ def test_a_refused_move_tells_the_client_to_write_to_the_manager(tmp_path, monke
     follow = client.get(r.headers["Location"]).get_data(as_text=True)
     assert "Напишите менеджеру" in follow and orders.get_card(conn, order)["stage"]["code"] == "from_point"
     assert conn.execute("SELECT 1 FROM audit WHERE action = 'shop_order_cancel'").fetchone() is None
+
+
+def test_an_order_the_client_cancelled_is_never_made_in_webmim(tmp_path):
+    """The manager opened «Заказать в МИМ», the client cancelled, the manager confirms (the review of the lead 2026-10-31): refused,
+    nothing goes to WebMIM, the button is gone."""
+    from test_webmim_create import TODAY, FakeWebmim, client_of
+    from tires_sync import webmim_create
+    app, client, conn, tg, pid = shop(tmp_path)
+    order = _order(client)
+    orders.update_card(conn, order, {"tags": "тест"}, NOW, "zaman1")                     # the test server makes tagged orders only
+    seen = webmim_create.fingerprint(conn, orders.get_card(conn, order))                 # the window was open before the cancel
+    post(client, "/shop/orders/%d/cancel" % order, "tok", confirm="1")
+    assert orders.get_card(conn, order)["stage"]["code"] == "cancel"
+    fake = FakeWebmim()
+    import pytest
+    with pytest.raises(orders.OrderError, match="Заказ закрыт"):
+        webmim_create.place(conn, order, client_of(fake), "test", NOW, TODAY, "zaman1", sleep=lambda _s: None, seen=seen)
+    assert fake.calls == [] and webmim_create.get_state(conn, order) is None
+    assert orders.get_card(conn, order)["stage"]["code"] == "cancel" and orders.get_card(conn, order)["webmim_id"] == ""

@@ -74,6 +74,9 @@ def checks(conn, card: dict, today: date, mode: str = "new") -> List[Tuple[str, 
     out = []
     if card.get("deal_kind") == "stock":
         return [("items", "Сделка из наличия точки: заказ в WebMIM для неё не нужен.")]
+    stage = card.get("stage") or {}
+    if stage.get("kind", "open") != "open":                 # cancelled (the client may cancel the own order, shop_cart.cancel), done, closed:
+        return [("items", "Заказ закрыт («%s»): в WebMIM его не оформить." % stage.get("name", ""))]   # _claim checks it under its lock
     items = [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"] or 0) > 0]      # the tyres taken from «На ОТХ» are ours already
     if not items and any(int(i["qty"] or 0) > 0 for i in card.get("items") or []):
         return [("items", ALL_OTH)]
@@ -514,10 +517,12 @@ def button(conn, card: dict, server: str) -> Optional[dict]:
     out = {"label": "", "state": state, "state_name": STATE_NAMES.get(state["state"], "") if state else "", "live": server in CREATE_SERVERS,
            "server": webmim_orders.SERVER_NAMES[server], "test": server == "test"}
     if state and state["webmim_id"]:
-        if state["state"] != "done" and str(card.get("webmim_id") or "") == state["webmim_id"]:
+        if state["state"] != "done" and str(card.get("webmim_id") or "") == state["webmim_id"] and (card.get("stage") or {}).get("kind", "open") == "open":
             out["label"] = "Досоздать " + where
         return out
     if typed:
         return out if state and state["result"] else None               # a number typed by hand: no button
+    if (card.get("stage") or {}).get("kind", "open") != "open":
+        return out if state and state["result"] else None               # a closed order (cancelled, done): nothing to make
     out["label"] = "Оформить " + where
     return out
