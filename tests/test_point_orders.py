@@ -134,7 +134,7 @@ def test_the_sections_at_the_bottom_with_their_counters(w):
     for url, sec in (("/orders", "orders"), ("/my-point", "mypoint"), ("/my-point/handed", "handed")):
         page = _page(w["point"], url)
         nav = page[page.index("data-point-nav"):].split("</nav>")[0]
-        assert re.findall(r'data-sec="([a-z]+)"', nav) == ["mypoint", "handed", "orders", "chats"], url
+        assert re.findall(r'data-sec="([a-z]+)"', nav) == ["mypoint", "handed", "orders", "tasks", "chats"], url   # «Задачи» (2026-10-31)
         assert re.search(r'aria-current="page" data-sec="%s"' % sec, nav), url
     counts = points_nav(w)
     assert counts["orders"] == 2                                                   # «Новый заказ» with the folded «Переговоры», as its chip
