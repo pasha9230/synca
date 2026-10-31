@@ -23,12 +23,14 @@
 {% if current_user().role == "point" %}<nav class="sb-group">
 <a class="sb-link{% if path.startswith('/my-point') and not path.startswith('/my-point/handed') %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
 <a class="sb-link{% if path.startswith('/my-point/handed') %} is-active{% endif %}" href="/my-point/handed">{{ icon("users") }}Переданные клиенты</a>
+{% include "_nav_tasks.html" %}
 </nav>{% endif %}
 {% if can("home") %}<nav class="sb-group">
 <a class="sb-link{% if path == '/' %} is-active{% endif %}" href="/">{{ icon("home") }}Главная</a>
 </nav>{% endif %}
 {% if can("orders") or can("chats") or can("calls") or can("alerts") %}<nav class="sb-group"><div class="sb-label">Продажи</div>
 {% if can("orders") %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}
+{% if current_user().role != "point" %}{% include "_nav_tasks.html" %}{% endif %}
 {% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_unread %}<span class="sb-count">{{ nav.chat_unread }}</span>{% endif %}</a>{% endif %}
 {% if can("calls") %}<a class="sb-link{% if path.startswith('/calls') %} is-active{% endif %}" href="/calls">{{ icon("clock") }}Звонки</a>{% endif %}
 {% if can("clients") %}<a class="sb-link{% if path.startswith('/clients') %} is-active{% endif %}" href="/clients">{{ icon("users") }}CRM</a>{% endif %}

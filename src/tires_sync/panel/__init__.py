@@ -267,6 +267,11 @@ def create_app(config: dict) -> Flask:
                 from flask import session
                 from .routes_alerts import nav_counts
                 self._data.update(nav_counts(conn, session["user"]))
+                from .. import order_notify, tasks
+                from .common import own_point
+                from .routes_orders import local_iso
+                counted = tasks.counter(conn, session["user"], order_notify.get_owner_login(conn), local_iso(), own_point() is not None)
+                self._data.update(tasks=counted["count"], tasks_late=counted["late"])
             return self._data
 
         def __getattr__(self, name):
@@ -358,6 +363,8 @@ def create_app(config: dict) -> Flask:
     routes_search.register(app)
     routes_sheet.register(app)
     routes_inquiry.register(app)
+    from . import routes_tasks
+    routes_tasks.register(app)
     routes_shop.register(app)
     routes_client_terms.register(app)
 

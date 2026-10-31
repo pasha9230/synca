@@ -135,6 +135,12 @@ def audit_text(entry: dict) -> str:
     return words(d) if words else action
 
 
+def _task_kind(kind) -> str:
+    """«Задачи» (tasks.KINDS, 2026-10-31): an entry before them has no kind — it was «перезвонить»."""
+    from ..tasks import KINDS
+    return KINDS.get(kind or "callback", _q(kind))
+
+
 def _q(value) -> str:
     """A field of a record as it is shown: «?» when it is not there."""
     return "?" if value in (None, "") else str(value)
@@ -294,11 +300,11 @@ _MORE_TEXTS = {
     "vk_catchup": lambda d: "ВКонтакте: сообщение подобрано без уведомления%s, сообщение №%s" % (
         " (точка «%s»)" % d["point"] if d.get("point") else "", _q(d.get("message_id"))),
     "call_listened": lambda d: "Прослушана запись звонка №%s" % _q(d.get("call")),
-    "callback": lambda d: "Задача перезвонить №%s: %s, до %s, ответственный %s" % (
-        _q(d.get("task")), "клиент №%s" % d["client"] if d.get("client") else ("заказ №%s" % d["order"] if d.get("order") else "чат Ч-%s" % _q(d.get("chat"))),
-        _q(d.get("due")), _q(d.get("to"))),
-    "callback_done": lambda d: "Задача перезвонить №%s выполнена" % _q(d.get("task")),
-    "callback_cancel": lambda d: "Задача перезвонить №%s отменена" % _q(d.get("task")),
+    "callback": lambda d: "Задача №%s «%s»: %s, до %s, исполнитель %s" % (
+        _q(d.get("task")), _task_kind(d.get("kind")), "заказ №%s" % d["order"] if d.get("order") else ("клиент №%s" % d["client"] if d.get("client")
+        else ("чат Ч-%s" % d["chat"] if d.get("chat") else "без заказа")), _q(d.get("due")), _q(d.get("to"))),
+    "callback_done": lambda d: "Задача №%s выполнена%s" % (_q(d.get("task")), (": " + str(d["result"])) if d.get("result") else ""),
+    "callback_cancel": lambda d: "Задача №%s отменена" % _q(d.get("task")),
     "client_saved": lambda d: "Изменена карточка клиента №%s" % _q(d.get("client")),
     "client_tagged": lambda d: "Клиент №%s: метка «%s» %s" % (_q(d.get("client")), _q(d.get("tag")), _on(d.get("on"), "поставлена", "снята")),
     "client_pair_skipped": lambda d: "Клиенты №%s и №%s отмечены как разные люди" % (_q(d.get("client")), _q(d.get("to"))),

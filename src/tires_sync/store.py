@@ -462,7 +462,8 @@ CREATE TABLE IF NOT EXISTS client_inquiry (
     updated_at TEXT NOT NULL DEFAULT '', active_at TEXT NOT NULL DEFAULT '', looked_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS client_inquiry_status ON client_inquiry (status);
--- «Перезвонить» (inquiry.py): a call to make at due_at by the assignee, shown in «Уведомления» when it is due
+-- «Задачи» (tasks.py; «Перезвонить» of inquiry.py before 2026-10-31): a task to do by due_at by the assignee (a login), of an order, a chat,
+-- a client or of none; `kind` callback|order|oth|other and `title` («что сделать») since 2026-10-31 (the table keeps its name)
 CREATE TABLE IF NOT EXISTS callback_task (
     id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER, order_id INTEGER, chat_row INTEGER, due_at TEXT NOT NULL,
     assignee TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, created_by TEXT NOT NULL,
@@ -607,6 +608,8 @@ def _migrate(conn) -> None:
     _add_column(conn, "order_task", "arg", "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "order_task", "stage_id", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "order_event", "level", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "callback_task", "kind", "TEXT NOT NULL DEFAULT 'callback'")   # «Задачи» (2026-10-31): the old rows are «перезвонить»
+    _add_column(conn, "callback_task", "title", "TEXT NOT NULL DEFAULT ''")
     for column in ("way", "place"):                                   # «Получение» of «Мои заказы»: as the client chose it at the checkout
         _add_column(conn, "shop_order", column, "TEXT NOT NULL DEFAULT ''")
     for column in ("address", "hours", "map_url"):                     # what the client is told on the arrival (order_templates)

@@ -15,7 +15,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "tires_sync"
 # The places whose action is computed (not a word in the code): what each of them can write. A new such place makes the test fail
 # until it is named here, a place gone from the code too.
 COMPUTED = {
-    "inquiry.close_callback": {"callback_done", "callback_cancel"},
+    "tasks.close": {"callback_done", "callback_cancel"},                     # «Задачи» (2026-10-31; inquiry.close_callback before)
 }
 
 
@@ -250,7 +250,7 @@ def test_a_record_without_its_fields_does_not_break_the_journal(action):
     ("order_chat_link", {"order": 40, "chat": 12, "how": "manual"}, "Чат Ч-12 привязан к заказу №40"),
     ("share_created", {"link": 3, "items": 4, "price": False}, "Создана подборка №3: позиций 4, без цен"),
     ("callback", {"task": 2, "client": 5, "order": None, "chat": None, "due": "2026-10-26 10:00", "to": "ivan"},
-     "Задача перезвонить №2: клиент №5, до 2026-10-26 10:00, ответственный ivan"),
+     "Задача №2 «Перезвонить»: клиент №5, до 2026-10-26 10:00, исполнитель ivan"),       # «Задачи» (2026-10-31): the kind is said
     ("orders_bulk_move", {"stage": 4, "moved": 6, "skipped": 1, "left": 0, "cards": [1, 2]},
      "Массовый перенос заказов: перенесено 6, пропущено 1, осталось 0"),
     ("orders_bulk_move", {"stage": 4, "moved": 2, "skipped": 0, "left": 4, "stopped": "database is locked"},

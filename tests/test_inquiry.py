@@ -301,15 +301,13 @@ def test_a_callback_goes_to_the_responsible_of_the_deal_and_is_due_at_its_time(c
     task = inquiry.add_callback(conn, at(60)[:16], "Подумает", NOW, "owner", order_id=card_id)
     got = inquiry.get_callback(conn, task)
     assert got["assignee"] == "worker2" and got["client_id"] == client_of_chat(conn, h) and got["due_at"] == at(60)[:16]
-    logins = {"owner", "worker2"}
-    assert inquiry.due_rows(conn, "worker2", at(59), "owner", logins) == []
-    [row] = inquiry.due_rows(conn, "worker2", at(60), "owner", logins)
-    assert row["level"] == "yellow" and row["text"].startswith("Перезвонить") and "Подумает" in row["text"] and row["href"] == "/orders/%d" % card_id
-    assert inquiry.due_rows(conn, "owner", at(60), "owner", logins) == []             # not the owner's task
-    assert inquiry.due_rows(conn, "worker2", at(121), "owner", logins)[0]["level"] == "red"
+    from tires_sync import tasks                                                       # «Задачи» since 2026-10-31: no row of the alerts
+    assert tasks.counter(conn, "worker2", "owner", at(-60), False) == {"count": 1, "late": 0}           # due today
+    assert tasks.counter(conn, "worker2", "owner", at(61), False) == {"count": 1, "late": 1}            # late
+    assert tasks.counter(conn, "owner", "owner", at(61), False)["count"] == 0                           # not the owner's task
     assert [t["id"] for t in inquiry.open_callbacks(conn, client_id=client_of_chat(conn, h))] == [task]
     inquiry.close_callback(conn, task, "done", at(61), "worker2")
-    assert inquiry.due_rows(conn, "worker2", at(200), "owner", logins) == [] and inquiry.open_callbacks(conn, order_id=card_id) == []
+    assert tasks.counter(conn, "worker2", "owner", at(200), False)["count"] == 0 and inquiry.open_callbacks(conn, order_id=card_id) == []
     with pytest.raises(inquiry.InquiryError):
         inquiry.close_callback(conn, task, "cancel", at(62), "worker2")
 
@@ -323,7 +321,8 @@ def test_a_callback_without_a_deal_goes_to_the_chat_responsible_else_the_author_
     other = inquiry.add_callback(conn, at(10)[:16], "", NOW, "owner", chat_row=h)
     assert inquiry.get_callback(conn, other)["assignee"] == "worker2"
     conn.execute("UPDATE callback_task SET assignee = 'gone' WHERE id = ?", (other,))          # the user left the panel afterwards
-    assert [r["callback"] for r in inquiry.due_rows(conn, "owner", at(10), "owner", {"owner", "worker2"})] == [task, other]
+    from tires_sync import tasks
+    assert [t["id"] for t in tasks.listing(conn, tab="mine", login="owner", owner_login="owner", now=at(10), point=False)] == [task, other]
 
 
 def test_the_assignee_is_the_deal_maker_when_nobody_is_named_and_never_a_point_or_an_observer(conn):
@@ -484,8 +483,9 @@ def test_a_task_of_a_switched_off_user_goes_to_the_owner_and_avito_notes_are_not
     task = inquiry.add_callback(conn, at(10)[:16], "", NOW, "owner", chat_row=h)
     users.set_active(conn, "worker2", False, NOW, "owner")
     conn.commit()
-    from tires_sync import order_alerts
-    assert [r["callback"] for r in order_alerts.callback_rows(conn, "owner", at(10))] == [task]
+    from tires_sync import order_alerts, tasks
+    assert [t["id"] for t in tasks.listing(conn, tab="mine", login="owner", owner_login="owner", now=at(10), point=False)] == [task]
+    assert not [r for r in order_alerts.page_rows(conn, "owner", at(10)) if r.get("callback")]     # a task is no alert (2026-10-31)
     other = chat(conn, peer="p2")
     message(conn, other, at(-5))
     message(conn, other, at(-4), direction="out", kind="system", text="Автоматическое уведомление")

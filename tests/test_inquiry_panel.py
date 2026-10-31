@@ -88,60 +88,58 @@ def test_point_accounts_closed_chats_and_waits_from_before_the_release_are_not_u
     assert urgent(conn) == []                                                    # the look of every minute has not started it yet
 
 
-def test_the_bell_shows_urgent_and_callback_rows(tmp_path):
+def test_the_bell_shows_urgent_and_never_a_task(tmp_path):
+    """The owner 2026-10-31: a due task is not in «Уведомления» nor in the bell — only the counter and the light of «Задачи»."""
     app, client, tok, conn = setup(tmp_path)
     message(conn, chat(conn), at(-90))
     inquiry.add_callback(conn, at(-5)[:16], "", at(-30), "owner", chat_row=chat(conn, peer="p9", name="Олег"))
     feed = client.get("/alerts/feed").get_json()
-    titles = sorted(i["title"] for i in feed["items"])
-    assert feed["red"] is True and titles == ["Чат", "Чат"] and any(i["text"].startswith("Перезвонить") for i in feed["items"])
+    assert feed["red"] is True and [i["title"] for i in feed["items"]] == ["Чат"] and not any("Перезвонить" in i["text"] for i in feed["items"])
 
 
 # ---- «Перезвонить» -------------------------------------------------------------------------------------------------------------------
 
-def test_the_callback_form_of_an_order_and_done_from_the_alerts(tmp_path):
+def test_the_task_form_of_an_order_and_done_from_the_card(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     card_id = orders.create_card(conn, {"client_name": "Иван", "client_phone": "+79001112233"}, NOW, "owner")
     conn.commit()
     page = client.get("/orders/%d" % card_id).get_data(as_text=True)
-    assert 'action="/callbacks/new"' in page and 'name="order_id" value="%d"' % card_id in page
-    r = post(client, "/callbacks/new", tok, order_id=str(card_id), date="2026-10-23", time="12:30", note="Подумает", back="/orders/%d" % card_id)
+    assert "Задачи по заказу" in page and 'action="/tasks/new"' in page and 'name="order_id" value="%d"' % card_id in page
+    r = post(client, "/tasks/new", tok, order_id=str(card_id), kind="callback", date="2026-10-23", time="12:30", note="Подумает",
+             back="/orders/%d" % card_id)
     assert r.status_code == 302 and r.headers["Location"].endswith("/orders/%d" % card_id)
     [task] = inquiry.open_callbacks(conn, order_id=card_id)
-    assert task["assignee"] == "owner" and task["note"] == "Подумает"
-    assert "Подумает" in client.get("/orders/%d" % card_id).get_data(as_text=True)
-    assert "Перезвонить" not in client.get("/alerts").get_data(as_text=True).split("<tbody>")[1]           # not due yet
+    assert task["assignee"] == "owner" and task["note"] == "Подумает" and task["kind"] == "callback"
     app.config["NOW"] = lambda: datetime(2026, 10, 23, 9, 31, 0)
-    page = client.get("/alerts").get_data(as_text=True)
-    assert "Перезвонить: +7 900 111-22-33 — Подумает" in page and 'action="/callbacks/%d/done"' % task["id"] in page
-    r = post(client, "/callbacks/%d/done" % task["id"], tok, back="/alerts")
+    assert "Перезвонить" not in client.get("/alerts").get_data(as_text=True).split("<tbody>")[1]          # never an alert (2026-10-31)
+    r = post(client, "/tasks/%d/done" % task["id"], tok, result="Договорились на завтра", back="/orders/%d" % card_id)
     assert r.status_code == 302 and inquiry.open_callbacks(conn, order_id=card_id) == []
-    assert "Перезвонить" not in client.get("/alerts").get_data(as_text=True).split("<tbody>")[1]
 
 
-def test_a_bad_callback_is_explained_and_a_foreign_back_is_ignored(tmp_path):
+def test_a_bad_task_is_explained_and_a_foreign_back_is_ignored(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     h = chat(conn)
-    r = post(client, "/callbacks/new", tok, chat_row=str(h), date="2026-10-22", time="10:00", back="https://evil.example/")
-    assert r.status_code == 302 and r.headers["Location"].endswith("/") and "evil" not in r.headers["Location"]
+    r = post(client, "/tasks/new", tok, chat_row=str(h), kind="callback", date="2026-10-22", time="10:00", back="https://evil.example/")
+    assert r.status_code == 302 and "evil" not in r.headers["Location"]
     assert inquiry.open_callbacks(conn, chat_row=h) == []
-    assert client.post("/callbacks/new", data={"chat_row": str(h)}).status_code == 400                     # no CSRF token
+    assert client.post("/tasks/new", data={"chat_row": str(h)}).status_code == 400                         # no CSRF token
 
 
-def test_a_point_and_an_observer_cannot_set_callbacks(tmp_path):
+def test_a_point_never_sets_a_task_of_a_chat_and_an_observer_none(tmp_path):
     from test_mypoint import manager
     app, client, tok, conn = setup(tmp_path)
     pid = conn.execute("INSERT INTO point (name) VALUES ('Бета')").lastrowid
     conn.commit()
     mine = manager(app, conn, pid)
     h = chat(conn)
-    assert post(mine, "/callbacks/new", "tok", chat_row=str(h), date="2026-10-24", time="10:00").status_code == 403
+    assert post(mine, "/tasks/new", "tok", chat_row=str(h), kind="callback", date="2026-10-24", time="10:00").status_code == 403
     users.add_user(conn, "viewer", "password-123", NOW, role="viewer")
     conn.commit()
     watcher = app.test_client()
     with watcher.session_transaction() as session:
         session["user"], session["epoch"], session["csrf"] = "viewer", store.get_session_epoch(conn, "viewer"), "tok"
-    assert post(watcher, "/callbacks/new", "tok", chat_row=str(h), date="2026-10-24", time="10:00").status_code == 403
+    assert post(watcher, "/tasks/new", "tok", chat_row=str(h), kind="callback", date="2026-10-24", time="10:00").status_code == 403
+    assert conn.execute("SELECT COUNT(*) FROM callback_task").fetchone()[0] == 0
 
 
 # ---- the status in the pages and «в работе» on opening -------------------------------------------------------------------------------
@@ -179,8 +177,8 @@ def test_the_client_card_partial_shows_the_status_and_the_callbacks(tmp_path):
         cell = render_template_string('{% with inquiry_client_id = cid, inquiry_place = "list" %}{% include "_client_inquiry.html" %}{% endwith %}',
                                       cid=client_id)
         none = render_template_string('{% with inquiry_client_id = 999, inquiry_place = "list" %}{% include "_client_inquiry.html" %}{% endwith %}')
-    assert 'data-inquiry="new"' in html and "Подумает" in html and 'name="client_id" value="%d"' % client_id in html and "Перезвонить (1)" in html
-    assert re.search(r'data-inquiry="new"', cell) and "Перезвонить" not in cell and none.strip() == ""
+    assert 'data-inquiry="new"' in html and "Подумает" in html and 'name="client_id" value="%d"' % client_id in html and "Задачи (1)" in html
+    assert re.search(r'data-inquiry="new"', cell) and "Задачи" not in cell and none.strip() == ""
 
 
 def test_avito_notes_do_not_make_a_chat_urgent(tmp_path):

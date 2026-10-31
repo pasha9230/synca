@@ -1,0 +1,2 @@
+{# «Задачи» in the menu (routes_tasks): my tasks late or due today; red when some are late #}
+{% if can("orders") %}<a class="sb-link{% if path.startswith('/tasks') %} is-active{% endif %}" href="/tasks">{{ icon("check") }}Задачи{% if nav.tasks %}<span class="sb-count{% if nav.tasks_late %} sb-count--red{% endif %}" title="Мои: просроченные и на сегодня">{{ nav.tasks }}</span>{% endif %}</a>{% endif %}

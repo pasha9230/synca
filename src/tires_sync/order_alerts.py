@@ -142,7 +142,7 @@ def page_rows(conn, login: str, now: Optional[str] = None) -> List[dict]:
     has the most important colour of its records. The user's own records are not alerts for them, except red ones.
     `now` (the panel's local time): a green alert older than GREEN_DAYS days is not shown either; nothing is deleted.
     The chats without an order whose client waits (chat_rows) are rows too; with `now` also «Срочно ответить» (urgent_rows, in place of the
-    chat's «Клиент написал») and the user's «Перезвонить» that are due (callback_rows); for the partner the orders a point named that are not
+    chat's «Клиент написал»; a due task is no row here since 2026-10-31 — it is «Задачи»'s); for the partner the orders a point named that are not
     in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts."""
     from . import order_points
     border = (datetime.fromisoformat(now) - timedelta(days=GREEN_DAYS)).isoformat(timespec="seconds") if now else ""
@@ -174,8 +174,6 @@ def page_rows(conn, login: str, now: Optional[str] = None) -> List[dict]:
     rows += [row for row in chat_rows(conn) if row["chat_row"] not in skip] + urgent   # one row per chat: «Срочно ответить»
                                                                                           # takes the place of «Клиент написал», of a chat
                                                                                           # with an order too
-    if now:
-        rows += callback_rows(conn, login, now)
     rows += missing_rows(conn, login)
     for row in rows:
         shown = stub_text(row.get("text"))
@@ -284,13 +282,6 @@ def missing_rows(conn, login: str) -> List[dict]:
         return []
     return [{"id": "inbox-%d" % item["id"], "order_id": None, "chat_row": None, "client": "", "at": item["at"], "author": "", "kind": "inbox",
              "level": "yellow", "more": 0, "title": "Входящие", "href": "/orders/inbox", "text": item["text"]} for item in order_manager.missing_orders(conn)]
-
-
-def callback_rows(conn, login: str, now: str) -> List[dict]:
-    """«Перезвонить» that are due for this user (inquiry.due_rows)."""
-    from . import inquiry, order_notify
-    owner = order_notify.get_owner_login(conn)
-    return inquiry.due_rows(conn, login, now, owner, inquiry.callers(conn, owner))
 
 
 def order_levels(conn, login: str, now: Optional[str] = None) -> Dict[int, str]:

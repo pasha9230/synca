@@ -114,13 +114,13 @@ def may_take() -> bool:
 
 def acceptable(rows: list) -> list:
     """The rows «Принять все» takes (the owner 2026-10-27): the records of the order journal only (a numeric id), red, yellow and green.
-    Left out, each by its own button: the chat rows («Клиент написал» of a chat without an order, «Срочно ответить»), «Перезвонить»,
+    Left out, each by its own button: the chat rows («Клиент написал» of a chat without an order, «Срочно ответить»),
     «Входящие», the point's questions (string ids), and the handed-over clients (a press there «берёт в работу»)."""
     return [r for r in rows if isinstance(r["id"], int) and r["order_id"] is not None and not is_handoff(r) and r["level"] in order_alerts.ALERT_LEVELS]
 
 
 def href(row: dict) -> str:
-    if row.get("href"):                                           # «Перезвонить» (inquiry.due_rows) knows its own place
+    if row.get("href"):                                           # «Входящие» knows its own place
         return row["href"]
     if row.get("chat_row"):
         return "/chats/%d" % row["chat_row"]

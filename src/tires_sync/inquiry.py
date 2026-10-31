@@ -28,8 +28,6 @@ NOT_THE_CLIENT = ("system", "deleted")                   # Avito's own notes in 
 RETRY_MARK = "inquiry_retry"                             # app_state: the events whose look failed, [what, key, failures], looked at again
 RETRIES = 3                                              # at most so many times (the lead 2026-10-25), then a record of the journal of actions
 HANDOFF_WINDOW = timedelta(minutes=10)                   # a handoff may reuse an older order (its number is no mark): read by time, remembered
-NOTE_MAX = 300
-DUE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 
 
 log = logging.getLogger("tires_sync.inquiry")
@@ -441,86 +439,39 @@ def tick(conn, now: str) -> dict:
 
 # ---- «Перезвонить» -----------------------------------------------------------------------------------------------------------------
 
-CALLBACK_FIELDS = ("id", "client_id", "order_id", "chat_row", "due_at", "assignee", "note", "created_at", "created_by", "done_at", "done_by",
-                   "cancelled_at")
-
-
-def _callback(row) -> dict:
-    return dict(zip(CALLBACK_FIELDS, row))
-
-
+# «Перезвонить» is a task of «Задачи» since 2026-10-31 (tasks.py): these keep the old calls working (a task of the kind «callback»)
 def get_callback(conn, task_id) -> dict:
-    row = conn.execute("SELECT %s FROM callback_task WHERE id = ?" % ", ".join(CALLBACK_FIELDS), (task_id,)).fetchone()
-    if row is None:
-        raise InquiryError("Такой задачи нет.")
-    return _callback(row)
+    from . import tasks
+    try:
+        return tasks.get(conn, task_id)
+    except tasks.TaskError as err:
+        raise InquiryError(str(err)) from err
 
 
 def add_callback(conn, due_at: str, note: str, now: str, author: str, client_id=None, order_id=None, chat_row=None) -> int:
-    """«Перезвонить» at `due_at` (YYYY-MM-DDTHH:MM, Moscow) for the client of the order, of the chat or the client itself. It goes to the one
-    who answers for the deal: the responsible of the order, else of the chat, else the author."""
-    due = str(due_at or "").strip()[:16]
-    if not DUE.match(due) or _dt(due) is None:
-        raise InquiryError("Укажите дату и время звонка.")
-    if due < now[:16]:
-        raise InquiryError("Это время уже прошло.")
-    from . import order_notify
-    staff = callers(conn, order_notify.get_owner_login(conn))
-    candidates = []                                          # the one who answers for the deal, if they work the orders in the panel
-    if order_id:
-        row = conn.execute("SELECT responsible, created_by FROM order_card WHERE id = ?", (order_id,)).fetchone()
-        if row is None:
-            raise InquiryError("Такого заказа нет.")
-        candidates.append(row[0] or row[1] or "")             # as the card shows it: the maker until another manager is named
-        found = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (order_id,)).fetchone()
-        client_id = client_id or (found[0] if found else None)
-    if chat_row:
-        row = conn.execute("SELECT responsible FROM avito_chat WHERE id = ?", (chat_row,)).fetchone()
-        if row is None:
-            raise InquiryError("Такого чата нет.")
-        candidates.append(row[0] or "")
-        found = conn.execute("SELECT client_id FROM client_chat WHERE chat_row = ?", (chat_row,)).fetchone()
-        client_id = client_id or (found[0] if found else None)
-    if client_id and conn.execute("SELECT 1 FROM client WHERE id = ?", (client_id,)).fetchone() is None:
-        raise InquiryError("Такого клиента нет.")
-    if not (client_id or order_id or chat_row):
-        raise InquiryError("Не указано, кому перезвонить.")
-    assignee = next((c for c in candidates if c in staff), author)
-    task_id = conn.execute("INSERT INTO callback_task (client_id, order_id, chat_row, due_at, assignee, note, created_at, created_by) VALUES (?,?,?,?,?,?,?,?)",
-                           (client_id or None, order_id or None, chat_row or None, due, assignee, " ".join(str(note or "").split())[:NOTE_MAX], now,
-                            author)).lastrowid
-    store.write_audit(conn, now, author, "callback", {"task": task_id, "client": client_id, "order": order_id, "chat": chat_row, "due": due,
-                                                     "to": assignee})
-    return task_id
+    """«Перезвонить» at `due_at` (YYYY-MM-DDTHH:MM, Moscow) for the client of the order, of the chat or the client itself; to the one who
+    answers for the deal (tasks.default_assignee)."""
+    from . import order_notify, tasks
+    try:
+        return tasks.add(conn, kind="callback", title="", due_at=due_at, note=note, now=now, author=author,
+                         owner_login=order_notify.get_owner_login(conn), client_id=client_id, order_id=order_id, chat_row=chat_row)
+    except tasks.TaskError as err:
+        raise InquiryError(str(err)) from err
 
 
 def close_callback(conn, task_id, how: str, now: str, who: str) -> None:
     """«Сделано» (how = "done") or «Отменить» (how = "cancel"); a closed task stays closed."""
-    if how not in ("done", "cancel"):
-        raise InquiryError("Неизвестное действие.")
-    get_callback(conn, task_id)
-    column = "done_at" if how == "done" else "cancelled_at"
-    cur = conn.execute("UPDATE callback_task SET %s = ?, done_by = ? WHERE id = ? AND done_at IS NULL AND cancelled_at IS NULL" % column,
-                       (now, who, task_id))
-    if cur.rowcount != 1:
-        conn.rollback()
-        raise InquiryError("Задача уже закрыта.")
-    store.write_audit(conn, now, who, "callback_" + how, {"task": int(task_id)})
+    from . import tasks
+    try:
+        tasks.close(conn, task_id, how, now, who)
+    except tasks.TaskError as err:
+        raise InquiryError(str(err)) from err
 
 
 def open_callbacks(conn, client_id=None, order_id=None, chat_row=None) -> List[dict]:
-    """The open «Перезвонить» of a client (with those of its orders and chats), of an order or of a chat, the nearest first."""
-    if client_id:
-        sql, args = ("(client_id = ? OR order_id IN (SELECT order_id FROM client_order WHERE client_id = ?) "
-                     "OR chat_row IN (SELECT chat_row FROM client_chat WHERE client_id = ?))", [client_id] * 3)
-    elif order_id:
-        sql, args = "order_id = ?", [order_id]
-    elif chat_row:
-        sql, args = "chat_row = ?", [chat_row]
-    else:
-        return []
-    return [_callback(r) for r in conn.execute("SELECT %s FROM callback_task WHERE done_at IS NULL AND cancelled_at IS NULL AND %s ORDER BY due_at, id"
-                                               % (", ".join(CALLBACK_FIELDS), sql), args)]
+    """The open tasks of a client (with those of its orders and chats), of an order or of a chat, the nearest first."""
+    from . import tasks
+    return tasks.of_place(conn, client_id=client_id, order_id=order_id, chat_row=chat_row)
 
 
 def _who_called(conn, task: dict) -> tuple:
@@ -544,24 +495,3 @@ def _who_called(conn, task: dict) -> tuple:
 def callers(conn, owner_login: str) -> set:
     """Who may get a «Перезвонить»: the active people of the panel who work the orders (not a point, not an observer, not a client), and the owner."""
     return {u["login"] for u in users.list_users(conn) if u["active"] and u["role"] not in ("point", "viewer", "client")} | {owner_login}
-
-
-def due_rows(conn, login: str, now: str, owner_login: str, panel_logins: set) -> List[dict]:
-    """The rows of «Уведомления» for the «Перезвонить» that are due for this user (`panel_logins`: callers(); a task of somebody who left
-    the panel or was switched off: the owner's). Red an hour after the time."""
-    rows = []
-    late = _iso(_dt(now) - timedelta(hours=1))
-    for row in conn.execute("SELECT %s FROM callback_task WHERE done_at IS NULL AND cancelled_at IS NULL AND due_at <= ? ORDER BY due_at"
-                            % ", ".join(CALLBACK_FIELDS), (now[:16],)):
-        task = _callback(row)
-        if not (task["assignee"] == login or (task["assignee"] not in panel_logins and login == owner_login)):
-            continue
-        name, phone = _who_called(conn, task)
-        text = "Перезвонить%s%s" % (": " + clients.display(phone) if phone else "", " — " + task["note"] if task["note"] else "")
-        href = ("/orders/%d" % task["order_id"] if task["order_id"] else "/chats/%d" % task["chat_row"] if task["chat_row"]
-                else "/clients/%d" % task["client_id"])
-        title = "Заказ №%d" % task["order_id"] if task["order_id"] else "Чат" if task["chat_row"] else "Клиент"
-        rows.append({"id": "callback-%d" % task["id"], "order_id": None, "chat_row": None, "callback": task["id"], "client": name,
-                     "at": task["due_at"] + ":00", "author": "", "kind": "callback", "level": "red" if task["due_at"] <= late[:16] else "yellow",
-                     "more": 0, "text": text, "href": href, "title": title})
-    return rows
