@@ -220,10 +220,11 @@ def set_own_name(conn, login: str, name: str, now: str) -> None:
     name = _name(name)
     if not name:
         raise UserError("Название или имя: впишите его.")
-    if get_role(conn, login)["role"] != "client":
+    old = get_role(conn, login)
+    if old["role"] != "client":
         raise UserError("Имя меняет владелец.")
     conn.execute("UPDATE panel_user_role SET display_name = ?, updated = ?, updated_by = ? WHERE login = ?", (name, now, normalize(login), normalize(login)))
-    store.write_audit(conn, now, normalize(login), "client_own_name", {"login": normalize(login)})
+    store.write_audit(conn, now, normalize(login), "client_own_name", {"login": normalize(login), "from": old["display_name"], "to": name})
     conn.commit()
 
 

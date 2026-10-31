@@ -141,3 +141,15 @@ def test_nothing_priced_is_a_catalog_not_set_up(tmp_path):
     app, client, conn, _ = make_shop(tmp_path, role=(None, None), brands=(("LAUFENN", None, None),))
     html = page(client)
     assert "Ассортимент ещё не настроен" in html and prices(html) == []
+
+
+def test_the_journal_says_the_old_and_the_new_name(tmp_path):
+    import json
+    from tires_sync.panel import texts
+    app, client, conn, _ = make_shop(tmp_path)
+    post(client, "/shop/profile", "tok", name="Первый", phone="+7 900 111-22-33", address="г. Тест, ул. Первая, 1")
+    post(client, "/shop/profile", "tok", name="Второй", phone="+7 900 111-22-33", address="г. Тест, ул. Первая, 1")
+    detail = json.loads(conn.execute("SELECT detail FROM audit WHERE action = 'client_own_name' ORDER BY id DESC").fetchone()[0])
+    assert (detail["from"], detail["to"]) == ("Первый", "Второй")
+    line = texts.audit_text({"action": "client_own_name", "detail": detail, "author": "buyer", "at": "2026-10-07T12:00:00"})
+    assert "Первый" in line and "Второй" in line and "buyer" in line
