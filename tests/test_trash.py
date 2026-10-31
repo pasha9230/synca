@@ -34,6 +34,8 @@ def base(tmp_path):
     conn.execute("INSERT INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, 4, ?, 'o')", (item, card, NOW))
     conn.execute("INSERT INTO order_item_oth (item_id, order_id, from_item, from_order, qty, at, author, undone_at) VALUES (?, ?, 999, 999, 4, ?, 'o', ?)",
                  (item, card, NOW, NOW))                                         # «Взять с ОТХ» given back: holds nothing, goes with the order
+    conn.execute("INSERT INTO callback_task (order_id, due_at, assignee, created_at, created_by, kind, title) VALUES (?, '2026-10-24T10:00', 'o', ?, "
+                 "'o', 'order', 'Оформить')", (card, NOW))                       # «Задачи» of the order (2026-10-31): go and come back with it
     conn.commit()
     return conn, fake, account, chats.get_chat(conn, chat["id"]), card
 

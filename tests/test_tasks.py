@@ -250,3 +250,33 @@ def test_the_review_tails_whom_to_call_a_points_task_of_another_point_the_delete
     assert texts.audit_text({"action": "callback", "detail": {"task": 9, "due": "2026-10-24T10:00", "to": "owner", "kind": "other"}}).startswith(
         "Задача №9 «Другое»: без заказа")
     assert texts.audit_text({"action": "callback_done", "detail": {"task": 9, "result": "Готово"}}) == "Задача №9 выполнена: Готово"
+
+
+def test_the_office_never_gives_a_points_manager_a_chat_a_client_nor_another_points_order(tmp_path):
+    """The lead's review: through the office a point would see the name and the phone of a client out of its own orders (CRM is closed to
+    the points, the owner 2026-10-29) — a point's manager gets an order of its own point or none, never a chat or a client."""
+    from test_inquiry import chat
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    manager(app, conn, alpha)
+    own, other = card(conn, alpha), card(conn, beta, "+79005556677")
+    h = chat(conn)
+    client_id = conn.execute("INSERT INTO client (name, created_at) VALUES ('Чужой клиент', ?)", (NOW,)).lastrowid
+    conn.commit()
+    for form in ({"chat_row": str(h)}, {"client_id": str(client_id)}, {"order_id": str(other)},
+                 {"order_id": str(own), "client_id": str(client_id)}):                           # a client slipped in beside its own order
+        assert new(client, tok, assignee="gamma", **form).status_code == 302, form
+        assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE assignee = 'gamma'").fetchone()[0] == 0, form
+    assert new(client, tok, assignee="gamma", order_id=str(own)).status_code == 302
+    assert new(client, tok, assignee="gamma").status_code == 302
+    assert conn.execute("SELECT order_id, client_id FROM callback_task WHERE assignee = 'gamma' ORDER BY id").fetchall()[1] == (None, None)
+    assert new(client, tok, assignee="zaman", chat_row=str(h), kind="callback", title="").status_code == 302    # the office: as before
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE assignee = 'zaman' AND chat_row = ?", (h,)).fetchone()[0] == 1
+
+
+def test_a_direct_post_of_a_point_with_a_chat_is_refused(tmp_path):
+    from test_inquiry import chat
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    gamma = manager(app, conn, alpha)
+    h = chat(conn)
+    assert new(gamma, chat_row=str(h), kind="callback", title="").status_code == 403
+    assert conn.execute("SELECT COUNT(*) FROM callback_task").fetchone()[0] == 0

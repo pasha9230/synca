@@ -124,10 +124,10 @@ def register(app) -> None:
             if not may_take():
                 abort(403)
             allowed = {p["login"] for p in tasks.assignees(conn, _owner(conn), _main(app))}
-            if order_id and assignee:                     # a point's manager: the orders of its own point only (the review)
-                role = users.get_role(conn, assignee)
-                if role["role"] == "point" and _card_point(conn, order_id) != role["point_id"]:
-                    flash("Менеджеру точки можно поставить задачу только по заказу его точки.", "error")
+            role = users.get_role(conn, assignee) if assignee else None
+            if role and role["role"] == "point":          # a point's manager (the lead's review): an order of its own point or none — never
+                if chat_row or client_id or (order_id and _card_point(conn, order_id) != role["point_id"]):   # a chat nor a client
+                    flash("Менеджеру точки можно поставить задачу только по заказу его точки или без заказа.", "error")
                     return redirect(_back())
         due = "%sT%s" % (str(f.get("date") or "").strip(), str(f.get("time") or "").strip())
         try:
