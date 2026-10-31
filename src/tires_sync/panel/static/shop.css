@@ -117,6 +117,11 @@ body.shop,.shop-cat{--cl-primary:#1677ff;--cl-primary-bg:#e6f4ff;--cl-error:#ff4
 .shop-steps li.is-cur{color:var(--cl-text)}
 .shop-steps li.is-cur::before{background:var(--cl-primary);border-color:var(--cl-primary)}
 .shop-steps li.is-err::before{background:var(--cl-error);border-color:var(--cl-error)}
+.shop-hold{display:block;margin-top:2px;font-size:12px;color:var(--cl-text-3)}
+.shop-recv{margin:6px 0 0;overflow-wrap:anywhere}
+.shop-cancel{margin-top:16px;padding:12px;border:1px solid #ffa39e;background:#fff1f0;border-radius:8px}
+.shop-cancel p{margin:0 0 10px}
+.shop-cancel-link{margin-top:16px}
 .shop-narrow{max-width:560px;display:flex;flex-direction:column;gap:16px}
 .shop-me-card{display:flex;align-items:center;gap:12px}
 .shop-me-card div{display:flex;flex-direction:column}
@@ -187,13 +192,14 @@ body.shop,.shop-cat{--cl-primary:#1677ff;--cl-primary-bg:#e6f4ff;--cl-error:#ff4
   .shop-cart-table .c-qty{grid-area:qty;padding-top:8px}
   .shop-orders-table thead{display:none}
   .shop-orders-table,.shop-orders-table tbody{display:block}
-  .shop-orders-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"no sum" "date status";padding:12px;
+  .shop-orders-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"no sum" "date status" "recv recv";padding:12px;
     border-bottom:1px solid var(--cl-border-2)}
   .shop-orders-table td{display:block;padding:0;border:0;height:auto}
   .shop-orders-table .c-no{grid-area:no;font-weight:600}
   .shop-orders-table .c-sum{grid-area:sum;font-weight:600}
   .shop-orders-table .c-date{grid-area:date;color:var(--cl-text-3);font-size:13px}
   .shop-orders-table .c-status{grid-area:status;text-align:right}
+  .shop-orders-table .c-recv{grid-area:recv;color:var(--cl-text-2);font-size:13px;padding-top:4px;overflow-wrap:anywhere}
   .shop .pager{padding:12px}
   .shop .empty{padding:32px 16px}
   .shop .empty h3,.shop .empty p{overflow-wrap:anywhere}

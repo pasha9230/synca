@@ -158,6 +158,10 @@ def test_every_step_of_the_client_lights_an_element_of_the_catalog(tmp_path):
     assert shown(html) == [s["title"] for s in steps] == ["Каталог", "Фильтры", "Склад 1 и Склад 2", "Корзина и заказ", tour.AGAIN["title"]]
     for s in steps:
         assert len(select(html, s["sel"])) == 1, s["sel"]
+        if "phone" in s:                                       # the filters sit in a closed sheet on a phone: its button is lit there
+            assert len(select(html, s["phone"])) == 1, s["phone"]
+            assert "@media (max-width:%dpx){body:has(#tour-s%d:checked) %s{" % (tour.PHONE, steps.index(s) + 1, s["phone"]) in html
+    assert [s["title"] for s in steps if s.get("phone") == ".shop-ft-open"] == ["Фильтры", "Склад 1 и Склад 2"]
     assert "<script" not in html and "script-src" not in response.headers["Content-Security-Policy"]     # the catalog keeps no script
 
 

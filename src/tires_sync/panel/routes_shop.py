@@ -183,6 +183,20 @@ def _after_order(app, conn, card_id: int, name: str, stamp: str) -> None:
         conn.commit()
 
 
+def _tell_cancel(app, conn, card: dict, name: str, stamp: str) -> None:
+    """The client cancelled the order: its manager is told the way of a new order (_after_order); a failure never undoes the cancel."""
+    try:
+        from . import routes_vk
+        _send, _deliver, notify = routes_vk.channel(app, conn, stamp)
+        base = (store.get_state(conn, "public_base") or "").rstrip("/")
+        notify(order_manager.staff_card(conn, orders.get_card(conn, card["id"])),
+               shop_cart.cancel_message(card, name, base + "/orders/%d" % card["id"] if base else ""))
+    except Exception:
+        current_app.logger.exception("the message about the cancel of the client's order %s failed", card["id"])
+        orders.add_event(conn, card["id"], stamp, "оповещение", "notify", "Оповещение не отправлено: канал оповещений недоступен")
+        conn.commit()
+
+
 def register(app) -> None:
     @app.route("/shop")
     def shop_page():
@@ -272,7 +286,26 @@ def register(app) -> None:
         order = shop_cart.my_order(conn, login, order_id)
         if order is None:
             abort(404)                                          # another client's, not of the catalog, or no such: the same answer
-        return _page("shop_order.html", conn, login, order=order)
+        return _page("shop_order.html", conn, login, order=order, confirm=request.args.get("cancel") == "1")
+
+    @app.route("/shop/orders/<order_id>/cancel", methods=["POST"])
+    def shop_order_cancel(order_id):
+        """«Отменить заказ» (the owner 2026-10-31): the client's own order while it is early (shop_cart.cancel); its manager is told the
+        way of a new order. Nothing goes to the client here: only what the rules of «Отмена» send anyway."""
+        conn, login = get_conn(), current_user()["login"]
+        if shop_cart.my_order(conn, login, order_id) is None:
+            abort(404)
+        if request.form.get("confirm") != "1":
+            return redirect("/shop/orders/%s?cancel=1#cancel" % int(order_id))
+        stamp = local_iso()
+        try:
+            card = shop_cart.cancel(conn, login, order_id, stamp)
+        except shop_cart.CartError as err:
+            flash(str(err), "error")
+            return redirect("/shop/orders/%d" % int(order_id))
+        _tell_cancel(app, conn, card, users.get_role(conn, login)["display_name"] or login, stamp)
+        flash("Заказ №%d отменён." % card["id"], "ok")
+        return redirect("/shop/orders/%d" % card["id"])
 
     @app.route("/shop/profile")
     def shop_profile_page():

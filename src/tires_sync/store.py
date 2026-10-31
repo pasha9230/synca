@@ -325,7 +325,8 @@ CREATE TABLE IF NOT EXISTS shop_cart (
 -- the client's own contacts for the orders (asked at the first order, kept for the next)
 CREATE TABLE IF NOT EXISTS client_profile (login TEXT PRIMARY KEY, phone TEXT NOT NULL, address TEXT NOT NULL, updated_at TEXT NOT NULL);
 -- the orders a client placed from the catalog: «Мои заказы» shows only these, of this login
-CREATE TABLE IF NOT EXISTS shop_order (order_id INTEGER PRIMARY KEY, login TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS shop_order (order_id INTEGER PRIMARY KEY, login TEXT NOT NULL, created_at TEXT NOT NULL,
+    way TEXT NOT NULL DEFAULT '', place TEXT NOT NULL DEFAULT '');      -- how the client chose to receive it: «point» (the point's name) / «delivery» (the address)
 CREATE INDEX IF NOT EXISTS shop_order_login ON shop_order (login);
 CREATE TABLE IF NOT EXISTS photo (
     id INTEGER PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL, ext TEXT NOT NULL, width INTEGER, height INTEGER, bytes INTEGER,
@@ -599,6 +600,8 @@ def _migrate(conn) -> None:
     _add_column(conn, "order_task", "arg", "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "order_task", "stage_id", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "order_event", "level", "TEXT NOT NULL DEFAULT ''")
+    for column in ("way", "place"):                                   # «Получение» of «Мои заказы»: as the client chose it at the checkout
+        _add_column(conn, "shop_order", column, "TEXT NOT NULL DEFAULT ''")
     for column in ("address", "hours", "map_url"):                     # what the client is told on the arrival (order_templates)
         _add_column(conn, "point", column, "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "point", "avito_account_id", "INTEGER")          # the Avito account of the point: its manager sees its chats (none: no chat)

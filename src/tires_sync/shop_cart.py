@@ -5,11 +5,12 @@ price and the stock are taken anew at the checkout (the panel passes the positio
 Everything here is of one login, the one signed in; a client never reaches another's cart, contacts or orders."""
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from . import connections, economics, orders, store, terms as terms_store, users
+from . import connections, economics, order_points, orders, store, terms as terms_store, users
 from .panel import economics_view
 
 RESPONSIBLE_KEY = "shop_orders_responsible"
@@ -20,6 +21,9 @@ ADDRESS_MIN, ADDRESS_MAX = 5, 300
 STATUS = {"from_point": "Принят", "new": "Принят", "talk": "Принят", "wait": "Принят", "placed": "Оформлен", "moving": "В пути",
           "at_point": "Готов к выдаче", "done": "Выполнен", "cancel": "Отменён", "oth": "Отменён", "return_given": "Отменён", "return": "Отменён"}
 STATUS_OTHER = "В работе"                                     # a stage the owner made (no code)
+# the client cancels the own order only before it is placed with the supplier (the owner 2026-10-31): these stages and nothing of placing
+EARLY = ("from_point", "new", "talk", "wait")
+CANCEL_REASON = ("отменил клиент", "сам, в каталоге клиента")    # orders.cancel_reason_of: the managers see who cancelled it
 
 
 class CartError(ValueError):
@@ -195,7 +199,8 @@ def place(conn, login: str, name: str, cart_lines: List[Line], contacts: dict, p
         card_id = orders.create_card(conn, fields, now, login, require_contact=False, commit=False, stage=stage, many_open=True)
         for l in cart_lines:
             orders.add_item(conn, card_id, now=now, author=login, commit=False, **_item_args(conn, l.item, l.qty, now[:10]))
-        conn.execute("INSERT INTO shop_order (order_id, login, created_at) VALUES (?, ?, ?)", (card_id, login, now))
+        conn.execute("INSERT INTO shop_order (order_id, login, created_at, way, place) VALUES (?, ?, ?, ?, ?)",
+                     (card_id, login, now, "point" if point else "delivery", point["name"] if point else contacts["address"]))
         conn.execute("INSERT INTO client_profile (login, phone, address, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (login) DO UPDATE SET "
                      "phone = excluded.phone, address = excluded.address, updated_at = excluded.updated_at",
                      (login, contacts["phone"], contacts["address"], now))
@@ -211,6 +216,12 @@ def message(card: dict, name: str, total_sum: int, link: str) -> str:
     rows = ["%s × %d — %s ₽" % (i["name"], i["qty"], _rub(i["qty"] * i["sale_unit"])) for i in card["items"]]
     head = "Заказ №%d из каталога клиента: %s, %s. Сумма: %s ₽." % (card["id"], name, card["client_phone"], _rub(total_sum))
     return "\n".join([head] + ([link] if link else []) + rows + ([card["comment"]] if card["comment"] else []))
+
+
+def cancel_message(card: dict, name: str, link: str) -> str:
+    """The text for the manager when the client cancelled the order itself (shop_cart.cancel)."""
+    head = "Клиент отменил заказ №%d из каталога клиента: %s, %s. Был на этапе «%s»." % (card["id"], name, card["client_phone"], card["stage"]["name"])
+    return "\n".join([head] + ([link] if link else []))
 
 
 def _rub(value) -> str:
@@ -242,11 +253,49 @@ def my_orders(conn, login: str) -> List[dict]:
     return out
 
 
+def _receive(conn, card: dict, way: str, place: str) -> str:
+    """«Получение» as the client chose it: the point (the order's point now: a manager may move it) or the delivery and its address.
+    An order of before 2026-10-31 has no choice kept: the first words of its comment say it (the comment itself is never shown)."""
+    if not way:
+        way = "point" if card["comment"].startswith("Самовывоз:") else "delivery" if card["comment"].startswith("Доставка:") else ""
+    if way == "point":
+        name = place
+        if card["point_id"]:
+            try:
+                name = order_points.get_point(conn, int(card["point_id"]))["name"]
+            except (order_points.PointError, ValueError):
+                pass
+        return "Самовывоз: %s" % name if name else "Самовывоз"
+    if way == "delivery":
+        return "Доставка: %s" % place if place else "Доставка"
+    return ""
+
+
+def cancellable(conn, card: dict) -> bool:
+    """Before the order is placed with the supplier: an early stage, no number of WebMIM, of 4 Точки (order_supplier, not of the card's
+    fields) or of a transfer, no sale; no press of «Оформить в WebMIM» that is going or may have made the order (webmim_create: only
+    «не оформлен» lets it go, the review 2026-10-31); no tyres taken from «На ОТХ» (move_card refuses the cancel with them)."""
+    from . import oth_sale
+    if card["stage"].get("code") not in EARLY or card["sale_ids"]:
+        return False
+    if any(str(card.get(k) or "").strip() for k in ("webmim_id", "webmim_number", "transfer_number")):
+        return False
+    row = conn.execute("SELECT supplier_number FROM order_card WHERE id = ?", (card["id"],)).fetchone()
+    if row and str(row[0] or "").strip():
+        return False
+    pressed = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card["id"],)).fetchone()
+    if pressed and pressed[0] != "refused":
+        return False
+    return not oth_sale.holds(conn, card["id"])
+
+
 def my_order(conn, login: str, order_id) -> Optional[dict]:
-    """One order of the login (None: not the login's or not of the catalog): status, positions with the client's price, the sum."""
+    """One order of the login (None: not the login's or not of the catalog): status, positions with the client's price, the sum,
+    «Получение», «храним до» (the reservation of the point, orders._start_reserve: the date the point and the managers see), whether the
+    client may cancel it."""
     if not re.fullmatch(r"\d{1,12}", str(order_id)):
         return None
-    row = conn.execute("SELECT created_at FROM shop_order WHERE order_id = ? AND login = ?", (int(order_id), login)).fetchone()
+    row = conn.execute("SELECT created_at, way, place FROM shop_order WHERE order_id = ? AND login = ?", (int(order_id), login)).fetchone()
     if row is None:
         return None
     try:
@@ -254,5 +303,38 @@ def my_order(conn, login: str, order_id) -> Optional[dict]:
     except orders.OrderError:
         return None
     items = [{"name": _shown_name(i), "qty": i["qty"], "price": i["sale_unit"]} for i in orders.list_items(conn, card["id"])]
+    at_point = card["stage"].get("code") == "at_point"
     return {"id": card["id"], "created_at": row[0], "status": status(card["stage"]), "items": items,
-            "total": sum(i["qty"] * i["price"] for i in items)}
+            "total": sum(i["qty"] * i["price"] for i in items), "receive": _receive(conn, card, row[1], row[2]),
+            "hold_until": card["reserve_until"] if at_point else "", "can_cancel": cancellable(conn, card)}
+
+
+def cancel(conn, login: str, order_id, now: str) -> dict:
+    """The client cancels the own order (the owner 2026-10-31): only the login's, only while cancellable. The card goes to «Отмена /
+    невыкуп» with the reason «отменил клиент» the usual way (orders.move_card: its journal, the rules of the stage), the audit gets a line.
+    The check and the move are one transaction: a manager placing it a moment before wins (CartError). Returns the card as it was."""
+    if my_order(conn, login, order_id) is None:
+        raise CartError("Такого заказа нет.")
+    stage = conn.execute("SELECT id FROM order_stage WHERE code = 'cancel'").fetchone()
+    if stage is None:
+        raise CartError("Отменить не получилось: напишите менеджеру.")
+    try:
+        conn.execute("UPDATE order_card SET updated_at = updated_at WHERE id = ?", (int(order_id),))   # a write first: the lock is ours
+        card = orders.get_card(conn, int(order_id))
+        if not cancellable(conn, card):
+            raise CartError("Заказ уже в работе у поставщика. Чтобы отменить, напишите менеджеру.")
+        moved = orders.move_card(conn, card["id"], stage[0], now, login, changes={"cancel_reason": orders.cancel_reason_of(*CANCEL_REASON)})
+    except orders.OrderError:
+        conn.rollback()                                       # the why is the red record of the order's journal (move_card): staff words
+        raise CartError("Отменить не получилось. Напишите менеджеру.")
+    except Exception:
+        conn.rollback()
+        raise
+    if not moved:
+        raise CartError("Заказ уже изменился. Обновите страницу.")
+    try:                                                      # the cancel is saved: a busy base here must not hide it from the manager
+        store.write_audit(conn, now, login, "shop_order_cancel", {"order": card["id"], "login": login, "stage": card["stage"]["name"]})
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.shop_cart").exception("the audit of the client's cancel of order %s failed", card["id"])
+    return card

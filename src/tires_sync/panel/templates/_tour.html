@@ -6,7 +6,9 @@
                      "catalog": empty is defined and not empty}) if tour is defined else [] %}
 {% if steps %}
 <style>{% for s in steps %}
-body:has(#tour-s{{ loop.index }}:checked) {{ s.sel|safe }}{outline:3px solid var(--primary-600);outline-offset:4px;box-shadow:0 0 0 9px rgba(127,86,217,.22);border-radius:var(--r-md);scroll-margin:120px}{% endfor %}
+body:has(#tour-s{{ loop.index }}:checked) {{ s.sel|safe }}{outline:3px solid var(--primary-600);outline-offset:4px;box-shadow:0 0 0 9px rgba(127,86,217,.22);border-radius:var(--r-md);scroll-margin:120px}
+{%- if s.phone %}
+@media (max-width:{{ tour_phone }}px){body:has(#tour-s{{ loop.index }}:checked) {{ s.phone|safe }}{outline:3px solid var(--primary-600);outline-offset:4px;box-shadow:0 0 0 9px rgba(127,86,217,.22);border-radius:var(--r-md);scroll-margin:120px}}{% endif %}{% endfor %}
 </style>
 <div class="tour" role="region" data-tour-root aria-label="Обзор панели">
 {% for s in steps %}<input class="tour-radio" type="radio" name="tour-step" id="tour-s{{ loop.index }}" aria-label="Шаг {{ loop.index }}: {{ s.title }}"{% if loop.first %} checked{% endif %}>

@@ -61,17 +61,21 @@ STEPS = {
     "client": [
         {"sel": "[data-tour=catalog]", "need": "shop", "when": "catalog", "title": "Каталог",
          "text": "Шины, которые есть в наличии, с вашими ценами за штуку. Сортировка — над таблицей."},
-        {"sel": ".shop-filters", "need": "shop", "when": "catalog", "title": "Фильтры",
-         "text": "Размеры через пробел, бренд, сезон, шипы. «Показать» применяет фильтры, «Сбросить» убирает. Они запоминаются в вашем аккаунте."},
-        {"sel": "#f-wh", "need": "shop", "when": "catalog", "title": "Склад 1 и Склад 2",
-         "text": "Шины лежат на двух складах. Выберите склад, чтобы видеть только его; в таблице склад указан у каждой шины."},
+        {"sel": ".shop-filters", "phone": ".shop-ft-open", "need": "shop", "when": "catalog", "title": "Фильтры",
+         "text": "Размеры через пробел, бренд, сезон, шипы. «Показать» применяет фильтры, «Сбросить» убирает. Они запоминаются в вашем аккаунте. "
+                 "На телефоне фильтры открывает кнопка «Фильтры»."},
+        {"sel": "#f-wh", "phone": ".shop-ft-open", "need": "shop", "when": "catalog", "title": "Склад 1 и Склад 2",
+         "text": "Шины лежат на двух складах. Выберите склад, чтобы видеть только его; в таблице склад указан у каждой шины. "
+                 "На телефоне склад — в «Фильтрах»."},
         {"sel": "[data-tour=cart]", "need": "shop", "when": "catalog", "title": "Корзина и заказ",
          "text": "«В корзину» в строке шины добавляет её с количеством. В корзине поправьте количество, выберите точку или доставку и "
                  "оформите заказ — менеджер свяжется. Статус заказов — в «Мои заказы»."},
         AGAIN,
     ],
 }
-assert all(SELECTOR.match(s["sel"]) for steps in STEPS.values() for s in steps), "a selector of the tour that <style> cannot hold"
+assert all(SELECTOR.match(s[k]) for steps in STEPS.values() for s in steps for k in ("sel", "phone") if k in s), "a selector of the tour that <style> cannot hold"
+# `phone`: the element a step lights on a phone (PHONE wide at most) where its own `sel` is hidden (the client's filters: in a closed sheet)
+PHONE = 720
 # `when`: what of the page (_tour.html reads it from the page's own values) a step needs
 WHEN = ("point", "cards", "returns", "catalog")
 # where the tour of a kind is shown (the endpoint of its start page)
@@ -121,7 +125,7 @@ def register(app) -> None:
             if request.endpoint != START[kind(role)] or done(get_conn(), login):
                 return []
             return on_page(steps_for(role), has or {})
-        return {"tour": tour}
+        return {"tour": tour, "tour_phone": PHONE}
 
     @app.route("/tour/done", methods=["POST"])
     def tour_done():

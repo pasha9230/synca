@@ -1,4 +1,5 @@
-{# «Мои заказы» of a client (shop_cart.my_orders): number, date, the status for the client, the sum; nothing of the inside.
+{# «Мои заказы» of a client (shop_cart.my_orders): number, date, «Получение», the status for the client («храним до» on the point), the sum;
+   nothing of the inside.
    The new design (the owner 2026-10-30, the prototype): a table, a row opens the order with its stages #}
 {% extends "shop_base.html" %}
 {% block title %}Мои заказы{% endblock %}
@@ -6,8 +7,8 @@
 <h1 class="shop-h1">Мои заказы</h1>
 <section class="card">
 {% if orders_list %}<div class="table-wrap"><table class="table shop-orders-table">
-<thead><tr><th>Заказ</th><th>Дата</th><th>Статус</th><th class="num">Сумма</th></tr></thead>
-<tbody>{% for o in orders_list %}<tr><td class="c-no"><a href="/shop/orders/{{ o.id }}">№ {{ o.id }}</a></td><td class="c-date">{{ o.created_at|short_dt }}</td><td class="c-status"><span class="shop-status shop-st-{{ {'Принят': 'blue', 'Оформлен': 'cyan', 'В пути': 'orange', 'Готов к выдаче': 'green', 'Отменён': 'red'}.get(o.status, 'gray') }}">{{ o.status }}</span></td><td class="num c-sum">{{ o.total|money }}</td></tr>{% endfor %}</tbody></table></div>
+<thead><tr><th>Заказ</th><th>Дата</th><th>Получение</th><th>Статус</th><th class="num">Сумма</th></tr></thead>
+<tbody>{% for o in orders_list %}<tr><td class="c-no"><a href="/shop/orders/{{ o.id }}">№ {{ o.id }}</a></td><td class="c-date">{{ o.created_at|short_dt }}</td><td class="c-recv">{{ o.receive or "—" }}</td><td class="c-status"><span class="shop-status shop-st-{{ {'Принят': 'blue', 'Оформлен': 'cyan', 'В пути': 'orange', 'Готов к выдаче': 'green', 'Отменён': 'red'}.get(o.status, 'gray') }}">{{ o.status }}</span>{% if o.hold_until %}<span class="shop-hold">храним до {{ o.hold_until|day }}</span>{% endif %}</td><td class="num c-sum">{{ o.total|money }}</td></tr>{% endfor %}</tbody></table></div>
 {% else %}<div class="empty"><h3>Заказов пока нет</h3><p>Соберите корзину в <a href="/shop">каталоге</a> и оформите заказ.</p></div>{% endif %}
 </section>
 {% endblock %}
