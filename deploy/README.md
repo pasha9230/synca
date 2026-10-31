@@ -105,6 +105,24 @@
 - Установка: как с блоком `/s/`, боевой `sites-enabled/tires-panel` целиком не заменять (его правил certbot): добавить в серверный блок с `listen 443` только этот `location`, сделать копию прежнего файла, `nginx -t`, `systemctl reload nginx`. Без блока агент не загрузит ни одного фото.
 - Flask на сервере должен быть не ниже 3.1 (`request.max_content_length` задаётся в маршрутах агента): проверить `/opt/tires-sync/venv/bin/python -c "import importlib.metadata as m; print(m.version('flask'))"` до выкладки.
 
+## Прототип для партнёра по секретному коду (решение владельца 2026-10-31)
+- Статичные страницы прототипа открываются по ссылке `https://<панель>/proto/<код из 32 hex>/<страница>.html`. В репозитории их нет: страницы приватные, их кладут на сервер вручную в `/var/lib/tires-sync/proto/<код>/`. Панель эти адреса не обслуживает, всё делает nginx (`nginx-panel.conf`):
+  - **regex-блок** `location ~ "^/proto/([0-9a-f]{32})/([A-Za-z0-9._-]+\.html)$"` отдаёт файл через `alias`. Заголовки: `X-Robots-Tag noindex`, `Cache-Control no-store`, `Referrer-Policy no-referrer` (адрес с кодом не уходит на CDN шрифтов), `nosniff`, HSTS. HSTS продублирован потому, что `add_header` в `location` отменяет все `add_header` уровня `server`.
+  - **префикс** `location /proto/ { return 404; }` закрывает всё остальное под `/proto/`: адрес без кода, не `.html`, вложенные пути, список папки. Это обычный префикс, НЕ `^~`: с `^~` nginx не проверил бы regex-блок, и верная ссылка тоже дала бы 404.
+  - код маскируется в журнале: в `map $uri $panel_uri` строки `/proto/<код>/…` → `/proto/***/…` и «голого» `/proto/<код>`, в `map $http_referer $panel_referer` строка `…/proto/***`.
+- **Установка.** Боевой `sites-enabled/tires-panel` (его правил certbot) целиком не заменять:
+  1. Копия: `cp /etc/nginx/sites-enabled/tires-panel /root/nginx-backup-pre-proto-<дата>`.
+  2. В `map $uri $panel_uri` добавить две строки: `"~^/proto/[^/]+/(?<proto_rest>.*)$" "/proto/***/$proto_rest";` и `proto` в строку `"~^/(?<bare_kind>feed|img|proto)/"`. В `map $http_referer $panel_referer` добавить строку `"~^(?<proto_ref>[^?]*/proto/)" "${proto_ref}***";` до общей строки `panel_ref`.
+  3. Оба `location` (regex-блок и префикс `/proto/`) вставить в серверный блок с `listen 443`. Строка `add_header Strict-Transport-Security "max-age=31536000" always;` в regex-блоке нужна, если HSTS стоит на уровне `server` блока 443.
+  4. Папка: `mkdir -p /var/lib/tires-sync/proto/<код>`, владелец `root`, права 755 на папку и 644 на файлы (`chmod 755 …/proto …/proto/<код>`, `chmod 644 …/proto/<код>/*.html`). nginx только читает.
+  5. `nginx -t`, затем `systemctl reload nginx`.
+- **Проверка.**
+  - `curl -sI https://<панель>/proto/<код>/index.html` → 200, заголовки `X-Robots-Tag`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, HSTS.
+  - `curl -sI https://<панель>/proto/`, `…/proto/<код>/`, `…/proto/<код>/x.js`, `…/proto/<другой код>/index.html` → 404.
+  - `tail -5 /var/log/nginx/access.log` — в строках `/proto/***/…`, самого кода нет.
+- **Откат.** Вернуть копию `/root/nginx-backup-pre-proto-<дата>` в `sites-enabled/tires-panel`, `nginx -t`, `systemctl reload nginx`. Папку `/var/lib/tires-sync/proto/` можно оставить: без блока её не раздают.
+- **Сделано 2026-10-31** тимлидом: копия прежней настройки, `nginx -t` прошёл, reload; верная ссылка → 200 с заголовками, остальные адреса → 404, кода в `access.log` нет. У прототипа только `.html`.
+
 ## Агент фото на сервере (генерация из панели, решение владельца 2026-10-23)
 Кнопки «Сгенерировать» в «Генерации» ставят запрос; таймер `tires-photo-agent` раз в минуту запускает `python -m tires_sync photo-agent-tick`: без запроса он сразу выходит, с запросом расшифровывает ключ OpenAI и прокси из «Подключения → OpenAI (фото)», выпускает одноразовый токен агента и передаёт всё это бинарнику `tire-photo-agent tick --stdin-secrets` через stdin (не в файлах, не в env, не в журнале); после запуска токен стирается. Запросы к `api.openai.com` идут через прокси (OpenAI не отвечает на запросы из России), в панель и за фото агент ходит напрямую по `public_base`.
 

@@ -243,7 +243,10 @@ def test_nginx_config_gives_the_hsts_line_to_put_into_the_certbot_block_of_443()
     from pathlib import Path
     conf = (Path(__file__).resolve().parents[1] / "deploy" / "nginx-panel.conf").read_text(encoding="utf-8")
     assert re.search(r'^\s*# add_header Strict-Transport-Security "max-age=31536000" always;$', conf, re.M)
-    assert not re.search(r"^\s*add_header Strict-Transport-Security", conf, re.M)
+    # the one active HSTS line is the prototype's own (add_header of a location drops the server's, 2026-10-31): never on the server level
+    active = [m.start() for m in re.finditer(r"^\s*add_header Strict-Transport-Security", conf, re.M)]
+    proto = re.search(r'location ~ "\^/proto/[^"]+" \{.*?\n    \}', conf, re.S)
+    assert len(active) == 1 and proto.start() < active[0] < proto.end()
 
 
 def _nginx_map(conf: str, name: str):
@@ -302,7 +305,8 @@ def test_nginx_prototype_is_served_by_its_code_only_and_nothing_else_of_proto_re
                 "/proto/%s/index.html" % code.upper(), "/proto/abc/index.html", "/proto/%sff/index.html" % code):
         assert not rx.match(bad), bad
     assert "alias /var/lib/tires-sync/proto/$1/$2;" in block
-    for header in ('X-Robots-Tag "noindex, nofollow" always', 'Cache-Control "no-store" always', 'Referrer-Policy "no-referrer" always'):
+    for header in ('X-Robots-Tag "noindex, nofollow" always', 'Cache-Control "no-store" always', 'Referrer-Policy "no-referrer" always',
+                   'Strict-Transport-Security "max-age=31536000" always'):          # add_header of a location drops the server's HSTS
         assert "add_header %s;" % header in block, header
     assert "proxy_pass" not in block and "error_log /dev/null crit" in block
     rest = re.search(r"location /proto/ \{(.*?)\}", conf, re.S)
