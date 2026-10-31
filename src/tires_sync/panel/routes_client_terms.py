@@ -37,7 +37,8 @@ def rows_of(choices, ours: dict, data: dict, typed=None, prefix: str = "") -> li
     sent = {}
     if typed:
         for i, key in enumerate(typed.getlist(prefix + "bk")[:ct.MAX_BRANDS]):
-            sent[key] = {d: typed.get("%s%s_%d" % (prefix, d[0], i), "")[:12] for d, _label in ct.DIAMETERS}
+            sent[key] = {d: (typed.get("%s%s_%d" % (prefix, d[0], i), "")[:12], typed.get("%sm%s_%d" % (prefix, d[0], i), ""))
+                         for d, _label in ct.DIAMETERS}
     out = []
     for key, label in choices:
         mine, row = ours.get(key, []), data.get(key, ct.EMPTY)
@@ -46,9 +47,10 @@ def rows_of(choices, ours: dict, data: dict, typed=None, prefix: str = "") -> li
             mode, our = ct.mode_of(mine, diameter)
             absolute = row[1] if diameter == "small" else row[3]
             cells[diameter] = {
-                "mode": mode, "mark": ("abs:%g" % (row[0] if diameter == "small" else row[2])) if absolute and mode != "abs"
-                else "pct:%g" % our if mode == "pct" else mode,
-                "value": sent[key][diameter] if key in sent else ct.field_value(row, diameter, mine),
+                "mode": mode, "mark": ct.mark(row, diameter, mine),
+                # a refused form gives back what was typed — but a field drawn another way (our % changed since) shows what is saved
+                "value": sent[key][diameter][0] if key in sent and sent[key][diameter][1] in ("", ct.mark(row, diameter, mine))
+                else ct.field_value(row, diameter, mine),
                 "absolute": absolute and mode != "abs",                      # kept absolute: we had no % then, we have one now
                 "totals": [{"label": o["label"], "our": o[diameter], "client": ct.client_pct(row, diameter, o[diameter])} for o in mine],
                 "own": ct.client_pct(row, diameter, None)}

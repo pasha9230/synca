@@ -438,3 +438,22 @@ def test_the_rules_are_written_on_the_invitation_and_the_profile(tmp_path):
         html = page(owner, url)
         assert "<b>Правила</b>" in html and "закупка + наш % бренда + сдвиг клиента" in html, url
         assert "Выключенный в нашем фиде" in html and "Пустое поле — как у нас" in html and "от −50 до 300" in html and "«Применить» остановится" in html, url
+
+
+def test_a_new_number_in_a_field_drawn_before_our_percent_changed_is_refused_however_it_was_drawn(tmp_path):
+    """The lead's review: a field of the client's own % (drawn as «свой», ours one) got a new number while «Применить» gave the brand
+    a second % of ours — it was read as a shift (35/37 in place of 25); a shift field typed «+5» while ours became one — read as «свой 5».
+    Now a new number is read only the way it was drawn, else refused; the refused form shows what is saved for such a brand."""
+    app, buyer, conn, _ = make_shop(tmp_path, role=(10, 20))
+    owner, tok = owner_of(app)
+    ct.save_rows(conn, "buyer", {"laufenn": (20, True, None, False)}, NOW, "owner")    # its own 20 % (kept absolute: ours came later)
+    data = fill(profile_form(owner), "laufenn", "25")
+    set_ours(conn, {"IKON TYRES|winter": (10, 20), "LAUFENN|summer": (10, 20), "LAUFENN|winter": (12, 20)})   # A: a second % of ours
+    response = send(owner, "/client-terms/c/buyer", tok, data)
+    html = response.get_data(as_text=True)
+    assert response.status_code == 400 and "изменился" in html and ct.rows(conn, "buyer")["laufenn"] == (20.0, True, None, False)
+    assert 'name="s_%d" value="20"' % row_index(data, "laufenn") in html                 # the saved own %, not the 25 drawn another way
+    ct.save_rows(conn, "buyer", {"laufenn": (None, False, None, False)}, NOW, "owner")
+    data = fill(profile_form(owner), "laufenn", "+5")                                    # B: drawn as a shift (two of ours)
+    set_ours(conn, {"IKON TYRES|winter": (10, 20), "LAUFENN|summer": (10, 20)})          # ours became one
+    assert send(owner, "/client-terms/c/buyer", tok, data).status_code == 400 and ct.rows(conn, "buyer") == {}

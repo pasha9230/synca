@@ -137,6 +137,17 @@ def rows(conn, login: str) -> Dict[str, Row]:
     return out
 
 
+def mark_of(mode: str, our: Optional[float]) -> str:
+    """How a field was drawn (the hidden m<d>_<i>): «pct:<our one %>», «shift» or «abs»; a field of a kept own % is «abs:<own>|<this>»."""
+    return "pct:%g" % our if mode == "pct" else mode
+
+
+def mark(row: Row, diameter: str, ours: List[dict]) -> str:
+    mode, our = mode_of(ours, diameter)
+    value, absolute = (row[0], row[1]) if diameter == "small" else (row[2], row[3])
+    return ("abs:%g|%s" % (value, mark_of(mode, our))) if absolute and mode != "abs" else mark_of(mode, our)
+
+
 def field_value(row: Row, diameter: str, ours: List[dict]) -> str:
     """What a field shows: the client's % (pct, abs) or the shift (several of ours)."""
     mode, our = mode_of(ours, diameter)
@@ -165,15 +176,14 @@ def parse_rows(form, prefix: str, ours: Dict[str, List[dict]]) -> Dict[str, Row]
         for diameter, label in DIAMETERS:
             field = "%s%s_%d" % (prefix, diameter[0], i)
             mode, our = mode_of(mine, diameter)
-            drawn = form.get("%sm%s_%d" % (prefix, diameter[0], i), mode)       # a form without the mark is read as it reads now
-            if drawn.startswith("abs:") and mode != "abs":                     # the client's own % set when we had none (the review):
-                kept = parse(drawn[4:], PCT_MIN, PCT_MAX, PCT_TEXT, field)      # the field left as drawn keeps it as it is, never read
-                typed = parse(form.get(field, ""), PCT_MIN if mode == "pct" else SHIFT_MIN, PCT_MAX if mode == "pct" else SHIFT_MAX,
-                              PCT_TEXT if mode == "pct" else SHIFT_TEXT, field)   # as a shift of «several of ours»
-                if kept is not None and typed == kept:
-                    parts += [kept, True]
+            drawn = form.get("%sm%s_%d" % (prefix, diameter[0], i), mark_of(mode, our))   # a form without the mark: as it reads now
+            if drawn.startswith("abs:") and "|" in drawn and mode != "abs":     # the client's own % set when we had none (the review):
+                kept_text, drawn = drawn[4:].split("|", 1)                       # «abs:<own>|<the mode it was drawn in>»
+                kept = parse(kept_text, PCT_MIN, PCT_MAX, PCT_TEXT, field)
+                if kept is not None and _number(form.get(field, "")) == _number(fmt(kept)):
+                    parts += [kept, True]                                        # left as drawn: it stays the client's own, as it is
                     continue
-            elif drawn not in (mode, "pct:%g" % our if mode == "pct" else mode):
+            if drawn != mark_of(mode, our):                                      # a new number is read only the way it was drawn
                 raise TermsError("Наш %% бренда %s изменился, пока открыта страница: проверьте значения и сохраните снова." % key.upper(), field)
             if mode == "shift":
                 value = parse(form.get(field, ""), SHIFT_MIN, SHIFT_MAX, SHIFT_TEXT, field)
