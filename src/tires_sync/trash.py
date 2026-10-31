@@ -12,7 +12,8 @@ from .orders import OrderError
 ORDER_TABLES = (("order_item", "order_id"), ("order_event", "order_id"), ("order_field_value", "order_id"), ("order_task", "order_id"),
                 ("order_want", "order_id"), ("order_oth_client", "order_id"), ("oth_return", "order_id"),   # «На ОТХ»: the client put aside, the
                 ("order_item_oth", "order_id"),                                                            # marks «возвращено» (хвост З16); the
-                ("callback_task", "order_id"))      # «Задачи» of the order (2026-10-31): never left on /tasks without their order
+                ("callback_task", "order_id"),      # «Задачи» of the order (2026-10-31): never left on /tasks without their order
+                ("order_unsent", "order_id"))       # «Не дошло клиенту» (unsent.py, 2026-10-31): goes and comes back with the order
 # positions «с ОТХ» of the order (oth_sale): deleted and restored with it, so a restored order keeps where its tyres came from (the Google
 # table, the purchase not replaced by WebMIM's price). An order holding tyres of «На ОТХ», or whose tyres another order holds, is never deleted
 # (oth_sale.why_not_delete): what goes here is only what no longer holds a tyre.

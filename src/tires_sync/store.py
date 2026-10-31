@@ -470,6 +470,13 @@ CREATE TABLE IF NOT EXISTS callback_task (
     done_at TEXT, done_by TEXT NOT NULL DEFAULT '', cancelled_at TEXT
 );
 CREATE INDEX IF NOT EXISTS callback_task_open ON callback_task (done_at, cancelled_at, due_at);
+-- «Не дошло клиенту» (unsent.py, the owner 2026-10-31): a message to the client that did not go, with its text (chat_send_log drops it on
+-- «failed») and why, one per send token; closed by «Отправил вручную». Goes and comes back with the order (trash), moves with a merge
+CREATE TABLE IF NOT EXISTS order_unsent (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, at TEXT NOT NULL, why TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'chat', closed_at TEXT, closed_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS order_unsent_order ON order_unsent (order_id, closed_at);
 -- the number in stock sent to Avito per ad (avito_stock.py): the last value and how it went; `before_*` is what Avito showed before our first send
 CREATE TABLE IF NOT EXISTS avito_stock (
     account_id INTEGER NOT NULL, avito_id INTEGER NOT NULL, ad_id TEXT NOT NULL DEFAULT '', code TEXT NOT NULL DEFAULT '',

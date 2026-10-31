@@ -6,6 +6,7 @@
 {% block content %}
 {% set csrf %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endset %}
 {{ entity_ui.crumbs(entity.crumbs) }}
+{% include "_order_unsent.html" %}
 <div class="ocard-layout">
 <div class="ocard-main">
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}

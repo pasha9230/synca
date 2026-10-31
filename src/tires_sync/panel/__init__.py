@@ -365,6 +365,8 @@ def create_app(config: dict) -> Flask:
     routes_inquiry.register(app)
     from . import routes_tasks
     routes_tasks.register(app)
+    from . import routes_unsent
+    routes_unsent.register(app)
     routes_shop.register(app)
     routes_client_terms.register(app)
 

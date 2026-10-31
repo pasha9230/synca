@@ -1,0 +1,14 @@
+{# «Не дошло клиенту» (unsent.py, the owner 2026-10-31): a red block per message to the client that did not go — when, why, the whole text
+   read-only, «Скопировать» and «Отправил вручную» (the right on the order: a point by its own orders). Nothing is sent from here. The root
+   class .order-unsent: its phone styles are the point's lane's. #}
+{% set unsent_rows = unsent_for(c.id) %}{% if unsent_rows %}
+<section class="order-unsent card" id="unsent" role="alert" style="border-color:var(--err-200);background:var(--err-50)"><div class="card-body stack">
+<h3 class="text-err" style="margin:0">Не дошло клиенту{% if unsent_rows|length > 1 %} · {{ unsent_rows|length }}{% endif %}</h3>
+<p class="small muted" style="margin:0">Скопируйте текст, отправьте клиенту сами и нажмите «Отправил вручную». Панель сама ничего не отправит.</p>
+{% for u in unsent_rows %}{% set uid = "unsent-%s-%s"|format(u.kind, u.id) %}<div class="stack order-unsent-item" data-unsent="{{ u.kind }}-{{ u.id }}" style="gap:var(--s-2)">
+<div class="small"><b>{{ u.at|short_dt }}</b> · {{ u.source }}{% if u.why %}<div class="text-err">{{ u.why }}</div>{% endif %}</div>
+<textarea class="textarea" id="{{ uid }}" rows="5" readonly aria-label="Текст сообщения клиенту">{{ u.text }}</textarea>
+<div class="row" style="gap:var(--s-2);flex-wrap:wrap"><button type="button" class="btn btn--secondary btn--sm" data-copy="#{{ uid }}">Скопировать</button>
+{% if can_post("order_unsent_by_hand") %}<form method="post" action="/orders/{{ c.id }}/unsent/{{ u.kind }}/{{ u.id }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">Отправил вручную</button></form>{% endif %}</div>
+</div>{% endfor %}
+</div></section>{% endif %}

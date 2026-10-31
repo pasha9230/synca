@@ -740,6 +740,17 @@ DELIVERED_AGAIN = "Итог: сообщение клиенту дошло (от�
 FOUND_AGAIN = "Итог: сообщение клиенту дошло (найдено в чате Авито). Делать ничего не нужно."
 
 
+def _keep_unsent(conn, chat: dict, token: str, now: str, why: str, text: str) -> None:
+    """The text of a send to the client that did not go, kept for «Не дошло клиенту» of its order (unsent.record: a savepoint, never raises)."""
+    try:
+        from . import unsent
+        unsent.record(conn, chat.get("order_id"), token, now, why, text, "arrived" if str(token).startswith("arrived-") else "chat")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        log.warning("the unsent send %s of chat %s could not be kept", token, chat.get("id"))
+
+
 def _alert_not_sent(conn, chat: dict, token: str, now: str, why: str, text: str, ending: str = "Отправьте вручную.") -> None:
     """The minute's sync could not send it (nobody is on the page): a line of «Входящие» from «система», with the text to copy (as «можно
     забирать» that did not go). Whatever happens to the line, the send is what it is."""
@@ -779,6 +790,8 @@ def _deliver(conn, client, chat: dict, user_id, token: str, now: str, author: st
             hint = ("Авито отказал %d раза подряд, система больше не повторяет: отправьте вручную позже; если повторяется — напишите владельцу."
                     % (tries + 1) if err.status == 402 else _refused_hint(err))
             said = ChatError("Авито не принял %s (%s). %s" % ("сообщение с фото" if photo else "сообщение", _avito_said(err, ours), hint))
+            if not photo:                                                    # «Не дошло клиенту» of the order card: its text kept (never breaks the send)
+                _keep_unsent(conn, chat, token, now, str(said), text)
             if by_sync:
                 _alert_not_sent(conn, chat, token, now, str(said), "" if photo else text)
             raise _not_delivered(conn, chat, now, author, what, said) from None
@@ -1398,6 +1411,8 @@ def _retry_refused(conn, client, writer, chat: dict, row: dict, now: str, clock)
             return "busy"
         conn.commit()
         _note_order(conn, chat, now, "%s клиенту не отправлено: %s" % (what, said), "red")
+        if not photo and ending == "Отправьте вручную.":
+            _keep_unsent(conn, chat, token, now, said, text)
         _alert_not_sent(conn, chat, token, now, said, "" if photo or ending != "Отправьте вручную." else text, ending)
         return "failed"
     late = _retry_late(row["first_at"] or row["at"], now)
@@ -1461,6 +1476,8 @@ def _retry_refused(conn, client, writer, chat: dict, row: dict, now: str, clock)
         _mark(conn, token, "failed", _send_record(chat["id"], err, text))
         said = "Авито не отдал данные кабинета, система больше не повторяет."
         _note_order(conn, chat, now, "%s клиенту не отправлено: %s" % (what, said), "red")
+        if not photo:
+            _keep_unsent(conn, chat, token, now, said, text)
         _alert_not_sent(conn, chat, token, now, said, "" if photo else text)
         return "failed"
     try:
