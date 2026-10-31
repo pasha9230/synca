@@ -264,7 +264,8 @@ def _nginx_apply(pairs, text: str) -> str:
 @pytest.mark.parametrize("uri, logged", [
     ("/feed/" + "a" * 32 + "/avito_feed.xml", "/feed/***/avito_feed.xml"), ("/img/" + "b" * 32 + "/123.jpg", "/img/***/123.jpg"),
     ("/hook/avito/secret123", "/hook/avito/***"), ("/invite/tok123", "/invite/***"), ("/orders/5", "/orders/5"),
-    ("/feed/" + "c" * 32, "/feed/***"), ("/img/" + "d" * 32, "/img/***")])
+    ("/feed/" + "c" * 32, "/feed/***"), ("/img/" + "d" * 32, "/img/***"),
+    ("/proto/" + "e" * 32 + "/index.html", "/proto/***/index.html"), ("/proto/" + "f" * 32, "/proto/***")])   # the prototype (2026-10-31)
 def test_nginx_journal_never_writes_the_tokens_of_the_address(uri, logged):
     from pathlib import Path
     conf = (Path(__file__).resolve().parents[1] / "deploy" / "nginx-panel.conf").read_text(encoding="utf-8")
@@ -278,6 +279,35 @@ def test_nginx_referer_of_an_invitation_has_no_token_and_no_query():
     pairs = _nginx_map(conf, "panel_referer")
     assert _nginx_apply(pairs, "https://panel.example/invite/tok123") == "https://panel.example/invite/***"
     assert _nginx_apply(pairs, "https://panel.example/orders?q=+7900") == "https://panel.example/orders"
+
+
+def test_nginx_referer_of_the_prototype_has_no_code():
+    from pathlib import Path
+    conf = (Path(__file__).resolve().parents[1] / "deploy" / "nginx-panel.conf").read_text(encoding="utf-8")
+    pairs = _nginx_map(conf, "panel_referer")
+    assert _nginx_apply(pairs, "https://panel.example/proto/" + "a" * 32 + "/index.html") == "https://panel.example/proto/***"
+
+
+def test_nginx_prototype_is_served_by_its_code_only_and_nothing_else_of_proto_reaches_the_panel():
+    """The owner 2026-10-31: the partner opens the static prototype at /proto/<32 hex>/<page>.html (the pages are on the server, not in
+    the repo). The rest of /proto/ is 404 — a plain prefix, never «^~»: with «^~» nginx skips the regexes and the right link is 404 too."""
+    from pathlib import Path
+    conf = (Path(__file__).resolve().parents[1] / "deploy" / "nginx-panel.conf").read_text(encoding="utf-8")
+    found = re.search(r'location ~ "(\^/proto/[^"]+)" \{(.*?)\n    \}', conf, re.S)
+    assert found, "no regex location of /proto/"
+    rx, block = re.compile(found.group(1)), found.group(2)
+    code = "0123456789abcdef" * 2
+    assert rx.match("/proto/%s/index.html" % code) and rx.match("/proto/%s/owner-2.html" % code)
+    for bad in ("/proto/", "/proto/%s/" % code, "/proto/%s/app.js" % code, "/proto/%s/../x.html" % code, "/proto/%s/a/b.html" % code,
+                "/proto/%s/index.html" % code.upper(), "/proto/abc/index.html", "/proto/%sff/index.html" % code):
+        assert not rx.match(bad), bad
+    assert "alias /var/lib/tires-sync/proto/$1/$2;" in block
+    for header in ('X-Robots-Tag "noindex, nofollow" always', 'Cache-Control "no-store" always', 'Referrer-Policy "no-referrer" always'):
+        assert "add_header %s;" % header in block, header
+    assert "proxy_pass" not in block and "error_log /dev/null crit" in block
+    rest = re.search(r"location /proto/ \{(.*?)\}", conf, re.S)
+    assert rest and "return 404;" in rest.group(1) and "proxy_pass" not in rest.group(1)
+    assert "location ^~ /proto/" not in conf
 
 
 def test_nginx_invitation_has_its_own_limit():
