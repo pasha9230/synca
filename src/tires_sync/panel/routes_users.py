@@ -23,16 +23,19 @@ def register(app) -> None:
         except ValueError:
             return None
 
-    @app.route("/users")
-    def users_page():
-        from .routes_client_terms import brand_choices
-        conn = get_conn()
+    def users_view(conn, status=200, typed=None):
+        """«Пользователи»; `typed`: a refused invitation of a client comes back with the corrections typed (routes_client_terms.rows_of)."""
+        from .routes_client_terms import brand_choices, rows_of
         return render_template("users.html", users_list=users.list_users(conn), invites=users.list_invites(conn, now_iso()),
                                points={p["id"]: p["name"] for p in points.list_points(conn)}, roles=users.ROLES, sections=users.SECTIONS,
-                               rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None),
-                               invite_brands=brand_choices(app, conn, client_terms.read(conn, client_terms.ROLE)["brands"]),
-                               describe=client_terms.describe, shop_resp=_shop_resp(conn), main_name=users.main_name(conn),
-                               main_login=app.config["AUTHOR"])
+                               rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None) if not typed else None,
+                               invite_rows=rows_of(brand_choices(app, conn), client_terms.active_ours(conn), {}, typed, "c_"),
+                               invite_typed=bool(typed), invite_form=typed, describe=client_terms.describe, shop_resp=_shop_resp(conn),
+                               main_name=users.main_name(conn), main_login=app.config["AUTHOR"]), status
+
+    @app.route("/users")
+    def users_page():
+        return users_view(get_conn())
 
     def _shop_resp(conn):
         """«Ответственный за заказы клиентов»: the owner's choice, who gets them now, the staff to choose from."""
@@ -59,15 +62,15 @@ def register(app) -> None:
 
     @app.route("/users/invite", methods=["POST"])
     def users_invite():
+        from .routes_client_terms import parse_form
         conn = get_conn()
         role, f = request.form.get("role", ""), request.form
         try:
-            terms = client_terms.invite_terms(f.get("c_small", ""), f.get("c_large", ""), f.get("c_mode", "inherit"),
-                                              f.getlist("c_brand")) if role == "client" else ""
+            terms = client_terms.invite_terms(parse_form(f, "c_")) if role == "client" else ""
             token = users.create_invite(conn, role, _point(f.get("point_id")), f.get("display_name", ""), now_iso(), author(), terms)
-        except client_terms.TermsError as err:
+        except client_terms.TermsError as err:                   # the form comes back with what was typed, the message under its field
             flash(str(err), "field:" + err.field if err.field else "error")
-            return redirect("/users")
+            return users_view(conn, 400, f)
         except users.UserError as err:
             flash(str(err))
             return redirect("/users")

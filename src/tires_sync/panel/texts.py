@@ -213,8 +213,25 @@ def _client_terms_text(d: dict) -> str:
         parts.append("бренды +%d −%d" % (len(added), len(removed)))
     if pcts:
         parts.append("свой %% у брендов: %d" % len(pcts))
-    who = "роли «Клиент»" if d.get("subject") == "*" else "клиента %s" % _q(d.get("subject"))
+    who = "роли «Клиент» (общий %)" if d.get("subject") == "*" else "клиента %s" % _q(d.get("subject"))
     return "Условия %s: %s" % (who, ", ".join(parts) or "без изменений")
+
+
+def _client_pct_text(d: dict) -> str:
+    """«Свой % клиента ivan: GISLAVED (до R17 как у нас, от R18 как у нас) → (до R17 +2 п. к нашему, …)» (the owner 2026-10-31)."""
+    changes = d.get("changes") if isinstance(d.get("changes"), dict) else {}
+    parts = ["%s: %s → %s" % (_q(str(k).upper()), _q(v[0]), _q(v[1])) for k, v in sorted(changes.items())
+             if isinstance(v, (list, tuple)) and len(v) == 2]
+    shown = "; ".join(parts[:10]) + (" и ещё %d" % (len(parts) - 10) if len(parts) > 10 else "")
+    return "Свой %% клиента %s: %s" % (_q(d.get("subject")), shown or "без изменений")
+
+
+def _client_followed_text(d: dict) -> str:
+    """«Наш % изменён — % клиентов следом (клиентов 3): buyer, GISLAVED (лето) до R17: 12 % → 15 %; …»."""
+    lines = [str(x) for x in d.get("lines") or [] if isinstance(x, str)]
+    more = d.get("more") if isinstance(d.get("more"), int) else 0
+    return "Наш %% изменён — %% клиентов следом (клиентов %s): %s%s" % (_q(d.get("clients")), "; ".join(lines[:10]) or "—",
+                                                                     " и ещё %d" % (len(lines) - 10 + more) if len(lines) > 10 or more else "")
 
 
 # The journal of actions (owner's word 2026-10-25, run «match2»): every action the code writes has its text. No secret, no address of a
@@ -237,6 +254,8 @@ _MORE_TEXTS = {
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
     "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",
     "client_terms_changed": lambda d: _client_terms_text(d),
+    "client_pct_changed": lambda d: _client_pct_text(d),
+    "client_pct_followed": lambda d: _client_followed_text(d),
     "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),
     "supplier_created": lambda d: "Добавлен поставщик «%s»" % _q(d.get("name")),
     "account_chats_send": lambda d: "Отправка сообщений из панели, %s: %s" % (_acc(d), _on(d.get("enabled"), "включена", "выключена")),

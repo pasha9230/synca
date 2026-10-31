@@ -1,13 +1,28 @@
-{# The brands of client conditions: a search, a tick «в наборе» and the % of the brand (up to R17 / from R18); `rows`, `table_id`, `with_role` #}
+{# A client's own % of the brands (client_terms, the owner 2026-10-31): `rows` (routes_client_terms.rows_of), `table_id`, `prefix` of the
+   fields. Per diameter: we have one % — the field is the client's %; several (seasons, warehouses) — the field is the shift in points and
+   the client's % of each of ours is beside (app.js counts it again as it is typed); none — the client's own %, needed to show the brand.
+   The hidden m<d>_<i> says how the field was drawn: our % changed since, the server refuses rather than reads it another way #}
+<div class="small" style="border:1px solid var(--gray-200);border-radius:8px;padding:var(--s-3) var(--s-4);background:var(--gray-25, #fcfcfd)"><b>Правила</b>
+<ul style="margin:4px 0 0;padding-left:18px">
+<li>Цена клиента = закупка + наш % бренда + сдвиг клиента; вверх до 10 ₽. Наш % — из «Настройки → Бренды и наценки», без поправки аккаунта.</li>
+<li>Клиент видит всё, на что задан %: наш % бренда или свой % клиента. Выключенный в нашем фиде бренд, сезон или позиция на клиента не влияет.</li>
+<li>Пустое поле — как у нас. Бренд, у которого нашего % нет, клиент видит только со своим %.</li>
+<li>Когда мы меняем наш %, % клиента сдвигается на столько же пунктов: у нас 10 → 13, у клиента 12 → 15.</li>
+<li>% клиента — от −50 до 300 (ниже закупки можно). Если наша корректировка выведет клиента за эти границы, «Применить» остановится и покажет, у кого.</li>
+</ul></div>
 <div class="row" style="gap:var(--s-3);align-items:center;flex-wrap:wrap">
 <input class="input" type="search" data-brand-filter="{{ table_id }}" placeholder="Найти бренд" aria-label="Найти бренд" style="max-width:260px">
-<span class="small muted">Пустой % бренда — берётся общий. Порядок: % бренда клиента → общий % клиента → % бренда роли → общий % роли.</span></div>
-<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px;max-height:520px;overflow:auto"><table class="table" id="{{ table_id }}">
-<thead><tr><th>В наборе</th><th>Бренд</th><th>% до R17</th><th>% с R18</th>{% if with_role %}<th>У роли</th>{% endif %}</tr></thead>
+</div>
+<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px;max-height:560px;overflow:auto"><table class="table" id="{{ table_id }}">
+<thead><tr><th>Бренд</th><th>У нас сейчас, до R17 / от R18</th><th>Клиенту до R17</th><th>Клиенту от R18</th></tr></thead>
 <tbody>{% for r in rows %}{% set i = loop.index0 %}<tr data-name="{{ (r.label ~ ' ' ~ r.key)|lower }}">
-<td><input type="hidden" name="bk" value="{{ r.key }}"><label class="check"><input type="checkbox" name="on_{{ i }}" value="1"{% if r.on %} checked{% endif %} aria-label="{{ r.label }}: в наборе"></label></td>
-<td class="strong">{{ r.label }}</td>
-<td><input class="input input--sm input--num" style="width:90px" name="s_{{ i }}" value="{{ r.small }}" inputmode="decimal" placeholder="общий" aria-label="{{ r.label }}, % до R17"></td>
-<td><input class="input input--sm input--num" style="width:90px" name="l_{{ i }}" value="{{ r.large }}" inputmode="decimal" placeholder="общий" aria-label="{{ r.label }}, % с R18"></td>
-{% if with_role %}<td class="small muted">{% if r.role_on %}в наборе{% if r.role_pct[0] is not none or r.role_pct[1] is not none %} · {{ fmt(r.role_pct[0]) or "общий" }} / {{ fmt(r.role_pct[1]) or "общий" }} %{% endif %}{% else %}—{% endif %}</td>{% endif %}
-</tr>{% else %}<tr><td colspan="{{ 5 if with_role else 4 }}" class="muted">Брендов нет: выгрузки ещё не загружены.</td></tr>{% endfor %}</tbody></table></div>
+<td class="strong"><input type="hidden" name="{{ prefix }}bk" value="{{ r.key }}">{{ r.label }}</td>
+<td class="small">{% for o in r.ours %}<div>{{ o.label }}: {{ "%g"|format(o.small) }} / {{ "%g"|format(o.large) }} %</div>{% else %}<span class="muted">нашего % нет</span>{% endfor %}</td>
+{% for d in ("small", "large") %}{% set c = r.cells[d] %}{% set name = "%s%s_%d"|format(prefix, d[0], i) %}<td>
+<input type="hidden" name="{{ prefix }}m{{ d[0] }}_{{ i }}" value="{{ c.mark }}">
+<label class="field" style="gap:2px"><span class="xs muted">{% if c.mode == "pct" %}свой %{% elif c.mode == "shift" %}на сколько пунктов выше (+) или ниже (−) нашего{% else %}свой % (у нас нет — без него бренд скрыт){% endif %}</span>
+<input class="input input--sm input--num" style="width:90px" name="{{ name }}" value="{{ c.value }}" inputmode="decimal" placeholder="{{ 'как у нас' if c.mode != 'abs' else '' }}" aria-label="{{ r.label }}, {{ 'до R17' if d == 'small' else 'от R18' }}"{% if c.mode == "shift" %} data-shift-field{% endif %}></label>
+{% if c.absolute %}<div class="xs text-warn">свой {{ "%g"|format(c.own) }} % (задан, когда нашего не было): пока число не меняете, он остаётся своим; новое число прочитается {{ "как % клиента" if c.mode == "pct" else "как сдвиг от нашего" }}</div>{% endif %}
+{% if c.mode == "shift" %}<div class="xs muted">{% for t in c.totals %}<div>{{ t.label }}: <span data-total-of="{{ name }}" data-our="{{ '%g'|format(t.our) }}">{{ "—" if t.client is none else "%g %%"|format(t.client) }}</span></div>{% endfor %}</div>{% endif %}
+</td>{% endfor %}
+</tr>{% else %}<tr><td colspan="4" class="muted">Брендов нет: выгрузки ещё не загружены.</td></tr>{% endfor %}</tbody></table></div>

@@ -129,6 +129,8 @@ def confirm_draft(conn, draft_id: int, now: str, author: str, strong: bool = Fal
         if not strong and (changed_max > limit or limit_changed):
             raise PercentLimitError(max(changed_max, float(changes["pct_limit"])) if limit_changed else changed_max)
         settings_from_dict(merged, enforce_pct_limit=False)
+        from . import client_terms                               # the clients' % follow ours: stopped when one would leave −50…300
+        client_terms.follow_check(conn, raw.get("pricing"), merged.get("pricing"), now, author)
         vid = _insert_version(conn, merged, now, author, note or "draft %d" % draft_id)
         conn.execute("UPDATE settings_active SET version_id = ? WHERE id = 1", (vid,))
         conn.execute("DELETE FROM app_state WHERE key = 'nav_pending_pairs'")
@@ -153,8 +155,10 @@ def rollback(conn, to_version: int, now: str, author: str) -> int:
     row = conn.execute("SELECT json FROM settings_version WHERE id = ?", (to_version,)).fetchone()
     if row is None:
         raise ValueError("version %s does not exist" % to_version)
-    old_active = get_active(conn)[0]
+    old_active, old_raw = get_active(conn)
     with conn:
+        from . import client_terms                               # as «Применить»: the clients' % follow, never out of −50…300
+        client_terms.follow_check(conn, old_raw.get("pricing"), json.loads(row[0]).get("pricing"), now, author)
         vid = _insert_version(conn, json.loads(row[0]), now, author, "rollback to %d" % to_version)
         conn.execute("UPDATE settings_active SET version_id = ? WHERE id = 1", (vid,))
         conn.execute("DELETE FROM app_state WHERE key = 'nav_pending_pairs'")

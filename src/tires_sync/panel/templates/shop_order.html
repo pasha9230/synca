@@ -18,6 +18,7 @@
 <tbody>{% for i in order["items"] %}<tr><td>{{ i.name }}</td><td class="num">{{ i.price|money }}</td><td class="num">{{ i.qty }}</td><td class="num">{{ (i.qty * i.price)|money }}</td></tr>{% endfor %}</tbody>
 <tfoot><tr><td colspan="3"><b>Итого</b></td><td class="num"><b>{{ order.total|money }}</b></td></tr></tfoot></table></div>
 <p class="small muted">Оформлен {{ order.created_at|short_dt }}. Менеджер свяжется с вами, чтобы подтвердить заказ.</p>
+{% if order.merged %}<p class="shop-recv muted">Менеджер объединил этот заказ с другим для общей доставки: этапы ниже — общего заказа.</p>{% endif %}
 {% if order.receive %}<p class="shop-recv"><span class="muted">Получение:</span> {{ order.receive }}</p>{% endif %}
 {% if order.hold_until %}<p class="shop-recv"><span class="muted">Храним до:</span> <b>{{ order.hold_until|day }}</b></p>{% endif %}
 </section>

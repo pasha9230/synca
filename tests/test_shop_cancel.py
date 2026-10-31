@@ -242,3 +242,59 @@ def test_an_order_the_client_cancelled_is_never_made_in_webmim(tmp_path):
         webmim_create.place(conn, order, client_of(fake), "test", NOW, TODAY, "zaman1", sleep=lambda _s: None, seen=seen)
     assert fake.calls == [] and webmim_create.get_state(conn, order) is None
     assert orders.get_card(conn, order)["stage"]["code"] == "cancel" and orders.get_card(conn, order)["webmim_id"] == ""
+
+
+# ---- an order merged into another (the owner 2026-10-31) ----------------------------------------------------------------------------
+
+def _merge(conn, ids, client_from=None):
+    from tires_sync import order_merge
+    return order_merge.merge(conn, ids, _stage(conn, "new"), NOW, "zaman1", client_from=client_from)
+
+
+def test_a_merged_order_shows_the_new_orders_stage_and_never_cancelled(tmp_path):
+    app, client, conn, tg, pid = shop(tmp_path)
+    first = _order(client, way="point", point_id=str(pid))
+    second = _order(client, way="point", point_id=str(pid))
+    before = shop_cart.my_order(conn, "buyer", first)
+    new = _merge(conn, [first, second], client_from=first)
+    assert orders.get_card(conn, first)["stage"]["code"] == "cancel"
+    view = shop_cart.my_order(conn, "buyer", first)
+    assert view["status"] == "Принят" and view["merged"] and not view["can_cancel"]
+    assert view["items"] == before["items"] and view["total"] == before["total"]            # the client's own tyres, not the new order's all
+    assert view["receive"] == "Самовывоз: Бета"
+    html = page(client, "/shop/orders/%d" % first)
+    assert "Отменён" not in html and "объединил этот заказ" in html and "Отменить заказ" not in html and "№ %d" % new not in html
+    assert post(client, "/shop/orders/%d/cancel" % first, "tok", confirm="1").status_code == 302
+    assert orders.get_card(conn, new)["stage"]["code"] == "new"                              # nothing cancelled through the old number
+    orders.update_card(conn, new, {"delivery_date": "2026-10-08"}, NOW, "zaman1")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (_stage(conn, "moving"), new))
+    conn.commit()
+    orders.move_card(conn, new, _stage(conn, "at_point"), "2026-10-08T10:00:00", "zaman1")
+    listing = page(client, "/shop/orders")
+    assert "Готов к выдаче" in listing and "храним до 11.10" in listing and "Отменён" not in listing
+
+
+def test_a_merge_with_another_clients_order_shows_none_of_it(tmp_path):
+    app, client, conn, tg, pid = shop(tmp_path)
+    mine = _order(client, way="point", point_id=str(pid))
+    other = second_client(app, conn)
+    add(other, keys(page(other))[1], qty="3")
+    theirs = int(checkout(other, way="point", point_id=str(pid), phone="+7 900 555-66-77").headers["Location"].rsplit("/", 1)[1])
+    before = shop_cart.my_order(conn, "buyer", mine)
+    theirs_tyre = orders.list_items(conn, theirs)[0]["name"]
+    _merge(conn, [mine, theirs], client_from=theirs)                                         # the new order is the other client's
+    html = page(client, "/shop/orders/%d" % mine)
+    assert "555-66-77" not in html and "buyer2" not in html and theirs_tyre not in html     # no tyre, phone or name of theirs
+    view = shop_cart.my_order(conn, "buyer", mine)
+    assert view["items"] == before["items"] and view["total"] == before["total"] and view["merged"]
+
+
+def test_an_unmerged_order_is_the_clients_own_again(tmp_path):
+    from tires_sync import order_merge
+    app, client, conn, tg, pid = shop(tmp_path)
+    first = _order(client, way="point", point_id=str(pid))
+    second = _order(client, way="point", point_id=str(pid))
+    new = _merge(conn, [first, second], client_from=first)
+    order_merge.unmerge(conn, new, NOW, "zaman1")
+    view = shop_cart.my_order(conn, "buyer", first)
+    assert not view["merged"] and view["status"] == "Принят" and view["can_cancel"]

@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from flask import abort, flash, jsonify, redirect, render_template, request
 
-from .. import avito_upload, connections, staging, store
+from .. import avito_upload, client_terms, connections, staging, store
 from ..cycle import run_for_accounts
 from ..publishing import feed_lock, publish_live_accounts, remember_expected
 from ..settings_store import active_settings
@@ -352,6 +352,8 @@ def register(app) -> None:
             return again("Черновик устарел: настройки уже изменены. Создайте новый.")
         except PercentLimitError as err:
             return again("Процент %s вне допустимого диапазона: нужно усиленное подтверждение." % err.max_pct)
+        except client_terms.FollowError as err:                # a client's % would leave −50…300: the list stays on the draft
+            return again(str(err))
         except ValueError as err:
             flash(str(err))
             return redirect(stay or return_page())

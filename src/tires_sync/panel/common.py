@@ -285,7 +285,7 @@ for _section, _endpoints in {
     "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
               "users_shop_responsible",                 # «Ответственный за заказы клиентов» (shop_cart.RESPONSIBLE_KEY)
               "users_main_name",                        # «Имя основного входа» (users.MAIN_NAME_KEY)
-              "users_clients_page", "users_clients_role_save", "users_client_page", "users_client_save",     # the conditions of the clients
+              "users_clients_page", "users_client_page", "users_client_save",     # the conditions of the clients
               "users_client_preview",                   # «Каталог глазами клиента»
               "points_history", "history_points"),     # «История → Точки» (and its old address): the owner and the partner only (users: nobody else looks)
     "self": ("account_password_page", "account_password", "orders_list_columns",     # «Колонки» of the list of orders: one's own setting

@@ -6,7 +6,7 @@ import math
 import re
 
 import dataclasses
-from .. import connections, store
+from .. import client_terms, connections, store
 from ..candidates import Evaluation, evaluate
 from ..models import Season
 from ..overrides import override_key
@@ -1404,6 +1404,7 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
         "pct_strong": needs_strong_confirmation(raw, draft["changes"]),
         "needs_strong": needs_strong_confirmation(raw, draft["changes"]) or bool(own_risky),
         "stale": draft["base_version"] != active_id,
+        "clients": client_terms.follow(conn, raw.get("pricing"), merged.get("pricing")),     # the clients' % follow ours (2026-10-31)
     }
 
 

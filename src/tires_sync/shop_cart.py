@@ -302,11 +302,42 @@ def my_order(conn, login: str, order_id) -> Optional[dict]:
         card = orders.get_card(conn, int(order_id))
     except orders.OrderError:
         return None
+    merged = _merged_into(conn, card)
+    if merged is not None:                                    # «Объединить заказы»: its tyres went on in the new order (order_merge)
+        items = _merged_items(conn, card["id"])
+        at_point = merged["stage"].get("code") == "at_point"
+        return {"id": card["id"], "created_at": row[0], "status": status(merged["stage"]), "items": items, "merged": True,
+                "total": sum(i["qty"] * i["price"] for i in items), "receive": _receive(conn, dict(merged, comment=card["comment"]), row[1], row[2]),
+                "hold_until": merged["reserve_until"] if at_point else "", "can_cancel": False}
     items = [{"name": _shown_name(i), "qty": i["qty"], "price": i["sale_unit"]} for i in orders.list_items(conn, card["id"])]
     at_point = card["stage"].get("code") == "at_point"
-    return {"id": card["id"], "created_at": row[0], "status": status(card["stage"]), "items": items,
+    return {"id": card["id"], "created_at": row[0], "status": status(card["stage"]), "items": items, "merged": False,
             "total": sum(i["qty"] * i["price"] for i in items), "receive": _receive(conn, card, row[1], row[2]),
             "hold_until": card["reserve_until"] if at_point else "", "can_cancel": cancellable(conn, card)}
+
+
+def _merged_into(conn, card: dict) -> Optional[dict]:
+    """The order a cancelled order of the client was merged into (its tyres moved there; not «справочно»), else None (the owner
+    2026-10-31: the client sees that order's stage, «Получение» and «храним до», never «Отменён»). Only those three are read of it:
+    the new order may hold the tyres and the name of another client."""
+    from . import order_merge
+    if card["stage"].get("code") != "cancel":
+        return None
+    into = order_merge.moved_into(conn, card["id"])
+    if into is None:
+        return None
+    try:
+        return orders.get_card(conn, into)
+    except orders.OrderError:
+        return None
+
+
+def _merged_items(conn, order_id: int) -> List[dict]:
+    """The client's own tyres of a merged order as they moved (order_merge_item: the pieces and the price they had), not the new order's."""
+    rows = conn.execute("SELECT i.name, i.code, mi.qty, src.sale_unit FROM order_merge_item mi JOIN order_merge m ON m.id = mi.merge_id "
+                        "JOIN order_item i ON i.id = mi.item_id JOIN order_item src ON src.id = mi.from_item "     # the source's own row: its price
+                        "WHERE mi.from_order = ? AND m.undone_at = '' ORDER BY mi.item_id", (order_id,))           # as it moved, not a later edit
+    return [{"name": _shown_name({"name": n, "code": c}), "qty": q, "price": p} for n, c, q, p in rows]
 
 
 def cancel(conn, login: str, order_id, now: str) -> dict:

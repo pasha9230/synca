@@ -258,7 +258,7 @@ def test_a_new_point_gets_no_step_about_a_card_or_a_return_it_does_not_have(tmp_
 
 
 def test_an_empty_catalog_shows_no_tour_and_keeps_it_for_later(tmp_path):
-    app, client, conn, _ = make_shop(tmp_path, role=(None, None), brands=())
+    app, client, conn, _ = make_shop(tmp_path, role=(None, None))
     html = text(client.get("/shop"))
     assert "Ассортимент ещё не настроен" in html and not shown(html) and "tour-radio" not in html
     assert user_prefs.get(conn, "buyer", tour.PREF) is None                 # not passed: it comes once the catalog is there

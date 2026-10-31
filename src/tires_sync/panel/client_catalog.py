@@ -1,11 +1,11 @@
 """The catalog of a client (a buyer, the owner 2026-10-29; plan client-role §4.3-§6, §13): the rows a client may see and nothing else.
 
 A row is built here from a white list of fields (FIELDS) and the template gets only rows: never an offer, a goods id, a supplier's code,
-the supplier's photo address, the purchase price or our retail price. The price is the purchase (the price of the unload) + the client's
-% of the brand by the diameter (up to R17 / from R18), rounded up to tens (pricing.final_price). The % is the first one set of: the
-profile's % of the brand (client_brand), the profile's general % (client_terms), the role's '*' % of the brand, the role's general %.
-The brands seen are the profile's own set (brands_mode 'own'), else the role's. No %, or a brand out of the set: the position is hidden.
-Everything with stock of the client's brands is shown, in a feed or not (§13 В8). Suppliers are «Склад 1» / «Склад 2» (4tochki)."""
+the supplier's photo address, the purchase price or our retail price. The price is the purchase (the price of the unload) × (1 + the
+client's % / 100), rounded up to tens (pricing.final_price). Since 2026-10-31 (the owner) the client's % of a tyre is our % of it (the
+feed's general settings: its brand at its supplier, its season, by the diameter; no correction of an account) + the client's shift of
+the brand (client_terms); a brand we have no % of is shown only by the client's own absolute %. A % out of −50…300: hidden. Every brand
+of the suppliers with stock is shown, in a feed or not (§13 В8). Suppliers are «Склад 1» / «Склад 2» (4tochki)."""
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +13,7 @@ import hmac
 import math
 import re
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..catalog import resolve_brand
 from ..models import PricingRule
@@ -32,7 +32,7 @@ PARAMS = ("size", "q", "s", "t", "wh", "b", "xb", "o", "r", "p", "v")     # the 
 MAX_TEXT = 120                        # the length of a text filter (the size line, the search)
 MAX_SIZES = 20
 MAX_BRANDS = 60                       # the brands ticked in one filter
-PCT_MAX = 300.0                       # a % outside 0-300 (В5) is a broken condition: the position is hidden, never sold at the purchase
+PCT_MIN, PCT_MAX = -50.0, 300.0       # the client's % (the owner 2026-10-31: below the purchase down to −50 %); outside: hidden
 SIZE = re.compile(r"(\d{3})\s*/\s*(\d{2})\s*(?:/\s*|[ZzЗз]?\s*[RrРр]\s*)(\d{2})")
 
 
@@ -46,23 +46,20 @@ Pct = Tuple[Optional[float], Optional[float]]                       # (up to R17
 
 @dataclass(frozen=True)
 class Terms:
-    brands: FrozenSet[str]          # the bare keys of the brands of the profile's own set, else the role's: their own % only — the client sees
-                                    # every brand the suppliers have (the owner 2026-10-30), not this set
-    steps: Tuple[Tuple[Dict[str, Pct], Pct], ...]   # (the % of brands, the general %): the profile's, then the role's
+    ours: Dict[Tuple[str, str], Pct]            # our % by (the brand key of the supplier, the season): the feed's general settings
+    rows: Dict[str, tuple]                      # the client's rows by the bare key (client_terms.Row)
 
 
 def terms_of(conn, login: str) -> Terms:
     """The acting conditions of the client `login` (read on every request: a change acts at once)."""
-    rows = {r[0]: r[1:] for r in conn.execute(
-        "SELECT subject, pct_small, pct_large, brands_mode FROM client_terms WHERE subject IN (?, '*')", (login, ))}
-    brand_pct: Dict[str, Dict[str, Pct]] = {login: {}, "*": {}}
-    for subject, key, small, large in conn.execute(
-            "SELECT subject, brand_key, pct_small, pct_large FROM client_brand WHERE subject IN (?, '*') ORDER BY brand_key", (login, )):
-        brand_pct[subject].setdefault(bare_brand(key), (small, large))
-    own = rows.get(login)
-    sees = login if own is not None and own[2] == "own" else "*"
-    steps = tuple((brand_pct[s], tuple(rows[s][:2]) if s in rows else (None, None)) for s in (login, "*"))
-    return Terms(frozenset(brand_pct[sees]), steps)
+    from ..client_terms import rows
+    from ..settings_store import get_active
+    ours = {}
+    for key, rule in (get_active(conn)[1].get("pricing") or {}).items():
+        brand, _, season = key.rpartition("|")
+        if brand and isinstance(rule, dict):
+            ours[(brand, season)] = (rule.get("pct_small"), rule.get("pct_large"))
+    return Terms(ours, rows(conn, login))
 
 
 def _pct(value) -> Optional[float]:
@@ -70,24 +67,19 @@ def _pct(value) -> Optional[float]:
         pct = float(value)
     except (TypeError, ValueError):
         return None
-    return pct if math.isfinite(pct) and 0 <= pct <= PCT_MAX else None
+    return pct if math.isfinite(pct) and PCT_MIN <= pct <= PCT_MAX else None
 
 
 def client_price(terms: Terms, offer) -> Optional[int]:
-    """The client's price of a position, or None (no %, no purchase): such a position is never shown. Every brand of the suppliers
-    (the owner 2026-10-30: not only the set; the feed's exclusions do not act on the client). The first % set acts (the owner
-    2026-10-29: the profile's own over the role's): the profile's % of the brand, the profile's general %, the role's % of the brand,
-    the role's general % (up to R17 / from R18) — a brand without its own %. A broken first one hides the position."""
-    brand = bare_brand(offer.brand_key)
+    """The client's price of a position, or None (no % — neither ours nor the client's own —, no purchase, a % out of −50…300): such a
+    position is never shown. Our % of the tyre + the client's shift of the brand, or the client's own absolute % (the owner 2026-10-31)."""
+    from ..client_terms import EMPTY, client_pct
     if not offer.base_price or offer.base_price <= 0 or not math.isfinite(offer.base_price):
         return None
-    column = 0 if offer.diameter <= 17 else 1
-    found = None
-    for brands, general in terms.steps:
-        for value in (brands.get(brand, (None, None))[column], general[column]):
-            if found is None and value is not None:
-                found = value
-    pct = _pct(found)
+    diameter = "small" if offer.diameter <= 17 else "large"
+    season = getattr(offer.season, "value", offer.season)
+    our = terms.ours.get((offer.brand_key, season), (None, None))[0 if diameter == "small" else 1]
+    pct = _pct(client_pct(terms.rows.get(bare_brand(offer.brand_key), EMPTY), diameter, None if our is None else float(our)))
     if pct is None:
         return None
     return final_price(offer.base_price, PricingRule(pct, pct), offer.diameter)
@@ -100,8 +92,8 @@ def photo_token(secret, goods_id: str) -> str:
 
 
 def priced(terms: Terms) -> bool:
-    """Some % is set for the client (a general one or a brand's): else the catalog is not set up yet («Ассортимент ещё не настроен»)."""
-    return any(v is not None for brands, general in terms.steps for v in list(general) + [p for pair in brands.values() for p in pair])
+    """Some % acts (ours of a brand or a client's own one): else the catalog is not set up yet («Ассортимент ещё не настроен»)."""
+    return bool(terms.ours) or any(r[1] or r[3] for r in terms.rows.values())
 
 
 @dataclass(frozen=True)

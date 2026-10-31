@@ -277,6 +277,20 @@
       var q = box.value.trim().toLowerCase();
       if (table) table.querySelectorAll("tbody tr[data-name]").forEach(function (tr) { tr.hidden = q !== "" && tr.getAttribute("data-name").indexOf(q) === -1; });
     });
+    // свой % клиента (_client_brands.html): у поля-сдвига рядом % клиента по каждому нашему, пересчёт при вводе; проверку делает сервер
+    document.addEventListener("input", function (e) {
+      var box = e.target;
+      if (!box.matches || !box.matches("[data-shift-field]")) return;
+      var raw = box.value.trim().replace(",", ".").replace("\u2212", "-").replace(/\s/g, "");
+      var shift = raw === "" ? 0 : Number(raw);
+      document.querySelectorAll("[data-total-of]").forEach(function (cell) {
+        if (cell.getAttribute("data-total-of") !== box.name) return;
+        if (!isFinite(shift)) { cell.textContent = "—"; cell.classList.remove("text-err"); return; }
+        var total = Math.round((Number(cell.getAttribute("data-our")) + shift) * 100) / 100;
+        cell.textContent = total + " %";
+        cell.classList.toggle("text-err", total < -50 || total > 300);
+      });
+    });
     document.addEventListener("change", function (e) {
       var box = e.target;
       if (!box.matches || !box.matches("input[name=excluded]")) return;

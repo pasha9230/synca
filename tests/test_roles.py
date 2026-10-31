@@ -422,7 +422,7 @@ def test_the_pages_of_the_client_have_nothing_of_the_staff_panel(tmp_path):
         assert page.status_code == code, url
         for mark in ("topsearch", 'action="/search"', "bell", "sb-link", "sb-count", "notify.js", "topbar.js", "app.js", 'href="/orders"', 'href="/catalog"'):
             assert mark not in html, (url, mark)
-    assert "Ассортимент ещё не настроен" in client.get("/shop").get_data(as_text=True)     # no conditions yet: the empty catalog (build 2)
+    assert "Каталог" in client.get("/shop").get_data(as_text=True)    # since 2026-10-31 a client gets our % of the brands from the start
 
 
 def test_the_forms_of_the_client_are_only_the_own_password():
@@ -496,7 +496,9 @@ def test_the_tables_of_the_client_conditions_and_their_cleanup(tmp_path):
     users.add_user(conn, "buyer", PASSWORD, NOW, role="client")
     conn.execute("INSERT INTO client_terms (subject, pct_small, pct_large) VALUES ('buyer', 10, 12)")
     conn.execute("INSERT INTO client_brand (subject, brand_key, pct_small) VALUES ('buyer', 'MICHELIN', 8), ('*', 'MICHELIN', NULL)")
+    conn.execute("INSERT INTO client_brand_pct (login, brand_key, small) VALUES ('buyer', 'michelin', 3)")   # the own % (2026-10-31)
     users.remove_user(conn, "buyer", NOW)
+    assert not conn.execute("SELECT 1 FROM client_brand_pct").fetchone()
     assert conn.execute("SELECT subject FROM client_terms").fetchall() == [("*",)]
     assert conn.execute("SELECT subject FROM client_brand").fetchall() == [("*",)]
 

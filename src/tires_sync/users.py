@@ -91,6 +91,7 @@ def remove_user(conn, login: str, now: str) -> None:
     conn.execute("DELETE FROM panel_user_role WHERE login = ?", (login,))
     conn.execute("DELETE FROM client_terms WHERE subject = ?", (login,))           # a client's own conditions ('*' is the role's, never a login)
     conn.execute("DELETE FROM client_brand WHERE subject = ?", (login,))
+    conn.execute("DELETE FROM client_brand_pct WHERE login = ?", (login,))        # the client's own % of the brands
     conn.execute("DELETE FROM user_pref WHERE login = ?", (login,))                  # the person's own settings (the columns of «Заказы»)
     store.write_audit(conn, now, "server", "user_removed", {"login": login})
     store.bump_session_epoch(conn, login)
@@ -321,7 +322,10 @@ def accept_invite(conn, token: str, login: str, password: str, now: str) -> str:
         add_user(conn, login, password, now, role=invite["role"], point_id=invite["point_id"], display_name=invite["display_name"],
                  author=login, commit=False)
         if terms is not None:
-            client_terms.save(conn, login, terms["small"], terms["large"], terms["mode"], terms["brands"], now, login, commit=False)
+            try:
+                client_terms.save_rows(conn, login, terms["rows"], now, login, commit=False, whole=True)
+            except client_terms.TermsError as err:   # our % changed since: a client's % would leave −50…300
+                raise client_terms.TermsError("Условия приглашения устарели: попросите новую ссылку.") from err
         conn.commit()
         return login
     except sqlite3.IntegrityError:                        # the same login taken by another invitation a moment ago

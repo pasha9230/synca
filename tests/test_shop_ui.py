@@ -138,7 +138,7 @@ def test_the_owners_preview_has_the_new_design_and_no_cart(tmp_path):
 
 
 def test_nothing_priced_is_a_catalog_not_set_up(tmp_path):
-    app, client, conn, _ = make_shop(tmp_path, role=(None, None), brands=(("LAUFENN", None, None),))
+    app, client, conn, _ = make_shop(tmp_path, role=(None, None), rows_of=(("laufenn", 5, 0, 5, 0),))
     html = page(client)
     assert "Ассортимент ещё не настроен" in html and prices(html) == []
 

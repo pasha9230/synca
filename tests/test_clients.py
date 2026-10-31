@@ -174,7 +174,8 @@ def test_the_old_code_reads_a_base_with_clients(conn, tmp_path):
         "client_tag", "client_pair_skip",                                                          # CRM (2026-10-23): the tags, «не тот же»
         "client_inquiry",                                                                          # the status of the inquiry (2026-10-23)
         "client_terms", "client_brand",                                    # the conditions of the role «Клиент» (a buyer, 2026-10-29), not of CRM
-        "client_profile"}                                                  # the buyer's contacts of the cart (shop_cart, 2026-10-30): only added
+        "client_profile",                                                  # the buyer's contacts of the cart (shop_cart, 2026-10-30): only added
+        "client_brand_pct"}                                                # the buyer's own % of the brands (2026-10-31)
 
 
 def test_a_new_phone_of_a_linked_order_goes_to_its_client_unless_another_has_it(conn):

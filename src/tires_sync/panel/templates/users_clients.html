@@ -1,22 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Условия клиентов · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Условия клиентов</h1><p class="sub">Цена клиента = закупка (цена в выгрузке) + наценка, вверх до 10 ₽. Клиент видит только итог; бренды — все, что есть у поставщиков (WebMIM и 4 Точки), исключения фида на клиента не действуют. <a href="/users">← Пользователи</a></p></div></header>
-<section class="card card-body stack">
-<h2>Роль «Клиент» — для всех клиентов без своих условий</h2>
-<p class="small muted">Наценка от 0 до 300 %, до двух знаков после запятой. Пусто — не задано: если процента нет нигде, позиция клиенту не показывается. Галочка бренда даёт ему свой %; бренд без своего % клиент видит по общему % роли (до R17 / с R18).</p>
-{% set ro = not can_post("users_clients_role_save") %}
-{% if not ro %}<form method="post" action="/client-terms/role" class="stack">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
-<div class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">
-<label class="field"><span class="label">Общий % до R17</span><input class="input input--num" name="small" value="{{ typed.get('small', '') if typed else fmt(role.small) }}" inputmode="decimal" style="max-width:140px"></label>
-<label class="field"><span class="label">Общий % с R18</span><input class="input input--num" name="large" value="{{ typed.get('large', '') if typed else fmt(role.large) }}" inputmode="decimal" style="max-width:140px"></label>
-<button class="btn btn--primary">Сохранить условия роли</button></div>
-{% with rows = rows, table_id = "role-brands", with_role = false %}{% include "_client_brands.html" %}{% endwith %}
-<div class="row"><button class="btn btn--primary">Сохранить условия роли</button></div>
-{% if not ro %}</form>{% else %}</fieldset>{% endif %}
-</section>
-<section class="card" style="margin-top:var(--s-4)"><div class="card-body" style="overflow-x:auto"><h2>Клиенты</h2>
-<table class="table"><thead><tr><th>Логин</th><th>Имя, компания</th><th>Свои условия</th><th>Состояние</th><th></th></tr></thead><tbody>
+<header class="page-head"><div><h1>Условия клиентов</h1><p class="sub">Цена клиента = закупка (цена в выгрузке) × (1 + % клиента / 100), вверх до 10 ₽. % клиента по бренду — наш % бренда («Настройки → Бренды и наценки», без поправки аккаунта) или свой % клиента, заданный в его условиях; он хранится как сдвиг от нашего и следует за ним. Бренд без нашего % клиент видит только со своим %. Клиент видит только итоговую цену. <a href="/users">← Пользователи</a></p></div></header>
+<section class="card"><div class="card-body" style="overflow-x:auto"><h2>Клиенты</h2>
+<table class="table"><thead><tr><th>Логин</th><th>Имя, компания</th><th>Свой % брендов</th><th>Состояние</th><th></th></tr></thead><tbody>
 {% for c in clients %}<tr{% if not c.active %} class="muted"{% endif %}><td>{{ c.login }}</td><td>{{ c.display_name }}</td><td class="small">{{ describe(c.terms)|join(" · ") }}</td>
 <td>{% if c.active %}<span class="badge badge--ok">включён</span>{% else %}<span class="badge badge--neutral">выключен</span>{% endif %}</td>
 <td style="white-space:nowrap"><a class="btn btn--secondary btn--sm" href="/client-terms/c/{{ c.login }}">Условия</a> <a class="btn btn--link-gray btn--sm" href="/client-terms/c/{{ c.login }}/preview">Каталог глазами клиента</a></td></tr>

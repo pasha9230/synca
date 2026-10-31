@@ -11,7 +11,7 @@ import pytest
 
 from helpers import catalog_xml, commodity_xml, make_offer
 from panel_helpers import login, make_app
-from tires_sync import connections, share_photos, store, users
+from tires_sync import connections, settings_store, share_photos, store, users
 from tires_sync.models import Season
 from tires_sync.panel import client_catalog as cc, service, shop_photos
 from tires_sync.panel.data import load_merged, load_reference
@@ -92,8 +92,20 @@ def tochki_row(code, rest=41, price=7001.0):
             "puncture": "", "strengthening": False, "omolog": "", "card": True}
 
 
-def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), brands=(("IKON TYRES", None, None),)):
-    """An app with the rows of WebMIM, 4tochki (switch off: shown in the catalog only) and a client «buyer» with the role's conditions."""
+def set_ours(conn, pricing: dict) -> None:
+    """Our % of the brands in the active settings («Бренды и наценки»): {"BRAND|season": (small, large)}; the clients' % is ours + shift."""
+    vid, raw = settings_store.get_active(conn)
+    raw.pop("version", None)
+    raw["pricing"] = {k: {"pct_small": v[0], "pct_large": v[1]} for k, v in pricing.items()}
+    raw["enabled"] = [p for p in raw.get("enabled", []) if "%s|%s" % tuple(p) in raw["pricing"]]
+    conn.execute("UPDATE settings_version SET json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), vid))
+    conn.commit()
+
+
+def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), rows_of=()):
+    """An app with the rows of WebMIM, 4tochki (switch off: shown in the catalog only) and a client «buyer». `role`: OUR % (up to R17,
+    from R18) of the brands of the rows (IKON winter, LAUFENN summer, IKON of 4 Точки winter; None: no % of ours); `rows_of`: the buyer's
+    own rows ((bare key, small, small_abs, large, large_abs), …) — the owner 2026-10-31: the client's % = ours + the shift."""
     app = make_app(tmp_path, PHOTO_FETCH=fake_fetch)
     open(app.config["UNLOAD_PATH"], "wb").write(catalog_xml(*rows))
     conn = store.connect(app.config["DB_PATH"])
@@ -104,8 +116,9 @@ def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), brands=(("IKON TYRE
         (tmp_path / "tochki-snapshot.json").write_text(json.dumps({"version": 1, "fetched_at": "2026-10-07T11:00:00",   # an hour before the app's clock
                                                                    "warehouse_id": 7, "items": list(tochki)}), encoding="utf-8")
     users.add_user(conn, "buyer", "длинный-пароль-1", NOW, role="client")
-    conn.execute("UPDATE client_terms SET pct_small = ?, pct_large = ? WHERE subject = '*'", role)
-    conn.executemany("INSERT INTO client_brand (subject, brand_key, pct_small, pct_large) VALUES ('*', ?, ?, ?)", brands)
+    keys = ["IKON TYRES|winter", "LAUFENN|summer"] + (["S%d:IKON TYRES|winter" % sid] if sid else [])
+    set_ours(conn, {k: role for k in keys} if role != (None, None) else {})
+    conn.executemany("INSERT INTO client_brand_pct (login, brand_key, small, small_abs, large, large_abs) VALUES ('buyer', ?, ?, ?, ?, ?)", rows_of)
     conn.commit()
     client = app.test_client()
     with client.session_transaction() as session:
@@ -134,18 +147,14 @@ def listing(html):
 
 def test_the_page_has_nothing_of_the_supplier_nor_the_purchase_nor_our_retail_price(tmp_path):
     app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1")])
-    settings = active_settings(conn)
-    parsed = load_merged(conn, settings, app.config["UNLOAD_PATH"])
-    retail = {g: c.price for g, c in service.evaluation(conn, settings, parsed, load_reference(app.config["REFERENCE_PATH"])).ok.items()}
-    assert retail.get("77001") and retail.get("77002")                       # our retail prices exist: they must not be on the page
+    # since 2026-10-31 (the owner) a client without its own % gets our % of the brand: its price IS our base price, no leak to look for
     html = page(client)
     shop_photos.drain()
     html += page(client)
     assert sorted(prices(html)) == sorted([13580, 65190, 7710, 3670] * 2)      # 12345×1.10, 54321×1.20 (R18), 7001×1.10, Laufenn 3333×1.10
     lowered = html.lower()
     for leak in ["12345", "12 345", "12 345", "54321", "54 321", "54 321", "7001", "7 001", "7 001", "secretcode", "77001",
-                 "77002", "s%d-t1" % sid, "supplier-one", "4tochki", "webmim", "4 точки", "4точки", "mim", "4т", "/img/"] + \
-            ["%d" % retail["77001"], "{:,}".format(int(retail["77001"])).replace(",", " ")]:
+                 "77002", "s%d-t1" % sid, "supplier-one", "4tochki", "webmim", "4 точки", "4точки", "mim", "4т", "/img/"]:
         assert leak.lower() not in lowered, leak
     assert "Склад 1" in html and "Склад 2" in html
 
@@ -182,18 +191,16 @@ def test_no_purchase_no_stock_or_no_markup_hides_the_position(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
     html = page(client)
     assert "Найдено 3" in html                                                 # 77004 (purchase 0) and 77005 (stock 0) are not shown
-    conn.execute("UPDATE client_terms SET pct_large = NULL WHERE subject = '*'")
-    conn.commit()
+    set_ours(conn, {"LAUFENN|summer": (10, 20)})
     html = page(client)
-    assert "Найдено 2" in html and sorted(prices(html)) == [3670, 13580]       # R18 without a % is hidden, never at the purchase
-    conn.execute("UPDATE client_terms SET pct_small = NULL WHERE subject = '*'")
-    conn.commit()
+    assert "Найдено 1" in html and prices(html) == [3670]                      # IKON without a % of ours is hidden, never at the purchase
+    set_ours(conn, {})
     html = page(client)
     assert "Ассортимент ещё не настроен" in html and prices(html) == []        # nothing has a price: as nothing set up
 
 
 def test_an_empty_role_shows_an_empty_catalog(tmp_path):
-    app, client, conn, _ = make_shop(tmp_path, role=(None, None), brands=())
+    app, client, conn, _ = make_shop(tmp_path, role=(None, None))
     html = page(client)
     assert "Ассортимент ещё не настроен" in html and prices(html) == [] and "<table" not in html
 
@@ -211,14 +218,18 @@ def test_the_headers_of_the_page(tmp_path):
 
 def terms_conn(tmp_path):
     conn = store.connect(tmp_path / "terms.db")
-    conn.execute("UPDATE client_terms SET pct_small = 10, pct_large = 20 WHERE subject = '*'")
-    conn.execute("INSERT INTO client_brand VALUES ('*', 'IKON TYRES', NULL, NULL)")
-    conn.execute("INSERT INTO client_brand VALUES ('*', 'CORDIANT', 5, 7)")
+    from helpers import settings_dict
+    settings_store.init_settings(conn, settings_dict(), NOW)
+    set_ours(conn, {"IKON TYRES|winter": (10, 20), "IKON TYRES|summer": (12, 22), "S2:IKON TYRES|winter": (11, 21)})
     return conn
 
 
 def price(conn, login="buyer", **kw):
     return cc.client_price(cc.terms_of(conn, login), make_offer(**kw))
+
+
+def own(conn, key, small=None, large=None, small_abs=False, large_abs=False, login="buyer"):
+    conn.execute("INSERT OR REPLACE INTO client_brand_pct VALUES (?, ?, ?, ?, ?, ?)", (login, key, small, int(small_abs), large, int(large_abs)))
 
 
 @pytest.mark.parametrize("base, diameter, expected", [
@@ -228,52 +239,49 @@ def price(conn, login="buyer", **kw):
     (7000, 18, 8400),        # R18 takes the large %
     (12345, 22, 14820),      # 14814 -> up
 ])
-def test_the_price_is_the_purchase_plus_the_percent_by_the_diameter_up_to_tens(tmp_path, base, diameter, expected):
+def test_without_its_own_the_client_gets_our_percent_by_the_diameter_up_to_tens(tmp_path, base, diameter, expected):
     assert price(terms_conn(tmp_path), base_price=base, diameter=diameter) == expected
 
 
-def test_the_profile_over_the_role_the_brand_over_the_general_and_nothing_means_hidden(tmp_path):
-    """The order (the owner 2026-10-29): the profile's % of the brand, the profile's general %, the role's % of the brand, the role's general %."""
+def test_the_clients_percent_is_ours_of_the_tyre_plus_the_shift_and_follows_ours(tmp_path):
+    """The owner 2026-10-31: «у нас Gislaved до R17 10, у клиента 12; у нас стало 13 — у клиента 15»: the shift of the brand is one for
+    every season and warehouse, our % is the tyre's own (its brand at its supplier, its season)."""
     conn = terms_conn(tmp_path)
-    conn.execute("UPDATE client_brand SET pct_small = 15, pct_large = 15 WHERE brand_key = 'CORDIANT'")
-    assert price(conn, base_price=1000, diameter=16, brand_key="CORDIANT") == 1150                 # the role's % of the brand
-    assert price(conn, base_price=1000, diameter=18, brand_key="S2:Cordiant") == 1150              # one brand at both warehouses
-    assert price(conn, base_price=1000, diameter=16) == 1100                                       # the role's general %
-    conn.execute("INSERT INTO client_terms (subject, pct_small, pct_large) VALUES ('buyer', 18, NULL)")
-    assert price(conn, base_price=1000, diameter=16, brand_key="CORDIANT") == 1180                 # the example: role Cordiant 15, profile 18 -> 18
-    assert price(conn, base_price=1000, diameter=18, brand_key="CORDIANT") == 1150                 # NULL in the profile: the role's brand %
-    assert price(conn, base_price=1000, diameter=16) == 1180 and price(conn, base_price=1000, diameter=18) == 1200
-    conn.execute("INSERT INTO client_brand VALUES ('buyer', 'CORDIANT', 12, NULL)")                 # the profile's % of the brand: first
-    assert price(conn, base_price=1000, diameter=16, brand_key="CORDIANT") == 1120
-    assert price(conn, base_price=1000, diameter=16) == 1180                                       # brands_mode 'inherit': the role's set
-    conn.execute("UPDATE client_terms SET brands_mode = 'own' WHERE subject = 'buyer'")
-    assert price(conn, base_price=1000, diameter=16) == 1180                                       # an own set without IKON: shown at
-                                                                                                    # the general % (the owner 2026-10-30)
-    assert price(conn, base_price=1000, diameter=16, brand_key="CORDIANT") == 1120
-    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL")
-    conn.execute("UPDATE client_brand SET pct_small = NULL, pct_large = NULL")
-    assert price(conn, base_price=1000, diameter=16, brand_key="CORDIANT") is None                 # no % anywhere: hidden
-    assert price(conn, "other", base_price=1000, diameter=16) is None
+    own(conn, "ikon tyres", small=2, large=-1)
+    assert price(conn, base_price=1000, diameter=16) == 1120                                       # winter 10 + 2
+    assert price(conn, base_price=1000, diameter=18) == 1190                                       # winter 20 − 1
+    assert price(conn, base_price=1000, diameter=16, season=Season.SUMMER) == 1140                 # summer 12 + 2
+    assert price(conn, base_price=1000, diameter=16, brand_key="S2:IKON TYRES") == 1130            # 4 Точки: their 11 + 2
+    assert price(conn, "other", base_price=1000, diameter=16) == 1100                              # another client: ours
+    set_ours(conn, {"IKON TYRES|winter": (13, 20)})
+    assert price(conn, base_price=1000, diameter=16) == 1150                                       # ours 13: the client's 15
+    assert price(conn, base_price=1000, diameter=16, season=Season.SUMMER) is None                 # no % of ours for summer: hidden
 
 
-def test_a_broken_first_percent_never_falls_to_the_next(tmp_path):
+def test_a_brand_we_have_no_percent_of_is_shown_by_the_clients_own_only(tmp_path):
     conn = terms_conn(tmp_path)
-    conn.execute("INSERT INTO client_terms (subject, pct_small, pct_large) VALUES ('buyer', -1, NULL)")
-    assert price(conn, base_price=1000, diameter=16) is None and price(conn, base_price=1000, diameter=18) == 1200
+    assert price(conn, base_price=1000, diameter=16, brand_key="NOKIAN") is None
+    own(conn, "nokian", small=-5, small_abs=True)
+    assert price(conn, base_price=1000, diameter=16, brand_key="NOKIAN") == 950                    # below the purchase: allowed down to −50
+    assert price(conn, base_price=1000, diameter=18, brand_key="NOKIAN") is None                   # from R18 not given: hidden
 
 
-@pytest.mark.parametrize("pct", [-5, 300.01, float("nan"), float("inf")])
-def test_a_broken_percent_hides_the_position(tmp_path, pct):
+def test_the_sum_of_two_decimals_is_never_a_float_tail(tmp_path):
     conn = terms_conn(tmp_path)
-    conn.execute("UPDATE client_terms SET pct_small = ? WHERE subject = '*'", (pct, ))
-    assert price(conn, base_price=1000, diameter=16) is None
-    assert price(conn, base_price=1000, diameter=18) == 1200
+    set_ours(conn, {"IKON TYRES|winter": (10.1, 20)})
+    own(conn, "ikon tyres", small=0.2)
+    assert price(conn, base_price=10000, diameter=16) == 11030                                     # 10.3 % of 10000 = 11030, not 11040
 
 
-def test_zero_percent_only_when_set_and_no_purchase_is_hidden(tmp_path):
+@pytest.mark.parametrize("shift, shown", [(-60.01, None), (-60, 500), (290, 4000), (290.01, None)])
+def test_a_percent_out_of_minus_50_300_hides_the_position(tmp_path, shift, shown):
     conn = terms_conn(tmp_path)
-    conn.execute("UPDATE client_terms SET pct_small = 0 WHERE subject = '*'")
-    assert price(conn, base_price=1001, diameter=16) == 1010
+    own(conn, "ikon tyres", small=shift)
+    assert price(conn, base_price=1000, diameter=16) == shown
+
+
+def test_no_purchase_is_hidden(tmp_path):
+    conn = terms_conn(tmp_path)
     assert price(conn, base_price=0, diameter=16) is None and price(conn, base_price=-5, diameter=16) is None
 
 
@@ -292,8 +300,7 @@ def many_rows(n):
 
 
 def test_the_filters_the_sort_and_the_pages(tmp_path):
-    app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1", rest=3)],
-                                       brands=(("IKON TYRES", None, None), ("LAUFENN", None, None)))
+    app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1", rest=3)])
     assert "Найдено 4" in page(client)
     html = page(client, "/shop?size=205/55R16+245/45R18")
     assert "Найдено 3" in html and "195/65 R15" not in html
@@ -384,7 +391,7 @@ def test_the_photo_of_a_position_out_of_the_set_or_any_address_is_never_served(t
     assert client.get("/shop/photo/https://example.com/a.jpg").status_code == 404
     assert client.get("/shop/photo?url=https://example.com/a.jpg").status_code in (403, 404)
     assert not any("77003" in u or "example.com" in u for u in FETCHED)
-    conn.execute("DELETE FROM client_brand")                                  # the set changed: the old link is closed at once
+    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL WHERE subject = '*'")   # no general %: the old link closes
     conn.commit()
     assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, "77001")).status_code == 404
 
@@ -521,3 +528,18 @@ def test_an_old_snapshot_of_4tochki_hides_the_second_warehouse_and_warns_once(tm
     assert ("«Склад 2» скрыт" in preview) is not shown
     assert ("Склад 2</td>" in rows_of(preview)) is shown and ("Склад 2</td>" in rows_of(html)) is shown
     assert "скрыт" not in html and "4 Точ" not in html                                  # the client is never told why
+
+
+def test_the_client_sees_everything_we_have_a_percent_of_whatever_the_feed_shows(tmp_path):
+    """The owner 2026-10-31: «клиент должен видеть все значения, на которые мы задаём %»: a brand, a season or a position switched off in
+    our feed is still the client's (its % is ours of the brand + the client's shift)."""
+    app, client, conn, _ = make_shop(tmp_path)
+    before = sorted(prices(page(client)))
+    vid, raw = settings_store.get_active(conn)
+    raw.pop("version", None)
+    raw["enabled"] = []                                                       # no brand × season in our feed
+    raw["excluded_brands"] = ["LAUFENN"]
+    raw["overrides"] = {"77001": "off", "77002": "off"}
+    conn.execute("UPDATE settings_version SET json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), vid))
+    conn.commit()
+    assert sorted(prices(page(client))) == before == [3670, 13580, 65190]

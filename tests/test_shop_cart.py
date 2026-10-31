@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet
 from http_fakes import ScriptedHttp
 from panel_helpers import login, post
 from test_roles import sign_in
-from test_shop import make_shop, page
+from test_shop import make_shop, page, set_ours
 from tires_sync import connections, order_points, order_notify, orders, shop_cart, store, users
 from tires_sync.secretbox import SecretBox
 
@@ -81,8 +81,7 @@ def test_a_key_of_no_position_or_without_a_price_puts_nothing(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path)
     assert add(client, "0" * 32).status_code == 302 and shop_cart.cart(conn, "buyer") == {}
     from tires_sync.panel import client_catalog as cc
-    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL WHERE subject = '*'")   # Laufenn: no % of its own nor general
-    conn.commit()
+    set_ours(conn, {"IKON TYRES|winter": (10, 20)})                                   # Laufenn: no % of ours nor of the client
     add(client, cc.photo_token(app.secret_key, "77003"))
     assert shop_cart.cart(conn, "buyer") == {}
 
@@ -152,15 +151,12 @@ def test_the_price_is_taken_anew_at_the_checkout_and_a_tyre_no_longer_sold_stops
     app, client, conn, tg, pid = shop(tmp_path)
     ks = keys(page(client))
     add(client, ks[0])
-    conn.execute("UPDATE client_terms SET pct_small = 20 WHERE subject = '*'")         # the conditions changed after the cart
-    conn.commit()
+    set_ours(conn, {"IKON TYRES|winter": (20, 20), "LAUFENN|summer": (10, 20)})       # our % changed after the cart
     r = checkout(client, price="1")                                                   # a price in the form means nothing
     card = orders.get_card(conn, int(r.headers["Location"].rsplit("/", 1)[1]))
     assert [i["sale_unit"] for i in card["items"]] == [14820]                         # 12345 + 20 %, rounded to 10 as the catalog
     add(client, ks[1])
-    conn.execute("DELETE FROM client_brand")                                          # no % for anything left: nothing is sold
-    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL WHERE subject = '*'")
-    conn.commit()
+    set_ours(conn, {})
     r = checkout(client)
     assert r.status_code == 400 and "нет в наличии" in r.get_data(as_text=True)
     assert conn.execute("SELECT COUNT(*) FROM shop_order").fetchone()[0] == 1
@@ -329,8 +325,7 @@ def test_a_price_changed_since_the_cart_was_shown_is_not_ordered_silently(tmp_pa
     add(client, keys(page(client))[0], qty="2")
     seen = re.search(r'name="total" value="(\d+)"', page(client, "/shop/cart")).group(1)
     assert seen == "27160"
-    conn.execute("UPDATE client_terms SET pct_small = 20 WHERE subject = '*'")
-    conn.commit()
+    set_ours(conn, {"IKON TYRES|winter": (20, 20), "LAUFENN|summer": (10, 20)})
     r = checkout(client, total=seen)
     assert r.status_code == 400 and "Цены изменились" in r.get_data(as_text=True) and shop_cart.cart(conn, "buyer")
     assert checkout(client, total=re.search(r'name="total" value="(\d+)"', page(client, "/shop/cart")).group(1)).status_code == 302

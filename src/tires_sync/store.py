@@ -196,6 +196,13 @@ CREATE TABLE IF NOT EXISTS client_terms (
 CREATE TABLE IF NOT EXISTS client_brand (
     subject TEXT NOT NULL, brand_key TEXT NOT NULL, pct_small REAL, pct_large REAL, PRIMARY KEY (subject, brand_key)
 );
+-- since 2026-10-31 (the owner): a client's own % of a brand (bare key) as a shift in points from our % of the tyre (the feed's general
+-- settings: its brand at its supplier, its season), up to R17 / from R18; `*_abs` = 1: the client's % as it is (we have no % of the brand).
+-- client_brand and the rows of client_terms are not read any more (kept: nothing is deleted)
+CREATE TABLE IF NOT EXISTS client_brand_pct (
+    login TEXT NOT NULL, brand_key TEXT NOT NULL, small REAL, small_abs INTEGER NOT NULL DEFAULT 0, large REAL,
+    large_abs INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (login, brand_key)
+);
 CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS login_attempt (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL, at TEXT NOT NULL
