@@ -229,7 +229,7 @@ def test_a_call_of_the_client_is_a_line_and_an_alert_in_the_open_order(tmp_path)
 
 # --- the guard: sending to the client is not changed by this lane ----------------------------------------------------------------------
 
-SEND_CODE = {"send_reply": "67a2e20061cd2c7d", "send_image": "246067c5cbb76d35", "_not_delivered": "a8956eb6a6144a6f",
+SEND_CODE = {"send_reply": "860e35bebb7b477e", "send_image": "246067c5cbb76d35", "_not_delivered": "a8956eb6a6144a6f",
              "_definitely_not_sent": "54fccf3440320712", "prepare_image": "49124b261ee79487", "_ours_at_avito": "b314973f9e146a88",
              "_resume_interrupted": "6dafc631f5931af4", "_avito_said": "c548573094ccd636", "_refused_hint": "43286dbe7edeb825",
              "_send_record": "31f9efceaa31c6ea", "_quotes": "fd5e8049fdeab435", "_deliver": "026189c9548d1b16",
@@ -242,6 +242,7 @@ SEND_CODE = {"send_reply": "67a2e20061cd2c7d", "send_image": "246067c5cbb76d35",
              "_inbox_close": "480dcd9ae2041726"}       # run8, lane stuck-sending: a mark «sending» older than 5 minutes is resolved (tests/test_stuck_sending.py)
 # 2026-10-31 unsent (RED, reviewed): _deliver and _retry_refused keep the text of a send failed for good for «Не дошло клиенту» (unsent.record,
 # a savepoint that never raises; tests/test_unsent.py); what is sent and repeated is unchanged
+# 2026-11-01 unsent, the lead's review: send_reply keeps the text of a press refused before the send (no cabinet's id) the same way
 # 2026-10-24 reliability, lane rel-core (RED, reviewed): send_reply asks the cabinet's id before the send; its failure is «failed», not «unknown»
 # 2026-10-24 open1, lane chat-402 (RED, reviewed): a refusal shows and keeps Avito's own answer (tests/test_chat_send_refusal.py); what is repeated is unchanged
 # 2026-10-25 tails1, lane tails-chats (reviewed): Ч2 a failure of our own is not «нет ответа»; Ч3 a pause of Avito named, 400/404 «повтор не поможет»; Ч4 an escaped quote of ours is found (tests/test_tails_chats.py); what is repeated is unchanged

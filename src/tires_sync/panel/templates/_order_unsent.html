@@ -4,7 +4,7 @@
 {% set unsent_rows = unsent_for(c.id) %}{% if unsent_rows %}
 <section class="order-unsent card" id="unsent" role="alert" style="border-color:var(--err-200);background:var(--err-50)"><div class="card-body stack">
 <h3 class="text-err" style="margin:0">Не дошло клиенту{% if unsent_rows|length > 1 %} · {{ unsent_rows|length }}{% endif %}</h3>
-<p class="small muted" style="margin:0">Скопируйте текст, отправьте клиенту сами и нажмите «Отправил вручную». Панель сама ничего не отправит.</p>
+<p class="small muted" style="margin:0">Сначала проверьте чат: если клиенту уже написали — просто нажмите «Отправил вручную». Иначе скопируйте текст, отправьте клиенту сами и нажмите «Отправил вручную». Панель сама ничего не отправит.</p>
 {% for u in unsent_rows %}{% set uid = "unsent-%s-%s"|format(u.kind, u.id) %}<div class="stack order-unsent-item" data-unsent="{{ u.kind }}-{{ u.id }}" style="gap:var(--s-2)">
 <div class="small"><b>{{ u.at|short_dt }}</b> · {{ u.source }}{% if u.why %}<div class="text-err">{{ u.why }}</div>{% endif %}</div>
 <textarea class="textarea" id="{{ uid }}" rows="5" readonly aria-label="Текст сообщения клиенту">{{ u.text }}</textarea>

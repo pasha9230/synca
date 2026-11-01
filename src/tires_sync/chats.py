@@ -961,6 +961,7 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
         _mark(conn, token, "failed", _send_record(chat_row, err, text))
         why = (_avito_said(err, text) if isinstance(err, AvitoError) else str(err) if isinstance(err, reliability.ServiceUnavailable)
                else "нет ответа" if isinstance(err, OSError) else "непредвиденная ошибка %s" % type(err).__name__)
+        _keep_unsent(conn, chat, token, now, "Авито не отдал данные кабинета (%s)" % why, text)     # «Не дошло клиенту» (the lead's review)
         raise _not_delivered(conn, chat, now, author, "Сообщение", ChatError(
             "Сообщение не отправлено: Авито не отдал данные кабинета (%s). Повторите позже." % why)) from None
     _deliver(conn, client, chat, user_id, token, now, author, 0, text)

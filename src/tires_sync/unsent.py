@@ -118,6 +118,7 @@ def sent_by_hand(conn, order_id, kind: str, item_id, now: str, who: str) -> None
         raise UnsentError("Неизвестное сообщение.")
     orders.add_event(conn, order_id, now, who, "chat", "Сообщение клиенту отправлено вручную (не дошло из панели)", level="grey")
     store.write_audit(conn, now, who, "unsent_by_hand", {"order": order_id, "kind": kind, "id": int(item_id)})
-    if kind == "send":                                        # after the mark is saved (it commits or rolls back on its own): the lines of
-        from . import chats                                   # «Входящие» about the send are answered — nobody writes it to the client twice
-        chats._inbox_close(conn, token, now, "Итог: отправлено вручную из карточки заказа (%s)." % who, alerts=True)
+    from . import chats                                       # after the mark is saved (it commits or rolls back on its own): the lines of
+    if kind == "task":                                        # «Входящие» about the send are answered — nobody writes it to the client twice;
+        token = order_engine.task_token(task)                 # a task's mark («arrived-…» of «можно забирать», the lead's review)
+    chats._inbox_close(conn, token, now, "Итог: отправлено вручную из карточки заказа (%s)." % who, alerts=True)

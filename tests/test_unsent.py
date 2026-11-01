@@ -123,8 +123,11 @@ def test_an_order_without_a_chat_shows_the_waiting_message_with_its_text(arrived
     [row] = unsent.of_order(conn, card)
     assert row["kind"] == "task" and "нет чата Авито" in row["why"] and row["text"] == "Заказ 5000777 приехал, можно забирать"
     assert conn.execute("SELECT COUNT(*) FROM order_unsent").fetchone()[0] == 0                      # one place, never twice
+    inbox = "SELECT status FROM manager_message WHERE message_id LIKE 'arrived-%'"
+    assert conn.execute(inbox).fetchone()[0] == "new"                                               # «можно забирать» waits in «Входящие» too
     unsent.sent_by_hand(conn, card, "task", row["id"], at(60), "owner")
     assert unsent.of_order(conn, card) == [] and engine.get_task(conn, row["id"])["status"] == "done"
+    assert conn.execute(inbox).fetchone()[0] == "answered"                                          # the lead's review: never written twice
     sent, _note = mgr.tell_client_arrived(conn, card, None, at(120), "точка")                         # «приехал» again: never back
     assert unsent.of_order(conn, card) == []
 
@@ -282,3 +285,19 @@ def test_a_point_never_ticks_off_a_message_the_block_does_not_show(tmp_path):
     conn.commit()
     assert post(gamma, "/orders/%d/unsent/task/%d" % (card, task_id), "tok").status_code == 302
     assert engine.get_task(conn, task_id)["status"] == "pending"                                     # not shown in the block: not touched
+
+
+def test_a_press_without_the_cabinets_data_is_kept_too(env, monkeypatch):
+    """The lead's review: a press refused before the send (Avito did not give the cabinet's id) is «не отправлено» for good as well."""
+    from tires_sync import connections
+    conn, chat_row, card = env
+
+    def no_cabinet(*args, **kwargs):
+        raise OSError("timed out")
+    monkeypatch.setattr(connections, "cabinet_user_id", no_cabinet)
+    sender = Sender()
+    with pytest.raises(chats.ChatError):
+        chats.send_reply(conn, sender, chat_row, "Шины пришли", "tok-1", NOW, "owner")
+    assert sender.sent == []
+    [row] = unsent.of_order(conn, card)
+    assert row["text"] == "Шины пришли" and "данные кабинета" in row["why"]
