@@ -69,7 +69,7 @@ def test_the_preview_lists_new_gone_and_repriced_positions_and_writes_nothing(tm
     # position 4 left the unload during the day: it waits for the morning refill of the supplier's catalog instead of going at once
     assert "Появятся (1)" in html and "Ждут утра (1)" in html and "Исчезнут" not in html and "Изменится цена (1)" in html
     row = re.search(r"Изменится цена \(1\).*?<tbody>(.*?)</tbody>", html, re.S).group(1)
-    assert "4" in row and "810" in row and "780" in row                                               # 4 810 became 5 780 (6000 with the brand's markdown)
+    assert "4" in row and "850" in row and "800" in row                                               # 4 850 became 5 800 (6000 with the brand's markdown, up to 50)
     assert tables(conn) == before and public_feed(app, conn, account) == feed_before                   # reading changed nothing
     post(client, "/feed/update/confirm", tok, rev=rev_of(client))
     assert "<Id>4</Id>" in public_feed(app, conn, account)                                              # still published, waiting

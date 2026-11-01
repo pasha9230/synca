@@ -14,7 +14,7 @@ def run(offers, issues=None, confirmed=None):
 def test_good_offer_becomes_candidate_with_price_and_avito_names():
     ev = run([make_offer(base_price=5000.0)])
     c = ev.ok["100"]
-    assert (c.price, c.avito_brand, c.avito_model) == (4810, "Ikon Tyres", "Test Model")
+    assert (c.price, c.avito_brand, c.avito_model) == (4850, "Ikon Tyres", "Test Model")
 
 
 def test_unmapped_model_is_a_problem_and_listed_as_unmatched():

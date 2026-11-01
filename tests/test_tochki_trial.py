@@ -111,7 +111,7 @@ def test_a_webmim_ad_goes_on_under_its_id_with_4tochki_stock_and_price_and_keeps
     conn.close()
     second = by_id(cycle_and_publish(tmp_path, args)["Основной"])
     ad = second["100"]
-    assert ad.findtext("Price") == "3680"                                                    # accepted: 3500 + 5 %, the rule of S2:IKON
+    assert ad.findtext("Price") == "3700"                                                    # accepted: 3500 + 5 % = 3675, up to 50; the rule of S2:IKON
     text = ad.findtext("Description")
     assert "В наличии: 40 шт." in text and "Артикул: CI7" in text and "Страна происхождения бренда: Корея" in text
     conn = store.connect(tmp_path / "t.db")

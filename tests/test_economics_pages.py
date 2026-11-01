@@ -38,8 +38,8 @@ def test_overview_shows_totals_and_a_row_per_brand(tmp_path):
 def test_the_position_money_follows_the_owners_formula(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     html = client.get("/economics/brand?brand=IKON%20TYRES").get_data(as_text=True)
-    # supplier price 5000, sale 4810 (-3.82 %), bonus 7 % + monthly 10 % of the price = 850 back: margin 660
-    assert "660" in html and "13,2" in html and "4 810" in html and "5 000" in html
+    # supplier price 5000, sale 4850 (-3.82 % = 4809, up to 50), bonus 7 % + monthly 10 % of the price = 850 back: margin 700
+    assert "700" in html and "14,0" in html and "4 850" in html and "5 000" in html
     assert "×4" in html or "Комплект" in html
     assert client.get("/economics/brand?brand=NOBODY").status_code == 404
     assert app.test_client().get("/economics").status_code == 302
@@ -48,7 +48,7 @@ def test_the_position_money_follows_the_owners_formula(tmp_path):
 def test_totals_count_only_what_is_in_the_feed_with_stock(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     html = client.get("/economics").get_data(as_text=True)
-    # Ikon: 10 pcs at 660 and 3 pcs of R19: 5000 → 4810/… ; profit text appears as rubles with a thin space
+    # Ikon: 10 pcs at 700 and 3 pcs of R19: 5000 → 4850/… ; profit text appears as rubles with a thin space
     assert "Объявлений в фиде" in html and "остаток 10 шт." in html            # R19 has 3 pcs: below the threshold of 4, not in the feed
     from tires_sync.panel import economics_view
     from tires_sync.panel.routes_main import context
@@ -80,7 +80,7 @@ def test_costs_of_avito_change_the_margin(tmp_path):
     post(client, "/economics/params", tok, fee_pct="5", promo_pct="2")
     assert terms.get_params(conn) == {"fee_pct": 5.0, "promo_pct": 2.0}
     html = client.get("/economics/brand?brand=IKON%20TYRES").get_data(as_text=True)
-    assert "336" in html or "337" in html                                       # 660 - 7 % of 4810 (= 336.7)
+    assert "360" in html or "361" in html                                       # 700 - 7 % of 4850 (= 360.5)
     post(client, "/economics/params", tok, fee_pct="90", promo_pct="0")
     assert "допустимо от 0 до 50" in client.get("/economics/terms").get_data(as_text=True)
 
@@ -135,7 +135,7 @@ def test_a_brand_that_is_off_shows_what_it_would_bring_if_it_were_on(tmp_path):
 def test_a_sale_is_recorded_from_the_form_and_shows_up_in_the_facts(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     page = client.get("/economics/sales/new?goods_id=1").get_data(as_text=True)
-    assert "Продано:" in page and 'name="sale_total"' in page and 'value="4810"' in page.replace(" ", "") or "4810" in page
+    assert "Продано:" in page and 'name="sale_total"' in page and 'value="4850"' in page.replace(" ", "") or "4850" in page
     r = post(client, "/economics/sales/add", tok, goods_id="1", ad_kind="single", pieces="4", sale_total="19 240", day="2026-10-07",
              account_id="", point="Бета", note="тест")
     assert r.status_code == 302 and r.headers["Location"].endswith("/economics/sales")

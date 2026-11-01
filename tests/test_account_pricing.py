@@ -49,7 +49,7 @@ def test_two_accounts_get_their_own_prices_from_the_same_supplier_data(tmp_path)
     cycle.run_for_accounts(conn, xml, REF, date(2026, 10, 14), tmp_path / "feed")
     text = {a: (tmp_path / "feed" / connections.get_account(conn, a)["feed_token"] / "next" / "avito_feed.xml").read_text(encoding="utf-8")
             for a in (first, second)}
-    assert "<Price>4810</Price>" in text[first] and "<Price>4910</Price>" in text[second]
+    assert "<Price>4850</Price>" in text[first] and "<Price>4950</Price>" in text[second]
 
 
 def test_account_page_has_a_form_for_the_account_pricing(tmp_path):

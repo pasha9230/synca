@@ -44,7 +44,7 @@ def test_a_new_position_joins_the_mirror_with_our_settings_and_the_template_of_t
     assert ads["100_20260801"].findtext("Description").startswith("Текст Партнёра")
     new = ads["200"]
     assert new.findtext("Description").startswith("ШАБЛОН ПАРТНЁРА") and "NEW2" in new.findtext("Description")
-    assert new.findtext("Price") == "4810" and new.findtext("Brand")                         # priced by the settings of the account
+    assert new.findtext("Price") == "4850" and new.findtext("Brand")                         # priced by the settings of the account
 
 
 def test_the_new_position_is_remembered_and_the_published_feed_commits_it(tmp_path):

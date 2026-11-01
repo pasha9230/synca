@@ -233,7 +233,7 @@ def own(conn, key, small=None, large=None, small_abs=False, large_abs=False, log
 
 
 @pytest.mark.parametrize("base, diameter, expected", [
-    (7001, 16, 7710),        # 7701.1 -> up
+    (7001, 16, 7710),        # 7701.1 -> up to tens, not to 50: the client catalog keeps tens (the owner, 2026-11-01)
     (7000, 16, 7700),        # an even ten does not grow
     (7000, 17, 7700),        # R17 is «up to R17»
     (7000, 18, 8400),        # R18 takes the large %

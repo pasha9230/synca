@@ -1,7 +1,7 @@
 """The cross-supplier merge (tire_match) is prepared switched off: with the switch off the feeds stay byte for byte what they were.
 
 The golden file was taken on `origin/run/2026-10-25-match` (`76e4bb2`) before tire_match existed (set REGENERATE_MATCH_GOLDEN=1 to retake it,
-only on a known-good tree). The scenario holds what the merge would change if it leaked: 4tochki is in the feed, it has the owner's example
+only on a known-good tree; its prices moved up to 50 ₽ on 2026-11-01, the owner's rounding, nothing else). The scenario holds what the merge would change if it leaked: 4tochki is in the feed, it has the owner's example
 tire that WebMIM has too, and the two sides are mapped to different Avito models (so the old same_tire does not merge them)."""
 from __future__ import annotations
 

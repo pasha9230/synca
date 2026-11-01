@@ -62,14 +62,14 @@ def test_a_link_shows_the_snapshot_and_nothing_a_client_must_not_see(tmp_path):
     ids = goods_ids(client)[:2]
     assert len(ids) == 2
     preview = client.post("/shares/new", data={"g": ids, "csrf": tok}).get_data(as_text=True)
-    assert "Ссылка для клиента" in preview and "4 810 ₽" in preview
+    assert "Ссылка для клиента" in preview and "4 850 ₽" in preview
     made = create(client, tok, ids, show_price="1", note="для Audi")
     assert made.status_code == 200 and made.headers["Cache-Control"] == "no-store"
     token = token_of(made)
     anon = app.test_client()                                    # no session at all
     page = anon.get("/s/" + token)
     html = page.get_data(as_text=True)
-    assert page.status_code == 200 and "для Audi" in html and "4 810 ₽" in html and "205/55 R16" in html
+    assert page.status_code == 200 and "для Audi" in html and "4 850 ₽" in html and "205/55 R16" in html
     for forbidden in ("5 000", "SECRETCODE", " шт", "в наличии", "под заказ", "Цена поставщика", "goods", "csrf", "/catalog"):
         assert forbidden not in html, forbidden
     assert "Set-Cookie" not in page.headers
@@ -88,7 +88,7 @@ def test_the_price_can_be_hidden_and_shown_again_at_once(tmp_path):
     assert "₽" not in anon.get("/s/" + token).get_data(as_text=True)
     link_id = store.connect(app.config["DB_PATH"]).execute("SELECT id FROM share_link").fetchone()[0]
     post(client, "/shares/%d/price" % link_id, tok, show_price="1")
-    assert "4 810 ₽" in anon.get("/s/" + token).get_data(as_text=True)
+    assert "4 850 ₽" in anon.get("/s/" + token).get_data(as_text=True)
     post(client, "/shares/%d/price" % link_id, tok, show_price="0")
     assert "₽" not in anon.get("/s/" + token).get_data(as_text=True)
 
@@ -127,7 +127,7 @@ def test_the_snapshot_does_not_change_when_the_prices_change_later(tmp_path):
     open(app.config["UNLOAD_PATH"], "wb").write(catalog_xml(
         commodity_xml(NNOMMODIF="1", SMODIFNAME="IKON 205/55/16 T 94 Test Model Ш.", NREST="0", NPRICE_DELAYED="9000", SMNFCODE="SECRETCODE1")))
     html = app.test_client().get("/s/" + token).get_data(as_text=True)
-    assert "4 810 ₽" in html and "9 000" not in html and "8 " not in html
+    assert "4 850 ₽" in html and "9 000" not in html and "8 " not in html
 
 
 def test_positions_without_a_selling_price_are_left_out_and_said_so(tmp_path):

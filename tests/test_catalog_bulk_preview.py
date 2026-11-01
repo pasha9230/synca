@@ -55,7 +55,7 @@ def test_preview_shows_the_ad_as_it_will_be_built(tmp_path):
     connections.save_addresses(conn, a, "percent", None, [
         {"name": "Бета", "address_id": "101", "enabled": True, "share": 100, "address_text": "СПб, ул. Примерова, 35А"}], T, "owner", address_mode="text")
     html = client.get("/catalog/preview/1").get_data(as_text=True)
-    assert "4810" in html and "Ikon  205/55/16" in html and "C1" in html
+    assert "4850" in html and "Ikon  205/55/16" in html and "C1" in html
     assert "СПб, ул. Примерова, 35А" in html and "В наличии: 12 шт." in html
     assert "Заголовок" in html and "Описание" in html and "Количество" in html
     assert "<html" not in html  # a fragment for the dialog
@@ -124,4 +124,4 @@ def test_preview_of_a_hand_added_position_with_no_price_percent_keeps_the_exact_
     html = client.get("/catalog/preview/1").get_data(as_text=True)
     assert "Объявление не собирается: не задан процент цены." in html
     assert "Ikon  205/55/16" in html and "Заголовок" in html and "Описание" in html
-    assert "процент не задан" in html and "4810" not in html                               # no price is made up
+    assert "процент не задан" in html and "4850" not in html                               # no price is made up

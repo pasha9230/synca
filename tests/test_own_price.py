@@ -51,12 +51,12 @@ def test_old_settings_without_the_key_have_no_own_prices():
 def test_position_price_own_percent_and_fixed_price_go_up_to_tens_brand_otherwise():
     offer = make_offer(base_price=5000.0)
     s = make_settings()
-    assert position_price(offer, s) == 4810                                                            # −3,82 % бренда
+    assert position_price(offer, s) == 4850                                                            # −3,82 % бренда, вверх до 50
     assert position_price(offer, dataclasses.replace(s, own_prices={"100": ("pct", 10.0)})) == 5500
     assert position_price(offer, dataclasses.replace(s, own_prices={"100": ("pct", 10.01)})) == 5510   # вверх до десятков
     assert position_price(offer, dataclasses.replace(s, own_prices={"100": ("price", 6995)})) == 7000
     assert position_price(offer, dataclasses.replace(s, own_prices={"100": ("price", 6990)})) == 6990
-    assert position_price(offer, dataclasses.replace(s, own_prices={"999": ("price", 1)})) == 4810     # чужая позиция не влияет
+    assert position_price(offer, dataclasses.replace(s, own_prices={"999": ("price", 1)})) == 4850     # чужая позиция не влияет
 
 
 def test_general_settings_never_apply_an_own_price_only_the_accounts_effective_ones_do(tmp_path):
@@ -93,8 +93,8 @@ def test_own_price_goes_only_into_the_feed_of_its_account_and_the_pack_costs_fou
     conn.commit()
     cycle.run_for_accounts(conn, catalog_xml(commodity_xml(NREST="10")), REF, date(2026, 10, 29), tmp_path / "feed")
     one, two = _feed_text(tmp_path, conn, first), _feed_text(tmp_path, conn, second)
-    assert "<Price>4810</Price>" in one and "<Price>19240</Price>" in one and "<Price>7000</Price>" not in one
-    assert "<Price>7000</Price>" in two and "<Price>28000</Price>" in two and "<Price>4810</Price>" not in two
+    assert "<Price>4850</Price>" in one and "<Price>19400</Price>" in one and "<Price>7000</Price>" not in one
+    assert "<Price>7000</Price>" in two and "<Price>28000</Price>" in two and "<Price>4850</Price>" not in two
 
 
 def test_mirror_ads_take_the_own_price_of_their_account_a_pack_its_count(tmp_path):
@@ -104,7 +104,7 @@ def test_mirror_ads_take_the_own_price_of_their_account_a_pack_its_count(tmp_pat
     general = settings_from_dict(settings_dict(price_overrides={"%d:100" % second: {"pct": 10}, "%d:101" % first: {"price": 100}}))
     offers = {"100": make_offer(), "101": make_offer(goods_id="101", code="TS2")}
     prices = mirror_feed.prices_for(conn, second, offers, connections.effective_settings(conn, second, general))
-    assert prices == {"100_1": 5500, "100-x4": 22000, "101_1": 4810}                                   # 101: своя цена другого аккаунта
+    assert prices == {"100_1": 5500, "100-x4": 22000, "101_1": 4850}                                   # 101: своя цена другого аккаунта
 
 
 # --- черновик, «Применить», откат ----------------------------------------------------------------------------------------------
@@ -349,7 +349,7 @@ def test_a_mirrored_ad_counts_only_while_the_account_is_a_mirror(tmp_path):
 
 @pytest.mark.parametrize("value, asked", [("4000", True), ("6990", True), ("3000", True), ("5200", False), ("6200", False)])
 def test_a_fixed_price_below_the_purchase_or_far_from_the_feed_is_asked_once_more(tmp_path, value, asked):
-    """Purchase 5 000, feed price by the brand 4 810: 4 000 is below the purchase, 6 990 is +45 %, 3 000 both; 5 200 and 6 200 neither."""
+    """Purchase 5 000, feed price by the brand 4 850: 4 000 is below the purchase, 6 990 is +45 %, 3 000 both; 5 200 and 6 200 neither."""
     app, conn, (first, _) = _app(tmp_path)
     client = app.test_client()
     tok = login(client)
@@ -358,7 +358,7 @@ def test_a_fixed_price_below_the_purchase_or_far_from_the_feed_is_asked_once_mor
     page = client.get("/draft/%d" % draft_id).get_data(as_text=True)
     assert ("Подтверждаю значения вне диапазона" in page) == asked
     if asked:
-        assert "закупка 5 000 ₽" in page and "было 4 810 ₽" in page
+        assert "закупка 5 000 ₽" in page and "было 4 850 ₽" in page
     post(client, "/draft/%d/confirm" % draft_id, tok)                                                  # без отметки
     assert (active_settings(conn).price_overrides == {}) == asked
     if asked:

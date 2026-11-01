@@ -10,7 +10,7 @@ from panel_helpers import post
 from tires_sync import connections, orders
 from tires_sync import order_points as points
 from tires_sync.models import Season
-from tires_sync.pricing import final_price
+from tires_sync.pricing import FEED_STEP, final_price
 from tires_sync.settings_store import active_settings
 
 NOW = "2026-10-12T09:00:00"
@@ -33,7 +33,7 @@ def feed_price(conn, account_id, goods_id):
     """What the feed of this account asks for one tyre: the rule of the account's own settings, rounded as the feed rounds it."""
     base, diameter = BASE[goods_id]
     rule = connections.effective_settings(conn, account_id, active_settings(conn)).pricing[("IKON TYRES", Season.WINTER)]
-    return float(final_price(base, rule, diameter))
+    return float(final_price(base, rule, diameter, step=FEED_STEP))
 
 
 def chat_of(conn, account_id, goods_id="100", avito_id=7001):

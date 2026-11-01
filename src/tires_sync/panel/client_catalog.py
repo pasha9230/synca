@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ..catalog import resolve_brand
 from ..models import PricingRule
-from ..pricing import final_price
+from ..pricing import TENS, final_price
 from ..suppliers import supplier_of_id
 from . import service
 
@@ -82,7 +82,7 @@ def client_price(terms: Terms, offer) -> Optional[int]:
     pct = _pct(client_pct(terms.rows.get(bare_brand(offer.brand_key), EMPTY), diameter, None if our is None else float(our)))
     if pct is None:
         return None
-    return final_price(offer.base_price, PricingRule(pct, pct), offer.diameter)
+    return final_price(offer.base_price, PricingRule(pct, pct), offer.diameter, step=TENS)
 
 
 def photo_token(secret, goods_id: str) -> str:

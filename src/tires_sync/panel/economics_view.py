@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from .. import economics, terms as terms_store
 from ..models import Season
-from ..pricing import final_price, position_price
+from ..pricing import FEED_STEP, final_price, position_price
 from . import service
 
 
@@ -36,7 +36,7 @@ def positions(conn, effective, parsed, ref, day: str, params: Dict[str, float], 
                 if offer.goods_id in effective.own_prices:                  # the account's own price of the position first
                     sale = position_price(offer, effective) if offer.base_price > 0 else None
                 else:
-                    sale = final_price(offer.base_price, rule, offer.diameter) if rule and offer.base_price > 0 else None
+                    sale = final_price(offer.base_price, rule, offer.diameter, step=FEED_STEP) if rule and offer.base_price > 0 else None
             found = economics.pick_terms(rules, offer.brand_key, season, offer.diameter, day)
             row = {"goods_id": offer.goods_id, "brand": offer.brand_key, "name": item["name"], "model": item["model"], "size": item["size"],
                    "diameter": offer.diameter, "season": season, "kind": item["kind"], "stock": offer.stock, "state": item["state"],

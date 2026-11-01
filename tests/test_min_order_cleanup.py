@@ -1,6 +1,7 @@
 """Dead minimum-order code removed (owner's terms of sale, 2026-10-20): the feeds must stay byte for byte what they were.
 
-The golden file was taken on `origin/master` before the clean-up (set REGENERATE_MIN_ORDER_GOLDEN=1 to retake it, only on a known-good tree).
+The golden file was taken on `origin/master` before the clean-up (set REGENERATE_MIN_ORDER_GOLDEN=1 to retake it, only on a known-good tree;
+retaken 2026-11-01 when the brand price went up to 50 ₽: only the prices changed).
 Scenarios: our own build with different stock, and the mirror (ads of the file with Quantity / MinimumOrderQuantity of every kind, the first ad of
 the file as the pattern for new positions: with a minimum order, with `Quantity` only, with neither)."""
 from __future__ import annotations

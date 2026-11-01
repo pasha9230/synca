@@ -75,7 +75,7 @@ def test_committing_after_promotion_records_what_avito_will_see(tmp_path):
     publish.promote_feed(f)
     store.commit_pending(conn, 1, (f / "avito_feed.xml").read_bytes())
     pub = store.load_published(conn, account_id=1)
-    assert set(pub) == {"100", "101"} and pub["100"].price == 4810 and pub["100"].base_price == 5000.0
+    assert set(pub) == {"100", "101"} and pub["100"].price == 4850 and pub["100"].base_price == 5000.0
     assert "<Id>100</Id>" in store.get_snapshot(conn, "100", account_id=1)
     assert not store.has_pending(conn, 1)
 

@@ -17,9 +17,9 @@ NOW = "2026-10-30T10:00:00"
 
 
 def price(base):
-    """Our price of a tyre of the test brand at `base` (-3.82 %, up to tens)."""
+    """Our price of a tyre of the test brand at `base` (-3.82 %, up to a multiple of 50: the owner, 2026-11-01)."""
     import math
-    return int(math.ceil(base * (1 - 0.0382) / 10.0)) * 10
+    return int(math.ceil(base * (1 - 0.0382) / 50.0)) * 50
 
 
 def at(tmp_path, base, *more):

@@ -23,7 +23,7 @@ def test_changing_a_percent_shows_only_price_changes():
     pricing = settings_dict()["pricing"]
     pricing["IKON TYRES|winter"] = {"pct_small": -5.0, "pct_large": -5.0}
     result = run(make_settings(), make_settings(pricing=pricing))
-    assert result.price_changes == [("100", 4810, 4750)]
+    assert result.price_changes == [("100", 4850, 4750)]
     assert result.appear == [] and result.disappear == []
 
 

@@ -98,7 +98,7 @@ def supplier(conn, account, code="100"):
     return "%s/img/%s/%s.jpg" % (BASE, connections.get_account(conn, account)["feed_token"], code)
 
 
-GOLDEN = Path(__file__).parent / "fixtures" / "own_photos_switch_off.xml"     # made by the code before own photos (f4460a4; re-made at master 9cb239e: identical)
+GOLDEN = Path(__file__).parent / "fixtures" / "own_photos_switch_off.xml"     # made by the code before own photos (f4460a4; re-made at master 9cb239e: identical; prices up to 50 ₽ since 2026-11-01)
 
 
 def test_switch_off_feed_unchanged(tmp_path):

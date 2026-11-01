@@ -1,7 +1,7 @@
 """Stage 1 of the 4tochki supplier: its positions are loaded and shown, but the feeds stay byte for byte what they were.
 
 The golden file was taken on `origin/run/2026-10-20-night` before the 4tochki loader existed (set REGENERATE_TOCHKI_GOLDEN=1 to retake it, only
-on a known-good tree). The scenario holds everything that would put a 4tochki position into the feed if it leaked: the supplier is set up,
+on a known-good tree; retaken 2026-11-01 when the brand price went up to 50 ₽: only the prices changed). The scenario holds everything that would put a 4tochki position into the feed if it leaked: the supplier is set up,
 its snapshot is on disk with a tire the WebMIM unload also has and a tire only 4tochki has, its brand (S2:) is switched on and priced, and
 the reference knows the model. Only the switch «в фид» is off."""
 from __future__ import annotations

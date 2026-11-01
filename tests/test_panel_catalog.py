@@ -38,7 +38,7 @@ def test_catalog_is_in_the_menu_and_groups_goods_by_brand_with_status(tmp_path):
     assert "IKON TYRES" in table and "LAUFENN" in table
     assert ">C1<" in html and ">C2<" in html
     assert "в фиде" in html and "остаток ниже порога" in html
-    assert "5\u00a0000\u00a0₽" in html and "4\u00a0810\u00a0₽" in html
+    assert "5\u00a0000\u00a0₽" in html and "4\u00a0850\u00a0₽" in html
     assert re.search(r'<td class="num">(?:<details class="own-cell"[^>]*><summary[^>]*>)?—', html)   # no price: a dash (the owner's in his price cell)
     assert "сочетание не включено" in html
 
