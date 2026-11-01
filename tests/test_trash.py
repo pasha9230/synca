@@ -36,6 +36,8 @@ def base(tmp_path):
                  (item, card, NOW, NOW))                                         # «Взять с ОТХ» given back: holds nothing, goes with the order
     conn.execute("INSERT INTO callback_task (order_id, due_at, assignee, created_at, created_by, kind, title) VALUES (?, '2026-10-24T10:00', 'o', ?, "
                  "'o', 'order', 'Оформить')", (card, NOW))                       # «Задачи» of the order (2026-10-31): go and come back with it
+    conn.execute("INSERT INTO order_unsent (order_id, token, at, why, text) VALUES (?, 'tok-unsent', ?, 'Авито отказал', 'Добрый день')",
+                 (card, NOW))                                                    # «Не дошло клиенту» (2026-10-31): goes and comes back with it
     conn.commit()
     return conn, fake, account, chats.get_chat(conn, chat["id"]), card
 
