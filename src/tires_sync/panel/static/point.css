@@ -154,3 +154,79 @@
   body.pt-orders-page .pt-phone{display:block}
   body.pt-orders-page .pt-phone .mp-card{display:flex;margin:0 16px 12px}
 }
+
+/* the chats and the card of an order on a point's phone (2026-10-31, point-mobile): only the layout; the markup and the scripts are the office's.
+   «Чаты»: the list alone, or the open chat alone with «← Чаты»; the order of the chat under the conversation, never folded away.
+   The card: one column, the window of the order first, «Задачи по заказу» and the chats under it, the buttons under a finger. */
+.pt-chats-back{display:none}
+@media (max-width:760px){
+  body.pt-chats-page .page,body.pt-card-page .page{padding:12px 12px 84px}
+  body.pt-chats-page .page-head .sub{display:none}
+  body.pt-chats-page .page-head h1{font-size:20px}
+  body.pt-chats-page.is-chat-open .page-head{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}   /* the h1 stays for a screen reader */
+  .pt-chats-back{display:inline-flex;align-self:flex-start;align-items:center;min-height:40px;font-size:15px;font-weight:500}
+  body:is(.pt-chats-page,.pt-card-page) .msgs:not(:has(*)){display:none}
+  body.pt-chats-page .chats-layout,body.pt-chats-page .chats-layout.is-deal-folded{grid-template-columns:minmax(0,1fr);grid-template-areas:"list" "main" "deal";gap:12px}
+  body.pt-chats-page:not(.is-chat-open) .chats-main,body.pt-chats-page:not(.is-chat-open) .chats-layout .chats-deal{display:none}
+  /* the list scrolls in itself (app.js keeps its place per filter); with a chat open it is hidden but keeps its size, so its place survives */
+  body.pt-chats-page .chats-layout{position:relative}
+  body.pt-chats-page .chats-list{max-height:calc(100dvh - 190px)}
+  body.pt-chats-page.is-chat-open .chats-list{visibility:hidden;position:absolute;left:0;right:0;top:0;pointer-events:none}
+  body.pt-chats-page .chat-row{padding:12px}
+  body.pt-chats-page .chats-search .input{height:40px;font-size:16px}
+  body.pt-chats-page.is-chat-open .chats-layout.is-deal-folded .chats-deal{display:block}
+  body.pt-chats-page :is([data-deal-unfold],.chats-deal-fold){display:none!important}
+  body.pt-chats-page .chat-head{padding:10px 12px;row-gap:8px}
+  body.pt-chats-page .chat-title{flex:1 1 100%;font-size:17px}
+  body.pt-chats-page .chat-head>.ml-auto{margin-left:0;flex:1 1 100%;flex-wrap:wrap}
+  body.pt-chats-page .chat-head>.ml-auto>*{min-width:0}
+  body.pt-chats-page .chat-assign,body.pt-chats-page .chat-stage{flex:1 1 100%;flex-wrap:wrap}
+  body.pt-chats-page .chat-stage{order:-1}
+  body.pt-chats-page :is(.chat-assign,.chat-stage) .select{flex:1 1 auto;max-width:none;height:44px;font-size:16px}
+  body.pt-chats-page .chat-head .btn{min-height:40px}
+  body.pt-chats-page .chat-product{padding:8px 12px}
+  body.pt-chats-page .chat-thread{padding:12px;max-height:max(260px,calc(100dvh - 330px))}
+  body.pt-chats-page .msg{max-width:88%}
+  body.pt-chats-page .chat-composer{padding:10px 12px 12px}
+  body.pt-chats-page .chat-send .textarea{font-size:16px}
+  body.pt-chats-page .chat-send .btn,body.pt-chats-page .chat-photo .btn{min-height:44px}
+  body.pt-chats-page .chat-photo{flex-wrap:wrap}
+  body.pt-chats-page .chat-send-note{white-space:normal}
+  body.pt-chats-page .chats-deal .suggest{left:0;right:auto;width:100%}
+
+  body.pt-card-page .ocard-layout{grid-template-columns:minmax(0,1fr);gap:12px}
+  body.pt-card-page .ocard-main,body.pt-card-page .ocard-side{gap:12px}
+  body.pt-card-page .crumbs{font-size:13px;flex-wrap:wrap}
+  body.pt-card-page .card-head{flex-wrap:wrap;row-gap:4px}
+  body.pt-card-page .card-head>.sub{white-space:nowrap}
+  body.pt-card-page .owin-head{padding:12px}
+  body.pt-card-page .owin-top{flex-wrap:wrap;row-gap:8px}
+  body.pt-card-page .owin-top .owin-title{flex:1 1 100%;white-space:normal}
+  body.pt-card-page .owin-next{flex:1 1 auto;margin-left:0;min-height:44px;font-size:15px}
+  body.pt-card-page .owin-stage{padding:8px 12px}
+  body.pt-card-page .owin-body{padding:12px}
+  body.pt-card-page .owin-add{flex-wrap:wrap}
+  body.pt-card-page .owin-add>:is(.grow,.suggest-wrap,.field:first-child){flex:1 1 100%}
+  body.pt-card-page .owin-add>.owin-price{flex:1 1 auto;width:auto}
+  body.pt-card-page .owin-items td{padding:8px 4px}
+  body.pt-card-page .owin-foot{flex-wrap:wrap}
+  body.pt-card-page .owin-foot .btn{flex:1 1 auto;min-height:44px}
+}
+@media (max-width:760px){
+  body:is(.pt-chats-page,.pt-card-page) :is(.owin-grid,.grid-2,.grid-3){grid-template-columns:minmax(0,1fr)}
+  body:is(.pt-chats-page,.pt-card-page) :is(.input,.select,.textarea){font-size:16px}
+  body:is(.pt-chats-page,.pt-card-page) :is(.input,.select):not([type=checkbox]):not([type=radio]){min-height:40px}
+  body:is(.pt-chats-page,.pt-card-page) :is(.btn--sm,.btn--xs){min-height:40px}
+  body:is(.pt-chats-page,.pt-card-page) .menu-item{min-height:44px;white-space:normal}
+  body:is(.pt-chats-page,.pt-card-page) #callbacks form[action="/tasks/new"]>*{flex:1 1 100%}
+  body:is(.pt-chats-page,.pt-card-page) #callbacks [data-task]>.ml-auto{margin-left:0;flex:1 1 100%;flex-wrap:wrap}
+  body:is(.pt-chats-page,.pt-card-page) #callbacks [data-task] form.inline{display:flex;flex:1 1 100%}
+  body:is(.pt-chats-page,.pt-card-page) #callbacks [data-task] form.inline>.input{flex:1 1 auto;min-width:0}
+  body:is(.pt-chats-page,.pt-card-page) .modal{width:calc(100vw - 16px);max-width:none;max-height:calc(100dvh - 16px)}
+  body:is(.pt-chats-page,.pt-card-page) .modal-foot{flex-wrap:wrap}
+  body:is(.pt-chats-page,.pt-card-page) .modal-foot .btn{flex:1 1 100%;min-height:44px}
+  /* «Не дошло клиенту» (_order_unsent.html, another lane): the text across the screen, «Скопировать» and «Отправил вручную» big, one under the other */
+  body.pt-card-page .order-unsent :is(textarea,.textarea,input[type=text]){width:100%;font-size:16px}
+  body.pt-card-page .order-unsent :is(.row,form){flex-direction:column;align-items:stretch}
+  body.pt-card-page .order-unsent .btn{width:100%;min-height:48px;font-size:16px;justify-content:center}
+}
