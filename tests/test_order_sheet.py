@@ -142,7 +142,7 @@ def test_the_settings_take_only_an_address_of_apps_script(tmp_path):
         sheet.save_settings(conn, "https://script.google.com/a/macros/evil.example/x/s/AKfycbTEST_1234567890abc/exec", True, NOW, "owner")
     sheet.save_settings(conn, "https://script.google.com/a/macros/example.com/s/AKfycbTEST_1234567890abc/exec", True, NOW, "owner")
     sheet.save_settings(conn, URL, True, NOW, "owner")
-    assert sheet.settings(conn) == {"url": URL, "enabled": True, "since": NOW, "secret_for": ""}
+    assert sheet.settings(conn) == {"url": URL, "enabled": True, "since": NOW, "secret_for": "", "keep_from": ""}    # keep_from: 2026-11-01
     sheet.save_settings(conn, URL, True, LATER, "owner")
     assert sheet.settings(conn)["since"] == NOW                                                 # saved again: still on since the first time
 
@@ -944,3 +944,53 @@ def test_the_line_of_a_merged_order_already_told_is_information_not_an_error():
     assert placed_kind(order_placed.MERGED) == "info"
     assert placed_kind("Клиенту отправлено «Клиенту: заказ оформлен»") == "ok"
     assert placed_kind("Клиенту не отправлено «Клиенту: заказ оформлен»: нет чата") == "error"
+
+
+# ---- «Вести заказы, оформленные с» (the owner 2026-11-01: «старые не надо») ----------------------------------------------------------
+
+def test_an_order_before_the_day_is_never_sent_nor_said_and_one_after_goes_as_before(table):
+    conn, box, fake = table
+    old = placed(conn)                                                     # queued at NOW (2026-10-23)
+    sheet.flush(conn, box, fake, NOW)
+    assert len(fake.rows) == 2
+    fake.rows.clear()                                                      # the owner removed the old rows from the sheet
+    sheet.save_settings(conn, URL, True, LATER, "owner", keep_from="2026-11-01")
+    before = len(events(conn, old))
+    posts = len(fake.posts)
+    orders.move_card(conn, old, stage(conn, "at_point")["id"], LATER, "pavel")          # a change of the old order
+    assert sheet.flush(conn, box, fake, LATER) == {} and sheet.flush(conn, box, fake, LATER, full=True) == {}
+    assert len(fake.posts) == posts and len(events(conn, old)) == before                 # nothing sent, no «изменена или удалена вручную»
+    assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE order_id = ?", (old,)).fetchone()[0] == 1   # its row of the queue stays
+    new = card(conn, client_phone="+7 911 555-44-33")
+    orders.move_card(conn, new, stage(conn, "placed")["id"], "2026-11-01T10:00:00", "owner")
+    assert new in sheet.flush(conn, box, fake, "2026-11-01T10:00:00")
+    assert len(fake.rows) == 2 and any("Записано в Google-таблицу" in e for e in events(conn, new))
+
+
+def test_the_day_never_touches_enabled_since_and_empty_is_every_order(table):
+    conn, box, fake = table
+    s = sheet.settings(conn)
+    assert s["keep_from"] == "" and s["enabled"] and s["since"] == NOW               # the default: every queued order, as before
+    sheet.save_settings(conn, URL, True, LATER, "owner", keep_from="2026-11-01")
+    after = sheet.settings(conn)
+    assert after["keep_from"] == "2026-11-01" and after["since"] == NOW and after["enabled"] and after["secret_for"] == URL
+    sheet.save_settings(conn, URL, True, LATER, "owner")                              # a save without the field keeps it
+    assert sheet.settings(conn)["keep_from"] == "2026-11-01"
+    with pytest.raises(sheet.SheetError, match="дата вида"):
+        sheet.save_settings(conn, URL, True, LATER, "owner", keep_from="2026-13-40")
+    from tires_sync.panel import texts
+    detail = json.loads(conn.execute("SELECT detail FROM audit WHERE action = 'sheet_keep_from'").fetchone()[0])
+    assert texts.audit_text({"action": "sheet_keep_from", "detail": detail}) == "Google-таблица: вести заказы, оформленные с 2026-11-01 (было всех)"
+
+
+def test_the_form_keeps_the_day_and_the_switch(panel):
+    app, conn, box, fake, client = panel
+    client.post("/connections/sheet", data={"csrf": "tok", "url": URL, "secret": SECRET, "enabled": "1"})
+    since = sheet.settings(conn)["since"]
+    page = client.get("/connections/sheet").get_data(as_text=True)
+    assert 'name="keep_from" value="%s"' % since[:10] in page                     # the day it was switched on, until set
+    client.post("/connections/sheet", data={"csrf": "tok", "url": URL, "secret": "", "enabled": "1", "keep_from": "2026-11-01"})
+    s = sheet.settings(conn)
+    assert s["keep_from"] == "2026-11-01" and s["since"] == since and s["enabled"]
+    client.post("/connections/sheet", data={"csrf": "tok", "url": URL, "secret": "", "enabled": "1", "keep_from": "вчера"})
+    assert sheet.settings(conn)["keep_from"] == "2026-11-01"                         # a wrong day is not saved

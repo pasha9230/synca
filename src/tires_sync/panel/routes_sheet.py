@@ -77,8 +77,11 @@ def register(app) -> None:
         conn = get_conn()
         url, secret, on = request.form.get("url", "").strip(), request.form.get("secret", "").strip(), request.form.get("enabled") == "1"
         before = order_sheet.settings(conn)
+        keep_from = request.form.get("keep_from") if "keep_from" in request.form else None
         try:
             order_sheet.check_url(url, on)
+            if keep_from is not None:
+                keep_from = order_sheet.check_day(keep_from)
         except order_sheet.SheetError as err:
             flash(str(err))
             return False
@@ -92,7 +95,7 @@ def register(app) -> None:
             except SecretKeyError:
                 flash(NO_KEY)
                 return False
-        order_sheet.save_settings(conn, url, on, now_iso(), author(), secret_typed=bool(secret))
+        order_sheet.save_settings(conn, url, on, now_iso(), author(), secret_typed=bool(secret), keep_from=keep_from)
         return True
 
     @app.route("/connections/sheet", methods=["POST"])

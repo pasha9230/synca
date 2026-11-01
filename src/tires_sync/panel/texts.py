@@ -304,6 +304,7 @@ _MORE_TEXTS = {
         _q(d.get("task")), _task_kind(d.get("kind")), "заказ №%s" % d["order"] if d.get("order") else ("клиент №%s" % d["client"] if d.get("client")
         else ("чат Ч-%s" % d["chat"] if d.get("chat") else "без заказа")), _q(d.get("due")), _q(d.get("to"))),
     "callback_done": lambda d: "Задача №%s выполнена%s" % (_q(d.get("task")), (": " + str(d["result"])) if d.get("result") else ""),
+    "sheet_keep_from": lambda d: "Google-таблица: вести заказы, оформленные с %s (было %s)" % (_q(d.get("to") or "всех"), _q(d.get("from") or "всех")),
     "unsent_by_hand": lambda d: "Заказ №%s: сообщение клиенту отправлено вручную (не дошло из панели)" % _q(d.get("order")),
     "callback_cancel": lambda d: "Задача №%s отменена" % _q(d.get("task")),
     "client_saved": lambda d: "Изменена карточка клиента №%s" % _q(d.get("client")),

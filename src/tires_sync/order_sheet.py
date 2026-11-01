@@ -58,8 +58,28 @@ class SheetError(Exception):
 # ---- settings -----------------------------------------------------------------------------------------------------------------------
 
 def settings(conn) -> dict:
-    """url, enabled, since; secret_for: the address the secret was typed for (the secret never goes to another one)."""
-    return dict({"url": "", "enabled": False, "since": "", "secret_for": ""}, **connections.get_config(conn, KIND, 0))
+    """url, enabled, since; secret_for: the address the secret was typed for (the secret never goes to another one); keep_from: «Вести
+    заказы, оформленные с» (YYYY-MM-DD, the owner 2026-11-01: «старые не надо»; '' — every queued order, as before)."""
+    return dict({"url": "", "enabled": False, "since": "", "secret_for": "", "keep_from": ""}, **connections.get_config(conn, KIND, 0))
+
+
+DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def check_day(value) -> str:
+    """«Вести заказы, оформленные с»: a day YYYY-MM-DD or empty (every queued order)."""
+    value = str(value or "").strip()
+    if value and (not DAY.match(value) or not _valid_day(value)):
+        raise SheetError("«Вести заказы, оформленные с»: дата вида 01.11.2026.")
+    return value
+
+
+def _valid_day(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
 
 
 def enabled(conn) -> bool:
@@ -76,15 +96,25 @@ def check_url(url: str, on: bool) -> str:
     return url
 
 
-def save_settings(conn, url: str, on: bool, now: str, author: str, secret_typed: bool = False) -> None:
+def save_settings(conn, url: str, on: bool, now: str, author: str, secret_typed: bool = False, keep_from: Optional[str] = None) -> None:
     """The address of the web app and the switch; `since` is the moment it was switched on (the orders placed from then on).
-    `secret_typed`: the secret was typed with this address (it is the address's secret from now on)."""
+    `secret_typed`: the secret was typed with this address (it is the address's secret from now on). `keep_from` (None: as it was):
+    the orders queued before that day are left alone — never sent nor marked (the owner 2026-11-01); «Включено с» is not touched."""
     url = check_url(url, on)
     before = settings(conn)
+    keep_from = before["keep_from"] if keep_from is None else check_day(keep_from)
     since = before["since"] if before["enabled"] and on else (now if on else "")
     connections.set_config(conn, KIND, 0, {"url": url, "enabled": bool(on), "since": since,
-                                           "secret_for": url if secret_typed else before["secret_for"]}, now, author)
+                                           "secret_for": url if secret_typed else before["secret_for"], "keep_from": keep_from}, now, author)
+    if keep_from != before["keep_from"]:
+        store.write_audit(conn, now, author, "sheet_keep_from", {"from": before["keep_from"], "to": keep_from})
     conn.commit()
+
+
+def _kept(conn) -> Tuple[str, list]:
+    """The SQL of «Вести заказы, оформленные с» on sheet_order `s` (empty: every order)."""
+    day = settings(conn)["keep_from"]
+    return (" AND s.placed_at >= ?", [day]) if day else ("", [])
 
 
 def _secret(conn, box, s: dict) -> Optional[str]:
@@ -133,8 +163,10 @@ def _due(conn, now: str, full: bool) -> List[int]:
     else:
         changed, args = (" AND (s.failing > 0 OR s.sent_at = '' OR EXISTS (SELECT 1 FROM order_event e WHERE e.order_id = s.order_id"
                          " AND e.id > s.seen_event AND e.author != ?))"), [AUTHOR]             # its own records are no change of the order
+    kept, day = _kept(conn)                                                # the orders before «Вести заказы, оформленные с»: never looked at
     rows = conn.execute("SELECT s.order_id FROM sheet_order s JOIN order_card c ON c.id = s.order_id WHERE (s.next_at = '' OR s.next_at <= ?)"
-                        " AND (s.claim_until = '' OR s.claim_until < ?)" + changed + " ORDER BY s.order_id LIMIT ?", [now, now] + args + [-1 if full else BATCH])
+                        " AND (s.claim_until = '' OR s.claim_until < ?)" + changed + kept + " ORDER BY s.order_id LIMIT ?",
+                        [now, now] + args + day + [-1 if full else BATCH])
     return [r[0] for r in rows]
 
 
@@ -492,7 +524,9 @@ def lasting(conn, now: str) -> List[dict]:
     """The orders whose failures go on for LASTING_HOURS or longer (the streak begins at its first record in the order's journal)."""
     edge = (datetime.fromisoformat(now[:19]) - timedelta(hours=LASTING_HOURS)).isoformat(timespec="seconds")
     found = []
-    for card_id, error in conn.execute("SELECT order_id, error FROM sheet_order WHERE failing > 0 ORDER BY order_id").fetchall():
+    kept, day = _kept(conn)                                                # an order left alone never keeps the alarm on
+    for card_id, error in conn.execute("SELECT s.order_id, s.error FROM sheet_order s WHERE s.failing > 0" + kept + " ORDER BY s.order_id",
+                                       day).fetchall():
         row = conn.execute("SELECT MAX(at) FROM order_event WHERE order_id = ? AND author = ? AND kind = 'sheet' AND (text LIKE ? OR text LIKE ?)",
                            (card_id, AUTHOR) + STREAK_STARTS).fetchone()
         if row and row[0] and row[0][:19] <= edge:
