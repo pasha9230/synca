@@ -318,7 +318,7 @@ def test_the_table_lowers_the_old_row_and_marks_the_new_one(tmp_path):
     follow = {order_sheet.key(old, i) for i in oth_sale.given(conn, old)}
     ops = order_sheet.changes(order_sheet.rows_of(conn, old, T), written, follow)
     assert ops == [{"key": mark, "create": False, "fields": {"Кол-во": 1, "Сумма MIM": 4000.0, "Сумма продажи": 5000.0},
-                    "check": {"Артикул": written[mark]["Артикул"]}}]
+                    "check": {"Артикул": written[mark]["Артикул"], "Телефон": written[mark]["Телефон"]}}]    # the phone too (2026-11-01)
     other = dict(written, **{mark: dict(written[mark], **{"Кол-во": 9})})
     assert order_sheet.changes(order_sheet.rows_of(conn, old, T), other) == [op for op in order_sheet.changes(
         order_sheet.rows_of(conn, old, T), other) if "Кол-во" not in op["fields"]]                   # without `follow`: written once, as before

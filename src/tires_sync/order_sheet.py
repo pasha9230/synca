@@ -6,7 +6,7 @@ written once with every column, then only the columns that follow the order (UPD
 rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
 it finds a row by the value «tires:<order>:<position>» in its hidden column «tires_id» (the script adds and hides it; a value moves with
 its row when the sheet is sorted; the notes of «Дата счета» and «Дата» held it before 2026-11-01 — the script moves those marks over and
-drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» is still what the panel wrote (CHECK; the name the owner may correct).
+drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» and «Телефон» are still what the panel wrote (CHECK; the name the owner may correct).
 
 Nothing waits for Google in a request: `enroll` only queues the order (`sheet_order`) in the transaction of the move, `flush` sends what
 changed since the last answer, after the request in a thread of its own (panel) and every hour (`orders-tick`). A failure is retried later
@@ -35,7 +35,9 @@ ASKED = tuple(c for c in COLUMNS if c != "Примечание")         # what 
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
 FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
-CHECK = ("Артикул",)                                         # written once: the script finds the row by its mark and checks it is still there
+CHECK = ("Артикул", "Телефон")                              # written once: the script finds the row by its mark and checks it is still there;
+                                                             # the phone too (the lead's review 2026-11-01): two rows of one code swapped
+                                                             # by a sort that left their marks behind are «missing», never written over
 RECENT_DAYS = 45                                               # the hourly look: the orders placed so recently (and every failing one)
 URL = re.compile(r"^https://script\.google\.com/(?:macros|a/macros/[a-z0-9.-]{1,100})/s/[A-Za-z0-9_-]{10,200}/exec$")   # a/macros/<domain>: Workspace
 REDIRECT = "https://script.googleusercontent.com/"            # Google answers a web app with a redirect there; anywhere else is refused
@@ -359,6 +361,9 @@ def check(conn, box, http: Transport) -> str:
         return said
     said += (" Строк с меткой (скрытая колонка «tires_id»): %d, перенесено сейчас из примечаний: %d, не перенесено: %d."
              % (marked, moved or 0, blocked or 0))
+    if answer.get("filter_outside") is True:                               # a sort from that filter would leave the marks behind
+        said += (" Фильтр на листе не включает скрытую колонку «tires_id»: удалите фильтр и создайте заново (Данные → Создать фильтр), "
+                 "иначе сортировка из фильтра оторвёт метки.")
     if blocked:                                                            # the owner 2026-11-01: no note of a mark, «Дата» goes last
         said += (" У %d строк метка в примечании расходится с колонкой «tires_id»: примечания оставлены, колонку «Дата» пока не удаляйте "
                  "и напишите разработчику." % blocked)
