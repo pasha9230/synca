@@ -4,9 +4,9 @@ A row is a position of an order. An order joins the table when it is placed (the
 оформлен» or later) while the table is switched on in «Подключения → Google-таблица»: the orders placed before never do. Its rows are
 written once with every column, then only the columns that follow the order (UPDATED) are kept up to date; the owner's own columns and
 rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
-it finds a row by the note «tires:<order>:<position>» of its cell «Дата счета» (a note moves with its cell when the sheet is sorted; «Дата»
-held it before 2026-11-01 — the script moves those marks over by itself), not by
-a cell the owner may edit, and writes into it only while its «Артикул» is still what the panel wrote (CHECK; the name the owner may correct).
+it finds a row by the value «tires:<order>:<position>» in its hidden column «tires_id» (the script adds and hides it; a value moves with
+its row when the sheet is sorted; the notes of «Дата счета» and «Дата» held it before 2026-11-01 — the script moves those marks over and
+drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» is still what the panel wrote (CHECK; the name the owner may correct).
 
 Nothing waits for Google in a request: `enroll` only queues the order (`sheet_order`) in the transaction of the move, `flush` sends what
 changed since the last answer, after the request in a thread of its own (panel) and every hour (`orders-tick`). A failure is retried later
@@ -30,8 +30,8 @@ COLUMNS = ("Дата счета", "№ заказа MIM", "Перемещени�
            "Уведомление точке", "Уведомление клиенту", "Примечание")
 OWNERS = ("Примечание",)                    # never filled (the owner 2026-10-30): «Примечание» is the people's; «Дата» is gone (2026-11-01)
 SENT = tuple(c for c in COLUMNS if c not in OWNERS)            # what a new row is written with (a sheet without «Примечание» still takes it)
-ASKED = tuple(c for c in COLUMNS if c != "Примечание")         # what «Проверить» asks for: «Дата счета» holds the hidden mark of each row
-                                                               # (the script's KEY_COLUMN): without it no row is found nor written
+ASKED = tuple(c for c in COLUMNS if c != "Примечание")         # what «Проверить» asks for; never «tires_id» (the script's KEY_COLUMN:
+                                                               # it adds the hidden column by itself, the panel never sends nor reads it)
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
 FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
@@ -357,10 +357,11 @@ def check(conn, box, http: Transport) -> str:
     marked, moved, blocked = number("marked"), number("moved"), number("blocked")
     if marked is None:                                                     # an older script: it says nothing of the marks
         return said
-    said += " Строк с меткой в «Дата счета»: %d, перенесено сейчас из «Дата»: %d, не перенесено: %d." % (marked, moved or 0, blocked or 0)
-    if blocked:                                                            # the owner 2026-11-01: «Дата» goes only when nothing is left behind
-        said += (" Колонку «Дата» пока не удаляйте: у %d строк в «Дата счета» уже есть своё примечание — перенесите его или удалите, "
-                 "затем «Проверить»." % blocked)
+    said += (" Строк с меткой (скрытая колонка «tires_id»): %d, перенесено сейчас из примечаний: %d, не перенесено: %d."
+             % (marked, moved or 0, blocked or 0))
+    if blocked:                                                            # the owner 2026-11-01: no note of a mark, «Дата» goes last
+        said += (" У %d строк метка в примечании расходится с колонкой «tires_id»: примечания оставлены, колонку «Дата» пока не удаляйте "
+                 "и напишите разработчику." % blocked)
     return said
 
 
