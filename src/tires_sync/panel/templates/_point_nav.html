@@ -6,5 +6,5 @@
 <a href="/my-point/handed" class="{{ 'is-active' if section == 'handed' else '' }}"{% if section == 'handed' %} aria-current="page"{% endif %} data-sec="handed">{{ icon("users") }}<span>Переданные</span>{% if n.handed %}<b>{{ n.handed }}</b>{% endif %}</a>
 {% if can("orders") %}<a href="/orders" class="{{ 'is-active' if section == 'orders' else '' }}"{% if section == 'orders' %} aria-current="page"{% endif %} data-sec="orders">{{ icon("clipboard") }}<span>Заказы</span>{% if n.orders %}<b>{{ n.orders }}</b>{% endif %}</a>{% endif %}
 {% if can("orders") %}<a href="/tasks" class="{{ 'is-active' if section == 'tasks' else '' }}"{% if section == 'tasks' %} aria-current="page"{% endif %} data-sec="tasks">{{ icon("check") }}<span>Задачи</span>{% if nav.tasks %}<b{% if nav.tasks_late %} class="is-hot"{% endif %}>{{ nav.tasks }}</b>{% endif %}</a>{% endif %}
-{% if can("chats") %}<a href="/chats" data-sec="chats">{{ icon("chat") }}<span>Чаты</span>{% if nav.chat_unread %}<b class="is-hot">{{ nav.chat_unread }}</b>{% endif %}</a>{% endif %}
+{% if can("chats") %}<a href="/chats" class="{{ 'is-active' if section == 'chats' else '' }}"{% if section == 'chats' %} aria-current="page"{% endif %} data-sec="chats">{{ icon("chat") }}<span>Чаты</span>{% if nav.chat_unread %}<b class="is-hot">{{ nav.chat_unread }}</b>{% endif %}</a>{% endif %}
 </nav>{% endif %}

@@ -3,12 +3,17 @@
 {% from "_ui.html" import icon, empty %}
 {% from "_handoff_dialog.html" import handoff_button, handoff_window with context %}
 {% block title %}Чаты · Tires Sync{% endblock %}
+{# a point's phone (2026-10-31, point-mobile): its own width, the frame of «Рабочее место», the list or the open chat; the office keeps 1280 #}
+{% block viewport %}{% if current_user().role == "point" %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
+{% block body_class %}{% if current_user().role == "point" %}pt-ui pt-chats-page{% if current %} is-chat-open{% endif %}{% endif %}{% endblock %}
+{% block head %}{% if current_user().role == "point" %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Чаты</h1><p class="sub">Переписка с клиентами на Авито. Заказ по чату создаёт менеджер кнопкой «Создать заказ» справа.</p></div></header>
 <div id="chats-live" data-sig="{{ live_sig }}" data-place="{{ query }}" data-chat="{{ current.id if current else '' }}" data-csrf="{{ csrf_token() }}" hidden></div>
 <div class="flash flash--warn" id="chats-offline" role="status" hidden><div class="flash-text">Нет связи с панелью: новые сообщения сейчас не приходят. Проверьте интернет и <a href="">обновите страницу</a> (если вход истёк, панель попросит войти).</div></div>
 <div class="flash flash--info" id="chats-order" hidden><div class="flash-text">Список чатов изменился (новые чаты или сообщения). Он не двигается, пока вы работаете. <a href="" data-chats-relist>Обновить список</a></div></div>
 {% if offer and not offer.chat %}<div class="flash flash--info"><div class="flash-text">Правило этапа подготовило сообщение клиенту «{{ offer.task.title }}», но отправить его из панели нельзя: {{ offer.why }} Оно ждёт в <a href="/orders/{{ offer.card_id }}">заказе №{{ offer.card_id }}</a>.</div></div>{% endif %}
+{% if current and current_user().role == "point" %}<a class="pt-chats-back" href="/chats{{ query }}" aria-label="Чаты — назад к списку">← Чаты</a>{% endif %}
 <div class="chats-layout">
 <section class="card chats-list">
 <form method="get" action="/chats{{ '/%d' % current.id if current else '' }}" class="chats-search" role="search">{% if flt %}<input type="hidden" name="f" value="{{ flt }}">{% endif %}{% if acc or every %}<input type="hidden" name="acc" value="{{ acc or every }}">{% endif %}<input class="input input--sm" type="search" name="q" value="{{ q }}" maxlength="80" placeholder="Имя, телефон, текст, № заказа" aria-label="Поиск по чатам">{% if q %}<a class="small nowrap" href="{{ unsearch }}">Сбросить</a>{% endif %}</form>
@@ -108,4 +113,5 @@
 <div class="modal-body stack"><p class="small">Сообщения заказа ждут отправки (клиенту или точке): откройте их в карточке заказа.</p><div><a class="btn btn--primary btn--sm" href="{{ offer.more }}" data-messages-link>Открыть сообщения заказа</a></div></div>
 <div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Позже</button></div></div></div>{% endif %}
 {{ handoff_window(handoff) }}
+{% if current_user().role == "point" %}{% with section="chats" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
 {% endblock %}
