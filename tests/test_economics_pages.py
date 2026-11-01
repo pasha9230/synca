@@ -45,6 +45,22 @@ def test_the_position_money_follows_the_owners_formula(tmp_path):
     assert app.test_client().get("/economics").status_code == 302
 
 
+def test_a_position_without_a_feed_price_is_priced_as_the_feed_would_price_it(tmp_path, monkeypatch):
+    """A position the catalog gives no price (no candidate) is priced by the brand's rule, rounded as the feed rounds it: up to 50 ₽ (the
+    owner, 2026-11-01): 5000 − 3.82 % = 4809 → 4 850, not 4 810."""
+    from types import SimpleNamespace
+    from helpers import make_offer, make_settings
+    from tires_sync.panel import economics_view, service
+    app, client, tok, conn = setup(tmp_path)
+    offer = make_offer(base_price=5000.0)
+    item = {"goods_id": offer.goods_id, "price": None, "name": "n", "model": "m", "size": "s", "kind": "k", "state": "off", "reason": "",
+            "scode": "", "car_type": ""}
+    monkeypatch.setattr(service, "catalog_groups", lambda *a, **k: [{"items": [item]}])
+    rows = economics_view.positions(conn, make_settings(), SimpleNamespace(offers={offer.goods_id: offer}), None, "2026-10-09",
+                                    {"fee_pct": 0.0, "promo_pct": 0.0})
+    assert [r["sale"] for r in rows] == [4850]
+
+
 def test_totals_count_only_what_is_in_the_feed_with_stock(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     html = client.get("/economics").get_data(as_text=True)
