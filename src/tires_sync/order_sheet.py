@@ -352,9 +352,16 @@ def check(conn, box, http: Transport) -> str:
     missing = [str(c) for c in answer.get("missing") or []]
     if missing:
         raise SheetError("На листе «%s» нет колонок: %s." % (SHEET, ", ".join(missing)))
-    moved = answer.get("moved") if isinstance(answer.get("moved"), int) else 0
-    return "Таблица отвечает: лист «%s», все колонки на месте.%s" % (SHEET, (" Метки строк перенесены из «Дата» в «Дата счета»: %d — "
-                                                                           "колонку «Дата» теперь можно удалить." % moved) if moved else "")
+    said = "Таблица отвечает: лист «%s», все колонки на месте." % SHEET
+    number = lambda name: answer.get(name) if isinstance(answer.get(name), int) and not isinstance(answer.get(name), bool) else None
+    marked, moved, blocked = number("marked"), number("moved"), number("blocked")
+    if marked is None:                                                     # an older script: it says nothing of the marks
+        return said
+    said += " Строк с меткой в «Дата счета»: %d, перенесено сейчас из «Дата»: %d, не перенесено: %d." % (marked, moved or 0, blocked or 0)
+    if blocked:                                                            # the owner 2026-11-01: «Дата» goes only when nothing is left behind
+        said += (" Колонку «Дата» пока не удаляйте: у %d строк в «Дата счета» уже есть своё примечание — перенесите его или удалите, "
+                 "затем «Проверить»." % blocked)
+    return said
 
 
 # ---- sending ------------------------------------------------------------------------------------------------------------------------

