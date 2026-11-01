@@ -4,7 +4,8 @@ A row is a position of an order. An order joins the table when it is placed (the
 оформлен» or later) while the table is switched on in «Подключения → Google-таблица»: the orders placed before never do. Its rows are
 written once with every column, then only the columns that follow the order (UPDATED) are kept up to date; the owner's own columns and
 rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
-it finds a row by the note «tires:<order>:<position>» of its cell «Дата» (a note moves with its cell when the sheet is sorted), not by
+it finds a row by the note «tires:<order>:<position>» of its cell «Дата счета» (a note moves with its cell when the sheet is sorted; «Дата»
+held it before 2026-11-01 — the script moves those marks over by itself), not by
 a cell the owner may edit, and writes into it only while its «Артикул» is still what the panel wrote (CHECK; the name the owner may correct).
 
 Nothing waits for Google in a request: `enroll` only queues the order (`sheet_order`) in the transaction of the move, `flush` sends what
@@ -24,13 +25,13 @@ from . import connections, order_engine as engine, order_merge, order_report, or
 
 KIND = "gsheet"
 SHEET = "Заказы"
-COLUMNS = ("Дата", "№ заказа MIM", "Перемещение MIM", "Дата счета", "Артикул", "Наименование", "Кол-во", "Цена MIM", "Сумма MIM",
+COLUMNS = ("Дата счета", "№ заказа MIM", "Перемещение MIM", "Артикул", "Наименование", "Кол-во", "Цена MIM", "Сумма MIM",
            "Цена продажи", "Сумма продажи", "Имя", "Телефон", "ПВЗ", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту", "Примечание")
-OWNERS = ("Дата", "Примечание")             # never filled (the owner 2026-10-30): «Примечание» is the people's, «Дата» stays empty
+OWNERS = ("Примечание",)                    # never filled (the owner 2026-10-30): «Примечание» is the people's; «Дата» is gone (2026-11-01)
 SENT = tuple(c for c in COLUMNS if c not in OWNERS)            # what a new row is written with (a sheet without «Примечание» still takes it)
-ASKED = tuple(c for c in COLUMNS if c != "Примечание")         # what «Проверить» asks for: «Дата» holds the hidden mark of each row (the
-                                                               # script's KEY_COLUMN): without it no row is found nor written
+ASKED = tuple(c for c in COLUMNS if c != "Примечание")         # what «Проверить» asks for: «Дата счета» holds the hidden mark of each row
+                                                               # (the script's KEY_COLUMN): without it no row is found nor written
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
 FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
@@ -282,7 +283,7 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
 def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] = None) -> dict:
     """The columns of a row that are the order's, not the position's (card_rows)."""
     sent = sent or {}
-    return {"Дата": _day(placed_at), "№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
+    return {"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
             "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
             "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": card["stage"]["name"], "Реализация": realization(card),
             "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
@@ -351,7 +352,9 @@ def check(conn, box, http: Transport) -> str:
     missing = [str(c) for c in answer.get("missing") or []]
     if missing:
         raise SheetError("На листе «%s» нет колонок: %s." % (SHEET, ", ".join(missing)))
-    return "Таблица отвечает: лист «%s», все колонки на месте." % SHEET
+    moved = answer.get("moved") if isinstance(answer.get("moved"), int) else 0
+    return "Таблица отвечает: лист «%s», все колонки на месте.%s" % (SHEET, (" Метки строк перенесены из «Дата» в «Дата счета»: %d — "
+                                                                           "колонку «Дата» теперь можно удалить." % moved) if moved else "")
 
 
 # ---- sending ------------------------------------------------------------------------------------------------------------------------
