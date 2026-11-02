@@ -52,12 +52,21 @@ def _card_point(conn, order_id):
         return None
 
 
+def _mine_as_point(conn, to_set: bool = False) -> list:
+    """Whose tasks the person sees and sets as a point: the point manager its own login; the owner or the partner working as a point the
+    managers of that point (tasks.listing as_point; the lead 2026-11-02) — to set one (`to_set`), the active ones only."""
+    user = current_user()
+    if user["as_point"] is None:
+        return [user["login"]]
+    return tasks.point_managers(conn, user["as_point"], active_only=to_set)
+
+
 def register(app) -> None:
     def tasks_for(client_id=None, order_id=None, chat_row=None) -> list:
         """The open tasks of the place for the one who looks: a point only its own; late ones known, the names of the assignees."""
         conn, now = get_conn(), local_iso()
         found = tasks.of_place(conn, client_id=client_id, order_id=order_id, chat_row=chat_row,
-                               only=current_user()["login"] if is_point() else None)
+                               only=_mine_as_point(conn) if is_point() else None)
         for t in found:
             t["late"] = t["due_at"] < now[:16]
             t["assignee_name"] = users.person_name(conn, t["assignee"], _main(app))
@@ -66,14 +75,16 @@ def register(app) -> None:
     def task_people() -> list:
         conn = get_conn()
         if is_point():
-            me = current_user()["login"]
-            return [{"login": me, "name": users.person_name(conn, me), "group": "Себе"}]
+            group = "Точка" if current_user()["as_point"] is not None else "Себе"
+            return [{"login": login, "name": users.person_name(conn, login), "group": group} for login in _mine_as_point(conn, to_set=True)]
         return tasks.assignees(conn, _owner(conn), _main(app))
 
     def task_default(order_id=None, chat_row=None) -> str:
         conn = get_conn()
         me = current_user()["login"]
-        return me if is_point() else tasks.default_assignee(conn, _owner(conn), me, order_id, chat_row)
+        if is_point():
+            return next(iter(_mine_as_point(conn, to_set=True)), "")
+        return tasks.default_assignee(conn, _owner(conn), me, order_id, chat_row)
 
     app.jinja_env.globals.update(tasks_for=tasks_for, may_task=may_set, task_people=task_people, task_default=task_default,
                                  task_kinds=tasks.KINDS)
@@ -92,7 +103,8 @@ def register(app) -> None:
         due = due if due in DUES else ""
         kind = request.args.get("kind", "")
         kind = kind if kind in tasks.KINDS else ""
-        rows = tasks.listing(conn, tab=tab, login=me, owner_login=_owner(conn), now=local_iso(), point=point, to=to, due=due, kind=kind)
+        rows = tasks.listing(conn, tab=tab, login=me, owner_login=_owner(conn), now=local_iso(), point=point, to=to, due=due, kind=kind,
+                             as_point=current_user()["as_point"])
         from .. import inquiry
         for t in rows:                                    # whom to call: the name and the phone, as the reminder had them
             t["who"], t["phone"] = inquiry._who_called(conn, t)
@@ -114,12 +126,16 @@ def register(app) -> None:
         f = request.form
         order_id, chat_row, client_id = _int("order_id"), _int("chat_row"), _int("client_id")
         assignee = f.get("assignee", "").strip()
-        if is_point():                                   # the point: to itself only, of an order of its own point or of none
-            if chat_row or client_id or (assignee and assignee != me):
+        if is_point():                                   # the point: to itself only (as a point: to its managers), of an order of its
+            mine = _mine_as_point(conn, to_set=True)     # own point or of none
+            if chat_row or client_id or (assignee and assignee not in mine):
                 abort(403)
             if order_id and _card_point(conn, order_id) != own_point():
                 abort(403)
-            assignee, allowed = me, {me}
+            if not mine:
+                flash("У точки нет менеджера в панели: задачу поставить некому.", "error")
+                return redirect(_back())
+            assignee, allowed = assignee or mine[0], set(mine)
         else:
             if not may_take():
                 abort(403)
@@ -133,7 +149,7 @@ def register(app) -> None:
         try:
             tasks.add(conn, kind=f.get("kind", "callback"), title=f.get("title", ""), due_at=due, note=f.get("note", ""), now=local_iso(),
                       author=me, assignee=assignee or None, owner_login=_owner(conn), client_id=client_id, order_id=order_id,
-                      chat_row=chat_row, allowed=allowed)
+                      chat_row=chat_row, allowed=allowed, journal_author=author())
             flash("Задача поставлена.", "info")
         except tasks.TaskError as err:
             conn.rollback()
@@ -152,12 +168,12 @@ def register(app) -> None:
             task = tasks.get(conn, task_id)
         except tasks.TaskError:
             abort(404)
-        if is_point() and task["assignee"] != me:        # a point closes only its own: another's is refused, never even looked at
-            abort(403)
+        if is_point() and task["assignee"] not in _mine_as_point(conn):     # a point closes only its own (as a point: its managers'):
+            abort(403)                                                  # another's is refused, never even looked at
         if not is_point() and not may_take():
             abort(403)
         try:
-            tasks.close(conn, task_id, how, local_iso(), me, request.form.get("result", ""))
+            tasks.close(conn, task_id, how, local_iso(), me, request.form.get("result", ""), journal_author=author())
             flash("Задача выполнена." if how == "done" else "Задача отменена.", "info")
         except tasks.TaskError as err:
             flash(str(err), "error")

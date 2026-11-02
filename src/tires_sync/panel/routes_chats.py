@@ -11,7 +11,7 @@ from .. import catalog_archive, chat_deals as deals, chat_handover, chats, conne
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
-from .common import author, can, chat_of_other_point, get_conn, login_required, own_point, point_account, safe_path
+from .common import author, can, chat_of_other_point, get_conn, login_required, own_logins, own_point, point_account, safe_path
 import logging
 from datetime import datetime
 from urllib.parse import urlencode
@@ -648,7 +648,7 @@ def register(app) -> None:
         try:
             order_notify.tell_people(conn, app.config.get("SECRET_BOX"), made["to"],
                                      chat_handover.message(made["point"], chat_row, request.host_url.rstrip("/") + "/chats/%d" % chat_row, made["id"]),
-                                     tg_http=app.config.get("TG_HTTP") or urllib_transport, now=now)
+                                     tg_http=app.config.get("TG_HTTP") or urllib_transport, now=now, skip_logins=own_logins(conn))
         except Exception:                                                  # the tasks and the light are there; only the message is lost
             logging.getLogger(__name__).exception("the Telegram message of a chat handover failed")
         flash("Клиент передан %s: в «Чатах» он подсвечен, у них задача «Взять клиента»." % ("владельцу и партнёру" if len(made["to"]) > 1 else "владельцу"), "ok")
@@ -710,8 +710,11 @@ def register(app) -> None:
                 send = lambda row, text, token: chats.send_reply(conn, _writer(conn, chats.get_chat(conn, row)), row, text, token, stamp, author())
                 arrived = order_manager.arrived_by_move(conn, before, send, stamp, author())
                 from .. import order_intercity, order_notify                # «Отправлен» from the chat: as the point's press (2026-11-02)
+                from .common import own_logins
+                skip = own_logins(conn)                                    # not to the person working as the point (2026-11-02)
                 arrived = arrived or order_intercity.shipped_by_hand(conn, before, author(), stamp, send, lambda logins, text: order_notify.tell_people(
-                    conn, app.config.get("SECRET_BOX"), logins, text, tg_http=app.config.get("TG_HTTP") or order_notify.urllib_transport, now=stamp))
+                    conn, app.config.get("SECRET_BOX"), logins, text, tg_http=app.config.get("TG_HTTP") or order_notify.urllib_transport, now=stamp,
+                    skip_logins=skip))
                 if arrived:
                     flash(arrived)
                 offer_send(conn, chat["order_id"], stamp)

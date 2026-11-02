@@ -43,6 +43,8 @@ STAGE_FIELDS = "id, code, name, color, position, kind, hint, limit_hours"
 DEFAULT_RESPONSIBLE_KEY = "orders_default_responsible"
 
 
+ACTING_MARK = " за точку «"       # the author of the owner or the partner working as a point (panel/common.as_point_author): never a login
+
 def default_responsible(conn) -> str:
     """Who answers for the orders the robot makes (from the chats) until a manager is named: set by the owner, empty = whoever made the card."""
     row = conn.execute("SELECT value FROM app_state WHERE key = ?", (DEFAULT_RESPONSIBLE_KEY,)).fetchone()
@@ -551,7 +553,8 @@ def get_card(conn, card_id) -> dict:
     card["items"] = list_items(conn, card_id)
     from . import order_wait
     card["wants"] = order_wait.list_wants(conn, card_id)
-    card["responsible"] = card["responsible"] or card["created_by"]            # whoever made the card answers for it until another manager is named
+    made_by = "" if ACTING_MARK in (card["created_by"] or "") else card["created_by"]    # «<name> за точку «X»» is no login: the point's rules
+    card["responsible"] = card["responsible"] or made_by                         # whoever made the card answers for it until another manager is named
     from . import oth_sale
     card["in_stock"] = int(card_id) in oth_sale.in_stock_ids(conn, [card_id])   # every tyre taken from «На ОТХ»: no date of delivery (2026-10-30)
     from . import order_intercity

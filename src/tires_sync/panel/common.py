@@ -188,8 +188,14 @@ def session_valid() -> bool:
 
 
 def author() -> str:
-    """Who is acting, for the journal and the settings versions."""
-    return session.get("user") or current_app.config["AUTHOR"]
+    """Who is acting, for the journal and the settings versions. The owner or the partner working as a point (as_point): «<name> за точку
+    «X»», so that the journal shows who pressed it; never a login then, so nothing may look a person up by it (current_user()["login"])."""
+    user = session.get("user") or current_app.config["AUTHOR"]
+    if session.get("user") and session.get("as_point") is not None:
+        acting = current_user()
+        if acting["as_point"] is not None:
+            return as_point_author(get_conn(), acting["login"], acting["as_point_name"])
+    return user
 
 
 def login_required(view):
@@ -198,7 +204,7 @@ def login_required(view):
         valid = session_valid()
         if not valid:
             if session.get("user"):
-                session.clear()
+                drop_session()
             return redirect("/login")
         return view(*args, **kwargs)
 
@@ -305,6 +311,8 @@ SECTION_OF.update(tasks_page="orders", task_new="orders", task_close="orders")  
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
 SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
                   order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
+SECTION_OF.update(ui_new_page="setup",                           # «Новый вид» (routes_design, 2026-11-02): the owner changes, the partner looks
+                  as_point_start="self", as_point_stop="self")   # «Работать как точка»: check_access lets them by AS_POINT_PAGES
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
 NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catalog_own_price_inline": "money", "catalog_market_token": "money", "catalog_market_switch": "money", "order_delete": "delete", "chat_delete": "delete", "deleted_restore": "delete", "economics_terms_delete": "delete",
          "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "chats_merge": "bulk",
@@ -343,15 +351,82 @@ VIEW_POSTS = frozenset({"chats_refresh"})
 
 
 def current_user() -> dict:
-    """{"login", "role", "point_id", "display_name"} of the person signed in (the shared password is the owner)."""
+    """{"login", "role", "point_id", "display_name", "real_role", "as_point", "as_point_name"} of the person signed in (the shared password
+    is the owner). «Работать как точка» (session as_point, checked here on every request): the role is «point» of that point, `real_role`
+    is the person's own; a mode that no longer holds (the role was changed, the point deleted) ends here."""
     if "user_info" not in g:
         login = session.get("user") or ""
         if login and login == current_app.config["AUTHOR"]:
             info = {"role": "owner", "point_id": None, "display_name": ""}
         else:
             info = users.get_role(get_conn(), login) if login else {"role": "", "point_id": None, "display_name": ""}
-        g.user_info = {"login": login, "role": info["role"], "point_id": info["point_id"], "display_name": info["display_name"]}
+        user = {"login": login, "role": info["role"], "point_id": info["point_id"], "display_name": info["display_name"],
+                "real_role": info["role"], "as_point": None, "as_point_name": ""}
+        if login and session.get("as_point") is not None:
+            point = acting_point(get_conn(), info["role"], session.get("as_point"))
+            if point is None:
+                end_as_point(login, "invalid")
+            else:
+                user.update(role="point", point_id=point["id"], as_point=point["id"], as_point_name=point["name"])
+        g.user_info = user
     return g.user_info
+
+
+# ---- «Работать как точка» (the owner 2026-11-02, base-plan part 3) --------------------------------------------------------------------
+# The owner and the partner (Заман) work as the manager of a point: the session keeps as_point=<id>, current_user() gives them the role
+# «point» of that point (the menu, the pages, check_access, own_point), author() names them «<name> за точку «X»». Checked on every request:
+# the person's own role is still owner or partner, the point is there; else the mode ends. A sign-out, a new password, a new epoch end it.
+AS_POINT_ROLES = frozenset({"owner", "partner"})
+AS_POINT_PAGES = frozenset({"as_point_start", "as_point_stop"})
+
+
+def acting_point(conn, real_role: str, point_id):
+    """{"id", "name"} of the point the person may work as; None: not their right or no such point."""
+    if real_role not in AS_POINT_ROLES or isinstance(point_id, bool):
+        return None
+    try:
+        point_id = int(point_id)
+    except (TypeError, ValueError):
+        return None
+    row = conn.execute("SELECT id, name FROM point WHERE id = ?", (point_id,)).fetchone()
+    return {"id": row[0], "name": row[1]} if row else None
+
+
+def as_point_author(conn, login: str, point_name: str) -> str:
+    from ..orders import ACTING_MARK
+    return "%s%s%s»" % (users.person_name(conn, login, current_app.config["AUTHOR"]), ACTING_MARK, point_name)
+
+
+def end_as_point(login: str, why: str) -> None:
+    """The mode ends (the person's «Выйти», a new password, a sign-out, or it no longer holds); audited with the point it was."""
+    point = session.pop("as_point", None)
+    g.pop("user_info", None)
+    if point is not None and login:
+        conn = get_conn()
+        row = conn.execute("SELECT name FROM point WHERE id = ?", (point,)).fetchone() if isinstance(point, int) else None
+        store.write_audit(conn, now_iso(), login, "as_point_stop", dict({"point": point}, **({"name": row[0]} if row else {}), why=why))
+
+
+def own_logins(conn) -> set:
+    """The logins the alerts know the owner or the partner working as a point by: the alerts about their own press are not sent to them (the
+    lead 2026-11-02); the other people hear as usual, a chat they share too. The shared password is the owner's login of the alerts. Out of
+    the mode: none."""
+    user = current_user()
+    if user["as_point"] is None:
+        return set()
+    from .. import order_notify
+    found = {user["login"]}
+    if user["login"] == current_app.config["AUTHOR"]:
+        found.add(order_notify.get_owner_login(conn))
+    return found
+
+
+def drop_session(why: str = "signed_out") -> None:
+    """session.clear() of a session that is over (a sign-out, a new epoch, the shared password changed): «Работать как точка» ends with it,
+    in the journal too."""
+    if session.get("as_point") is not None:
+        end_as_point(session.get("user") or "", why)
+    session.clear()
 
 
 def can(section: str, need: str = "view") -> bool:
@@ -368,6 +443,8 @@ def can_post(endpoint: str) -> bool:
     section = SECTION_OF.get(endpoint)
     if endpoint in OPEN:
         return True
+    if endpoint in AS_POINT_PAGES:                       # as check_access: the person's own role
+        return current_user()["real_role"] in AS_POINT_ROLES
     if section is None or users.level(role, section) < (users.VIEW if role == "point" and endpoint in VIEW_POSTS else users.EDIT):
         return False
     if role == "point" and endpoint not in POINT_PAGES:
@@ -445,9 +522,13 @@ def check_access():
         return None
     if not session_valid():
         if session.get("user"):
-            session.clear()
+            drop_session()
         return redirect("/login")
     user = current_user()
+    if endpoint in AS_POINT_PAGES:                        # «Работать как точка» / «Выйти»: the owner's and the partner's own (the role
+        if user["real_role"] not in AS_POINT_ROLES:       # of the person, not the point's they work as); «Выйти» always open to them
+            abort(403)
+        return None
     section = SECTION_OF.get(endpoint)
     if section is None:                                   # a page nobody gave a right to: closed
         abort(403)

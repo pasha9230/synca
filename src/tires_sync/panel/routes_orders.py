@@ -19,7 +19,7 @@ from ..transport import urllib_transport
 from .. import message_texts, onboarding_texts, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
-from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
+from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
 from .routes_main import context
 
 log = logging.getLogger(__name__)
@@ -608,7 +608,9 @@ def register(app) -> None:
     def orders_list_columns():
         """«Колонки» of the list: the person's own choice and order of the columns (user_pref), or back to the default."""
         conn = get_conn()
-        if request.form.get("reset"):
+        if current_user()["as_point"] is not None:                       # the person's own columns are the office's: not from a point
+            flash("В режиме точки колонки не сохраняются.")
+        elif request.form.get("reset"):
             orders_list.reset(conn, session["user"])
         elif not orders_list.save(conn, session["user"], list_money(), request.form.getlist("order"), request.form.getlist("shown"), now_iso(),
                                    point=own_point() is not None):
@@ -1242,10 +1244,14 @@ def register(app) -> None:
         return back(card_id, "webmim")
 
     def people_tell(conn, stamp: str):
-        """The owner's and the partner's Telegram (order_notify.tell_people with the panel's keys) for order_intercity; never raises."""
+        """The owner's and the partner's Telegram (order_notify.tell_people with the panel's keys) for order_intercity; never raises. Never to
+        the person who moved it working as a point (common.own_logins)."""
+        from .common import own_logins
+        skip = own_logins(conn)
+
         def tell(logins, text):
             return order_notify.tell_people(conn, app.config.get("SECRET_BOX"), logins, text,
-                                            tg_http=app.config.get("TG_HTTP") or order_notify.urllib_transport, now=stamp)
+                                            tg_http=app.config.get("TG_HTTP") or order_notify.urllib_transport, now=stamp, skip_logins=skip)
         return tell
 
     def avito_deliver(conn, stamp: str):

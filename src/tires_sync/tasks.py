@@ -91,9 +91,10 @@ def default_assignee(conn, owner_login: str, author: str, order_id=None, chat_ro
 # ---- set, close ---------------------------------------------------------------------------------------------------------------------------
 
 def add(conn, *, kind: str, title: str, due_at: str, note: str, now: str, author: str, assignee: Optional[str] = None, owner_login: str = "owner",
-        client_id=None, order_id=None, chat_row=None, allowed: Optional[set] = None) -> int:
+        client_id=None, order_id=None, chat_row=None, allowed: Optional[set] = None, journal_author: Optional[str] = None) -> int:
     """A task. `assignee` None: default_assignee; else one of `allowed` (the logins of assignees(); the caller narrows it for a point).
-    «Перезвонить» needs whom to call (an order, a chat or a client); another kind may be of none. The order's journal gets its line."""
+    «Перезвонить» needs whom to call (an order, a chat or a client); another kind may be of none. The order's journal gets its line.
+    `journal_author`: who the journal and the audit name when not the login (panel/common.author: «<name> за точку «X»»)."""
     if kind not in KINDS:
         raise TaskError("Выберите, что сделать.")
     due = str(due_at or "").strip()[:16]
@@ -126,15 +127,16 @@ def add(conn, *, kind: str, title: str, due_at: str, note: str, now: str, author
                            "VALUES (?,?,?,?,?,?,?,?,?,?)", (client_id or None, order_id or None, chat_row or None, due, assignee,
                                                            _one_line(note, NOTE_MAX), now, author, kind, title)).lastrowid
     if order_id:
-        _journal(conn, order_id, now, author, "Задача: %s — %s, до %s" % (_what(kind, title), users.person_name(conn, assignee), _shown(due)))
-    store.write_audit(conn, now, author, "callback", {"task": task_id, "client": client_id, "order": order_id, "chat": chat_row, "due": due,
+        _journal(conn, order_id, now, journal_author or author, "Задача: %s — %s, до %s" % (_what(kind, title), users.person_name(conn, assignee),
+                                                                                         _shown(due)))
+    store.write_audit(conn, now, journal_author or author, "callback", {"task": task_id, "client": client_id, "order": order_id, "chat": chat_row, "due": due,
                                                      "to": assignee, "kind": kind})
     return task_id
 
 
-def close(conn, task_id, how: str, now: str, who: str, result: str = "") -> dict:
+def close(conn, task_id, how: str, now: str, who: str, result: str = "", journal_author: Optional[str] = None) -> dict:
     """«Выполнено» (how = "done", with what came of it) or «Отменить» (how = "cancel"); a closed task stays closed. The rights are the
-    caller's (routes_tasks: a point only its own)."""
+    caller's (routes_tasks: a point only its own). `journal_author` as in add."""
     if how not in ("done", "cancel"):
         raise TaskError("Неизвестное действие.")
     task = get(conn, task_id)
@@ -146,9 +148,9 @@ def close(conn, task_id, how: str, now: str, who: str, result: str = "") -> dict
         raise TaskError("Задача уже закрыта.")
     result = _one_line(result, RESULT_MAX)
     if task["order_id"]:
-        _journal(conn, task["order_id"], now, who, "Задача %s: %s%s" % ("выполнена" if how == "done" else "отменена",
+        _journal(conn, task["order_id"], now, journal_author or who, "Задача %s: %s%s" % ("выполнена" if how == "done" else "отменена",
                                                                        _what(task["kind"], task["title"]), (" — " + result) if result else ""))
-    store.write_audit(conn, now, who, "callback_" + how, {"task": int(task_id), "result": result} if result else {"task": int(task_id)})
+    store.write_audit(conn, now, journal_author or who, "callback_" + how, {"task": int(task_id), "result": result} if result else {"task": int(task_id)})
     from . import chat_handover                                            # «Взять клиента» of a chat a point handed over (2026-11-02)
     try:                                                                   # the task is closed already: its light never spoils that
         chat_handover.task_closed(conn, task, who, now)
@@ -186,17 +188,24 @@ def of_place(conn, client_id=None, order_id=None, chat_row=None, only: Optional[
         sql, args = "chat_row = ?", [chat_row]
     else:
         return []
-    if only is not None:
-        sql, args = sql + " AND assignee = ?", args + [only]
+    if only is not None:                                                    # one login, or several (a point's managers)
+        only = [only] if isinstance(only, str) else list(only)
+        sql, args = sql + " AND assignee IN (%s)" % ",".join("?" * len(only)) if only else sql + " AND 0", args + only
     return [_row(r) for r in conn.execute("SELECT %s FROM callback_task WHERE done_at IS NULL AND cancelled_at IS NULL AND %s ORDER BY due_at, id"
                                           % (", ".join(FIELDS), sql), args)]
 
 
-def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bool, to: str = "", due: str = "", kind: str = "") -> List[dict]:
+def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bool, to: str = "", due: str = "", kind: str = "",
+            as_point=None) -> List[dict]:
     """The open tasks of the page «Задачи»: `tab` mine (to me), by_me (set by me), all (the office only); a point gets only its own
-    whatever the tab. Filters: `to` (a login), `due` overdue|today|week, `kind`. Each task knows if it is late."""
+    whatever the tab. Filters: `to` (a login), `due` overdue|today|week, `kind`. Each task knows if it is late. `as_point`: the owner or
+    the partner working as that point (panel/common.current_user) sees what its managers see: the tasks set to them (the lead 2026-11-02),
+    never the person's own (those come back with «Выйти»)."""
     where, args = ["done_at IS NULL", "cancelled_at IS NULL"], []
-    if point:
+    if as_point is not None:
+        where.append("assignee IN (%s)" % MANAGERS)
+        args.append(as_point)
+    elif point:
         where.append("assignee = ?")
         args.append(login)
     if tab == "mine" and not point:
@@ -230,6 +239,14 @@ def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bo
     return out
 
 
+MANAGERS = "SELECT login FROM panel_user_role WHERE role = 'point' AND point_id = ?"     # the managers of a point (one argument)
+
+
+def point_managers(conn, point_id, active_only: bool = False) -> List[str]:
+    """The logins of the managers of a point, by login; `active_only`: those who can sign in (whom to set a task to)."""
+    return [r[0] for r in conn.execute(MANAGERS + (" AND active = 1" if active_only else "") + " ORDER BY login", (point_id,))]
+
+
 def _mine(conn, login: str, owner_login: str) -> tuple:
     if login != owner_login:
         return "assignee = ?", [login]
@@ -241,7 +258,7 @@ def _day_end(now: str) -> str:
     return (datetime.strptime(now[:10], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%dT00:00")
 
 
-def counter(conn, login: str, owner_login: str, now: str, point: bool) -> Dict[str, int]:
+def counter(conn, login: str, owner_login: str, now: str, point: bool, as_point=None) -> Dict[str, int]:
     """The menu's number: my open tasks late or due today; «late» — some of them are past their time (red)."""
-    tasks = listing(conn, tab="mine", login=login, owner_login=owner_login, now=now, point=point, due="today")
+    tasks = listing(conn, tab="mine", login=login, owner_login=owner_login, now=now, point=point, due="today", as_point=as_point)
     return {"count": len(tasks), "late": sum(1 for t in tasks if t["late"])}

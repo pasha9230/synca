@@ -268,9 +268,10 @@ def create_app(config: dict) -> Flask:
                 from .routes_alerts import nav_counts
                 self._data.update(nav_counts(conn, session["user"]))
                 from .. import order_notify, tasks
-                from .common import own_point
+                from .common import current_user, own_point
                 from .routes_orders import local_iso
-                counted = tasks.counter(conn, session["user"], order_notify.get_owner_login(conn), local_iso(), own_point() is not None)
+                counted = tasks.counter(conn, session["user"], order_notify.get_owner_login(conn), local_iso(), own_point() is not None,
+                                         as_point=current_user()["as_point"])
                 self._data.update(tasks=counted["count"], tasks_late=counted["late"])
             return self._data
 
@@ -371,6 +372,8 @@ def create_app(config: dict) -> Flask:
     routes_intercity.register(app)
     routes_shop.register(app)
     routes_client_terms.register(app)
+    from . import routes_design
+    routes_design.register(app)
 
     from flask import render_template
 
@@ -386,9 +389,9 @@ def create_app(config: dict) -> Flask:
 
     def _forget_stale_session():                                         # a page of an error never draws the menu of a session that is over
         from flask import session
-        from .common import session_valid
+        from .common import drop_session, session_valid
         if session.get("user") and not session_valid():
-            session.clear()
+            drop_session()
 
     @app.errorhandler(403)
     def forbidden(_err):

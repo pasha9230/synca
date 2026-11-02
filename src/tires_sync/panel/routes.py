@@ -4,7 +4,7 @@ from flask import redirect, render_template, request, session
 from werkzeug.security import check_password_hash
 
 from .. import store, users
-from .common import epoch_login, get_conn, login_blocked, login_failed, now_iso, session_valid, shared_mark
+from .common import drop_session, epoch_login, get_conn, login_blocked, login_failed, now_iso, session_valid, shared_mark
 
 
 def register(app) -> None:
@@ -24,7 +24,7 @@ def register(app) -> None:
                 who = users.verify(conn, typed, password)
             if who:
                 store.write_audit(conn, now_iso(), who, "login", {"ip": ip})
-                session.clear()
+                drop_session()
                 session.permanent = True
                 session["user"] = who
                 session["epoch"] = store.get_session_epoch(conn, epoch_login(conn, who))
@@ -43,5 +43,6 @@ def register(app) -> None:
         if session_valid():              # only a signed-in user ends their own sessions
             conn = get_conn()
             store.bump_session_epoch(conn, epoch_login(conn, session["user"]))
-        session.clear()
+            drop_session("logout")
+        drop_session()
         return redirect("/login")

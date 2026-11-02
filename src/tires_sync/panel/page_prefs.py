@@ -83,10 +83,12 @@ def remember():
     endpoint, login = request.endpoint, session.get("user")
     if request.method != "GET" or not login or request.headers.get("X-Requested-With") == "fetch":
         return None
+    from .common import current_user, get_conn
+    if current_user()["as_point"] is not None:                       # the owner as a point: the saved filters are the office's, untouched
+        return None
     posted = session.get(POSTED) == request.path                      # this GET is the redirect after a form (PRG), not a link of the page
     if posted:
         session.pop(POSTED)
-    from .common import current_user, get_conn
     for group, (pages, members) in TABS.items():
         if endpoint in pages:
             conn = get_conn()
