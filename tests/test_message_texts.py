@@ -210,6 +210,10 @@ def test_the_rules_templates_are_journaled_and_may_not_take_a_systems_name(tmp_p
         post(client, "/orders/templates/save", tok, name=name, audience="manager", body="x")
         post(client, "/orders/templates/save", tok, id=str(t["id"]), name=name, audience="manager", body="x")
     assert [(r["name"], r["body"]) for r in tpl.list_templates(conn)] == [("Свой 2", "Заказ {order_no}!")]
+    twin = tpl.add_template(conn, tpl.ARRIVED_SAMPLE[0], "manager", "Двойник {order_no}")      # the name of a client's text, to the manager
+    post(client, "/orders/templates/save", tok, id=str(twin), name=tpl.ARRIVED_SAMPLE[0], audience="client", body="Двойник {order_no}")
+    assert tpl.get_template(conn, twin)["audience"] == "manager"                             # it never becomes the system's text
+    tpl.delete_template(conn, twin)
     assert "занято текстом, который система отправляет сама" in client.get("/orders/templates").get_data(as_text=True)
     post(client, "/orders/templates/%d/delete" % t["id"], tok)
     said = [texts.audit_text(e) for e in store.list_audit(conn, 50) if e["action"] == mt.CHANGED]

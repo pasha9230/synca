@@ -1860,7 +1860,7 @@ def register(app) -> None:
         try:
             template_id = _int(f.get("id"))
             was = templates.get_template(conn, template_id) if template_id is not None else None
-            if message_texts.taken(f.get("name")) and (was is None or was["name"] != str(f.get("name") or "").strip()):
+            if message_texts.taken(f.get("name")) and (was is None or (was["name"], was["audience"]) != (str(f.get("name") or "").strip(), f.get("audience"))):
                 raise orders.OrderError("Имя «%s» занято текстом, который система отправляет сама: правьте его выше, в «Сообщения, которые "
                                         "уходят сами», или назовите шаблон иначе." % str(f.get("name")).strip())
             if template_id is None:
