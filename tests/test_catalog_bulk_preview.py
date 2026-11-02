@@ -56,7 +56,7 @@ def test_preview_shows_the_ad_as_it_will_be_built(tmp_path):
         {"name": "Бета", "address_id": "101", "enabled": True, "share": 100, "address_text": "СПб, ул. Примерова, 35А"}], T, "owner", address_mode="text")
     html = client.get("/catalog/preview/1").get_data(as_text=True)
     assert "4850" in html and "Ikon  205/55/16" in html and "C1" in html
-    assert "СПб, ул. Примерова, 35А" in html and "В наличии: 12 шт." in html
+    assert "СПб, ул. Примерова, 35А" in html and "В наличии: более 4 шт." in html
     assert "Заголовок" in html and "Описание" in html and "Количество" in html
     assert "<html" not in html  # a fragment for the dialog
 

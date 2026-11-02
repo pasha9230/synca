@@ -113,7 +113,7 @@ def test_a_webmim_ad_goes_on_under_its_id_with_4tochki_stock_and_price_and_keeps
     ad = second["100"]
     assert ad.findtext("Price") == "3700"                                                    # accepted: 3500 + 5 % = 3675, up to 50; the rule of S2:IKON
     text = ad.findtext("Description")
-    assert "В наличии: 40 шт." in text and "Артикул: CI7" in text and "Страна происхождения бренда: Корея" in text
+    assert "В наличии: более 4 шт." in text and "Артикул: CI7" in text and "Страна происхождения бренда: Корея" in text    # 4tochki 40, above 4: «более 4» (the owner 2026-11-02)
     conn = store.connect(tmp_path / "t.db")
     assert store.last_match_switches(conn, 1)["100"][:2] == ("100", "s2-TCH1")
     assert store.last_match_switches(conn, 2) == {}
@@ -121,7 +121,7 @@ def test_a_webmim_ad_goes_on_under_its_id_with_4tochki_stock_and_price_and_keeps
     (tmp_path / "unload.xml").write_bytes(unload(rest_100="12"))                             # WebMIM back: the live ad stays as it is
     third = by_id(cycle_and_publish(tmp_path, args)["Основной"])
     assert not [i for i in third if "TCH1" in i] and images(third["100"]) == images(live)
-    assert "В наличии: 40 шт." in third["100"].findtext("Description") and "Артикул: CI7" in third["100"].findtext("Description")
+    assert "В наличии: более 4 шт." in third["100"].findtext("Description") and "Артикул: CI7" in third["100"].findtext("Description")
     (tmp_path / "unload.xml").write_bytes(unload(without_100=True))                         # WebMIM gone for good: the live ad is the same
     for _ in range(2):
         later = by_id(cycle_and_publish(tmp_path, args)["Основной"])
@@ -134,14 +134,14 @@ def test_the_trial_switched_off_gives_the_ad_back_to_webmim_under_the_same_id(tm
     args = prepare(tmp_path)
     live = by_id(cycle_and_publish(tmp_path, args)["Основной"])["100"]
     (tmp_path / "unload.xml").write_bytes(unload(rest_100="2"))
-    assert "В наличии: 40 шт." in by_id(cycle_and_publish(tmp_path, args)["Основной"])["100"].findtext("Description")
+    assert "В наличии: более 4 шт." in by_id(cycle_and_publish(tmp_path, args)["Основной"])["100"].findtext("Description")
     conn = store.connect(tmp_path / "t.db")
     connections.set_config(conn, "tochki", 0, dict(connections.get_config(conn, "tochki", 0), accounts=[]), NOW, "owner")   # «Откат»
     conn.commit()
     conn.close()
     (tmp_path / "unload.xml").write_bytes(unload(rest_100="12"))
     ads = by_id(cycle_and_publish(tmp_path, args)["Основной"])
-    assert not [i for i in ads if "s2-" in i] and "В наличии: 12 шт." in ads["100"].findtext("Description")
+    assert not [i for i in ads if "s2-" in i] and "В наличии: более 4 шт." in ads["100"].findtext("Description")
     assert images(ads["100"]) == images(live) and ads["100"].findtext("Title") == live.findtext("Title")
 
 

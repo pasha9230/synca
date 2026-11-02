@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "_inquiry.html" as inq_ui %}
 {% from "_ui.html" import icon, empty %}
-{% from "_handoff_dialog.html" import handoff_button, handoff_window with context %}
+{% from "_handoff_dialog.html" import handoff_button with context %}
 {% block title %}Чаты · Tires Sync{% endblock %}
 {# a point's phone (2026-10-31, point-mobile): its own width, the frame of «Рабочее место», the list or the open chat; the office keeps 1280 #}
 {% block viewport %}{% if current_user().role == "point" %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
@@ -21,8 +21,8 @@
 {% for label, links in filter_menus %}<details class="menu chats-filter-menu"><summary class="btn btn--secondary btn--sm">{{ label }}</summary><div class="menu-list">
 {% for item, href, on in links %}<a class="menu-item{% if on %} is-on{% endif %}" href="{{ href }}"{% if on %} aria-current="page"{% endif %}>{{ item }}</a>{% endfor %}
 </div></details>{% endfor %}<span class="small muted ml-auto nowrap">Всего: {{ total }}{% if kept %} · открытый чат вне фильтра{% endif %} · <a href="/deleted?k=chat">Удалённые</a></span></div>
-{% set inq = inquiry_chats(rows|map(attribute="id")|list) %}{% for c in rows %}<a class="chat-row{% if current and current.id == c.id %} is-active{% endif %}{% if c.unread %} is-unread{% endif %}" href="/chats/{{ c.id }}{{ query }}">
-<div class="row" style="gap:var(--s-2);align-items:baseline"><span class="chat-dot{% if c.unread %} is-on{% endif %}" aria-hidden="true"></span><span class="strong chat-name">{{ c.peer_name or "Без имени" }}</span>{{ inq_ui.badge(inq.get(c.id)) }}{% if c.kept %}<span class="badge badge--neutral" title="Чат открыт, но под выбранный фильтр больше не подходит; в «Всего» не входит">вне фильтра</span>{% endif %}{% if c.unread %}<span class="badge badge--warn">{{ c.unread }}</span>{% endif %}<span class="small muted ml-auto nowrap" title="{{ c.last_at|dt }}">{{ c.last_at|short_dt }}</span></div>
+{% set inq = inquiry_chats(rows|map(attribute="id")|list) %}{% set office = current_user().role != "point" %}{% for c in rows %}{% set hd = handed.get(c.id) if office else none %}<a class="chat-row{% if current and current.id == c.id %} is-active{% endif %}{% if c.unread %} is-unread{% endif %}{% if hd %} is-handed{% endif %}" href="/chats/{{ c.id }}{{ query }}">
+<div class="row" style="gap:var(--s-2);align-items:baseline"><span class="chat-dot{% if c.unread %} is-on{% endif %}" aria-hidden="true"></span><span class="strong chat-name">{{ c.peer_name or "Без имени" }}</span>{{ inq_ui.badge(inq.get(c.id)) }}{% if hd %}<span class="badge badge--warn chat-handed" title="Передан {{ hd.at|dt }}: возьмите клиента в работу">передан с точки {{ hd.point }}</span>{% endif %}{% if c.kept %}<span class="badge badge--neutral" title="Чат открыт, но под выбранный фильтр больше не подходит; в «Всего» не входит">вне фильтра</span>{% endif %}{% if c.unread %}<span class="badge badge--warn">{{ c.unread }}</span>{% endif %}<span class="small muted ml-auto nowrap" title="{{ c.last_at|dt }}">{{ c.last_at|short_dt }}</span></div>
 {% if c.wait_text or c.responsible %}<div class="row chat-row-meta">{% if c.wait_text %}<span class="badge {{ 'badge--err' if c.waits >= 60 else 'badge--warn' }} badge--dot" title="Клиент ждёт ответа">ждёт {{ c.wait_text }}</span>{% endif %}{% if c.responsible %}<span class="small muted ml-auto chat-who">{{ answer_names.get(c.responsible, c.responsible) }}</span>{% endif %}</div>{% endif %}
 <div class="small muted chat-last">{{ "Вы: " if c.last_dir == "out" else "" }}{% if c.last_avito is not none %}Сообщение без текста: видно только в Авито{% else %}{{ c.last_text or ("история недоступна" if not c.history_ok else "—") }}{% endif %}</div>
 {% if accounts|length > 1 and c.account_name %}<div class="small muted chat-last chat-meta">{{ c.account_name }}</div>{% endif %}</a>
@@ -37,6 +37,7 @@
 <div class="ml-auto row" style="gap:var(--s-2);align-items:center">
 <button type="button" class="btn btn--secondary btn--sm" data-deal-unfold aria-controls="chats-deal" hidden>‹ Заказ</button>
 {{ handoff_button(handoff) }}
+{% if take %}<span class="badge badge--warn">передан с точки {{ take.point }}</span><form method="post" action="/chats/{{ current.id }}/take" class="inline" data-once>{{ keep }}<button class="btn btn--primary btn--sm">Взять клиента</button></form>{% endif %}
 {% if deal and can_post("chat_stage") %}<form method="post" action="/chats/{{ current.id }}/stage" class="row chat-stage" style="gap:var(--s-2);align-items:center" data-autosubmit>{{ keep }}
 <span class="small muted">Заказ №{{ deal.id }}</span><select class="select select--sm" name="stage_id" aria-label="Этап заказа">{% for s in stages %}<option value="{{ s.id }}"{% if s.id == deal.stage_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select><span class="small muted nowrap">{{ deal.days }} дн.</span><noscript><button class="btn btn--secondary btn--sm">Перенести</button></noscript></form>{% endif %}
 {% if can_post("chat_status") %}<details class="menu"><summary class="btn btn--secondary btn--sm">Ещё ⋯</summary><div class="menu-list">
@@ -112,6 +113,6 @@
 <div class="modal-head"><h3 id="order-messages-{{ offer.card_id }}-h">Сообщения по заказу №{{ offer.card_id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack"><p class="small">Сообщения заказа ждут отправки (клиенту или точке): откройте их в карточке заказа.</p><div><a class="btn btn--primary btn--sm" href="{{ offer.more }}" data-messages-link>Открыть сообщения заказа</a></div></div>
 <div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Позже</button></div></div></div>{% endif %}
-{{ handoff_window(handoff) }}
+<style>.chat-row.is-handed{box-shadow:inset 3px 0 0 var(--warn-500);background:var(--warn-50)}</style>
 {% if current_user().role == "point" %}{% with section="chats" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
 {% endblock %}

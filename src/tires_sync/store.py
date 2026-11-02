@@ -286,6 +286,21 @@ CREATE TABLE IF NOT EXISTS order_item (
     terms TEXT NOT NULL DEFAULT '{}', fee_pct REAL NOT NULL DEFAULT 0, promo_pct REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS order_item_order ON order_item (order_id);
+-- a position removed from its order (orders.remove_item, 2026-11-02): kept for the client's history (clients.purchases_view, «удалён»);
+-- `data` is the whole order_item row as JSON. Only added to, never read back into order_item.
+CREATE TABLE IF NOT EXISTS order_item_removed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL, order_id INTEGER NOT NULL, name TEXT NOT NULL DEFAULT '',
+    qty INTEGER NOT NULL DEFAULT 0, sale_unit REAL NOT NULL DEFAULT 0, data TEXT NOT NULL DEFAULT '{}', removed_at TEXT NOT NULL,
+    removed_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS order_item_removed_order ON order_item_removed (order_id);
+-- «Передать клиента» from a point's chat (chat_handover.py, 2026-11-02): lit in «Чаты» while taken_at is NULL; `tasks`: JSON list of the
+-- ids of its tasks «Взять клиента» (callback_task); taken_how: take (the button in the chat) | task (a task closed in «Задачи»).
+CREATE TABLE IF NOT EXISTS chat_handover (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, chat_row INTEGER NOT NULL, point_id INTEGER, point_name TEXT NOT NULL DEFAULT '', at TEXT NOT NULL,
+    handed_by TEXT NOT NULL DEFAULT '', tasks TEXT NOT NULL DEFAULT '[]', taken_at TEXT, taken_by TEXT, taken_how TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS chat_handover_chat ON chat_handover (chat_row, taken_at);
 CREATE TABLE IF NOT EXISTS order_event (
     id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,
     kind TEXT NOT NULL, text TEXT NOT NULL, level TEXT NOT NULL DEFAULT ''

@@ -307,6 +307,10 @@ _MORE_TEXTS = {
     "sheet_keep_from": lambda d: "Google-таблица: вести заказы, оформленные с %s (было %s)" % (_q(d.get("to") or "всех"), _q(d.get("from") or "всех")),
     "unsent_by_hand": lambda d: "Заказ №%s: сообщение клиенту отправлено вручную (не дошло из панели)" % _q(d.get("order")),
     "callback_cancel": lambda d: "Задача №%s отменена" % _q(d.get("task")),
+    "chat_handover": lambda d: "Точка передала клиента из чата Ч-%s владельцу и партнёру (%s), задачи «Взять клиента»: %s" % (     # chat_handover.py
+        _q(d.get("chat")), ", ".join(map(str, d.get("to") or [])) if isinstance(d.get("to"), list) else _q(d.get("to")), _count(d.get("tasks"))),
+    "chat_handover_taken": lambda d: "Клиент из чата Ч-%s взят в работу (%s)" % (
+        _q(d.get("chat")), {"take": "кнопкой в чате", "task": "закрыта задача №%s" % _q(d.get("task"))}.get(d.get("how"), _q(d.get("how")))),
     "client_saved": lambda d: "Изменена карточка клиента №%s" % _q(d.get("client")),
     "client_tagged": lambda d: "Клиент №%s: метка «%s» %s" % (_q(d.get("client")), _q(d.get("tag")), _on(d.get("on"), "поставлена", "снята")),
     "client_pair_skipped": lambda d: "Клиенты №%s и №%s отмечены как разные люди" % (_q(d.get("client")), _q(d.get("to"))),

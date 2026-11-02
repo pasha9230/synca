@@ -55,7 +55,7 @@ PLACEHOLDER_HELP = {
     "made_in": "строка целиком: «Страна производства: КНР», если в названии у поставщика в конце «CN»; иначе пусто — строка не выводится",
     "price": "цена в рублях, целое число",
     "search": "варианты написания размера для поиска",
-    "stock": "остаток у поставщика, штук (в объявление количество не передаётся, только в текст)",
+    "stock": "остаток у поставщика: число до 4, больше 4 — «более 4» (например «В наличии: более 4 шт.»); в Авито количество передаётся отдельно, точным числом",
     "old_model": "прежнее название модели вместе со словами «Прежнее название шин», например «Прежнее название шин Nokian Hakkapeliitta 9» "
                  "у Ikon Autograph Ice 9 (название задаётся в «Сопоставлениях»); если не задано, строка с этой подстановкой не выводится; "
                  "если в строке перед подстановкой уже написано «Прежнее название шин», слова не повторяются",
@@ -81,6 +81,7 @@ _OLD_MODEL_WORDS_BEFORE = re.compile(r"прежнее\s+название\s+ши�
 _LATIN_TWINS = str.maketrans("aceopxyABCEHKMOPTXY", "асеорхуАВСЕНКМОРТХУ")     # the owner types some Cyrillic letters as Latin ones
 _NEW_ONLY_MARK = re.compile(r"[ \t]*\{new_only\}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+STOCK_SHOWN_MAX = 4         # {stock} above it reads «более 4» (the owner 2026-11-02); the Avito stock API gets the real count (avito_stock)
 
 
 def search_variants(width: int, height: int, diameter: int) -> str:
@@ -92,6 +93,12 @@ def search_variants(width: int, height: int, diameter: int) -> str:
         "%d/%dR%d" % (w, h, d),
     ]
     return ", ".join(variants)
+
+
+def stock_text(stock: int) -> str:
+    """{stock}: the exact count up to 4, «более 4» above it (the owner 2026-11-02: «В наличии: более 4 шт.»)."""
+    stock = int(stock or 0)
+    return "более %d" % STOCK_SHOWN_MAX if stock > STOCK_SHOWN_MAX else str(stock)
 
 
 def _starts_with_words(name: str) -> bool:
@@ -119,7 +126,7 @@ def values(c: Candidate, price: int, old_model: str = "") -> Dict[str, str]:
         "size_slash": "%d/%d/%d" % (o.width, o.height, o.diameter), "indexes": speed_load,
         "season": SEASON_WORD.get(o.season, ""), "code": o.code, "country": brand_country(c),
         "made_in": MADE_IN_TEXT if MADE_IN_CHINA.search(AGE_NOTE.sub(" ", o.name_orig or "")) else "",     # the whole line (the owner 2026-10-30)
-        "price": str(price), "search": search_variants(o.width, o.height, o.diameter), "stock": str(o.stock),
+        "price": str(price), "search": search_variants(o.width, o.height, o.diameter), "stock": stock_text(o.stock),
         "old_model": ("%s %s" % (OLD_MODEL_WORDS, old_model)) if old_model and not _starts_with_words(old_model) else old_model,
     }
 

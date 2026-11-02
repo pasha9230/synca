@@ -86,13 +86,15 @@ def test_control_characters_are_rejected_in_templates_and_stripped_from_feed_val
     assert "\x0b" not in parsed.findtext("Ad/Description")
 
 
-def test_stock_placeholder_shows_the_exact_supplier_stock_only_in_the_description():
+def test_stock_placeholder_shows_the_supplier_stock_up_to_4_and_more_than_4_above_only_in_the_description():
+    """The owner 2026-11-02: «В наличии: более 4 шт.» when the supplier has more than 4, the exact number otherwise; no Quantity in the ad."""
     from tires_sync.description import validate_template
-    c = Candidate("100", make_offer(stock=12), 4810, "Ikon Tyres", "Test Model")
     assert validate_template("В наличии: {stock} шт.") == []
-    ad = render_ad(c, 4810, "P1", make_settings(), date(2026, 10, 6), template="В наличии: {stock} шт.")
-    assert ad.findtext("Description") == "В наличии: 12 шт."
-    assert ad.find("Quantity") is None
+    for stock, text in ((12, "более 4"), (5, "более 4"), (4, "4"), (1, "1"), (0, "0")):
+        c = Candidate("100", make_offer(stock=stock), 4810, "Ikon Tyres", "Test Model")
+        ad = render_ad(c, 4810, "P1", make_settings(), date(2026, 10, 6), template="В наличии: {stock} шт.")
+        assert ad.findtext("Description") == "В наличии: %s шт." % text
+        assert ad.find("Quantity") is None
 
 
 def test_the_russian_title_and_the_known_russian_brands_are_available():

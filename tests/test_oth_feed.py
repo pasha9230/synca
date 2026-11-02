@@ -12,6 +12,7 @@ from helpers import make_offer, make_settings
 from tires_sync import feed_check, oth_stock, order_points, orders, store
 from tires_sync.candidates import Candidate, Evaluation, evaluate
 from tires_sync.decide import decide
+from tires_sync.description import stock_text
 from tires_sync.overrides import override_key
 from tires_sync.models import Action, PublishedItem
 from tests.test_order_reserve import card_at, stage
@@ -104,7 +105,9 @@ def test_the_first_line_names_the_points_and_the_count_is_put_in_the_text():
     marked = oth_stock.add_line(text, ("Янино",))
     assert oth_stock.add_line(marked, ("Юнона",)) == "Шины в наличии на Юнона\n" + text and oth_stock.drop_line(marked) == text
     assert oth_stock.drop_line(text) == text and oth_stock.add_line("x" * 7495, ("Янино",)) == "x" * 7495
-    assert oth_stock.with_count(text, 9) == text.replace("6 шт", "9 шт")
+    assert oth_stock.with_count(text, 9) == text.replace("6 шт", "более 4 шт")                        # above 4: as {stock} writes it
+    assert oth_stock.with_count(text, 3) == text.replace("6 шт", "3 шт")
+    assert oth_stock.with_count(text.replace("6 шт", "более 4 шт"), 2) == text.replace("6 шт", "2 шт")    # a saved ad already says «более 4»
     assert oth_stock.with_count(text + "\n▸ В наличии: 2 шт.", 9) == text + "\n▸ В наличии: 2 шт."          # two such lines: left as it is
     assert oth_stock.with_count("без числа", 9) == "без числа"
 
@@ -157,8 +160,13 @@ def description(data: bytes, ad_id: str) -> str:
     return ad_of(data, ad_id).findtext("Description")
 
 
-def shown(text: str) -> int:
-    return int(re.search(r"В наличии:\s*(\d+)", text).group(1))
+def shown(text: str) -> str:
+    """The count of «В наличии: N шт.» as the text writes it: the number up to 4, «более 4» above (description.stock_text, the owner 2026-11-02)."""
+    return re.search(r"В наличии:\s*(более \d+|\d+)", text).group(1)
+
+
+def count(n: int) -> str:
+    return stock_text(n)
 
 
 def snapshot(tmp_path, code, acct=1) -> str:
@@ -192,8 +200,8 @@ def test_the_cycle_keeps_and_marks_the_positions_on_oth_in_every_account_and_let
             text = description(data, code + suffix)
             assert text.startswith(AT_BETA + "\n") and text.count(LINE) == 1
             assert ad_of(data, code + suffix).findtext("Price") == ET.fromstring(before[acct][code + suffix]).findtext("Price")
-        assert shown(description(data, "101" + suffix)) == 4 + 2           # ours on OTH and the supplier's
-        assert shown(description(data, "102" + suffix)) == 4               # gone from the unload: ours only
+        assert shown(description(data, "101" + suffix)) == count(4 + 2)    # ours on OTH and the supplier's
+        assert shown(description(data, "102" + suffix)) == count(4)        # gone from the unload: ours only
         assert not description(data, "103" + suffix).startswith(LINE)
         assert {"101", "102"} <= set(published(tmp_path, acct)) and events(tmp_path, acct) == []
         assert LINE not in snapshot(tmp_path, "101", acct)                # the saved ad stays clean: no line left after OTH
@@ -221,7 +229,7 @@ def test_two_points_are_named_in_order_and_a_test_point_gives_nothing(tmp_path, 
     assert run(tmp_path, FIVE) == 0
     passed(capsys)
     text = description(public(tmp_path), "103")
-    assert text.startswith("Шины в наличии на Девяткино, Янино\n") and shown(text) == 4 + 4 + 10 and "Тест" not in text
+    assert text.startswith("Шины в наличии на Девяткино, Янино\n") and shown(text) == count(4 + 4 + 10) and "Тест" not in text
     assert not description(public(tmp_path), "104").startswith(LINE)
     conn = connect(tmp_path)
     try:
@@ -256,7 +264,7 @@ def test_a_stocked_position_on_oth_gets_the_line_and_loses_it_when_the_order_lea
     assert snapshot(tmp_path, "103") != before and LINE not in snapshot(tmp_path, "103")
     move(tmp_path, cid, "at_point")                                      # the client came back
     assert run(tmp_path, AFTER) == 0
-    assert LINE not in description(public(tmp_path), "103") and shown(description(public(tmp_path), "103")) == 10
+    assert LINE not in description(public(tmp_path), "103") and shown(description(public(tmp_path), "103")) == count(10)
 
 
 def test_a_position_returned_to_the_supplier_is_no_longer_on_oth(tmp_path):
@@ -373,7 +381,7 @@ def test_a_removed_position_comes_back_under_its_former_id_when_it_goes_to_oth(t
         data = public(tmp_path, acct)
         assert {"101" + suffix, "102" + suffix} <= set(ads_of(data))      # the former Ids: no new ad for Avito to call a repeat
         assert not any(i.startswith(("101_", "102_")) and i not in ("101_a2", "102_a2") for i in ads_of(data))
-        assert shown(description(data, "101" + suffix)) == 6 and shown(description(data, "102" + suffix)) == 4
+        assert shown(description(data, "101" + suffix)) == count(6) and shown(description(data, "102" + suffix)) == count(4)
         assert description(data, "102" + suffix).startswith(AT_BETA + "\n")
         assert ad_of(data, "102" + suffix).findtext("DateEnd") == ad_of(data, "103" + suffix).findtext("DateEnd")
         assert {"101", "102"} <= set(published(tmp_path, acct))
@@ -406,7 +414,7 @@ def test_a_season_switched_off_does_not_keep_a_position_on_oth_off_avito(tmp_pat
     capsys.readouterr()
     assert run(tmp_path, unload) == 0
     passed(capsys)
-    assert description(public(tmp_path), "106").startswith(AT_BETA + "\n") and shown(description(public(tmp_path), "106")) == 5
+    assert description(public(tmp_path), "106").startswith(AT_BETA + "\n") and shown(description(public(tmp_path), "106")) == count(5)
 
 
 def test_a_former_id_that_another_ad_has_now_is_never_published_twice(tmp_path, capsys):
@@ -495,7 +503,7 @@ def test_two_lots_of_one_tire_on_oth_give_one_ad(tmp_path, capsys):
     assert run(tmp_path, lots) == 0
     passed(capsys)
     ads = ads_of(public(tmp_path))
-    assert "107" in ads and "108" not in ads and shown(description(public(tmp_path), "107")) == 4 + 4 + 1     # both lots on OTH and the stock of the position of the ad
+    assert "107" in ads and "108" not in ads and shown(description(public(tmp_path), "107")) == count(4 + 4 + 1)     # both lots on OTH and the stock of the position of the ad
 
 
 def test_a_4tochki_position_on_oth_never_shows_more_than_40():

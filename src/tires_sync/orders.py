@@ -789,6 +789,14 @@ def _gave_oth(conn, item_id) -> Optional[int]:
     return row[0] if row else None
 
 
+def _keep_removed(conn, item_id, now: str, author: str) -> None:
+    """The position as it was, for the client's history (clients.purchases_view shows it «удалён»); goes back with a rollback of the removal."""
+    cur = conn.execute("SELECT * FROM order_item WHERE id = ?", (item_id,))
+    row = dict(zip([d[0] for d in cur.description], cur.fetchone()))
+    conn.execute("INSERT INTO order_item_removed (item_id, order_id, name, qty, sale_unit, data, removed_at, removed_by) VALUES (?,?,?,?,?,?,?,?)",
+                 (item_id, row["order_id"], row["name"], row["qty"], row["sale_unit"], json.dumps(row, ensure_ascii=False), now, author))
+
+
 def remove_item(conn, item_id, now: str, author: str) -> None:
     old = _item_row(conn, item_id)
     _no_sale(conn, old["order_id"])
@@ -798,6 +806,7 @@ def remove_item(conn, item_id, now: str, author: str) -> None:
     if holder:
         raise OrderError("Шины этой позиции взяты с ОТХ в заказ №%d: удалить её нельзя, им некуда будет вернуться." % holder)
     before = _stage_gaps(conn, old["order_id"])
+    _keep_removed(conn, item_id, now, author)
     conn.execute("DELETE FROM order_item WHERE id = ?", (item_id,))
     add_event(conn, old["order_id"], now, author, "item", "Удалено: %s" % old["name"])
     try:

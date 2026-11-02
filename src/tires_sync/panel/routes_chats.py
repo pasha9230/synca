@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import abort, flash, jsonify, redirect, render_template, request, session
 
-from .. import catalog_archive, chat_deals as deals, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
+from .. import catalog_archive, chat_deals as deals, chat_handover, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
@@ -43,7 +43,8 @@ def _to_own_point(conn, card_id) -> None:
 
 
 def _took(conn, chat_row) -> None:
-    """The staff answered the client in the chat: a client a point handed over from it is «взят в работу» (never by the point itself).
+    """The staff answered the client in the chat: a client a point handed over from it (an order, or «Передать клиента») is «взят в работу»
+    (never by the point itself).
     A failure here never spoils the answer that went."""
     if own_point() is not None or not can("orders", "edit"):
         return
@@ -52,6 +53,11 @@ def _took(conn, chat_row) -> None:
     except Exception:
         conn.rollback()
         logging.getLogger(__name__).exception("the handed-over client of chat %s could not be marked taken", chat_row)
+    try:
+        chat_handover.take(conn, chat_row, author(), local_iso())         # «Передать клиента» (2026-11-02): the answer takes it too
+    except Exception:
+        conn.rollback()
+        logging.getLogger(__name__).exception("the chat handover of chat %s could not be marked taken", chat_row)
 
 
 def _chat_or_404(conn, chat_row):
@@ -313,19 +319,17 @@ def register(app) -> None:
             filter_menus.append(("Аккаунт: " + ((names.get(acc) or "аккаунт №%d" % acc) if acc is not None else "Все аккаунты"),
                                  [("Все аккаунты", link(flt, every or ("all" if connections.chats_default_account(conn, author()) else None)), acc is None)]
                                  + [(a["name"], link(flt, a["id"]), a["id"] == acc) for a in accounts]))
+        handed = chat_handover.open_of(conn, [c["id"] for c in rows] + ([current["id"]] if current else []))   # «передан с точки» (2026-11-02)
         handoff = None
         if current and mine and current["account_id"] == point_account() and not chat_of_other_point(current["id"]):   # what the POST allows
-            typed = session.pop("handoff_%d" % current["id"], None)
-            handed = mgr.open_handoff_of_chat(conn, current["id"])
-            handoff = {"action": "/chats/%d/handoff" % current["id"], "token": secrets.token_hex(12), "error": bool(typed),
-                       "form": typed or {"phone": mgr.chat_phone(conn, current["id"])}, "seasons": mgr.SEASONS,
-                       "done": handed}
+            handoff = {"action": "/chats/%d/handoff" % current["id"], "done": handed.get(current["id"])}
+        take = handed.get(current["id"]) if current and not mine and can("orders", "edit") else None
         can_send = bool(current) and any(a["id"] == current["account_id"] and a["chats_send"] and a["chats_enabled"] for a in connections.list_accounts(conn))
         offer = send_offer(conn, deal["id"], chat_row) if deal else None
         stages = orders.list_stages(conn)
         if deal and own_point() is not None and deal["id"] in points.own_sales(conn, own_point()):     # its own sale: the four (and where it is)
             stages = [s for s in stages if s["code"] in points.POINT_STAGES or s["id"] == deal["stage_id"]]
-        return render_template("chats.html", offer=offer, handoff=handoff, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=chats.pending_sends(conn, [current["id"]], local_iso()) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
+        return render_template("chats.html", offer=offer, handoff=handoff, handed=handed, take=take, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=chats.pending_sends(conn, [current["id"]], local_iso()) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
                                accounts=accounts, stages=stages, statuses=chats.STATUSES, q=q, answerers=answerers, answer_names=dict(answerers),
                                unsearch="/chats" + ("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every)) if kv[1]]) if (flt or acc or every) else ""), every=every,
                                query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every), ("q", q)) if kv[1]])) if (flt or acc or every or q) else "")
@@ -626,29 +630,42 @@ def register(app) -> None:
     @app.route("/chats/<int:chat_row>/handoff", methods=["POST"])
     @login_required
     def chat_handoff(chat_row):
-        """«Передать под заказ»: the manager of a point hands the client of a chat of the point's account to the person on duty
-        (order_manager.hand_over). Only a point's manager; the window comes back open with what was typed when something is wrong."""
+        """«Передать клиента» (the owner 2026-11-02): the manager of a point hands the client of a chat of the point's account to the owner and
+        the partner (chat_handover.hand): no order; the chat is lit in their «Чаты», each gets a task «Взять клиента» and a Telegram message."""
         conn = get_conn()
         chat = _chat_or_404(conn, chat_row)
         point = own_point()
-        if point is None or chat["account_id"] != point_account():
+        if point is None or chat["account_id"] != point_account() or chat_of_other_point(chat_row):
             abort(403)
-        form = {k: str(request.form.get(k) or "")[:600] for k in ("phone", "size", "season", "brand", "comment")}
+        now = local_iso()
         try:
-            from .routes_vk import channel
-            _send, _deliver, notify = channel(app, conn, local_iso())
-        except Exception:                                                  # without the alert channel the client still goes; the order shows it
-            logging.getLogger(__name__).exception("the alert channel for a handoff failed")
-            notify = None
-        try:
-            _card_id, answer = mgr.hand_over(conn, point, {"kind": "chat", "chat_row": chat_row}, form["phone"], mgr.handoff_fields(form),
-                                             request.form.get("token"), author(), local_iso(), notify)
-            from .. import point_log
-            point_log.record(conn, local_iso(), author(), point, "handoff", _card_id, "из чата")              # «История точки»
-            flash(answer, "ok")
-        except orders.OrderError as err:
+            made = chat_handover.hand(conn, point, chat_row, author(), now)
+        except chat_handover.HandoverError as err:
             flash(str(err))
-            session["handoff_%d" % chat_row] = form                        # the window opens again with what was typed
+            return back(chat_row)
+        from .. import order_notify, point_log
+        point_log.record(conn, now, author(), point, "handoff", None, "клиент из чата %s передан офису" % deals.ref(chat_row))     # «История точки»
+        try:
+            order_notify.tell_people(conn, app.config.get("SECRET_BOX"), made["to"],
+                                     chat_handover.message(made["point"], chat_row, request.host_url.rstrip("/") + "/chats/%d" % chat_row, made["id"]),
+                                     tg_http=app.config.get("TG_HTTP") or urllib_transport, now=now)
+        except Exception:                                                  # the tasks and the light are there; only the message is lost
+            logging.getLogger(__name__).exception("the Telegram message of a chat handover failed")
+        flash("Клиент передан %s: в «Чатах» он подсвечен, у них задача «Взять клиента»." % ("владельцу и партнёру" if len(made["to"]) > 1 else "владельцу"), "ok")
+        return back(chat_row)
+
+    @app.route("/chats/<int:chat_row>/take", methods=["POST"])
+    @login_required
+    def chat_take(chat_row):
+        """«Взять клиента» (the office): the light «передан с точки» goes out, the tasks of the handover are done."""
+        conn = get_conn()
+        _chat_or_404(conn, chat_row)
+        if own_point() is not None or not can("orders", "edit"):
+            abort(403)
+        if chat_handover.take(conn, chat_row, author(), local_iso()):
+            flash("Клиент взят в работу.", "ok")
+        else:
+            flash("Клиента из этого чата уже взяли.")
         return back(chat_row)
 
     @app.route("/chats/<int:chat_row>/wait", methods=["POST"])
