@@ -156,7 +156,8 @@ def check(conn, now: str, tell: Tell, tell_point: Optional[Callable[[dict, str],
         text = "Заказ №%s: %s — %s. %s: %s" % (label, LINE.lower(), why, act, _link(conn, card["id"]))
         if order_points.of_account(conn, card["id"]) is not None:
             if tell_point is not None:                                  # the point's own account: the point, never the office
-                tell_point(card, "Заказ №%s: %s — %s. Напишите клиенту в чате Авито." % (label, LINE.lower(), why))
+                from . import message_texts                             # the owner's words («Шаблоны сообщений»)
+                tell_point(card, message_texts.text(conn, message_texts.UNTOLD_POINT, order_label=label, why=why))
         else:
             tell([x for x in dict.fromkeys([card.get("responsible") or "", owner]) if x in staff or x == owner], text)
         made += 1
