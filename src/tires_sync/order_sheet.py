@@ -4,7 +4,7 @@ A row is a position of an order. An order joins the table when it is placed (the
 оформлен» or later) while the table is switched on in «Подключения → Google-таблица»: the orders placed before never do. It stays only
 while its stage is «Заказ оформлен» or later (`listed`, the owner 2026-11-02): moved back, its rows are taken out; placed again, back. Its rows are
 written once with every column, then only the columns that follow the order (UPDATED) are kept up to date; the owner's own columns and
-rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
+rows are never touched (but a row of the panel taken out when its order went back goes whole, with what the owner typed into it). The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
 it finds a row by the value «tires:<order>:<position>» in its hidden column «tires_id» (the script adds and hides it; a value moves with
 its row when the sheet is sorted; the notes of «Дата счета» and «Дата» held it before 2026-11-01 — the script moves those marks over and
 drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» and «Телефон» are still what the panel wrote (CHECK; the name the owner may correct).
@@ -437,7 +437,7 @@ def check(conn, box, http: Transport) -> str:
     said = "Таблица отвечает: лист «%s», все колонки на месте." % SHEET
     if missing:                                                            # the owner 2026-11-02: a warning, the rows go all the same
         said = ("Таблица отвечает: лист «%s», нужные колонки на месте. Нет колонки %s: добавьте её в первую строку листа, иначе она не "
-                "заполняется (остальное пишется и без неё; строки, записанные до неё, заполнятся при следующем изменении заказа)."
+                "заполняется (остальное пишется и без неё; строки, отправленные без неё, заполнятся, только когда подпись аккаунта изменится)."
                 % (SHEET, ", ".join("«%s»" % c for c in missing)))
     number = lambda name: answer.get(name) if isinstance(answer.get(name), int) and not isinstance(answer.get(name), bool) else None
     marked, moved, blocked = number("marked"), number("moved"), number("blocked")
