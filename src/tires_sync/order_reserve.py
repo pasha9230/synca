@@ -261,7 +261,7 @@ def question_open(conn, card: dict, now: str) -> bool:
     """«Рабочее место» shows the question of the last day («Клиент забрал?») while the point can still answer it as in VK: asked in this stay at
     the point, the reservation still ends on the day it was asked, and that day's working hours are not over. It only reads: the answers
     (`here`, «выдал») and the tick move the question."""
-    if (card.get("stage") or {}).get("code") != "at_point":
+    if (card.get("stage") or {}).get("code") != "at_point" or (card.get("intercity") or {}).get("on"):
         return False
     was = store.get_state(conn, _ask_key(card)) or ""
     if not was.startswith("asked|") or _returned(conn, card):
@@ -412,6 +412,8 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
                                    % ",".join("?" * len(STAGE_CODES)), STAGE_CODES).fetchall():
         try:
             card = orders.get_card(conn, card_id)
+            if (card.get("intercity") or {}).get("on"):      # to another city (order_intercity): no reservation, no reminder, no «На ОТХ»
+                continue
             until = date.fromisoformat(card["reserve_until"])
             try:
                 if _no_answer_step(conn, card, now, notify):

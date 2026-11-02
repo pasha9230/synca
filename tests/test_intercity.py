@@ -1,0 +1,352 @@
+"""«Доставка в другой город» (order_intercity, the owner 2026-11-02): the checkbox, the city, the transport company, the track number and the
+labels of an order; no reservation, «можно забирать», reminder, move to «На ОТХ», question of the seventh day nor «Клиент не пришёл» for it;
+«Передал курьеру ТК» (the button, «отправил N», «передал курьеру N») moves it to «Отправлен» (a successful stage), tells the client, the owner
+and the partner, and asks them for the track number when it is empty; «Отменить» puts it back. Fakes only: nothing leaves the tests."""
+from __future__ import annotations
+
+import io
+import re
+
+import pytest
+
+from panel_helpers import post
+from test_mypoint import manager, press, token, workplace
+from test_point_undo import T1, T2, clock, told  # noqa: F401  (fixtures)
+from test_vk_commands import SENT, _card, _stage, hook, ready, to_client, to_points
+from tires_sync import (order_engine as engine, order_intercity as intercity, order_manager as mgr, order_notify, order_oth, order_reserve,
+                        order_rules as rules, order_sheet, order_templates as templates, orders, point_log, store, users)
+
+NOW = "2026-10-13T12:00:00"
+PDF = b"%PDF-1.4\n% labels\n" + b"0" * 100
+
+
+def city(conn, card, track="", **more):
+    """The order is to another city: Псков, ПЭК (and the track number when given)."""
+    templates.add_samples(conn)
+    return intercity.save(conn, card, dict(dict(enabled="1", city="Псков", carrier="ПЭК", track=track), **more), NOW, "owner")
+
+
+def code(conn, card):
+    return orders.get_card(conn, card)["stage"]["code"]
+
+
+@pytest.fixture
+def tg(monkeypatch):
+    sent = []
+    monkeypatch.setattr(order_notify, "tell_people", lambda conn, box, logins, text, **k: sent.append((logins, text)) or "ok")
+    return sent
+
+
+def track_tasks(conn, card):
+    return conn.execute("SELECT assignee, title, done_at, cancelled_at FROM callback_task WHERE order_id = ? ORDER BY id", (card,)).fetchall()
+
+
+# ---- the stage, the fields --------------------------------------------------------------------------------------------------------------
+
+def test_the_stage_shipped_stands_after_at_point_and_is_successful(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    stages = orders.list_stages(conn)
+    codes = [s["code"] for s in stages]
+    assert codes[codes.index("at_point") + 1] == "shipped"
+    shipped = next(s for s in stages if s["code"] == "shipped")
+    assert shipped["name"] == "Отправлен" and shipped["kind"] == "won"
+    with pytest.raises(orders.OrderError):                                       # a system stage: renamed, never deleted
+        orders.delete_stage(conn, shipped["id"])
+    orders.ensure_pipeline(conn, NOW)                                            # once
+    assert [s["code"] for s in orders.list_stages(conn)].count("shipped") == 1
+
+
+def test_an_order_not_to_another_city_never_goes_to_shipped(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    with pytest.raises(orders.OrderError, match="доставка в другой город"):
+        orders.move_card(conn, card, _stage(conn, "shipped"), NOW, "owner")
+    assert code(conn, card) == "moving"
+
+
+def test_the_fields_are_checked_and_journaled(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    with pytest.raises(orders.OrderError, match="ПЭК или КИТ"):
+        intercity.save(conn, card, dict(enabled="1", carrier="СДЭК"), NOW, "owner")
+    with pytest.raises(orders.OrderError, match="Трек-номер"):
+        intercity.save(conn, card, dict(enabled="1", track="<script>"), NOW, "owner")
+    assert not intercity.is_on(conn, card)
+    assert city(conn, card) == ["Доставка в другой город", "Город", "ТК"]
+    assert intercity.of(conn, card) == {"on": True, "city": "Псков", "carrier": "ПЭК", "track": ""}
+    assert city(conn, card) == []                                                # nothing changed: nothing written
+    texts = [e["text"] for e in orders.list_events(conn, card)]
+    assert "Доставка в другой город: да" in texts and "ТК: ПЭК" in texts
+
+
+def test_the_owner_saves_the_fields_from_the_card_and_sees_the_tag(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    r = post(client, "/orders/%d/intercity" % card, tok, enabled="1", city="Псков", carrier="КИТ", track="")
+    assert r.status_code == 302 and intercity.of(conn, card)["carrier"] == "КИТ"
+    page = client.get("/orders/%d" % card).get_data(as_text=True)
+    assert "data-intercity-tag" in page and "Загрузить этикетки" in page
+    board = client.get("/orders").get_data(as_text=True)
+    assert board.count("data-intercity-tag") == 1
+
+
+# ---- the labels -----------------------------------------------------------------------------------------------------------------------
+
+def upload(client, tok, card, data=PDF, name="labels.pdf"):
+    return client.post("/orders/%d/labels" % card, data={"csrf": tok, "file": (io.BytesIO(data), name)}, content_type="multipart/form-data")
+
+
+def test_the_office_uploads_a_pdf_within_the_limits(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    assert upload(client, tok, card).status_code == 302 and intercity.labels(conn, card) == []      # not to another city yet
+    city(conn, card)
+    assert upload(client, tok, card).status_code == 302
+    [label] = intercity.labels(conn, card)
+    assert label["name"] == "labels.pdf" and label["size"] == len(PDF)
+    upload(client, tok, card, data=b"MZ not a pdf", name="labels.pdf")
+    upload(client, tok, card, name="labels.exe")
+    upload(client, tok, card, data=PDF + b"0" * intercity.LABEL_MAX)
+    assert len(intercity.labels(conn, card)) == 1
+    for _ in range(intercity.LABELS_MAX):
+        upload(client, tok, card)
+    assert len(intercity.labels(conn, card)) == intercity.LABELS_MAX
+    r = client.get("/orders/%d/labels/%d" % (card, label["id"]))
+    assert r.status_code == 200 and r.data == PDF and r.mimetype == "application/pdf" and "attachment" in r.headers["Content-Disposition"]
+    r = post(client, "/orders/%d/labels/%d/delete" % (card, label["id"]), tok)
+    assert r.status_code == 302 and len(intercity.labels(conn, card)) == intercity.LABELS_MAX - 1
+    assert client.get("/orders/%d/labels/%d" % (card, label["id"])).status_code == 404
+
+
+def test_a_point_downloads_the_labels_of_its_order_only_and_writes_nothing(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card)
+    label = intercity.add_label(conn, card, "a.pdf", PDF, NOW, "owner")
+    mine = manager(app, conn, pid)
+    assert mine.get("/orders/%d/labels/%d" % (card, label)).data == PDF
+    assert upload(mine, "tok", card).status_code == 403
+    assert post(mine, "/orders/%d/labels/%d/delete" % (card, label), "tok").status_code == 403
+    assert post(mine, "/orders/%d/intercity" % card, "tok", enabled="").status_code == 403
+    assert len(intercity.labels(conn, card)) == 1 and intercity.is_on(conn, card)
+    from tires_sync import order_points as points
+    other = points.save_point(conn, dict(name="Дельта", channel="panel"))
+    theirs = manager(app, conn, other, login_="delta")
+    assert theirs.get("/orders/%d/labels/%d" % (card, label)).status_code == 403
+    users.add_user(conn, "watch", "password-123", NOW, role="viewer")
+    conn.commit()
+    viewer = app.test_client()
+    with viewer.session_transaction() as session:
+        session["user"], session["epoch"], session["csrf"] = "watch", store.get_session_epoch(conn, "watch"), "tok"
+    assert upload(viewer, "tok", card).status_code == 403
+
+
+# ---- at the point: no pickup ------------------------------------------------------------------------------------------------------------
+
+def test_the_arrival_sets_no_reservation_and_tells_the_client_nothing(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card)
+    hook(app, conn, "Приехал 5000100")
+    got = orders.get_card(conn, card)
+    assert got["stage"]["code"] == "at_point" and got["reserve_until"] == ""
+    assert to_client(app) == []
+    assert "клиенту «можно забирать» не отправляется" in to_points(app)[-1][1]
+    from tires_sync import order_arrived
+    assert order_arrived.untold(conn, "2026-10-14T12:00:00") == []
+    assert any("Заказ в другой город" in e["text"] for e in orders.list_events(conn, card) if e["kind"] == "point")
+
+
+def test_no_reminder_no_question_and_no_oth_for_an_order_to_another_city(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    assert orders.get_card(conn, card)["reserve_until"] == "2026-10-16"         # an ordinary order has its three days
+    city(conn, card)                                                             # the checkbox came after the arrival
+    alerts = []
+    for moment in ("2026-10-16T09:30:00", "2026-10-16T12:45:00", "2026-10-17T02:00:00", "2026-10-17T10:00:00"):
+        order_reserve.check(conn, moment, lambda c, text: alerts.append(text) or "ok", deliver=lambda *a: alerts.append(a), point_send=lambda *a, **k: alerts.append(a))
+    assert alerts == [] and code(conn, card) == "at_point"
+    assert not order_reserve.question_open(conn, orders.get_card(conn, card), "2026-10-16T10:00:00")
+
+
+def test_the_seventh_day_on_oth_asks_nothing_for_an_order_to_another_city(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    order_oth.ask_seventh_day(conn, "2026-10-01T00:00:00")                       # the rule's first tick
+    plain = _card(conn, pid, webmim="700300", code="at_point")
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    for c in (card, plain):
+        orders.move_card(conn, c, _stage(conn, "oth"), NOW, "o", changes={"cancel_reason": "Клиент не пришёл"})
+    assert order_oth.ask_seventh_day(conn, "2026-10-19T13:00:00") == 1
+    assert not order_oth.question_open(conn, orders.get_card(conn, card)) and order_oth.question_open(conn, orders.get_card(conn, plain))
+
+
+# ---- «Передал курьеру ТК» from VK --------------------------------------------------------------------------------------------------------
+
+def test_vk_handed_to_the_courier_ships_tells_the_client_the_office_and_asks_for_the_track(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    users.add_user(conn, "zaman", "password-123", NOW, role="partner")
+    conn.commit()
+    city(conn, card)
+    hook(app, conn, "передал курьеру 5000100")
+    assert code(conn, card) == "shipped"
+    assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\n\nСпасибо за покупку!"]
+    assert "передан курьеру ТК" in to_points(app)[-1][1]
+    assert tg and tg[0][0] == ["owner", "zaman"] and "передала заказ №5000100 курьеру ТК ПЭК в Псков" in tg[0][1]
+    assert [(a, t) for a, t, _d, _c in track_tasks(conn, card)] == [("owner", "Внести трек-номер заказа №5000100"),
+                                                                    ("zaman", "Внести трек-номер заказа №5000100")]
+    [line] = [e for e in orders.list_events(conn, card) if "курьеру ТК" in e["text"] and e["kind"] == "point"]
+    assert line["level"] == "yellow" and "трек-номер не внесён" in line["text"]
+    hook(app, conn, "отправил 5000100", event="e2")                              # again: nothing more
+    assert len(to_client(app)) == 1 and "уже отмечен" in to_points(app)[-1][1]
+    intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="ПЭК", track="ПЭК-123"), "2026-10-13T13:00:00", "owner")
+    assert all(d for _a, _t, d, _c in track_tasks(conn, card))                   # the number came: the tasks are done
+
+
+def test_vk_sent_with_the_track_number_says_it_and_asks_nothing(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card, track="12-3456")
+    hook(app, conn, "Отправил заказ 5000100")
+    assert code(conn, card) == "shipped"
+    assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\nТрек-номер: 12-3456\n\nСпасибо за покупку!"]
+    assert track_tasks(conn, card) == []
+
+
+@pytest.mark.parametrize("text", ["отправил на возврат 5000100", "передал курьеру деньги 5000100", "отправил 5000100?", "отдал курьеру 5000100"])
+def test_vk_words_that_are_not_strictly_the_command_are_a_question_for_the_owner(tmp_path, text):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    hook(app, conn, text)
+    assert code(conn, card) == "at_point" and mgr.new_count(conn) == 1
+
+
+def test_vk_issued_or_no_show_of_an_order_to_another_city_goes_to_the_owner(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    hook(app, conn, "выдал 5000100")
+    hook(app, conn, "клиент не пришёл 5000100", event="e2")
+    assert code(conn, card) == "at_point" and mgr.new_count(conn) == 2
+    assert "передал курьеру 5000100" in to_points(app)[0][1]
+    assert not any(e["level"] == "red" and "не пришёл" in e["text"] for e in orders.list_events(conn, card))
+
+
+def test_vk_handed_to_the_courier_of_an_ordinary_order_is_a_question(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    hook(app, conn, "передал курьеру 5000100")
+    assert code(conn, card) == "at_point" and mgr.new_count(conn) == 1 and "не в другой город" in to_points(app)[-1][1]
+
+
+def test_the_owner_confirms_a_disputed_courier_word(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    hook(app, conn, "передал курьеру")                                           # no number
+    item_id = conn.execute("SELECT id FROM manager_message ORDER BY id DESC LIMIT 1").fetchone()[0]
+    reply = mgr.confirm(conn, item_id, "5000100", "2026-10-13T13:00:00", "owner", deliver=lambda *a: None)
+    assert code(conn, card) == "shipped" and "подтвердил владелец" in reply
+
+
+# ---- «Рабочее место» -----------------------------------------------------------------------------------------------------------------
+
+def test_the_workplace_card_shows_the_tag_the_labels_and_the_courier_button(tmp_path, clock, told):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    label = intercity.add_label(conn, card, "a.pdf", PDF, NOW, "owner")
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    mine = manager(app, conn, pid)
+    page = workplace(mine)
+    block = page[page.index('id="order-%d"' % card):]
+    block = block[:block.index("</article>")]
+    assert "В другой город" in block and intercity.HINT in block and "/orders/%d/labels/%d" % (card, label) in block
+    assert "Скачать этикетки" in block and "Передал курьеру ТК" in block
+    assert "/my-point/%d/issued" % card not in block and "/my-point/%d/no_show" % card not in block
+    r = post(mine, "/my-point/%d/issued" % card, "tok", token="a" * 24)            # a crafted «Выдал»: refused
+    assert r.status_code == 302 and code(conn, card) == "at_point"
+    r = post(mine, "/my-point/%d/no_show" % card, "tok", token="b" * 24)
+    assert code(conn, card) == "at_point" and not any("не пришёл" in e["text"] and e["level"] == "red" for e in orders.list_events(conn, card))
+    press(mine, card, "shipped")
+    assert code(conn, card) == "shipped" and len(to_client(app)) == 1
+    assert told and "курьеру ТК" in told[0][1]
+    assert [r["kind"] for r in point_log.history(conn, pid)][0] == "shipped"
+
+
+def test_the_courier_mark_is_undone_and_the_track_tasks_are_cancelled(tmp_path, clock, told):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    before = orders.get_card(conn, card)
+    mine = manager(app, conn, pid)
+    press(mine, card, "shipped")
+    assert code(conn, card) == "shipped" and track_tasks(conn, card)
+    page = workplace(mine)
+    assert 'action="/my-point/%d/undo"' % card in page and "«Передал курьеру ТК»" in page
+    clock["now"] = T2
+    r = post(mine, "/my-point/%d/undo" % card, "tok")
+    assert r.status_code == 302
+    after = orders.get_card(conn, card)
+    assert (after["stage"]["code"], after["entered_at"], after["reserve_until"]) == ("at_point", before["entered_at"], "")
+    assert all(c for _a, _t, _d, c in track_tasks(conn, card))                   # cancelled
+    assert len(to_client(app)) == 1                                              # what went stays, nothing new
+
+
+# ---- the client's messages ---------------------------------------------------------------------------------------------------------------
+
+def test_the_placed_message_of_an_order_to_another_city_is_its_own(tmp_path):
+    from test_order_placed import Deliver, db, ready as placed_ready
+    from test_webmim_create import FakeWebmim, place
+    from tires_sync import order_placed
+    conn = db(tmp_path)
+    mine = placed_ready(conn)
+    city(conn, mine)
+    place(conn, mine, FakeWebmim())
+    deliver = Deliver()
+    [line] = [order_placed.tell_client(conn, mine, "1001", NOW, "owner", deliver)]
+    assert line.startswith("Клиенту отправлено «Клиенту: заказ в другой город оформлен»")
+    [(_chat, text, _tok)] = deliver.sent
+    assert text.startswith("Заказ 5001 оформлен с доставкой в город Псков транспортной компанией ПЭК.") and "сообщим здесь в чате" in text
+    order_placed.tell_client(conn, mine, "1001", "2026-10-23T12:10:00", "owner", deliver)
+    assert len(deliver.sent) == 1                                                # one of the two, once
+
+
+def test_a_rule_of_the_placed_stage_with_the_usual_text_is_skipped(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    templates.add_samples(conn)
+    usual = next(t["id"] for t in templates.list_templates(conn) if t["name"] == "Клиенту: заказ оформлен")
+    other = _card(conn, pid, webmim="700300", code="moving")
+    for c in (card, other):
+        orders.move_card(conn, c, _stage(conn, "talk"), NOW, "o")
+    rules.add_rule(conn, _stage(conn, "placed"), "enter", 0, "message", usual, "", "ask", None)
+    city(conn, card)
+    for c in (card, other):
+        orders.move_card(conn, c, _stage(conn, "placed"), "2026-10-13T13:00:00", "o")
+    status = lambda c: [t["status"] for t in engine.list_tasks(conn, c) if t["title"] == "Клиенту: заказ оформлен"]
+    assert status(card) == ["skipped"] and status(other) == ["pending"]
+
+
+def test_a_lacking_city_leaves_the_shipped_message_waiting(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card, city="")
+    hook(app, conn, "передал курьеру 5000100")
+    assert code(conn, card) == "shipped" and to_client(app) == []
+    [task] = [t for t in engine.list_tasks(conn, card) if t["rule_id"] == intercity.SHIPPED_RULE]
+    assert task["status"] == "error" and "Город доставки" in task["result"]
+    assert "не отправлено" in to_points(app)[-1][1]
+
+
+def test_the_samples_are_at_the_end_and_render_without_a_track(tmp_path):
+    names = [s[0] for s in templates.SAMPLES]
+    assert names[-2:] == [intercity.PLACED_TEMPLATE, intercity.SHIPPED_TEMPLATE]
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card)
+    text, missing = templates.render(conn, orders.get_card(conn, card), templates.INTERCITY_SHIPPED_SAMPLE[2])
+    assert missing == [] and "Трек-номер" not in text
+
+
+# ---- done for the table, the sales ----------------------------------------------------------------------------------------------------
+
+def test_shipped_is_realized_in_the_sheet_and_may_record_a_sale(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    hook(app, conn, "передал курьеру 5000100")
+    shipped = orders.get_card(conn, card)
+    assert order_sheet.realization(shipped) == order_sheet.REALIZED
+    assert orders.record_sales(conn, card, "2026-10-13", NOW, "owner", "2026-10-13")
+    with pytest.raises(orders.OrderError, match="галочку не снять"):
+        intercity.save(conn, card, dict(enabled=""), NOW, "owner")

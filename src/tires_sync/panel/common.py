@@ -302,6 +302,8 @@ for _section, _endpoints in {
         SECTION_OF[_endpoint] = _section
 SECTION_OF.update(tasks_page="orders", task_new="orders", task_close="orders")      # «Задачи» (routes_tasks, 2026-10-31): «менять» to set
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
+SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
+                  order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
 NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catalog_own_price_inline": "money", "catalog_market_token": "money", "catalog_market_switch": "money", "order_delete": "delete", "chat_delete": "delete", "deleted_restore": "delete", "economics_terms_delete": "delete",
          "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "chats_merge": "bulk",
@@ -327,7 +329,8 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
                          "calls_page", "call_record", "call_create_order", "call_handoff",            # the calls of the point's account (own_call)
                          "tasks_page", "task_new", "task_close",      # «Задачи»: its own only, to itself only (routes_tasks checks it)
-                         "order_unsent_by_hand"}                       # «Отправил вручную» by its own orders (card_id of the address)
+                         "order_unsent_by_hand",                       # «Отправил вручную» by its own orders (card_id of the address)
+                         "order_label_file"}                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
 CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again",

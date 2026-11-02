@@ -216,7 +216,7 @@ def _stamp(text: str) -> str:
 
 def realization(card: dict) -> str:
     code = card["stage"].get("code")
-    if code == "done":
+    if code in ("done", "shipped"):                  # «Отправлен»: an order to another city handed to the courier (the owner 2026-11-02)
         return FROM_STOCK if card["deal_kind"] == "stock" else REALIZED
     return REFUSED if code == "oth" else ""          # the owner 2026-11-02: «О» is «На ОТХ» only; «Отмена», «Возврат», «Возврат передан»: empty
 

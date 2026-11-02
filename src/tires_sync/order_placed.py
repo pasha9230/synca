@@ -64,7 +64,7 @@ def _fill_in(who: dict, missing: List[str]) -> str:
 
 
 def _not_sent(conn, card_id, who: dict, now: str, why: str, what: str) -> str:
-    orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение %s «%s» не отправлено: %s" % (who["whom"], who["template"], why), level="red")
+    orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", "Сообщение %s «%s» не отправлено: %s" % (who["whom"], who["template"], why), level="red")
     conn.commit()
     return "%s не отправлено «%s»: %s %s" % (who["Whom"], who["template"], why, what)
 
@@ -78,12 +78,12 @@ def _earlier(conn, card_id, template_id) -> Optional[dict]:
 
 def _use_earlier(conn, card_id, who: dict, task: dict, now: str, author: str, send) -> str:
     if task["status"] == "done":
-        orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение %s «%s» уже отправлено %s: второй раз не отправляется." % (
-            who["whom"], who["template"], "после оформления в WebMIM" if task["rule_id"] == RULE else "по правилу этапа"))
+        orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", "Сообщение %s «%s» уже отправлено %s: второй раз не отправляется." % (
+            who["whom"], who["template"], who.get("author", AUTHOR) if task["rule_id"] == who.get("rule", RULE) else "по правилу этапа"))
         conn.commit()
         return "%s «%s» уже было отправлено раньше: второе не отправляется." % (who["Whom"], who["template"])
     if task["status"] == "skipped":
-        orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение %s «%s» было пропущено вручную: само не отправляется." % (who["whom"], who["template"]))
+        orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", "Сообщение %s «%s» было пропущено вручную: само не отправляется." % (who["whom"], who["template"]))
         conn.commit()
         return "Сообщение %s «%s» было пропущено вручную: не отправлено." % (who["whom"], who["template"])
     if task["status"] == "running":
@@ -98,7 +98,7 @@ def _use_earlier(conn, card_id, who: dict, task: dict, now: str, author: str, se
 
 def _send(conn, card_id, who: dict, task: dict, now: str, author: str, send) -> str:
     """Send a waiting message task the way a person's press does; a warning when it cannot go (the task stays waiting)."""
-    if who is CLIENT:
+    if who["audience"] == "client":
         chat, why = engine.send_target(conn, task)
         if chat is None:
             return _not_sent(conn, card_id, who, now, why, WAITING)
@@ -111,7 +111,7 @@ def _send(conn, card_id, who: dict, task: dict, now: str, author: str, send) -> 
         if send is None:
             return _not_sent(conn, card_id, who, now, engine.NO_VK_KEY, WAITING)
     try:
-        if who is CLIENT:
+        if who["audience"] == "client":
             sent_to = engine.send_task(conn, task["id"], task["body"], send, now, author)
         else:
             sent_to = engine.send_point_task(conn, task["id"], task["body"], send, now, author, bot=True)       # sent by itself: «(бот) »
@@ -121,7 +121,7 @@ def _send(conn, card_id, who: dict, task: dict, now: str, author: str, send) -> 
         return _not_sent(conn, card_id, who, now, "неизвестно, ушло ли.", "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте.")
     except (orders.OrderError, chats.ChatError, vk_send.VkError) as err:
         return _not_sent(conn, card_id, who, now, str(err)[:400], WAITING)      # 400: Avito's answer is in it
-    if who is CLIENT:
+    if who["audience"] == "client":
         return "Клиенту отправлено «%s» в чат Ч-%d." % (who["template"], sent_to)
     return "Точке «%s» отправлено «%s» в ВК." % (sent_to, who["template"])
 
@@ -152,14 +152,15 @@ def _tell(conn, card_id, who: dict, webmim_id: str, now: str, author: str, send)
         text, missing = templates.render(conn, card, template["body"], now)
         made = conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
                             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                            (card_id, RULE, "webmim-%s%s" % (webmim_id, who["suffix"]), "message", str(template["id"]), card["stage_id"],
+                            (card_id, who.get("rule", RULE), who.get("key") or "webmim-%s%s" % (webmim_id, who["suffix"]), "message", str(template["id"]), card["stage_id"],
                              "error" if missing else "pending", who["template"], "" if missing else text,
                              "Не хватает: %s." % ", ".join(missing) if missing else "", now))
         if made.rowcount != 1:                                    # this WebMIM order has its message already (sent, waiting or skipped)
             conn.commit()
             return "Сообщение %s об оформлении уже было подготовлено: второе не отправляется." % who["whom"]
         task_id = made.lastrowid
-        orders.add_event(conn, card_id, now, AUTHOR, "rule", "Сообщение %s после оформления в WebMIM («%s») подготовлено." % (who["whom"], who["template"]))
+        orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "rule", "Сообщение %s %s («%s») подготовлено." % (
+            who["whom"], who.get("author", AUTHOR), who["template"]))
                                                                   # its text: in the record of the send (order_engine._finish), never twice
         conn.commit()
         if missing:
@@ -176,8 +177,10 @@ def _tell(conn, card_id, who: dict, webmim_id: str, now: str, author: str, send)
 
 
 def tell_client(conn, card_id, webmim_id: str, now: str, author: str, deliver: Optional[Deliver]) -> str:
-    """«Клиенту: заказ оформлен» to the client of the order, once per WebMIM order."""
-    return _tell(conn, card_id, CLIENT, webmim_id, now, author, deliver)
+    """«Клиенту: заказ оформлен» to the client of the order, once per WebMIM order; an order to another city gets «Клиенту: заказ в другой
+    город оформлен» instead (order_intercity, the owner 2026-11-02), under the same mark: one of them, never both."""
+    from . import order_intercity
+    return _tell(conn, card_id, order_intercity.PLACED_CLIENT if order_intercity.is_on(conn, card_id) else CLIENT, webmim_id, now, author, deliver)
 
 
 def tell_point(conn, card_id, webmim_id: str, now: str, author: str, send_vk: Optional[SendVk]) -> str:

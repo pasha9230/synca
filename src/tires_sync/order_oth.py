@@ -293,8 +293,8 @@ def ask_due(card: dict, now: str) -> bool:
 def ask_seventh_day(conn, now: str) -> int:
     """The tick: the orders on «На ОТХ» whose seventh day has come are asked, once per stay. Only those that entered «На ОТХ» since the first
     tick of this rule (the owner 2026-11-02: the old ones are not asked; SINCE_KEY, kept by the first tick). Not one whose return is agreed
-    already (the act МХ-3 is on its way), nor one with tyres marked «возвращено поставщику» (the lead 2026-11-02), nor a point's own sale.
-    Returns how many were asked."""
+    already (the act МХ-3 is on its way), nor one with tyres marked «возвращено поставщику» (the lead 2026-11-02), nor a point's own sale,
+    nor an order to another city (order_intercity, the owner 2026-11-02). Returns how many were asked."""
     from . import order_points as points
     conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (SINCE_KEY, now))
     conn.commit()
@@ -302,7 +302,8 @@ def ask_seventh_day(conn, now: str) -> int:
     asked = 0
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth' AND c.point_id IS NOT NULL "
                                    "AND c.entered_at >= ? AND NOT EXISTS (SELECT 1 FROM oth_return_plan r WHERE r.order_id = c.id) "
-                                   "AND NOT EXISTS (SELECT 1 FROM oth_return r WHERE r.order_id = c.id) ORDER BY c.id", (since,)).fetchall():
+                                   "AND NOT EXISTS (SELECT 1 FROM oth_return r WHERE r.order_id = c.id) "
+                                   "AND NOT EXISTS (SELECT 1 FROM order_intercity i WHERE i.order_id = c.id AND i.enabled = 1) ORDER BY c.id", (since,)).fetchall():
         card = orders.get_card(conn, card_id)
         if not ask_due(card, now) or card_id in points.own_sales(conn, card["point_id"]):
             continue

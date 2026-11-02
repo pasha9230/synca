@@ -301,6 +301,17 @@ CREATE TABLE IF NOT EXISTS chat_handover (
     handed_by TEXT NOT NULL DEFAULT '', tasks TEXT NOT NULL DEFAULT '[]', taken_at TEXT, taken_by TEXT, taken_how TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS chat_handover_chat ON chat_handover (chat_row, taken_at);
+-- «Доставка в другой город» of an order (order_intercity.py, the owner 2026-11-02): the city, the transport company (ПЭК, КИТ), the track
+-- number; `enabled` is the checkbox. The labels of the transport company are PDF files of the order (order_label, the file itself in `data`).
+CREATE TABLE IF NOT EXISTS order_intercity (
+    order_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, city TEXT NOT NULL DEFAULT '', carrier TEXT NOT NULL DEFAULT '',
+    track TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS order_label (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, data BLOB NOT NULL,
+    uploaded_at TEXT NOT NULL, uploaded_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS order_label_order ON order_label (order_id);
 CREATE TABLE IF NOT EXISTS order_event (
     id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,
     kind TEXT NOT NULL, text TEXT NOT NULL, level TEXT NOT NULL DEFAULT ''

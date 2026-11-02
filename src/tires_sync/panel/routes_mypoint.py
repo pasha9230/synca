@@ -23,7 +23,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_manager as mgr, order_merge, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_orders import local_iso, local_now
 
@@ -32,7 +32,9 @@ ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "no_show": mgr.NO_SHO
            "reserve_issued": "выдал", "reserve_here": mgr.HERE,         # the two answers to «Клиент забрал?» (the question of the reservation)
            "act_signed": "акт МХ-3 подписан",                           # «Подписал акт и отдал»: the return of «На ОТХ» (order_oth.sign_act)
            "to_oth": "на ОТХ",                                          # after «Клиент не пришёл»: the tyres stay at the point (the owner 2026-10-29)
-           "oth_issued": "выдали (ОТХ)", "oth_here": "на точке (ОТХ)"}  # the two answers to the seventh day on «На ОТХ» (the owner 2026-11-02)
+           "oth_issued": "выдали (ОТХ)", "oth_here": "на точке (ОТХ)",  # the two answers to the seventh day on «На ОТХ» (the owner 2026-11-02)
+           "shipped": mgr.SHIP}                                         # «Передал курьеру ТК»: an order to another city (order_intercity, 2026-11-02)
+PICKUP = ("issued", "reserve_issued", "reserve_here", "no_show", "to_oth")    # what a client's pickup means: never for an order to another city
 NO_SHOW_REASON = "Клиент не пришёл"
 UNDO = "undo"                                      # /my-point/<order>/undo: «Отменить» a press (point_log.undo, the owner 2026-11-02)
 BUILTIN = {"arrived": (mgr.ARRIVE_FROM, "at_point"), "issued": (mgr.ISSUE_FROM, "done")}
@@ -106,6 +108,12 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
     """What the VK command of the same word does for an order of the point (order_manager._command for the built-in words): returns
     (outcome for the log, answer for the manager, done). A word that does not fit the stage changes nothing."""
     code = card["stage"]["code"]
+    if action == "shipped":                                                     # the courier of the transport company took it
+        outcome, answer = order_intercity.ship(conn, card, who, now, deliver, tell)
+        return outcome, answer, not outcome.startswith("не ")
+    if action in PICKUP and order_intercity.on(card):
+        return ("не подходит: заказ в другой город", "Заказ №%s — в другой город, клиент за ним не придёт: отдайте шины с этикетками курьеру ТК "
+                "и нажмите «Передал курьеру ТК»." % mgr.label(card), False)
     if action == "act_signed":                                                  # the return of «На ОТХ» agreed with the supplier
         plan = order_oth.return_plan(conn, card["id"])
         if plan is not None and plan["signed_at"]:
@@ -428,7 +436,9 @@ def register(app) -> None:
                           "oth_asked": code == "oth" and order_oth.question_open(conn, card), "to_agree": code == "oth" and order_oth.to_agree(conn, card),
                           "oth_question": order_oth.question(conn, card, now) if code == "oth" else "",
                           "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
-                          "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"]))})     # «Шины с ОТХ, заказ №…»
+                          "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"])),     # «Шины с ОТХ, заказ №…»
+                          "intercity": order_intercity.on(card) and code != "oth",              # «В другой город» (2026-11-02)
+                          "labels": order_intercity.labels(conn, card["id"]) if order_intercity.on(card) else []})
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over
@@ -471,7 +481,7 @@ def register(app) -> None:
                                returns=returns,
                                oth_ask=_oth_ask(conn, cards),
                                undo=[dict(u, label=mgr.label(u["card"])) for u in point_log.undo_list(conn, point_id)]
-                               if point_id is not None else [], undo_hint=point_log.UNDO_HINT)
+                               if point_id is not None else [], undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
