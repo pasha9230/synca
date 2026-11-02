@@ -346,7 +346,7 @@ def test_the_persons_own_settings_are_not_changed_from_the_point(w):
     client = owner(w)
     as_point(client, w["pa"])
     before = conn.execute("SELECT COUNT(*) FROM user_pref").fetchone()[0]
-    post(client, "/orders/list/columns", "tok", order="client", shown="client")
+    post(client, "/orders/list/columns", "tok", order="Имя", shown="Имя")                # a real column: a save would write it
     post(client, "/tour/done", "tok", how="skip")
     post(client, "/tour/again", "tok")
     assert conn.execute("SELECT COUNT(*) FROM user_pref").fetchone()[0] == before
