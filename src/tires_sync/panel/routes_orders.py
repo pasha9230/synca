@@ -318,14 +318,23 @@ def send_form(conn, task: dict, prefer=None):
 
 def _lacking(result: str) -> str:
     """What a message lacks, said as what to do in the order window."""
-    names = [n.strip() for n in str(result or "").split(":", 1)[-1].rstrip(".").split(",") if n.strip()]
+    names = [n.strip() for n in str(result or "").rsplit(":", 1)[-1].rstrip(".").split(",") if n.strip()]
     if templates.VARIABLES["transfer_number"] in names:
         rest = [n for n in names if n != templates.VARIABLES["transfer_number"]]
         return "Впишите номер перемещения в окне заказа (поле «Номер перемещения»)%s." % ("; ещё не хватает: " + ", ".join(rest) if rest else "")
     return "Заполните в окне заказа: %s." % ", ".join(names) if names else str(result or "")
 
 
-def messages_view(conn, card_id, vk_ready: bool) -> list:
+ORDER_FIELDS = ("webmim_number", "transfer_number", "client_name", "client_phone", "delivery_date")    # the order window's own fields
+
+
+def _lacking_fields(result) -> list:
+    """The fields of the order window a message lacks: [(name of the field, its label)], for «Вписать …» next to «Не хватает»."""
+    names = [n.strip() for n in str(result or "").rsplit(":", 1)[-1].rstrip(".").split(",")]
+    return [(key, templates.VARIABLES[key]) for key in ORDER_FIELDS if templates.VARIABLES[key] in names]
+
+
+def messages_view(conn, card_id, vk_ready: bool, now: Optional[str] = None) -> list:
     """The window «Сообщения по заказу»: every waiting message of the order (to the client, to the manager of the point), where it goes, what
     it lacks, and why it cannot go from the panel. `can`: its own button sends it. `current`: made since the order entered its stage (the
     owner 2026-10-25: «Отправить все» sends only these; the older ones keep their own buttons)."""
@@ -335,7 +344,7 @@ def messages_view(conn, card_id, vk_ready: bool) -> list:
         if task["kind"] != "message":
             continue
         whom = engine.audience(conn, task)
-        view = {"task": task, "whom": whom, "where": "", "chat": None, "point": None, "why": "", "lacking": "", "can": False,
+        view = {"task": task, "whom": whom, "where": "", "chat": None, "point": None, "why": "", "lacking": "", "draft": "", "fields": [], "can": False,
                 "current": str(task["created_at"] or "") >= entered}
         if whom == "client":
             chat, view["why"] = engine.send_target(conn, task)
@@ -350,6 +359,8 @@ def messages_view(conn, card_id, vk_ready: bool) -> list:
             view["why"] = "Шаблона этого сообщения больше нет: отправьте текст сами и отметьте «Отправлено вручную»."
         if task["status"] == "error":
             view["lacking"] = _lacking(task["result"])
+            view["draft"] = engine.draft(conn, task, now or local_iso())
+            view["fields"] = _lacking_fields(task["result"])
         view["can"] = task["status"] == "pending" and bool(view["chat"] or view["point"]) and not view["why"]
         out.append(view)
     return out
@@ -1708,8 +1719,12 @@ def register(app) -> None:
     @login_required
     def order_task_run(card_id, task_id):
         conn = get_conn()
-        _task_or_404(conn, card_id, task_id)
+        task = _task_or_404(conn, card_id, task_id)
         try:
+            if task["kind"] == "message":                           # «Отправлено вручную»: also while it lacks a value (the draft was copied)
+                engine.sent_by_hand(conn, task_id, local_iso(), author())
+                flash("Готово.", "ok")
+                return back(card_id)
             status = engine.run_task(conn, task_id, local_iso(), author())
             flash("Готово." if status == "done" else "Не выполнено: %s" % engine.get_task(conn, task_id)["result"], "ok" if status == "done" else "error")
         except orders.OrderError as err:

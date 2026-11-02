@@ -1194,6 +1194,18 @@
     }).observe(win, {attributes: true, attributeFilter: ["class"]});
   });
 
+  // «Вписать …» рядом с «Не хватает данных» в «Сообщениях по заказу»: окно закрывается, курсор — в поле окна заказа на карточке
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("[data-focus-field]");
+    if (!btn) return;
+    var name = btn.getAttribute("data-focus-field");
+    var field = Array.prototype.filter.call(document.querySelectorAll('[name="' + name + '"]'), function (f) { return !f.closest(".modal-backdrop"); })[0];
+    if (!field) return;
+    closeModals();
+    field.scrollIntoView({block: "center"});
+    field.focus();
+  });
+
   // 14) Каталог: фото позиции не загрузилось — та же заглушка «нет фото», что и без фото, а не значок битой картинки
   function noPhoto(img) {
     var box = document.createElement("div");

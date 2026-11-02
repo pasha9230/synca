@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from test_order_placed import Deliver, placed, ready, tasks
+from test_order_placed import Deliver, panel, placed, ready, tasks  # noqa: F401  (panel: the fixture)
+from panel_helpers import post
 from test_webmim_create import NOW, FakeWebmim, db, place
 from tires_sync import order_engine as engine, order_manager as mgr, order_placed, order_templates as templates, orders
 from tires_sync.panel.routes_orders import messages_view
@@ -44,14 +45,14 @@ def test_arrival_without_the_number_waits_then_becomes_sendable(tmp_path, sample
     sent, _note = mgr.tell_client_arrived(conn, mine, deliver, NOW, "точка")
     [task] = arrival(conn, mine)
     assert not sent and not deliver.sent and task["status"] == "error" and task["arg"] == "" and "Номер заказа WebMIM" in task["result"]
-    assert not messages_view(conn, mine, True)[0]["can"]
+    assert not messages_view(conn, mine, True, LATER)[0]["can"]
 
     orders.update_card(conn, mine, {"webmim_number": "5000504"}, LATER, "owner")
     engine.refresh_tasks(conn, mine, LATER)
     [task] = arrival(conn, mine)
     assert task["status"] == "pending" and task["body"] == "Заказ 5000504 приехал, можно забирать." and task["result"] == ""
     assert deliver.sent == []                                            # a refresh sends nothing by itself
-    assert messages_view(conn, mine, True)[0]["can"]
+    assert messages_view(conn, mine, True, LATER)[0]["can"]
 
     engine.send_task(conn, task["id"], task["body"], deliver, LATER, "owner")
     assert [(text, token) for _row, text, token in deliver.sent] == [(task["body"], task["entered_at"])]     # the arrival's own mark
@@ -201,3 +202,67 @@ def test_a_failure_building_the_arrival_text_keeps_the_rest_of_the_refresh(tmp_p
     monkeypatch.setattr(mgr, "_oth_arrived_body", broken)
     engine.refresh_tasks(conn, mine, "2026-10-23T18:00:00")
     assert [t["status"] for t in engine.list_tasks(conn, mine) if t["kind"] == "remind"] == ["pending"]
+
+
+def test_the_draft_marks_what_is_lacking(tmp_path, sample):
+    conn = db(tmp_path)
+    mine = ready(conn)
+    no_arrival_template(conn)
+    at_point(conn, mine)
+    mgr.tell_client_arrived(conn, mine, Deliver(), NOW, "точка")
+    [view] = messages_view(conn, mine, True, LATER)
+    assert view["draft"] == "Заказ [Номер заказа WebMIM] приехал, можно забирать." and view["fields"] == [("webmim_number", "Номер заказа WebMIM")]
+
+
+def test_sent_by_hand_while_lacking_closes_it_for_good(tmp_path, sample):
+    """«Отправлено вручную» of a message that lacks a value: done, the inbox line answered; never sent by itself after (a chat, a refresh,
+    a second «приехал»)."""
+    conn = db(tmp_path)
+    mine = ready(conn)
+    no_arrival_template(conn)
+    at_point(conn, mine)
+    mgr.tell_client_arrived(conn, mine, Deliver(), NOW, "точка")
+    engine.sent_by_hand(conn, arrival(conn, mine)[0]["id"], LATER, "owner")
+    [task] = arrival(conn, mine)
+    assert task["status"] == "done" and task["result"] == "отправлено вручную"
+    assert any("отправлено вручную" in e["text"] for e in orders.list_events(conn, mine))
+    [(status, answer)] = conn.execute("SELECT status, answer FROM manager_message WHERE message_id LIKE 'arrived-%'").fetchall()
+    assert status != "new" and "вручную" in answer
+    orders.update_card(conn, mine, {"webmim_number": "5000504"}, LATER, "owner")
+    engine.refresh_tasks(conn, mine, LATER)
+    deliver = Deliver()
+    assert mgr.arrived_after_link(conn, mine, deliver, LATER, "owner") == ""
+    mgr.tell_client_arrived(conn, mine, deliver, LATER, "точка")
+    assert deliver.sent == [] and arrival(conn, mine)[0]["status"] == "done"
+    with pytest.raises(orders.OrderError):
+        engine.sent_by_hand(conn, task["id"], LATER, "owner")
+
+
+def test_skipped_is_never_sent_after_the_value_comes(tmp_path, sample):
+    """Order 504: the owner wrote it by hand and pressed «Пропустить»; the number filled in later sends nothing."""
+    conn = db(tmp_path)
+    mine = ready(conn)
+    no_arrival_template(conn)
+    at_point(conn, mine)
+    mgr.tell_client_arrived(conn, mine, Deliver(), NOW, "точка")
+    engine.skip_task(conn, arrival(conn, mine)[0]["id"], LATER, "owner")
+    orders.update_card(conn, mine, {"webmim_number": "5000504"}, LATER, "owner")
+    engine.refresh_tasks(conn, mine, LATER)
+    deliver = Deliver()
+    assert mgr.arrived_after_link(conn, mine, deliver, LATER, "owner") == ""
+    mgr.tell_client_arrived(conn, mine, deliver, LATER, "точка")
+    assert deliver.sent == [] and arrival(conn, mine)[0]["status"] == "skipped" and messages_view(conn, mine, True, LATER) == []
+
+
+def test_the_window_shows_the_draft_the_field_and_the_manual_mark(panel):
+    from test_order_messages import client_tasks, need_transfer, page, placed_waiting  # noqa: F401
+    from test_send_popup import _window
+    app, conn, fake, avito, box, client = panel
+    mine = placed_waiting(panel)
+    [task] = client_tasks(conn, mine)
+    assert task["status"] == "error"
+    _, win = _window(page(client, mine, messages=1))
+    assert "[Номер перемещения]" in win and 'data-focus-field="transfer_number"' in win and 'data-copy="#message-%d"' % task["id"] in win
+    assert 'formaction="/orders/%d/task/%d/run"' % (mine, task["id"]) in win
+    post(client, "/orders/%d/task/%d/run" % (mine, task["id"]), "tok")
+    assert client_tasks(conn, mine)[0]["status"] == "done" and client_tasks(conn, mine)[0]["result"] == "отправлено вручную"
