@@ -183,7 +183,7 @@ def test_vk_handed_to_the_courier_ships_tells_the_client_the_office_and_asks_for
     conn.commit()
     city(conn, card)
     hook(app, conn, "передал курьеру 5000100")
-    assert code(conn, card) == "shipped"
+    assert code(conn, card) == "done" and intercity.was_shipped(conn, orders.get_card(conn, card))     # through «Отправлен» to «Выполнено»
     assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\n\nСпасибо за покупку!"]
     assert "передан курьеру ТК" in to_points(app)[-1][1]
     assert tg and tg[0][0] == ["owner", "zaman"] and "передала заказ №5000100 курьеру ТК ПЭК в Псков" in tg[0][1]
@@ -201,7 +201,7 @@ def test_vk_sent_with_the_track_number_says_it_and_asks_nothing(tmp_path, tg):
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     city(conn, card, track="12-3456")
     hook(app, conn, "Отправил заказ 5000100")
-    assert code(conn, card) == "shipped"
+    assert code(conn, card) == "done"
     assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\nТрек-номер: 12-3456\n\nСпасибо за покупку!"]
     assert track_tasks(conn, card) == []
 
@@ -240,7 +240,7 @@ def test_the_owner_confirms_a_disputed_courier_word(tmp_path, tg):
     hook(app, conn, "передал курьеру")                                           # no number
     item_id = conn.execute("SELECT id FROM manager_message ORDER BY id DESC LIMIT 1").fetchone()[0]
     reply = mgr.confirm(conn, item_id, "5000100", "2026-10-13T13:00:00", "owner", deliver=lambda *a: None)
-    assert code(conn, card) == "shipped" and "подтвердил владелец" in reply
+    assert code(conn, card) == "done" and "подтвердил владелец" in reply
 
 
 # ---- «Рабочее место» -----------------------------------------------------------------------------------------------------------------
@@ -262,7 +262,7 @@ def test_the_workplace_card_shows_the_tag_the_labels_and_the_courier_button(tmp_
     r = post(mine, "/my-point/%d/no_show" % card, "tok", token="b" * 24)
     assert code(conn, card) == "at_point" and not any("не пришёл" in e["text"] and e["level"] == "red" for e in orders.list_events(conn, card))
     press(mine, card, "shipped")
-    assert code(conn, card) == "shipped" and len(to_client(app)) == 1
+    assert code(conn, card) == "done" and len(to_client(app)) == 1
     assert told and "курьеру ТК" in told[0][1]
     assert [r["kind"] for r in point_log.history(conn, pid)][0] == "shipped"
 
@@ -274,7 +274,7 @@ def test_the_courier_mark_is_undone_and_the_track_tasks_are_cancelled(tmp_path, 
     before = orders.get_card(conn, card)
     mine = manager(app, conn, pid)
     press(mine, card, "shipped")
-    assert code(conn, card) == "shipped" and track_tasks(conn, card)
+    assert code(conn, card) == "done" and track_tasks(conn, card)
     page = workplace(mine)
     assert 'action="/my-point/%d/undo"' % card in page and "«Передал курьеру ТК»" in page
     clock["now"] = T2
@@ -324,7 +324,7 @@ def test_a_lacking_city_leaves_the_shipped_message_waiting(tmp_path, tg):
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     city(conn, card, city="")
     hook(app, conn, "передал курьеру 5000100")
-    assert code(conn, card) == "shipped" and to_client(app) == []
+    assert code(conn, card) == "done" and to_client(app) == []
     [task] = [t for t in engine.list_tasks(conn, card) if t["rule_id"] == intercity.SHIPPED_RULE]
     assert task["status"] == "error" and "Город доставки" in task["result"]
     assert "не отправлено" in to_points(app)[-1][1]
@@ -358,7 +358,7 @@ def test_the_messages_go_on_a_base_where_nobody_pressed_add_samples(tmp_path, tg
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="КИТ"), NOW, "owner")     # no templates.add_samples
     hook(app, conn, "передал курьеру 5000100")
-    assert code(conn, card) == "shipped"
+    assert code(conn, card) == "done"
     assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией КИТ.\n\nСпасибо за покупку!"]
     assert intercity.SHIPPED_TEMPLATE in [t["name"] for t in templates.list_templates(conn)]       # editable from now on
 
@@ -409,5 +409,29 @@ def test_after_the_undo_a_second_courier_mark_still_tells_the_client_once(tmp_pa
     intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="ПЭК"), T2, "owner")
     clock["now"] = "2026-10-16T14:00:00"
     press(mine, card, "shipped")
-    assert code(conn, card) == "shipped"
+    assert code(conn, card) == "done"
     assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\n\nСпасибо за покупку!"]
+
+
+# ---- the owner's answers of 2026-11-02 (evening) ---------------------------------------------------------------------------------------
+
+def test_the_office_moving_it_to_shipped_does_what_the_point_does(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    users.add_user(conn, "zaman", "password-123", NOW, role="partner")
+    conn.commit()
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    r = post(client, "/orders/%d/move" % card, tok, stage_id=str(_stage(conn, "shipped")))
+    assert r.status_code == 302
+    assert code(conn, card) == "done" and intercity.was_shipped(conn, orders.get_card(conn, card))
+    assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\n\nСпасибо за покупку!"]
+    assert tg and tg[0][0] == ["owner", "zaman"] and "Офис" in tg[0][1]
+    assert len(track_tasks(conn, card)) == 2
+
+
+def test_the_rules_of_done_run_after_shipped(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    rules.add_rule(conn, _stage(conn, "done"), "enter", 0, "record_sale", None, "", "auto", None)
+    city(conn, card, track="1")
+    hook(app, conn, "передал курьеру 5000100")
+    assert code(conn, card) == "done" and orders.get_card(conn, card)["sale_ids"]        # the owner's rule of «Выполнено» recorded the sale

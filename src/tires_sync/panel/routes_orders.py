@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import onboarding_texts, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
+from .. import onboarding_texts, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -820,6 +820,7 @@ def register(app) -> None:
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
             if moved:                                                     # «Товар на точке» by hand: «можно забирать» as «приехал» (2026-10-30)
                 note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())
+                note = note or order_intercity.shipped_by_hand(conn, card, author(), stamp, avito_deliver(conn, stamp), people_tell(conn, stamp))
                 message = (message + " " + note) if note else message
             if moved and own_point() is not None:                         # «История точки»: the point moved its order on the board
                 point_log.record(conn, stamp, author(), own_point(), "move", card_id, "этап «%s»" % orders.get_stage(conn, stage_id)["name"])
@@ -1182,6 +1183,7 @@ def register(app) -> None:
                 stamp = local_iso()
                 if orders.move_card(conn, card_id, stage_id, stamp, author()):
                     note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())     # as it was before the press
+                    note = note or order_intercity.shipped_by_hand(conn, card, author(), stamp, avito_deliver(conn, stamp), people_tell(conn, stamp))
                     flash("Заказ перенесён." + (" " + note if note else ""))
                     offer_send(conn, card_id, stamp)
             except orders.OrderError as err:
@@ -1238,6 +1240,13 @@ def register(app) -> None:
         if request.form.get("back") == "webmim":
             return redirect("/orders/webmim")
         return back(card_id, "webmim")
+
+    def people_tell(conn, stamp: str):
+        """The owner's and the partner's Telegram (order_notify.tell_people with the panel's keys) for order_intercity; never raises."""
+        def tell(logins, text):
+            return order_notify.tell_people(conn, app.config.get("SECRET_BOX"), logins, text,
+                                            tg_http=app.config.get("TG_HTTP") or order_notify.urllib_transport, now=stamp)
+        return tell
 
     def avito_deliver(conn, stamp: str):
         """deliver(chat row, text, token) for order_placed: chats.send_reply from the Avito account of the chat; None without the master key."""

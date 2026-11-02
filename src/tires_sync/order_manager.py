@@ -372,7 +372,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         if not order_intercity.on(card):
             return dispute(point, "«%s», а заказ не в другой город" % SHIP, CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s — не в другой город; сообщение передано владельцу." % label(card))
-        if code != orders.SHIPPED and code not in order_intercity.SHIP_FROM:
+        if code != orders.SHIPPED and code not in order_intercity.SHIP_FROM and not (code == "done" and order_intercity.was_shipped(conn, card)):
             return dispute(point, "«%s», а заказ на этапе «%s»" % (SHIP, card["stage"]["name"]), CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
         return finish(*order_intercity.ship(conn, card, "менеджер %s" % point["name"], now, deliver, getattr(notify, "tell", None)))
@@ -1078,7 +1078,7 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
         raise OrderError("Заказ №%s — в другой город: клиент за ним не придёт. Если точка отдала шины курьеру ТК, подтвердите «передал курьеру» "
                          "или переведите заказ вручную и ответьте точке." % label(card))
     fits = (code == "at_point") if word == NO_SHOW else _return_from(card) if word == RETURN else \
-        (order_intercity.on(card) and code in order_intercity.SHIP_FROM + (orders.SHIPPED,)) if word == SHIP else \
+        (order_intercity.on(card) and (code in order_intercity.SHIP_FROM + (orders.SHIPPED,) or (code == "done" and order_intercity.was_shipped(conn, card)))) if word == SHIP else \
         ((code in sources or code == target) if target else command is not None)
     if not fits:
         raise OrderError("Команда «%s» не подходит к заказу №%s на этапе «%s»: переведите заказ вручную и ответьте точке."

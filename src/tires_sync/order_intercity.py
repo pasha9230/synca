@@ -78,7 +78,7 @@ def save(conn, card_id, form: dict, now: str, author: str) -> List[str]:
         raise OrderError("ТК: %s." % " или ".join(CARRIERS))
     if not TRACK.match(new["track"]):
         raise OrderError("Трек-номер: буквы, цифры, дефис и косая черта.")
-    if was["on"] and not new["on"] and card["stage"]["code"] == orders.SHIPPED:
+    if was["on"] and not new["on"] and (card["stage"]["code"] == orders.SHIPPED or (card["stage"]["code"] == "done" and was_shipped(conn, card))):
         raise OrderError("Заказ уже отправлен в другой город: галочку не снять. Сначала перенесите заказ на другой этап.")
     changed = [key for key in ("on", "city", "carrier", "track") if new[key] != was[key]]
     if not changed:
@@ -151,15 +151,22 @@ def _stage(conn, code) -> Optional[dict]:
     return next((s for s in orders.list_stages(conn) if s["code"] == code), None)
 
 
+def was_shipped(conn, card: dict) -> bool:
+    """The order went through «Отправлен» (it is on «Выполнено» after it, the owner 2026-11-02)."""
+    stage = _stage(conn, orders.SHIPPED)
+    return stage is not None and conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'stage' AND text LIKE ? LIMIT 1",
+                                              (card["id"], "%→ «" + stage["name"] + "»")).fetchone() is not None
+
+
 def ship(conn, card: dict, who: str, now: str, deliver, tell: Optional[Tell] = None) -> Tuple[str, str]:
     """«Передал курьеру ТК» of the point (the button, the VK words): (outcome for the log, answer for the point). The order goes to
-    «Отправлен»; then the client's message, the owner and the partner, the task of the track number — each on its own, never undoing the move."""
+    «Отправлен», then the client's message, the owner and the partner, the task of the track number, and on to «Выполнено» (after_shipped)."""
     number = _label(card)
     if not on(card):
         return ("не подходит: заказ не в другой город", "Заказ №%s — не в другой город: «Передал курьеру ТК» ему не подходит; сообщение передано "
                 "владельцу." % number)
     code = card["stage"]["code"]
-    if code == orders.SHIPPED:
+    if code == orders.SHIPPED or (code == "done" and was_shipped(conn, card)):
         return "уже отмечено", "Заказ №%s уже отмечен: передан курьеру ТК." % number
     if code not in SHIP_FROM:
         return ("не подходит: заказ на этапе «%s»" % card["stage"]["name"],
@@ -171,29 +178,57 @@ def ship(conn, card: dict, who: str, now: str, deliver, tell: Optional[Tell] = N
         return "не выполнено: %s" % err, "Не получилось: %s" % err
     if not moved:
         return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % number
-    data = of(conn, card["id"])
     point = (card.get("point") or {}).get("name") or ""
-    text = "Точка «%s» передала заказ №%s курьеру ТК%s%s%s." % (
-        point, number, " %s" % data["carrier"] if data["carrier"] else "", " в %s" % data["city"] if data["city"] else "",
+    sent, note, final = after_shipped(conn, card["id"], "Точка «%s» передала" % point, who, now, deliver, tell)
+    return ("заказ перенесён на «%s»; клиенту %s" % (final, "отправлено" if sent else "не отправлено"),
+            "Заказ №%s — отмечено: передан курьеру ТК (теперь на этапе «%s»). %s" % (number, final, note))
+
+
+def shipped_by_hand(conn, before: dict, who: str, now: str, deliver, tell: Optional[Tell] = None) -> str:
+    """The office moved an order to another city to «Отправлен» itself (the board, the card; the owner 2026-11-02: as the point's press):
+    the same message, alert, task and «Выполнено». Returns the line for the person ('' when the move was not that)."""
+    try:
+        card = orders.get_card(conn, before["id"])
+    except OrderError:
+        return ""
+    if card["stage"]["code"] != orders.SHIPPED or before["stage"]["code"] == orders.SHIPPED or not on(card):
+        return ""
+    sent, note, final = after_shipped(conn, card["id"], "Офис (%s) отметил: заказ передан" % who, who, now, deliver, tell)
+    return "%s Заказ на этапе «%s»." % (note, final)
+
+
+def after_shipped(conn, card_id, whose: str, who: str, now: str, deliver, tell: Optional[Tell]) -> Tuple[bool, str, str]:
+    """What follows the entry into «Отправлен»: the journal, «Клиенту: заказ отправлен», the owner and the partner in Telegram, «Внести
+    трек-номер» when there is no track number, then «Выполнено» with its rules (the owner 2026-11-02: «при отправлен переходит в выполнено»).
+    Each step on its own: none undoes the move. Returns (sent to the client, note, the stage the order stands on)."""
+    card = orders.get_card(conn, card_id)
+    number, data = _label(card), of(conn, card_id)
+    text = "%s заказ №%s курьеру ТК%s%s%s." % (
+        whose, number, " %s" % data["carrier"] if data["carrier"] else "", " в %s" % data["city"] if data["city"] else "",
         ", трек-номер %s" % data["track"] if data["track"] else ": трек-номер не внесён — внесите его в заказ")
-    orders.add_event(conn, card["id"], now, who, "point", text, level="green" if data["track"] else "yellow")
+    orders.add_event(conn, card_id, now, who, "point", text, level="green" if data["track"] else "yellow")
     conn.commit()
-    sent, note = tell_shipped(conn, card["id"], now, who, deliver)
+    sent, note = tell_shipped(conn, card_id, now, who, deliver)
     if tell is not None:
         try:
             from . import order_oth
             tell(order_oth.office_logins(conn), text)
         except Exception:                                                 # noqa: BLE001 - the move is done; the journal has the record
             conn.rollback()
-            logging.getLogger("tires_sync.orders").exception("the alert of the courier of order %s failed", card["id"])
+            logging.getLogger("tires_sync.orders").exception("the alert of the courier of order %s failed", card_id)
     if not data["track"]:
         try:
-            track_tasks(conn, card["id"], number, now, who)
+            track_tasks(conn, card_id, number, now, who)
         except Exception:                                                 # noqa: BLE001 - the journal's yellow record says it
             conn.rollback()
-            logging.getLogger("tires_sync.orders").exception("the track tasks of order %s failed", card["id"])
-    return ("заказ перенесён на «%s»; клиенту %s" % (stage["name"], "отправлено" if sent else "не отправлено"),
-            "Заказ №%s — отмечено: передан курьеру ТК (теперь на этапе «%s»). %s" % (number, stage["name"], note))
+            logging.getLogger("tires_sync.orders").exception("the track tasks of order %s failed", card_id)
+    done = _stage(conn, "done")
+    try:
+        if done is not None:
+            orders.move_card(conn, card_id, done["id"], now, who)
+    except OrderError:                                                    # its refusal is a red record of the journal; it stays on «Отправлен»
+        pass
+    return sent, note, orders.get_card(conn, card_id)["stage"]["name"]
 
 
 def tell_shipped(conn, card_id, now: str, who: str, deliver) -> Tuple[bool, str]:
@@ -218,7 +253,7 @@ def track_tasks(conn, card_id, number: str, now: str, who: str) -> List[int]:
     from . import order_notify, order_oth, tasks
     owner = order_notify.get_owner_login(conn)
     due = (datetime.fromisoformat(now[:19]) + timedelta(hours=1)).isoformat()[:16]
-    return [tasks.add(conn, kind="other", title="%s заказа №%s" % (TRACK_TASK, number), due_at=due, note="Точка передала заказ курьеру ТК",
+    return [tasks.add(conn, kind="other", title="%s заказа №%s" % (TRACK_TASK, number), due_at=due, note="Заказ передан курьеру ТК",
                       now=now, author=who, assignee=login, owner_login=owner, order_id=card_id) for login in order_oth.office_logins(conn)]
 
 
