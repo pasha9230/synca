@@ -711,9 +711,13 @@ def merge(conn, keep_id, gone_id, now: str, author: str) -> None:
         raise ClientError("Это один и тот же клиент.")
     if keep["merged_into"] or gone["merged_into"]:
         raise ClientError("Клиент уже объединён с другим.")
-    moved = {"orders": [o["id"] for o in gone["orders"] + gone["deleted_orders"]], "chats": [h["id"] for h in gone["chats"]], "phones": gone["phones"],
+    def linked(client):                             # the live orders and the links kept to orders in «Удалённые» (unmerge gives them back too)
+        live = [o["id"] for o in client["orders"]]
+        return live + [r[0] for r in conn.execute("SELECT order_id FROM client_order WHERE client_id = ? ORDER BY order_id DESC", (client["id"],))
+                       if r[0] not in live]
+    moved = {"orders": linked(gone), "chats": [h["id"] for h in gone["chats"]], "phones": gone["phones"],
              "peers": ["%s:%s" % (p["account_id"], p["peer_id"]) for p in gone["peers"]], "calls": [k["id"] for k in gone.get("calls") or []]}
-    links = {"orders": [o["id"] for o in keep["orders"]], "chats": [h["id"] for h in keep["chats"]], "calls": [k["id"] for k in keep.get("calls") or []]}
+    links = {"orders": linked(keep), "chats": [h["id"] for h in keep["chats"]], "calls": [k["id"] for k in keep.get("calls") or []]}
     for table in ("client_order", "client_chat", "client_call", "client_phone", "client_peer"):
         conn.execute("UPDATE %s SET client_id = ? WHERE client_id = ?" % table, (keep["id"], gone["id"]))
     note = "\n".join(t for t in (keep["note"], gone["note"]) if t)[:NOTE_MAX]

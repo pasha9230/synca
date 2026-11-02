@@ -62,7 +62,8 @@ def hand(conn, point_id: int, chat_row: int, who: str, now: str) -> dict:
         for login in to:
             made.append(tasks.add(conn, kind="other", title=title, due_at=now[:16], note=note, now=now, author=who, assignee=login,
                                   owner_login=to[0], chat_row=chat_row))
-            conn.execute("UPDATE chat_handover SET tasks = ? WHERE id = ?", (json.dumps(made), handover_id))   # with each task: a stop between
+            conn.execute("UPDATE chat_handover SET tasks = ? WHERE id = ?", (json.dumps(made), handover_id))   # with each task: a stop
+            conn.commit()                                                  # between them leaves every task closable
         store.write_audit(conn, now, who, "chat_handover", {"handover": handover_id, "chat": chat_row, "point": point["id"], "to": to, "tasks": made})
     except BaseException:
         conn.rollback()
