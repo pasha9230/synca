@@ -232,3 +232,44 @@ def test_on_the_staff_still_has_no_page_of_the_client(tmp_path):
         assert owner.get(url).status_code == 403, url
     assert post(owner, "/shop/profile", "tok", part="delivery", **DELIVERY).status_code == 403
     assert post(owner, "/shop/checkout", "tok", way="point", phone="+7 900 111-22-33").status_code == 403
+
+
+# ---- the review of 2026-11-02 ---------------------------------------------------------------------------------------------------------
+
+def test_on_a_failed_save_of_the_delivery_never_silences_the_order(tmp_path, monkeypatch):
+    app, client, conn, tg, pid = shop(tmp_path)
+    new_view(conn)
+    add(client, keys(page(client))[0])
+
+    def broken(*a, **kw):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(shop_cart, "save_delivery", broken)
+    r = post(client, "/shop/checkout", "tok", way="delivery", phone="+7 900 111-22-33", **DELIVERY)
+    assert r.status_code == 302 and conn.execute("SELECT COUNT(*) FROM shop_order").fetchone()[0] == 1
+    assert any("sendMessage" in c[1] for c in tg.calls)                                # the manager is told all the same
+
+
+def test_on_an_address_changed_in_the_old_view_is_not_offered_as_kept(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    new_view(conn)
+    post(client, "/shop/profile", "tok", part="delivery", **DELIVERY)
+    new_view(conn, "off")
+    shop_cart.save_profile(conn, "buyer", "+7 900 111-22-33", "г. Новый, ул. Другая, 7", "2026-11-02T12:00:00")
+    kept = shop_cart.delivery(conn, "buyer")
+    assert not kept["saved"] and kept["street"] == "г. Новый, ул. Другая, 7" and kept["city"] == "" and kept["house"] == ""
+    assert kept["recipient"] == "Иннокентий"                                          # the recipient stays offered
+
+
+def test_on_a_chip_given_twice_is_one_and_its_cross_drops_it(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    new_view(conn)
+    html = page(client, "/shop?w=205&w=205&d=16")
+    assert html.count(">ширина 205<") == 1 and 'href="/shop?d=16"' in html
+
+
+def test_on_the_fields_of_the_delivery_say_the_limits_of_the_server(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    new_view(conn)
+    html = page(client, "/shop/profile")
+    for key, limit in shop_cart.DELIVERY_LIMITS.items():
+        assert re.search(r'name="%s" maxlength="%d"' % (key, limit), html), key

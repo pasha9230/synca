@@ -23,7 +23,7 @@
 {% set d = v if part == "delivery" else {} %}
 <form method="post" action="/shop/profile#delivery" class="shop2-dlv"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="part" value="delivery">
 {% for key, label, ph, need in (("city", "Город", "Город", true), ("street", "Улица", "Улица", true), ("house", "Дом", "12, корп. 1", true), ("recipient", "Получатель", "Имя получателя", true), ("recipient_phone", "Телефон получателя", "+7 900 000-00-00", true), ("driver_note", "Комментарий для водителя", "например: въезд со двора, позвонить за час", false)) %}
-<label class="field shop2-dlv-{{ key }}{% if part == 'delivery' and ef == key %} is-err{% endif %}"><span class="label">{{ label }}{% if not need %} (по желанию){% endif %}</span><input class="input" name="{{ key }}" maxlength="{{ 200 if key == 'driver_note' else 120 }}"{% if key == "recipient_phone" %} type="tel" inputmode="tel" autocomplete="tel"{% endif %} placeholder="{{ ph }}" value="{{ d.get(key, delivery[key]) }}"></label>
+<label class="field shop2-dlv-{{ key }}{% if part == 'delivery' and ef == key %} is-err{% endif %}"><span class="label">{{ label }}{% if not need %} (по желанию){% endif %}</span><input class="input" name="{{ key }}" maxlength="{{ delivery.limits[key] }}"{% if key == "recipient_phone" %} type="tel" inputmode="tel" autocomplete="tel"{% endif %} placeholder="{{ ph }}" value="{{ d.get(key, delivery[key]) }}"></label>
 {% endfor %}
 <p class="small muted shop2-full">Подставится в заказ с доставкой — вводить заново не нужно.</p>
 <div class="shop2-full"><button class="btn btn--primary">Сохранить адрес</button></div>

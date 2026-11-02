@@ -164,15 +164,16 @@ DELIVERY_NAMES = {"city": "Город", "street": "Улица", "house": "Дом
 
 
 def delivery(conn, login: str) -> dict:
-    """The kept delivery of the client (the columns of client_profile; empty strings when none). An address kept before 2026-11-02 is one
-    line only: it is offered in «Улица», the client puts it in order once. `saved`: every needed field is there (the checkout shows a card)."""
+    """The kept delivery of the client (the columns of client_profile; empty strings when none). An address kept before 2026-11-02, or
+    changed since in the old design (only `address` then), is one line: it is offered in «Улица», the client puts it in order once. `saved`: every needed field is there (the checkout shows a card)."""
     row = conn.execute("SELECT city, street, house, recipient, recipient_phone, driver_note, address FROM client_profile WHERE login = ?",
                        (login,)).fetchone()
     out = dict(zip(DELIVERY, row[:6])) if row else dict.fromkeys(DELIVERY, "")
-    if row and not any(out[k] for k in ("city", "street", "house")) and row[6]:
-        out["street"] = row[6]
+    if row and row[6] and row[6] != delivery_address(out):     # kept before, or changed since in the old «Профиль» / checkout: that line
+        out.update(city="", street=row[6], house="")
     out["saved"] = all(out[k] for k in DELIVERY if k != "driver_note")
     out["address"] = delivery_address(out)
+    out["limits"] = DELIVERY_LIMITS
     return out
 
 

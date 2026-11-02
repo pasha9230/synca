@@ -41,7 +41,7 @@
 <details class="shop2-change"><summary>Изменить адрес</summary>{% endif %}
 <div class="shop2-dlv">
 {% for key, label, ph, need in (("city", "Город", "Город", true), ("street", "Улица", "Улица", true), ("house", "Дом", "12, корп. 1", true), ("recipient", "Получатель", "Имя получателя", true), ("recipient_phone", "Телефон получателя", "+7 900 000-00-00", true), ("driver_note", "Комментарий для водителя", "например: въезд со двора, позвонить за час", false)) %}
-<label class="field shop2-dlv-{{ key }}{% if ef == key %} is-err{% endif %}"><span class="label">{{ label }}{% if not need %} (по желанию){% endif %}</span><input class="input" name="{{ key }}" maxlength="{{ 200 if key == 'driver_note' else 120 }}"{% if key == "recipient_phone" %} type="tel" inputmode="tel" autocomplete="tel"{% endif %} placeholder="{{ ph }}" value="{{ v.get(key, delivery[key]) }}"{% if ef == key %} aria-invalid="true" autofocus{% endif %}></label>
+<label class="field shop2-dlv-{{ key }}{% if ef == key %} is-err{% endif %}"><span class="label">{{ label }}{% if not need %} (по желанию){% endif %}</span><input class="input" name="{{ key }}" maxlength="{{ delivery.limits[key] }}"{% if key == "recipient_phone" %} type="tel" inputmode="tel" autocomplete="tel"{% endif %} placeholder="{{ ph }}" value="{{ v.get(key, delivery[key]) }}"{% if ef == key %} aria-invalid="true" autofocus{% endif %}></label>
 {% endfor %}
 <p class="small muted shop2-full">Вводится один раз — в следующих заказах подставится сам. Поменять можно здесь или в «Профиле».</p>
 </div>

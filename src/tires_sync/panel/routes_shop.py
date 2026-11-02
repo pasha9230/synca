@@ -138,10 +138,10 @@ def _new_catalog(base: str, f, here: list, items) -> dict:
             "xb": lambda v: cc.bare_brand(v) in f.without and "кроме %s" % labels[cc.bare_brand(v)],
             "q": lambda v: v.strip() and "«%s»" % v.strip()[:40], "size": lambda v: v.strip() and v.strip()[:40]}
     chips = []
-    for n, (k, v) in enumerate(here):
+    for k, v in dict.fromkeys(here):                                             # a value given twice: one chip, its cross drops both
         label = acts[k](v) if k in acts and str(v).strip() else None             # «Все» of a filter sends it empty
         if label:
-            rest = here[:n] + here[n + 1:]
+            rest = [kv for kv in here if kv != (k, v)]
             chips.append((label, base + ("?" + urlencode(rest) if rest else "")))
     folded = request.args.get("sf") == "0"
     keep = [kv for kv in here if kv[0] != "sf"]
@@ -344,9 +344,12 @@ def register(app) -> None:
         except (shop_cart.CartError, orders.OrderError) as err:
             return _page("shop_cart.html", conn, login, **dict(view, error=str(err), form=f), error_field=getattr(err, "field", ""),
                          **_cart_new(conn, login)), 400
+        _after_order(app, conn, card_id, name, stamp)                   # the order is saved: its rules and its manager first
         if kept is not None:
-            shop_cart.save_delivery(conn, login, kept, stamp)
-        _after_order(app, conn, card_id, name, stamp)
+            try:
+                shop_cart.save_delivery(conn, login, kept, stamp)
+            except Exception:                                          # only the next order's offer is lost, never the order
+                current_app.logger.exception("the delivery of %s was not kept", login)
         return redirect("/shop/orders/%d?placed=1" % card_id)              # the page says «Заказ №… принят» itself (no flash twice)
 
     @app.route("/shop/orders")
