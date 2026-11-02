@@ -182,3 +182,22 @@ def test_a_failure_building_the_arrival_text_does_not_break_the_card(tmp_path, s
     monkeypatch.setattr(mgr, "_oth_arrived_body", broken)
     engine.refresh_tasks(conn, mine, LATER)                              # never raises: the card opens, the task stays as it was
     assert arrival(conn, mine)[0]["status"] == "error"
+
+
+def test_a_failure_building_the_arrival_text_keeps_the_rest_of_the_refresh(tmp_path, sample, monkeypatch):
+    """A task stuck «running» after a killed panel comes back even when the arrival's text cannot be built in the same refresh."""
+    conn = db(tmp_path)
+    mine = ready(conn)
+    no_arrival_template(conn)
+    card = orders.get_card(conn, mine)
+    conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at, done_at) "
+                 "VALUES (?, 0, 'x', 'remind', '', ?, 'running', 'Позвонить', '', '', ?, ?)", (mine, card["stage_id"], NOW, NOW))
+    conn.commit()
+    at_point(conn, mine)
+    mgr.tell_client_arrived(conn, mine, Deliver(), NOW, "точка")
+
+    def broken(conn, card):
+        raise RuntimeError("oth")
+    monkeypatch.setattr(mgr, "_oth_arrived_body", broken)
+    engine.refresh_tasks(conn, mine, "2026-10-23T18:00:00")
+    assert [t["status"] for t in engine.list_tasks(conn, mine) if t["kind"] == "remind"] == ["pending"]

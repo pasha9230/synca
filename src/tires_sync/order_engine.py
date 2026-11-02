@@ -165,8 +165,8 @@ def refresh_tasks(conn, card_id, now: str) -> None:
             from . import order_manager as mgr                     # (no template id kept, or it is gone): the text it is made from now
             try:
                 body = mgr._oth_arrived_body(conn, card) or mgr._arrived_body(conn)
-            except Exception:                                      # the card still opens; the task stays as it was
-                conn.rollback()
+            except Exception:                                      # the card still opens; the task stays as it was (it only reads,
+                                                                   # no rollback: the rest of this refresh is kept)
                 logging.getLogger("tires_sync.orders").exception("the text of «можно забирать» of card %s", card_id)
                 continue
         if body is None:
