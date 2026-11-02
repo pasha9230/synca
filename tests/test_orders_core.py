@@ -611,6 +611,23 @@ def test_board_phone_search_stays_inside_the_point(tmp_path):
     assert ids("89000000011") == [a] and ids("7700001") == []
 
 
+def test_board_search_finds_the_article_of_any_position_whole_or_four_characters_in_any_case(tmp_path):
+    """The owner 2026-11-02: «Заказы» finds an order by the supplier's code of any of its positions, not only the first one's name."""
+    conn = db(tmp_path)
+    a = card(conn, client_name="Иван", client_phone="+7 900 000-00-11")
+    item(conn, a, goods_id="G1", code="T743172")
+    item(conn, a, goods_id="G2", code="Kx-55aB")                 # the second position
+    b = card(conn, client_name="Ольга", client_phone="+7 900 000-00-15", deal_kind="stock")
+    item(conn, b, goods_id="126496625866", code="")              # no code: its goods id is the article
+    item(conn, b, goods_id=orders.POINT_GOODS, name="Шина с точки", supplier_price=0, terms={})
+    ids = lambda q: [c["id"] for col in orders.board(conn, datetime(2026, 10, 12, 12), query=q)["columns"] for c in col["cards"]]
+    assert ids("kx-55ab") == [a] and ids("KX-5") == [a] and ids("t743172") == [a] and ids("7431") == [a]
+    assert ids("6496625") == [b] and ids("126496625866") == [b]
+    assert ids("Kx-") == [] and ids("743") == [] and ids("point") == []   # three characters of a code, a point's tyre: nothing
+    mine = points.save_point(conn, {"name": "Гамма"})
+    assert [c["id"] for col in orders.board(conn, datetime(2026, 10, 12, 12), point_id=mine, query="Kx-55aB")["columns"] for c in col["cards"]] == []
+
+
 def test_a_position_without_its_purchase_makes_the_margin_unknown_not_bigger(tmp_path):
     """Хвост З7: the purchase 0 (a point tyre before it is typed) is «не указана»: no margin of 4 × the sale price; the sale sum stays."""
     conn = db(tmp_path)

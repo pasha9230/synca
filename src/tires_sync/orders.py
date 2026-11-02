@@ -1002,13 +1002,17 @@ def board_query(query: str) -> tuple:
     return needle, digits, int(found.group(1)) if found else None, phone
 
 
-def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item: str, webmim_number: str = "", transfer_number: str = "") -> bool:
+def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item: str, webmim_number: str = "", transfer_number: str = "",
+                  articles: tuple = ()) -> bool:
     """The order fits the search of the board (board_query): a number finds that order, the order with that number of WebMIM (or a phone with
     those digits, or a transfer number ending in them, four and more), not every order with the digit; words find the client's name or the
     first position, six characters and more the transfer number as typed («26R-004417», the owner 2026-10-29: never every «26R» of the year); three digits and more find the phone; a whole phone
-    (the last ten digits) finds it written in any way."""
+    (the last ten digits) finds it written in any way. `articles`: the supplier's codes of every position of the order (board_articles; the owner
+    2026-11-02) — the whole code in any case, or four characters and more of it, a number too."""
     needle, digits, number, phone10 = wanted
     if not needle:
+        return True
+    if any(needle == a or (len(needle) >= 4 and needle in a) for a in articles):
         return True
     phone_digits = re.sub(r"\D", "", phone)
     if phone10 and phone10 in phone_digits:
@@ -1020,6 +1024,16 @@ def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item
                 or bool(transfer and len(digits) >= 4 and re.sub(r"\D", "", transfer).endswith(digits)))
     hay = " ".join([name.lower(), first_item.lower()])
     return needle in hay or (len(digits) >= 3 and digits in phone_digits) or (len(needle) >= 6 and needle in transfer)
+
+
+def board_articles(conn) -> Dict[int, tuple]:
+    """The supplier's codes of the positions of every order in lower case, for board_matches (the code, else the goods id; never a point's tyre)."""
+    found: Dict[int, tuple] = {}
+    for order_id, code, goods_id in conn.execute("SELECT order_id, code, goods_id FROM order_item ORDER BY id"):
+        article = " ".join(str(code or (goods_id if goods_id != POINT_GOODS else "") or "").split()).lower()
+        if article:
+            found[order_id] = found.get(order_id, ()) + (article,)
+    return found
 
 
 ORIGIN_NO_ACCOUNT = "Без аккаунта"
@@ -1091,6 +1105,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         count[order_id] = count.get(order_id, 0) + 1
         first.setdefault(order_id, "%s × %d" % (name, qty))
     wanted = board_query(query)
+    articles = board_articles(conn) if wanted[0] else {}
     columns = {s["id"]: {"stage": s, "count": 0, "sum": 0.0, "cards": []} for s in stages}
     summary = {"open": 0, "overdue": 0, "new_today": 0, "sum_open": 0.0}
     rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number "
@@ -1105,7 +1120,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
             continue
         if tag and tag not in tag_names:
             continue
-        if not board_matches(wanted, cid, name, phone, first.get(cid, ""), webmim or ""):
+        if not board_matches(wanted, cid, name, phone, first.get(cid, ""), webmim or "", articles=articles.get(cid, ())):
             continue
         stage = columns[sid]["stage"]
         seconds = _seconds_on_stage(entered, now)

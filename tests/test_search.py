@@ -125,6 +125,21 @@ def test_the_owner_finds_any_order_by_the_number_the_phone_in_three_forms_webmim
         assert [t for t in titles(find(w["owner"], q), "orders") if t.startswith(other)], q
 
 
+def test_the_article_of_any_position_finds_the_order_and_never_another_points_for_a_point(w):
+    """The owner 2026-11-02: the supplier's code of any position (not only the first) finds the order; a point still only its own."""
+    conn = w["conn"]
+    for card, code in ((w["mine"], "MINE-1"), (w["mine"], "Ab7731x"), (w["other"], "ZQ90551")):
+        conn.execute("INSERT INTO order_item (order_id, goods_id, code, name, qty, supplier_price, sale_unit) VALUES (?, 'G', ?, 'Шина', 1, 1, 1)",
+                     (card, code))
+    conn.commit()
+    bind(w)
+    manager, _ = person(w["app"], "point", w["rust"])
+    mine, other = "Заказ №%d" % w["mine"], "Заказ №%d" % w["other"]
+    assert [t for t in titles(find(manager, "ab7731X"), "orders") if t.startswith(mine)]
+    assert [t for t in titles(find(w["owner"], "9055"), "orders") if t.startswith(other)]
+    assert not [t for t in titles(find(manager, "ZQ90551"), "orders") if t.startswith(other)]
+
+
 def test_the_point_finds_the_chats_of_its_account_only_and_never_through_another_points_order(w):
     bind(w)
     manager, _ = person(w["app"], "point", w["rust"])
