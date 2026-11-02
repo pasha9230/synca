@@ -101,11 +101,17 @@ def save(conn, card_id, form: dict, now: str, author: str) -> List[str]:
     return [FIELD_NAMES["enabled" if key == "on" else key] for key in changed]
 
 
+PICKUP_TOKENS = ("arrived-%d-%%", "reserve-%d-%%")       # the sends of «можно забирать» (order_manager.arrived_token) and «срок резерва»
+NOT_NEEDED = "Итог: заказ в другой город — «можно забирать» и «срок резерва» не нужны."
+
+
 def skip_pickup_messages(conn, card_id, now: str, who: str) -> int:
     """The checkbox came after the pickup messages were prepared (the owner 2026-11-02): «можно забирать» and «срок резерва истекает»
-    still waiting are skipped, never sent by hand by mistake. Returns how many."""
-    from . import order_engine as engine
-    skipped = 0
+    still waiting are skipped, never sent by hand by mistake; their tails go with them — the lines of «Входящие» about those sends, the rows
+    of «Не дошло клиенту», a 402 the sync would send again. A send «unknown» (did it go?) is only checked by the sync, never sent again.
+    Returns how many tasks were skipped."""
+    from . import chats, order_engine as engine
+    skipped, tokens = 0, set()
     for task in engine.list_tasks(conn, card_id, ("pending", "error")):
         if task["kind"] == "message" and (task["rule_id"] == engine.ARRIVED_RULE or task["title"] in (templates.ARRIVED_SAMPLE[0], templates.RESERVE_SAMPLE[0])):
             try:
@@ -115,10 +121,19 @@ def skip_pickup_messages(conn, card_id, now: str, who: str) -> int:
                 continue
             conn.execute("UPDATE order_task SET result = ? WHERE id = ? AND status = 'skipped'", (engine.INTERCITY_SKIP, task["id"]))
             conn.commit()
+            tokens.add(engine.task_token(task))
             skipped += 1
+    like = [pattern % int(card_id) for pattern in PICKUP_TOKENS]
+    where = " OR ".join("token LIKE ?" for _ in like)
+    tokens |= {r[0] for r in conn.execute("SELECT token FROM order_unsent WHERE closed_at IS NULL AND (%s)" % where, like)}
+    tokens |= {r[0] for r in conn.execute("SELECT token FROM chat_send_log WHERE status IN ('retry', 'failed') AND (%s)" % where, like)}
+    conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE closed_at IS NULL AND (%s)" % where, [now, who] + like)
+    conn.execute("UPDATE chat_send_log SET status = 'failed', next_at = '', text = '', error = ? WHERE status = 'retry' AND (%s)" % where,
+                 [SKIP] + like)                                           # as the sync does for a deleted chat: never sent again
+    conn.commit()
+    for token in sorted(tokens):
+        chats._inbox_close(conn, token, now, NOT_NEEDED, alerts=True)
     return skipped
-
-
 
 
 # ---- the labels -----------------------------------------------------------------------------------------------------------------------

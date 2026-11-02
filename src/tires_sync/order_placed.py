@@ -58,8 +58,8 @@ def _template(conn, who: dict, card_id=None, now: str = "") -> Optional[dict]:
     if row is None and who.get("sample"):
         templates.add_template(conn, who["template"], who["audience"], who["sample"])
         if card_id is not None:                                             # the owner 2026-11-02: seen in the order's journal
-            orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", "Шаблона «%s» не было (удалён или переименован): шаблон "
-                             "создан заново из образца, его можно поправить в «Шаблонах сообщений»." % who["template"], level="grey")
+            orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", "Шаблона «%s» не было в базе: создан из образца, "
+                             "его можно поправить в «Шаблонах сообщений»." % who["template"], level="grey")
             conn.commit()
         row = conn.execute("SELECT id, body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", (who["template"], who["audience"])).fetchone()
     return {"id": row[0], "body": row[1]} if row else None

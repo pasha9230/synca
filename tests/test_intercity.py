@@ -499,7 +499,7 @@ def test_a_recreated_template_leaves_a_grey_record(tmp_path, tg):
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="КИТ"), NOW, "owner")       # no templates.add_samples
     hook(app, conn, "передал курьеру 5000100")
-    [line] = [e for e in orders.list_events(conn, card) if "создан заново из образца" in e["text"]]
+    [line] = [e for e in orders.list_events(conn, card) if "создан из образца" in e["text"]]
     assert line["level"] == "grey" and intercity.SHIPPED_TEMPLATE in line["text"]
 
 
@@ -517,3 +517,55 @@ def test_the_client_rules_of_done_are_not_prepared_for_an_order_to_another_city(
     status = lambda c, name: [t["status"] for t in engine.list_tasks(conn, c) if t["title"] == name]
     assert status(card, "Клиенту: спасибо") == ["skipped"] and status(card, "Менеджеру: заказ оформлен") == ["pending"]
     assert status(other, "Клиенту: спасибо") == ["pending"]
+
+
+# ---- the review of f52d0b6 -----------------------------------------------------------------------------------------------------------
+
+def test_the_checkbox_closes_the_tails_of_a_failed_pickup_message(tmp_path):
+    from tires_sync import chats, unsent
+    app, client, tok, conn, pid, card = ready(tmp_path, (402, {"error": {"message": "Перейдите на подписку с API мессенджера"}}))
+    conn.execute("UPDATE avito_chat SET order_id = NULL WHERE order_id = ?", (card,))           # no chat: «можно забирать» cannot go
+    conn.commit()
+    hook(app, conn, "Приехал 5000100")
+    arrived = [t for t in engine.list_tasks(conn, card) if t["rule_id"] == engine.ARRIVED_RULE]
+    assert [t["status"] for t in arrived] == ["pending"]
+    token = engine.task_token(arrived[0])
+    unsent.record(conn, card, token, NOW, "нет чата Авито", "Заказ приехал", source="arrived")
+    conn.execute("INSERT INTO manager_message (message_id, sender, text, at, status) VALUES (?, ?, 'клиенту не отправлено «можно забирать»', ?, 'new')",
+                 (token, chats.SYSTEM, NOW))
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status, next_at) VALUES ('reserve-%d-1', 1, ?, 'o', 'retry', ?)" % card, (NOW, NOW))
+    conn.commit()
+    intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="ПЭК"), NOW, "owner")
+    assert [t["status"] for t in engine.list_tasks(conn, card) if t["rule_id"] == engine.ARRIVED_RULE] == ["skipped"]
+    assert unsent.of_order(conn, card) == []
+    assert conn.execute("SELECT status, answer FROM manager_message WHERE message_id = ?", (token,)).fetchone() == ("answered", intercity.NOT_NEEDED)
+    assert conn.execute("SELECT status, next_at FROM chat_send_log WHERE token = 'reserve-%d-1'" % card).fetchone() == ("failed", "")
+
+
+def test_the_checkbox_skips_a_waiting_reserve_reminder_and_one_in_error(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    templates.add_samples(conn)
+    reserve = next(t["id"] for t in templates.list_templates(conn) if t["name"] == templates.RESERVE_SAMPLE[0])
+    arrived = next(t["id"] for t in templates.list_templates(conn) if t["name"] == templates.ARRIVED_SAMPLE[0])
+    rules.add_rule(conn, _stage(conn, "at_point"), "enter", 0, "message", reserve, "", "ask", None)
+    rules.add_rule(conn, _stage(conn, "at_point"), "enter", 0, "message", arrived, "", "ask", None)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    conn.execute("UPDATE order_task SET status = 'error', result = 'Не хватает: Точка.' WHERE order_id = ? AND title = ?", (card, templates.ARRIVED_SAMPLE[0]))
+    conn.commit()
+    city(conn, card)
+    status = {t["title"]: t["status"] for t in engine.list_tasks(conn, card) if t["kind"] == "message"}
+    assert status[templates.RESERVE_SAMPLE[0]] == "skipped" and status[templates.ARRIVED_SAMPLE[0]] == "skipped"
+
+
+def test_the_owners_text_of_shipped_goes_and_reset_brings_the_sample_back(tmp_path, tg):
+    from tires_sync import message_texts as mt
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    post(client, "/orders/templates/text", tok, key="intercity_shipped", body="Ваш заказ {webmim_number} уехал в {city} ({carrier}).{track_line}")
+    assert mt.body(conn, "intercity_shipped") == "Ваш заказ {webmim_number} уехал в {city} ({carrier}).{track_line}"
+    hook(app, conn, "передал курьеру 5000100")
+    assert to_client(app) == ["Ваш заказ 5000100 уехал в Псков (ПЭК)."]
+    post(client, "/orders/templates/text/reset", tok, key="intercity_shipped")
+    assert mt.body(conn, "intercity_shipped") == templates.INTERCITY_SHIPPED_SAMPLE[2]
+    post(client, "/orders/templates/text", tok, key="intercity_placed", body="Оформили в {city}, {carrier}.")
+    assert mt.body(conn, "intercity_placed") == "Оформили в {city}, {carrier}."
