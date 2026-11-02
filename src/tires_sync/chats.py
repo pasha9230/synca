@@ -360,6 +360,8 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
 
 
 CLIENT_WROTE_AUTHOR = "чаты Авито"         # as chat_deals.SYSTEM_AUTHOR: not a panel login, so it is an alert for everybody
+POINT_WROTE_AUTHOR = "чаты Авито (заказ на точке)"   # «Клиент написал» of an order the point works (order_points.work_orders): no alert for the
+                                                        # owner and the partner (2026-11-03) even after the order leaves the point
 
 
 def _note_client_wrote(conn, chat_row: int, now: str) -> None:
@@ -378,7 +380,9 @@ def _note_client_wrote(conn, chat_row: int, now: str) -> None:
     last = conn.execute("SELECT text FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind = 'text' ORDER BY ts DESC, id DESC LIMIT 1",
                         (chat_row,)).fetchone()
     text = " ".join((last[0] if last else "").split())
-    orders.add_event(conn, card["id"], now, CLIENT_WROTE_AUTHOR, "chat", "Клиент написал: %s" % (text[:80] + ("…" if len(text) > 80 else "")), level="yellow")
+    from .order_points import work_orders
+    who = POINT_WROTE_AUTHOR if card["id"] in work_orders(conn) else CLIENT_WROTE_AUTHOR
+    orders.add_event(conn, card["id"], now, who, "chat", "Клиент написал: %s" % (text[:80] + ("…" if len(text) > 80 else "")), level="yellow")
 
 
 def _note_client_called(conn, chat_row: int, text: str, now: str) -> None:

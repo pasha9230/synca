@@ -126,13 +126,52 @@ def _staff(conn, login: str) -> bool:
     return users.get_role(conn, login)["role"] != "point"
 
 
-def counts(conn, login: str) -> Dict[str, int]:
-    """How many open alerts of every colour this user has (as page_rows, without the orders of the points' accounts for the staff)."""
+def point_words(event: dict) -> bool:
+    """«Клиент написал: …» in the order's journal (chats._note_client_wrote): the owner 2026-11-03, of an order the point works it is not the
+    staff's alert. «Клиент написал после закрытия», «Клиент звонил» and the failures stay."""
+    return event.get("kind") == "chat" and level_of(event) != "red" and str(event.get("text") or "").startswith(CLIENT_WROTE)
+
+
+POINT_WORK_QUIET = ("owner", "partner")          # the owner 2026-11-03 «мне и Заману»: the chats' manager still hears of them (the lead, B)
+
+
+def _quiet_of_point_work(conn, login: str) -> bool:
+    """The owner and the partner: the client's words and «Срочно ответить» of the orders the points work are no alerts for them."""
+    from . import users
+    return users.get_role(conn, login)["role"] in POINT_WORK_QUIET
+
+
+def _quiet(conn, login: str, staff: bool) -> dict:
+    """What is no alert for this user. For the staff: every record of the orders of the points' Avito accounts and their chats (2026-10-26).
+    For the owner and the partner besides: the client's words of the orders the points work now or worked when the client wrote
+    (chats.POINT_WROTE_AUTHOR) and «Срочно ответить» of their chats (2026-11-03), except a client they took from the point
+    (order_points.office_taken): of it they are told as usual, «Срочно ответить» of a point's chat too."""
     from . import order_points
-    theirs = order_points.account_orders(conn) if _staff(conn, login) else set()
+    if not staff:
+        return {"all": set(), "words": set(), "chats": set(), "on": False, "taken": set(), "taken_chats": set()}
+    every, chats = order_points.account_orders(conn), order_points.account_chats(conn)
+    if not _quiet_of_point_work(conn, login):
+        return {"all": every, "words": set(), "chats": chats, "on": False, "taken": set(), "taken_chats": set()}
+    taken, taken_chats = order_points.office_taken(conn)
+    return {"all": every - taken, "words": order_points.work_orders(conn) - taken, "chats": chats - taken_chats, "on": True,
+            "taken": taken, "taken_chats": taken_chats & chats}            # urgent_rows has the other chats already
+
+
+def _hidden(event: dict, quiet: dict) -> bool:
+    from .chats import POINT_WROTE_AUTHOR
+    if event["order_id"] in quiet["all"]:
+        return True
+    return point_words(event) and (event["order_id"] in quiet["words"] or (
+        quiet["on"] and event["author"] == POINT_WROTE_AUTHOR and event["order_id"] not in quiet["taken"]))
+
+
+def counts(conn, login: str) -> Dict[str, int]:
+    """How many open alerts of every colour this user has (as page_rows, without the orders of the points' accounts nor the client's words
+    of the orders the points work for the owner and the partner)."""
+    quiet = _quiet(conn, login, _staff(conn, login))
     result = {level: 0 for level in ALERT_LEVELS}
     for event in open_alerts(conn, login):
-        if event["order_id"] not in theirs:
+        if not _hidden(event, quiet):
             result[event["level"]] += 1
     return result
 
@@ -144,16 +183,17 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
     `now` (the panel's local time): a green alert older than GREEN_DAYS days is not shown either; nothing is deleted.
     The chats without an order whose client waits (chat_rows) are rows too; with `now` also «Срочно ответить» (urgent_rows, in place of the
     chat's «Клиент написал»; a due task is no row here since 2026-10-31 — it is «Задачи»'s); for the partner the orders a point named that are not
-    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts.
+    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts; for the owner and
+    the partner (_quiet_of_point_work) nor are the client's words (point_words) and «Срочно ответить» of an order the point works now
+    (order_points.work_orders, the owner 2026-11-03), unless they took the client from the point (_quiet).
     `staff` False: the owner or the partner working as a point (panel/common.current_user) sees the point's; `own_prefix`: the start of their
     author «<name> за точку «» — what they pressed as a point is their own record too."""
-    from . import order_points
     border = (datetime.fromisoformat(now) - timedelta(days=GREEN_DAYS)).isoformat(timespec="seconds") if now else ""
     staff = _staff(conn, login) if staff is None else staff
-    theirs = order_points.account_orders(conn) if staff else set()
+    quiet = _quiet(conn, login, staff)
     rows, folded = [], {}
     for event in open_alerts(conn, login):
-        if event["order_id"] in theirs:
+        if _hidden(event, quiet):
             continue
         if (event["author"] == login or (own_prefix and str(event["author"] or "").startswith(own_prefix))) \
                 and event["level"] != "red":                                 # one's own failure still waits for «Разобрался»
@@ -170,11 +210,12 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
                 continue
             folded[event["order_id"]] = event
         rows.append(event)
-    urgent = urgent_rows(conn, now) if now else []
+    urgent = [row for row in (urgent_rows(conn, now, also=quiet["taken_chats"]) if now else [])
+              if row["chat_row"] in quiet["taken_chats"] or (row["of_order"] not in quiet["words"] and row["of_order"] not in quiet["all"])]
     late = {row["chat_row"] for row in urgent}
     late_orders = {row["of_order"] for row in urgent if row["of_order"]}
     rows = [row for row in rows if not (row["order_id"] in late_orders and row is folded.get(row["order_id"]) and row["level"] == "yellow")]
-    skip = late | (order_points.account_chats(conn) if staff else set())
+    skip = late | quiet["chats"]
     rows += [row for row in chat_rows(conn) if row["chat_row"] not in skip] + urgent   # one row per chat: «Срочно ответить»
                                                                                           # takes the place of «Клиент написал», of a chat
                                                                                           # with an order too
@@ -243,8 +284,9 @@ URGENT_DAYS = 7                             # a chat silent for longer is no lon
 URGENT_START_KEY = "urgent_start"           # app_state: a client who waited from before this moment is the past (set by the look of every minute)
 
 
-def urgent_rows(conn, now: str) -> List[dict]:
-    """«Срочно ответить»: an open chat of our accounts (not of a point) whose client waits for an answer longer than an hour of working time
+def urgent_rows(conn, now: str, also=()) -> List[dict]:
+    """«Срочно ответить»: an open chat of our accounts (not of a point; `also`: the chats of a point that are, the clients the owner or the
+    partner took, order_points.office_taken) whose client waits for an answer longer than an hour of working time
     (the hours of the handoffs) since their first message after our last one. Avito's auto-answer (an outgoing «system» message, on for
     the owner's accounts since 2026-10-13) is not an answer. Goes by itself when a person answers or the chat is closed or marked
     «Не требует ответа». Nothing is stored: it is read from the chat every time."""
@@ -263,7 +305,8 @@ def urgent_rows(conn, now: str) -> List[dict]:
             "AND kind NOT IN ('call', 'system', 'deleted') AND ts > COALESCE((SELECT MAX(ts) FROM avito_message WHERE chat_row = c.id "
             "AND direction = 'out' AND kind NOT IN ('system', 'deleted')), 0) ORDER BY ts, id LIMIT 1) "
             "WHERE c.status = 'open' AND c.last_at >= ? AND a.chats_enabled = 1 "
-            "AND NOT EXISTS (SELECT 1 FROM point p WHERE p.avito_account_id = c.account_id)", (since,)).fetchall():
+            "AND (NOT EXISTS (SELECT 1 FROM point p WHERE p.avito_account_id = c.account_id) OR c.id IN (%s))"
+            % (",".join(str(int(r)) for r in also) or "0"), (since,)).fetchall():
         first = (first_at, first_text)
         if (first[0] or "") < start:
             continue
