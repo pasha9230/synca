@@ -11,6 +11,12 @@
   --pt-font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif;
   font-family:var(--pt-font);color:var(--pt-text);font-size:14px;line-height:1.5715;max-width:880px
 }
+/* «Новый вид» «Строгий» (body.ui-new, план 2026-11-02): те же токены точки, другие значения; без класса ничего не меняется */
+.ui-new .pt{
+  --pt-primary:#4F46E5;--pt-primary-hover:#4338CA;--pt-primary-bg:#F3F4F6;--pt-primary-border:#C7D2FE;
+  --pt-bg-layout:#FFFFFF;--pt-fill:#F6F8FA;--pt-fill-2:#F0F2F5;--pt-border:#D0D7DE;--pt-border-2:#E4E7EB;
+  --pt-text:#1F2328;--pt-text-2:#3D444D;--pt-text-3:#59636E;--pt-radius:6px;--pt-radius-lg:6px;--pt-radius-card:6px
+}
 .pt h1,.pt h2,.pt h3{font-family:var(--pt-font);color:var(--pt-text)}
 .pt a{color:var(--pt-primary)}
 
