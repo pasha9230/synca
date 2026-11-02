@@ -286,6 +286,17 @@ def test_doubtful_give_is_a_question(tmp_path, text):
     assert _code(conn, card) == "at_point", text
 
 
+@pytest.mark.parametrize("text", ["отдал на точку", "отдал на точке", "отдали по 2", "отдал деньги", "отдал курьеру", "отдал поставщику",
+                                  "отдала на склад", "отдал водителю"])
+def test_doubtful_give_in_reply_to_the_order_is_a_question(tmp_path, text):
+    """In reply the number is known: only the strict tail keeps «отдал на точку» (to the point, not to the client) from closing the order."""
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5284060, "moving")
+    assert not mgr.is_command(conn, text), text
+    mgr.dispatch(conn, "x", "111", text, 5284060, NOW)
+    assert _code(conn, card) == "moving", text
+
+
 @pytest.mark.parametrize("text", ["возврат отдал {}", "отдал на возврат {}", "отдали на возврат {}", "отдала на возврат {}",
                                   "{} возврат отдали", "{} отдали на возврат"])
 def test_the_return_phrases_with_give_stay_the_return(tmp_path, text):
