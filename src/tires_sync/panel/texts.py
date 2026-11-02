@@ -250,6 +250,20 @@ def _client_followed_text(d: dict) -> str:
                                                                      " и ещё %d" % (len(lines) - 10 + more) if len(lines) > 10 or more else "")
 
 
+def _template_text(d: dict) -> str:
+    """«Шаблон «…»: «было» → «стало»», each text cut to 300 signs (the owner's texts, never a client's)."""
+    def cut(value):
+        value = str(value or "")
+        return "«%s»" % (value[:300] + "…" if len(value) > 300 else value) if value else "—"
+    head = ("Шаблон «%s» удалён" if d.get("deleted") else "Шаблону «%s» возвращён исходный текст" if d.get("reset")
+            else "Шаблон «%s» добавлен" if d.get("added") else "Шаблон «%s» изменён") % _q(d.get("name"))
+    if d.get("was_name"):
+        head += " (было имя «%s»)" % _q(d["was_name"])
+    if d.get("audience"):
+        head += ", адресат: %s" % _q(d["audience"])
+    return "%s: %s → %s" % (head, cut(d.get("from")), cut(d.get("to")))
+
+
 # The journal of actions (owner's word 2026-10-25, run «match2»): every action the code writes has its text. No secret, no address of a
 # subscription, no text of a client, no login typed at a failed sign-in (it may be a password typed in the wrong field) is shown.
 _MORE_TEXTS = {
@@ -276,6 +290,7 @@ _MORE_TEXTS = {
         "«%s»" % d["name"] if d.get("name") else "№%s" % _q(d.get("point")),
         {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)",
          "invalid": " (режим больше не действует)"}.get(d.get("why"), "")),
+    "message_template_changed": lambda d: _template_text(d),             # «Шаблоны сообщений» (message_texts, 2026-11-02)
     "client_pct_changed": lambda d: _client_pct_text(d),
     "client_pct_followed": lambda d: _client_followed_text(d),
     "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),

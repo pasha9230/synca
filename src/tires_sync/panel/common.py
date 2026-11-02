@@ -287,6 +287,7 @@ for _section, _endpoints in {
               "orders_command_delete", "orders_command_add", "orders_default_responsible", "orders_rule_delete", "orders_rule_toggle",
               "orders_rule_add", "orders_stage_delete", "orders_stage_shift", "orders_stage_update", "orders_stage_add",
               "orders_templates_page", "orders_template_delete", "orders_template_samples", "orders_template_save",
+              "orders_text_save", "orders_text_reset",    # «Шаблоны сообщений»: the texts that go by themselves (message_texts)
               "orders_bot_answer_delete", "orders_bot_answer_toggle", "orders_bot_answer_add", "orders_report_rates"),
     "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
               "users_shop_responsible",                 # «Ответственный за заказы клиентов» (shop_cart.RESPONSIBLE_KEY)
