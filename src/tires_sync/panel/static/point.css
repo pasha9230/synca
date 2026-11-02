@@ -103,6 +103,7 @@
   body.pt-ui .main,body.pt-ui .page{padding:0;margin:0;min-width:0;max-width:none;overflow:visible}
   body.pt-ui .msgs{margin:8px 16px 0}
   body.pt-ui{min-width:0;background:var(--pt-bg-layout, #f5f5f5)}
+  body.pt-ui.pt-whatsnew-page .page{padding:12px 16px 84px}
   .pt{max-width:none;padding:0 0 84px}
   .pt-top{background:var(--pt-bg);border-bottom:1px solid var(--pt-border-2);padding:8px 16px;margin:0 0 12px}
   .pt-menu{display:block}
