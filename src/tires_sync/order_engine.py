@@ -137,6 +137,32 @@ PANEL_SKIP = "точка работает в панели: в ВК ей не п�
 RUNNING_TIMEOUT = 600                                              # seconds; a task «running» longer than this was cut off (a killed worker)
 
 
+def message_body(conn, task: dict, card: dict) -> Optional[str]:
+    """The template text a message task is built from: its template's (the id in `arg`); «можно забирать» with the sample's text or the one
+    without the number (no template id kept, or it is gone) — the text it is made from now (order_manager). None: there is none."""
+    if str(task["arg"]).isdigit():
+        try:
+            return templates.get_template(conn, int(task["arg"]))["body"]
+        except OrderError:
+            pass
+    if task["rule_id"] == ARRIVED_RULE:
+        from . import order_manager as mgr
+        return mgr._oth_arrived_body(conn, card) or mgr._arrived_body(conn)
+    return None
+
+
+def draft(conn, task: dict, now: str) -> str:
+    """The text of a message that lacks values, «[name]» in place of each (copied and sent by hand while the value is not there); ''
+    when it has no template text. Never raises."""
+    try:
+        card = orders.get_card(conn, task["order_id"])
+        body = message_body(conn, task, card)
+        return templates.render(conn, card, body, now, mark=True)[0] if body else ""
+    except Exception:                                              # it only reads: no rollback of what the page wrote before it
+        logging.getLogger("tires_sync.orders").exception("the draft of message task %s", task["id"])
+        return ""
+
+
 def refresh_tasks(conn, card_id, now: str) -> None:
     """Bring the waiting tasks of a card up to date: a message is built from the card as it is now (a lacking value filled in later makes
     an error task usable again, a value taken away makes it an error), and a task stuck in «running» after a killed worker comes back."""
@@ -152,14 +178,18 @@ def refresh_tasks(conn, card_id, now: str) -> None:
             if stuck:
                 conn.execute("UPDATE order_task SET status = 'pending' WHERE id = ? AND status = 'running'", (task["id"],))
             continue
-        if task["kind"] != "message" or not str(task["arg"]).isdigit():
-            continue
-        try:
-            template = templates.get_template(conn, int(task["arg"]))
-        except OrderError:
+        if task["kind"] != "message":
             continue
         card = card or orders.get_card(conn, card_id)
-        text, missing = templates.render(conn, card, template["body"])
+        try:
+            body = message_body(conn, task, card)
+        except Exception:                                          # the card still opens; the task stays as it was (it only reads,
+                                                                   # no rollback: the rest of this refresh is kept)
+            logging.getLogger("tires_sync.orders").exception("the text of message task %s of card %s", task["id"], card_id)
+            continue
+        if body is None:
+            continue
+        text, missing = templates.render(conn, card, body, now)
         status, body, result = ("error", "", "Не хватает: %s." % ", ".join(missing)) if missing else ("pending", text, "")
         if (status, body, result) != (task["status"], task["body"], task["result"]):
             conn.execute("UPDATE order_task SET status = ?, body = ?, result = ? WHERE id = ? AND status IN ('pending', 'error')", (status, body, result, task["id"]))
@@ -413,6 +443,11 @@ def send_task(conn, task_id, text: str, deliver, now: str, author: str, prefer=N
         return chat["id"]
     conn.execute("UPDATE order_task SET body = ? WHERE id = ? AND status = 'running'", (text, task_id))
     _finish(conn, task, "done", SENT_TO_CLIENT + ("" if text.strip() == str(task["body"] or "").strip() else ", текст изменён"), now, author, text)
+    if token.startswith("arrived-"):                               # «…Отправьте вручную.» of «Входящие» about it: answered, nobody writes it twice
+        try:
+            chats._inbox_done(conn, token, now, "отправлено из «Сообщений по заказу»")
+        except Exception:
+            conn.rollback()
     return chat["id"]
 
 
@@ -451,6 +486,27 @@ def close_after_send(conn, token, text: str, now: str, how: str) -> bool:
         conn.execute("UPDATE order_task SET body = ? WHERE id = ? AND status IN ('pending', 'running', 'error')", (text, task["id"]))
     _finish(conn, task, "done", "%s системой (%s)" % (SENT_TO_CLIENT, how), now, chats.SYSTEM, text)
     return True
+
+
+def sent_by_hand(conn, task_id, now: str, author: str) -> None:
+    """«Отправлено вручную» of a message: a person wrote it themselves — also while it lacks a value (the draft was copied); never sent by
+    the panel after it. Its «Не дошло клиенту» (order_unsent) is closed and the lines of «Входящие» about its send mark are answered (as
+    unsent.sent_by_hand): nobody writes it to the client a second time."""
+    task = get_task(conn, task_id)
+    if task["kind"] != "message":
+        raise OrderError("Это не сообщение.")
+    if task["status"] not in ("pending", "error"):
+        raise OrderError("Это сообщение уже отправляется или обработано.")
+    cur = conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status IN ('pending', 'error')",
+                       ("отправлено вручную", now, task_id))
+    if cur.rowcount != 1:                                          # a send or another press got there first
+        conn.rollback()
+        raise OrderError("Это сообщение уже отправляется или обработано.")
+    token = task_token(task)
+    conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE token = ? AND closed_at IS NULL", (now, author, token))
+    orders.add_event(conn, task["order_id"], now, author, "rule", "%s: %s (отправлено вручную)" % (task["title"], STATUS_NAMES["done"]), level="grey")
+    conn.commit()
+    chats._inbox_close(conn, token, now, "Итог: отправлено вручную из «Сообщений по заказу» (%s)." % author, alerts=True)
 
 
 def skip_task(conn, task_id, now: str, author: str) -> None:
