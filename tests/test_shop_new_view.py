@@ -292,7 +292,7 @@ def test_on_minus_stops_at_one_and_delete_drops_the_tyre(tmp_path):
     new_view(conn, "off")
     add(client, k, qty="1")
     old = page(client, "/shop/cart")
-    assert ">Убрать</button>" in old and "disabled" not in old                                  # the old cart as it was
+    assert ">Убрать</button>" in old and 'aria-label="Меньше"' not in old                       # the old cart as it was
 
 
 def test_on_a_tyre_opens_its_card_with_the_big_photo_and_the_buy(tmp_path):
@@ -328,3 +328,11 @@ def test_on_my_orders_shows_how_many_are_open(tmp_path):
     conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE code = 'done') WHERE id = ?", (order_id(r),))
     conn.commit()
     assert '"Заказы в работе">1</b>' in nav(page(client, "/shop/orders"))                   # «Выполнен» is not in the digit
+    conn.execute("INSERT INTO order_stage (code, name, position, kind) VALUES ('', 'Свой закрытый', 98, 'won')")
+    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE name = 'Свой закрытый') WHERE id = 1")
+    conn.commit()
+    assert shop_cart.open_orders(conn, "buyer") == 0                                          # a stage of the owner: by its kind
+    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE code = 'from_point') WHERE id = 1")
+    conn.execute("UPDATE order_card SET sale_ids = 'not json' WHERE id = 1")                 # an order the card cannot read
+    conn.commit()
+    assert shop_cart.open_orders(conn, "buyer") == 1                                          # the count never reads the card

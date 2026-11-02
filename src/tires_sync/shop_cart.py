@@ -338,9 +338,13 @@ def my_orders(conn, login: str) -> List[dict]:
 
 
 def open_orders(conn, login: str) -> int:
-    """How many of the login's orders are not «Выполнен» nor «Отменён» (the digit on «Мои заказы» of «Новый вид»): the statuses of
-    my_orders, so a merged order counts as its new order does."""
-    return sum(1 for o in my_orders(conn, login) if o["status"] not in ("Выполнен", "Отменён"))
+    """How many of the login's orders are in work (the digit on «Мои заказы» of «Новый вид»): one query on every page, never a card read
+    (one order a card cannot read never stops the client's pages). A stage of ours by its code (not «Выполнен» nor «Отменён»: a merged
+    order is cancelled, its tyres count in the new one), a stage the owner made by its kind (open)."""
+    closed = [code for code, shown in STATUS.items() if shown in ("Выполнен", "Отменён")]
+    return conn.execute("SELECT COUNT(*) FROM shop_order o JOIN order_card c ON c.id = o.order_id JOIN order_stage s ON s.id = c.stage_id "
+                        "WHERE o.login = ? AND CASE WHEN s.code != '' THEN s.code NOT IN (%s) ELSE s.kind = 'open' END"
+                        % ", ".join("?" * len(closed)), [login] + closed).fetchone()[0]
 
 
 def _receive(conn, card: dict, way: str, place: str) -> str:
