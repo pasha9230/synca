@@ -21,6 +21,7 @@ body.ui-new{
   --sh-xs:none; --sh-sm:none;
   --sh-md:0 0 0 1px #D0D7DE,0 8px 24px rgba(66,74,83,.12); --sh-lg:var(--sh-md); --sh-xl:var(--sh-md);
   --s-2:7px; --s-3:10px; --s-4:14px; --s-6:20px; --s-8:28px;
+  --ring:0 0 0 2px var(--gray-0),0 0 0 4px var(--primary-600);   /* :root computes it from its own values: again here */
   background:var(--gray-0);color:var(--gray-900)
 }
 body.ui-new h1{font-size:22px;line-height:30px}

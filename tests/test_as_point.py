@@ -340,14 +340,19 @@ def test_the_stop_names_the_point(w):
 
 
 def test_the_persons_own_settings_are_not_changed_from_the_point(w):
-    """The columns of the list and the mark of the tour are the person's own (user_pref): as a point they stay as the office left them."""
-    from tires_sync import user_prefs
+    """The columns of the list, the mark of the tour and the filters of the lists are the person's own (user_pref): as a point they stay as
+    the office left them."""
     conn = w["conn"]
     client = owner(w)
+    client.get("/orders?t=1", headers={"Referer": "http://localhost/orders"})          # the office's filter of the list
     as_point(client, w["pa"])
-    before = conn.execute("SELECT COUNT(*) FROM user_pref").fetchone()[0]
+    before = conn.execute("SELECT login, key, value FROM user_pref ORDER BY login, key").fetchall()
+    assert before == [("owner", "f.orders_page", '{"t":["1"]}')]
     post(client, "/orders/list/columns", "tok", order="Имя", shown="Имя")                # a real column: a save would write it
     post(client, "/tour/done", "tok", how="skip")
     post(client, "/tour/again", "tok")
-    assert conn.execute("SELECT COUNT(*) FROM user_pref").fetchone()[0] == before
+    client.get("/orders?t=2", headers={"Referer": "http://localhost/orders"})
+    assert conn.execute("SELECT login, key, value FROM user_pref ORDER BY login, key").fetchall() == before
+    client.get("/orders?reset=1", headers={"Referer": "http://localhost/orders"})
+    assert conn.execute("SELECT login, key, value FROM user_pref ORDER BY login, key").fetchall() == before
     assert 'data-tour-root' not in client.get("/my-point").get_data(as_text=True)
