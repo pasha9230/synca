@@ -1,7 +1,8 @@
 """The owner's Google table of orders, sheet «Заказы» (`docs/DECISIONS.md`, 2026-10-23): the panel fills it by itself.
 
 A row is a position of an order. An order joins the table when it is placed (the button «Оформить в WebMIM» or the move to «Заказ
-оформлен» or later) while the table is switched on in «Подключения → Google-таблица»: the orders placed before never do. Its rows are
+оформлен» or later) while the table is switched on in «Подключения → Google-таблица»: the orders placed before never do. It stays only
+while its stage is «Заказ оформлен» or later (`listed`, the owner 2026-11-02): moved back, its rows stay, filled grey; placed again, the fill goes. Its rows are
 written once with every column, then only the columns that follow the order (UPDATED) are kept up to date; the owner's own columns and
 rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
 it finds a row by the value «tires:<order>:<position>» in its hidden column «tires_id» (the script adds and hides it; a value moves with
@@ -27,10 +28,12 @@ KIND = "gsheet"
 SHEET = "Заказы"
 COLUMNS = ("Дата счета", "№ заказа MIM", "Перемещение MIM", "Артикул", "Наименование", "Кол-во", "Цена MIM", "Сумма MIM",
            "Цена продажи", "Сумма продажи", "Имя", "Телефон", "ПВЗ", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
-           "Уведомление точке", "Уведомление клиенту", "Примечание")
+           "Уведомление точке", "Уведомление клиенту", "Аккаунт", "Примечание")
 OWNERS = ("Примечание",)                    # never filled (the owner 2026-10-30): «Примечание» is the people's; «Дата» is gone (2026-11-01)
-SENT = tuple(c for c in COLUMNS if c not in OWNERS)            # what a new row is written with (a sheet without «Примечание» still takes it)
-ASKED = tuple(c for c in COLUMNS if c != "Примечание")         # what «Проверить» asks for; never «tires_id» (the script's KEY_COLUMN:
+OPTIONAL = ("Аккаунт",)                     # the owner 2026-11-02: sent apart («extra»), written only where the sheet has the column; a sheet
+                                            # without it (or a script before 2026-11-02, which never reads «extra») takes the rest all the same
+SENT = tuple(c for c in COLUMNS if c not in OWNERS + OPTIONAL)  # what a new row is written with (a sheet without «Примечание» still takes it)
+ASKED = tuple(c for c in COLUMNS if c != "Примечание" and c not in OPTIONAL)   # what «Проверить» needs; never «tires_id» (the script's KEY_COLUMN:
                                                                # it adds the hidden column by itself, the panel never sends nor reads it)
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
@@ -126,9 +129,29 @@ def _secret(conn, box, s: dict) -> Optional[str]:
 
 # ---- the queue ----------------------------------------------------------------------------------------------------------------------
 
+LISTED_CODES = orders.PLACED_CODES + ("cancel", "refused", "return", orders.RETURN_GIVEN)   # «Заказ оформлен» and the system stages after it
+BEFORE_CODES = ("new", "talk", "wait", orders.FROM_POINT[0])                                  # before placing, wherever the owner puts them
+
+
+def listed(conn, card_id: int) -> bool:
+    """The order belongs in the table now (the owner 2026-11-02): its stage is «Заказ оформлен» or after it — a system stage by its code
+    (moving a stage in the pipeline turns no row grey, the review of 2026-11-02), an own stage of the owner by its place after «Заказ
+    оформлен» (orders._needs_placed decides so too). An order back on an earlier stage keeps its rows, filled grey (send_order), and loses
+    the fill when it is placed again. A pipeline without «Заказ оформлен»: every own stage."""
+    row = conn.execute("SELECT s.code, s.position, s.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.id = ?", (int(card_id),)).fetchone()
+    if row is None:
+        return False
+    code, position, stage_id = row
+    if code in LISTED_CODES or code in BEFORE_CODES:
+        return code in LISTED_CODES
+    placed = orders._placed_stage(conn)
+    return placed is None or (position, stage_id) >= (placed["position"], placed["id"])          # the order of list_stages
+
+
 def enroll(conn, card_id: int, now: str) -> None:
-    """The order is placed: it joins the table if the table is on. In the caller's transaction; once (a second placing keeps the first)."""
-    if enabled(conn):
+    """The order is placed: it joins the table if the table is on and the order stands on «Заказ оформлен» or later (listed: the button
+    «Оформить в WebMIM» whose move of the stage failed puts nothing in). In the caller's transaction; once (a second placing keeps the first)."""
+    if enabled(conn) and listed(conn, card_id):
         conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (int(card_id), now))
 
 
@@ -195,7 +218,7 @@ def realization(card: dict) -> str:
     code = card["stage"].get("code")
     if code == "done":
         return FROM_STOCK if card["deal_kind"] == "stock" else REALIZED
-    return REFUSED if code in ("cancel", "refused", "return", "oth", orders.RETURN_GIVEN) else ""      # «Возврат передан»: the tyres of «На ОТХ» went back
+    return REFUSED if code == "oth" else ""          # the owner 2026-11-02: «О» is «На ОТХ» only; «Отмена», «Возврат», «Возврат передан»: empty
 
 
 def _invoice_day(conn, card: dict) -> str:
@@ -282,8 +305,17 @@ def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
     """The rows of the order now, as they go to the table: mark → {column of SENT: value}. Numbers are numbers, days are «YYYY-MM-DD» (the
     script makes them dates); the phone is sheet_phone. «Список» of the panel shows card_rows (the comment, the panel's phone)."""
     card = orders.get_card(conn, card_id)
-    phone = sheet_phone(card["client_phone"])
-    return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone}) for mark, row in card_rows(conn, card, placed_at, _sent(conn, card_id)).items()}
+    phone, account = sheet_phone(card["client_phone"]), account_label(conn, card_id)
+    return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone, "Аккаунт": account})
+            for mark, row in card_rows(conn, card, placed_at, _sent(conn, card_id)).items()}
+
+
+def account_label(conn, card_id: int) -> str:
+    """«Аккаунт» (the owner 2026-11-02): «Подпись в таблице заказов» of the order's Avito account — the account of its first chat, else of
+    its first call. No account, or an account without the label: empty. Only the table has it: the list of «Заказы» and a point never do."""
+    row = (conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? ORDER BY id LIMIT 1", (int(card_id),)).fetchone()
+           or conn.execute("SELECT account_id FROM avito_call WHERE order_id = ? ORDER BY call_at, id LIMIT 1", (int(card_id),)).fetchone())
+    return connections.get_sheet_label(conn, row[0]) if row and row[0] is not None else ""
 
 
 def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] = None) -> Dict[str, dict]:
@@ -330,20 +362,32 @@ def followed(conn, card_id: int) -> set:
     return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)}
 
 
-def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=()) -> List[dict]:
+def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey: bool = False) -> List[dict]:
     """What to send: a new position with every column (`create`), a written one with the columns of UPDATED that changed and the cells
     of CHECK as written (the script writes nothing into a row that no longer has them). A row the script did not find (the owner deleted or
     rewrote it) is not made again. `follow`: the rows whose quantity follows the order too (FOLLOWED: a position that gave tyres from «На ОТХ»
-    to a new order, the owner 2026-10-29)."""
+    to a new order, the owner 2026-10-29). OPTIONAL columns that changed go in «extra» (never an empty one into a new row). `grey`: the order
+    stands before «Заказ оформлен» (listed): its rows are filled grey, and the fill goes when it is placed again (`shade`, the owner
+    2026-11-02: the rows are never taken out)."""
     out = []
     for mark, fields in now_rows.items():
         before = written.get(mark)
+        extra = {c: fields[c] for c in OPTIONAL if c in fields and fields[c] != (before or {}).get(c, "")}
         if before is None:
-            out.append({"key": mark, "create": True, "fields": {c: fields[c] for c in SENT}})
+            op = {"key": mark, "create": True, "fields": {c: fields[c] for c in SENT}}
+            if grey:
+                op["shade"] = True
         elif not before.get("_missing"):
             diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
-            if diff:
-                out.append({"key": mark, "create": False, "fields": diff, "check": {c: before.get(c, "") for c in CHECK}})
+            shade = grey != bool(before.get("_grey"))
+            if not diff and not extra and not shade:
+                continue
+            op = {"key": mark, "create": False, "fields": diff, "check": {c: before.get(c, "") for c in CHECK}}
+            if shade:
+                op["shade"] = grey
+        else:
+            continue
+        out.append(dict(op, extra=extra) if extra else op)
     return out
 
 
@@ -382,14 +426,20 @@ def check(conn, box, http: Transport) -> str:
     secret = _secret(conn, box, s)
     if not secret:
         raise SheetError("Секрет не задан для этого адреса: впишите его." if connections.get_secret(conn, box, KIND, 0, "secret") else "Секрет не задан.")
-    answer = call(http, s["url"], {"secret": secret, "sheet": SHEET, "ping": True, "columns": list(ASKED)})
+    answer = call(http, s["url"], {"secret": secret, "sheet": SHEET, "ping": True, "columns": list(ASKED + OPTIONAL),
+                                     "optional": list(OPTIONAL)})          # a missing optional one never stops the look at the marks
     missing = [str(c) for c in answer.get("missing") or []]
-    if missing:
-        raise SheetError("На листе «%s» нет колонок: %s." % (SHEET, ", ".join(missing)))
+    needed = [c for c in missing if c not in OPTIONAL]
+    if needed:
+        raise SheetError("На листе «%s» нет колонок: %s." % (SHEET, ", ".join(needed)))
     said = "Таблица отвечает: лист «%s», все колонки на месте." % SHEET
+    if missing:                                                            # the owner 2026-11-02: a warning, the rows go all the same
+        said = ("Таблица отвечает: лист «%s», нужные колонки на месте. Нет колонки %s: добавьте её в первую строку листа, иначе она не "
+                "заполняется (остальное пишется и без неё; строки, отправленные без неё, заполнятся, только когда подпись аккаунта изменится)."
+                % (SHEET, ", ".join("«%s»" % c for c in missing)))
     number = lambda name: answer.get(name) if isinstance(answer.get(name), int) and not isinstance(answer.get(name), bool) else None
     marked, moved, blocked = number("marked"), number("moved"), number("blocked")
-    if marked is None:                                                     # an older script: it says nothing of the marks
+    if marked is None or (missing and answer.get("optional") is not True):  # an older script: no word of the marks (or none looked at)
         return said
     said += (" Строк с меткой (скрытая колонка «tires_id»): %d, перенесено сейчас из примечаний: %d, не перенесено: %d."
              % (marked, moved or 0, blocked or 0))
@@ -416,7 +466,7 @@ def _last_event(conn, card_id: int) -> int:
 def _names(items: List[dict]) -> str:
     seen: List[str] = []
     for op in items:
-        for c in op["fields"]:
+        for c in list(op["fields"]) + list(op.get("extra") or {}):
             if c not in seen:
                 seen.append(c)
     return ", ".join(c for c in COLUMNS if c in seen)
@@ -437,7 +487,7 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     placed_at, written, failing = row[0], json.loads(row[1] or "{}"), row[2]
     seen = _last_event(conn, card_id)                                      # before the rows: a change made while Google answers is looked at again
     current = rows_of(conn, card_id, placed_at)
-    ops = changes(current, written, followed(conn, card_id))
+    ops = changes(current, written, followed(conn, card_id), grey=not listed(conn, card_id))   # back before «Заказ оформлен»: grey
     gone = [m for m in written if m not in current and not written[m].get("_gone")]
     for m in gone:
         written[m]["_gone"] = True
@@ -453,19 +503,31 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
         return _failed(conn, card_id, failing, str(err), now, seen)
     replies = [r for r in answer.get("results") or [] if isinstance(r, dict)]
     results = {str(r.get("key")): str(r.get("status")) for r in replies}
+    shaded = {str(r.get("key")): r.get("shade") for r in replies}          # the fill the script made (a script before 2026-11-02 says nothing)
     why = next((str(r.get("error"))[:200] for r in replies if r.get("error")), "")
-    made = [op for op in ops if op["create"] and results.get(op["key"]) in ("created", "updated")]     # updated: made by a send whose answer was lost
-    kept = [op for op in ops if not op["create"] and results.get(op["key"]) == "updated"]
+    unshaded = [op for op in ops if "shade" in op and results.get(op["key"]) in ("created", "updated") and shaded.get(op["key"]) is not op["shade"]]
+    if unshaded and not why:
+        why = "скрипт таблицы не умеет заливать строки: нужно новое развертывание Apps Script"
+    made = [op for op in ops if op["create"] and results.get(op["key"]) in ("created", "updated") and op not in unshaded]   # updated: made
+    kept = [op for op in ops if not op["create"] and results.get(op["key"]) == "updated" and op not in unshaded]            # by a lost answer
     missing = [op for op in ops if results.get(op["key"]) == "missing"]
     for op in made + kept:
-        written[op["key"]] = dict(written.get(op["key"], {}), **op["fields"])
+        written[op["key"]] = dict(written.get(op["key"], {}), **op["fields"], **op.get("extra", {}))
+        if "shade" in op:
+            written[op["key"]]["_grey"] = op["shade"]
     for op in missing:
         written[op["key"]] = dict(written.get(op["key"], {}), _missing=True)
     lines = []
     if made:
         lines.append("Записано в Google-таблицу: %d стр." % len(made))
-    if kept:
-        lines.append("Google-таблица обновлена: %s." % _names(kept))
+    if any(op["fields"] or op.get("extra") for op in kept):
+        lines.append("Google-таблица обновлена: %s." % _names([op for op in kept if op["fields"] or op.get("extra")]))
+    greyed = [op for op in made + kept if op.get("shade") is True]
+    cleared = [op for op in kept if op.get("shade") is False]
+    if greyed:
+        lines.append("Заказ на этапе до «Заказ оформлен»: строки Google-таблицы залиты серым: %d стр." % len(greyed))
+    if cleared:
+        lines.append("Заказ снова оформлен: серая заливка строк Google-таблицы снята: %d стр." % len(cleared))
     if missing:
         lines.append("Строка Google-таблицы изменена или удалена вручную (другой артикул или строки нет): %d стр. "
                      "Заново не создаём, обновления этих строк не идут." % len(missing))

@@ -390,14 +390,14 @@ def test_the_point_after_no_show_is_asked_and_moves_the_order_to_oth(tmp_path):
 
 # ---- review fixes -------------------------------------------------------------------------------------------------------------------
 
-def test_the_sheet_says_refused_for_a_return_given_and_the_point_bell_stays_quiet(tmp_path):
+def test_the_sheet_says_nothing_for_a_return_given_and_the_point_bell_stays_quiet(tmp_path):
     from tires_sync import order_sheet
     from tires_sync.panel import routes_alerts
     app, client, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid)
     order_oth.agree(conn, orders.get_card(conn, oth), date(2026, 10, 28), NOW, "owner")
     order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "gamma")
-    assert order_sheet.realization(orders.get_card(conn, oth)) == order_sheet.REFUSED
+    assert order_sheet.realization(orders.get_card(conn, oth)) == ""          # the owner 2026-11-02: «О» is «На ОТХ» only
     assert routes_alerts.is_return_ask({"kind": "point", "text": order_oth.SIGNED_ASK})
     mine, order_id = _handed_over(app, conn, pid, login_="gamma3")
     post(mine, "/my-point/handoff/%d/cancel" % order_id, "tok")
