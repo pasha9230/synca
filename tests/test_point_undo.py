@@ -79,11 +79,13 @@ def test_issued_is_undone_into_the_same_stay_at_the_point(tmp_path, clock, told)
     mine = manager(app, conn, pid)
     press(mine, card, "issued")
     assert orders.get_card(conn, card)["stage"]["code"] == "done"
+    reserve_lines = lambda: [e["text"] for e in orders.list_events(conn, card) if e["text"].startswith("Резерв: товар на точке")]
+    lines_before = reserve_lines()
     clock["now"] = T2
     undo(mine, card)
     assert state(conn, card) == before and to_client(app) == []                          # the same stay: no new «можно забирать»
     texts = [e["text"] for e in orders.list_events(conn, card)]
-    assert not [t for t in texts if t.startswith("Резерв: товар на точке")][0].endswith("2026-10-19")     # no new date of the undo's move
+    assert reserve_lines() == lines_before                                             # the undo's move leaves no «Резерв…» line of its own
     assert any("снова на этапе «Товар на точке», резерв до 16.10.2026" in t for t in texts)
     assert not any("[резерв:на-отх:" in t for t in texts)                               # no reminder went: a later one still counts
 
