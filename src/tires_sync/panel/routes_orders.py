@@ -25,6 +25,7 @@ from .routes_main import context
 log = logging.getLogger(__name__)
 
 
+AUTOSAVED = ("client_name", "client_phone", "point_id", "deal_kind", "responsible")     # saved by themselves on change (order_autosave)
 ORDER_PARTS = ("items", "wants", "money")        # the parts of the order page a form comes back to (old links name them as ?tab=)
 
 
@@ -1176,6 +1177,32 @@ def register(app) -> None:
                 flash(str(err), "error")                                  # the fields stay saved; the refusal is a red record of the journal
         part = part or request.form.get("tab", "")
         return back(card_id, part if part in ORDER_PARTS else "")
+
+    @app.route("/orders/<int:card_id>/autosave", methods=["POST"])
+    @login_required
+    def order_autosave(card_id):
+        """One field of the window saved by itself (the owner 2026-11-02: the client's name, the phone, the point, the deal, the responsible),
+        checked and written in the journal as «Сохранить» does; the rights are «Сохранить»'s (a point has none). JSON: {ok, value} — the
+        value as stored, for the window's `was` — or {ok: false, error}."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        key = request.form.get("field", "")
+        if key not in AUTOSAVED or key not in request.form:
+            return jsonify(ok=False, error="Это поле само не сохраняется: нажмите «Сохранить»."), 400
+        changes = _touched(conn, {key: request.form[key]}, request.form.get("was"), orders._row(conn, card_id))
+        if changes.get("responsible") == card["responsible"]:
+            changes.pop("responsible")                                       # as «Сохранить»: who answers now is nobody new
+        lacking_before = {t["id"] for t in engine.list_tasks(conn, card_id, ("error",)) if t["kind"] == "message"}
+        try:
+            check_responsible(app, conn, changes.get("responsible"), card["responsible"])
+            changed = orders.update_card(conn, card_id, changes, local_iso(), author())
+        except orders.OrderError as err:
+            return jsonify(ok=False, error=str(err)), 400
+        if changed and lacking_before:                                    # a lacking value typed (the phone): the waiting messages, as «Сохранить»
+            engine.refresh_tasks(conn, card_id, local_iso())
+            if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
+                offer_waiting(conn, card_id)
+        return jsonify(ok=True, value=orders._row(conn, card_id)[key])
 
     @app.route("/orders/webmim")
     @login_required

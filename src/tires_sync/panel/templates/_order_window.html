@@ -9,6 +9,7 @@
 {# without the right to change the order (the viewer, the manager of a point) the window is read-only: no form, the fields are disabled, no buttons;
    the positions, the deletion and the chats have the same right as the window (orders, «менять»), the deletion needs «удалять» on top #}
 {% set ro = not can_post("order_save" if card else "order_new") %}
+{% set auto = " data-autosave" if card and not ro else "" %}{# the client, the phone, the point, the deal, the responsible save by themselves (order_autosave, app.js; the owner 2026-11-02) #}
 {% set can_delete = card and can_post("order_delete") %}
 <section class="card owin" aria-labelledby="{{ 'ow-title-kind ' if card else '' }}ow-title">
 {% if ro %}<div id="ow-main"><fieldset disabled style="border:0;padding:0;margin:0;min-width:0">{% else %}<form id="ow-main" method="post" action="{{ '/orders/%d/save' % c.id if card else '/orders/new' }}" data-once data-owin>
@@ -36,11 +37,11 @@
 </div>
 <div class="owin-body">
 <div class="owin-grid">
-<label class="field"><span class="label">Имя клиента{% if card and c.client and can("clients") %} · <a href="/clients/{{ c.client.id }}">карточка клиента №{{ c.client.id }}</a>{% endif %}</span><input class="input" name="client_name" value="{{ v.client_name or '' }}" maxlength="120"{% if not card %} autofocus{% endif %}></label>
-<div class="field"><label class="label" for="client-phone">Телефон</label><div class="row" style="gap:var(--s-2)"><input class="input grow" id="client-phone" type="tel" inputmode="tel" autocomplete="tel" name="client_phone" value="{{ v.client_phone or '' }}" maxlength="30" placeholder="+7 900 000-00-00">{% if card and c.client_phone %}<button type="button" class="btn btn--secondary btn--sm" data-copy="client-phone">Копировать</button>{% endif %}</div></div>
-<label class="field"><span class="label">Точка (ПВЗ)</span><select class="select" name="point_id"><option value="">Не выбрана</option>{% for p in points %}<option value="{{ p.id }}"{% if v.point_id|string == p.id|string %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>{% if card and c.point %}<span class="hint">Менеджер: {{ c.point.manager_name or "не указан" }}{% if c.point.manager_phone %} · {{ c.point.manager_phone|phone }}{% endif %}</span>{% endif %}</label>
-<label class="field"><span class="label">Тип сделки</span><select class="select" name="deal_kind">{% for key, label in deal_kinds.items() %}<option value="{{ key }}"{% if (v.deal_kind or "webmim") == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-<label class="field"><span class="label">Ответственный (ему приходят уведомления)</span><select class="select" name="responsible">{% for o in responsible_options %}<option value="{{ o.login }}"{% if o.login == v.responsible %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Имя клиента{% if card and c.client and can("clients") %} · <a href="/clients/{{ c.client.id }}">карточка клиента №{{ c.client.id }}</a>{% endif %}</span><input class="input" name="client_name" value="{{ v.client_name or '' }}" maxlength="120"{{ auto }}{% if not card %} autofocus{% endif %}></label>
+<div class="field"><label class="label" for="client-phone">Телефон</label><div class="row" style="gap:var(--s-2)"><input class="input grow" id="client-phone" type="tel" inputmode="tel" autocomplete="tel" name="client_phone" value="{{ v.client_phone or '' }}" maxlength="30"{{ auto }} placeholder="+7 900 000-00-00">{% if card and c.client_phone %}<button type="button" class="btn btn--secondary btn--sm" data-copy="client-phone">Копировать</button>{% endif %}</div></div>
+<label class="field"><span class="label">Точка (ПВЗ)</span><select class="select" name="point_id"{{ auto }}><option value="">Не выбрана</option>{% for p in points %}<option value="{{ p.id }}"{% if v.point_id|string == p.id|string %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>{% if card and c.point %}<span class="hint">Менеджер: {{ c.point.manager_name or "не указан" }}{% if c.point.manager_phone %} · {{ c.point.manager_phone|phone }}{% endif %}</span>{% endif %}</label>
+<label class="field"><span class="label">Тип сделки</span><select class="select" name="deal_kind"{{ auto }}>{% for key, label in deal_kinds.items() %}<option value="{{ key }}"{% if (v.deal_kind or "webmim") == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Ответственный (ему приходят уведомления)</span><select class="select" name="responsible"{{ auto }}>{% for o in responsible_options %}<option value="{{ o.login }}"{% if o.login == v.responsible %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
 </div>
 
 <h2 class="owin-sec" id="items">Позиции</h2>

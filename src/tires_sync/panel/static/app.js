@@ -885,6 +885,53 @@
     if (value.form) value.form.addEventListener("submit", add);                // a tag typed but not yet added goes too
   });
 
+  // 13e) Окно заказа: клиент, телефон, точка, тип сделки и ответственный сохраняются сами (решение владельца 2026-11-02) — текст через
+  // секунду после ввода и при уходе с поля, список сразу при выборе; рядом «сохранено» или ошибка. Права и проверки те же, что у «Сохранить»
+  // (/orders/<id>/autosave); ответ даёт сохранённое значение, оно уходит в «was» окна, чтобы «Сохранить» потом сравнивал с ним
+  document.querySelectorAll("form[data-owin]").forEach(function (form) {
+    var fields = form.querySelectorAll("[data-autosave]"), was = form.querySelector("input[name=was]"), csrf = form.querySelector("input[name=csrf]");
+    var url = String(form.getAttribute("action") || "").replace(/\/save$/, "/autosave");
+    if (!fields.length || !was || !csrf || !/\/autosave$/.test(url)) return;
+    fields.forEach(function (field) {
+      var saved = field.value, busy = false, again = false, timer = null, hide = null, mark = document.createElement("span");
+      mark.className = "hint"; mark.setAttribute("data-autosave-mark", ""); mark.setAttribute("aria-live", "polite");
+      (field.closest(".field") || field.parentNode).appendChild(mark);
+      function show(text, bad) {
+        clearTimeout(hide);
+        mark.textContent = text; mark.className = bad ? "hint hint--err" : "hint text-ok";
+        if (bad) mark.setAttribute("role", "alert"); else mark.removeAttribute("role");
+        if (!bad && text) hide = setTimeout(function () { mark.textContent = ""; }, 3000);
+      }
+      function save() {
+        clearTimeout(timer);
+        if (field.value === saved) { if (mark.getAttribute("role") === "alert") show("", false); return; }   // typed back: nothing to save
+        if (busy) { again = true; return; }                                 // one request a field at a time: the newest value goes after it
+        busy = true;
+        var value = field.value, data = new FormData();
+        data.append("csrf", csrf.value); data.append("was", was.value); data.append("field", field.name); data.append(field.name, value);
+        show("сохраняю…", false);
+        fetch(url, {method: "POST", body: data, credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
+          .then(function (r) {
+            return r.json().catch(function () { return {ok: false, error: r.status === 403 ? "нет права менять заказ" : "ошибка сервера (" + r.status + ")"}; });
+          })
+          .then(function (res) {
+            if (!res.ok) { show("Не сохранено: " + (res.error || "ошибка"), true); return; }
+            saved = value;
+            try { var shown = JSON.parse(was.value); shown[field.name] = res.value; was.value = JSON.stringify(shown); } catch (e) { /* «Сохранить» takes all */ }
+            show("сохранено", false);
+          })
+          .catch(function () { show("Не сохранено: проверьте соединение", true); })
+          .then(function () { busy = false; if (again) { again = false; save(); } });
+      }
+      if (field.tagName === "SELECT") {
+        field.addEventListener("change", save);
+      } else {
+        field.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(save, 1000); });
+        field.addEventListener("change", save);
+        field.addEventListener("blur", save);
+      }
+    });
+  });
   // 13a) Заказ: ссылка на часть страницы (#wants после правки строки «Что нужно клиенту») раскрывает её, если она свёрнута
   (function () {
     var part = location.hash && document.getElementById(location.hash.slice(1));
