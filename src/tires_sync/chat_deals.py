@@ -124,8 +124,8 @@ CLEARED_BY_HAND = "%s: (пусто)" % orders.LABELS["point_id"]             # t
 
 def claim_point(conn, card_id, point_id, now: str, author: str, text: str, auto: bool = False) -> bool:
     """The order of no point becomes the point's: one UPDATE with the condition (as «Взять»), so a point set meanwhile is never changed;
-    the record only when it was written. `auto` (the binding by a chat): only an open order whose point no person took off. The point's usual
-    delivery time comes with it when no time is there, as when a person chooses the point (orders._default_time). Not saved."""
+    the record only when it was written. `auto` (the binding by a chat): only an open order whose point no person took off. Not saved.
+    The point's usual delivery time is not copied into the order (the owner 2026-11-02: no time in the card; WebMIM gets the point's)."""
     extra = (" AND stage_id IN (SELECT id FROM order_stage WHERE kind = 'open') AND NOT EXISTS (SELECT 1 FROM order_event e WHERE "
              "e.order_id = order_card.id AND e.kind = 'field' AND e.text = ? AND e.author != ?)") if auto else ""
     args = (point_id, now, card_id, point_id) + ((CLEARED_BY_HAND, SYSTEM_AUTHOR) if auto else ())
@@ -133,9 +133,6 @@ def claim_point(conn, card_id, point_id, now: str, author: str, text: str, auto:
                     + extra, args).rowcount != 1:
         return False
     orders.add_event(conn, card_id, now, author, "field", text)
-    usual = conn.execute("SELECT default_time FROM point WHERE id = ?", (point_id,)).fetchone()[0]
-    if usual and conn.execute("UPDATE order_card SET delivery_time = ? WHERE id = ? AND delivery_time = ''", (usual, card_id)).rowcount == 1:
-        orders.add_event(conn, card_id, now, author, "field", "%s: %s" % (orders.LABELS["delivery_time"], str(usual)[:80]))     # as update_card says it
     return True
 
 

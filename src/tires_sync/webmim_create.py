@@ -103,7 +103,7 @@ def checks(conn, card: dict, today: date, mode: str = "new") -> List[Tuple[str, 
         if not webmim_phone(point["manager_phone"]):
             out.append(("phone", "У точки «%s» телефон не российский мобильный или не указан: он контактный телефон доставки." % point["name"]))
         if not (card.get("delivery_time") or point["default_time"]):
-            out.append(("time", "Не указано время доставки (в заказе или время точки по умолчанию)."))
+            out.append(("time", "У точки «%s» не указано время доставки по умолчанию (Подключения → Точки)." % point["name"]))
     if not card.get("delivery_date"):
         out.append(("date", "Не указана дата доставки."))
     elif card["delivery_date"] < today.isoformat() and mode == "new":

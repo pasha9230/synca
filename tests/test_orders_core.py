@@ -545,15 +545,16 @@ def test_a_position_keeps_the_suppliers_article_and_falls_back_to_the_internal_c
     assert "Код T743172" in text and "Код 777" in text and "126496625866" not in text
 
 
-def test_the_delivery_time_of_the_point_is_filled_in_when_the_point_is_chosen_and_never_over_a_typed_one(tmp_path):
+def test_the_delivery_time_of_the_point_is_never_copied_in_and_an_old_one_is_kept(tmp_path):
+    """The owner 2026-11-02: no «Время доставки» in the card; the point's usual time is not copied in (WebMIM and the messages take it)."""
     from tires_sync import order_points as points
     conn = db(tmp_path)
     pid = points.save_point(conn, dict(name="Бета", default_time="с 10 до 20"))
     cid = orders.create_card(conn, dict(client_name="Иван", point_id=pid), NOW, "o")
-    assert orders.get_card(conn, cid)["delivery_time"] == "с 10 до 20"                                   # a new deal on a point
+    assert orders.get_card(conn, cid)["delivery_time"] == ""                                             # a new deal on a point
     other = orders.create_card(conn, dict(client_name="Пётр"), NOW, "o")
-    orders.update_card(conn, other, dict(point_id=str(pid), delivery_time=""), NOW, "o")                 # the card form sends an empty time with the point
-    assert orders.get_card(conn, other)["delivery_time"] == "с 10 до 20"
+    orders.update_card(conn, other, dict(point_id=str(pid)), NOW, "o")
+    assert orders.get_card(conn, other)["delivery_time"] == ""
     typed = orders.create_card(conn, dict(client_name="Анна", point_id=pid, delivery_time="до 18:00"), NOW, "o")
     assert orders.get_card(conn, typed)["delivery_time"] == "до 18:00"
     orders.update_card(conn, other, dict(delivery_time="завтра"), NOW, "o")

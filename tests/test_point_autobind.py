@@ -242,20 +242,20 @@ def _usual_time(conn, point_id, account_id=None):
     points.save_point(conn, data, point_id)
 
 
-def test_the_point_bound_by_the_chat_brings_its_usual_delivery_time_and_a_time_typed_stays(tmp_path):
+def test_the_point_bound_by_the_chat_brings_no_delivery_time_and_an_old_time_stays(tmp_path):
+    """The owner 2026-11-02: no «Время доставки» in the card — the point's usual time is not copied in (WebMIM gets the point's own)."""
     w = base(tmp_path)
     _usual_time(w["conn"], w["rust"])
     card_id = deals.create_deal(w["conn"], w["petr"], NOW, "owner")
     card = orders.get_card(w["conn"], card_id)
-    assert card["point_id"] == w["rust"] and card["delivery_time"] == "с 12 до 18"
-    told = [e for e in orders.list_events(w["conn"], card_id) if e["text"].startswith("Время доставки:")]
-    assert len(told) == 1 and told[0]["author"] == deals.SYSTEM_AUTHOR and "с 12 до 18" in told[0]["text"]
+    assert card["point_id"] == w["rust"] and card["delivery_time"] == ""
+    assert [e for e in orders.list_events(w["conn"], card_id) if e["text"].startswith("Время доставки:")] == []
     typed = orders.create_card(w["conn"], {"client_name": "Пётр", "delivery_time": "после 19"}, NOW, "o")
     deals.link_chat(w["conn"], w["petr"], typed, NOW, "owner")
     assert orders.get_card(w["conn"], typed)["point_id"] == w["rust"] and orders.get_card(w["conn"], typed)["delivery_time"] == "после 19"
 
 
-def test_the_manager_of_the_point_brings_the_usual_time_too_and_never_a_point_that_is_gone(tmp_path):
+def test_the_manager_of_the_point_brings_no_time_either_and_never_a_point_that_is_gone(tmp_path):
     w = world(tmp_path)
     bind(w)
     _usual_time(w["conn"], w["rust"])
@@ -263,7 +263,7 @@ def test_the_manager_of_the_point_brings_the_usual_time_too_and_never_a_point_th
     manager, conn = person(w["app"], "point", w["rust"])
     manager.post("/chats/%d/create-deal" % w["petr"]["id"], data={"csrf": "tok"})
     card_id = chats.get_chat(conn, w["petr"]["id"])["order_id"]
-    assert orders.get_card(conn, card_id)["point_id"] == w["rust"] and orders.get_card(conn, card_id)["delivery_time"] == "с 12 до 18"
+    assert orders.get_card(conn, card_id)["point_id"] == w["rust"] and orders.get_card(conn, card_id)["delivery_time"] == ""
     free = orders.create_card(conn, {"client_name": "Никто"}, NOW, "o")
     assert deals.claim_point(conn, free, 999, NOW, "point1", "Точка: 999") is False                # no such point: nothing is written
     assert orders.get_card(conn, free)["point_id"] is None

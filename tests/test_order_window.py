@@ -34,9 +34,9 @@ def test_the_new_order_window_has_the_fields_in_the_order_of_the_mockup_and_the_
     users.add_user(conn, "worker2", "пароль-для-партнёра-1", "2026-10-15T12:00:00")
     page = client.get("/orders/new").get_data(as_text=True)
     order = ["client_name", "client_phone", "point_id", "deal_kind", "responsible", "item_query", "item_qty", "item_sale_unit", "delivery_date",
-             "delivery_time", "webmim_number", "transfer_number", "comment", "special_terms", "special_amount", "receipt_needed", "avito_chat", "source"]
+             "webmim_number", "transfer_number", "comment", "special_terms", "special_amount", "receipt_needed", "avito_chat", "source"]
     at = [page.index('name="%s"' % name) for name in order]
-    assert at == sorted(at)
+    assert at == sorted(at) and 'name="delivery_time"' not in page and "Время доставки" not in page     # the owner 2026-11-02: no time any more
     assert page.index('<summary>Дополнительно') < page.index('name="comment"')                   # the rare fields are folded
     assert 'name="tags"' in page and 'class="owin-head"' in page and "Закупка" not in page and "прибыль" not in page.lower()
     assert '<option value="owner" selected>' in page and 'value="worker2"' in page                 # the one who makes the order answers, another can be chosen

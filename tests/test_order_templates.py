@@ -48,6 +48,17 @@ def test_render_fills_every_variable_from_the_card(tmp_path):
     assert "15.10.2026" in text and "14:00" in text
 
 
+def test_the_delivery_time_is_the_points_usual_one_when_the_order_has_none(tmp_path):
+    """The owner 2026-11-02: no time in the card any more, so a template with {delivery_time} says the point's usual time, as WebMIM gets it;
+    an old order's own time goes first."""
+    conn = db(tmp_path)
+    pid = points.save_point(conn, dict(name="Альфа", default_time="с 12 до 20"))
+    new = orders.get_card(conn, orders.create_card(conn, dict(client_name="Иван", point_id=pid), NOW, "o"))
+    assert tpl.render(conn, new, "{delivery_time}") == ("с 12 до 20", [])
+    old = orders.get_card(conn, full_card(conn))
+    assert tpl.render(conn, old, "{delivery_time}") == ("14:00", [])
+
+
 def test_a_missing_value_is_reported_and_never_left_empty(tmp_path):
     conn = db(tmp_path)
     card = orders.get_card(conn, orders.create_card(conn, dict(client_name="Иван"), NOW, "o"))

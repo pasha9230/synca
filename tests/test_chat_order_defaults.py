@@ -132,7 +132,7 @@ def test_a_chat_of_a_points_account_gives_the_point_its_manager_the_next_day_and
     row = chat_of(conn, acc["yunona"], [("in", "Здравствуйте, актуально?")])
     card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
     assert card["point_id"] == pt["yunona"] and card["responsible"] == "yun"
-    assert card["delivery_date"] == "2026-10-27" and card["delivery_time"] == "с 12 до 20"
+    assert card["delivery_date"] == "2026-10-27" and card["delivery_time"] == ""         # the point's time is not copied (the owner 2026-11-02)
     assert any("по аккаунту Авито" in t and "Юнона" in t for t in journal(conn, card["id"]))
 
 
@@ -143,7 +143,7 @@ def test_a_points_account_always_keeps_its_point_whatever_the_client_names(tmp_p
     users.add_user(conn, "rus", "pass-word-1", NOW, role="point", point_id=pt["rustaveli"])
     row = chat_of(conn, acc["yunona"], [("in", "Здравствуйте"), ("out", "Забрать можно на Юноне или на Руставели"), ("in", "Мне на Руставели")])
     card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
-    assert card["point_id"] == pt["yunona"] and card["responsible"] == "yun" and card["delivery_time"] == "с 12 до 20"
+    assert card["point_id"] == pt["yunona"] and card["responsible"] == "yun" and card["delivery_time"] == ""
     assert any("по аккаунту Авито" in t and "Юнона" in t for t in journal(conn, card["id"]))
     assert not any(t.startswith("Точка из сообщения клиента") for t in journal(conn, card["id"]))
 
@@ -152,7 +152,7 @@ def test_the_client_naming_the_accounts_own_point_is_the_binding_by_the_account(
     conn, acc, pt = setup(tmp_path)
     row = chat_of(conn, acc["yunona"], [("in", "Заберу у вас на Юноне")])
     card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
-    assert card["point_id"] == pt["yunona"] and card["delivery_time"] == "с 12 до 20"
+    assert card["point_id"] == pt["yunona"] and card["delivery_time"] == ""
     assert any("по аккаунту Авито" in t for t in journal(conn, card["id"]))
     assert not any(t.startswith("Точка из сообщения клиента") for t in journal(conn, card["id"]))
 
@@ -173,7 +173,7 @@ def test_a_main_account_takes_the_point_from_the_clients_words_only(tmp_path):
     row = chat_of(conn, acc["main"], [("in", "Заберу на Юноне")])
     card = orders.get_card(conn, deals.create_deal(conn, row, NOW, "pavel"))
     assert card["point_id"] == pt["yunona"] and card["responsible"] == "worker2" and card["delivery_date"] == "2026-10-27"
-    assert card["delivery_time"] == "с 12 до 20"                                          # the point's usual time, as when a person chooses it
+    assert card["delivery_time"] == ""                     # the point's usual time is not copied into the order (the owner 2026-11-02)
     assert any(t.startswith("Точка из сообщения клиента: «Юнона»") for t in journal(conn, card["id"]))
 
 

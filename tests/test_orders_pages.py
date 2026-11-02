@@ -377,7 +377,8 @@ def test_the_card_shows_the_stages_the_summary_and_hides_the_rare_actions_in_the
     assert '<span class="owin-stage is-current" aria-current="step">Новый заказ · 0 дн.</span>' in funnel and "Выполнено" in funnel and "Отмена" not in funnel
     assert 'formaction="/orders/%d/save" name="stage_id" value="%d"' % (cid, stages(conn)["placed"]) in funnel        # a click on a stage saves the window and moves
     window = page[page.index('<form id="ow-main"'):page.index("</form>", page.index('<form id="ow-main"'))]
-    assert 'value="%d" selected>Гамма' % pid in window and 'value="2026-10-21"' in window and 'value="после 18"' in window and 'value="1234567"' in window
+    assert 'value="%d" selected>Гамма' % pid in window and 'value="2026-10-21"' in window and 'value="1234567"' in window
+    assert 'name="delivery_time"' not in window and 'value="после 18"' not in window                   # no time in the card (the owner 2026-11-02)
     menu = page[page.index('<details class="menu owin-menu">'):page.index("</details>", page.index('<details class="menu owin-menu">'))]
     assert 'form="ow-delete"' in menu and 'data-open-modal="finish-window"' in menu and '<form id="ow-delete" method="post" action="/orders/%d/delete"' % cid in page
     assert 'id="finish-window"' in page and 'value="%d"' % orders.get_stage(conn, [s for s in orders.list_stages(conn) if s["code"] == "cancel"][0]["id"])["id"] in page

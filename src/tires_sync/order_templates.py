@@ -123,7 +123,8 @@ def _order_date(conn, card: dict, now) -> str:
 
 
 def values(conn, card: dict, now=None) -> dict:
-    """The value of every variable for a card; an empty string where the card has nothing. `now`: local ISO time of the panel."""
+    """The value of every variable for a card; an empty string where the card has nothing. `now`: local ISO time of the panel.
+    {delivery_time}: the card's old time, else the point's usual one, as WebMIM gets it (the card has no time since 2026-11-02)."""
     point = card.get("point") or {}
     address = point.get("address") or ""                 # the address written for the point; else the one of its Avito address
     if not address and point.get("avito_address_id"):
@@ -149,7 +150,7 @@ def values(conn, card: dict, now=None) -> dict:
         "client_name": card.get("client_name", ""), "client_phone": card.get("client_phone", ""), "order_no": str(card["id"]),
         "items": "; ".join("%s × %d" % (i["name"], i["qty"]) for i in items), "total": money(total) if items else "",
         "point": point.get("name", ""), "point_address": address, "manager": point.get("name", ""),
-        "delivery_date": _date(card.get("delivery_date", "")) or (IN_STOCK if card.get("in_stock") else ""), "delivery_time": card.get("delivery_time", ""),
+        "delivery_date": _date(card.get("delivery_date", "")) or (IN_STOCK if card.get("in_stock") else ""), "delivery_time": card.get("delivery_time") or point.get("default_time") or "",
         "items_full": full, "webmim_number": card.get("webmim_number", ""), "transfer_number": card.get("transfer_number", ""), "hold_until": hold, "order_date": _order_date(conn, card, now),
         "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or "",
         "oth_orders": _oth_orders(conn, card["id"])}

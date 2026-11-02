@@ -462,19 +462,6 @@ def _first_stage(conn) -> dict:
     return stages[0]
 
 
-def _default_time(conn, clean: dict, current_time: str, current_point=None) -> None:
-    """A point chosen for a deal brings the point's usual delivery time, unless a time is there or was typed."""
-    point = clean.get("point_id")
-    if not point or point == current_point or clean.get("delivery_time") or current_time:
-        return
-    try:
-        usual = points_store.get_point(conn, point)["default_time"]
-    except points_store.PointError:
-        return
-    if usual:
-        clean["delivery_time"] = usual
-
-
 def create_card(conn, fields: dict, now: str, author: str, require_contact: bool = True, commit: bool = True, stage: Optional[dict] = None,
                 scope_point: Optional[int] = None, many_open: bool = False) -> int:
     """A new card on the first stage (or on `stage`). `commit=False` writes it without saving and without the rules of the stage: the caller saves and fires them.
@@ -484,7 +471,6 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
     clean = {k: _clean(k, v, conn) for k, v in fields.items() if k in EDITABLE}
     if require_contact and not any(clean.get(k) for k in ("client_name", "client_phone", "avito_chat")):
         raise OrderError("Укажите хотя бы имя, телефон или чат клиента.")
-    _default_time(conn, clean, "")
     stage = stage or _first_stage(conn)
     base = {"client_name": "", "client_phone": "", "avito_chat": "", "point_id": None, "delivery_date": "", "delivery_time": "", "tags": "",
             "comment": "", "webmim_id": "", "webmim_number": "", "webmim_status": "", "cancel_reason": "", "return_kind": "",
@@ -590,7 +576,6 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     not theirs (хвост З15: no empty client is made, no phone is added to the client put aside)."""
     card = _row(conn, card_id)
     clean = {k: _clean(k, v, conn) for k, v in changes.items() if k in EDITABLE}
-    _default_time(conn, clean, card["delivery_time"], card["point_id"])
     changed = {k: v for k, v in clean.items() if card[k] != v and not (k in ("return_amount", "special_amount") and float(card[k]) == float(v))}
     if not changed:
         return []
