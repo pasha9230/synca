@@ -285,4 +285,4 @@ def test_sent_by_hand_closes_the_unsent_block_and_the_sync_alerts(tmp_path):
     conn.commit()
     engine.sent_by_hand(conn, task["id"], LATER, "owner")
     assert conn.execute("SELECT closed_at FROM order_unsent WHERE token = ?", (token,)).fetchone()[0] == LATER
-    assert conn.execute("SELECT status FROM manager_message WHERE message_id LIKE 'send-%'").fetchone()[0] != "new"
+    assert conn.execute("SELECT status FROM manager_message WHERE message_id = ?", ("send-%s-1" % token,)).fetchone()[0] != "new"

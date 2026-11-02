@@ -228,7 +228,7 @@ def test_a_task_in_error_is_marked_by_hand_and_the_window_copies_it(tmp_path):
 def test_the_window_of_messages_copies_a_task_in_error_too(tmp_path):
     from pathlib import Path
     source = (Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "templates" / "_order_messages.html").read_text(encoding="utf-8")
-    assert '{% if t.body %}<button type="button" class="btn btn--secondary btn--sm" data-copy="#message-{{ t.id }}">' in source
+    assert '{% elif t.body %}<button type="button" class="btn btn--secondary btn--sm" data-copy="#message-{{ t.id }}">' in source    # a draft first (msg-refresh)
     assert re.search(r'\{% if t.status != "error" or t.body %\}<label', source)
 
 
