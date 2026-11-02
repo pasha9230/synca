@@ -129,15 +129,23 @@ def _secret(conn, box, s: dict) -> Optional[str]:
 
 # ---- the queue ----------------------------------------------------------------------------------------------------------------------
 
+LISTED_CODES = orders.PLACED_CODES + ("cancel", "refused", "return", orders.RETURN_GIVEN)   # «Заказ оформлен» and the system stages after it
+BEFORE_CODES = ("new", "talk", "wait", orders.FROM_POINT[0])                                  # before placing, wherever the owner puts them
+
+
 def listed(conn, card_id: int) -> bool:
-    """The order belongs in the table now (the owner 2026-11-02): its stage is «Заказ оформлен» or stands after it in the pipeline (the
-    owner's own stages too; «Выполнено», «Отмена», «Возврат» stand after it). An order back on an earlier stage has its rows taken out of
-    the table (send_order) and back when it is placed again. A pipeline without «Заказ оформлен»: every stage."""
+    """The order belongs in the table now (the owner 2026-11-02): its stage is «Заказ оформлен» or after it — a system stage by its code
+    (moving a stage in the pipeline takes no order out of the table, the review of 2026-11-02), an own stage of the owner by its place
+    after «Заказ оформлен» (orders._needs_placed decides so too). An order back on an earlier stage has its rows taken out of the table
+    (send_order) and back when it is placed again. A pipeline without «Заказ оформлен»: every own stage."""
+    row = conn.execute("SELECT s.code, s.position, s.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.id = ?", (int(card_id),)).fetchone()
+    if row is None:
+        return False
+    code, position, stage_id = row
+    if code in LISTED_CODES or code in BEFORE_CODES:
+        return code in LISTED_CODES
     placed = orders._placed_stage(conn)
-    if placed is None:
-        return True
-    row = conn.execute("SELECT s.position, s.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.id = ?", (int(card_id),)).fetchone()
-    return row is not None and (row[0], row[1]) >= (placed["position"], placed["id"])          # the order of list_stages
+    return placed is None or (position, stage_id) >= (placed["position"], placed["id"])          # the order of list_stages
 
 
 def enroll(conn, card_id: int, now: str) -> None:
@@ -420,18 +428,20 @@ def check(conn, box, http: Transport) -> str:
     secret = _secret(conn, box, s)
     if not secret:
         raise SheetError("Секрет не задан для этого адреса: впишите его." if connections.get_secret(conn, box, KIND, 0, "secret") else "Секрет не задан.")
-    answer = call(http, s["url"], {"secret": secret, "sheet": SHEET, "ping": True, "columns": list(ASKED + OPTIONAL)})
+    answer = call(http, s["url"], {"secret": secret, "sheet": SHEET, "ping": True, "columns": list(ASKED + OPTIONAL),
+                                     "optional": list(OPTIONAL)})          # a missing optional one never stops the look at the marks
     missing = [str(c) for c in answer.get("missing") or []]
     needed = [c for c in missing if c not in OPTIONAL]
     if needed:
         raise SheetError("На листе «%s» нет колонок: %s." % (SHEET, ", ".join(needed)))
-    if missing:                                                            # the owner 2026-11-02: a warning, the rows go all the same
-        return ("Таблица отвечает: лист «%s», нужные колонки на месте. Нет колонки %s: добавьте её в первую строку листа, иначе она не "
-                "заполняется (остальное пишется и без неё)." % (SHEET, ", ".join("«%s»" % c for c in missing)))
     said = "Таблица отвечает: лист «%s», все колонки на месте." % SHEET
+    if missing:                                                            # the owner 2026-11-02: a warning, the rows go all the same
+        said = ("Таблица отвечает: лист «%s», нужные колонки на месте. Нет колонки %s: добавьте её в первую строку листа, иначе она не "
+                "заполняется (остальное пишется и без неё; строки, записанные до неё, заполнятся при следующем изменении заказа)."
+                % (SHEET, ", ".join("«%s»" % c for c in missing)))
     number = lambda name: answer.get(name) if isinstance(answer.get(name), int) and not isinstance(answer.get(name), bool) else None
     marked, moved, blocked = number("marked"), number("moved"), number("blocked")
-    if marked is None:                                                     # an older script: it says nothing of the marks
+    if marked is None or (missing and answer.get("optional") is not True):  # an older script: no word of the marks (or none looked at)
         return said
     said += (" Строк с меткой (скрытая колонка «tires_id»): %d, перенесено сейчас из примечаний: %d, не перенесено: %d."
              % (marked, moved or 0, blocked or 0))

@@ -618,7 +618,8 @@ def register(app) -> None:
         try:
             connections.set_sheet_label(get_conn(), account_id, request.form.get("sheet_label", ""), now_iso(), author())
             get_conn().commit()
-            flash("Подпись в таблице заказов сохранена: колонка «Аккаунт» обновится у заказов этого аккаунта при ближайшей отправке.")
+            flash("Подпись в таблице заказов сохранена: колонка «Аккаунт» обновится у заказов этого аккаунта за последние 45 дней в течение часа, "
+                  "у более старых — при следующем изменении заказа.")
         except ValueError as err:
             flash(str(err))
         return redirect("/connections/avito/%d#sheet-label" % account_id)
