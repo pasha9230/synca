@@ -428,7 +428,8 @@ def test_the_pages_of_the_client_have_nothing_of_the_staff_panel(tmp_path):
 def test_the_forms_of_the_client_are_only_the_own_password():
     from flask import Flask, g
     with Flask(__name__).test_request_context("/"):
-        g.user_info = {"login": "client1", "role": "client", "point_id": None, "display_name": ""}
+        g.user_info = {"login": "client1", "role": "client", "point_id": None, "display_name": "",
+                       "real_role": "client", "as_point": None, "as_point_name": ""}       # common.current_user()
         allowed = {e for e in common.SECTION_OF if common.can_post(e)}
     # one address: the page and its form; and the mark of «Обзор» (the owner 2026-10-30, panel/tour.py): the client's own «пройден»
     # and the own cart and orders (the owner 2026-10-30, shop_cart.py): «shop» is EDIT, so its pages count too (the GET ones send nothing)
