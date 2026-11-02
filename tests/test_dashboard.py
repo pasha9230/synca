@@ -270,3 +270,23 @@ def test_working_minutes_run_only_in_the_working_hours():
     assert analytics.working_minutes(at("2026-10-21T11:20:00"), at("2026-10-21T12:00:00"), (10, 20)) == 40
     assert analytics.working_minutes(at("2026-10-20T21:00:00"), at("2026-10-21T09:59:00"), (10, 20)) == 0
     assert analytics.working_minutes(at("2026-10-19T19:00:00"), at("2026-10-21T10:30:00"), (10, 20)) == 60 + 600 + 30
+
+
+def test_a_client_who_keeps_writing_still_waits_and_since_their_first_message(tmp_path):
+    """By the review: a client who first wrote 8 days ago and nobody answered, then wrote again yesterday, waits; the minutes run from the
+    first message, not from before the account was first read."""
+    conn = store.connect(str(tmp_path / "x.db"))
+    fill(conn)
+    account = conn.execute("SELECT id FROM account").fetchone()[0]
+    store.set_state(conn, "chats_baseline_%d" % account, "2026-10-12T15:00:00")
+    _waiting_chat(conn, account, "keeps-writing", "2026-10-20T19:00:00")
+    _waiting_chat(conn, account, "old-thread", "2026-10-21T11:00:00")
+    for chat_id, at in (("keeps-writing", "2026-10-13T19:00:00"), ("keeps-writing", "2026-10-20T19:00:00"),
+                        ("old-thread", "2026-10-10T12:00:00"), ("old-thread", "2026-10-21T11:00:00")):
+        row = conn.execute("SELECT id FROM avito_chat WHERE chat_id = ?", (chat_id,)).fetchone()[0]
+        conn.execute("INSERT INTO avito_message (chat_row, message_id, at, ts, direction, kind, text) VALUES (?,?,?,?,'in','text','x')",
+                     (row, chat_id + at, at, int(datetime.fromisoformat(at).timestamp())))
+    conn.commit()
+    got = {w["peer_name"]: w["minutes"] for w in analytics.day_numbers(conn, NOW, without_points=True)["waiting"]}
+    assert got["keeps-writing"] == analytics.working_minutes(datetime(2026, 10, 13, 19), NOW, (10, 20))
+    assert got["old-thread"] == analytics.working_minutes(datetime(2026, 10, 12, 15), NOW, (10, 20))      # from the first read of the account

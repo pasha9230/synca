@@ -207,3 +207,21 @@ def test_the_problems_of_an_account_go_only_to_whom_it_names(tmp_path):
     assert connections.get_problems_to(conn, second) == "zamantyres"
     post(owner, "/connections/accounts/%d/problems-to" % second, "tok", problems_to="")
     assert connections.get_problems_to(conn, second) == "" and seen(owner) == {"Ошибка первого", "Ошибка второго"}
+
+
+def test_the_problems_go_to_everybody_when_the_chosen_person_cannot_see_them(tmp_path):
+    """By the review: the chosen person switched off — a problem of money never reaches nobody."""
+    from tires_sync import users
+    app = make_app(tmp_path)
+    conn = store.connect(app.config["DB_PATH"])
+    account = connections.create_account(conn, "Шина-Колесо", "2026-10-07T10:00:00", "owner")
+    users.add_user(conn, "zamantyres", "длинный-пароль-1", "2026-10-07T10:00:00", role="owner")
+    store.set_state(conn, "avito_report:%d" % account, json.dumps(report([{"text": "Нужно пополнить аванс.", "kind": "payment", "count": 2, "examples": ["1"]}]), ensure_ascii=False))
+    connections.set_problems_to(conn, account, "zamantyres", ["owner", "zamantyres"], "2026-10-07T10:00:00", "owner")
+    conn.commit()
+    owner = app.test_client()
+    login(owner)
+    assert "нужно пополнить аванс" not in owner.get("/").get_data(as_text=True)
+    users.set_active(conn, "zamantyres", False, "2026-10-08T10:00:00", "owner")
+    conn.commit()
+    assert "нужно пополнить аванс" in owner.get("/").get_data(as_text=True)

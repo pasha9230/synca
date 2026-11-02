@@ -235,11 +235,24 @@ def feed_tiles(conn, feeds) -> list:
     return tiles
 
 
-def dashboard_data(conn, settings, parsed, ref, unload_path="", feed_root="", now=None, catalog=None, login=None) -> dict:
+def problems_reader(conn, login: str, author: str) -> bool:
+    """The person chosen in «Кому сообщать о проблемах аккаунта» still sees them: the shared owner (`author`), or a person of the panel who
+    is active and has the right to the catalog (the cards are shown with it). Else the problems go to everybody, as when nobody is chosen:
+    a problem of money never reaches nobody."""
+    from .. import users
+    if login == author:
+        return True
+    if conn.execute("SELECT 1 FROM panel_user WHERE login = ?", (login,)).fetchone() is None:
+        return False
+    role = users.get_role(conn, login)
+    return role["active"] and users.level(role["role"], "catalog") >= users.VIEW
+
+
+def dashboard_data(conn, settings, parsed, ref, unload_path="", feed_root="", now=None, catalog=None, login=None, author="owner") -> dict:
     """`catalog`: the settings and positions as the catalog page shows them (unconfirmed changes, 4tochki for viewing, the owner's
     exclusions hidden), so that «Позиции с проблемами» counts what «Разобрать» opens; without it, the active settings and `parsed`.
     `login`: who looks; what Avito says about an account's ads goes only to its «Кому сообщать о проблемах аккаунта» when it is set (the
-    owner 2026-11-03), None: to everybody."""
+    owner 2026-11-03) while that person can see them (`problems_reader`), None: to everybody."""
     unmatched, unmatched_goods = unmatched_models(conn, parsed, ref)
     if store.get_state(conn, "nav_pending_pairs") != str(unmatched):
         store.set_state(conn, "nav_pending_pairs", str(unmatched))
@@ -284,7 +297,7 @@ def dashboard_data(conn, settings, parsed, ref, unload_path="", feed_root="", no
         when = report["at"][8:10] + "." + report["at"][5:7] + " " + report["at"][11:16]
         who = "«%s»: " % connections.display_name(conn, account["id"]) if many else ""
         problems_to = connections.get_problems_to(conn, account["id"])
-        if login is not None and problems_to and problems_to != login:
+        if login is not None and problems_to and problems_to != login and problems_reader(conn, problems_to, author):
             continue                                                       # another person's account: its owner sees it
         errors, pay = [], 0
         for group in report["groups"]:
