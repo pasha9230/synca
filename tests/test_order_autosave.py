@@ -48,6 +48,11 @@ def test_the_records_are_those_of_save(tmp_path, monkeypatch):
     post(client, "/orders/%d/save" % two, tok, client_name="Пётр")
     assert journal(conn, one)[-1] == journal(conn, two)[-1] == "%s: Пётр" % orders.LABELS["client_name"]
     assert 'name="client_name" value="Иван" maxlength="120" data-autosave' in page and 'name="point_id" data-autosave' in page
+    # the phone only when the field is left (review 2026-11-02): ten digits of a number half typed are a «number» already — the order would
+    # join a client of that wrong phone; the script waits for the pause only without data-autosave-whole
+    assert 'maxlength="30" data-autosave data-autosave-whole' in page
+    script = open(app.root_path + "/static/app.js", encoding="utf-8").read()
+    assert 'if (!field.hasAttribute("data-autosave-whole")) field.addEventListener("input"' in script
 
 
 def test_a_wrong_value_is_refused_with_its_message_and_nothing_is_saved(tmp_path, monkeypatch):

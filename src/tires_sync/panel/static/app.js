@@ -885,8 +885,9 @@
     if (value.form) value.form.addEventListener("submit", add);                // a tag typed but not yet added goes too
   });
 
-  // 13e) Окно заказа: клиент, телефон, точка, тип сделки и ответственный сохраняются сами (решение владельца 2026-11-02) — текст через
-  // секунду после ввода и при уходе с поля, список сразу при выборе; рядом «сохранено» или ошибка. Права и проверки те же, что у «Сохранить»
+  // 13e) Окно заказа: клиент, телефон, точка, тип сделки и ответственный сохраняются сами (решение владельца 2026-11-02) — имя через
+  // 2 с после ввода и при уходе с поля, телефон только при уходе с поля (data-autosave-whole: десять цифр недописанного номера — уже «номер»,
+  // заказ ушёл бы к чужому клиенту), список сразу при выборе; рядом «сохранено» или ошибка. Права и проверки те же, что у «Сохранить»
   // (/orders/<id>/autosave); ответ даёт сохранённое значение, оно уходит в «was» окна, чтобы «Сохранить» потом сравнивал с ним
   document.querySelectorAll("form[data-owin]").forEach(function (form) {
     var fields = form.querySelectorAll("[data-autosave]"), was = form.querySelector("input[name=was]"), csrf = form.querySelector("input[name=csrf]");
@@ -912,7 +913,10 @@
         show("сохраняю…", false);
         fetch(url, {method: "POST", body: data, credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
           .then(function (r) {
-            return r.json().catch(function () { return {ok: false, error: r.status === 403 ? "нет права менять заказ" : "ошибка сервера (" + r.status + ")"}; });
+            if (r.redirected) return {ok: false, error: "вход истёк, обновите страницу и войдите снова"};      // /login answers the fetch
+            return r.json().catch(function () {
+              return {ok: false, error: r.status === 403 ? "нет права менять заказ" : r.status === 400 ? "обновите страницу" : "ошибка сервера (" + r.status + ")"};
+            });
           })
           .then(function (res) {
             if (!res.ok) { show("Не сохранено: " + (res.error || "ошибка"), true); return; }
@@ -926,7 +930,7 @@
       if (field.tagName === "SELECT") {
         field.addEventListener("change", save);
       } else {
-        field.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(save, 1000); });
+        if (!field.hasAttribute("data-autosave-whole")) field.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(save, 2000); });
         field.addEventListener("change", save);
         field.addEventListener("blur", save);
       }
