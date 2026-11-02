@@ -148,6 +148,8 @@ def close(conn, task_id, how: str, now: str, who: str, result: str = "") -> dict
         _journal(conn, task["order_id"], now, who, "Задача %s: %s%s" % ("выполнена" if how == "done" else "отменена",
                                                                        _what(task["kind"], task["title"]), (" — " + result) if result else ""))
     store.write_audit(conn, now, who, "callback_" + how, {"task": int(task_id), "result": result} if result else {"task": int(task_id)})
+    from . import chat_handover                                            # «Взять клиента» of a chat a point handed over (2026-11-02)
+    chat_handover.task_closed(conn, task, who, now)
     return task
 
 

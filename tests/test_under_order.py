@@ -40,9 +40,16 @@ def token() -> str:
     return secrets.token_hex(12)
 
 
-def hand(w, client=None, **form):
+def hand(w, **form):
+    """The order flow of a chat (order_manager.hand_over), called as the panel called it before 2026-11-02: «Чаты» of a point hand the client
+    to the office now (chat_handover, test_chat_handover.py); hand_over keeps the calls and the VK. Returns the error text or None."""
     data = dict({"phone": "", "size": "", "season": "", "brand": "", "comment": "", "token": token()}, **form)
-    return (client or w["manager"]).post("/chats/%d/handoff" % w["petr"]["id"], data=dict(data, csrf="tok"))
+    try:
+        mgr.hand_over(w["conn"], w["rust"], {"kind": "chat", "chat_row": w["petr"]["id"]}, data["phone"], mgr.handoff_fields(data), data["token"],
+                      "point1", NOW)
+    except orders.OrderError as err:
+        return str(err)
+    return None
 
 
 def handed(conn, order_id=None):
@@ -52,15 +59,12 @@ def handed(conn, order_id=None):
     return [f for f in found if order_id is None or f["order"] == order_id]
 
 
-# ---- the window in «Чаты» ----------------------------------------------------------------------------------------------------------------
+# ---- the order flow of a chat (hand_over) ----------------------------------------------------------------------------------------------------------------
 
 def test_the_point_hands_over_a_chat_with_what_the_client_wants(w):
     conn = w["conn"]
-    page = w["manager"].get("/chats/%d" % w["petr"]["id"]).get_data(as_text=True)
-    assert "Передать под заказ" in page and "Клиент хочет шины под заказ?" in page and 'action="/chats/%d/handoff"' % w["petr"]["id"] in page
     tok = token()
-    r = hand(w, phone="8 (900) 111-22-33", size="205/55 R16", season="winter_studded", brand="Nokian", comment="к пятнице", token=tok)
-    assert r.status_code == 302
+    assert hand(w, phone="8 (900) 111-22-33", size="205/55 R16", season="winter_studded", brand="Nokian", comment="к пятнице", token=tok) is None
     [h] = handed(conn)
     card = orders.get_card(conn, h["order"])
     assert (h["point"], h["phone"], h["kind"], h["chat"], h["size"], h["season"], h["brand"]) == (
@@ -74,16 +78,14 @@ def test_the_point_hands_over_a_chat_with_what_the_client_wants(w):
     ask = [e for e in orders.list_events(conn, card["id"]) if e["text"].startswith(mgr.ASK)]
     assert len(ask) == 1 and ask[0]["level"] == "yellow" and "Альфа" in ask[0]["text"] and "чат Авито" in ask[0]["text"]
     again = hand(w, phone="89001112233", token=tok)                                               # the same press twice
-    assert again.status_code == 302 and len(handed(conn)) == 1
-    assert "уже передан" in w["manager"].get("/chats/%d" % w["petr"]["id"]).get_data(as_text=True)
-    assert len(handed(conn)) == 1 and hand(w, phone="89001112233").status_code == 302 and len(handed(conn)) == 1    # a new press: the chat is handed already
+    assert "уже передан" in again and len(handed(conn)) == 1
+    assert "уже передан" in hand(w, phone="89001112233") and len(handed(conn)) == 1             # a new press: the chat is handed already
 
 
 def test_without_a_phone_the_chat_is_handed_over_and_a_bad_phone_makes_nothing(w):
     conn = w["conn"]
-    hand(w, phone="12345")
+    assert "Телефон не распознан" in hand(w, phone="12345")
     assert handed(conn) == []
-    assert "Телефон не распознан" in w["manager"].get("/chats/%d" % w["petr"]["id"]).get_data(as_text=True)    # the window comes back open
     hand(w, comment="хочет летние")
     [h] = handed(conn)
     assert h["phone"] == "" and h["need"] == "хочет летние"
@@ -101,15 +103,6 @@ def test_the_phone_of_the_window_comes_from_the_chat(tmp_path):
     conn.execute("UPDATE avito_chat SET order_id = ? WHERE id = ?", (w["mine"], w["petr"]["id"]))
     conn.commit()
     assert mgr.chat_phone(conn, w["petr"]["id"]) == "+79001112233"                                # the order's phone first
-
-
-def test_only_the_manager_of_the_point_of_the_chat_hands_it_over(w):
-    owner_page = w["owner"].get("/chats/%d" % w["petr"]["id"]).get_data(as_text=True)
-    assert "Передать под заказ" not in owner_page
-    assert hand(w, client=w["owner"], phone="89001112233").status_code == 403                    # the staff take clients, they do not hand them
-    other, _ = person(w["app"], "point", w["gamma"], login_="gamma1")
-    assert hand(w, client=other, phone="89001112233").status_code == 403                         # a chat of another point's account
-    assert handed(w["conn"]) == []
 
 
 def test_an_early_order_of_the_point_is_handed_over_itself_a_later_one_is_not_doubled(w):
@@ -359,7 +352,7 @@ def test_the_button_is_not_shown_for_a_chat_of_another_points_order_and_hand_ove
     conn = w["conn"]
     conn.execute("UPDATE avito_chat SET order_id = ? WHERE id = ?", (w["other"], w["petr"]["id"]))    # Пётр's chat, an order of Гамма
     conn.commit()
-    assert "Передать под заказ" not in w["manager"].get("/chats/%d" % w["petr"]["id"]).get_data(as_text=True)
+    assert "Передать клиента" not in w["manager"].get("/chats/%d" % w["petr"]["id"]).get_data(as_text=True)     # «Передать клиента» since 2026-11-02
     with pytest.raises(orders.OrderError):
         mgr.hand_over(conn, w["rust"], {"kind": "chat", "chat_row": w["petr"]["id"]}, "89001112233", mgr.handoff_fields({}), token(), "point1", NOW)
     with pytest.raises(orders.OrderError):                                                          # Татьяна: the chat of the main account

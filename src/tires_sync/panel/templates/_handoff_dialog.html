@@ -1,8 +1,10 @@
-{# «Передать под заказ» (order_manager.hand_over): the button and the window «Клиент хочет шины под заказ?» of a point's manager.
+{# «Передать под заказ» (order_manager.hand_over): the window «Клиент хочет шины под заказ?» of a point's manager (the calls).
    `h`: {"action": where the form goes (a chat, a call), "token", "form": what to show (the phone found, or what was typed), "error": open it
    again, "seasons": order_manager.SEASONS, "done": the order the client was already handed over in}. One window per page: id «handoff». #}
 {% from "_ui.html" import icon %}
-{% macro handoff_button(h, small=True) %}{% if h %}<button type="button" class="btn btn--primary{{ ' btn--sm' if small }}" data-open-modal="handoff"{% if h.done %} title="Клиент уже передан, заказ №{{ h.done }}"{% endif %}>Передать под заказ</button>{% endif %}{% endmacro %}
+{# «Передать клиента» of a point's chat (chat_handover, the owner 2026-11-02): no window, no order; `h`: {"action", "done": the handover not
+   taken yet (open_of) or None}. #}
+{% macro handoff_button(h, small=True) %}{% if h %}{% if h.done %}<span class="badge badge--warn" title="Клиент передан владельцу и партнёру {{ h.done.at|dt }}; ждёт, пока его возьмут">Передан офису</span>{% else %}<form method="post" action="{{ h.action }}" class="inline" data-once data-confirm-title="Передать клиента?" data-confirm="Чат увидят владелец и партнёр: у них появится задача «Взять клиента». Заказ не создаётся." data-confirm-ok="Передать"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary{{ ' btn--sm' if small }}">Передать клиента</button></form>{% endif %}{% endif %}{% endmacro %}
 {% macro handoff_window(h) %}{% if h %}{% set f = h.form %}
 <div class="modal-backdrop{{ ' is-open' if h.error }}" id="handoff" role="dialog" aria-modal="true" aria-labelledby="handoff-h"><div class="modal">
 <form method="post" action="{{ h.action }}" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ h.token }}">{% if h.back %}<input type="hidden" name="back" value="{{ h.back }}">{% endif %}

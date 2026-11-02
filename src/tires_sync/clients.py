@@ -214,13 +214,15 @@ def tags_of(conn, client_id) -> List[str]:
 
 
 # a client is «передан точкой» when a point handed over one of its orders, chats or calls (order_manager._open_handoff writes the source)
-_HANDED_SQL = ("EXISTS (SELECT 1 FROM order_handoff_source s WHERE s.order_id IN (SELECT order_id FROM client_order WHERE client_id = {c}) "
+# or the client of one of its chats («Передать клиента», chat_handover)
+_HANDED_SQL = ("(EXISTS (SELECT 1 FROM order_handoff_source s WHERE s.order_id IN (SELECT order_id FROM client_order WHERE client_id = {c}) "
                "OR s.chat_row IN (SELECT chat_row FROM client_chat WHERE client_id = {c}) "
-               "OR (s.kind = 'call' AND s.call_id IN (SELECT CAST(call_row AS TEXT) FROM client_call WHERE client_id = {c})))")
+               "OR (s.kind = 'call' AND s.call_id IN (SELECT CAST(call_row AS TEXT) FROM client_call WHERE client_id = {c}))) "
+               "OR EXISTS (SELECT 1 FROM chat_handover h WHERE h.chat_row IN (SELECT chat_row FROM client_chat WHERE client_id = {c})))")
 
 
 def handed(conn, client_id) -> bool:
-    return bool(conn.execute("SELECT " + _HANDED_SQL.format(c="?"), (client_id,) * 3).fetchone()[0])
+    return bool(conn.execute("SELECT " + _HANDED_SQL.format(c="?"), (client_id,) * 4).fetchone()[0])
 
 
 def all_tags(conn) -> List[str]:
