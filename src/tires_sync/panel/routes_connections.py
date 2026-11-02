@@ -311,7 +311,7 @@ def register(app) -> None:
                 check=connections.get_check(conn, "avito", account_id), form=build_form(conn, account_id),
                 pricing=connections.get_account_pricing(conn, account_id), own_photos=connections.account_own_photos(conn, account_id), exclude_types=connections.get_excluded_types(conn, account_id),
                 contact_name=connections.get_contact_name(conn, account_id), sheet_label=connections.get_sheet_label(conn, account_id),
-                responsible=connections.get_responsible(conn, account_id), staff=staff(conn),
+                responsible=connections.get_responsible(conn, account_id), staff=staff(conn), problems_to=connections.get_problems_to(conn, account_id),
                 brand_delta_text="\n".join("%s: %s" % (k, ("%g" % v)) for k, v in sorted(connections.get_brand_deltas(conn, account_id).items())),
                 title_template=connections.get_title_template(conn, account_id), photo_base=connections.get_photo_base(conn, account_id),
                 title_fields=feed_module.TITLE_FIELDS, photo_style=connections.get_photo_style(conn, account_id),
@@ -599,6 +599,20 @@ def register(app) -> None:
         except ValueError as err:
             flash(str(err))
         return redirect("/connections/avito/%d#responsible" % account_id)
+
+    @app.route("/connections/accounts/<int:account_id>/problems-to", methods=["POST"])
+    @login_required
+    def account_problems_to(account_id):
+        """«Кому сообщать о проблемах аккаунта» (the owner 2026-11-03): what Avito says about the account's ads goes to this person only."""
+        _account_or_404(account_id)
+        conn = get_conn()
+        try:
+            connections.set_problems_to(conn, account_id, request.form.get("problems_to", ""), staff(conn), now_iso(), author())
+            flash("Сохранено: проблемы объявлений этого аккаунта на главной видит только выбранный сотрудник." if request.form.get("problems_to", "").strip()
+                  else "Сохранено: проблемы объявлений этого аккаунта видят все, у кого есть право.")
+        except ValueError as err:
+            flash(str(err))
+        return redirect("/connections/avito/%d#problems-to" % account_id)
 
     @app.route("/connections/accounts/<int:account_id>/contact-name", methods=["POST"])
     @login_required

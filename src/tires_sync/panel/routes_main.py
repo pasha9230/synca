@@ -33,7 +33,7 @@ def catalog_scope(app, conn, parsed):
 def register(app) -> None:
     def _feed_data(conn, settings, parsed, ref):
         return service.dashboard_data(conn, settings, parsed, ref, app.config["UNLOAD_PATH"], app.config.get("FEED_ROOT", ""),
-                                      now().replace(tzinfo=None), catalog=catalog_scope(app, conn, parsed))
+                                      now().replace(tzinfo=None), catalog=catalog_scope(app, conn, parsed), login=current_user()["login"])
 
     @app.route("/")
     @login_required

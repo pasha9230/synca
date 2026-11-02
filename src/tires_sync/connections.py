@@ -532,6 +532,25 @@ def set_sheet_label(conn, account_id: int, label: str, now: str, author: str) ->
     set_config(conn, "avito", account_id, config, now, author)
 
 
+def get_problems_to(conn, account_id: int) -> str:
+    """«Кому сообщать о проблемах аккаунта» (the owner 2026-11-03): the login that alone sees what Avito says about this account's ads
+    («пополнить аванс», «не принял»); '' = everybody with the right, as before."""
+    return str(get_config(conn, "avito", account_id).get("problems_to") or "")
+
+
+def set_problems_to(conn, account_id: int, login: str, staff: List[str], now: str, author: str) -> None:
+    """Save «Кому сообщать о проблемах аккаунта»: one of `staff` (the people of the panel, never a client nor a point) or '' (everybody)."""
+    login = str(login or "").strip()
+    if login and login not in staff:
+        raise ValueError("Кому сообщать о проблемах аккаунта: выберите сотрудника из списка (не клиента и не точку).")
+    config = get_config(conn, "avito", account_id)
+    if login:
+        config["problems_to"] = login
+    else:
+        config.pop("problems_to", None)
+    set_config(conn, "avito", account_id, config, now, author)
+
+
 def get_responsible(conn, account_id: int) -> str:
     """«Ответственный» of the account (the owner 2026-10-29): who answers for its new orders (a chat, a call, by hand); '' = as before."""
     return str(get_config(conn, "avito", account_id).get("responsible") or "")

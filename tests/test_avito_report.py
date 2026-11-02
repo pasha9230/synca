@@ -150,3 +150,60 @@ def test_the_report_of_a_mirrored_account_that_is_not_in_the_air_yet_is_not_show
     connections.set_live(conn, other, True, "2026-10-13T10:00:00", "o")
     conn.commit()
     assert "Чужая ошибка" in client.get("/").get_data(as_text=True)                                       # in the air with our link: now it is ours
+
+
+def test_a_word_of_success_is_no_reason_and_an_empty_title_leaves_no_stray_colon():
+    """The owner 2026-11-03: «Авито не принял 3 объявления · «Шины СПб»: : Объявление активировалось»."""
+    s = avito_report.summarize([item("1", "unknown", ("", "Объявление активировалось")), item("2", "unknown", ("Объявление активировалось.", "")),
+                                item("3", "unknown", ("", "Объявление активировалось"), ("", "Ошибка параметра: поле Quantity")),
+                                item("4", "rejected", ("", "Объявление не активировано"))])
+    assert [g["text"] for g in s["groups"]] == ["Ошибка параметра: поле Quantity", "Объявление не активировано"]
+    assert s["counts"] == {"unknown": 3, "rejected": 1}                                                   # counted, not a reason
+    assert avito_report.is_success("Объявление успешно опубликовано") and not avito_report.is_success("Объявление не активировалось")
+
+
+def test_a_report_kept_before_shows_no_success_as_a_rejection(tmp_path):
+    groups = [{"text": ": Объявление активировалось", "kind": "error", "count": 3, "examples": ["1", "2", "3"]}]
+    assert "Авито не" not in home(tmp_path, report(groups)).get("/").get_data(as_text=True)
+
+
+def test_payment_reasons_of_one_account_make_one_card_with_the_sum(tmp_path):
+    groups = [{"text": "Нужно пополнить аванс.", "kind": "payment", "count": 1, "examples": ["1"]},
+              {"text": "Нужно пополнить аванс. Как только на счёте появятся деньги", "kind": "payment", "count": 2, "examples": ["2", "3"]}]
+    html = home(tmp_path, report(groups)).get("/").get_data(as_text=True)
+    assert html.count("нужно пополнить аванс") == 1 and "Авито не активировал 3 объявления: нужно пополнить аванс" in html
+
+
+def test_the_problems_of_an_account_go_only_to_whom_it_names(tmp_path):
+    """«Кому сообщать о проблемах аккаунта» (the owner 2026-11-03): №1 to the owner, №2 to Заман; not set: everybody, as before."""
+    from tires_sync import users
+    app = make_app(tmp_path)
+    conn = store.connect(app.config["DB_PATH"])
+    first = connections.create_account(conn, "Шины СПб", "2026-10-07T10:00:00", "owner")
+    second = connections.create_account(conn, "Шина-Колесо", "2026-10-07T10:00:00", "owner")
+    users.add_user(conn, "zamantyres", "длинный-пароль-1", "2026-10-07T10:00:00", role="owner")
+    users.add_user(conn, "shopper", "длинный-пароль-1", "2026-10-07T10:00:00", role="client")
+    for account, text in ((first, "Ошибка первого"), (second, "Ошибка второго")):
+        store.set_state(conn, "avito_report:%d" % account, json.dumps(report([{"text": text, "kind": "error", "count": 1, "examples": ["1"]}]), ensure_ascii=False))
+    conn.commit()
+    owner = app.test_client()
+    login(owner)
+    zaman = app.test_client()
+    with zaman.session_transaction() as s:
+        s["user"], s["epoch"], s["csrf"] = "zamantyres", store.get_session_epoch(conn, "zamantyres"), "tok"
+
+    def seen(client, page="/"):
+        html = client.get(page).get_data(as_text=True)
+        return {text for text in ("Ошибка первого", "Ошибка второго") if text in html}
+
+    assert seen(owner) == seen(zaman) == {"Ошибка первого", "Ошибка второго"}                              # not set: as before
+    assert post(owner, "/connections/accounts/%d/problems-to" % first, "tok", problems_to="owner").status_code == 302
+    assert post(owner, "/connections/accounts/%d/problems-to" % second, "tok", problems_to="zamantyres").status_code == 302
+    assert connections.get_problems_to(conn, first) == "owner" and connections.get_problems_to(conn, second) == "zamantyres"
+    assert 'value="zamantyres" selected' in owner.get("/connections/avito/%d" % second).get_data(as_text=True)
+    assert seen(owner) == seen(owner, "/feeds") == {"Ошибка первого"}
+    assert seen(zaman) == seen(zaman, "/feeds") == {"Ошибка второго"}
+    post(owner, "/connections/accounts/%d/problems-to" % second, "tok", problems_to="shopper")                 # a client is never the one
+    assert connections.get_problems_to(conn, second) == "zamantyres"
+    post(owner, "/connections/accounts/%d/problems-to" % second, "tok", problems_to="")
+    assert connections.get_problems_to(conn, second) == "" and seen(owner) == {"Ошибка первого", "Ошибка второго"}
