@@ -711,7 +711,7 @@ def merge(conn, keep_id, gone_id, now: str, author: str) -> None:
         raise ClientError("Это один и тот же клиент.")
     if keep["merged_into"] or gone["merged_into"]:
         raise ClientError("Клиент уже объединён с другим.")
-    moved = {"orders": [o["id"] for o in gone["orders"]], "chats": [h["id"] for h in gone["chats"]], "phones": gone["phones"],
+    moved = {"orders": [o["id"] for o in gone["orders"] + gone["deleted_orders"]], "chats": [h["id"] for h in gone["chats"]], "phones": gone["phones"],
              "peers": ["%s:%s" % (p["account_id"], p["peer_id"]) for p in gone["peers"]], "calls": [k["id"] for k in gone.get("calls") or []]}
     links = {"orders": [o["id"] for o in keep["orders"]], "chats": [h["id"] for h in keep["chats"]], "calls": [k["id"] for k in keep.get("calls") or []]}
     for table in ("client_order", "client_chat", "client_call", "client_phone", "client_peer"):

@@ -150,3 +150,16 @@ def test_the_card_page_marks_the_deleted_order_and_position(tmp_path, monkeypatc
     assert page.count(">удалён</span>") == 3                                 # the deleted order, its position, the removed position
     assert '<a href="/orders/%d">' % live in page and '<a href="/orders/%d">' % gone not in page
     assert "split-order/%d" % gone not in page
+
+
+def test_a_deleted_order_goes_back_with_its_client_when_a_join_is_undone(conn):
+    a = clients.client_of_order(conn, _order(conn, "+79001112233", "Иван"))["id"]
+    gone_order = _order(conn, "+79005556677", "Ваня")
+    _item(conn, gone_order, "Ikon 205/55 R16", 4, 6000)
+    b = clients.client_of_order(conn, gone_order)["id"]
+    trash.delete_order(conn, gone_order, NOW, "owner")
+    clients.merge(conn, a, b, LATER, "owner")
+    assert [o["id"] for o in clients.get_client(conn, a)["deleted_orders"]] == [gone_order]       # joined: the history of the whole person
+    clients.unmerge(conn, a, b, "2026-11-02T14:00:00", "owner")
+    assert clients.get_client(conn, a)["deleted_orders"] == []
+    assert [o["id"] for o in clients.get_client(conn, b)["deleted_orders"]] == [gone_order]       # split off: back with its own client
