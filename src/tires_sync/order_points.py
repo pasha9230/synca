@@ -106,6 +106,18 @@ def check_point_move(conn, point_id, order_id, stage: dict) -> None:
         raise OrderError(MOVE_REFUSED)
 
 
+WORK_STAGES = ("at_point", "oth", "return_given", "shipped")   # «Товар на точке», «На ОТХ», «Возврат передан», «Отправлен» (other city)
+
+
+def work_orders(conn) -> set:
+    """The orders the point works now (the owner 2026-11-03: the client's words and «Срочно ответить» of them are no alerts for the staff,
+    as account_orders): a point named and the stage one of WORK_STAGES; a client the point handed over to the staff is the staff's."""
+    marks = ",".join("?" * len(WORK_STAGES))
+    return {r[0] for r in conn.execute(
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id JOIN point p ON p.id = c.point_id WHERE s.code IN (%s) "
+        "AND NOT EXISTS (SELECT 1 FROM order_handoff h WHERE h.order_id = c.id)" % marks, WORK_STAGES)}
+
+
 def account_chats(conn) -> set:
     """The chats of the Avito accounts of the points."""
     return {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id IN (" + POINT_ACCOUNTS + ")")}

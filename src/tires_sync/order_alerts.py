@@ -126,13 +126,22 @@ def _staff(conn, login: str) -> bool:
     return users.get_role(conn, login)["role"] != "point"
 
 
+def point_words(event: dict) -> bool:
+    """«Клиент написал: …» in the order's journal (chats._note_client_wrote): the owner 2026-11-03, of an order the point works it is not the
+    staff's alert. «Клиент написал после закрытия», «Клиент звонил» and the failures stay."""
+    return event.get("kind") == "chat" and level_of(event) != "red" and str(event.get("text") or "").startswith(CLIENT_WROTE)
+
+
 def counts(conn, login: str) -> Dict[str, int]:
-    """How many open alerts of every colour this user has (as page_rows, without the orders of the points' accounts for the staff)."""
+    """How many open alerts of every colour this user has (as page_rows, without the orders of the points' accounts nor the client's words
+    of the orders the points work for the staff)."""
     from . import order_points
-    theirs = order_points.account_orders(conn) if _staff(conn, login) else set()
+    staff = _staff(conn, login)
+    theirs = order_points.account_orders(conn) if staff else set()
+    working = order_points.work_orders(conn) if staff else set()
     result = {level: 0 for level in ALERT_LEVELS}
     for event in open_alerts(conn, login):
-        if event["order_id"] not in theirs:
+        if event["order_id"] not in theirs and not (event["order_id"] in working and point_words(event)):
             result[event["level"]] += 1
     return result
 
@@ -144,16 +153,18 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
     `now` (the panel's local time): a green alert older than GREEN_DAYS days is not shown either; nothing is deleted.
     The chats without an order whose client waits (chat_rows) are rows too; with `now` also «Срочно ответить» (urgent_rows, in place of the
     chat's «Клиент написал»; a due task is no row here since 2026-10-31 — it is «Задачи»'s); for the partner the orders a point named that are not
-    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts.
+    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts; nor are the
+    client's words (point_words) and «Срочно ответить» of an order the point works now (order_points.work_orders, the owner 2026-11-03).
     `staff` False: the owner or the partner working as a point (panel/common.current_user) sees the point's; `own_prefix`: the start of their
     author «<name> за точку «» — what they pressed as a point is their own record too."""
     from . import order_points
     border = (datetime.fromisoformat(now) - timedelta(days=GREEN_DAYS)).isoformat(timespec="seconds") if now else ""
     staff = _staff(conn, login) if staff is None else staff
     theirs = order_points.account_orders(conn) if staff else set()
+    working = order_points.work_orders(conn) if staff else set()
     rows, folded = [], {}
     for event in open_alerts(conn, login):
-        if event["order_id"] in theirs:
+        if event["order_id"] in theirs or (event["order_id"] in working and point_words(event)):
             continue
         if (event["author"] == login or (own_prefix and str(event["author"] or "").startswith(own_prefix))) \
                 and event["level"] != "red":                                 # one's own failure still waits for «Разобрался»
@@ -170,7 +181,7 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
                 continue
             folded[event["order_id"]] = event
         rows.append(event)
-    urgent = urgent_rows(conn, now) if now else []
+    urgent = [row for row in (urgent_rows(conn, now) if now else []) if row["of_order"] not in working]
     late = {row["chat_row"] for row in urgent}
     late_orders = {row["of_order"] for row in urgent if row["of_order"]}
     rows = [row for row in rows if not (row["order_id"] in late_orders and row is folded.get(row["order_id"]) and row["level"] == "yellow")]

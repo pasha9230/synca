@@ -29,7 +29,7 @@ def _rub(value) -> str:
 
 def text(conn, now: datetime) -> str:
     """3–6 lines: the orders, yesterday's and the week's money, the chats."""
-    day = analytics.day_numbers(conn, now)
+    day = analytics.day_numbers(conn, now, without_points=True)        # the chats of the points' accounts are the points' (2026-11-03)
     yesterday = now.date() - timedelta(days=1)
     money_y = analytics.money(conn, yesterday.isoformat(), yesterday.isoformat())
     week = analytics.money(conn, (yesterday - timedelta(days=6)).isoformat(), yesterday.isoformat())     # seven whole days up to yesterday
