@@ -251,3 +251,17 @@ def test_a_mark_that_cannot_be_saved_still_opens_the_page(app, monkeypatch):
     client = app.test_client()
     login(client)
     assert "Цена" in page(client) and dot_on(client, "/")
+
+
+@pytest.mark.parametrize("state", ["off", "all"])
+def test_the_client_has_the_item_and_the_dot_in_the_old_and_the_new_look(app, state):
+    from tires_sync import store
+    conn = conn_of(app)
+    store.set_state(conn, "ui_new.client", state)
+    client, _conn = person(app, "client")
+    for url in ("/shop", "/shop/cart", "/shop/orders", "/shop/profile"):
+        html = client.get(url).get_data(as_text=True)
+        assert 'href="/whats-new"' in html and DOT in html, (state, url)
+        assert ("ui-new" in html.split("<body", 1)[1].split(">", 1)[0]) == (state == "all")
+    html = page(client)
+    assert "Каталог" in html and "<script" not in html and not dot_on(client, "/shop")
