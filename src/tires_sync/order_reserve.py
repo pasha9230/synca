@@ -45,6 +45,8 @@ CLIENT_AT = (12, 30)                              # the owner 2026-11-02: the re
 NO_ANSWER = timedelta(hours=12)                   # no message of the client in the chat this long after the reminder: «На ОТХ»
 NO_ANSWER_REASON = "Клиент не ответил на напоминание о сроке резерва"
 OTH_MARK = "[резерв:на-отх:%s]"                   # once per stay at the point: moved, refused, or the client wrote
+NO_ANSWER_MAX = timedelta(hours=48)               # an older reminder moves nothing (review 2026-11-02: no mass move of forgotten orders)
+CHATS_FRESH = timedelta(minutes=30)               # the chats of the account read this lately, or «no answer» is not known (they are read every minute)
 
 
 def _marker(kind: str, until: str) -> str:
@@ -307,6 +309,8 @@ def _client_step(conn, card: dict, today: date, now: str, hours, deliver) -> Non
     """The owner 2026-11-02: the last day of the reservation, from 12:30 to the end of the working hours, «срок резерва истекает» goes to the
     client by itself, whatever the point answered (tell_client: once per stay; not on the day «можно забирать» went). Not after a return."""
     moment = datetime.fromisoformat(now)
+    if card["stage"]["code"] not in STAGE_CODES:                # a «выдал» since the card was read: nothing to remind of
+        return
     if deliver is None or card["reserve_until"] != today.isoformat() or (moment.hour, moment.minute) < CLIENT_AT or moment.hour >= hours[1]:
         return
     if _returned(conn, card):
@@ -324,10 +328,18 @@ def _no_answer_step(conn, card: dict, now: str) -> bool:
                         ("reserve-%d-%s" % (card["id"], re.sub(r"\D", "", stay)),)).fetchone()
     if sent is None or now < (datetime.fromisoformat(sent[0]) + NO_ANSWER).isoformat(timespec="seconds") or _done(conn, card["id"], marker):
         return False
+    if now > (datetime.fromisoformat(sent[0]) + NO_ANSWER_MAX).isoformat(timespec="seconds"):
+        return False                                            # a reminder of days ago: the order was forgotten, not left by the client
     if card["reserve_until"] != sent[0][:10] or _returned(conn, card):
         return False                                            # extended since (a new reminder may come), or the goods went back
-    if conn.execute("SELECT 1 FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND at > ? LIMIT 1",
-                    (sent[1], sent[0])).fetchone():
+    fresh = (datetime.fromisoformat(now) - CHATS_FRESH).isoformat(timespec="seconds")
+    if not conn.execute("SELECT 1 FROM avito_chat WHERE account_id = (SELECT account_id FROM avito_chat WHERE id = ?) AND synced_at >= ? LIMIT 1",
+                        (sent[1], fresh)).fetchone():
+        return False                                            # our copy of the chats may be behind: tried again at the next tick
+    chats_of = "(SELECT id FROM avito_chat WHERE id = ? OR order_id = ?)"     # the chat of the reminder and any other chat of the order
+    if conn.execute("SELECT 1 FROM avito_message WHERE chat_row IN %s AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND at > ? "
+                    "UNION ALL SELECT 1 FROM avito_chat WHERE id IN %s AND last_dir = 'in' AND last_at > ? LIMIT 1" % (chats_of, chats_of),
+                    (sent[1], card["id"], sent[0], sent[1], card["id"], sent[0])).fetchone():
         orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент ответил на напоминание о сроке резерва: на «На ОТХ» не переводим %s"
                          % marker, level="grey")
         conn.commit()

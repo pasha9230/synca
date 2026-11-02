@@ -41,6 +41,8 @@ def test_the_question_comes_on_the_seventh_day_at_12_30_not_on_the_sixth_nor_at_
     assert order_oth.ask_seventh_day(conn, "2026-10-27T13:07:00") == 0
     [asked] = [e for e in orders.list_events(conn, cid) if "задан вопрос" in e["text"]]
     assert asked["text"] == "Точке «Бета» задан вопрос на «Рабочем месте»: «Заказ выдали или он на точке?»"
+    [vk_only] = [e for e in orders.list_events(conn, cid) if e["level"] == "yellow" and "7-го дня" in e["text"]]   # review D7: Бета is on VK
+    assert vk_only["text"].startswith("Точка «Бета» работает в ВК")
 
 
 def test_a_later_day_still_asks_and_an_agreed_return_is_never_asked(tmp_path):
@@ -153,3 +155,16 @@ def test_issued_on_the_page_closes_it_and_can_be_undone_with_the_question_open_a
     assert card["stage"]["code"] == "oth" and card["entered_at"] == ENTERED and order_oth.question_open(conn, card)
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (here,)).fetchone() is None      # unlinked again on «На ОТХ»
     assert store.get_state(conn, order_oth._ask_key(card)).startswith("asked|")
+
+
+def test_issued_after_a_partial_return_cannot_be_undone(tmp_path, clock):
+    """Review D3: the undo of «Выдали» would enter «На ОТХ» again, and entering drops the marks «возвращено поставщику»: refused."""
+    app, conn, pid, here, mine = asked_on_page(tmp_path)
+    item = orders.list_items(conn, here)[0]["id"]
+    order_oth.mark_returned(conn, item, "2026-10-26T12:40:00", "owner", qty=1)
+    press(mine, here, "oth_issued")
+    assert orders.get_card(conn, here)["stage"]["code"] == "done"
+    assert 'action="/my-point/%d/undo"' % here not in workplace(mine)
+    r = post(mine, "/my-point/%d/undo" % here, "tok")
+    assert "уже не отменить" in mine.get(r.headers["Location"]).get_data(as_text=True)
+    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone()[0] == 1

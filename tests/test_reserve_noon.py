@@ -95,9 +95,16 @@ def test_a_reminder_that_did_not_go_is_alerted_as_before(tmp_path):
 
 # ---- 2. no answer of the client for 12 hours: «На ОТХ» -----------------------------------------------------------------------------
 
+def read_chats(conn, at):
+    """The sync read the chats of the accounts at `at` (avito_chat.synced_at, Moscow time, as chats.sync_account)."""
+    conn.execute("UPDATE avito_chat SET synced_at = ?", (at,))
+    conn.commit()
+
+
 def told(tmp_path, error=None):
     conn, cid, chat, deliver, vk = ready(tmp_path, error)
     tick(conn, DAY + "T12:30:00", deliver, vk)
+    read_chats(conn, "2099-01-01T00:00:00")                                             # the chats are read (the guard of the review)
     return conn, cid, chat, deliver, vk
 
 
@@ -170,3 +177,47 @@ def test_a_refused_move_is_one_red_record(tmp_path, monkeypatch):
     tick(conn, NEXT + "T10:07:00", deliver, vk)
     red = [e for e in orders.list_events(conn, cid) if e["level"] == "red" and "не перевести" in e["text"]]
     assert len(red) == 1 and "нельзя" in red[0]["text"] and code(conn, cid) == "at_point"
+
+
+# ---- the review of 2026-11-02 -----------------------------------------------------------------------------------------------------
+
+def test_an_old_reminder_never_moves_the_order(tmp_path):
+    """D1: a reminder of days ago (the order forgotten at the point, or sent before the rule came) is not a reason to move it now."""
+    conn, cid, _chat, deliver, vk = told(tmp_path)
+    tick(conn, "2026-10-21T09:07:00", deliver, vk)
+    assert code(conn, cid) == "at_point"
+
+
+def test_chats_not_read_lately_move_nothing(tmp_path):
+    """D2: our copy of the chat may be behind (keys, Avito blocking): no move until the chats of the account were read lately."""
+    conn, cid, _chat, deliver, vk = told(tmp_path)
+    read_chats(conn, NEXT + "T08:00:00")                                                # an hour before the tick: stale
+    tick(conn, NEXT + "T09:07:00", deliver, vk)
+    assert code(conn, cid) == "at_point"
+    read_chats(conn, NEXT + "T09:59:00")
+    tick(conn, NEXT + "T10:07:00", deliver, vk)
+    assert code(conn, cid) == "oth"
+
+
+def test_an_answer_in_another_chat_of_the_order_or_only_in_the_chats_preview_keeps_it(tmp_path):
+    conn, cid, chat, deliver, vk = told(tmp_path)
+    account = conn.execute("SELECT account_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
+    other = conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at, synced_at) VALUES (?, 'c-other', ?, ?, ?)",
+                         (account, cid, DAY, "2099-01-01T00:00:00")).lastrowid
+    wrote(conn, other, DAY + "T18:00:00")
+    tick(conn, NEXT + "T09:07:00", deliver, vk)
+    assert code(conn, cid) == "at_point"
+    (tmp_path / "b").mkdir()
+    conn, cid, chat, deliver, vk = told(tmp_path / "b")
+    conn.execute("UPDATE avito_chat SET last_dir = 'in', last_at = ? WHERE id = ?", (DAY + "T18:00:00", chat))   # the list says so, the messages not yet
+    conn.commit()
+    tick(conn, NEXT + "T09:07:00", deliver, vk)
+    assert code(conn, cid) == "at_point"
+
+
+def test_the_reminder_never_goes_to_an_order_that_left_the_point_meanwhile(tmp_path):
+    """D4: the card read again after the question may be on another stage (a «Выдал» in between)."""
+    conn, cid, _chat, deliver, _vk = ready(tmp_path)
+    orders.move_card(conn, cid, stage(conn, "done"), DAY + "T12:31:00", "точка")
+    reserve._client_step(conn, orders.get_card(conn, cid), orders.date.fromisoformat(DAY), DAY + "T12:31:00", (10, 20), deliver)
+    assert deliver.sent == []

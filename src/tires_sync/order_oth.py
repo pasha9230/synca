@@ -300,8 +300,12 @@ def ask_seventh_day(conn, now: str) -> int:
             continue
         if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (_ask_key(card), "asked|" + now)).rowcount != 1:
             continue
+        point = card.get("point") or {}
         orders.add_event(conn, card_id, now, "система", "point", "Точке «%s» задан вопрос на «Рабочем месте»: «%s»" % (
-            (card.get("point") or {}).get("name") or "", question(conn, card, now)), level="grey")
+            point.get("name") or "", question(conn, card, now)), level="grey")
+        if point and point.get("channel") != points.PANEL:      # review 2026-11-02: a point on VK may never open its page
+            orders.add_event(conn, card_id, now, "система", "point", "Точка «%s» работает в ВК: вопрос 7-го дня на ОТХ (выдали заказ или он на "
+                             "точке) она может не увидеть — узнайте у точки сами" % point.get("name", ""), level="yellow")
         conn.commit()
         asked += 1
     return asked

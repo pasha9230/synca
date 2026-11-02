@@ -126,6 +126,10 @@ def undoable(conn, card: dict, point_id) -> Optional[dict]:
     if (rec.get("point") != point_id or card["stage_id"] != rec.get("to_stage") or (card["entered_at"] or "") != rec.get("to_entered")
             or card["sale_ids"]):
         return None
+    if rec.get("action") == "oth_issued" and conn.execute(
+            "SELECT 1 FROM oth_return WHERE order_id = ? UNION ALL SELECT 1 FROM oth_return_plan WHERE order_id = ? LIMIT 1",
+            (card["id"], card["id"])).fetchone():
+        return None                                                       # back on «На ОТХ» would drop the marks of the return (order_oth.detach)
     if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind IN ('point', 'stage') AND id > ? LIMIT 1",
                     (card["id"], int(rec.get("last_event") or 0))).fetchone():
         return None                                                       # the point did something more (a press, a VK command), or it moved
