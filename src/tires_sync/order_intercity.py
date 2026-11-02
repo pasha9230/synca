@@ -96,7 +96,29 @@ def save(conn, card_id, form: dict, now: str, author: str) -> List[str]:
     conn.commit()
     if "track" in changed and new["track"]:
         close_track_tasks(conn, card_id, "done", now, author, "трек-номер %s" % new["track"])
+    if "on" in changed and new["on"]:
+        skip_pickup_messages(conn, card_id, now, author)
     return [FIELD_NAMES["enabled" if key == "on" else key] for key in changed]
+
+
+def skip_pickup_messages(conn, card_id, now: str, who: str) -> int:
+    """The checkbox came after the pickup messages were prepared (the owner 2026-11-02): «можно забирать» and «срок резерва истекает»
+    still waiting are skipped, never sent by hand by mistake. Returns how many."""
+    from . import order_engine as engine
+    skipped = 0
+    for task in engine.list_tasks(conn, card_id, ("pending", "error")):
+        if task["kind"] == "message" and (task["rule_id"] == engine.ARRIVED_RULE or task["title"] in (templates.ARRIVED_SAMPLE[0], templates.RESERVE_SAMPLE[0])):
+            try:
+                engine.skip_task(conn, task["id"], now, who)
+            except OrderError:                                            # a person took it meanwhile
+                conn.rollback()
+                continue
+            conn.execute("UPDATE order_task SET result = ? WHERE id = ? AND status = 'skipped'", (engine.INTERCITY_SKIP, task["id"]))
+            conn.commit()
+            skipped += 1
+    return skipped
+
+
 
 
 # ---- the labels -----------------------------------------------------------------------------------------------------------------------

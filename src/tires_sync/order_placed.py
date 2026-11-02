@@ -51,12 +51,16 @@ def on_placed(conn, card_id, webmim_id: str, now: str, author: str, deliver: Opt
     return [tell_client(conn, card_id, webmim_id, now, author, deliver), tell_point(conn, card_id, webmim_id, now, author, send_vk)]
 
 
-def _template(conn, who: dict) -> Optional[dict]:
+def _template(conn, who: dict, card_id=None, now: str = "") -> Optional[dict]:
     """The owner's template of the name; a message that came with a later release (`who["sample"]`, order_intercity) and is not in the base
     yet is made from its sample first (nobody has to press «Добавить образцы»), then it is the owner's to edit."""
     row = conn.execute("SELECT id, body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", (who["template"], who["audience"])).fetchone()
     if row is None and who.get("sample"):
         templates.add_template(conn, who["template"], who["audience"], who["sample"])
+        if card_id is not None:                                             # the owner 2026-11-02: seen in the order's journal
+            orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", "Шаблона «%s» не было (удалён или переименован): шаблон "
+                             "создан заново из образца, его можно поправить в «Шаблонах сообщений»." % who["template"], level="grey")
+            conn.commit()
         row = conn.execute("SELECT id, body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", (who["template"], who["audience"])).fetchone()
     return {"id": row[0], "body": row[1]} if row else None
 
@@ -136,7 +140,7 @@ def _send(conn, card_id, who: dict, task: dict, now: str, author: str, send) -> 
 def _tell(conn, card_id, who: dict, webmim_id: str, now: str, author: str, send) -> str:
     """The message `who` of the order once per WebMIM order."""
     try:
-        template = _template(conn, who)
+        template = _template(conn, who, card_id, now)
         if template is None:
             return _not_sent(conn, card_id, who, now, "шаблона с таким именем «%s» нет (переименован или удалён)." % who["whom"],
                              "Сохраните его в «Настройка → Шаблоны сообщений» или напишите %s сами." % who["whom"])

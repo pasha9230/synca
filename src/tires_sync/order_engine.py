@@ -67,8 +67,10 @@ def _make_task(conn, card: dict, rule: dict, now: str, chain: Tuple[int, ...]) -
                 (card["id"], str(rule["template_id"]))).fetchone():
             status, result = "skipped", SENT_SKIP                # back in «Заказ оформлен»: the client heard «оформлен» already (a point
                                                                  # may be another one now: its message is prepared as before)
-        elif template["audience"] == "client" and template["name"] in PICKUP_TEMPLATES and (card.get("intercity") or {}).get("on"):
-            status, result = "skipped", INTERCITY_SKIP           # to another city (order_intercity): «оформлен» has its own text, no pickup
+        elif template["audience"] == "client" and (card.get("intercity") or {}).get("on") and (
+                template["name"] in PICKUP_TEMPLATES or (card.get("stage") or {}).get("code") == "done"):
+            status, result = "skipped", INTERCITY_SKIP           # to another city (order_intercity): «оформлен» has its own text, no pickup;
+                                                                 # the client's texts of «Выполнено» never (the owner 2026-11-02: the tyres are on the way)
         elif template["audience"] == "manager" and points.in_panel(card.get("point")):
             status, result = "skipped", PANEL_SKIP               # the point works in the panel: nothing to it in VK, nobody has to skip it by hand
     else:

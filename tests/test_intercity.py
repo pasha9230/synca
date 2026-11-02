@@ -470,3 +470,50 @@ def test_a_renamed_stage_still_knows_the_order_was_shipped(tmp_path, tg):
     assert intercity.was_shipped(conn, orders.get_card(conn, card))
     hook(app, conn, "отправил 5000100", event="e9")
     assert "уже отмечен" in to_points(app)[-1][1]
+
+
+# ---- the owner's answers of 2026-11-02 (night): Q3, Q4, Q5; «Шаблоны сообщений» ------------------------------------------------------
+
+def test_the_two_texts_are_on_the_page_of_the_texts_that_go_by_themselves(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    page = client.get("/orders/templates").get_data(as_text=True)
+    auto = page[page.index("Сообщения, которые уходят сами"):]
+    assert intercity.PLACED_TEMPLATE in auto and intercity.SHIPPED_TEMPLATE in auto
+
+
+def test_the_checkbox_skips_the_waiting_pickup_messages(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    templates.add_samples(conn)
+    arrived = next(t["id"] for t in templates.list_templates(conn) if t["name"] == templates.ARRIVED_SAMPLE[0])
+    other = next(t["id"] for t in templates.list_templates(conn) if t["name"] == "Менеджеру: заказ оформлен")
+    for template_id in (arrived, other):
+        rules.add_rule(conn, _stage(conn, "at_point"), "enter", 0, "message", template_id, "", "ask", None)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    status = lambda name: [t["status"] for t in engine.list_tasks(conn, card) if t["title"] == name]
+    assert status(templates.ARRIVED_SAMPLE[0]) == ["pending"]
+    city(conn, card)
+    assert status(templates.ARRIVED_SAMPLE[0]) == ["skipped"] and status("Менеджеру: заказ оформлен") == ["pending"]
+
+
+def test_a_recreated_template_leaves_a_grey_record(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="КИТ"), NOW, "owner")       # no templates.add_samples
+    hook(app, conn, "передал курьеру 5000100")
+    [line] = [e for e in orders.list_events(conn, card) if "создан заново из образца" in e["text"]]
+    assert line["level"] == "grey" and intercity.SHIPPED_TEMPLATE in line["text"]
+
+
+def test_the_client_rules_of_done_are_not_prepared_for_an_order_to_another_city(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    templates.add_samples(conn)
+    thanks = templates.add_template(conn, "Клиенту: спасибо", "client", "Спасибо за покупку, {client_name}!")
+    point_note = next(t["id"] for t in templates.list_templates(conn) if t["name"] == "Менеджеру: заказ оформлен")
+    for template_id in (thanks, point_note):
+        rules.add_rule(conn, _stage(conn, "done"), "enter", 0, "message", template_id, "", "ask", None)
+    other = _card(conn, pid, webmim="700300", code="at_point")
+    city(conn, card)
+    hook(app, conn, "передал курьеру 5000100")
+    orders.move_card(conn, other, _stage(conn, "done"), NOW, "o")
+    status = lambda c, name: [t["status"] for t in engine.list_tasks(conn, c) if t["title"] == name]
+    assert status(card, "Клиенту: спасибо") == ["skipped"] and status(card, "Менеджеру: заказ оформлен") == ["pending"]
+    assert status(other, "Клиенту: спасибо") == ["pending"]
