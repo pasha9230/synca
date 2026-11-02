@@ -110,12 +110,37 @@ WORK_STAGES = ("at_point", "oth", "return_given", "shipped")   # «Товар н
 
 
 def work_orders(conn) -> set:
-    """The orders the point works now (the owner 2026-11-03: the client's words and «Срочно ответить» of them are no alerts for the staff,
-    as account_orders): a point named and the stage one of WORK_STAGES; a client the point handed over to the staff is the staff's."""
+    """The orders the point works now (the owner 2026-11-03: the client's words and «Срочно ответить» of them are no alerts for the owner and
+    the partner, order_alerts.POINT_WORK_QUIET): a point named and the stage one of WORK_STAGES; a client the point handed over to the staff
+    is the staff's."""
     marks = ",".join("?" * len(WORK_STAGES))
     return {r[0] for r in conn.execute(
         "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id JOIN point p ON p.id = c.point_id WHERE s.code IN (%s) "
         "AND NOT EXISTS (SELECT 1 FROM order_handoff h WHERE h.order_id = c.id)" % marks, WORK_STAGES)}
+
+
+OFFICE_ROLES = ("owner", "partner")
+
+
+def office_taken(conn) -> tuple:
+    """(orders, chats) the owner or the partner took from a point (the owner 2026-11-03: «если я или Заман берёт клиента от точки, то по
+    таким нужны уведомления»): a chat handed over (chat_handover) that one of them took, a chat one of them answers for (a chat's
+    responsible is only ever set by a person), an order a person made one of them responsible for (its record «Ответственный: <login>»;
+    the responsible a new order gets by itself is no taking), and the chats of such an order and the order of such a chat. A client the
+    point handed over with an order (order_handoff) is the staff's already (account_orders, work_orders)."""
+    from . import orders, users                                           # both import this module
+    from .order_notify import get_owner_login
+    office = sorted({u["login"] for u in users.list_users(conn) if u["role"] in OFFICE_ROLES} | {get_owner_login(conn)})
+    marks = ",".join("?" * len(office))
+    found = {r[0] for r in conn.execute(
+        "SELECT c.id FROM order_card c WHERE c.responsible IN (%s) AND EXISTS (SELECT 1 FROM order_event e WHERE e.order_id = c.id "
+        "AND e.kind = 'field' AND e.text = ? || c.responsible)" % marks, office + [orders.LABELS["responsible"] + ": "])}
+    chats = {r[0] for r in conn.execute("SELECT chat_row FROM chat_handover WHERE taken_by IN (%s) UNION SELECT id FROM avito_chat "
+                                        "WHERE responsible IN (%s)" % (marks, marks), office + office)}
+    found |= {r[0] for r in conn.execute("SELECT order_id FROM avito_chat WHERE order_id > 0 AND id IN (%s)" % ",".join("?" * len(chats)),
+                                         sorted(chats))} if chats else set()
+    chats |= {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id IN (%s)" % ",".join("?" * len(found)), sorted(found))} if found else set()
+    return found, chats
 
 
 def account_chats(conn) -> set:

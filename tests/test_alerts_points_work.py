@@ -10,7 +10,7 @@ import pytest
 
 from test_inquiry import message
 from test_notify_by_point import OWN_ACCOUNT, POINT_ACCOUNT, card, chat, env, point
-from tires_sync import daily_summary, order_alerts, order_points as points, orders, store, users
+from tires_sync import chat_handover, chats, daily_summary, order_alerts, order_points as points, orders, store, users
 
 NOW = "2026-10-15T12:00:00"
 STAFF = ("owner", "zamantyres", "partner1")       # «owner» has no role row (an owner made before the roles); Заман is an owner by role
@@ -126,3 +126,54 @@ def test_the_morning_summary_does_not_count_the_points_chats(tmp_path):
         message(conn, row, "2026-10-15T10:00:00", text="Есть шины?")
     text = daily_summary.text(conn, datetime(2026, 10, 15, 12, 0))
     assert "Чаты: непрочитанных 1, ждут ответа 1." in text
+
+
+def test_the_client_words_written_while_at_the_point_stay_quiet_after_the_order_leaves_it(tmp_path):
+    conn, pid = setup(tmp_path)
+    mine = card(conn, "owner", pid)
+    row = chat(conn, OWN_ACCOUNT, mine["id"], unread=1)
+    message(conn, row, "2026-10-15T11:30:00", text="Спасибо, забрал")   # not «Срочно» yet
+    on_stage(conn, mine["id"], "at_point")
+    chats._note_client_wrote(conn, row, NOW)                                   # the real writer of «Клиент написал»
+    conn.commit()
+    on_stage(conn, mine["id"], "done")                                         # the point's work is over: still not the owner's (review D5)
+    for login in STAFF:
+        assert mine["id"] not in seen(conn, login)
+    assert mine["id"] in seen(conn, "olga")
+    later = card(conn, "owner", pid)                                           # written while not at the point: as before
+    row2 = chat(conn, OWN_ACCOUNT, later["id"], peer="q", unread=1)
+    message(conn, row2, "2026-10-15T11:30:00")
+    on_stage(conn, later["id"], "moving")
+    chats._note_client_wrote(conn, row2, NOW)
+    conn.commit()
+    assert later["id"] in seen(conn, "owner")
+
+
+def test_a_client_the_owner_or_the_partner_took_from_the_point_is_told_as_usual(tmp_path):
+    conn, pid = setup(tmp_path)
+    lone = chat(conn, POINT_ACCOUNT, None, peer="x", unread=1)                 # a point's chat handed over and taken by Заман
+    message(conn, lone, "2026-10-15T10:30:00", text="Есть шины?")
+    conn.execute("INSERT INTO chat_handover (chat_row, point_id, point_name, at, handed_by) VALUES (?, ?, 'Гамма', ?, 'gamma1')", (lone, pid, NOW))
+    conn.commit()
+    assert lone not in {r.get("chat_row") for r in order_alerts.page_rows(conn, "owner", NOW)}
+    assert chat_handover.take(conn, lone, "zamantyres", NOW)
+    assigned = card(conn, "gamma1", pid)                                       # an order at the point the owner made the partner answer for
+    on_stage(conn, assigned["id"], "at_point")
+    orders.update_card(conn, assigned["id"], {"responsible": "partner1"}, NOW, "owner")
+    wrote(conn, assigned["id"])
+    answered = card(conn, "gamma1", pid)                                       # a chat of an order at the point the owner answers
+    on_stage(conn, answered["id"], "oth")
+    row = chat(conn, OWN_ACCOUNT, answered["id"], peer="a")
+    message(conn, row, "2026-10-15T10:30:00")
+    chats.set_responsible(conn, row, "owner", NOW, "owner")
+    by_default = card(conn, "owner", pid)                                      # «owner» only by default (no one named them): still quiet
+    on_stage(conn, by_default["id"], "at_point")
+    wrote(conn, by_default["id"])
+    for login in STAFF:
+        rows = order_alerts.page_rows(conn, login, NOW)
+        assert {r["chat_row"] for r in rows if r.get("urgent")} == {lone, row}
+        assert assigned["id"] in seen(conn, login) and by_default["id"] not in seen(conn, login)
+    olga = order_alerts.page_rows(conn, "olga", NOW)                           # the chats' manager: the point's account stays the point's
+    assert lone not in {r.get("chat_row") for r in olga}
+    gamma = order_alerts.page_rows(conn, "gamma1", NOW)                         # the point's rows: no «Срочно ответить» of its account
+    assert lone not in {r["chat_row"] for r in gamma if r.get("urgent")}
