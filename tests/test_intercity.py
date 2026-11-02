@@ -605,6 +605,23 @@ def test_a_board_move_to_shipped_working_as_the_point_tells_the_others_only(tmp_
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     city(conn, card)
     orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
-    post(client, "/as-point", tok, point_id=str(pid))
-    post(client, "/orders/%d/move" % card, tok, stage_id=str(_stage(conn, "shipped")))
+    assert post(client, "/as-point", tok, point_id=str(pid)).status_code == 302
+    assert post(client, "/orders/%d/move" % card, tok, stage_id=str(_stage(conn, "shipped"))).status_code == 302
     assert code(conn, card) == "done" and sent and "owner" in sent[0][1]
+
+
+def test_the_checkbox_closes_the_unsent_row_of_a_rule_task_too(tmp_path):
+    from tires_sync import unsent
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    templates.add_samples(conn)
+    arrived = next(t["id"] for t in templates.list_templates(conn) if t["name"] == templates.ARRIVED_SAMPLE[0])
+    rules.add_rule(conn, _stage(conn, "at_point"), "enter", 0, "message", arrived, "", "ask", None)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    [task] = [t for t in engine.list_tasks(conn, card) if t["title"] == templates.ARRIVED_SAMPLE[0] and t["rule_id"] != engine.ARRIVED_RULE]
+    conn.execute("UPDATE order_task SET status = 'error', result = 'Авито отказал' WHERE id = ?", (task["id"],))
+    unsent.record(conn, card, engine.task_token(task), NOW, "Авито отказал", "Заказ приехал")
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status, next_at) VALUES ('arrived-%d-7', 1, ?, 'o', 'retry', ?)" % card, (NOW, NOW))
+    conn.commit()
+    city(conn, card)
+    assert [u for u in unsent.of_order(conn, card) if u["kind"] == "send"] == []
+    assert any("не будет отправлено" in e["text"] for e in orders.list_events(conn, card))           # the stopped 402 is in the journal

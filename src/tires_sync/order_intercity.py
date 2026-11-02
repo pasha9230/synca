@@ -125,12 +125,22 @@ def skip_pickup_messages(conn, card_id, now: str, who: str) -> int:
             skipped += 1
     like = [pattern % int(card_id) for pattern in PICKUP_TOKENS]
     where = " OR ".join("token LIKE ?" for _ in like)
-    tokens |= {r[0] for r in conn.execute("SELECT token FROM order_unsent WHERE closed_at IS NULL AND (%s)" % where, like)}
-    tokens |= {r[0] for r in conn.execute("SELECT token FROM chat_send_log WHERE status IN ('retry', 'failed') AND (%s)" % where, like)}
-    conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE closed_at IS NULL AND (%s)" % where, [now, who] + like)
-    conn.execute("UPDATE chat_send_log SET status = 'failed', next_at = '', text = '', error = ? WHERE status = 'retry' AND (%s)" % where,
-                 [SKIP] + like)                                           # as the sync does for a deleted chat: never sent again
-    conn.commit()
+    try:
+        tokens |= {r[0] for r in conn.execute("SELECT token FROM order_unsent WHERE closed_at IS NULL AND (%s)" % where, like)}
+        retry = [r[0] for r in conn.execute("SELECT token FROM chat_send_log WHERE status = 'retry' AND (%s)" % where, like)]
+        tokens |= {r[0] for r in conn.execute("SELECT token FROM chat_send_log WHERE status = 'failed' AND (%s)" % where, like)} | set(retry)
+        mine = sorted(tokens)                                             # the skipped tasks' own marks too («task-<id>-…» of a rule's message)
+        conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE closed_at IS NULL AND (%s OR token IN (%s))"
+                     % (where, ",".join("?" * len(mine)) or "''"), [now, who] + like + mine)
+        stopped = conn.execute("UPDATE chat_send_log SET status = 'failed', next_at = '', text = '', error = ? WHERE status = 'retry' AND (%s)"
+                               % where, [SKIP] + like).rowcount        # as the sync does for a deleted chat: never sent again
+        if stopped:
+            orders.add_event(conn, card_id, now, who, "chat", "Заказ в другой город: повтор сообщения «можно забирать» / «срок резерва» "
+                             "остановлен, клиенту не будет отправлено.", level="grey")
+        conn.commit()
+    except Exception:                                                     # noqa: BLE001 - the checkbox is saved; only the tails stay
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the pickup tails of order %s were not closed", card_id)
     for token in sorted(tokens):
         chats._inbox_close(conn, token, now, NOT_NEEDED, alerts=True)
     return skipped
