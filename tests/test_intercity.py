@@ -569,3 +569,42 @@ def test_the_owners_text_of_shipped_goes_and_reset_brings_the_sample_back(tmp_pa
     assert mt.body(conn, "intercity_shipped") == templates.INTERCITY_SHIPPED_SAMPLE[2]
     post(client, "/orders/templates/text", tok, key="intercity_placed", body="Оформили в {city}, {carrier}.")
     assert mt.body(conn, "intercity_placed") == "Оформили в {city}, {carrier}."
+
+
+# ---- «Работать как точка» (the base of the design, 2026-11-02) --------------------------------------------------------------------------
+
+def test_the_owner_working_as_the_point_ships_downloads_and_undoes_but_never_writes_labels(tmp_path, clock, monkeypatch):
+    sent = []
+    monkeypatch.setattr(order_notify, "tell_people", lambda conn, box, logins, text, skip_logins=(), **k: sent.append((list(logins), set(skip_logins), text)) or "ok")
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    users.add_user(conn, "zaman", "password-123", NOW, role="partner")
+    conn.commit()
+    city(conn, card)
+    label = intercity.add_label(conn, card, "a.pdf", PDF, NOW, "owner")
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    assert post(client, "/as-point", tok, point_id=str(pid)).status_code == 302                  # the owner works as the point
+    assert client.get("/orders/%d/labels/%d" % (card, label)).data == PDF
+    assert upload(client, tok, card).status_code == 403
+    assert post(client, "/orders/%d/labels/%d/delete" % (card, label), tok).status_code == 403
+    assert post(client, "/orders/%d/intercity" % card, tok, enabled="").status_code == 403
+    page = workplace(client)
+    assert "Передал курьеру ТК" in page and "Скачать этикетки" in page
+    press(client, card, "shipped", tok=tok)
+    assert code(conn, card) == "done" and len(to_client(app)) == 1
+    [line] = [e for e in orders.list_events(conn, card) if e["kind"] == "point" and "курьеру ТК" in e["text"]]
+    assert " за точку «" in line["author"]
+    assert sent and sent[0][0] == ["owner", "zaman"] and "owner" in sent[0][1]                    # not to the one who pressed
+    clock["now"] = T2
+    assert post(client, "/my-point/%d/undo" % card, tok).status_code == 302
+    assert code(conn, card) == "at_point"
+
+
+def test_a_board_move_to_shipped_working_as_the_point_tells_the_others_only(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(order_notify, "tell_people", lambda conn, box, logins, text, skip_logins=(), **k: sent.append((list(logins), set(skip_logins))) or "ok")
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    post(client, "/as-point", tok, point_id=str(pid))
+    post(client, "/orders/%d/move" % card, tok, stage_id=str(_stage(conn, "shipped")))
+    assert code(conn, card) == "done" and sent and "owner" in sent[0][1]
