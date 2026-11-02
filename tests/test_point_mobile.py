@@ -26,7 +26,7 @@ def test_a_point_gets_its_phone_on_the_chats_and_the_card(world):
     listed = people["point"].get("/chats").get_data(as_text=True)
     assert "is-chat-open" not in listed and "pt-chats-back" not in listed
     card = people["point"].get("/orders/%d" % ids["card"]).get_data(as_text=True)
-    assert "pt-card-page" in card and 'aria-current="page" data-sec="orders"' in card
+    assert "pt-card-page" in card and "data-point-nav" in card and 'data-sec="orders"' not in card     # «Заказы» hidden (the owner 2026-11-02)
 
 
 def test_the_office_keeps_the_computer_page(world):

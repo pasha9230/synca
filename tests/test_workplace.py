@@ -37,7 +37,8 @@ def test_the_point_works_in_the_panels_frame_with_its_own_menu(tmp_path):
     page = _text(mine.get("/my-point"))
     assert 'class="sidebar"' in page and '<title>Рабочее место' in page and "<h1>Рабочее место · Бета" in page
     assert 'href="/my-point">' in page and "Рабочее место</a>" in page and "mypoint.css" in page
-    assert 'href="/orders"' in page and 'href="/chats"' in page and 'href="/clients"' not in page           # its sections, no CRM
+    assert 'href="/orders"' not in page and 'href="/calls"' in page                       # the owner 2026-11-02: «Заказы» hidden, «Звонки» shown
+    assert 'href="/chats"' in page and 'href="/clients"' not in page                       # its sections, no CRM
     assert 'href="/points/history"' not in page and "Моя точка" not in page
     assert page.count("notify.js") == 1                                                    # the bell's sound: once, from the frame
 
@@ -208,14 +209,14 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     assert orders.get_card(conn, oth)["stage"]["code"] == "return"
 
 
-def test_the_old_return_button_still_works(tmp_path):
+def test_the_return_button_is_gone_from_an_order_at_the_point(tmp_path):
+    """The owner 2026-11-02: no «Возврат» on «На точке» (it was in «Подробнее»); the press of an old page is refused."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
-    page = _text(mine.get("/my-point"))
-    token = re.search(r'action="/my-point/%d/returned".*?name="token" value="([0-9a-f]+)"' % here, page, re.S).group(1)
-    post(mine, "/my-point/%d/returned" % here, "tok", token=token)
-    assert any(e["text"] == mgr.RETURN_LINE for e in orders.list_events(conn, here))
+    assert "/my-point/%d/returned" % here not in _text(mine.get("/my-point"))
+    assert post(mine, "/my-point/%d/returned" % here, "tok", token="a" * 24).status_code == 404
+    assert not any(e["text"] == mgr.RETURN_LINE for e in orders.list_events(conn, here))
 
 
 def test_the_stage_is_added_once_right_after_oth_to_an_old_pipeline(tmp_path):

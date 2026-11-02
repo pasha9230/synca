@@ -83,6 +83,11 @@ def test_the_question_row_goes_at_the_end_of_the_working_day(tmp_path, clock):
 RETURN = "Заказ № 5000100: возврат отмечен, ждёт суммы от менеджера"
 
 
+def vk_return(conn, card):
+    """The point's «возврат отдал» (VK; the button of «Рабочее место» is gone since 2026-11-02): order_manager.returned."""
+    order_manager.returned(conn, orders.get_card(conn, card), "менеджер Бета", DAY + "T09:30:00")
+
+
 def returns(client):
     return [it for it in bell(client)["items"] if it["title"] == RETURN]
 
@@ -95,7 +100,7 @@ def test_a_return_the_point_pressed_is_a_green_row_of_its_bell_until_the_order_m
     other = points.save_point(conn, dict(name="Гамма", channel="vk", vk_peer_id="777"))
     theirs = manager(app, conn, other, login_="gamma2")
     assert returns(mine) == []
-    press(mine, card, "returned")                                                          # no amount: the order stays «На точке»
+    vk_return(conn, card)                                                                  # no amount: the order stays «На точке»
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
     for person in (mine, mate):
         assert [(r["level"], r["href"], r["order_id"]) for r in returns(person)] == [("green", "/my-point", card)]
@@ -117,7 +122,7 @@ def test_the_yellow_fill_the_sum_rows_are_for_the_staff_only(tmp_path, clock):
     at_point(conn, card)
     mine = manager(app, conn, pid)
     mate = manager(app, conn, pid, login_="beta2")
-    press(mine, card, "returned")
+    vk_return(conn, card)
     orders.add_event(conn, card, DAY + "T10:00:00", "o", "point", order_manager.RETURN_GAPS % "причина возврата", level="yellow")
     conn.commit()
     asks = ("заполните сумму возврата", "не заполнено — причина возврата")
@@ -135,7 +140,7 @@ def test_a_return_of_an_earlier_stay_is_no_row(tmp_path, clock):
     app, owner, tok, conn, pid, card = ready(tmp_path)
     at_point(conn, card)
     mine = manager(app, conn, pid)
-    press(mine, card, "returned")
+    vk_return(conn, card)
     orders.move_card(conn, card, _stage(conn, "moving"), DAY + "T12:00:00", "o")
     orders.move_card(conn, card, _stage(conn, "at_point"), DAY + "T12:30:00", "o")
     conn.commit()

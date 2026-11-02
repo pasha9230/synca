@@ -3,19 +3,27 @@ tyres back, signed the act МХ-3, moved an order — with the time and the auth
 
 No table of its own: the panel writes every action of a point as a record of the journal of actions (audit, action «point_action», the
 point and the order in its detail); the commands a point wrote in VK are read from the log of the commands (order_command_log, the sender
-is the point's VK). Writing never stops the action: a busy base loses the record, never the press."""
+is the point's VK). Writing never stops the action: a busy base loses the record, never the press.
+
+The owner 2026-11-02: «Отменить» of a press of «Рабочее место» that moved the order («Приехал», «Выдал», «Выдан», «Выдали», «На ОТХ»;
+«Передал клиента» is order_manager.cancel_handoff). The press leaves what it changed in app_state (UNDO_KEY, one per order, the newest);
+the undo is there, without a time limit, while the order stands where the press put it (its stage and the moment it came there), no later
+press, command of the point or move happened, and no sale is recorded; it puts back the stage, the moment, the reservation date and the
+reason of the cancel, without the stage's rules, tells the owner and the partner, and is an action of «История точки». What already went
+to the client is not recalled."""
 from __future__ import annotations
 
 import json
 import logging
-from typing import List, Optional
+from typing import Callable, List, Optional
 
-from . import order_points as points
+from . import order_points as points, orders
 
 ACTION = "point_action"
 NAMES = {"arrived": "принял заказ (приехал)", "issued": "выдал заказ", "no_show": "клиент не пришёл", "returned": "отдал на возврат",
          "reserve_issued": "выдал (ответ на резерв)", "reserve_here": "на точке (ответ на резерв)", "handoff": "передал клиента",
-         "handoff_cancel": "отменил передачу", "act_signed": "подписал акт МХ-3 и отдал", "to_oth": "оставил шины на ОТХ", "move": "сменил этап", "vk": "команда ВК"}
+         "handoff_cancel": "отменил передачу", "act_signed": "подписал акт МХ-3 и отдал", "to_oth": "оставил шины на ОТХ", "move": "сменил этап", "vk": "команда ВК",
+         "oth_issued": "выдал (7-й день ОТХ)", "oth_here": "шины на точке (7-й день ОТХ)", "undo": "отменил отметку"}
 SHOWN = 300
 
 
@@ -67,3 +75,116 @@ def history(conn, point_id: Optional[int] = None, limit: int = SHOWN) -> List[di
                               "name": "команда ВК «%s»" % (word or ""), "order_id": order_id, "text": outcome or ""})
     found.sort(key=lambda r: r["at"] or "", reverse=True)
     return found[:limit]
+
+
+UNDO_KEY = "point_undo:%d"
+UNDOABLE = {"arrived": "«Приехал»", "issued": "«Выдал»", "reserve_issued": "«Выдан»", "oth_issued": "«Выдали»", "to_oth": "«На ОТХ»"}
+UNDO_HINT = "Сообщение, которое уже ушло клиенту, не отзывается."
+UNDO_SHOWN = 10
+
+
+def remember(conn, before: dict, action: str, point_id, author: str, now: str) -> None:
+    """After a press of «Рабочее место»: a press that moved the order can be undone (the newest one); any other forgets the order's undo."""
+    try:
+        after = orders.get_card(conn, before["id"])
+        if action not in UNDOABLE or after["stage_id"] == before["stage_id"]:
+            forget(conn, before["id"])
+            return
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (UNDO_KEY % before["id"], json.dumps({
+            "action": action, "point": int(point_id), "at": now, "author": author, "from_stage": before["stage_id"],
+            "from_entered": before["entered_at"] or "", "from_until": before["reserve_until"] or "", "from_reason": before["cancel_reason"] or "",
+            "to_stage": after["stage_id"], "to_entered": after["entered_at"] or "",
+            "last_event": conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event WHERE order_id = ?", (before["id"],)).fetchone()[0]},
+            ensure_ascii=False)))
+        conn.commit()
+    except Exception:                                                     # noqa: BLE001 - the press is done; only its undo is lost
+        conn.rollback()
+        logging.getLogger("tires_sync.panel").exception("the undo of %s of order %s was not kept", action, before.get("id"))
+
+
+def forget(conn, order_id) -> None:
+    conn.execute("DELETE FROM app_state WHERE key = ?", (UNDO_KEY % int(order_id),))
+    conn.commit()
+
+
+def _kept(conn, order_id) -> Optional[tuple]:
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (UNDO_KEY % int(order_id),)).fetchone()
+    if row is None:
+        return None
+    try:
+        return row[0], json.loads(row[0])
+    except ValueError:
+        return None
+
+
+def undoable(conn, card: dict, point_id) -> Optional[dict]:
+    """The press that can be undone on this order of this point, or None (none kept, another point's, moved since, a later action, a sale)."""
+    kept = _kept(conn, card["id"])
+    if kept is None:
+        return None
+    rec = kept[1]
+    if (rec.get("point") != point_id or card["stage_id"] != rec.get("to_stage") or (card["entered_at"] or "") != rec.get("to_entered")
+            or card["sale_ids"]):
+        return None
+    if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind IN ('point', 'stage') AND id > ? LIMIT 1",
+                    (card["id"], int(rec.get("last_event") or 0))).fetchone():
+        return None                                                       # the point did something more (a press, a VK command), or it moved
+    return dict(rec, raw=kept[0], name=UNDOABLE.get(rec.get("action"), ""))
+
+
+def undo_list(conn, point_id, limit: int = UNDO_SHOWN) -> List[dict]:
+    """The presses of the point that can still be undone, the newest first: {"card", "rec"}."""
+    rows = []
+    for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'point_undo:%'"):
+        try:
+            rec = json.loads(value)
+            rows.append((str(rec.get("at") or ""), int(key.split(":", 1)[1]), rec))
+        except (ValueError, IndexError, AttributeError):
+            continue
+    found = []
+    for _at, order_id, rec in sorted(rows, key=lambda r: (r[0], r[1]), reverse=True):
+        if rec.get("point") != point_id:
+            continue
+        try:
+            card = orders.get_card(conn, order_id)
+        except orders.OrderError:
+            continue
+        kept = undoable(conn, card, point_id)
+        if kept is not None:
+            found.append({"card": card, "rec": kept})
+        if len(found) >= limit:
+            break
+    return found
+
+
+def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Callable] = None) -> str:
+    """«Отменить»: the order goes back where the press found it (stage, moment, reservation date, reason of the cancel), in one transaction
+    with the claim of the undo (a second press undoes nothing more). Raises orders.OrderError when it cannot. Returns the answer."""
+    from . import order_oth
+    rec = undoable(conn, card, point["id"])
+    if rec is None:
+        raise orders.OrderError("Отметку уже не отменить: по заказу было действие позже, его перенесли или отметку уже отменили.")
+    if conn.execute("DELETE FROM app_state WHERE key = ? AND value = ?", (UNDO_KEY % card["id"], rec["raw"])).rowcount != 1:
+        conn.rollback()
+        raise orders.OrderError("Отметку уже отменили.")
+    author = "менеджер %s (%s)" % (point["name"], who)
+    stage = orders.get_stage(conn, rec["from_stage"])
+    if not orders.move_card(conn, card["id"], stage["id"], now, author, fire_rules=False, commit=False):     # a refusal rolls back the claim
+        conn.rollback()
+        raise orders.OrderError("Заказ только что перенесли: отметку уже не отменить.")
+    conn.execute("UPDATE order_card SET entered_at = ?, reserve_until = ?, cancel_reason = ? WHERE id = ?",
+                 (rec["from_entered"], rec["from_until"], rec["from_reason"], card["id"]))
+    if rec["action"] == "oth_issued":                                     # the question of the seventh day is open again
+        conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
+    label = card.get("webmim_number") or str(card["id"])
+    text = "Точка «%s» отменила отметку %s по заказу №%s (%s): заказ снова на этапе «%s». %s" % (
+        point["name"], rec["name"], label, who, stage["name"], UNDO_HINT)
+    orders.add_event(conn, card["id"], now, author, "point", text, level="yellow")
+    conn.commit()
+    record(conn, now, who, point["id"], "undo", card["id"], "отменил %s" % rec["name"])
+    if tell is not None:
+        try:
+            tell(order_oth.office_logins(conn), text)
+        except Exception:                                                 # noqa: BLE001 - the undo is done; the journal has the record
+            logging.getLogger("tires_sync.panel").exception("the alert of the undo of order %s failed", card["id"])
+    return "Отметка %s отменена: заказ №%s снова на этапе «%s». %s" % (rec["name"], label, stage["name"], UNDO_HINT)

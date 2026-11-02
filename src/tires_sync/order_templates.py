@@ -27,7 +27,7 @@ ARRIVED_SAMPLE = ("Клиенту: товар на точке, можно заб
                   "Заказ {webmim_number} приехал в пункт выдачи, можно забирать.\nТерритория {point_address}\nГрафик работы {point_hours}\n"
                   "Локация на Яндекс Картах {point_map}\n\n{items}\n\nХранение резерва до {hold_until}\n\nПокупатель {client_name} {client_phone}\n\n"
                   "! Обратите внимание. К оплате принимаем наличные.")
-# goes after the point's «на точке» on the last day of the reservation (order_reserve); the owner's text 2026-10-26, without the prepayment
+# goes by itself on the last day of the reservation from 12:30 (order_reserve, the owner 2026-11-02); the owner's text 2026-10-26, without the prepayment
 RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "client",
                   "Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — спасибо, "
                   "не обращайте внимания. Если нужно продлить ожидание, напишите нам.")
@@ -35,7 +35,9 @@ RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "c
 OTH_POINT_SAMPLE = ("Точке: шины с ОТХ отложены под клиента", "manager",
                     "Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента: заказ №{order_no}, {client_name}, {client_phone}, {items}. "
                     "Не продавать другим, резерв до {hold_until}.")
-SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE, OTH_POINT_SAMPLE)
+# the question to the point on the seventh day of «На ОТХ», a banner of its «Рабочее место» (order_oth.ask_seventh_day, the owner 2026-11-02)
+OTH_ASK_SAMPLE = ("Точке: ОТХ 7-й день", "manager", "Заказ выдали или он на точке?")
+SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE, OTH_POINT_SAMPLE, OTH_ASK_SAMPLE)
 RETIRED = {RESERVE_SAMPLE[0]: ("Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "   # the owner
                                "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",)}                                       # 2026-10-23
 FIELDS = "id, name, audience, body"

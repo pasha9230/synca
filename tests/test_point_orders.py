@@ -131,11 +131,13 @@ def test_the_phone_chips_show_the_cards_of_one_stage(w):
 
 
 def test_the_sections_at_the_bottom_with_their_counters(w):
-    for url, sec in (("/orders", "orders"), ("/my-point", "mypoint"), ("/my-point/handed", "handed")):
+    for url, sec in (("/my-point", "mypoint"), ("/my-point/handed", "handed")):
         page = _page(w["point"], url)
         nav = page[page.index("data-point-nav"):].split("</nav>")[0]
-        assert re.findall(r'data-sec="([a-z]+)"', nav) == ["mypoint", "handed", "orders", "tasks", "chats"], url   # «Задачи» (2026-10-31)
+        assert re.findall(r'data-sec="([a-z]+)"', nav) == ["mypoint", "handed", "calls", "tasks", "chats"], url   # «Задачи» (2026-10-31); «Заказы» → «Звонки» (the owner 2026-11-02)
         assert re.search(r'aria-current="page" data-sec="%s"' % sec, nav), url
+    page = _page(w["point"], "/orders")                                            # hidden from the menu, the address still opens
+    assert not re.search(r'aria-current="page" data-sec=', page[page.index("data-point-nav"):].split("</nav>")[0])
     counts = points_nav(w)
     assert counts["orders"] == 2                                                   # «Новый заказ» with the folded «Переговоры», as its chip
     assert counts["mypoint"] >= 1                                                  # «Наш едет» comes to the point

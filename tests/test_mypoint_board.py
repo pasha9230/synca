@@ -1,6 +1,6 @@
 """«Рабочее место», the owner's answers of 2026-10-26: the counters at the top, one list newest first by the order's last event, the card says
 what the VK message «Менеджеру: заказ оформлен» says (with the client's prices: the point takes the cash), «Возврат» on the orders at the
-point does what «возврат отдал» does, and the question of the last day of the reservation («Клиент забрал?») is answered on the page with
+point did what «возврат отдал» does (no button since 2026-11-02), and the question of the last day of the reservation («Клиент забрал?») is answered on the page with
 the same effect as in VK and never twice."""
 from __future__ import annotations
 
@@ -135,36 +135,19 @@ def test_the_card_says_what_the_vk_message_says_with_the_clients_prices(tmp_path
 
 # --- «Возврат» -------------------------------------------------------------------------------------------------------------------------
 
-def test_return_only_on_orders_at_the_point_and_does_what_the_vk_command_does(tmp_path, clock):
+def test_no_return_button_and_its_press_is_refused_the_vk_command_stays(tmp_path, clock):
+    """The owner 2026-11-02: «Возврат» is gone from the orders at the point; the VK «возврат отдал» is as before."""
     (vk_app, _c, _t, vk_conn, _p, vk_card), (app, client, tok, conn, pid, card) = two(tmp_path)
     at_point(vk_conn, vk_card)
     hook(vk_app, vk_conn, "возврат отдал 5000100")
+    assert mgr.RETURN_LINE in [t for _k, t, _l in journal(vk_conn, vk_card)]
     coming = _card(conn, pid, webmim="700200")
     at_point(conn, card)
     mine = manager(app, conn, pid)
     page = mine.get("/my-point").get_data(as_text=True)
-    assert '/my-point/%d/returned' % card in page and '/my-point/%d/returned' % coming not in page
-    assert 'data-confirm-title="Возврат поставщику' in page
-    first, page = press(mine, card, "returned")
-    assert [(k, t, l) for k, t, l in journal(conn, card)][-3:] == [(k, t, l) for k, t, l in journal(vk_conn, vk_card)][-3:]
-    got, vk_got = orders.get_card(conn, card), orders.get_card(vk_conn, vk_card)
-    assert (got["stage"]["code"], got["return_kind"], got["return_reason"]) == (vk_got["stage"]["code"], vk_got["return_kind"], vk_got["return_reason"])
-    assert "отмечено — шины отданы на возврат" in page and to_client(app) == []
-    _t, page = press(mine, card, "returned", again=first)                                  # a double tap
-    assert "уже выполнена" in page
-    r = post(mine, "/my-point/%d/returned" % card, "tok", token="b" * 24)                   # a new press: the VK command's own «уже отмечено»
-    assert "уже отмечен" in mine.get(r.headers["Location"]).get_data(as_text=True)
-    assert len([t for _k, t, _l in journal(conn, card) if t == mgr.RETURN_LINE]) == 1
-
-
-def test_return_on_an_order_on_its_way_changes_nothing(tmp_path, clock):
-    app, client, tok, conn, pid, card = ready(tmp_path)
-    mine = manager(app, conn, pid)
-    r = post(mine, "/my-point/%d/returned" % card, "tok", token="c" * 24)
-    assert "«возврат» отмечают, когда заказ на точке" in mine.get(r.headers["Location"]).get_data(as_text=True)
-    assert conn.execute("SELECT outcome FROM order_command_log WHERE message_id = ?", ("page-" + "c" * 24,)).fetchone()[0].startswith("не подходит")
-    got = orders.get_card(conn, card)
-    assert got["stage"]["code"] == "moving" and not got["return_kind"]
+    assert "/returned" not in page and 'data-confirm-title="Возврат поставщику' not in page
+    for order in (card, coming):
+        assert post(mine, "/my-point/%d/returned" % order, "tok", token="b" * 24).status_code == 404
     assert mgr.RETURN_LINE not in [t for _k, t, _l in journal(conn, card)]
 
 
@@ -193,7 +176,8 @@ def test_no_question_before_the_bot_asked(tmp_path, clock):
     assert question(page) == "" and "mp-tab--hot" not in page
 
 
-def test_the_question_is_on_top_and_here_tells_the_client_once_as_in_vk(tmp_path, clock):
+def test_the_question_is_on_top_and_here_only_marks_the_answer(tmp_path, clock):
+    """The owner 2026-11-02: «На точке» no longer writes to the client (the reminder goes by itself at 12:30, order_reserve)."""
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     at_point(conn, card)
     asked(conn, card)
@@ -204,17 +188,16 @@ def test_the_question_is_on_top_and_here_tells_the_client_once_as_in_vk(tmp_path
     assert 'class="mp-ask"' in block and re.findall(r'<article class="mp-card[^"]*" id="order-(\d+)"', page)[0] == str(card)   # first
     assert '/my-point/%d/reserve_issued' % card in block and '/my-point/%d/reserve_here' % card in block
     clock["now"] = DAY + "T12:00:00"
+    assert "Клиенту в 12:30 уходит напоминание" in block
     first, page = press(mine, card, "reserve_here")
-    assert "отмечено: на точке" in page and "напоминание" in page
-    [text] = to_client(app)
-    assert text.startswith("Добрый день. Срок хранения вашего заказа №5000100 истекает 16.10.2026")
+    assert "отмечено: на точке" in page and to_client(app) == []
     assert "Точка ответила: заказ ещё на точке" in [t for _k, t, _l in journal(conn, card)]
     assert question(page) == "" and orders.get_card(conn, card)["stage"]["code"] == "at_point"
     _t, page = press(mine, card, "reserve_here", again=first)                               # a double tap
     r = post(mine, "/my-point/%d/reserve_here" % card, "tok", token="e" * 24)               # a stale page
     assert "уже отмечен" in mine.get(r.headers["Location"]).get_data(as_text=True)
     assert mgr.dispatch(conn, "vk-late", PEER, "на точке 5000100", None, DAY + "T12:30:00") == "Заказ №5000100 уже отмечен: на точке."
-    assert len(to_client(app)) == 1
+    assert to_client(app) == []
 
 
 def test_an_answer_in_vk_first_closes_the_question_on_the_page(tmp_path, clock):
@@ -253,7 +236,7 @@ def test_the_question_leaves_at_the_end_of_the_working_day_and_a_late_here_tells
     page = mine.get("/my-point").get_data(as_text=True)
     assert question(page) == ""
     r = post(mine, "/my-point/%d/reserve_here" % card, "tok", token=stale)
-    assert "клиенту не написали" in mine.get(r.headers["Location"]).get_data(as_text=True) and to_client(app) == []
+    assert "ответ пришёл после конца рабочего дня" in mine.get(r.headers["Location"]).get_data(as_text=True) and to_client(app) == []
 
 
 def test_the_feed_has_one_key_per_open_question(tmp_path, clock):
@@ -268,7 +251,7 @@ def test_the_feed_has_one_key_per_open_question(tmp_path, clock):
     assert store.get_state(conn, reserve._ask_key(orders.get_card(conn, card))).startswith("asked|")       # the feed reads, never moves
 
 
-def test_a_point_in_the_panel_is_asked_on_its_page_and_its_here_tells_the_client(tmp_path, clock):
+def test_a_point_in_the_panel_is_asked_on_its_page_and_its_here_is_marked(tmp_path, clock):
     """The lead 2026-10-26: a point on «Панель» gets the question on «Рабочее место» (no VK, no yellow «точку не спросить»); the rest as in VK."""
     app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
     conn.execute("UPDATE point SET channel = ? WHERE id = ?", (points.PANEL, pid))
@@ -283,7 +266,7 @@ def test_a_point_in_the_panel_is_asked_on_its_page_and_its_here_tells_the_client
     mine = manager(app, conn, pid)
     assert "Клиент забрал заказ № 5000100?" in question(mine.get("/my-point").get_data(as_text=True))
     _t, page = press(mine, card, "reserve_here")
-    assert "напоминание" in page and len(to_client(app)) == 1
+    assert "отмечено: на точке" in page and to_client(app) == []                            # the client: by the tick at 12:30 (2026-11-02)
     reserve.check(conn, DAY + "T21:00:00", lambda c, t: "ok", lambda *a, **k: None, None)   # the evening tick: answered, no silence record
     assert not [e for e in orders.list_events(conn, card) if "не ответила" in e["text"]]
 

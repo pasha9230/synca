@@ -75,7 +75,7 @@ def test_the_manager_sees_the_orders_of_the_own_point_only_with_phone_items_and_
     assert page.index("700200") < page.index("5000100")                                   # newest first (same last event: the later order)
     assert '/my-point/%d/arrived' % card in page and '/my-point/%d/issued' % here in page and '/my-point/%d/no_show' % here in page
     assert '/my-point/%d/no_show' % card not in page                                      # only the marks that fit the stage («выдал» fits on the way too: owner 2026-10-21)
-    assert 'data-confirm-title="Выдать заказ' in page and 'data-confirm-title="Клиент не пришёл?"' in page       # the panel's window (UX 1.0g)
+    assert 'data-confirm-title="Выдать заказ' in page and 'data-confirm-title="Точно клиент не пришёл?"' in page       # the panel's window (UX 1.0g; the words: the owner 2026-11-02)
 
 
 def test_an_order_of_another_point_cannot_be_marked_even_by_its_address(tmp_path):
@@ -155,7 +155,9 @@ def test_issued_closes_the_order_and_tells_the_client_nothing(tmp_path):
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and to_client(app) == [] == to_client(vk_app)
     assert [(k, t) for k, t, _l in journal(conn, card)] == [(k, t) for k, t, _l in journal(vk_conn, vk_card)]
     assert "отмечено: выдан" in page
-    assert "5000100" not in mine.get("/my-point").get_data(as_text=True)                  # a closed order leaves the page
+    page = mine.get("/my-point").get_data(as_text=True)
+    assert 'id="order-%d"' % card not in page                                             # a closed order leaves the list
+    assert 'action="/my-point/%d/undo"' % card in page                                    # its «Выдал» can be undone (the owner 2026-11-02)
 
 
 def test_no_show_writes_the_red_record_as_the_vk_command_and_the_client_hears_nothing(tmp_path):

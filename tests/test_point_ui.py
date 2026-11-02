@@ -139,7 +139,7 @@ def test_the_workplace_is_made_for_a_phone_and_the_rest_keeps_its_width(w):
 def test_the_phone_menu_names_only_the_points_own_pages(w):
     page = _page(w["point"])
     menu = page[page.index('class="pt-menu"'):].split("</details>")[0]
-    assert 'href="/orders"' in menu and 'href="/chats"' in menu and 'href="/calls"' in menu
+    assert 'href="/orders"' not in menu and 'href="/chats"' in menu and 'href="/calls"' in menu       # «Заказы» hidden (the owner 2026-11-02)
     assert 'href="/catalog"' not in menu and 'href="/users"' not in menu
     assert '<form method="post" action="/logout"' in menu and 'name="csrf"' in menu                 # the sign-out is a POST (the route takes no GET)
 

@@ -29,7 +29,7 @@
 <a class="sb-link{% if path == '/' %} is-active{% endif %}" href="/">{{ icon("home") }}Главная</a>
 </nav>{% endif %}
 {% if can("orders") or can("chats") or can("calls") or can("alerts") %}<nav class="sb-group"><div class="sb-label">Продажи</div>
-{% if can("orders") %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}
+{% if can("orders") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}{# the point: hidden (the owner 2026-11-02) #}
 {% if current_user().role != "point" %}{% include "_nav_tasks.html" %}{% endif %}
 {% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_unread %}<span class="sb-count">{{ nav.chat_unread }}</span>{% endif %}</a>{% endif %}
 {% if can("calls") %}<a class="sb-link{% if path.startswith('/calls') %} is-active{% endif %}" href="/calls">{{ icon("clock") }}Звонки</a>{% endif %}

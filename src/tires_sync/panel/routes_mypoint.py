@@ -11,9 +11,10 @@ it. «Оповещения» (a line under the search, the list on ?notes=1) sho
 (order_points.notes); the bot's answers to the clients are not shown to the point (the owner 2026-10-30). /my-point/feed is what notify.js asks every
 half a minute for the sound and the browser's notification: the orders of the point, its notes and the rows of its bell (one source with it).
 The owner 2026-10-26: counters at the top; one list, newest first by the order's last event that matters to the point (_cards); the card's text is
-the VK message «Менеджеру: заказ оформлен» (its template, with the client's prices: the point takes the cash; never the purchase); «Возврат» on an order at the point is
-the VK «возврат отдал» (order_manager.returned); the question of the last day of the reservation (order_reserve, asked in VK) is answered
-here too: «Выдан» is «выдал», «На точке» is «на точке» (order_reserve.here), one answer whichever comes first."""
+the VK message «Менеджеру: заказ оформлен» (its template, with the client's prices: the point takes the cash; never the purchase); «Возврат» of an order at the
+point has no button since 2026-11-02 (the VK «возврат отдал» stays); the question of the last day of the reservation (order_reserve, asked in VK) is answered
+here too: «Выдан» is «выдал», «На точке» is «на точке» (order_reserve.here), one answer whichever comes first. The owner 2026-11-02: the
+question of the seventh day on «На ОТХ» («Выдали» / «На точке», order_oth), and «Отменить» of a press that moved an order (point_log.undo)."""
 from __future__ import annotations
 
 import re
@@ -27,11 +28,13 @@ from .common import author, current_user, get_conn, login_required, own_point
 from .routes_orders import local_iso, local_now
 
 STAGES = ("placed", "moving", "at_point")          # placed (the panel may not say «on the way» yet), on the way to the point, at the point
-ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "no_show": mgr.NO_SHOW, "returned": mgr.RETURN,
+ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "no_show": mgr.NO_SHOW,     # «Возврат» of an order at the point: no button since 2026-11-02
            "reserve_issued": "выдал", "reserve_here": mgr.HERE,         # the two answers to «Клиент забрал?» (the question of the reservation)
            "act_signed": "акт МХ-3 подписан",                           # «Подписал акт и отдал»: the return of «На ОТХ» (order_oth.sign_act)
-           "to_oth": "на ОТХ"}                                          # after «Клиент не пришёл»: the tyres stay at the point (the owner 2026-10-29)
+           "to_oth": "на ОТХ",                                          # after «Клиент не пришёл»: the tyres stay at the point (the owner 2026-10-29)
+           "oth_issued": "выдали (ОТХ)", "oth_here": "на точке (ОТХ)"}  # the two answers to the seventh day on «На ОТХ» (the owner 2026-11-02)
 NO_SHOW_REASON = "Клиент не пришёл"
+UNDO = "undo"                                      # /my-point/<order>/undo: «Отменить» a press (point_log.undo, the owner 2026-11-02)
 BUILTIN = {"arrived": (mgr.ARRIVE_FROM, "at_point"), "issued": (mgr.ISSUE_FROM, "done")}
 
 
@@ -99,7 +102,7 @@ def _not_here(card: dict, what: str):
             "Заказ №%s сейчас на этапе «%s»: «%s» отмечают, когда заказ на точке." % (mgr.label(card), card["stage"]["name"], what), False)
 
 
-def act(conn, card: dict, action: str, who: str, now: str, deliver, notify):
+def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell=None):
     """What the VK command of the same word does for an order of the point (order_manager._command for the built-in words): returns
     (outcome for the log, answer for the manager, done). A word that does not fit the stage changes nothing."""
     code = card["stage"]["code"]
@@ -130,16 +133,13 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify):
         if not moved:
             return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % mgr.label(card), False
         return "заказ перенесён на «%s»" % oth["name"], "Заказ №%s на «%s»: шины остаются на точке нашим товаром." % (mgr.label(card), oth["name"]), True
+    if action == "oth_issued":                                                  # «Выдали» to «Заказ выдали или он на точке?»
+        return order_oth.answer_issued(conn, card, who, now)
+    if action == "oth_here":
+        return order_oth.answer_here(conn, card, who, now, tell)
     if action == "reserve_issued":                                              # «Выдан» to the question is «выдал»
         action = "issued"
-    if action == "returned":                                                    # the VK «возврат отдал»; the button is on the orders at the point only
-        if code == "return":
-            return "уже отмечено", "Заказ №%s уже отмечен: %s." % (mgr.label(card), mgr.RETURNED), True
-        if code != "at_point":
-            return _not_here(card, "возврат")
-        outcome, answer = mgr.returned(conn, card, who, now)
-        return outcome, answer, not outcome.startswith("не ")
-    if action == "reserve_here":                                                # the VK «на точке»: the client hears the reminder only when asked
+    if action == "reserve_here":                                                # the VK «на точке»: marks the answer (the reminder: at 12:30, 2026-11-02)
         if code != "at_point":
             return _not_here(card, "на точке")
         outcome, answer = reserve.here(conn, card, who, now, deliver)
@@ -161,6 +161,16 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify):
     stage_id = next(s["id"] for s in orders.list_stages(conn) if s["code"] == target)
     outcome, answer = mgr.apply(conn, card, stage_id, who, now, deliver)
     return outcome, answer, not outcome.startswith("не ")
+
+
+def _tell(conn, now: str):
+    """The owner's and the partner's Telegram for a press of the point (order_notify.tell_people with the panel's keys); never raises."""
+    from .. import order_notify
+
+    def tell(logins, text):
+        return order_notify.tell_people(conn, current_app.config.get("SECRET_BOX"), logins, text,
+                                        tg_http=current_app.config.get("TG_HTTP") or order_notify.urllib_transport, now=now)
+    return tell
 
 
 def no_show_now(conn, card: dict) -> bool:
@@ -264,10 +274,11 @@ ALERTS_READ = 500                                  # the notes read to find the 
 
 def _in_tab(row: dict, tab: str) -> bool:
     """«Едут»: «Заказ оформлен» and «Перемещение на точку» (the owner 2026-10-29); «На точке»: «Товар на точке», waiting for the client; «На ОТХ»:
-    our tyres at the point (the owner 2026-10-30); «На возврат»: an «На ОТХ» whose return is agreed and the act МХ-3 not signed yet."""
+    our tyres at the point (the owner 2026-10-30); «На возврат»: an «На ОТХ» whose return is agreed and the act МХ-3 not signed yet, or one
+    the point said «На точке» of on its seventh day, waiting for the agreement (the owner 2026-11-02)."""
     code = row["card"]["stage"]["code"]
-    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": row["oth"] and not row.get("returning"),
-            "return": bool(row.get("returning"))}[tab]
+    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": row["oth"] and not row.get("returning") and not row.get("to_agree"),
+            "return": bool(row.get("returning") or row.get("to_agree"))}[tab]
 
 
 def _tab_of(row: dict) -> str:
@@ -414,6 +425,8 @@ def register(app) -> None:
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
+                          "oth_asked": code == "oth" and order_oth.question_open(conn, card), "to_agree": code == "oth" and order_oth.to_agree(conn, card),
+                          "oth_question": order_oth.question(conn, card, now) if code == "oth" else "",
                           "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
                           "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"]))})     # «Шины с ОТХ, заказ №…»
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
@@ -437,9 +450,10 @@ def register(app) -> None:
             row["returning"] = row["card"]["id"] in returning
         tab = request.args.get("tab", "")
         tab = tab if tab in TABS else DEFAULT_TAB
-        shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not r["asked"])     # «Клиент забрал?» first (sorted keeps the order)
+        shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not (r["asked"] or r["oth_asked"]))     # the questions first
         counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
-        hot = {"here": any(r["asked"] for r in cards), "return": bool(counts["return"])}           # the tabs that wait for the point
+        hot = {"here": any(r["asked"] for r in cards), "oth": any(r["oth_asked"] for r in cards),
+               "return": any(r.get("returning") for r in cards)}                                   # the tabs that wait for the point
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
         found = _found(conn, query, point_id) if query and point_id is not None else None
         if found:                                                                # the search looks at every order of the point: say its tab
@@ -455,11 +469,35 @@ def register(app) -> None:
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns,
-                               oth_ask=_oth_ask(conn, cards))
+                               oth_ask=_oth_ask(conn, cards),
+                               undo=[dict(u, label=mgr.label(u["card"])) for u in point_log.undo_list(conn, point_id)]
+                               if point_id is not None else [], undo_hint=point_log.UNDO_HINT)
+
+    def _undo(card_id):
+        """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
+        owner and the partner are told; what went to the client stays."""
+        conn = get_conn()
+        point_id = _point_id(conn)
+        card = _own_card(conn, card_id, point_id)
+        back = _back(point_id)
+        try:
+            point = points.get_point(conn, point_id)
+        except points.PointError:
+            abort(403)
+        now = local_iso()
+        try:
+            answer = point_log.undo(conn, card, point, author(), now, _tell(conn, now))
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return redirect(back)
+        flash(answer, "info")
+        return redirect(back)
 
     @app.route("/my-point/<int:card_id>/<action>", methods=["POST"])
     @login_required
     def mypoint_action(card_id, action):
+        if action == UNDO:
+            return _undo(card_id)
         if action not in ACTIONS:
             abort(404)
         conn = get_conn()
@@ -483,7 +521,7 @@ def register(app) -> None:
         try:
             from . import routes_vk
             _send, deliver, notify = routes_vk.channel(current_app, conn, now)
-            outcome, answer, ok = act(conn, card, action, author(), now, deliver, notify)
+            outcome, answer, ok = act(conn, card, action, author(), now, deliver, notify, _tell(conn, now))
         except Exception:                                                        # the press must not stay «обрабатывается»
             conn.rollback()
             current_app.logger.exception("«Рабочее место»: %s of order %s failed", action, card_id)
@@ -492,6 +530,7 @@ def register(app) -> None:
         conn.commit()
         if ok and not outcome.startswith("уже"):                               # «История точки»: what was done, not a repeat
             point_log.record(conn, now, author(), point_id, action, card["id"], outcome)
+            point_log.remember(conn, card, action, point_id, author(), now)     # «Отменить» of a press that moved the order (2026-11-02)
         flash(answer, "info" if ok else "error")
         if action == "no_show" and ok:                                         # the question «Шины остаются на точке — на ОТХ?» (2026-10-29)
             return redirect(back + ("&" if "?" in back else "?") + "oth=%d#oth-%d" % (card["id"], card["id"]))
@@ -556,6 +595,9 @@ def register(app) -> None:
         cards, now = _cards(conn, point_id), local_iso()
         items = [{"key": "question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
                   "href": "/my-point"} for card in cards if reserve.question_open(conn, card, now)]      # of the stay: a new stay rings again
+        items += [{"key": "oth-question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Заказ № %s: выдали или на точке?"
+                   % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=oth"} for card in _oth_cards(conn, point_id)
+                  if order_oth.question_open(conn, card)]
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
                    else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "", "href": "/my-point"} for card in cards]
         try:

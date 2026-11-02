@@ -9,6 +9,9 @@ feed is never touched: these goods are put on Avito by hand (the owner)."""
 from __future__ import annotations
 
 import json
+import logging
+import re
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
 from . import orders
@@ -258,3 +261,140 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> bool:
         conn.rollback()
         return False
     return True
+
+
+# ---- the owner 2026-11-02: «На ОТХ» is held six days; on the seventh from 12:30 the point is asked «Заказ выдали или он на точке?» --------
+# On its «Рабочее место» (a banner with «Выдали» / «На точке»), once per stay on «На ОТХ» (app_state ASK_KEY, moved by one UPDATE only).
+# «Выдали»: the client came after all, the order is linked to its client again and closed as issued. «На точке»: the order stays on «На ОТХ»
+# (its tyres stay our stock until the return is agreed: the feed is not touched) and shows on the point's «На возврат»; the owner and the
+# partner get an alert and a task «Согласовать возврат» each; their «Согласовано с поставщиком» (agree) starts the act МХ-3 as before.
+HOLD_DAYS = 6
+ASK_AT = "12:30"
+ASK_KEY = "oth_ask:%d:%s"                        # per order and stay on «На ОТХ»: asked|<at> → issued|<at> / here|<at>
+RETURN_TASK = "Согласовать возврат"
+
+
+def _ask_key(card: dict) -> str:
+    return ASK_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""))
+
+
+def ask_due(card: dict, now: str) -> bool:
+    """The seventh day on «На ОТХ» (the day it entered is the first) from 12:30, or any later moment."""
+    entered = str(card.get("entered_at") or "")[:10]
+    try:
+        day = date.fromisoformat(entered) + timedelta(days=HOLD_DAYS)
+    except ValueError:
+        return False
+    return now >= "%sT%s" % (day.isoformat(), ASK_AT)
+
+
+def ask_seventh_day(conn, now: str) -> int:
+    """The tick: the orders on «На ОТХ» whose seventh day has come are asked, once per stay. Not one whose return is agreed already (the act
+    МХ-3 is on its way), nor a point's own sale. Returns how many were asked."""
+    from . import order_points as points
+    asked = 0
+    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth' AND c.point_id IS NOT NULL "
+                                   "AND NOT EXISTS (SELECT 1 FROM oth_return_plan r WHERE r.order_id = c.id) ORDER BY c.id").fetchall():
+        card = orders.get_card(conn, card_id)
+        if not ask_due(card, now) or card_id in points.own_sales(conn, card["point_id"]):
+            continue
+        if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (_ask_key(card), "asked|" + now)).rowcount != 1:
+            continue
+        orders.add_event(conn, card_id, now, "система", "point", "Точке «%s» задан вопрос на «Рабочем месте»: «%s»" % (
+            (card.get("point") or {}).get("name") or "", question(conn, card, now)), level="grey")
+        conn.commit()
+        asked += 1
+    return asked
+
+
+def question(conn, card: dict, now: str) -> str:
+    """The words of the question (the owner's template «Точке: ОТХ 7-й день» if there is one, else the sample)."""
+    from .order_templates import OTH_ASK_SAMPLE, render
+    row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", OTH_ASK_SAMPLE[:2]).fetchone()
+    return render(conn, card, row[0] if row else OTH_ASK_SAMPLE[2], now)[0].strip()
+
+
+def question_open(conn, card: dict) -> bool:
+    """«Рабочее место» shows the question: the order is on «На ОТХ», asked in this stay and not answered."""
+    return card["stage"]["code"] == "oth" and (store_value(conn, _ask_key(card)) or "").startswith("asked|")
+
+
+def to_agree(conn, card: dict) -> bool:
+    """The point said «На точке» in this stay on «На ОТХ» and the return is not agreed yet: the point's «На возврат», waiting for the owner."""
+    return (card["stage"]["code"] == "oth" and (store_value(conn, _ask_key(card)) or "").startswith("here|")
+            and return_plan(conn, card["id"]) is None)
+
+
+def store_value(conn, key: str) -> str:
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else ""
+
+
+def _answer(conn, card: dict, to: str, now: str) -> str:
+    """The question moves from «asked» to `to` (no commit): the state read, '' when it was not open (answered, or never asked)."""
+    key = _ask_key(card)
+    was = store_value(conn, key)
+    if not was.startswith("asked|") or conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value = ?",
+                                                    (to + "|" + now, key, was)).rowcount != 1:
+        return ""
+    return was
+
+
+def office_logins(conn) -> list:
+    """The owner (the login of the alerts) and every active partner (Заман's role; never a login written here)."""
+    from . import order_notify, users
+    owner = order_notify.get_owner_login(conn)
+    return [owner] + sorted(u["login"] for u in users.list_users(conn) if u["active"] and u["role"] == "partner" and u["login"] != owner)
+
+
+def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
+    """«Выдали»: the client is linked again and the order goes to «Выполнено», with the answer, in one transaction. (outcome, answer, done)."""
+    label = card.get("webmim_number") or str(card["id"])
+    if card["stage"]["code"] != "oth" or not _answer(conn, card, "issued", now):
+        conn.rollback()
+        return "уже отмечено", "Заказ №%s уже отмечен или ушёл с «На ОТХ»: обновите страницу." % label, False
+    done = next((s for s in orders.list_stages(conn) if s["code"] == "done"), None)
+    if done is None:
+        conn.rollback()
+        return "не выполнено: нет этапа «Выполнено»", "Не получилось: в воронке нет этапа «Выполнено».", False
+    reattach(conn, card["id"], now, who)
+    orders.add_event(conn, card["id"], now, who, "point", "Точка ответила на 7-й день ОТХ: заказ выдали")
+    try:
+        moved = orders.move_card(conn, card["id"], done["id"], now, who)
+    except orders.OrderError as err:                                                 # rolled back with the answer: the question stays
+        return "не выполнено: %s" % err, "Не получилось: %s" % err, False
+    if not moved:
+        conn.rollback()
+        return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % label, False
+    return "заказ перенесён на «%s»" % done["name"], "Заказ №%s — отмечено: выдан (теперь на этапе «%s»)." % (label, done["name"]), True
+
+
+def answer_here(conn, card: dict, who: str, now: str, tell=None) -> tuple:
+    """«На точке»: the tyres lie at the point for the return; the owner and the partner get a yellow record, an alert (`tell(logins, text)`)
+    and a task «Согласовать возврат» each. (outcome, answer, done)."""
+    from . import order_notify, tasks
+    label = card.get("webmim_number") or str(card["id"])
+    if card["stage"]["code"] != "oth" or not _answer(conn, card, "here", now):
+        conn.rollback()
+        return "уже отмечено", "Заказ №%s уже отмечен или ушёл с «На ОТХ»: обновите страницу." % label, False
+    point = (card.get("point") or {}).get("name") or "точка не указана"
+    text = "Заказ №%s (точка «%s») 7 дней на ОТХ, шины на точке: согласуйте возврат с поставщиком — /orders/%d" % (label, point, card["id"])
+    orders.add_event(conn, card["id"], now, who, "point", "Точка ответила на 7-й день ОТХ: шины на точке. Согласуйте возврат с поставщиком "
+                     "(«Согласовано с поставщиком» в заказе)", level="yellow")
+    conn.commit()
+    owner = order_notify.get_owner_login(conn)
+    due = (datetime.fromisoformat(now) + timedelta(days=1)).isoformat(timespec="minutes")
+    for login in office_logins(conn):
+        try:
+            tasks.add(conn, kind="other", title=RETURN_TASK, due_at=due, note="Заказ №%s, точка «%s», /orders/%d" % (label, point, card["id"]),
+                      now=now, author="система", assignee=login, owner_login=owner, order_id=card["id"])
+            conn.commit()
+        except Exception:                                                            # noqa: BLE001 - the answer is kept; the record says what to do
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the task «%s» of order %s for %s failed", RETURN_TASK, card["id"], login)
+    if tell is not None:
+        try:
+            tell(office_logins(conn), text)
+        except Exception:                                                            # noqa: BLE001
+            logging.getLogger("tires_sync.orders").exception("the alert of the return of order %s failed", card["id"])
+    return "на точке: на возврат, задача «%s»" % RETURN_TASK, "Заказ №%s — отмечено: шины на точке. Возврат согласуют с поставщиком." % label, True
