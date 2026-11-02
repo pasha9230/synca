@@ -406,6 +406,11 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
         return finish(*returned(conn, card, "менеджер %s" % point["name"], now))
     command = rules.find_command(conn, card["stage_id"], word)                   # a word the owner set up for this stage comes first
+    if ships(conn, card, command):                                               # the owner's word into «Выполнено»: «Передал курьеру ТК»
+        if not _ship_fits(conn, card):
+            return dispute(point, "«%s», а заказ на этапе «%s»" % (word, card["stage"]["name"]), CANCELLED % label(card) if code == "cancel" else
+                           "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
+        return finish(*order_intercity.ship(conn, card, "менеджер %s" % point["name"], now, deliver, getattr(notify, "tell", None)))
     if command is None and word in BUILTIN:
         sources, target = BUILTIN[word]
         if code == target:                                                       # moved by hand: the client still hears it once
@@ -539,6 +544,10 @@ def _issue_yes_no(conn, done, said, asked, card_id, taken, late, point, now: str
         return done("«да», но слово «%s» не подходит к этапу «%s»: ничего не изменено" % (asked.get("word"), card["stage"]["name"]),
                     "Для заказа №%s такая команда не нужна, ничего не изменено." % number)
     target = command["to_stage_id"] if command is not None else _stage_id(conn, "done")
+    from . import order_intercity
+    if order_intercity.on(card):                                        # marked to another city after the question: no «выдал» for it
+        return done("«да», но заказ в другой город: ничего не изменено",
+                    "Заказ №%s — в другой город: если отдали шины курьеру ТК, напишите «передал курьеру %s»." % (number, number))
     dispute = conn.execute("SELECT outcome FROM order_command_log WHERE message_id = ?", (original,)).fetchone()
     claimed = conn.execute("UPDATE order_command_log SET outcome = 'подтверждается' WHERE message_id = ? AND outcome LIKE ?",
                            (original, DISPUTE + "%")).rowcount == 1          # as confirm(): the owner may have dealt with the «выдал» already
@@ -561,6 +570,22 @@ def _issue_yes_no(conn, done, said, asked, card_id, taken, late, point, now: str
                  ("подтверждено точкой («да»): %s" % outcome, card["id"], original))
     conn.commit()
     return done("«да»: %s" % outcome, reply)
+
+
+def ships(conn, card: dict, command: Optional[dict]) -> bool:
+    """The owner's word of «Команды» that leads into «Выполнено» (or «Отправлен») said of an order to another city (the owner 2026-11-02):
+    it is «Передал курьеру ТК» — «Отправлен», the client's message, the office told, the track number asked, then «Выполнено»."""
+    from . import order_intercity
+    if not command or command.get("to_stage_id") is None or not order_intercity.on(card):
+        return False
+    return orders.get_stage(conn, command["to_stage_id"])["code"] in ("done", orders.SHIPPED)
+
+
+def _ship_fits(conn, card: dict) -> bool:
+    """«Передал курьеру ТК» fits the stage of the order: it may be at the point, or it is shipped already (answered «уже отмечено»)."""
+    from . import order_intercity
+    code = card["stage"]["code"]
+    return code in order_intercity.SHIP_FROM + (orders.SHIPPED,) or (code == "done" and order_intercity.was_shipped(conn, card))
 
 
 def _stage_id(conn, code) -> Optional[int]:
@@ -1077,8 +1102,9 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
     if order_intercity.on(card) and (word == NO_SHOW or target == "done"):
         raise OrderError("Заказ №%s — в другой город: клиент за ним не придёт. Если точка отдала шины курьеру ТК, подтвердите «передал курьеру» "
                          "или переведите заказ вручную и ответьте точке." % label(card))
+    ship = word == SHIP or ships(conn, card, command)                   # the owner's word into «Выполнено» of such an order: the courier's
     fits = (code == "at_point") if word == NO_SHOW else _return_from(card) if word == RETURN else \
-        (order_intercity.on(card) and (code in order_intercity.SHIP_FROM + (orders.SHIPPED,) or (code == "done" and order_intercity.was_shipped(conn, card)))) if word == SHIP else \
+        (order_intercity.on(card) and _ship_fits(conn, card)) if ship else \
         ((code in sources or code == target) if target else command is not None)
     if not fits:
         raise OrderError("Команда «%s» не подходит к заказу №%s на этапе «%s»: переведите заказ вручную и ответьте точке."
@@ -1091,7 +1117,7 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
     try:
         if word == NO_SHOW:
             outcome, reply = no_show(conn, card, who, now, notify)
-        elif word == SHIP:
+        elif ship:
             outcome, reply = order_intercity.ship(conn, card, who, now, deliver, getattr(notify, "tell", None))
             if outcome.startswith("не "):
                 raise OrderError(reply)

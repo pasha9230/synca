@@ -8,7 +8,8 @@ commands of the points and the reconciliation): a position's number is its sourc
 again (oth_sale.supplier_items). The sources go to «Отмена» («Объединён в заказ №N»), the revenue is the new order's sale, once.
 A source with a sale or on a closed stage takes part «справочно»: nothing of it moves (its tyres are sold or gone), the new order shows it.
 Nothing is sent: no rule wakes, the waiting tasks of the sources are skipped, every record of the merge is grey (no alert in the bell).
-«Разъединить» gives it all back while the new order is not sold, not placed after the merge and its positions are as they came."""
+«Разъединить» gives it all back while the new order is not sold, not placed after the merge and its positions are as they came.
+Orders to another city (order_intercity, the owner 2026-11-02) merge only with each other, to one city by one company, none sent yet."""
 from __future__ import annotations
 
 import json
@@ -202,13 +203,15 @@ def why_not_delete(conn, order_id) -> Optional[str]:
 # ---- the merge -----------------------------------------------------------------------------------------------------------------------
 
 def _why_not_source(conn, card: dict) -> Optional[str]:
-    from . import oth_sale
+    from . import order_intercity, oth_sale
     label = _label(card)
     found = into(conn, card["id"])
     if found:
         return "Заказ №%s уже объединён в заказ №%d." % (label, found)
     if is_target(conn, card["id"]):
         return "Заказ №%s уже объединён из других: сначала разъедините его." % label
+    if card["stage"]["code"] == orders.SHIPPED or (card["stage"]["code"] == "done" and order_intercity.was_shipped(conn, card)):
+        return "Заказ №%s уже отправлен в другой город: объединить его нельзя." % label         # the owner 2026-11-02
     if _ref(card):
         return None
     state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card["id"],)).fetchone()
@@ -322,7 +325,46 @@ def check(conn, ids, stage_id) -> dict:
         raise MergeError("Нечего объединять: все выбранные заказы закрыты или с продажей — их шины не переходят.")
     if len({c["deal_kind"] for c in moving}) > 1:
         raise MergeError("Сделки «Из наличия точки» объединяются только с такими же.")
+    _why_not_intercity(moving)
     return {"cards": cards, "moving": moving, "ref": [c for c in cards if _ref(c)], "stage": stage, "point_id": places.pop() if places else None}
+
+
+def _why_not_intercity(cards: List[dict]) -> None:
+    """«Доставка в другой город» (the owner 2026-11-02): such orders merge only with each other and only to the same city by the same
+    transport company; an order to another city and an ordinary one never. Of the sources whose tyres move: one «справочно» ships nothing."""
+    from . import order_intercity
+    marks = [order_intercity.on(c) for c in cards]
+    if any(marks) and not all(marks):
+        raise MergeError("Заказ в другой город и обычный заказ объединить нельзя: %s — в другой город, %s — обычный." % (
+            ", ".join("№%s" % _label(c) for c, m in zip(cards, marks) if m), ", ".join("№%s" % _label(c) for c, m in zip(cards, marks) if not m)))
+    if all(marks) and len({(c["intercity"]["city"].casefold(), c["intercity"]["carrier"]) for c in cards}) > 1:
+        raise MergeError("Заказы в другой город объединяются, только если у них один город и одна ТК: %s." % "; ".join(
+            "№%s — %s, %s" % (_label(c), c["intercity"]["city"] or "город не указан", c["intercity"]["carrier"] or "ТК не указана") for c in cards))
+
+
+def _carry_intercity(conn, cards: List[dict], new: int, now: str, author: str) -> None:
+    """The new order of orders to another city is one too (the owner 2026-11-02): their city and company, the track number of the only one or
+    of the first that has it (another one is written into the journal), copies of the labels of all of them — of the sources whose tyres
+    move (`cards`): a source «справочно» keeps its own shipment. The sources keep their own mark, fields and labels: «Разъединить» leaves
+    them as they were."""
+    first = cards[0]["intercity"]
+    tracks = [(c, c["intercity"]["track"]) for c in cards if c["intercity"]["track"]]
+    track = tracks[0][1] if tracks else ""
+    conn.execute("INSERT INTO order_intercity (order_id, enabled, city, carrier, track, updated_at, updated_by) VALUES (?,1,?,?,?,?,?)",
+                 (new, first["city"], first["carrier"], track, now, author))
+    copied = 0
+    for card in cards:
+        for name, size, data, at, who in conn.execute("SELECT name, size, data, uploaded_at, uploaded_by FROM order_label WHERE order_id = ? ORDER BY id",
+                                                      (card["id"],)).fetchall():
+            conn.execute("INSERT INTO order_label (order_id, name, size, data, uploaded_at, uploaded_by) VALUES (?,?,?,?,?,?)",
+                         (new, name, size, data, at, who))
+            copied += 1
+    orders.add_event(conn, new, now, author, "field", "Доставка в другой город: да — %s, ТК %s%s; этикеток из заказов: %d" % (
+        first["city"] or "город не указан", first["carrier"] or "не указана", ", трек-номер %s" % track if track else "", copied), level="grey")
+    for card, other in tracks[1:]:
+        if other != track:
+            orders.add_event(conn, new, now, author, "field", "Трек-номер заказа №%s: %s — не перенесён, в заказе трек-номер %s (заказа №%s)" % (
+                _label(card), other, track, _label(tracks[0][0])), level="grey")
 
 
 def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_name: str = "", client_phone: str = "") -> int:
@@ -348,6 +390,10 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
                   "source": base["source"] if base["source"] in orders.SOURCES else "",      # an old value is never refused
                   "responsible": orders._row(conn, base["id"])["responsible"]}       # the source's own, not «created_by» in its place
         new = orders.create_card(conn, fields, now, author, require_contact=False, commit=False, stage=stage)   # no rule, no message
+        from . import order_intercity
+        intercity = order_intercity.on(moving[0])                       # all of them or none (check)
+        if intercity:
+            _carry_intercity(conn, moving, new, now, author)             # before the reservation: such an order has none
         merge_id = conn.execute("INSERT INTO order_merge (into_order, at, author) VALUES (?,?,?)", (new, now, author)).lastrowid
         cancel = next((s for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
         if cancel is None:
@@ -387,7 +433,7 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
         else:
             orders._attach_client(conn, new, now, author)
         if stage["code"] == "at_point":
-            ahead = [c["reserve_until"] for c in moving if c["stage"]["code"] == "at_point" and c["reserve_until"] >= now[:10]]
+            ahead = [c["reserve_until"] for c in moving if c["stage"]["code"] == "at_point" and c["reserve_until"] >= now[:10] and not intercity]
             if ahead:
                 conn.execute("UPDATE order_card SET reserve_until = ? WHERE id = ?", (max(ahead), new))
                 _carry_reserve(conn, [c for c in moving if c["stage"]["code"] == "at_point" and c["reserve_until"] == max(ahead)], new, now)
