@@ -152,14 +152,20 @@ def refresh_tasks(conn, card_id, now: str) -> None:
             if stuck:
                 conn.execute("UPDATE order_task SET status = 'pending' WHERE id = ? AND status = 'running'", (task["id"],))
             continue
-        if task["kind"] != "message" or not str(task["arg"]).isdigit():
-            continue
-        try:
-            template = templates.get_template(conn, int(task["arg"]))
-        except OrderError:
+        if task["kind"] != "message":
             continue
         card = card or orders.get_card(conn, card_id)
-        text, missing = templates.render(conn, card, template["body"])
+        if str(task["arg"]).isdigit():
+            try:
+                body = templates.get_template(conn, int(task["arg"]))["body"]
+            except OrderError:
+                continue
+        elif task["rule_id"] == ARRIVED_RULE:                      # «можно забирать» with the sample's text or the one without the number
+            from . import order_manager as mgr                     # (no template id kept): the text it was made from, as the card is now
+            body = mgr._oth_arrived_body(conn, card) or mgr._arrived_body(conn)
+        else:
+            continue
+        text, missing = templates.render(conn, card, body, now)
         status, body, result = ("error", "", "Не хватает: %s." % ", ".join(missing)) if missing else ("pending", text, "")
         if (status, body, result) != (task["status"], task["body"], task["result"]):
             conn.execute("UPDATE order_task SET status = ?, body = ?, result = ? WHERE id = ? AND status IN ('pending', 'error')", (status, body, result, task["id"]))
