@@ -61,7 +61,8 @@
 {% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
 <a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
-<a class="sb-link{% if path.startswith(('/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders/settings">{{ icon("layers") }}Настройки заказов</a>
+<a class="sb-link{% if path.startswith('/orders/settings') %} is-active{% endif %}" href="/orders/settings">{{ icon("layers") }}Настройки заказов</a>
+<a class="sb-link{% if path.startswith('/orders/templates') %} is-active{% endif %}" href="/orders/templates">{{ icon("edit") }}Шаблоны сообщений</a>
 <a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>{% endif %}
 {% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
 {% endcall %}{% endif %}

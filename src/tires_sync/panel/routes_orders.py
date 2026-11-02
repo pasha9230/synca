@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import onboarding_texts, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
+from .. import message_texts, onboarding_texts, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -979,7 +979,7 @@ def register(app) -> None:
         card = card_or_404(conn, card_id)
         now = local_iso()
         if order_oth.unagree(conn, card, now, author()):
-            told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, order_oth.UNAGREED_POINT % manager.label(card), now,
+            told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, message_texts.text(conn, message_texts.UNAGREED, order_label=manager.label(card)), now,
                                            vk_http=app.config.get("VK_HTTP") or urllib_transport)
             flash("Согласование отменено: шины снова на ОТХ, точка возврат не видит. Точке: %s." % told, "ok")
         else:
@@ -1634,7 +1634,8 @@ def register(app) -> None:
         stages = orders.list_stages(conn)
         return render_template(
             "orders_settings.html", stages=stages, counts=counts, removable=orders.REMOVABLE_SYSTEM, kinds=orders.KIND_NAMES, triggers=rules.TRIGGERS, actions=rules.ACTIONS,
-            modes=rules.MODES, templates=templates.list_templates(conn), points=points.list_points(conn),
+            modes=rules.MODES, templates=[t for t in templates.list_templates(conn) if t["name"] not in message_texts.CODE_NAMES],   # the code's texts: not for rules
+            points=points.list_points(conn),
             rules_by_stage={s["id"]: rules.list_rules(conn, s["id"]) for s in stages},
             commands_by_stage={s["id"]: rules.list_commands(conn, s["id"]) for s in stages}, stage_names={s["id"]: s["name"] for s in stages},
             template_names={t["id"]: t["name"] for t in templates.list_templates(conn)}, point_names={p["id"]: p["name"] for p in points.list_points(conn)},
@@ -1829,8 +1830,37 @@ def register(app) -> None:
     @app.route("/orders/templates")
     @login_required
     def orders_templates_page():
-        return render_template("orders_templates.html", templates=templates.list_templates(get_conn()), audiences=templates.AUDIENCES,
-                               variables=templates.VARIABLES)
+        """«Настройка → Шаблоны сообщений» (the owner 2026-11-02): every text the system sends by itself (message_texts), then the owner's
+        own templates of the rules."""
+        conn = get_conn()
+        known = {(t["name"], t["audience"]) for t in message_texts.TEXTS}
+        return render_template("orders_templates.html", texts=message_texts.listing(conn),
+                               templates=[t for t in templates.list_templates(conn) if (t["name"], t["audience"]) not in known],
+                               audiences=templates.AUDIENCES, variables=templates.VARIABLES)
+
+    @app.route("/orders/templates/text", methods=["POST"])
+    @login_required
+    def orders_text_save():
+        f = request.form
+        try:
+            warnings = message_texts.save(get_conn(), f.get("key"), f.get("body"), author(), now_iso())
+            flash("Шаблон «%s» сохранён." % message_texts.entry(f.get("key"))["name"], "ok")
+            for warning in warnings:
+                flash(warning, "info")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return redirect("/orders/templates#t-%s" % re.sub(r"[^\w-]", "", str(f.get("key") or ""))[:80])
+
+    @app.route("/orders/templates/text/reset", methods=["POST"])
+    @login_required
+    def orders_text_reset():
+        key = request.form.get("key")
+        try:
+            done = message_texts.reset(get_conn(), key, author(), now_iso())
+            flash(("Шаблону «%s» возвращён исходный текст." if done else "У шаблона «%s» и так исходный текст.") % message_texts.entry(key)["name"], "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return redirect("/orders/templates#t-%s" % re.sub(r"[^\w-]", "", str(key or ""))[:80])
 
     @app.route("/orders/templates/save", methods=["POST"])
     @login_required
@@ -1838,10 +1868,19 @@ def register(app) -> None:
         conn, f = get_conn(), request.form
         try:
             template_id = _int(f.get("id"))
+            was = templates.get_template(conn, template_id) if template_id is not None else None
+            if message_texts.taken(f.get("name")) and (was is None or (was["name"], was["audience"]) != (str(f.get("name") or "").strip(), f.get("audience"))):
+                raise orders.OrderError("Имя «%s» занято текстом, который система отправляет сама: правьте его выше, в «Сообщения, которые "
+                                        "уходят сами», или назовите шаблон иначе." % str(f.get("name")).strip())
             if template_id is None:
-                templates.add_template(conn, f.get("name"), f.get("audience"), f.get("body"))
+                template_id = templates.add_template(conn, f.get("name"), f.get("audience"), f.get("body"))
             else:
                 templates.update_template(conn, template_id, f.get("name"), f.get("audience"), f.get("body"))
+            saved = templates.get_template(conn, template_id)
+            if was is None or (was["name"], was["audience"], was["body"]) != (saved["name"], saved["audience"], saved["body"]):
+                message_texts.audit(conn, author(), now_iso(), {"name": saved["name"], "from": was["body"] if was else "", "to": saved["body"],
+                                                                "added": was is None, "was_name": was["name"] if was and was["name"] != saved["name"] else "",
+                                                                "audience": templates.AUDIENCES.get(saved["audience"], "") if was and was["audience"] != saved["audience"] else ""})
             flash("Шаблон сохранён.")
         except orders.OrderError as err:
             flash(str(err))
@@ -1856,8 +1895,11 @@ def register(app) -> None:
     @app.route("/orders/templates/<int:template_id>/delete", methods=["POST"])
     @login_required
     def orders_template_delete(template_id):
+        conn = get_conn()
         try:
-            templates.delete_template(get_conn(), template_id)
+            was = templates.get_template(conn, template_id)
+            templates.delete_template(conn, template_id)
+            message_texts.audit(conn, author(), now_iso(), {"name": was["name"], "from": was["body"], "to": "", "deleted": True})
             flash("Шаблон удалён.")
         except orders.OrderError as err:
             flash(str(err))

@@ -139,7 +139,7 @@ def _tell(conn, card_id, who: dict, webmim_id: str, now: str, author: str, send)
         template = _template(conn, who)
         if template is None:
             return _not_sent(conn, card_id, who, now, "шаблона с таким именем «%s» нет (переименован или удалён)." % who["whom"],
-                             "Верните шаблону имя в «Заказы → Шаблоны» или напишите %s сами." % who["whom"])
+                             "Сохраните его в «Настройка → Шаблоны сообщений» или напишите %s сами." % who["whom"])
         point = orders.get_card(conn, card_id).get("point") if who is POINT else None
         if points.in_panel(point):                                # the owner 2026-10-23: the point sees the order on «Рабочее место», nothing in VK
             line = "Точка «%s» %s«%s» в ВК не отправляется, заказ виден на её «Рабочем месте»." % (point["name"], IN_PANEL, who["template"])

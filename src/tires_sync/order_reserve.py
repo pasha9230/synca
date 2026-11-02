@@ -27,7 +27,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Callable, Optional, Tuple
 
-from . import chats, order_manager, order_templates, orders, store, vk_send
+from . import chats, message_texts, order_manager, order_templates, orders, store, vk_send
 from .order_points import PANEL
 
 FIRST_HOUR = 9                                   # no alert before 09:00 (Moscow), so that nobody is woken by the hourly tick
@@ -36,9 +36,7 @@ Notify = Callable[[dict, str], str]               # (card, text) -> how it went;
 CLIENT_TEMPLATE = order_templates.RESERVE_SAMPLE[0]
 PointSend = Callable[..., object]                 # vk_send.sender_for: (peer_id, text, random_id=None, keyboard=None); raises when it did not go
 ASK_KEY = "reserve_ask:%d:%s"                     # app_state, per order and stay at the point: «asking|<at>» → asked → answered / silent; failed, unasked
-ASK = "Заказ №%s (%s) ещё на точке? Ответьте «выдал %s» или «на точке %s»."
 HERE = "на точке"
-ASK_NUMBER = "Укажите номер заказа WebMIM по заказу %d (%s)"
 NO_NUMBER_MARK = "[резерв:нет-номера]"            # once per order, whatever its stays at the point
 NUMBER = re.compile(r"[ \t\u00a0]*[№#N]?[ \t\u00a0]*\{webmim_number\}")
 CLIENT_AT = (12, 30)                              # the owner 2026-11-02: the reminder goes on the last day from 12:30 (Moscow), by itself
@@ -49,7 +47,6 @@ NO_ANSWER_MAX = timedelta(hours=48)               # an older reminder moves noth
 CHATS_FRESH = timedelta(minutes=30)               # the chats of the account read this lately, or «no answer» is not known (they are read every minute)
 STALE_AFTER = timedelta(hours=24)                 # the move held up this long after its window by chats not read: one yellow record (the lead 2026-11-02)
 STALE_MARK = "[резерв:чаты-не-читаются:%s]"
-MOVED_NOTE = "Заказ №%s переведён на «На ОТХ»: клиент не ответил на напоминание о сроке резерва"     # to the point, the owner, the partner
 
 
 def _marker(kind: str, until: str) -> str:
@@ -128,7 +125,7 @@ def _ask_number(conn, card: dict, notify: Notify, now: str) -> None:
     if ((oth_sale.taken_ids(conn, card["id"]) or order_merge.placed_ids(conn, card["id"]))
             and not [i for i in oth_sale.supplier_items(conn, card) if int(i["qty"]) >= 1]):
         return                                                  # every tyre taken from «На ОТХ» or ordered by the sources of a merge: no number to ask
-    text = ASK_NUMBER % (card["id"], card["client_name"] or card["client_phone"] or "клиент")
+    text = message_texts.text(conn, message_texts.ASK_NUMBER, order_no=card["id"], client=card["client_name"] or card["client_phone"] or "клиент")
     orders.add_event(conn, card["id"], now, "система", "reserve", "Менеджеру: «%s»: %s %s" % (text, notify(card, text), NO_NUMBER_MARK),
                      level="yellow")
     conn.commit()
@@ -180,7 +177,8 @@ def ask_point(conn, card: dict, point_send: Optional[PointSend], now: str) -> st
     elif point_send is None:
         why = "ВК не настроен: нет ключа сообщества"
     number = order_manager.label(card)
-    text = ASK % (number, ", ".join(w for w in (card["client_name"], order_manager.short(card)) if w) or "без позиций", number, number)
+    text = message_texts.text(conn, message_texts.RESERVE_ASK, order_label=number,      # the owner's words («Шаблоны сообщений»)
+                              order_summary=", ".join(w for w in (card["client_name"], order_manager.short(card)) if w) or "без позиций")
     if point and point.get("channel") == PANEL:                 # the lead 2026-10-26: a point in the panel is asked on «Рабочее место» (question_open)
         if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, "asked|" + now)).rowcount != 1:
             conn.commit()
@@ -327,7 +325,7 @@ def _tell_moved(conn, card: dict, notify: Optional[Notify], now: str) -> None:
     if notify is None:
         return
     from . import order_oth
-    text = MOVED_NOTE % order_manager.label(card)
+    text = message_texts.text(conn, message_texts.MOVED_NOTE, order_label=order_manager.label(card))
     for who in [""] + order_oth.office_logins(conn):            # "": nobody of the staff answers, so the alert goes to the point
         try:
             notify(dict(card, responsible=who, to_staff=bool(who)), text)

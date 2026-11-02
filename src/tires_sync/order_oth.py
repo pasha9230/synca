@@ -219,9 +219,6 @@ def unagree(conn, card: dict, now: str, author: str) -> bool:
     return True
 
 
-UNAGREED_POINT = "Возврат по заказу №%s поставщику отменён, шины остаются на точке"     # to the point after «Отменить согласование» (2026-10-30)
-
-
 def act_orders(conn, order_id) -> str:
     """The orders the act МХ-3 of a return is likely made by (the owner 2026-10-30: the supplier's driver brings it for the order the tyres
     were bought by): those of the positions of the order taken from «На ОТХ», the first order of a chain, by the number the point knows
@@ -408,7 +405,8 @@ def answer_here(conn, card: dict, who: str, now: str, tell=None) -> tuple:
         conn.rollback()
         return "уже отмечено", "Заказ №%s уже отмечен или ушёл с «На ОТХ»: обновите страницу." % label, False
     point = (card.get("point") or {}).get("name") or "точка не указана"
-    text = "Заказ №%s (точка «%s») 7 дней на ОТХ, шины на точке: согласуйте возврат с поставщиком — /orders/%d" % (label, point, card["id"])
+    from . import message_texts                                 # the owner's words («Шаблоны сообщений»)
+    text = message_texts.text(conn, message_texts.RETURN_AGREE, order_label=label, point=point, link="/orders/%d" % card["id"])
     orders.add_event(conn, card["id"], now, who, "point", "Точка ответила на 7-й день ОТХ: шины на точке. Согласуйте возврат с поставщиком "
                      "(«Согласовано с поставщиком» в заказе)", level="yellow")
     conn.commit()

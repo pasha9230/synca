@@ -1,9 +1,22 @@
 {% extends "base.html" %}
 {% from "_ui.html" import icon, empty %}
-{% block title %}Шаблоны сообщений · Заказы · Tires Sync{% endblock %}
+{% block title %}Шаблоны сообщений · Настройка · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Шаблоны сообщений</span></div><h1>Шаблоны сообщений</h1>
-<p class="sub">Текст для клиента или менеджера точки. Правила воронки подставляют данные заказа и показывают готовый текст в карточке заказа.</p></div></header>
+<header class="page-head"><div><div class="crumbs"><span>Настройка</span>{{ icon("chev", "i-sm") }}<span>Шаблоны сообщений</span></div><h1>Шаблоны сообщений</h1>
+<p class="sub">Все тексты, которые система отправляет сама: клиенту, точке и менеджеру. Исправьте текст и сохраните — следующие сообщения уйдут с ним. «Вернуть исходный текст» ставит текст по умолчанию.</p></div></header>
+<section class="card" style="margin-bottom:var(--s-4)"><div class="card-head"><h3>Сообщения, которые уходят сами</h3></div>
+{% for t in texts %}{% if can_post("orders_text_save") %}<form method="post" action="/orders/templates/text" class="card-body stack" id="t-{{ t.key }}" style="border-bottom:1px solid var(--gray-200)">{% else %}<fieldset disabled class="ro-form card-body stack" id="t-{{ t.key }}" style="border:0;border-bottom:1px solid var(--gray-200);margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ t.key }}">
+<div class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:center"><strong>{{ t.name }}</strong><span class="badge badge--brand" data-to="{{ t.to }}">Кому: {{ t.to_name }}</span>{% if t.changed %}<span class="badge badge--warn">Изменён</span>{% endif %}{% if t.off %}<span class="badge badge--err">Не отправляется: шаблона нет — нажмите «Сохранить»</span>{% endif %}</div>
+<p class="small muted" style="margin:0">Когда: {{ t.when }}</p>
+<label class="field"><span class="label">Текст</span><textarea class="textarea" name="body" rows="4" maxlength="2000">{{ t.body }}</textarea></label>
+<div class="small"><span class="muted">Подстановки (нажмите, чтобы вставить):</span> {% for key, label in t.variables.items() %}<button type="button" class="badge" data-insert="{{ '{' ~ key ~ '}' }}" title="{{ label }}">{{ "{" ~ key ~ "}" }} · {{ label }}</button> {% endfor %}</div>
+{% if t.keep %}<p class="small muted" style="margin:0">Ответ на это сообщение читает система: оставьте в тексте {% for w in t.keep %}«{{ w }}»{% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+<div class="row" style="gap:var(--s-2)"><button class="btn btn--primary btn--sm">Сохранить</button>{% if t.changed and can_post("orders_text_reset") %}<button class="btn btn--secondary btn--sm" formaction="/orders/templates/text/reset">Вернуть исходный текст</button>{% endif %}</div>
+{% if t.changed %}<details class="small"><summary class="muted">Исходный текст</summary><pre style="white-space:pre-wrap;margin:var(--s-2) 0 0">{{ t.default }}</pre></details>{% endif %}
+{% if can_post("orders_text_save") %}</form>{% else %}</fieldset>{% endif %}{% endfor %}
+</section>
+<h2 style="margin:var(--s-5) 0 var(--s-2)">Свои шаблоны для правил воронки</h2>
+<p class="sub">Текст для клиента или менеджера точки. Правила воронки подставляют данные заказа и показывают готовый текст в карточке заказа.</p>
 <details class="card" style="margin-bottom:var(--s-4)"><summary class="card-body strong">Какие подстановки есть</summary><div class="card-body"><table class="table table--plain"><tbody>{% for key, label in variables.items() %}<tr><td><code>{{ "{" ~ key ~ "}" }}</code></td><td>{{ label }}</td></tr>{% endfor %}</tbody></table><p class="small muted">Если для заказа нет значения (например, телефона), сообщение не готовится: задача покажет, чего не хватает.</p></div></details>
 <section class="card">
 {% for t in templates %}{% if can_post("orders_template_save") %}<form method="post" action="/orders/templates/save" class="card-body stack" style="border-bottom:1px solid var(--gray-200)">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="id" value="{{ t.id }}">
@@ -20,3 +33,4 @@
 <label class="field"><span class="label">Текст</span><textarea class="textarea" name="body" rows="3" maxlength="2000"></textarea></label></div>
 <div class="card-foot"><button class="btn btn--primary">{{ icon("plus") }}Добавить шаблон</button></div>{% if can_post("orders_template_save") %}</form>{% else %}</fieldset>{% endif %}</section>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='templates.js') }}"></script>{% endblock %}
