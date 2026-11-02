@@ -155,15 +155,21 @@ def refresh_tasks(conn, card_id, now: str) -> None:
         if task["kind"] != "message":
             continue
         card = card or orders.get_card(conn, card_id)
+        body = None
         if str(task["arg"]).isdigit():
             try:
                 body = templates.get_template(conn, int(task["arg"]))["body"]
             except OrderError:
+                pass
+        if body is None and task["rule_id"] == ARRIVED_RULE:       # «можно забирать» with the sample's text or the one without the number
+            from . import order_manager as mgr                     # (no template id kept, or it is gone): the text it is made from now
+            try:
+                body = mgr._oth_arrived_body(conn, card) or mgr._arrived_body(conn)
+            except Exception:                                      # the card still opens; the task stays as it was
+                conn.rollback()
+                logging.getLogger("tires_sync.orders").exception("the text of «можно забирать» of card %s", card_id)
                 continue
-        elif task["rule_id"] == ARRIVED_RULE:                      # «можно забирать» with the sample's text or the one without the number
-            from . import order_manager as mgr                     # (no template id kept): the text it was made from, as the card is now
-            body = mgr._oth_arrived_body(conn, card) or mgr._arrived_body(conn)
-        else:
+        if body is None:
             continue
         text, missing = templates.render(conn, card, body, now)
         status, body, result = ("error", "", "Не хватает: %s." % ", ".join(missing)) if missing else ("pending", text, "")
@@ -419,6 +425,11 @@ def send_task(conn, task_id, text: str, deliver, now: str, author: str, prefer=N
         return chat["id"]
     conn.execute("UPDATE order_task SET body = ? WHERE id = ? AND status = 'running'", (text, task_id))
     _finish(conn, task, "done", SENT_TO_CLIENT + ("" if text.strip() == str(task["body"] or "").strip() else ", текст изменён"), now, author, text)
+    if token.startswith("arrived-"):                               # «…Отправьте вручную.» of «Входящие» about it: answered, nobody writes it twice
+        try:
+            chats._inbox_done(conn, token, now, "отправлено из «Сообщений по заказу»")
+        except Exception:
+            conn.rollback()
     return chat["id"]
 
 

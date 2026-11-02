@@ -138,3 +138,47 @@ def test_placed_message_comes_back_and_goes_again_with_its_value(tmp_path):
     task = tasks(conn, mine)[0]
     engine.send_task(conn, task["id"], "Заказ 5001, перемещение 26R-2", deliver, LATER, "owner")
     assert [text for _row, text, _token in deliver.sent] == ["Заказ 5001, перемещение 26R-2"] and tasks(conn, mine)[0]["status"] == "done"
+
+
+def test_the_inbox_line_send_by_hand_is_answered_after_the_press(tmp_path, sample):
+    """«…не хватает: Номер заказа WebMIM. Отправьте вручную.» of «Входящие» is closed once the press sent it: nobody writes it twice."""
+    conn = db(tmp_path)
+    mine = ready(conn)
+    no_arrival_template(conn)
+    at_point(conn, mine)
+    mgr.tell_client_arrived(conn, mine, Deliver(), NOW, "точка")
+    inbox = "SELECT status, answer FROM manager_message WHERE message_id LIKE 'arrived-%'"
+    assert [r[0] for r in conn.execute(inbox)] == ["new"]
+    orders.update_card(conn, mine, {"webmim_number": "5000504"}, LATER, "owner")
+    task = arrival(conn, mine)[0]
+    engine.send_task(conn, task["id"], "Заказ 5000504 приехал, можно забирать.", Deliver(), LATER, "owner")
+    [(status, answer)] = conn.execute(inbox).fetchall()
+    assert status != "new" and answer.startswith("Итог:")
+
+
+def test_a_deleted_template_falls_back_to_the_arrival_text(tmp_path, sample):
+    conn = db(tmp_path)
+    mine = ready(conn)
+    template = next(t for t in templates.list_templates(conn) if t["name"] == mgr.ARRIVED_TEMPLATE)
+    templates.update_template(conn, template["id"], template["name"], "client", BODY)
+    at_point(conn, mine)
+    mgr.tell_client_arrived(conn, mine, Deliver(), NOW, "точка")
+    assert arrival(conn, mine)[0]["arg"] == str(template["id"])
+    no_arrival_template(conn)
+    orders.update_card(conn, mine, {"webmim_number": "5000504"}, LATER, "owner")
+    engine.refresh_tasks(conn, mine, LATER)
+    assert arrival(conn, mine)[0]["status"] == "pending" and "5000504" in arrival(conn, mine)[0]["body"]
+
+
+def test_a_failure_building_the_arrival_text_does_not_break_the_card(tmp_path, sample, monkeypatch):
+    conn = db(tmp_path)
+    mine = ready(conn)
+    no_arrival_template(conn)
+    at_point(conn, mine)
+    mgr.tell_client_arrived(conn, mine, Deliver(), NOW, "точка")
+
+    def broken(conn, card):
+        raise RuntimeError("oth")
+    monkeypatch.setattr(mgr, "_oth_arrived_body", broken)
+    engine.refresh_tasks(conn, mine, LATER)                              # never raises: the card opens, the task stays as it was
+    assert arrival(conn, mine)[0]["status"] == "error"
