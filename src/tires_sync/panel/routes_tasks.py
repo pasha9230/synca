@@ -52,11 +52,13 @@ def _card_point(conn, order_id):
         return None
 
 
-def _mine_as_point(conn) -> list:
+def _mine_as_point(conn, to_set: bool = False) -> list:
     """Whose tasks the person sees and sets as a point: the point manager its own login; the owner or the partner working as a point the
-    managers of that point (tasks.listing as_point; the lead 2026-11-02)."""
+    managers of that point (tasks.listing as_point; the lead 2026-11-02) — to set one (`to_set`), the active ones only."""
     user = current_user()
-    return tasks.point_managers(conn, user["as_point"]) if user["as_point"] is not None else [user["login"]]
+    if user["as_point"] is None:
+        return [user["login"]]
+    return tasks.point_managers(conn, user["as_point"], active_only=to_set)
 
 
 def register(app) -> None:
@@ -74,14 +76,14 @@ def register(app) -> None:
         conn = get_conn()
         if is_point():
             group = "Точка" if current_user()["as_point"] is not None else "Себе"
-            return [{"login": login, "name": users.person_name(conn, login), "group": group} for login in _mine_as_point(conn)]
+            return [{"login": login, "name": users.person_name(conn, login), "group": group} for login in _mine_as_point(conn, to_set=True)]
         return tasks.assignees(conn, _owner(conn), _main(app))
 
     def task_default(order_id=None, chat_row=None) -> str:
         conn = get_conn()
         me = current_user()["login"]
         if is_point():
-            return next(iter(_mine_as_point(conn)), "")
+            return next(iter(_mine_as_point(conn, to_set=True)), "")
         return tasks.default_assignee(conn, _owner(conn), me, order_id, chat_row)
 
     app.jinja_env.globals.update(tasks_for=tasks_for, may_task=may_set, task_people=task_people, task_default=task_default,
@@ -125,7 +127,7 @@ def register(app) -> None:
         order_id, chat_row, client_id = _int("order_id"), _int("chat_row"), _int("client_id")
         assignee = f.get("assignee", "").strip()
         if is_point():                                   # the point: to itself only (as a point: to its managers), of an order of its
-            mine = _mine_as_point(conn)                  # own point or of none
+            mine = _mine_as_point(conn, to_set=True)     # own point or of none
             if chat_row or client_id or (assignee and assignee not in mine):
                 abort(403)
             if order_id and _card_point(conn, order_id) != own_point():

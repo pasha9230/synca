@@ -242,9 +242,9 @@ def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bo
 MANAGERS = "SELECT login FROM panel_user_role WHERE role = 'point' AND point_id = ?"     # the managers of a point (one argument)
 
 
-def point_managers(conn, point_id) -> List[str]:
-    """The logins of the managers of a point, by login."""
-    return [r[0] for r in conn.execute(MANAGERS + " ORDER BY login", (point_id,))]
+def point_managers(conn, point_id, active_only: bool = False) -> List[str]:
+    """The logins of the managers of a point, by login; `active_only`: those who can sign in (whom to set a task to)."""
+    return [r[0] for r in conn.execute(MANAGERS + (" AND active = 1" if active_only else "") + " ORDER BY login", (point_id,))]
 
 
 def _mine(conn, login: str, owner_login: str) -> tuple:

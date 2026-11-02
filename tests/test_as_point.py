@@ -391,6 +391,8 @@ def test_telegram_about_ones_own_press_as_a_point_is_not_sent_to_oneself(w):
         card = orders.get_card(conn, w["mine"])
         answer = notify(dict(card, responsible="owner", to_staff=True), "заказ")
         assert "нажал сам" in answer and told() == set()
+        note = conn.execute("SELECT text FROM order_event WHERE order_id = ? AND kind = 'notify' ORDER BY id DESC LIMIT 1", (w["mine"],)).fetchone()
+        assert note[0] == "Оповещение в свой Telegram не отправлено: нажал сам, работая за точку"     # the journal says why, no failure
         notify(dict(card, responsible="zaman", to_staff=True), "заказ")
         assert told() == {"2000"}
     with w["app"].test_request_context("/my-point"):                      # out of the mode: as before, the owner is told
@@ -460,3 +462,42 @@ def test_an_order_made_for_a_point_never_has_the_text_as_its_responsible(w):
     assert way["channel"] != "telegram" and "Янино" in way["why"]          # as a point manager's order: through the point
     made = orders.create_card(conn, {"client_name": "Другой", "client_phone": "+79005550002"}, NOW, "zaman")
     assert orders.get_card(conn, made)["responsible"] == "zaman"           # a login: as before
+
+
+def test_a_chat_shared_with_another_person_still_hears_of_the_press(w):
+    """The skip is by the person, not by the chat: the partner who shares the owner's chat of the alerts still gets it."""
+    from flask import session
+    from http_fakes import ScriptedHttp
+    from tires_sync import order_notify
+    from tires_sync.panel import routes_mypoint, routes_vk
+    conn = w["conn"]
+    _chats(w)
+    order_notify.set_user_chat(conn, "zaman", "1000", NOW, "owner")       # one group chat for both
+    tg = ScriptedHttp(*[(200, {"ok": True, "result": {}})] * 10)
+    w["app"].config["TG_HTTP"] = tg
+    with w["app"].test_request_context("/my-point"):
+        session.update(user="owner", as_point=w["pa"])
+        routes_mypoint._tell(conn, NOW)(["owner", "zaman"], "точка отметила")
+        assert {str(json.loads(c[3]).get("chat_id")) for c in tg.calls} == {"1000"}
+        tg.calls.clear()
+        _send, _deliver, notify = routes_vk.channel(w["app"], conn, NOW)
+        notify(dict(orders.get_card(conn, w["mine"]), responsible="zaman", to_staff=True), "заказ")
+        assert {str(json.loads(c[3]).get("chat_id")) for c in tg.calls} == {"1000"}
+
+
+def test_a_switched_off_manager_is_listed_but_never_given_a_task(w):
+    conn = w["conn"]
+    users.add_user(conn, "pa_old", PASSWORD, NOW, role="point", point_id=w["pa"])
+    users.add_user(conn, "pb_new", PASSWORD, NOW, role="point", point_id=w["pa"])
+    tasks.add(conn, kind="other", title="старому менеджеру", due_at="2026-10-07T13:00", note="", now=NOW, author="owner", assignee="pa_old",
+              owner_login="owner", allowed={"pa_old"})
+    users.set_active(conn, "pa_old", False, NOW, "owner")
+    client = owner(w)
+    as_point(client, w["pa"])
+    page = client.get("/tasks").get_data(as_text=True)
+    assert "старому менеджеру" in page                                      # its open task is still the point's
+    assert 'value="pa_old"' not in page and 'value="pb_new"' in page        # «Кому»: who can sign in
+    assert post(client, "/tasks/new", "tok", kind="other", title="без кому", date="2026-10-08", time="10:00").status_code == 302
+    assert conn.execute("SELECT assignee FROM callback_task WHERE title = 'без кому'").fetchone()[0] == "pb_new"
+    assert post(client, "/tasks/new", "tok", kind="other", title="выключенному", date="2026-10-08", time="10:00",
+                assignee="pa_old").status_code == 403

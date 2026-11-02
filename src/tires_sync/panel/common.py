@@ -404,18 +404,18 @@ def end_as_point(login: str, why: str) -> None:
         store.write_audit(conn, now_iso(), login, "as_point_stop", dict({"point": point}, **({"name": row[0]} if row else {}), why=why))
 
 
-def own_chats(conn) -> set:
-    """The Telegram chats of the owner or the partner working as a point: the alerts about their own press are not sent to them (the lead
-    2026-11-02); the other people hear as usual. Out of the mode: none."""
+def own_logins(conn) -> set:
+    """The logins the alerts know the owner or the partner working as a point by: the alerts about their own press are not sent to them (the
+    lead 2026-11-02); the other people hear as usual, a chat they share too. The shared password is the owner's login of the alerts. Out of
+    the mode: none."""
     user = current_user()
     if user["as_point"] is None:
         return set()
     from .. import order_notify
-    from ..connections import get_config
-    found = {str(order_notify.user_chats(conn).get(user["login"]) or "")}
-    if user["login"] in (order_notify.get_owner_login(conn), current_app.config["AUTHOR"]):          # the owner: the chat of the alerts
-        found.add(str(get_config(conn, "telegram", 0).get("chat_id") or ""))
-    return {chat for chat in found if chat}
+    found = {user["login"]}
+    if user["login"] == current_app.config["AUTHOR"]:
+        found.add(order_notify.get_owner_login(conn))
+    return found
 
 
 def drop_session(why: str = "signed_out") -> None:
