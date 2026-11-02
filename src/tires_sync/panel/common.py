@@ -310,6 +310,8 @@ for _section, _endpoints in {
         SECTION_OF[_endpoint] = _section
 SECTION_OF.update(tasks_page="orders", task_new="orders", task_close="orders")      # «Задачи» (routes_tasks, 2026-10-31): «менять» to set
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
+SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
+                  order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
 SECTION_OF.update(ui_new_page="setup",                           # «Новый вид» (routes_design, 2026-11-02): the owner changes, the partner looks
                   as_point_start="self", as_point_stop="self")   # «Работать как точка»: check_access lets them by AS_POINT_PAGES
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
@@ -338,6 +340,7 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "calls_page", "call_record", "call_create_order", "call_handoff",            # the calls of the point's account (own_call)
                          "tasks_page", "task_new", "task_close",      # «Задачи»: its own only, to itself only (routes_tasks checks it)
                          "order_unsent_by_hand",                       # «Отправил вручную» by its own orders (card_id of the address)
+                         "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
                          "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)

@@ -49,10 +49,13 @@ RETURN_LINE = "точка: шины отданы поставщику (возв�
 RETURN_ASK = "Точка отдала шины поставщику (возврат): заполните сумму возврата и переведите в «Возврат»."
 RETURN_GAPS = "Точка отдала шины поставщику (возврат): не заполнено — %s; заполните и переведите в «Возврат»."
 HERE = "на точке"                                  # the point's answer to the question of the last day of the reservation (order_reserve, 2026-10-26)
+SHIP = "передал курьеру"                           # an order to another city handed to the courier of the transport company (order_intercity,
+                                                   # the owner 2026-11-02): «передал курьеру N», «передал курьеру ТК N», «отправил N»
 PHRASES = ((NO_SHOW_PHRASE, NO_SHOW),
            (re.compile(r"^\W*на\s+точке(?![^\W\d_])", re.I), HERE),
            (re.compile(r"^\W*отдал[аи]?\s+клиенту(?![^\W\d_])", re.I), ISSUE_PHRASE),
-           (re.compile(r"^\W*(?:возврат\s+отдал[аи]?|(?:отдал[аи]?|отправлен[аоы]?|отправили)\s+на\s+возврат)(?![^\W\d_])", re.I), RETURN))
+           (re.compile(r"^\W*(?:возврат\s+отдал[аи]?|(?:отдал[аи]?|отправлен[аоы]?|отправили)\s+на\s+возврат)(?![^\W\d_])", re.I), RETURN),
+           (re.compile(r"^\W*(?:передал[аи]?\s+курьеру(?:\s+тк)?|отправил[аи]?)(?![^\W\d_])", re.I), SHIP))
 # «пришли» is also «send» («пришли фото», «пришли нам»), «приехала» is also a car or a client, «отдал клиенту» also money («отдал клиенту
 # деньги», review 2026-10-26): after these only the order, the tyres, «все», «шт», «на точку»
 STRICT = ("привезли", "пришли", "приехала", ISSUE_PHRASE)
@@ -170,23 +173,23 @@ def is_command(conn, text) -> bool:
     parser did not take («приехали 5259052 шины», two numbers), a part («3 из 4», «только 2»), «приехал клиент». Those are questions for the owner."""
     word = _word(text)
     words = {c["word"] for c in rules.list_commands(conn)}
-    if not word or not (word in (NO_SHOW, RETURN, HERE) or word in BUILTIN or word in words) or re.search(r"[?？]", str(text or "")):
+    if not word or not (word in (NO_SHOW, RETURN, HERE, SHIP) or word in BUILTIN or word in words) or re.search(r"[?？]", str(text or "")):
         return False
     body = _command_text(text)
     phrase = _phrase(body)[0]
     tokens = WORD_PART.findall(rules.normalise_word(body[phrase.end():] if phrase else body))      # «не-а» is «не» and «а»
     if any(t in NEGATION or t in DOUBT or any(d in t for d in DAMAGE) for t in tokens) or PART.search(body):
         return False
-    if word == HERE and any(not ORDER_WORD.match(t) for t in tokens):
+    if word in (HERE, SHIP) and any(not ORDER_WORD.match(t) for t in tokens):
         return False                                  # «на точке» and the order only: «на точке нет шин», «на точке клиент» are questions
-    target = word if word in (RETURN, HERE) else BUILTIN.get(word, (None, None))[1]
+    target = word if word in (RETURN, HERE, SHIP) else BUILTIN.get(word, (None, None))[1]
     if target in ("at_point", RETURN) and any(t.startswith("клиент") for t in tokens):
         return False                                  # «приехал клиент» is about the client, not the tyres (the owner 2026-10-25);
     number = order_number(text)                       # «возврат отдал клиенту» is not the supplier's return
     tail = GIVE_TAIL if word in GIVE else STRICT_TAIL if word in STRICT else None
     if tail and any(t not in tail and not (number is not None and ORDER_WORD.match(t)) for t in (tokens if phrase else tokens[1:])):
         return False                                  # «пришли фото», «приехала машина»: not about the tyres
-    meanings = {NO_SHOW if word == NO_SHOW else target} if phrase else set()
+    meanings = {NO_SHOW if word == NO_SHOW else target} if phrase else set()     # «передал курьеру» / «отправил»: SHIP
     meanings |= {BUILTIN[t][1] if t in BUILTIN else t for t in tokens if t in BUILTIN or t in words}
     meanings |= {RETURN for t in tokens if t.startswith("возврат")}
     if len(meanings) > 1:
@@ -364,6 +367,19 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         conn.commit()
         return answer
     code = card["stage"]["code"]
+    from . import order_intercity
+    if word == SHIP:                                   # the courier of the transport company took an order to another city (2026-11-02)
+        if not order_intercity.on(card):
+            return dispute(point, "«%s», а заказ не в другой город" % SHIP, CANCELLED % label(card) if code == "cancel" else
+                           "Заказ №%s — не в другой город; сообщение передано владельцу." % label(card))
+        if code != orders.SHIPPED and code not in order_intercity.SHIP_FROM and not (code == "done" and order_intercity.was_shipped(conn, card)):
+            return dispute(point, "«%s», а заказ на этапе «%s»" % (SHIP, card["stage"]["name"]), CANCELLED % label(card) if code == "cancel" else
+                           "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
+        return finish(*order_intercity.ship(conn, card, "менеджер %s" % point["name"], now, deliver, getattr(notify, "tell", None)))
+    if order_intercity.on(card) and (word in (NO_SHOW, HERE) or BUILTIN.get(word, ((), None))[1] == "done"):
+        return dispute(point, "«%s», а заказ в другой город" % word,
+                       "Заказ №%s — в другой город, клиент за ним не придёт: если отдали шины курьеру ТК, напишите «передал курьеру %s». "
+                       "Сообщение передано владельцу." % (label(card), label(card)))
     if word == HERE:                                   # the client hears «срок резерва истекает» only when the bot asked (order_reserve.here)
         from . import order_reserve
         if code != "at_point":
@@ -430,9 +446,10 @@ def short(card: dict) -> str:
 
 
 def _issuable(conn, point_id) -> List[dict]:
-    """The point's orders on the stages «выдал» moves from."""
+    """The point's orders on the stages «выдал» moves from; not an order to another city (no client comes for it)."""
     return [orders.get_card(conn, r[0]) for r in conn.execute(
-        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (%s) ORDER BY c.id"
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (%s) AND NOT EXISTS "
+        "(SELECT 1 FROM order_intercity i WHERE i.order_id = c.id AND i.enabled = 1) ORDER BY c.id"
         % ",".join("?" * len(ISSUE_FROM)), (point_id,) + ISSUE_FROM)]
 
 
@@ -657,6 +674,7 @@ def _arrived_body(conn) -> str:
 
 
 ARRIVAL = "Поступили шины по заказу №%s (точка «%s»). Клиенту «можно забирать»: %s."
+ARRIVAL_INTERCITY = "Поступили шины по заказу №%s (точка «%s»). Заказ в другой город: точка отдаст шины с этикетками курьеру ТК."
 
 
 def note_arrival(conn, card_id, who: str, now: str, sent: bool) -> None:
@@ -669,7 +687,10 @@ def note_arrival(conn, card_id, who: str, now: str, sent: bool) -> None:
                         (card_id, card["entered_at"] or "")).fetchone():
             return
         point = (card.get("point") or {}).get("name") or "точка не указана"
-        orders.add_event(conn, card["id"], now, who, "point", ARRIVAL % (label(card), point, "отправлено" if sent else "не отправлено"), level="yellow")
+        from . import order_intercity
+        text = (ARRIVAL_INTERCITY % (label(card), point) if order_intercity.on(card) else
+                ARRIVAL % (label(card), point, "отправлено" if sent else "не отправлено"))
+        orders.add_event(conn, card["id"], now, who, "point", text, level="yellow")
         conn.commit()
     except Exception:
         conn.rollback()
@@ -738,7 +759,12 @@ def send_to_client(conn, card: dict, body: str, token: str, deliver: Optional[De
 def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """The point says the goods came: «можно забирать» to the client (_tell_arrived) and «Поступили шины» for the bell (note_arrival), once per
     stay at the point each. Every «приехал» of a point comes here (the command, the button of «Рабочее место», the owner's confirmation), and
-    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}», it has none)."""
+    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}», it has none).
+    An order to another city (order_intercity): the client does not come, nothing to the client."""
+    from . import order_intercity
+    if order_intercity.is_on(conn, card_id):
+        note_arrival(conn, card_id, who, now, False)
+        return False, "Заказ в другой город: клиенту «можно забирать» не отправляется. Отдайте шины с этикетками курьеру ТК."
     sent, note = _tell_arrived(conn, card_id, deliver, now, who, body)
     note_arrival(conn, card_id, who, now, sent)
     return sent, note
@@ -1046,8 +1072,13 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
         raise OrderError("Заказ №%s не этой точки: исправьте точку в заказе или переведите его вручную." % label(card))
     word, who, code = item["word"], "%s (подтверждение из «Входящих»)" % author, card["stage"]["code"]
     sources, target = BUILTIN.get(word, ((), None))
-    command = None if word in (NO_SHOW, RETURN) or target else rules.find_command(conn, card["stage_id"], word)
+    from . import order_intercity
+    command = None if word in (NO_SHOW, RETURN, SHIP) or target else rules.find_command(conn, card["stage_id"], word)
+    if order_intercity.on(card) and (word == NO_SHOW or target == "done"):
+        raise OrderError("Заказ №%s — в другой город: клиент за ним не придёт. Если точка отдала шины курьеру ТК, подтвердите «передал курьеру» "
+                         "или переведите заказ вручную и ответьте точке." % label(card))
     fits = (code == "at_point") if word == NO_SHOW else _return_from(card) if word == RETURN else \
+        (order_intercity.on(card) and (code in order_intercity.SHIP_FROM + (orders.SHIPPED,) or (code == "done" and order_intercity.was_shipped(conn, card)))) if word == SHIP else \
         ((code in sources or code == target) if target else command is not None)
     if not fits:
         raise OrderError("Команда «%s» не подходит к заказу №%s на этапе «%s»: переведите заказ вручную и ответьте точке."
@@ -1060,6 +1091,10 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
     try:
         if word == NO_SHOW:
             outcome, reply = no_show(conn, card, who, now, notify)
+        elif word == SHIP:
+            outcome, reply = order_intercity.ship(conn, card, who, now, deliver, getattr(notify, "tell", None))
+            if outcome.startswith("не "):
+                raise OrderError(reply)
         elif word == RETURN:
             outcome, reply = returned(conn, card, who, now)
             if outcome.startswith("не "):

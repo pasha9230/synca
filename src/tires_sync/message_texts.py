@@ -43,6 +43,10 @@ TEXTS = (
             needs_row=True),
     _sample("placed_manager", PLACED_MANAGER, "point", "Сам, после «Оформить в WebMIM» в панели, точке в ВК (и по правилу этапа «Заказ оформлен»).",
             needs_row=True),
+    _sample("intercity_placed", templates.INTERCITY_PLACED_SAMPLE, "client", "Сам, после «Оформить в WebMIM» в панели, вместо «Клиенту: заказ "
+            "оформлен», если в заказе отмечено «Доставка в другой город»; в чат Авито заказа."),
+    _sample("intercity_shipped", templates.INTERCITY_SHIPPED_SAMPLE, "client", "Сам, когда заказ в другой город передан курьеру ТК (точка нажала "
+            "«Передал курьеру ТК» или написала «отправил N», или офис перевёл заказ в «Отправлен»); в чат Авито заказа."),
     _sample("arrived", templates.ARRIVED_SAMPLE, "client", "Сам, когда точка отметила «приехал»: товар на точке."),
     _sample("reserve_client", templates.RESERVE_SAMPLE, "client", "Сам, в последний день резерва с 12:30, в чат Авито заказа."),
     _sample("oth_point", templates.OTH_POINT_SAMPLE, "point", "Когда все шины заказа взяты с ОТХ и заказ переведён сразу на «Товар на точке»."),

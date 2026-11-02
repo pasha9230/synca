@@ -18,7 +18,7 @@
 <div class="owin-head">
 {% call entity_ui.head(entity if card else {"type": "order", "kind": "", "title": "Новый заказ"}, id="ow-title", title_class="owin-title", extra="owin-top") %}
 {% if card and c.stage.code == "return_given" %}{% set next_stage = stages|selectattr("code", "equalto", "return")|first %}{# the tyres went back: the amount closes it in «Возврат» #}
-{% elif card and c.stage.kind == "open" %}{% set next_stage = stages|selectattr("kind", "in", ["open", "won"])|rejectattr("code", "equalto", "return_given")|selectattr("position", "gt", c.stage.position)|first %}{% endif %}{# «Возврат передан» is the point's act МХ-3, never a click of the window #}
+{% elif card and c.stage.kind == "open" %}{% set next_stage = stages|selectattr("kind", "in", ["open", "won"])|rejectattr("code", "equalto", "return_given")|rejectattr("code", "equalto", "-" if c.intercity.on else "shipped")|selectattr("position", "gt", c.stage.position)|first %}{% endif %}{# «Возврат передан» is the point's act МХ-3, never a click of the window #}
 {# one button to the next stage of the flow (review 2026-10-21, 2.5): like a chip of the strip, it saves the window, then moves #}
 {% if next_stage and not ro %}<button class="btn btn--primary btn--sm owin-next" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ next_stage.id }}" title="Сохранить окно и перенести заказ на этап «{{ next_stage.name }}»">Перевести в «{{ next_stage.name }}» {{ icon("arrow-right", "i-sm") }}</button>{% endif %}
 {% if card and (not ro or can_delete or (c.stage.code not in ("cancel", "return") and can_post("order_move"))) %}<details class="menu owin-menu"><summary>Ещё ⋯</summary><div class="menu-list">
@@ -27,11 +27,11 @@
 {% if can_delete %}<hr><button class="menu-item menu-item--danger" form="ow-delete">Удалить заказ…</button>
 <span class="small muted menu-note">Удаляется только из нашей базы: в Авито и WebMIM ничего не меняется. <a href="/deleted">Удалённые</a></span>{% endif %}
 </div></details>{% endif %}{% endcall %}
-{% if card %}{% set flow = stages|selectattr("kind", "in", ["open", "won"])|list %}
+{% if card %}{% set flow = stages|selectattr("kind", "in", ["open", "won"])|rejectattr("code", "equalto", "-" if c.intercity.on else "shipped")|list %}{# «Отправлен»: an order to another city only #}
 <div class="owin-stages" aria-label="Этапы заказа: нажмите, чтобы сохранить окно и перенести заказ">{% for s in flow %}{% if s.id == c.stage_id %}<span class="owin-stage is-current" aria-current="step">{{ s.name }} · {{ days }} дн.</span>{% elif ro %}<span class="owin-stage{{ ' is-done' if c.stage.kind in ('open', 'won') and s.position < c.stage.position else '' }}">{{ s.name }}</span>{% else %}<button class="owin-stage{{ ' is-done' if c.stage.kind in ('open', 'won') and s.position < c.stage.position else '' }}" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ s.id }}" title="Перенести на этап «{{ s.name }}»">{{ s.name }}</button>{% endif %}{% endfor %}
 {% if c.stage.kind not in ("open", "won") %}<span class="owin-stage is-stopped" aria-current="step">{{ c.stage.name }} · {{ days }} дн.</span>{% endif %}</div>
 <p class="owin-note">Этап «{{ c.stage.name }}» с {{ c.entered_at|short_dt }}{% if c.stage.hint %} · {{ c.stage.hint }}{% endif %}</p>{% endif %}
-<div class="owin-tags"{% if not ro %} data-tags{% endif %}>{% for t in tags %}<span class="owin-tag" data-tag="{{ t }}">{{ t }}{% if not ro %}<button type="button" class="owin-tag-x" data-tag-x aria-label="Убрать тег «{{ t }}»">{{ icon("x", "i-sm") }}</button>{% endif %}</span>{% endfor %}
+<div class="owin-tags"{% if not ro %} data-tags{% endif %}>{% if card and c.intercity.on %}<a class="badge badge--warn" href="#intercity" data-intercity-tag>В другой город</a> {% endif %}{% for t in tags %}<span class="owin-tag" data-tag="{{ t }}">{{ t }}{% if not ro %}<button type="button" class="owin-tag-x" data-tag-x aria-label="Убрать тег «{{ t }}»">{{ icon("x", "i-sm") }}</button>{% endif %}</span>{% endfor %}
 {% if not ro %}<input class="owin-tagin" list="ow-known-tags" maxlength="30" placeholder="+ тег" aria-label="Добавить тег (Enter)" data-tag-in><input type="hidden" name="tags" value="{{ tags|join(', ') }}" data-tag-value>
 <datalist id="ow-known-tags">{% for t in known_tags %}<option value="{{ t }}">{% endfor %}</datalist>{% endif %}</div>
 </div>

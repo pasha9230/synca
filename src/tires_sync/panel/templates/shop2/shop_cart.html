@@ -1,0 +1,64 @@
+{# «Новый вид» of the cart and the checkout (routes_shop._cart_view + _cart_new; the prototype clCartLines / clCheckout, the owner's edits
+   of 2026-10-31 п. 26, 27, 29): «−» / «+» post the new quantity (never above the stock), «Забрать на точке» or «Доставка» (a radio and its
+   block, no script); the phone and the delivery are typed once, then shown as a card with «Изменить» (the fields stay in the form, inside
+   <details>). The first order shows its steps. The order is made by /shop/checkout as before. #}
+{% extends "shop_base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Корзина{% endblock %}
+{% block content %}
+{% set v = form or {} %}{% set ef = error_field|default("") %}
+<div class="shop2 shop2-cart">
+<h1 class="shop-h1">Корзина{% if rows %} <span class="muted shop2-h1-sub">{{ rows|selectattr("ok")|sum(attribute="qty") }} шт.</span>{% endif %}</h1>
+{% if error %}<div class="flash flash--err" role="alert"><div class="flash-text">{{ error }}</div></div>{% endif %}
+{% if rows %}
+<div class="shop-two shop2-two">
+<section class="shop2-lines">
+{% if first_order %}<div class="card shop2-first" data-tour="first-order"><b>Первый заказ — как это работает</b>
+<ol><li>Проверьте количество: «−» и «+», больше остатка не даст.</li><li>Выберите, как получить: забрать на точке или доставка.</li><li>Укажите телефон — спросим один раз, дальше подставится сам.</li><li>«Оформить заказ» — менеджер проверит наличие и свяжется с вами. Статус — в «Мои заказы».</li></ol></div>{% endif %}
+{% for r in rows %}<article class="card shop2-line{% if not r.ok %} is-gone{% endif %}">
+<div class="shop2-line-top"><div class="shop2-line-name"><b>{{ r.name }}</b>
+{% if r.ok %}<div class="shop2-line-meta">{% if r.row.season %}<span class="shop2-tag">{{ r.row.season }}{% if r.row.studs %} · шипы{% endif %}</span>{% endif %}<span class="shop2-tag">{{ r.row.warehouse }}</span><span class="muted">есть {{ r.row.stock }} шт.</span></div>
+{% else %}<div class="shop2-line-meta"><span class="badge badge--err">нет в наличии</span></div>{% endif %}</div>
+<form method="post" action="/shop/cart/set" class="shop2-drop"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}"><button class="btn btn--link-gray btn--sm" name="drop" value="1" aria-label="Убрать из корзины">{{ icon("x") }}Убрать</button></form></div>
+{% if r.ok %}<div class="shop2-line-bottom"><form method="post" action="/shop/cart/set" class="shop2-stepper"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
+<button class="btn btn--secondary" name="qty" value="{{ r.qty - 1 }}" aria-label="Меньше">−</button><span class="shop2-qty" aria-label="Количество">{{ r.qty }}</span><button class="btn btn--secondary" name="qty" value="{{ r.qty + 1 }}" aria-label="Больше"{% if r.qty >= r.max %} disabled title="Больше нет в наличии"{% endif %}>+</button></form>
+<div class="shop2-line-sum"><span class="muted">{{ r.row.price|money }} × {{ r.qty }}</span><b>{{ r.sum|money }}</b></div></div>{% endif %}
+</article>{% endfor %}
+</section>
+<section class="card shop-checkout shop2-checkout">
+<h2>Оформление</h2>
+<dl class="shop-sum"><dt>Позиций</dt><dd>{{ rows|selectattr("ok")|list|length }}</dd><dt>Шин</dt><dd>{{ rows|selectattr("ok")|sum(attribute="qty") }} шт.</dd><dt class="shop-total">Итого</dt><dd class="shop-total"><b>{{ total|money }}</b></dd></dl>
+<form method="post" action="/shop/checkout" class="stack shop2-form" data-tour="checkout"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="total" value="{{ total }}">
+{% set way = v.get("way") or ("point" if points else "delivery") %}
+<fieldset class="shop2-way{% if ef == 'way' %} is-err{% endif %}"><legend class="label">Как получить</legend>
+<input type="radio" name="way" value="point" id="way-point" class="shop2-way-r"{% if way == "point" %} checked{% endif %}{% if not points %} disabled{% endif %}>
+<input type="radio" name="way" value="delivery" id="way-delivery" class="shop2-way-r"{% if way == "delivery" %} checked{% endif %}>
+<div class="shop2-seg shop2-way-seg"><label for="way-point">Забрать на точке</label><label for="way-delivery">Доставка</label></div>
+<div class="shop2-way-point{% if ef == 'point_id' %} is-err{% endif %}">{% for p in points %}<label class="shop-radio-card"><input type="radio" name="point_id" value="{{ p.id }}"{% if v.get('point_id') == p.id|string or points|length == 1 %} checked{% endif %}><span><b>{{ p.name }}</b>{% if p.address %}<span class="muted">{{ p.address }}</span>{% endif %}{% if p.hours %}<span class="muted">{{ p.hours }}</span>{% endif %}</span></label>{% else %}<p class="muted small">Точек самовывоза пока нет.</p>{% endfor %}</div>
+<div class="shop2-way-delivery">
+{% set dlv_err = ef in ("city", "street", "house", "recipient", "recipient_phone", "driver_note") %}
+{% if delivery.saved and not dlv_err %}<div class="shop2-kept"><div><b>{{ delivery.address }}</b><span class="muted">Получатель: {{ delivery.recipient }}, {{ delivery.recipient_phone|phone }}</span>{% if delivery.driver_note %}<span class="muted">Водителю: {{ delivery.driver_note }}</span>{% endif %}</div></div>
+<details class="shop2-change"><summary>Изменить адрес</summary>{% endif %}
+<div class="shop2-dlv">
+{% for key, label, ph, need in (("city", "Город", "Город", true), ("street", "Улица", "Улица", true), ("house", "Дом", "12, корп. 1", true), ("recipient", "Получатель", "Имя получателя", true), ("recipient_phone", "Телефон получателя", "+7 900 000-00-00", true), ("driver_note", "Комментарий для водителя", "например: въезд со двора, позвонить за час", false)) %}
+<label class="field shop2-dlv-{{ key }}{% if ef == key %} is-err{% endif %}"><span class="label">{{ label }}{% if not need %} (по желанию){% endif %}</span><input class="input" name="{{ key }}" maxlength="{{ delivery.limits[key] }}"{% if key == "recipient_phone" %} type="tel" inputmode="tel" autocomplete="tel"{% endif %} placeholder="{{ ph }}" value="{{ v.get(key, delivery[key]) }}"{% if ef == key %} aria-invalid="true" autofocus{% endif %}></label>
+{% endfor %}
+<p class="small muted shop2-full">Вводится один раз — в следующих заказах подставится сам. Поменять можно здесь или в «Профиле».</p>
+</div>
+{% if delivery.saved and not dlv_err %}</details>{% endif %}
+</div>
+</fieldset>
+<div class="shop2-contacts"><span class="label">Контакты</span>
+{% if profile.phone and ef != "phone" %}<div class="shop2-kept"><div><b>{{ profile.phone|phone }}</b><span class="muted">менеджер позвонит, если нужно уточнить</span></div></div>
+<details class="shop2-change"><summary>Изменить телефон</summary>{% endif %}
+<label class="field{% if ef == 'phone' %} is-err{% endif %}"><span class="label">Телефон</span><input class="input" type="tel" name="phone" inputmode="tel" autocomplete="tel" maxlength="40" placeholder="+7 900 000-00-00" value="{{ v.get('phone', profile.phone) }}"{% if ef == "phone" %} aria-invalid="true" autofocus{% endif %}>{% if not profile.phone %}<span class="hint">Спрашиваем один раз — при первом заказе. Потом меняется в «Профиле».</span>{% endif %}</label>
+{% if profile.phone and ef != "phone" %}</details>{% endif %}
+</div>
+<label class="field"><span class="label">Комментарий (по желанию)</span><textarea class="input" name="comment" rows="2" maxlength="1500" placeholder="Например: нужно к пятнице">{{ v.get('comment', '') }}</textarea></label>
+<button class="btn btn--primary shop-xl">Оформить заказ на {{ total|money }}</button>
+<p class="small muted">Цену и наличие проверим ещё раз при оформлении. Менеджер подтвердит наличие и свяжется с вами.</p>
+</form></section>
+</div>
+{% else %}<section class="card"><div class="empty"><h3>Корзина пуста</h3><p>Выберите шины в каталоге.</p><p><a class="btn btn--primary" href="/shop">В каталог</a></p></div></section>{% endif %}
+</div>
+{% endblock %}

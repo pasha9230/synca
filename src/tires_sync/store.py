@@ -301,6 +301,17 @@ CREATE TABLE IF NOT EXISTS chat_handover (
     handed_by TEXT NOT NULL DEFAULT '', tasks TEXT NOT NULL DEFAULT '[]', taken_at TEXT, taken_by TEXT, taken_how TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS chat_handover_chat ON chat_handover (chat_row, taken_at);
+-- «Доставка в другой город» of an order (order_intercity.py, the owner 2026-11-02): the city, the transport company (ПЭК, КИТ), the track
+-- number; `enabled` is the checkbox. The labels of the transport company are PDF files of the order (order_label, the file itself in `data`).
+CREATE TABLE IF NOT EXISTS order_intercity (
+    order_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, city TEXT NOT NULL DEFAULT '', carrier TEXT NOT NULL DEFAULT '',
+    track TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS order_label (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, data BLOB NOT NULL,
+    uploaded_at TEXT NOT NULL, uploaded_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS order_label_order ON order_label (order_id);
 CREATE TABLE IF NOT EXISTS order_event (
     id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,
     kind TEXT NOT NULL, text TEXT NOT NULL, level TEXT NOT NULL DEFAULT ''
@@ -646,6 +657,8 @@ def _migrate(conn) -> None:
     for column in ("active_at", "looked_at"):                         # the inquiry: the last word of either side; the last look at its orders
         _add_column(conn, "client_inquiry", column, "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "panel_invite", "client_terms", "TEXT NOT NULL DEFAULT ''")     # the conditions a client's invitation puts in the profile (JSON)
+    for column in ("city", "street", "house", "recipient", "recipient_phone", "driver_note"):   # the delivery of «Новый вид» (2026-11-02)
+        _add_column(conn, "client_profile", column, "TEXT NOT NULL DEFAULT ''")
     if not conn.execute("SELECT 1 FROM client_terms WHERE subject = '*'").fetchone():          # the role's conditions: empty (no price, no brand)
         conn.execute("INSERT OR IGNORE INTO client_terms (subject, brands_mode) VALUES ('*', 'own')")
         conn.commit()

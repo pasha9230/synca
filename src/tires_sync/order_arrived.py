@@ -51,7 +51,9 @@ def _no_api(error: str) -> bool:
 
 def told(conn, card: dict, now: str) -> bool:
     """The client of the order heard «можно забирать» in this stay at the point (by itself, by hand, by a rule's message), or a person
-    decided not to (skipped, answered its line of «Входящие»)."""
+    decided not to (skipped, answered its line of «Входящие»). An order to another city: nothing to tell (order_intercity)."""
+    if (card.get("intercity") or {}).get("on"):
+        return True
     token = mgr.arrived_token(card, now)
     row = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (token,)).fetchone()
     if row and row[0] == "sent":
@@ -100,9 +102,11 @@ def reason(conn, card: dict, now: str) -> str:
 
 
 def untold(conn, now: str, grace: int = GRACE_MINUTES) -> List[Dict]:
-    """The orders on «Товар на точке» whose client was not told, longer than `grace` minutes there: [{card, reason}]."""
+    """The orders on «Товар на точке» whose client was not told, longer than `grace` minutes there: [{card, reason}]. Not an order to another
+    city (order_intercity): its client hears nothing of a pickup."""
     out = []
-    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'at_point' ORDER BY c.id").fetchall():
+    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'at_point' AND NOT EXISTS "
+                                   "(SELECT 1 FROM order_intercity i WHERE i.order_id = c.id AND i.enabled = 1) ORDER BY c.id").fetchall():
         card = orders.get_card(conn, card_id)
         if _hours(card["entered_at"] or now, now) * 60 < grace or told(conn, card, now):
             continue
