@@ -52,7 +52,12 @@ def on_placed(conn, card_id, webmim_id: str, now: str, author: str, deliver: Opt
 
 
 def _template(conn, who: dict) -> Optional[dict]:
+    """The owner's template of the name; a message that came with a later release (`who["sample"]`, order_intercity) and is not in the base
+    yet is made from its sample first (nobody has to press «Добавить образцы»), then it is the owner's to edit."""
     row = conn.execute("SELECT id, body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", (who["template"], who["audience"])).fetchone()
+    if row is None and who.get("sample"):
+        templates.add_template(conn, who["template"], who["audience"], who["sample"])
+        row = conn.execute("SELECT id, body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", (who["template"], who["audience"])).fetchone()
     return {"id": row[0], "body": row[1]} if row else None
 
 

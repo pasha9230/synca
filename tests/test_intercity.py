@@ -350,3 +350,49 @@ def test_shipped_is_realized_in_the_sheet_and_may_record_a_sale(tmp_path, tg):
     assert orders.record_sales(conn, card, "2026-10-13", NOW, "owner", "2026-10-13")
     with pytest.raises(orders.OrderError, match="галочку не снять"):
         intercity.save(conn, card, dict(enabled=""), NOW, "owner")
+
+
+# ---- after the review of 2026-11-02 ------------------------------------------------------------------------------------------------------
+
+def test_the_messages_go_on_a_base_where_nobody_pressed_add_samples(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="КИТ"), NOW, "owner")     # no templates.add_samples
+    hook(app, conn, "передал курьеру 5000100")
+    assert code(conn, card) == "shipped"
+    assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией КИТ.\n\nСпасибо за покупку!"]
+    assert intercity.SHIPPED_TEMPLATE in [t["name"] for t in templates.list_templates(conn)]       # editable from now on
+
+
+def test_the_owner_cannot_confirm_issued_or_no_show_of_an_order_to_another_city(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    hook(app, conn, "выдал 5000100")
+    hook(app, conn, "клиент не пришёл 5000100", event="e2")
+    for (item_id,) in conn.execute("SELECT id FROM manager_message ORDER BY id").fetchall():
+        with pytest.raises(orders.OrderError, match="в другой город"):
+            mgr.confirm(conn, item_id, "5000100", "2026-10-13T13:00:00", "owner", deliver=lambda *a: None)
+    assert code(conn, card) == "at_point"
+    assert not any(e["level"] == "red" and "не пришёл" in e["text"] for e in orders.list_events(conn, card))
+
+
+def test_vk_here_of_an_order_to_another_city_goes_to_the_owner(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card)
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    hook(app, conn, "на точке 5000100")
+    assert mgr.new_count(conn) == 1 and to_client(app) == []
+
+
+def test_the_undo_skips_a_shipped_message_still_waiting(tmp_path, clock, told):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    city(conn, card, city="")                                                    # lacking: the message waits
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    mine = manager(app, conn, pid)
+    press(mine, card, "shipped")
+    [task] = [t for t in engine.list_tasks(conn, card) if t["rule_id"] == intercity.SHIPPED_RULE]
+    assert task["status"] == "error"
+    clock["now"] = T2
+    post(mine, "/my-point/%d/undo" % card, "tok")
+    assert code(conn, card) == "at_point"
+    assert [t["status"] for t in engine.list_tasks(conn, card) if t["rule_id"] == intercity.SHIPPED_RULE] == ["skipped"]

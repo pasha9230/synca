@@ -200,6 +200,7 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
     if rec["action"] == "shipped":                                        # the track number is not awaited any more (order_intercity)
         from . import order_intercity
         order_intercity.close_track_tasks(conn, card["id"], "cancel", now, author, "отметка «Передал курьеру ТК» отменена")
+        order_intercity.skip_waiting_message(conn, card["id"], now, author)
     record(conn, now, who, point["id"], "undo", card["id"], "отменил %s" % rec["name"])
     if tell is not None:
         try:

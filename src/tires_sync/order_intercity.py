@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Callable, List, Optional, Tuple
 
-from . import orders
+from . import order_templates as templates, orders
 from .orders import OrderError
 
 CARRIERS = ("ПЭК", "КИТ")
@@ -30,10 +30,11 @@ TRACK = re.compile(r"^[0-9A-Za-zА-Яа-яЁё\-/ ]*$")
 SHIP_FROM = ("at_point", "placed", "moving")      # as «выдал»: the panel may still say the tyres are on the way
 PLACED_TEMPLATE = "Клиенту: заказ в другой город оформлен"
 SHIPPED_TEMPLATE = "Клиенту: заказ отправлен"
-PLACED_CLIENT = {"template": PLACED_TEMPLATE, "audience": "client", "suffix": "", "whom": "клиенту", "Whom": "Клиенту"}    # order_placed
+PLACED_CLIENT = {"template": PLACED_TEMPLATE, "audience": "client", "suffix": "", "whom": "клиенту", "Whom": "Клиенту",    # order_placed
+                 "sample": next(b for n, _a, b in templates.SAMPLES if n == PLACED_TEMPLATE)}
 SHIPPED_RULE = -4                                # the «rule» number of «заказ отправлен» (order_engine: −2 placed, −3 arrived)
 SHIPPED_CLIENT = {"template": SHIPPED_TEMPLATE, "audience": "client", "suffix": "", "whom": "клиенту", "Whom": "Клиенту", "rule": SHIPPED_RULE,
-                  "author": "после передачи курьеру ТК"}
+                  "author": "после передачи курьеру ТК", "sample": next(b for n, _a, b in templates.SAMPLES if n == SHIPPED_TEMPLATE)}
 TRACK_TASK = "Внести трек-номер"
 SKIP = "заказ в другой город: клиент не приходит на точку"          # order_engine: a rule's message of the point's pickup
 FIELD_NAMES = {"enabled": "Доставка в другой город", "city": "Город", "carrier": "ТК", "track": "Трек-номер"}
@@ -219,6 +220,17 @@ def track_tasks(conn, card_id, number: str, now: str, who: str) -> List[int]:
     due = (datetime.fromisoformat(now[:19]) + timedelta(hours=1)).isoformat()[:16]
     return [tasks.add(conn, kind="other", title="%s заказа №%s" % (TRACK_TASK, number), due_at=due, note="Точка передала заказ курьеру ТК",
                       now=now, author=who, assignee=login, owner_login=owner, order_id=card_id) for login in order_oth.office_logins(conn)]
+
+
+def skip_waiting_message(conn, card_id, now: str, who: str) -> None:
+    """«Заказ отправлен» still waiting (not sent: no chat, lacking values) once the courier's mark is undone: never sent by hand later."""
+    from . import order_engine as engine
+    for task in engine.list_tasks(conn, card_id, ("pending", "error")):
+        if task["rule_id"] == SHIPPED_RULE:
+            try:
+                engine.skip_task(conn, task["id"], now, who)
+            except OrderError:                                            # a person took it meanwhile
+                conn.rollback()
 
 
 def close_track_tasks(conn, card_id, how: str, now: str, who: str, result: str = "") -> int:
