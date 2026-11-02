@@ -396,3 +396,18 @@ def test_the_undo_skips_a_shipped_message_still_waiting(tmp_path, clock, told):
     post(mine, "/my-point/%d/undo" % card, "tok")
     assert code(conn, card) == "at_point"
     assert [t["status"] for t in engine.list_tasks(conn, card) if t["rule_id"] == intercity.SHIPPED_RULE] == ["skipped"]
+
+
+def test_after_the_undo_a_second_courier_mark_still_tells_the_client_once(tmp_path, clock, told):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card, city="")                                                    # lacking: the first message waits
+    orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+    mine = manager(app, conn, pid)
+    press(mine, card, "shipped")
+    clock["now"] = T2
+    post(mine, "/my-point/%d/undo" % card, "tok")
+    intercity.save(conn, card, dict(enabled="1", city="Псков", carrier="ПЭК"), T2, "owner")
+    clock["now"] = "2026-10-16T14:00:00"
+    press(mine, card, "shipped")
+    assert code(conn, card) == "shipped"
+    assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\n\nСпасибо за покупку!"]

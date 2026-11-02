@@ -34,7 +34,7 @@ PLACED_CLIENT = {"template": PLACED_TEMPLATE, "audience": "client", "suffix": ""
                  "sample": next(b for n, _a, b in templates.SAMPLES if n == PLACED_TEMPLATE)}
 SHIPPED_RULE = -4                                # the «rule» number of «заказ отправлен» (order_engine: −2 placed, −3 arrived)
 SHIPPED_CLIENT = {"template": SHIPPED_TEMPLATE, "audience": "client", "suffix": "", "whom": "клиенту", "Whom": "Клиенту", "rule": SHIPPED_RULE,
-                  "author": "после передачи курьеру ТК", "sample": next(b for n, _a, b in templates.SAMPLES if n == SHIPPED_TEMPLATE)}
+                  "author": "после передачи курьеру ТК", "undone": "отметка «Передал курьеру ТК» отменена", "sample": next(b for n, _a, b in templates.SAMPLES if n == SHIPPED_TEMPLATE)}
 TRACK_TASK = "Внести трек-номер"
 SKIP = "заказ в другой город: клиент не приходит на точку"          # order_engine: a rule's message of the point's pickup
 FIELD_NAMES = {"enabled": "Доставка в другой город", "city": "Город", "carrier": "ТК", "track": "Трек-номер"}
@@ -231,6 +231,9 @@ def skip_waiting_message(conn, card_id, now: str, who: str) -> None:
                 engine.skip_task(conn, task["id"], now, who)
             except OrderError:                                            # a person took it meanwhile
                 conn.rollback()
+                continue
+            conn.execute("UPDATE order_task SET result = ? WHERE id = ? AND status = 'skipped'", (SHIPPED_CLIENT["undone"], task["id"]))
+            conn.commit()                                                 # a later «Передал» makes its own message (order_placed._earlier)
 
 
 def close_track_tasks(conn, card_id, how: str, now: str, who: str, result: str = "") -> int:

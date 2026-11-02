@@ -74,9 +74,11 @@ def _not_sent(conn, card_id, who: dict, now: str, why: str, what: str) -> str:
     return "%s не отправлено «%s»: %s %s" % (who["Whom"], who["template"], why, what)
 
 
-def _earlier(conn, card_id, template_id) -> Optional[dict]:
-    """The order's message task of this template made before (by a rule of a stage, or by this hook): the most advanced one, sent first."""
-    found = [t for t in engine.list_tasks(conn, card_id) if t["kind"] == "message" and str(t["arg"]) == str(template_id)]
+def _earlier(conn, card_id, template_id, undone: str = "") -> Optional[dict]:
+    """The order's message task of this template made before (by a rule of a stage, or by this hook): the most advanced one, sent first.
+    `undone`: the result of a task skipped because its occasion was undone (order_intercity): not a person's choice, not counted."""
+    found = [t for t in engine.list_tasks(conn, card_id) if t["kind"] == "message" and str(t["arg"]) == str(template_id)
+             and not (undone and t["status"] == "skipped" and t["result"] == undone)]
     rank = {"done": 0, "running": 1, "pending": 2, "error": 3, "skipped": 4}
     return min(found, key=lambda t: (rank.get(t["status"], 5), t["id"])) if found else None
 
@@ -150,7 +152,7 @@ def _tell(conn, card_id, who: dict, webmim_id: str, now: str, author: str, send)
                     except orders.OrderError:                     # a person took it meanwhile: theirs
                         conn.rollback()
             return line
-        earlier = _earlier(conn, card_id, template["id"])
+        earlier = _earlier(conn, card_id, template["id"], who.get("undone", ""))
         if earlier is not None:
             return _use_earlier(conn, card_id, who, earlier, now, author, send)
         card = orders.get_card(conn, card_id)
