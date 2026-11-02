@@ -1,10 +1,11 @@
 """The owner 2026-10-26 (a client got «срок резерва истекает» the day after picking the order up): on the last day of the reservation the
-point is asked first; only its «на точке» tells the client; silence tells nobody but the responsible. «выдал» without a number asks the
+point is asked first; silence tells nobody but the responsible. The owner 2026-11-02: the client no longer waits for the point's answer:
+the reminder goes from the tick of 12:30 (its own tests: test_reserve_noon.py), «на точке» only marks the answer. «выдал» without a number asks the
 point which order, and nothing moves without its «да» or a number. The text to the client has no prepayment."""
 from __future__ import annotations
 
 from test_order_reserve import OLD_TEXT, POINT_VK, PointVk, _deliver, card_at, chat_of, db, ok, owner_text, stage
-from tires_sync import order_manager as mgr, order_reserve as reserve, order_templates as tpl, orders, vk_send
+from tires_sync import order_manager as mgr, order_reserve as reserve, order_templates as tpl, orders, store, vk_send
 
 DAY = "2026-10-18"                                     # the last day of a card that came to the point on 2026-10-15
 
@@ -32,23 +33,27 @@ def yellow(conn, cid):
 
 # ---- 1. the point is asked before the client -------------------------------------------------------------------------------------
 
-def test_the_tick_of_the_last_day_asks_the_point_once_and_writes_nothing_to_the_client(tmp_path):
+def test_the_tick_of_the_last_day_asks_the_point_once_and_the_client_only_from_12_30(tmp_path):
     conn, cid, _chat, deliver, vk = ready(tmp_path)
     reserve.check(conn, at(9, 30), ok, deliver, vk)                                     # before the working hours: nobody
     assert vk.sent == []
-    for hour in (10, 11, 15, 19):
+    for hour in (10, 11):
         reserve.check(conn, at(hour), ok, deliver, vk)
-    assert deliver.sent == []                                                           # the client hears nothing from the tick
+    assert deliver.sent == []                                                           # the client hears nothing before 12:30
+    for hour in (15, 19):
+        reserve.check(conn, at(hour), ok, deliver, vk)
+    assert len(deliver.sent) == 1                                                       # once, whatever the point answered (2026-11-02)
     assert vk.sent == [(POINT_VK, "(бот) Заказ №5200001 (Иван, 205/55 R16) ещё на точке? Ответьте «выдал 5200001» или «на точке 5200001».")]
     assert mgr.line_number(vk.sent[0][1]) == 5200001                                     # a reply to it in VK names the order by itself
     assert any(e["text"].startswith("Точке «Бета» отправлен вопрос: «Заказ №5200001") for e in orders.list_events(conn, cid))
 
 
-def test_the_point_says_here_and_the_client_hears_it_once(tmp_path):
+def test_the_point_says_here_it_is_marked_and_the_client_hears_the_tick_once(tmp_path):
     conn, cid, chat, deliver, vk = ready(tmp_path)
     reserve.check(conn, at(10), ok, deliver, vk)
     answer = say(conn, "на точке 5200001", deliver, at(11))
-    assert answer == "Заказ №5200001 — отмечено: на точке. Клиенту отправлено напоминание о сроке хранения."
+    assert answer == "Заказ №5200001 — отмечено: на точке." and deliver.sent == []
+    reserve.check(conn, at(12, 30), ok, deliver, vk)
     assert [(c, t) for c, t, _ in deliver.sent] == [(chat, owner_text())]
     assert say(conn, "на точке 5200001", deliver, at(11, 30), "m2") == "Заказ №5200001 уже отмечен: на точке."
     assert say(conn, "на точке 5200001", deliver, at(11, 30), "m1") == "Это сообщение уже обработано."    # a repeat of the VK event
@@ -68,7 +73,7 @@ def test_a_reply_to_the_question_with_here_is_enough(tmp_path):
     reply = vk_callback._message(event, "42")["reply_no"]
     assert reply == 5200001
     say(conn, "На точке", deliver, at(10, 30), reply=reply)
-    assert [(c, t) for c, t, _ in deliver.sent] == [(chat, owner_text())]
+    assert deliver.sent == [] and store.get_state(conn, reserve._ask_key(orders.get_card(conn, _cid))).startswith("answered|")
 
 
 def test_issued_closes_the_order_and_the_client_gets_nothing(tmp_path):
@@ -82,18 +87,17 @@ def test_issued_closes_the_order_and_the_client_gets_nothing(tmp_path):
     assert deliver.sent == [] and yellow(conn, cid) == []
 
 
-def test_no_answer_by_the_end_of_the_day_is_a_yellow_record_and_nothing_to_the_client(tmp_path):
+def test_no_answer_by_the_end_of_the_day_is_a_yellow_record(tmp_path):
     conn, cid, _chat, deliver, vk = ready(tmp_path)
     reserve.check(conn, at(10), ok, deliver, vk)
     reserve.check(conn, at(19, 55), ok, deliver, vk)
-    assert yellow(conn, cid) == []                                                      # the day is not over yet
+    assert yellow(conn, cid) == [] and len(deliver.sent) == 1                           # the day is not over yet; the client: from 12:30
     reserve.check(conn, at(20), ok, deliver, vk)
     reserve.check(conn, at(21), ok, deliver, vk)
     [record] = yellow(conn, cid)
-    assert record.startswith("Точка «Бета» не ответила до конца рабочего дня, ещё ли заказ на точке: клиенту «Клиенту: срок резерва истекает» "
-                             "не отправлено")
+    assert record.startswith("Точка «Бета» не ответила до конца рабочего дня, ещё ли заказ на точке. Узнайте у точки, забрал ли клиент заказ")
     assert say(conn, "на точке 5200001", deliver, at(20, 30)).startswith("Заказ №5200001: ответ пришёл после конца рабочего дня")
-    assert deliver.sent == [] and yellow(conn, cid)[0] == "Точка ответила после конца рабочего дня: заказ ещё на точке (клиенту не отправлено)" and len(yellow(conn, cid)) == 2   # the late answer is seen too
+    assert len(deliver.sent) == 1 and yellow(conn, cid)[0] == "Точка ответила после конца рабочего дня: заказ ещё на точке" and len(yellow(conn, cid)) == 2   # the late answer is seen too
 
 
 def test_silence_is_found_the_next_morning_when_no_evening_tick_ran_and_a_late_here_sends_nothing(tmp_path):
@@ -101,7 +105,7 @@ def test_silence_is_found_the_next_morning_when_no_evening_tick_ran_and_a_late_h
     reserve.check(conn, at(10), ok, deliver, vk)
     assert say(conn, "на точке 5200001", deliver, at(9, 0, "2026-10-19")).startswith("Заказ №5200001: ответ пришёл после конца рабочего дня")
     reserve.check(conn, at(9, 30, "2026-10-19"), ok, deliver, vk)
-    assert deliver.sent == [] and yellow(conn, cid)[0] == "Точка ответила после конца рабочего дня: заказ ещё на точке (клиенту не отправлено)" and len(yellow(conn, cid)) == 2
+    assert deliver.sent == [] and yellow(conn, cid)[0] == "Точка ответила после конца рабочего дня: заказ ещё на точке" and len(yellow(conn, cid)) == 2
 
 
 def test_here_without_a_question_or_after_an_extension_writes_nothing_to_the_client(tmp_path):
@@ -268,7 +272,7 @@ def test_a_question_cut_before_it_went_never_lets_here_tell_the_client(tmp_path)
     say(conn, "на точке 5200001", deliver, at(10, 30))
     reserve.check(conn, at(20), ok, deliver, vk)
     assert deliver.sent == [] and vk.sent == []
-    assert [t.split(":")[0] for t in yellow(conn, cid)] == ["Клиенту «Клиенту"] and "неизвестно, ушёл ли вопрос" in yellow(conn, cid)[0]
+    assert len(yellow(conn, cid)) == 1 and yellow(conn, cid)[0].startswith("Неизвестно, ушёл ли вопрос точке")
 
 
 def test_the_reserve_question_ends_an_open_question_about_an_issue(tmp_path):

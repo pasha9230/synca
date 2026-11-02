@@ -44,8 +44,7 @@ def test_no_number_tells_the_manager_once_and_the_client_still_gets_the_reminder
         reserve.check(conn, at(hour), notify, deliver, vk)
     assert asks(notify) == [(cid, ASK_NUMBER % cid)]
     assert vk.sent == [(POINT_VK, "(бот) Заказ №%d (Иван, 205/55 R16) ещё на точке? Ответьте «выдал %d» или «на точке %d»." % (cid, cid, cid))]
-    assert say(conn, "на точке", deliver, at(11, 30), reply=cid) == \
-        "Заказ №%d — отмечено: на точке. Клиенту отправлено напоминание о сроке хранения." % cid
+    assert say(conn, "на точке", deliver, at(11, 30), reply=cid) == "Заказ №%d — отмечено: на точке." % cid     # the tick of 15:05 told the client (2026-11-02)
     assert [(c, t) for c, t, _ in deliver.sent] == [(chat, NO_NUMBER_TEXT)]
     for when in (at(20), at(10, day="2026-10-19"), at(12, day="2026-10-20")):
         reserve.check(conn, when, notify, deliver, vk)
@@ -74,6 +73,7 @@ def test_an_order_with_a_number_is_as_before(tmp_path):
     conn, cid, chat, deliver, vk, notify = ready(tmp_path, number=True)
     reserve.check(conn, at(10), notify, deliver, vk)
     say(conn, "на точке 5200001", deliver, at(11))
+    reserve.check(conn, at(12, 30), notify, deliver, vk)                               # the reminder: by the tick from 12:30 (the owner 2026-11-02)
     assert asks(notify) == [] and [(c, t) for c, t, _ in deliver.sent] == [(chat, owner_text())]
     assert not [e for e in orders.list_events(conn, cid) if "нет-номера" in e["text"]]
 
@@ -85,6 +85,7 @@ def test_the_owners_own_template_loses_the_number_cleanly(tmp_path):
     conn.commit()
     reserve.check(conn, at(10), notify, deliver, vk)
     say(conn, "на точке", deliver, at(11), reply=cid)                                  # a reply to the question (a bare «1» is a quantity)
+    reserve.check(conn, at(12, 30), notify, deliver, vk)
     assert [(c, t) for c, t, _ in deliver.sent] == [(chat, "Заказ ждёт вас до 18.10.2026. Заказ, ждём.")]
 
 
@@ -122,6 +123,7 @@ def test_a_number_after_a_non_breaking_space_a_hash_or_n_is_left_out_cleanly(tmp
     conn.commit()
     reserve.check(conn, at(10), notify, deliver, vk)
     say(conn, "на точке", deliver, at(11), reply=cid)
+    reserve.check(conn, at(12, 30), notify, deliver, vk)
     assert [(c, t) for c, t, _ in deliver.sent] == [(chat, "Заказ и и до 18.10.2026.")]
 
 
@@ -140,6 +142,6 @@ def test_without_avito_keys_the_number_is_asked_once_and_the_client_side_is_as_b
     deliver = _deliver(conn, chats.ChatError("У аккаунта не заданы ключи Авито."))
     reserve.check(conn, at(10), notify, deliver, vk)
     say(conn, "на точке", deliver, at(11), reply=cid)
-    reserve.check(conn, at(12), notify, deliver, vk)
+    reserve.check(conn, at(12, 30), notify, deliver, vk)
     assert asks(notify) == [(cid, ASK_NUMBER % cid)] and deliver.sent == []
     assert any("не заданы ключи" in e["text"] for e in orders.list_events(conn, cid))

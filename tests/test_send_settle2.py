@@ -298,7 +298,7 @@ def test_the_reserve_message_with_a_402_says_only_that_the_system_repeats_it(tmp
                      (token, chat_row, "2026-10-18T12:00:00", text))
         conn.commit()
         raise chats.ChatSendRetry("Авито отказал (402), повторю сам через минуту (попытка 1 из 3).")
-    told(conn, "2026-10-18T12:00:00", deliver)
+    told(conn, "2026-10-18T12:30:00", deliver)                                           # the reminder goes from 12:30 (2026-11-02)
     [event] = [e for e in orders.list_events(conn, cid) if e["kind"] == "reserve" and "Клиенту: срок резерва" in e["text"]]
     assert "повторю сам через минуту" in event["text"] and event["level"] == "yellow" and not any(bad in event["text"] for bad in BAD)
     [line] = [r[0] for r in conn.execute("SELECT text FROM manager_message")]

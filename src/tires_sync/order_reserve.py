@@ -6,15 +6,19 @@ whether the goods go back to the supplier is the owner's call), a date left ther
 On the last day of the reservation the client is asked once (the owner 2026-10-23, п. 17: «Срок резерва истекает…», the template
 «Клиенту: срок резерва истекает»), in the working hours, in the order's Avito chat; once per stay at the point (a date moved later brings no second one).
 The owner 2026-10-26 (a client got it after picking the order up): the point is asked first, in VK, at the first tick of the working hours of
-that day («Заказ №… ещё на точке?»). Only its «на точке <номер>» the same day before the end of the working hours sends the client the message
-(`here`); «выдал» closes the order as any «выдал»; silence, or a point that cannot be asked, sends nothing and leaves a yellow record for the
-responsible. The state of the question is one row of app_state per stay at the point, moved from «asked» by one UPDATE only (`_move`).
+that day («Заказ №… ещё на точке?»). Its «на точке <номер>» the same day before the end of the working hours marks the answer (`here`; it
+told the client until 2026-11-02, see below); «выдал» closes the order as any «выдал»; silence, or a point that cannot be asked, leaves a
+yellow record for the responsible. The state of the question is one row of app_state per stay at the point, moved from «asked» by one UPDATE only (`_move`).
 The owner 2026-10-26: an order without a WebMIM number on that day asks the responsible once per order for the number (`_ask_number`, the
 same alert as the end of the reservation: a point account's order goes to its point), also when no message to the client can go; the
 client's text then has no «№…» (`_client_body`).
 The lead 2026-10-26: a point on «Панель» is asked on its «Рабочее место» instead of VK (the same state «asked», then the same answers and silence).
 The owner 2026-10-26: an order the point gave back to the supplier in this stay («Возврат», order_manager.returned) stays «На точке» until the
 manager fills the amount; nobody is asked about it, the client gets no reminder and no yellow record is left (`_returned`).
+The owner 2026-11-02: the client no longer waits for the point's answer: on the last day of the reservation from 12:30 (CLIENT_AT) the
+reminder goes by itself (`_client_step`); the point is still asked as before («на точке» / «выдан» on its «Рабочее место»), its «на точке»
+only marks the answer. When the reminder went and the client wrote nothing in that chat for 12 hours (NO_ANSWER), the order goes to «На ОТХ»
+by itself (`_no_answer_step`): not when the date was moved since, the order left «Товар на точке» or the reminder did not go.
 """
 from __future__ import annotations
 
@@ -37,6 +41,10 @@ HERE = "на точке"
 ASK_NUMBER = "Укажите номер заказа WebMIM по заказу %d (%s)"
 NO_NUMBER_MARK = "[резерв:нет-номера]"            # once per order, whatever its stays at the point
 NUMBER = re.compile(r"[ \t\u00a0]*[№#N]?[ \t\u00a0]*\{webmim_number\}")
+CLIENT_AT = (12, 30)                              # the owner 2026-11-02: the reminder goes on the last day from 12:30 (Moscow), by itself
+NO_ANSWER = timedelta(hours=12)                   # no message of the client in the chat this long after the reminder: «На ОТХ»
+NO_ANSWER_REASON = "Клиент не ответил на напоминание о сроке резерва"
+OTH_MARK = "[резерв:на-отх:%s]"                   # once per stay at the point: moved, refused, or the client wrote
 
 
 def _marker(kind: str, until: str) -> str:
@@ -194,8 +202,8 @@ def ask_point(conn, card: dict, point_send: Optional[PointSend], now: str) -> st
                              level="grey")              # a bare «да» from now on is never the answer to «Это заказ №…?»
             conn.commit()
             return "asked"
-    orders.add_event(conn, card["id"], now, "система", "reserve", "Клиенту «%s» не отправлено: точку не спросить, ещё ли заказ на точке (%s). "
-                     "Узнайте у точки, забрал ли клиент заказ, и при необходимости напишите клиенту %s" % (CLIENT_TEMPLATE, why, marker), level="yellow")
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Точку не спросить, ещё ли заказ на точке (%s). Узнайте у точки, забрал ли клиент "
+                     "заказ %s" % (why, marker), level="yellow")
     conn.commit()
     return "unasked" if state.startswith("unasked") else "failed"
 
@@ -204,17 +212,16 @@ def _silent(conn, card: dict, key: str, was: str, now: str) -> bool:
     """The point did not answer by the end of its working day: nothing to the client, a yellow record for the responsible (once)."""
     if not _move(conn, key, was, "silent|" + now):
         return False
-    orders.add_event(conn, card["id"], now, "система", "reserve", "Точка «%s» не ответила до конца рабочего дня, ещё ли заказ на точке: клиенту «%s» "
-                     "не отправлено. Узнайте у точки, забрал ли клиент заказ, и при необходимости напишите клиенту [резерв:точка-молчит:%s]"
-                     % (_point_name(card), CLIENT_TEMPLATE, card["entered_at"] or ""), level="yellow")
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Точка «%s» не ответила до конца рабочего дня, ещё ли заказ на точке. Узнайте у "
+                     "точки, забрал ли клиент заказ [резерв:точка-молчит:%s]" % (_point_name(card), card["entered_at"] or ""), level="yellow")
     conn.commit()
     return True
 
 
 def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.Deliver]) -> Tuple[str, str]:
-    """The point's «на точке <номер>» about an order at the point (order_manager checks the point and the stage): the client gets «срок резерва
-    истекает» only when the point was asked in this stay at the point, the same day, before the end of the working hours, and the reservation
-    still ends that day. (outcome for the log, answer for the point)."""
+    """The point's «на точке <номер>» about an order at the point (order_manager checks the point and the stage): the answer to the question of
+    this stay, the same day, before the end of the working hours, is marked; the client is never written to from here (the owner 2026-11-02:
+    the reminder goes by itself at 12:30, `_client_step`). `deliver` is kept for the callers. (outcome for the log, answer for the point)."""
     number = order_manager.label(card)
     if _returned(conn, card):                                   # the owner 2026-10-26: the goods went back, the question is over
         return ("«на точке» после возврата: клиенту не отправлено",
@@ -229,11 +236,10 @@ def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.D
         if kind == "answered":
             return "уже отмечено", "Заказ №%s уже отмечен: на точке." % number
         if kind == "silent":
-            orders.add_event(conn, card["id"], now, who, "point", "Точка ответила после конца рабочего дня: заказ ещё на точке (клиенту не отправлено)",
-                             level="yellow")
+            orders.add_event(conn, card["id"], now, who, "point", "Точка ответила после конца рабочего дня: заказ ещё на точке", level="yellow")
             conn.commit()
-            return ("«на точке» после конца рабочего дня: клиенту не отправлено",
-                    "Заказ №%s: ответ пришёл после конца рабочего дня, клиенту не написали — с ним свяжется менеджер." % number)
+            return ("«на точке» после конца рабочего дня",
+                    "Заказ №%s: ответ пришёл после конца рабочего дня — отмечено, менеджер увидит." % number)
         return ("«на точке» без вопроса бота: ничего не изменено",
                 "Про заказ №%s бот не спрашивал, ничего не изменено. Если клиент забрал заказ, напишите «выдал %s»." % (number, number))
     if not _move(conn, key, was, "answered|" + now):            # another message of the point got it first
@@ -243,12 +249,7 @@ def here(conn, card: dict, who: str, now: str, deliver: Optional[order_manager.D
     if card["reserve_until"] != was.split("|", 1)[1][:10]:      # the date was moved since the question: the reservation does not end today
         return ("на точке; резерв продлён: клиенту не отправлено",
                 "Заказ №%s — отмечено: на точке. Резерв уже продлён, клиенту не пишем." % number)
-    status = tell_client(conn, card, deliver, now)
-    if status == "sent":
-        return "на точке; клиенту отправлено", "Заказ №%s — отмечено: на точке. Клиенту отправлено напоминание о сроке хранения." % number
-    if not status:
-        return "на точке; клиенту уже писали", "Заказ №%s — отмечено: на точке. Клиенту сегодня уже писали, второе сообщение не отправляем." % number
-    return "на точке; клиенту не отправлено", "Заказ №%s — отмечено: на точке. Клиенту сообщение не отправлено: менеджер разберётся." % number
+    return "на точке", "Заказ №%s — отмечено: на точке." % number         # the reminder goes by itself at 12:30 (the owner 2026-11-02)
 
 
 def question_open(conn, card: dict, now: str) -> bool:
@@ -282,14 +283,12 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
         return
     if was.startswith("asking|"):                               # the work was cut while the question was sent: maybe it went, maybe not
         if _late(was, now, hours) and _move(conn, key, was, "failed|" + now):
-            orders.add_event(conn, card["id"], now, "система", "reserve", "Клиенту «%s» не отправлено: неизвестно, ушёл ли вопрос точке (отправка "
-                             "прервалась). Узнайте у точки, забрал ли клиент заказ, и при необходимости напишите клиенту" % CLIENT_TEMPLATE, level="yellow")
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Неизвестно, ушёл ли вопрос точке, ещё ли заказ на точке (отправка "
+                             "прервалась). Узнайте у точки, забрал ли клиент заказ", level="yellow")
             conn.commit()
         return
     if was or not working or card["reserve_until"] != today.isoformat():
         return
-    if _done(conn, card["id"], "[резерв:клиенту:%s]" % (card["entered_at"] or "")):
-        return                                                  # the client was told in this stay already
     try:
         _ask_number(conn, card, notify, now)                    # also when no client message can go (the owner 2026-10-26)
     except Exception:                                           # the notice is a help: the question to the point still goes
@@ -299,10 +298,57 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
         return
     if _returned(conn, card):                                   # the owner 2026-10-26: given back, waits for the amount: nobody is asked
         return
-    if _arrived_today(conn, card, now):
-        tell_client(conn, card, deliver, now)                   # «можно забирать» went today: the grey record only, nobody is asked
-        return
+    if _arrived_today(conn, card, now):                         # «можно забирать» went today: nobody is asked (the reminder's grey record
+        return                                                  # comes at 12:30, _client_step)
     ask_point(conn, card, point_send, now)
+
+
+def _client_step(conn, card: dict, today: date, now: str, hours, deliver) -> None:
+    """The owner 2026-11-02: the last day of the reservation, from 12:30 to the end of the working hours, «срок резерва истекает» goes to the
+    client by itself, whatever the point answered (tell_client: once per stay; not on the day «можно забирать» went). Not after a return."""
+    moment = datetime.fromisoformat(now)
+    if deliver is None or card["reserve_until"] != today.isoformat() or (moment.hour, moment.minute) < CLIENT_AT or moment.hour >= hours[1]:
+        return
+    if _returned(conn, card):
+        return
+    tell_client(conn, card, deliver, now)
+
+
+def _no_answer_step(conn, card: dict, now: str) -> bool:
+    """The owner 2026-11-02: the reminder went (its send mark «sent») and the client wrote nothing in that chat for 12 hours: the order goes
+    from «Товар на точке» to «На ОТХ», a record in its journal. Once per stay (OTH_MARK). Nothing when the date was moved since the reminder,
+    the point marked a return, or the client wrote (a grey record). Returns True when the order moved."""
+    stay = card["entered_at"] or ""
+    marker = OTH_MARK % stay
+    sent = conn.execute("SELECT at, chat_row FROM chat_send_log WHERE token = ? AND status = 'sent'",
+                        ("reserve-%d-%s" % (card["id"], re.sub(r"\D", "", stay)),)).fetchone()
+    if sent is None or now < (datetime.fromisoformat(sent[0]) + NO_ANSWER).isoformat(timespec="seconds") or _done(conn, card["id"], marker):
+        return False
+    if card["reserve_until"] != sent[0][:10] or _returned(conn, card):
+        return False                                            # extended since (a new reminder may come), or the goods went back
+    if conn.execute("SELECT 1 FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND at > ? LIMIT 1",
+                    (sent[1], sent[0])).fetchone():
+        orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент ответил на напоминание о сроке резерва: на «На ОТХ» не переводим %s"
+                         % marker, level="grey")
+        conn.commit()
+        return False
+    oth = next((s for s in orders.list_stages(conn) if s["code"] == "oth"), None)
+    if oth is None:
+        return False
+    try:
+        moved = orders.move_card(conn, card["id"], oth["id"], now, "система", changes=None if card["cancel_reason"] else {"cancel_reason": NO_ANSWER_REASON},
+                                 journal=False)                 # the refusal is the one red record below
+    except orders.OrderError as err:
+        orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент не ответил за 12 часов на напоминание о сроке резерва, но на «%s» "
+                         "заказ не перевести: %s %s" % (oth["name"], err, marker), level="red")
+        conn.commit()
+        return False
+    if not moved:
+        return False
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент не ответил за 12 часов на напоминание о сроке резерва: заказ переведён на "
+                     "«%s» %s" % (oth["name"], marker))
+    conn.commit()
+    return True
 
 
 def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_manager.Deliver] = None,
@@ -320,16 +366,33 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     hours = order_manager.duty_settings(conn)["hours"]
     working = hours[0] <= moment.hour < hours[1]
     made = 0
+    try:
+        from . import order_oth
+        order_oth.ask_seventh_day(conn, now)                  # the owner 2026-11-02: «На ОТХ» 6 days, then the point is asked
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the question of the seventh day on OTH failed")
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s) AND c.reserve_until != ''"
                                    % ",".join("?" * len(STAGE_CODES)), STAGE_CODES).fetchall():
         try:
             card = orders.get_card(conn, card_id)
             until = date.fromisoformat(card["reserve_until"])
             try:
+                if _no_answer_step(conn, card, now):
+                    continue                                  # on «На ОТХ» now: no alert of the end of the reservation
+            except Exception:
+                conn.rollback()
+                logging.getLogger("tires_sync.orders").exception("the move to OTH of card %s after the reminder failed", card_id)
+            try:
                 _point_step(conn, card, today, now, hours, working, deliver, point_send, notify)
             except Exception:                                 # the alert of the manager still goes
                 conn.rollback()
                 logging.getLogger("tires_sync.orders").exception("the reserve question to the point of card %s failed", card_id)
+            try:
+                _client_step(conn, orders.get_card(conn, card_id), today, now, hours, deliver)
+            except Exception:
+                conn.rollback()
+                logging.getLogger("tires_sync.orders").exception("the reserve reminder to the client of card %s failed", card_id)
             kind = "due" if until <= today else ("before" if until - timedelta(days=1) == today else "")
             if not kind:
                 continue

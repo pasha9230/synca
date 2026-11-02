@@ -179,8 +179,8 @@ class PointVk:
 
 
 def told(conn, at, deliver, notify=None, point_vk=None):
-    """The tick of `at` asks the points, and every point asked answers «на точке» at once (order_reserve.here): the way the client hears
-    «срок резерва истекает» since 2026-10-26."""
+    """The tick of `at` asks the points, and every point asked answers «на точке» at once (order_reserve.here). Since 2026-11-02 the answer
+    only marks it: the client hears «срок резерва истекает» from the tick itself, on the last day from 12:30."""
     point_vk = point_vk or PointVk()
     asked = len(point_vk.sent)
     made = reserve.check(conn, at, notify or ok, deliver, point_vk)
@@ -221,15 +221,19 @@ def ok(card, text):
     return "ok"
 
 
-def test_the_client_is_asked_once_on_the_last_day_in_the_working_hours(tmp_path):
+def test_the_client_gets_the_reminder_once_on_the_last_day_from_12_30(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")                              # until 2026-10-18
     chat = chat_of(conn, cid)
     deliver, vk = _deliver(conn), PointVk()
-    told(conn, "2026-10-17T12:00:00", deliver, point_vk=vk)                             # the day before: only the manager
+    told(conn, "2026-10-17T12:30:00", deliver, point_vk=vk)                             # the day before: only the manager
     assert deliver.sent == [] and vk.sent == []
     assert told(conn, "2026-10-18T09:30:00", deliver, point_vk=vk) == 1 and deliver.sent == [] and vk.sent == []     # the manager at 09:00, the point from 10:00
     told(conn, "2026-10-18T10:05:00", deliver, point_vk=vk)
+    assert deliver.sent == [] and len(vk.sent) == 1                                     # the point is asked, its «на точке» sends nothing
+    told(conn, "2026-10-18T12:29:59", deliver, point_vk=vk)
+    assert deliver.sent == []                                                           # the owner 2026-11-02: from 12:30
+    told(conn, "2026-10-18T12:30:00", deliver, point_vk=vk)
     assert [(c, t) for c, t, _ in deliver.sent] == [(chat, OWNER_TEXT)]                 # the owner's text word for word
     told(conn, "2026-10-18T11:05:00", deliver, point_vk=vk)
     told(conn, "2026-10-18T19:05:00", deliver, point_vk=vk)
@@ -243,10 +247,10 @@ def test_after_an_extension_the_client_is_not_asked_again_in_the_same_stay(tmp_p
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat_of(conn, cid)
     deliver = _deliver(conn)
-    told(conn, "2026-10-18T12:00:00", deliver)
+    told(conn, "2026-10-18T12:30:00", deliver)
     orders.update_card(conn, cid, {"reserve_until": "2026-10-21"}, "2026-10-18T13:00:00", "o")
     alerts = []
-    told(conn, "2026-10-21T12:00:00", deliver, lambda card, text: (alerts.append(text), "ok")[1])
+    told(conn, "2026-10-21T12:30:00", deliver, lambda card, text: (alerts.append(text), "ok")[1])
     assert len(deliver.sent) == 1 and alerts and "Сегодня (21.10.2026)" in alerts[0]   # the manager hears it again, the client does not (the lead 2026-10-24)
 
 
@@ -284,7 +288,7 @@ def test_a_send_of_unknown_outcome_is_never_repeated_nor_asked_by_hand(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat_of(conn, cid)
     broken = _deliver(conn, chats.ChatSendUnknown("timeout"))
-    told(conn, "2026-10-18T12:00:00", broken)
+    told(conn, "2026-10-18T12:30:00", broken)
     good = _deliver(conn)
     told(conn, "2026-10-18T13:00:00", good)
     assert good.sent == [] and reserve.here(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-18T13:30:00", good)[0] == "уже отмечено"
@@ -299,7 +303,7 @@ def test_the_owners_template_of_that_name_is_sent_in_place_of_the_sample(tmp_pat
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat_of(conn, cid)
     deliver = _deliver(conn)
-    told(conn, "2026-10-18T12:00:00", deliver)
+    told(conn, "2026-10-18T12:30:00", deliver)
     assert [t for _, t, _ in deliver.sent] == ["Иван, резерв до 18.10.2026 истекает сегодня."]
 
 
@@ -332,12 +336,12 @@ def test_a_reserve_message_of_unknown_outcome_is_a_line_without_the_text_and_a_s
     conn = db(tmp_path)
     unknown = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat_of(conn, unknown)
-    told(conn, "2026-10-18T12:00:00", _deliver(conn, chats.ChatSendUnknown("timeout")))
+    told(conn, "2026-10-18T12:30:00", _deliver(conn, chats.ChatSendUnknown("timeout")))
     [line] = _inbox(conn)
     assert "повторно не отправляйте" in line and order_manager.COPY_MARK not in line
     sent = card_at(conn, "at_point", "2026-10-16T10:00:00")
     chat_of(conn, sent)
-    told(conn, "2026-10-19T12:00:00", _deliver(conn))
+    told(conn, "2026-10-19T12:30:00", _deliver(conn))
     assert len(_inbox(conn)) == 1
 
 
@@ -361,7 +365,7 @@ def test_a_reserve_line_is_never_written_once_its_message_went_meanwhile(tmp_pat
                      (token, chat))
         conn.commit()
         raise chats.ChatError("Авито не принял сообщение (403).")
-    told(conn, "2026-10-18T12:00:00", refused)
+    told(conn, "2026-10-18T12:30:00", refused)
     assert _inbox(conn) == []
 
 class AvitoSender:
@@ -386,7 +390,7 @@ def test_the_reserve_message_is_one_record_of_the_journal_not_two(tmp_path):
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat = chat_of(conn, cid)
     avito = AvitoSender()
-    told(conn, "2026-10-18T12:00:00", lambda row, text, token: chats.send_reply(conn, avito, row, text, token, "2026-10-18T12:00:00", "система"))
+    told(conn, "2026-10-18T12:30:00", lambda row, text, token: chats.send_reply(conn, avito, row, text, token, "2026-10-18T12:00:00", "система"))
     assert avito.sent == [OWNER_TEXT]
     sent = [e for e in orders.list_events(conn, cid) if e["kind"] in ("chat", "reserve") and ("отправлен" in e["text"].lower())
             and not e["text"].startswith("Точке «Бета» отправлен вопрос")]                 # the question to the point is a record of its own
@@ -427,5 +431,5 @@ def test_the_reserve_message_goes_when_the_goods_came_on_an_earlier_day(tmp_path
     chat_of(conn, cid)
     _arrived_sent(conn, cid, "2026-10-15T10:01:00")
     deliver = _deliver(conn)
-    told(conn, "2026-10-18T12:00:00", deliver)
+    told(conn, "2026-10-18T12:30:00", deliver)
     assert [t for _c, t, _tok in deliver.sent] == [OWNER_TEXT]

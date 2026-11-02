@@ -139,12 +139,12 @@ def test_the_reserve_line_of_a_402_is_closed_when_the_sync_sent_it(tmp_path):
     chat_row = chat_of(conn, cid)
     account = conn.execute("SELECT account_id FROM avito_chat WHERE id = ?", (chat_row,)).fetchone()[0]
     sender = Refusing(refused402())
-    when = "2026-10-18T12:00:00"
+    when = "2026-10-18T12:30:00"                                                         # the reminder goes from 12:30 (2026-11-02)
     told(conn, when, lambda c, t, k: chats.send_reply(conn, sender, c, t, k, when, "система"))
     [token] = [r[0] for r in conn.execute("SELECT token FROM chat_send_log WHERE token LIKE 'reserve-%'")]
     [line] = [r for r in lines(conn) if r["message_id"] == token]
     assert line["status"] == "new"
-    assert chats.settle_sends(conn, sender, lambda: sender, account, "2026-10-18T12:01:01") == {"sent": 1}
+    assert chats.settle_sends(conn, sender, lambda: sender, account, "2026-10-18T12:31:01") == {"sent": 1}
     [line] = [r for r in lines(conn) if r["message_id"] == token]
     assert line["status"] == "answered" and "повтор после отказа Авито" in line["answer"]
 
