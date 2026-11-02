@@ -436,7 +436,8 @@ def test_the_forms_of_the_client_are_only_the_own_password():
     assert allowed == {"account_password_page", "account_password", "tour_done", "tour_again", "shop_page", "shop_photo", "shop_cart_add",
                        "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
                        "shop_profile_page", "shop_profile_save",                              # its own «Профиль» (the owner 2026-10-30)
-                       "shop_order_cancel"}                                                   # its own early order cancelled (the owner 2026-10-31)
+                       "shop_order_cancel",                                                   # its own early order cancelled (the owner 2026-10-31)
+                       "whatsnew_page"}                                                       # «Что нового» (GET only; the owner 2026-11-02)
 
 
 def test_the_client_catalog_is_the_clients_only(tmp_path):

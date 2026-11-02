@@ -19,7 +19,7 @@ MAX_QTY = 100                                                 # a position of an
 ADDRESS_MIN, ADDRESS_MAX = 5, 300
 # what a client reads of the stage of the own order: never the inside of the work (the owner 2026-10-30)
 STATUS = {"from_point": "Принят", "new": "Принят", "talk": "Принят", "wait": "Принят", "placed": "Оформлен", "moving": "В пути",
-          "at_point": "Готов к выдаче", "done": "Выполнен", "cancel": "Отменён", "oth": "Отменён", "return_given": "Отменён", "return": "Отменён"}
+          "at_point": "Готов к выдаче", "shipped": "Отправлен", "done": "Выполнен", "cancel": "Отменён", "oth": "Отменён", "return_given": "Отменён", "return": "Отменён"}
 STATUS_OTHER = "В работе"                                     # a stage the owner made (no code)
 # the client cancels the own order only before it is placed with the supplier (the owner 2026-10-31): these stages and nothing of placing
 EARLY = ("from_point", "new", "talk", "wait")

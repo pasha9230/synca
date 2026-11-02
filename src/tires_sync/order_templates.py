@@ -38,6 +38,16 @@ OTH_POINT_SAMPLE = ("Точке: шины с ОТХ отложены под кл
 # the question to the point on the seventh day of «На ОТХ», a banner of its «Рабочее место» (order_oth.ask_seventh_day, the owner 2026-11-02)
 OTH_ASK_SAMPLE = ("Точке: ОТХ 7-й день", "manager", "Заказ выдали или он на точке?")
 SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE, OTH_POINT_SAMPLE, OTH_ASK_SAMPLE)
+# an order to another city (order_intercity, the owner 2026-11-02): on placing, instead of «Клиенту: заказ оформлен» (order_placed), and when
+# the point handed it to the courier of the transport company; {track_line} is empty while there is no track number (never «не хватает»)
+VARIABLES.update(city="Город доставки", carrier="Транспортная компания", track="Трек-номер", track_line="Строка трек-номера")
+OPTIONAL = {"track_line"}
+INTERCITY_PLACED_SAMPLE = ("Клиенту: заказ в другой город оформлен", "client",
+                           "Заказ {webmim_number} оформлен с доставкой в город {city} транспортной компанией {carrier}.\n\n{items_full}\n\n"
+                           "Покупатель {client_name} {client_phone}\n\nКогда передадим заказ в {carrier}, сообщим здесь в чате.")
+INTERCITY_SHIPPED_SAMPLE = ("Клиенту: заказ отправлен", "client",
+                            "Заказ {webmim_number} отправлен в город {city} транспортной компанией {carrier}.{track_line}\n\nСпасибо за покупку!")
+SAMPLES = SAMPLES + (INTERCITY_PLACED_SAMPLE, INTERCITY_SHIPPED_SAMPLE)
 RETIRED = {RESERVE_SAMPLE[0]: ("Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "   # the owner
                                "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",)}                                       # 2026-10-23
 FIELDS = "id, name, audience, body"
@@ -153,7 +163,15 @@ def values(conn, card: dict, now=None) -> dict:
         "delivery_date": _date(card.get("delivery_date", "")) or (IN_STOCK if card.get("in_stock") else ""), "delivery_time": card.get("delivery_time") or point.get("default_time") or "",
         "items_full": full, "webmim_number": card.get("webmim_number", ""), "transfer_number": card.get("transfer_number", ""), "hold_until": hold, "order_date": _order_date(conn, card, now),
         "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or "",
-        "oth_orders": _oth_orders(conn, card["id"])}
+        "oth_orders": _oth_orders(conn, card["id"]), **_intercity(card)}
+
+
+def _intercity(card: dict) -> dict:
+    """{city}, {carrier}, {track}, {track_line} of an order to another city (orders.get_card's «intercity»)."""
+    data = card.get("intercity") or {}
+    track = data.get("track") or ""
+    return {"city": data.get("city") or "", "carrier": data.get("carrier") or "", "track": track,
+            "track_line": "\nТрек-номер: %s" % track if track else ""}
 
 
 def _oth_orders(conn, card_id) -> str:
@@ -179,6 +197,8 @@ def render(conn, card: dict, body: str, now=None, mark: bool = False) -> Tuple[s
 
     def put(match):
         key = match.group(1)
+        if not data.get(key) and key in OPTIONAL:
+            return ""
         if not data.get(key):
             label = VARIABLES.get(key, key)
             if label not in missing:

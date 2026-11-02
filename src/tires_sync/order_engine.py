@@ -67,6 +67,10 @@ def _make_task(conn, card: dict, rule: dict, now: str, chain: Tuple[int, ...]) -
                 (card["id"], str(rule["template_id"]))).fetchone():
             status, result = "skipped", SENT_SKIP                # back in «Заказ оформлен»: the client heard «оформлен» already (a point
                                                                  # may be another one now: its message is prepared as before)
+        elif template["audience"] == "client" and (card.get("intercity") or {}).get("on") and (
+                template["name"] in PICKUP_TEMPLATES or (card.get("stage") or {}).get("code") == "done"):
+            status, result = "skipped", INTERCITY_SKIP           # to another city (order_intercity): «оформлен» has its own text, no pickup;
+                                                                 # the client's texts of «Выполнено» never (the owner 2026-11-02: the tyres are on the way)
         elif template["audience"] == "manager" and points.in_panel(card.get("point")):
             status, result = "skipped", PANEL_SKIP               # the point works in the panel: nothing to it in VK, nobody has to skip it by hand
     else:
@@ -133,6 +137,8 @@ PLACED_RULE = -2                                                   # the «rule�
 ARRIVED_RULE = -3                                                  # «можно забирать» that did not go by itself (order_manager._tell_arrived)
 PLACED_SKIP = "подготовлено после оформления в WebMIM"
 SENT_SKIP = "это сообщение по заказу уже отправлено"
+INTERCITY_SKIP = "заказ в другой город: у него свои сообщения клиенту"
+PICKUP_TEMPLATES = ("Клиенту: заказ оформлен", templates.ARRIVED_SAMPLE[0], templates.RESERVE_SAMPLE[0])     # order_placed.CLIENT_TEMPLATE …
 PANEL_SKIP = "точка работает в панели: в ВК ей не пишем, заказ виден на её «Рабочем месте»"
 RUNNING_TIMEOUT = 600                                              # seconds; a task «running» longer than this was cut off (a killed worker)
 

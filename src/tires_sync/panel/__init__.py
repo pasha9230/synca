@@ -295,6 +295,10 @@ def create_app(config: dict) -> Flask:
     app.before_request(page_prefs.remember)                            # after the right: the person's own filters of a list page
     app.after_request(page_prefs.after_post)
 
+    def _client_signed_in() -> bool:
+        from .common import current_user
+        return current_user()["role"] == "client"
+
     @app.after_request
     def security_headers(response):
         from flask import request
@@ -318,7 +322,8 @@ def create_app(config: dict) -> Flask:
             "frame-ancestors 'none'")
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if request.endpoint in ("shop_page", "shop_photo", "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
-                                "shop_profile_page", "shop_profile_save", "shop_order_cancel"):
+                                "shop_profile_page", "shop_profile_save", "shop_order_cancel") \
+                or (request.endpoint == "whatsnew_page" and _client_signed_in()):    # «Что нового» in the client's frame
             # the client's catalog: no scripts, no picture from outside (a supplier's host is never asked by the client's browser), not kept
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; "
@@ -368,10 +373,14 @@ def create_app(config: dict) -> Flask:
     routes_tasks.register(app)
     from . import routes_unsent
     routes_unsent.register(app)
+    from . import routes_intercity
+    routes_intercity.register(app)
     routes_shop.register(app)
     routes_client_terms.register(app)
     from . import routes_design
     routes_design.register(app)
+    from . import routes_whatsnew
+    routes_whatsnew.register(app)
 
     from flask import render_template
 

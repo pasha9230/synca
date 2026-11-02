@@ -30,7 +30,7 @@ KIND_NAMES = {"open": "обычный", "won": "успешный", "lost": "от
 DEFAULT_STAGES = (
     ("new", "Новый заказ", "#7F56D9", "open"), ("talk", "Переговоры", "#2E90FA", "open"), ("wait", "Ожидает наличие", "#0BA5EC", "open"),
     ("placed", "Заказ оформлен", "#F79009", "open"), ("moving", "Перемещение на точку", "#EF6820", "open"),
-    ("at_point", "Товар на точке", "#17B26A", "open"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "Возврат передан", "#DC6803", "open"),
+    ("at_point", "Товар на точке", "#17B26A", "open"), ("shipped", "Отправлен", "#0E9384", "won"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "Возврат передан", "#DC6803", "open"),
     ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена / невыкуп", "#D92D20", "lost"), ("return", "Возврат", "#B54708", "closed"))
 # «Отмена» and «Отказ/невыкуп» are one stage with the reason (the owner 2026-10-29); the reason is a text of cancel_reason
 CANCEL_KINDS = ("отменил клиент", "не выкупил", "другое")
@@ -70,6 +70,7 @@ def ensure_pipeline(conn, now: str) -> None:
     _ensure_wait_stage(conn)
     _merge_refused_stage(conn, now)
     _ensure_return_given_stage(conn)
+    _ensure_shipped_stage(conn)
 
 
 def _ensure_wait_stage(conn) -> None:
@@ -175,6 +176,25 @@ def _ensure_return_given_stage(conn) -> None:
     cur = conn.execute("INSERT INTO order_stage (code, name, color, position, kind) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM order_stage WHERE code = ?)",
                        (code, name, color, at, kind, code))
     if cur.rowcount == 1:                                       # the owner's own stages have no code: «code != …» alone would skip them
+        conn.execute("UPDATE order_stage SET position = position + 1 WHERE position >= ? AND (code IS NULL OR code != ?)", (at, code))
+    conn.commit()
+
+
+SHIPPED = "shipped"
+
+
+def _ensure_shipped_stage(conn) -> None:
+    """A pipeline made before «Отправлен» existed (the owner 2026-11-02: an order to another city, handed by the point to the courier of the
+    transport company) gets it once, right after «Товар на точке» (one statement, like «Ожидает наличие»). A successful stage («won»): the
+    order is done for the sales, the reports and the Google table, as «Выполнено»."""
+    if conn.execute("SELECT 1 FROM order_stage WHERE code = ?", (SHIPPED,)).fetchone():
+        return
+    here = conn.execute("SELECT position FROM order_stage WHERE code = 'at_point'").fetchone()
+    at = (here[0] + 1) if here else (conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM order_stage").fetchone()[0])
+    code, name, color, kind = next(d for d in DEFAULT_STAGES if d[0] == SHIPPED)
+    cur = conn.execute("INSERT INTO order_stage (code, name, color, position, kind) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM order_stage WHERE code = ?)",
+                       (code, name, color, at, kind, code))
+    if cur.rowcount == 1:
         conn.execute("UPDATE order_stage SET position = position + 1 WHERE position >= ? AND (code IS NULL OR code != ?)", (at, code))
     conn.commit()
 
@@ -537,6 +557,8 @@ def get_card(conn, card_id) -> dict:
     card["responsible"] = card["responsible"] or made_by                         # whoever made the card answers for it until another manager is named
     from . import oth_sale
     card["in_stock"] = int(card_id) in oth_sale.in_stock_ids(conn, [card_id])   # every tyre taken from «На ОТХ»: no date of delivery (2026-10-30)
+    from . import order_intercity
+    card["intercity"] = order_intercity.of(conn, card_id)                       # «Доставка в другой город» (2026-11-02)
     return card
 
 
@@ -805,7 +827,7 @@ def remove_item(conn, item_id, now: str, author: str) -> None:
     conn.commit()
 
 
-PLACED_CODES = ("placed", "moving", "at_point", "oth", "done")
+PLACED_CODES = ("placed", "moving", "at_point", SHIPPED, "oth", "done")
 
 
 def _needs_placed(stage: dict, placed: Optional[dict]) -> bool:
@@ -835,6 +857,8 @@ def missing_for(card: dict, stage: dict, placed: Optional[dict] = None) -> List[
             gaps.append("клиент (имя или телефон)")
         if not card.get("wants"):
             gaps.append("что нужно клиенту")
+    if code == SHIPPED and not (card.get("intercity") or {}).get("on"):
+        gaps.append("доставка в другой город")                         # «Отправлен» is the courier of the transport company only
     if code == "cancel":
         if not card["cancel_reason"]:
             gaps.append("причина отмены")
@@ -867,6 +891,10 @@ def _start_reserve(conn, card: dict, now: str, author: str) -> None:
     """The goods have arrived at the point: the reservation runs three days from today. A date the managers set in advance (the client asked
     for later) that is still ahead is kept; an old date left from an earlier stay is replaced."""
     today = now[:10]
+    if (card.get("intercity") or {}).get("on"):                                # to another city: the courier takes it, no client comes
+        conn.execute("UPDATE order_card SET reserve_until = '' WHERE id = ?", (card["id"],))
+        add_event(conn, card["id"], now, author, "field", "Резерв: товар на точке, срок не ставится — заказ в другой город, его заберёт курьер ТК")
+        return
     if card["reserve_until"] and card["reserve_until"] >= today:
         add_event(conn, card["id"], now, author, "field", "Резерв: товар на точке, срок до %s (задан заранее)" % card["reserve_until"])
         return
@@ -1100,6 +1128,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
                         "FROM order_card ORDER BY id DESC").fetchall()
     from . import oth_sale
     stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке» (open stages only)
+    intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
             continue
@@ -1117,7 +1146,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
-                                      "tags": tag_names})
+                                      "tags": tag_names, "intercity": cid in intercity})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":

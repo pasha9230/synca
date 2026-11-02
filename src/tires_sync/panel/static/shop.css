@@ -145,6 +145,7 @@ body.shop.ui-new,.shop-cat:where(.ui-new *){--cl-primary:#4F46E5;--cl-primary-bg
   .shop-nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--cl-border-2);display:grid;
     grid-auto-flow:column;grid-auto-columns:1fr;gap:0;padding-bottom:env(safe-area-inset-bottom)}
   .shop-nav a{flex-direction:column;justify-content:center;gap:3px;min-height:60px;padding:6px 2px;font-size:11px;border:0;position:relative}
+  .shop-nav .wn-dot{position:absolute;top:8px;left:calc(50% + 8px);margin:0}
   .shop-nav a .i{width:22px;height:22px}
   .shop-nav a .shop-count{position:absolute;top:4px;left:calc(50% + 6px);min-width:18px;line-height:18px;font-size:11px}
   .shop-cat{display:block}

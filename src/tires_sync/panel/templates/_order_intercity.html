@@ -1,0 +1,30 @@
+{# «Доставка в другой город» (order_intercity, the owner 2026-11-02): the office writes the checkbox, the city, the transport company (ПЭК, КИТ),
+   the track number and the labels (PDF); whoever else sees the order (the point, the observer) sees them and downloads the labels. #}
+{% set ic = c.intercity %}{% set ic_labels = intercity_labels(c.id) if ic.on else [] %}{% set ic_edit = can_post("order_intercity_save") %}
+{% if ic_edit or ic.on %}
+<section class="card" id="intercity" data-intercity><div class="card-body stack" style="gap:var(--s-3)">
+<h3 style="margin:0">Доставка в другой город{% if ic.on %} <span class="badge badge--warn" data-intercity-tag>В другой город</span>{% endif %}</h3>
+{% if ic_edit %}
+<form method="post" action="/orders/{{ c.id }}/intercity" class="stack" style="gap:var(--s-2)" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="row owin-check"><input type="checkbox" name="enabled" value="1"{% if ic.on %} checked{% endif %}><span>Доставка в другой город (точка отдаёт шины курьеру ТК)</span></label>
+<div class="owin-grid">
+<label class="field"><span class="label">Город</span><input class="input" name="city" value="{{ ic.city }}" maxlength="60" placeholder="Например, Псков"></label>
+<label class="field"><span class="label">ТК</span><select class="select" name="carrier"><option value="">Не выбрана</option>{% for t in intercity_carriers %}<option value="{{ t }}"{% if ic.carrier == t %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Трек-номер (можно внести позже)</span><input class="input mono" name="track" value="{{ ic.track }}" maxlength="60"></label>
+</div>
+<div><button class="btn btn--primary btn--sm">Сохранить доставку</button></div>
+</form>
+{% else %}
+<p class="small" style="margin:0">{% if ic.city %}Город: <b>{{ ic.city }}</b>{% endif %}{% if ic.carrier %} · ТК: <b>{{ ic.carrier }}</b>{% endif %}{% if ic.track %} · Трек-номер: <span class="mono">{{ ic.track }}</span>{% endif %}</p>
+{% endif %}
+{% if ic.on %}
+<div class="stack" style="gap:var(--s-2)"><span class="strong">Этикетки ТК</span>
+{% for f in ic_labels %}<div class="row" style="gap:var(--s-2);align-items:center"><a href="/orders/{{ c.id }}/labels/{{ f.id }}" data-label-file>{{ f.name }}</a> <span class="small muted">{{ (f.size / 1024)|round|int }} КБ · {{ f.uploaded_at|short_dt }}</span>
+{% if can_post("order_label_delete") %}<form method="post" action="/orders/{{ c.id }}/labels/{{ f.id }}/delete" class="inline" data-once data-confirm="Удалить файл «{{ f.name }}»?" data-confirm-ok="Удалить" data-confirm-danger><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Удалить</button></form>{% endif %}</div>
+{% else %}<p class="small muted" style="margin:0">Этикеток пока нет.</p>{% endfor %}
+{% if can_post("order_label_upload") %}<form method="post" action="/orders/{{ c.id }}/labels" enctype="multipart/form-data" class="row" style="gap:var(--s-2);align-items:center;flex-wrap:wrap" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input type="file" name="file" accept="application/pdf,.pdf" required aria-label="Файл этикеток (PDF)"><button class="btn btn--secondary btn--sm">Загрузить этикетки</button><span class="small muted">PDF до 1,9 МБ, не больше 10 файлов</span></form>{% endif %}
+</div>
+{% endif %}
+</div></section>
+{% endif %}

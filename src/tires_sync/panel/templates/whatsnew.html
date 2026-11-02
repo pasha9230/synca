@@ -1,0 +1,21 @@
+{# «Что нового» (routes_whatsnew, the owner 2026-11-02): the updates newest first, the items of the viewer's role only; the owner and the
+   partner see all with the roles each is shown to. The client's frame for a client, the point's phone sections for a point. #}
+{% extends "shop_base.html" if client else "base.html" %}
+{% block viewport %}{% if point %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
+{% block body_class %}{% if point %}pt-ui pt-whatsnew-page{% endif %}{% endblock %}
+{% block head %}{% if point %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
+{% block title %}Что нового{% if not client %} · Tires Sync{% endif %}{% endblock %}
+{% block content %}
+{% if client %}<h1 class="shop-h1">Что нового</h1>{% else %}<header class="page-head"><div><h1>Что нового</h1><p class="sub">Что изменилось в панели — по номерам обновлений, свежие сверху.</p></div></header>{% endif %}
+<div class="wn{% if client %} shop-narrow{% endif %}">
+{% for u in updates %}<section class="card wn-update" id="u{{ u.number }}">
+<div class="card-head"><h2>{{ u.title }}</h2><span class="sub">№{{ u.number }} · {{ u.date }}</span></div>
+<div class="card-body">{% for item in u["items"] %}<article class="wn-item">
+<h3>{{ item.title }}</h3>
+{% if sees_all %}<div class="wn-roles">{% for r in role_names if r in item.roles %}<span class="badge">{{ role_names[r] }}</span>{% endfor %}</div>{% endif %}
+<div class="wn-body">{{ item.body }}</div>
+</article>{% endfor %}</div>
+</section>{% else %}<section class="card card-body"><p class="muted">Пока ничего нового.</p></section>{% endfor %}
+</div>
+{% if point %}{% with section="whatsnew" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
+{% endblock %}

@@ -298,7 +298,8 @@ for _section, _endpoints in {
     "self": ("account_password_page", "account_password", "orders_list_columns",     # «Колонки» of the list of orders: one's own setting
              "orders_hint_fold",                        # «Что делать сейчас» folded: one's own setting
              "search", "search_json",                   # the search of the top bar: every role; search.scope_for narrows what it finds
-             "tour_done", "tour_again"),                # «Обзор» (panel/tour.py): one's own mark «пройден», every role
+             "tour_done", "tour_again",                 # «Обзор» (panel/tour.py): one's own mark «пройден», every role
+             "whatsnew_page"),                          # «Что нового» (routes_whatsnew): every role, its own items
     "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
              "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",   # its cart, its orders,
@@ -309,6 +310,8 @@ for _section, _endpoints in {
         SECTION_OF[_endpoint] = _section
 SECTION_OF.update(tasks_page="orders", task_new="orders", task_close="orders")      # «Задачи» (routes_tasks, 2026-10-31): «менять» to set
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
+SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
+                  order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
 SECTION_OF.update(ui_new_page="setup",                           # «Новый вид» (routes_design, 2026-11-02): the owner changes, the partner looks
                   as_point_start="self", as_point_stop="self")   # «Работать как точка»: check_access lets them by AS_POINT_PAGES
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
@@ -336,12 +339,14 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "chat_stage", "chat_handoff", "alerts_go",   # positions of an order (items, «клиент ждёт»): not the point's (the owner did not say)
                          "calls_page", "call_record", "call_create_order", "call_handoff",            # the calls of the point's account (own_call)
                          "tasks_page", "task_new", "task_close",      # «Задачи»: its own only, to itself only (routes_tasks checks it)
-                         "order_unsent_by_hand"}                       # «Отправил вручную» by its own orders (card_id of the address)
+                         "order_unsent_by_hand",                       # «Отправил вручную» by its own orders (card_id of the address)
+                         "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
+                         "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
 CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again",
                           "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
-                          "shop_profile_page", "shop_profile_save", "shop_order_cancel"})
+                          "shop_profile_page", "shop_profile_save", "shop_order_cancel", "whatsnew_page"})
 # «CRM» is not the point's (the owner 2026-10-29: hidden; before, its own part of a client, 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})

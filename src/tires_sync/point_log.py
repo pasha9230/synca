@@ -23,7 +23,8 @@ ACTION = "point_action"
 NAMES = {"arrived": "принял заказ (приехал)", "issued": "выдал заказ", "no_show": "клиент не пришёл", "returned": "отдал на возврат",
          "reserve_issued": "выдал (ответ на резерв)", "reserve_here": "на точке (ответ на резерв)", "handoff": "передал клиента",
          "handoff_cancel": "отменил передачу", "act_signed": "подписал акт МХ-3 и отдал", "to_oth": "оставил шины на ОТХ", "move": "сменил этап", "vk": "команда ВК",
-         "oth_issued": "выдал (7-й день ОТХ)", "oth_here": "шины на точке (7-й день ОТХ)", "undo": "отменил отметку"}
+         "oth_issued": "выдал (7-й день ОТХ)", "oth_here": "шины на точке (7-й день ОТХ)", "undo": "отменил отметку",
+         "shipped": "передал курьеру ТК"}
 SHOWN = 300
 
 
@@ -78,7 +79,8 @@ def history(conn, point_id: Optional[int] = None, limit: int = SHOWN) -> List[di
 
 
 UNDO_KEY = "point_undo:%d"
-UNDOABLE = {"arrived": "«Приехал»", "issued": "«Выдал»", "reserve_issued": "«Выдан»", "oth_issued": "«Выдали»", "to_oth": "«На ОТХ»"}
+UNDOABLE = {"arrived": "«Приехал»", "issued": "«Выдал»", "reserve_issued": "«Выдан»", "oth_issued": "«Выдали»", "to_oth": "«На ОТХ»",
+            "shipped": "«Передал курьеру ТК»"}
 UNDO_HINT = "Сообщение, которое уже ушло клиенту, не отзывается."
 UNDO_SHOWN = 10
 
@@ -195,6 +197,10 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
         ", резерв до %s.%s.%s" % (until[8:10], until[5:7], until[:4]) if stage["code"] == "at_point" and len(until) == 10 else "", UNDO_HINT)
     orders.add_event(conn, card["id"], now, author, "point", text, level="yellow")
     conn.commit()
+    if rec["action"] == "shipped":                                        # the track number is not awaited any more (order_intercity)
+        from . import order_intercity
+        order_intercity.close_track_tasks(conn, card["id"], "cancel", now, author, "отметка «Передал курьеру ТК» отменена")
+        order_intercity.skip_waiting_message(conn, card["id"], now, author)
     record(conn, now, who, point["id"], "undo", card["id"], "отменил %s" % rec["name"])
     if tell is not None:
         try:

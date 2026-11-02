@@ -36,6 +36,7 @@
 {% include "_order_hint.html" %}
 {% if own_sale %}{% include "_point_sale.html" %}{% endif %}{# the point edits its own sale here; the window stays read-only for it #}
 {% include "_order_window.html" %}
+{% include "_order_intercity.html" %}
 {% if messages %}{% call entity_ui.section("Сообщения по заказу", id="messages") %}<div class="card-body row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center">
 <span>Ждут отправки: {{ messages|length }} ({% for m in messages %}{{ m.task.title }}{% if not loop.last %}; {% endif %}{% endfor %}).</span>{% if messages|selectattr("lacking")|list %}<span class="small text-err">Не хватает данных: см. в окне.</span>{% endif %}
 <button type="button" class="btn btn--primary btn--sm ml-auto" data-open-modal="order-messages">Открыть сообщения</button></div>{% endcall %}

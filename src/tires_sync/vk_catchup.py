@@ -51,6 +51,10 @@ def channel(conn, local: str, box, vk_http: Transport = urllib_transport, avito_
 
     def notify(card, text):
         return order_notify.deliver(conn, box, card, text, local, tg_http=tg_http, vk_http=vk_http)
+
+    def tell(logins, text):                                     # the owner and the partner by name (order_intercity.ship): never raises
+        return order_notify.tell_people(conn, box, logins, text, tg_http=tg_http, now=local)
+    notify.tell = tell
     return sender, deliver, notify
 
 
