@@ -1199,7 +1199,7 @@
     var btn = e.target.closest && e.target.closest("[data-focus-field]");
     if (!btn) return;
     var name = btn.getAttribute("data-focus-field");
-    var field = Array.prototype.filter.call(document.querySelectorAll('[name="' + name + '"]'), function (f) { return !f.closest(".modal-backdrop"); })[0];
+    var field = document.querySelector('#ow-main [name="' + name + '"]');
     if (!field) return;
     closeModals();
     field.scrollIntoView({block: "center"});

@@ -158,8 +158,7 @@ def draft(conn, task: dict, now: str) -> str:
         card = orders.get_card(conn, task["order_id"])
         body = message_body(conn, task, card)
         return templates.render(conn, card, body, now, mark=True)[0] if body else ""
-    except Exception:
-        conn.rollback()
+    except Exception:                                              # it only reads: no rollback of what the page wrote before it
         logging.getLogger("tires_sync.orders").exception("the draft of message task %s", task["id"])
         return ""
 
@@ -491,7 +490,8 @@ def close_after_send(conn, token, text: str, now: str, how: str) -> bool:
 
 def sent_by_hand(conn, task_id, now: str, author: str) -> None:
     """«Отправлено вручную» of a message: a person wrote it themselves — also while it lacks a value (the draft was copied); never sent by
-    the panel after it. «Можно забирать»: the line «…Отправьте вручную» of «Входящие» about it is answered (as unsent.mark_by_hand)."""
+    the panel after it. Its «Не дошло клиенту» (order_unsent) is closed and the lines of «Входящие» about its send mark are answered (as
+    unsent.sent_by_hand): nobody writes it to the client a second time."""
     task = get_task(conn, task_id)
     if task["kind"] != "message":
         raise OrderError("Это не сообщение.")
@@ -502,11 +502,11 @@ def sent_by_hand(conn, task_id, now: str, author: str) -> None:
     if cur.rowcount != 1:                                          # a send or another press got there first
         conn.rollback()
         raise OrderError("Это сообщение уже отправляется или обработано.")
+    token = task_token(task)
+    conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE token = ? AND closed_at IS NULL", (now, author, token))
     orders.add_event(conn, task["order_id"], now, author, "rule", "%s: %s (отправлено вручную)" % (task["title"], STATUS_NAMES["done"]), level="grey")
     conn.commit()
-    token = task_token(task)
-    if token.startswith("arrived-"):
-        chats._inbox_close(conn, token, now, "Итог: отправлено вручную из «Сообщений по заказу» (%s)." % author, alerts=True)
+    chats._inbox_close(conn, token, now, "Итог: отправлено вручную из «Сообщений по заказу» (%s)." % author, alerts=True)
 
 
 def skip_task(conn, task_id, now: str, author: str) -> None:

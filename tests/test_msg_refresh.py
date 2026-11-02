@@ -262,7 +262,27 @@ def test_the_window_shows_the_draft_the_field_and_the_manual_mark(panel):
     [task] = client_tasks(conn, mine)
     assert task["status"] == "error"
     _, win = _window(page(client, mine, messages=1))
-    assert "[Номер перемещения]" in win and 'data-focus-field="transfer_number"' in win and 'data-copy="#message-%d"' % task["id"] in win
+    assert "[Номер перемещения]" in win and 'data-focus-field="transfer_number"' in win and 'data-copy="#draft-%d"' % task["id"] in win
     assert 'formaction="/orders/%d/task/%d/run"' % (mine, task["id"]) in win
     post(client, "/orders/%d/task/%d/run" % (mine, task["id"]), "tok")
     assert client_tasks(conn, mine)[0]["status"] == "done" and client_tasks(conn, mine)[0]["result"] == "отправлено вручную"
+
+
+def test_sent_by_hand_closes_the_unsent_block_and_the_sync_alerts(tmp_path):
+    """A rule's message that did not reach the client («Не дошло клиенту», order_unsent) marked «Отправлено вручную» in the window: the
+    block and the sync's lines of «Входящие» about its mark are closed — nobody writes it a second time."""
+    conn = db(tmp_path)
+    mine = ready(conn)
+    template = next(t for t in templates.list_templates(conn) if t["name"] == order_placed.CLIENT_TEMPLATE)
+    templates.update_template(conn, template["id"], template["name"], "client", "Заказ {webmim_number} оформлен")
+    place(conn, mine, FakeWebmim())
+    placed(conn, mine, Deliver(fail=RuntimeError("down")))
+    [task] = tasks(conn, mine)
+    token = engine.task_token(task)
+    conn.execute("INSERT OR IGNORE INTO order_unsent (order_id, token, at, why, text) VALUES (?, ?, ?, 'Авито отказал', ?)", (mine, token, NOW, task["body"]))
+    conn.execute("INSERT INTO manager_message (message_id, at, point_id, sender, text, status) VALUES (?, ?, NULL, 'система', 'не отправлено', 'new')",
+                 ("send-%s-1" % token, NOW))
+    conn.commit()
+    engine.sent_by_hand(conn, task["id"], LATER, "owner")
+    assert conn.execute("SELECT closed_at FROM order_unsent WHERE token = ?", (token,)).fetchone()[0] == LATER
+    assert conn.execute("SELECT status FROM manager_message WHERE message_id LIKE 'send-%'").fetchone()[0] != "new"
