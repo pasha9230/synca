@@ -1,4 +1,10 @@
-{% from "_ui.html" import icon %}
+{% from "_ui.html" import icon -%}
+{# a menu section that folds by its title (the owner 2026-11-02): navfold.js keeps the choice; the section of the current page is always open -#}
+{% macro sb_section(key, label) -%}
+{%- set items = caller() -%}{# a call block: the links stay local, a page's own `items` is not touched #}
+<nav class="sb-group" data-sec="{{ key }}"{% if "is-active" in items %} data-current{% endif %}><button type="button" class="sb-fold" aria-expanded="true" aria-controls="sb-sec-{{ key }}"><span class="sb-label">{{ label }}</span>{{ icon("chev", "sb-chev") }}</button>
+<div class="sb-items" id="sb-sec-{{ key }}">{{ items }}</div></nav>
+{%- endmacro -%}
 <!doctype html>
 <html lang="ru">
 <head>
@@ -10,6 +16,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='bell.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='topbar.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='tour.css') }}">
+{% if session.get("user") %}<script src="{{ url_for('static', filename='navfold.js') }}"></script>{% endif %}{# before the body: folded sections are hidden before paint #}
 {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -28,7 +35,7 @@
 {% if can("home") %}<nav class="sb-group">
 <a class="sb-link{% if path == '/' %} is-active{% endif %}" href="/">{{ icon("home") }}Главная</a>
 </nav>{% endif %}
-{% if can("orders") or can("chats") or can("calls") or can("alerts") %}<nav class="sb-group"><div class="sb-label">Продажи</div>
+{% if can("orders") or can("chats") or can("calls") or can("alerts") %}{% call sb_section("sales", "Продажи") %}
 {% if can("orders") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}{# the point: hidden (the owner 2026-11-02) #}
 {% if current_user().role != "point" %}{% include "_nav_tasks.html" %}{% endif %}
 {% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_unread %}<span class="sb-count">{{ nav.chat_unread }}</span>{% endif %}</a>{% endif %}
@@ -36,8 +43,8 @@
 {% if can("clients") %}<a class="sb-link{% if path.startswith('/clients') %} is-active{% endif %}" href="/clients">{{ icon("users") }}CRM</a>{% endif %}
 {% if can("alerts") %}<a class="sb-link{% if path.startswith('/alerts') %} is-active{% endif %}" href="/alerts">{{ icon("alert") }}Уведомления{% if nav.alerts %}<span class="sb-count{% if nav.alerts_red %} sb-count--red{% endif %}">{{ nav.alerts }}</span>{% endif %}</a>{% endif %}
 {% if can("chats") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/shares') %} is-active{% endif %}" href="/shares">{{ icon("send") }}Ссылки для клиентов</a>{% endif %}
-</nav>{% endif %}
-{% if can("catalog") %}<nav class="sb-group"><div class="sb-label">Товар и фид</div>
+{% endcall %}{% endif %}
+{% if can("catalog") %}{% call sb_section("goods", "Товар и фид") %}
 <a class="sb-link{% if path.startswith('/catalog') or path.startswith('/draft') or path.startswith('/publish') %} is-active{% endif %}" href="/catalog">{{ icon("tire") }}Каталог<span class="sb-count sb-count--pend" id="navpend" title="Неподтверждённые изменения" data-pend-count{% if not nav.staged %} hidden{% endif %}>{{ nav.staged }}</span></a>
 <a class="sb-link{% if path.startswith('/new') %} is-active{% endif %}" href="/new">{{ icon("sparkle") }}Новые позиции{% if nav.new_count %}<span class="sb-count">{{ nav.new_count }}</span>{% endif %}</a>
 <a class="sb-link{% if path.startswith('/mappings') or path.startswith('/pairs') %} is-active{% endif %}" href="/mappings">{{ icon("link") }}Сопоставления{% if nav.pending_pairs %}<span class="sb-count">{{ nav.pending_pairs }}</span>{% endif %}</a>
@@ -45,19 +52,19 @@
 <a class="sb-link{% if path.startswith('/feeds') %} is-active{% endif %}" href="/feeds">{{ icon("upload") }}Фиды</a>
 <a class="sb-link{% if path.startswith('/oth') %} is-active{% endif %}" href="/oth">{{ icon("undo") }}На ОТХ</a>
 {% if current_user().role == "owner" %}<a class="sb-link{% if path.startswith('/prices') %} is-active{% endif %}" href="/prices/changes">{{ icon("arrow-up") }}Цены поставщика</a>{% endif %}
-</nav>{% endif %}
-{% if can("home") %}<nav class="sb-group"><div class="sb-label">Аналитика</div>
+{% endcall %}{% endif %}
+{% if can("home") %}{% call sb_section("analytics", "Аналитика") %}
 <a class="sb-link{% if path.startswith('/analytics') %} is-active{% endif %}" href="/analytics">{{ icon("arrow-up") }}Продажи и воронка</a>
 {% if can("analytics") and has_right("money") %}<a class="sb-link{% if path.startswith('/economics') %} is-active{% endif %}" href="/economics">{{ icon("chart") }}Юнит-экономика</a>
 <a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>{% endif %}
-</nav>{% endif %}
-{% if can("setup") or can("users") %}<nav class="sb-group"><div class="sb-label">Настройка</div>
+{% endcall %}{% endif %}
+{% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
 <a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
 <a class="sb-link{% if path.startswith(('/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders/settings">{{ icon("layers") }}Настройки заказов</a>
 <a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>{% endif %}
 {% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
-</nav>{% endif %}
+{% endcall %}{% endif %}
 {% set me = current_user() %}
 <div class="sb-foot">{{ icon("lock", "i-sm") }}<a href="/account/password" title="Свой пароль">{{ me.display_name or (me.login if me.login != config.AUTHOR else "Владелец") }}</a>
 <form method="post" action="/tour/again" class="inline ml-auto"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Пройти обзор заново" aria-label="Пройти обзор заново" data-tour="again">{{ icon("info") }}</button></form>
