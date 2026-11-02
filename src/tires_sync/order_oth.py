@@ -394,6 +394,7 @@ def close_return_tasks(conn, order_id, now: str, who: str, result: str) -> int:
             closed += 1
         except Exception:                                                            # noqa: BLE001 - closed meanwhile, or a busy base
             conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the task %s «%s» of order %s was not closed", task_id, RETURN_TASK, order_id)
     return closed
 
 

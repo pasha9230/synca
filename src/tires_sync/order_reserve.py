@@ -356,7 +356,7 @@ def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None)
         late = now >= (datetime.fromisoformat(sent[0]) + NO_ANSWER + STALE_AFTER).isoformat(timespec="seconds")
         if late and not _done(conn, card["id"], STALE_MARK % stay):
             orders.add_event(conn, card["id"], now, "система", "reserve", "Чаты аккаунта Авито не читаются: не узнать, ответил ли клиент на напоминание "
-                             "о сроке резерва, на «На ОТХ» заказ сам не переведён. Свяжитесь с клиентом %s" % (STALE_MARK % stay), level="yellow")
+                             "о сроке резерва, на «На ОТХ» заказ пока не переведён. Свяжитесь с клиентом %s" % (STALE_MARK % stay), level="yellow")
             conn.commit()
         return False
     chats_of = "(SELECT id FROM avito_chat WHERE id = ? OR order_id = ?)"     # the chat of the reminder and any other chat of the order
