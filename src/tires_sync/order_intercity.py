@@ -152,10 +152,10 @@ def _stage(conn, code) -> Optional[dict]:
 
 
 def was_shipped(conn, card: dict) -> bool:
-    """The order went through «Отправлен» (it is on «Выполнено» after it, the owner 2026-11-02)."""
-    stage = _stage(conn, orders.SHIPPED)
-    return stage is not None and conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'stage' AND text LIKE ? LIMIT 1",
-                                              (card["id"], "%→ «" + stage["name"] + "»")).fetchone() is not None
+    """The order went through «Отправлен» (it is on «Выполнено» after it, the owner 2026-11-02): its «заказ отправлен» was made and not
+    undone by the point's «Отменить» (a task under SHIPPED_RULE, whatever the stage is called now)."""
+    return conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id = ? AND NOT (status = 'skipped' AND result = ?) LIMIT 1",
+                        (card["id"], SHIPPED_RULE, SHIPPED_CLIENT["undone"])).fetchone() is not None
 
 
 def ship(conn, card: dict, who: str, now: str, deliver, tell: Optional[Tell] = None) -> Tuple[str, str]:
@@ -193,7 +193,10 @@ def shipped_by_hand(conn, before: dict, who: str, now: str, deliver, tell: Optio
         return ""
     if card["stage"]["code"] != orders.SHIPPED or before["stage"]["code"] == orders.SHIPPED or not on(card):
         return ""
-    sent, note, final = after_shipped(conn, card["id"], "Офис (%s) отметил: заказ передан" % who, who, now, deliver, tell)
+    if was_shipped(conn, card):                                           # sent once already: back to «Выполнено», nothing repeated
+        _to_done(conn, card["id"], now, who)
+        return "Заказ уже был отправлен: сообщения и задачи не повторяются. Заказ на этапе «%s»." % orders.get_card(conn, card["id"])["stage"]["name"]
+    sent, note, final = after_shipped(conn, card["id"], "Офис (%s) отметил: передан" % who, who, now, deliver, tell)
     return "%s Заказ на этапе «%s»." % (note, final)
 
 
@@ -222,13 +225,21 @@ def after_shipped(conn, card_id, whose: str, who: str, now: str, deliver, tell: 
         except Exception:                                                 # noqa: BLE001 - the journal's yellow record says it
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the track tasks of order %s failed", card_id)
+    _to_done(conn, card_id, now, who)
+    return sent, note, orders.get_card(conn, card_id)["stage"]["name"]
+
+
+def _to_done(conn, card_id, now: str, who: str) -> None:
+    """On to «Выполнено» with its rules; a refusal is a red record of the journal and the order stays on «Отправлен». Never raises."""
     done = _stage(conn, "done")
     try:
         if done is not None:
             orders.move_card(conn, card_id, done["id"], now, who)
-    except OrderError:                                                    # its refusal is a red record of the journal; it stays on «Отправлен»
+    except OrderError:
         pass
-    return sent, note, orders.get_card(conn, card_id)["stage"]["name"]
+    except Exception:                                                     # noqa: BLE001 - a busy base: the message and the alert went already
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the move of shipped order %s to done failed", card_id)
 
 
 def tell_shipped(conn, card_id, now: str, who: str, deliver) -> Tuple[bool, str]:

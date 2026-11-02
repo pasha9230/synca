@@ -34,7 +34,7 @@
 {% if row.oth %}<div class="mp-oth" data-oth-card="{{ c.id }}"><span class="mp-sub">{% if row.to_agree %}Шины на точке, возврат согласуют с поставщиком{% else %}На ОТХ с {{ c.entered_at|day }} · срока продажи нет{% endif %}</span></div>
 {% else %}<div class="mp-actions">
 {% if not row.here %}{{ press(c, row, "arrived", "Приехал", "btn--primary") }}{# «Едут»: one button (the owner 2026-10-30) #}
-{% elif row.intercity %}{{ press(c, row, "shipped", "Передал курьеру ТК", "btn--primary mp-btn--big", "Передать заказ № %s курьеру ТК?"|format(row.label), "Шины и этикетки отданы курьеру; заказ перейдёт в «Отправлен», клиенту уйдёт сообщение.", "Передал") }}{# no «Клиент не пришёл»: no client comes #}
+{% elif row.intercity %}{{ press(c, row, "shipped", "Передал курьеру ТК", "btn--primary mp-btn--big", "Передать заказ № %s курьеру ТК?"|format(row.label), "Шины и этикетки отданы курьеру; клиенту уйдёт сообщение, заказ закроется («Выполнено»).", "Передал") }}{# no «Клиент не пришёл»: no client comes #}
 {% else %}{{ press(c, row, "issued", "Выдал", "btn--primary mp-btn--big", "Выдать заказ № %s?"|format(row.label), who ~ " забирает заказ; он закроется.", "Выдал") }}{{ press(c, row, "no_show", "Клиент не пришёл", "mp-btn--quiet", "Точно клиент не пришёл?", "Заказ № %s останется на точке, владелец свяжется с клиентом."|format(row.label), "Да, не пришёл") }}{% endif %}
 </div>{% endif %}
 <details class="mp-more"><summary>Подробнее</summary>

@@ -707,8 +707,11 @@ def register(app) -> None:
             moved = orders.move_card(conn, chat["order_id"], stage_id, stamp, author())
             if moved:
                 from .. import order_manager                               # «Товар на точке» from the chat: «можно забирать» (2026-10-30)
-                arrived = order_manager.arrived_by_move(conn, before, lambda row, text, token: chats.send_reply(
-                    conn, _writer(conn, chats.get_chat(conn, row)), row, text, token, stamp, author()), stamp, author())
+                send = lambda row, text, token: chats.send_reply(conn, _writer(conn, chats.get_chat(conn, row)), row, text, token, stamp, author())
+                arrived = order_manager.arrived_by_move(conn, before, send, stamp, author())
+                from .. import order_intercity, order_notify                # «Отправлен» from the chat: as the point's press (2026-11-02)
+                arrived = arrived or order_intercity.shipped_by_hand(conn, before, author(), stamp, send, lambda logins, text: order_notify.tell_people(
+                    conn, app.config.get("SECRET_BOX"), logins, text, tg_http=app.config.get("TG_HTTP") or order_notify.urllib_transport, now=stamp))
                 if arrived:
                     flash(arrived)
                 offer_send(conn, chat["order_id"], stamp)

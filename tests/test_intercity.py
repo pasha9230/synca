@@ -435,3 +435,38 @@ def test_the_rules_of_done_run_after_shipped(tmp_path, tg):
     city(conn, card, track="1")
     hook(app, conn, "передал курьеру 5000100")
     assert code(conn, card) == "done" and orders.get_card(conn, card)["sale_ids"]        # the owner's rule of «Выполнено» recorded the sale
+
+
+def test_the_office_moving_it_from_the_chat_or_the_window_does_it_too(tmp_path, tg):
+    for how in ("chat", "window"):
+        (tmp_path / how).mkdir()
+        app, client, tok, conn, pid, card = ready(tmp_path / how, SENT, SENT)
+        city(conn, card)
+        orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")
+        if how == "chat":
+            row = conn.execute("SELECT id FROM avito_chat WHERE order_id = ?", (card,)).fetchone()[0]
+            post(client, "/chats/%d/stage" % row, tok, stage_id=str(_stage(conn, "shipped")))
+        else:
+            post(client, "/orders/%d/save" % card, tok, stage_id=str(_stage(conn, "shipped")))
+        assert code(conn, card) == "done" and len(to_client(app)) == 1, how
+
+
+def test_moving_a_shipped_order_back_into_shipped_repeats_nothing(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    hook(app, conn, "передал курьеру 5000100")
+    tasks_before, told_before = len(track_tasks(conn, card)), len(tg)
+    post(client, "/orders/%d/move" % card, tok, stage_id=str(_stage(conn, "shipped")))
+    assert code(conn, card) == "done" and len(to_client(app)) == 1
+    assert len(track_tasks(conn, card)) == tasks_before and len(tg) == told_before
+
+
+def test_a_renamed_stage_still_knows_the_order_was_shipped(tmp_path, tg):
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT, SENT)
+    city(conn, card)
+    hook(app, conn, "передал курьеру 5000100")
+    conn.execute("UPDATE order_stage SET name = 'Уехал в ТК' WHERE code = 'shipped'")
+    conn.commit()
+    assert intercity.was_shipped(conn, orders.get_card(conn, card))
+    hook(app, conn, "отправил 5000100", event="e9")
+    assert "уже отмечен" in to_points(app)[-1][1]
