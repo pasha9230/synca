@@ -27,7 +27,11 @@ CANCEL_REASON = ("отменил клиент", "сам, в каталоге к�
 
 
 class CartError(ValueError):
-    """What the client did cannot be done; the text is for the client."""
+    """What the client did cannot be done; the text is for the client. `field`: the field of the form it is about (the new design lights it)."""
+
+    def __init__(self, text: str, field: str = ""):
+        super().__init__(text)
+        self.field = field
 
 
 @dataclass(frozen=True)
@@ -151,6 +155,82 @@ def clean_contacts(phone, address) -> dict:
     return {"phone": tel, "address": text}
 
 
+# ---- the delivery of «Новый вид» (the owner 2026-10-31, п. 29: the city, the street, the house + the recipient + a word for the driver) --
+
+DELIVERY = ("city", "street", "house", "recipient", "recipient_phone", "driver_note")
+DELIVERY_LIMITS = {"city": 60, "street": 120, "house": 30, "recipient": 60, "recipient_phone": 40, "driver_note": 200}
+DELIVERY_NAMES = {"city": "Город", "street": "Улица", "house": "Дом", "recipient": "Получатель", "recipient_phone": "Телефон получателя",
+                  "driver_note": "Комментарий для водителя"}
+
+
+def delivery(conn, login: str) -> dict:
+    """The kept delivery of the client (the columns of client_profile; empty strings when none). An address kept before 2026-11-02, or
+    changed since in the old design (only `address` then), is one line: it is offered in «Улица», the client puts it in order once. `saved`: every needed field is there (the checkout shows a card)."""
+    row = conn.execute("SELECT city, street, house, recipient, recipient_phone, driver_note, address FROM client_profile WHERE login = ?",
+                       (login,)).fetchone()
+    out = dict(zip(DELIVERY, row[:6])) if row else dict.fromkeys(DELIVERY, "")
+    if row and row[6] and row[6] != delivery_address(out):     # kept before, or changed since in the old «Профиль» / checkout: that line
+        out.update(city="", street=row[6], house="")
+    out["saved"] = all(out[k] for k in DELIVERY if k != "driver_note")
+    out["address"] = delivery_address(out)
+    out["limits"] = DELIVERY_LIMITS
+    return out
+
+
+def delivery_address(fields: dict) -> str:
+    return ", ".join(p for p in (fields.get("city", ""), fields.get("street", ""), ("д. " + fields["house"]) if fields.get("house") else "") if p)
+
+
+def clean_delivery(form) -> dict:
+    """The fields of the delivery as typed (one space between words, the limits); every one but the word for the driver is needed. The
+    recipient's phone is a Russian number. CartError with the field otherwise."""
+    out = {k: " ".join(str(form.get(k, "") or "").split()) for k in DELIVERY}
+    for key in DELIVERY:
+        if key != "driver_note" and not out[key]:
+            raise CartError("%s: впишите." % DELIVERY_NAMES[key], key)
+        if len(out[key]) > DELIVERY_LIMITS[key]:
+            raise CartError("%s: не длиннее %d знаков." % (DELIVERY_NAMES[key], DELIVERY_LIMITS[key]), key)
+    tel = connections.normalize_phone(out["recipient_phone"])
+    if not tel:
+        raise CartError("Телефон получателя: российский номер, например +7 900 000-00-00.", "recipient_phone")
+    out["recipient_phone"] = tel
+    if not ADDRESS_MIN <= len(delivery_address(out)) <= ADDRESS_MAX:
+        raise CartError("Адрес: от %d до %d знаков." % (ADDRESS_MIN, ADDRESS_MAX), "street")
+    return out
+
+
+def delivery_note(fields: dict) -> str:
+    """What the manager reads of the delivery after its address (the order's comment)."""
+    text = "Получатель: %s, %s" % (fields["recipient"], fields["recipient_phone"])
+    return text + (". Водителю: %s" % fields["driver_note"] if fields.get("driver_note") else "")
+
+
+def save_delivery(conn, login: str, fields: dict, now: str) -> None:
+    """Kept for the next order and «Профиль»; `address` (the one line of the old design and of the order) is the address of these fields."""
+    values = [fields[k] for k in DELIVERY]
+    conn.execute("INSERT INTO client_profile (login, phone, address, updated_at, %s) VALUES (?, '', ?, ?, %s) ON CONFLICT (login) DO UPDATE "
+                 "SET address = excluded.address, updated_at = excluded.updated_at, %s"
+                 % (", ".join(DELIVERY), ", ".join("?" * len(DELIVERY)), ", ".join("%s = excluded.%s" % (k, k) for k in DELIVERY)),
+                 [login, delivery_address(fields), now] + values)
+    conn.commit()
+
+
+def clean_phone(phone) -> str:
+    tel = connections.normalize_phone(phone)
+    if not tel:
+        raise CartError("Телефон: российский номер, например +7 900 000-00-00.", "phone")
+    return tel
+
+
+def save_phone(conn, login: str, phone, now: str) -> str:
+    """«Контакты» of the new «Профиль»: the phone alone (the address is the delivery's own form)."""
+    tel = clean_phone(phone)
+    conn.execute("INSERT INTO client_profile (login, phone, address, updated_at) VALUES (?, ?, '', ?) ON CONFLICT (login) DO UPDATE SET "
+                 "phone = excluded.phone, updated_at = excluded.updated_at", (login, tel, now))
+    conn.commit()
+    return tel
+
+
 # ---- the order ---------------------------------------------------------------------------------------------------------------------
 
 def _client_name(item) -> str:
@@ -170,11 +250,12 @@ def _item_args(conn, item, qty: int, day: str) -> dict:
 
 
 def place(conn, login: str, name: str, cart_lines: List[Line], contacts: dict, point: Optional[dict], comment: str, now: str,
-          expected_total: Optional[int] = None) -> int:
+          expected_total: Optional[int] = None, extra: str = "") -> int:
     """The order of the cart: all or nothing. The cart that was read must still be the cart (a second press, another tab: «корзина пуста»);
     a position not sold any more or above the stock refuses the whole order (the client corrects the cart). The contacts are kept for the
     next order. `expected_total`: the sum the client saw on the button; a price changed since refuses (the client looks again).
-    Returns the order's id; the caller fires the rules and tells the manager."""
+    `extra`: said after the way (the recipient and the word for the driver of «Новый вид»). Returns the order's id; the caller fires the
+    rules and tells the manager."""
     if not cart_lines:
         raise CartError("Корзина пуста.")
     for l in cart_lines:
@@ -187,8 +268,11 @@ def place(conn, login: str, name: str, cart_lines: List[Line], contacts: dict, p
     if expected_total is not None and expected_total != total(cart_lines):
         raise CartError("Цены изменились: было %s ₽, стало %s ₽. Проверьте корзину и оформите снова." % (_rub(expected_total), _rub(total(cart_lines))))
     stage = orders.ensure_from_point_stage(conn)              # it saves the stage it makes: before the order's own transaction
-    comment = " ".join(str(comment or "").split())[:orders.MAX_COMMENT - ADDRESS_MAX - 40]
+    extra = " ".join(str(extra or "").split())[:400]
+    comment = " ".join(str(comment or "").split())[:orders.MAX_COMMENT - ADDRESS_MAX - 40 - (len(extra) + 2 if extra else 0)]
     text = ("Самовывоз: %s" % point["name"]) if point else ("Доставка: %s" % contacts["address"])
+    if extra:
+        text += ". " + extra
     fields = {"client_name": name or login, "client_phone": contacts["phone"], "point_id": str(point["id"]) if point else "",
               "source": "shop", "responsible": responsible(conn), "comment": "%s%s" % (text, (". " + comment) if comment else "")}
     try:

@@ -657,6 +657,8 @@ def _migrate(conn) -> None:
     for column in ("active_at", "looked_at"):                         # the inquiry: the last word of either side; the last look at its orders
         _add_column(conn, "client_inquiry", column, "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "panel_invite", "client_terms", "TEXT NOT NULL DEFAULT ''")     # the conditions a client's invitation puts in the profile (JSON)
+    for column in ("city", "street", "house", "recipient", "recipient_phone", "driver_note"):   # the delivery of «Новый вид» (2026-11-02)
+        _add_column(conn, "client_profile", column, "TEXT NOT NULL DEFAULT ''")
     if not conn.execute("SELECT 1 FROM client_terms WHERE subject = '*'").fetchone():          # the role's conditions: empty (no price, no brand)
         conn.execute("INSERT OR IGNORE INTO client_terms (subject, brands_mode) VALUES ('*', 'own')")
         conn.commit()

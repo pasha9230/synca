@@ -1,0 +1,16 @@
+{# «Новый вид» of «Мои заказы» (shop_cart.my_orders; the owner 2026-10-31 п. 28: no change of what it says): a table on a computer, cards on
+   a phone (shop.css), the status as a coloured tag, «храним до» under it #}
+{% extends "shop_base.html" %}
+{% block title %}Мои заказы{% endblock %}
+{% block content %}
+{% set colour = {'Принят': 'blue', 'Оформлен': 'cyan', 'В пути': 'orange', 'Готов к выдаче': 'green', 'Отменён': 'red'} %}
+<div class="shop2 shop2-orders">
+<h1 class="shop-h1">Мои заказы</h1>
+{% if orders_list %}<section class="card"><div class="table-wrap"><table class="table shop-orders-table shop2-orders-table">
+<thead><tr><th>Заказ</th><th>Дата</th><th>Шины</th><th>Получение</th><th>Статус</th><th class="num">Сумма</th></tr></thead>
+<tbody>{% for o in orders_list %}<tr><td class="c-no"><a href="/shop/orders/{{ o.id }}">№ {{ o.id }}</a></td><td class="c-date">от {{ o.created_at|short_dt }}</td>
+<td class="c-items">{% for i in o["items"] %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+<td class="c-recv">{{ o.receive or "—" }}</td><td class="c-status"><span class="shop-status shop-st-{{ colour.get(o.status, 'gray') }}">{{ o.status }}</span>{% if o.hold_until %}<span class="shop-hold shop2-ready">Можно забирать · храним до {{ o.hold_until|day }}</span>{% endif %}</td><td class="num c-sum">{{ o.total|money }}</td></tr>{% endfor %}</tbody></table></div></section>
+{% else %}<section class="card"><div class="empty"><h3>Заказов пока нет</h3><p>Соберите корзину в каталоге и оформите заказ.</p><p><a class="btn btn--primary" href="/shop">В каталог</a></p></div></section>{% endif %}
+</div>
+{% endblock %}
