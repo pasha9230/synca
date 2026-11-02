@@ -18,6 +18,7 @@ from . import client_catalog as cc, shop_photos
 from ..suppliers import supplier_of_id
 from .. import users
 from .common import current_user, get_conn, now, safe_path
+from .routes_design import ui_new
 from .routes_orders import local_iso
 from .data import load_merged, load_reference
 
@@ -85,14 +86,15 @@ def _goods_of(view, token: str):
     return found[1].get(token)
 
 
-def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False) -> dict:
+def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, new: bool = False) -> dict:
     """What the catalog page of the client `login` shows (the client's own /shop, and the owner's preview «глазами клиента» at `base`):
     the same rows, filters and prices. `photos=False`: no photo links (the owner's preview; /shop/photo is the client's own). `cart`: each
-    row gets `key` (the opaque token of «В корзину»), the client's own page only."""
+    row gets `key` (the opaque token of «В корзину»), the client's own page only. `new` («Новый вид» of the client): the width, the
+    height and the radius by several values, the wider search, the chips of the filters on, the filters folded (`sf=0`)."""
     if not login:
         raise ValueError("the catalog of nobody")                 # never the person signed in by default
     items = _visible(app, conn, _offers(app, conn).offers.values(), login)
-    f = cc.filters_of(request.args, {i.brand for i in items})
+    f = cc.filters_of(request.args, {i.brand for i in items}, wide=new)
     found = cc.apply(items, f)
     total = len(found)
     pages = max(1, -(-total // cc.PAGE))
@@ -115,12 +117,45 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False) 
     view_links = {"table": base + ("?" + urlencode(plain) if plain else ""), "tiles": base + "?" + urlencode(plain + [("v", "tiles")])}
     shown = sorted({1, pages} | set(range(max(1, page - 4), min(pages, page + 4) + 1)))       # a window of pages, not hundreds
     pager = {n: base + "?" + urlencode(here + [("p", n)]) for n in shown} if pages > 1 else {}
-    return dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
-                seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart, view=view, view_links=view_links)
+    out = dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
+               seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart, view=view, view_links=view_links)
+    if new:
+        out.update(_new_catalog(base, f, here, items))
+    return out
+
+
+def _new_catalog(base: str, f, here: list, items) -> dict:
+    """The parts of the catalog only «Новый вид» draws: the values of the size chips, the chips of the filters on (each a link without
+    it), the links folding and opening the filters (the owner 2026-10-31 п. 25: the catalog takes the whole width)."""
+    labels = dict(cc.brand_list(items))
+    num = lambda v: str(v).strip().upper().lstrip("R")
+    acts = {"w": lambda v: num(v).isdigit() and int(num(v)) in f.widths and "ширина %s" % num(v),
+            "h": lambda v: num(v).isdigit() and int(num(v)) in f.heights and "высота %s" % num(v),
+            "d": lambda v: num(v).isdigit() and int(num(v)) in f.diameters and "R%s" % num(v),
+            "s": lambda v: v == f.season and cc.SEASONS[v], "t": lambda v: v == f.studs and {"studded": "Шипы", "friction": "Без шипов"}[v],
+            "wh": lambda v: f.warehouse and v == str(f.warehouse) and "Склад %s" % v,
+            "b": lambda v: cc.bare_brand(v) in f.brands and labels[cc.bare_brand(v)],
+            "xb": lambda v: cc.bare_brand(v) in f.without and "кроме %s" % labels[cc.bare_brand(v)],
+            "q": lambda v: v.strip() and "«%s»" % v.strip()[:40], "size": lambda v: v.strip() and v.strip()[:40]}
+    chips = []
+    for n, (k, v) in enumerate(here):
+        label = acts[k](v) if k in acts and str(v).strip() else None             # «Все» of a filter sends it empty
+        if label:
+            rest = here[:n] + here[n + 1:]
+            chips.append((label, base + ("?" + urlencode(rest) if rest else "")))
+    folded = request.args.get("sf") == "0"
+    keep = [kv for kv in here if kv[0] != "sf"]
+    side_links = {"fold": base + "?" + urlencode(keep + [("sf", "0")]), "open": base + ("?" + urlencode(keep) if keep else "")}
+    reset = [kv for kv in here if kv[0] in ("v", "sf", "o", "r")]
+    return dict(new=True, sizes=cc.size_values(items), chips=chips, folded=folded, side_links=side_links,
+                reset_link=base + ("?" + urlencode(reset) if reset else ""))
 
 
 def _page(template: str, conn, login: str, **values):
-    """A page of the client: the frame shows the cart's count; never kept by a cache."""
+    """A page of the client: the frame shows the cart's count; never kept by a cache. «Новый вид» of the client on for this viewer: the
+    page of shop2/ (the old one stays exactly as it was with it off)."""
+    if ui_new():
+        template = "shop2/" + template
     response = make_response(render_template(template, cart_count=len(shop_cart.cart(conn, login)), **values))
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -153,6 +188,7 @@ def _cart_view(app, conn, login: str) -> dict:
         return {i.offer.goods_id: i for i in _visible(app, conn, offers, login)}
     lines = shop_cart.lines(conn, login, visible_of)
     rows = [{"key": cc.photo_token(app.secret_key, l.goods_id), "qty": l.qty, "ok": l.item is not None,
+             "max": min(int(l.item.offer.stock), shop_cart.MAX_QTY) if l.item is not None else 0,
              "row": cc.row(l.item, None) if l.item is not None else None,
              "name": shop_cart._client_name(l.item) if l.item is not None else "Шина больше не продаётся",
              "sum": l.qty * l.item.price if l.item is not None else 0} for l in lines]
@@ -161,6 +197,13 @@ def _cart_view(app, conn, login: str) -> dict:
               for p in order_points.list_points(conn) if p["id"] not in tests]
     return {"lines": lines, "rows": rows, "total": shop_cart.total(lines), "profile": shop_cart.profile(conn, login), "points": points,
             "error": "", "form": {}}
+
+
+def _cart_new(conn, login: str) -> dict:
+    """What the cart of «Новый вид» draws besides the old one's: the kept delivery, and whether this is the client's first order (the
+    owner 2026-10-31 п. 26: the steps of the first order are shown on the cart)."""
+    first = conn.execute("SELECT 1 FROM shop_order WHERE login = ? LIMIT 1", (login,)).fetchone() is None
+    return {"delivery": shop_cart.delivery(conn, login), "first_order": first}
 
 
 def _after_order(app, conn, card_id: int, name: str, stamp: str) -> None:
@@ -201,7 +244,7 @@ def register(app) -> None:
     @app.route("/shop")
     def shop_page():
         conn, login = get_conn(), current_user()["login"]
-        return _page("shop.html", conn, login, **catalog(app, conn, login, "/shop", photos=True, cart=True))
+        return _page("shop.html", conn, login, **catalog(app, conn, login, "/shop", photos=True, cart=True, new=ui_new()))
 
     @app.route("/shop/cart/add", methods=["POST"])
     def shop_cart_add():
@@ -223,7 +266,7 @@ def register(app) -> None:
     @app.route("/shop/cart")
     def shop_cart_page():
         conn, login = get_conn(), current_user()["login"]
-        return _page("shop_cart.html", conn, login, **_cart_view(app, conn, login))
+        return _page("shop_cart.html", conn, login, **_cart_view(app, conn, login), **(_cart_new(conn, login) if ui_new() else {}))
 
     @app.route("/shop/cart/set", methods=["POST"])
     def shop_cart_set():
@@ -255,6 +298,8 @@ def register(app) -> None:
         if not view["lines"]:                                    # a second press after the order: it is there, not an error
             flash("Корзина пуста: оформленный заказ — в «Мои заказы».", "info")
             return redirect("/shop/orders")
+        if ui_new():
+            return _checkout_new(conn, login, f, view)
         try:
             contacts = shop_cart.clean_contacts(f.get("phone", ""), f.get("address", ""))
             point = None
@@ -275,6 +320,35 @@ def register(app) -> None:
         flash("Заказ №%d принят, менеджер свяжется с вами." % card_id, "ok")
         return redirect("/shop/orders/%d" % card_id)
 
+    def _checkout_new(conn, login: str, f, view):
+        """The checkout of «Новый вид» (the owner 2026-10-31 п. 27, 29): at a point — the phone only (no address); a delivery — the
+        city, the street, the house, the recipient and the phone of the recipient (the word for the driver if any), kept for the next
+        order. The order itself is made as by the old checkout (shop_cart.place): the same stage, fields, positions and prices."""
+        try:
+            phone = shop_cart.clean_phone(f.get("phone", ""))
+            point, kept, extra, address = None, None, "", view["profile"]["address"]
+            if f.get("way") == "point":
+                point = next((p for p in view["points"] if str(p["id"]) == f.get("point_id", "")), None)
+                if point is None:
+                    raise shop_cart.CartError("Выберите точку самовывоза.", "point_id")
+            elif f.get("way") == "delivery":
+                kept = shop_cart.clean_delivery(f)
+                address, extra = shop_cart.delivery_address(kept), shop_cart.delivery_note(kept)
+            else:
+                raise shop_cart.CartError("Выберите: забрать на точке или доставка.", "way")
+            stamp = local_iso()
+            name = users.get_role(conn, login)["display_name"] or login
+            seen = f.get("total", "")
+            card_id = shop_cart.place(conn, login, name, view["lines"], {"phone": phone, "address": address}, point, f.get("comment", ""),
+                                      stamp, expected_total=int(seen) if seen.isdigit() else None, extra=extra)
+        except (shop_cart.CartError, orders.OrderError) as err:
+            return _page("shop_cart.html", conn, login, **dict(view, error=str(err), form=f), error_field=getattr(err, "field", ""),
+                         **_cart_new(conn, login)), 400
+        if kept is not None:
+            shop_cart.save_delivery(conn, login, kept, stamp)
+        _after_order(app, conn, card_id, name, stamp)
+        return redirect("/shop/orders/%d?placed=1" % card_id)              # the page says «Заказ №… принят» itself (no flash twice)
+
     @app.route("/shop/orders")
     def shop_orders_page():
         conn, login = get_conn(), current_user()["login"]
@@ -286,7 +360,7 @@ def register(app) -> None:
         order = shop_cart.my_order(conn, login, order_id)
         if order is None:
             abort(404)                                          # another client's, not of the catalog, or no such: the same answer
-        return _page("shop_order.html", conn, login, order=order, confirm=request.args.get("cancel") == "1")
+        return _page("shop_order.html", conn, login, order=order, confirm=request.args.get("cancel") == "1", placed=request.args.get("placed") == "1")
 
     @app.route("/shop/orders/<order_id>/cancel", methods=["POST"])
     def shop_order_cancel(order_id):
@@ -311,13 +385,38 @@ def register(app) -> None:
     def shop_profile_page():
         conn, login = get_conn(), current_user()["login"]
         return _page("shop_profile.html", conn, login, profile=shop_cart.profile(conn, login), name=users.get_role(conn, login)["display_name"],
-                     form={}, error=None)
+                     form={}, error=None, **({"delivery": shop_cart.delivery(conn, login)} if ui_new() else {}))
+
+    def _profile_new(conn, login: str, f):
+        """«Профиль» of «Новый вид»: «Контакты» (the name, the phone) and «Адрес доставки» (the fields of the delivery) are two forms
+        (`part`); each checks all its fields before it writes any."""
+        part = f.get("part", "")
+        try:
+            stamp = local_iso()
+            if part == "contacts":
+                shop_cart.clean_phone(f.get("phone", ""))
+                if not " ".join(f.get("name", "").split()):
+                    raise users.UserError("Название или имя: впишите его.")
+                if " ".join(f.get("name", "").split()) != users.get_role(conn, login)["display_name"]:
+                    users.set_own_name(conn, login, f.get("name", ""), stamp)
+                shop_cart.save_phone(conn, login, f.get("phone", ""), stamp)
+            elif part == "delivery":
+                shop_cart.save_delivery(conn, login, shop_cart.clean_delivery(f), stamp)
+            else:
+                abort(400)
+        except (shop_cart.CartError, users.UserError) as err:
+            return _page("shop_profile.html", conn, login, profile=shop_cart.profile(conn, login), name=users.get_role(conn, login)["display_name"],
+                         form=f, error=str(err), error_field=getattr(err, "field", ""), part=part, delivery=shop_cart.delivery(conn, login)), 400
+        flash("Адрес доставки сохранён." if part == "delivery" else "Контакты сохранены.", "ok")
+        return redirect("/shop/profile" + ("#delivery" if part == "delivery" else ""))
 
     @app.route("/shop/profile", methods=["POST"])
     def shop_profile_save():
         """«Профиль» (the owner 2026-10-30): the name, the phone and the address of delivery; the password is /account/password's."""
         conn, login = get_conn(), current_user()["login"]
         f = request.form
+        if ui_new():
+            return _profile_new(conn, login, f)
         try:
             stamp = local_iso()
             shop_cart.clean_contacts(f.get("phone", ""), f.get("address", ""))   # all checked first: a refusal changes nothing (the review)

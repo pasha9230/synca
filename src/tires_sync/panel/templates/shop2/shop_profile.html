@@ -1,0 +1,41 @@
+{# «Новый вид» of «Профиль» (the prototype clProfile; the owner 2026-10-31 п. 29): «Контакты» (the name, the phone), «Адрес доставки» (the
+   city, the street, the house, the recipient and the phone, a word for the driver: the next delivery takes them), the password
+   (/account/password, back here). Two forms of /shop/profile by `part`. #}
+{% extends "shop_base.html" %}
+{% block title %}Профиль{% endblock %}
+{% block content %}
+{% set v = form or {} %}{% set ef = error_field|default("") %}{% set part = part|default("") %}
+<div class="shop2 shop2-profile">
+<h1 class="shop-h1">Профиль</h1>
+<div class="shop-narrow">
+{% if error %}<div class="flash flash--err" role="alert"><div class="flash-text">{{ error }}</div></div>{% endif %}
+<section class="card card-body shop-me-card"><span class="shop-avatar">{{ (name or "?")[:1]|upper }}</span><div><b>{{ name or current_user().login }}</b><span class="muted">{{ profile.phone|phone if profile.phone else "телефон не указан" }}</span></div></section>
+<section class="card card-body">
+<h2>Контакты</h2>
+{% set c = v if part == "contacts" else {} %}
+<form method="post" action="/shop/profile" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="part" value="contacts">
+<label class="field"><span class="label">Название или имя</span><input class="input" name="name" required maxlength="60" value="{{ c.get('name', name) }}"></label>
+<label class="field{% if part == 'contacts' and ef == 'phone' %} is-err{% endif %}"><span class="label">Телефон</span><input class="input" type="tel" name="phone" required inputmode="tel" autocomplete="tel" maxlength="40" placeholder="+7 900 000-00-00" value="{{ c.get('phone', profile.phone) }}"><span class="hint">Менеджер звонит по нему, если нужно уточнить заказ.</span></label>
+<div><button class="btn btn--primary">Сохранить</button></div>
+</form></section>
+<section class="card card-body" id="delivery">
+<h2>Адрес доставки</h2>
+{% set d = v if part == "delivery" else {} %}
+<form method="post" action="/shop/profile#delivery" class="shop2-dlv"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="part" value="delivery">
+{% for key, label, ph, need in (("city", "Город", "Город", true), ("street", "Улица", "Улица", true), ("house", "Дом", "12, корп. 1", true), ("recipient", "Получатель", "Имя получателя", true), ("recipient_phone", "Телефон получателя", "+7 900 000-00-00", true), ("driver_note", "Комментарий для водителя", "например: въезд со двора, позвонить за час", false)) %}
+<label class="field shop2-dlv-{{ key }}{% if part == 'delivery' and ef == key %} is-err{% endif %}"><span class="label">{{ label }}{% if not need %} (по желанию){% endif %}</span><input class="input" name="{{ key }}" maxlength="{{ 200 if key == 'driver_note' else 120 }}"{% if key == "recipient_phone" %} type="tel" inputmode="tel" autocomplete="tel"{% endif %} placeholder="{{ ph }}" value="{{ d.get(key, delivery[key]) }}"></label>
+{% endfor %}
+<p class="small muted shop2-full">Подставится в заказ с доставкой — вводить заново не нужно.</p>
+<div class="shop2-full"><button class="btn btn--primary">Сохранить адрес</button></div>
+</form></section>
+<section class="card card-body" id="password">
+<h2>Пароль</h2>
+<form method="post" action="/account/password" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Текущий пароль</span><input class="input" type="password" name="old" required autocomplete="current-password"></label>
+<label class="field"><span class="label">Новый пароль</span><input class="input" type="password" name="new" required minlength="10" autocomplete="new-password"><span class="hint">Не короче 10 знаков.</span></label>
+<label class="field"><span class="label">Повторите новый</span><input class="input" type="password" name="new2" required minlength="10" autocomplete="new-password"></label>
+<div><button class="btn btn--secondary">Сменить пароль</button></div>
+</form></section>
+</div>
+</div>
+{% endblock %}

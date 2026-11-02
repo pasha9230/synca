@@ -106,7 +106,7 @@ def register(app) -> None:
         """«Каталог глазами клиента»: the very rows of the client's /shop (client_catalog with the client's conditions), without photos."""
         conn = get_conn()
         login = _client_or_404(conn, login)
-        page = routes_shop.catalog(app, conn, login, "/client-terms/c/%s/preview" % login, photos=False)
+        page = routes_shop.catalog(app, conn, login, "/client-terms/c/%s/preview" % login, photos=False, new=routes_shop.ui_new())
         response = make_response(render_template("users_client_preview.html", login=login, info=users.get_role(conn, login), **page))
         response.headers["Cache-Control"] = "private, no-store"
         return response

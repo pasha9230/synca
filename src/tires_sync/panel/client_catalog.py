@@ -28,7 +28,9 @@ STOCK_MANY = "40+"                    # 4tochki sends 41 for «more than 40» (t
 SEASONS = {"summer": "Лето", "winter": "Зима", "all": "Всесезонные"}
 SORTS = ("brand", "size", "price", "stock")
 PAGE = 50
-PARAMS = ("size", "q", "s", "t", "wh", "b", "xb", "o", "r", "p", "v")     # the only parameters the links of the page carry on
+PARAMS = ("size", "q", "s", "t", "wh", "b", "xb", "o", "r", "p", "v",     # the only parameters the links of the page carry on
+          "w", "h", "d", "sf")                                         # «Новый вид»: the width, the height, the radius; the filters folded
+MAX_VALUES = 30                       # the values of one of the width, the height, the radius ticked at once
 MAX_TEXT = 120                        # the length of a text filter (the size line, the search)
 MAX_SIZES = 20
 MAX_BRANDS = 60                       # the brands ticked in one filter
@@ -141,12 +143,17 @@ def parse_sizes(text: str) -> Tuple[List[Tuple[int, int, int]], List[str]]:
     return sizes[:MAX_SIZES], rest[:MAX_SIZES]
 
 
-def _search_fields(item: Visible) -> tuple:
-    """The fields the client's search looks in: the name, the brand, the model and the size; never the code or the goods id."""
+def _search_fields(item: Visible, wide: bool = False) -> tuple:
+    """The fields the client's search looks in: the name, the brand, the model and the size; never the code or the goods id. `wide`
+    («Новый вид», the owner 2026-10-31 п. 21): the country, the year, the season, the indexes, the studs and RunFlat too."""
     o = item.offer
     size = ["%d/%d R%d" % (o.width, o.height, o.diameter), "%d/%d/%d" % (o.width, o.height, o.diameter),
             "%d %d %d" % (o.width, o.height, o.diameter), "%d%d%d" % (o.width, o.height, o.diameter)]
-    fields = [f.lower() for f in [_name(o), item.brand_label, item.brand, o.model_raw or ""] + size if f]
+    more = []
+    if wide:
+        more = [o.country or "", str(o.mnf_year or ""), SEASONS.get(o.season.value, ""), "%s%s" % (o.load or "", o.speed or ""),
+                "шипы" if o.studded else "", "runflat" if o.runflat else ""]
+    fields = [f.lower() for f in [_name(o), item.brand_label, item.brand, o.model_raw or ""] + size + more if f]
     return fields, [service._compact(f) for f in fields]
 
 
@@ -164,10 +171,24 @@ class Filters:
     sort: str
     descending: bool
     page: int
+    widths: List[int] = ()
+    heights: List[int] = ()
+    diameters: List[int] = ()
+    wide: bool = False                 # «Новый вид»: the search looks in more fields (_search_fields)
 
 
-def filters_of(args, known_brands) -> Filters:
-    """The GET parameters, parsed on the server with limits; a brand the client sees no position of is dropped (never searched for)."""
+def _numbers(args, name: str) -> List[int]:
+    out = []
+    for value in args.getlist(name)[:MAX_VALUES]:
+        value = str(value).strip().upper().lstrip("R")
+        if value.isdigit() and len(value) <= 3 and int(value) not in out:
+            out.append(int(value))
+    return sorted(out)
+
+
+def filters_of(args, known_brands, wide: bool = False) -> Filters:
+    """The GET parameters, parsed on the server with limits; a brand the client sees no position of is dropped (never searched for).
+    `wide` («Новый вид»): the width, the height and the radius by several values each, the search in more fields."""
     size_text = (args.get("size") or "")[:MAX_TEXT]
     sizes, unknown = parse_sizes(size_text)
     pick = lambda name: [b for b in dict.fromkeys(bare_brand(v) for v in args.getlist(name)[:MAX_BRANDS]) if b in known_brands]
@@ -178,7 +199,8 @@ def filters_of(args, known_brands) -> Filters:
     return Filters(sizes, unknown, size_text, pick("b"), pick("xb"),
                    args.get("s") if args.get("s") in SEASONS else "", args.get("t") if args.get("t") in ("studded", "friction") else "",
                    {"1": 1, "2": 2}.get(args.get("wh") or "", 0), (args.get("q") or "")[:MAX_TEXT].strip(),
-                   args.get("o") if args.get("o") in SORTS else "brand", args.get("r") == "1", page)
+                   args.get("o") if args.get("o") in SORTS else "brand", args.get("r") == "1", page,
+                   *((_numbers(args, "w"), _numbers(args, "h"), _numbers(args, "d"), True) if wide else ()))
 
 
 def apply(items: List[Visible], f: Filters) -> List[Visible]:
@@ -189,13 +211,15 @@ def apply(items: List[Visible], f: Filters) -> List[Visible]:
         o = i.offer
         if sizes and (o.width, o.height, o.diameter) not in sizes:
             continue
+        if (f.widths and o.width not in f.widths) or (f.heights and o.height not in f.heights) or (f.diameters and o.diameter not in f.diameters):
+            continue
         if (brands and i.brand not in brands) or i.brand in without:
             continue
         if (f.season and o.season.value != f.season) or (f.studs and o.studded != (f.studs == "studded")):
             continue
         if f.warehouse and i.warehouse != f.warehouse:
             continue
-        if terms and not service.fields_match(_search_fields(i), terms):
+        if terms and not service.fields_match(_search_fields(i, f.wide), terms):
             continue
         out.append(i)
     keys = {"brand": lambda i: (i.brand_label.casefold(), (i.offer.model_raw or "").casefold(), _size_key(i), i.price),
@@ -233,3 +257,9 @@ def brand_list(items: List[Visible]) -> List[Tuple[str, str]]:
     for i in items:
         seen.setdefault(i.brand, i.brand_label)
     return sorted(seen.items(), key=lambda kv: kv[1].casefold())
+
+
+def size_values(items: List[Visible]) -> dict:
+    """The widths, the heights and the radii of the positions the client sees (the chips of «Новый вид»), each sorted."""
+    return {"w": sorted({i.offer.width for i in items}), "h": sorted({i.offer.height for i in items}),
+            "d": sorted({i.offer.diameter for i in items})}
