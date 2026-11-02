@@ -191,3 +191,30 @@ def test_a_total_shows_under_its_column_even_first(panel):
     foot = client.get("/orders?v=list").get_data(as_text=True).split("<tfoot>", 1)[1].split("</tfoot>", 1)[0]
     cells = foot.split("</td>")
     assert "Итого" in cells[0] and rub(20000) in cells[1]
+
+
+def test_the_note_of_the_list_has_no_automatic_part(panel):
+    """The owner 2026-11-03: the ad (or the call) an order came with is not a note of «Список»; what a person wrote after it is."""
+    app, conn, client = panel
+    ad = "Объявление: Kumho WinterCraft 205/55 R16 https://www.avito.ru/moskva/zapchasti/kumho_123"
+    cases = {ad: "", ad + "\nпозвонить после 18": "позвонить после 18", ad + " — ждёт ответа": "ждёт ответа",
+             "Объявление: Kumho WinterCraft": "", "Звонок 2026-11-01 12:30 на аккаунт «Шинный Двор» (принят)": "",
+             "Звонок 2026-11-01 12:30 (пропущен). Перезвонить": "Перезвонить", "Звонок 2026-11-01 12:30 (пропущен).": "", "Звонок 2026-11-01 12:30 (принят)\n-2 шт со скидкой": "-2 шт со скидкой",
+             "голосовое сообщение, нужна расшифровка": "",
+             "клиент просил R16": "клиент просил R16", "": ""}
+    ids = {card(conn, comment=text): (text, want) for text, want in cases.items()}
+    for line in orders_list.rows(conn, list(ids), True):
+        assert line["values"]["Примечание"] == ids[line["order"]][1], ids[line["order"]][0]
+    assert [orders.get_card(conn, i)["comment"] for i in ids] == [t for t, _ in ids.values()]   # the order keeps its comment
+    page = client.get("/orders?v=list").get_data(as_text=True)
+    assert "позвонить после 18" in page and "avito.ru/moskva/zapchasti/kumho_123" not in page
+
+
+def test_a_point_reads_the_note_without_the_ad_and_the_account(panel):
+    app, conn, client = panel
+    pid = point(conn)
+    conn.execute("INSERT INTO account (name, feed_token, created) VALUES ('Шинный Двор', 't-1', 'x')")
+    conn.commit()
+    mine = card(conn, point_id=pid, comment="Объявление: Kumho https://avito.ru/x_1\nиз Шинный Двор")
+    got = orders_list.rows(conn, [mine], False, point=True)[0]["values"]["Примечание"]
+    assert "Объявление" not in got and "Шинный Двор" not in got and "аккаунт Авито" in got

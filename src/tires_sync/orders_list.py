@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from . import order_sheet, orders, user_prefs
+from . import order_notes, order_sheet, orders, user_prefs
 
 COLUMNS = ("Дата счета", "№ заказа MIM", "Перемещение MIM", "Артикул", "Наименование", "Кол-во", "Цена MIM", "Сумма MIM", "Цена продажи",
            "Сумма продажи", "Имя", "Телефон", "ПВЗ", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽", "Примечание")
@@ -57,11 +57,12 @@ def reset(conn, login: str) -> None:
 
 def rows(conn, card_ids: List[int], money: bool, point: bool = False) -> List[dict]:
     """The rows of the orders, newest first, a position each (an order without positions: one row without them): {"order": id,
-    "values": {column: value}} with the allowed columns only. `point`: no SALE, the note without an Avito account's name."""
+    "values": {column: value}} with the allowed columns only. `point`: no SALE, the note without an Avito account's name. The note is a person's: no automatic part (order_notes.person_text)."""
     ok = allowed(money, point)
     out = []
     for card_id in card_ids:
         card = orders.get_card(conn, card_id)
+        card = dict(card, comment=order_notes.person_text(card["comment"]))       # «Примечание»: no ad nor call the order came with
         found = list(order_sheet.card_rows(conn, card, "").values()) or [dict(order_sheet.common_of(conn, card, ""), **{c: "" for c in POSITION})]
         for values in found:
             if point:

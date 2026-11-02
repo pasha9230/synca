@@ -13,6 +13,11 @@ NOTE_HINT = 100
 AUTO_NOTES = ("Возвращён после массового перевода", "Клиент передан через «Рабочее место»")
 # the comments a new order gets from its source and nobody typed (chat_deals.create_deal, calls, order_manager.VOICE_NOTE)
 AUTO_COMMENT = re.compile(r"^(Объявление: |Звонок \d{4}-\d{2}-\d{2} \d{2}:\d{2}[ (]|голосовое сообщение, нужна расшифровка$)")
+# the automatic part itself, to the end of the ad's link or of the call's «(принят)»/«(пропущен)» (else its line): «Примечание» of «Список»
+# shows what a person wrote after it, never the part (the owner 2026-11-03)
+AUTO_PART = re.compile(r"^(?:Объявление: [^\n]*?https?://\S+|Объявление: [^\n]*|Звонок \d{4}-\d{2}-\d{2} \d{2}:\d{2}[ (][^\n]*?\((?:принят|пропущен)\)"
+                       r"|Звонок \d{4}-\d{2}-\d{2} \d{2}:\d{2}[ (][^\n]*|голосовое сообщение, нужна расшифровка)")
+SEPARATOR = re.compile(r"^\s*(?:[.,;:—–-](?=\s|$))?\s*")    # what joins the part to a person's text («. », « — »), never a «-2» of it
 COMMENT_EVENT = "Комментарий: "                     # orders.update_card: the record of a changed comment
 
 
@@ -24,6 +29,13 @@ def is_person(author: str) -> bool:
     «система», «чаты Авито», «бот ВК» and the like."""
     author = str(author or "")
     return (bool(LOGIN.match(author)) and author not in RESERVED - {"owner"}) or author.startswith(POINT_MANAGER)
+
+
+def person_text(comment: str) -> str:
+    """The comment without the automatic part it starts with (AUTO_PART): the text of a person, or empty."""
+    comment = str(comment or "")
+    found = AUTO_PART.match(comment)
+    return SEPARATOR.sub("", comment[found.end():], count=1) if found else comment
 
 
 def hint(text: str) -> str:
