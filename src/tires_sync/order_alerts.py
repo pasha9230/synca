@@ -82,12 +82,13 @@ def _red_event(conn, event_id: int) -> dict:
     return event
 
 
-def ack(conn, event_id: int, login: str, now: str) -> None:
-    """«Разобрался»: the red record closes for this user only."""
+def ack(conn, event_id: int, login: str, now: str, author: Optional[str] = None) -> None:
+    """«Разобрался»: the red record closes for this user only. `author`: who pressed, when not the login (the owner or the partner working
+    as a point: «<name> за точку «X»», panel/common.author); the mark stays the login's."""
     if not login or login == EVERYBODY:
         raise AlertError("Не указан пользователь.")
     _red_event(conn, event_id)
-    conn.execute("INSERT OR IGNORE INTO order_event_ack (event_id, login, at, author) VALUES (?,?,?,?)", (event_id, login, now, login))
+    conn.execute("INSERT OR IGNORE INTO order_event_ack (event_id, login, at, author) VALUES (?,?,?,?)", (event_id, login, now, author or login))
 
 
 def resolve(conn, event_id: int, now: str, author: str) -> None:

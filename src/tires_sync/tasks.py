@@ -188,8 +188,9 @@ def of_place(conn, client_id=None, order_id=None, chat_row=None, only: Optional[
         sql, args = "chat_row = ?", [chat_row]
     else:
         return []
-    if only is not None:
-        sql, args = sql + " AND assignee = ?", args + [only]
+    if only is not None:                                                    # one login, or several (a point's managers)
+        only = [only] if isinstance(only, str) else list(only)
+        sql, args = sql + " AND assignee IN (%s)" % ",".join("?" * len(only)) if only else sql + " AND 0", args + only
     return [_row(r) for r in conn.execute("SELECT %s FROM callback_task WHERE done_at IS NULL AND cancelled_at IS NULL AND %s ORDER BY due_at, id"
                                           % (", ".join(FIELDS), sql), args)]
 
@@ -198,14 +199,15 @@ def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bo
             as_point=None) -> List[dict]:
     """The open tasks of the page «Задачи»: `tab` mine (to me), by_me (set by me), all (the office only); a point gets only its own
     whatever the tab. Filters: `to` (a login), `due` overdue|today|week, `kind`. Each task knows if it is late. `as_point`: the owner or
-    the partner working as that point (panel/common.current_user): their own tasks of an order of that point or of none only."""
+    the partner working as that point (panel/common.current_user) sees what its managers see: the tasks set to them (the lead 2026-11-02),
+    never the person's own (those come back with «Выйти»)."""
     where, args = ["done_at IS NULL", "cancelled_at IS NULL"], []
-    if point:
+    if as_point is not None:
+        where.append("assignee IN (%s)" % MANAGERS)
+        args.append(as_point)
+    elif point:
         where.append("assignee = ?")
         args.append(login)
-    if as_point is not None:
-        where.append("chat_row IS NULL AND (order_id IN (SELECT id FROM order_card WHERE point_id = ?) OR (order_id IS NULL AND client_id IS NULL))")
-        args.append(as_point)
     if tab == "mine" and not point:
         sql, more = _mine(conn, login, owner_login)
         where.append(sql)
@@ -235,6 +237,14 @@ def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bo
         task["late"] = task["due_at"] < now[:16]
         out.append(task)
     return out
+
+
+MANAGERS = "SELECT login FROM panel_user_role WHERE role = 'point' AND point_id = ?"     # the managers of a point (one argument)
+
+
+def point_managers(conn, point_id) -> List[str]:
+    """The logins of the managers of a point, by login."""
+    return [r[0] for r in conn.execute(MANAGERS + " ORDER BY login", (point_id,))]
 
 
 def _mine(conn, login: str, owner_login: str) -> tuple:

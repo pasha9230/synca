@@ -52,13 +52,11 @@ def _card_point(conn, order_id):
         return None
 
 
-def _of_point(conn, task, point_id) -> bool:
-    """The task is one the owner or the partner working as the point sees (tasks.listing as_point): of an order of that point or of nothing."""
-    if task["chat_row"]:
-        return False
-    if task["order_id"]:
-        return _card_point(conn, task["order_id"]) == point_id
-    return not task["client_id"]
+def _mine_as_point(conn) -> list:
+    """Whose tasks the person sees and sets as a point: the point manager its own login; the owner or the partner working as a point the
+    managers of that point (tasks.listing as_point; the lead 2026-11-02)."""
+    user = current_user()
+    return tasks.point_managers(conn, user["as_point"]) if user["as_point"] is not None else [user["login"]]
 
 
 def register(app) -> None:
@@ -66,7 +64,7 @@ def register(app) -> None:
         """The open tasks of the place for the one who looks: a point only its own; late ones known, the names of the assignees."""
         conn, now = get_conn(), local_iso()
         found = tasks.of_place(conn, client_id=client_id, order_id=order_id, chat_row=chat_row,
-                               only=current_user()["login"] if is_point() else None)
+                               only=_mine_as_point(conn) if is_point() else None)
         for t in found:
             t["late"] = t["due_at"] < now[:16]
             t["assignee_name"] = users.person_name(conn, t["assignee"], _main(app))
@@ -75,14 +73,16 @@ def register(app) -> None:
     def task_people() -> list:
         conn = get_conn()
         if is_point():
-            me = current_user()["login"]
-            return [{"login": me, "name": users.person_name(conn, me), "group": "Себе"}]
+            group = "Точка" if current_user()["as_point"] is not None else "Себе"
+            return [{"login": login, "name": users.person_name(conn, login), "group": group} for login in _mine_as_point(conn)]
         return tasks.assignees(conn, _owner(conn), _main(app))
 
     def task_default(order_id=None, chat_row=None) -> str:
         conn = get_conn()
         me = current_user()["login"]
-        return me if is_point() else tasks.default_assignee(conn, _owner(conn), me, order_id, chat_row)
+        if is_point():
+            return next(iter(_mine_as_point(conn)), "")
+        return tasks.default_assignee(conn, _owner(conn), me, order_id, chat_row)
 
     app.jinja_env.globals.update(tasks_for=tasks_for, may_task=may_set, task_people=task_people, task_default=task_default,
                                  task_kinds=tasks.KINDS)
@@ -124,12 +124,16 @@ def register(app) -> None:
         f = request.form
         order_id, chat_row, client_id = _int("order_id"), _int("chat_row"), _int("client_id")
         assignee = f.get("assignee", "").strip()
-        if is_point():                                   # the point: to itself only, of an order of its own point or of none
-            if chat_row or client_id or (assignee and assignee != me):
+        if is_point():                                   # the point: to itself only (as a point: to its managers), of an order of its
+            mine = _mine_as_point(conn)                  # own point or of none
+            if chat_row or client_id or (assignee and assignee not in mine):
                 abort(403)
             if order_id and _card_point(conn, order_id) != own_point():
                 abort(403)
-            assignee, allowed = me, {me}
+            if not mine:
+                flash("У точки нет менеджера в панели: задачу поставить некому.", "error")
+                return redirect(_back())
+            assignee, allowed = assignee or mine[0], set(mine)
         else:
             if not may_take():
                 abort(403)
@@ -162,10 +166,8 @@ def register(app) -> None:
             task = tasks.get(conn, task_id)
         except tasks.TaskError:
             abort(404)
-        if is_point() and task["assignee"] != me:        # a point closes only its own: another's is refused, never even looked at
-            abort(403)
-        if current_user()["as_point"] is not None and not _of_point(conn, task, own_point()):    # the owner as a point: of that point only
-            abort(403)
+        if is_point() and task["assignee"] not in _mine_as_point(conn):     # a point closes only its own (as a point: its managers'):
+            abort(403)                                                  # another's is refused, never even looked at
         if not is_point() and not may_take():
             abort(403)
         try:

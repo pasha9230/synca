@@ -261,21 +261,6 @@ def test_the_point_deleted_ends_it(w):
 
 # --- the places that compare the login with the owner or the assignee -----------------------------------------------------------------
 
-def test_tasks_as_a_point_are_the_persons_own_of_that_point_only(w):
-    conn = w["conn"]
-    common_args = dict(kind="other", note="", now=NOW, author="owner", assignee="owner", owner_login="owner", allowed={"owner"})
-    tasks.add(conn, title="своей точки", due_at="2026-10-07T13:00", order_id=w["mine"], **common_args)
-    tasks.add(conn, title="чужой точки", due_at="2026-10-07T13:00", order_id=w["other"], **common_args)
-    tasks.add(conn, title="без заказа", due_at="2026-10-07T13:00", **common_args)
-    client = owner(w)
-    office = client.get("/tasks").get_data(as_text=True)
-    assert "своей точки" in office and "чужой точки" in office and "без заказа" in office
-    as_point(client, w["pa"])
-    text = client.get("/tasks").get_data(as_text=True)
-    assert "своей точки" in text and "без заказа" in text and "чужой точки" not in text
-    assert tasks.counter(conn, "owner", "owner", NOW, True, as_point=w["pa"])["count"] == 2
-
-
 def test_the_bell_as_a_point_is_the_points(w):
     """The owner's own bell leaves out the orders of the points' accounts (order_alerts._staff); as a point it is the point's, and what
     the person pressed as a point is their own record, never an alert to themselves."""
@@ -294,12 +279,13 @@ def test_the_bell_as_a_point_is_the_points(w):
 def test_a_task_set_and_closed_as_a_point_names_the_person_for_the_point(w):
     conn = w["conn"]
     users.set_main_name(conn, "Павел", NOW, "owner")
+    users.add_user(conn, "pt1", PASSWORD, NOW, role="point", point_id=w["pa"])
     client = owner(w)
     as_point(client, w["pa"])
     assert post(client, "/tasks/new", "tok", kind="other", title="позвонить", date="2026-10-08", time="10:00",
                 order_id=str(w["mine"])).status_code == 302
     task = conn.execute("SELECT id, created_by, assignee FROM callback_task").fetchone()
-    assert task[1:] == ("owner", "owner")                                 # the person's own: «Поставил я», «Мне»
+    assert task[1:] == ("owner", "pt1")                                   # set by the person, to the point's manager
     assert post(client, "/tasks/%d/done" % task[0], "tok", result="ок").status_code == 302
     journal = [r[0] for r in conn.execute("SELECT author FROM order_event WHERE order_id = ? AND kind = 'task' ORDER BY id", (w["mine"],))]
     assert journal == ["Павел за точку «Янино»"] * 2
@@ -356,3 +342,121 @@ def test_the_persons_own_settings_are_not_changed_from_the_point(w):
     client.get("/orders?reset=1", headers={"Referer": "http://localhost/orders"})
     assert conn.execute("SELECT login, key, value FROM user_pref ORDER BY login, key").fetchall() == before
     assert 'data-tour-root' not in client.get("/my-point").get_data(as_text=True)
+
+
+# --- the lead's decisions (2026-11-02): «Разобрался», Telegram to oneself, the point's tasks, the responsible ---------------------------
+
+def test_ack_as_a_point_names_the_person_for_the_point_and_closes_it_for_them(w):
+    conn = w["conn"]
+    users.set_main_name(conn, "Павел", NOW, "owner")
+    event = orders.add_event(conn, w["mine"], NOW, "система", "notify", "Оповещение не отправлено", level="red")
+    conn.commit()
+    event = event or conn.execute("SELECT MAX(id) FROM order_event").fetchone()[0]
+    client = owner(w)
+    as_point(client, w["pa"])
+    assert post(client, "/alerts/%d/ack" % event, "tok").status_code == 302
+    assert conn.execute("SELECT login, author FROM order_event_ack WHERE event_id = ?", (event,)).fetchall() == \
+        [("owner", "Павел за точку «Янино»")]                             # the mark is the person's own; who pressed: for the point
+
+
+def _chats(w):
+    from cryptography.fernet import Fernet
+    from tires_sync import connections, order_notify
+    from tires_sync.secretbox import SecretBox
+    conn, box = w["conn"], SecretBox(Fernet.generate_key())
+    w["app"].config["SECRET_BOX"] = box
+    connections.set_config(conn, "telegram", 0, {"chat_id": "1000"}, NOW, "owner")       # the owner's chat
+    connections.set_secret(conn, box, "telegram", 0, "bot_token", "123456:ABCdef-TEST", NOW, "owner")
+    order_notify.set_user_chat(conn, "zaman", "2000", NOW, "owner")
+
+
+def test_telegram_about_ones_own_press_as_a_point_is_not_sent_to_oneself(w):
+    from flask import session
+    from http_fakes import ScriptedHttp
+    from tires_sync.panel import routes_mypoint, routes_vk
+    conn = w["conn"]
+    _chats(w)
+    tg = ScriptedHttp(*[(200, {"ok": True, "result": {}})] * 10)
+    w["app"].config["TG_HTTP"] = tg
+
+    def told():
+        found = {str(json.loads(c[3]).get("chat_id")) for c in tg.calls}
+        tg.calls.clear()
+        return found
+    with w["app"].test_request_context("/my-point"):
+        session.update(user="owner", as_point=w["pa"])
+        routes_mypoint._tell(conn, NOW)(["owner", "zaman"], "точка отметила")
+        assert told() == {"2000"}                                         # the partner hears; the owner who pressed does not
+        _send, _deliver, notify = routes_vk.channel(w["app"], conn, NOW)
+        card = orders.get_card(conn, w["mine"])
+        answer = notify(dict(card, responsible="owner", to_staff=True), "заказ")
+        assert "нажал сам" in answer and told() == set()
+        notify(dict(card, responsible="zaman", to_staff=True), "заказ")
+        assert told() == {"2000"}
+    with w["app"].test_request_context("/my-point"):                      # out of the mode: as before, the owner is told
+        session.update(user="owner")
+        routes_mypoint._tell(conn, NOW)(["owner"], "точка отметила снова")
+        assert told() == {"1000"}
+
+
+@pytest.fixture
+def staff(w):
+    conn = w["conn"]
+    users.add_user(conn, "pt1", PASSWORD, NOW, role="point", point_id=w["pa"])
+    users.add_user(conn, "pt2", PASSWORD, NOW, role="point", point_id=w["pb"])
+    args = dict(kind="other", note="", now=NOW, author="owner", owner_login="owner", allowed={"owner", "pt1", "pt2"})
+    ids = {
+        "pt1_order": tasks.add(conn, title="менеджеру точки по заказу", due_at="2026-10-07T13:00", assignee="pt1", order_id=w["mine"], **args),
+        "pt1_free": tasks.add(conn, title="менеджеру точки без заказа", due_at="2026-10-07T13:00", assignee="pt1", **args),
+        "owner": tasks.add(conn, title="владельцу по заказу точки", due_at="2026-10-07T13:00", assignee="owner", order_id=w["mine"], **args),
+        "pt2": tasks.add(conn, title="другой точке", due_at="2026-10-07T13:00", assignee="pt2", order_id=w["other"], **args),
+    }
+    return ids
+
+
+def test_tasks_as_a_point_are_exactly_the_points_managers(w, staff):
+    conn = w["conn"]
+    client = owner(w)
+    as_point(client, w["pa"])
+    text = client.get("/tasks").get_data(as_text=True)
+    assert "менеджеру точки по заказу" in text and "менеджеру точки без заказа" in text
+    assert "владельцу по заказу точки" not in text and "другой точке" not in text
+    assert tasks.counter(conn, "owner", "owner", NOW, True, as_point=w["pa"])["count"] == 2
+    card = client.get("/orders/%d" % w["mine"]).get_data(as_text=True)
+    assert "менеджеру точки по заказу" in card
+    assert post(client, "/tasks/%d/cancel" % staff["owner"], "tok").status_code == 403         # the person's own: after «Выйти»
+    assert post(client, "/tasks/%d/cancel" % staff["pt2"], "tok").status_code == 403
+    assert post(client, "/tasks/%d/done" % staff["pt1_free"], "tok", result="ок").status_code == 302
+    assert conn.execute("SELECT done_by FROM callback_task WHERE id = ?", (staff["pt1_free"],)).fetchone()[0] == "owner"
+    assert post(client, "/tasks/new", "tok", kind="other", title="себе", date="2026-10-08", time="10:00", assignee="owner").status_code == 403
+    assert post(client, "/tasks/new", "tok", kind="other", title="точке", date="2026-10-08", time="10:00", assignee="pt1").status_code == 302
+    assert conn.execute("SELECT assignee, created_by FROM callback_task WHERE title = 'точке'").fetchone() == ("pt1", "owner")
+    post(client, "/as-point/stop", "tok")
+    assert "владельцу по заказу точки" in client.get("/tasks").get_data(as_text=True)          # back after «Выйти»
+
+
+def test_a_point_without_a_manager_has_no_tasks_and_sets_none(w):
+    client = owner(w)
+    as_point(client, w["pa"])
+    assert "Задач нет" in client.get("/tasks").get_data(as_text=True)
+    post(client, "/tasks/new", "tok", kind="other", title="никому", date="2026-10-08", time="10:00")
+    assert w["conn"].execute("SELECT COUNT(*) FROM callback_task").fetchone()[0] == 0
+
+
+def test_an_order_made_for_a_point_never_has_the_text_as_its_responsible(w):
+    """created_by is the journal's «<name> за точку «X»»; the responsible is a login or empty (the rules of the point then), never that text."""
+    conn = w["conn"]
+    users.set_main_name(conn, "Павел", NOW, "owner")
+    with w["app"].test_request_context("/"):
+        from flask import session
+        session.update(user="owner", as_point=w["pa"])
+        who = common.author()
+    assert orders.ACTING_MARK in who
+    card_id = orders.create_card(conn, {"client_name": "Новый", "client_phone": "+79005550001", "point_id": str(w["pa"])}, NOW, who)
+    card = orders.get_card(conn, card_id)
+    assert card["responsible"] == "" and orders.ACTING_MARK not in card["responsible"]
+    from tires_sync import order_notify
+    way = order_notify.route(conn, card)
+    assert way["channel"] != "telegram" and "Янино" in way["why"]          # as a point manager's order: through the point
+    made = orders.create_card(conn, {"client_name": "Другой", "client_phone": "+79005550002"}, NOW, "zaman")
+    assert orders.get_card(conn, made)["responsible"] == "zaman"           # a login: as before

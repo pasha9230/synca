@@ -7,7 +7,7 @@ import re
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, session
 
 from .. import order_alerts, order_engine, order_manager as mgr, order_oth, order_reserve as reserve, orders, store
-from .common import AS_POINT_ROLES, as_point_author, can, current_user, get_conn, login_required, own_point, point_account
+from .common import AS_POINT_ROLES, as_point_author, author, can, current_user, get_conn, login_required, own_point, point_account
 from .routes_orders import from_panel, local_iso
 
 log = logging.getLogger(__name__)
@@ -195,7 +195,7 @@ def register(app):
     def alerts_ack(event_id):
         conn = get_conn()
         try:
-            order_alerts.ack(conn, event_id, session["user"], local_iso())
+            order_alerts.ack(conn, event_id, session["user"], local_iso(), author())
             conn.commit()
         except order_alerts.AlertError as err:
             flash(str(err), "error")
@@ -221,7 +221,7 @@ def register(app):
                 continue
             if row["level"] == "red":
                 try:
-                    order_alerts.ack(conn, row["id"], login, now)
+                    order_alerts.ack(conn, row["id"], login, now, author())
                 except order_alerts.AlertError:
                     continue
                 taken += 1

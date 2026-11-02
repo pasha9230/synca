@@ -389,7 +389,8 @@ def acting_point(conn, real_role: str, point_id):
 
 
 def as_point_author(conn, login: str, point_name: str) -> str:
-    return "%s за точку «%s»" % (users.person_name(conn, login, current_app.config["AUTHOR"]), point_name)
+    from ..orders import ACTING_MARK
+    return "%s%s%s»" % (users.person_name(conn, login, current_app.config["AUTHOR"]), ACTING_MARK, point_name)
 
 
 def end_as_point(login: str, why: str) -> None:
@@ -400,6 +401,20 @@ def end_as_point(login: str, why: str) -> None:
         conn = get_conn()
         row = conn.execute("SELECT name FROM point WHERE id = ?", (point,)).fetchone() if isinstance(point, int) else None
         store.write_audit(conn, now_iso(), login, "as_point_stop", dict({"point": point}, **({"name": row[0]} if row else {}), why=why))
+
+
+def own_chats(conn) -> set:
+    """The Telegram chats of the owner or the partner working as a point: the alerts about their own press are not sent to them (the lead
+    2026-11-02); the other people hear as usual. Out of the mode: none."""
+    user = current_user()
+    if user["as_point"] is None:
+        return set()
+    from .. import order_notify
+    from ..connections import get_config
+    found = {str(order_notify.user_chats(conn).get(user["login"]) or "")}
+    if user["login"] in (order_notify.get_owner_login(conn), current_app.config["AUTHOR"]):          # the owner: the chat of the alerts
+        found.add(str(get_config(conn, "telegram", 0).get("chat_id") or ""))
+    return {chat for chat in found if chat}
 
 
 def drop_session(why: str = "signed_out") -> None:

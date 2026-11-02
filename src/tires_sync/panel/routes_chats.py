@@ -11,7 +11,7 @@ from .. import catalog_archive, chat_deals as deals, chat_handover, chats, conne
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
-from .common import author, can, chat_of_other_point, get_conn, login_required, own_point, point_account, safe_path
+from .common import author, can, chat_of_other_point, get_conn, login_required, own_chats, own_point, point_account, safe_path
 import logging
 from datetime import datetime
 from urllib.parse import urlencode
@@ -648,7 +648,7 @@ def register(app) -> None:
         try:
             order_notify.tell_people(conn, app.config.get("SECRET_BOX"), made["to"],
                                      chat_handover.message(made["point"], chat_row, request.host_url.rstrip("/") + "/chats/%d" % chat_row, made["id"]),
-                                     tg_http=app.config.get("TG_HTTP") or urllib_transport, now=now)
+                                     tg_http=app.config.get("TG_HTTP") or urllib_transport, now=now, skip_chats=own_chats(conn))
         except Exception:                                                  # the tasks and the light are there; only the message is lost
             logging.getLogger(__name__).exception("the Telegram message of a chat handover failed")
         flash("Клиент передан %s: в «Чатах» он подсвечен, у них задача «Взять клиента»." % ("владельцу и партнёру" if len(made["to"]) > 1 else "владельцу"), "ok")

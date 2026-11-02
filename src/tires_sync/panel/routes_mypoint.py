@@ -164,12 +164,15 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
 
 
 def _tell(conn, now: str):
-    """The owner's and the partner's Telegram for a press of the point (order_notify.tell_people with the panel's keys); never raises."""
+    """The owner's and the partner's Telegram for a press of the point (order_notify.tell_people with the panel's keys); never raises. Never
+    to the person who pressed it working as the point (common.own_chats)."""
     from .. import order_notify
+    from .common import own_chats
+    skip = own_chats(conn)
 
     def tell(logins, text):
         return order_notify.tell_people(conn, current_app.config.get("SECRET_BOX"), logins, text,
-                                        tg_http=current_app.config.get("TG_HTTP") or order_notify.urllib_transport, now=now)
+                                        tg_http=current_app.config.get("TG_HTTP") or order_notify.urllib_transport, now=now, skip_chats=skip)
     return tell
 
 

@@ -17,8 +17,28 @@ def channel(app, conn, local: str):
     """What the bot needs to act on a manager's message (vk_catchup.channel), with the keys and the transports of the panel. Needs no request:
     it also runs after the answer to VK has gone."""
     config = app.config
-    return vk_catchup.channel(conn, local, config.get("SECRET_BOX"), vk_http=config.get("VK_HTTP") or urllib_transport,
-                              avito_http=config.get("AVITO_HTTP") or urllib_transport, tg_http=config.get("TG_HTTP") or urllib_transport)
+    sender, deliver, notify = vk_catchup.channel(conn, local, config.get("SECRET_BOX"), vk_http=config.get("VK_HTTP") or urllib_transport,
+                                                 avito_http=config.get("AVITO_HTTP") or urllib_transport,
+                                                 tg_http=config.get("TG_HTTP") or urllib_transport)
+    return sender, deliver, _not_to_oneself(conn, notify)
+
+
+def _not_to_oneself(conn, notify):
+    """In a request of the owner or the partner working as a point: an alert whose way is their own Telegram is not sent (they pressed it;
+    the lead 2026-11-02); every other way as usual."""
+    from flask import has_request_context, session
+    from .. import order_notify
+    from .common import own_chats
+    skip = own_chats(conn) if has_request_context() and session.get("user") else set()
+    if not skip:
+        return notify
+
+    def quiet(card, text):
+        way = order_notify.route(conn, card)
+        if way["channel"] == "telegram" and way["to"] in skip:
+            return "Telegram не отправлен: нажал сам, работая за точку"
+        return notify(card, text)
+    return quiet
 
 
 def after_answer(app, job) -> None:

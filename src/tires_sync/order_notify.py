@@ -210,7 +210,8 @@ def missing_order_people(conn) -> List[str]:
     return sorted({u["login"] for u in people if u["role"] == "owner"} | {get_owner_login(conn)})
 
 
-def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg_http: Transport = urllib_transport, now: str = "") -> str:
+def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg_http: Transport = urllib_transport, now: str = "",
+                skip_chats=()) -> str:
     """The same text in Telegram to each of these panel users who has a chat (the owner's login: the chat of the failure alerts), once per chat.
     With `now`, the same text to the same chat within the hour is a repeat and is not sent again. Never raises; returns how it went."""
     owner = get_owner_login(conn)
@@ -220,7 +221,7 @@ def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg
     chats: Dict[str, List[str]] = {}
     for login in logins:
         chat = owner_chat if login == owner else ("" if login in clients else str(mine.get(login) or ""))
-        if chat:
+        if chat and chat not in skip_chats:                                 # skip_chats: the person who pressed it themselves
             chats.setdefault(chat, []).append(login)
     if not chats:
         return "Telegram: ни у кого нет чата (%s)" % ", ".join(logins)
