@@ -15,7 +15,7 @@ FIRST_LINE = "Шины в наличии"
 MAX_DESCRIPTION = 7500                                    # feed.validate_ad: a longer description is refused by Avito
 TEST_POINTS_KEY = "oth_test_points"                       # state: JSON list of the ids of test points, besides the names that start with «тест»
 _LINE = re.compile(r"Шины в наличии(?: на [^\n]*)?\n")
-_COUNT = re.compile(r"(В наличии:\s*)\d+(\s*шт)")
+_COUNT = re.compile(r"(В наличии:\s*)(?:более\s+)?\d+(\s*шт)")      # a count of {stock}: «6» or «более 4» (description.stock_text)
 
 
 def _test_points(conn) -> frozenset:
@@ -88,7 +88,9 @@ def drop_line(text: str) -> str:
 
 
 def with_count(text: str, count: int) -> str:
-    """«В наличии: N шт.» of a saved ad with `count`, when the text says it exactly once; otherwise as it is (a template of the owner's own)."""
+    """«В наличии: N шт.» of a saved ad with `count` written as {stock} writes it («более 4» above 4), when the text says it exactly once;
+    otherwise as it is (a template of the owner's own)."""
+    from .description import stock_text
     if len(_COUNT.findall(text or "")) != 1:
         return text
-    return _COUNT.sub(lambda m: "%s%d%s" % (m.group(1), count, m.group(2)), text)
+    return _COUNT.sub(lambda m: "%s%s%s" % (m.group(1), stock_text(count), m.group(2)), text)
