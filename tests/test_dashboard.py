@@ -232,3 +232,41 @@ def test_avitos_auto_answer_does_not_put_out_the_waiting_on_the_dashboard(tmp_pa
     conn.commit()
     assert [w["minutes"] for w in analytics.day_numbers(conn, NOW)["waiting"]] == [40]
     assert [c["minutes"] for c in analytics.my_day(conn, "olya", NOW)["chats"]] == [40]
+
+
+def _waiting_chat(conn, account, chat_id, at, status="open", order_id=None):
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, peer_name, last_dir, last_at, unread, status, order_id) VALUES (?,?,?,?,?,?,?,?)",
+                 (account, chat_id, chat_id, "in", at, 1, status, order_id))
+
+
+def test_only_the_clients_the_staff_should_answer_wait_and_in_working_minutes(tmp_path):
+    """The owner 2026-11-03 («Дольше всех — 2396620 мин.»): not the chats from before the account was first read, not a client silent for a
+    week, not a chat closed or «не требует ответа», not the chat of an order on the point's stages; the minutes are of working time."""
+    conn = store.connect(str(tmp_path / "x.db"))
+    fill(conn)                                                                     # Татьяна waits since 11:20, 40 minutes
+    account = conn.execute("SELECT id FROM account").fetchone()[0]
+    store.set_state(conn, "chats_baseline_%d" % account, "2026-10-01T09:00:00")
+    _waiting_chat(conn, account, "before-baseline", "2026-09-30T12:00:00")
+    _waiting_chat(conn, account, "eight-days", "2026-10-13T11:00:00")
+    _waiting_chat(conn, account, "closed", "2026-10-21T10:00:00", "closed")
+    _waiting_chat(conn, account, "no-reply", "2026-10-21T10:00:00", "no_reply")
+    orders.ensure_pipeline(conn, "2026-10-21T10:00:00")
+    stage = {s["code"]: s["id"] for s in orders.list_stages(conn)}
+    for code in analytics.POINT_WORK + ("placed",):
+        card = orders.create_card(conn, {"client_name": code}, "2026-10-21T09:00:00", "o")
+        conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage[code], card))
+        _waiting_chat(conn, account, "order-" + code, "2026-10-21T11:30:00", order_id=card)
+    _waiting_chat(conn, account, "last-night", "2026-10-20T19:50:00")             # 10 minutes yesterday + 2 hours this morning (10:00–20:00)
+    conn.commit()
+    staff = analytics.day_numbers(conn, NOW, without_points=True)
+    assert sorted((w["peer_name"], w["minutes"]) for w in staff["waiting"]) == [("last-night", 130), ("order-placed", 30), ("Татьяна", 40)]
+    assert [w["peer_name"] for w in staff["waiting_long"]] == ["last-night", "Татьяна", "order-placed"]
+    everyone = analytics.day_numbers(conn, NOW)                                    # the morning summary: the point's orders too
+    assert {w["peer_name"] for w in everyone["waiting"]} == {"last-night", "order-placed", "Татьяна"} | {"order-" + c for c in analytics.POINT_WORK}
+
+
+def test_working_minutes_run_only_in_the_working_hours():
+    at = datetime.fromisoformat
+    assert analytics.working_minutes(at("2026-10-21T11:20:00"), at("2026-10-21T12:00:00"), (10, 20)) == 40
+    assert analytics.working_minutes(at("2026-10-20T21:00:00"), at("2026-10-21T09:59:00"), (10, 20)) == 0
+    assert analytics.working_minutes(at("2026-10-19T19:00:00"), at("2026-10-21T10:30:00"), (10, 20)) == 60 + 600 + 30
