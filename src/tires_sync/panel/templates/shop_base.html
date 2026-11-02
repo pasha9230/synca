@@ -19,7 +19,7 @@
 <nav class="shop-nav" aria-label="Разделы" data-tour="shop-nav">
 <a href="/shop"{% if p == "/shop" %} class="is-active" aria-current="page"{% endif %}>{{ icon("tire") }}<span>Каталог</span></a>
 <a href="/shop/cart"{% if p.startswith("/shop/cart") %} class="is-active" aria-current="page"{% endif %} data-tour="cart">{{ icon("box-down") }}<span>Корзина</span>{% if cart_count %} <b class="shop-count">{{ cart_count }}</b>{% endif %}</a>
-<a href="/shop/orders"{% if p.startswith("/shop/orders") %} class="is-active" aria-current="page"{% endif %}>{{ icon("clipboard") }}<span>Мои заказы</span></a>
+<a href="/shop/orders"{% if p.startswith("/shop/orders") %} class="is-active" aria-current="page"{% endif %}>{{ icon("clipboard") }}<span>Мои заказы</span>{% if orders_count %} <b class="shop-count" title="Заказы в работе">{{ orders_count }}</b>{% endif %}</a>
 <a href="/shop/profile"{% if p.startswith("/shop/profile") or p.startswith("/account") %} class="is-active" aria-current="page"{% endif %}>{{ icon("users") }}<span>Профиль</span></a></nav>
 <div class="shop-top-right">{% if me.display_name %}<span class="shop-me">{{ me.display_name }}</span>{% endif %}<form method="post" action="/tour/again" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="tour-again" data-tour="again" aria-label="Пройти обзор заново"><span class="tour-again-long">Пройти обзор заново</span><span class="tour-again-short">Обзор</span></button></form>
 <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form></div></div>

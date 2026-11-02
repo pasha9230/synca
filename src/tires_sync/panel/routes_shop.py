@@ -156,6 +156,7 @@ def _page(template: str, conn, login: str, **values):
     page of shop2/ (the old one stays exactly as it was with it off)."""
     if ui_new():
         template = "shop2/" + template
+        values.setdefault("orders_count", shop_cart.open_orders(conn, login))      # the digit on «Мои заказы» (the prototype)
     response = make_response(render_template(template, cart_count=len(shop_cart.cart(conn, login)), **values))
     response.headers["Cache-Control"] = "private, no-store"
     return response

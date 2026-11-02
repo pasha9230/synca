@@ -337,6 +337,12 @@ def my_orders(conn, login: str) -> List[dict]:
     return out
 
 
+def open_orders(conn, login: str) -> int:
+    """How many of the login's orders are not «Выполнен» nor «Отменён» (the digit on «Мои заказы» of «Новый вид»): the statuses of
+    my_orders, so a merged order counts as its new order does."""
+    return sum(1 for o in my_orders(conn, login) if o["status"] not in ("Выполнен", "Отменён"))
+
+
 def _receive(conn, card: dict, way: str, place: str) -> str:
     """«Получение» as the client chose it: the point (the order's point now: a manager may move it) or the delivery and its address.
     An order of before 2026-10-31 has no choice kept: the first words of its comment say it (the comment itself is never shown)."""

@@ -69,7 +69,7 @@ def test_on_the_catalog_has_the_size_chips_one_search_no_except_and_the_photo_ce
         assert 'name="%s" value="%s"' % (key, value) in html, (key, value)
     assert 'form="shop-f"' in html and 'id="shop-f"' in html and 'name="q"' in html
     assert html.count('class="c-photo"') == len(prices(html)) and "<script" not in html
-    assert len(keys(html)) == len(prices(html))                            # «В корзину» in each row
+    assert len(set(keys(html))) == len(prices(html))                       # «В корзину» in each row (and in its card)
 
 
 def test_on_several_widths_and_radii_at_once(tmp_path):
@@ -273,3 +273,58 @@ def test_on_the_fields_of_the_delivery_say_the_limits_of_the_server(tmp_path):
     html = page(client, "/shop/profile")
     for key, limit in shop_cart.DELIVERY_LIMITS.items():
         assert re.search(r'name="%s" maxlength="%d"' % (key, limit), html), key
+
+
+
+# ---- the owner's answers of 2026-11-02 -------------------------------------------------------------------------------------------------
+
+def test_on_minus_stops_at_one_and_delete_drops_the_tyre(tmp_path):
+    app, client, conn, tg, pid = shop(tmp_path)
+    new_view(conn)
+    k = keys(page(client))[0]
+    add(client, k, qty="1")
+    cart = page(client, "/shop/cart")
+    assert re.search(r'name="qty" value="0"[^>]*disabled', cart) and ">Удалить</button>" in cart and "Убрать</button>" not in cart
+    add(client, k, qty="1")
+    assert not re.search(r'name="qty" value="1"[^>]*disabled', page(client, "/shop/cart"))      # at two «−» works
+    post(client, "/shop/cart/set", "tok", key=k, drop="1")
+    assert shop_cart.cart(conn, "buyer") == {}
+    new_view(conn, "off")
+    add(client, k, qty="1")
+    old = page(client, "/shop/cart")
+    assert ">Убрать</button>" in old and "disabled" not in old                                  # the old cart as it was
+
+
+def test_on_a_tyre_opens_its_card_with_the_big_photo_and_the_buy(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    new_view(conn)
+    html = page(client)
+    n = len(prices(html))
+    assert n and all('href="#tire-%d"' % i in html and 'id="tire-%d"' % i in html and 'id="row-%d"' % i in html for i in range(1, n + 1))
+    card = html[html.index('id="tire-1"'):].split('class="shop2-sheet"')[0]
+    assert "Размер" in card and "Наличие" in card and 'action="/shop/cart/add"' in card and 'href="#row-1"' in card
+    assert "<script" not in html
+    tiles = page(client, "/shop?v=tiles")
+    assert 'href="#tire-1"' in tiles and 'id="tire-1"' in tiles
+    owner = app.test_client()
+    login(owner)
+    new_view(conn, "owner_only")
+    preview = page(owner, "/client-terms/c/buyer/preview")
+    assert 'id="tire-1"' in preview and 'action="/shop/cart/add"' not in preview                # the preview never buys
+
+
+def test_on_my_orders_shows_how_many_are_open(tmp_path):
+    app, client, conn, tg, pid = shop(tmp_path)
+    ks = keys(page(client))
+    add(client, ks[0])
+    checkout(client, way="point", point_id=str(pid))
+    nav = lambda html: html[html.index('class="shop-nav"'):].split("</nav>")[0]
+    assert "Заказы в работе" not in nav(page(client))                                       # off: the old header
+    new_view(conn)
+    add(client, ks[0])
+    r = post(client, "/shop/checkout", "tok", way="point", point_id=str(pid), phone="+7 900 111-22-33")
+    assert re.search(r'Мои заказы</span> <b class="shop-count" title="Заказы в работе">2</b>', nav(page(client)))
+    conn.execute("INSERT INTO order_stage (code, name, position, kind) VALUES ('done', 'Выполнено', 99, 'won')")
+    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE code = 'done') WHERE id = ?", (order_id(r),))
+    conn.commit()
+    assert '"Заказы в работе">1</b>' in nav(page(client, "/shop/orders"))                   # «Выполнен» is not in the digit
