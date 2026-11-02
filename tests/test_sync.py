@@ -72,8 +72,8 @@ def test_deliberate_mass_removal_is_not_blocked_by_feed_shrink_check(tmp_path):
 
 def test_invalid_rendered_ad_on_published_item_becomes_a_hold_not_a_silent_keep(tmp_path):
     conn = store.connect(tmp_path / "t.db")
-    store.upsert_published(conn, PublishedItem("100", 4810, 5000.0, "P1"), "<Ad><Id>100</Id><Title>OLD</Title></Ad>")
-    store.upsert_published(conn, PublishedItem("101", 4810, 5000.0, "P1"), "<Ad><Id>101</Id></Ad>")
+    store.upsert_published(conn, PublishedItem("100", 4850, 5000.0, "P1"), "<Ad><Id>100</Id><Title>OLD</Title></Ad>")
+    store.upsert_published(conn, PublishedItem("101", 4850, 5000.0, "P1"), "<Ad><Id>101</Id></Ad>")
     data = xml(commodity_xml(NNOMMODIF="100", SMODIFNAME="", SMODIFNAME_ORIG=""), commodity_xml(NNOMMODIF="101"))
     report = run_cycle(data, make_settings(), REF, conn, TODAY, out_dir=tmp_path)
     assert report.counts == {"hold": 1, "keep": 1}
@@ -85,8 +85,8 @@ def test_invalid_rendered_ad_on_published_item_becomes_a_hold_not_a_silent_keep(
 def test_invalid_rendered_ad_is_removed_after_stale_days(tmp_path):
     conn = store.connect(tmp_path / "t.db")
     from datetime import timedelta
-    store.upsert_published(conn, PublishedItem("100", 4810, 5000.0, "P1", first_hold=TODAY - timedelta(days=3)), "<Ad><Id>100</Id></Ad>")
-    store.upsert_published(conn, PublishedItem("101", 4810, 5000.0, "P1"), "<Ad><Id>101</Id></Ad>")
+    store.upsert_published(conn, PublishedItem("100", 4850, 5000.0, "P1", first_hold=TODAY - timedelta(days=3)), "<Ad><Id>100</Id></Ad>")
+    store.upsert_published(conn, PublishedItem("101", 4850, 5000.0, "P1"), "<Ad><Id>101</Id></Ad>")
     data = xml(commodity_xml(NNOMMODIF="100", SMODIFNAME="", SMODIFNAME_ORIG=""), commodity_xml(NNOMMODIF="101"))
     report = run_cycle(data, make_settings(), REF, conn, TODAY, out_dir=tmp_path)
     assert report.counts == {"remove": 1, "keep": 1}
