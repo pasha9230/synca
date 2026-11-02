@@ -59,6 +59,15 @@ def _events(conn, card):
     ("отправлен на возврат", mgr.RETURN, None),
     ("5259052 отправлено на возврат", mgr.RETURN, 5259052),
     ("отправили на возврат", mgr.RETURN, None),
+    # the owner 2026-11-02: «отдал» with the order is «выдал»; the phrases of the return and of the client are read before it
+    ("отдал 5284060", "отдал", 5284060),
+    ("Отдали заказ 5284060", "отдали", 5284060),
+    ("5284060 отдал", "отдал", 5284060),
+    ("отдал 5284060 шины", "отдал", 5284060),
+    ("шины 5284060 отдала", "отдала", 5284060),
+    ("отдали на возврат 5284060", mgr.RETURN, 5284060),
+    ("5284060 возврат отдали", mgr.RETURN, 5284060),
+    ("отдали клиенту 5284060", "отдал клиенту", 5284060),
 ])
 def test_the_words_of_the_points_are_read(text, word, number):
     assert mgr._word(text) == word and mgr.order_number(text) == number, text
@@ -96,7 +105,7 @@ def test_the_tyre_arrived_in_reply_tells_the_client_once(tmp_path):
     "привезли другие", "привезли летние вместо зимних", "пришли, но не все", "привезли 3 из 4", "привезли?", "пришли?", "привезли и выдали",
     "шины приехали, брак", "шины не приехали", "шина приехала?", "шины приехали только 2", "привезли 5259052 и 5253058", "Пришли 5 259 052",
     "Клиенты пришли", "шины", "Шины 5259052", "приехали 5259052 шины 4", "приехала, одна битая", "привезли, но одна повреждена",
-    "забрала не всё", "выдала 2 из 4", "отдал клиенту?", "отдал", "отдал 5259052", "приехали, отдал клиенту",
+    "забрала не всё", "выдала 2 из 4", "отдал клиенту?", "приехали, отдал клиенту",
     "возврат отдал?", "возврат не отдал", "отдал на возврат 2 из 4", "возврат отдал клиенту", "клиент вернул, отдал на возврат",
     "приехали, возврат 5259052", "отдал на возврат и выдал", "лтправлен на возврат", "возврат", "возврат 5259052", "на возврат",
     "отправил фото на возврат?",
@@ -232,3 +241,70 @@ def test_a_return_of_an_order_cancelled_not_for_not_buying_is_a_question(tmp_pat
     _with_amount(conn, card)
     mgr.dispatch(conn, "r", "111", "№5259053 возврат отдал", None, NOW)
     assert orders.get_card(conn, card)["stage"]["code"] == "cancel"
+
+
+# ---- the owner 2026-11-02: «Сообщение ВК: отдал — тоже относится к выдаче заказа» ------------------------------------------------
+
+@pytest.mark.parametrize("text", ["отдал {}", "отдала {}", "отдали {}", "Отдали заказ {}", "{} отдал", "отдал {} шины", "отдала №{}",
+                                  "шины {} отдали", "Шины отдали заказ {}", "Добрый день, отдали {}"])
+def test_give_with_the_number_issues_the_order(tmp_path, text):
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5284060, "at_point")
+    assert mgr.is_command(conn, text.format(5284060)), text
+    mgr.dispatch(conn, "g", "111", text.format(5284060), None, NOW)
+    assert _code(conn, card) == "done", text
+
+
+@pytest.mark.parametrize("text", ["отдал", "отдали", "Отдала", "отдали все", "отдал шины", "отдал 4 шт"])
+def test_give_in_reply_to_the_order_issues_it(tmp_path, text):
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5284060, "at_point")
+    mgr.dispatch(conn, "g", "111", text, 5284060, NOW)
+    assert _code(conn, card) == "done", text
+
+
+def test_give_without_a_number_asks_which_order_as_issued_does(tmp_path):
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5284060, "at_point")
+    answer = mgr.dispatch(conn, "g", "111", "отдал", None, NOW)
+    assert answer.startswith("Это заказ №5284060") and _code(conn, card) == "at_point"
+    assert mgr.dispatch(conn, "y", "111", "да", None, NOW).startswith("Заказ №5284060 — отмечено: выдан") and _code(conn, card) == "done"
+
+
+@pytest.mark.parametrize("text", [
+    "отдал деньги", "отдал деньги {}", "отдал деньги по заказу {}", "отдал клиенту деньги {}", "отдал курьеру", "отдал курьеру {}",
+    "отдал поставщику {}", "отдал на точку {}", "отдал по заказу {}", "отдал водителю шины {}", "отдал?", "отдал {}?", "не отдал {}",
+    "отдал {} не все", "отдал 2 из 4 {}", "отдал {} и {}", "отдал {} и 5253058", "отдал и приехали {}", "приехали, отдал {}",
+    "отдал {}, приехали", "отдал возврат {}", "отдал {} брак", "отдала сдачу {}",
+])
+def test_doubtful_give_is_a_question(tmp_path, text):
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5284060, "at_point")
+    text = text.replace("{}", "5284060")
+    assert not mgr.is_command(conn, text), text
+    mgr.dispatch(conn, "x", "111", text, None, NOW)
+    assert _code(conn, card) == "at_point", text
+
+
+@pytest.mark.parametrize("text", ["возврат отдал {}", "отдал на возврат {}", "отдали на возврат {}", "отдала на возврат {}",
+                                  "{} возврат отдали", "{} отдали на возврат"])
+def test_the_return_phrases_with_give_stay_the_return(tmp_path, text):
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5284060, "at_point")
+    _with_amount(conn, card)
+    text = text.replace("{}", "5284060")
+    assert mgr._word(text) == mgr.RETURN and mgr.is_command(conn, text), text
+    mgr.dispatch(conn, "r", "111", text, None, NOW)
+    assert _code(conn, card) == "return", text
+
+
+@pytest.mark.parametrize("tail", ["шины 5284060", "все 5284060", "5284060 4 шт", "заказ 5284060"])
+def test_give_reads_the_number_exactly_as_issued_does(tmp_path, tail):
+    """A word between the command and the number («выдал шины 5284060») is not read by «выдал» either: the same answer for «отдал»."""
+    conn, _pid, _ = setup(tmp_path)
+    assert (mgr.order_number("отдал " + tail), mgr.is_command(conn, "отдал " + tail)) == \
+        (mgr.order_number("выдал " + tail), mgr.is_command(conn, "выдал " + tail)), tail
+
+
+def test_the_texts_for_the_points_name_give():
+    assert "отдал" in mgr.HINT

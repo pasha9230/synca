@@ -29,8 +29,9 @@ ARRIVED, ISSUED, NO_SHOW = "приехал", "выдан", "клиент не п
 ARRIVE_FROM = ("placed", "moving")                 # the owner 2026-10-21 (order 423): the panel often still says «Заказ оформлен» when the tyres come
 ISSUE_FROM = ("at_point",) + ARRIVE_FROM           # the owner 2026-10-21: «выдал» also when the panel never said the tyres came
 ISSUE_PHRASE = "отдал клиенту"                     # the owner 2026-10-25: «отдал/отдала/отдали клиенту» is «выдал»
+GIVE = ("отдал", "отдала", "отдали")               # the owner 2026-11-02: «отдал 5284060» is «выдал» too
 BUILTIN = dict([(w, (ARRIVE_FROM, "at_point")) for w in ("приехал", "приехали", "приехала", "привезли", "пришли")] +   # the words of the
-               [(w, (ISSUE_FROM, "done")) for w in ("выдал", "выдали", "выдала", "забрал", "забрали", "забрала", ISSUE_PHRASE)])   # decisions
+               [(w, (ISSUE_FROM, "done")) for w in ("выдал", "выдали", "выдала", "забрал", "забрали", "забрала", ISSUE_PHRASE) + GIVE])   # decisions
 #  2026-10-19 and of the owner 2026-10-25 (the audit of «Входящие»): they work without being set up in «Команды»
 NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её]л|ла|ли)(?![а-я])", re.I)       # «не пришёл заказ» is about goods: not this
 # the owner 2026-10-25: «Возврат отдал», «отдал на возврат», «отправлен(о) на возврат», «отправили на возврат» — the tyres went back to the
@@ -56,6 +57,9 @@ PHRASES = ((NO_SHOW_PHRASE, NO_SHOW),
 # деньги», review 2026-10-26): after these only the order, the tyres, «все», «шт», «на точку»
 STRICT = ("привезли", "пришли", "приехала", ISSUE_PHRASE)
 STRICT_TAIL = {"шина", "шины", "колёса", "колеса", "комплект", "все", "всё", "шт", "по", "на", "точку", "точке"}
+# «отдал» alone is also money, the supplier, a courier («отдал деньги», «отдал курьеру», «отдал на точку»): after it only the order, the tyres,
+# «все», «шт» — not «по», «на», «точку»; «возврат отдал», «отдал на возврат», «отдал клиенту» are phrases and are read before it
+GIVE_TAIL = STRICT_TAIL - {"по", "на", "точку", "точке"}
 NOUN = r"(?:шин[аы]|кол[её]са|комплект)(?![^\W\d_])"   # «Шины приехали», «5245392 шина приехала!», «приехали 5259052 шины»
 DISPUTE = "спорно: "
 BOT_MARK = "(бот) "                                 # the owner 2026-10-24: «Подписывай сообщение от бота вк так: (бот) …» (never to a client)
@@ -179,11 +183,12 @@ def is_command(conn, text) -> bool:
     if target in ("at_point", RETURN) and any(t.startswith("клиент") for t in tokens):
         return False                                  # «приехал клиент» is about the client, not the tyres (the owner 2026-10-25);
     number = order_number(text)                       # «возврат отдал клиенту» is not the supplier's return
-    if word in STRICT and any(t not in STRICT_TAIL and not (number is not None and ORDER_WORD.match(t)) for t in (tokens if phrase else tokens[1:])):
+    tail = GIVE_TAIL if word in GIVE else STRICT_TAIL if word in STRICT else None
+    if tail and any(t not in tail and not (number is not None and ORDER_WORD.match(t)) for t in (tokens if phrase else tokens[1:])):
         return False                                  # «пришли фото», «приехала машина»: not about the tyres
     meanings = {NO_SHOW if word == NO_SHOW else target} if phrase else set()
     meanings |= {BUILTIN[t][1] if t in BUILTIN else t for t in tokens if t in BUILTIN or t in words}
-    meanings |= {RETURN for t in tokens if t.startswith("возврат")} | {"done" for t in tokens if t in ("отдал", "отдала", "отдали")}
+    meanings |= {RETURN for t in tokens if t.startswith("возврат")}
     if len(meanings) > 1:
         return False                                  # every number that names an order («заказ 17», «№4», 5+ digits) must be the one taken
     named = LONG_NUMBER.findall(body) + [m.group(1) for m in MARKED_NUMBER.finditer(body)]
@@ -1143,7 +1148,7 @@ def bind(conn, code: str, sender) -> str:
         point = points.bind_vk(conn, code, sender)
     except points.PointError as err:
         return str(err)
-    return "ВК привязан к точке «%s». Команды: «приехал 123456», «выдал 123456», «клиент не пришёл 123456»." % point["name"]
+    return "ВК привязан к точке «%s». Команды: «приехал 123456», «выдал 123456» (или «отдал 123456»), «клиент не пришёл 123456»." % point["name"]
 
 
 def dispatch(conn, message_id, sender, text, reply_order_no, now: str, deliver: Optional[Deliver] = None, notify: Optional[Notify] = None,
@@ -1205,7 +1210,7 @@ BUTTON_ANSWER = ("Напишите одним сообщением телефо�
                  "Можно и как раньше: клиент <телефон> <что нужно>.")
 
 
-HINT = ("Команды: приехал <номер>, выдал <номер>, клиент <телефон> что нужно — или кнопка «%s».\n"
+HINT = ("Команды: приехал <номер>, выдал (отдал) <номер>, клиент <телефон> что нужно — или кнопка «%s».\n"
         "Лучше всего — ответом на сообщение о заказе или с номером заказа." % BUTTON)
 HINT_KEY = "vk_hint_%s"                           # app_state: the last hint to the point
 HINT_EVERY = timedelta(minutes=30)
