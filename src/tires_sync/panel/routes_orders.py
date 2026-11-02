@@ -1279,7 +1279,7 @@ def register(app) -> None:
             if result["ok"]:                                              # the first full success only: a done order refuses a press
                 stamp = local_iso()
                 state = webmim_create.get_state(conn, card_id) or {"webmim_id": ""}
-                order_sheet.enroll(conn, card_id, stamp)                  # placed in WebMIM: its rows go to the Google table (if it is on)
+                order_sheet.enroll(conn, card_id, stamp)                  # placed in WebMIM: its rows go to the Google table (if on and the stage moved)
                 conn.commit()
                 for line in order_placed.on_placed(conn, card_id, state["webmim_id"], stamp, author(), avito_deliver(conn, stamp), vk_sender(conn)):
                     flash(line, placed_kind(line))

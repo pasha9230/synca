@@ -27,8 +27,8 @@ class FakeScript:
     """The web app of docs/integrations/google-sheet-apps-script.md: rows found by their hidden mark, the answer behind a redirect.
     `fail`: what the next POSTs do instead ("timeout", "500", "html")."""
 
-    def __init__(self, columns=sheet.COLUMNS, secret=SECRET):
-        self.columns, self.secret = list(columns), secret
+    def __init__(self, columns=sheet.COLUMNS, secret=SECRET, legacy=False):
+        self.columns, self.secret, self.legacy = list(columns), secret, legacy        # legacy: the script before 2026-11-02 (no delete, no extra)
         self.rows, self.posts, self.fail, self.result, self.marks = {}, [], [], None, {}
 
     def __call__(self, method, url, headers, body):
@@ -55,6 +55,16 @@ class FakeScript:
             return dict({"ok": True, "missing": [c for c in p["columns"] if c not in self.columns]}, **self.marks)
         out = []
         for row in p["rows"]:
+            if row.get("delete") and not self.legacy:
+                if row["key"] not in self.rows:
+                    out.append({"key": row["key"], "status": "absent"})
+                elif row.get("check") and any(self.rows[row["key"]].get(c) != v for c, v in row["check"].items()):
+                    out.append({"key": row["key"], "status": "missing"})
+                else:
+                    del self.rows[row["key"]]
+                    out.append({"key": row["key"], "status": "deleted"})
+                continue
+            row = dict(row, fields=row.get("fields", {}), create=row.get("create", False))
             lacking = [c for c in row["fields"] if c not in self.columns]
             if lacking:
                 out.append({"key": row["key"], "status": "error", "error": "нет колонок: " + ", ".join(lacking)})
@@ -71,6 +81,8 @@ class FakeScript:
             else:
                 status = "updated"
             self.rows[row["key"]].update(row["fields"])
+            if not self.legacy:
+                self.rows[row["key"]].update({c: v for c, v in (row.get("extra") or {}).items() if c in self.columns})
             out.append({"key": row["key"], "status": status})
         return {"ok": True, "results": out}
 
@@ -157,7 +169,7 @@ def test_a_row_per_position_with_every_column(table):
     items = orders.get_card(conn, mine)["items"]
     assert list(rows) == [sheet.key(mine, i["id"]) for i in items] and len(rows) == 2
     first = rows[sheet.key(mine, items[0]["id"])]
-    assert set(first) == set(sheet.SENT) and "Дата" not in first and "Примечание" not in first     # «Примечание» is the owner's; «Дата» is gone
+    assert set(first) == set(sheet.SENT + sheet.OPTIONAL) and "Дата" not in first and "Примечание" not in first     # «Примечание» is the owner's; «Дата» is gone
     assert sheet.COLUMNS[0] == "Дата счета" and "Дата" not in sheet.COLUMNS and "Дата" not in sheet.ASKED    # (the owner 2026-11-01)
     assert first == dict(first, **{"№ заказа MIM": "1234567", "Перемещение MIM": "26R-922352", "Артикул": "111",
                                    "Наименование": "Шина 111", "Кол-во": 4, "Цена MIM": 4000.0, "Сумма MIM": 16000.0, "Цена продажи": 5000.0,
@@ -506,6 +518,7 @@ def test_the_script_knows_the_columns_of_the_panel():
     for name in re.findall(r"'([^']+)'", re.search(r"var PANEL_COLUMNS = \[(.*?)\];", code, re.S).group(1)):
         assert name in sheet.COLUMNS, name
     assert "body.secret !== secret" in code and "LockService" in code and "row.create" in code and "typeof value === 'string'" in code
+    assert "row.delete" in code and "deleteRow" in code and "'absent'" in code and "row.extra" in code        # 2026-11-02
     doc = doc_text()
     for name in sheet.COLUMNS:
         assert name in doc, name
@@ -529,6 +542,184 @@ def test_the_webmim_button_puts_the_order_in_the_table(tmp_path, monkeypatch):
     assert orders.get_card(conn, mine)["webmim_id"] and conn.execute("SELECT 1 FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()
     assert len(fake.rows) == 2 and {r["№ заказа MIM"] for r in fake.rows.values()} == {orders.get_card(conn, mine)["webmim_number"] or orders.get_card(conn, mine)["webmim_id"]}
     assert "Записано в Google-таблицу: 2 стр." in events(conn, mine)
+
+
+# ---- only the orders on «Заказ оформлен» or later (the owner 2026-11-02) ----------------------------------------------------------------
+
+LATEST = "2026-10-23T13:00:00"
+
+
+def own_stage(conn, before_placed):
+    """A stage of the owner: last in the pipeline (after «Возврат»), or moved up to stand right before «Заказ оформлен»."""
+    mine = orders.add_stage(conn, "Свой этап", "#123456", "open", "", 0)
+    while before_placed and [s["id"] for s in orders.list_stages(conn)].index(mine) > [s["code"] for s in orders.list_stages(conn)].index("placed"):
+        orders.shift_stage(conn, mine, -1)
+    return orders.get_stage(conn, mine)
+
+
+def test_the_table_takes_an_order_by_the_position_of_its_stage(table):
+    conn, box, fake = table
+    before, after = own_stage(conn, True), own_stage(conn, False)
+    assert not orders._needs_placed(before, orders._placed_stage(conn))
+    early, late, fresh = card(conn), card(conn, client_name="Пётр"), card(conn, client_name="Олег")
+    orders.move_card(conn, early, before["id"], NOW, "owner")
+    orders.move_card(conn, late, after["id"], NOW, "owner")
+    sheet.enroll(conn, fresh, NOW)                                         # «Новый заказ»: an enroll of the caller puts nothing in
+    assert {r[0] for r in conn.execute("SELECT order_id FROM sheet_order")} == {late}
+    assert [sheet.listed(conn, c) for c in (early, late, fresh)] == [False, True, False]
+    for code in ("placed", "moving", "at_point", "oth", "return_given", "done", "cancel", "return"):
+        conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, code)["id"], fresh))
+        assert sheet.listed(conn, fresh), code
+    for code in ("new", "talk", "wait"):
+        conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, code)["id"], fresh))
+        assert not sheet.listed(conn, fresh), code
+
+
+def test_an_order_moved_back_has_its_rows_taken_out_and_placed_again_back(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    assert len(fake.rows) == 2
+    orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    deletes = [r for r in fake.data_posts()[-1]["rows"]]
+    assert fake.rows == {} and all(r["delete"] and set(r["check"]) == set(sheet.CHECK) for r in deletes) and len(deletes) == 2
+    assert events(conn, mine)[-1] == "Заказ на этапе до «Заказ оформлен»: строки убраны из Google-таблицы: 2 стр."
+    posts = len(fake.posts)
+    orders.update_card(conn, mine, {"comment": "позже"}, LATER, "owner")   # a change while it stands before: nothing goes
+    sheet.flush(conn, box, fake, LATER)
+    assert len(fake.posts) == posts and fake.rows == {}
+    orders.move_card(conn, mine, stage(conn, "placed")["id"], LATEST, "owner")
+    sheet.flush(conn, box, fake, LATEST)
+    assert len(fake.rows) == 2 and all(r["Этап"] == "Заказ оформлен" and r["Артикул"] for r in fake.rows.values())
+    assert events(conn, mine)[-1] == "Записано в Google-таблицу: 2 стр."
+    assert all(not r.get("_deleted") for r in json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0]).values())
+    orders.move_card(conn, mine, stage(conn, "cancel")["id"], LATEST, "owner", {"cancel_reason": "передумал"})
+    sheet.flush(conn, box, fake, LATEST)                                   # «Отмена» after placing stays in the table, «О»
+    assert len(fake.rows) == 2 and {r["Реализация"] for r in fake.rows.values()} == {"О"}
+
+
+def test_a_rewritten_row_is_not_taken_out_nor_made_again(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    first = sorted(fake.rows)[0]
+    fake.rows[first]["Артикул"] = "чужой"
+    orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    assert list(fake.rows) == [first]                                      # the owner's row stays, the other went
+    orders.move_card(conn, mine, stage(conn, "placed")["id"], LATEST, "owner")
+    sheet.flush(conn, box, fake, LATEST)
+    assert len(fake.rows) == 2 and fake.rows[first]["Артикул"] == "чужой"  # the other came back, the rewritten one is not made twice
+    assert not any(op.get("key") == first for op in fake.data_posts()[-1]["rows"])
+
+
+def test_a_script_that_cannot_take_rows_out_is_said_and_retried(table):
+    conn, box, fake = table
+    fake.legacy = True
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    assert len(fake.rows) == 2
+    assert any("не приняла 2 стр." in e and "новое развертывание Apps Script" in e for e in events(conn, mine))
+    assert conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0] == 1
+    fake.legacy = False                                                    # the owner deployed the new version
+    sheet.flush(conn, box, fake, "2026-10-23T12:40:00")
+    assert fake.rows == {} and conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0] == 0
+
+
+def test_an_order_before_keep_from_is_left_alone_when_moved_back(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    sheet.save_settings(conn, URL, True, NOW, "owner", keep_from="2026-10-24")
+    orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    sheet.flush(conn, box, fake, LATER, full=True)
+    assert len(fake.rows) == 2 and len(fake.data_posts()) == 1
+
+
+def test_the_webmim_button_without_the_move_puts_nothing_in(tmp_path, monkeypatch):
+    from test_order_placed import panel as placed_panel, ready
+    from tires_sync import webmim_create
+    app, conn, webmim, avito, box, client = placed_panel.__wrapped__(tmp_path, monkeypatch)
+    fake = FakeScript()
+    app.config.update(SHEET_HTTP=fake, SHEET_RUN=lambda work: work())
+    turn_on(conn, box)
+    mine = ready(conn, chat=False)
+    monkeypatch.setattr(webmim_create, "_to_placed", lambda *a: ("", "Этап не сменился (остался «Новый заказ»): проверка. Переведите заказ сами."))
+    assert post(client, "/orders/%d/webmim/create" % mine, "tok").status_code == 302
+    assert orders.get_card(conn, mine)["webmim_id"] and orders.get_card(conn, mine)["stage"]["code"] == "new"
+    assert conn.execute("SELECT 1 FROM sheet_order WHERE order_id = ?", (mine,)).fetchone() is None and fake.rows == {}
+    orders.move_card(conn, mine, stage(conn, "placed")["id"], LATER, "owner")          # moved by hand later: in
+    sheet.flush(conn, box, fake, LATER)
+    assert len(fake.rows) == 2
+
+
+# ---- «Аккаунт» (the owner 2026-11-02) ----------------------------------------------------------------------------------------------------
+
+def account(conn, name, label=""):
+    found = connections.create_account(conn, name, NOW, "owner")
+    connections.set_sheet_label(conn, found, label, NOW, "owner")
+    conn.commit()
+    return found
+
+
+def chat_of(conn, account_id, order_id, chat="c-1"):
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, peer_name, last_at, order_id) VALUES (?, ?, 'Иван', ?, ?)", (account_id, chat, NOW, order_id))
+    conn.commit()
+
+
+def test_the_account_column_is_the_label_of_the_order_s_account(table):
+    conn, box, fake = table
+    first, second, bare = account(conn, "Основной", "Павел"), account(conn, "Шина-Колесо", "Заман"), account(conn, "Третий")
+    by_chat, by_call, unlabelled, alone = placed(conn), placed(conn, client_name="Пётр"), placed(conn, client_name="Олег"), placed(conn, client_name="Ира")
+    chat_of(conn, second, by_chat)
+    chat_of(conn, first, by_chat, "c-2")                                   # a later chat of another account: the first one counts
+    conn.execute("INSERT INTO avito_call (account_id, call_id, call_at, order_id) VALUES (?, 7, ?, ?)", (first, NOW, by_call))
+    chat_of(conn, bare, unlabelled, "c-3")
+    labels = {c: {r["Аккаунт"] for r in sheet.rows_of(conn, c, NOW).values()} for c in (by_chat, by_call, unlabelled, alone)}
+    assert labels == {by_chat: {"Заман"}, by_call: {"Павел"}, unlabelled: {""}, alone: {""}}
+    sheet.flush(conn, box, fake, NOW)
+    assert {r["Аккаунт"] for k, r in fake.rows.items() if k.startswith("tires:%d:" % by_chat)} == {"Заман"}
+    assert all("Аккаунт" not in r for k, r in fake.rows.items() if k.startswith("tires:%d:" % alone))     # an empty label: never sent
+    assert all("Аккаунт" not in op["fields"] for p in fake.data_posts() for op in p["rows"])              # always apart, in «extra»
+    connections.set_sheet_label(conn, second, "Заман К.", LATER, "owner")
+    orders.update_card(conn, by_chat, {"comment": "x"}, LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    assert {r["Аккаунт"] for k, r in fake.rows.items() if k.startswith("tires:%d:" % by_chat)} == {"Заман К."}
+    assert events(conn, by_chat)[-1] == "Google-таблица обновлена: Аккаунт."
+    assert "Павел" not in str(orders.get_card(conn, by_call))              # only the table has it
+
+
+def test_the_label_is_typed_on_the_account_page(panel):
+    app, conn, box, fake, client = panel
+    mine = connections.create_account(conn, "Основной", NOW, "owner")
+    conn.commit()
+    assert "Подпись в таблице заказов" in client.get("/connections/avito/%d" % mine).get_data(as_text=True)
+    assert post(client, "/connections/accounts/%d/sheet-label" % mine, "tok", sheet_label="  Павел ").status_code == 302
+    assert connections.get_sheet_label(conn, mine) == "Павел" and 'value="Павел"' in client.get("/connections/avito/%d" % mine).get_data(as_text=True)
+    post(client, "/connections/accounts/%d/sheet-label" % mine, "tok", sheet_label="")
+    assert connections.get_sheet_label(conn, mine) == ""
+    with pytest.raises(ValueError):
+        connections.set_sheet_label(conn, mine, "x" * 41, NOW, "owner")
+
+
+def test_a_sheet_without_the_account_column_takes_the_rows_and_the_check_warns(table):
+    conn, box, fake = table
+    fake.columns = [c for c in fake.columns if c != "Аккаунт"]
+    labelled = account(conn, "Основной", "Павел")
+    mine = placed(conn)
+    chat_of(conn, labelled, mine)
+    sheet.flush(conn, box, fake, NOW)
+    assert len(fake.rows) == 2 and all("Аккаунт" not in r for r in fake.rows.values())
+    assert events(conn, mine) == ["Записано в Google-таблицу: 2 стр."]
+    said = sheet.check(conn, box, fake)
+    assert said.startswith("Таблица отвечает") and "Нет колонки «Аккаунт»" in said
+    fake.columns.remove("ПВЗ")
+    with pytest.raises(sheet.SheetError, match="нет колонок: ПВЗ.$"):          # a needed column is an error, «Аккаунт» never is
+        sheet.check(conn, box, fake)
 
 
 def test_an_update_carries_the_cells_that_identify_the_row_and_a_rewritten_row_is_left_alone(table):

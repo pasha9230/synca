@@ -509,6 +509,29 @@ def set_contact_name(conn, account_id: int, name: str, now: str, author: str) ->
     set_config(conn, "avito", account_id, config, now, author)
 
 
+SHEET_LABEL_MAX = 40
+
+
+def get_sheet_label(conn, account_id: int) -> str:
+    """«Подпись в таблице заказов» (the owner 2026-11-02): what the column «Аккаунт» of the Google table says for this account's orders
+    (order_sheet.account_label); empty: the column stays empty."""
+    return str(get_config(conn, "avito", account_id).get("sheet_label") or "")
+
+
+def set_sheet_label(conn, account_id: int, label: str, now: str, author: str) -> None:
+    label = " ".join(str(label or "").split())
+    if len(label) > SHEET_LABEL_MAX:
+        raise ValueError("Подпись в таблице заказов: не длиннее %d знаков." % SHEET_LABEL_MAX)
+    if any(ord(ch) < 32 for ch in label) or label.startswith("="):
+        raise ValueError("Подпись в таблице заказов: обычный текст, без «=» в начале.")
+    config = get_config(conn, "avito", account_id)
+    if label:
+        config["sheet_label"] = label
+    else:
+        config.pop("sheet_label", None)
+    set_config(conn, "avito", account_id, config, now, author)
+
+
 def get_responsible(conn, account_id: int) -> str:
     """«Ответственный» of the account (the owner 2026-10-29): who answers for its new orders (a chat, a call, by hand); '' = as before."""
     return str(get_config(conn, "avito", account_id).get("responsible") or "")
