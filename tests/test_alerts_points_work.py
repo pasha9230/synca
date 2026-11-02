@@ -177,3 +177,29 @@ def test_a_client_the_owner_or_the_partner_took_from_the_point_is_told_as_usual(
     assert lone not in {r.get("chat_row") for r in olga}
     gamma = order_alerts.page_rows(conn, "gamma1", NOW)                         # the point's rows: no «Срочно ответить» of its account
     assert lone not in {r["chat_row"] for r in gamma if r.get("urgent")}
+
+
+def test_an_order_taken_from_the_point_brings_back_its_client_words_of_every_kind(tmp_path):
+    conn, pid = setup(tmp_path)
+    theirs = card(conn, "gamma1", pid)                                         # an order of the point's account (a), taken by the owner
+    chat(conn, POINT_ACCOUNT, theirs["id"], peer="t")
+    wrote(conn, theirs["id"])
+    working = card(conn, "gamma1", pid)                                        # «Клиент написал» written at the point (POINT_WROTE_AUTHOR)
+    row = chat(conn, OWN_ACCOUNT, working["id"], peer="w", unread=1)
+    message(conn, row, "2026-10-15T11:30:00")
+    on_stage(conn, working["id"], "at_point")
+    chats._note_client_wrote(conn, row, NOW)
+    on_stage(conn, working["id"], "done")
+    of_chat = card(conn, "gamma1", pid)                                        # an order of a chat the partner answers
+    on_stage(conn, of_chat["id"], "oth")
+    chats.set_responsible(conn, chat(conn, OWN_ACCOUNT, of_chat["id"], peer="c"), "partner1", NOW, "owner")
+    wrote(conn, of_chat["id"])
+    conn.commit()
+    for login in STAFF:
+        assert {theirs["id"], working["id"], of_chat["id"]} & seen(conn, login) == {of_chat["id"]}
+    orders.update_card(conn, theirs["id"], {"responsible": "owner"}, NOW, "partner1")
+    orders.update_card(conn, working["id"], {"responsible": "zamantyres"}, NOW, "owner")
+    for login in STAFF:
+        assert {theirs["id"], working["id"], of_chat["id"]} <= seen(conn, login)
+        assert order_alerts.counts(conn, login)["yellow"] == 3
+    assert theirs["id"] not in seen(conn, "olga")                               # the chats' manager: the point's account stays the point's

@@ -154,7 +154,7 @@ def _quiet(conn, login: str, staff: bool) -> dict:
         return {"all": every, "words": set(), "chats": chats, "on": False, "taken": set(), "taken_chats": set()}
     taken, taken_chats = order_points.office_taken(conn)
     return {"all": every - taken, "words": order_points.work_orders(conn) - taken, "chats": chats - taken_chats, "on": True,
-            "taken": taken, "taken_chats": taken_chats}
+            "taken": taken, "taken_chats": taken_chats & chats}            # urgent_rows has the other chats already
 
 
 def _hidden(event: dict, quiet: dict) -> bool:
