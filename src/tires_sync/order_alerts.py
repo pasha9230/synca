@@ -132,13 +132,22 @@ def point_words(event: dict) -> bool:
     return event.get("kind") == "chat" and level_of(event) != "red" and str(event.get("text") or "").startswith(CLIENT_WROTE)
 
 
+POINT_WORK_QUIET = ("owner", "partner")          # the owner 2026-11-03 «мне и Заману»: the chats' manager still hears of them (the lead, B)
+
+
+def _quiet_of_point_work(conn, login: str) -> bool:
+    """The owner and the partner: the client's words and «Срочно ответить» of the orders the points work are no alerts for them."""
+    from . import users
+    return users.get_role(conn, login)["role"] in POINT_WORK_QUIET
+
+
 def counts(conn, login: str) -> Dict[str, int]:
     """How many open alerts of every colour this user has (as page_rows, without the orders of the points' accounts nor the client's words
-    of the orders the points work for the staff)."""
+    of the orders the points work for the owner and the partner)."""
     from . import order_points
     staff = _staff(conn, login)
     theirs = order_points.account_orders(conn) if staff else set()
-    working = order_points.work_orders(conn) if staff else set()
+    working = order_points.work_orders(conn) if staff and _quiet_of_point_work(conn, login) else set()
     result = {level: 0 for level in ALERT_LEVELS}
     for event in open_alerts(conn, login):
         if event["order_id"] not in theirs and not (event["order_id"] in working and point_words(event)):
@@ -153,15 +162,16 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
     `now` (the panel's local time): a green alert older than GREEN_DAYS days is not shown either; nothing is deleted.
     The chats without an order whose client waits (chat_rows) are rows too; with `now` also «Срочно ответить» (urgent_rows, in place of the
     chat's «Клиент написал»; a due task is no row here since 2026-10-31 — it is «Задачи»'s); for the partner the orders a point named that are not
-    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts; nor are the
-    client's words (point_words) and «Срочно ответить» of an order the point works now (order_points.work_orders, the owner 2026-11-03).
+    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts; for the owner and
+    the partner (_quiet_of_point_work) nor are the client's words (point_words) and «Срочно ответить» of an order the point works now
+    (order_points.work_orders, the owner 2026-11-03).
     `staff` False: the owner or the partner working as a point (panel/common.current_user) sees the point's; `own_prefix`: the start of their
     author «<name> за точку «» — what they pressed as a point is their own record too."""
     from . import order_points
     border = (datetime.fromisoformat(now) - timedelta(days=GREEN_DAYS)).isoformat(timespec="seconds") if now else ""
     staff = _staff(conn, login) if staff is None else staff
     theirs = order_points.account_orders(conn) if staff else set()
-    working = order_points.work_orders(conn) if staff else set()
+    working = order_points.work_orders(conn) if staff and _quiet_of_point_work(conn, login) else set()
     rows, folded = [], {}
     for event in open_alerts(conn, login):
         if event["order_id"] in theirs or (event["order_id"] in working and point_words(event)):

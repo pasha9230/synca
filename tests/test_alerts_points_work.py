@@ -1,6 +1,7 @@
 """«Клиент написал» and «Срочно ответить» of the points are not the owner's nor the partner's (the owner 2026-11-03): neither of the orders and
-chats of a point's Avito account (2026-10-26) nor of an order the point works now («Товар на точке», «На ОТХ», «Возврат передан»,
-«Отправлен») and its chats. The failures, «после закрытия», the calls, the point's own bell and the work «за точку» stay as they were."""
+chats of a point's Avito account (2026-10-26, for every staff role) nor of an order the point works now («Товар на точке», «На ОТХ»,
+«Возврат передан», «Отправлен») and its chats (the owner and the partner only: the chats' manager still hears of them, the lead's B). The
+failures, «после закрытия», the calls, the point user's rows and the work «за точку» stay as they were."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -19,6 +20,7 @@ WROTE = "Клиент написал: Когда можно забрать?"
 def setup(tmp_path):
     conn, box = env(tmp_path)
     users.add_user(conn, "zamantyres", "пароль-для-замана-1", NOW, role="owner")
+    users.add_user(conn, "olga", "пароль-для-ольги-1", NOW, role="chats")      # the chats' manager: hears of the points' work (the lead, B)
     pid = point(conn, channel="panel")
     users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
     store.set_state(conn, order_alerts.URGENT_START_KEY, "2026-10-01T00:00:00")
@@ -49,7 +51,7 @@ def test_the_orders_and_chats_of_a_point_account_stay_away_from_both_owners_and_
     wrote(conn, theirs["id"])
     lone = chat(conn, POINT_ACCOUNT, None, peer="x", unread=1)                 # a chat of the point's account without an order
     message(conn, lone, "2026-10-15T10:00:00", text="Есть шины?")
-    for login in STAFF:
+    for login in STAFF + ("olga",):
         rows = order_alerts.page_rows(conn, login, NOW)
         assert theirs["id"] not in seen(conn, login) and lone not in {r.get("chat_row") for r in rows}
         assert order_alerts.counts(conn, login)["yellow"] == 0
@@ -66,8 +68,9 @@ def test_the_client_words_of_an_order_the_point_works_are_the_points_only(tmp_pa
     for login in STAFF:
         assert mine["id"] not in seen(conn, login) and order_alerts.order_levels(conn, login, NOW).get(mine["id"]) == "green"
         assert order_alerts.counts(conn, login)["yellow"] == 0
-    assert mine["id"] in seen(conn, "gamma1")                                   # the point's bell: as before
-    assert mine["id"] in seen(conn, "owner", staff=False)                       # the owner working as the point sees the point's
+    assert mine["id"] in seen(conn, "olga") and order_alerts.counts(conn, "olga")["yellow"] == 1      # the chats' manager: as before
+    assert mine["id"] in seen(conn, "gamma1")                                   # the point user's rows: not touched by this rule
+    assert mine["id"] in seen(conn, "owner", staff=False)                       # the owner working as the point: the point's rows
 
 
 def test_failures_after_closing_calls_and_other_orders_stay_with_the_staff(tmp_path):
@@ -96,10 +99,11 @@ def test_failures_after_closing_calls_and_other_orders_stay_with_the_staff(tmp_p
         assert order_alerts.counts(conn, login)["red"] == 1
 
 
-def test_srochno_otvetit_of_an_order_the_point_works_is_not_the_staffs(tmp_path):
+@pytest.mark.parametrize("code", points.WORK_STAGES)
+def test_srochno_otvetit_of_an_order_the_point_works_is_not_the_owners_nor_the_partners(tmp_path, code):
     conn, pid = setup(tmp_path)
     there = card(conn, "owner", pid)
-    on_stage(conn, there["id"], "at_point")
+    on_stage(conn, there["id"], code)
     late = chat(conn, OWN_ACCOUNT, there["id"], peer="a")
     message(conn, late, "2026-10-15T10:30:00")
     before = card(conn, "owner", pid)
@@ -110,6 +114,7 @@ def test_srochno_otvetit_of_an_order_the_point_works_is_not_the_staffs(tmp_path)
         urgent = {r["chat_row"] for r in order_alerts.page_rows(conn, login, NOW) if r.get("urgent")}
         assert urgent == {waits}
         assert order_alerts.order_levels(conn, login, NOW)[there["id"]] == "green"            # no red dot of «Срочно ответить»
+    assert {r["chat_row"] for r in order_alerts.page_rows(conn, "olga", NOW) if r.get("urgent")} == {late, waits}
     on_stage(conn, there["id"], "done")                                       # the point's work is over: the office's chat again
     assert late in {r["chat_row"] for r in order_alerts.page_rows(conn, "owner", NOW) if r.get("urgent")}
 
