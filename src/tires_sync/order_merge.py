@@ -325,13 +325,13 @@ def check(conn, ids, stage_id) -> dict:
         raise MergeError("Нечего объединять: все выбранные заказы закрыты или с продажей — их шины не переходят.")
     if len({c["deal_kind"] for c in moving}) > 1:
         raise MergeError("Сделки «Из наличия точки» объединяются только с такими же.")
-    _why_not_intercity(cards)
+    _why_not_intercity(moving)
     return {"cards": cards, "moving": moving, "ref": [c for c in cards if _ref(c)], "stage": stage, "point_id": places.pop() if places else None}
 
 
 def _why_not_intercity(cards: List[dict]) -> None:
     """«Доставка в другой город» (the owner 2026-11-02): such orders merge only with each other and only to the same city by the same
-    transport company; an order to another city and an ordinary one never."""
+    transport company; an order to another city and an ordinary one never. Of the sources whose tyres move: one «справочно» ships nothing."""
     from . import order_intercity
     marks = [order_intercity.on(c) for c in cards]
     if any(marks) and not all(marks):
@@ -344,8 +344,9 @@ def _why_not_intercity(cards: List[dict]) -> None:
 
 def _carry_intercity(conn, cards: List[dict], new: int, now: str, author: str) -> None:
     """The new order of orders to another city is one too (the owner 2026-11-02): their city and company, the track number of the only one or
-    of the first that has it (another one is written into the journal), copies of the labels of all of them. The sources keep their own mark,
-    fields and labels: «Разъединить» leaves them as they were."""
+    of the first that has it (another one is written into the journal), copies of the labels of all of them — of the sources whose tyres
+    move (`cards`): a source «справочно» keeps its own shipment. The sources keep their own mark, fields and labels: «Разъединить» leaves
+    them as they were."""
     first = cards[0]["intercity"]
     tracks = [(c, c["intercity"]["track"]) for c in cards if c["intercity"]["track"]]
     track = tracks[0][1] if tracks else ""
@@ -390,9 +391,9 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
                   "responsible": orders._row(conn, base["id"])["responsible"]}       # the source's own, not «created_by» in its place
         new = orders.create_card(conn, fields, now, author, require_contact=False, commit=False, stage=stage)   # no rule, no message
         from . import order_intercity
-        intercity = order_intercity.on(cards[0])                        # all of them or none (check)
+        intercity = order_intercity.on(moving[0])                       # all of them or none (check)
         if intercity:
-            _carry_intercity(conn, cards, new, now, author)             # before the reservation: such an order has none
+            _carry_intercity(conn, moving, new, now, author)             # before the reservation: such an order has none
         merge_id = conn.execute("INSERT INTO order_merge (into_order, at, author) VALUES (?,?,?)", (new, now, author)).lastrowid
         cancel = next((s for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
         if cancel is None:

@@ -159,3 +159,31 @@ def test_the_owner_confirms_a_disputed_owners_word_as_the_courier(tmp_path, tg):
     assert code(conn, card) == "done" and intercity.was_shipped(conn, orders.get_card(conn, card))
     assert "передан курьеру ТК" in reply and "подтвердил владелец" in reply
     assert len(track_tasks(conn, card)) == 1
+
+
+def test_a_source_for_reference_gives_no_track_nor_labels_and_does_not_block(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "at_point", T)
+    _to_city(conn, old, track="ПЭК-OLD", labels=("old.pdf",))
+    orders.move_card(conn, old, _stage(conn, "done"), NOW, "o")                  # moved by hand: «справочно», never shipped
+    a = _second(conn)
+    _to_city(conn, a, labels=("a.pdf",))
+    new = _merge(conn, [old, a], client_from=a)
+    assert intercity.of(conn, new) == {"on": True, "city": "Псков", "carrier": "ПЭК", "track": ""}
+    assert [n for n, _d in _labels(conn, new)] == ["a.pdf"]
+    assert intercity.of(conn, old)["track"] == "ПЭК-OLD" and [n for n, _d in _labels(conn, old)] == ["old.pdf"]
+    ordinary = card_at(conn, "at_point", T)                                      # an ordinary order for reference does not block either
+    orders.move_card(conn, ordinary, _stage(conn, "done"), NOW, "o")
+    b, c = _second(conn, goods="3"), _second(conn, goods="4")
+    _to_city(conn, b)
+    _to_city(conn, c)
+    assert intercity.of(conn, _merge(conn, [ordinary, b, c], client_from=b))["on"]
+
+
+def test_yes_to_the_question_of_an_order_marked_to_another_city_meanwhile_issues_nothing(tmp_path):
+    from test_reserve_ask_point import at, say, two
+    conn, cid, deliver = two(tmp_path)
+    say(conn, "выдал", deliver, at(12))
+    _to_city(conn, cid)
+    assert "в другой город" in say(conn, "да", deliver, at(12, 1), "m2")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "at_point"
