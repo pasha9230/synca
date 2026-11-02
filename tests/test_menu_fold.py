@@ -57,3 +57,12 @@ def test_navfold_touches_storage_only_inside_try():
     lines = [line for line in js.splitlines() if "localStorage" in line and not line.lstrip().startswith("//")]
     assert lines and all("try {" in line for line in lines)
     assert all('"%s"' % key in js for key in SECTIONS)
+
+
+def test_folding_menu_leaves_the_page_variables_alone(tmp_path):
+    """The menu captures its links without a page-level variable: /catalog and /shares/new get their own `items` (review 2026-11-02)."""
+    client = make_app(tmp_path).test_client()
+    login(client)
+    assert 'aria-label="Выбрать TS1"' in page(tmp_path, "/catalog", client)   # a product row of the table
+    shared = client.post("/shares/new", data={"csrf": "tok", "g": "TS1"})   # not in this unload: its own `items` is empty, no card of items
+    assert shared.status_code == 200 and "Позиции в ссылке:" not in shared.get_data(as_text=True)

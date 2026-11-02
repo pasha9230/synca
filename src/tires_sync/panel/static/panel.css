@@ -94,7 +94,7 @@ hr{border:0;border-top:1px solid var(--gray-200);margin:var(--s-4) 0}
 .sb-fold .sb-label{flex:1}
 .sb-fold:hover .sb-label{color:var(--gray-700)}
 .sb-fold:focus-visible{outline:0;box-shadow:var(--ring)}
-.sb-chev{width:14px;height:14px;margin-right:var(--s-3);color:var(--gray-400);transform:rotate(90deg);transition:transform .15s ease}
+svg.sb-chev{width:14px;height:14px;margin-right:var(--s-3);color:var(--gray-400);transform:rotate(90deg);transition:transform .15s ease}
 .sb-fold[aria-expanded="false"] .sb-chev{transform:none}
 .sb-items{display:flex;flex-direction:column;gap:2px}
 .sb-group.is-closed .sb-items{display:none}

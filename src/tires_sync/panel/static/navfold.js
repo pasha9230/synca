@@ -11,7 +11,7 @@
   };
   read().forEach(function (k) { root.classList.add("navc-" + k); });
   document.addEventListener("DOMContentLoaded", function () {
-    var closed = read();
+    var closed = document.querySelector("[data-tour-root]") ? [] : read();   // «Обзор» points at menu links: all sections open while it runs
     document.querySelectorAll(".sb-group[data-sec]").forEach(function (g) {
       var k = g.getAttribute("data-sec"), btn = g.querySelector(".sb-fold");
       if (!btn) return;
