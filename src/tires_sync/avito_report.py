@@ -15,6 +15,7 @@ KEY = "avito_report:%d"
 EXAMPLES = 5
 TAGS = re.compile(r"<[^>]+>")
 PAYMENT = "пополнить аванс"
+SUCCESS = re.compile(r"(?i)^(объявление (успешно )?(активировалось|активировано|опубликовано|размещено|обновлено)|изменения (успешно )?применены)\.?$")
 
 
 def clean(text: str) -> str:
@@ -23,6 +24,16 @@ def clean(text: str) -> str:
 
 def kind_of(text: str) -> str:
     return "payment" if PAYMENT in text.lower() else "error"
+
+
+def is_success(text: str) -> bool:
+    """Avito's word that all went well («Объявление активировалось», the owner 2026-11-03): no reason for the home page."""
+    return bool(SUCCESS.match(clean(text)))
+
+
+def message_text(message: dict) -> str:
+    """«title: description», without the empty part (no stray «: »)."""
+    return ": ".join(part for part in (str(message.get("title") or "").strip(), str(message.get("description") or "").strip()) if part)
 
 
 def summarize(items: List[dict]) -> Dict[str, object]:
@@ -34,9 +45,7 @@ def summarize(items: List[dict]) -> Dict[str, object]:
         counts[status] = counts.get(status, 0) + 1
         if status == "active":
             continue
-        text = clean("; ".join(
-            "%s: %s" % (m.get("title", ""), m.get("description", "")) if m.get("description") else str(m.get("title", ""))
-            for m in item.get("messages") or []))
+        text = clean("; ".join(part for part in (message_text(m) for m in item.get("messages") or []) if part and not is_success(part)))
         if not text:
             continue
         group = groups.setdefault(text, {"text": text, "kind": kind_of(text), "count": 0, "examples": []})

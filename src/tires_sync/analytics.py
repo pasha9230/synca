@@ -233,29 +233,65 @@ def money(conn, start: str, end: str) -> dict:
 
 
 WAIT_ALERT_MINUTES = 15                            # a client waiting longer than this is «горит» on the dashboard
+WAIT_DAYS = 7                                      # a client silent for longer is not waiting any more (as «Срочно ответить», order_alerts)
+POINT_WORK = ("at_point", "shipped", "oth", "return_given")   # the stages where the order is the point's work: its chat is the point's to answer
+
+
+def working_minutes(since: datetime, until: datetime, hours) -> int:
+    """The minutes of working time between `since` and `until` (Moscow): the clock runs only between the working `hours`, every day (the
+    clock of «Срочно ответить», order_manager.take_deadline)."""
+    start, end = hours
+    total, day = timedelta(0), since.replace(hour=0, minute=0, second=0, microsecond=0)
+    while day <= until:
+        opens, closes = max(since, day + timedelta(hours=start)), min(until, day + timedelta(hours=end))
+        if closes > opens:
+            total += closes - opens
+        day += timedelta(days=1)
+    return int(total.total_seconds() // 60)
 
 
 def day_numbers(conn, now: datetime, with_money: bool = True, without_points: bool = False) -> dict:
     """The figures of the day dashboard at `now` (Moscow, naive): the orders in work, overdue and new today (the board's own summary), the
     money of today and of the last 7 days (`money`, the report of the orders), the chats unread and the clients waiting for an answer
-    (`chats.waiting_minutes`, the timer of the chats page); `without_points`: not those of the points' accounts (the staff's dashboard, the
-    owner 2026-10-26). Read only; no formula of its own."""
-    from . import chats, order_points
+    (`waiting`: an open chat whose client waits for our answer and wrote last within WAIT_DAYS and after its account was first read; the
+    minutes of working time since their first message after our answer, as «Срочно ответить»; the owner 2026-11-03); `without_points`: not those of the points' accounts nor of the orders on
+    the point's stages (the staff's dashboard, the owner 2026-10-26, 2026-11-03). Read only; no formula of its own."""
+    from . import chats, order_manager, order_points, store
     summary = orders.board(conn, now)["summary"]
     today = now.date()
     week_start = (today - timedelta(days=6)).isoformat()
     waiting = []
     enabled = {r[0] for r in conn.execute("SELECT id FROM account WHERE chats_enabled = 1")}     # the chats the panel reads (as unread_total)
+    skip_orders = set()
     if without_points:
         enabled -= {r[0] for r in conn.execute(order_points.POINT_ACCOUNTS)}
-    rows = [c for c in chats.list_chats(conn) if c["account_id"] in enabled and c["status"] == "open"]
+        skip_orders = {r[0] for r in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s)"
+                                                  % ",".join("?" * len(POINT_WORK)), POINT_WORK)}
+    rows = [c for c in chats.list_chats(conn) if c["account_id"] in enabled and c["status"] == "open" and c.get("order_id") not in skip_orders]
     starts = chats.wait_starts(conn, [c["id"] for c in rows])                  # as the chats page: Avito's auto-answer is no answer
+    hours = order_manager.duty_settings(conn)["hours"]
+    oldest = (now - timedelta(days=WAIT_DAYS)).isoformat(timespec="seconds")
+    baselines, latest = {}, {}
+    ids = [c["id"] for c in rows]
+    for part in range(0, len(ids), 500):                                     # the client's last message: they still write (as order_alerts.chat_rows)
+        latest.update(conn.execute("SELECT chat_row, MAX(at) FROM avito_message WHERE direction = 'in' AND kind NOT IN ('system', 'deleted') "
+                                   "AND chat_row IN (%s) GROUP BY chat_row" % ",".join("?" * len(ids[part:part + 500])), ids[part:part + 500]).fetchall())
     for chat in rows:
-        if chat["id"] in starts:
-            chat["wait_since"] = starts[chat["id"]]
-        minutes = chats.waiting_minutes(chat, now)
-        if minutes is not None:
-            waiting.append({"id": chat["id"], "peer_name": chat["peer_name"], "minutes": minutes, "responsible": chat.get("responsible", "")})
+        since = starts[chat["id"]] if chat["id"] in starts else (chat.get("last_at") if chat.get("last_dir") == "in" else None)
+        if not since:
+            continue
+        since = str(since)[:19]
+        last = str(latest.get(chat["id"]) or (chat.get("last_at") if chat.get("last_dir") == "in" else "") or since)[:19]
+        if chat["account_id"] not in baselines:
+            baselines[chat["account_id"]] = store.get_state(conn, "chats_baseline_%d" % chat["account_id"]) or ""
+        if last < oldest or last < baselines[chat["account_id"]]:            # the past: not a client waiting now
+            continue
+        since = max(since, baselines[chat["account_id"]])                    # before the account was first read is not counted
+        try:
+            minutes = working_minutes(datetime.fromisoformat(since), now, hours)
+        except ValueError:
+            continue
+        waiting.append({"id": chat["id"], "peer_name": chat["peer_name"], "minutes": minutes, "responsible": chat.get("responsible", "")})
     waiting.sort(key=lambda w: -w["minutes"])
     return {"orders_open": summary["open"], "orders_overdue": summary["overdue"], "orders_new_today": summary["new_today"],
             "money_today": money(conn, today.isoformat(), today.isoformat()) if with_money else None,         # not counted for whom it is not shown
