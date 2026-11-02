@@ -317,5 +317,15 @@ def test_give_reads_the_number_exactly_as_issued_does(tmp_path, tail):
         (mgr.order_number("выдал " + tail), mgr.is_command(conn, "выдал " + tail)), tail
 
 
+def test_the_owner_confirms_a_disputed_give(tmp_path):
+    """«отдал» without a number waits in «Входящие»; the owner's number closes the order as for «выдал»."""
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5284060, "at_point")
+    mgr.dispatch(conn, "g", "111", "отдал", None, NOW)
+    [item] = mgr.list_inbox(conn)
+    mgr.confirm(conn, item["id"], "5284060", NOW, "owner")
+    assert _code(conn, card) == "done"
+
+
 def test_the_texts_for_the_points_name_give():
     assert "отдал" in mgr.HINT
