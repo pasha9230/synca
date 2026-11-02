@@ -84,9 +84,31 @@ def get_client(conn, client_id) -> dict:
     client["chats"] = [dict(zip(("id", "account_id", "peer_name", "item_title", "last_at", "order_id", "how"), r)) for r in conn.execute(
         "SELECT a.id, a.account_id, a.peer_name, a.item_title, a.last_at, a.order_id, l.how FROM client_chat l JOIN avito_chat a ON a.id = l.chat_row "
         "WHERE l.client_id = ? ORDER BY a.last_at DESC", (client_id,))]
+    client["deleted_orders"] = deleted_orders(conn, client_id)                  # only for the history (purchases_view): nothing else counts them
     from . import calls                                                          # the calls through the Avito substitute numbers
     client["calls"] = calls.calls_of_client(conn, client_id)
     return client
+
+
+def deleted_orders(conn, client_id) -> List[dict]:
+    """The client's orders lying in «Удалённые» (trash.delete_order keeps the link client_order): read from the record of the deletion, newest
+    first, each with its positions as they were deleted. A link whose order is neither here nor in «Удалённые» gives nothing; a restored order
+    is a live one again (client["orders"]). The keys of client["orders"] plus "items" and "deleted_at"."""
+    found: Dict[int, dict] = {}
+    for order_id, how, data, deleted_at in conn.execute(
+            "SELECT l.order_id, l.how, r.data, r.deleted_at FROM client_order l JOIN deleted_record r ON r.kind = 'order' AND r.record_id = l.order_id "
+            "AND r.restored_at IS NULL WHERE l.client_id = ? AND NOT EXISTS (SELECT 1 FROM order_card c WHERE c.id = l.order_id) ORDER BY r.id",
+            (client_id,)):
+        try:
+            saved = json.loads(data or "{}")
+            card = saved["card"]
+        except (TypeError, ValueError, KeyError):
+            continue
+        stage = conn.execute("SELECT name, kind FROM order_stage WHERE id = ?", (card.get("stage_id"),)).fetchone() or ("", "")
+        found[order_id] = {"id": order_id, "client_name": card.get("client_name") or "", "client_phone": card.get("client_phone") or "",
+                           "created_at": card.get("created_at") or "", "stage": stage[0], "kind": stage[1], "how": how,
+                           "point_id": card.get("point_id"), "items": saved.get("order_item") or [], "deleted_at": deleted_at}
+    return sorted(found.values(), key=lambda o: o["id"], reverse=True)
 
 
 def card_view(conn, client: dict, accounts: Dict[int, str], bought: Optional[float], chat_links: bool, whole: bool = True) -> dict:
@@ -243,21 +265,45 @@ def inquiries(conn, client_id) -> List[dict]:
 
 def purchases_view(conn, client: dict) -> List[dict]:
     """The client's orders as purchases, newest first: what (the positions with the size read from the name), how many, at what price of
-    sale, the sums, when, the point, the stage; `won`: bought (a stage «успешный»), `lost`: refused. The purchase price is never here."""
+    sale, the sums, when, the point, the stage; `won`: bought (a stage «успешный»), `lost`: refused. The purchase price is never here.
+    Kept for the history (the owner 2026-11-02): a position removed from its order (order_item_removed) and an order in «Удалённые»
+    (client["deleted_orders"]) are shown with `deleted`; they never count in a `total`, a deleted order is neither won nor lost."""
     from .order_wait import SIZE_IN_TITLE                                   # the orders read the clients: imported here
-    ids = [o["id"] for o in client["orders"]]
+    gone = client.get("deleted_orders") or []
+    ids = [o["id"] for o in client["orders"]] + [o["id"] for o in gone]
     if not ids:
         return []
     marks = ",".join("?" * len(ids))
     points = dict(conn.execute("SELECT c.id, p.name FROM order_card c JOIN point p ON p.id = c.point_id WHERE c.id IN (%s)" % marks, ids))
-    items: Dict[int, List[dict]] = defaultdict(list)
-    for order_id, name, qty, unit in conn.execute("SELECT order_id, name, qty, sale_unit FROM order_item WHERE order_id IN (%s) ORDER BY id" % marks, ids):
+    names = dict(conn.execute("SELECT id, name FROM point"))
+
+    def line(name, qty, unit, deleted: bool) -> dict:
         size = SIZE_IN_TITLE.search(name or "")
-        items[order_id].append({"name": name, "size": "%s/%s R%s" % size.groups() if size else "", "qty": qty, "unit": unit,
-                                "sum": round(qty * unit, 2)})
-    return [{"id": o["id"], "created": o["created_at"], "stage": o["stage"], "won": o["kind"] == "won", "lost": o["kind"] == "lost",
-             "point": points.get(o["id"], ""), "items": items[o["id"]], "total": round(sum(i["sum"] for i in items[o["id"]]), 2)}
-            for o in client["orders"]]
+        qty, unit = int(qty or 0), float(unit or 0)
+        return {"name": name, "size": "%s/%s R%s" % size.groups() if size else "", "qty": qty, "unit": unit, "sum": round(qty * unit, 2),
+                "deleted": deleted}
+
+    items: Dict[int, List[dict]] = defaultdict(list)
+    live: Dict[int, set] = defaultdict(set)
+    for item_id, order_id, name, qty, unit in conn.execute(
+            "SELECT id, order_id, name, qty, sale_unit FROM order_item WHERE order_id IN (%s) ORDER BY id" % marks, ids):
+        items[order_id].append(line(name, qty, unit, False))
+        live[order_id].add(item_id)
+    for o in gone:
+        for row in o["items"]:
+            items[o["id"]].append(line(row.get("name"), row.get("qty"), row.get("sale_unit"), True))
+            live[o["id"]].add(row.get("id"))
+    for item_id, order_id, name, qty, unit in conn.execute(
+            "SELECT item_id, order_id, name, qty, sale_unit FROM order_item_removed WHERE order_id IN (%s) ORDER BY id" % marks, ids):
+        if item_id not in live[order_id]:                                   # a position put back since (the same id) is shown once, as it is now
+            items[order_id].append(line(name, qty, unit, True))
+            live[order_id].add(item_id)
+    views = [{"id": o["id"], "created": o["created_at"], "stage": o["stage"], "won": o["kind"] == "won", "lost": o["kind"] == "lost",
+              "deleted": False, "point": points.get(o["id"], ""), "items": items[o["id"]],
+              "total": round(sum(i["sum"] for i in items[o["id"]] if not i["deleted"]), 2)} for o in client["orders"]]
+    views += [{"id": o["id"], "created": o["created_at"], "stage": o["stage"], "won": False, "lost": False, "deleted": True,
+               "point": names.get(o["point_id"], "") if o["point_id"] else "", "items": items[o["id"]], "total": 0.0} for o in gone]
+    return sorted(views, key=lambda v: v["id"], reverse=True)
 
 
 def list_clients(conn, query: str = "", limit: int = 200, fold: bool = False, tag: str = "") -> List[dict]:
