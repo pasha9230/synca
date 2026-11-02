@@ -114,7 +114,7 @@ def load(folder: Path = DIR) -> list:
         try:
             if not match or int(match.group(1)) < 1:
                 raise BadFile("the name must be NNNN.md, from 0001")
-            found.append(parse(path.read_text(encoding="utf-8"), int(match.group(1))))
+            found.append(parse(path.read_text(encoding="utf-8-sig"), int(match.group(1))))
         except (BadFile, OSError, UnicodeDecodeError) as err:
             log.warning("whatsnew: %s skipped: %s", path.name, err)
     return sorted(found, key=lambda u: u["number"], reverse=True)
@@ -152,7 +152,7 @@ def has_new(conn, login: str, role: str, updates) -> bool:
     if not login or not role:
         return False
     seen = _seen(conn, login).get(role, 0)
-    return latest(updates, role) > (seen if isinstance(seen, int) else 0)
+    return latest(updates, role) > (seen if isinstance(seen, int) and not isinstance(seen, bool) else 0)
 
 
 def mark_seen(conn, login: str, role: str, updates, now: str) -> None:

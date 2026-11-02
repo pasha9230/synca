@@ -220,3 +220,34 @@ def test_the_shipped_updates_light_the_dot_of_the_office(tmp_path):
     client = make_app(tmp_path).test_client()
     login(client)
     assert dot_on(client, "/") and "Обновление панели №1" in page(client) and not dot_on(client, "/")
+
+
+def test_a_file_with_a_bom_and_windows_line_ends_reads(folder):
+    (folder / "0003.md").write_bytes(("﻿" + update(3, ("А", "owner"), ("Б", "chats"))).replace("\n", "\r\n").encode("utf-8"))
+    third = whatsnew.load(folder)[0]
+    assert third["number"] == 3 and [i["title"] for i in third["items"]] == ["✅ А", "✅ Б"] and "\r" not in str(third["items"][1]["body"])
+
+
+@pytest.mark.parametrize("role", ["chats", "viewer"])
+def test_a_role_sees_an_item_naming_it_and_gets_the_dot(app, folder, role):
+    (folder / "0003.md").write_text(update(3, ("Для офиса", "owner, chats, viewer"), ("Только владельцу", "owner")), encoding="utf-8")
+    client, _conn = person(app, role)
+    assert dot_on(client, "/")
+    html = page(client)
+    assert "Для офиса" in html and "Только владельцу" not in html and "Цена" not in html and not dot_on(client, "/")
+
+
+def test_the_office_keeps_its_scripts_on_the_page(app):
+    client = app.test_client()
+    login(client)
+    response = client.get("/whats-new")
+    assert "script-src 'self'" in response.headers["Content-Security-Policy"] and "navfold.js" in response.get_data(as_text=True)
+
+
+def test_a_mark_that_cannot_be_saved_still_opens_the_page(app, monkeypatch):
+    def busy(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(user_prefs, "put", busy)
+    client = app.test_client()
+    login(client)
+    assert "Цена" in page(client) and dot_on(client, "/")

@@ -2,12 +2,15 @@
 the dot on its menu item while an update for the role is unread; opening the page reads it. No popup."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from flask import current_app, make_response, render_template
+from flask import current_app, g, make_response, render_template
 
 from .. import users, whatsnew
 from .common import current_user, get_conn, now_iso
+
+log = logging.getLogger(__name__)
 
 
 def updates() -> tuple:
@@ -17,8 +20,11 @@ def updates() -> tuple:
 
 
 def whatsnew_dot() -> bool:
-    user = current_user()
-    return whatsnew.has_new(get_conn(), user["login"], user["role"], updates())
+    """Once per request: a point's page draws it twice (the menu and the phone's sections)."""
+    if "whatsnew_dot" not in g:
+        user = current_user()
+        g.whatsnew_dot = whatsnew.has_new(get_conn(), user["login"], user["role"], updates())
+    return g.whatsnew_dot
 
 
 def register(app) -> None:
@@ -33,7 +39,11 @@ def register(app) -> None:
         if role == "client":
             from .. import shop_cart
             values["cart_count"] = len(shop_cart.cart(conn, user["login"]))
-        whatsnew.mark_seen(conn, user["login"], role, shown, now_iso())     # before the menu is drawn: no dot on the page that reads it
+        try:                                                                 # before the menu is drawn: no dot on the page that reads it
+            whatsnew.mark_seen(conn, user["login"], role, shown, now_iso())
+            g.whatsnew_dot = False
+        except Exception:                                                    # a busy database: the page still opens, the dot stays
+            log.exception("whatsnew: the mark of %s not saved", user["login"])
         response = make_response(render_template("whatsnew.html", **values))
         response.headers["Cache-Control"] = "private, no-store"
         return response

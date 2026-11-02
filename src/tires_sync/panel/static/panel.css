@@ -797,6 +797,7 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
 @media (min-width:1400px){.t-own td:first-child{white-space:nowrap}}
 /* «Что нового» (routes_whatsnew): the dot of the menu while an update is unread, the page of the updates */
 .wn-dot{display:inline-block;flex:none;width:8px;height:8px;border-radius:50%;background:var(--err-500);margin-left:auto}
+.app.is-collapsed .wn-dot{position:absolute;top:6px;right:8px;margin:0}
 .wn{display:flex;flex-direction:column;gap:var(--s-4);margin-top:var(--s-4);max-width:860px}
 .wn-update .card-head .sub{margin-left:auto}
 .wn-item+.wn-item{margin-top:var(--s-5);padding-top:var(--s-5);border-top:1px solid var(--gray-200)}
