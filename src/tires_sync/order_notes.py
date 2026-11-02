@@ -17,6 +17,7 @@ AUTO_COMMENT = re.compile(r"^(Объявление: |Звонок \d{4}-\d{2}-\d
 # shows what a person wrote after it, never the part (the owner 2026-11-03)
 AUTO_PART = re.compile(r"^(?:Объявление: [^\n]*?https?://\S+|Объявление: [^\n]*|Звонок \d{4}-\d{2}-\d{2} \d{2}:\d{2}[ (][^\n]*?\((?:принят|пропущен)\)"
                        r"|Звонок \d{4}-\d{2}-\d{2} \d{2}:\d{2}[ (][^\n]*|голосовое сообщение, нужна расшифровка)")
+SEPARATOR = re.compile(r"^\s*(?:[.,;:—–-](?=\s))?\s*")    # what joins the part to a person's text («. », « — »), never a «-2» of it
 COMMENT_EVENT = "Комментарий: "                     # orders.update_card: the record of a changed comment
 
 
@@ -34,7 +35,7 @@ def person_text(comment: str) -> str:
     """The comment without the automatic part it starts with (AUTO_PART): the text of a person, or empty."""
     comment = str(comment or "")
     found = AUTO_PART.match(comment)
-    return comment[found.end():].lstrip(" \t\r\n.,;:—–-") if found else comment
+    return SEPARATOR.sub("", comment[found.end():], count=1) if found else comment
 
 
 def hint(text: str) -> str:
