@@ -2,9 +2,9 @@
 
 A row is a position of an order. An order joins the table when it is placed (the button «Оформить в WebMIM» or the move to «Заказ
 оформлен» or later) while the table is switched on in «Подключения → Google-таблица»: the orders placed before never do. It stays only
-while its stage is «Заказ оформлен» or later (`listed`, the owner 2026-11-02): moved back, its rows are taken out; placed again, back. Its rows are
+while its stage is «Заказ оформлен» or later (`listed`, the owner 2026-11-02): moved back, its rows stay, filled grey; placed again, the fill goes. Its rows are
 written once with every column, then only the columns that follow the order (UPDATED) are kept up to date; the owner's own columns and
-rows are never touched (but a row of the panel taken out when its order went back goes whole, with what the owner typed into it). The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
+rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
 it finds a row by the value «tires:<order>:<position>» in its hidden column «tires_id» (the script adds and hides it; a value moves with
 its row when the sheet is sorted; the notes of «Дата счета» and «Дата» held it before 2026-11-01 — the script moves those marks over and
 drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» and «Телефон» are still what the panel wrote (CHECK; the name the owner may correct).
@@ -135,9 +135,9 @@ BEFORE_CODES = ("new", "talk", "wait", orders.FROM_POINT[0])                    
 
 def listed(conn, card_id: int) -> bool:
     """The order belongs in the table now (the owner 2026-11-02): its stage is «Заказ оформлен» or after it — a system stage by its code
-    (moving a stage in the pipeline takes no order out of the table, the review of 2026-11-02), an own stage of the owner by its place
-    after «Заказ оформлен» (orders._needs_placed decides so too). An order back on an earlier stage has its rows taken out of the table
-    (send_order) and back when it is placed again. A pipeline without «Заказ оформлен»: every own stage."""
+    (moving a stage in the pipeline turns no row grey, the review of 2026-11-02), an own stage of the owner by its place after «Заказ
+    оформлен» (orders._needs_placed decides so too). An order back on an earlier stage keeps its rows, filled grey (send_order), and loses
+    the fill when it is placed again. A pipeline without «Заказ оформлен»: every own stage."""
     row = conn.execute("SELECT s.code, s.position, s.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.id = ?", (int(card_id),)).fetchone()
     if row is None:
         return False
@@ -218,7 +218,7 @@ def realization(card: dict) -> str:
     code = card["stage"].get("code")
     if code == "done":
         return FROM_STOCK if card["deal_kind"] == "stock" else REALIZED
-    return REFUSED if code in ("cancel", "refused", "return", "oth", orders.RETURN_GIVEN) else ""      # «Возврат передан»: the tyres of «На ОТХ» went back
+    return REFUSED if code == "oth" else ""          # the owner 2026-11-02: «О» is «На ОТХ» only; «Отмена», «Возврат», «Возврат передан»: empty
 
 
 def _invoice_day(conn, card: dict) -> str:
@@ -362,35 +362,33 @@ def followed(conn, card_id: int) -> set:
     return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)}
 
 
-def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=()) -> List[dict]:
-    """What to send: a new position with every column (`create`; a row taken out when the order went back counts as new), a written one
-    with the columns of UPDATED that changed and the cells of CHECK as written (the script writes nothing into a row that no longer has
-    them). A row the script did not find (the owner deleted or rewrote it) is not made again. `follow`: the rows whose quantity follows the
-    order too (FOLLOWED: a position that gave tyres from «На ОТХ» to a new order, the owner 2026-10-29). OPTIONAL columns that changed go
-    in «extra» (never an empty one into a new row)."""
+def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey: bool = False) -> List[dict]:
+    """What to send: a new position with every column (`create`), a written one with the columns of UPDATED that changed and the cells
+    of CHECK as written (the script writes nothing into a row that no longer has them). A row the script did not find (the owner deleted or
+    rewrote it) is not made again. `follow`: the rows whose quantity follows the order too (FOLLOWED: a position that gave tyres from «На ОТХ»
+    to a new order, the owner 2026-10-29). OPTIONAL columns that changed go in «extra» (never an empty one into a new row). `grey`: the order
+    stands before «Заказ оформлен» (listed): its rows are filled grey, and the fill goes when it is placed again (`shade`, the owner
+    2026-11-02: the rows are never taken out)."""
     out = []
     for mark, fields in now_rows.items():
         before = written.get(mark)
-        new = before is None or bool(before.get("_deleted"))
-        extra = {c: fields[c] for c in OPTIONAL if c in fields and fields[c] != ({} if new else before).get(c, "")}
-        if new:
+        extra = {c: fields[c] for c in OPTIONAL if c in fields and fields[c] != (before or {}).get(c, "")}
+        if before is None:
             op = {"key": mark, "create": True, "fields": {c: fields[c] for c in SENT}}
+            if grey:
+                op["shade"] = True
         elif not before.get("_missing"):
             diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
-            if not diff and not extra:
+            shade = grey != bool(before.get("_grey"))
+            if not diff and not extra and not shade:
                 continue
             op = {"key": mark, "create": False, "fields": diff, "check": {c: before.get(c, "") for c in CHECK}}
+            if shade:
+                op["shade"] = grey
         else:
             continue
         out.append(dict(op, extra=extra) if extra else op)
     return out
-
-
-def removals(written: Dict[str, dict]) -> List[dict]:
-    """The order went back before «Заказ оформлен» (listed): its rows out of the table — each found by its mark and checked by CHECK as
-    written (a row the owner rewrote stays); one the script did not find before, or took out already, is not asked for again."""
-    return [{"key": mark, "delete": True, "check": {c: row.get(c, "") for c in CHECK}}
-            for mark, row in written.items() if not row.get("_missing") and not row.get("_deleted")]
 
 
 # ---- the web app --------------------------------------------------------------------------------------------------------------------
@@ -488,12 +486,9 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     row = conn.execute("SELECT placed_at, rows, failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()
     placed_at, written, failing = row[0], json.loads(row[1] or "{}"), row[2]
     seen = _last_event(conn, card_id)                                      # before the rows: a change made while Google answers is looked at again
-    if listed(conn, card_id):
-        current = rows_of(conn, card_id, placed_at)
-        ops = changes(current, written, followed(conn, card_id))
-        gone = [m for m in written if m not in current and not written[m].get("_gone") and not written[m].get("_deleted")]
-    else:                                                                  # back before «Заказ оформлен»: the rows go out (the owner 2026-11-02)
-        ops, gone = removals(written), []
+    current = rows_of(conn, card_id, placed_at)
+    ops = changes(current, written, followed(conn, card_id), grey=not listed(conn, card_id))   # back before «Заказ оформлен»: grey
+    gone = [m for m in written if m not in current and not written[m].get("_gone")]
     for m in gone:
         written[m]["_gone"] = True
         orders.add_event(conn, card_id, now, AUTHOR, "sheet", "Позиция убрана из заказа: её строку в Google-таблице поправьте вручную.")
@@ -508,32 +503,35 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
         return _failed(conn, card_id, failing, str(err), now, seen)
     replies = [r for r in answer.get("results") or [] if isinstance(r, dict)]
     results = {str(r.get("key")): str(r.get("status")) for r in replies}
+    shaded = {str(r.get("key")): r.get("shade") for r in replies}          # the fill the script made (a script before 2026-11-02 says nothing)
     why = next((str(r.get("error"))[:200] for r in replies if r.get("error")), "")
-    made = [op for op in ops if op.get("create") and results.get(op["key"]) in ("created", "updated")]     # updated: made by a send whose answer was lost
-    kept = [op for op in ops if not op.get("create") and not op.get("delete") and results.get(op["key"]) == "updated"]
-    removed = [op for op in ops if op.get("delete") and results.get(op["key"]) in ("deleted", "absent")]   # absent: taken out by a lost answer
+    unshaded = [op for op in ops if "shade" in op and results.get(op["key"]) in ("created", "updated") and shaded.get(op["key"]) is not op["shade"]]
+    if unshaded and not why:
+        why = "скрипт таблицы не умеет заливать строки: нужно новое развертывание Apps Script"
+    made = [op for op in ops if op["create"] and results.get(op["key"]) in ("created", "updated") and op not in unshaded]   # updated: made
+    kept = [op for op in ops if not op["create"] and results.get(op["key"]) == "updated" and op not in unshaded]            # by a lost answer
     missing = [op for op in ops if results.get(op["key"]) == "missing"]
-    if not why and any(op.get("delete") and results.get(op["key"]) == "updated" for op in ops):          # a script before 2026-11-02
-        why = "скрипт таблицы не умеет убирать строки: нужно новое развертывание Apps Script"
-    for op in made:                                                        # a row made again after it was taken out: none of the old marks
-        written[op["key"]] = dict(op["fields"], **op.get("extra", {}))
-    for op in kept:
+    for op in made + kept:
         written[op["key"]] = dict(written.get(op["key"], {}), **op["fields"], **op.get("extra", {}))
-    for op in removed:
-        written[op["key"]] = dict(written[op["key"]], _deleted=True)
+        if "shade" in op:
+            written[op["key"]]["_grey"] = op["shade"]
     for op in missing:
         written[op["key"]] = dict(written.get(op["key"], {}), _missing=True)
     lines = []
     if made:
         lines.append("Записано в Google-таблицу: %d стр." % len(made))
-    if kept:
-        lines.append("Google-таблица обновлена: %s." % _names(kept))
-    if removed:
-        lines.append("Заказ на этапе до «Заказ оформлен»: строки убраны из Google-таблицы: %d стр." % len(removed))
+    if any(op["fields"] or op.get("extra") for op in kept):
+        lines.append("Google-таблица обновлена: %s." % _names([op for op in kept if op["fields"] or op.get("extra")]))
+    greyed = [op for op in made + kept if op.get("shade") is True]
+    cleared = [op for op in kept if op.get("shade") is False]
+    if greyed:
+        lines.append("Заказ на этапе до «Заказ оформлен»: строки Google-таблицы залиты серым: %d стр." % len(greyed))
+    if cleared:
+        lines.append("Заказ снова оформлен: серая заливка строк Google-таблицы снята: %d стр." % len(cleared))
     if missing:
         lines.append("Строка Google-таблицы изменена или удалена вручную (другой артикул или строки нет): %d стр. "
                      "Заново не создаём, обновления этих строк не идут." % len(missing))
-    lost = [op for op in ops if op not in made + kept + removed + missing]
+    lost = [op for op in ops if op not in made + kept + missing]
     if lost and not failing:                                               # the script did not take them: they go again (said once)
         lines.append("Google-таблица не приняла %d стр.%s: отправим ещё раз." % (len(lost), " (%s)" % why if why else ""))
     for line in lines:

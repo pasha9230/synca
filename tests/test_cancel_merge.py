@@ -57,13 +57,14 @@ def test_the_orders_of_refused_go_to_the_one_stage_with_the_reason(tmp_path):
 
 
 def test_the_reports_count_the_merged_orders_as_before(tmp_path):
-    """The Google table «Реализация»: «О» for both before and after; the analytics count kind «lost» — the stage stays «lost»."""
+    """The Google table «Реализация»: the same before and after (empty since the owner 2026-11-02: «О» is «На ОТХ» only); the analytics
+    count kind «lost» — the stage stays «lost»."""
     conn = old_db(tmp_path)
     card = put(conn, "refused")
     before = order_sheet.realization(orders.get_card(conn, card))
     orders.ensure_pipeline(conn, LATER)
     after = orders.get_card(conn, card)
-    assert before == order_sheet.realization(after) == order_sheet.REFUSED and after["stage"]["kind"] == "lost"
+    assert before == order_sheet.realization(after) == "" and after["stage"]["kind"] == "lost"
 
 
 def test_the_rules_of_refused_come_switched_off_and_the_pointers_follow(tmp_path):

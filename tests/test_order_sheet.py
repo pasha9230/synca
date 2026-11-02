@@ -28,7 +28,8 @@ class FakeScript:
     `fail`: what the next POSTs do instead ("timeout", "500", "html")."""
 
     def __init__(self, columns=sheet.COLUMNS, secret=SECRET, legacy=False):
-        self.columns, self.secret, self.legacy = list(columns), secret, legacy        # legacy: the script before 2026-11-02 (no delete, no extra)
+        self.columns, self.secret, self.legacy = list(columns), secret, legacy        # legacy: the script before 2026-11-02 (no shade, no extra)
+        self.grey = set()                                                              # the rows filled grey
         self.rows, self.posts, self.fail, self.result, self.marks = {}, [], [], None, {}
 
     def __call__(self, method, url, headers, body):
@@ -55,16 +56,6 @@ class FakeScript:
             return dict({"ok": True, "missing": [c for c in p["columns"] if c not in self.columns]}, **self.marks)
         out = []
         for row in p["rows"]:
-            if row.get("delete") and not self.legacy:
-                if row["key"] not in self.rows:
-                    out.append({"key": row["key"], "status": "absent"})
-                elif row.get("check") and any(self.rows[row["key"]].get(c) != v for c, v in row["check"].items()):
-                    out.append({"key": row["key"], "status": "missing"})
-                else:
-                    del self.rows[row["key"]]
-                    out.append({"key": row["key"], "status": "deleted"})
-                continue
-            row = dict(row, fields=row.get("fields", {}), create=row.get("create", False))
             lacking = [c for c in row["fields"] if c not in self.columns]
             if lacking:
                 out.append({"key": row["key"], "status": "error", "error": "нет колонок: " + ", ".join(lacking)})
@@ -83,6 +74,10 @@ class FakeScript:
             self.rows[row["key"]].update(row["fields"])
             if not self.legacy:
                 self.rows[row["key"]].update({c: v for c, v in (row.get("extra") or {}).items() if c in self.columns})
+                if row.get("shade") in (True, False):
+                    (self.grey.add if row["shade"] else self.grey.discard)(row["key"])
+                    out.append({"key": row["key"], "status": status, "shade": row["shade"]})
+                    continue
             out.append({"key": row["key"], "status": status})
         return {"ok": True, "results": out}
 
@@ -180,7 +175,8 @@ def test_a_row_per_position_with_every_column(table):
 
 
 @pytest.mark.parametrize("code, kind, letter", [("placed", "webmim", ""), ("at_point", "webmim", ""), ("done", "webmim", "Р"), ("done", "stock", "Б"),
-                                                ("cancel", "webmim", "О"), ("return", "webmim", "О"), ("oth", "webmim", "О")])
+                                                ("cancel", "webmim", ""), ("return", "webmim", ""), ("oth", "webmim", "О"),
+                                                ("return_given", "webmim", "")])      # the owner 2026-11-02: «О» is «На ОТХ» only
 def test_realization_follows_the_legend(table, code, kind, letter):
     conn, box, fake = table
     mine = placed(conn, deal_kind=kind)
@@ -518,8 +514,8 @@ def test_the_script_knows_the_columns_of_the_panel():
     for name in re.findall(r"'([^']+)'", re.search(r"var PANEL_COLUMNS = \[(.*?)\];", code, re.S).group(1)):
         assert name in sheet.COLUMNS, name
     assert "body.secret !== secret" in code and "LockService" in code and "row.create" in code and "typeof value === 'string'" in code
-    assert "row.delete" in code and "deleteRow" in code and "'absent'" in code and "row.extra" in code        # 2026-11-02
-    assert "строка сдвинулась" in code and "body.optional" in code
+    assert "row.shade" in code and "setBackground" in code and "row.extra" in code and "body.optional" in code   # 2026-11-02
+    assert "deleteRow" not in code and "row.delete" not in code                                                     # rows are never taken out
     doc = doc_text()
     for name in sheet.COLUMNS:
         assert name in doc, name
@@ -592,31 +588,53 @@ def test_reordering_the_system_stages_takes_no_order_out(table):
     assert not sheet.listed(conn, moving)
 
 
-def test_an_order_moved_back_has_its_rows_taken_out_and_placed_again_back(table):
+def test_an_order_moved_back_has_its_rows_filled_grey_and_placed_again_cleared(table):
     conn, box, fake = table
     mine = placed(conn)
     sheet.flush(conn, box, fake, NOW)
-    assert len(fake.rows) == 2
+    assert len(fake.rows) == 2 and fake.grey == set()
     orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
     sheet.flush(conn, box, fake, LATER)
-    deletes = [r for r in fake.data_posts()[-1]["rows"]]
-    assert fake.rows == {} and all(r["delete"] and set(r["check"]) == set(sheet.CHECK) for r in deletes) and len(deletes) == 2
-    assert events(conn, mine)[-1] == "Заказ на этапе до «Заказ оформлен»: строки убраны из Google-таблицы: 2 стр."
-    posts = len(fake.posts)
-    orders.update_card(conn, mine, {"comment": "позже"}, LATER, "owner")   # a change while it stands before: nothing goes
+    ops = fake.data_posts()[-1]["rows"]
+    assert all(op["shade"] is True and set(op["check"]) == set(sheet.CHECK) and op["fields"] == {"Этап": "Новый заказ"} for op in ops) and len(ops) == 2
+    assert len(fake.rows) == 2 and fake.grey == set(fake.rows) and {r["Этап"] for r in fake.rows.values()} == {"Новый заказ"}   # never taken out
+    assert events(conn, mine)[-2:] == ["Google-таблица обновлена: Этап.", "Заказ на этапе до «Заказ оформлен»: строки Google-таблицы залиты серым: 2 стр."]
+    orders.update_card(conn, mine, {"webmim_number": "777"}, LATER, "owner")   # a change while it stands before: updated, the fill not sent again
     sheet.flush(conn, box, fake, LATER)
-    assert len(fake.posts) == posts and fake.rows == {}
+    assert all("shade" not in op for op in fake.data_posts()[-1]["rows"]) and {r["№ заказа MIM"] for r in fake.rows.values()} == {"777"}
     orders.move_card(conn, mine, stage(conn, "placed")["id"], LATEST, "owner")
     sheet.flush(conn, box, fake, LATEST)
-    assert len(fake.rows) == 2 and all(r["Этап"] == "Заказ оформлен" and r["Артикул"] for r in fake.rows.values())
-    assert events(conn, mine)[-1] == "Записано в Google-таблицу: 2 стр."
-    assert all(not r.get("_deleted") for r in json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0]).values())
+    assert fake.grey == set() and len(fake.rows) == 2 and {r["Этап"] for r in fake.rows.values()} == {"Заказ оформлен"}
+    assert events(conn, mine)[-1] == "Заказ снова оформлен: серая заливка строк Google-таблицы снята: 2 стр."
+    assert all(not op["create"] for op in fake.data_posts()[-1]["rows"])   # the same rows, never new ones
     orders.move_card(conn, mine, stage(conn, "cancel")["id"], LATEST, "owner", {"cancel_reason": "передумал"})
-    sheet.flush(conn, box, fake, LATEST)                                   # «Отмена» after placing stays in the table, «О»
-    assert len(fake.rows) == 2 and {r["Реализация"] for r in fake.rows.values()} == {"О"}
+    sheet.flush(conn, box, fake, LATEST)                                   # «Отмена» stands after placing: not grey, «Реализация» empty
+    assert fake.grey == set() and {(r["Этап"], r["Реализация"]) for r in fake.rows.values()} == {("Отмена / невыкуп", "")}
 
 
-def test_a_rewritten_row_is_not_taken_out_nor_made_again(table):
+def test_back_then_cancelled_loses_the_fill_and_its_letter(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    orders.move_card(conn, mine, stage(conn, "oth")["id"], NOW, "owner")
+    sheet.flush(conn, box, fake, NOW)
+    assert {r["Реализация"] for r in fake.rows.values()} == {"О"}
+    orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    assert fake.grey == set(fake.rows) and {r["Реализация"] for r in fake.rows.values()} == {""}
+    orders.move_card(conn, mine, stage(conn, "cancel")["id"], LATEST, "owner", {"cancel_reason": "передумал"})
+    sheet.flush(conn, box, fake, LATEST)
+    assert fake.grey == set() and {r["Этап"] for r in fake.rows.values()} == {"Отмена / невыкуп"}
+
+
+def test_an_order_back_before_its_first_send_is_written_grey(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    assert len(fake.rows) == 2 and fake.grey == set(fake.rows) and all(op["create"] and op["shade"] is True for op in fake.data_posts()[-1]["rows"])
+
+
+def test_a_rewritten_row_is_neither_filled_nor_cleared(table):
     conn, box, fake = table
     mine = placed(conn)
     sheet.flush(conn, box, fake, NOW)
@@ -624,26 +642,25 @@ def test_a_rewritten_row_is_not_taken_out_nor_made_again(table):
     fake.rows[first]["Артикул"] = "чужой"
     orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
     sheet.flush(conn, box, fake, LATER)
-    assert list(fake.rows) == [first]                                      # the owner's row stays, the other went
+    assert fake.grey == set(fake.rows) - {first} and len(fake.rows) == 2   # the owner's row: untouched
     orders.move_card(conn, mine, stage(conn, "placed")["id"], LATEST, "owner")
     sheet.flush(conn, box, fake, LATEST)
-    assert len(fake.rows) == 2 and fake.rows[first]["Артикул"] == "чужой"  # the other came back, the rewritten one is not made twice
-    assert not any(op.get("key") == first for op in fake.data_posts()[-1]["rows"])
+    assert fake.grey == set() and not any(op["key"] == first for op in fake.data_posts()[-1]["rows"])
 
 
-def test_a_script_that_cannot_take_rows_out_is_said_and_retried(table):
+def test_a_script_that_cannot_fill_is_said_and_retried(table):
     conn, box, fake = table
     fake.legacy = True
     mine = placed(conn)
     sheet.flush(conn, box, fake, NOW)
     orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
     sheet.flush(conn, box, fake, LATER)
-    assert len(fake.rows) == 2
-    assert any("не приняла 2 стр." in e and "новое развертывание Apps Script" in e for e in events(conn, mine))
+    assert fake.grey == set() and any("не приняла 2 стр." in e and "новое развертывание Apps Script" in e for e in events(conn, mine))
     assert conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0] == 1
     fake.legacy = False                                                    # the owner deployed the new version
     sheet.flush(conn, box, fake, "2026-10-23T12:40:00")
-    assert fake.rows == {} and conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0] == 0
+    assert fake.grey == set(fake.rows) and len(fake.rows) == 2
+    assert conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0] == 0
 
 
 def test_an_order_before_keep_from_is_left_alone_when_moved_back(table):
@@ -654,7 +671,7 @@ def test_an_order_before_keep_from_is_left_alone_when_moved_back(table):
     orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
     sheet.flush(conn, box, fake, LATER)
     sheet.flush(conn, box, fake, LATER, full=True)
-    assert len(fake.rows) == 2 and len(fake.data_posts()) == 1
+    assert fake.grey == set() and len(fake.data_posts()) == 1
 
 
 def test_the_webmim_button_without_the_move_puts_nothing_in(tmp_path, monkeypatch):
@@ -872,10 +889,7 @@ Sheet.prototype.getLastRow = function () {                          // as Google
 };
 Sheet.prototype.getMaxRows = function () { return this.maxRows; };
 Sheet.prototype.insertRowsAfter = function (after, n) { this.maxRows += n; };
-Sheet.prototype.getFrozenRows = function () { return 1; };
-Sheet.prototype.deleteRow = function (r) {                           // the rows under it go up (with their notes and formulas: not used here)
-  this.cells.splice(r - 1, 1); this.maxRows -= 1; (this.deleted = this.deleted || []).push(r);
-};
+
 Sheet.prototype.getMaxColumns = function () { return this.maxCols || this.width(); };
 Sheet.prototype.insertColumnsAfter = function (after, n) { this.maxCols = this.getMaxColumns() + n; };
 Sheet.prototype.hideColumns = function (c) { (this.hidden = this.hidden || []).push(c); };
@@ -915,7 +929,8 @@ Sheet.prototype.getRange = function (r, c, nr, nc) {
     setNotes: function (rows) { rows.forEach(function (row, i) { row.forEach(function (v, j) { sheet.notes[(r + i) + ',' + (c + j)] = v; }); }); return this; },
     setValues: function (rows) { rows.forEach(function (row, i) { row.forEach(function (v, j) { sheet.set(r + i, c + j, v); }); }); return this; },
     setValue: function (v) { sheet.set(r, c, v); return this; },
-    clearContent: function () { for (var i = 0; i < nr; i++) for (var j = 0; j < nc; j++) sheet.set(r + i, c + j, ''); return this; },
+    setBackground: function (color) { for (var i = 0; i < nr; i++) for (var j = 0; j < nc; j++) {
+      (sheet.bg = sheet.bg || {})[(r + i) + ',' + (c + j)] = color; } return this; },
     getDataValidation: function () { return sheet.valid[r + ',' + c] || null; },
     insertCheckboxes: function () { sheet.valid[r + ',' + c] = 'checkbox'; return this; },
     setNumberFormat: function (f) { for (var i = 0; i < nr; i++) for (var j = 0; j < nc; j++) sheet.formats[(r + i) + ',' + (c + j)] = f; return this; }
@@ -1040,17 +1055,15 @@ var made = post({secret: SECRET, sheet: 'Заказы', rows: [
   {key: 'tires:7:1', create: true, fields: acc('701'), extra: {'Аккаунт': 'Павел', 'Нет такой': 'x'}},
   {key: 'tires:7:2', create: true, fields: acc('702')}]});
 out.extra = {results: made.results, account: sheet.get(sheet.keyAt('tires:7:1'), col['Аккаунт'])};
-var rows = sheet.cells.length, below = sheet.keyAt('tires:7:2');
-out.deleted = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:7:1', delete: true, check: {'Артикул': '701', 'Телефон': '+7 911 111-22-33'}}]});
-out.afterDelete = {rows: sheet.cells.length === rows - 1, gone: sheet.keyAt('tires:7:1'), up: sheet.keyAt('tires:7:2') === below - 1};
-out.absent = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:7:1', delete: true, check: {'Артикул': '701'}}]});
-out.rewrittenDelete = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:7:2', delete: true, check: {'Артикул': 'другой'}}]});
-var at72 = sheet.keyAt('tires:7:2'), at31 = sheet.keyAt('tires:3:1');
-sheet.onSet = function () { var t = sheet.cells[at72 - 1]; sheet.cells[at72 - 1] = sheet.cells[at31 - 1]; sheet.cells[at31 - 1] = t; };
-var deletedBefore = (sheet.deleted || []).length;
-out.moved = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:7:2', delete: true, check: {'Артикул': '702'}},
-                                                         {key: 'tires:8:1', create: true, fields: acc('801')}]});
-out.movedKept = (sheet.deleted || []).length === deletedBefore && sheet.keyAt('tires:7:2') > 0;
+function bg(key) { var at = sheet.keyAt(key), w = sheet.width(), out = []; for (var j = 1; j <= w; j++) out.push((sheet.bg || {})[at + ',' + j]); return out; }
+out.greyed = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:7:1', create: false, fields: {'Этап': 'Новый заказ'}, shade: true,
+                                                          check: {'Артикул': '701', 'Телефон': '+7 911 111-22-33'}}]});
+out.greyRow = bg('tires:7:1');
+out.otherRow = bg('tires:7:2');
+out.cleared = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:7:1', create: false, fields: {}, shade: false, check: {'Артикул': '701'}}]});
+out.clearedRow = bg('tires:7:1');
+out.rewrittenShade = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:7:2', create: false, fields: {}, shade: true, check: {'Артикул': 'другой'}}]});
+out.rewrittenRow = bg('tires:7:2');
 out.selfTest = selfTest();
 out.probes = probes.length === 2 && probes[1] === 'deleted';
 console.log(JSON.stringify(out));
@@ -1099,11 +1112,10 @@ def test_the_script_on_a_fake_of_google_sheets(tmp_path):
     assert out["renamed"] == {"ok": False, "error": "нет колонки «tires_id» — восстановите её (Файл → История версий) или напишите разработчику"}
     assert out["optionalPing"]["missing"] == ["Нет такой"] and out["optionalPing"]["marked"] > 0     # an optional one: the marks looked at
     assert out["extra"] == {"results": [{"key": "tires:7:1", "status": "created"}, {"key": "tires:7:2", "status": "created"}], "account": "Павел"}
-    assert out["deleted"]["results"] == [{"key": "tires:7:1", "status": "deleted"}] and out["afterDelete"] == {"rows": True, "gone": 0, "up": True}
-    assert out["absent"]["results"] == [{"key": "tires:7:1", "status": "absent"}]
-    assert out["rewrittenDelete"]["results"] == [{"key": "tires:7:2", "status": "missing"}]
-    assert out["moved"]["results"] == [{"key": "tires:7:2", "status": "error", "error": "строка сдвинулась, повторим"},   # moved by hand
-                                       {"key": "tires:8:1", "status": "created"}] and out["movedKept"]                    # meanwhile: kept
+    assert out["greyed"]["results"] == [{"key": "tires:7:1", "status": "updated", "shade": True}]     # the whole width of the sheet, nothing else
+    assert out["greyRow"] == ["#d9d9d9"] * len(out["greyRow"]) and len(out["greyRow"]) == len(sheet.COLUMNS) + 2 and set(out["otherRow"]) == {None}
+    assert out["cleared"]["results"] == [{"key": "tires:7:1", "status": "updated", "shade": False}] and set(out["clearedRow"]) == {None}
+    assert out["rewrittenShade"]["results"] == [{"key": "tires:7:2", "status": "missing"}] and set(out["rewrittenRow"]) == {None}
     assert out["renamedPing"]["ok"] is False and out["noNewColumn"]
     assert out["removed"] >= 1 and out["cleaned"]["number"] == "5300825" and out["cleaned"]["fmt"] == "@"
     assert out["cleaned"]["qty"] == 4 and out["cleaned"]["qtyFmt"] == "" and out["cleaned"]["manual"] == "'Ручная строка"   # a number and
