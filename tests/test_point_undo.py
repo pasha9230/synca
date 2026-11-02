@@ -82,6 +82,10 @@ def test_issued_is_undone_into_the_same_stay_at_the_point(tmp_path, clock, told)
     clock["now"] = T2
     undo(mine, card)
     assert state(conn, card) == before and to_client(app) == []                          # the same stay: no new «можно забирать»
+    texts = [e["text"] for e in orders.list_events(conn, card)]
+    assert not [t for t in texts if t.startswith("Резерв: товар на точке")][0].endswith("2026-10-19")     # no new date of the undo's move
+    assert any("снова на этапе «Товар на точке», резерв до 16.10.2026" in t for t in texts)
+    assert not any("[резерв:на-отх:" in t for t in texts)                               # no reminder went: a later one still counts
 
 
 def test_to_oth_is_undone_with_the_reason_and_the_reservation(tmp_path, clock, told):
@@ -172,3 +176,21 @@ def test_the_sidebar_of_the_point_has_calls_and_no_orders(tmp_path, clock):
     sidebar = page[page.index('class="sidebar"'):page.index("</aside>")] if "</aside>" in page else page
     assert 'href="/calls"' in sidebar and 'href="/orders"' not in sidebar
     assert 'href="/orders"' in client.get("/my-point").get_data(as_text=True)          # the owner keeps «Заказы»
+
+
+def test_an_undone_issue_is_not_moved_to_oth_by_the_reminder_of_before(tmp_path, clock, told):
+    from tires_sync import order_reserve as reserve
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
+    got = orders.get_card(conn, card)
+    chat = conn.execute("SELECT id FROM avito_chat WHERE order_id = ?", (card,)).fetchone()[0]
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES (?, ?, '2026-10-16T10:00:00', 'система', 'sent')",
+                 ("reserve-%d-%s" % (card, re.sub(r"\D", "", got["entered_at"])), chat))   # the reminder of the last day went
+    conn.execute("UPDATE avito_chat SET synced_at = '2099-01-01T00:00:00'")
+    conn.commit()
+    mine = manager(app, conn, pid)
+    press(mine, card, "issued")
+    clock["now"] = T2
+    undo(mine, card)
+    assert not reserve._no_answer_step(conn, orders.get_card(conn, card), "2026-10-16T23:00:00")
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point"

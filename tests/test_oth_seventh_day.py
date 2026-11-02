@@ -17,7 +17,14 @@ from tires_sync.panel import routes_mypoint
 ENTERED = "2026-10-20T11:00:00"                       # the first day on «На ОТХ»; the seventh is 2026-10-26
 
 
+def started(conn, at="2026-10-01T00:00:00"):
+    """The first tick of the rule (the deploy): orders that enter «На ОТХ» since are asked (the owner 2026-11-02)."""
+    conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (order_oth.SINCE_KEY, at))
+    conn.commit()
+
+
 def on_oth(conn, cid, when=ENTERED):
+    started(conn)
     orders.move_card(conn, cid, stage(conn, "oth"), when, "точка", changes={"cancel_reason": "Клиент не пришёл"})
     return orders.get_card(conn, cid)
 
@@ -113,6 +120,7 @@ def clock(monkeypatch):
 def asked_on_page(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     here = _card(conn, pid, webmim="700200", code="at_point")
+    started(conn)
     orders.move_card(conn, here, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Клиент не пришёл"})
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
     return app, conn, pid, here, manager(app, conn, pid)
@@ -168,3 +176,47 @@ def test_issued_after_a_partial_return_cannot_be_undone(tmp_path, clock):
     r = post(mine, "/my-point/%d/undo" % here, "tok")
     assert "уже не отменить" in mine.get(r.headers["Location"]).get_data(as_text=True)
     assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone()[0] == 1
+
+
+# ---- the answers of 2026-11-02 (the owner, the lead) --------------------------------------------------------------------------------
+
+def test_only_orders_that_entered_oth_after_the_first_tick_are_asked(tmp_path):
+    conn = db(tmp_path)
+    old = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    orders.move_card(conn, old, stage(conn, "oth"), ENTERED, "точка", changes={"cancel_reason": "Клиент не пришёл"})
+    assert order_oth.ask_seventh_day(conn, "2026-10-25T13:07:00") == 0                   # the deploy: the first tick keeps its moment
+    assert store.get_state(conn, order_oth.SINCE_KEY) == "2026-10-25T13:07:00"
+    new = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    orders.move_card(conn, new, stage(conn, "oth"), "2026-10-26T10:00:00", "точка", changes={"cancel_reason": "Клиент не пришёл"})
+    assert order_oth.ask_seventh_day(conn, "2026-11-01T12:30:00") == 1
+    assert order_oth.question_open(conn, orders.get_card(conn, new)) and not order_oth.question_open(conn, orders.get_card(conn, old))
+    assert order_oth.ask_seventh_day(conn, "2026-11-02T12:30:00") == 0 and store.get_state(conn, order_oth.SINCE_KEY) == "2026-10-25T13:07:00"
+
+
+def test_a_partly_returned_order_is_not_asked(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    on_oth(conn, cid)
+    order_oth.mark_returned(conn, orders.list_items(conn, cid)[0]["id"], "2026-10-22T10:00:00", "owner", qty=1)
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0
+
+
+def test_the_tasks_close_by_themselves_on_the_agreement_or_on_issued(tmp_path):
+    def open_tasks(conn, cid):
+        return conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (cid,)).fetchone()[0]
+    conn = db(tmp_path)
+    office(conn)
+    agreed, issued = (card_at(conn, "at_point", "2026-10-15T10:00:00") for _ in range(2))
+    for cid in (agreed, issued):
+        on_oth(conn, cid)
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
+    for cid in (agreed, issued):
+        order_oth.answer_here(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-26T13:00:00")
+        assert open_tasks(conn, cid) == 2
+    order_oth.agree(conn, orders.get_card(conn, agreed), orders.date.fromisoformat("2026-10-27"), "2026-10-27T10:00:00", "owner")
+    assert open_tasks(conn, agreed) == 0
+    conn.execute("UPDATE app_state SET value = 'asked|2026-10-26T12:30:00' WHERE key = ?", (order_oth._ask_key(orders.get_card(conn, issued)),))
+    conn.commit()                                                                       # (asked again: the point corrects itself)
+    assert order_oth.answer_issued(conn, orders.get_card(conn, issued), "менеджер Бета", "2026-10-27T11:00:00")[2]
+    assert open_tasks(conn, issued) == 0
+    assert any(e["text"].startswith("Задача выполнена: Другое: Согласовать возврат — согласовано с поставщиком") for e in orders.list_events(conn, agreed))

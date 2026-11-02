@@ -47,6 +47,9 @@ NO_ANSWER_REASON = "Клиент не ответил на напоминание
 OTH_MARK = "[резерв:на-отх:%s]"                   # once per stay at the point: moved, refused, or the client wrote
 NO_ANSWER_MAX = timedelta(hours=48)               # an older reminder moves nothing (review 2026-11-02: no mass move of forgotten orders)
 CHATS_FRESH = timedelta(minutes=30)               # the chats of the account read this lately, or «no answer» is not known (they are read every minute)
+STALE_AFTER = timedelta(hours=24)                 # the move held up this long after its window by chats not read: one yellow record (the lead 2026-11-02)
+STALE_MARK = "[резерв:чаты-не-читаются:%s]"
+MOVED_NOTE = "Заказ №%s переведён на «На ОТХ»: клиент не ответил на напоминание о сроке резерва"     # to the point, the owner, the partner
 
 
 def _marker(kind: str, until: str) -> str:
@@ -318,7 +321,22 @@ def _client_step(conn, card: dict, today: date, now: str, hours, deliver) -> Non
     tell_client(conn, card, deliver, now)
 
 
-def _no_answer_step(conn, card: dict, now: str) -> bool:
+def _tell_moved(conn, card: dict, notify: Optional[Notify], now: str) -> None:
+    """The owner 2026-11-02: the move to «На ОТХ» is told to the point (its «Рабочее место» or VK, as the alerts of the order go to a point)
+    and to the owner and the partner (their Telegram), through the tick's own alerts; each says how it went in the journal (order_notify)."""
+    if notify is None:
+        return
+    from . import order_oth
+    text = MOVED_NOTE % order_manager.label(card)
+    for who in [""] + order_oth.office_logins(conn):            # "": nobody of the staff answers, so the alert goes to the point
+        try:
+            notify(dict(card, responsible=who, to_staff=bool(who)), text)
+        except Exception:                                       # noqa: BLE001 - the move is done; the journal has its record
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the alert of the move to OTH of card %s failed", card["id"])
+
+
+def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None) -> bool:
     """The owner 2026-11-02: the reminder went (its send mark «sent») and the client wrote nothing in that chat for 12 hours: the order goes
     from «Товар на точке» to «На ОТХ», a record in its journal. Once per stay (OTH_MARK). Nothing when the date was moved since the reminder,
     the point marked a return, or the client wrote (a grey record). Returns True when the order moved."""
@@ -334,8 +352,13 @@ def _no_answer_step(conn, card: dict, now: str) -> bool:
         return False                                            # extended since (a new reminder may come), or the goods went back
     fresh = (datetime.fromisoformat(now) - CHATS_FRESH).isoformat(timespec="seconds")
     if not conn.execute("SELECT 1 FROM avito_chat WHERE account_id = (SELECT account_id FROM avito_chat WHERE id = ?) AND synced_at >= ? LIMIT 1",
-                        (sent[1], fresh)).fetchone():
-        return False                                            # our copy of the chats may be behind: tried again at the next tick
+                        (sent[1], fresh)).fetchone():           # our copy of the chats may be behind: tried again at the next tick
+        late = now >= (datetime.fromisoformat(sent[0]) + NO_ANSWER + STALE_AFTER).isoformat(timespec="seconds")
+        if late and not _done(conn, card["id"], STALE_MARK % stay):
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Чаты аккаунта Авито не читаются: не узнать, ответил ли клиент на напоминание "
+                             "о сроке резерва, на «На ОТХ» заказ сам не переведён. Свяжитесь с клиентом %s" % (STALE_MARK % stay), level="yellow")
+            conn.commit()
+        return False
     chats_of = "(SELECT id FROM avito_chat WHERE id = ? OR order_id = ?)"     # the chat of the reminder and any other chat of the order
     if conn.execute("SELECT 1 FROM avito_message WHERE chat_row IN %s AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND at > ? "
                     "UNION ALL SELECT 1 FROM avito_chat WHERE id IN %s AND last_dir = 'in' AND last_at > ? LIMIT 1" % (chats_of, chats_of),
@@ -360,6 +383,7 @@ def _no_answer_step(conn, card: dict, now: str) -> bool:
     orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент не ответил за 12 часов на напоминание о сроке резерва: заказ переведён на "
                      "«%s» %s" % (oth["name"], marker))
     conn.commit()
+    _tell_moved(conn, orders.get_card(conn, card["id"]), notify, now)
     return True
 
 
@@ -390,7 +414,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
             card = orders.get_card(conn, card_id)
             until = date.fromisoformat(card["reserve_until"])
             try:
-                if _no_answer_step(conn, card, now):
+                if _no_answer_step(conn, card, now, notify):
                     continue                                  # on «На ОТХ» now: no alert of the end of the reservation
             except Exception:
                 conn.rollback()

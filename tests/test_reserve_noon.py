@@ -221,3 +221,33 @@ def test_the_reminder_never_goes_to_an_order_that_left_the_point_meanwhile(tmp_p
     orders.move_card(conn, cid, stage(conn, "done"), DAY + "T12:31:00", "точка")
     reserve._client_step(conn, orders.get_card(conn, cid), orders.date.fromisoformat(DAY), DAY + "T12:31:00", (10, 20), deliver)
     assert deliver.sent == []
+
+
+# ---- the answers of 2026-11-02 (the owner, the lead) --------------------------------------------------------------------------------
+
+def test_the_move_is_told_to_the_point_and_to_the_owner_and_the_partner(tmp_path):
+    from tires_sync import order_notify, users
+    conn, cid, _chat, deliver, vk = told(tmp_path)
+    users.add_user(conn, "zaman", "password-123", DAY + "T10:00:00", role="partner")
+    conn.commit()
+    got = []
+    deliver.at = NEXT + "T09:07:00"
+    reserve.check(conn, NEXT + "T09:07:00", lambda card, text: (got.append((card.get("responsible"), bool(card.get("to_staff")), text)), "ok")[1],
+                  deliver, vk)
+    note = "Заказ №5200001 переведён на «На ОТХ»: клиент не ответил на напоминание о сроке резерва"
+    assert [g for g in got if g[2] == note] == [("", False, note), ("owner", True, note), ("zaman", True, note)]
+    card = orders.get_card(conn, cid)
+    assert order_notify.route(conn, dict(card, responsible="", to_staff=False))["channel"] == "vk"          # the point's own way
+    assert order_notify.route(conn, dict(card, responsible="zaman", to_staff=True))["why"] in ("zaman", "у zaman нет чата Telegram")
+
+
+def test_chats_not_read_for_a_day_after_the_window_are_one_yellow_record(tmp_path):
+    conn, cid, _chat, deliver, vk = told(tmp_path)
+    read_chats(conn, DAY + "T13:00:00")                                                 # read last on the day of the reminder
+    tick(conn, NEXT + "T09:07:00", deliver, vk)                                         # 20 h after the reminder: not yet a day after its window
+    assert not [e for e in orders.list_events(conn, cid) if "не читаются" in e["text"]]
+    tick(conn, "2026-10-20T00:31:00", deliver, vk)                                      # (before 09:00: the tick does nothing)
+    tick(conn, "2026-10-20T09:07:00", deliver, vk)
+    tick(conn, "2026-10-20T10:07:00", deliver, vk)
+    [stale] = [e for e in orders.list_events(conn, cid) if "не читаются" in e["text"]]
+    assert stale["level"] == "yellow" and code(conn, cid) == "at_point"
