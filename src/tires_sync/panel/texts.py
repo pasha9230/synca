@@ -177,6 +177,16 @@ def _acc(d: dict) -> str:
     return "аккаунт №%s" % _q(d.get("account_id", d.get("account")))
 
 
+def _ui_group(key) -> str:
+    from .routes_design import UI_GROUPS
+    return _pick(UI_GROUPS, key, _q(key))
+
+
+def _ui_state(key) -> str:
+    from .routes_design import UI_STATES
+    return _pick(UI_STATES, key, _q(key))
+
+
 def _role(key) -> str:
     from ..users import ROLES
     return _pick(ROLES, key, _q(key))
@@ -260,6 +270,10 @@ _MORE_TEXTS = {
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
     "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",
     "client_terms_changed": lambda d: _client_terms_text(d),
+    "ui_new": lambda d: "Новый вид, %s: %s → %s" % (_ui_group(d.get("group")), _ui_state(d.get("from")), _ui_state(d.get("to"))),
+    "as_point_start": lambda d: "Начал работать как точка «%s»" % _q(d.get("name") or d.get("point")),
+    "as_point_stop": lambda d: "Закончил работать как точка №%s%s" % (_q(d.get("point")), {"exit": "", "password": " (сменил пароль)",
+                                                                                             "invalid": " (режим больше не действует)"}.get(d.get("why"), "")),
     "client_pct_changed": lambda d: _client_pct_text(d),
     "client_pct_followed": lambda d: _client_followed_text(d),
     "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),

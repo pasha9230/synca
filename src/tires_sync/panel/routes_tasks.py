@@ -92,7 +92,8 @@ def register(app) -> None:
         due = due if due in DUES else ""
         kind = request.args.get("kind", "")
         kind = kind if kind in tasks.KINDS else ""
-        rows = tasks.listing(conn, tab=tab, login=me, owner_login=_owner(conn), now=local_iso(), point=point, to=to, due=due, kind=kind)
+        rows = tasks.listing(conn, tab=tab, login=me, owner_login=_owner(conn), now=local_iso(), point=point, to=to, due=due, kind=kind,
+                             as_point=current_user()["as_point"])
         from .. import inquiry
         for t in rows:                                    # whom to call: the name and the phone, as the reminder had them
             t["who"], t["phone"] = inquiry._who_called(conn, t)

@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='shop.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='tour.css') }}">
 </head>
-<body class="shop">
+<body class="shop{% if session.get("user") and ui_new() %} ui-new{% endif %}">
 {% if session.get("user") %}
 {% set p = request.path %}{% set me = current_user() %}
 <header class="shop-top"><div class="shop-top-in"><a class="shop-logo" href="/shop"><span class="shop-logo-mark">{{ icon("tire") }}</span>Шины</a>

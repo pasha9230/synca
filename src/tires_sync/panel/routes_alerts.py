@@ -7,7 +7,7 @@ import re
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, session
 
 from .. import order_alerts, order_engine, order_manager as mgr, order_oth, order_reserve as reserve, orders, store
-from .common import can, get_conn, login_required, own_point, point_account
+from .common import AS_POINT_ROLES, as_point_author, can, current_user, get_conn, login_required, own_point, point_account
 from .routes_orders import from_panel, local_iso
 
 log = logging.getLogger(__name__)
@@ -17,8 +17,9 @@ def grouped(conn, login: str) -> list:
     """The rows of the page, newest first: `order_alerts.page_rows` (one source with the bell, its counter and the dots by the order numbers),
     at the panel's local time, so that old green alerts are left out."""
     now = local_iso()
-    rows = order_alerts.page_rows(conn, login, now)
-    point = own_point()
+    point, user = own_point(), current_user()
+    own_prefix = as_point_author(conn, login, "")[:-1] if user["real_role"] in AS_POINT_ROLES else ""      # «<name> за точку «»
+    rows = order_alerts.page_rows(conn, login, now, staff=False if user["as_point"] is not None else None, own_prefix=own_prefix)
     if point is None:
         return rows
     account = point_account()                                     # the manager of a point: the orders of the point, the chats of its account

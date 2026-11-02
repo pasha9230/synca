@@ -136,23 +136,26 @@ def counts(conn, login: str) -> Dict[str, int]:
     return result
 
 
-def page_rows(conn, login: str, now: Optional[str] = None) -> List[dict]:
+def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool] = None, own_prefix: str = "") -> List[dict]:
     """The rows of «Уведомления», of the bell and of its counter, and the dots by the order numbers: one source for all of them. Newest first:
     every alert on its own, except that the non-red chat records of one order (client messages) are one row until the order is opened; such a row
     has the most important colour of its records. The user's own records are not alerts for them, except red ones.
     `now` (the panel's local time): a green alert older than GREEN_DAYS days is not shown either; nothing is deleted.
     The chats without an order whose client waits (chat_rows) are rows too; with `now` also «Срочно ответить» (urgent_rows, in place of the
     chat's «Клиент написал»; a due task is no row here since 2026-10-31 — it is «Задачи»'s); for the partner the orders a point named that are not
-    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts."""
+    in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts.
+    `staff` False: the owner or the partner working as a point (panel/common.current_user) sees the point's; `own_prefix`: the start of their
+    author «<name> за точку «» — what they pressed as a point is their own record too."""
     from . import order_points
     border = (datetime.fromisoformat(now) - timedelta(days=GREEN_DAYS)).isoformat(timespec="seconds") if now else ""
-    staff = _staff(conn, login)
+    staff = _staff(conn, login) if staff is None else staff
     theirs = order_points.account_orders(conn) if staff else set()
     rows, folded = [], {}
     for event in open_alerts(conn, login):
         if event["order_id"] in theirs:
             continue
-        if event["author"] == login and event["level"] != "red":            # one's own failure still waits for «Разобрался»
+        if (event["author"] == login or (own_prefix and str(event["author"] or "").startswith(own_prefix))) \
+                and event["level"] != "red":                                 # one's own failure still waits for «Разобрался»
             continue
         if border and event["level"] == "green" and (event["at"] or "") < border:
             continue

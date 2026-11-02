@@ -19,7 +19,7 @@
 {% if session.get("user") %}<script src="{{ url_for('static', filename='navfold.js') }}"></script>{% endif %}{# before the body: folded sections are hidden before paint #}
 {% block head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}{% if session.get("user") and ui_new() %} ui-new{% endif %}">{# «Новый вид» (routes_design) #}
 {% if session.get("user") %}
 <div class="app">
 <aside class="sidebar">
@@ -62,7 +62,8 @@
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
 <a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
 <a class="sb-link{% if path.startswith(('/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders/settings">{{ icon("layers") }}Настройки заказов</a>
-<a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>{% endif %}
+<a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>
+<a class="sb-link{% if path.startswith('/ui-new') %} is-active{% endif %}" href="/ui-new">{{ icon("sparkle") }}Новый вид</a>{% endif %}
 {% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
 {% endcall %}{% endif %}
 {% set me = current_user() %}
@@ -78,7 +79,9 @@
 <div class="bell-head"><strong>Уведомления</strong><button type="button" class="bell-close" id="bell-close" aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="bell-list" id="bell-list"></div>
 <a class="bell-all" href="/alerts">Все уведомления &rsaquo;</a>
-</div></div>{% endif %}</div>
+</div></div>{% endif %}{% set as_points = as_point_choices() %}{% if as_points %}<details class="as-point"><summary class="btn btn--sm">Работать как точка ▾</summary>{# the owner and the partner (routes_design) #}
+<form method="post" action="/as-point" class="as-point-pop"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% for p in as_points %}<button class="as-point-item" name="point_id" value="{{ p.id }}">{{ p.name }}</button>{% endfor %}</form></details>{% endif %}</div>
+{% if current_user().as_point %}<div class="as-point-bar" role="status">Вы работаете как точка «{{ current_user().as_point_name }}» · <form method="post" action="/as-point/stop" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="as-point-exit">Выйти</button></form></div>{% endif %}
 {% if nav.stale and can("catalog", "edit") %}
 <div class="stickybar stickybar--stale"><div class="grow"><div class="stickybar-title">Рабочий черновик устарел</div><div class="small muted">Настройки изменились после того, как вы начали правки. Отмените черновик и повторите изменения.</div></div>
 <form method="post" action="/catalog/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path.rstrip('?') if request.method == 'GET' and not request.path.startswith(('/draft', '/publish', '/catalog/')) else '/catalog' }}"><button class="btn btn--link-gray">Отменить всё</button></form></div>

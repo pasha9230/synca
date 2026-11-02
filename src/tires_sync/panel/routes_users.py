@@ -4,7 +4,7 @@ from __future__ import annotations
 from flask import flash, redirect, render_template, request, session
 
 from .. import client_terms, order_points as points, store, users
-from .common import author, current_user, get_conn, login_blocked, login_failed, now_iso
+from .common import author, current_user, end_as_point, get_conn, login_blocked, login_failed, now_iso
 
 
 def _user_field(message: str) -> str:
@@ -156,5 +156,6 @@ def register(app) -> None:
             flash(str(err), {"login": "error", "password": "field:new"}.get(_user_field(str(err)), "field:old" if wrong else "error"))
             return redirect(back)
         session["epoch"] = store.get_session_epoch(conn, login)          # this session stays, the others end
+        end_as_point(login, "password")                               # «Работать как точка» ends with a new password
         flash("Пароль сменён. Остальные открытые входы закрыты.", "ok")
         return redirect("/shop/profile" if current_user()["role"] == "client" else "/")

@@ -192,13 +192,18 @@ def of_place(conn, client_id=None, order_id=None, chat_row=None, only: Optional[
                                           % (", ".join(FIELDS), sql), args)]
 
 
-def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bool, to: str = "", due: str = "", kind: str = "") -> List[dict]:
+def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bool, to: str = "", due: str = "", kind: str = "",
+            as_point=None) -> List[dict]:
     """The open tasks of the page «Задачи»: `tab` mine (to me), by_me (set by me), all (the office only); a point gets only its own
-    whatever the tab. Filters: `to` (a login), `due` overdue|today|week, `kind`. Each task knows if it is late."""
+    whatever the tab. Filters: `to` (a login), `due` overdue|today|week, `kind`. Each task knows if it is late. `as_point`: the owner or
+    the partner working as that point (panel/common.current_user): their own tasks of an order of that point or of none only."""
     where, args = ["done_at IS NULL", "cancelled_at IS NULL"], []
     if point:
         where.append("assignee = ?")
         args.append(login)
+    if as_point is not None:
+        where.append("chat_row IS NULL AND (order_id IN (SELECT id FROM order_card WHERE point_id = ?) OR (order_id IS NULL AND client_id IS NULL))")
+        args.append(as_point)
     if tab == "mine" and not point:
         sql, more = _mine(conn, login, owner_login)
         where.append(sql)
@@ -241,7 +246,7 @@ def _day_end(now: str) -> str:
     return (datetime.strptime(now[:10], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%dT00:00")
 
 
-def counter(conn, login: str, owner_login: str, now: str, point: bool) -> Dict[str, int]:
+def counter(conn, login: str, owner_login: str, now: str, point: bool, as_point=None) -> Dict[str, int]:
     """The menu's number: my open tasks late or due today; «late» — some of them are past their time (red)."""
-    tasks = listing(conn, tab="mine", login=login, owner_login=owner_login, now=now, point=point, due="today")
+    tasks = listing(conn, tab="mine", login=login, owner_login=owner_login, now=now, point=point, due="today", as_point=as_point)
     return {"count": len(tasks), "late": sum(1 for t in tasks if t["late"])}
