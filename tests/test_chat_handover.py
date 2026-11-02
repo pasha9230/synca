@@ -165,3 +165,18 @@ def test_a_failed_task_leaves_nothing_half_made(w, monkeypatch):
         chat_handover.hand(conn, w["rust"], chat, "point1", NOW)
     assert conn.execute("SELECT COUNT(*) FROM chat_handover").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM callback_task").fetchone()[0] == 0
+
+
+def test_a_chat_bound_to_another_points_order_is_not_handed_over(w):
+    conn, chat = w["conn"], w["petr"]["id"]
+    conn.execute("UPDATE avito_chat SET order_id = ? WHERE id = ?", (w["other"], chat))                  # Пётр's chat, an order of Гамма
+    conn.commit()
+    assert "Передать клиента" not in w["manager"].get("/chats/%d" % chat).get_data(as_text=True)
+    assert give(w).status_code == 403 and chat_handover.open_of(conn) == {}
+
+
+def test_a_new_handover_of_the_same_chat_is_told_again(w):
+    give(w)
+    post(w["owner"], "/chats/%d/take" % w["petr"]["id"], "tok")
+    give(w)
+    assert len(w["told"]) == 2 and w["told"][0][1] != w["told"][1][1]                                     # never a repeat of the hour

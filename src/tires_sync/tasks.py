@@ -10,6 +10,7 @@ one only to itself (of an order of its own point or of none) and sees and closes
 cancelled (grey: no alert)."""
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -149,7 +150,11 @@ def close(conn, task_id, how: str, now: str, who: str, result: str = "") -> dict
                                                                        _what(task["kind"], task["title"]), (" — " + result) if result else ""))
     store.write_audit(conn, now, who, "callback_" + how, {"task": int(task_id), "result": result} if result else {"task": int(task_id)})
     from . import chat_handover                                            # «Взять клиента» of a chat a point handed over (2026-11-02)
-    chat_handover.task_closed(conn, task, who, now)
+    try:                                                                   # the task is closed already: its light never spoils that
+        chat_handover.task_closed(conn, task, who, now)
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.tasks").exception("the chat handover of task %s was not marked taken", task_id)
     return task
 
 

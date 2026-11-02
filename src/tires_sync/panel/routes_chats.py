@@ -50,10 +50,14 @@ def _took(conn, chat_row) -> None:
         return
     try:
         mgr.take_chat(conn, chat_row, "ответил в чате", author(), local_iso())
-        chat_handover.take(conn, chat_row, author(), local_iso())         # «Передать клиента» (2026-11-02): the answer takes it too
     except Exception:
         conn.rollback()
         logging.getLogger(__name__).exception("the handed-over client of chat %s could not be marked taken", chat_row)
+    try:
+        chat_handover.take(conn, chat_row, author(), local_iso())         # «Передать клиента» (2026-11-02): the answer takes it too
+    except Exception:
+        conn.rollback()
+        logging.getLogger(__name__).exception("the chat handover of chat %s could not be marked taken", chat_row)
 
 
 def _chat_or_404(conn, chat_row):
@@ -643,11 +647,11 @@ def register(app) -> None:
         point_log.record(conn, now, author(), point, "handoff", None, "клиент из чата %s передан офису" % deals.ref(chat_row))     # «История точки»
         try:
             order_notify.tell_people(conn, app.config.get("SECRET_BOX"), made["to"],
-                                     chat_handover.message(made["point"], chat_row, request.host_url.rstrip("/") + "/chats/%d" % chat_row),
+                                     chat_handover.message(made["point"], chat_row, request.host_url.rstrip("/") + "/chats/%d" % chat_row, made["id"]),
                                      tg_http=app.config.get("TG_HTTP") or urllib_transport, now=now)
         except Exception:                                                  # the tasks and the light are there; only the message is lost
             logging.getLogger(__name__).exception("the Telegram message of a chat handover failed")
-        flash("Клиент передан владельцу и партнёру: они увидят чат и задачу «Взять клиента».", "ok")
+        flash("Клиент передан %s: в «Чатах» он подсвечен, у них задача «Взять клиента»." % ("владельцу и партнёру" if len(made["to"]) > 1 else "владельцу"), "ok")
         return back(chat_row)
 
     @app.route("/chats/<int:chat_row>/take", methods=["POST"])

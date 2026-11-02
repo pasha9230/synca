@@ -46,6 +46,7 @@ def hand(conn, point_id: int, chat_row: int, who: str, now: str) -> dict:
         raise HandoverError("Такого чата нет.")
     if chat["account_id"] != point.get("avito_account_id"):
         raise HandoverError("Это чат не аккаунта вашей точки: передать из него клиента нельзя.")
+    to = recipients(conn)
     cur = conn.execute("INSERT INTO chat_handover (chat_row, point_id, point_name, at, handed_by) SELECT ?, ?, ?, ?, ? "
                        "WHERE NOT EXISTS (SELECT 1 FROM chat_handover WHERE chat_row = ? AND taken_at IS NULL)",
                        (chat_row, point["id"], point["name"], now, who, chat_row))
@@ -56,13 +57,12 @@ def hand(conn, point_id: int, chat_row: int, who: str, now: str) -> dict:
     ref = "Ч-%d" % chat_row
     title = "%s: чат %s, точка «%s»" % (TITLE, ref, point["name"])
     note = " · ".join(p for p in (chat.get("peer_name") or "", chat.get("item_title") or "") if p)
-    to = recipients(conn)
     made = []
     try:
         for login in to:
             made.append(tasks.add(conn, kind="other", title=title, due_at=now[:16], note=note, now=now, author=who, assignee=login,
                                   owner_login=to[0], chat_row=chat_row))
-        conn.execute("UPDATE chat_handover SET tasks = ? WHERE id = ?", (json.dumps(made), handover_id))
+            conn.execute("UPDATE chat_handover SET tasks = ? WHERE id = ?", (json.dumps(made), handover_id))   # with each task: a stop between
         store.write_audit(conn, now, who, "chat_handover", {"handover": handover_id, "chat": chat_row, "point": point["id"], "to": to, "tasks": made})
     except BaseException:
         conn.rollback()
@@ -74,9 +74,11 @@ def hand(conn, point_id: int, chat_row: int, who: str, now: str) -> dict:
     return {"id": handover_id, "point": point["name"], "tasks": made, "to": to}
 
 
-def message(point_name: str, chat_row: int, link: str = "") -> str:
-    """The Telegram text to the owner and the partner."""
-    return "Точка «%s» передала клиента из чата Ч-%d: возьмите его в работу.%s" % (point_name, chat_row, (" " + link) if link else "")
+def message(point_name: str, chat_row: int, link: str = "", handover_id: int = 0) -> str:
+    """The Telegram text to the owner and the partner; the number of the handover keeps a new handover of the same chat from being a repeat
+    (order_notify.tell_people sends one text to one chat once an hour)."""
+    return "Точка «%s» передала клиента из чата Ч-%d%s: возьмите его в работу.%s" % (
+        point_name, chat_row, " (передача №%d)" % handover_id if handover_id else "", (" " + link) if link else "")
 
 
 def _task_ids(raw) -> List[int]:
@@ -120,5 +122,5 @@ def _close_tasks(conn, ids: List[int], how: str, who: str, now: str) -> None:
     for task_id in ids:
         try:
             tasks.close(conn, task_id, how, now, who)
-        except tasks.TaskError:                                            # closed already by hand, or gone with its chat
+        except tasks.TaskError:                                            # closed already by hand
             pass
