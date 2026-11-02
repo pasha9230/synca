@@ -122,6 +122,8 @@ def register(app) -> None:
             if not login or request.method != "GET":
                 return []
             role = current_user()["role"]
+            if current_user()["as_point"] is not None:                 # the owner as a point: their tour mark is the office's
+                return []
             if request.endpoint != START[kind(role)] or done(get_conn(), login):
                 return []
             return on_page(steps_for(role), has or {})
@@ -130,11 +132,13 @@ def register(app) -> None:
     @app.route("/tour/done", methods=["POST"])
     def tour_done():
         """«Пропустить» or the last step: not shown again; back to the page it was on."""
-        mark_done(get_conn(), current_user()["login"], "skip" if request.form.get("how") == "skip" else "end", now_iso())
+        if current_user()["as_point"] is None:
+            mark_done(get_conn(), current_user()["login"], "skip" if request.form.get("how") == "skip" else "end", now_iso())
         return redirect(safe_path(request.form.get("next", "")) or "/")
 
     @app.route("/tour/again", methods=["POST"])
     def tour_again():
         """«Пройти обзор заново»: forget the mark and open the start page of the role (the tour is shown there)."""
-        forget(get_conn(), current_user()["login"])
+        if current_user()["as_point"] is None:
+            forget(get_conn(), current_user()["login"])
         return redirect({"staff": "/", "point": "/my-point", "client": "/shop"}[kind(current_user()["role"])])

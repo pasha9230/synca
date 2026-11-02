@@ -52,6 +52,15 @@ def _card_point(conn, order_id):
         return None
 
 
+def _of_point(conn, task, point_id) -> bool:
+    """The task is one the owner or the partner working as the point sees (tasks.listing as_point): of an order of that point or of nothing."""
+    if task["chat_row"]:
+        return False
+    if task["order_id"]:
+        return _card_point(conn, task["order_id"]) == point_id
+    return not task["client_id"]
+
+
 def register(app) -> None:
     def tasks_for(client_id=None, order_id=None, chat_row=None) -> list:
         """The open tasks of the place for the one who looks: a point only its own; late ones known, the names of the assignees."""
@@ -134,7 +143,7 @@ def register(app) -> None:
         try:
             tasks.add(conn, kind=f.get("kind", "callback"), title=f.get("title", ""), due_at=due, note=f.get("note", ""), now=local_iso(),
                       author=me, assignee=assignee or None, owner_login=_owner(conn), client_id=client_id, order_id=order_id,
-                      chat_row=chat_row, allowed=allowed)
+                      chat_row=chat_row, allowed=allowed, journal_author=author())
             flash("Задача поставлена.", "info")
         except tasks.TaskError as err:
             conn.rollback()
@@ -155,10 +164,12 @@ def register(app) -> None:
             abort(404)
         if is_point() and task["assignee"] != me:        # a point closes only its own: another's is refused, never even looked at
             abort(403)
+        if current_user()["as_point"] is not None and not _of_point(conn, task, own_point()):    # the owner as a point: of that point only
+            abort(403)
         if not is_point() and not may_take():
             abort(403)
         try:
-            tasks.close(conn, task_id, how, local_iso(), me, request.form.get("result", ""))
+            tasks.close(conn, task_id, how, local_iso(), me, request.form.get("result", ""), journal_author=author())
             flash("Задача выполнена." if how == "done" else "Задача отменена.", "info")
         except tasks.TaskError as err:
             flash(str(err), "error")

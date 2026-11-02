@@ -7,9 +7,9 @@ body.shop,.shop-cat{--cl-primary:#1677ff;--cl-primary-bg:#e6f4ff;--cl-error:#ff4
   --cl-border-2:#f0f0f0;--cl-text:rgba(0,0,0,.88);--cl-text-2:rgba(0,0,0,.65);--cl-text-3:rgba(0,0,0,.45);--cl-fill:rgba(0,0,0,.04);
   background:var(--cl-layout);color:var(--cl-text);font-size:14px;line-height:1.5714}
 /* «Новый вид» «Строгий» (body.ui-new, план 2026-11-02): те же токены клиента, другие значения; без класса ничего не меняется */
-body.shop.ui-new,.ui-new .shop-cat{--cl-primary:#4F46E5;--cl-primary-bg:#F3F4F6;--cl-layout:#FFFFFF;--cl-border:#D0D7DE;--cl-border-2:#E4E7EB;
+body.shop.ui-new,.shop-cat:where(.ui-new *){--cl-primary:#4F46E5;--cl-primary-bg:#F3F4F6;--cl-layout:#FFFFFF;--cl-border:#D0D7DE;--cl-border-2:#E4E7EB;
   --cl-text:#1F2328;--cl-text-2:#3D444D;--cl-text-3:#59636E;--cl-fill:#F6F8FA}
-.ui-new.shop .card{border-radius:6px;border-color:var(--cl-border)}
+.shop.ui-new .card{border-radius:6px;border-color:var(--cl-border)}
 .shop .main{overflow:visible;background:var(--cl-layout)}
 .shop .page{max-width:1240px;padding:24px 24px 48px;gap:16px;margin:0 auto}
 .shop .card{border:1px solid var(--cl-border-2);border-radius:12px;box-shadow:none}

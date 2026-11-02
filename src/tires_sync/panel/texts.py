@@ -272,8 +272,10 @@ _MORE_TEXTS = {
     "client_terms_changed": lambda d: _client_terms_text(d),
     "ui_new": lambda d: "Новый вид, %s: %s → %s" % (_ui_group(d.get("group")), _ui_state(d.get("from")), _ui_state(d.get("to"))),
     "as_point_start": lambda d: "Начал работать как точка «%s»" % _q(d.get("name") or d.get("point")),
-    "as_point_stop": lambda d: "Закончил работать как точка №%s%s" % (_q(d.get("point")), {"exit": "", "password": " (сменил пароль)",
-                                                                                             "invalid": " (режим больше не действует)"}.get(d.get("why"), "")),
+    "as_point_stop": lambda d: "Закончил работать как точка %s%s" % (
+        "«%s»" % d["name"] if d.get("name") else "№%s" % _q(d.get("point")),
+        {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)",
+         "invalid": " (режим больше не действует)"}.get(d.get("why"), "")),
     "client_pct_changed": lambda d: _client_pct_text(d),
     "client_pct_followed": lambda d: _client_followed_text(d),
     "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),

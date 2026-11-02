@@ -91,9 +91,10 @@ def default_assignee(conn, owner_login: str, author: str, order_id=None, chat_ro
 # ---- set, close ---------------------------------------------------------------------------------------------------------------------------
 
 def add(conn, *, kind: str, title: str, due_at: str, note: str, now: str, author: str, assignee: Optional[str] = None, owner_login: str = "owner",
-        client_id=None, order_id=None, chat_row=None, allowed: Optional[set] = None) -> int:
+        client_id=None, order_id=None, chat_row=None, allowed: Optional[set] = None, journal_author: Optional[str] = None) -> int:
     """A task. `assignee` None: default_assignee; else one of `allowed` (the logins of assignees(); the caller narrows it for a point).
-    «Перезвонить» needs whom to call (an order, a chat or a client); another kind may be of none. The order's journal gets its line."""
+    «Перезвонить» needs whom to call (an order, a chat or a client); another kind may be of none. The order's journal gets its line.
+    `journal_author`: who the journal and the audit name when not the login (panel/common.author: «<name> за точку «X»»)."""
     if kind not in KINDS:
         raise TaskError("Выберите, что сделать.")
     due = str(due_at or "").strip()[:16]
@@ -126,15 +127,16 @@ def add(conn, *, kind: str, title: str, due_at: str, note: str, now: str, author
                            "VALUES (?,?,?,?,?,?,?,?,?,?)", (client_id or None, order_id or None, chat_row or None, due, assignee,
                                                            _one_line(note, NOTE_MAX), now, author, kind, title)).lastrowid
     if order_id:
-        _journal(conn, order_id, now, author, "Задача: %s — %s, до %s" % (_what(kind, title), users.person_name(conn, assignee), _shown(due)))
-    store.write_audit(conn, now, author, "callback", {"task": task_id, "client": client_id, "order": order_id, "chat": chat_row, "due": due,
+        _journal(conn, order_id, now, journal_author or author, "Задача: %s — %s, до %s" % (_what(kind, title), users.person_name(conn, assignee),
+                                                                                         _shown(due)))
+    store.write_audit(conn, now, journal_author or author, "callback", {"task": task_id, "client": client_id, "order": order_id, "chat": chat_row, "due": due,
                                                      "to": assignee, "kind": kind})
     return task_id
 
 
-def close(conn, task_id, how: str, now: str, who: str, result: str = "") -> dict:
+def close(conn, task_id, how: str, now: str, who: str, result: str = "", journal_author: Optional[str] = None) -> dict:
     """«Выполнено» (how = "done", with what came of it) or «Отменить» (how = "cancel"); a closed task stays closed. The rights are the
-    caller's (routes_tasks: a point only its own)."""
+    caller's (routes_tasks: a point only its own). `journal_author` as in add."""
     if how not in ("done", "cancel"):
         raise TaskError("Неизвестное действие.")
     task = get(conn, task_id)
@@ -146,9 +148,9 @@ def close(conn, task_id, how: str, now: str, who: str, result: str = "") -> dict
         raise TaskError("Задача уже закрыта.")
     result = _one_line(result, RESULT_MAX)
     if task["order_id"]:
-        _journal(conn, task["order_id"], now, who, "Задача %s: %s%s" % ("выполнена" if how == "done" else "отменена",
+        _journal(conn, task["order_id"], now, journal_author or who, "Задача %s: %s%s" % ("выполнена" if how == "done" else "отменена",
                                                                        _what(task["kind"], task["title"]), (" — " + result) if result else ""))
-    store.write_audit(conn, now, who, "callback_" + how, {"task": int(task_id), "result": result} if result else {"task": int(task_id)})
+    store.write_audit(conn, now, journal_author or who, "callback_" + how, {"task": int(task_id), "result": result} if result else {"task": int(task_id)})
     from . import chat_handover                                            # «Взять клиента» of a chat a point handed over (2026-11-02)
     try:                                                                   # the task is closed already: its light never spoils that
         chat_handover.task_closed(conn, task, who, now)

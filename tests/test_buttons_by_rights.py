@@ -77,7 +77,8 @@ def allowed_to_post(app, role: str, path: str) -> bool:
     """What the server says to this role posting there: the real check_access, not a copy of it. The edits of a point's own sale
     (common.POINT_SALE_PAGES) are checked per order: the order of the world is the point's own sale (deal_kind «stock»), so can_post agrees."""
     with app.test_request_context(path, method="POST"):
-        g.user_info = {"login": role, "role": role, "point_id": 1 if role == "point" else None, "display_name": ""}
+        g.user_info = {"login": role, "role": role, "point_id": 1 if role == "point" else None, "display_name": "",
+                       "real_role": role, "as_point": None, "as_point_name": ""}   # common.current_user()
         common.session_valid, saved = (lambda: True), common.session_valid
         try:
             common.check_access()
@@ -150,7 +151,8 @@ def test_can_post_says_what_the_server_says_for_every_role_and_every_page(world)
             if not any("POST" in r.methods for r in app.url_map.iter_rules() if r.endpoint == endpoint):
                 continue
             with app.test_request_context("/"):
-                g.user_info = {"login": role, "role": role, "point_id": 1 if role == "point" else None, "display_name": ""}
+                g.user_info = {"login": role, "role": role, "point_id": 1 if role == "point" else None, "display_name": "",
+                               "real_role": role, "as_point": None, "as_point_name": ""}   # common.current_user()
                 helper = common.can_post(endpoint)
             assert helper == allowed_to_post(app, role, _post_path(app, endpoint)), (role, endpoint)
 

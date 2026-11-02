@@ -118,7 +118,7 @@ def test_a_planted_session_point_of_a_viewer_gives_nothing(w):
     assert client.get("/my-point").status_code == 403                    # the viewer has no «Рабочее место»
     assert client.get("/orders/%d" % w["mine"]).status_code == 200      # its own right: the orders, all of them
     assert session_point(client) is None
-    assert audits(conn, "as_point_stop") == [("view1", {"point": w["pa"], "why": "invalid"})]
+    assert audits(conn, "as_point_stop") == [("view1", {"point": w["pa"], "name": "Янино", "why": "invalid"})]
 
 
 # --- exactly the point ---------------------------------------------------------------------------------------------------------------
@@ -209,7 +209,7 @@ def test_exit_ends_it_and_the_owner_is_back(w):
     response = post(client, "/as-point/stop", "tok")
     assert response.status_code == 302 and session_point(client) is None
     assert client.get("/connections/webmim").status_code == 200 and client.get("/orders/%d" % w["other"]).status_code == 200
-    assert audits(w["conn"], "as_point_stop") == [("owner", {"point": w["pa"], "why": "exit"})]
+    assert audits(w["conn"], "as_point_stop") == [("owner", {"point": w["pa"], "name": "Янино", "why": "exit"})]
     assert client.post("/as-point/stop", data={}).status_code == 400       # CSRF as everywhere
 
 
@@ -235,7 +235,7 @@ def test_a_new_password_ends_it_and_the_session_stays(w):
     assert response.status_code == 302
     assert session_point(client) is None
     assert client.get("/orders/%d" % w["other"]).status_code == 200      # the partner again, still signed in
-    assert audits(w["conn"], "as_point_stop") == [("zaman", {"point": w["pa"], "why": "password"})]
+    assert audits(w["conn"], "as_point_stop") == [("zaman", {"point": w["pa"], "name": "Янино", "why": "password"})]
 
 
 def test_a_role_taken_away_ends_it_on_the_next_request(w):
@@ -246,7 +246,7 @@ def test_a_role_taken_away_ends_it_on_the_next_request(w):
     conn.commit()
     assert client.get("/my-point").status_code == 403                   # the chats' manager, not the point
     assert session_point(client) is None
-    assert audits(conn, "as_point_stop")[-1] == ("zaman", {"point": w["pa"], "why": "invalid"})
+    assert audits(conn, "as_point_stop")[-1] == ("zaman", {"point": w["pa"], "name": "Янино", "why": "invalid"})
 
 
 def test_the_point_deleted_ends_it(w):
@@ -287,3 +287,67 @@ def test_the_bell_as_a_point_is_the_points(w):
     texts = [r["text"] for r in order_alerts.page_rows(conn, "owner", None, own_prefix="Павел за точку «")]
     assert "нажала точка" in texts and "сам нажал" not in texts
     assert "сам нажал" in [r["text"] for r in order_alerts.page_rows(conn, "owner", None)]
+
+
+# --- the review (2026-11-02): tasks, the end by a sign-out, the person's own settings -------------------------------------------------
+
+def test_a_task_set_and_closed_as_a_point_names_the_person_for_the_point(w):
+    conn = w["conn"]
+    users.set_main_name(conn, "Павел", NOW, "owner")
+    client = owner(w)
+    as_point(client, w["pa"])
+    assert post(client, "/tasks/new", "tok", kind="other", title="позвонить", date="2026-10-08", time="10:00",
+                order_id=str(w["mine"])).status_code == 302
+    task = conn.execute("SELECT id, created_by, assignee FROM callback_task").fetchone()
+    assert task[1:] == ("owner", "owner")                                 # the person's own: «Поставил я», «Мне»
+    assert post(client, "/tasks/%d/done" % task[0], "tok", result="ок").status_code == 302
+    journal = [r[0] for r in conn.execute("SELECT author FROM order_event WHERE order_id = ? AND kind = 'task' ORDER BY id", (w["mine"],))]
+    assert journal == ["Павел за точку «Янино»"] * 2
+    assert [r[0] for r in conn.execute("SELECT author FROM audit WHERE action IN ('callback', 'callback_done') ORDER BY id")] == \
+        ["Павел за точку «Янино»"] * 2
+    assert conn.execute("SELECT done_by FROM callback_task").fetchone()[0] == "owner"
+
+
+def test_as_a_point_a_task_of_another_point_is_not_closed(w):
+    conn = w["conn"]
+    tasks.add(conn, kind="other", title="чужой точки", due_at="2026-10-07T13:00", note="", now=NOW, author="owner", assignee="owner",
+              owner_login="owner", order_id=w["other"], allowed={"owner"})
+    client = owner(w)
+    as_point(client, w["pa"])
+    assert post(client, "/tasks/1/done", "tok").status_code == 403
+    assert conn.execute("SELECT done_at FROM callback_task").fetchone()[0] is None
+
+
+def test_a_sign_out_while_a_point_is_in_the_journal(w):
+    client = owner(w)
+    as_point(client, w["pa"])
+    post(client, "/logout", "tok")
+    other = partner(w)
+    as_point(other, w["pb"])
+    store.bump_session_epoch(w["conn"], "zaman")
+    other.get("/my-point")
+    assert audits(w["conn"], "as_point_stop") == [("owner", {"point": w["pa"], "name": "Янино", "why": "logout"}),
+                                                  ("zaman", {"point": w["pb"], "name": "Юнона", "why": "signed_out"})]
+
+
+def test_the_stop_names_the_point(w):
+    from tires_sync.panel import texts
+    client = owner(w)
+    as_point(client, w["pa"])
+    post(client, "/as-point/stop", "tok")
+    detail = audits(w["conn"], "as_point_stop")[0][1]
+    assert texts.audit_text({"action": "as_point_stop", "detail": detail}) == "Закончил работать как точка «Янино»"
+
+
+def test_the_persons_own_settings_are_not_changed_from_the_point(w):
+    """The columns of the list and the mark of the tour are the person's own (user_pref): as a point they stay as the office left them."""
+    from tires_sync import user_prefs
+    conn = w["conn"]
+    client = owner(w)
+    as_point(client, w["pa"])
+    before = conn.execute("SELECT COUNT(*) FROM user_pref").fetchone()[0]
+    post(client, "/orders/list/columns", "tok", order="client", shown="client")
+    post(client, "/tour/done", "tok", how="skip")
+    post(client, "/tour/again", "tok")
+    assert conn.execute("SELECT COUNT(*) FROM user_pref").fetchone()[0] == before
+    assert 'data-tour-root' not in client.get("/my-point").get_data(as_text=True)

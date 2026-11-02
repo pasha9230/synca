@@ -204,7 +204,7 @@ def login_required(view):
         valid = session_valid()
         if not valid:
             if session.get("user"):
-                session.clear()
+                drop_session()
             return redirect("/login")
         return view(*args, **kwargs)
 
@@ -393,11 +393,21 @@ def as_point_author(conn, login: str, point_name: str) -> str:
 
 
 def end_as_point(login: str, why: str) -> None:
-    """The mode ends (the person's «Выйти», a new password, or it no longer holds); audited with the point it was."""
+    """The mode ends (the person's «Выйти», a new password, a sign-out, or it no longer holds); audited with the point it was."""
     point = session.pop("as_point", None)
     g.pop("user_info", None)
     if point is not None and login:
-        store.write_audit(get_conn(), now_iso(), login, "as_point_stop", {"point": point, "why": why})
+        conn = get_conn()
+        row = conn.execute("SELECT name FROM point WHERE id = ?", (point,)).fetchone() if isinstance(point, int) else None
+        store.write_audit(conn, now_iso(), login, "as_point_stop", dict({"point": point}, **({"name": row[0]} if row else {}), why=why))
+
+
+def drop_session(why: str = "signed_out") -> None:
+    """session.clear() of a session that is over (a sign-out, a new epoch, the shared password changed): «Работать как точка» ends with it,
+    in the journal too."""
+    if session.get("as_point") is not None:
+        end_as_point(session.get("user") or "", why)
+    session.clear()
 
 
 def can(section: str, need: str = "view") -> bool:
@@ -414,6 +424,8 @@ def can_post(endpoint: str) -> bool:
     section = SECTION_OF.get(endpoint)
     if endpoint in OPEN:
         return True
+    if endpoint in AS_POINT_PAGES:                       # as check_access: the person's own role
+        return current_user()["real_role"] in AS_POINT_ROLES
     if section is None or users.level(role, section) < (users.VIEW if role == "point" and endpoint in VIEW_POSTS else users.EDIT):
         return False
     if role == "point" and endpoint not in POINT_PAGES:
@@ -491,7 +503,7 @@ def check_access():
         return None
     if not session_valid():
         if session.get("user"):
-            session.clear()
+            drop_session()
         return redirect("/login")
     user = current_user()
     if endpoint in AS_POINT_PAGES:                        # «Работать как точка» / «Выйти»: the owner's and the partner's own (the role

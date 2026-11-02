@@ -387,9 +387,9 @@ def create_app(config: dict) -> Flask:
 
     def _forget_stale_session():                                         # a page of an error never draws the menu of a session that is over
         from flask import session
-        from .common import session_valid
+        from .common import drop_session, session_valid
         if session.get("user") and not session_valid():
-            session.clear()
+            drop_session()
 
     @app.errorhandler(403)
     def forbidden(_err):
