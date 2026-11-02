@@ -154,6 +154,7 @@
   .pt-nav b{position:absolute;top:4px;left:calc(50% + 6px);min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;font-size:11px;
     font-weight:400;background:rgba(0,0,0,.25);color:#fff}
   .pt-nav b.is-hot{background:#ff4d4f}
+  .pt-nav .wn-dot{position:absolute;top:8px;left:calc(50% + 8px);margin:0}
   .pt-bell{display:inline-flex;gap:4px;align-items:center}
   .pt-bell b{min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;font-size:11px;background:#ff4d4f;color:#fff}
   body.pt-orders-page .pt-desk{display:none}
