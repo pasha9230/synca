@@ -177,6 +177,7 @@ def stage_times(conn, start: str, end: str, now: str, stuck_hours: Optional[floa
         raise ValueError("Порог «зависших»: больше нуля часов.")
     stages = orders.list_stages(conn)
     by_name = {s["name"]: s for s in stages}
+    renamed = {old: orders.stage_name(conn, code) for code, old in orders.OLD_NAMES_2026_11_03.items() if old not in by_name}   # 2026-11-03
     durations: Dict[str, List[float]] = {}
     last: Dict[int, tuple] = {}
     for order_id, at, kind, text in conn.execute("SELECT order_id, at, kind, text FROM order_event WHERE kind IN ('created', 'stage', 'restored') "
@@ -187,6 +188,7 @@ def stage_times(conn, start: str, end: str, now: str, stuck_hours: Optional[floa
         name = _entered(kind, text)
         if name is None:
             continue
+        name = renamed.get(name, name)                                     # the journal before the renaming: the stage by its new name
         previous = last.get(order_id)
         if previous is not None and kind == "stage" and _in(at, start, end):
             durations.setdefault(previous[0], []).append(_hours(previous[1], at))

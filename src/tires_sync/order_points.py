@@ -89,7 +89,12 @@ POINT_STAGES = ("new", "placed", "done", "cancel")         # «Заказы» of
 POINT_FOLD = {"from_point": "new", "talk": "new", "wait": "new", "moving": "placed", "at_point": "placed",     # another stage of the owner's:
               "oth": "cancel", "return_given": "cancel", "return": "cancel"}                                  # the nearest column (the lead)
 KIND_FOLD = {"open": "new", "won": "done", "lost": "cancel", "closed": "cancel"}                         # a stage the owner added himself
-MOVE_REFUSED = "Свою продажу точка переводит только между этапами «Новый заказ», «Заказ оформлен», «Выполнено» и «Отмена / невыкуп»."
+MOVE_REFUSED = "Свою продажу точка переводит только между этапами «%s», «%s», «%s» и «%s»."     # POINT_STAGES by their current names
+
+
+def move_refused(conn) -> str:
+    from .orders import stage_name
+    return MOVE_REFUSED % tuple(stage_name(conn, code) for code in POINT_STAGES)
 
 
 def point_column(stage: dict) -> str:
@@ -103,7 +108,7 @@ def check_point_move(conn, point_id, order_id, stage: dict) -> None:
     owner's moves are as before. Raises orders.OrderError."""
     if point_id is not None and stage.get("code") not in POINT_STAGES and order_id in own_sales(conn, point_id):
         from .orders import OrderError
-        raise OrderError(MOVE_REFUSED)
+        raise OrderError(move_refused(conn))
 
 
 WORK_STAGES = ("at_point", "oth", "return_given", "shipped")   # «Товар на точке», «На ОТХ», «Возврат передан», «Отправлен» (other city)

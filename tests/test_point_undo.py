@@ -86,7 +86,7 @@ def test_issued_is_undone_into_the_same_stay_at_the_point(tmp_path, clock, told)
     assert state(conn, card) == before and to_client(app) == []                          # the same stay: no new «можно забирать»
     texts = [e["text"] for e in orders.list_events(conn, card)]
     assert reserve_lines() == lines_before                                             # the undo's move leaves no «Резерв…» line of its own
-    assert any("снова на этапе «Товар на точке», резерв до 16.10.2026" in t for t in texts)
+    assert any("снова на этапе «На точке, ждём клиента», резерв до 16.10.2026" in t for t in texts)
     assert not any("[резерв:на-отх:" in t for t in texts)                               # no reminder went: a later one still counts
 
 

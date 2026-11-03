@@ -127,7 +127,7 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
             return "не выполнено: %s" % err, "Не получилось: %s" % err, False
         if not done:
             return "не выполнено: заказ уже изменили", "Заказ №%s уже изменили: обновите страницу." % mgr.label(card), False
-        return ("заказ перенесён на «Возврат передан»", "Заказ №%s: акт МХ-3 подписан, шины отданы. Менеджер заполнит сумму возврата." % mgr.label(card),
+        return ("заказ перенесён на «%s»" % orders.stage_name(conn, orders.RETURN_GIVEN), "Заказ №%s: акт МХ-3 подписан, шины отданы. Менеджер заполнит сумму возврата." % mgr.label(card),
                 True)
     if action == "to_oth":                                                      # «Шины остаются на точке — на ОТХ?» after «Клиент не пришёл»
         if code != "at_point" or not no_show_now(conn, card):

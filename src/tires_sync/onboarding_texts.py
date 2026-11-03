@@ -14,6 +14,7 @@ from markupsafe import Markup, escape
 PREF = "hint.%s"                        # user_pref: True = folded («Свернуть»), for every card of the place
 PLACES = ("stage", "point")             # the order's card, «Рабочее место»
 BUTTON = re.compile(r"\[([^\[\]]+)\]")
+STAGE = re.compile(r"\{(\w+)\}")          # {code}: the name of that stage (the owner renames them: the panel gives the current ones), else as is
 
 RULES = "Если владелец настроил правила этапа, панель подготовит сообщения в «Сообщения по заказу»; отправляете их вы."
 FORWARD = "[Перевести в «…»] наверху окна или нужный этап в полосе этапов"
@@ -66,9 +67,9 @@ STAGES = {
         "steps": ("Впишите номер перемещения, если его ещё нет, и нажмите [Сохранить].",
                   "Ждите отметку точки: шины приедут — точка нажмёт [Приехал] на «Рабочем месте» (или напишет в ВК).",
                   "Шины приехали, а точка не отметила — " + FORWARD + " сами."),
-        "auto": ("Точка нажала «Приехал» — заказ сам переходит на «Товар на точке», клиенту уходит «Клиенту: товар на точке, можно забирать» "
+        "auto": ("Точка нажала «Приехал» — заказ сам переходит на «{at_point}», клиенту уходит «Клиенту: товар на точке, можно забирать» "
                  "(если у заказа есть чат Авито; нет — сообщение ждёт в заказе, в ленте красная запись).",
-                 "При вашем ручном переводе на «Товар на точке» это сообщение само не уходит."),
+                 "При вашем ручном переводе на «{at_point}» это сообщение само не уходит."),
     },
     "at_point": {
         "steps": ("Проверьте в ленте событий, ушло ли клиенту «можно забирать».",
@@ -93,7 +94,7 @@ STAGES = {
                   "Передумали до подписи акта — отмените согласование кнопкой на плашке с датой возврата."),
         "auto": ("Клиенту ничего не пишется, резерв снимается, срока на ОТХ нет.",
                  "После «Согласовано» точка видит дату возврата (ближайшую нечётную) и «Подпишите акт МХ-3». "
-                 "Точка отметила — заказ сам переходит в «Возврат передан».",
+                 "Точка отметила — заказ сам переходит в «{return_given}».",
                  "Отменили согласование — точке уходит сообщение, что возврат отменён."),
     },
     "return_given": {
@@ -114,7 +115,7 @@ STAGES = {
                   "Шины остались на точке — нажмите «На ОТХ» в полосе этапов: их можно будет продать другому клиенту или вернуть поставщику.",
                   "Клиент вернулся — переведите заказ на нужный этап в полосе этапов."),
         "auto": ("Клиенту ничего не уходит.",
-                 "Заказ с «Товар на точке» панель сначала спрашивает: оставить шины на ОТХ?",
+                 "Заказ с «{at_point}» панель сначала спрашивает: оставить шины на ОТХ?",
                  "Если заказ уже был в Google-таблице, его строка остаётся, «Этап» обновится, «Реализация» — пусто."),
     },
     "return": {
@@ -138,8 +139,20 @@ POINT_OF_STAGE = {"placed": "going", "moving": "going", "at_point": "here", "oth
 POINT_CARD = "Отметки «Приехал» и «Выдал» ставятся на «Рабочем месте»."
 
 
-def _render(text: str) -> Markup:
-    """The text escaped, its [buttons] bold."""
+def _names(names: Optional[dict]) -> dict:
+    from .orders import DEFAULT_STAGES, FROM_POINT
+    return dict({d[0]: d[1] for d in DEFAULT_STAGES + (FROM_POINT,)}, **(names or {}))
+
+
+def fill(text: str, names: Optional[dict] = None) -> str:
+    """The text with each {code} put as the stage's name: `names` {code: name} (the current ones), else the default names."""
+    names = _names(names)
+    return STAGE.sub(lambda m: names.get(m.group(1), m.group(0)), text)
+
+
+def _render(text: str, names: Optional[dict] = None) -> Markup:
+    """The text escaped, its [buttons] bold, its {stages} named."""
+    text = fill(text, names)
     out, at = [], 0
     for m in BUTTON.finditer(text):
         out.append(escape(text[at:m.start()]))
@@ -149,14 +162,14 @@ def _render(text: str) -> Markup:
     return Markup("").join(out)
 
 
-def stage_hint(code: Optional[str], point: bool = False) -> Optional[dict]:
+def stage_hint(code: Optional[str], point: bool = False, names: Optional[dict] = None) -> Optional[dict]:
     """The hint of the stage `code` for the order's card: {"steps", "auto"} drawn, or None (a stage of the owner's own, no code).
-    `point`: the manager of a point, whose card is read-only — the line of «Рабочее место» about its buttons instead."""
+    `point`: the manager of a point, whose card is read-only — the line of «Рабочее место» about its buttons instead. `names`: see fill."""
     if point:
         state = POINT_OF_STAGE.get(code or "")
-        return {"steps": [_render(POINT[state]), _render(POINT_CARD)], "auto": []} if state else None
+        return {"steps": [_render(POINT[state], names), _render(POINT_CARD, names)], "auto": []} if state else None
     h = STAGES.get(code or "")
-    return {"steps": [_render(s) for s in h["steps"]], "auto": [_render(a) for a in h["auto"]]} if h else None
+    return {"steps": [_render(s, names) for s in h["steps"]], "auto": [_render(a, names) for a in h["auto"]]} if h else None
 
 
 def point_hint(state: str) -> Markup:
@@ -164,7 +177,7 @@ def point_hint(state: str) -> Markup:
 
 
 def stage_texts() -> list:
-    return [t for h in STAGES.values() for t in h["steps"] + h["auto"]]
+    return [fill(t) for h in STAGES.values() for t in h["steps"] + h["auto"]]
 
 
 def point_texts() -> list:

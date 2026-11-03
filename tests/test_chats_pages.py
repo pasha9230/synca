@@ -719,7 +719,7 @@ def test_the_list_shows_the_last_message_time_as_day_month(tmp_path):
 
 
 def test_a_move_the_order_lacks_data_for_is_refused_out_loud_and_the_deal_block_names_what_is_missing(tmp_path):
-    """Order №226: cancelled, no point, no delivery date. The move to «Перемещение на точку» is refused in red with the gaps named,
+    """Order №226: cancelled, no point, no delivery date. The move to «Едет на точку» is refused in red with the gaps named,
     the deal block says what is missing before anyone tries, and once the gaps are filled the same move goes through."""
     from tires_sync import order_points as points
     app, client, tok, conn, account = setup(tmp_path)
@@ -743,7 +743,7 @@ def test_a_move_the_order_lacks_data_for_is_refused_out_loud_and_the_deal_block_
     assert "chat-deal-gaps" not in page and "21.10" in page
     page = client.post("/chats/%d/stage" % ivan["id"], data={"csrf": tok, "stage_id": str(stage["moving"])}, follow_redirects=True).get_data(as_text=True)
     assert orders.get_card(conn, cid)["stage"]["code"] == "moving"
-    assert "Заказ №%d перенесён в «Перемещение на точку»." % cid in page and "flash--err" not in page
+    assert "Заказ №%d перенесён в «Едет на точку»." % cid in page and "flash--err" not in page
 
 
 STUB = "Сообщение не поддерживается. Пожалуйста, перейдите в Авито мессенджер https://avito.ru/profile/messenger/channel/u2i-Ab_9~x."

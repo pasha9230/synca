@@ -10,7 +10,7 @@
 <span class="mp-card-head"><span class="mp-no">№ {{ c.id }}</span>{% if c.real %}<span class="badge badge--neutral" data-real-stage>{{ c.real }}</span>{% endif %}<span class="mp-sub">{{ c.days }} дн.</span></span>
 <span class="mp-tyres">{{ c.items_text or "позиции не выбраны" }}</span><span class="mp-sub">{{ c.client }}</span></a>
 {% if can_post("order_move") and col.stage.kind == "open" %}<div class="pt-ocard-moves">{% for to in data.columns if to.stage.code in ("placed", "done") and to.stage.position > col.stage.position %}<form method="post" action="/orders/{{ c.id }}/move" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ to.stage.id }}"><input type="hidden" name="ost" value="{{ ost }}"><button class="btn btn--secondary btn--sm" data-move="{{ to.stage.code }}">{{ to.stage.name }}</button></form>{% endfor %}
-<a class="btn btn--link-gray btn--sm" href="/orders/{{ c.id }}#finish">Отмена / невыкуп</a></div>{% endif %}</div>
+<a class="btn btn--link-gray btn--sm" href="/orders/{{ c.id }}#finish">{{ stage_name("cancel") }}</a></div>{% endif %}</div>
 {% else %}<p class="mp-empty">Здесь сейчас нет заказов.</p>{% endfor %}{% endfor %}
 {% with section="orders" %}{% include "_point_nav.html" %}{% endwith %}
 </div>

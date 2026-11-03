@@ -79,7 +79,7 @@ def test_the_point_sees_its_own_sales_on_four_stages_the_others_folded_with_the_
     assert shown == {m["stock_new"], m["stock_talk"], m["stock_at"], m["stock_done"], m["stock_oth"], m["account"]}
     names = re.findall(r'<a class="pt-chip[^"]*" href="/orders\?ost=([a-z]+)"', page)
     assert names == ["new", "placed", "done", "cancel"]
-    for card, real in ((m["stock_talk"], "Переговоры"), (m["stock_at"], "Товар на точке"), (m["stock_oth"], "На ОТХ")):
+    for card, real in ((m["stock_talk"], "Переговоры"), (m["stock_at"], "На точке, ждём клиента"), (m["stock_oth"], "На ОТХ")):
         piece = page[page.index('data-card="%d"' % card):].split("</a>")[0]
         assert "data-real-stage" in piece and real in piece, card
     plain = page[page.index('data-card="%d"' % m["stock_new"]):].split("</a>")[0]
@@ -106,7 +106,7 @@ def test_the_point_moves_its_own_sale_between_the_four_stages_only(w):
     assert r.status_code in (302, 303)
     assert orders.get_card(conn, m["stock_new"])["stage_id"] == s["new"]
     r = w["point"].post("/orders/%d/move" % m["stock_new"], data={"csrf": "tok", "stage_id": s["talk"]}, follow_redirects=True)
-    assert points.MOVE_REFUSED in r.get_data(as_text=True)
+    assert points.move_refused(conn) in r.get_data(as_text=True)
     w["point"].post("/orders/%d/move" % m["stock_talk"], data={"csrf": "tok", "stage_id": s["new"]})     # into the four: as before
     assert orders.get_card(conn, m["stock_talk"])["stage_id"] == s["new"]
 

@@ -15,7 +15,7 @@ NOW = "2026-10-07T12:00:00"
 
 
 def shop(tmp_path):
-    """test_shop_cart.shop with the whole pipeline of the orders (the stages of placing, the point, «Отмена / невыкуп»)."""
+    """test_shop_cart.shop with the whole pipeline of the orders (the stages of placing, the point, «Отмена»)."""
     app, client, conn, tg, pid = _bare_shop(tmp_path)
     orders.ensure_pipeline(conn, NOW)
     return app, client, conn, tg, pid
@@ -96,7 +96,7 @@ def test_the_client_cancels_an_early_order_after_a_confirmation(tmp_path):
     assert r.status_code == 302 and r.headers["Location"].endswith("/shop/orders/%d" % order)
     card = orders.get_card(conn, order)
     assert card["stage"]["code"] == "cancel" and card["cancel_reason"] == "отменил клиент: сам, в каталоге клиента"
-    assert any("«Передано с точки» → «Отмена / невыкуп»" in e["text"] and e["author"] == "buyer" for e in orders.list_events(conn, order))
+    assert any("«Передано с точки» → «Отмена»" in e["text"] and e["author"] == "buyer" for e in orders.list_events(conn, order))
     told = _sent(tg)[before:]
     assert len(told) == 1 and "Клиент отменил заказ №%d" % order in told[0] and "https://panel.example.test/orders/%d" % order in told[0]
     audit = conn.execute("SELECT author, detail FROM audit WHERE action = 'shop_order_cancel'").fetchall()

@@ -63,7 +63,7 @@
 <td class="num owin-isum" data-sum="{{ r.sum if r.sum is not none else '' }}">{{ r.sum|money if r.sum is not none else "—" }}</td>
 <td class="owin-ix"><button type="button" class="icon-btn" data-item-x title="Убрать из списка" aria-label="Убрать {{ r.name or r.query or r.goods_id }}">{{ icon("x") }}</button></td></tr>{% endfor %}{% endif %}
 </tbody></table>
-{% if card and oth_at_point and not ro %}<div class="flash flash--ok" data-oth-at-point role="status"><div class="flash-text">Все шины заказа взяты с ОТХ: WebMIM не нужен. <button class="btn btn--primary btn--xs" form="ow-oth-at-point">Шины уже на точке — перевести на «Товар на точке»</button></div></div>{% endif %}
+{% if card and oth_at_point and not ro %}<div class="flash flash--ok" data-oth-at-point role="status"><div class="flash-text">Все шины заказа взяты с ОТХ: WebMIM не нужен. <button class="btn btn--primary btn--xs" form="ow-oth-at-point">Шины уже на точке — перевести на «{{ stage_name("at_point") }}»</button></div></div>{% endif %}
 <p class="owin-total">{% if card %}{% if c['items'] %}Итого: <b>{{ totals.sale|money }}</b>{% else %}<span class="muted">Позиций пока нет.</span>{% if ad_position %} <button class="btn btn--secondary btn--xs" form="ow-ad-position" title="Объявление Авито №{{ ad_position.item_id }} из чата Ч-{{ ad_position.id }}">Подставить позицию из объявления</button>{% endif %}{% endif %}{% else %}<span data-item-total>{% if rows %}Итого: <b>{{ rows|selectattr("sum", "ne", none)|map(attribute="sum")|sum|money }}</b>{% if rows|selectattr("sum", "none")|list %} <span class="muted">без позиций по цене панели</span>{% endif %}{% else %}<span class="muted">Позиций пока нет.</span>{% endif %}</span>{% endif %}</p>
 
 <h2 class="owin-sec">Доставка и WebMIM</h2>

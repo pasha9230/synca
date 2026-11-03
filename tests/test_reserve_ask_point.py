@@ -291,11 +291,11 @@ def test_after_an_extension_the_silence_is_no_yellow_record(tmp_path):
     assert yellow(conn, cid) == [] and deliver.sent == []
 
 
-# ---- the owner 2026-10-26: «Возврат» without an amount -------------------------------------------------------------------------
+# ---- the owner 2026-10-26: «Вернули поставщику» without an amount -------------------------------------------------------------------------
 
 def other_yellow(conn, cid):
     """The yellow records besides «заполните сумму возврата» of the return itself."""
-    return [t for t in yellow(conn, cid) if t != mgr.RETURN_ASK]
+    return [t for t in yellow(conn, cid) if t != mgr.RETURN_ASK % orders.stage_name(conn, "return")]
 
 
 def test_after_a_return_without_an_amount_nobody_is_asked_and_the_client_gets_nothing(tmp_path):

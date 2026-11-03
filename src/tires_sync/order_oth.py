@@ -171,7 +171,8 @@ def unmark_returned(conn, item_id, now: str, author: str, qty=None) -> None:
 
 ACT = "акт МХ-3"
 SIGNED_LINE = "Точка «%s»: %s подписан, шины отданы поставщику (возврат с ОТХ)."
-SIGNED_ASK = "Точка отдала шины с ОТХ поставщику по акту МХ-3: заполните сумму возврата и переведите заказ в «Возврат»."
+SIGNED_HEAD = "Точка отдала шины с ОТХ поставщику по акту МХ-3: "     # routes_alerts.is_return_ask (the old records too)
+SIGNED_ASK = SIGNED_HEAD + "заполните сумму возврата и переведите заказ в «%s»."   # the current name of «return» (orders.stage_name)
 
 
 def return_date(today) -> str:
@@ -248,7 +249,7 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> bool:
         conn.rollback()
         return False
     orders.add_event(conn, card["id"], now, author, "point", SIGNED_LINE % (point_name, ACT))     # saved with the move (move_card commits it all)
-    orders.add_event(conn, card["id"], now, author, "point", SIGNED_ASK, level="yellow")
+    orders.add_event(conn, card["id"], now, author, "point", SIGNED_ASK % orders.stage_name(conn, "return"), level="yellow")
     _audit(conn, now, author, "oth_act_signed", {"order": int(card["id"])})
     try:
         moved = orders.move_card(conn, card["id"], stage["id"], now, author)

@@ -19,19 +19,19 @@ def test_the_default_pipeline_is_seeded_once_in_the_owners_order(tmp_path):
     conn = db(tmp_path)
     orders.ensure_pipeline(conn, NOW)                                           # a second call changes nothing
     stages = orders.list_stages(conn)
-    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "shipped", "oth", "return_given", "done", "cancel", "return"]   # «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Отправлен» after «Товар на точке» (2026-11-02); «Возврат передан» after «На ОТХ» (2026-10-29); «Отмена» and «Отказ/невыкуп» are one stage (2026-10-29, test_cancel_merge)
+    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "shipped", "oth", "return_given", "done", "cancel", "return"]   # «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Отправлен» after «На точке, ждём клиента» (2026-11-02); «Возврат передан» after «На ОТХ» (2026-10-29); «Отмена» and «Отказ/невыкуп» are one stage (2026-10-29, test_cancel_merge)
     assert [s["name"] for s in stages][:4] == ["Новый заказ", "Переговоры", "Ожидает наличие", "Заказ оформлен"]
     assert {s["code"]: s["kind"] for s in stages}["done"] == "won" and {s["code"]: s["kind"] for s in stages}["cancel"] == "lost"
     assert [s["position"] for s in stages] == list(range(len(orders.DEFAULT_STAGES)))
 
 
 def test_a_card_moves_to_cancel_with_a_reason_and_not_with_a_sale(tmp_path):
-    """(Was «Отказ/невыкуп» without new data; the owner 2026-10-29: one stage «Отмена / невыкуп», its reason is needed.)"""
+    """(Was «Отказ/невыкуп» without new data; the owner 2026-10-29: one stage «Отмена», its reason is needed.)"""
     conn = db(tmp_path)
     cancel = next(s for s in orders.list_stages(conn) if s["code"] == "cancel")
     card_id = orders.create_card(conn, {"client_name": "Иван"}, NOW, "owner")
     assert orders.move_card(conn, card_id, cancel["id"], NOW, "owner", {"cancel_reason": "не выкупил"}) is True
-    assert orders.get_card(conn, card_id)["stage"]["name"] == "Отмена / невыкуп"
+    assert orders.get_card(conn, card_id)["stage"]["name"] == "Отмена"
     other = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "owner")
     conn.execute("UPDATE order_card SET sale_ids = '[7]' WHERE id = ?", (other,))
     conn.commit()
@@ -46,7 +46,7 @@ def test_stages_can_be_added_renamed_moved_and_only_empty_user_stages_deleted(tm
     assert orders.get_stage(conn, mine)["name"] == "Ждём ответа"
     orders.shift_stage(conn, mine, -1)
     names = [s["name"] for s in orders.list_stages(conn)]
-    assert names[-2] == "Ждём ответа" and names[-1] == "Возврат"
+    assert names[-2] == "Ждём ответа" and names[-1] == "Вернули поставщику"
     orders.shift_stage(conn, orders.list_stages(conn)[0]["id"], -1)             # the first one cannot go up: nothing happens
     assert orders.list_stages(conn)[0]["code"] == "new"
     orders.delete_stage(conn, mine)
