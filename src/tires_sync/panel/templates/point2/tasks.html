@@ -3,4 +3,4 @@
    tasks.html (the same values, forms and scripts); only the look of «Строгий» (point2.css) and the sections of the new design at the bottom. #}
 {% block body_class %}{{ super() }} p2{% endblock %}
 {% block head %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='point2.css') }}">{% endblock %}
-{% block point_nav %}<div class="p2w">{% with section="tasks" %}{% include "point2/_nav.html" %}{% endwith %}</div>{% endblock %}
+{% block point_nav %}{% with section="tasks" %}{% include "point2/_nav.html" %}{% endwith %}{% endblock %}

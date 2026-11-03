@@ -6,7 +6,7 @@
    the order | the stage | the buttons), a phone — one line on top, compact cards, the sections at the bottom. The main buttons hide while a
    question hangs on the card (the owner 2026-11-02: «Выдал» hidden while «Клиент забрал заказ?» is asked); its answers are in the question. #}
 {% block viewport %}width=device-width, initial-scale=1{% endblock %}
-{% block body_class %}pt-ui p2 p2-mypoint{% endblock %}
+{% block body_class %}pt-ui p2 p2-own p2-mypoint{% endblock %}
 {% block title %}Рабочее место · Tires Sync{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='point2.css') }}">{% endblock %}
 {% block content %}
@@ -27,6 +27,7 @@
 {% if not row.oth %}<div class="p2-who mp-name">{{ c.client_name or "Без имени" }}</div>{% endif %}
 {% if row.intercity %}<div class="p2-note" data-intercity="{{ c.id }}">{{ icon("info") }}<span><b>{{ intercity_hint }}</b>{% if c.intercity.city %} · {{ c.intercity.city }}{% endif %}{% if c.intercity.carrier %} · ТК {{ c.intercity.carrier }}{% endif %}{% if c.intercity.track %} · трек {{ c.intercity.track }}{% endif %}{% if not row.labels %} · Этикеток пока нет: их загрузит офис.{% endif %}</span></div>
 {% elif row.oth %}<div class="p2-note" data-oth-card="{{ c.id }}">{{ icon("info") }}<span class="mp-sub">{% if row.to_agree %}Шины на точке, возврат согласуют с поставщиком{% else %}На ОТХ с {{ c.entered_at|day }} · срока продажи нет{% endif %}</span></div>
+{% if hints %}<p class="p2-note mp-now mp-hint" data-point-hint="oth">{{ icon("clock") }}<span>{{ point_hint('oth') }}</span></p>{% endif %}
 {% elif hints %}<p class="p2-note mp-now mp-hint" data-point-hint="{{ 'ask' if row.asked else ('here' if row.here else 'going') }}">{{ icon("clock") }}<span>{{ point_hint('ask' if row.asked else ('here' if row.here else 'going')) }}</span></p>{% endif %}
 </div>
 <div class="p2-acts mp-actions">{% if not row.oth and not hold %}

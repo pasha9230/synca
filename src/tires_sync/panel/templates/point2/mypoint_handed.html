@@ -4,7 +4,7 @@
    draws it instead of mypoint_handed.html while routes_design.point_new(). The clients handed over first with «Отменить передачу» (the owner
    2026-10-30), the form «Передать клиента» under them (#handoff: «Ещё → Передать клиента»); the same forms, tokens and texts as mypoint_handed.html. #}
 {% block viewport %}width=device-width, initial-scale=1{% endblock %}
-{% block body_class %}pt-ui p2 p2-handed{% endblock %}
+{% block body_class %}pt-ui p2 p2-own p2-handed{% endblock %}
 {% block title %}Переданные клиенты · Tires Sync{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='point2.css') }}">{% endblock %}
 {% block content %}

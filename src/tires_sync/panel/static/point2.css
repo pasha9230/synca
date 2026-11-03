@@ -153,10 +153,11 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 @media (max-width:760px){
   body.p2 .sidebar,body.p2 .topbar{display:none}
   body.p2 .app{display:block}
-  body.p2 .main,body.p2 .page{padding:0;margin:0;min-width:0;max-width:none;overflow:visible}
+  body.p2 .main,body.p2 .page{min-width:0;max-width:none;overflow:visible}
+  body.p2 .main,body.p2.p2-own .page{padding:0;margin:0}
   body.p2 .msgs{margin:8px 12px 0}
   body.p2 .msgs:empty{display:none}
-  body.p2 .page{gap:0}
+  body.p2.p2-own .page{gap:0}
   body.p2{min-width:0;background:var(--p2-layout)}
   .p2w{padding:0 0 84px}
   .p2-only-phone{display:inline-flex}
@@ -192,7 +193,6 @@ a.p2-line:hover{border-color:var(--p2-primary)}
   .p2-row2{grid-template-columns:1fr}
   .p2w .mp-handoff-form .seg{display:grid;grid-template-columns:1fr 1fr;width:100%}
   .p2w .mp-handoff-form .seg label{justify-content:center;height:44px;border-bottom:1px solid var(--p2-border)}
-  body.p2 .page > .page-head{padding:10px 12px 0}
   .p2w .mp-handoff-form .input{height:48px;font-size:16px}
   .p2w .mp-handoff-form .mp-btn{height:48px;font-size:16px}
   .p2-calls thead{display:none}
@@ -204,7 +204,7 @@ a.p2-line:hover{border-color:var(--p2-primary)}
   .p2-calls .p2-call-acts{justify-content:stretch;margin-top:6px}
   .p2-calls .p2-call-acts > *{flex:1 1 0;min-height:44px;justify-content:center}
   .p2-filters{padding:8px 0}
-  .p2-nav{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;
+  .p2-nav{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;
     border-top:1px solid var(--p2-border-2);padding-bottom:env(safe-area-inset-bottom)}
   .p2-nav > a,.p2-nav > details > summary{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;min-height:60px;
     font-size:11px;line-height:13px;color:var(--p2-text-3);text-decoration:none;list-style:none;cursor:pointer}

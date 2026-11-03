@@ -24,7 +24,7 @@ def flag(conn, state):
 
 
 def is_new(html: str) -> bool:
-    return NEW in html and "point2.css" in html and "data-point-nav" in html
+    return "point2.css" in html and 'class="p2-nav"' in html and 'class="pt-nav"' not in html
 
 
 def world(tmp_path):
@@ -247,3 +247,27 @@ def test_off_the_owner_working_as_the_point_sees_the_old_screens(w):
     post(owner, "/as-point", "tok", point_id=str(w["pid"]))
     html = owner.get("/my-point").get_data(as_text=True)
     assert NEW not in html and 'class="pt mp-wrap"' in html
+
+
+# --- after the review ---------------------------------------------------------------------------------------------------------------
+
+def test_the_hint_of_an_oth_card_is_there_as_before(w):
+    old = w["point"].get("/my-point?tab=oth").get_data(as_text=True)
+    flag(w["conn"], "all")
+    new = w["point"].get("/my-point?tab=oth").get_data(as_text=True)
+    assert 'data-point-hint="oth"' in old and 'data-point-hint="oth"' in new
+
+
+def test_the_more_menu_of_the_phone_keeps_the_alerts_page(w):
+    flag(w["conn"], "all")
+    html = w["point"].get("/my-point").get_data(as_text=True)
+    more = html[html.index('class="p2-more-list"'):].split("</details>")[0]
+    assert 'href="/alerts"' in more and 'href="/my-point?notes=1"' in more and 'action="/logout"' in more
+    assert 'href="/orders"' not in more
+
+
+def test_the_old_pages_under_the_new_nav_keep_their_own_frame(w):
+    flag(w["conn"], "all")
+    for page in ("/chats", "/tasks", "/whats-new"):
+        html = w["point"].get(page).get_data(as_text=True)
+        assert NEW not in html and 'class="p2-nav"' in html, page               # no second frame (its padding) around the nav
