@@ -311,10 +311,11 @@ def _manual_gone(conn, parsed, on_oth: Dict[str, int], orders_oth: Dict[str, int
             continue
         price = oth_manual.gone_price(conn, code, settings)
         offer = catalog_archive.last_offer(conn, code)
-        if price is None or (offer is not None and feed_tire_type(offer) in left_out_types):
+        if offer is not None and feed_tire_type(offer) in left_out_types:
+            drop.add(code)                                                # a setting: an own price would not help
+        elif price is None:
             drop.add(code)
-            if price is None:
-                no_price.add(code)
+            no_price.add(code)
         else:
             prices[code] = price                                          # also for a fresh one held on its saved ad (an aged one)
             if offer is not None:

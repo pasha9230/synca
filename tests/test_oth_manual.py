@@ -347,6 +347,23 @@ def test_a_change_of_the_quantity_keeps_the_note(tmp_path):
     assert oth_manual.rows(conn, "102")[0]["note"] == "склад"
 
 
+def test_a_saved_ad_taken_off_by_a_setting_is_not_promised(tmp_path):
+    prepared(tmp_path, accounts=("A",), price_overrides={"1:102": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    assert run(tmp_path, AFTER) == 0
+    manual(tmp_path, "102", 2)
+    conn = connect(tmp_path)
+    conn.execute("DELETE FROM catalog_item WHERE goods_id = '102'")
+    conn.commit()
+    from tires_sync.panel.routes_catalog_oth import account_status
+    assert account_status(conn, "102", 1, AFTER_PARSED())[0] is True     # taken off for stock: comes back on its saved ad
+    conn.execute("UPDATE ad_event SET reason = 'manual_off' WHERE goods_id = '102' AND event = 'removed'")
+    conn.commit()
+    ok, text = account_status(conn, "102", 1, AFTER_PARSED())
+    assert ok is False and "настройкой" in text
+    conn.close()
+
+
 def test_the_text_of_two_held_orders_is_as_before():
     assert oth_sale.holds_text([5, 6]) == "В заказе шины с ОТХ (заказ №5, №6): переведите заказ на «На ОТХ» или верните их («Вернуть на ОТХ» у позиций)."
     assert oth_sale.holds_text([0]).startswith("В заказе шины с ОТХ (свой остаток)")
@@ -373,6 +390,9 @@ def test_the_card_tells_what_the_cycle_does(tmp_path):
     connections.set_excluded_types(conn, 1, [cycle.feed_tire_type(catalog_archive.last_offer(conn, "102"))], NOW, "owner")
     ok, text = account_status(conn, "102", 1, AFTER_PARSED())
     assert ok is False and "тип шин" in text
+    draft = settings_store.create_draft(conn, {"price_overrides": {}}, NOW)
+    settings_store.confirm_draft(conn, draft, NOW, "owner", strong=True)
+    assert "тип шин" in account_status(conn, "102", 1, AFTER_PARSED())[1]    # a setting, not «нужна своя цена»
     connections.set_excluded_types(conn, 1, [], NOW, "owner")
     draft = settings_store.create_draft(conn, {"price_overrides": {"1:102": {"pct": 10}}}, NOW)
     settings_store.confirm_draft(conn, draft, NOW, "owner", strong=True)

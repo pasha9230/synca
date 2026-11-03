@@ -59,6 +59,9 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
     before = store.retired_ad_of(conn, account_id, goods_id)
     if offer is None and not (published or before):
         return False, "не из чего собрать объявление: позиции нет ни в архиве каталога, ни среди сохранённых объявлений"
+    if offer is None and not published and (not sync._removed_for_stock(conn, account_id, goods_id)
+                                            or sync._off_by_the_owner(goods_id, before[1], eff, left_out, True)):
+        return False, "сохранённое объявление снято настройкой (не по остатку) — так оно и остаётся снятым"
     if offer is not None and not published and before:
         id_map = dict(mirror_feed.adopted_maps(conn, account_id)[0])
         if mirror_feed.alias_scheme(conn, account_id) and goods_id not in id_map:
@@ -94,7 +97,9 @@ def register(app) -> None:
         try:
             point = int(request.form.get("point") or 0)
             qty = 0 if request.form.get("action") == "remove" else oth_manual.pieces_of(request.form.get("qty"))
-            before = oth_manual.set_qty(conn, goods_id, point, qty, now_iso(), author(), request.form.get("note"))   # no field: the note stays
+            note = request.form.get("note")
+            before = oth_manual.set_qty(conn, goods_id, point, qty, now_iso(), author(),
+                                        note if note and note.strip() else None)        # no note typed: the row's note stays
             flash("Свой остаток: %d → %d шт." % (before, qty) if before != qty else "Свой остаток не изменился.")
         except oth_manual.ManualError as err:
             flash(str(err))

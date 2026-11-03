@@ -143,10 +143,12 @@ def note_no_price(conn, account_id: int, found: Dict[str, int], now: str) -> Non
         before = set(json.loads(store.get_state(conn, key) or "[]"))
     except (TypeError, ValueError):
         before = set()
+    from .connections import display_name
+    from .oth_stock import manual_rows
     for code in sorted(set(found) - before):
-        for row in rows(conn, code):
-            _log(conn, code, row["point_id"], row["qty"], row["qty"], now, "cycle", "аккаунт %d: нет своей цены — на Авито не уходит" % int(account_id),
-                 "no_price:%d" % int(account_id))
+        for row in (r for r in manual_rows(conn) if r["goods_id"] == code):
+            _log(conn, code, row["point_id"], row["qty"], row["qty"], now, "cycle",
+                 "%s: нет своей цены — на Авито не уходит" % display_name(conn, int(account_id)), "no_price:%d" % int(account_id))
         _audit(conn, now, "cycle", "oth_manual_no_price", {"account": int(account_id), "goods_id": code, "qty": int(found[code])})
     if set(found) != before:
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(sorted(found))))
