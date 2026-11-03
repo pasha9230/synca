@@ -75,6 +75,24 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
                   + "; лимит возвратов ОТХ и «одна шина — одно объявление» действуют")
 
 
+def manual_list(conn) -> list:
+    """The rows of «Свой остаток» for the page «На ОТХ» (no test point), with the name and code of the position as the catalog knows them."""
+    from .. import catalog_archive
+    from flask import current_app
+    from .routes_main import context
+    test = oth_stock._test_points(conn)
+    offers = getattr(context(current_app)[2], "offers", {}) or {}
+    out = []
+    for r in oth_manual.rows(conn):
+        if r["point_id"] in test:
+            continue
+        offer = offers.get(r["goods_id"]) or catalog_archive.last_offer(conn, r["goods_id"])
+        out.append(dict(r, name=(getattr(offer, "name_orig", "") or getattr(offer, "name", "")) if offer is not None else r["goods_id"],
+                        code=getattr(offer, "code", "") if offer is not None else "", in_unload=r["goods_id"] in offers,
+                        url="/catalog/item/" + quote(r["goods_id"], safe="")))
+    return out
+
+
 def _known(conn, goods_id: str) -> bool:
     """A position of the catalog: in the unload, in the archive, or with manual pieces already."""
     from flask import current_app
@@ -110,7 +128,17 @@ def register(app) -> None:
     @app.route("/oth")
     @login_required
     def oth_page():
-        return render_template("oth.html", **order_oth.stock(get_conn()))
+        """The orders' tyres on «На ОТХ» and «Свой остаток» (the owner 2026-11-03: its own rows, each opening the card to change it);
+        `?point=<id>` shows one point (both lists)."""
+        conn = get_conn()
+        data = order_oth.stock(conn)
+        own = manual_list(conn)
+        places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"]}
+        point = request.args.get("point", type=int)
+        if point:
+            data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
+            own = [r for r in own if r["point_id"] == point]
+        return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, **data)
 
     @app.route("/oth/return", methods=["POST"])
     @login_required

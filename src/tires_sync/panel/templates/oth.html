@@ -3,6 +3,7 @@
 {% block title %}На ОТХ · Tires Sync{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>На ОТХ</h1><p class="sub">Шины на нашем складе не под клиентов: клиент отказался, заказ на этапе «На ОТХ». Клиент от такого заказа отвязан. На Авито эти шины сами не публикуются, их выставляют вручную. «Вернуть поставщику» здесь только отметка у нас: в WebMIM ничего не отправляется, этап заказа не меняется.</p></div></header>
+{% if places %}<form method="get" action="/oth" class="filters"><label class="field"><span class="label">Точка</span><select class="select" name="point" onchange="this.form.submit()"><option value="">Все</option>{% for p in places %}<option value="{{ p[0] }}"{% if p[0] == point %} selected{% endif %}>{{ p[1] or "№%d"|format(p[0]) }}</option>{% endfor %}</select></label> <noscript><button class="btn btn--secondary btn--sm">Показать</button></noscript></form>{% endif %}
 <section class="card"><div class="card-head"><h3>На складе <span class="badge badge--neutral">{{ stock|sum(attribute="qty") }} шт.</span></h3></div>
 {% if stock %}<div class="table-wrap"><table class="table">
 <thead><tr><th>Товар</th><th>Код</th><th class="num">Сколько</th><th>Где лежит</th><th>Заказ</th><th>На ОТХ с</th><th class="t-actions" style="width:1%"></th></tr></thead>
@@ -13,6 +14,12 @@
 </tr>{% endfor %}</tbody></table></div>
 {% else %}<div class="empty"><div class="empty-icon">{{ icon("check") }}</div><h3>На ОТХ ничего нет</h3><p>Здесь появятся позиции заказов, переведённых на этап «На ОТХ».</p></div>{% endif %}
 </section>
+{% if manual %}<section class="card" data-oth-manual-list><div class="card-head"><h3>Свой остаток <span class="badge badge--neutral">{{ manual|sum(attribute="qty") }} шт.</span></h3><span class="sub">внесён вручную в карточке позиции; считается как ОТХ</span></div><div class="table-wrap"><table class="table">
+<thead><tr><th>Товар</th><th>Код</th><th class="num">Сколько</th><th>Где лежит</th><th>Кто и когда</th><th>Заметка</th><th class="t-actions" style="width:1%"></th></tr></thead>
+<tbody>{% for r in manual %}<tr{% if can("catalog") %} data-href="{{ r.url }}" class="is-link"{% endif %}>
+<td>{{ r.name }}{% if not r.in_unload %} <span class="badge badge--warn">нет у поставщика</span>{% endif %}</td><td class="t-code">{{ r.code or "—" }}</td><td class="num">{{ r.qty }} шт.</td><td>{{ r.point }}</td><td class="small">{{ author_label(r.author) }} · {{ r.at|dt }}</td><td class="small">{{ r.note }}</td>
+<td class="t-actions" style="white-space:nowrap">{% if can("catalog") %}<a class="btn btn--secondary btn--xs" href="{{ r.url }}">{{ "Изменить" if can_post("catalog_oth_manual") else "Открыть" }}</a>{% endif %}</td>
+</tr>{% endfor %}</tbody></table></div></section>{% endif %}
 {% if returned %}<section class="card"><div class="card-head"><h3>Возвращено поставщику</h3></div><div class="table-wrap"><table class="table">
 <thead><tr><th>Товар</th><th>Код</th><th class="num">Сколько</th><th>Заказ</th><th>Отмечено</th><th class="t-actions" style="width:1%"></th></tr></thead>
 <tbody>{% for r in returned %}<tr>

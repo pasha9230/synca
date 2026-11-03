@@ -407,3 +407,27 @@ def test_the_card_tells_what_the_cycle_does(tmp_path):
 def AFTER_PARSED():
     from tires_sync.webmim import parse_unload
     return parse_unload(AFTER, "T1")
+
+
+def test_the_page_of_oth_lists_the_own_stock_and_filters_by_point(tmp_path):
+    from tests.test_order_reserve import card_at as order_on
+    app = make_app(tmp_path)
+    owner = app.test_client()
+    login(owner)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, T)
+    old = order_on(conn, "oth", T)                                       # 4 of an order on OTH at «Бета»
+    beta, yunona, test = a_point(conn, "Бета"), a_point(conn), a_point(conn, "Тест 1")
+    oth_manual.set_qty(conn, "100", yunona, 3, NOW, "owner", "витрина")
+    conn.execute("INSERT INTO oth_manual (goods_id, point_id, qty, author, at) VALUES ('101', ?, 5, 'o', ?)", (test, NOW))   # named a test point later: not listed
+    conn.commit()
+    html = owner.get("/oth").get_data(as_text=True)
+    own = html.split("data-oth-manual-list")[1]
+    assert "Свой остаток" in html and "витрина" in own and "Юнона" in own and 'href="/catalog/item/100"' in own and "5 шт." not in own
+    assert "№%d" % old in html
+    page = owner.get("/oth?point=%d" % yunona).get_data(as_text=True)
+    assert "data-oth-manual-list" in page and "№%d" % old not in page.split("data-oth-manual-list")[0].split("<tbody>", 1)[-1]
+    page = owner.get("/oth?point=%d" % beta).get_data(as_text=True)
+    assert "data-oth-manual-list" not in page and "/orders/%d" % old in page
+    viewer, _c = person(app, "viewer")
+    assert viewer.get("/oth").status_code in (200, 302, 403)
