@@ -1,6 +1,6 @@
 """The permanent base of catalog positions. The unload of the supplier shows only what he has today; a position he took away must not vanish from our
-catalog with its name, size, photo and price. Every cycle writes what the unload has and marks what it no longer has. Display only: the feed, the prices
-and the decisions to publish or take off never read this table."""
+catalog with its name, size, photo and price. Every cycle writes what the unload has and marks what it no longer has. Display only, but for one thing: a position
+the supplier has no more with «Свой остаток (ОТХ)» and an own price goes to Avito from its row here (last_offer, sync.plan_decisions)."""
 from __future__ import annotations
 
 import dataclasses
@@ -86,6 +86,17 @@ def record(conn, parsed, now: str) -> dict:
 def gone_offer(conn, goods_id: str):
     """One position the supplier took away, by its id (the offer as it was, stock 0), or None."""
     row = conn.execute("SELECT data FROM catalog_item WHERE goods_id = ? AND gone_since != ''", (goods_id,)).fetchone()
+    if row is None:
+        return None
+    try:
+        return dataclasses.replace(_load(row[0]), stock=0)
+    except Exception:
+        return None
+
+
+def last_offer(conn, goods_id: str):
+    """The position as the unload last had it (taken away or not), stock 0, or None."""
+    row = conn.execute("SELECT data FROM catalog_item WHERE goods_id = ?", (goods_id,)).fetchone()
     if row is None:
         return None
     try:

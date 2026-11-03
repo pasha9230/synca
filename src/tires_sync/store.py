@@ -149,6 +149,13 @@ CREATE TABLE IF NOT EXISTS oth_return_plan (order_id INTEGER PRIMARY KEY, agreed
 CREATE TABLE IF NOT EXISTS order_item_oth (item_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, from_item INTEGER NOT NULL, from_order INTEGER NOT NULL,
     qty INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, sale_id INTEGER, undone_at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS order_item_oth_from ON order_item_oth (from_order);
+-- «Свой остаток (ОТХ)» of the catalog card (oth_manual, the owner 2026-11-03): tyres of ours at a point entered by hand, counted as «На ОТХ»;
+-- a row is removed when its quantity is 0. The log keeps every change (before → after) with who, when and why.
+CREATE TABLE IF NOT EXISTS oth_manual (id INTEGER PRIMARY KEY AUTOINCREMENT, goods_id TEXT NOT NULL, point_id INTEGER NOT NULL, qty INTEGER NOT NULL,
+    author TEXT NOT NULL, at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', UNIQUE (goods_id, point_id));
+CREATE TABLE IF NOT EXISTS oth_manual_log (id INTEGER PRIMARY KEY AUTOINCREMENT, goods_id TEXT NOT NULL, point_id INTEGER NOT NULL,
+    before INTEGER NOT NULL, after INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', why TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS oth_manual_log_goods ON oth_manual_log (goods_id);
 -- «Объединить заказы» (order_merge, the owner 2026-10-30): a merge of sources into a new order; each source as it stood (for «Разъединить»);
 -- each position given (oth: through order_item_oth, the source stood on «На ОТХ»)
 CREATE TABLE IF NOT EXISTS order_merge (id INTEGER PRIMARY KEY AUTOINCREMENT, into_order INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,

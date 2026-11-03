@@ -94,9 +94,10 @@ def stock(conn) -> Dict[str, List[dict]]:
 
 
 def goods_on_oth(conn) -> Dict[str, int]:
-    """goods_id → how many pieces of it are on «На ОТХ» and not returned: the mark of the catalog."""
+    """goods_id → how many pieces of it are on «На ОТХ» and not returned: the mark of the catalog; with «Свой остаток (ОТХ)» (oth_manual)."""
+    from .oth_stock import manual_rows
     found: Dict[str, int] = {}
-    for row in stock(conn)["stock"]:
+    for row in stock(conn)["stock"] + manual_rows(conn):
         if row["goods_id"]:
             found[row["goods_id"]] = found.get(row["goods_id"], 0) + int(row["qty"])
     return found

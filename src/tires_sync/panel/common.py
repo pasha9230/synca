@@ -311,6 +311,7 @@ for _section, _endpoints in {
     for _endpoint in _endpoints:
         SECTION_OF[_endpoint] = _section
 SECTION_OF.update(tasks_page="orders", task_new="orders", task_close="orders")      # «Задачи» (routes_tasks, 2026-10-31): «менять» to set
+SECTION_OF.update(catalog_oth_manual="orders")                   # «Свой остаток (ОТХ)» of the catalog card (2026-11-03): stock of OTH, NEEDS below
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
 SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
                   order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
@@ -327,6 +328,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
          "share_create": "send"}
+NEEDS["catalog_oth_manual"] = "supplier"                          # the owner and the partner only (the lead 2026-11-03), never as a point
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})
 # the manager of a point: the orders of the point only (the board, the file and the cards of the point)

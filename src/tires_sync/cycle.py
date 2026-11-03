@@ -118,7 +118,7 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
         owner_phone="" if account["id"] == connections.PRIMARY_ACCOUNT else feed_check._phone(active_settings(conn).contact_phone),
         foreign_addresses=foreign, allowed_photos=own.allowed if own is not None else frozenset(),
         known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem,
-        oth=frozenset(oth_stock.pieces(conn)) | frozenset(oth if oth is not None else _saved_oth(conn, account["id"])), **tochki)
+        oth=frozenset(oth_stock.pieces(conn, manual=False)) | frozenset(oth if oth is not None else _saved_oth(conn, account["id"])), **tochki)
     # the positions on OTH read from the base (a mirror's new positions too), and the codes the cycle handed them over to (another lot
     # of the same tire under their Id): known to the cycle, saved for `feed-check`
     return feed_check.check_feed(ads, ctx)
