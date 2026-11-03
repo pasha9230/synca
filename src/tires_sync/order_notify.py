@@ -172,6 +172,17 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
             failure = "панель → точка «%s»: %s" % (way["why"], err.__class__.__name__)
     if way.get("own_point") is not None:
         return _leave_on_point(conn, way, card, text, now, failure)
+    from . import order_alerts
+    kinds = order_alerts.people_kinds(conn)
+    who = order_alerts.responsibles(conn, kinds, card["id"]).get(card["id"], "")      # the order's own, not the card's of tell_point
+    if kinds.get(who) == "staff":                  # the owner 2026-11-03: a failure of an order is its responsible's only (the red record)
+        _event(conn, card["id"], now, "Оповещение не отправлено: %s; ответственному (%s) — в «Уведомлениях»" % (failure, who))
+        return "не отправлено: %s; ответственному — в «Уведомлениях»" % failure
+    if not who:                                    # nobody answers for it: both owners (the owner 2026-11-03)
+        told = "; " + tell_people(conn, box, order_alerts.owner_people(conn), "Некому отправить оповещение по заказу №%d (%s).\n%s" % (
+            card["id"], failure, text), tg_http=tg_http, now=now)
+        _event(conn, card["id"], now, "Оповещение не отправлено: %s%s" % (failure, told))
+        return "не отправлено: %s%s" % (failure, told)
     told = ""
     key = "owner|%s|%s|%s" % (card["id"], failure, text)
     try:

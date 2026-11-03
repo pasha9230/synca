@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from tires_sync import order_alerts as alerts, orders, store, trash
+from tires_sync import order_alerts as alerts, orders, store, trash, users
 
 NOW = "2026-10-20T12:00:00"
 LATER = "2026-10-20T13:00:00"
@@ -19,6 +19,13 @@ def db(tmp_path):
 
 def card(conn):
     return orders.create_card(conn, {"client_name": "Иван"}, NOW, "owner")
+
+
+def both_owners_card(conn):
+    """An order nobody answers for (made by the robot): its alerts are both owners' (the owner 2026-11-03), so every one has their own marks."""
+    if not users.exists(conn, "worker2"):
+        users.add_user(conn, "worker2", "пароль-второго-1", NOW, role="owner")
+    return orders.create_card(conn, {"client_name": "Иван"}, NOW, "система")
 
 
 @pytest.mark.parametrize("kind, text, level", [
@@ -93,7 +100,7 @@ def test_a_fresh_base_starts_from_zero(tmp_path):
 
 def test_opening_an_order_closes_green_and_yellow_for_that_user_only(tmp_path):
     conn = db(tmp_path)
-    one, two = card(conn), card(conn)
+    one, two = both_owners_card(conn), both_owners_card(conn)
     orders.add_event(conn, one, NOW, "система", "reserve", "Оповещение о конце резерва")
     orders.add_event(conn, one, NOW, "owner", "field", "Телефон: +7")                                         # grey: never an alert
     assert alerts.counts(conn, "owner") == {"red": 0, "yellow": 1, "green": 2}
@@ -109,7 +116,7 @@ def test_opening_an_order_closes_green_and_yellow_for_that_user_only(tmp_path):
 
 def test_a_red_record_waits_for_razobralsya_or_for_the_fix(tmp_path):
     conn = db(tmp_path)
-    cid = card(conn)
+    cid = both_owners_card(conn)
     orders.add_event(conn, cid, NOW, "система", "note", "Перемещение не прошло", level="red")
     red = alerts.open_alerts(conn, "owner", cid)[0]
     assert red["level"] == "red"

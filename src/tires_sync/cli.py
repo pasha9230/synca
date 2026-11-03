@@ -152,6 +152,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ot = sub.add_parser("orders-tick", help="часовая проверка заказов: задачи по правилам «завис на этапе» и оповещение ответственному об окончании резерва на точке (клиентам ничего не отправляет)")
     ot.add_argument("--db", required=True)
     ot.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    fr = sub.add_parser("orders-fill-responsible", help="один раз: заказам без ответственного поставить его по правилам нового заказа (аккаунт Авито, каталог клиента, кто создал); без --apply только показывает")
+    fr.add_argument("--db", required=True)
+    fr.add_argument("--apply", action="store_true", help="записать (сделайте копию базы до этого); без него ничего не пишется")
     se = sub.add_parser("sheet-enroll", help="поставить в очередь Google-таблицы открытые заказы, оформленные до её включения (строки только добавляются; запуск вручную)")
     se.add_argument("--db", required=True)
     se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «Возврат передан»")
@@ -1066,6 +1069,24 @@ def _cmd_orders_tick(args) -> int:
     _daily_summary(conn, args.key_file)
     _webmim_snapshot(conn, args.key_file)
     _google_sheet(conn, args.key_file)
+    return 0
+
+
+def _cmd_orders_fill_responsible(args) -> int:
+    """orders-fill-responsible: the orders without a stored responsible get one by the rules of a new order (chat_deals.fill_responsible);
+    without --apply it only shows how many and by which rule. Run by hand after a copy of the base and after «Ответственный за заказы этого
+    аккаунта» is set on the accounts (the owner 2026-11-03)."""
+    from . import chat_deals
+    conn = store.connect(args.db)
+    try:
+        made = chat_deals.fill_responsible(conn, moscow_now().isoformat(timespec="seconds"), "cli", apply=args.apply)
+    finally:
+        conn.close()
+    for rule, count in sorted(made["by"].items()):
+        print("%s: %d" % (rule, count))
+    print("%s: %d; без ответственного осталось: %d%s" % ("записано" if args.apply else "будет записано (ничего не записано, нужен --apply)",
+                                                        len(made["set"]), len(made["left"]),
+                                                        " (№ %s)" % ", ".join(map(str, made["left"][:30])) if made["left"] else ""))
     return 0
 
 
@@ -2803,6 +2824,8 @@ def main(argv=None) -> int:
             return _cmd_clients_link(args)
         if args.command == "orders-tick":
             return _cmd_orders_tick(args)
+        if args.command == "orders-fill-responsible":
+            return _cmd_orders_fill_responsible(args)
         if args.command == "sheet-enroll":
             return _cmd_sheet_enroll(args)
         if args.command == "vk-catchup":

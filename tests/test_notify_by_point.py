@@ -238,7 +238,7 @@ def test_a_no_show_with_nobody_to_tell_goes_to_the_owner_not_to_the_point_page(t
     chat(conn, POINT_ACCOUNT, mine["id"])
     tg, vk = ScriptedHttp(TG_OK), ScriptedHttp(VK_OK)
     outcome, _answer = _no_show(conn, box, mine, tg, vk)
-    assert vk.calls == [] and "владельцу написано" in outcome
+    assert vk.calls == [] and tg.calls == [] and "ответственному — в «Уведомлениях»" in outcome     # theirs only (the owner 2026-11-03)
     assert points.unseen_alerts(conn, pid, "") == []
 
 
@@ -278,6 +278,8 @@ def test_the_staff_do_not_see_the_point_account_alerts_and_the_point_does(tmp_pa
                      (row, "m-%s" % peer, NOW, 1, "in", "text", "Есть шины?"))
     conn.commit()
     for login in ("owner", "partner1"):
+        for cid in (theirs["id"], ours["id"], handed["id"]):                 # since 2026-11-03 only the responsible hears of an order
+            conn.execute("UPDATE order_card SET responsible = ? WHERE id = ?", (login, cid))
         rows = order_alerts.page_rows(conn, login, NOW)
         orders_seen = {r["order_id"] for r in rows if r["order_id"] is not None}
         assert theirs["id"] not in orders_seen and {ours["id"], handed["id"]} <= orders_seen

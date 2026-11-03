@@ -422,7 +422,8 @@ def answer_here(conn, card: dict, who: str, now: str, tell=None) -> tuple:
             logging.getLogger("tires_sync.orders").exception("the task «%s» of order %s for %s failed", RETURN_TASK, card["id"], login)
     if tell is not None:
         try:
-            tell(office_logins(conn), text)
+            from . import order_alerts
+            tell(order_alerts.told_people(conn, card["id"], office_logins(conn)), text)     # its responsible only (2026-11-03)
         except Exception:                                                            # noqa: BLE001
             logging.getLogger("tires_sync.orders").exception("the alert of the return of order %s failed", card["id"])
     return "на точке: на возврат, задача «%s»" % RETURN_TASK, "Заказ №%s — отмечено: шины на точке. Возврат согласуют с поставщиком." % label, True

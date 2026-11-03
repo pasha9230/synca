@@ -165,13 +165,84 @@ def _hidden(event: dict, quiet: dict) -> bool:
         quiet["on"] and event["author"] == POINT_WROTE_AUTHOR and event["order_id"] not in quiet["taken"]))
 
 
+def owner_people(conn) -> List[str]:
+    """Both owners: the owner's login of the alerts and every active user of the role «owner» (Заман's). They hear of an order nobody answers
+    for (the owner 2026-11-03: «не должно быть», but never lost)."""
+    from . import order_notify, users
+    return sorted({order_notify.get_owner_login(conn)} | {u["login"] for u in users.list_users(conn) if u["active"] and u["role"] == "owner"})
+
+
+def people_kinds(conn) -> Dict[str, str]:
+    """{login: "staff" | "point"} of everybody who may answer for an order: the owner's login of the alerts and every active panel user but a
+    client. Anybody else (the robot «чаты Авито», a removed or switched-off user, a client) answers for nothing."""
+    from . import order_notify, users
+    found = {order_notify.get_owner_login(conn): "staff"}
+    for user in users.list_users(conn):
+        if user["active"] and user["role"] != "client":
+            found[user["login"]] = "point" if user["role"] == "point" else "staff"
+    return found
+
+
+def responsibles(conn, kinds: Optional[Dict[str, str]] = None, order_id: Optional[int] = None) -> Dict[int, str]:
+    """{order: who answers for it}: its «Ответственный», else whoever made it (orders.get_card: the maker answers until another is named);
+    '' when that is nobody of people_kinds. All the orders, or the one `order_id`."""
+    from .orders import ACTING_MARK
+    kinds = people_kinds(conn) if kinds is None else kinds
+    found = {}
+    for card_id, named, made_by in conn.execute("SELECT id, responsible, created_by FROM order_card" + (" WHERE id = ?" if order_id is not None else ""),
+                                                (order_id,) if order_id is not None else ()):
+        who = named or ("" if ACTING_MARK in (made_by or "") else made_by or "")
+        found[card_id] = who if who in kinds else ""
+    return found
+
+
+def told_people(conn, order_id, usual) -> List[str]:
+    """Who of the staff is told of an order in Telegram (the owner 2026-11-03: only the one who answers for it): that person; both owners when
+    nobody answers for it; `usual` (the list as before) when a point user does: a point never gets Telegram."""
+    kinds = people_kinds(conn)
+    who = responsibles(conn, kinds, order_id).get(order_id, "") if order_id else ""
+    if not who:
+        return owner_people(conn)
+    return [who] if kinds[who] == "staff" else list(usual)
+
+
+def _mine(conn, login: str, staff: bool) -> Optional[dict]:
+    """What of the orders and the chats without an order is this user's (the owner 2026-11-03: the news of an order go only to its responsible,
+    of an order nobody answers for to both owners; the chats without an order to «Ответственный за заказы этого аккаунта», as before when the
+    account has none). None: no such rule for them (a point user, the owner or the partner working as a point: their rows as before)."""
+    if not staff:
+        return None
+    from . import connections
+    kinds = people_kinds(conn)
+    owner = login in owner_people(conn)
+    orders_of = {card_id for card_id, who in responsibles(conn, kinds).items() if who == login or (not who and owner)}
+    others = {account_id for account_id in [r[0] for r in conn.execute("SELECT id FROM account")]
+              if connections.account_responsible(conn, account_id) not in ("", login)}
+    return {"orders": orders_of, "other_accounts": others}
+
+
+def _not_mine(event: dict, mine: Optional[dict]) -> bool:
+    return mine is not None and event["order_id"] not in mine["orders"]
+
+
+def _not_theirs(row: dict, mine: Optional[dict]) -> bool:
+    """A chat's row (chat_rows, urgent_rows) that is not this user's: of an order they do not answer for, or of a chat without an order
+    whose account has another «Ответственный за заказы этого аккаунта»."""
+    if mine is None:
+        return False
+    if row.get("of_order"):
+        return row["of_order"] not in mine["orders"]
+    return row.get("account_id") in mine["other_accounts"]
+
+
 def counts(conn, login: str) -> Dict[str, int]:
-    """How many open alerts of every colour this user has (as page_rows, without the orders of the points' accounts nor the client's words
-    of the orders the points work for the owner and the partner)."""
-    quiet = _quiet(conn, login, _staff(conn, login))
+    """How many open alerts of every colour this user has (as page_rows: of the orders they answer for, without the orders of the points'
+    accounts nor the client's words of the orders the points work for the owner and the partner)."""
+    staff = _staff(conn, login)
+    quiet, mine = _quiet(conn, login, staff), _mine(conn, login, staff)
     result = {level: 0 for level in ALERT_LEVELS}
     for event in open_alerts(conn, login):
-        if not _hidden(event, quiet):
+        if not _hidden(event, quiet) and not _not_mine(event, mine):
             result[event["level"]] += 1
     return result
 
@@ -186,14 +257,16 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
     in the panel (missing_rows). For the staff (_staff) the orders and the chats of the points' Avito accounts are no alerts; for the owner and
     the partner (_quiet_of_point_work) nor are the client's words (point_words) and «Срочно ответить» of an order the point works now
     (order_points.work_orders, the owner 2026-11-03), unless they took the client from the point (_quiet).
+    Of the staff, only the one who answers for the order gets its rows, both owners those of an order nobody answers for, and the chats
+    without an order go to «Ответственный за заказы этого аккаунта» when the account has one (_mine, the owner 2026-11-03).
     `staff` False: the owner or the partner working as a point (panel/common.current_user) sees the point's; `own_prefix`: the start of their
     author «<name> за точку «» — what they pressed as a point is their own record too."""
     border = (datetime.fromisoformat(now) - timedelta(days=GREEN_DAYS)).isoformat(timespec="seconds") if now else ""
     staff = _staff(conn, login) if staff is None else staff
-    quiet = _quiet(conn, login, staff)
+    quiet, mine = _quiet(conn, login, staff), _mine(conn, login, staff)
     rows, folded = [], {}
     for event in open_alerts(conn, login):
-        if _hidden(event, quiet):
+        if _hidden(event, quiet) or _not_mine(event, mine):
             continue
         if (event["author"] == login or (own_prefix and str(event["author"] or "").startswith(own_prefix))) \
                 and event["level"] != "red":                                 # one's own failure still waits for «Разобрался»
@@ -211,12 +284,13 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
             folded[event["order_id"]] = event
         rows.append(event)
     urgent = [row for row in (urgent_rows(conn, now, also=quiet["taken_chats"]) if now else [])
-              if row["chat_row"] in quiet["taken_chats"] or (row["of_order"] not in quiet["words"] and row["of_order"] not in quiet["all"])]
+              if (row["chat_row"] in quiet["taken_chats"] or (row["of_order"] not in quiet["words"] and row["of_order"] not in quiet["all"]))
+              and not _not_theirs(row, mine)]
     late = {row["chat_row"] for row in urgent}
     late_orders = {row["of_order"] for row in urgent if row["of_order"]}
     rows = [row for row in rows if not (row["order_id"] in late_orders and row is folded.get(row["order_id"]) and row["level"] == "yellow")]
     skip = late | quiet["chats"]
-    rows += [row for row in chat_rows(conn) if row["chat_row"] not in skip] + urgent   # one row per chat: «Срочно ответить»
+    rows += [row for row in chat_rows(conn) if row["chat_row"] not in skip and not _not_theirs(row, mine)] + urgent   # one row per chat: «Срочно ответить»
                                                                                           # takes the place of «Клиент написал», of a chat
                                                                                           # with an order too
     rows += missing_rows(conn, login)
@@ -257,7 +331,7 @@ def chat_rows(conn) -> List[dict]:
         if (at or "") < baselines[account_id]:
             continue
         text = " ".join((text or "").split())
-        rows.append({"id": "chat-%d" % chat_row, "order_id": None, "chat_row": chat_row, "client": peer or "", "at": at, "author": "",
+        rows.append({"id": "chat-%d" % chat_row, "order_id": None, "chat_row": chat_row, "account_id": account_id, "client": peer or "", "at": at, "author": "",
                      "kind": "chat", "level": "yellow", "more": max(0, unread - 1),
                      "text": CLIENT_WROTE + text[:80] + ("…" if len(text) > 80 else "")})
     seen = {row["chat_row"] for row in rows}
@@ -272,7 +346,7 @@ def chat_rows(conn) -> List[dict]:
             baselines[account_id] = store.get_state(conn, "chats_baseline_%d" % account_id) or ""
         if (at or "") < baselines[account_id]:
             continue
-        rows.append({"id": "chat-%d" % chat_row, "order_id": None, "chat_row": chat_row, "client": peer or "", "at": at, "author": "",
+        rows.append({"id": "chat-%d" % chat_row, "order_id": None, "chat_row": chat_row, "account_id": account_id, "client": peer or "", "at": at, "author": "",
                      "kind": "chat", "level": "yellow", "more": 0,
                      "text": CLIENT_CALLED + (text or "").replace("Звонок через Авито", "", 1)})
     return rows
@@ -289,7 +363,8 @@ def urgent_rows(conn, now: str, also=()) -> List[dict]:
     partner took, order_points.office_taken) whose client waits for an answer longer than an hour of working time
     (the hours of the handoffs) since their first message after our last one. Avito's auto-answer (an outgoing «system» message, on for
     the owner's accounts since 2026-10-13) is not an answer. Goes by itself when a person answers or the chat is closed or marked
-    «Не требует ответа». Nothing is stored: it is read from the chat every time."""
+    «Не требует ответа», and never of an order on a closing stage (won, lost, closed; the owner 2026-11-03). Nothing is stored: it is read
+    from the chat every time."""
     from . import order_manager, store
     start = store.get_state(conn, URGENT_START_KEY)
     if not start:
@@ -299,12 +374,14 @@ def urgent_rows(conn, now: str, also=()) -> List[dict]:
     since = max(start, (moment - timedelta(days=URGENT_DAYS)).isoformat(timespec="seconds"))
     rows = []
     # one statement for the counter of every page; the chat's own last_dir is not a filter: Avito's auto-answer (out, «system») comes last
-    for chat_row, peer, order_id, first_at, first_text in conn.execute(
-            "SELECT c.id, c.peer_name, c.order_id, w.at, w.text FROM avito_chat c JOIN account a ON a.id = c.account_id "
+    for chat_row, account_id, peer, order_id, first_at, first_text in conn.execute(
+            "SELECT c.id, c.account_id, c.peer_name, c.order_id, w.at, w.text FROM avito_chat c JOIN account a ON a.id = c.account_id "
             "JOIN avito_message w ON w.id = (SELECT id FROM avito_message WHERE chat_row = c.id AND direction = 'in' "
             "AND kind NOT IN ('call', 'system', 'deleted') AND ts > COALESCE((SELECT MAX(ts) FROM avito_message WHERE chat_row = c.id "
             "AND direction = 'out' AND kind NOT IN ('system', 'deleted')), 0) ORDER BY ts, id LIMIT 1) "
             "WHERE c.status = 'open' AND c.last_at >= ? AND a.chats_enabled = 1 "
+            "AND NOT EXISTS (SELECT 1 FROM order_card o JOIN order_stage s ON s.id = o.stage_id WHERE o.id = c.order_id "
+            "AND s.kind IN ('won', 'lost', 'closed')) "                   # a closed order: never «срочно» (the owner 2026-11-03)
             "AND (NOT EXISTS (SELECT 1 FROM point p WHERE p.avito_account_id = c.account_id) OR c.id IN (%s))"
             % (",".join(str(int(r)) for r in also) or "0"), (since,)).fetchall():
         first = (first_at, first_text)
@@ -314,7 +391,7 @@ def urgent_rows(conn, now: str, also=()) -> List[dict]:
         if due > moment:
             continue
         text = " ".join((first[1] or "").split())
-        rows.append({"id": "urgent-%d" % chat_row, "order_id": None, "chat_row": chat_row, "client": peer or "", "at": due.isoformat(timespec="seconds"),
+        rows.append({"id": "urgent-%d" % chat_row, "order_id": None, "chat_row": chat_row, "account_id": account_id, "client": peer or "", "at": due.isoformat(timespec="seconds"),
                      "author": "", "kind": "chat", "level": "red", "more": 0, "urgent": True, "of_order": order_id if order_id and order_id > 0 else None,
                      "title": "Чат" + (" · заказ №%d" % order_id if order_id and order_id > 0 else ""),
                      "text": URGENT + "ждёт с %s: %s" % (first[0][11:16], text[:80] + ("…" if len(text) > 80 else ""))})

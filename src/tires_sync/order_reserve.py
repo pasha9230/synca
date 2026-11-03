@@ -324,9 +324,9 @@ def _tell_moved(conn, card: dict, notify: Optional[Notify], now: str) -> None:
     and to the owner and the partner (their Telegram), through the tick's own alerts; each says how it went in the journal (order_notify)."""
     if notify is None:
         return
-    from . import order_oth
+    from . import order_alerts, order_oth
     text = message_texts.text(conn, message_texts.MOVED_NOTE, order_label=order_manager.label(card))
-    for who in [""] + order_oth.office_logins(conn):            # "": nobody of the staff answers, so the alert goes to the point
+    for who in [""] + order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)):     # its responsible only (2026-11-03)            # "": nobody of the staff answers, so the alert goes to the point
         try:
             notify(dict(card, responsible=who, to_staff=bool(who)), text)
         except Exception:                                       # noqa: BLE001 - the move is done; the journal has its record
