@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import timedelta
 
 from flask import abort, flash, jsonify, redirect, render_template, request
@@ -48,8 +49,9 @@ def apply_publish(app, verify=None, upload=False) -> list:
                 return [problem]
         try:
             before = price_push.snapshot(conn, feed_root)            # the prices Avito has from the feed: what changes goes through the API
-        except Exception:                                            # noqa: BLE001 - the prices on Avito never stop a publication
+        except Exception as err:                                     # noqa: BLE001 - the prices on Avito never stop a publication
             before = {}
+            print("цены фида до публикации не прочитаны, на Авито через API не уйдут (%s: %s)" % (type(err).__name__, err), file=sys.stderr)
         try:
             settings = active_settings(conn)
             parsed = load_merged(conn, settings, app.config["UNLOAD_PATH"])

@@ -859,8 +859,10 @@ def _run_cycle(args) -> int:
             promoted = 0
             try:                                                    # the prices Avito has from the feed: what the cycle changes goes through the API
                 before_prices = price_push.snapshot(conn, args.feed_root)
-            except Exception:                                       # noqa: BLE001 - the prices on Avito never stop a publication
+            except Exception as err:                                # noqa: BLE001 - the prices on Avito never stop a publication
                 before_prices = {}
+                print("предупреждение: цены фида до публикации не прочитаны, на Авито через API не уйдут (%s: %s)" % (
+                    type(err).__name__, str(err)[:120]), file=sys.stderr)
             published_ids = []
             for r in results:
                 account = connections.get_account(conn, r.account_id)
@@ -869,9 +871,9 @@ def _run_cycle(args) -> int:
                 folder = Path(args.feed_root) / account["feed_token"]
                 try:
                     done = promote_feed(folder, expected_removals=expected)
+                    published_ids.append(account["id"])             # the new feed is public: its prices too, even if the state below fails
                     _record_state(conn, account, folder)
                     promoted += 1
-                    published_ids.append(account["id"])
                     print("%s: опубликован, объявлений: %d (было %d)" % (r.name, done["new"], done["old"]))
                 except (PublishError, store.StateError) as err:
                     print("%s: error, %s" % (r.name, err))
