@@ -78,7 +78,8 @@ def fingerprint(changes: dict) -> str:
 
 def rows(conn, general, offers: dict, purchases: Dict[str, float], changes: dict, gone=(), pct_limit: Optional[float] = None) -> list:
     """«было → стало» of a press, a row per account × position: the price of one tyre now (the draft on top: `general`) and after, and why it is
-    asked once more at «Применить» (below the purchase, more than JUMP away, a percent past `pct_limit`). The risky rows first."""
+    likely asked once more at «Применить» (below the supplier's price, more than JUMP away, a percent past `pct_limit`; «Применить» itself
+    compares with the published price). The risky rows first."""
     accounts, out = {}, []
     names = {a["id"]: a["name"] for a in connections.list_accounts(conn)}
     for key, value in changes.items():
@@ -90,8 +91,8 @@ def rows(conn, general, offers: dict, purchases: Dict[str, float], changes: dict
         offer = dataclasses.replace(offers[goods_id], base_price=base)
         was = position_price(offer, eff)
         new = own_price(base, own_price_value(value)) if value else position_price(offer, dataclasses.replace(eff, own_prices={}))
-        why = []
-        if value and new is not None and base > 0 and new < base:
+        why, cost = [], float(offers[goods_id].base_price or 0)              # «ниже закупки» as «Применить» asks it: the supplier's price
+        if value and new is not None and cost > 0 and new < cost:
             why.append("ниже закупки")
         if value and new and was and abs(new / was - 1) > JUMP:
             why.append("%+d %% к цене сейчас" % round((new / was - 1) * 100))

@@ -5,7 +5,7 @@
 {% set risky = rows|selectattr("why")|list %}
 <header class="page-head"><div><h1>Своя цена выбранным: было → стало</h1><p class="sub">{{ op_text }} · {{ positions }} {{ plural(positions, "позиция", "позиции", "позиций") }}, {{ rows|length }} {{ plural(rows|length, "строка", "строки", "строк") }} (позиция × аккаунт). Цена за 1 шт., вверх до десятков. На Авито ничего не изменится, пока вы не нажмёте «Применить».</p></div></header>
 <section class="card"><div class="card-body stack" data-own-bulk>
-{% if risky %}<div class="flash flash--warn" data-own-bulk-risky>{{ risky|length }} {{ plural(risky|length, "строка", "строки", "строк") }} ниже закупки, дальше 30 % от цены сейчас или с процентом выше предела: при «Применить» нужно будет подтвердить ещё раз. Они в начале таблицы.</div>{% endif %}
+{% if risky %}<div class="flash flash--warn" data-own-bulk-risky>{{ risky|length }} {{ plural(risky|length, "строка", "строки", "строк") }} ниже закупки, дальше 30 % от цены сейчас или с процентом выше предела: при «Применить», скорее всего, попросим подтвердить ещё раз. Они в начале таблицы.</div>{% endif %}
 {% if result.kept or result.skipped or result.same or other %}<ul class="small muted">
 {% if result.kept %}<li>Уже есть своя цена, не тронуто: {{ result.kept|length }} («изменить и их» — чтобы поменять).</li>{% endif %}
 {% for why, keys in result.skipped|dictsort %}<li data-own-bulk-skip="{{ why }}">Пропущено, {{ skips[why] }}: {{ keys|length }}.</li>{% endfor %}

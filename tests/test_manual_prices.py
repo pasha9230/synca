@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 
 import pytest
 
@@ -312,3 +313,46 @@ def test_the_audit_page_reads_the_own_price_lines():
     from tires_sync.panel.texts import audit_text
     text = audit_text({"action": "own_price_confirmed", "detail": {"draft": 7, "lines": ["a: 1 → 2"] * 6, "more": 3}})
     assert text.startswith("Свои цены, черновик №7: a: 1 → 2;") and text.endswith("ещё 4")
+
+
+# --- по ревью ---------------------------------------------------------------------------------------------------------------------------
+
+def test_a_gone_position_is_ticked_only_under_the_own_filter_and_never_gets_a_manual_rule(tmp_path):
+    app, conn, (first, _) = _gone_app(tmp_path)
+    client, tok = _owner(app)
+    staging.set_own_price(conn, GONE, [first], {"price": 4500}, NOW)
+    assert 'name="g" value="%s"' % GONE not in client.get("/catalog").get_data(as_text=True)
+    assert 'name="g" value="%s"' % GONE in client.get("/catalog?own=1").get_data(as_text=True)
+    for mode in ("on", "off"):
+        post(client, "/catalog/stage", tok, bulk=mode, g=["100", GONE])
+        assert staging.summary(conn)["changes"].get("overrides") == {"1:100": mode}
+
+
+def test_a_position_shown_for_viewing_only_gets_no_own_price_even_if_the_archive_knows_it(tmp_path, monkeypatch):
+    from tires_sync.panel import routes_catalog
+    app, conn, (first, _) = _gone_app(tmp_path)
+    client, tok = _owner(app)
+    held = catalog_archive.gone_offer(conn, GONE)
+    monkeypatch.setattr(routes_catalog, "_held_offers", lambda *a: [(held, datetime(2026, 10, 1, 10))])     # an old second unload holds it
+    r = post(client, "/catalog/item/%s/own-price" % GONE, tok, kind="price", value="4500", a=[str(first)], action="save")
+    assert "Такой позиции нет в выгрузке" in _flash(client, r)
+    r = _draft(client, tok, [GONE], [first], base="purchase", unit="rub", side="up", value="100")
+    assert staging.summary(conn)["draft_id"] is None and "Среди выбранных нет позиций фида" in _flash(client, r)
+
+
+def test_from_the_purchase_counts_from_the_anchor_and_below_is_said_as_apply_asks_it(tmp_path, monkeypatch):
+    """Поставщик снизил 5 000 → держим якорь 6 000 (price_guard): «−500 ₽ от закупки» = 5 500, не ниже цены поставщика — не «ниже закупки»."""
+    from tires_sync import price_guard
+    monkeypatch.setattr(price_guard, "base_for", lambda guard, gid, price, inherited=None: (6000.0, "held") if gid == "100" else (price, ""))
+    app, conn, (first, _) = _app(tmp_path)
+    client, tok = _owner(app)
+    page = _preview(client, tok, ["100"], [first], base="purchase", unit="rub", side="down", value="500").get_data(as_text=True)
+    row = re.search(r'<tr data-own-bulk-row="%d:100">.*?</tr>' % first, page.replace("\xa0", " "), re.S).group(0)
+    assert "6 000 ₽" in row and "5 500 ₽" in row and "ниже закупки" not in row
+    _draft(client, tok, ["100"], [first], base="purchase", unit="rub", side="down", value="500")
+    assert _changes(conn) == {"%d:100" % first: {"price": 5500}}
+
+
+def test_the_rub_limit_itself_is_accepted_and_a_live_position_without_a_purchase_gets_no_percent():
+    assert own_bulk.plan({}, {"a": 5000.0}, [1], {"base": "purchase", "unit": "rub", "delta": 50000})["set"] == {"1:a": {"price": 55000}}
+    assert own_bulk.plan({}, {"a": 0.0}, [1], {"base": "purchase", "unit": "pct", "delta": 5})["skipped"] == {"no_purchase": ["1:a"]}

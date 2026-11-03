@@ -307,7 +307,9 @@ def register(app) -> None:
             items = [i for i in items if i["problem"]]
         own_only = args.get("own") == "1" and has_right("money")
         if own_only:                                                  # «Ручные цены» (the owner 2026-11-03): an own price in an account, applied or in the draft
-            keyed = {k.partition(":")[2] for k in set(raw.get("price_overrides") or {}) | set({**raw, **changes}.get("price_overrides") or {})}
+            feed_ids = {a["id"] for a in connections.list_feed_accounts(conn)}      # an account without a feed: its own prices reach no Avito
+            keyed = {k.partition(":")[2] for k in set(raw.get("price_overrides") or {}) | set({**raw, **changes}.get("price_overrides") or {})
+                     if k.partition(":")[0].isdigit() and int(k.partition(":")[0]) in feed_ids}
             items = [i for i in items if i["goods_id"] in keyed]
         market_on = MARKET_SHOWN and has_right("money")               # the competitors' prices: the owner's, as the purchase (market.py)
         snaps = market.latest(conn) if market_on else {}
@@ -515,8 +517,16 @@ def register(app) -> None:
                 if mode not in ("on", "off", "clear"):
                     raise ValueError("Неизвестное действие.")
                 ids = form.getlist("g")
-                staging.set_overrides(conn, ids, None if mode == "clear" else mode, now_iso())
+                skipped = []
+                if mode != "clear":                                       # a position the supplier took away (ticked for its own price) gets no
+                    offers = context(app)[2].offers                       # manual rule: it would outlive its return (the owner 2026-11-03)
+                    skipped = [g for g in dict.fromkeys(ids) if g not in offers and catalog_archive.gone_offer(conn, g) is not None]
+                    ids = [g for g in ids if g not in skipped]
+                if ids or not skipped:
+                    staging.set_overrides(conn, ids, None if mode == "clear" else mode, now_iso())
                 message = "%s позиций: %d." % ({"on": "Добавлено вручную", "off": "Снято", "clear": "Возвращено"}[mode], len(set(ids)))
+                if skipped:
+                    message += " Пропущено, нет у поставщика: %d." % len(skipped)
             elif form.get("op"):
                 mode, _, goods_id = form["op"].partition(":")
                 if mode not in ("on", "off", "clear") or not goods_id:
@@ -597,11 +607,11 @@ def register(app) -> None:
                 if kind not in ("pct", "price") or not re.fullmatch(r"[+\-]?\d+(\.\d+)?", text):
                     raise ValueError("Введите процент к закупке или цену продажи числом.")
                 value = {"pct": float(text)} if kind == "pct" else {"price": float(text)}
-            if value is not None and goods_id not in context(app)[2].offers:          # «Как у бренда» also for a position gone
-                gone = catalog_archive.gone_offer(conn, goods_id)                        # the supplier took it away: a sale price always,
-                if gone is None:                                                         # a percent of its last purchase only (the owner 2026-11-03)
-                    raise ValueError("Такой позиции нет в выгрузке.")
-                if "pct" in value and not gone.base_price > 0:
+            if value is not None:                                                     # the reset also for a position gone
+                offers, _purchases, gone, _other = _bulk_positions(conn, [goods_id])     # the supplier took it away: a sale price always, a percent
+                if goods_id not in offers:                                               # of its last purchase only (the owner 2026-11-03); never
+                    raise ValueError("Такой позиции нет в выгрузке.")                     # a position shown for viewing only
+                if goods_id in gone and "pct" in value and not offers[goods_id].base_price > 0:
                     raise ValueError("Позиции нет у поставщика, и последняя закупка неизвестна: процент не от чего считать. "
                                      "Поставьте цену продажи в рублях.")
             staging.set_own_price(conn, goods_id, accounts, value, now_iso())
