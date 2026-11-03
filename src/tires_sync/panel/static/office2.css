@@ -52,7 +52,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-r3 .chat-who{max-width:none}
 .o2 .o2-cl-list .empty{padding:24px 16px}
 
-.o2 .o2-cl-pane{grid-area:main;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--o2-bg);position:relative}
+.o2 .o2-cl-pane{grid-area:main;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--o2-bg);position:relative;overflow-y:auto}
 .o2 .o2-cl-head{display:flex;align-items:center;flex-wrap:nowrap;gap:8px;padding:8px 12px 8px 16px;border-bottom:1px solid var(--o2-border-2);background:var(--o2-bg)}
 .o2-cl-back{display:none}
 .o2-cl-who{flex:1;min-width:0}
@@ -69,7 +69,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-dd-sec .select{width:100%;max-width:none}
 .o2 .o2-cl-product{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;padding:6px 16px;border-bottom:1px solid var(--o2-border-2);background:var(--o2-fill);font-size:13px}
 
-.o2 .o2-cl-panel{flex:none;max-height:42%;overflow-y:auto;border-bottom:1px solid var(--o2-border-2);background:var(--o2-fill);padding:10px 16px}
+.o2 .o2-cl-panel{flex:none;border-bottom:1px solid var(--o2-border-2);background:var(--o2-fill);padding:10px 16px}
 .o2 .chats-layout.is-deal-folded .o2-cl-panel{display:none}
 .o2-panel-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .o2-panel-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 24px;align-items:start}
@@ -77,7 +77,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-panel-row p{margin:0}
 .o2 .o2-kv{margin:0}
 .o2 .o2-panel-side .chat-pick{border-top:0;padding-top:0}
-.o2 .o2-cl-panel .suggest{left:0;right:auto}
+.o2 .o2-cl-panel .suggest{left:auto;right:0;width:min(440px,60vw)}   /* the panel has no scroll of its own: the list is never clipped */
 .o2-panel-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-top:8px}
 .o2-panel-foot>*{flex:1 1 320px;min-width:0}
 .o2-panel-foot .chat-wait>summary{list-style:none;display:inline-flex}
@@ -144,7 +144,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-season--all{background:var(--o2-fill);border-color:var(--o2-border-2);color:var(--o2-text-2)}
 .o2-season--all svg:first-child{color:var(--summer,#F79009)}.o2-season--all svg:nth-child(2){color:var(--winter,#2E90FA)}
 .o2-season--stud{padding:0 4px;background:#FEF3F2;border-color:#FECDCA}
-.o2 .o2-cat-table .st-ico{width:auto;height:22px;padding:0 8px 0 6px;gap:4px;display:inline-flex;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;
+.o2 .o2-cat-table .st-ico{width:auto;min-height:22px;height:auto;max-width:180px;padding:2px 8px 2px 6px;gap:4px;display:inline-flex;border-radius:4px;font-size:12px;font-weight:500;white-space:normal;line-height:16px;text-align:left;
   border:1px solid transparent}
 .o2 .o2-cat-table .st-ico svg{width:13px;height:13px}
 .o2 .o2-cat-table .st-ico::after{content:attr(data-tip-title)}
@@ -157,17 +157,16 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2 .o2-cat-table .t-status{width:auto!important}
 .o2 .o2-cat-table .is-pend td{background:var(--pend-50,#FEF6EE)}
 .o2 .o2-bulkbar{background:#24292F;color:#fff;border-radius:var(--o2-r)}
-.o2 .o2-cat-table .t-namecol{min-width:260px}
+.o2 .o2-cat-table .t-namecol{min-width:200px}
 
 /* ── Карточка позиции: what it is on the left, what is set by hand on the right ─────────────────────────────────────────── */
 .o2-item-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,440px);gap:16px;align-items:start}
 .o2-item-main,.o2-item-side{display:flex;flex-direction:column;gap:16px;min-width:0}
-.o2-item-side{position:sticky;top:12px}
 .o2-item-side .table{font-size:13px}
 .o2-item-side .input{max-width:100%}
 .o2-item-side [data-oth-manual] select.input,.o2-item-side [data-oth-manual] input[name=note]{width:100%;margin-bottom:6px}
 .o2-item .entity-media img{border-radius:var(--o2-r);border:1px solid var(--o2-border-2)}
-@media (max-width:1180px){.o2-item-cols{grid-template-columns:minmax(0,1fr)}.o2-item-side{position:static}}
+@media (max-width:1180px){.o2-item-cols{grid-template-columns:minmax(0,1fr)}}
 .o2-item-side .card-head{flex-direction:column;align-items:flex-start;gap:2px}
 .o2-item-side .card-head .sub{margin:0;font-size:12px;color:var(--o2-text-3)}
 .o2-item-side .entity-sec{border-left:3px solid var(--o2-primary)}

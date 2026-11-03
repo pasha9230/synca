@@ -206,7 +206,7 @@ def test_tasks_and_whats_new(w):
     html = w["owner"].get("/tasks?tab=all").get_data(as_text=True)
     assert 'data-open-modal="o2-newtask"' in html and 'id="o2-newtask"' in html and 'action="/tasks/new"' in html
     assert "Уточнить размер" in html and "Проверить остатки" in html and html.count('action="/tasks/') >= 5
-    assert '<th>Кому</th>' in html and '<th>Кому</th>' not in w["owner"].get("/tasks").get_data(as_text=True)
+    assert '<th>Кому</th>' in html and '<th>Кому</th>' in w["owner"].get("/tasks").get_data(as_text=True)     # «Мне» of the owner has others' too
     assert 'class="wn o2-wn"' in w["owner"].get("/whats-new").get_data(as_text=True)
 
 
