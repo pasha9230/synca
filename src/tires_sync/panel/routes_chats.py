@@ -7,11 +7,12 @@ from pathlib import Path
 
 from flask import abort, flash, jsonify, redirect, render_template, request, session
 
-from .. import catalog_archive, chat_deals as deals, chat_handover, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
+from .. import ad_stats, catalog_archive, chat_deals as deals, chat_handover, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
 from .common import author, can, chat_of_other_point, get_conn, login_required, own_logins, own_point, point_account, safe_path
+import functools
 import logging
 from datetime import datetime
 from urllib.parse import urlencode
@@ -20,6 +21,7 @@ from .routes_main import context
 from .routes_orders import local_iso, local_now, offer_send, send_offer
 
 LIST_LIMIT = 200
+AD_LOOKUP_TIMEOUT = 5         # seconds the press of «Создать заказ» waits for Avito's word on one ad it does not know yet
 FILTERS = {"": "Открытые", "wait": "Ждут ответа", "unread": "Не прочитанные", "nodeal": "Без заказа", "noreply": "Не требуют ответа", "closed": "Закрытые"}
 
 
@@ -190,6 +192,40 @@ def register(app) -> None:
                 log.exception("the position of a chat ad was not priced")
                 raise orders.OrderError("цена не посчитана (%s)" % type(err).__name__)
         return provider
+
+    def _ad_lookup(conn):
+        """Asks Avito for our Id of the ad of a chat the list of our ads does not know yet (ad_stats.lookup_one): one short request."""
+        def lookup(chat):
+            box = app.config.get("SECRET_BOX")
+            if box is None:
+                raise deals.NoLookup()
+            client_id = connections.get_secret(conn, box, "avito", chat["account_id"], "client_id")
+            client_secret = connections.get_secret(conn, box, "avito", chat["account_id"], "client_secret")
+            if not client_id or not client_secret:
+                raise deals.NoLookup()
+            http = app.config.get("AVITO_HTTP") or functools.partial(urllib_transport, timeout=AD_LOOKUP_TIMEOUT)
+            ad_stats.lookup_one(conn, AvitoClient(client_id, client_secret, http=http), chat["account_id"], chat["item_id"],
+                                chat["item_title"], local_now())
+        return lookup
+
+    @app.route("/orders/<int:card_id>/ad-position", methods=["POST"])
+    @login_required
+    def order_ad_position(card_id):
+        """«Подставить позицию из объявления» (2026-11-03): the order made from a chat got no position because the ad was not known then."""
+        conn = get_conn()
+        if own_point() is not None:
+            abort(403)
+        try:
+            card = orders.get_card(conn, card_id)
+        except orders.OrderError:
+            abort(404)
+        chat = deals.ad_position_chat(conn, card)
+        try:
+            flash(deals.add_ad_position(conn, card_id, _position_provider(conn, chat["id"]) if chat else None, _ad_lookup(conn),
+                                        local_iso(), author()), "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return redirect("/orders/%d" % card_id)
 
     @app.route("/chats")
     @app.route("/chats/<int:chat_row>")
@@ -621,7 +657,8 @@ def register(app) -> None:
         conn = get_conn()
         _chat_or_404(conn, chat_row)
         try:
-            card_id = deals.create_deal(conn, chat_row, local_iso(), author(), position_provider=_position_provider(conn, chat_row), own_point=own_point())
+            card_id = deals.create_deal(conn, chat_row, local_iso(), author(), position_provider=_position_provider(conn, chat_row), own_point=own_point(),
+                                       ad_lookup=_ad_lookup(conn))
             _to_own_point(conn, card_id)
         except orders.OrderError as err:
             flash(str(err))

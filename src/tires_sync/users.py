@@ -6,6 +6,7 @@ every section of the panel at a level «нет / смотреть / менять
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import secrets
 import sqlite3
@@ -93,6 +94,7 @@ def remove_user(conn, login: str, now: str) -> None:
     conn.execute("DELETE FROM client_brand WHERE subject = ?", (login,))
     conn.execute("DELETE FROM client_brand_pct WHERE login = ?", (login,))        # the client's own % of the brands
     conn.execute("DELETE FROM user_pref WHERE login = ?", (login,))                  # the person's own settings (the columns of «Заказы»)
+    conn.execute("UPDATE panel_login_reset SET revoked_at = ? WHERE login = ? AND used_at IS NULL AND revoked_at IS NULL", (now, login))
     store.write_audit(conn, now, "server", "user_removed", {"login": login})
     store.bump_session_epoch(conn, login)
 
@@ -258,7 +260,8 @@ def set_active(conn, login: str, active: bool, now: str, author: str) -> None:
                  (login, old["role"], int(bool(active)), old["point_id"], old["display_name"], now, author))
     store.write_audit(conn, now, author, "user_on" if active else "user_off", {"login": login})
     if not active:
-        store.bump_session_epoch(conn, login)
+        conn.execute("UPDATE panel_login_reset SET revoked_at = ? WHERE login = ? AND used_at IS NULL AND revoked_at IS NULL", (now, login))
+        store.bump_session_epoch(conn, login)          # the open link «Сбросить вход» ends too: switching on again never brings it back
 
 
 def change_own_password(conn, login: str, old_password: str, new_password: str, now: str) -> None:
@@ -358,3 +361,174 @@ def revoke_invite(conn, invite_id: int, now: str, author: str) -> None:
                     (now, int(invite_id))).rowcount != 1:
         raise UserError("Приглашение уже использовано или отозвано.")
     store.write_audit(conn, now, author, "invite_revoked", {"id": int(invite_id)})
+
+
+# ---- «Сбросить вход» -------------------------------------------------------------------------------------------------------------
+
+RESET_HOURS = 24
+RESET_BAD = "Ссылка недействительна: она уже использована, отозвана или истекла."
+
+
+def create_login_reset(conn, login: str, now: str, author: str, main_login: str) -> str:
+    """«Сбросить вход» (the owner 2026-11-03): a one-time link for 24 hours to set a new password and, if wanted, a new login; only its
+    hash is kept, the token is shown once. The open sessions of the user stay until the link is used; an earlier link of the user ends.
+    Never for the shared owner login (`main_login`, the panel's AUTHOR): its password is in panel.env."""
+    login = normalize(login)
+    if login == normalize(main_login) or login in RESERVED:
+        raise UserError("Общий вход владельца меняется на сервере (panel.env), не здесь.")
+    if not exists(conn, login):
+        raise UserError("Пользователя «%s» нет." % login)
+    if not is_active(conn, login):
+        raise UserError("Пользователь «%s» выключен: сначала включите его." % login)
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.fromisoformat(now) + timedelta(hours=RESET_HOURS)).isoformat(timespec="seconds")
+    conn.execute("UPDATE panel_login_reset SET revoked_at = ? WHERE login = ? AND used_at IS NULL AND revoked_at IS NULL", (now, login))
+    conn.execute("INSERT INTO panel_login_reset (token_hash, login, created, expires, created_by) VALUES (?,?,?,?,?)",
+                 (_token_hash(token), login, now, expires, author))
+    store.write_audit(conn, now, author, "login_reset_created", {"login": login, "expires": expires})
+    return token
+
+
+def find_login_reset(conn, token: str, now: str) -> Optional[dict]:
+    """The reset if the link is still good (not used, not revoked, not expired) and its user is there and switched on."""
+    row = conn.execute("SELECT r.login, r.expires FROM panel_login_reset r JOIN panel_user u ON u.login = r.login WHERE r.token_hash = ? "
+                       "AND r.used_at IS NULL AND r.revoked_at IS NULL AND r.expires > ?", (_token_hash(str(token or "")), now)).fetchone()
+    return None if row is None or not is_active(conn, row[0]) else {"login": row[0], "expires": row[1]}
+
+
+def list_login_resets(conn, now: str) -> List[dict]:
+    rows = conn.execute("SELECT rowid, login, created, expires, created_by FROM panel_login_reset WHERE used_at IS NULL AND revoked_at IS NULL "
+                        "AND expires > ? ORDER BY created DESC", (now,))
+    return [dict(zip(("id", "login", "created", "expires", "created_by"), r)) for r in rows]
+
+
+def revoke_login_reset(conn, reset_id: int, now: str, author: str) -> None:
+    row = conn.execute("SELECT login FROM panel_login_reset WHERE rowid = ? AND used_at IS NULL AND revoked_at IS NULL", (int(reset_id),)).fetchone()
+    if row is None or conn.execute("UPDATE panel_login_reset SET revoked_at = ? WHERE rowid = ? AND used_at IS NULL AND revoked_at IS NULL",
+                                   (now, int(reset_id))).rowcount != 1:
+        raise UserError("Сброс входа уже использован или отозван.")
+    store.write_audit(conn, now, author, "login_reset_revoked", {"id": int(reset_id), "login": row[0]})
+
+
+def use_login_reset(conn, token: str, new_login: str, password: str, now: str, main_login: str) -> str:
+    """The person sets a new password and, if typed, a new login. One transaction: the claim of the link (atomic: it works once), the
+    password, the rename of the login everywhere it is a key (rename_login; the journal and the history keep the old login as written),
+    the end of every open session of the user and the journal. Returns the login to sign in with."""
+    reset = find_login_reset(conn, token, now)
+    if reset is None:
+        raise UserError(RESET_BAD)
+    old = reset["login"]
+    new = normalize(new_login) or old
+    if new != old and (not LOGIN.match(new) or new in RESERVED or new == normalize(main_login) or login_taken(conn, new)):
+        raise UserError("Логин занят или не подходит: 2–32 символа, латинские буквы, цифры, точка, дефис, подчёркивание.")
+    _check_password(password)
+    try:
+        claim = conn.execute("UPDATE panel_login_reset SET used_at = ?, used_as = ? WHERE token_hash = ? AND used_at IS NULL "
+                             "AND revoked_at IS NULL AND expires > ?", (now, new, _token_hash(token), now))
+        if claim.rowcount != 1:
+            raise UserError(RESET_BAD)
+        conn.execute("UPDATE panel_user SET password_hash = ? WHERE login = ?", (_hash(password), old))
+        if new != old:
+            rename_login(conn, old, new)
+        conn.execute("UPDATE panel_login_reset SET revoked_at = ? WHERE login IN (?, ?) AND used_at IS NULL AND revoked_at IS NULL",
+                     (now, old, new))                      # an open link of a removed user of the new name never opens this one
+        _end_sessions(conn, old, new)
+        client_terms.audit(conn, now, new, "login_reset_used", {"from": old, "to": new}, commit=False)
+        conn.commit()
+    except sqlite3.IntegrityError:                         # the new login taken a moment ago (an invitation, another reset)
+        conn.rollback()
+        raise UserError("Логин занят: выберите другой.")
+    except Exception:
+        conn.rollback()
+        raise
+    return new
+
+
+# Every place a login is a key (the lane «login-reset» 2026-11-03: a grep of src for login, author, *_by, assignee, responsible and the
+# app_state keys). The journal and the history (audit.author, order_event.author, the *_by of the records, deleted_record) keep the old
+# login as written. The literals are the modules' own (users is imported by them); tests/test_login_reset.py holds them equal.
+LOGIN_COLUMNS = (("panel_user", "login"), ("panel_user_role", "login"), ("user_pref", "login"),     # user_pref: «Колонки», whatsnew, the tour
+                 ("shop_cart", "login"), ("client_profile", "login"), ("shop_order", "login"), ("client_brand_pct", "login"),
+                 ("client_terms", "subject"), ("client_brand", "subject"),                       # '*' is the role's: never a login
+                 ("order_event_seen", "login"), ("order_event_ack", "login"),                   # the alerts read; '*' is «for everybody»
+                 ("order_card", "responsible"), ("order_card", "created_by"),                   # created_by: the responsible when none (orders.py)
+                 ("avito_chat", "responsible"), ("callback_task", "assignee"), ("callback_task", "created_by"),   # «Мне», «Поставил я»
+                 ("chat_handover", "taken_by"))                                                 # order_points.office_taken
+LOGIN_STATE_KEYS = ("orders_default_responsible", "shop_orders_responsible")   # orders.DEFAULT_RESPONSIBLE_KEY, shop_cart.RESPONSIBLE_KEY
+DUTY_KEY, DUTY_TODAY_KEY = "handoff_duty", "handoff_duty_today"               # order_manager: {"0".."6": login}, {"date", "login"}
+TELEGRAM_KIND = "telegram_users"                                              # order_notify.KIND: {"chats": {login: chat}, "owner_login"}
+RESPONSIBLE_MARK = "Ответственный: "                                          # orders.LABELS["responsible"]: the record office_taken reads
+
+
+def _json(text, default):
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        return default
+    return value if isinstance(value, type(default)) else default
+
+
+def _json_places(conn, old: str, new: Optional[str]) -> int:
+    """The JSON settings that hold a login: how many name `old`; with `new`, they are written with `new` instead."""
+    found = 0
+    for key in LOGIN_STATE_KEYS:
+        row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+        if row and row[0] == old:
+            found += 1
+            if new:
+                conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (new, key))
+    for key, field in ((DUTY_KEY, None), (DUTY_TODAY_KEY, "login")):
+        row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+        value = _json(row[0], {}) if row else {}
+        names = [k for k, v in value.items() if v == old and (field is None or k == field)]
+        if names:
+            found += len(names)
+            if new:
+                value.update({k: new for k in names})
+                conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(value, ensure_ascii=False), key))
+    for kind, owner_id, config in conn.execute("SELECT kind, owner_id, config FROM connection WHERE kind IN ('avito', ?)", (TELEGRAM_KIND,)).fetchall():
+        value, hits = _json(config, {}), 0
+        fields = ("problems_to", "responsible") if kind == "avito" else ("owner_login",)
+        for field in fields:
+            if value.get(field) == old:
+                hits += 1
+                if new:
+                    value[field] = new
+        chats = value.get("chats") if kind == TELEGRAM_KIND else None
+        if isinstance(chats, dict) and old in chats:
+            hits += 1
+            if new:
+                value["chats"] = {(new if k == old else k): v for k, v in chats.items()}
+        found += hits
+        if hits and new:
+            conn.execute("UPDATE connection SET config = ? WHERE kind = ? AND owner_id = ?", (json.dumps(value, ensure_ascii=False), kind, owner_id))
+    return found
+
+
+def login_taken(conn, login: str) -> bool:
+    """A login is free for a rename when nothing names it: no user, and no leftover of a removed user (an order answered for, a read mark,
+    a setting), which a rename would hand to another person."""
+    login = normalize(login)
+    for table, column in LOGIN_COLUMNS:
+        if conn.execute("SELECT 1 FROM %s WHERE %s = ? LIMIT 1" % (table, column), (login,)).fetchone():
+            return True
+    if conn.execute("SELECT 1 FROM order_event WHERE kind = 'field' AND text = ? LIMIT 1", (RESPONSIBLE_MARK + login,)).fetchone():
+        return True
+    return _json_places(conn, login, None) > 0
+
+
+def rename_login(conn, old: str, new: str) -> None:
+    """Inside the caller's transaction: `old` becomes `new` in every place it is a key (LOGIN_COLUMNS, the JSON settings, the record
+    «Ответственный: <login>» office_taken matches with the order's responsible)."""
+    for table, column in LOGIN_COLUMNS:
+        conn.execute("UPDATE %s SET %s = ? WHERE %s = ?" % (table, column, column), (new, old))
+    conn.execute("UPDATE order_event SET text = ? WHERE kind = 'field' AND text = ?", (RESPONSIBLE_MARK + new, RESPONSIBLE_MARK + old))
+    _json_places(conn, old, new)
+
+
+def _end_sessions(conn, old: str, new: str) -> None:
+    """Every session of the old login ends: both counters go above every number either login ever had, so that no session kept from a
+    removed user of the new name comes back, and a user made later under the old name starts above the old sessions too."""
+    epoch = max(store.get_session_epoch(conn, old), store.get_session_epoch(conn, new)) + 1
+    for login in {old, new}:                               # inside the caller's transaction: the reset and the end of the sessions at once
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (store._epoch_key(login), str(epoch)))

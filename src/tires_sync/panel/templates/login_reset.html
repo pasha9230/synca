@@ -1,0 +1,19 @@
+{% extends "shop_base.html" if current_user().role == "client" else "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Сброс входа · Tires Sync{% endblock %}
+{% macro form() %}
+<form method="post" class="card card-body stack">
+<h2>Новый вход в панель</h2>
+{% if error %}<div class="flash flash--err" role="alert"{% if error_field %} data-field-error="{{ error_field }}"{% endif %}>{{ icon("alert") }}<div class="flash-text">{{ error }}</div></div>{% endif %}
+{% if reset %}
+<p class="muted">Логин сейчас: <b>{{ reset.login }}</b>. Ссылка действует до {{ reset.expires|dt_utc }} (Москва) и только один раз. После сохранения все открытые входы этого пользователя закроются.</p>
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Новый логин (пусто — оставить «{{ reset.login }}»)</span><input class="input" name="login" value="{{ login }}" autocomplete="username" placeholder="латиницей, например ivan"></label>
+<label class="field"><span class="label">Новый пароль (не короче 10 знаков)</span><input class="input" type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+<label class="field"><span class="label">Пароль ещё раз</span><input class="input" type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
+<button class="btn btn--primary btn--block">Сохранить вход</button>
+{% else %}<a class="btn btn--secondary" href="/login">Ко входу</a>{% endif %}
+</form>
+{% endmacro %}
+{% block auth %}{{ form() }}{% endblock %}
+{% block content %}{{ form() }}{% endblock %}

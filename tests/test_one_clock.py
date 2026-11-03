@@ -55,7 +55,7 @@ def test_the_avito_statistics_are_stamped_by_the_commands_clock(tmp_path, monkey
     monkeypatch.setattr(cli, "_collect_avito_reports", lambda conn, box: None)
     monkeypatch.setattr(cli, "_now", lambda: "2026-10-21T01:20:00")
 
-    def collect(conn, client, account_id, today, days=7, now_iso=""):
+    def collect(conn, client, account_id, today, days=7, now_iso="", stats=True):
         seen["now_iso"] = now_iso
         return {"ads": 0, "mapped": 0, "days": 0}
     monkeypatch.setattr(cli.ad_stats, "collect", collect)

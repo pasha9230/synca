@@ -282,6 +282,9 @@ _MORE_TEXTS = {
     "user_password": lambda d: ("Пользователь %s сменил свой пароль" if d.get("self") else "Пароль пользователя %s изменён") % _q(d.get("login")),
     "invite_created": lambda d: "Создано приглашение: %s, действует до %s" % (_role(d.get("role")), _q(d.get("expires"))),
     "invite_revoked": lambda d: "Приглашение №%s отозвано" % _q(d.get("id")),
+    "login_reset_created": lambda d: "Сброс входа выдан для %s, действует до %s" % (_q(d.get("login")), _q(d.get("expires"))),
+    "login_reset_revoked": lambda d: "Сброс входа №%s для %s отозван" % (_q(d.get("id")), _q(d.get("login"))),
+    "login_reset_used": lambda d: "Вход сброшен: %s → %s" % (_q(d.get("from")), _q(d.get("to"))),
     "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
     else "Ответственный за заказы клиентов не выбран: по умолчанию",
     "shop_order_cancel": lambda d: "Клиент %s отменил свой заказ №%s из каталога (этап был %s)" % (_q(d.get("login")), d.get("order", "?"), _q(d.get("stage") or "—")),
@@ -296,7 +299,7 @@ _MORE_TEXTS = {
     "as_point_start": lambda d: "Начал работать как точка «%s»" % _q(d.get("name") or d.get("point")),
     "as_point_stop": lambda d: "Закончил работать как точка %s%s" % (
         "«%s»" % d["name"] if d.get("name") else "№%s" % _q(d.get("point")),
-        {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)",
+        {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)", "login_reset": " (сброс входа)",
          "invalid": " (режим больше не действует)"}.get(d.get("why"), "")),
     "message_template_changed": lambda d: _template_text(d),             # «Шаблоны сообщений» (message_texts, 2026-11-02)
     "client_pct_changed": lambda d: _client_pct_text(d),
