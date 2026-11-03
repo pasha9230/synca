@@ -57,7 +57,7 @@ def test_the_board_and_the_list_show_the_cards_and_filters_work(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     assert app.test_client().get("/orders").status_code == 302
     html = client.get("/orders").get_data(as_text=True)
-    assert "Новый заказ" in html and "Переговоры" in html and "Возврат" in html and "Заказов пока нет" in html          # seeds the pipeline
+    assert "Новый заказ" in html and "Переговоры" in html and "На возврат" in html and "Заказов пока нет" in html          # seeds the pipeline
     cid = make_card(client, tok, client_name="Иван", tags="срочно")
     make_card(client, tok, client_name="Ольга")
     html = client.get("/orders").get_data(as_text=True)

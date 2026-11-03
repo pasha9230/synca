@@ -111,7 +111,7 @@ def check_point_move(conn, point_id, order_id, stage: dict) -> None:
         raise OrderError(move_refused(conn))
 
 
-WORK_STAGES = ("at_point", "oth", "return_given", "shipped")   # «Товар на точке», «На ОТХ», «Возврат передан», «Отправлен» (other city)
+WORK_STAGES = ("at_point", "oth", "return_given", "shipped")   # «Товар на точке», «На ОТХ», «На возврат», «Отправлен» (other city)
 
 
 def work_orders(conn) -> set:

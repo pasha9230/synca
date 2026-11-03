@@ -154,7 +154,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ot.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     se = sub.add_parser("sheet-enroll", help="поставить в очередь Google-таблицы открытые заказы, оформленные до её включения (строки только добавляются; запуск вручную)")
     se.add_argument("--db", required=True)
-    se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «Возврат передан»")
+    se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «На возврат»")
     se.add_argument("--dry-run", action="store_true", help="только показать список, ничего не ставить в очередь")
     vc = sub.add_parser("vk-catchup", help="подборщик ВК: прочитать переписку с точками и выполнить их сообщения, о которых ВК не прислал уведомление (не старше суток, каждое один раз); для таймера каждые 10–15 минут")
     vc.add_argument("--db", required=True)

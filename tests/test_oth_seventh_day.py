@@ -1,5 +1,5 @@
 """The owner 2026-11-02: «На ОТХ» is held six days; on the seventh from 12:30 the point is asked on its «Рабочее место» «Заказ выдали или он
-на точке?». «Выдали» closes the order as issued (its client linked again); «На точке» leaves it on «На ОТХ» for the return: the point's tab
+на точке?». «Выдали» closes the order as issued (its client linked again); «На точке» moves it to «На возврат» (2026-11-03): the point's tab
 «На возврат», an alert and a task «Согласовать возврат» for the owner and the partner (Заман: found by the role, never by the login)."""
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ def test_here_is_for_the_return_a_task_and_an_alert_for_the_owner_and_the_partne
                                                   lambda logins, text: told.append((logins, text)))
     assert done and "Возврат согласуют" in answer
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == "oth" and order_oth.to_agree(conn, card) and not order_oth.question_open(conn, card)
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.to_agree(conn, card) and not order_oth.question_open(conn, card)   # 2026-11-03
     assert told == [(["owner", "zaman"], "Заказ №5200001 (точка «Бета») 7 дней на ОТХ, шины на точке: согласуйте возврат с поставщиком — /orders/%d" % cid)]
     made = [tasks.get(conn, r[0]) for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ? ORDER BY id", (cid,))]
     assert [(t["assignee"], t["title"], t["kind"]) for t in made] == [("owner", "Согласовать возврат", "other"), ("zaman", "Согласовать возврат", "other")]
@@ -215,8 +215,9 @@ def test_the_tasks_close_by_themselves_on_the_agreement_or_on_issued(tmp_path):
         assert open_tasks(conn, cid) == 2
     order_oth.agree(conn, orders.get_card(conn, agreed), orders.date.fromisoformat("2026-10-27"), "2026-10-27T10:00:00", "owner")
     assert open_tasks(conn, agreed) == 0
-    conn.execute("UPDATE app_state SET value = 'asked|2026-10-26T12:30:00' WHERE key = ?", (order_oth._ask_key(orders.get_card(conn, issued)),))
-    conn.commit()                                                                       # (asked again: the point corrects itself)
+    orders.move_card(conn, issued, stage(conn, "oth"), "2026-10-27T10:30:00", "owner")      # 2026-11-03: «На точке» moved it to «На возврат»;
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, 'asked|2026-10-27T10:30:00')", (order_oth._ask_key(orders.get_card(conn, issued)),))
+    conn.commit()                                                                       # the office puts it back, the point is asked again
     assert order_oth.answer_issued(conn, orders.get_card(conn, issued), "менеджер Бета", "2026-10-27T11:00:00")[2]
     assert open_tasks(conn, issued) == 0
     assert any(e["text"].startswith("Задача выполнена: Другое: Согласовать возврат — согласовано с поставщиком") for e in orders.list_events(conn, agreed))

@@ -118,7 +118,7 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
         plan = order_oth.return_plan(conn, card["id"])
         if plan is not None and plan["signed_at"]:
             return "уже отмечено", "Заказ №%s уже отмечен: акт МХ-3 подписан, шины отданы." % mgr.label(card), True
-        if code != "oth" or plan is None:
+        if code not in order_oth.RETURNING or plan is None:
             return ("не подходит: возврат не согласован или заказ на этапе «%s»" % card["stage"]["name"],
                     "Заказ №%s: возврат с ОТХ не согласован с поставщиком, отмечать нечего." % mgr.label(card), False)
         try:
@@ -127,8 +127,11 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
             return "не выполнено: %s" % err, "Не получилось: %s" % err, False
         if not done:
             return "не выполнено: заказ уже изменили", "Заказ №%s уже изменили: обновите страницу." % mgr.label(card), False
-        return ("заказ перенесён на «%s»" % orders.stage_name(conn, orders.RETURN_GIVEN), "Заказ №%s: акт МХ-3 подписан, шины отданы. Менеджер заполнит сумму возврата." % mgr.label(card),
-                True)
+        if done == "signed":                                                    # no purchase to count the refund: the manager fills it
+            return ("акт подписан, заказ на «%s»: ждёт суммы возврата" % orders.stage_name(conn, orders.RETURN_GIVEN),
+                    "Заказ №%s: акт МХ-3 подписан, шины отданы. Менеджер заполнит сумму возврата." % mgr.label(card), True)
+        return ("заказ перенесён на «%s»" % orders.stage_name(conn, "return"),
+                "Заказ №%s: акт МХ-3 подписан, шины отданы, возврат закрыт." % mgr.label(card), True)
     if action == "to_oth":                                                      # «Шины остаются на точке — на ОТХ?» after «Клиент не пришёл»
         if code != "at_point" or not no_show_now(conn, card):
             return _not_here(card, "на ОТХ") if code != "at_point" else (
@@ -285,11 +288,11 @@ ALERTS_READ = 500                                  # the notes read to find the 
 
 def _in_tab(row: dict, tab: str) -> bool:
     """«Едут»: «Заказ оформлен» and «Перемещение на точку» (the owner 2026-10-29); «На точке»: «Товар на точке», waiting for the client; «На ОТХ»:
-    our tyres at the point (the owner 2026-10-30); «На возврат»: an «На ОТХ» whose return is agreed and the act МХ-3 not signed yet, or one
-    the point said «На точке» of on its seventh day, waiting for the agreement (the owner 2026-11-02)."""
+    our tyres at the point (the owner 2026-10-30); «На возврат»: the orders of the stage «На возврат» (the owner 2026-11-03: «Согласуем», or
+    agreed and the act МХ-3 not signed yet), and one of «На ОТХ» agreed before the stage came."""
     code = row["card"]["stage"]["code"]
-    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": row["oth"] and not row.get("returning") and not row.get("to_agree"),
-            "return": bool(row.get("returning") or row.get("to_agree"))}[tab]
+    returning = code == orders.RETURN_GIVEN or bool(row.get("returning"))
+    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": code == "oth" and not returning, "return": returning}[tab]
 
 
 def _tab_of(row: dict) -> str:
@@ -318,10 +321,11 @@ def _back(point_id) -> str:
 
 
 def _oth_cards(conn, point_id) -> list:
-    """The point's orders on «На ОТХ»: the tyres the client refused lie at the point (tab «На возврат»). Not its own sales («Заказы»)."""
+    """The point's orders on «На ОТХ» and «На возврат»: the tyres the client refused lie at the point (tabs «На ОТХ», «На возврат»). Not its
+    own sales («Заказы»)."""
     ids = [r[0] for r in conn.execute(
-        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'oth' ORDER BY c.entered_at, c.id",
-        (point_id,))]
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (?, ?) ORDER BY c.entered_at, c.id",
+        (point_id,) + order_oth.RETURNING)]
     mine = points.own_sales(conn, point_id) if ids else set()
     return [orders.get_card(conn, card_id) for card_id in ids if card_id not in mine]
 
@@ -431,16 +435,17 @@ def register(app) -> None:
             until = (card["reserve_until"] or "") if card["stage"]["code"] == "at_point" else ""     # «На ОТХ» has no term (2026-10-30)
             delivery = card["delivery_date"] or ""
             code = card["stage"]["code"]
-            cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": code == "at_point", "oth": code == "oth",
+            cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": code == "at_point", "oth": code in order_oth.RETURNING,
                           "tokens": {action: secrets.token_hex(12) for action in ACTIONS},          # every button is its own press
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
-                          "oth_asked": code == "oth" and order_oth.question_open(conn, card), "to_agree": code == "oth" and order_oth.to_agree(conn, card),
+                          "oth_asked": code == "oth" and order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
+                          "ret_label": order_oth.label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "oth_question": order_oth.question(conn, card, now) if code == "oth" else "",
                           "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
                           "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"])),     # «Шины с ОТХ, заказ №…»
-                          "intercity": order_intercity.on(card) and code != "oth",              # «В другой город» (2026-11-02)
+                          "intercity": order_intercity.on(card) and code not in order_oth.RETURNING,     # «В другой город» (2026-11-02)
                           "labels": order_intercity.labels(conn, card["id"]) if order_intercity.on(card) else []})
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:

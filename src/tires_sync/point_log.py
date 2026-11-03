@@ -80,7 +80,7 @@ def history(conn, point_id: Optional[int] = None, limit: int = SHOWN) -> List[di
 
 UNDO_KEY = "point_undo:%d"
 UNDOABLE = {"arrived": "«Приехал»", "issued": "«Выдал»", "reserve_issued": "«Выдан»", "oth_issued": "«Выдали»", "to_oth": "«На ОТХ»",
-            "shipped": "«Передал курьеру ТК»"}
+            "shipped": "«Передал курьеру ТК»", "act_signed": "«Подписал акт и отдал»"}
 UNDO_HINT = "Сообщение, которое уже ушло клиенту, не отзывается."
 UNDO_SHOWN = 10
 
@@ -95,6 +95,7 @@ def remember(conn, before: dict, action: str, point_id, author: str, now: str) -
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (UNDO_KEY % before["id"], json.dumps({
             "action": action, "point": int(point_id), "at": now, "author": author, "from_stage": before["stage_id"],
             "from_entered": before["entered_at"] or "", "from_until": before["reserve_until"] or "", "from_reason": before["cancel_reason"] or "",
+            "from_return": [before["return_kind"] or "", before["return_reason"] or "", float(before["return_amount"] or 0)],   # act_signed fills them
             "to_stage": after["stage_id"], "to_entered": after["entered_at"] or "",
             "last_event": conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event WHERE order_id = ?", (before["id"],)).fetchone()[0]},
             ensure_ascii=False)))
@@ -188,6 +189,10 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
         from . import order_reserve                                   # a reminder of before the undo moves nothing to «На ОТХ» (the lead 2026-11-02)
         orders.add_event(conn, card["id"], now, "система", "reserve", "Напоминание о сроке резерва до отмены отметки не считается: на «На ОТХ» "
                          "заказ сам не переведётся %s" % (order_reserve.OTH_MARK % rec["from_entered"]), level="grey")
+    if rec["action"] == "act_signed":                                     # the return is agreed again, the act not signed, the refund as it was
+        kind, reason, amount = (rec.get("from_return") or ["", "", 0.0])[:3]
+        conn.execute("UPDATE order_card SET return_kind = ?, return_reason = ?, return_amount = ? WHERE id = ?", (kind, reason, amount, card["id"]))
+        conn.execute("UPDATE oth_return_plan SET signed_at = NULL, signed_by = '' WHERE order_id = ?", (card["id"],))
     if rec["action"] == "oth_issued":                                     # the question of the seventh day is open again
         conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
     label = card.get("webmim_number") or str(card["id"])

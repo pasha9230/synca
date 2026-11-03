@@ -194,19 +194,17 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     r = post(mine, "/my-point/%d/act_signed" % oth, "tok", token=token)
     assert r.status_code == 302
     got = orders.get_card(conn, oth)
-    assert got["stage"]["code"] == orders.RETURN_GIVEN and got["stage"]["name"] == "Возврат передан" and got["stage"]["kind"] == "open"
+    assert got["stage"]["code"] == "return" and got["stage"]["kind"] == "closed"        # 2026-11-03: closed with the purchase as the refund
+    assert (got["return_kind"], got["return_amount"]) == ("supplier", 16000.0)
     assert order_oth.return_plan(conn, oth)["signed_at"]
-    assert any(e["level"] == "yellow" and e["text"] == order_oth.SIGNED_ASK % orders.stage_name(conn, "return") for e in orders.list_events(conn, oth))
+    assert not any(e["text"] == order_oth.SIGNED_ASK % orders.stage_name(conn, "return") for e in orders.list_events(conn, oth))
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (oth,)).fetchone() is None     # the refused client stays unlinked
     assert 'data-return="%d"' % oth not in _text(mine.get("/my-point"))
     assert "Акт МХ-3 подписан" in _text(client.get("/orders/%d" % oth))
     again = re.search(r'name="token" value="([0-9a-f]+)"', _all(mine)).group(1)
     post(mine, "/my-point/%d/act_signed" % oth, "tok", token=again)                        # a press of an old page: nothing more
-    assert sum(e["text"] == order_oth.SIGNED_ASK % orders.stage_name(conn, "return") for e in orders.list_events(conn, oth)) == 1
+    assert sum(order_oth.SIGNED_LINE % ("Бета", order_oth.ACT) == e["text"] for e in orders.list_events(conn, oth)) == 1
     assert [r["kind"] for r in point_log.history(conn, pid)][0] == "act_signed"
-    return_stage = _stage(conn, "return")                                                  # the manager closes it with the amount, as before
-    orders.move_card(conn, oth, return_stage, NOW, "o", changes={"return_kind": "supplier", "return_reason": "ОТХ", "return_amount": "20000"})
-    assert orders.get_card(conn, oth)["stage"]["code"] == "return"
 
 
 def test_the_return_button_is_gone_from_an_order_at_the_point(tmp_path):
@@ -295,15 +293,16 @@ def test_a_new_stay_on_oth_needs_a_new_agreement_and_the_window_never_skips_the_
     oth = _on_oth(conn, pid)
     order_oth.agree(conn, orders.get_card(conn, oth), date(2026, 10, 28), NOW, "owner")
     window = _text(client.get("/orders/%d" % oth))
-    assert "Перевести в «Возврат передан»" not in window                                    # the act is the point's press, not a click
-    assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "gamma")
-    assert "Перевести в «Вернули поставщику»" in _text(client.get("/orders/%d" % oth))                 # then the amount closes it
+    assert orders.get_card(conn, oth)["stage"]["code"] == orders.RETURN_GIVEN               # 2026-11-03: agreed, «На возврат»
+    assert "Перевести в «Вернули поставщику»" in window                                     # the manager may still close it by hand
+    assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "gamma") == "return"
+    assert orders.get_card(conn, oth)["stage"]["code"] == "return"
     assert orders.move_card(conn, oth, _stage(conn, "oth"), NOW, "o")                       # back on «На ОТХ» (a mistake): a new stay
     assert order_oth.return_plan(conn, oth) is None and order_oth.to_return(conn, pid) == []
     stranger = manager(app, conn, _other(conn), login_="delta")
     order_oth.agree(conn, orders.get_card(conn, oth), date(2026, 10, 28), NOW, "owner")
     assert post(stranger, "/my-point/%d/act_signed" % oth, "tok", token="a" * 24).status_code in (403, 404)
-    assert orders.get_card(conn, oth)["stage"]["code"] == "oth"
+    assert orders.get_card(conn, oth)["stage"]["code"] == orders.RETURN_GIVEN                # agreed from «На ОТХ»: «На возврат», nothing signed
 
 
 def test_a_take_between_the_check_and_the_cancel_wins(tmp_path, monkeypatch):

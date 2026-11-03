@@ -1,5 +1,5 @@
 """«На ОТХ» in the feed (the owner 2026-10-29): the tires of an order refused by its client lie at the point, they are ours. While the order
-stands in «На ОТХ», the ad of that position, in every account of ours, starts with «Шины в наличии на <точка>», shows the pieces on OTH plus
+stands in «На ОТХ» or «На возврат» (the owner 2026-11-03: until the return is agreed), the ad of that position, in every account of ours, starts with «Шины в наличии на <точка>», shows the pieces on OTH plus
 the supplier's stock, is not taken off for the supplier's stock and is published again if it is not on Avito (decide, sync.plan_decisions);
 an excluded brand or a season switched off do not stop it (candidates.evaluate). When the order leaves the stage, or the whole position is
 marked «возвращено поставщику», or its return is agreed with the supplier, the next cycle applies the usual rules. Orders at a test point

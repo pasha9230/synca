@@ -47,7 +47,7 @@ def test_a_new_pipeline_has_the_new_names_and_no_column_of_cancel_and_return(tmp
     conn = store.connect(str(tmp_path / "x.db"))
     orders.ensure_pipeline(conn, NOW)
     got = names(conn)
-    assert {code: got[code] for code in NEW} == NEW and got["return_given"] == "Возврат передан" and got["done"] == "Выполнено"
+    assert {code: got[code] for code in NEW} == NEW and got["return_given"] == "На возврат" and got["done"] == "Выполнено"
     assert {s["code"] for s in orders.list_stages(conn) if not s["on_board"]} == {"cancel", "return"}
 
 

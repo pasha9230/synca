@@ -155,7 +155,7 @@ def enroll(conn, card_id: int, now: str) -> None:
         conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (int(card_id), now))
 
 
-OPEN_STAGES = ("placed", "moving", "at_point", "oth", "return_given")      # «Заказ оформлен» … «На ОТХ», «Возврат передан»: not closed
+OPEN_STAGES = ("placed", "moving", "at_point", "oth", "return_given")      # «Заказ оформлен» … «На ОТХ», «На возврат»: not closed
 
 
 def open_unlisted(conn) -> List[dict]:
@@ -218,7 +218,7 @@ def realization(card: dict) -> str:
     code = card["stage"].get("code")
     if code in ("done", "shipped"):                  # «Отправлен»: an order to another city handed to the courier (the owner 2026-11-02)
         return FROM_STOCK if card["deal_kind"] == "stock" else REALIZED
-    return REFUSED if code == "oth" else ""          # the owner 2026-11-02: «О» is «На ОТХ» only; «Отмена», «Возврат», «Возврат передан»: empty
+    return REFUSED if code == "oth" else ""          # the owner 2026-11-02: «О» is «На ОТХ» only; «Отмена», «Вернули поставщику», «На возврат»: empty
 
 
 def _invoice_day(conn, card: dict) -> str:

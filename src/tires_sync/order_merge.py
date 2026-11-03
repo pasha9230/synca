@@ -212,6 +212,8 @@ def _why_not_source(conn, card: dict) -> Optional[str]:
         return "Заказ №%s уже объединён из других: сначала разъедините его." % label
     if card["stage"]["code"] == orders.SHIPPED or (card["stage"]["code"] == "done" and order_intercity.was_shipped(conn, card)):
         return "Заказ №%s уже отправлен в другой город: объединить его нельзя." % label         # the owner 2026-11-02
+    if card["stage"]["code"] == orders.RETURN_GIVEN:                     # the tyres go back to the supplier (the owner 2026-11-03)
+        return "Заказ №%s на этапе «%s»: объединить его нельзя." % (label, card["stage"]["name"])
     if _ref(card):
         return None
     state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card["id"],)).fetchone()

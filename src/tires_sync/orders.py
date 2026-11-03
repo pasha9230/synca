@@ -30,7 +30,7 @@ KIND_NAMES = {"open": "обычный", "won": "успешный", "lost": "от
 DEFAULT_STAGES = (
     ("new", "Новый заказ", "#7F56D9", "open"), ("talk", "Переговоры", "#2E90FA", "open"), ("wait", "Ожидает наличие", "#0BA5EC", "open"),
     ("placed", "Заказ оформлен", "#F79009", "open"), ("moving", "Едет на точку", "#EF6820", "open"),
-    ("at_point", "На точке, ждём клиента", "#17B26A", "open"), ("shipped", "Отправлен в ТК", "#0E9384", "won"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "Возврат передан", "#DC6803", "open"),
+    ("at_point", "На точке, ждём клиента", "#17B26A", "open"), ("shipped", "Отправлен в ТК", "#0E9384", "won"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "На возврат", "#DC6803", "open"),
     ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена", "#D92D20", "lost"), ("return", "Вернули поставщику", "#B54708", "closed"))
 # the owner 2026-11-03: the names of the stages before it (code: old default). A stage still called so is renamed once (rename_default_stages)
 OLD_NAMES_2026_11_03 = {"moving": "Перемещение на точку", "at_point": "Товар на точке", "shipped": "Отправлен", "cancel": "Отмена / невыкуп",
@@ -251,9 +251,9 @@ RETURN_GIVEN = "return_given"
 
 
 def _ensure_return_given_stage(conn) -> None:
-    """A pipeline made before «Возврат передан» existed (the owner 2026-10-29: the point signed the act МХ-3 and gave the tyres of «На ОТХ»
-    back to the supplier) gets it once, right after «На ОТХ» (one statement, like «Ожидает наличие»). An open stage: the money of the return
-    is not back yet; the manager closes the order in «Возврат» with the amount."""
+    """A pipeline made before «На возврат» existed (the owner 2026-10-29, «Возврат передан» then; 2026-11-03: the tyres of «На ОТХ» the
+    point keeps for the return, order_oth) gets it once, right after «На ОТХ» (one statement, like «Ожидает наличие»). An open stage: the act
+    МХ-3 closes the order in «Вернули поставщику»."""
     if conn.execute("SELECT 1 FROM order_stage WHERE code = ?", (RETURN_GIVEN,)).fetchone():
         return
     oth = conn.execute("SELECT position FROM order_stage WHERE code = 'oth'").fetchone()
@@ -707,7 +707,7 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
         conn.rollback()
         raise
     if link_client is None:
-        link_client = (conn.execute("SELECT code FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone() or [""])[0] != "oth"
+        link_client = (conn.execute("SELECT code FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone() or [""])[0] not in ("oth", RETURN_GIVEN)
     if "client_phone" in changed and link_client:
         _attach_client(conn, card_id, now, author)
     if commit:
@@ -1030,7 +1030,7 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     card = get_card(conn, card_id)                                                                               # the move is allowed
     phoned = "client_phone" in changed
     if card["stage_id"] == stage["id"]:
-        if phoned and stage["code"] != "oth":
+        if phoned and stage["code"] not in ("oth", RETURN_GIVEN):
             _attach_client(conn, card_id, now, author)
         if commit:
             conn.commit()                                                       # no move, but the fields that came are kept
@@ -1057,7 +1057,7 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
                                    "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (card_id, order_alerts.EVERYBODY)).fetchall():
         order_alerts.resolve(conn, refused, now, author)                       # the card moved: its refused moves are no longer a cause to act
     if stage["code"] == "at_point":
-        if card["stage"].get("code") == "oth":
+        if card["stage"].get("code") in ("oth", RETURN_GIVEN):
             card = dict(card, reserve_until="")                                 # back from «На ОТХ»: a date of an old stay is not a reservation
         _start_reserve(conn, card, now, author)
     elif stage["code"] == "oth":
@@ -1194,9 +1194,10 @@ def client_words(event: dict) -> bool:
     return event.get("kind") == "chat" and str(event.get("text") or "").startswith(("Клиент написал", "Клиент звонил"))
 
 
-def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", with_sums: bool = True) -> dict:
+def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", with_sums: bool = True, returning: str = "") -> dict:
     """The board: the cards by stage with their sums of sale, the columns' sums and «Сумма в работе»; `with_sums=False` (the manager of a point,
-    the owner 2026-10-26): every sum is None — not counted, not given."""
+    the owner 2026-10-26): every sum is None — not counted, not given. A card of «На возврат» has its label (order_oth.label_of);
+    `returning` (order_oth.FILTERS: «agree», «agreed»; the owner 2026-11-03) keeps only the cards of «На возврат» in that state."""
     stages = list_stages(conn)
     names = {p["id"]: p["name"] for p in points_store.list_points(conn)}
     sums: Dict[int, float] = {}
@@ -1212,8 +1213,9 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     summary = {"open": 0, "overdue": 0, "new_today": 0, "sum_open": 0.0}
     rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number "
                         "FROM order_card ORDER BY id DESC").fetchall()
-    from . import oth_sale
+    from . import oth_sale, order_oth
     stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке» (open stages only)
+    plans = order_oth.plans(conn)                                               # the labels of «На возврат» (2026-11-03)
     intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
@@ -1226,13 +1228,17 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         if not board_matches(wanted, cid, name, phone, first.get(cid, ""), webmim or "", articles=articles.get(cid, ())):
             continue
         stage = columns[sid]["stage"]
+        state = order_oth.state_of(plans.get(cid)) if stage["code"] == RETURN_GIVEN else ""
+        if returning and (state or "-") != returning and not (returning == order_oth.AGREED and state == order_oth.SIGNED):
+            continue
         seconds = _seconds_on_stage(entered, now)
         overdue = bool(stage["limit_hours"]) and stage["kind"] == "open" and seconds > stage["limit_hours"] * 3600
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
-                                      "tags": tag_names, "intercity": cid in intercity})
+                                      "tags": tag_names, "intercity": cid in intercity,
+                                      "returning": order_oth.label_of(plans.get(cid)) if state else ""})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":

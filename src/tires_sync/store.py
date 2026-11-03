@@ -678,6 +678,8 @@ def _migrate(conn) -> None:
     from . import orders                                              # the owner 2026-11-03: the new names of the stages, once
     orders.rename_default_stages(conn, moscow_iso())
     orders.hide_default_off_board(conn, moscow_iso())
+    from . import order_oth                                           # the owner 2026-11-03: «На возврат», the orders of the old flow, once
+    order_oth.migrate(conn, moscow_iso())
 
 
 BUSY_SECONDS = 15.0          # how long a connection waits for another one's write before «database is locked»

@@ -534,8 +534,9 @@ def register(app) -> None:
         orders.ensure_pipeline(conn, local_iso())
         view = "list" if request.args.get("v") == "list" else "board"
         point, tag, query = own_point() or _int(request.args.get("p")), request.args.get("t", "").strip()[:30], request.args.get("q", "").strip()[:80]
+        returning = request.args.get("r", "") if request.args.get("r", "") in order_oth.FILTERS else ""     # «На возврат» (2026-11-03)
         data = orders.board(conn, local_now(), point_id=point, tag=tag, query=query,          # a manager of a point: only the point (common.own_point),
-                            with_sums=own_point() is None)                                       # and no sums (the owner 2026-10-26)
+                            with_sums=own_point() is None, returning=returning)                  # and no sums (the owner 2026-10-26)
         only = _int(request.args.get("s"))                     # one stage (the stages of «Рабочее место» lead here, the owner 2026-10-29)
         if only is not None and not own_point() and any(col["stage"]["id"] == only for col in data["columns"]):    # a point: its four
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["id"] == only])
@@ -553,13 +554,13 @@ def register(app) -> None:
                                    clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
         total = sum(col["count"] for col in data["columns"])
         if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03),
-            found = bool(query or tag)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
+            found = bool(query or tag or returning)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only
                                        or (found and col["count"])])
         return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                stages=[] if own_point() else orders.list_stages(conn),
-                               dots=_dots(conn), rows=rows, total_cards=total, only_stage=only,
+                               dots=_dots(conn), rows=rows, total_cards=total, only_stage=only, returning=returning, returning_filters=order_oth.FILTERS,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
 
     def point_board(conn, data: dict, point_id: int) -> dict:
@@ -892,13 +893,14 @@ def register(app) -> None:
     @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
     @login_required
     def order_oth_agreed(card_id):
-        """«Согласовано с поставщиком» for an order on «На ОТХ» (the owner and the partner): the date of the return, the point sees it."""
+        """«Согласовано с поставщиком» for an order on «На возврат» or «На ОТХ» (the owner and the partner): the date of the return, the point
+        sees it; the tyres leave the ad."""
         conn = get_conn()
         card = card_or_404(conn, card_id)
         try:
             day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author())
             flash("Возврат согласован: точка передаст шины поставщику %s.%s и подпишет акт МХ-3." % (day[8:10], day[5:7]), "ok")
-        except order_oth.OthError as err:
+        except (order_oth.OthError, orders.OrderError) as err:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
@@ -997,7 +999,7 @@ def register(app) -> None:
         if order_oth.unagree(conn, card, now, author()):
             told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, message_texts.text(conn, message_texts.UNAGREED, order_label=manager.label(card)), now,
                                            vk_http=app.config.get("VK_HTTP") or urllib_transport)
-            flash("Согласование отменено: шины снова на ОТХ, точка возврат не видит. Точке: %s." % told, "ok")
+            flash("Согласование отменено: метка «%s», шины снова в продаже, точка возврат не видит. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
         else:
             flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
         return redirect("/orders/%d" % card_id)
