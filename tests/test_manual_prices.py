@@ -326,6 +326,8 @@ def test_a_gone_position_is_ticked_only_under_the_own_filter_and_never_gets_a_ma
     for mode in ("on", "off"):
         post(client, "/catalog/stage", tok, bulk=mode, g=["100", GONE])
         assert staging.summary(conn)["changes"].get("overrides") == {"1:100": mode}
+    r = client.post("/catalog/stage", data=dict(csrf=tok, bulk="on", g=[GONE]), headers={"X-Requested-With": "fetch"})
+    assert r.get_json()["ok"] is False and "ничего не записано" in r.get_json()["message"]
 
 
 def test_a_position_shown_for_viewing_only_gets_no_own_price_even_if_the_archive_knows_it(tmp_path, monkeypatch):

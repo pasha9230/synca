@@ -522,8 +522,9 @@ def register(app) -> None:
                     offers = context(app)[2].offers                       # manual rule: it would outlive its return (the owner 2026-11-03)
                     skipped = [g for g in dict.fromkeys(ids) if g not in offers and catalog_archive.gone_offer(conn, g) is not None]
                     ids = [g for g in ids if g not in skipped]
-                if ids or not skipped:
-                    staging.set_overrides(conn, ids, None if mode == "clear" else mode, now_iso())
+                if skipped and not ids:
+                    raise ValueError("Выбраны только позиции, которых нет у поставщика: ручное правило им не ставится, ничего не записано.")
+                staging.set_overrides(conn, ids, None if mode == "clear" else mode, now_iso())
                 message = "%s позиций: %d." % ({"on": "Добавлено вручную", "off": "Снято", "clear": "Возвращено"}[mode], len(set(ids)))
                 if skipped:
                     message += " Пропущено, нет у поставщика: %d." % len(skipped)
