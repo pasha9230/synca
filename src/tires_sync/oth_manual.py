@@ -128,3 +128,25 @@ def gone_price(conn, goods_id: str, settings) -> Optional[int]:
         return own_price(0, own)
     info = catalog_archive.item_info(conn, goods_id) or {}
     return own_price(float(info.get("last_price") or 0), own)
+
+
+NO_PRICE_KEY = "oth_manual_no_price:%d"         # app_state: the codes of an account last told «нет своей цены» (told once, again after a change)
+
+
+def note_no_price(conn, account_id: int, found: Dict[str, int], now: str) -> None:
+    """The cycle of an account did not count «Свой остаток» of gone positions for want of an own price: a line of the log and the journal
+    per position newly so (the owner sees why the ad did not come back); a position that got its price or lost its rows is forgotten."""
+    from . import store
+    key = NO_PRICE_KEY % int(account_id)
+    try:
+        before = set(json.loads(store.get_state(conn, key) or "[]"))
+    except (TypeError, ValueError):
+        before = set()
+    for code in sorted(set(found) - before):
+        for row in rows(conn, code):
+            _log(conn, code, row["point_id"], row["qty"], row["qty"], now, "cycle", "аккаунт %d: нет своей цены — на Авито не уходит" % int(account_id),
+                 "no_price:%d" % int(account_id))
+        _audit(conn, now, "cycle", "oth_manual_no_price", {"account": int(account_id), "goods_id": code, "qty": int(found[code])})
+    if set(found) != before:
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(sorted(found))))
+    conn.commit()

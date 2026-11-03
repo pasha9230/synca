@@ -103,6 +103,12 @@ def test_a_gone_position_with_manual_stock_stays_under_its_id_at_the_own_price_o
     assert "7000 руб" in text
     assert "102_a2" not in ads_of(public(tmp_path, 2))                   # no own price in the second account: not on Avito
     assert ("102", "removed", "absent_from_supplier") in events(tmp_path, 2) and events(tmp_path, 1) == [("101", "removed", "low_stock")]
+    assert run(tmp_path, AFTER) == 0                                     # told once: the journal and the log say which account and why
+    conn = connect(tmp_path)
+    told = [__import__("json").loads(r[0]) for r in conn.execute("SELECT detail FROM audit WHERE action = 'oth_manual_no_price'")]
+    assert told == [{"account": 2, "goods_id": "102", "qty": 3}]
+    assert [l["why"] for l in oth_manual.log_of(conn, "102") if l["why"].startswith("no_price")] == ["no_price:2"]
+    conn.close()
     manual(tmp_path, "102", 0)                                           # removed: the usual rules
     assert run(tmp_path, AFTER) == 0
     assert "102" not in ads_of(public(tmp_path, 1)) and ("102", "removed", "absent_from_supplier") in events(tmp_path, 1)

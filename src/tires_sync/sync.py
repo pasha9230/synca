@@ -169,7 +169,8 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     from . import oth_stock
     on_oth = {code: n for code, n in oth_stock.pieces(conn).items() if code not in left_out}   # a type left out: the owner's setting takes it off
     orders_oth = oth_stock.pieces(conn, manual=False)
-    gone_offers, gone_prices, no_manual = _manual_gone(conn, parsed, on_oth, orders_oth, settings, tochki if trial is None else None,
+    manual_total = dict(on_oth)
+    gone_offers, gone_prices, no_manual, no_price = _manual_gone(conn, parsed, on_oth, orders_oth, settings, tochki if trial is None else None,
                                                        left_out_types)
     for code in no_manual:                                                # «Свой остаток» of a gone position without an own price: not counted here
         if orders_oth.get(code):
@@ -184,6 +185,7 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     ev = evaluate(parsed.offers, parsed.issues, settings, ref, store.load_confirmed_mappings(conn),
                   store.load_brand_map(conn), oth=frozenset(on_oth))
     ev.oth_offers, ev.oth_price = gone_offers, gone_prices
+    ev.oth_no_price = {code: on_oth_all - orders_oth.get(code, 0) for code, on_oth_all in manual_total.items() if code in no_price}
     for gid, stock in getattr(parsed, "stocks", {}).items():                # a broken row or a stale supplier: a known fall below the threshold takes it off
         ev.stocks.setdefault(gid, stock)
     for gid in published:
@@ -294,12 +296,12 @@ def _manual_gone(conn, parsed, on_oth: Dict[str, int], orders_oth: Dict[str, int
                  left_out_types=frozenset()):
     """The positions the supplier has no more whose «Свой остаток (ОТХ)» (oth_manual, the owner 2026-11-03) may put them on Avito in this
     account: ({code: the archive's last offer, stock 0} built afresh, {code: own price} for a saved ad held or brought back,
-    {codes whose manual pieces do not count here}). Only with an own price of the account (oth_manual.gone_price): without it the manual
+    {codes whose manual pieces do not count here}, {those of them for want of an own price}). Only with an own price of the account (oth_manual.gone_price): without it the manual
     pieces are not counted. A position still sent with a broken row, of a supplier whose file failed, or of 4tochki out of its trial
     (`tochki_out`) is not gone. A tire type the owner left out of the account stays out."""
     from . import catalog_archive, oth_manual
     from .cycle import feed_tire_type
-    offers, prices, drop = {}, {}, set()
+    offers, prices, drop, no_price = {}, {}, set(), set()
     issues, unavailable = getattr(parsed, "issues", {}) or {}, getattr(parsed, "unavailable", ()) or ()
     for code, total in sorted(on_oth.items()):
         if total <= orders_oth.get(code, 0) or code in parsed.offers or code in issues or supplier_of_id(code) in unavailable:
@@ -311,11 +313,13 @@ def _manual_gone(conn, parsed, on_oth: Dict[str, int], orders_oth: Dict[str, int
         offer = catalog_archive.last_offer(conn, code)
         if price is None or (offer is not None and feed_tire_type(offer) in left_out_types):
             drop.add(code)
+            if price is None:
+                no_price.add(code)
         else:
             prices[code] = price                                          # also for a fresh one held on its saved ad (an aged one)
             if offer is not None:
                 offers[code] = offer
-    return offers, prices, drop
+    return offers, prices, drop, no_price
 
 
 def _off_by_the_owner(code: str, text: Optional[str], settings: Settings, left_out_types, aged_too: bool) -> bool:
@@ -857,6 +861,8 @@ def run_cycle(
         live = {d.goods_id for d in ds.decisions if d.action.value in ("publish", "update", "keep", "hold")}
         price_guard.record(conn, parsed.offers, store.moscow_iso(), ev, live)
         conn.commit()
+        from . import oth_manual
+        oth_manual.note_no_price(conn, acct, ev.oth_no_price, store.moscow_iso())
     live = live_titles_of(out_dir)
     titles = dict(mirror_feed.bound_titles(conn, acct), **live)
     live_unread = not live and out_dir is not None and (Path(out_dir).parent / "avito_feed.xml").exists()   # a broken file: do not forget renames
