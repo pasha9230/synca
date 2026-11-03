@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from flask import abort, flash, redirect, render_template, request
 
-from .. import catalog_archive, connections, oth_manual, oth_stock, order_oth, store
+from .. import connections, oth_manual, oth_stock, order_oth, store
 from ..settings_store import active_settings
 from .common import author, can_post, get_conn, has_right, login_required, now_iso
 
@@ -25,22 +25,51 @@ def manual_block(goods_id: str) -> dict:
     in_unload = goods_id in (getattr(parsed, "offers", {}) or {})
     status = []
     if rows and not in_unload:
-        general = active_settings(conn)
-        offer = catalog_archive.last_offer(conn, goods_id)
         for account in connections.list_feed_accounts(conn):
-            eff = connections.effective_settings(conn, account["id"], general)
-            price = oth_manual.gone_price(conn, goods_id, eff)
-            saved = store.get_snapshot(conn, goods_id, account["id"]) or (store.retired_ad_of(conn, account["id"], goods_id) or (None, None))[1]
-            if price is None:
-                text, ok = "нужна своя цена: без неё позиция, которой нет у поставщика, на Авито не уходит", False
-            elif offer is None and not saved:
-                text, ok = "не из чего собрать объявление: позиции нет ни в архиве каталога, ни среди сохранённых объявлений", False
-            else:
-                text, ok = ("уйдёт на Авито по своей цене" + (" %d ₽" % price if has_right("money") else "")
-                            + (" (из архива каталога)" if offer is not None else " (по сохранённому объявлению)")), True
-            status.append({"account": connections.display_name(conn, account["id"]), "text": text, "ok": ok})
+            found = account_status(conn, goods_id, account["id"], parsed, has_right("money"))
+            if found is not None:
+                status.append({"account": connections.display_name(conn, account["id"]), "text": found[1], "ok": found[0]})
     return {"rows": rows, "points": points, "log": oth_manual.log_of(conn, goods_id, 20), "in_unload": in_unload, "status": status,
             "can_edit": can_post("catalog_oth_manual")}
+
+
+def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = True):
+    """(goes to Avito, why) of a position on «Свой остаток» in one feed account, by the cycle's own rules (sync._manual_gone, the Id guard
+    of sync._oth_for_account); None: the cycle does not take it for gone (in the unload, a broken row, its supplier's file failed)."""
+    from .. import mirror_feed, sync, tochki_feed
+    from ..overrides import override_key
+    eff = connections.effective_settings(conn, account_id, active_settings(conn))
+    total, by_orders = oth_stock.pieces(conn).get(goods_id, 0), oth_stock.pieces(conn, manual=False)
+    tochki = tochki_feed.config(conn)["supplier_id"]
+    left_out = frozenset(connections.get_excluded_types(conn, account_id))
+    offers, prices, drop, no_price = sync._manual_gone(conn, parsed, {goods_id: total}, by_orders, eff,
+                                                      tochki if tochki_feed.trial(conn, account_id) is None else None, left_out)
+    if goods_id in no_price:
+        own = (eff.own_prices or {}).get(goods_id)
+        return False, ("своя цена в процентах к закупке, а последней закупки в архиве каталога нет: поставьте готовую цену" if own
+                       else "нужна своя цена: без неё позиция, которой нет у поставщика, на Авито не уходит")
+    if goods_id in drop:
+        return False, "позиция снята настройкой аккаунта (исключённый тип шин или 4 точки вне пробы)"
+    if goods_id not in prices:
+        return None
+    if eff.overrides.get(override_key(goods_id)) == "off":
+        return False, "на позиции стоит ручное «выкл»"
+    offer = offers.get(goods_id)
+    published = goods_id in store.load_published(conn, account_id)
+    before = store.retired_ad_of(conn, account_id, goods_id)
+    if offer is None and not (published or before):
+        return False, "не из чего собрать объявление: позиции нет ни в архиве каталога, ни среди сохранённых объявлений"
+    if offer is not None and not published and before:
+        id_map = dict(mirror_feed.adopted_maps(conn, account_id)[0])
+        if mirror_feed.alias_scheme(conn, account_id) and goods_id not in id_map:
+            id_map[goods_id] = mirror_feed.alias_id(account_id, goods_id)
+        suffix = "" if account_id == connections.PRIMARY_ACCOUNT else "_a%d" % account_id
+        now_id = sync._final_id(goods_id, id_map, suffix, mirror_feed.reissued_own(conn, account_id), account_id)
+        if sync.REISSUE_MARK.sub("", before[0]) != sync.REISSUE_MARK.sub("", now_id):
+            return False, "прежний Id объявления (%s) не совпадает с нынешним: новый Id не выдаём" % before[0]
+    return True, ("уйдёт на Авито по своей цене" + (" %d ₽" % prices[goods_id] if money else "")
+                  + (" (из архива каталога)" if offer is not None else " (по сохранённому объявлению)")
+                  + "; лимит возвратов ОТХ и «одна шина — одно объявление» действуют")
 
 
 def _known(conn, goods_id: str) -> bool:
@@ -65,7 +94,7 @@ def register(app) -> None:
         try:
             point = int(request.form.get("point") or 0)
             qty = 0 if request.form.get("action") == "remove" else oth_manual.pieces_of(request.form.get("qty"))
-            before = oth_manual.set_qty(conn, goods_id, point, qty, now_iso(), author(), request.form.get("note") or "")
+            before = oth_manual.set_qty(conn, goods_id, point, qty, now_iso(), author(), request.form.get("note"))   # no field: the note stays
             flash("Свой остаток: %d → %d шт." % (before, qty) if before != qty else "Свой остаток не изменился.")
         except oth_manual.ManualError as err:
             flash(str(err))

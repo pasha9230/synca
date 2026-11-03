@@ -322,3 +322,68 @@ def test_the_card_of_a_gone_position_says_why_it_does_not_go_to_avito(tmp_path):
         session.update(user="owner", epoch=0, pw=__import__("panel_helpers").shared_mark_of(app))
         block = __import__("tires_sync.panel.routes_catalog_oth", fromlist=["x"]).manual_block("555")
     assert [st["ok"] for st in block["status"]] == [False] and "не из чего собрать объявление" in block["status"][0]["text"]
+
+
+# ---- the review of 2026-11-03 -----------------------------------------------------------------------------------------------------
+
+def test_the_list_says_the_tyres_came_from_the_own_stock(tmp_path):
+    from tires_sync import order_sheet
+    conn = manual_db(tmp_path, qty=2)
+    cid = new_order(conn, qty=2)
+    o = oth_sale.offers(conn, orders.get_card(conn, cid))[line(conn, cid)["id"]][0]
+    oth_sale.take(conn, cid, line(conn, cid)["id"], o["from_item"], LATER, "o")
+    card = orders.get_card(conn, cid)
+    row = order_sheet.card_rows(conn, card, LATER)[order_sheet.key(cid, card["items"][0]["id"])]
+    assert row["Примечание"].startswith("с ОТХ, свой остаток") and "№0" not in row["Примечание"] and row["№ заказа MIM"] == ""
+
+
+def test_a_change_of_the_quantity_keeps_the_note(tmp_path):
+    conn = db(tmp_path)
+    pid = a_point(conn)
+    oth_manual.set_qty(conn, "102", pid, 3, NOW, "owner", "витрина")
+    oth_manual.set_qty(conn, "102", pid, 2, LATER, "owner", None)
+    assert oth_manual.rows(conn, "102")[0]["note"] == "витрина"
+    oth_manual.set_qty(conn, "102", pid, 2, LATER, "owner", "склад")
+    assert oth_manual.rows(conn, "102")[0]["note"] == "склад"
+
+
+def test_the_text_of_two_held_orders_is_as_before():
+    assert oth_sale.holds_text([5, 6]) == "В заказе шины с ОТХ (заказ №5, №6): переведите заказ на «На ОТХ» или верните их («Вернуть на ОТХ» у позиций)."
+    assert oth_sale.holds_text([0]).startswith("В заказе шины с ОТХ (свой остаток)")
+    assert oth_sale.holds_text([0, 5]).startswith("В заказе шины с ОТХ (заказ №5, свой остаток)")
+
+
+def test_the_card_tells_what_the_cycle_does(tmp_path):
+    """The card's status comes from the cycle's own rules (sync._manual_gone and the Id guard): a type left out, a percent with no purchase."""
+    from tires_sync import connections
+    prepared(tmp_path, accounts=("A",), price_overrides={"1:102": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    assert run(tmp_path, AFTER) == 0                                     # 102 gone, its ad retired under «102»
+    manual(tmp_path, "102", 2)
+    conn = connect(tmp_path)
+    from tires_sync.panel.routes_catalog_oth import account_status
+    assert account_status(conn, "102", 1, AFTER_PARSED())[0] is True
+    conn.execute("UPDATE retired_ad SET ad_id = '102_old' WHERE goods_id = '102'")
+    conn.commit()
+    ok, text = account_status(conn, "102", 1, AFTER_PARSED())
+    assert ok is False and "Id" in text
+    conn.execute("UPDATE retired_ad SET ad_id = '102' WHERE goods_id = '102'")
+    conn.commit()
+    from tires_sync import catalog_archive, cycle
+    connections.set_excluded_types(conn, 1, [cycle.feed_tire_type(catalog_archive.last_offer(conn, "102"))], NOW, "owner")
+    ok, text = account_status(conn, "102", 1, AFTER_PARSED())
+    assert ok is False and "тип шин" in text
+    connections.set_excluded_types(conn, 1, [], NOW, "owner")
+    draft = settings_store.create_draft(conn, {"price_overrides": {"1:102": {"pct": 10}}}, NOW)
+    settings_store.confirm_draft(conn, draft, NOW, "owner", strong=True)
+    conn.execute("UPDATE catalog_item SET last_price = 0 WHERE goods_id = '102'")
+    conn.commit()
+    ok, text = account_status(conn, "102", 1, AFTER_PARSED())
+    assert ok is False and "последней закупки" in text
+    assert account_status(conn, "103", 1, AFTER_PARSED()) is None          # in the unload: no status
+    conn.close()
+
+
+def AFTER_PARSED():
+    from tires_sync.webmim import parse_unload
+    return parse_unload(AFTER, "T1")

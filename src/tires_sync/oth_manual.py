@@ -51,8 +51,9 @@ def log_of(conn, goods_id: str, limit: int = 50) -> List[dict]:
         "LEFT JOIN point p ON p.id = l.point_id WHERE l.goods_id = ? ORDER BY l.id DESC LIMIT ?", (goods_id, limit))]
 
 
-def set_qty(conn, goods_id: str, point_id: int, qty: int, now: str, author: str, note: str = "") -> int:
-    """The pieces of the position at the point become `qty` (0: the row goes). A test point is refused. Commits; returns the pieces before."""
+def set_qty(conn, goods_id: str, point_id: int, qty: int, now: str, author: str, note: Optional[str] = "") -> int:
+    """The pieces of the position at the point become `qty` (0: the row goes); `note` None keeps the row's note. A test point is refused.
+    Commits; returns the pieces before."""
     from .oth_stock import _test_points
     goods_id = str(goods_id or "").strip()
     if not goods_id:
@@ -64,10 +65,10 @@ def set_qty(conn, goods_id: str, point_id: int, qty: int, now: str, author: str,
         raise ManualError("Тестовая точка: её остаток не считается.")
     if qty < 0 or qty > MAX_PIECES:
         raise ManualError("Количество: целое число от 0 до %d." % MAX_PIECES)
-    note = " ".join(str(note or "").split())[:MAX_NOTE]
-    row = conn.execute("SELECT qty FROM oth_manual WHERE goods_id = ? AND point_id = ?", (goods_id, point[0])).fetchone()
+    row = conn.execute("SELECT qty, note FROM oth_manual WHERE goods_id = ? AND point_id = ?", (goods_id, point[0])).fetchone()
     before = int(row[0]) if row else 0
-    if before == qty:
+    note = (row[1] if row else "") if note is None else " ".join(str(note).split())[:MAX_NOTE]
+    if before == qty and (row is None or row[1] == note):
         return before
     if qty == 0:
         conn.execute("DELETE FROM oth_manual WHERE goods_id = ? AND point_id = ?", (goods_id, point[0]))

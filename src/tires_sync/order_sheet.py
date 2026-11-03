@@ -332,8 +332,9 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
         row = common
         if item["id"] in from_oth:
             source = conn.execute("SELECT from_order FROM order_item_oth WHERE item_id = ?", (item["id"],)).fetchone()[0]
+            where = "заказ №%d" % source if source else "свой остаток"     # «Свой остаток (ОТХ)» (oth_manual): no old order
             row = dict(common, **{"№ заказа MIM": from_oth[item["id"]], "Примечание": " ".join(
-                ("с ОТХ, заказ №%d. %s" % (source, common["Примечание"] or "")).split()),
+                ("с ОТХ, %s. %s" % (where, common["Примечание"] or "")).split()),
                 "Реализация": FROM_STOCK if common["Реализация"] == REALIZED else common["Реализация"]})
         elif item["id"] in merged and merged[item["id"]]["placed"]:  # a placed source: its WebMIM order, transfer and invoice; else the new order's
             came = merged[item["id"]]
