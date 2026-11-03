@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{# «Рабочее место» in «Новый вид» (lane port-point; the prototype docs/ux/prototype-2026-10-30, role «Точка»: renderMypoint, pointCard,
+   renderPointMobile, pmCard): routes_mypoint.mypoint_page draws it instead of mypoint.html while routes_design.point_new(). The same
+   values, routes, forms, tokens and texts of the presses as mypoint.html; only the look: a computer — the card in one row (number and date |
+   the order | the stage | the buttons), a phone — one line on top, compact cards, the sections at the bottom. The main buttons hide while a
+   question hangs on the card (the owner 2026-11-02: «Выдал» hidden while «Клиент забрал заказ?» is asked); its answers are in the question. #}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}pt-ui p2 p2-own p2-mypoint{% endblock %}
+{% block title %}Рабочее место · Tires Sync{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='point2.css') }}">{% endblock %}
+{% block content %}
+{% set hints = not hint_folded("point") %}
+{% set pin %}{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}{% endset %}
+{% set pq = ("&p=%d"|format(point.id)) if choose and point else "" %}
+{% set short = {"moving": "Едут", "here": "На точке", "oth": "ОТХ", "return": "Возврат"} %}
+{% macro press(c, row, action, label, cls, confirm_title="", confirm="", confirm_ok="") %}<form method="post" action="/my-point/{{ c.id }}/{{ action }}" data-once{% if confirm_title %} data-confirm-title="{{ confirm_title }}" data-confirm="{{ confirm }}" data-confirm-ok="{{ confirm_ok }}"{% endif %}><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens[action] }}">{{ pin }}<button class="btn {{ cls }} mp-btn">{{ label }}</button></form>{% endmacro %}
+{% macro card(row) %}{% set c = row.card %}{% set who = ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' %}
+{% set hold = row.asked or row.oth_asked or oth_ask.get(c.id) %}
+<article class="mp-card p2-card{% if row.here %} mp-card--here{% endif %}{% if row.asked %} mp-card--ask{% endif %}" id="order-{{ c.id }}" data-order="{{ c.id }}"{% if row.asked %} data-question="{{ c.id }}"{% endif %}>
+<div class="p2-main">
+<div class="p2-no"><span class="mp-no" data-no>№ {{ c.webmim_number or "панель %d"|format(c.id) }}</span>{% if row.order_date %}<span class="mp-date" data-order-date>от {{ row.order_date }}</span>{% endif %}</div>
+<div class="p2-tags"><span class="p2-tag {{ 'p2-tag--ok' if row.here else ('p2-tag--grey' if row.oth and not row.to_agree else 'p2-tag--warn') }}">{{ "на точке" if row.here else (("на возврат" if row.to_agree else "на ОТХ") if row.oth else "едет на точку") }}</span>{% if row.intercity %}<span class="p2-tag p2-tag--purple" data-intercity-tag>В другой город</span>{% endif %}</div>
+<div class="p2-info">
+{# the tyres first, then the client (the owner 2026-10-30); «На ОТХ»: the client is gone, the tyres only; the phone is in «Подробнее» #}
+<div class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}<div class="p2-g">{{ i.name }}<span class="p2-q">{{ i.qty }} шт.</span></div>{% else %}<div class="p2-g">шины не указаны</div>{% endfor %}</div>
+{% if not row.oth %}<div class="p2-who mp-name">{{ c.client_name or "Без имени" }}</div>{% endif %}
+{% if row.intercity %}<div class="p2-note" data-intercity="{{ c.id }}">{{ icon("info") }}<span><b>{{ intercity_hint }}</b>{% if c.intercity.city %} · {{ c.intercity.city }}{% endif %}{% if c.intercity.carrier %} · ТК {{ c.intercity.carrier }}{% endif %}{% if c.intercity.track %} · трек {{ c.intercity.track }}{% endif %}{% if not row.labels %} · Этикеток пока нет: их загрузит офис.{% endif %}</span></div>
+{% elif row.oth %}<div class="p2-note" data-oth-card="{{ c.id }}">{{ icon("info") }}<span class="mp-sub">{% if row.to_agree %}Шины на точке, возврат согласуют с поставщиком{% else %}На ОТХ с {{ c.entered_at|day }} · срока продажи нет{% endif %}</span></div>
+{% if hints %}<p class="p2-note mp-now mp-hint" data-point-hint="oth">{{ icon("clock") }}<span>{{ point_hint('oth') }}</span></p>{% endif %}
+{% elif hints %}<p class="p2-note mp-now mp-hint" data-point-hint="{{ 'ask' if row.asked else ('here' if row.here else 'going') }}">{{ icon("clock") }}<span>{{ point_hint('ask' if row.asked else ('here' if row.here else 'going')) }}</span></p>{% endif %}
+</div>
+<div class="p2-acts mp-actions">{% if not row.oth and not hold %}
+{% if not row.here %}{{ press(c, row, "arrived", "Приехал", "btn--primary mp-btn--big") }}{# «Едут»: one button (the owner 2026-10-30) #}
+{% elif row.intercity %}{{ press(c, row, "shipped", "Передал курьеру ТК", "btn--primary mp-btn--big", "Передать заказ № %s курьеру ТК?"|format(row.label), "Шины и этикетки отданы курьеру; клиенту уйдёт сообщение, заказ закроется («Выполнено»).", "Передал") }}{# no «Клиент не пришёл»: no client comes #}
+{% else %}{{ press(c, row, "issued", "Выдал", "btn--primary mp-btn--big", "Выдать заказ № %s?"|format(row.label), who ~ " забирает заказ; он закроется.", "Выдал") }}{{ press(c, row, "no_show", "Клиент не пришёл", "mp-btn--quiet", "Точно клиент не пришёл?", "Заказ № %s останется на точке, владелец свяжется с клиентом."|format(row.label), "Да, не пришёл") }}{% endif %}
+{% endif %}{% if row.intercity %}{% for f in row.labels %}<a class="btn btn--secondary mp-btn" href="/orders/{{ c.id }}/labels/{{ f.id }}" data-label-file>{{ icon("download") }}Скачать этикетки{% if row.labels|length > 1 %} ({{ loop.index }}){% endif %}</a>{% endfor %}{% endif %}</div>
+</div>
+{% if row.asked %}<div class="mp-ask" role="note">{{ icon("warn") }}<div class="p2-ask-body"><b>Клиент забрал заказ № {{ row.label }}?</b><span class="p2-sub">Сегодня последний день хранения. Клиенту в 12:30 уходит напоминание о сроке хранения.</span>
+<div class="p2-ask-acts">{{ press(c, row, "reserve_issued", "Выдан", "btn--primary", "Выдать заказ № %s?"|format(row.label), who ~ " забрал заказ; он закроется.", "Выдан") }}{{ press(c, row, "reserve_here", "На точке", "btn--secondary") }}</div></div></div>{% endif %}
+{% if oth_ask.get(c.id) %}<div class="mp-ask" id="oth-{{ c.id }}" role="alert" data-oth-offer="{{ c.id }}">{{ icon("warn") }}<div class="p2-ask-body"><b>Шины остаются на точке — перевести на «На ОТХ»?</b><span class="p2-sub">«Нет» — заказ остаётся на точке, менеджер свяжется с клиентом.</span>
+<div class="p2-ask-acts">{{ press(c, row, "to_oth", "Да, на «На ОТХ»", "btn--primary") }}<a class="btn btn--secondary mp-btn" href="/my-point?tab={{ tab }}{% if choose %}&amp;p={{ point.id }}{% endif %}">Нет</a></div></div></div>{% endif %}
+{% if row.oth_asked %}<div class="mp-ask" role="note" data-oth-question="{{ c.id }}">{{ icon("warn") }}<div class="p2-ask-body"><b>{{ row.oth_question }}</b><span class="p2-sub">Шесть дней на ОТХ. «На точке» — шины вернут поставщику, возврат согласует владелец.</span>
+<div class="p2-ask-acts">{{ press(c, row, "oth_issued", "Выдали", "btn--primary", "Заказ № %s выдали?"|format(row.label), "Клиент забрал заказ; он закроется.", "Выдали") }}{{ press(c, row, "oth_here", "На точке", "btn--secondary") }}</div></div></div>{% endif %}
+<details class="mp-more"><summary>Подробнее</summary>
+<div class="mp-more-body">
+{% if row.tel and not row.oth %}<dl class="mp-facts"><div><dt>Телефон клиента</dt><dd><a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a></dd></div></dl>{% endif %}
+<div class="mp-transfer p2-sub" data-transfer>{% if c.transfer_number %}{{ c.transfer_number }} от {{ row.order_date }}{% else %}Перемещение: ещё нет · заказ от {{ row.order_date }}{% endif %}</div>
+{% if row.from_oth %}<div class="p2-sub" data-from-oth>Шины с ОТХ, заказ №{{ row.from_oth }}</div>{% endif %}
+{% if row.merged_from %}<div class="p2-sub" data-merged-from>Объединён из {{ row.merged_from }}</div>{% endif %}
+{% if row.origin %}<p class="p2-sub" data-origin>{{ row.origin.text }}: {{ row.origin.hint }}</p>{% endif %}
+{% if not row.oth %}<div class="mp-text">{{ row.text }}</div>{% endif %}{# «На ОТХ»: the client is gone (the owner 2026-10-30) #}
+{% if not row.here and not row.oth %}<dl class="mp-facts"><div><dt>Перемещение</dt><dd>{{ c.transfer_number or "номер ещё не вписан" }}</dd></div>{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}
+{% if row.until %}<div class="mp-until{% if row.late %} mp-until--late{% endif %}">Хранение до {{ row.until }}{% if row.late %} — срок прошёл{% endif %}</div>{% endif %}
+</div></details>
+</article>
+{% endmacro %}
+<div class="p2w" data-p2>
+<header class="p2-head">
+<div class="p2-title"><h1>{% if point %}<span class="p2-only-desk">Рабочее место · </span>{{ point.name }}{% else %}Рабочее место{% endif %}</h1><span class="p2-sub">Заказы на точке и те, что едут к вам{% if point %} · <span data-tab-title>{{ tabs[tab] }}</span>{% endif %}</span></div>
+<div class="p2-head-acts">
+{% if point %}<details class="p2-only-phone p2-find"{% if query %} open{% endif %}><summary class="p2-ico" aria-label="Найти заказ">{{ icon("search") }}</summary></details>{% endif %}
+{% if undo %}<a class="p2-ico p2-only-phone" href="#p2-undo" aria-label="Отменить отметку: {{ undo|length }}">{{ icon("undo") }}<b>{{ undo|length }}</b></a>{% endif %}
+<a class="p2-ico" href="/my-point?notes=1{% if choose and point %}&amp;p={{ point.id }}{% endif %}" aria-label="Оповещения{% if alerts_new %}: {{ alerts_new }} новых{% endif %}">{{ icon("alert") }}<span class="p2-ico-t">Оповещения</span>{% if alerts_new %}<b>{{ alerts_new }}</b>{% endif %}</a>
+{% if point %}<a class="p2-ico p2-ico--primary" href="/my-point/handed{% if choose %}?p={{ point.id }}{% endif %}#handoff" data-handoff-open data-tour="handoff" aria-label="Передать клиента">{{ icon("plus") }}<span class="p2-ico-t">Передать клиента</span></a>{% endif %}
+</div>
+</header>
+{% if user.role == "point" %}<div class="mp-notify" data-notify-box><button type="button" class="btn btn--secondary btn--sm" data-notify-enable hidden>Включить уведомления</button><span class="p2-sub" data-notify-state></span>
+<div class="mp-fresh" data-notify-fresh hidden><span>Есть новое.</span> <a class="btn btn--primary btn--sm" href="/my-point">Обновить</a></div></div>{% endif %}
+{% if choose and points %}<form method="get" action="/my-point" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
+{% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
+{% else %}
+<form method="get" action="/my-point" class="mp-search{% if not query %} p2-search-folded{% endif %}" role="search"><label class="field"><span class="label">Найти заказ точки</span><span class="p2-search-row"><input class="input" type="search" name="q" maxlength="80" value="{{ query }}" placeholder="Номер заказа, перемещения, телефон или имя" autocomplete="off"><button class="btn btn--secondary">Найти</button></span></label>{{ pin }}{% if tab != "here" %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}</form>
+{% if alerts_open %}<section class="p2-box mp-alerts" aria-labelledby="mp-alerts-h"><div class="p2-section"><h2 id="mp-alerts-h">Оповещения</h2>
+<ul class="p2-list">{% for n in alerts %}<li><div class="p2-grow"><span class="p2-sub">{{ n.at|short_dt }}{% if n.order_id %} · заказ №{{ n.order_id }}{% endif %}</span><span class="mp-note-text">{{ n.text }}</span></div></li>{% endfor %}</ul>
+<a class="p2-sub" href="/my-point?tab={{ tab }}{{ pq }}">Свернуть</a></div></section>
+{% elif alerts_new %}<a class="p2-line mp-alerts-line" href="/my-point?notes=1{% if tab != 'here' %}&amp;tab={{ tab }}{% endif %}{{ pq }}" data-alerts-new>{{ icon("alert") }}<span><b>Оповещения: {{ alerts_new }} {{ plural(alerts_new, "новое", "новых", "новых") }}</b> <span class="p2-sub">· нажмите, чтобы открыть</span></span></a>{% endif %}
+{% if found is not none %}<section class="p2-box mp-found" aria-labelledby="mp-found-h"><div class="p2-section"><h2 id="mp-found-h">Найдено{% if found %} <span class="p2-count">{{ found|length }}</span>{% endif %}</h2>
+{% if found %}<ul class="p2-list">{% for f in found %}<li><div class="p2-grow"><a class="mp-name" href="{{ f.url }}">{{ f.title }}</a><span class="p2-sub">{{ f.subtitle }}</span></div>{% if f.tab %}<a class="p2-tag p2-tag--grey" href="/my-point?tab={{ f.tab }}{{ pq }}" data-found-tab="{{ f.tab }}">{{ tabs[f.tab] }}</a>{% endif %}</li>{% endfor %}</ul>
+{% else %}<p class="p2-sub">Среди заказов точки ничего не нашлось.</p>{% endif %}<a class="p2-sub" href="/my-point{% if choose %}?p={{ point.id }}{% endif %}">Очистить поиск</a></div></section>{% endif %}
+{% if undo %}<details class="p2-box mp-undo" id="p2-undo" data-undo-list><summary>{{ icon("undo") }}<span id="mp-undo-h">Отменить отметку</span> <span class="p2-count">{{ undo|length }}</span></summary>
+<div class="p2-box-body"><p class="p2-sub" style="margin:0">Заказ вернётся туда, где был до отметки; владельцу и партнёру придёт оповещение. {{ undo_hint }}</p>
+<ul class="p2-list">{% for u in undo %}<li><div class="p2-grow"><span><b>№ {{ u.label }}</b> · {{ u.rec.name }}</span><span class="p2-sub">{{ u.rec.at|short_dt }}</span></div>
+<form method="post" action="/my-point/{{ u.card.id }}/undo" data-once data-confirm-title="Отменить {{ u.rec.name }} по заказу № {{ u.label }}?" data-confirm="Заказ вернётся туда, где был до отметки. {{ undo_hint }}" data-confirm-ok="Отменить"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--secondary btn--sm" data-undo="{{ u.card.id }}">Отменить</button></form></li>{% endfor %}</ul></div></details>{% endif %}
+{% if returns %}<section class="mp-returns" aria-labelledby="mp-returns-h"><h2 id="mp-returns-h" class="p2-sr">Возврат поставщику {{ returns|length }}</h2>
+{% for r in returns %}{% set c = r.card %}<article class="p2-mx3" data-return="{{ c.id }}">{{ icon("clipboard") }}<div><b>Подпишите акт МХ-3</b> при передаче шин поставщику (бумажный акт). <span class="p2-tag {{ 'p2-tag--err' if r.late else 'p2-tag--warn' }}">№ {{ r.label }} · возврат {{ r.date }}</span>
+<span class="p2-sub">{{ c.items_text or "шины с ОТХ" }}{% if r.act_order %} · Шины с ОТХ: акт, скорее всего, по исходному заказу №{{ r.act_order }}.{% endif %}</span>{% if hints %}<span class="p2-sub mp-hint" data-point-hint="return">{{ point_hint("return") }}</span>{% endif %}</div>
+<form method="post" action="/my-point/{{ c.id }}/act_signed" data-once data-confirm-title="Акт МХ-3 подписан, шины отданы?" data-confirm="Заказ № {{ r.label }} перейдёт в «{{ stage_name("return_given") }}», менеджер заполнит сумму возврата." data-confirm-ok="Подписал и отдал"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ r.token }}">{{ pin }}<button class="btn btn--primary mp-btn">Подписал акт и отдал</button></form></article>{% endfor %}</section>{% endif %}
+<nav class="mp-tabs" aria-label="Заказы точки">{% for key, name in tabs.items() %}<a class="mp-tab{% if key == tab %} is-active{% endif %}{% if hot.get(key) %} mp-tab--hot{% endif %}" href="/my-point?tab={{ key }}{{ pq }}" data-tab="{{ key }}"{% if key == tab %} aria-current="page"{% endif %}><span class="p2-tab-l">{{ name }}</span><span class="p2-tab-s" aria-hidden="true">{{ short.get(key, name) }}</span><b data-tab-count="{{ key }}">{{ counts[key] }}</b></a>{% endfor %}</nav>
+<div class="mp-list">
+{% if tab == "return" %}{% set waiting = cards|rejectattr("returning")|list %}{% if not returns and not waiting %}<p class="mp-empty">Возвратов поставщику сейчас нет.</p>{% endif %}{# the agreed returns are the plaque above #}
+{% if waiting %}<section class="mp-block" aria-labelledby="mp-agree-h"><h2 id="mp-agree-h">Ждут согласования возврата <span class="p2-count">{{ waiting|length }}</span></h2>{% for row in waiting %}{{ card(row) }}{% endfor %}</section>{% endif %}
+{% else %}
+<section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">{{ tabs[tab] }}{% if cards %} <span class="p2-count">{{ cards|length }}</span>{% endif %}</h2>
+{% for row in cards %}{{ card(row) }}{% else %}<p class="mp-empty">Здесь сейчас нет заказов.</p>{% endfor %}</section>
+{% endif %}
+</div>
+{# «Что делать сейчас» of the cards (onboarding_texts.POINT): a line in each card; folded for every card (user_pref «hint.point») #}
+<form method="post" action="/orders/hint/fold" class="p2-hints"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="where" value="point"><input type="hidden" name="back" value="/my-point?{{ {'p': point.id if choose and point else '', 'tab': tab if tab != 'here' else '', 'q': query}|dictsort|selectattr(1)|list|urlencode }}"><input type="hidden" name="fold" value="{{ '0' if not hints else '1' }}"><button class="p2-quiet">{{ "Свернуть подсказки" if hints else "Показать подсказки" }}</button></form>
+{% endif %}
+{% with section="mypoint" %}{% include "point2/_nav.html" %}{% endwith %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='mypoint.js') }}"></script>{% endblock %}
