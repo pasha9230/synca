@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{# The client's card of the office in «Новый вид» (lane port-office-rest; the prototype's owner-daily clientDrawer): routes draw it instead
+   of client.html while routes_design.office_new() (the office only: a point keeps client.html). The tabs of the prototype are links to the
+   blocks of one page (each form comes back to the same card): on the left the overview, the data, the tags and the duplicates; on the right
+   the purchases (with «удалён»), the chats, the calls, the inquiries, the events. The same forms as client.html. #}
+{% from "_ui.html" import icon %}
+{% import "_entity.html" as entity_ui %}
+{% block title %}Клиент №{{ c.id }} · CRM · Tires Sync{% endblock %}
+{% block body_class %}o2 o2-client-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block content %}
+{% set edit = can("clients", "edit") and not narrow %}{# narrow: the manager of a point, its own part of the client only (routes_clients) #}
+{% set split = edit and c.orders|length + c.chats|length > 1 %}
+{% set csrf %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endset %}
+<style>.crm-pragmatic{background:var(--err-600);border-color:var(--err-600);color:#fff;font-weight:700;font-size:var(--fs-sm,14px)}
+.crm-tags{display:flex;gap:var(--s-2);flex-wrap:wrap;align-items:center}.crm-tags form{display:inline}.crm-items{margin:0;padding-left:1.1em}</style>
+<div class="entity-page o2-client">
+<header>{{ entity_ui.crumbs(entity.crumbs) }}{% call entity_ui.head(entity) %}<span class="crm-tags">
+{# the status of the inquiry and «перезвонить» (the lane crm-inquiry, its own template and data): here in the head #}
+{% if not narrow %}{% with inquiry_client_id = c.id, inquiry_place = "card" %}{% include "_client_inquiry.html" ignore missing %}{% endwith %}{% endif %}
+{% for t in entity.tags %}{% if t == PRAGMATIC %}<span class="badge badge--err crm-pragmatic">{{ t }}</span>{% elif t == HANDED %}<span class="badge badge--warn" title="Точка передала клиента под заказ">{{ t }}</span>{% else %}<span class="badge badge--neutral">{{ t }}</span>{% endif %}{% endfor %}
+</span>{% endcall %}</header>
+<nav class="tabs o2-tabs o2-anchors" aria-label="Разделы карточки"><a class="is-active" href="#o2-main">Обзор</a><a href="#o2-orders">Заказы <span class="badge badge--neutral">{{ entity.purchases|length }}</span></a><a href="#o2-chats">Чаты <span class="badge badge--neutral">{{ entity.chats|length }}</span></a><a href="#o2-calls">Звонки <span class="badge badge--neutral">{{ entity.calls|length }}</span></a>{% if not narrow %}<a href="#o2-touch">Обращения</a><a href="#o2-log">События</a>{% endif %}{% if dups or joined or edit %}<a href="#o2-merge">Склейка{% if dups %} <span class="badge badge--warn">{{ dups|length }}</span>{% endif %}</a>{% endif %}</nav>
+<div class="o2-client-cols"><div class="o2-client-side" id="o2-main">
+<section class="card card-body">{{ entity_ui.fields(entity.fields) }}</section>
+{% if not narrow %}<section class="card card-body">
+{% if edit %}<form method="post" action="/clients/{{ c.id }}/save" class="stack">{{ csrf }}
+<label class="field"><span class="label">Имя</span><input class="input" name="name" value="{{ c.name }}" maxlength="120"></label>
+<div class="row" style="gap:var(--s-3);flex-wrap:wrap">
+<label class="field"><span class="label">Автомобиль: марка</span><input class="input" name="car_brand" value="{{ c.car_brand }}" maxlength="40" placeholder="Kia"></label>
+<label class="field"><span class="label">Модель</span><input class="input" name="car_model" value="{{ c.car_model }}" maxlength="40" placeholder="Rio"></label>
+<label class="field"><span class="label">Год</span><input class="input input--num" name="car_year" value="{{ c.car_year or '' }}" inputmode="numeric" maxlength="4" style="width:90px"></label></div>
+<label class="field"><span class="label">Комментарий</span><textarea class="input" name="note" rows="3" maxlength="2000">{{ c.note }}</textarea></label>
+<div><button class="btn btn--primary">Сохранить</button></div></form>
+{% else %}<p>{{ c.note or "Комментария нет." }}</p>{% endif %}</section>{% endif %}
+{% if edit %}{% call entity_ui.section("Теги", sub="«передан точкой» ставится сам, когда точка передаёт клиента") %}<div class="card-body crm-tags">
+{% set has_pragmatic = PRAGMATIC in entity.tags %}
+<form method="post" action="/clients/{{ c.id }}/tag">{{ csrf }}<input type="hidden" name="tag" value="{{ PRAGMATIC }}"><input type="hidden" name="on" value="{{ '0' if has_pragmatic else '1' }}"><button class="btn {{ 'btn--secondary' if has_pragmatic else 'btn--danger' }} btn--xs">{{ "Снять «Прагматик»" if has_pragmatic else "Поставить «Прагматик»" }}</button></form>
+{% for t in entity.tags if t not in (PRAGMATIC, HANDED) %}<form method="post" action="/clients/{{ c.id }}/tag">{{ csrf }}<input type="hidden" name="tag" value="{{ t }}"><input type="hidden" name="on" value="0"><button class="btn btn--secondary btn--xs" title="Убрать тег">{{ t }} {{ icon("x", "i-sm") }}</button></form>{% endfor %}
+<form method="post" action="/clients/{{ c.id }}/tag" class="row" style="gap:var(--s-2)">{{ csrf }}<input type="hidden" name="on" value="1"><input class="input input--sm" name="tag" maxlength="30" placeholder="Новый тег" aria-label="Новый тег" required><button class="btn btn--secondary btn--xs">Добавить</button></form>
+</div>{% endcall %}{% endif %}
+<div id="o2-merge" class="o2-client-merge">
+{% if dups %}{% call entity_ui.section("Возможно, тот же клиент", sub="склеить можно только вручную") %}<div class="entity-list"><table class="table"><thead><tr><th>Клиент</th><th>Почему</th><th></th></tr></thead><tbody>
+{% for d in dups %}<tr><td data-label="Клиент"><a href="/clients/{{ d.other }}">№{{ d.other }} {{ dup_names.get(d.other) or "без имени" }}</a></td><td data-label="Почему">{{ d.why|join("; ") }}</td>
+<td class="entity-row-actions">{% if edit %}<form method="post" action="/clients/{{ c.id }}/merge" class="inline" data-confirm-title="Склеить с клиентом №{{ d.other }}?" data-confirm="Заказы, чаты, звонки, телефоны и теги №{{ d.other }} перейдут в эту карточку. Разъединить можно здесь же." data-confirm-ok="Склеить">{{ csrf }}<input type="hidden" name="other" value="{{ d.other }}"><button class="btn btn--primary btn--xs">Склеить</button></form>
+<form method="post" action="/clients/{{ c.id }}/skip/{{ d.other }}" class="inline">{{ csrf }}<button class="btn btn--secondary btn--xs">Не тот же</button></form>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% endcall %}{% endif %}
+{% if joined %}{% call entity_ui.section("Склеенные клиенты", sub="ошибочную склейку можно разъединить") %}<ul class="feed card-body">{% for j in joined %}<li>№{{ j.id }} {{ j.name or "без имени" }}
+{% if edit %}<form method="post" action="/clients/{{ c.id }}/unmerge/{{ j.id }}" class="inline" data-confirm-title="Разъединить с клиентом №{{ j.id }}?" data-confirm="Клиенту №{{ j.id }} вернутся его заказы, чаты, звонки, телефоны и теги; звонки, заказы и чаты, пришедшие после склейки с его номеров и собеседников, — тоже (для склеек до 24.10 — только перенесённое)." data-confirm-ok="Разъединить">{{ csrf }}<button class="btn btn--secondary btn--xs">Разъединить</button></form>{% endif %}</li>{% endfor %}</ul>{% endcall %}{% endif %}
+{% if edit %}<section class="card card-body"><h3>Склеить вручную</h3>
+<form method="post" action="/clients/{{ c.id }}/merge" class="row" style="gap:var(--s-3);align-items:flex-end" data-confirm-title="Склеить клиентов?" data-confirm="Все заказы, чаты, звонки и теги другого клиента перейдут к этому. Разъединить можно в блоке «Склеенные клиенты»." data-confirm-ok="Склеить">{{ csrf }}
+<label class="field"><span class="label">Номер другого клиента (всё перейдёт сюда)</span><input class="input" name="other" inputmode="numeric" required></label><button class="btn btn--secondary">Склеить</button></form></section>{% endif %}
+</div>
+</div>
+<div class="o2-client-main">
+{% call entity_ui.section("Заказы и покупки", id="o2-orders", sub="цены продажи; купил — этап «успешный»") %}<div class="entity-list"><table class="table"><thead><tr><th>№</th><th>Создан</th><th>Что</th><th class="num">Сумма</th><th>Точка</th><th>Этап</th>{% if split %}<th></th>{% endif %}</tr></thead><tbody>
+{% for p in entity.purchases %}{% if p.deleted %}<tr class="muted"><td data-label="№">№{{ p.id }} <span class="badge badge--err">удалён</span></td>{% else %}<tr data-href="/orders/{{ p.id }}" class="is-link"><td data-label="№"><a href="/orders/{{ p.id }}">№{{ p.id }}</a></td>{% endif %}<td data-label="Создан"><time>{{ p.created|dt }}</time></td>
+<td data-label="Что">{% if p["items"] %}<ul class="crm-items">{% for i in p["items"] %}<li{% if i.deleted %} class="muted"{% endif %}>{{ i.name }}{% if i.size %} · <b>{{ i.size }}</b>{% endif %} · {{ i.qty }} шт × {{ i.unit|money }} = {{ i.sum|money }}{% if i.deleted %} <span class="badge badge--err">удалён</span>{% endif %}</li>{% endfor %}</ul>{% else %}<span class="muted">позиций нет</span>{% endif %}</td>
+<td data-label="Сумма" class="num">{{ p.total|money if p["items"]|rejectattr("deleted")|list and not p.deleted else "—" }}</td><td data-label="Точка">{{ p.point or "—" }}</td>
+<td data-label="Этап">{% if p.won %}<span class="badge badge--ok">{{ p.stage }}</span>{% elif p.lost %}<span class="badge badge--err">{{ p.stage }}</span>{% else %}{{ p.stage or "—" }}{% endif %}</td>
+{% if split %}<td class="entity-row-actions">{% if not p.deleted %}<form method="post" action="/clients/{{ c.id }}/split-order/{{ p.id }}" class="inline" data-confirm-title="Отделить заказ №{{ p.id }}?" data-confirm="Заказ перейдёт к новому отдельному клиенту." data-confirm-ok="Отделить">{{ csrf }}<button class="btn btn--secondary btn--xs">Отделить</button></form>{% endif %}</td>{% endif %}</tr>
+{% else %}<tr><td colspan="{{ 7 if split else 6 }}" class="muted">Заказов нет.</td></tr>{% endfor %}
+</tbody></table></div>{% endcall %}
+{% call entity_ui.section("Чаты Авито", id="o2-chats", sub="без срока") %}{% call(h) entity_ui.listing([{"key": "ref", "label": "Чат"}, {"key": "peer", "label": "Собеседник"}, {"key": "account", "label": "Аккаунт"}, {"key": "item", "label": "Объявление"}, {"key": "last", "label": "Последнее"}], entity.chats, "Чатов нет.") %}
+{% if split %}<form method="post" action="/clients/{{ c.id }}/split-chat/{{ h.id }}" class="inline" data-confirm-title="Отделить чат Ч-{{ h.id }}?" data-confirm="Чат перейдёт к новому отдельному клиенту." data-confirm-ok="Отделить">{{ csrf }}<button class="btn btn--secondary btn--xs">Отделить</button></form>{% endif %}
+{% endcall %}{% endcall %}
+{% set listen = has_right("listen") %}
+{% call entity_ui.section("Звонки", id="o2-calls", sub="запись хранится 7 дней") %}{% call(k) entity_ui.listing([{"key": "when", "label": "Когда"}, {"key": "account", "label": "Аккаунт / точка"}, {"key": "result", "label": "Итог"}, {"key": "record", "label": "Запись"}, {"key": "order", "label": "Заказ"}], entity.calls, "Звонков нет.") %}
+<span class="call-actions" data-call="{{ k.id }}" data-phone="{{ k.phone }}">{% if listen and k.listen %}<audio controls preload="none" src="/calls/{{ k.id }}/record"></audio>{% endif %}{% set hd = handed_calls.get(k.id) %}{% if hd %} <a class="badge badge--warn" href="/orders/{{ hd.order }}" title="Точка передала клиента под заказ">передан точкой · №{{ hd.order }}</a>{% endif %}</span>
+{% endcall %}{% endcall %}
+{% if not narrow %}{% call entity_ui.section("Обращения", id="o2-touch", sub="первое и повторные: звонок, сообщение или заказ после перерыва от %d ч" % GAP) %}{{ entity_ui.listing([{"key": "n", "label": "№"}, {"key": "when", "label": "Когда"}, {"key": "via", "label": "Как"}, {"key": "ref", "label": ""}], entity.inquiries, "Обращений нет.") }}{% endcall %}{% endif %}
+{% if not narrow %}{% call entity_ui.section("События", id="o2-log") %}<ul class="feed card-body">{% for e in entity.events %}<li><time title="{{ e.at|dt }}">{{ e.at|short_dt }}</time>{% if e.author %}<b>{{ author_label(e.author) }}</b> · {% endif %}{{ e.text }}</li>{% endfor %}</ul>{% endcall %}{% endif %}
+</div></div>
+</div>
+{% endblock %}

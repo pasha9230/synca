@@ -10,7 +10,7 @@ from flask import abort, flash, redirect, render_template, request
 from .. import order_notify, tasks, users
 from .common import author, can, current_user, get_conn, login_required, own_point, safe_path
 from .routes_alerts import may_take
-from .routes_design import point_page
+from .routes_design import office_page, point_page
 from .routes_orders import local_iso
 
 TABS = {"mine": "Мне", "by_me": "Поставил я", "all": "Все"}
@@ -115,7 +115,7 @@ def register(app) -> None:
                 if login not in names:
                     names[login] = users.person_name(conn, login, _main(app))
         tabs = {k: v for k, v in TABS.items() if office or k != "all"}
-        return render_template(point_page("tasks.html"), rows=rows, names=names, tab=tab, tabs=tabs, to=to, due=due, kind=kind, dues=DUES,
+        return render_template(office_page(point_page("tasks.html")), rows=rows, names=names, tab=tab, tabs=tabs, to=to, due=due, kind=kind, dues=DUES,
                                people=task_people(), point=point)
 
     @app.route("/tasks/new", methods=["POST"])

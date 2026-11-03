@@ -45,6 +45,17 @@ def point_page(template: str) -> str:
     return "point2/" + template if point_new() else template
 
 
+def office_new() -> bool:
+    """The office's screens of the new design (lanes port-office-*, the prototype's role «Офис»): a person of the office group (the owner,
+    the partner, the chats' manager, the viewer) with «Офис» on for them. Off: the pages exactly as before."""
+    return ui_group(current_user()["role"]) == "office" and ui_new()
+
+
+def office_page(template: str) -> str:
+    """The template of an office's page: office2/<template> while office_new(), the old one otherwise (the same values, the same forms)."""
+    return "office2/" + template if office_new() else template
+
+
 def as_point_choices() -> list:
     """The points of the topbar's «Работать как точка»: the owner and the partner only, never while working as a point."""
     user = current_user()
@@ -54,7 +65,7 @@ def as_point_choices() -> list:
 
 
 def register(app) -> None:
-    app.jinja_env.globals.update(ui_new=ui_new, point_new=point_new, as_point_choices=as_point_choices)
+    app.jinja_env.globals.update(ui_new=ui_new, point_new=point_new, office_new=office_new, as_point_choices=as_point_choices)
 
     @app.route("/ui-new", methods=["GET", "POST"])
     def ui_new_page():

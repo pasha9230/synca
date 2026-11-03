@@ -1,0 +1,12 @@
+{# The small pieces of the office's «Новый вид» (office2/*): the season as a tag with the sun or the snowflake, the stud icon. #}
+{% from "_ui.html" import icon %}
+{% macro stud(cls="") -%}
+<svg class="i o2-stud {{ cls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l3.2 7.5H8.8z" fill="currentColor" stroke="none"/><circle cx="12" cy="16" r="5.5"/><circle cx="12" cy="16" r="1.6" fill="currentColor" stroke="none"/></svg>
+{%- endmacro %}
+{% macro season_tag(kind) -%}
+{%- if kind == "summer" -%}<span class="o2-season o2-season--summer" title="Лето">{{ icon("sun") }}Лето</span>
+{%- elif kind == "all" -%}<span class="o2-season o2-season--all" title="Всесезонные">{{ icon("sun") }}{{ icon("snow") }}Всесезон</span>
+{%- elif kind == "winter_studded" -%}<span class="o2-season o2-season--winter" title="Зима">{{ icon("snow") }}Зима</span><span class="o2-season o2-season--stud" title="Шипы">{{ stud() }}<span class="sr-only">Шипы</span></span>
+{%- elif kind == "winter" -%}<span class="o2-season o2-season--winter" title="Зима">{{ icon("snow") }}Зима</span>
+{%- endif -%}
+{%- endmacro %}

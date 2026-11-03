@@ -14,6 +14,7 @@ from ..config import own_price_value, settings_from_dict
 from ..pricing import position_price
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
+from .routes_design import office_page
 from .data import load_merged, stale_unload
 from ..webmim import ParseResult
 from ..settings_store import active_settings
@@ -434,7 +435,7 @@ def register(app) -> None:
             shown.setdefault(key, 0)
         brand_choices = sorted(({"key": k, "label": label(k), "count": n} for k, n in shown.items()), key=lambda c: (c["label"].casefold(), c["key"]))
         return render_template(
-            "catalog.html", size={k: " ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
+            office_page("catalog.html"), size={k: " ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
             size_text=(args.get("size") or "")[:client_catalog.MAX_TEXT], size_unknown=view["unknown"], brand_choices=brand_choices, chosen_brands=view["brands"],
             without_brands=view["without"], feed_brands=_feed_brands(conn, counts, suppliers) if can_post("connections_excluded_brand") else None,
             size_options=service.size_options(b["parsed"]), supplier_tabs=supplier_tabs, wait=wait, **b)
@@ -499,7 +500,7 @@ def register(app) -> None:
     @app.route("/catalog/table")
     @login_required
     def catalog_table():
-        return render_template("_catalog_table.html", **table_context(request.args))
+        return render_template(office_page("_catalog_table.html"), **table_context(request.args))
 
     def _names(conn, ids):
         parsed = load_merged(conn, active_settings(conn), current_app.config["UNLOAD_PATH"])
@@ -586,7 +587,7 @@ def register(app) -> None:
                               "at": market.moscow(snapshot["run_at"]) if snapshot else ""}
         if wait is None and request.args.get("wait") and can_post("catalog_wait"):
             wait = _wait_window(conn, goods_id, {}, "", _item_path(goods_id), parsed.offers.get(goods_id))
-        return render_template("catalog_item.html", entity=data, wait=wait, wait_url=_item_path(goods_id) + "?wait=1")
+        return render_template(office_page("catalog_item.html"), entity=data, wait=wait, wait_url=_item_path(goods_id) + "?wait=1")
 
     @app.route("/catalog/item/<goods_id>/own-price", methods=["POST"])
     @login_required

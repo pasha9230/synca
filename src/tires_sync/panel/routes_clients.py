@@ -7,6 +7,7 @@ from flask import abort, flash, redirect, render_template, request
 
 from .. import clients, connections, order_manager
 from .common import author, can, get_conn, has_right, now_iso, own_point, point_account
+from .routes_design import office_page
 
 DUPLICATES_SHOWN = 300                  # the page of the duplicates shows this many pairs at most (the rest after these are joined or waved off)
 
@@ -19,7 +20,7 @@ def register(app) -> None:
         if own_point() is not None:                     # the manager of a point: the clients of its own part only, no tags (the owner 2026-10-26)
             return render_template("clients.html", rows=clients.list_clients_for_point(conn, own_point(), point_account(), query), query=query,
                                    tag="", tags=[], narrow=True, PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED)
-        return render_template("clients.html", rows=clients.list_clients(conn, query, fold=True, tag=tag), query=query, tag=tag,
+        return render_template(office_page("clients.html"), rows=clients.list_clients(conn, query, fold=True, tag=tag), query=query, tag=tag,
                                tags=clients.all_tags(conn), PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED)
 
     @app.route("/clients/duplicates")
@@ -52,7 +53,7 @@ def register(app) -> None:
         bought = clients.purchases(conn, client_id) if has_right("money") else None
         dups = clients.duplicates(conn, client_id)
         names = dict(conn.execute("SELECT id, name FROM client WHERE id IN (%s)" % ",".join("?" * len(dups)), [d["other"] for d in dups])) if dups else {}
-        return render_template("client.html", c=client, entity=clients.card_view(conn, client, accounts, bought, can("chats")),
+        return render_template(office_page("client.html"), c=client, entity=clients.card_view(conn, client, accounts, bought, can("chats")),
                                handed_calls=order_manager.handed_calls(conn, [k["id"] for k in client.get("calls") or []]),
                                dups=dups, dup_names=names, joined=clients.merged_from(conn, client_id), PRAGMATIC=clients.PRAGMATIC,
                                HANDED=clients.HANDED, GAP=clients.NEW_INQUIRY_GAP_HOURS)
