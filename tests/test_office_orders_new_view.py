@@ -1,0 +1,275 @@
+"""«Новый вид» of the office's «Заказы» (lane port-office-orders, the prototype's role «Офис»: the board, «Список» with the side panel of the
+selection, the card variant C): with the office group's flag on for the viewer the pages are drawn from templates/office2/; off — the pages
+as before. The new view adds «Дата создания», the bulk tag / responsible / delete of the selected and the person's own columns of the card."""
+from __future__ import annotations
+
+import io
+import json
+import re
+
+import pytest
+
+from panel_helpers import login, make_app
+from test_roles import PASSWORD, conn_of, sign_in
+from tires_sync import order_points as points, orders, store, trash, user_prefs, users
+
+NOW = "2026-10-07T12:00:00"
+NEW = "office2.css"
+
+
+@pytest.fixture(autouse=True)
+def cheap_hashes(monkeypatch):
+    monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
+
+
+def _order(conn, name, phone, created, webmim="", item=None):
+    card = orders.create_card(conn, dict(client_name=name, client_phone=phone), created, "o")
+    if webmim:
+        orders.update_card(conn, card, dict(webmim_number=webmim), created, "o")
+    if item:
+        orders.add_item(conn, card, goods_id="1", name=item, brand_key="nokian", season="winter", diameter=16, territory="1", qty=4,
+                        sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=created, author="o")
+    return card
+
+
+@pytest.fixture
+def w(tmp_path):
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    orders.ensure_pipeline(conn, NOW)
+    pid = points.save_point(conn, {"name": "Янино", "manager_name": "А", "channel": "vk"})
+    for login_, role in (("zaman", "partner"), ("chat1", "chats"), ("view1", "viewer"), ("pt1", "point")):
+        users.add_user(conn, login_, PASSWORD, NOW, role=role, point_id=pid if role == "point" else None)
+    ids = dict(a=_order(conn, "Анна", "+7 900 000-00-01", "2026-10-01T10:00:00", webmim="7712345", item="Nokian Hakkapeliitta 10 205/55 R16"),
+               b=_order(conn, "Борис", "+7 900 000-00-02", "2026-10-05T10:00:00"),
+               c=_order(conn, "Вера", "+7 900 000-00-03", "2026-10-07T09:00:00", item="Ikon Autograph Snow 3"))
+    conn.commit()
+    return {"app": app, "conn": conn, "pid": pid, "ids": ids}
+
+
+def client_of(w, who):
+    client = w["app"].test_client()
+    if who == "owner":
+        login(client)
+    else:
+        sign_in(client, w["conn"], who)
+    return client
+
+
+def flag(w, state):
+    store.set_state(w["conn"], "ui_new.office", state)
+    w["conn"].commit()
+
+
+def html(client, page):
+    r = client.get(page)
+    assert r.status_code == 200, page
+    return r.get_data(as_text=True)
+
+
+def is_new(text):
+    return NEW in text and "office2.js" in text
+
+
+def pages(w):
+    return ("/orders", "/orders?v=list", "/orders/%d" % w["ids"]["a"])
+
+
+def csrf(client):
+    with client.session_transaction() as s:
+        return s.get("csrf") or "tok"
+
+
+# --- who gets it ------------------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("state", ["", "off"])
+def test_off_everybody_keeps_the_old_pages(w, state):
+    if state:
+        flag(w, state)
+    for who in ("owner", "zaman", "chat1", "view1"):
+        client = client_of(w, who)
+        for page in pages(w):
+            text = html(client, page)
+            assert not is_new(text) and "o2-" not in text and "data-ccs" not in text, (who, page)
+    assert 'class="tiles tiles--row"' in html(client_of(w, "owner"), "/orders")             # the old board itself
+    assert 'class="ocard-layout"' in html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+
+
+def test_owner_only_is_the_owner_and_the_partner(w):
+    flag(w, "owner_only")
+    for who, new in (("owner", True), ("zaman", True), ("chat1", False), ("view1", False)):
+        client = client_of(w, who)
+        for page in pages(w):
+            assert is_new(html(client, page)) is new, (who, page)
+
+
+def test_all_is_every_office_role_never_a_point(w):
+    flag(w, "all")
+    for who in ("owner", "zaman", "chat1", "view1"):
+        client = client_of(w, who)
+        for page in pages(w):
+            assert is_new(html(client, page)), (who, page)
+    point = client_of(w, "pt1")
+    assert not is_new(html(point, "/orders"))                                                  # the point's own «Заказы» stay its own
+    store.set_state(w["conn"], "ui_new.point", "all")
+    w["conn"].commit()
+    assert not is_new(html(point, "/orders"))
+
+
+def test_off_written_is_the_same_markup_as_nothing_written(w):
+    client = client_of(w, "owner")
+
+    def snap():
+        return {p: re.sub(r'value="[0-9a-f]{24,}"', "", html(client, p)) for p in pages(w)}
+    snap()                                                                # the first look marks things seen (the tour, the alerts)
+    before = snap()
+    flag(w, "off")
+    assert snap() == before
+    flag(w, "owner_only")
+    assert snap() != before
+    flag(w, "off")
+    assert snap() == before
+
+
+# --- the board and the list -------------------------------------------------------------------------------------------------------
+
+def test_the_board_shows_the_webmim_number_first_and_the_model_bold(w):
+    flag(w, "all")
+    text = html(client_of(w, "chat1"), "/orders")
+    a = re.search(r'<a class="ocard o2-card[^"]*"[^>]*data-card="%d".*?</a>' % w["ids"]["a"], text, re.S).group(0)
+    assert '<span class="o2-wm">№ 7712345</span>' in a and "внутр. № %d" % w["ids"]["a"] in a
+    assert '<b class="o2-model">Nokian Hakkapeliitta 10 205/55 R16</b> × 4' in a
+    b = re.search(r'data-card="%d".*?</a>' % w["ids"]["b"], text, re.S).group(0)
+    assert "№ WebMIM ещё нет" in b
+    assert 'id="board"' in text and 'data-stage="' in text and 'draggable="true"' in text          # app.js drag and drop: the same hooks
+    assert 'class="o2-stats"' in text and "Сумма в работе" in text
+    assert 'name="from"' in text and 'name="to"' in text and 'name="s"' in text                    # «Дата создания» and «Этап»
+
+
+def test_the_date_of_creation_filters_the_board_the_list_and_the_file(w):
+    flag(w, "all")
+    client = client_of(w, "owner")
+    text = html(client, "/orders?from=2026-10-04&to=2026-10-06")
+    shown = set(int(x) for x in re.findall(r'data-card="(\d+)"', text))
+    assert shown == {w["ids"]["b"]}
+    assert "Фильтр включён: 1" in text
+    listed = html(client, "/orders?v=list&from=2026-10-06")
+    assert set(int(x) for x in re.findall(r'data-sel="(\d+)"', listed)) == {w["ids"]["c"]}
+    flag(w, "off")                                                        # the old view has no such filter: an address with it shows all
+    old = html(client, "/orders?from=2026-10-04&to=2026-10-06")
+    assert {w["ids"]["a"], w["ids"]["b"], w["ids"]["c"]} <= set(int(x) for x in re.findall(r'data-card="(\d+)"', old))
+
+
+def test_the_list_starts_with_the_stage_and_has_the_selection_panel(w):
+    flag(w, "all")
+    text = html(client_of(w, "zaman"), "/orders?v=list")
+    head = re.search(r"<thead><tr>(.*?)</tr></thead>", text, re.S).group(1)
+    assert re.findall(r"<th[^>]*>([^<]*)", head)[:4] == ["", "Этап", "№ WebMIM", "внутр. №"]
+    assert 'data-sel-all' in text and 'data-sel="%d"' % w["ids"]["a"] in text and 'data-wm="7712345"' in text
+    panel = re.search(r'<aside class="card o2-bulk".*?</aside>', text, re.S).group(0)
+    for action in ('action="/orders/bulk/check"', 'action="/orders/bulk/tag"', 'action="/orders/bulk/responsible"', "data-bulk-xls",
+                   'action="/orders/bulk/delete"'):
+        assert action in panel, action
+    assert "Отмена" in panel                                              # «Закрыть разом»'s targets
+
+
+def test_the_panel_offers_only_what_the_role_may(w):
+    flag(w, "all")
+    chats = re.search(r'<aside class="card o2-bulk".*?</aside>', html(client_of(w, "chat1"), "/orders?v=list"), re.S).group(0)
+    assert "data-bulk-xls" in chats and "/orders/bulk/" not in chats      # no «bulk», no «delete»: Excel only
+    viewer = re.search(r'<aside class="card o2-bulk".*?</aside>', html(client_of(w, "view1"), "/orders?v=list"), re.S).group(0)
+    assert "/orders/bulk/" not in viewer
+
+
+# --- the bulk actions -------------------------------------------------------------------------------------------------------------
+
+def _ids(w, *keys):
+    return [str(w["ids"][k]) for k in keys]
+
+
+def test_bulk_tag_on_and_off(w):
+    client = client_of(w, "zaman")
+    r = client.post("/orders/bulk/tag", data={"csrf": csrf(client), "id": _ids(w, "a", "b"), "tag": "предоплата", "mode": "on",
+                                              "back": "/orders?v=list&q=x"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/orders?v=list&q=x")
+    assert "предоплата" in orders.get_card(w["conn"], w["ids"]["a"])["tags"] and "предоплата" in orders.get_card(w["conn"], w["ids"]["b"])["tags"]
+    assert "предоплата" not in orders.get_card(w["conn"], w["ids"]["c"])["tags"]
+    assert any("Теги" in e["text"] or "тег" in e["text"].lower() for e in orders.list_events(w["conn"], w["ids"]["a"]))    # each order's journal
+    client.post("/orders/bulk/tag", data={"csrf": csrf(client), "id": _ids(w, "a"), "tag": "предоплата", "mode": "off"})
+    assert "предоплата" not in orders.get_card(w["conn"], w["ids"]["a"])["tags"]
+    assert "предоплата" in orders.get_card(w["conn"], w["ids"]["b"])["tags"]
+
+
+def test_bulk_responsible_names_only_staff(w):
+    client = client_of(w, "zaman")
+    client.post("/orders/bulk/responsible", data={"csrf": csrf(client), "id": _ids(w, "a", "c"), "responsible": "chat1"})
+    assert [orders.get_card(w["conn"], w["ids"][k])["responsible"] for k in "ac"] == ["chat1", "chat1"]
+    users.add_user(w["conn"], "buyer", PASSWORD, NOW, role="client")
+    client.post("/orders/bulk/responsible", data={"csrf": csrf(client), "id": _ids(w, "b"), "responsible": "buyer"})
+    assert orders.get_card(w["conn"], w["ids"]["b"])["responsible"] != "buyer"           # a forged POST never names a client
+
+
+def test_bulk_delete_goes_to_the_trash_and_needs_both_rights(w):
+    chats = client_of(w, "chat1")
+    r = chats.post("/orders/bulk/delete", data={"csrf": csrf(chats), "id": _ids(w, "a")})
+    assert r.status_code == 403
+    viewer = client_of(w, "view1")
+    assert viewer.post("/orders/bulk/tag", data={"csrf": csrf(viewer), "id": _ids(w, "a"), "tag": "x"}).status_code == 403
+    point = client_of(w, "pt1")
+    assert point.post("/orders/bulk/tag", data={"csrf": csrf(point), "id": _ids(w, "a"), "tag": "x"}).status_code == 403
+    partner = client_of(w, "zaman")
+    partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a", "b")})
+    left = {r[0] for r in w["conn"].execute("SELECT id FROM order_card")}
+    assert w["ids"]["a"] not in left and w["ids"]["b"] not in left and w["ids"]["c"] in left
+    assert len(trash.list_deleted(w["conn"], "order")) == 2
+
+
+def test_bulk_stage_is_the_check_of_close_at_once(w):
+    client = client_of(w, "zaman")
+    cancel = next(s["id"] for s in orders.list_stages(w["conn"]) if s["code"] == "cancel")
+    r = client.post("/orders/bulk/check", data={"csrf": csrf(client), "id": _ids(w, "a", "b"), "to": str(cancel), "reason": "тест"})
+    assert r.status_code == 200 and "orders/bulk/run" in r.get_data(as_text=True)              # the same confirmation as before
+
+
+def test_excel_of_the_selected_only(w):
+    openpyxl = pytest.importorskip("openpyxl")
+    client = client_of(w, "owner")
+    r = client.get("/orders/export.xlsx?ids=%s" % ",".join(_ids(w, "a", "c")))
+    assert r.status_code == 200
+    sheet = openpyxl.load_workbook(io.BytesIO(r.data)).active
+    names = {str(c.value) for row in sheet.iter_rows(min_row=2) for c in row if c.value}
+    assert "Анна" in names and "Вера" in names and "Борис" not in names
+    everything = openpyxl.load_workbook(io.BytesIO(client.get("/orders/export.xlsx").data)).active
+    assert everything.max_row == 4                                       # without ids: every order, as before
+
+
+# --- the card variant C -----------------------------------------------------------------------------------------------------------
+
+def test_the_card_has_three_columns_and_the_live_window(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+    assert [int(x) for x in re.findall(r'data-cc="(\d)"', text)] == [0, 1, 2]
+    assert "WebMIM № 7712345" in text and "внутр. № %d" % w["ids"]["a"] in text
+    for hook in ("form[data-owin]".replace("form[data-owin]", "data-owin"), 'class="owin-stages"', "data-autosave", 'action="/orders/%d/note"' % w["ids"]["a"],
+                 "data-feed-tabs", 'id="wants"', 'id="money"'):
+        assert hook in text, hook
+    assert json.loads(re.search(r"data-layout='([^']*)'", text).group(1)) == {"w": [1.15, 1.0, 0.85], "off": [False, False, False]}
+
+
+def test_the_columns_are_one_s_own(w):
+    flag(w, "all")
+    owner, partner = client_of(w, "owner"), client_of(w, "zaman")
+    layout = {"w": [1.5, 0.7, 0.8], "off": [False, False, True]}
+    r = owner.post("/orders/card/layout", data={"csrf": csrf(owner), "layout": json.dumps(layout)})
+    assert r.status_code == 200 and r.get_json() == {"ok": True}
+    assert user_prefs.get(w["conn"], "owner", "order.card.layout") == layout
+    text = html(owner, "/orders/%d" % w["ids"]["b"])
+    assert json.loads(re.search(r"data-layout='([^']*)'", text).group(1)) == layout
+    assert '<section class="o2c-col is-off" data-cc="2"' in text
+    assert "is-off" not in re.search(r'<div class="o2c-body".*', html(partner, "/orders/%d" % w["ids"]["b"]), re.S).group(0).split("data-cc=\"2\"")[0][-80:]
+    for bad in ({"w": [1, 1], "off": [False, False]}, {"w": [1, 1, 99], "off": [False] * 3}, {"w": [1, 1, 1], "off": [True] * 3},
+                {"w": [1, 1, 1], "off": [0, 0, 0]}, "nonsense"):
+        r = owner.post("/orders/card/layout", data={"csrf": csrf(owner), "layout": bad if isinstance(bad, str) else json.dumps(bad)})
+        assert r.status_code == 400, bad
+    assert user_prefs.get(w["conn"], "owner", "order.card.layout") == layout
+    assert owner.post("/orders/card/layout", data={"layout": json.dumps(layout)}).status_code == 400       # no csrf

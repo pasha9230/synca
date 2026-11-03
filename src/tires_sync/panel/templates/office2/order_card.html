@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% import "_entity.html" as entity_ui %}
+{% import "_inquiry.html" as inq_ui %}
+{# The order's card in «Новый вид» (lane port-office-orders; the prototype docs/ux/prototype-2026-10-30/order-card-variants.html, variant C):
+   routes_orders.card_page draws it instead of order_card.html while routes_design.office_new(). The same values, forms, routes and includes
+   as order_card.html (the window with its stage strip, autosave and «Ещё», the messages, the tasks, «Что нужно клиенту», WebMIM, the sale,
+   the journal), laid out full screen in three columns «Заказ» · «Лента» · «Чат Авито». A column folds to a strip and widens by its border;
+   both are the person's own (user_pref order.card.layout via /orders/card/layout, office2.js). The width of a column, not of the window,
+   decides how its insides lay out (container queries, office2.css). Never a point's page: the point keeps order_card.html. #}
+{% block title %}Заказ №{{ c.id }} · Tires Sync{% endblock %}
+{% block page_class %} page--wide o2c-page{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}o2 o2-card{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block content %}
+{% set csrf %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endset %}
+{% set names = ("Заказ", "Лента", "Чат Авито") %}
+{% macro col(i) %}{% set body = caller() %}<section class="o2c-col{{ ' is-off' if layout.off[i] else '' }}" data-cc="{{ i }}" style="--w:{{ layout.w[i] }}">
+<button type="button" class="o2c-strip" data-cc-toggle="{{ i }}" title="Развернуть колонку «{{ names[i] }}»" aria-expanded="false">{{ icon("chev", "i-sm") }}<span>{{ names[i] }}</span>{% if i == 2 and chat_links|map(attribute="unread")|select|sum %}<span class="sb-count">{{ chat_links|map(attribute="unread")|select|sum }}</span>{% endif %}</button>
+<div class="o2c-colin"><div class="o2c-colhead">{{ names[i] }}<button type="button" class="icon-btn ml-auto" data-cc-toggle="{{ i }}" title="Свернуть колонку «{{ names[i] }}»" aria-expanded="true">{{ icon("chev", "i-sm") }}</button></div>
+<div class="o2c-scroll">{{ body }}</div></div></section>{% endmacro %}
+<header class="o2c-head">
+<a class="o2c-back" href="/orders">{{ icon("arrow-left", "i-sm") }}Заказы</a>
+<div class="o2c-title"><span class="o2c-wm">{% if c.webmim_number %}WebMIM № {{ c.webmim_number }}{% else %}<span class="o2c-wm-none">№ WebMIM ещё нет</span>{% endif %}</span><span class="o2c-inner">внутр. № {{ c.id }}</span>{% if c.client_name %}<span class="o2c-client">· {{ c.client_name }}</span>{% endif %}{% if c.client_phone %}<a class="o2c-phone" href="tel:{{ c.client_phone }}">{{ c.client_phone|phone }}</a>{% endif %}</div>
+<span class="o2c-stage" style="--c:{{ c.stage.color }}">{{ c.stage.name }} · {{ days }} дн.</span>
+<button type="button" class="btn btn--link-gray btn--sm ml-auto" data-cc-reset title="Ширина и свёрнутые колонки — как по умолчанию">Колонки по умолчанию</button>
+</header>
+{% include "_order_unsent.html" %}
+<div class="o2c-body" data-ccs data-csrf="{{ csrf_token() }}" data-layout='{{ layout|tojson }}'>
+{% call col(0) %}
+{% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}
+{% if back_ask %}<div class="flash flash--info" id="oth-back" role="alert" data-oth-back><div class="flash-text stack"><b>{{ back_ask.question }}</b>
+<span class="small">Заказ стоит на «На ОТХ». Новому клиенту — новый заказ этой точки: шины берутся с ОТХ, этот заказ уходит в «Отмену», клиенту уходит «можно забирать».</span>
+<form method="post" action="/orders/{{ c.id }}/oth-back" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="check"><input type="radio" name="answer" value="new" checked> Новый клиент</label>
+<div class="grid-2"><label class="field"><span class="label">Имя</span><input class="input" name="client_name" maxlength="200"></label><label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="client_phone" maxlength="40" placeholder="+7 900 000-00-00"></label></div>
+<label class="check"><input type="radio" name="answer" value="same"> Тот же клиент ({{ c.client_name or "без имени" }}) — заказ просто перейдёт на «{{ stage_name("at_point") }}»</label>
+<div><button class="btn btn--primary btn--sm">Перевести на «{{ stage_name("at_point") }}»</button></div></form></div></div>
+{% endif %}
+{% if oth_ask %}<div class="flash flash--info" id="oth-offer" role="alert" data-oth-offer><div class="flash-text stack"><b>{{ oth_ask.question }}</b>
+<span class="small">Заказ уходит в «{{ oth_ask.target.name }}». Если шины лежат на точке, их можно оставить нашим товаром на ОТХ.{% if oth_ask.cancel_reason %} Причина: {{ oth_ask.cancel_reason }}.{% endif %}</span>
+<div class="row" style="gap:var(--s-2)"><form method="post" action="/orders/{{ c.id }}/move" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ oth_ask.oth.id }}"><input type="hidden" name="oth_answer" value="yes"><input type="hidden" name="cancel_reason" value="{{ oth_ask.cancel_reason }}"><button class="btn btn--primary btn--sm">Да, на «{{ oth_ask.oth.name }}»</button></form>
+<form method="post" action="/orders/{{ c.id }}/move" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ oth_ask.target.id }}"><input type="hidden" name="oth_answer" value="no"><input type="hidden" name="cancel_reason" value="{{ oth_ask.cancel_reason }}"><button class="btn btn--secondary btn--sm">Нет, в «{{ oth_ask.target.name }}»</button></form></div></div></div>
+{% endif %}
+{% if oth_plan and (c.stage.code in ("oth", "return_given") or oth_plan.signed_at) %}<div class="flash {{ 'flash--ok' if oth_plan.signed_at else 'flash--err' }}" data-oth-return role="status"><div class="flash-text">{% if oth_plan.signed_at %}<b>Акт МХ-3 подписан, шины отданы поставщику {{ oth_plan.signed_at|day }}</b> ({{ oth_plan.signed_by }}).{% else %}<b>Передать на возврат {{ oth_plan.return_date|day }}</b> — согласовано с поставщиком ({{ oth_plan.agreed_by }}); точка подписывает акт МХ-3 и отдаёт шины.{% endif %}</div>{% if not oth_plan.signed_at and can_post("order_oth_unagree") %}<form method="post" action="/orders/{{ c.id }}/oth-unagree" data-once data-confirm-title="Отменить согласование возврата?" data-confirm="Метка снова «Согласуем»: точка перестанет видеть возврат, шины снова будут в объявлении."><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Отменить согласование</button></form>{% endif %}</div>
+{% elif c.stage.code in ("oth", "return_given") and c.point_id and can_post("order_oth_agreed") %}<form method="post" action="/orders/{{ c.id }}/oth-agreed" class="row" style="gap:var(--s-2);align-items:center" data-once data-confirm-title="Возврат согласован с поставщиком?" data-confirm="Точка увидит дату возврата (ближайшую нечётную) и подпишет акт МХ-3." data-confirm-ok="Согласовано"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Согласовано с поставщиком</button><span class="small muted">возврат шин с ОТХ: точка получит дату и акт МХ-3</span></form>{% endif %}
+{% include "_order_merge.html" %}
+{% if arrived_untold %}<div class="flash flash--err" data-arrived-untold role="status"><div class="flash-text row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center"><span><b>Клиенту не сообщили, что шины на точке</b> — {{ arrived_untold.why }}. {{ arrived_untold.advice }}.</span>
+{% if arrived_untold.send and can_post("order_arrived_message") %}<form method="post" action="/orders/{{ c.id }}/arrived-message"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">Открыть сообщение клиенту</button></form>{% endif %}
+{% if can_post("order_arrived_told") %}<form method="post" action="/orders/{{ c.id }}/arrived-told" data-once data-confirm-title="Клиенту уже сообщили?" data-confirm="Сообщение «можно забирать» не будет отправлено, напоминания прекратятся." data-confirm-ok="Да, сообщили"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Клиенту сообщили</button></form>{% endif %}</div></div>{% endif %}
+{% include "_order_hint.html" %}
+{% if own_sale %}{% include "_point_sale.html" %}{% endif %}{# the point edits its own sale here; the window stays read-only for it #}
+{% include "_order_window.html" %}
+{% include "_order_intercity.html" %}
+{% if messages %}{% call entity_ui.section("Сообщения по заказу", id="messages") %}<div class="card-body row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center">
+<span>Ждут отправки: {{ messages|length }} ({% for m in messages %}{{ m.task.title }}{% if not loop.last %}; {% endif %}{% endfor %}).</span>{% if messages|selectattr("lacking")|list %}<span class="small text-err">Не хватает данных: см. в окне.</span>{% endif %}
+<button type="button" class="btn btn--primary btn--sm ml-auto" data-open-modal="order-messages">Открыть сообщения</button></div>{% endcall %}
+{% include "_order_messages.html" %}{% endif %}
+{% if tasks %}{% call entity_ui.section("Что ждёт действия", id="tasks") %}<div class="card-body stack">
+{% for t in tasks %}<div class="stack" style="border-bottom:1px solid var(--gray-200);padding-bottom:var(--s-3)"><div class="strong">{{ t.title }} {% if t.status == "error" %}<span class="badge badge--err">Ошибка</span>{% endif %}</div>
+{% if t.body %}<textarea class="textarea" id="task-{{ t.id }}" rows="3" readonly aria-label="Текст задачи">{{ t.body }}</textarea><div><button type="button" class="btn btn--secondary btn--xs" data-copy="task-{{ t.id }}">Скопировать</button></div>{% endif %}
+{% if t.title == exact_title and t.status == "pending" and send_chats and can_post("chat_send") %}
+<form method="post" action="/chats/{{ send_chats[0].id }}/send" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="reply_token" value="o{{ c.id }}t{{ t.id }}">
+<label class="field"><span class="label">Сообщение клиенту (можно поправить): уйдёт в чат Ч-{{ send_chats[0].id }}</span><textarea class="textarea" name="text" rows="4" maxlength="1000">{{ client_text }}</textarea></label>
+<div><button class="btn btn--primary btn--sm">Отправить клиенту в чат Авито</button></div></form>{% endif %}
+{% if t.result %}<p class="small text-err">{{ t.result }}</p>{% endif %}
+{% if t.status == "running" %}<p class="small muted">Выполняется. Если зависло, через 10 минут задача вернётся в список.</p>{% endif %}
+<div class="row" style="gap:var(--s-2)">{% if t.status == "pending" and can_post("order_task_run") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/run"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">{{ "Готово" if t.kind == "remind" else "Выполнить" }}</button></form>{% endif %}
+{% if t.status != "running" and can_post("order_task_skip") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/skip"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Пропустить</button></form>{% endif %}</div></div>{% endfor %}
+</div>{% endcall %}
+{% endif %}
+<details class="card ocard-part" id="wants"{% if c.wants or part == "wants" %} open{% endif %}><summary class="card-head"><h3>Что нужно клиенту{% if c.wants %} ({{ c.wants|length }}){% endif %}</h3>{{ icon("chev", "ml-auto") }}</summary>
+<div class="card-body stack">
+<p class="small muted">Что клиент хочет купить, когда это появится в наличии. Заказ можно перенести на этап «Ожидает наличие», когда есть хотя бы одна строка. Когда все строки найдены в наличии, на заказе появится метка «Появилось» и задача; если часть строк закрыта аналогами (отмечено «можно другие бренды» или «можно другие размеры»), метка «Есть аналоги».</p>
+{% for w in c.wants %}{% if not can_post("order_want_update") %}<div class="strong">{{ want_text(w) }}</div>{% else %}
+<form method="post" action="/orders/{{ c.id }}/wants/{{ w.id }}/update" class="stack" style="border-bottom:1px solid var(--gray-200);padding-bottom:var(--s-3)"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="strong">{{ want_text(w) }}</div>
+{% include "_order_want_fields.html" %}
+<div class="row" style="gap:var(--s-2)"><button class="btn btn--secondary btn--sm">Сохранить строку</button><button class="btn btn--danger-outline btn--sm" formaction="/orders/{{ c.id }}/wants/{{ w.id }}/delete" formnovalidate>Убрать строку</button></div></form>{% endif %}
+{% else %}<p class="muted">Строк пока нет.</p>{% endfor %}
+{% if can_post("order_want_add") %}<form method="post" action="/orders/{{ c.id }}/wants/add" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="strong">Добавить строку</div>
+{% set w = {"brand": "", "model": "", "width": "", "profile": "", "radius": "", "season": "", "studded": "", "qty": 4, "code": "", "any_brand": false, "any_size": false} %}
+{% include "_order_want_fields.html" %}
+<div><button class="btn btn--primary btn--sm">{{ icon("plus") }}Добавить строку</button></div></form>{% endif %}
+</div></details>
+{% include "_order_supplier.html" %}
+{% include "_order_webmim.html" %}
+{% call entity_ui.section("Продажа и расчёты", id="money") %}<div class="card-body stack">
+<p class="ocard-sum">Сумма заказа <b>{{ totals.sale|money }}</b>{% if c['items'] %} · {{ c['items']|length }} поз.{% endif %}</p>
+{% if webmim_cost and has_right("money") %}<p class="small" data-webmim-analytics>В аналитике закупка по WebMIM: <b>{{ webmim_cost.cost|money }}</b> ({{ webmim_cost.count }} из {{ webmim_cost.positions }} поз.; по цене из заказа WebMIM с учётом скидки поставщика). В заказ и продажи не записывается.</p>{% endif %}
+{% if c.stage.kind == "won" and not c.sale_ids and can_post("order_sale") %}<div class="row" style="gap:var(--s-3)"><span class="small muted">Продажа не записана</span><form method="post" action="/orders/{{ c.id }}/sale" data-once>{{ csrf }}<button class="btn btn--primary btn--sm">Записать продажу</button></form></div>{% endif %}
+{% if c.sale_ids %}<div class="row" style="gap:var(--s-3)">{% if -1 in c.sale_ids %}<span class="small text-err">Запись продажи не завершена (сбой при записи).</span>{% else %}<span class="small">Продажа записана ({{ c.sale_ids|length }} поз.).</span>{% endif %}
+{% if can_post("order_sale_reverse") %}<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once>{{ csrf }}<button class="btn btn--danger-outline btn--sm">{% if -1 in c.sale_ids %}Освободить заказ{% else %}Сторнировать продажу{% endif %}</button></form>{% endif %}</div>{% endif %}
+{% if can_post("order_save") %}<form method="post" action="/orders/{{ c.id }}/save" class="stack">{{ csrf }}<input type="hidden" name="tab" value="money">
+<p class="small muted">Дата, когда сделано; пусто, если ещё нет.</p><div class="grid-2">
+{% for key, label in marks.items() %}<label class="field"><span class="label">{{ label }}</span><input class="input" type="date" name="{{ key }}" value="{{ c[key] }}"></label>{% endfor %}</div>
+<div><button class="btn btn--secondary btn--sm">Сохранить даты</button></div></form>
+{% else %}<dl class="small">{% for key, label in marks.items() %}<dt>{{ label }}</dt><dd>{{ c[key] or "—" }}</dd>{% endfor %}</dl>{% endif %}
+</div>{% endcall %}
+{% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}{% include "_order_finish.html" %}{% endif %}
+{% endcall %}<div class="o2c-split" data-split="0" role="separator" aria-orientation="vertical" tabindex="0" title="Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию"></div>
+{% call col(1) %}
+{% if can("orders") %}{{ inq_ui.callbacks(tasks_for(order_id=c.id), order_id=c.id, back="/orders/%d"|format(c.id), title="Задачи по заказу") }}{% endif %}
+<section class="card entity-sec o2c-feed" id="feed">
+{% if can_post("order_note") %}<form method="post" action="/orders/{{ c.id }}/note" class="card-body row" style="gap:var(--s-2)">{{ csrf }}
+<textarea class="textarea grow" name="text" rows="1" maxlength="2000" placeholder="Заметка по заказу" aria-label="Заметка"></textarea><button class="btn btn--secondary btn--sm">Добавить</button></form>{% endif %}
+<div class="o2c-tabs" role="tablist" aria-label="Что показать в ленте" data-feed-tabs>{% for key, label in (("", "Все"), ("note", "Заметки"), ("stage", "Этапы"), ("chat", "Чат"), ("other", "Система")) %}<button type="button" role="tab" class="o2c-tab{{ ' is-on' if not key else '' }}" data-feed-tab="{{ key }}" aria-selected="{{ 'true' if not key else 'false' }}">{{ label }}</button>{% endfor %}</div>
+<ul class="feed card-body" data-feed>{% for e in events %}<li data-kind="{{ e.kind if e.kind in ('note', 'stage', 'chat') else 'other' }}" class="{{ 'is-note' if e.kind == 'note' else '' }}{{ ' is-red' if e.level == 'red' else '' }}"{% if e.level == 'red' %} data-red{% endif %}><time title="{{ e.at|dt }}">{{ e.at|short_dt }}</time><b>{{ author_label(e.author) }}</b> · {{ e.text }}{% if e.avito_link %} <a class="btn btn--secondary btn--xs" href="{{ e.avito_link }}" target="_blank" rel="noopener noreferrer">Открыть чат в Авито</a>{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endcall %}<div class="o2c-split" data-split="1" role="separator" aria-orientation="vertical" tabindex="0" title="Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию"></div>
+{% call col(2) %}
+{% if chat_links %}<section class="card entity-sec o2c-chats"><div class="card-body stack">
+{% with sends=chat_sends, back="/orders/%d"|format(c.id) %}{% include "_chat_sends.html" %}{% endwith %}
+{% for ch in chat_links %}<div class="stack" style="gap:2px"><div class="row" style="gap:var(--s-2)"><a href="/chats/{{ ch.id }}"><b>Ч-{{ ch.id }}</b> · {{ ch.peer_name or "без имени" }}</a>{% if ch.unread %}<span class="badge badge--warn">новых: {{ ch.unread }}</span>{% endif %}<a class="btn btn--secondary btn--xs ml-auto" href="/chats/{{ ch.id }}">Открыть</a></div>{% if ch.item_title %}<div class="small">{{ ch.item_title }}</div>{% endif %}<div class="small muted chat-last">{{ ch.last_text }}</div></div>{% endfor %}
+</div></section>{% else %}<p class="muted small o2c-empty">К заказу не привязан чат Авито. Привязать можно в окне заказа: «Дополнительно» → «Чат Авито».</p>{% endif %}
+{% endcall %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='office2.js') }}"></script>{% endblock %}

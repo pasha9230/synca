@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{# «Заказы» of the office in «Новый вид» (lane port-office-orders; the prototype docs/ux/prototype-2026-10-30/index.html, role «Офис»:
+   renderOrders, orderCard, ordersTable, bulkSide — variant 3): routes_orders.orders_page draws it instead of orders.html while
+   routes_design.office_new(). The same values, filters, links, drag and drop and «Колонки» as orders.html; the new view adds «Дата создания»
+   (from / to) and the selection of «Список» with the side panel (stage — «Закрыть разом»'s check, tag, responsible, Excel, delete).
+   The WebMIM number first, the panel's number small; the model bold; the list starts with the stage. Never a point's page. #}
+{% block title %}Заказы · Tires Sync{% endblock %}
+{% block page_class %} page--wide{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}o2 o2-orders{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block content %}
+{% set keep = {'q': query, 'p': point or '', 't': tag, 'from': date_from, 'to': date_to} %}
+{% set keep_q %}{% for k, v in keep.items() if v %}&amp;{{ k }}={{ v|urlencode }}{% endfor %}{% endset %}
+<header class="page-head"><div><h1>Заказы</h1><p class="sub">Заказы клиентов по этапам воронки: от переговоров до выдачи на точке.</p></div>
+<div class="actions"><div class="seg" role="group" aria-label="Вид"><a href="/orders?v=board{{ keep_q }}"{% if view == "board" %} class="is-active" aria-current="true"{% endif %}>{{ icon("layers", "i-sm") }}Доска</a><a href="/orders?v=list{{ keep_q }}"{% if view == "list" %} class="is-active" aria-current="true"{% endif %}>{{ icon("report", "i-sm") }}Список</a></div>
+{% if inbox_new %}<a class="btn btn--secondary" href="/orders/inbox" title="Новые входящие заказы">Входящие <span class="sb-count sb-count--red">{{ inbox_new }}</span></a>{% endif %}
+<details class="menu orders-more"><summary class="btn btn--secondary">Ещё ⋯</summary><div class="menu-list">
+{% if has_right("money") %}<a class="menu-item" href="/orders/report">Отчёт</a>{% endif %}
+<a class="menu-item" href="/orders/webmim">Сверка с WebMIM</a>
+<a class="menu-item" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Файл Excel с заказами по текущим фильтрам (поиск, точка, тег, дата создания)">Выгрузить в Excel</a>
+<a class="menu-item" href="/orders/inbox">Входящие{% if inbox_new %} ({{ inbox_new }}){% endif %}</a>
+{% if can_post("orders_bulk_run") %}<a class="menu-item" href="/orders/bulk">Закрыть разом</a>{% endif %}
+{% if can("setup") %}<a class="menu-item" href="/orders/templates">Шаблоны</a>
+<a class="menu-item" href="/orders/settings">Настроить воронку</a>{% endif %}
+<hr><a class="menu-item" href="/deleted">Удалённые</a>
+</div></details>
+{% if can_post("order_new") %}<a class="btn btn--primary" href="/orders/new">{{ icon("plus") }}Новый заказ</a>{% endif %}</div></header>
+<div class="o2-stats">
+<div class="o2-stat"><span class="t">В работе</span><b>{{ data.summary.open }}</b></div>
+<div class="o2-stat{% if data.summary.overdue %} is-warn{% endif %}" title="дольше срока этапа"><span class="t">Просрочено</span><b>{{ data.summary.overdue }}</b></div>
+<div class="o2-stat{% if waiting %} is-warn{% endif %}" title="заказов с задачами правил"><span class="t">Ждут действия</span><b>{{ waiting|length }}</b></div>
+<div class="o2-stat"><span class="t">Новые сегодня</span><b>{{ data.summary.new_today }}</b></div>
+{% if data.summary.sum_open is not none %}<div class="o2-stat" title="по ценам продажи"><span class="t">Сумма в работе</span><b>{{ data.summary.sum_open|money }}</b></div>{% endif %}
+</div>
+<form method="get" action="/orders" class="card o2-filters">
+<input type="hidden" name="v" value="{{ view }}">
+<label class="field o2-f-wide"><span class="label">Поиск</span><span class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, номер"></span></label>
+<label class="field"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for p in points %}<option value="{{ p.id }}"{% if point == p.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+{% if stages %}<label class="field"><span class="label">Этап</span><select class="select" name="s" data-stage-filter><option value="">Все</option>{% for s in stages %}<option value="{{ s.id }}"{% if only_stage == s.id %} selected{% endif %}>{{ s.name }}{% if not s.on_board %} (нет на доске){% endif %}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">{{ stage_name("return_given") }}</span><select class="select" name="r" data-return-filter><option value="">Все</option>{% for key, name in returning_filters.items() %}<option value="{{ key }}"{% if returning == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>{% endif %}
+<div class="field"><span class="label">Дата создания</span><span class="o2-dates"><input class="input" type="date" name="from" value="{{ date_from }}" aria-label="Дата создания: с"><span class="muted">—</span><input class="input" type="date" name="to" value="{{ date_to }}" aria-label="Дата создания: по"></span></div>
+<label class="field"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}" placeholder="Авито, предоплата…"></label>
+<button class="btn btn--secondary">Показать</button><a class="btn btn--link-gray" href="/orders?v={{ view }}">Сбросить</a>
+<a class="btn btn--secondary o2-icon-btn" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Скачать в Excel по текущим фильтрам" aria-label="Скачать в Excel">{{ icon("download") }}</a>
+</form>
+{% set on = [query, point, tag, only_stage, returning, date_from or date_to]|select|list|length %}
+{% if on %}<div class="o2-filter-on" data-o2-filter-on>Фильтр включён: {{ on }} · <a href="/orders?v={{ view }}">Сбросить фильтры</a></div>{% endif %}
+{% if only_stage %}<p class="small" data-only-stage="{{ only_stage }}">Только этап «{{ data.columns[0].stage.name }}» · <a href="/orders?v={{ view }}{{ keep_q }}">все этапы</a></p>{% endif %}
+<div class="flash flash--err" id="board-msg" hidden>{{ icon("alert") }}<div class="flash-text"></div></div>
+{% if total_cards == 0 and not query and not tag and not point %}
+<div class="flash flash--info" style="margin-bottom:var(--s-4)">{{ icon("info") }}<div class="flash-text"><b>Заказов пока нет.</b> Создайте первый, когда клиент написал вам на Авито: поле «Быстрое добавление» в первой колонке или кнопка «Новый заказ».</div></div>
+{% endif %}
+{% set dot_label = {"red": "Нужно действие", "yellow": "Внимание", "green": "Движется"} %}
+{% macro odot(id) %}{% if dots.get(id) %}<span class="odot odot--{{ dots[id] }}" title="{{ dot_label[dots[id]] }}"></span>{% endif %}{% endmacro %}
+{% macro wm(c) %}{% if c.webmim %}<span class="o2-wm">№ {{ c.webmim }}</span>{% else %}<span class="o2-wm o2-wm--none">№ WebMIM ещё нет</span>{% endif %}{% endmacro %}
+{% macro items(text) %}{% if text %}{% set parts = text.split(" × ", 1) %}<div class="o2-items"><b class="o2-model">{{ parts[0] }}</b>{% if parts|length > 1 %} × {{ parts[1] }}{% endif %}</div>{% endif %}{% endmacro %}
+{% set ic_ids = intercity_ids() %}
+{% if view == "list" %}{# the Google table of orders (orders_list): a row per position; the selection is of orders (every row of the order) #}
+{% set by_id = {} %}{% for r in rows %}{% set _ = by_id.update({r.card.id: r.card}) %}{% endfor %}
+{% macro cell(name, v) %}{% if name in ("Цена MIM", "Сумма MIM", "Цена продажи", "Сумма продажи", "Прибыль ₽") %}{{ v|money if v != "" else "—" }}{% elif name == "Прибыль %" %}{{ ("%.1f %%"|format(v)).replace(".", ",") if v != "" else "—" }}{% elif name == "Дата счета" %}{{ v|day }}{% elif name == "Списание" %}{{ "да" if v else "" }}{% else %}{{ v if v not in ("", none) else "" }}{% endif %}{% endmacro %}
+<div class="o2-listwrap" data-bulk-wrap>
+<section class="card orders-list o2-list"><div class="row orders-list-head"><span class="small muted">Заказов: {{ table.orders }}{% if table.pages > 1 %} · страница {{ table.page }} из {{ table.pages }}{% endif %}</span><span class="small muted" data-bulk-hint>Отметьте заказы галочками — справа откроется панель действий.</span>
+<details class="menu cols-menu ml-auto"><summary class="btn btn--secondary btn--sm">{{ icon("sliders", "i-sm") }}Колонки</summary><div class="menu-list cols-box">
+<form method="post" action="/orders/list/columns" data-cols><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% for k, v in table.keep.items() if k != "v" %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+<p class="small muted">Отметьте колонки и расставьте их стрелками.</p><ol class="cols-list">{% for c in table.columns %}<li data-col><label><input type="checkbox" name="shown" value="{{ c.name }}"{% if c.shown %} checked{% endif %}> {{ c.name }}</label><input type="hidden" name="order" value="{{ c.name }}"><span class="cols-move"><button type="button" class="btn btn--link-gray btn--sm" data-col-up aria-label="Выше: {{ c.name }}">↑</button><button type="button" class="btn btn--link-gray btn--sm" data-col-down aria-label="Ниже: {{ c.name }}">↓</button></span></li>{% endfor %}</ol>
+<div class="row" style="gap:var(--s-2)"><button class="btn btn--primary btn--sm">Сохранить</button><button class="btn btn--link-gray btn--sm" name="reset" value="1">Сбросить по умолчанию</button></div></form></div></details></div>
+<div class="table-wrap"><table class="table table--plain orders-sheet o2-sheet">
+<thead><tr><th class="o2-chk"><input type="checkbox" data-sel-all aria-label="Выбрать все заказы на странице"></th><th>Этап</th><th>№ WebMIM</th><th>внутр. №</th>{% for name in table.shown if name not in ("Этап", "№ заказа MIM") %}<th{% if name in table.numbers %} class="num"{% endif %}>{{ name }}</th>{% endfor %}</tr></thead>
+<tbody>{% for r in table.rows %}{% set c = by_id.get(r.order, {}) %}<tr data-href="/orders/{{ r.order }}" class="is-link" data-row="{{ r.order }}"><td class="o2-chk"><input type="checkbox" data-sel="{{ r.order }}" data-wm="{{ c.webmim or '' }}" data-client="{{ c.client or '' }}" data-stage-name="{{ r.stage.name }}" data-stage-color="{{ r.stage.color }}" data-sum="{{ c.sum if c.sum is not none else '' }}" aria-label="Выбрать заказ №{{ r.order }}"></td>
+<td class="nowrap"><span class="o2-stage" style="--c:{{ r.stage.color }}">{{ r.stage.name }}</span></td>
+<td class="nowrap">{{ odot(r.order) }}<a class="o2-wm-link" href="/orders/{{ r.order }}">{{ c.webmim or "—" }}</a> {% if r.order in ic_ids %}<span class="badge badge--warn" data-intercity-tag>В другой город</span> {% endif %}{% if notes.get(r.order) %}<span class="badge badge--neutral" data-note title="{{ notes[r.order] }}">Есть примечание</span>{% endif %}</td>
+<td class="nowrap muted small">{{ r.order }}</td>{% for name in table.shown if name not in ("Этап", "№ заказа MIM") %}<td{% if name in table.numbers %} class="num"{% endif %}>{{ cell(name, r["values"][name]) }}{% if name == "Имя" and labels.get(r.order) %} <span class="badge badge--warn" data-origin title="{{ labels[r.order].hint }}">{{ labels[r.order].text }}</span>{% endif %}</td>{% endfor %}</tr>
+{% else %}<tr><td colspan="{{ table.shown|length + 4 }}" class="muted">Ничего не найдено. Измените фильтры.</td></tr>{% endfor %}</tbody>
+{% if table.totals and table.rows %}<tfoot><tr class="orders-total"><td colspan="4"><b>Итого{% if table.pages > 1 %} по всем страницам{% endif %}</b></td>{% for name in table.shown if name not in ("Этап", "№ заказа MIM") %}<td{% if name in table.numbers %} class="num"{% endif %}>{% if name in ("Сумма MIM", "Сумма продажи", "Прибыль ₽") %}<b>{{ table.totals[name]|money }}</b>{% elif name == "Прибыль %" %}<b title="Прибыль ₽ / Сумма продажи позиций с записанной продажей">{{ ("%.1f %%"|format(table.totals[name])).replace(".", ",") if table.totals[name] is not none else "—" }}</b>{% endif %}</td>{% endfor %}</tr></tfoot>{% endif %}
+</table></div>
+{% if table.totals %}<p class="small muted orders-total-line">Итого по фильтру: закупка {{ table.totals["Сумма MIM"]|money }} · выручка {{ table.totals["Сумма продажи"]|money }} · прибыль {{ table.totals["Прибыль ₽"]|money }}{% if table.totals["Прибыль %"] is not none %} ({{ ("%.1f"|format(table.totals["Прибыль %"])).replace(".", ",") }} %){% endif %}</p>{% endif %}
+{% if table.pages > 1 %}<nav class="pager" aria-label="Страницы">{% for n in range(1, table.pages + 1) %}<a href="{{ table.link(n) }}"{% if n == table.page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
+</section>
+{% set back = request.full_path.rstrip("?") %}
+{% set ids_box %}<span data-bulk-ids></span><input type="hidden" name="back" value="{{ back }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endset %}
+<aside class="card o2-bulk" data-bulk hidden aria-label="Действия с выбранными заказами">
+<div class="o2-bulk-head"><b class="grow">Выбрано: <span data-bulk-n>0</span></b><button type="button" class="icon-btn" data-bulk-none title="Снять выбор" aria-label="Снять выбор">{{ icon("x") }}</button></div>
+<div class="o2-bulk-body">
+<ul class="o2-bulk-list" data-bulk-list></ul>
+{% if data.summary.sum_open is not none %}<div class="row o2-bulk-tot"><span class="grow">Сумма выбранных</span><b data-bulk-sum>0 ₽</b></div>{% endif %}
+{% if can_post("orders_bulk_check") %}<form method="post" action="/orders/bulk/check" class="o2-bulk-sec" data-bulk-form>{{ ids_box }}<h4>Перевести на этап</h4>
+<p class="muted small">Как «Закрыть разом»: перед переводом панель покажет, что перейдёт и что нет, и спросит ещё раз. Разом закрывают заказы — на этапы вне воронки.</p>
+<select class="select" name="to" required aria-label="Этап"><option value="">Выберите этап…</option>{% for s in bulk_targets %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
+<label class="field"><span class="label">Причина отмены (для «Отмены»)</span><input class="input" name="reason" value="{{ bulk_reason }}" maxlength="200"></label>
+<div><button class="btn btn--primary">Проверить и перевести</button></div></form>{% endif %}
+{% if can_post("orders_bulk_tag") %}<form method="post" action="/orders/bulk/tag" class="o2-bulk-sec" data-bulk-form data-once>{{ ids_box }}<h4>Тег</h4><p class="muted small">Поставить или снять тег у всех выбранных.</p>
+<div class="row" style="gap:var(--s-2)"><input class="input grow" name="tag" maxlength="30" required placeholder="например: предоплата" aria-label="Тег"><button class="btn btn--secondary" name="mode" value="on">Поставить</button><button class="btn btn--secondary" name="mode" value="off">Снять</button></div></form>{% endif %}
+{% if can_post("orders_bulk_responsible") %}<form method="post" action="/orders/bulk/responsible" class="o2-bulk-sec" data-bulk-form data-once>{{ ids_box }}<h4>Ответственный</h4><p class="muted small">Ему будут приходить уведомления по этим заказам.</p>
+<div class="row" style="gap:var(--s-2)"><select class="select grow" name="responsible" required aria-label="Ответственный"><option value="">Выберите…</option>{% for o in responsible_options %}<option value="{{ o.login }}">{{ o.label }}</option>{% endfor %}</select><button class="btn btn--secondary">Назначить</button></div></form>{% endif %}
+<section class="o2-bulk-sec"><h4>Excel</h4><p class="muted small">Только выбранные заказы.</p><a class="btn btn--secondary" href="/orders/export.xlsx" data-bulk-xls>{{ icon("download", "i-sm") }}Скачать <span data-bulk-n>0</span></a></section>
+{% if can_post("orders_bulk_delete") and has_right("bulk") %}<form method="post" action="/orders/bulk/delete" class="o2-bulk-sec" data-bulk-form data-once data-confirm-title="Удалить выбранные заказы?" data-confirm="Заказы уйдут в «Удалённые», вернуть их можно там. В Авито и WebMIM ничего не меняется, клиентам ничего не отправится." data-confirm-ok="Удалить" data-confirm-danger>{{ ids_box }}<h4>Удалить</h4>
+<p class="muted small">Уйдут в «Удалённые» («Ещё ⋯» → «Удалённые») — оттуда можно вернуть. Заказ с записанной продажей не удаляется.</p><div><button class="btn btn--danger-outline">{{ icon("x", "i-sm") }}Удалить <span data-bulk-n>0</span>…</button></div></form>{% endif %}
+</div></aside>
+</div>
+{% else %}
+<div class="board o2-board" id="board" data-csrf="{{ csrf_token() }}">
+{% set quick_stage = ((data.columns|selectattr("stage.code", "equalto", "new")|first) or (data.columns|first) or {"stage": {}}).stage.id %}
+{% for col in data.columns %}{% set folded = col.stage.kind != "open" and not (query or tag or point) %}<section class="col{% if folded %} is-folded{% endif %}" data-stage="{{ col.stage.id }}"{% if folded %} data-fold{% endif %}>
+{% if folded %}<button type="button" class="col-head" data-fold-toggle aria-expanded="false" aria-controls="col-body-{{ col.stage.id }}" title="{% if col.stage.hint %}{{ col.stage.hint }} · {% endif %}Нажмите, чтобы показать или скрыть заказы этапа"><span class="dot" style="background:{{ col.stage.color }}"></span><span class="col-name">{{ col.stage.name }}</span> <span class="o2-count">{{ col.count }}</span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</button>
+{% else %}<div class="col-head" title="{{ col.stage.hint }}"><span class="dot" style="background:{{ col.stage.color }}"></span>{{ col.stage.name }} <span class="o2-count">{{ col.count }}</span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</div>{% endif %}
+<div class="col-body" id="col-body-{{ col.stage.id }}">
+{% if col.stage.id == quick_stage and can_post("order_new") %}<form method="post" action="/orders/new" class="quick"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input class="input input--sm" name="client_name" placeholder="Имя или телефон клиента" maxlength="120" aria-label="Быстрое добавление"><button class="btn btn--secondary btn--sm">Добавить</button></form>{% endif %}
+{% for c in col.cards %}<a class="ocard o2-card{% if waiting.get(c.id) %} waiting{% endif %}" draggable="{{ 'true' if can_post('order_move') else 'false' }}" data-card="{{ c.id }}" href="/orders/{{ c.id }}">
+<div class="o2-t1">{{ odot(c.id) }}{{ wm(c) }}<span class="o2-inner">внутр. № {{ c.id }}</span></div>
+<div class="o2-cli">{{ c.client }}</div>
+{{ items(c.items_text) }}
+<div class="o2-meta">{{ c.point or "Точка не выбрана" }}{% if c.delivery_date %} · {{ c.delivery_date|day }}{% elif c.in_stock %} · Товар в наличии на точке{% endif %}</div>
+{% if c.intercity or c.returning or c.real or labels.get(c.id) or waiting.get(c.id) or notes.get(c.id) %}<div class="o2-tags">{% if c.intercity %}<span class="badge badge--warn" data-intercity-tag>В другой город</span>{% endif %}{% if c.returning %}<span class="badge badge--warn" data-return-label>{{ c.returning }}</span>{% endif %}{% if c.real %}<span class="badge badge--neutral" data-real-stage title="Настоящий этап заказа">{{ c.real }}</span>{% endif %}{% if labels.get(c.id) %}<span class="badge badge--warn" data-origin title="{{ labels[c.id].hint }}">{{ labels[c.id].text }}</span>{% endif %}{% if waiting.get(c.id) %}<span class="badge badge--err" title="Есть задачи правил: откройте заказ">Ждёт действия: {{ waiting[c.id] }}</span>{% endif %}{% if notes.get(c.id) %}<span class="badge badge--neutral" data-note title="{{ notes[c.id] }}">Есть примечание</span>{% endif %}</div>{% endif %}
+<div class="o2-foot">{% if c.sum is not none %}<b>{{ c.sum|money }}</b>{% endif %}{% for t in c.tags %}<span class="badge badge--neutral">{{ t }}</span>{% endfor %}<span class="daymark{% if c.overdue %} is-over{% endif %} ml-auto">{{ c.days }} дн.</span></div></a>{% endfor %}
+</div></section>{% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='office2.js') }}"></script>{% endblock %}

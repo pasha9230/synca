@@ -1,0 +1,121 @@
+/* «Новый вид» of the office's «Заказы» (lane port-office-orders; the prototype docs/ux/prototype-2026-10-30: index.html role «Офис» and
+   order-card-variants.html variant C): only on the pages of templates/office2/ (body.o2, with body.ui-new and its tokens «Строгий»).
+   Light theme only. The board and the list: smaller tiles (~80%), the WebMIM number first, the model bold, the stage first in the list, the
+   side panel of the selection. The card: full screen, three columns that fold and widen; their insides follow the column's width
+   (container queries), never the window's. Without body.o2 nothing here applies. */
+
+/* the pages of the new view follow the window down to 1024 (the panel's other pages keep their 1280) */
+body.o2{min-width:1000px}
+
+/* ---- «Заказы»: the head, the tiles, the filters ---- */
+body.o2 .page-head{margin-bottom:0}
+body.o2 .seg a{display:inline-flex;align-items:center;gap:6px}
+body.o2 .o2-stats{display:flex;flex-wrap:wrap;gap:var(--s-2)}
+body.o2 .o2-stat{display:flex;align-items:baseline;gap:var(--s-2);padding:6px var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-md);background:var(--gray-0)}
+body.o2 .o2-stat .t{font-size:12px;color:var(--gray-500)}
+body.o2 .o2-stat b{font-size:16px;font-variant-numeric:tabular-nums}
+body.o2 .o2-stat.is-warn b{color:var(--err-600)}
+body.o2 .o2-filters{display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:flex-end;padding:var(--s-3) var(--s-4)}
+body.o2 .o2-filters .field{gap:4px;min-width:120px;flex:0 1 auto}
+body.o2 .o2-filters .select{max-width:200px}
+body.o2 .o2-filters .label{font-size:12px;color:var(--gray-500)}
+body.o2 .o2-filters .o2-f-wide{flex:1 1 200px;max-width:320px}
+body.o2 .o2-dates{display:flex;gap:4px;align-items:center}
+body.o2 .o2-dates .input{width:136px}
+body.o2 .o2-icon-btn{padding-left:10px;padding-right:10px}
+body.o2 .o2-filter-on{font-size:13px;padding:6px var(--s-3);border:1px solid var(--primary-200);background:var(--primary-25);border-radius:var(--r-md)}
+
+/* ---- the board: the stage's colour on the head, compact cards ---- */
+body.o2 .o2-board .col{flex:1 1 230px;min-width:220px}
+body.o2 .o2-count{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--gray-100);color:var(--gray-600);font-size:12px;text-align:center}
+body.o2 .o2-card{padding:var(--s-2) var(--s-3);font-size:13px;line-height:1.45}
+body.o2 .o2-card + .o2-card{margin-top:var(--s-2)}
+body.o2 .o2-t1{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+body.o2 .o2-wm{font-weight:600;font-size:14px}
+body.o2 .o2-wm--none{font-weight:400;font-size:12px;color:var(--gray-500)}
+body.o2 .o2-inner{margin-left:auto;font-size:11px;color:var(--gray-400);white-space:nowrap}
+body.o2 .o2-cli{color:var(--gray-700)}
+body.o2 .o2-items{margin-top:2px}
+body.o2 .o2-model{font-weight:600}
+body.o2 .o2-meta{font-size:12px;color:var(--gray-500);margin-top:2px}
+body.o2 .o2-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+body.o2 .o2-tags .badge,body.o2 .o2-foot .badge{margin-top:0}
+body.o2 .o2-foot{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+
+/* ---- «Список»: the stage first, the selection, the side panel (variant 3) ---- */
+body.o2 .o2-stage{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;border-radius:var(--r-sm);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);background:color-mix(in srgb,var(--c) 12%,#fff);font-size:12px;white-space:nowrap}
+body.o2 .o2-stage::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--c)}
+body.o2 .o2-chk{width:36px}
+body.o2 .o2-wm-link{font-weight:600}
+body.o2 .o2-sheet tr.is-sel td{background:var(--primary-25)}
+body.o2 .o2-listwrap{display:flex;gap:var(--s-3);align-items:flex-start}
+body.o2 .o2-listwrap > .o2-list{flex:1 1 auto;min-width:0}
+body.o2 .o2-bulk{flex:0 0 340px;position:sticky;top:var(--s-3);max-height:calc(100vh - 2 * var(--s-3));display:flex;flex-direction:column}
+body.o2 .o2-bulk[hidden]{display:none}
+body.o2 .o2-bulk-head{display:flex;align-items:center;gap:var(--s-2);padding:var(--s-3) var(--s-4);border-bottom:1px solid var(--gray-200)}
+body.o2 .o2-bulk-body{overflow:auto;padding:var(--s-3) var(--s-4);display:flex;flex-direction:column;gap:var(--s-4)}
+body.o2 .o2-bulk-body > *{flex-shrink:0}
+body.o2 .o2-bulk-list{list-style:none;margin:0;padding:0;max-height:220px;overflow:auto;border:1px solid var(--gray-200);border-radius:var(--r-md)}
+body.o2 .o2-bulk-list li{display:flex;gap:var(--s-2);align-items:center;padding:6px var(--s-2);border-bottom:1px solid var(--gray-100);font-size:13px}
+body.o2 .o2-bulk-list li:last-child{border-bottom:0}
+body.o2 .o2-bulk-list .o2-bl-main{flex:1 1 auto;min-width:0}
+body.o2 .o2-bulk-list .o2-bl-row{display:flex;gap:6px;align-items:center;margin-top:2px}
+body.o2 .o2-bulk-list .o2-bl-cli{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-600)}
+body.o2 .o2-bulk-tot{padding:0 2px}
+body.o2 .o2-bulk-sec{display:flex;flex-direction:column;gap:6px}
+body.o2 .o2-bulk-sec h4{margin:0;font-size:14px}
+body.o2 .o2-bulk-sec p{margin:0}
+@media (max-width:1180px){body.o2 .o2-bulk{flex-basis:290px}}
+
+/* ---- the card, variant C: full screen, three columns ---- */
+body.o2-card .page.o2c-page{gap:var(--s-2);padding-top:var(--s-3);padding-bottom:0}
+body.o2-card .o2c-head{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;padding:var(--s-2) var(--s-4);border:1px solid var(--gray-200);border-radius:var(--r-md);background:var(--gray-25)}
+body.o2-card .o2c-back{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--gray-600)}
+body.o2-card .o2c-title{display:flex;align-items:baseline;gap:var(--s-2);flex-wrap:wrap;min-width:0}
+body.o2-card .o2c-wm{font-size:20px;font-weight:700}
+body.o2-card .o2c-wm-none{font-size:15px;font-weight:500;color:var(--gray-500)}
+body.o2-card .o2c-inner{font-size:12px;color:var(--gray-500)}
+body.o2-card .o2c-client{font-size:15px;color:var(--gray-700)}
+body.o2-card .o2c-phone{font-size:13px}
+body.o2-card .o2c-stage{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:12px;font-size:12px;background:color-mix(in srgb,var(--c) 14%,#fff);border:1px solid color-mix(in srgb,var(--c) 45%,transparent)}
+body.o2-card .o2c-stage::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--c)}
+body.o2-card .o2c-body{display:flex;align-items:stretch;height:calc(100vh - 150px);min-height:520px;border:1px solid var(--gray-200);border-radius:var(--r-md);background:var(--gray-0);overflow:hidden}
+body.o2-card .o2c-col{flex:var(--w,1) 1 0;min-width:min(300px,28%);display:flex;flex-direction:column;min-height:0}
+body.o2-card .o2c-col[data-cc="0"]{min-width:min(380px,36%)}
+body.o2-card .o2c-col[data-cc="2"]{min-width:min(280px,26%)}
+body.o2-card .o2c-col.is-off{flex:0 0 40px;min-width:40px}
+body.o2-card .o2c-col.is-off .o2c-colin{display:none}
+body.o2-card .o2c-strip{display:none}
+body.o2-card .o2c-col.is-off .o2c-strip{display:flex;flex-direction:column;align-items:center;gap:var(--s-2);width:40px;height:100%;padding:var(--s-3) 0;border:0;background:var(--gray-50);cursor:pointer;color:var(--gray-600);font:inherit;font-size:13px}
+body.o2-card .o2c-strip span:not(.sb-count){writing-mode:vertical-rl}
+body.o2-card .o2c-strip:hover{background:var(--gray-100)}
+body.o2-card .o2c-colin{display:flex;flex-direction:column;min-height:0;height:100%}
+body.o2-card .o2c-colhead{display:flex;align-items:center;gap:var(--s-2);padding:6px var(--s-3);border-bottom:1px solid var(--gray-200);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--gray-500)}
+body.o2-card .o2c-colhead .icon-btn .i{transform:rotate(180deg)}
+body.o2-card .o2c-scroll{flex:1 1 auto;overflow:auto;padding:var(--s-3);display:flex;flex-direction:column;gap:var(--s-3);container-type:inline-size}
+body.o2-card .o2c-split{flex:0 0 6px;cursor:col-resize;background:var(--gray-100);border-left:1px solid var(--gray-200);border-right:1px solid var(--gray-200)}
+body.o2-card .o2c-split:hover,body.o2-card .o2c-split.is-drag,body.o2-card .o2c-split:focus-visible{background:var(--primary-200)}
+body.o2-card .o2c-split.is-idle{cursor:default;background:var(--gray-50)}
+body.o2-card .o2c-body.is-dragging{user-select:none;cursor:col-resize}
+body.o2-card .o2c-scroll > .card,body.o2-card .o2c-scroll > details.card{margin:0}
+body.o2-card .o2c-tabs{display:flex;gap:4px;flex-wrap:wrap;padding:var(--s-2) var(--s-3) 0}
+body.o2-card .o2c-tab{border:1px solid var(--gray-200);background:var(--gray-0);border-radius:12px;padding:1px 10px;font:inherit;font-size:12px;cursor:pointer;color:var(--gray-600)}
+body.o2-card .o2c-tab.is-on{background:var(--primary-50);border-color:var(--primary-300);color:var(--primary-700)}
+body.o2-card .o2c-feed li[hidden]{display:none}
+body.o2-card .o2c-empty{padding:var(--s-3)}
+/* the window in a column: its own grid follows the column (container queries) */
+body.o2-card .o2c-scroll .owin-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+body.o2-card .o2c-scroll .owin-stages{flex-wrap:wrap;overflow-x:visible}       /* every stage seen in a column: the strip wraps */
+@container (max-width:560px){
+  body.o2-card .o2c-scroll .owin-grid{grid-template-columns:minmax(0,1fr)}
+  body.o2-card .owin-add{flex-wrap:wrap}
+  body.o2-card .owin-head .entity-head{flex-wrap:wrap}
+  body.o2-card .ocard-hint .card-head{flex-wrap:wrap}
+}
+@container (max-width:420px){
+  body.o2-card .owin-items td.owin-iqty{white-space:normal}
+  body.o2-card .entity-sec .card-head .sub{display:none}
+}
+@container (min-width:900px){body.o2-card .o2c-scroll .owin-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:1100px){body.o2-card .o2c-body{height:calc(100vh - 170px)}}
+@container (max-width:360px){body.o2-card .o2c-feed form.row{flex-direction:column;align-items:stretch}}

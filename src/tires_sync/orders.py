@@ -1237,7 +1237,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
-                                      "tags": tag_names, "intercity": cid in intercity,
+                                      "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
                                       "returning": order_oth.label_of(plans.get(cid)) if state else ""})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)

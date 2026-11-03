@@ -36,12 +36,15 @@ def _row(card: dict, hidden=frozenset()) -> list:
             card["delivery_date"] or (oth_sale.IN_STOCK if card.get("in_stock") and card["stage"]["kind"] == "open" else ""), card["webmim_number"], card["webmim_status"], card["comment"], card["avito_chat"]]
 
 
-def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", money: bool = True) -> bytes:
-    """The file (bytes) with the orders the page would list under these filters; without `money` (a point) no column of MONEY."""
+def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", money: bool = True, only=None, start: str = "",
+          end: str = "") -> bytes:
+    """The file (bytes) with the orders the page would list under these filters; without `money` (a point) no column of MONEY. «Новый вид»
+    (lane port-office-orders): `only` — the selected orders of the list among them, `start` / `end` — «Дата создания» (ГГГГ-ММ-ДД)."""
     import openpyxl
     from openpyxl.styles import Font
     data = orders.board(conn, now, point_id=point_id, tag=tag, query=query)
-    ids = sorted((c["id"] for col in data["columns"] for c in col["cards"]), reverse=True)
+    ids = sorted((c["id"] for col in data["columns"] for c in col["cards"] if (only is None or c["id"] in only)
+                  and (not start or c["created"] >= start) and (not end or c["created"] <= end)), reverse=True)
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = "Заказы"

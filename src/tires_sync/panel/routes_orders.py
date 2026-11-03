@@ -16,10 +16,11 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import message_texts, onboarding_texts, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
+from .. import message_texts, onboarding_texts, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
+from .routes_design import office_new, office_page
 from .routes_main import context
 
 log = logging.getLogger(__name__)
@@ -433,6 +434,51 @@ def ask_back(card_id: int, stage: dict):
     return redirect(where)
 
 
+def _day(value) -> str:
+    """A date of a filter (ГГГГ-ММ-ДД) or ""."""
+    text = str(value or "").strip()[:10]
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return ""
+
+
+def in_dates(data: dict, start: str, end: str) -> dict:
+    """«Дата создания» of «Заказы» in «Новый вид» (lane port-office-orders): only the cards made from `start` to `end` (either may be ""),
+    the columns' counts and sums of what is left; the tiles above stay those of the whole board, as in the prototype."""
+    if not start and not end:
+        return data
+    columns = []
+    for col in data["columns"]:
+        cards = [c for c in col["cards"] if (not start or c["created"] >= start) and (not end or c["created"] <= end)]
+        total = None if col["sum"] is None else round(sum(c["sum"] or 0 for c in cards), 2)
+        columns.append(dict(col, cards=cards, count=len(cards), sum=total))
+    return dict(data, columns=columns)
+
+
+CARD_LAYOUT = "order.card.layout"      # user_pref: the three columns of the card in «Новый вид» — {"w": [3 shares], "off": [3 folded]}
+
+
+def card_layout(conn, login) -> dict:
+    """The columns of the order's card variant C as the person left them (user_pref), else the prototype's default."""
+    value = user_prefs.get(conn, login, CARD_LAYOUT) if login else None
+    return clean_layout(value) or {"w": [1.15, 1.0, 0.85], "off": [False, False, False]}
+
+
+def clean_layout(value):
+    """A layout sent by the page, checked: three shares 0.2–5 and three folds, never all three folded; None if it is not one."""
+    if not isinstance(value, dict):
+        return None
+    w, off = value.get("w"), value.get("off")
+    if not isinstance(w, list) or not isinstance(off, list) or len(w) != 3 or len(off) != 3:
+        return None
+    if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not 0.2 <= x <= 5 for x in w) or any(not isinstance(x, bool) for x in off):
+        return None
+    if all(off):
+        return None
+    return {"w": [round(float(x), 3) for x in w], "off": list(off)}
+
+
 def card_or_404(conn, card_id):
     try:
         return orders.get_card(conn, card_id)
@@ -552,12 +598,18 @@ def register(app) -> None:
         table = list_table(conn, rows, only) if view == "list" else None
         notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
                                    clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
+        start, end = (_day(request.args.get(k)) for k in ("from", "to")) if office_new() else ("", "")
+        if start or end:                                         # «Дата создания» (the new view only): the list and the file the same
+            data = in_dates(data, start, end)
+            rows = [r for r in rows if (not start or r["card"]["created"] >= start) and (not end or r["card"]["created"] <= end)]
+            table = list_table(conn, rows, only) if view == "list" else None
         total = sum(col["count"] for col in data["columns"])
         if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03),
             found = bool(query or tag or returning)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only
                                        or (found and col["count"])])
-        return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes,
+        extra = dict(date_from=start, date_to=end, bulk_targets=order_bulk.targets(conn), bulk_reason=order_bulk.DEFAULT_REASON, responsible_options=_responsible_options(app, conn)) if office_new() else {}
+        return render_template(office_page("orders.html"), data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes, **extra,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                stages=[] if own_point() else orders.list_stages(conn),
                                dots=_dots(conn), rows=rows, total_cards=total, only_stage=only, returning=returning, returning_filters=order_oth.FILTERS,
@@ -605,7 +657,8 @@ def register(app) -> None:
             line["stage"] = stage[line["order"]]
         columns = orders_list.choice(conn, session["user"], money, point=own_point() is not None)
         keep = {k: v for k, v in (("v", "list"), ("p", request.args.get("p", "")), ("t", request.args.get("t", "")),
-                                  ("q", request.args.get("q", "")), ("s", only or "")) if v}
+                                  ("q", request.args.get("q", "")), ("s", only or ""), ("from", _day(request.args.get("from")) if office_new() else ""),
+                                  ("to", _day(request.args.get("to")) if office_new() else "")) if v}       # «Дата создания»: the new view's
         return {"rows": lines, "columns": columns, "shown": [c["name"] for c in columns if c["shown"]], "totals": orders_list.totals(found, money),
                 "numbers": orders_list.NUMBERS, "page": page, "pages": pages, "orders": len(ids), "keep": keep,
                 "link": lambda n: "/orders?" + urlencode(dict(keep, page=n))}
@@ -622,7 +675,7 @@ def register(app) -> None:
         elif not orders_list.save(conn, session["user"], list_money(), request.form.getlist("order"), request.form.getlist("shown"), now_iso(),
                                    point=own_point() is not None):
             flash("Оставьте хотя бы одну колонку.")
-        keep = {k: request.form.get(k, "").strip()[:80] for k in ("p", "t", "q", "s")}
+        keep = {k: request.form.get(k, "").strip()[:80] for k in ("p", "t", "q", "s", "from", "to")}
         return redirect("/orders?" + urlencode(dict({"v": "list"}, **{k: v for k, v in keep.items() if v})))
 
     def hint_folded(where: str) -> bool:
@@ -638,6 +691,21 @@ def register(app) -> None:
         return orders.stage_name(get_conn(), code)
 
     app.jinja_env.globals.update(hint_folded=hint_folded, stage_hint=stage_hint, point_hint=onboarding_texts.point_hint, stage_name=stage_name)
+
+    @app.route("/orders/card/layout", methods=["POST"])
+    @login_required
+    def order_card_layout():
+        """The columns of the order's card in «Новый вид» folded and widened: one's own setting (user_pref), sent by the page as JSON in `layout`."""
+        try:
+            layout = clean_layout(json.loads(request.form.get("layout", "")))
+        except ValueError:
+            layout = None
+        if layout is None:
+            return jsonify(ok=False), 400
+        if current_user()["as_point"] is not None:                       # one's own setting is the office's: not from a point
+            return jsonify(ok=False), 409
+        user_prefs.put(get_conn(), session["user"], CARD_LAYOUT, layout, now_iso())
+        return jsonify(ok=True)
 
     @app.route("/orders/hint/fold", methods=["POST"])
     @login_required
@@ -657,8 +725,10 @@ def register(app) -> None:
         orders.ensure_pipeline(conn, local_iso())
         stamp = local_now()
         try:
+            ids = {i for i in (_int(x) for x in request.args.get("ids", "").split(",")) if i} or None     # «Excel» of the selected (new view)
             data = orders_export.build(conn, stamp, point_id=own_point() or _int(request.args.get("p")), tag=request.args.get("t", "").strip()[:30],
-                                       query=request.args.get("q", "").strip()[:80], money=own_point() is None)   # a point: no sums
+                                       query=request.args.get("q", "").strip()[:80], money=own_point() is None,   # a point: no sums
+                                       only=ids, start=_day(request.args.get("from")), end=_day(request.args.get("to")))
         except ImportError:                                           # the library of Excel files is not installed on this machine
             flash("Выгрузка в Excel недоступна: на сервере не установлена библиотека openpyxl.")
             return redirect("/orders")
@@ -1049,7 +1119,8 @@ def register(app) -> None:
             if bind:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         return render_template(
-            "order_card.html", messages=messages, open_messages=open_messages,
+            office_page("order_card.html"), messages=messages, open_messages=open_messages,
+            **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
