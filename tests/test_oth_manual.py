@@ -314,7 +314,13 @@ def test_the_card_of_a_gone_position_says_why_it_does_not_go_to_avito(tmp_path):
     draft = settings_store.create_draft(conn, {"price_overrides": {"1:555": {"price": 7000}}}, NOW)
     settings_store.confirm_draft(conn, draft, NOW, "owner", strong=True)
     html = card_html(owner, "555")
-    assert "уйдёт на Авито по своей цене 7000 ₽ (из архива каталога)" in html and "нужна своя цена" not in html
+    assert "раньше не публиковалась в этом аккаунте" in html and "нужна своя цена" not in html      # never on Avito here: no Id to come back under
+    conn.execute("INSERT INTO retired_ad (account_id, goods_id, ad_id, snapshot, identity, removed_at) VALUES (1, '555', '555', '<Ad/>', '[]', ?)",
+                 (NOW,))
+    conn.commit()
+    html = card_html(owner, "555")
+    assert "уйдёт на Авито по своей цене 7000 ₽ (из архива каталога)" in html
+    conn.execute("DELETE FROM retired_ad")
     conn.execute("DELETE FROM catalog_item")                            # nothing to build the ad from, and no card to open either
     conn.commit()
     with app.test_request_context():
@@ -431,3 +437,63 @@ def test_the_page_of_oth_lists_the_own_stock_and_filters_by_point(tmp_path):
     assert "data-oth-manual-list" not in page and "/orders/%d" % old in page
     viewer, _c = person(app, "viewer")
     assert viewer.get("/oth").status_code in (200, 302, 403)
+
+
+def test_a_gone_position_never_published_in_an_account_never_gets_a_new_id(tmp_path, capsys):
+    """feed-reviewer 2026-11-03: built from the archive it would go under live_id_of — a new Id; it goes nowhere, the journal says why once."""
+    import json
+    from tires_sync import catalog_archive
+    prepared(tmp_path, price_overrides={"1:199": {"price": 7000}, "2:199": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    conn = connect(tmp_path)
+    data = json.loads(conn.execute("SELECT data FROM catalog_item WHERE goods_id = '105'").fetchone()[0])
+    data.update(goods_id="199", code="TS199", width=235, name=data["name"].replace("205", "235"),
+                name_orig=data["name_orig"].replace("205", "235"))          # another tire: no lot of the same tire carries it
+    conn.execute("INSERT INTO catalog_item (goods_id, supplier_id, data, first_seen, last_seen, last_stock, last_price, gone_since) "
+                 "VALUES ('199', 1, ?, ?, ?, 0, 5000, ?)", (json.dumps(data, ensure_ascii=False), NOW, NOW, NOW))
+    conn.commit()
+    conn.close()
+    manual(tmp_path, "199", 4)
+    capsys.readouterr()
+    assert run(tmp_path, FIVE) == 0
+    passed(capsys)
+    assert run(tmp_path, FIVE) == 0
+    for acct in (1, 2):
+        assert not any(i.startswith("199") for i in ads_of(public(tmp_path, acct)))
+        assert "199" not in published(tmp_path, acct)
+    conn = connect(tmp_path)
+    told = sorted(json.loads(r[0])["account"] for r in conn.execute("SELECT detail FROM audit WHERE action = 'oth_manual_no_id'"))
+    assert told == [1, 2]
+    from tires_sync.panel.routes_catalog_oth import account_status
+    from tires_sync.webmim import parse_unload
+    assert "раньше не публиковалась" in account_status(conn, "199", 2, parse_unload(FIVE, "T1"))[1]
+    conn.close()
+
+
+def test_the_saved_ad_changes_only_its_price_line():
+    from tires_sync import sync
+    ad = ET.fromstring("<Ad><Price>4900</Price><Description>💰 Цена: 4900 руб. за 1 шт.\nДоставка 4900 руб. отдельно\n4900 ₽</Description></Ad>")
+    sync._set_price(ad, 7300)
+    assert ad.findtext("Price") == "7300"
+    assert ad.findtext("Description") == "💰 Цена: 7300 руб. за 1 шт.\nДоставка 4900 руб. отдельно\n4900 ₽"
+
+
+def test_the_page_of_oth_hides_test_points_and_ignores_an_unknown_one(tmp_path):
+    from tests.test_order_reserve import card_at as order_on
+    app = make_app(tmp_path)
+    owner = app.test_client()
+    login(owner)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, T)
+    test = a_point(conn, "Тест склад")
+    old = order_on(conn, "oth", T)
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (test, old))       # a test order on OTH
+    conn.commit()
+    oth_manual.set_qty(conn, "100", a_point(conn), 3, NOW, "owner")
+    html = owner.get("/oth").get_data(as_text=True)
+    assert '<option value="%d"' % test not in html and "Юнона</option>" in html
+    assert "Заказов на ОТХ нет" not in html                              # the test order is still listed as before
+    page = owner.get("/oth?point=99999").get_data(as_text=True)
+    assert "data-oth-manual-list" in page                                # an unknown point: the whole page
+    only = owner.get("/oth?point=%d" % a_point(conn)).get_data(as_text=True)
+    assert "Заказов на ОТХ нет" in only and "data-oth-manual-list" in only

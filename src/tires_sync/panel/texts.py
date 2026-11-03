@@ -121,6 +121,9 @@ def audit_text(entry: dict) -> str:
         return "ОТХ: заказ №%s вернул %s шт. на ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
     if action == "oth_manual":
         return "Свой остаток (ОТХ) %s, точка №%s: %s → %s шт." % (d.get("goods_id", "?"), d.get("point", "?"), d.get("before", "?"), d.get("after", "?"))
+    if action == "oth_manual_no_id":
+        return "Свой остаток (ОТХ) %s: в аккаунте №%s позиция раньше не публиковалась — новый Id не выдаём, %s шт. не ушли на Авито" % (
+            d.get("goods_id", "?"), d.get("account", "?"), d.get("qty", "?"))
     if action == "oth_manual_no_price":
         return "Свой остаток (ОТХ) %s: аккаунт №%s без своей цены — %s шт. не ушли на Авито" % (d.get("goods_id", "?"), d.get("account", "?"), d.get("qty", "?"))
     if action == "point_action":

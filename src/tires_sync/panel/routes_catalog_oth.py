@@ -62,6 +62,8 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
     if offer is None and not published and (not sync._removed_for_stock(conn, account_id, goods_id)
                                             or sync._off_by_the_owner(goods_id, before[1], eff, left_out, True)):
         return False, "сохранённое объявление снято настройкой (не по остатку) — так оно и остаётся снятым"
+    if offer is not None and not published and not before:
+        return False, "раньше не публиковалась в этом аккаунте — на Авито не уходит (новый Id не выдаём)"
     if offer is not None and not published and before:
         id_map = dict(mirror_feed.adopted_maps(conn, account_id)[0])
         if mirror_feed.alias_scheme(conn, account_id) and goods_id not in id_map:
@@ -133,8 +135,11 @@ def register(app) -> None:
         conn = get_conn()
         data = order_oth.stock(conn)
         own = manual_list(conn)
-        places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"]}
+        test = oth_stock._test_points(conn)
+        places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"] and r["point_id"] not in test}
         point = request.args.get("point", type=int)
+        if point not in {p[0] for p in places}:                       # an unknown point, or one with nothing left: the whole page
+            point = None
         if point:
             data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
             own = [r for r in own if r["point_id"] == point]

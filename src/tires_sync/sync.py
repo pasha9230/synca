@@ -109,12 +109,12 @@ def _show_count(ad, count: int) -> None:
         node.text = oth_stock.with_count(node.text or "", count)
 
 
-_PRICE_IN_TEXT = r"(?<!\d)%s(?=\s*(?:руб|₽))"
+_PRICE_IN_TEXT = r"(Цена:[^\S\n]*)%s(?=[^\S\n]*(?:руб|₽))"           # the price line of the template («💰 Цена: {price} руб. за 1 шт.») only
 
 
 def _set_price(ad, price: int) -> None:
-    """A saved ad at a new price (a gone position on «Свой остаток» at its own price): «Price» and, in the description, the old price where it
-    stands before «руб»/«₽» (the template's «Цена: {price} руб.»)."""
+    """A saved ad at a new price (a gone position on «Свой остаток» at its own price): «Price» and, in the description, the old price of the
+    template's price line «Цена: {price} руб.» (no other number of the text)."""
     node = ad.find("Price")
     old = (node.text or "").strip() if node is not None else ""
     if node is None:
@@ -122,7 +122,7 @@ def _set_price(ad, price: int) -> None:
     node.text = str(int(price))
     text = ad.find("Description")
     if old.isdigit() and text is not None and text.text and old != str(int(price)):
-        text.text = re.sub(_PRICE_IN_TEXT % re.escape(old), str(int(price)), text.text)
+        text.text = re.sub(_PRICE_IN_TEXT % re.escape(old), lambda m: m.group(1) + str(int(price)), text.text)
 
 
 def _snapshot_text(ad) -> str:
@@ -426,11 +426,13 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
         if code not in ev.ok and code not in retired:
             continue                                                      # nothing to publish it from (hidden as same_tire and no carrier)
         ad_id = retired[code][0] if code in retired else live_id_of(code)
-        before = store.retired_ad_of(conn, acct, code) if code in getattr(ev, "oth_offers", {}) else None
-        if before and REISSUE_MARK.sub("", before[0]) != REISSUE_MARK.sub("", ad_id):
-            oth.pop(code)                                                 # a gone position built afresh never comes back under a new Id
-            points.pop(code, None)
-            continue
+        if code in getattr(ev, "oth_offers", {}):                         # a gone position built afresh: only under the Id it had in this account
+            before = store.retired_ad_of(conn, acct, code)
+            if not before or REISSUE_MARK.sub("", before[0]) != REISSUE_MARK.sub("", ad_id):
+                oth.pop(code)                                             # never published here, or its Id was another: never a new Id
+                points.pop(code, None)
+                ev.oth_no_id[code] = "never" if not before else before[0]
+                continue
         if (live_ids.get(ad_id) not in (None, code)) or ad_id in set(ev.inherit.values()) or ad_id in foreign:
             oth.pop(code)                                                 # its Id is another ad's now: never two ads under one Id
             points.pop(code, None)
@@ -864,6 +866,7 @@ def run_cycle(
         conn.commit()
         from . import oth_manual
         oth_manual.note_no_price(conn, acct, ev.oth_no_price, store.moscow_iso())
+        oth_manual.note_no_price(conn, acct, oth_manual.manual_of(conn, ev.oth_no_id), store.moscow_iso(), kind="id")
     live = live_titles_of(out_dir)
     titles = dict(mirror_feed.bound_titles(conn, acct), **live)
     live_unread = not live and out_dir is not None and (Path(out_dir).parent / "avito_feed.xml").exists()   # a broken file: do not forget renames

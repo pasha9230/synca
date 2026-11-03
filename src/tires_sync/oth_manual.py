@@ -132,13 +132,29 @@ def gone_price(conn, goods_id: str, settings) -> Optional[int]:
 
 
 NO_PRICE_KEY = "oth_manual_no_price:%d"         # app_state: the codes of an account last told «нет своей цены» (told once, again after a change)
+NO_ID_KEY = "oth_manual_no_id:%d"               # the same for «раньше не публиковалась в этом аккаунте» (no Id of its own to come back under)
+_NOT_SENT = {"price": (NO_PRICE_KEY, "нет своей цены — на Авито не уходит", "oth_manual_no_price", "no_price"),
+             "id": (NO_ID_KEY, "раньше не публиковалась в этом аккаунте (или под другим Id) — новый Id не выдаём, на Авито не уходит",
+                    "oth_manual_no_id", "no_id")}
 
 
-def note_no_price(conn, account_id: int, found: Dict[str, int], now: str) -> None:
-    """The cycle of an account did not count «Свой остаток» of gone positions for want of an own price: a line of the log and the journal
-    per position newly so (the owner sees why the ad did not come back); a position that got its price or lost its rows is forgotten."""
+def manual_of(conn, codes) -> Dict[str, int]:
+    """code → its manual pieces (no test point), for the codes given."""
+    from .oth_stock import manual_rows
+    wanted, found = set(codes), {}
+    for r in manual_rows(conn):
+        if r["goods_id"] in wanted:
+            found[r["goods_id"]] = found.get(r["goods_id"], 0) + int(r["qty"])
+    return found
+
+
+def note_no_price(conn, account_id: int, found: Dict[str, int], now: str, kind: str = "price") -> None:
+    """The cycle of an account did not send «Свой остаток» of gone positions (`kind` "price": no own price; "id": never published in this
+    account, so no Id of its own): a line of the log and the journal per position newly so (the owner sees why the ad did not come back);
+    a position that got it or lost its rows is forgotten."""
     from . import store
-    key = NO_PRICE_KEY % int(account_id)
+    key_of, text, action, why = _NOT_SENT[kind]
+    key = key_of % int(account_id)
     try:
         before = set(json.loads(store.get_state(conn, key) or "[]"))
     except (TypeError, ValueError):
@@ -147,9 +163,9 @@ def note_no_price(conn, account_id: int, found: Dict[str, int], now: str) -> Non
     from .oth_stock import manual_rows
     for code in sorted(set(found) - before):
         for row in (r for r in manual_rows(conn) if r["goods_id"] == code):
-            _log(conn, code, row["point_id"], row["qty"], row["qty"], now, "cycle",
-                 "%s: нет своей цены — на Авито не уходит" % display_name(conn, int(account_id)), "no_price:%d" % int(account_id))
-        _audit(conn, now, "cycle", "oth_manual_no_price", {"account": int(account_id), "goods_id": code, "qty": int(found[code])})
+            _log(conn, code, row["point_id"], row["qty"], row["qty"], now, "cycle", "%s: %s" % (display_name(conn, int(account_id)), text),
+                 "%s:%d" % (why, int(account_id)))
+        _audit(conn, now, "cycle", action, {"account": int(account_id), "goods_id": code, "qty": int(found[code])})
     if set(found) != before:
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(sorted(found))))
     conn.commit()
