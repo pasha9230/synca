@@ -103,6 +103,8 @@ def test_on_for_everybody_every_screen_of_the_point_is_the_new_one(w):
 
 def test_the_office_never_gets_the_point_screens(w):
     flag(w["conn"], "all")
+    store.set_state(w["conn"], "ui_new.office", "all")                  # the office's own «Новый вид» on too: still not the point's screens
+    w["conn"].commit()
     for page in ("/my-point", "/calls", "/chats", "/tasks", "/whats-new"):
         assert NEW not in w["owner"].get(page).get_data(as_text=True), page
 
