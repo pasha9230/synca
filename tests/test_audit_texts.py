@@ -16,6 +16,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "tires_sync"
 # until it is named here, a place gone from the code too.
 COMPUTED = {
     "tasks.close": {"callback_done", "callback_cancel"},                     # «Задачи» (2026-10-31; inquiry.close_callback before)
+    "oth_manual.note_no_price": {"oth_manual_no_price", "oth_manual_no_id"},  # «Свой остаток (ОТХ)»: not sent for want of a price / an Id
 }
 
 

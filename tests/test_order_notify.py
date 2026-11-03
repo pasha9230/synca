@@ -114,12 +114,17 @@ def test_the_alert_is_delivered_by_the_chosen_channel_and_written_in_the_feed_of
 def test_a_refusal_of_the_channel_falls_back_to_the_owner_and_never_raises(tmp_path):
     conn, box = env(tmp_path)
     order_notify.set_user_chat(conn, "worker2", "555", NOW, "owner")
-    tg = ScriptedHttp((403, {}), TG_OK)                                                                         # the user's chat refuses, the owner's chat takes the fallback
-    c = card(conn, "worker2")
+    tg = ScriptedHttp((403, {}), TG_OK)                                                                         # the user's chat refuses: the red record is
+    c = card(conn, "worker2")                                                                                   # theirs only (the owner 2026-11-03)
+    status = order_notify.deliver(conn, box, c, "Позиция появилась", NOW, tg_http=tg)
+    assert status.startswith("не отправлено") and len(tg.calls) == 1 and "ответственному" in status
+    assert any("не отправлено" in e["text"] for e in orders.list_events(conn, c["id"]))
+    tg = ScriptedHttp(TG_OK, TG_OK)                                                                             # nobody answers for it: both owners
+    c = card(conn, "ghost")                                                                                     # (worker2 is an owner by role)
     status = order_notify.deliver(conn, box, c, "Позиция появилась", NOW, tg_http=tg)
     assert status.startswith("не отправлено") and len(tg.calls) == 2
-    assert json.loads(tg.calls[1][3])["chat_id"] == "1000" and "некому отправить" in sent_text(tg.calls[1]).lower()
-    assert any("не отправлено" in e["text"] for e in orders.list_events(conn, c["id"]))
+    assert {json.loads(call[3])["chat_id"] for call in tg.calls} == {"1000", "555"}
+    assert all("некому отправить" in sent_text(call).lower() for call in tg.calls)
     bare = store.connect(str(tmp_path / "bare.db"))
     orders.ensure_pipeline(bare, NOW)
     nobody = order_notify.deliver(bare, None, card(bare, "ghost"), "текст", NOW)                                # no key, no Telegram at all: only the card tells

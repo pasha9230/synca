@@ -65,7 +65,7 @@ def test_arrived_is_undone_back_to_the_way_and_the_office_is_told(tmp_path, cloc
     assert "Отметка «Приехал» отменена" in page and "не отзывается" in page
     assert state(conn, card) == before                                                  # the stage, the moment, the date, the reason
     assert len(to_client(app)) == 1                                                     # nothing new to the client, nothing recalled
-    assert told and told[0][0] == ["owner", "zaman"] and "отменила отметку «Приехал»" in told[0][1]
+    assert told and told[0][0] == ["owner"] and "отменила отметку «Приехал»" in told[0][1]
     [record] = [e for e in orders.list_events(conn, card) if "отменила отметку" in e["text"]]
     assert record["level"] == "yellow" and point_log.UNDO_HINT in record["text"]
     assert [r["kind"] for r in point_log.history(conn, pid)][:2] == ["undo", "arrived"]
@@ -86,7 +86,7 @@ def test_issued_is_undone_into_the_same_stay_at_the_point(tmp_path, clock, told)
     assert state(conn, card) == before and to_client(app) == []                          # the same stay: no new «можно забирать»
     texts = [e["text"] for e in orders.list_events(conn, card)]
     assert reserve_lines() == lines_before                                             # the undo's move leaves no «Резерв…» line of its own
-    assert any("снова на этапе «Товар на точке», резерв до 16.10.2026" in t for t in texts)
+    assert any("снова на этапе «На точке, ждём клиента», резерв до 16.10.2026" in t for t in texts)
     assert not any("[резерв:на-отх:" in t for t in texts)                               # no reminder went: a later one still counts
 
 

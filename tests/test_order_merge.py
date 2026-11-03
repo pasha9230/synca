@@ -248,7 +248,7 @@ def test_the_table_keeps_the_old_rows_and_adds_the_new_ones_with_their_webmim_nu
     for src in (a, b):
         now_rows = order_sheet.rows_of(conn, src, T)
         ops = order_sheet.changes(now_rows, written[src], order_sheet.followed(conn, src))
-        assert len(ops) == 1 and ops[0]["fields"]["Кол-во"] == 0 and ops[0]["fields"]["Этап"] == "Отмена / невыкуп"
+        assert len(ops) == 1 and ops[0]["fields"]["Кол-во"] == 0 and ops[0]["fields"]["Этап"] == "Отмена"
         assert "Примечание" not in ops[0]["fields"]                               # the old row's note is never rewritten
 
 

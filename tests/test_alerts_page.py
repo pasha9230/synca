@@ -151,6 +151,9 @@ def test_the_users_own_records_are_not_alerts_for_them_except_red(tmp_path):
     html = client.get("/alerts").get_data(as_text=True)                       # one's own failure stays until «Разобрался»
     assert "сбой" in html and "Отправлен ответ клиенту" not in html and "Резерв кончается" not in html and "Заказ создан" not in html
     assert counter(client.get("/").get_data(as_text=True)) == (1, True)
+    assert counter(worker2.get("/").get_data(as_text=True)) == (0, False)        # not theirs: the owner answers for it (2026-11-03)
+    conn.execute("UPDATE order_card SET responsible = 'worker2' WHERE id = ?", (cid,))
+    conn.commit()
     html = worker2.get("/alerts").get_data(as_text=True)                        # somebody else's records are alerts
     assert "Отправлен ответ клиенту: да" in html and "сбой" in html and "Заказ создан" in html
     assert counter(worker2.get("/").get_data(as_text=True)) == (4, True)

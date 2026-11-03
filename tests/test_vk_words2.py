@@ -1,6 +1,6 @@
 """The words of the real point messages (the owner 2026-10-25, the audit of «Входящие»): «Привезли», «Пришли», «Шины приехали», «5245392 шина
 приехала!» are «приехал»; «Забрала», «выдала», «отдал клиенту» are «выдал»; «Возврат отдал», «отправлен на возврат» are a new command: the
-tyres went back to the supplier — the order goes to «Возврат» (only from «Товар на точке», «На ОТХ», «Отказ/невыкуп»), the client is told
+tyres went back to the supplier — the order goes to «Вернули поставщику» (only from «На точке, ждём клиента», «На ОТХ», «Отказ/невыкуп»), the client is told
 nothing. Every rule of doubt (a negation, «?», a part, a defect, «клиент», two commands, two numbers) holds for the new words too."""
 from __future__ import annotations
 
@@ -166,7 +166,7 @@ def test_a_return_without_the_amount_leaves_the_stage_and_asks_the_responsible(t
     assert got["return_kind"] == "supplier" and got["return_reason"] == mgr.RETURN_REASON          # kept: only the amount is left to fill
     events = _events(conn, card)
     assert mgr.RETURN_LINE in [t for t, _ in events]
-    assert [lvl for t, lvl in events if "заполните сумму возврата и переведите в «Возврат»" in t] == ["yellow"]
+    assert [lvl for t, lvl in events if "заполните сумму возврата и переведите в «Вернули поставщику»" in t] == ["yellow"]
     assert not [t for t, lvl in events if lvl == "red"]
     again = mgr.dispatch(conn, "r2", "111", "возврат отдал 5259052", None, NOW)                     # a repeat adds no second record
     assert "уже" in again and len(_events(conn, card)) == len(events)
@@ -203,7 +203,7 @@ def test_a_return_already_marked_is_not_repeated(tmp_path):
 
 
 def test_a_return_never_tells_the_client(tmp_path):
-    """«Возврат отдал» in reply to the order line on «Товар на точке»: no «можно забирать», no message to the client at all."""
+    """«Возврат отдал» in reply to the order line on «На точке, ждём клиента»: no «можно забирать», no message to the client at all."""
     app, client, tok, conn, pid, card = ready(tmp_path, SENT)
     orders.move_card(conn, card, next(s["id"] for s in orders.list_stages(conn) if s["code"] == "at_point"), NOW, "o")
     before = len(to_client(app))
@@ -234,7 +234,7 @@ def test_the_hint_asks_for_a_reply_or_a_number():
 
 
 def test_a_return_of_an_order_cancelled_not_for_not_buying_is_a_question(tmp_path):
-    """«Отмена / невыкуп» with another reason: the tyres never came to the point, «возврат отдал» does not fit."""
+    """«Отмена» with another reason: the tyres never came to the point, «возврат отдал» does not fit."""
     conn, pid, _ = setup(tmp_path)
     card = _webmim(conn, pid, 5259053, "at_point")
     orders.move_card(conn, card, _stage_id(conn, "cancel"), NOW, "o", {"cancel_reason": "отменил клиент"})

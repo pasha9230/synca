@@ -32,10 +32,11 @@
 {% if data.summary.sum_open is not none %}<div class="tile"><span class="tile-label">Сумма в работе</span><span class="tile-value">{{ data.summary.sum_open|money }}</span><span class="tile-sub">по ценам продажи</span></div>{% endif %}{# a point: no sums (orders.board) #}
 </div>{% endif %}
 <form method="get" action="/orders" class="filters filters--flat">
-<input type="hidden" name="v" value="{{ view }}">{% if only_stage %}<input type="hidden" name="s" value="{{ only_stage }}">{% endif %}
+<input type="hidden" name="v" value="{{ view }}">{% if only_stage and not stages %}<input type="hidden" name="s" value="{{ only_stage }}">{% endif %}
 <div class="field" style="width:260px"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, номер"></div></div>
 {% if not point_view %}<div class="field" style="width:200px"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for p in points %}<option value="{{ p.id }}"{% if point == p.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>{% endif %}
 <div class="field" style="width:160px"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}"></div>
+{% if stages %}<div class="field" style="width:220px"><span class="label">Этап</span><select class="select" name="s" data-stage-filter><option value="">Все</option>{% for s in stages %}<option value="{{ s.id }}"{% if only_stage == s.id %} selected{% endif %}>{{ s.name }}{% if not s.on_board %} (нет на доске){% endif %}</option>{% endfor %}</select></div>{% endif %}
 <button class="btn btn--secondary" style="height:40px">Показать</button><a class="btn btn--link-gray" style="height:40px" href="/orders?v={{ view }}">Сбросить</a>
 </form>
 {% if only_stage %}<p class="small" data-only-stage="{{ only_stage }}">Только этап «{{ data.columns[0].stage.name }}» · <a href="/orders?v={{ view }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}{% if point and not current_user().point_id %}&amp;p={{ point }}{% endif %}{% if tag %}&amp;t={{ tag|urlencode }}{% endif %}">все этапы</a></p>{% endif %}

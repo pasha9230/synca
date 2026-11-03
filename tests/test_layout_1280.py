@@ -62,13 +62,16 @@ def test_the_inbox_shows_itself_in_the_head_only_when_something_came(tmp_path, m
     assert "Входящие (3)" in top                                                               # and in the menu with the count
 
 
-def test_closed_stages_are_folded_columns_and_open_ones_are_not(tmp_path, monkeypatch):
+def test_closed_stages_on_the_board_are_folded_columns_and_open_ones_are_not(tmp_path, monkeypatch):
     client, tok, conn = setup(tmp_path, monkeypatch)
     new_card(client, tok)
     page = client.get("/orders").get_data(as_text=True)
     stages = {s["code"]: s for s in orders.list_stages(conn)}
     for code, s in stages.items():
         col = re.search(r'<section class="col([^"]*)" data-stage="%d"([^>]*)>(.*?)</section>' % s["id"], page, re.S)
+        if code in orders.OFF_BOARD:                       # the owner 2026-11-03: «Отмена» and «Вернули поставщику» have no column at all
+            assert not col and not s["on_board"], code
+            continue
         assert col, code
         folded = s["kind"] != "open"
         assert ("is-folded" in col.group(1)) == folded and ("data-fold" in col.group(2)) == folded, code
@@ -78,6 +81,7 @@ def test_closed_stages_are_folded_columns_and_open_ones_are_not(tmp_path, monkey
         else:
             assert "data-fold-toggle" not in col.group(3)
     assert {c for c, s in stages.items() if s["kind"] != "open"} == {"shipped", "done", "cancel", "return"}      # «Отправлен» (2026-11-02): a successful stage, folded like «Выполнено»
+    assert page.count("data-fold-toggle aria-expanded") == 2                     # the folded ones left: «Отправлен в ТК» and «Выполнено»
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     assert '[data-fold-toggle]' in js and 'classList.toggle("is-folded")' in js and '"aria-expanded"' in js
     css = (STATIC / "panel.css").read_text(encoding="utf-8")

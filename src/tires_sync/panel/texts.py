@@ -112,9 +112,20 @@ def audit_text(entry: dict) -> str:
     if action == "oth_new_client":
         return "ОТХ: шины заказа №%s переданы новому клиенту, заказ №%s" % (d.get("from_order", "?"), d.get("order", "?"))
     if action == "oth_take":
+        if d.get("manual"):
+            return "ОТХ: заказ №%s взял %s шт. из своего остатка" % (d.get("order", "?"), d.get("qty", "?"))
         return "ОТХ: заказ №%s взял %s шт. с ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
     if action == "oth_untake":
+        if d.get("manual"):
+            return "ОТХ: заказ №%s вернул %s шт. в свой остаток" % (d.get("order", "?"), d.get("qty", "?"))
         return "ОТХ: заказ №%s вернул %s шт. на ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
+    if action == "oth_manual":
+        return "Свой остаток (ОТХ) %s, точка №%s: %s → %s шт." % (d.get("goods_id", "?"), d.get("point", "?"), d.get("before", "?"), d.get("after", "?"))
+    if action == "oth_manual_no_id":
+        return "Свой остаток (ОТХ) %s: в аккаунте №%s позиция раньше не публиковалась — новый Id не выдаём, %s шт. не ушли на Авито" % (
+            d.get("goods_id", "?"), d.get("account", "?"), d.get("qty", "?"))
+    if action == "oth_manual_no_price":
+        return "Свой остаток (ОТХ) %s: аккаунт №%s без своей цены — %s шт. не ушли на Авито" % (d.get("goods_id", "?"), d.get("account", "?"), d.get("qty", "?"))
     if action == "point_action":
         from .. import point_log
         return "Точка %s: %s%s" % ("«%s»" % d["name"] if d.get("name") else "№%s" % d.get("point", "?"), point_log.NAMES.get(d.get("kind", ""), d.get("kind") or "действие"),
@@ -282,9 +293,18 @@ _MORE_TEXTS = {
     "user_password": lambda d: ("Пользователь %s сменил свой пароль" if d.get("self") else "Пароль пользователя %s изменён") % _q(d.get("login")),
     "invite_created": lambda d: "Создано приглашение: %s, действует до %s" % (_role(d.get("role")), _q(d.get("expires"))),
     "invite_revoked": lambda d: "Приглашение №%s отозвано" % _q(d.get("id")),
+    "login_reset_created": lambda d: "Сброс входа выдан для %s, действует до %s" % (_q(d.get("login")), _q(d.get("expires"))),
+    "login_reset_revoked": lambda d: "Сброс входа №%s для %s отозван" % (_q(d.get("id")), _q(d.get("login"))),
+    "login_reset_used": lambda d: "Вход сброшен: %s → %s" % (_q(d.get("from")), _q(d.get("to"))),
     "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
     else "Ответственный за заказы клиентов не выбран: по умолчанию",
+    "orders_fill_responsible": lambda d: "Заказам без ответственного поставлен ответственный: %d (без ответственного осталось %d)" % (
+        len(d.get("set") or {}), len(d.get("left") or [])),
     "shop_order_cancel": lambda d: "Клиент %s отменил свой заказ №%s из каталога (этап был %s)" % (_q(d.get("login")), d.get("order", "?"), _q(d.get("stage") or "—")),
+    "stage_renamed": lambda d: "Этап переименован: «%s» → «%s»" % (d.get("from", "?"), d.get("to", "?")),
+    "stage_names_templates": lambda d: "Шаблоны сообщений называют этапы по-старому (тексты не изменены, поправьте вручную): %s" % "; ".join(
+        "№%s «%s» — %s" % (t.get("id", "?"), t.get("name", ""), ", ".join("«%s»" % n for n in t.get("stages") or ())) for t in d.get("templates") or ()),
+    "stage_off_board": lambda d: "Этап «%s» убран с доски: его заказы — в «Списке», в поиске и в фильтре «Этап»" % (d.get("name") or d.get("stage", "?")),
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
     "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",
     "client_terms_changed": lambda d: _client_terms_text(d),
@@ -292,7 +312,7 @@ _MORE_TEXTS = {
     "as_point_start": lambda d: "Начал работать как точка «%s»" % _q(d.get("name") or d.get("point")),
     "as_point_stop": lambda d: "Закончил работать как точка %s%s" % (
         "«%s»" % d["name"] if d.get("name") else "№%s" % _q(d.get("point")),
-        {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)",
+        {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)", "login_reset": " (сброс входа)",
          "invalid": " (режим больше не действует)"}.get(d.get("why"), "")),
     "message_template_changed": lambda d: _template_text(d),             # «Шаблоны сообщений» (message_texts, 2026-11-02)
     "client_pct_changed": lambda d: _client_pct_text(d),

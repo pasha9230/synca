@@ -123,7 +123,7 @@ def test_the_yellow_fill_the_sum_rows_are_for_the_staff_only(tmp_path, clock):
     mine = manager(app, conn, pid)
     mate = manager(app, conn, pid, login_="beta2")
     vk_return(conn, card)
-    orders.add_event(conn, card, DAY + "T10:00:00", "o", "point", order_manager.RETURN_GAPS % "причина возврата", level="yellow")
+    orders.add_event(conn, card, DAY + "T10:00:00", "o", "point", order_manager.RETURN_GAPS % ("причина возврата", "Вернули поставщику"), level="yellow")
     conn.commit()
     asks = ("заполните сумму возврата", "не заполнено — причина возврата")
     for person in (mine, mate):

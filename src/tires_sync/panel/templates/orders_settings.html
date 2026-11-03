@@ -28,6 +28,7 @@
 {% else %}<label class="field"><span class="label">Тип</span><select class="select" name="kind">{% for key, label in kinds.items() %}<option value="{{ key }}"{% if s.kind == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endif %}
 <label class="field" style="width:110px"><span class="label">Срок, часов</span><input class="input input--num" name="limit_hours" value="{{ s.limit_hours }}" inputmode="numeric" title="0 — без срока"></label>
 <label class="field" style="flex:1;min-width:220px"><span class="label">Подсказка сотруднику</span><input class="input" name="hint" value="{{ s.hint }}" maxlength="300"></label>
+<input type="hidden" name="board_shown" value="1"><label class="check" style="height:40px" title="Выключено — у этапа нет колонки на доске; его заказы видны в «Списке», в поиске и в фильтре «Этап»"><input type="checkbox" name="on_board" value="1"{% if s.on_board %} checked{% endif %}> Показывать на доске</label>
 </div>
 <div class="row" style="gap:var(--s-2)">
 <button class="btn btn--primary btn--sm">Сохранить</button>

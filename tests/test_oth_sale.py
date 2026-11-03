@@ -191,7 +191,7 @@ def test_the_order_holding_them_is_neither_cancelled_nor_deleted(tmp_path):
     old = card_at(conn, "oth", T)
     cid = new_order(conn, qty=2)
     take(conn, cid)
-    for reason in ("отменил клиент", "не выкупил"):                                    # «Отмена / невыкуп»: one stage, either reason
+    for reason in ("отменил клиент", "не выкупил"):                                    # «Отмена»: one stage, either reason
         with pytest.raises(orders.OrderError, match="шины с ОТХ \\(заказ №%d\\)" % old):
             orders.move_card(conn, cid, stage(conn, "cancel"), LATER, "o", changes={"cancel_reason": reason})
     assert code(conn, cid) == "new"
@@ -572,7 +572,7 @@ def test_the_button_moves_to_the_point_past_placed_and_tells_the_client_once_and
     mixed = new_order(conn, qty=6)
     take(conn, mixed)
     assert "Шины уже на точке" not in owner.get("/orders/%d" % mixed).get_data(as_text=True)
-    assert "Шины уже на точке — перевести на «Товар на точке»" in owner.get("/orders/%d" % cid).get_data(as_text=True)
+    assert "Шины уже на точке — перевести на «На точке, ждём клиента»" in owner.get("/orders/%d" % cid).get_data(as_text=True)
     from tires_sync import order_manager, order_notify
     told_client, told_point = [], []
     monkeypatch.setattr(order_manager, "tell_client_arrived", lambda c, card_id, deliver, now, who, body=None: (told_client.append((card_id, body)), (True, "Клиенту отправлено."))[1])
@@ -688,7 +688,7 @@ def test_a_removed_user_leaves_no_settings_of_their_own(tmp_path):
 
 
 
-# ---- «Отмена / невыкуп» is one stage (lane chats-orders) meets «Взять с ОТХ» --------------------------------------------------------
+# ---- «Отмена» is one stage (lane chats-orders) meets «Взять с ОТХ» --------------------------------------------------------
 
 def test_a_refusal_at_the_point_of_an_order_with_tyres_of_oth_asks_on_oth_and_no_is_refused(tmp_path):
     app, owner, tok, conn = panel(tmp_path)
@@ -702,7 +702,7 @@ def test_a_refusal_at_the_point_of_an_order_with_tyres_of_oth_asks_on_oth_and_no
     assert r.headers["Location"].endswith("#oth-offer") and code(conn, cid) == "at_point"           # the question «на ОТХ?» first
     assert "Шины остаются на точке" in owner.get("/orders/%d" % cid).get_data(as_text=True)
     post(owner, "/orders/%d/move" % cid, tok, stage_id=cancel, oth_answer="no", cancel_kind="не выкупил", cancel_reason="")
-    assert code(conn, cid) == "at_point"                                                          # «нет»: «Отмена / невыкуп» refused
+    assert code(conn, cid) == "at_point"                                                          # «нет»: «Отмена» refused
     assert any(e["text"] == "Перевод не выполнен: В заказе шины с ОТХ (заказ №%d): переведите заказ на «На ОТХ»." % old
                for e in orders.list_events(conn, cid))                                       # at the point there is no «Вернуть на ОТХ» to offer
     post(owner, "/orders/%d/move" % cid, tok, stage_id=str(stage(conn, "oth")), oth_answer="yes", cancel_kind="не выкупил", cancel_reason="")

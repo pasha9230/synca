@@ -149,6 +149,13 @@ CREATE TABLE IF NOT EXISTS oth_return_plan (order_id INTEGER PRIMARY KEY, agreed
 CREATE TABLE IF NOT EXISTS order_item_oth (item_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, from_item INTEGER NOT NULL, from_order INTEGER NOT NULL,
     qty INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, sale_id INTEGER, undone_at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS order_item_oth_from ON order_item_oth (from_order);
+-- «Свой остаток (ОТХ)» of the catalog card (oth_manual, the owner 2026-11-03): tyres of ours at a point entered by hand, counted as «На ОТХ»;
+-- a row is removed when its quantity is 0. The log keeps every change (before → after) with who, when and why.
+CREATE TABLE IF NOT EXISTS oth_manual (id INTEGER PRIMARY KEY AUTOINCREMENT, goods_id TEXT NOT NULL, point_id INTEGER NOT NULL, qty INTEGER NOT NULL,
+    author TEXT NOT NULL, at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', UNIQUE (goods_id, point_id));
+CREATE TABLE IF NOT EXISTS oth_manual_log (id INTEGER PRIMARY KEY AUTOINCREMENT, goods_id TEXT NOT NULL, point_id INTEGER NOT NULL,
+    before INTEGER NOT NULL, after INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', why TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS oth_manual_log_goods ON oth_manual_log (goods_id);
 -- «Объединить заказы» (order_merge, the owner 2026-10-30): a merge of sources into a new order; each source as it stood (for «Разъединить»);
 -- each position given (oth: through order_item_oth, the source stood on «На ОТХ»)
 CREATE TABLE IF NOT EXISTS order_merge (id INTEGER PRIMARY KEY AUTOINCREMENT, into_order INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,
@@ -185,6 +192,11 @@ CREATE TABLE IF NOT EXISTS client_pair_skip (a INTEGER NOT NULL, b INTEGER NOT N
 CREATE TABLE IF NOT EXISTS panel_invite (
     token_hash TEXT PRIMARY KEY, role TEXT NOT NULL, point_id INTEGER, display_name TEXT NOT NULL DEFAULT '', created TEXT NOT NULL,
     expires TEXT NOT NULL, created_by TEXT NOT NULL, used_at TEXT, used_by TEXT, revoked_at TEXT
+);
+-- «Сбросить вход» (the owner 2026-11-03): a one-time link for one user to set a new password and, if wanted, a new login; only the hash
+CREATE TABLE IF NOT EXISTS panel_login_reset (
+    token_hash TEXT PRIMARY KEY, login TEXT NOT NULL, created TEXT NOT NULL, expires TEXT NOT NULL, created_by TEXT NOT NULL,
+    used_at TEXT, used_as TEXT, revoked_at TEXT
 );
 -- the conditions of a client (a buyer; the owner 2026-10-29): subject '*' is the role's (the default), else a login. The price is the purchase
 -- + the % of the brand by the diameter (pct_small up to R17, pct_large from R18); NULL: the role's. client_brand is the set of brands
@@ -668,6 +680,10 @@ def _migrate(conn) -> None:
     if not conn.execute("SELECT 1 FROM client_terms WHERE subject = '*'").fetchone():          # the role's conditions: empty (no price, no brand)
         conn.execute("INSERT OR IGNORE INTO client_terms (subject, brands_mode) VALUES ('*', 'own')")
         conn.commit()
+    _add_column(conn, "order_stage", "on_board", "INTEGER NOT NULL DEFAULT 1")       # «Показывать на доске» (the owner 2026-11-03)
+    from . import orders                                              # the owner 2026-11-03: the new names of the stages, once
+    orders.rename_default_stages(conn, moscow_iso())
+    orders.hide_default_off_board(conn, moscow_iso())
 
 
 BUSY_SECONDS = 15.0          # how long a connection waits for another one's write before «database is locked»

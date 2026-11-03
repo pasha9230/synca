@@ -1,5 +1,5 @@
-"""«Выдал» from «Заказ оформлен» and «Перемещение на точку» (the owner 2026-10-21): the order closes as an ordinary issue (the point's report
-counts it), the journal says it went past «Товар на точке», the client gets nothing, a repeat closes nothing twice. From «Новый заказ» it
+"""«Выдал» from «Заказ оформлен» and «Едет на точку» (the owner 2026-10-21): the order closes as an ordinary issue (the point's report
+counts it), the journal says it went past «На точке, ждём клиента», the client gets nothing, a repeat closes nothing twice. From «Новый заказ» it
 stays «спорно»."""
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from test_mypoint import manager, press
 from test_vk_commands import _card, _stage, hook, ready, to_client, to_points
 from tires_sync import order_manager as mgr, order_report, orders
 
-PAST = "минуя «Товар на точке»"
+PAST = "минуя «На точке, ждём клиента»"
 
 
 def _past(conn, card):

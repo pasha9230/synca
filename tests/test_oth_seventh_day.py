@@ -99,7 +99,7 @@ def test_here_is_for_the_return_a_task_and_an_alert_for_the_owner_and_the_partne
     assert done and "Возврат согласуют" in answer
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == "oth" and order_oth.to_agree(conn, card) and not order_oth.question_open(conn, card)
-    assert told == [(["owner", "zaman"], "Заказ №5200001 (точка «Бета») 7 дней на ОТХ, шины на точке: согласуйте возврат с поставщиком — /orders/%d" % cid)]
+    assert told == [(["owner"], "Заказ №5200001 (точка «Бета») 7 дней на ОТХ, шины на точке: согласуйте возврат с поставщиком — /orders/%d" % cid)]
     made = [tasks.get(conn, r[0]) for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ? ORDER BY id", (cid,))]
     assert [(t["assignee"], t["title"], t["kind"]) for t in made] == [("owner", "Согласовать возврат", "other"), ("zaman", "Согласовать возврат", "other")]
     assert made[0]["note"] == "Заказ №5200001, точка «Бета», /orders/%d" % cid

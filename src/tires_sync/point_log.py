@@ -204,7 +204,8 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
     record(conn, now, who, point["id"], "undo", card["id"], "отменил %s" % rec["name"])
     if tell is not None:
         try:
-            tell(order_oth.office_logins(conn), text)
+            from . import order_alerts
+            tell(order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)), text)     # its responsible only (2026-11-03)
         except Exception:                                                 # noqa: BLE001 - the undo is done; the journal has the record
             logging.getLogger("tires_sync.panel").exception("the alert of the undo of order %s failed", card["id"])
     return "Отметка %s отменена: заказ №%s снова на этапе «%s». %s" % (rec["name"], label, stage["name"], UNDO_HINT)

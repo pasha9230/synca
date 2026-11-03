@@ -94,9 +94,10 @@ def stock(conn) -> Dict[str, List[dict]]:
 
 
 def goods_on_oth(conn) -> Dict[str, int]:
-    """goods_id → how many pieces of it are on «На ОТХ» and not returned: the mark of the catalog."""
+    """goods_id → how many pieces of it are on «На ОТХ» and not returned: the mark of the catalog; with «Свой остаток (ОТХ)» (oth_manual)."""
+    from .oth_stock import manual_rows
     found: Dict[str, int] = {}
-    for row in stock(conn)["stock"]:
+    for row in stock(conn)["stock"] + manual_rows(conn):
         if row["goods_id"]:
             found[row["goods_id"]] = found.get(row["goods_id"], 0) + int(row["qty"])
     return found
@@ -170,7 +171,8 @@ def unmark_returned(conn, item_id, now: str, author: str, qty=None) -> None:
 
 ACT = "акт МХ-3"
 SIGNED_LINE = "Точка «%s»: %s подписан, шины отданы поставщику (возврат с ОТХ)."
-SIGNED_ASK = "Точка отдала шины с ОТХ поставщику по акту МХ-3: заполните сумму возврата и переведите заказ в «Возврат»."
+SIGNED_HEAD = "Точка отдала шины с ОТХ поставщику по акту МХ-3: "     # routes_alerts.is_return_ask (the old records too)
+SIGNED_ASK = SIGNED_HEAD + "заполните сумму возврата и переведите заказ в «%s»."   # the current name of «return» (orders.stage_name)
 
 
 def return_date(today) -> str:
@@ -247,7 +249,7 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> bool:
         conn.rollback()
         return False
     orders.add_event(conn, card["id"], now, author, "point", SIGNED_LINE % (point_name, ACT))     # saved with the move (move_card commits it all)
-    orders.add_event(conn, card["id"], now, author, "point", SIGNED_ASK, level="yellow")
+    orders.add_event(conn, card["id"], now, author, "point", SIGNED_ASK % orders.stage_name(conn, "return"), level="yellow")
     _audit(conn, now, author, "oth_act_signed", {"order": int(card["id"])})
     try:
         moved = orders.move_card(conn, card["id"], stage["id"], now, author)
@@ -397,8 +399,8 @@ def close_return_tasks(conn, order_id, now: str, who: str, result: str) -> int:
 
 
 def answer_here(conn, card: dict, who: str, now: str, tell=None) -> tuple:
-    """«На точке»: the tyres lie at the point for the return; the owner and the partner get a yellow record, an alert (`tell(logins, text)`)
-    and a task «Согласовать возврат» each. (outcome, answer, done)."""
+    """«На точке»: the tyres lie at the point for the return; a yellow record, an alert to the order's responsible (`tell(logins, text)`,
+    order_alerts.told_people, 2026-11-03) and a task «Согласовать возврат» for the owner and the partner each. (outcome, answer, done)."""
     from . import order_notify, tasks
     label = card.get("webmim_number") or str(card["id"])
     if card["stage"]["code"] != "oth" or not _answer(conn, card, "here", now):
@@ -422,7 +424,8 @@ def answer_here(conn, card: dict, who: str, now: str, tell=None) -> tuple:
             logging.getLogger("tires_sync.orders").exception("the task «%s» of order %s for %s failed", RETURN_TASK, card["id"], login)
     if tell is not None:
         try:
-            tell(office_logins(conn), text)
+            from . import order_alerts
+            tell(order_alerts.told_people(conn, card["id"], office_logins(conn)), text)     # its responsible only (2026-11-03)
         except Exception:                                                            # noqa: BLE001
             logging.getLogger("tires_sync.orders").exception("the alert of the return of order %s failed", card["id"])
     return "на точке: на возврат, задача «%s»" % RETURN_TASK, "Заказ №%s — отмечено: шины на точке. Возврат согласуют с поставщиком." % label, True

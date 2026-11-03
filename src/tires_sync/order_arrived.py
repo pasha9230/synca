@@ -133,18 +133,13 @@ def advice(why: str) -> str:
     return "Отправить можно из «Сообщений по заказу» или отметить «Клиенту сообщили»"
 
 
-def _staff(conn) -> set:
-    from . import users
-    return {u["login"] for u in users.list_users(conn) if u["active"] and u["role"] in ("owner", "partner", "chats")}
-
-
 def check(conn, now: str, tell: Tell, tell_point: Optional[Callable[[dict, str], object]] = None) -> int:
-    """The hourly look: each untold order is told the responsible and the owner (`tell(logins, text)`; the staff only, never a point nor
+    """The hourly look: each untold order is told its responsible (`tell(logins, text)`; order_alerts.told_people: both owners when nobody answers
+    for it, the owner when a point user does; never a point nor
     «система») and marked in its journal (yellow the first time), once a day while it stays untold. An order of a point's own Avito account
     is the point's (the owner 2026-10-26): `tell_point(card, text)` only. Returns how many were told. Writes nothing to a client."""
-    from . import order_notify, order_points
+    from . import order_alerts, order_notify, order_points
     owner = order_notify.get_owner_login(conn)
-    staff = _staff(conn)
     made = 0
     for found in untold(conn, now):
         card, why = found["card"], found["reason"]
@@ -163,7 +158,7 @@ def check(conn, now: str, tell: Tell, tell_point: Optional[Callable[[dict, str],
                 from . import message_texts                             # the owner's words («Шаблоны сообщений»)
                 tell_point(card, message_texts.text(conn, message_texts.UNTOLD_POINT, order_label=label, why=why))
         else:
-            tell([x for x in dict.fromkeys([card.get("responsible") or "", owner]) if x in staff or x == owner], text)
+            tell(order_alerts.told_people(conn, card["id"], [owner]), text)      # its responsible only (the owner 2026-11-03)
         made += 1
     return made
 
