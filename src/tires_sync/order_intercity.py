@@ -261,8 +261,8 @@ def after_shipped(conn, card_id, whose: str, who: str, now: str, deliver, tell: 
     sent, note = tell_shipped(conn, card_id, now, who, deliver)
     if tell is not None:
         try:
-            from . import order_oth
-            tell(order_oth.office_logins(conn), text)
+            from . import order_alerts, order_oth
+            tell(order_alerts.told_people(conn, card_id, order_oth.office_logins(conn)), text)     # its responsible only (2026-11-03)
         except Exception:                                                 # noqa: BLE001 - the move is done; the journal has the record
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the alert of the courier of order %s failed", card_id)

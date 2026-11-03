@@ -216,7 +216,8 @@ def test_for_a_chat_with_an_order_urgent_takes_the_place_of_the_yellow_record(tm
     """Хвост З13 (c): «Срочно ответить» of a chat with an order replaces the order's yellow «Клиент написал», as for a chat without one;
     the order's dot is red. Other records of the order stay."""
     app, client, tok, conn = setup(tmp_path)
-    cid = orders.create_card(conn, {"client_name": "Татьяна"}, NOW, "owner")
+    users.add_user(conn, "worker", "password-123", NOW, role="owner")         # an order nobody answers for: both owners' (2026-11-03)
+    cid = orders.create_card(conn, {"client_name": "Татьяна"}, NOW, "система")
     h = chat(conn, order_id=cid)
     message(conn, h, at(-70), text="Есть 205/55 R16?")
     orders.add_event(conn, cid, at(-70), "клиент", "chat", "Клиент написал: Есть 205/55 R16?", level="yellow")
@@ -239,7 +240,8 @@ def test_for_a_chat_with_an_order_urgent_takes_the_place_of_the_yellow_record(tm
 def test_avitos_stub_is_a_label_with_the_chat_in_avito_on_the_card_and_in_the_alerts(tmp_path):
     """Хвост З19: «Клиент написал: Сообщение не поддерживается…» is shown as a label (the card: with «Открыть чат в Авито»); the record stays."""
     app, client, tok, conn = setup(tmp_path)
-    cid = orders.create_card(conn, {"client_name": "Татьяна"}, NOW, "owner")
+    users.add_user(conn, "worker", "password-123", NOW, role="owner")         # an order nobody answers for: both owners' (2026-11-03)
+    cid = orders.create_card(conn, {"client_name": "Татьяна"}, NOW, "система")
     h = chat(conn, order_id=cid)
     stub = "Клиент написал: Сообщение не поддерживается. Чтобы посмотреть сообщение, перейдите в Авито мессенджер"
     orders.add_event(conn, cid, at(-5), "клиент", "chat", stub, level="yellow")

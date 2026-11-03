@@ -298,6 +298,8 @@ _MORE_TEXTS = {
     "login_reset_used": lambda d: "Вход сброшен: %s → %s" % (_q(d.get("from")), _q(d.get("to"))),
     "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
     else "Ответственный за заказы клиентов не выбран: по умолчанию",
+    "orders_fill_responsible": lambda d: "Заказам без ответственного поставлен ответственный: %d (без ответственного осталось %d)" % (
+        len(d.get("set") or {}), len(d.get("left") or [])),
     "shop_order_cancel": lambda d: "Клиент %s отменил свой заказ №%s из каталога (этап был %s)" % (_q(d.get("login")), d.get("order", "?"), _q(d.get("stage") or "—")),
     "stage_renamed": lambda d: "Этап переименован: «%s» → «%s»" % (d.get("from", "?"), d.get("to", "?")),
     "stage_names_templates": lambda d: "Шаблоны сообщений называют этапы по-старому (тексты не изменены, поправьте вручную): %s" % "; ".join(

@@ -39,6 +39,13 @@ def wrote(conn, card_id, text=WROTE, level="yellow"):
     conn.commit()
 
 
+def answers(conn, login, *card_ids):
+    """Make `login` the one who answers for the orders: since 2026-11-03 only they hear of them."""
+    for card_id in card_ids:
+        conn.execute("UPDATE order_card SET responsible = ? WHERE id = ?", (login, card_id))
+    conn.commit()
+
+
 def seen(conn, login, **kw):
     """The orders with a row of the client's or a failure on the page (not the green «Заказ создан» every order has)."""
     return {r["order_id"] for r in order_alerts.page_rows(conn, login, NOW, **kw) if r["order_id"] is not None and r["kind"] == "chat"}
@@ -65,9 +72,11 @@ def test_the_client_words_of_an_order_the_point_works_are_the_points_only(tmp_pa
     chat(conn, OWN_ACCOUNT, mine["id"])                                         # the chat of our account: not (a)
     on_stage(conn, mine["id"], code)
     wrote(conn, mine["id"])
-    for login in STAFF:
+    for login in STAFF:                                                         # even when they answer for it
+        answers(conn, login, mine["id"])
         assert mine["id"] not in seen(conn, login) and order_alerts.order_levels(conn, login, NOW).get(mine["id"]) == "green"
         assert order_alerts.counts(conn, login)["yellow"] == 0
+    answers(conn, "olga", mine["id"])
     assert mine["id"] in seen(conn, "olga") and order_alerts.counts(conn, "olga")["yellow"] == 1      # the chats' manager: as before
     assert mine["id"] in seen(conn, "gamma1")                                   # the point user's rows: not touched by this rule
     assert mine["id"] in seen(conn, "owner", staff=False)                       # the owner working as the point: the point's rows
@@ -94,8 +103,10 @@ def test_failures_after_closing_calls_and_other_orders_stay_with_the_staff(tmp_p
     on_stage(conn, handed["id"], "at_point")
     conn.execute("INSERT INTO order_handoff (order_id, message_id, point_id, created_at) VALUES (?, 'h1', ?, ?)", (handed["id"], pid, NOW))
     wrote(conn, handed["id"])
+    every = (failed["id"], closed["id"], called["id"], moving["id"], no_point["id"], handed["id"])
     for login in STAFF:
-        assert {failed["id"], closed["id"], called["id"], moving["id"], no_point["id"], handed["id"]} <= seen(conn, login)
+        answers(conn, login, *every)
+        assert set(every) <= seen(conn, login)
         assert order_alerts.counts(conn, login)["red"] == 1
 
 
@@ -111,11 +122,15 @@ def test_srochno_otvetit_of_an_order_the_point_works_is_not_the_owners_nor_the_p
     waits = chat(conn, OWN_ACCOUNT, before["id"], peer="b")
     message(conn, waits, "2026-10-15T10:30:00")
     for login in STAFF:
+        answers(conn, login, there["id"], before["id"])
         urgent = {r["chat_row"] for r in order_alerts.page_rows(conn, login, NOW) if r.get("urgent")}
         assert urgent == {waits}
         assert order_alerts.order_levels(conn, login, NOW)[there["id"]] == "green"            # no red dot of «Срочно ответить»
-    assert {r["chat_row"] for r in order_alerts.page_rows(conn, "olga", NOW) if r.get("urgent")} == {late, waits}
-    on_stage(conn, there["id"], "done")                                       # the point's work is over: the office's chat again
+    answers(conn, "olga", there["id"], before["id"])
+    shipped = code == "shipped"                                               # «Отправлен» closes the order (won): never «срочно» (2026-11-03)
+    assert {r["chat_row"] for r in order_alerts.page_rows(conn, "olga", NOW) if r.get("urgent")} == ({waits} if shipped else {late, waits})
+    answers(conn, "owner", there["id"])
+    on_stage(conn, there["id"], "placed")                                     # the point's work is over: the office's chat again
     assert late in {r["chat_row"] for r in order_alerts.page_rows(conn, "owner", NOW) if r.get("urgent")}
 
 
@@ -138,7 +153,9 @@ def test_the_client_words_written_while_at_the_point_stay_quiet_after_the_order_
     conn.commit()
     on_stage(conn, mine["id"], "done")                                         # the point's work is over: still not the owner's (review D5)
     for login in STAFF:
+        answers(conn, login, mine["id"])
         assert mine["id"] not in seen(conn, login)
+    answers(conn, "olga", mine["id"])
     assert mine["id"] in seen(conn, "olga")
     later = card(conn, "owner", pid)                                           # written while not at the point: as before
     row2 = chat(conn, OWN_ACCOUNT, later["id"], peer="q", unread=1)
@@ -169,10 +186,13 @@ def test_a_client_the_owner_or_the_partner_took_from_the_point_is_told_as_usual(
     by_default = card(conn, "owner", pid)                                      # «owner» only by default (no one named them): still quiet
     on_stage(conn, by_default["id"], "at_point")
     wrote(conn, by_default["id"])
-    for login in STAFF:
-        rows = order_alerts.page_rows(conn, login, NOW)
+    for login in STAFF:                                     # the point answers for `answered`: the taken client is the office's as before;
+        rows = order_alerts.page_rows(conn, login, NOW)     # `assigned` has a person: theirs only (2026-11-03)
         assert {r["chat_row"] for r in rows if r.get("urgent")} == {lone, row}
-        assert assigned["id"] in seen(conn, login) and by_default["id"] not in seen(conn, login)
+        assert (assigned["id"] in seen(conn, login)) == (login == "partner1") and by_default["id"] not in seen(conn, login)
+    orders.update_card(conn, answered["id"], {"responsible": "zamantyres"}, NOW, "owner")           # a person answers for it now: theirs only
+    assert row in {r["chat_row"] for r in order_alerts.page_rows(conn, "zamantyres", NOW) if r.get("urgent")}
+    assert row not in {r["chat_row"] for r in order_alerts.page_rows(conn, "owner", NOW) if r.get("urgent")}
     olga = order_alerts.page_rows(conn, "olga", NOW)                           # the chats' manager: the point's account stays the point's
     assert lone not in {r.get("chat_row") for r in olga}
     gamma = order_alerts.page_rows(conn, "gamma1", NOW)                         # the point's rows: no «Срочно ответить» of its account
@@ -195,11 +215,11 @@ def test_an_order_taken_from_the_point_brings_back_its_client_words_of_every_kin
     chats.set_responsible(conn, chat(conn, OWN_ACCOUNT, of_chat["id"], peer="c"), "partner1", NOW, "owner")
     wrote(conn, of_chat["id"])
     conn.commit()
-    for login in STAFF:
+    for login in STAFF:                                     # the point answers for all three; of_chat is taken (its chat): as before
         assert {theirs["id"], working["id"], of_chat["id"]} & seen(conn, login) == {of_chat["id"]}
     orders.update_card(conn, theirs["id"], {"responsible": "owner"}, NOW, "partner1")
     orders.update_card(conn, working["id"], {"responsible": "zamantyres"}, NOW, "owner")
-    for login in STAFF:
-        assert {theirs["id"], working["id"], of_chat["id"]} <= seen(conn, login)
-        assert order_alerts.counts(conn, login)["yellow"] == 3
+    for login, mine in (("owner", {theirs["id"], of_chat["id"]}), ("zamantyres", {working["id"], of_chat["id"]}), ("partner1", {of_chat["id"]})):
+        assert {theirs["id"], working["id"], of_chat["id"]} & seen(conn, login) == mine         # a person answers: theirs only (2026-11-03)
+        assert order_alerts.counts(conn, login)["yellow"] == len(mine)
     assert theirs["id"] not in seen(conn, "olga")                               # the chats' manager: the point's account stays the point's
