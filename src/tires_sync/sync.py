@@ -421,7 +421,7 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
         # One tire, one ad (the owner's rule): the ad that carries OTH is a published one that no setting takes off and whose Id stays
         # (on OTH it stays in the feed), else the lot that goes in on its stock, else the first lot on OTH that can go in.
         published_ok = [c for c in members if c in published and c not in ev.excluded and c not in taken]
-        stocked = [c for c in members if c not in published and c in ev.ok and ev.ok[c].offer.stock >= min_stock]   # it goes in anyway
+        stocked = [c for c in members if c not in published and c not in no_id and c in ev.ok and ev.ok[c].offer.stock >= min_stock]   # it goes in anyway
         own = [c for c in members if c in news and c not in no_id and (c in ev.ok or c in retired)]
         carrier = (published_ok or stocked or own or [None])[0]
         for code in members:
