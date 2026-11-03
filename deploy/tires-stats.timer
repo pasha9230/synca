@@ -1,8 +1,12 @@
 [Unit]
-Description=Daily Tires Sync Avito statistics
+Description=Tires Sync Avito statistics daily at 04:20, the list of our ads every 2 hours from 07:20
 
 [Timer]
+# the statistics once a day (the first run of the day collects them); the other runs only re-read the list of our ads and map them to our
+# Ids (2026-11-03: an ad published by the morning upload was unknown to the button "Create order" till the next night). Every 2 hours: a whole list
+# is a few dozen GETs per account, far below Avito's limits; :20 misses the cycle (:40) and the stock passes (:10, :25, :55)
 OnCalendar=*-*-* 04:20:00
+OnCalendar=*-*-* 07/2:20:00
 Persistent=true
 RandomizedDelaySec=300
 

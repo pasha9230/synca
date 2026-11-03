@@ -302,6 +302,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ss.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     ss.add_argument("--account", type=int, default=0, help="номер аккаунта; без него все аккаунты с ключами")
     ss.add_argument("--days", type=int, default=7, help="сколько последних дней обновлять (до 270; первый запуск удобно с 30)")
+    ss.add_argument("--stats", action="store_true", help="собрать статистику, даже если сегодня уже собрана (без флага: раз в день, "
+                    "остальные запуски обновляют только список объявлений)")
     al = sub.add_parser("alert", help="отправить сообщение в Telegram (для служб systemd при сбое)")
     al.add_argument("--db", required=True)
     al.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
@@ -2546,7 +2548,7 @@ def _cmd_avito_stats(args) -> int:
         raise ValueError("мастер-ключ недоступен (проверьте --key-file или TIRES_SECRET_KEY_FILE)")
     conn = store.connect(args.db)
     accounts = [connections.get_account(conn, args.account)] if args.account else connections.list_feed_accounts(conn)
-    failed = 0
+    failed = stats_runs = 0
     for account in accounts:
         if account is None:
             raise ValueError("аккаунт №%d не найден" % args.account)
@@ -2556,15 +2558,23 @@ def _cmd_avito_stats(args) -> int:
             print("аккаунт «%s»: ключи не заданы, пропущен" % account["name"])
             continue
         client = AvitoClient(client_id, client_secret, http=_http(), now=_epoch)
+        today = date.today()
+        day_key = "ad_stats_day:%d" % account["id"]
+        stats = args.stats or store.get_state(conn, day_key) != today.isoformat()     # the timer runs every 2 hours; the statistics once a day
+        stats_runs += stats
         try:
-            result = ad_stats.collect(conn, client, account["id"], date.today(), days=args.days, now_iso=_now())
+            result = ad_stats.collect(conn, client, account["id"], today, days=args.days, now_iso=_now(), stats=stats)
         except (AvitoError, OSError) as err:
+            conn.rollback()
             failed += 1
-            print("аккаунт «%s»: статистика не собрана (%s)" % (account["name"], err), file=sys.stderr)
+            print("аккаунт «%s»: %s (%s)" % (account["name"], "статистика не собрана" if stats else "список объявлений не обновлён", err), file=sys.stderr)
             continue
-        print("аккаунт «%s»: объявлений %d, новых сопоставлений с нашими %d, строк статистики %d" % (
-            account["name"], result["ads"], result["mapped"], result["days"]))
-    _collect_avito_reports(conn, box)
+        if stats:
+            store.set_state(conn, day_key, today.isoformat())
+        print("аккаунт «%s»: объявлений %d, новых сопоставлений с нашими %d, строк статистики %s" % (
+            account["name"], result["ads"], result["mapped"], result["days"] if stats else "— (сегодня уже собрана)"))
+    if stats_runs:
+        _collect_avito_reports(conn, box)                                # the cycle reads them every hour anyway
     return 1 if failed else 0
 
 
