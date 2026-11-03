@@ -34,6 +34,17 @@ def ui_new() -> bool:
     return state == "all" or (state == "owner_only" and user["real_role"] in VIEWERS)
 
 
+def point_new() -> bool:
+    """The point's screens of the new design (lane port-point, the prototype's role «Точка»): a point's manager with «Точка» on for them, or
+    the owner and the partner working as a point with «только у владельца» / «у всех». Off: the pages exactly as before."""
+    return current_user()["role"] == "point" and ui_new()
+
+
+def point_page(template: str) -> str:
+    """The template of a point's page: point2/<template> while point_new(), the old one otherwise (the same values, the same forms)."""
+    return "point2/" + template if point_new() else template
+
+
 def as_point_choices() -> list:
     """The points of the topbar's «Работать как точка»: the owner and the partner only, never while working as a point."""
     user = current_user()
@@ -43,7 +54,7 @@ def as_point_choices() -> list:
 
 
 def register(app) -> None:
-    app.jinja_env.globals.update(ui_new=ui_new, as_point_choices=as_point_choices)
+    app.jinja_env.globals.update(ui_new=ui_new, point_new=point_new, as_point_choices=as_point_choices)
 
     @app.route("/ui-new", methods=["GET", "POST"])
     def ui_new_page():
