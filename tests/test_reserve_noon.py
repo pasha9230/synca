@@ -235,7 +235,7 @@ def test_the_move_is_told_to_the_point_and_to_the_owner_and_the_partner(tmp_path
     reserve.check(conn, NEXT + "T09:07:00", lambda card, text: (got.append((card.get("responsible"), bool(card.get("to_staff")), text)), "ok")[1],
                   deliver, vk)
     note = "Заказ №5200001 переведён на «На ОТХ»: клиент не ответил на напоминание о сроке резерва"
-    assert [g for g in got if g[2] == note] == [("", False, note), ("owner", True, note), ("zaman", True, note)]
+    assert [g for g in got if g[2] == note] == [("", False, note), ("owner", True, note)] # the order's responsible only (the owner 2026-11-03)
     card = orders.get_card(conn, cid)
     assert order_notify.route(conn, dict(card, responsible="", to_staff=False))["channel"] == "vk"          # the point's own way
     assert order_notify.route(conn, dict(card, responsible="zaman", to_staff=True))["why"] in ("zaman", "у zaman нет чата Telegram")

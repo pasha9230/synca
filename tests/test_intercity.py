@@ -186,7 +186,7 @@ def test_vk_handed_to_the_courier_ships_tells_the_client_the_office_and_asks_for
     assert code(conn, card) == "done" and intercity.was_shipped(conn, orders.get_card(conn, card))     # through «Отправлен» to «Выполнено»
     assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\n\nСпасибо за покупку!"]
     assert "передан курьеру ТК" in to_points(app)[-1][1]
-    assert tg and tg[0][0] == ["owner", "zaman"] and "передала заказ №5000100 курьеру ТК ПЭК в Псков" in tg[0][1]
+    assert tg and tg[0][0] == ["owner"] and "передала заказ №5000100 курьеру ТК ПЭК в Псков" in tg[0][1]
     assert [(a, t) for a, t, _d, _c in track_tasks(conn, card)] == [("owner", "Внести трек-номер заказа №5000100"),
                                                                     ("zaman", "Внести трек-номер заказа №5000100")]
     [line] = [e for e in orders.list_events(conn, card) if "курьеру ТК" in e["text"] and e["kind"] == "point"]
@@ -425,7 +425,7 @@ def test_the_office_moving_it_to_shipped_does_what_the_point_does(tmp_path, tg):
     assert r.status_code == 302
     assert code(conn, card) == "done" and intercity.was_shipped(conn, orders.get_card(conn, card))
     assert to_client(app) == ["Заказ 5000100 отправлен в город Псков транспортной компанией ПЭК.\n\nСпасибо за покупку!"]
-    assert tg and tg[0][0] == ["owner", "zaman"] and "Офис" in tg[0][1]
+    assert tg and tg[0][0] == ["owner"] and "Офис" in tg[0][1] # the order's responsible only (the owner 2026-11-03)
     assert len(track_tasks(conn, card)) == 2
 
 
@@ -593,7 +593,7 @@ def test_the_owner_working_as_the_point_ships_downloads_and_undoes_but_never_wri
     assert code(conn, card) == "done" and len(to_client(app)) == 1
     [line] = [e for e in orders.list_events(conn, card) if e["kind"] == "point" and "курьеру ТК" in e["text"]]
     assert " за точку «" in line["author"]
-    assert sent and sent[0][0] == ["owner", "zaman"] and "owner" in sent[0][1]                    # not to the one who pressed
+    assert sent and sent[0][0] == ["owner"] and "owner" in sent[0][1]                    # not to the one who pressed
     clock["now"] = T2
     assert post(client, "/my-point/%d/undo" % card, tok).status_code == 302
     assert code(conn, card) == "at_point"

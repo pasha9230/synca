@@ -287,6 +287,8 @@ _MORE_TEXTS = {
     "login_reset_used": lambda d: "Вход сброшен: %s → %s" % (_q(d.get("from")), _q(d.get("to"))),
     "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
     else "Ответственный за заказы клиентов не выбран: по умолчанию",
+    "orders_fill_responsible": lambda d: "Заказам без ответственного поставлен ответственный: %d (без ответственного осталось %d)" % (
+        len(d.get("set") or {}), len(d.get("left") or [])),
     "shop_order_cancel": lambda d: "Клиент %s отменил свой заказ №%s из каталога (этап был %s)" % (_q(d.get("login")), d.get("order", "?"), _q(d.get("stage") or "—")),
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
     "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",

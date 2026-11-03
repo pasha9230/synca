@@ -180,11 +180,6 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
         # never see its records (order_alerts._quiet), so the owner is told as before (review 1)
         _event(conn, card["id"], now, "Оповещение не отправлено: %s; ответственному (%s) — в «Уведомлениях»" % (failure, who))
         return "не отправлено: %s; ответственному — в «Уведомлениях»" % failure
-    if not who:                                    # nobody answers for it: both owners (the owner 2026-11-03)
-        told = "; " + tell_people(conn, box, order_alerts.owner_people(conn), "Некому отправить оповещение по заказу №%d (%s).\n%s" % (
-            card["id"], failure, text), tg_http=tg_http, now=now)
-        _event(conn, card["id"], now, "Оповещение не отправлено: %s%s" % (failure, told))
-        return "не отправлено: %s%s" % (failure, told)
     told = ""
     key = "owner|%s|%s|%s" % (card["id"], failure, text)
     try:
@@ -197,6 +192,11 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
             told = "; владельцу написано в Telegram"
     except (notify.NotifyError, SecretKeyError):
         told = "; владельцу написать не удалось"
+    others = [x for x in order_alerts.owner_people(conn) if x != get_owner_login(conn)] if not who else []
+    if others:                                     # nobody answers for it: both owners (the owner 2026-11-03)
+        how = tell_people(conn, box, others, "Некому отправить оповещение по заказу №%d (%s).\n%s" % (card["id"], failure, text),
+                          tg_http=tg_http, now=now)
+        told += "" if how.startswith("Telegram: ни у кого нет чата") else "; " + how      # a second owner without Telegram is no news
     _event(conn, card["id"], now, "Оповещение не отправлено: %s%s" % (failure, told))
     return "не отправлено: %s%s" % (failure, told)
 
