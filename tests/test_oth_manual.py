@@ -520,3 +520,27 @@ def test_a_never_published_lot_does_not_take_the_oth_of_a_lot_that_can_come_back
     passed(capsys)
     ids = ads_of(public(tmp_path))
     assert "102" in ids and not any(i.startswith("1015") for i in ids)
+
+
+def test_a_never_published_lot_on_own_stock_is_carried_by_the_live_ad_of_the_same_tire(tmp_path, capsys):
+    """Review round 2: gone lot G (never on Avito here) of the same tire as the published 103: 103 carries its pieces and point, nothing
+    is told as «не публиковалась»."""
+    import json
+    prepared(tmp_path, accounts=("A",), price_overrides={"1:1035": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    conn = connect(tmp_path)
+    data = json.loads(conn.execute("SELECT data FROM catalog_item WHERE goods_id = '103'").fetchone()[0])
+    data.update(goods_id="1035", code="TS1035")
+    conn.execute("INSERT INTO catalog_item (goods_id, supplier_id, data, first_seen, last_seen, last_stock, last_price, gone_since) "
+                 "VALUES ('1035', 1, ?, ?, ?, 0, 5000, ?)", (json.dumps(data, ensure_ascii=False), NOW, NOW, NOW))
+    conn.commit()
+    conn.close()
+    manual(tmp_path, "1035", 2)
+    capsys.readouterr()
+    assert run(tmp_path, FIVE) == 0
+    passed(capsys)
+    ids = ads_of(public(tmp_path))
+    assert not any(i.startswith("1035") for i in ids) and description(public(tmp_path), "103").startswith(AT_YUNONA + "\n")
+    conn = connect(tmp_path)
+    assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_manual_no_id'").fetchone()[0] == 0
+    conn.close()

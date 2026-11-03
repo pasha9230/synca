@@ -391,12 +391,12 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
             retired[code] = (found[0], found[1], price)
     taken = {c for c in published if taken_by.get(live_id_of(c)) not in (None, c)}     # its Id goes to another lot in this step
     from . import oth_manual
+    no_id: Dict[str, str] = {}                                            # gone positions built afresh with no Id of their own in this account:
     for code in sorted(c for c in oth if c in getattr(ev, "oth_offers", {}) and c not in published and c not in ev.inherit):
-        before = oth_manual.retired_id(conn, acct, code)                  # a gone position built afresh: only under the Id it had in this
-        if not before or REISSUE_MARK.sub("", before) != REISSUE_MARK.sub("", live_id_of(code)):    # account; decided before one tire's
-            oth.pop(code)                                                 # carrier is chosen, so it never takes another lot's OTH and drops it
-            points.pop(code, None)
-            ev.oth_no_id[code] = "never" if not before else before
+        before = oth_manual.retired_id(conn, acct, code)                  # never a carrier of one tire (they would take another lot's OTH and
+        now_id = retired[code][0] if code in retired else live_id_of(code)    # then be dropped), handed over to a carrier as any lot, else
+        if not before or REISSUE_MARK.sub("", before) != REISSUE_MARK.sub("", now_id):    # not sent (below)
+            no_id[code] = "never" if not before else before
 
     def tire(code):
         if code in ev.ok:
@@ -422,12 +422,18 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
         # (on OTH it stays in the feed), else the lot that goes in on its stock, else the first lot on OTH that can go in.
         published_ok = [c for c in members if c in published and c not in ev.excluded and c not in taken]
         stocked = [c for c in members if c not in published and c in ev.ok and ev.ok[c].offer.stock >= min_stock]   # it goes in anyway
-        own = [c for c in members if c in news and (c in ev.ok or c in retired)]
+        own = [c for c in members if c in news and c not in no_id and (c in ev.ok or c in retired)]
         carrier = (published_ok or stocked or own or [None])[0]
         for code in members:
             if code in news and code in oth and code != carrier and carrier is not None:
                 hand_over(code, carrier)
                 retired.pop(code, None)
+    for code, why in no_id.items():
+        if code in oth:                                                   # no carrier took it: never under a new Id (feed-reviewer 2026-11-03)
+            oth.pop(code)
+            points.pop(code, None)
+            retired.pop(code, None)
+            ev.oth_no_id[code] = why
     live_ids = {live_id_of(p): p for p in published}
     for code in [c for c in news if c in oth and c not in published]:
         if code not in ev.ok and code not in retired:
