@@ -552,8 +552,10 @@ def register(app) -> None:
         notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
                                    clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
         total = sum(col["count"] for col in data["columns"])
-        if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03)
-            data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only])
+        if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03),
+            found = bool(query or tag)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
+            data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only
+                                       or (found and col["count"])])
         return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                stages=[] if own_point() else orders.list_stages(conn),

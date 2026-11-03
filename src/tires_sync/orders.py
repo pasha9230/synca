@@ -117,7 +117,7 @@ def hide_default_off_board(conn, now: str) -> None:
         for code in OFF_BOARD:
             if conn.execute("UPDATE order_stage SET on_board = 0 WHERE code = ? AND on_board = 1", (code,)).rowcount:
                 conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, "system", "stage_off_board", json.dumps(
-                    {"stage": code}, ensure_ascii=False)))
+                    {"stage": code, "name": stage_name(conn, code)}, ensure_ascii=False)))
         conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (BOARD_KEY, now))
     except Exception:
         conn.rollback()

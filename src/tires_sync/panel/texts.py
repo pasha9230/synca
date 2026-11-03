@@ -285,6 +285,10 @@ _MORE_TEXTS = {
     "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
     else "Ответственный за заказы клиентов не выбран: по умолчанию",
     "shop_order_cancel": lambda d: "Клиент %s отменил свой заказ №%s из каталога (этап был %s)" % (_q(d.get("login")), d.get("order", "?"), _q(d.get("stage") or "—")),
+    "stage_renamed": lambda d: "Этап переименован: «%s» → «%s»" % (d.get("from", "?"), d.get("to", "?")),
+    "stage_names_templates": lambda d: "Шаблоны сообщений называют этапы по-старому (тексты не изменены, поправьте вручную): %s" % "; ".join(
+        "№%s «%s» — %s" % (t.get("id", "?"), t.get("name", ""), ", ".join("«%s»" % n for n in t.get("stages") or ())) for t in d.get("templates") or ()),
+    "stage_off_board": lambda d: "Этап «%s» убран с доски: его заказы — в «Списке», в поиске и в фильтре «Этап»" % (d.get("name") or d.get("stage", "?")),
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
     "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",
     "client_terms_changed": lambda d: _client_terms_text(d),

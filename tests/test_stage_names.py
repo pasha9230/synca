@@ -161,3 +161,40 @@ def test_the_box_of_the_pipeline_settings_shows_and_hides_a_stage(tmp_path, monk
     form.pop("board_shown")                                                                        # a form without the box changes nothing
     post(client, "/orders/settings/stage/%d/update" % done["id"], tok, **form)
     assert orders.get_stage(conn, done["id"])["on_board"]
+
+
+def test_the_journal_names_the_renamings_and_the_templates_in_words(tmp_path):
+    from tires_sync.panel import texts
+    path, conn = old_db(tmp_path)
+    conn.execute("INSERT INTO order_template (name, audience, body) VALUES ('мой', 'client', 'В «Возврат».')")
+    conn.commit()
+    conn = store.connect(path)
+    said = [texts.audit_text(r) for r in store.list_audit(conn, limit=50)]
+    assert "Этап переименован: «Товар на точке» → «На точке, ждём клиента»" in said
+    assert any(t.startswith("Шаблоны сообщений называют этапы по-старому") and "№1 «мой»" in t and "«Возврат»" in t for t in said)
+    assert any(t.startswith("Этап «Отмена» убран с доски") for t in said) and not any("«cancel»" in t for t in said)
+
+
+def test_the_time_on_the_stages_counts_the_old_name_of_a_renamed_stage_as_the_stage(tmp_path):
+    from tires_sync import analytics
+    path, conn = old_db(tmp_path)
+    card = conn.execute("INSERT INTO order_card (stage_id, created_at, created_by, updated_at, entered_at) VALUES (?, ?, 'o', ?, ?)",
+                        (by_code(conn, "at_point")["id"], NOW, NOW, NOW)).lastrowid
+    orders.add_event(conn, card, "2026-11-01T10:00:00", "o", "stage", "Этап: «Перемещение на точку» → «Товар на точке»")
+    orders.add_event(conn, card, "2026-11-01T14:00:00", "o", "stage", "Этап: «Товар на точке» → «Выполнено»")
+    conn.commit()
+    conn = store.connect(path)
+    stays = analytics.stage_times(conn, "2026-11-01", "2026-11-03", NOW)["stays"]
+    here = next(s for s in stays if s["stage_id"] == by_code(conn, "at_point")["id"])
+    assert here["name"] == "На точке, ждём клиента" and here["count"] == 1 and here["mean_hours"] == 4
+    assert not any(s["name"] == "Товар на точке" for s in stays)
+
+
+def test_a_search_on_the_board_shows_what_it_found_on_a_stage_off_the_board(tmp_path, monkeypatch):
+    client, tok, conn = setup(tmp_path, monkeypatch)
+    card = new_card(client, tok)
+    cancel = by_code(conn, "cancel")
+    assert orders.move_card(conn, card, cancel["id"], NOW, "o", changes={"cancel_reason": "отменил клиент"})
+    found = client.get("/orders?q=Иван").get_data(as_text=True)
+    assert column(found, cancel["id"]) and 'href="/orders/%d"' % card in found
+    assert not column(client.get("/orders?q=Никто").get_data(as_text=True), cancel["id"])      # nothing found there: no column

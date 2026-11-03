@@ -295,7 +295,7 @@ def test_after_an_extension_the_silence_is_no_yellow_record(tmp_path):
 
 def other_yellow(conn, cid):
     """The yellow records besides «заполните сумму возврата» of the return itself."""
-    return [t for t in yellow(conn, cid) if not t.startswith(mgr.RETURN_HEAD)]
+    return [t for t in yellow(conn, cid) if t != mgr.RETURN_ASK % orders.stage_name(conn, "return")]
 
 
 def test_after_a_return_without_an_amount_nobody_is_asked_and_the_client_gets_nothing(tmp_path):
