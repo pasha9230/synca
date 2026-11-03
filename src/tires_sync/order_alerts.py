@@ -225,11 +225,15 @@ def _mine(conn, login: str, staff: bool, quiet: dict) -> Optional[dict]:
             orders_of.add(card_id)
         elif owner and kinds.get(who) == "point":
             reds.add(card_id)
-    others = {account_id for account_id in [r[0] for r in conn.execute("SELECT id FROM account")]
-              if connections.account_responsible(conn, account_id) not in ("", login)}
+    others = set()
+    for (account_id,) in conn.execute("SELECT id FROM account").fetchall():
+        who = connections.account_responsible(conn, account_id)
+        if who in kinds and who != login:                                    # a viewer there is nobody: as before (review 2, D2)
+            others.add(account_id)
     chat_people = {chat_row: who for chat_row, who in conn.execute("SELECT id, responsible FROM avito_chat WHERE responsible != ''")
                    if kinds.get(who) == "staff"}
-    return {"login": login, "orders": orders_of, "reds": reds, "other_accounts": others, "chat_people": chat_people}
+    return {"login": login, "orders": orders_of, "reds": reds, "other_accounts": others, "chat_people": chat_people,
+            "taken_chats": quiet["taken_chats"]}
 
 
 def _not_mine(event: dict, mine: Optional[dict]) -> bool:
@@ -246,6 +250,8 @@ def _not_theirs(row: dict, mine: Optional[dict]) -> bool:
     who = mine["chat_people"].get(row.get("chat_row"))
     if who:
         return who != mine["login"]
+    if row.get("chat_row") in mine["taken_chats"]:                          # a client taken from the point: as before (review 2, D1)
+        return False
     return row.get("account_id") in mine["other_accounts"]
 
 

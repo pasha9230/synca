@@ -420,7 +420,7 @@ def fill_responsible(conn, now: str, author: str, apply: bool = False) -> dict:
     from . import order_alerts, shop_cart
     kinds = order_alerts.people_kinds(conn)
     usual, shop = orders.default_responsible(conn), None
-    found, by, left = {}, {}, []
+    found, rules, left = {}, {}, []
     for card_id, source, made_by in conn.execute("SELECT id, source, created_by FROM order_card WHERE responsible = '' ORDER BY id").fetchall():
         account = conn.execute("SELECT account_id FROM (SELECT account_id, 0 AS k, id FROM avito_chat WHERE order_id = ? UNION ALL "
                                "SELECT account_id, 1, id FROM avito_call WHERE order_id = ?) ORDER BY k, id LIMIT 1", (card_id, card_id)).fetchone()
@@ -442,11 +442,15 @@ def fill_responsible(conn, now: str, author: str, apply: bool = False) -> dict:
             left.append(card_id)
             continue
         found[card_id] = who
-        by[rule] = by.get(rule, 0) + 1
+        rules[card_id] = rule
     if apply and found:
         for card_id, who in list(found.items()):
             if conn.execute("UPDATE order_card SET responsible = ? WHERE id = ? AND responsible = ''", (who, card_id)).rowcount != 1:
                 del found[card_id]                                         # set by a person meanwhile: theirs stays
+    by = {}
+    for card_id in found:
+        by[rules[card_id]] = by.get(rules[card_id], 0) + 1
+    if apply and found:
         store.write_audit(conn, now, author, FILL_AUDIT, {"set": {str(k): v for k, v in found.items()}, "by": by, "left": left})
     return {"by": by, "left": left, "set": found}
 

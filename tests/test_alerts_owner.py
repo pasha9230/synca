@@ -9,7 +9,7 @@ import json
 from test_inquiry import message
 from test_notify_by_point import OWN_ACCOUNT, POINT_ACCOUNT, card, chat, env, point
 from tires_sync import chat_deals, cli, connections, order_alerts, order_arrived, order_notify, orders, shop_cart, store, users
-from tires_sync import order_manager
+from tires_sync import chat_handover, order_manager
 from http_fakes import ScriptedHttp
 
 NOW = "2026-10-15T12:00:00"
@@ -246,3 +246,28 @@ def test_a_viewer_answers_for_nothing(tmp_path):
     conn.commit()
     assert order_alerts.counts(conn, "owner")["red"] == 1 and order_alerts.counts(conn, "look1")["red"] == 0
     assert order_alerts.told_people(conn, theirs["id"], ["x"]) == ["owner", "zamantyres"]
+
+
+def test_a_chat_taken_from_a_point_stays_with_the_office_whoever_answers_for_the_account(tmp_path):
+    """Review 2, D1: «Ответственный за заказы этого аккаунта» of a point's account does not hide a client the office took from the point."""
+    conn, box = setup(tmp_path)
+    pid = point(conn, channel="panel")
+    users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
+    connections.set_responsible(conn, POINT_ACCOUNT, "olga", staff_list(conn), NOW, "owner")
+    lone = chat(conn, POINT_ACCOUNT, None, peer="x", unread=1)
+    message(conn, lone, "2026-10-15T10:30:00", text="Есть шины?")
+    conn.execute("INSERT INTO chat_handover (chat_row, point_id, point_name, at, handed_by) VALUES (?, ?, 'Гамма', ?, 'gamma1')", (lone, pid, NOW))
+    conn.commit()
+    assert chat_handover.take(conn, lone, "zamantyres", NOW)
+    for login in ("owner", "zamantyres"):
+        assert lone in urgent(conn, login)
+
+
+def test_a_viewer_as_the_account_responsible_is_nobody(tmp_path):
+    conn, box = setup(tmp_path)
+    users.add_user(conn, "look1", "пароль-наблюдателя-1", NOW, role="viewer")
+    connections.set_responsible(conn, OWN_ACCOUNT, "look1", staff_list(conn) + ["look1"], NOW, "owner")
+    row = chat(conn, OWN_ACCOUNT, None, peer="a", unread=1)
+    message(conn, row, "2026-10-15T10:30:00", text="Есть шины?")
+    for login in ("owner", "zamantyres", "olga"):
+        assert row in chats_seen(conn, login)
