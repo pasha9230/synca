@@ -175,7 +175,9 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
     from . import order_alerts
     kinds = order_alerts.people_kinds(conn)
     who = order_alerts.responsibles(conn, kinds, card["id"]).get(card["id"], "")      # the order's own, not the card's of tell_point
-    if kinds.get(who) == "staff":                  # the owner 2026-11-03: a failure of an order is its responsible's only (the red record)
+    if kinds.get(who) == "staff" and points.of_account(conn, card["id"]) is None:
+        # the owner 2026-11-03: a failure of an order is its responsible's only (the red record); not of a point's account order: the staff
+        # never see its records (order_alerts._quiet), so the owner is told as before (review 1)
         _event(conn, card["id"], now, "Оповещение не отправлено: %s; ответственному (%s) — в «Уведомлениях»" % (failure, who))
         return "не отправлено: %s; ответственному — в «Уведомлениях»" % failure
     if not who:                                    # nobody answers for it: both owners (the owner 2026-11-03)

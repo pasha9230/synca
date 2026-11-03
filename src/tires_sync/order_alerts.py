@@ -174,11 +174,12 @@ def owner_people(conn) -> List[str]:
 
 def people_kinds(conn) -> Dict[str, str]:
     """{login: "staff" | "point"} of everybody who may answer for an order: the owner's login of the alerts and every active panel user but a
-    client. Anybody else (the robot «чаты Авито», a removed or switched-off user, a client) answers for nothing."""
+    client and a viewer (who may not act on an order). Anybody else (the robot «чаты Авито», a removed or switched-off user) answers for
+    nothing."""
     from . import order_notify, users
     found = {order_notify.get_owner_login(conn): "staff"}
     for user in users.list_users(conn):
-        if user["active"] and user["role"] != "client":
+        if user["active"] and user["role"] not in ("client", "viewer"):
             found[user["login"]] = "point" if user["role"] == "point" else "staff"
     return found
 
@@ -206,32 +207,45 @@ def told_people(conn, order_id, usual) -> List[str]:
     return [who] if kinds[who] == "staff" else list(usual)
 
 
-def _mine(conn, login: str, staff: bool) -> Optional[dict]:
+def _mine(conn, login: str, staff: bool, quiet: dict) -> Optional[dict]:
     """What of the orders and the chats without an order is this user's (the owner 2026-11-03: the news of an order go only to its responsible,
     of an order nobody answers for to both owners; the chats without an order to «Ответственный за заказы этого аккаунта», as before when the
-    account has none). None: no such rule for them (a point user, the owner or the partner working as a point: their rows as before)."""
+    account has none). Besides: a client the owner or the partner took from a point (_quiet's «taken») while a point (or nobody) answers for
+    the order is theirs as before (the owner's same-day rule); the red failures of an order a point user answers for are both owners' too
+    (a point seldom can fix them); a chat without an order a person answers for (its own «Ответственный») is that person's.
+    None: no such rule for them (a point user, the owner or the partner working as a point: their rows as before)."""
     if not staff:
         return None
     from . import connections
     kinds = people_kinds(conn)
     owner = login in owner_people(conn)
-    orders_of = {card_id for card_id, who in responsibles(conn, kinds).items() if who == login or (not who and owner)}
+    orders_of, reds = set(), set()
+    for card_id, who in responsibles(conn, kinds).items():
+        if who == login or (not who and owner) or (card_id in quiet["taken"] and kinds.get(who) != "staff"):
+            orders_of.add(card_id)
+        elif owner and kinds.get(who) == "point":
+            reds.add(card_id)
     others = {account_id for account_id in [r[0] for r in conn.execute("SELECT id FROM account")]
               if connections.account_responsible(conn, account_id) not in ("", login)}
-    return {"orders": orders_of, "other_accounts": others}
+    chat_people = {chat_row: who for chat_row, who in conn.execute("SELECT id, responsible FROM avito_chat WHERE responsible != ''")
+                   if kinds.get(who) == "staff"}
+    return {"login": login, "orders": orders_of, "reds": reds, "other_accounts": others, "chat_people": chat_people}
 
 
 def _not_mine(event: dict, mine: Optional[dict]) -> bool:
-    return mine is not None and event["order_id"] not in mine["orders"]
+    return mine is not None and event["order_id"] not in mine["orders"] and not (event["level"] == "red" and event["order_id"] in mine["reds"])
 
 
 def _not_theirs(row: dict, mine: Optional[dict]) -> bool:
-    """A chat's row (chat_rows, urgent_rows) that is not this user's: of an order they do not answer for, or of a chat without an order
-    whose account has another «Ответственный за заказы этого аккаунта»."""
+    """A chat's row (chat_rows, urgent_rows) that is not this user's: of an order they do not answer for, of a chat without an order another
+    person answers for, or else whose account has another «Ответственный за заказы этого аккаунта»."""
     if mine is None:
         return False
     if row.get("of_order"):
         return row["of_order"] not in mine["orders"]
+    who = mine["chat_people"].get(row.get("chat_row"))
+    if who:
+        return who != mine["login"]
     return row.get("account_id") in mine["other_accounts"]
 
 
@@ -239,7 +253,8 @@ def counts(conn, login: str) -> Dict[str, int]:
     """How many open alerts of every colour this user has (as page_rows: of the orders they answer for, without the orders of the points'
     accounts nor the client's words of the orders the points work for the owner and the partner)."""
     staff = _staff(conn, login)
-    quiet, mine = _quiet(conn, login, staff), _mine(conn, login, staff)
+    quiet = _quiet(conn, login, staff)
+    mine = _mine(conn, login, staff, quiet)
     result = {level: 0 for level in ALERT_LEVELS}
     for event in open_alerts(conn, login):
         if not _hidden(event, quiet) and not _not_mine(event, mine):
@@ -263,7 +278,8 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
     author «<name> за точку «» — what they pressed as a point is their own record too."""
     border = (datetime.fromisoformat(now) - timedelta(days=GREEN_DAYS)).isoformat(timespec="seconds") if now else ""
     staff = _staff(conn, login) if staff is None else staff
-    quiet, mine = _quiet(conn, login, staff), _mine(conn, login, staff)
+    quiet = _quiet(conn, login, staff)
+    mine = _mine(conn, login, staff, quiet)
     rows, folded = [], {}
     for event in open_alerts(conn, login):
         if _hidden(event, quiet) or _not_mine(event, mine):

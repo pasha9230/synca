@@ -397,8 +397,8 @@ def close_return_tasks(conn, order_id, now: str, who: str, result: str) -> int:
 
 
 def answer_here(conn, card: dict, who: str, now: str, tell=None) -> tuple:
-    """«На точке»: the tyres lie at the point for the return; the owner and the partner get a yellow record, an alert (`tell(logins, text)`)
-    and a task «Согласовать возврат» each. (outcome, answer, done)."""
+    """«На точке»: the tyres lie at the point for the return; a yellow record, an alert to the order's responsible (`tell(logins, text)`,
+    order_alerts.told_people, 2026-11-03) and a task «Согласовать возврат» for the owner and the partner each. (outcome, answer, done)."""
     from . import order_notify, tasks
     label = card.get("webmim_number") or str(card["id"])
     if card["stage"]["code"] != "oth" or not _answer(conn, card, "here", now):

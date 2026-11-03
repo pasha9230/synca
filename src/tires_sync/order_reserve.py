@@ -321,12 +321,13 @@ def _client_step(conn, card: dict, today: date, now: str, hours, deliver) -> Non
 
 def _tell_moved(conn, card: dict, notify: Optional[Notify], now: str) -> None:
     """The owner 2026-11-02: the move to «На ОТХ» is told to the point (its «Рабочее место» or VK, as the alerts of the order go to a point)
-    and to the owner and the partner (their Telegram), through the tick's own alerts; each says how it went in the journal (order_notify)."""
+    and to its responsible (order_alerts.told_people, the owner 2026-11-03), through the tick's own alerts; each says how it went in the journal (order_notify)."""
     if notify is None:
         return
     from . import order_alerts, order_oth
     text = message_texts.text(conn, message_texts.MOVED_NOTE, order_label=order_manager.label(card))
-    for who in [""] + order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)):     # its responsible only (2026-11-03)            # "": nobody of the staff answers, so the alert goes to the point
+    for who in [""] + order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)):
+        # "": nobody of the staff answers, so the alert goes to the point; then its responsible only (2026-11-03)
         try:
             notify(dict(card, responsible=who, to_staff=bool(who)), text)
         except Exception:                                       # noqa: BLE001 - the move is done; the journal has its record

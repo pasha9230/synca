@@ -238,7 +238,7 @@ def test_a_no_show_with_nobody_to_tell_goes_to_the_owner_not_to_the_point_page(t
     chat(conn, POINT_ACCOUNT, mine["id"])
     tg, vk = ScriptedHttp(TG_OK), ScriptedHttp(VK_OK)
     outcome, _answer = _no_show(conn, box, mine, tg, vk)
-    assert vk.calls == [] and tg.calls == [] and "ответственному — в «Уведомлениях»" in outcome     # theirs only (the owner 2026-11-03)
+    assert vk.calls == [] and "владельцу написано" in outcome       # a point's account order: the staff never see its records (review 1)
     assert points.unseen_alerts(conn, pid, "") == []
 
 

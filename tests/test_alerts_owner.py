@@ -9,6 +9,7 @@ import json
 from test_inquiry import message
 from test_notify_by_point import OWN_ACCOUNT, POINT_ACCOUNT, card, chat, env, point
 from tires_sync import chat_deals, cli, connections, order_alerts, order_arrived, order_notify, orders, shop_cart, store, users
+from tires_sync import order_manager
 from http_fakes import ScriptedHttp
 
 NOW = "2026-10-15T12:00:00"
@@ -185,10 +186,10 @@ def test_the_fill_of_the_old_orders_follows_the_rules_of_a_new_one(tmp_path, cap
     robot = _made(conn, chat_deals.SYSTEM_AUTHOR, "avito")                    # no chat left: nobody
     named = _made(conn, "owner", responsible="olga")                           # has one: untouched
     conn.commit()
-    want = {of_own: "owner", of_other: "zamantyres", of_point: "gamma1", by_call: "zamantyres", shop: "partner1", manual: "zamantyres"}
-    dry = chat_deals.fill_responsible(conn, NOW, "cli")
+    want = {of_own: "owner", of_other: "olga", of_point: "gamma1", by_call: "zamantyres", shop: "partner1", manual: "zamantyres"}
+    dry = chat_deals.fill_responsible(conn, NOW, "cli")                      # olga made hers: she is shown as its responsible, she stays
     assert dry["set"] == want and sorted(dry["left"]) == sorted([acting, robot])
-    assert dry["by"] == {"аккаунт Авито": 4, "каталог клиента": 1, "кто создал": 1}
+    assert dry["by"] == {"аккаунт Авито": 3, "каталог клиента": 1, "кто создал": 2}
     assert conn.execute("SELECT COUNT(*) FROM order_card WHERE responsible = ''").fetchone()[0] == 8      # dry: nothing written
     db = conn.execute("PRAGMA database_list").fetchone()[2]
     assert cli.main(["orders-fill-responsible", "--db", db, "--apply"]) == 0
@@ -199,3 +200,49 @@ def test_the_fill_of_the_old_orders_follows_the_rules_of_a_new_one(tmp_path, cap
     assert audit["set"] == {str(k): v for k, v in want.items()} and sorted(audit["left"]) == sorted([acting, robot])
     assert not conn.execute("SELECT 1 FROM order_event WHERE kind = 'field' AND text LIKE 'Ответственный:%'").fetchone()   # no «taken»
     assert chat_deals.fill_responsible(conn, NOW, "cli", apply=True)["set"] == {}                          # a second run: nothing new
+
+
+def test_a_failure_of_a_point_account_order_still_reaches_the_owner(tmp_path):
+    """Review 1: the staff never see the records of a point's account order, so its failure is not left on a bell nobody sees."""
+    conn, box = setup(tmp_path)
+    pid = point(conn)
+    theirs = card(conn, "zamantyres", pid)                                    # Заман answers, he has no Telegram chat
+    chat(conn, POINT_ACCOUNT, theirs["id"])
+    tg = ScriptedHttp(TG_OK)
+    outcome = order_notify.deliver(conn, box, order_manager.staff_card(conn, theirs), "Клиент не пришёл", NOW, tg_http=tg)
+    assert "владельцу написано" in outcome and json.loads(tg.calls[0][3])["chat_id"] == "1000"
+
+
+def test_the_red_failures_of_an_order_a_point_answers_for_are_both_owners_too(tmp_path):
+    conn, box = setup(tmp_path)
+    pid = point(conn, channel="panel", account=None)
+    users.add_user(conn, "gamma1", "пароль-для-точки-1", NOW, role="point", point_id=pid)
+    theirs = card(conn, "gamma1", pid)
+    orders.add_event(conn, theirs["id"], NOW, "система", "reserve", "Резерв заканчивается", level="yellow")
+    orders.add_event(conn, theirs["id"], NOW, "система", "rule", "Задача не подготовлена", level="red")
+    conn.commit()
+    for login in ("owner", "zamantyres"):
+        assert order_alerts.counts(conn, login) == {"red": 1, "yellow": 0, "green": 0}
+    assert order_alerts.counts(conn, "partner1")["red"] == 0
+    assert theirs["id"] in of_orders(conn, "gamma1")
+
+
+def test_a_chat_without_an_order_a_person_answers_for_is_theirs(tmp_path):
+    conn, box = setup(tmp_path)
+    connections.set_responsible(conn, OWN_ACCOUNT, "zamantyres", staff_list(conn), NOW, "owner")
+    row = chat(conn, OWN_ACCOUNT, None, peer="a", unread=1)
+    message(conn, row, "2026-10-15T10:30:00", text="Есть шины?")
+    conn.execute("UPDATE avito_chat SET responsible = 'olga' WHERE id = ?", (row,))
+    conn.commit()
+    assert row in chats_seen(conn, "olga") and row in urgent(conn, "olga")
+    assert row not in chats_seen(conn, "zamantyres") and row not in chats_seen(conn, "owner")
+
+
+def test_a_viewer_answers_for_nothing(tmp_path):
+    conn, box = setup(tmp_path)
+    users.add_user(conn, "look1", "пароль-наблюдателя-1", NOW, role="viewer")
+    theirs = card(conn, "look1")
+    orders.add_event(conn, theirs["id"], NOW, "система", "rule", "Задача не подготовлена", level="red")
+    conn.commit()
+    assert order_alerts.counts(conn, "owner")["red"] == 1 and order_alerts.counts(conn, "look1")["red"] == 0
+    assert order_alerts.told_people(conn, theirs["id"], ["x"]) == ["owner", "zamantyres"]

@@ -411,9 +411,10 @@ FILL_AUDIT = "orders_fill_responsible"
 
 def fill_responsible(conn, now: str, author: str, apply: bool = False) -> dict:
     """The one-time fill of the orders without a stored «Ответственный» (the owner 2026-11-03: every order has one), by the rules of a new
-    order: of a chat or a call of an Avito account — as order_responsible (the point's manager of the account's point, else «Ответственный за
-    заказы этого аккаунта»), else the usual responsible of the robot's orders; of the client catalog — shop_cart.responsible; any order — else
-    whoever made it, when that is a person who may answer for orders (order_alerts.people_kinds). No journal record «Ответственный: …»: that
+    order: of the client catalog — shop_cart.responsible; made by a person who may answer for orders (order_alerts.people_kinds) — that
+    person, who is shown as its responsible now (orders.get_card; review 4: a living order never changes hands silently); made by the robot
+    from a chat or a call of an Avito account — as order_responsible (the point's manager of the account's point, else «Ответственный за
+    заказы этого аккаунта»), else the usual responsible of the robot's orders. No journal record «Ответственный: …»: that
     one means a person chose it (order_points.office_taken). Without `apply` nothing is written. Returns {"by": {rule: count}, "left": [ids],
     "set": {id: login}}; one audit record of every order set."""
     from . import order_alerts, shop_cart
@@ -421,13 +422,15 @@ def fill_responsible(conn, now: str, author: str, apply: bool = False) -> dict:
     usual, shop = orders.default_responsible(conn), None
     found, by, left = {}, {}, []
     for card_id, source, made_by in conn.execute("SELECT id, source, created_by FROM order_card WHERE responsible = '' ORDER BY id").fetchall():
-        account = conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? UNION ALL SELECT account_id FROM avito_call WHERE order_id = ? "
-                               "LIMIT 1", (card_id, card_id)).fetchone()
+        account = conn.execute("SELECT account_id FROM (SELECT account_id, 0 AS k, id FROM avito_chat WHERE order_id = ? UNION ALL "
+                               "SELECT account_id, 1, id FROM avito_call WHERE order_id = ?) ORDER BY k, id LIMIT 1", (card_id, card_id)).fetchone()
         maker = "" if orders.ACTING_MARK in (made_by or "") else made_by or ""
         who, rule = "", ""
         if source == "shop":
             shop = shop_cart.responsible(conn) if shop is None else shop
             who, rule = shop, "каталог клиента"
+        elif maker in kinds:
+            who, rule = maker, "кто создал"
         elif account is not None:
             of_account = points_store.point_by_account(conn, account[0])
             who, rule = order_responsible(conn, account[0], (of_account or {}).get("id")), "аккаунт Авито"
@@ -441,8 +444,9 @@ def fill_responsible(conn, now: str, author: str, apply: bool = False) -> dict:
         found[card_id] = who
         by[rule] = by.get(rule, 0) + 1
     if apply and found:
-        for card_id, who in found.items():
-            conn.execute("UPDATE order_card SET responsible = ? WHERE id = ? AND responsible = ''", (who, card_id))
+        for card_id, who in list(found.items()):
+            if conn.execute("UPDATE order_card SET responsible = ? WHERE id = ? AND responsible = ''", (who, card_id)).rowcount != 1:
+                del found[card_id]                                         # set by a person meanwhile: theirs stays
         store.write_audit(conn, now, author, FILL_AUDIT, {"set": {str(k): v for k, v in found.items()}, "by": by, "left": left})
     return {"by": by, "left": left, "set": found}
 
