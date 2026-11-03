@@ -108,9 +108,17 @@ def audit_text(entry: dict) -> str:
     if action == "oth_new_client":
         return "ОТХ: шины заказа №%s переданы новому клиенту, заказ №%s" % (d.get("from_order", "?"), d.get("order", "?"))
     if action == "oth_take":
+        if d.get("manual"):
+            return "ОТХ: заказ №%s взял %s шт. из своего остатка" % (d.get("order", "?"), d.get("qty", "?"))
         return "ОТХ: заказ №%s взял %s шт. с ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
     if action == "oth_untake":
+        if d.get("manual"):
+            return "ОТХ: заказ №%s вернул %s шт. в свой остаток" % (d.get("order", "?"), d.get("qty", "?"))
         return "ОТХ: заказ №%s вернул %s шт. на ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
+    if action == "oth_manual":
+        return "Свой остаток (ОТХ) %s, точка №%s: %s → %s шт." % (d.get("goods_id", "?"), d.get("point", "?"), d.get("before", "?"), d.get("after", "?"))
+    if action == "oth_manual_no_price":
+        return "Свой остаток (ОТХ) %s: аккаунт №%s без своей цены — %s шт. не ушли на Авито" % (d.get("goods_id", "?"), d.get("account", "?"), d.get("qty", "?"))
     if action == "point_action":
         from .. import point_log
         return "Точка %s: %s%s" % ("«%s»" % d["name"] if d.get("name") else "№%s" % d.get("point", "?"), point_log.NAMES.get(d.get("kind", ""), d.get("kind") or "действие"),
