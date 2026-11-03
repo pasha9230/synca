@@ -551,9 +551,13 @@ def register(app) -> None:
         table = list_table(conn, rows, only) if view == "list" else None
         notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
                                    clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
+        total = sum(col["count"] for col in data["columns"])
+        if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03)
+            data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only])
         return render_template("orders.html", data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
-                               dots=_dots(conn), rows=rows, total_cards=sum(col["count"] for col in data["columns"]), only_stage=only,
+                               stages=[] if own_point() else orders.list_stages(conn),
+                               dots=_dots(conn), rows=rows, total_cards=total, only_stage=only,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
 
     def point_board(conn, data: dict, point_id: int) -> dict:
@@ -1705,6 +1709,8 @@ def register(app) -> None:
         f = request.form
         try:
             orders.update_stage(get_conn(), stage_id, f.get("name"), f.get("color"), f.get("kind"), f.get("hint"), f.get("limit_hours"))
+            if "board_shown" in f:                                         # the form of «Настроить воронку» has the box (an unticked one sends nothing)
+                orders.set_on_board(get_conn(), stage_id, f.get("on_board") == "1")
             flash("Этап сохранён.")
         except orders.OrderError as err:
             flash(str(err))
