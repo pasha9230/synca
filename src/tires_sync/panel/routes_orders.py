@@ -1057,7 +1057,8 @@ def register(app) -> None:
             webmim_cost=order_report.order_webmim(conn, card_id) if has_right("money") else None,                # the purchase is money
             webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn)) if can_post("order_webmim_create") else None,
             supplier=supplier_view(conn, card) if can_post("order_webmim_create") and own_point() is None else None,
-            supplier_number=order_supplier.number_of(conn, card_id)), status, {
+            supplier_number=order_supplier.number_of(conn, card_id),
+            ad_position=deals.ad_position_chat(conn, card) if own_point() is None and can_post("order_ad_position") else None), status, {
             "Cache-Control": "no-store"}            # «Назад» reads the order again: the positions a press added are shown (хвост З6)
 
     def back(card_id, part=""):

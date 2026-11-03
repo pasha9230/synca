@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 
 from . import chat_name, chats as chats_store, clients, connections, order_points as points_store, order_wait, orders, store
@@ -183,24 +183,94 @@ def ad_goods(conn, account_id, item_id):
     return (PACK.sub("", ad_id), int(pack.group(1)) if pack else 1) if ad_id else None
 
 
-def _add_position(conn, chat: dict, card_id: int, provider, now: str, author: str) -> None:
-    """The position of the ad the client wrote about, priced as the panel prices it today. Any trouble is only noted: the deal stands."""
+class NoLookup(Exception):
+    """The ad cannot be asked of Avito: the master key or the account's keys are missing."""
+
+
+PRESS_GAP = 60                                                             # seconds a press of «Подставить позицию» holds the order
+RETRY_HINT = "повторю по кнопке «Подставить позицию из объявления» в заказе"
+
+
+def _lookup_failure(err: BaseException) -> str:
+    """What the journal says of a lookup that failed (never Avito's raw answer: the journal may be read by a point)."""
+    from .avito import AvitoError, RateLimited
+    if isinstance(err, NoLookup):
+        return "у аккаунта нет ключей Авито"
+    if isinstance(err, RateLimited):
+        return "Авито просит подождать (429)"
+    if isinstance(err, AvitoError):
+        return "Авито ответил ошибкой %s" % err.status
+    return "Авито не ответил (%s)" % type(err).__name__
+
+
+def _add_position(conn, chat: dict, card_id: int, provider, now: str, author: str, ad_lookup=None) -> bool:
+    """The position of the ad the client wrote about, priced as the panel prices it today. Any trouble is only noted: the deal stands.
+    An ad the list of our ads does not know yet (it is read a few times a day) is asked of Avito by `ad_lookup(chat)` once. True: added."""
     traced = ad_goods(conn, chat["account_id"], chat["item_id"])
     if provider is None:
-        return
+        return False
     if traced is None:
-        if chat["item_id"]:
-            orders.add_event(conn, card_id, now, author, "chat", "Позиция не определена: объявление Авито №%s не найдено среди наших объявлений" % chat["item_id"])
+        if not chat["item_id"]:
+            return False
+        why = ""
+        if ad_lookup is not None and str(chat["item_id"]).strip().isdigit():
+            conn.commit()                                                 # the deal is kept whatever the lookup does
+            try:
+                ad_lookup(chat)
+                traced = ad_goods(conn, chat["account_id"], chat["item_id"])
+                why = "" if traced else " (Авито не называет его нашим)"
+            except Exception as err:                                      # noqa: BLE001 — a miss of Avito never stops the deal
+                conn.rollback()                                           # only what the lookup itself began
+                log.warning("the ad %s of chat %s was not looked up: %s", chat["item_id"], chat["id"], type(err).__name__)
+                why = " (%s)" % _lookup_failure(err)
+        if traced is None:
+            orders.add_event(conn, card_id, now, author, "chat", "Позиция не определена: объявление Авито №%s не найдено среди наших объявлений%s; %s" % (
+                chat["item_id"], why, RETRY_HINT))
             conn.commit()
-        return
+            return False
     goods_id, pack = traced
+    added = False
     try:
         args = provider(goods_id, pack)
         if args:
             orders.add_item(conn, card_id, qty=DEFAULT_QTY, now=now, author=author, **args)
+            added = True
     except OrderError as err:
         orders.add_event(conn, card_id, now, author, "chat", "Позиция не добавлена: %s" % err)
     conn.commit()
+    return added
+
+
+def ad_position_chat(conn, card: dict) -> Optional[dict]:
+    """The chat whose ad «Подставить позицию из объявления» takes, or None (no button): an open order without positions, with a chat of an ad.
+    The chat of the field «Чат Авито» first, else the newest."""
+    if card["items"] or card["stage"]["kind"] != "open":
+        return None
+    linked = [ch for ch in chats_store.chats_of_order(conn, card["id"]) if str(ch["item_id"] or "").strip().isdigit()]
+    named = chat_of_field(conn, card["avito_chat"]) if card.get("avito_chat") else None
+    return next((ch for ch in linked if ch["id"] == named), linked[0] if linked else None)
+
+
+def add_ad_position(conn, card_id: int, provider, ad_lookup, now: str, author: str) -> str:
+    """«Подставить позицию из объявления»: the position of the ad of the order's chat, the ad asked of Avito when the list does not know it.
+    Never a second position: an order with positions is refused. Returns what to tell the person; raises OrderError when there is nothing to do."""
+    card = orders.get_card(conn, card_id)
+    chat = ad_position_chat(conn, card)
+    if chat is None:
+        raise OrderError("Позицию из объявления подставить нельзя: в заказе уже есть позиции, он закрыт или у его чата нет объявления.")
+    began = datetime.fromisoformat(now)
+    if not store.claim_state(conn, "ad_position:%d" % card_id, now, (began - timedelta(seconds=PRESS_GAP)).isoformat(timespec="seconds")):
+        raise OrderError("Позиция из объявления уже подставляется: обновите страницу через минуту.")    # two presses at once: one position
+    added = False
+    try:
+        added = _add_position(conn, chat, card_id, provider, now, author, ad_lookup)
+    finally:
+        if not added:                                                     # a press that added nothing may be repeated at once
+            conn.rollback()
+            store.set_state(conn, "ad_position:%d" % card_id, "")
+    if added:
+        return "Позиция из объявления №%s добавлена." % chat["item_id"]
+    raise OrderError("Позиция не добавлена: причина в журнале заказа.")
 
 
 # ---- what «Создать заказ» fills in (the owner 2026-10-26): the point, the responsible, the delivery date ---------------------------------
@@ -335,7 +405,8 @@ def next_day(now: str) -> str:
     return (date.fromisoformat(now[:10]) + timedelta(days=1)).isoformat()
 
 
-def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None, delivery: bool = True, own_point=None) -> int:
+def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_provider=None, delivery: bool = True, own_point=None,
+                ad_lookup=None) -> int:
     """A new deal for a chat. A chat that already has one gets no second: the deal it has is returned. `delivery`: the delivery date is
     tomorrow (the button «Создать заказ»; not an order that waits for the goods). The point: a point's account gives its own (one pick-up place,
     the owner 2026-10-26), another account the point the client named, else `own_point` (the point of the manager who pressed it).
@@ -388,7 +459,7 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         if earlier:
             orders.add_event(conn, card_id, now, author, "chat", "Ранее писал: заказы %s" % ", ".join("№%d" % i for i in earlier))
             conn.commit()
-        _add_position(conn, chat, card_id, position_provider, now, author)
+        _add_position(conn, chat, card_id, position_provider, now, author, ad_lookup)
     except BaseException:
         conn.rollback()
         conn.execute("UPDATE avito_chat SET order_id = NULL WHERE id = ? AND order_id = -1", (chat_row,))        # give the claim back

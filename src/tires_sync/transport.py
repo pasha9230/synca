@@ -33,10 +33,10 @@ def _web_only_opener() -> urllib.request.OpenerDirector:
 _OPENER = _web_only_opener()
 
 
-def urllib_transport(method: str, url: str, headers: Dict[str, str], body: Optional[bytes]) -> Tuple[int, Dict[str, str], bytes]:
+def urllib_transport(method: str, url: str, headers: Dict[str, str], body: Optional[bytes], timeout: float = 30) -> Tuple[int, Dict[str, str], bytes]:
     request = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
-        with _OPENER.open(request, timeout=30) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             body = response.read(MAX_BODY + 1)
             if len(body) > MAX_BODY:
                 raise ResponseTooLarge("ответ сервера слишком большой")
