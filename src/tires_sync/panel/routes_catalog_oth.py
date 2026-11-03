@@ -63,6 +63,9 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
                                             or sync._off_by_the_owner(goods_id, before[1], eff, left_out, True)):
         return False, "сохранённое объявление снято настройкой (не по остатку) — так оно и остаётся снятым"
     former = oth_manual.retired_id(conn, account_id, goods_id)          # its Id here, the saved ad kept or not
+    carrier = oth_manual.carried_by(conn, account_id).get(goods_id) if not published else None
+    if carrier:                                                         # one tire, one ad: the last cycle showed its pieces there
+        return True, "штуки показаны в объявлении %s (та же шина)" % carrier
     if offer is not None and not published and not former:
         return False, "раньше не публиковалась в этом аккаунте — на Авито не уходит (новый Id не выдаём)"
     if offer is not None and not published and former:

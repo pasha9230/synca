@@ -543,4 +543,12 @@ def test_a_never_published_lot_on_own_stock_is_carried_by_the_live_ad_of_the_sam
     assert not any(i.startswith("1035") for i in ids) and description(public(tmp_path), "103").startswith(AT_YUNONA + "\n")
     conn = connect(tmp_path)
     assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_manual_no_id'").fetchone()[0] == 0
+    from tires_sync.panel.routes_catalog_oth import account_status
+    from tires_sync.webmim import parse_unload
+    assert account_status(conn, "1035", 1, parse_unload(FIVE, "T1")) == (True, "штуки показаны в объявлении 103 (та же шина)")   # the card
+    conn.close()
+    manual(tmp_path, "1035", 0)                                          # gone from the own stock: the next cycle forgets it
+    assert run(tmp_path, FIVE) == 0
+    conn = connect(tmp_path)
+    assert oth_manual.carried_by(conn, 1) == {}
     conn.close()
