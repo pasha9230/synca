@@ -260,7 +260,8 @@ def set_active(conn, login: str, active: bool, now: str, author: str) -> None:
                  (login, old["role"], int(bool(active)), old["point_id"], old["display_name"], now, author))
     store.write_audit(conn, now, author, "user_on" if active else "user_off", {"login": login})
     if not active:
-        store.bump_session_epoch(conn, login)
+        conn.execute("UPDATE panel_login_reset SET revoked_at = ? WHERE login = ? AND used_at IS NULL AND revoked_at IS NULL", (now, login))
+        store.bump_session_epoch(conn, login)          # the open link «Сбросить вход» ends too: switching on again never brings it back
 
 
 def change_own_password(conn, login: str, old_password: str, new_password: str, now: str) -> None:
@@ -377,6 +378,8 @@ def create_login_reset(conn, login: str, now: str, author: str, main_login: str)
         raise UserError("Общий вход владельца меняется на сервере (panel.env), не здесь.")
     if not exists(conn, login):
         raise UserError("Пользователя «%s» нет." % login)
+    if not is_active(conn, login):
+        raise UserError("Пользователь «%s» выключен: сначала включите его." % login)
     token = secrets.token_urlsafe(32)
     expires = (datetime.fromisoformat(now) + timedelta(hours=RESET_HOURS)).isoformat(timespec="seconds")
     conn.execute("UPDATE panel_login_reset SET revoked_at = ? WHERE login = ? AND used_at IS NULL AND revoked_at IS NULL", (now, login))
@@ -387,10 +390,10 @@ def create_login_reset(conn, login: str, now: str, author: str, main_login: str)
 
 
 def find_login_reset(conn, token: str, now: str) -> Optional[dict]:
-    """The reset if the link is still good (not used, not revoked, not expired) and its user is there."""
+    """The reset if the link is still good (not used, not revoked, not expired) and its user is there and switched on."""
     row = conn.execute("SELECT r.login, r.expires FROM panel_login_reset r JOIN panel_user u ON u.login = r.login WHERE r.token_hash = ? "
                        "AND r.used_at IS NULL AND r.revoked_at IS NULL AND r.expires > ?", (_token_hash(str(token or "")), now)).fetchone()
-    return None if row is None else {"login": row[0], "expires": row[1]}
+    return None if row is None or not is_active(conn, row[0]) else {"login": row[0], "expires": row[1]}
 
 
 def list_login_resets(conn, now: str) -> List[dict]:
@@ -524,8 +527,8 @@ def rename_login(conn, old: str, new: str) -> None:
 
 
 def _end_sessions(conn, old: str, new: str) -> None:
-    """Every session of the old login ends; the counter of the new login goes above every number either login ever had, so that no
-    session kept from a removed user of that name comes back. The old login's counter stays (a user made later under it starts above)."""
+    """Every session of the old login ends: both counters go above every number either login ever had, so that no session kept from a
+    removed user of the new name comes back, and a user made later under the old name starts above the old sessions too."""
     epoch = max(store.get_session_epoch(conn, old), store.get_session_epoch(conn, new)) + 1
     for login in {old, new}:                               # inside the caller's transaction: the reset and the end of the sessions at once
         conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (store._epoch_key(login), str(epoch)))

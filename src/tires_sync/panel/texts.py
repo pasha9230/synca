@@ -291,7 +291,7 @@ _MORE_TEXTS = {
     "as_point_start": lambda d: "Начал работать как точка «%s»" % _q(d.get("name") or d.get("point")),
     "as_point_stop": lambda d: "Закончил работать как точка %s%s" % (
         "«%s»" % d["name"] if d.get("name") else "№%s" % _q(d.get("point")),
-        {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)",
+        {"exit": "", "password": " (сменил пароль)", "logout": " (вышел из панели)", "signed_out": " (вход закончился)", "login_reset": " (сброс входа)",
          "invalid": " (режим больше не действует)"}.get(d.get("why"), "")),
     "message_template_changed": lambda d: _template_text(d),             # «Шаблоны сообщений» (message_texts, 2026-11-02)
     "client_pct_changed": lambda d: _client_pct_text(d),

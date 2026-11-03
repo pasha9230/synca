@@ -4,7 +4,7 @@ from __future__ import annotations
 from flask import flash, redirect, render_template, request, session
 
 from .. import client_terms, order_points as points, store, users
-from .common import author, current_user, end_as_point, get_conn, login_blocked, login_failed, now_iso
+from .common import author, current_user, drop_session, end_as_point, get_conn, login_blocked, login_failed, now_iso
 
 
 def _user_field(message: str) -> str:
@@ -147,7 +147,7 @@ def register(app) -> None:
                 login = users.use_login_reset(conn, token, typed, request.form.get("password", ""), now_iso(), app.config["AUTHOR"])
             except users.UserError as err:
                 return render_template("login_reset.html", reset=reset, error=str(err), error_field=_user_field(str(err)), login=typed), 400
-            session.clear()
+            drop_session("login_reset")                       # «Работать как точка» of this browser ends in the journal too
             flash("Готово: войдите с логином «%s» и новым паролем." % login, "ok")
             return redirect("/login")
         return render_template("login_reset.html", reset=reset, error=None, login="")

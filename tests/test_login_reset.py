@@ -370,3 +370,17 @@ def test_the_link_of_a_removed_user_ends_and_never_opens_a_later_user_of_the_nam
     token = users.create_login_reset(conn, "zaman", NOW, "owner", "owner")
     users.use_login_reset(conn, token, "bob", NEW_PASSWORD, NOW, "owner")
     assert users.find_login_reset(conn, bobs, NOW) is None
+
+
+def test_a_switched_off_user_gets_no_link_and_the_open_one_ends():
+    conn = store.connect(":memory:")
+    users.add_user(conn, "zaman", PASSWORD, NOW)
+    token = users.create_login_reset(conn, "zaman", NOW, "owner", "owner")
+    users.set_active(conn, "zaman", False, NOW, "owner")
+    assert users.find_login_reset(conn, token, NOW) is None
+    with pytest.raises(users.UserError):
+        users.use_login_reset(conn, token, "zaman2", NEW_PASSWORD, NOW, "owner")
+    with pytest.raises(users.UserError):
+        users.create_login_reset(conn, "zaman", NOW, "owner", "owner")
+    users.set_active(conn, "zaman", True, NOW, "owner")
+    assert users.find_login_reset(conn, token, NOW) is None and users.verify(conn, "zaman", PASSWORD) == "zaman"
