@@ -175,3 +175,25 @@ def note_no_price(conn, account_id: int, found: Dict[str, int], now: str, kind: 
     if set(found) != before:
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(sorted(found))))
     conn.commit()
+
+
+CARRIED_KEY = "oth_manual_carried:%d"           # app_state: {code: the Id of the ad of the same tire that shows its manual pieces} of the last cycle
+
+
+def remember_carried(conn, account_id: int, carried: Dict[str, str]) -> None:
+    """What the last cycle of the account did with «Свой остаток» of gone lots handed to another lot of the same tire: the card says it."""
+    from . import store
+    key = CARRIED_KEY % int(account_id)
+    value = json.dumps(dict(sorted(carried.items())), ensure_ascii=False)
+    if (store.get_state(conn, key) or "{}") != value:
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, value))
+        conn.commit()
+
+
+def carried_by(conn, account_id: int) -> Dict[str, str]:
+    from . import store
+    try:
+        found = json.loads(store.get_state(conn, CARRIED_KEY % int(account_id)) or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}

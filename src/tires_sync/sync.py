@@ -371,7 +371,10 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
         settings, left_out_types, code not in published)}
     points = {code: tuple(names.get(code, ())) for code in oth}
 
+    gave: Dict[str, str] = {}                                             # code -> the lot it handed its OTH over to (one tire, one ad)
+
     def hand_over(code, taker):
+        gave[code] = taker
         oth[taker] = oth.get(taker, 0) + oth.pop(code)
         points[taker] = tuple(sorted(set(points.get(taker, ())) | set(points.pop(code, ()))))
 
@@ -443,6 +446,17 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
             oth.pop(code)                                                 # its Id is another ad's now: never two ads under one Id
             points.pop(code, None)
             retired.pop(code, None)
+    carried: Dict[str, str] = {}                                          # «Свой остаток» of a gone lot shown in another lot's ad: that ad's Id
+    for code in gave:
+        if code not in getattr(ev, "oth_offers", {}):
+            continue
+        taker, seen = gave[code], {code}
+        while taker in gave and taker not in seen:
+            seen.add(taker)
+            taker = gave[taker]
+        if taker in oth:
+            carried[code] = retired[taker][0] if taker in retired else (ev.inherit.get(taker) or live_id_of(taker))
+    ev.oth_carried = carried
     ev.oth, ev.oth_points, ev.oth_retired = oth, points, retired
 
 
@@ -873,6 +887,7 @@ def run_cycle(
         from . import oth_manual
         oth_manual.note_no_price(conn, acct, ev.oth_no_price, store.moscow_iso())
         oth_manual.note_no_price(conn, acct, oth_manual.manual_of(conn, ev.oth_no_id), store.moscow_iso(), kind="id")
+        oth_manual.remember_carried(conn, acct, ev.oth_carried)
     live = live_titles_of(out_dir)
     titles = dict(mirror_feed.bound_titles(conn, acct), **live)
     live_unread = not live and out_dir is not None and (Path(out_dir).parent / "avito_feed.xml").exists()   # a broken file: do not forget renames
