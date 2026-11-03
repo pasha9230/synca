@@ -109,6 +109,22 @@ def _show_count(ad, count: int) -> None:
         node.text = oth_stock.with_count(node.text or "", count)
 
 
+_PRICE_IN_TEXT = r"(?<!\d)%s(?=\s*(?:руб|₽))"
+
+
+def _set_price(ad, price: int) -> None:
+    """A saved ad at a new price (a gone position on «Свой остаток» at its own price): «Price» and, in the description, the old price where it
+    stands before «руб»/«₽» (the template's «Цена: {price} руб.»)."""
+    node = ad.find("Price")
+    old = (node.text or "").strip() if node is not None else ""
+    if node is None:
+        node = ET.SubElement(ad, "Price")
+    node.text = str(int(price))
+    text = ad.find("Description")
+    if old.isdigit() and text is not None and text.text and old != str(int(price)):
+        text.text = re.sub(_PRICE_IN_TEXT % re.escape(old), str(int(price)), text.text)
+
+
 def _snapshot_text(ad) -> str:
     """The ad as it is saved for later holds: without the line «Шины в наличии» of «На ОТХ», which belongs to the cycle that adds it."""
     from . import oth_stock
@@ -152,8 +168,22 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
             settings.territory_rn, len(published)))
     from . import oth_stock
     on_oth = {code: n for code, n in oth_stock.pieces(conn).items() if code not in left_out}   # a type left out: the owner's setting takes it off
+    orders_oth = oth_stock.pieces(conn, manual=False)
+    gone_offers, gone_prices, no_manual = _manual_gone(conn, parsed, on_oth, orders_oth, settings, tochki if trial is None else None,
+                                                       left_out_types)
+    for code in no_manual:                                                # «Свой остаток» of a gone position without an own price: not counted here
+        if orders_oth.get(code):
+            on_oth[code] = orders_oth[code]
+        else:
+            on_oth.pop(code, None)
+    if gone_offers:                                                       # this account's view only: the cycle's unload and archive never see them
+        parsed = copy.copy(parsed)
+        parsed.offers = dict(parsed.offers, **gone_offers)
+    all_names, order_names = oth_stock.points(conn), oth_stock.points(conn, manual=False)
+    oth_names = {code: (order_names.get(code, ()) if code in no_manual else names) for code, names in all_names.items()}
     ev = evaluate(parsed.offers, parsed.issues, settings, ref, store.load_confirmed_mappings(conn),
                   store.load_brand_map(conn), oth=frozenset(on_oth))
+    ev.oth_offers, ev.oth_price = gone_offers, gone_prices
     for gid, stock in getattr(parsed, "stocks", {}).items():                # a broken row or a stale supplier: a known fall below the threshold takes it off
         ev.stocks.setdefault(gid, stock)
     for gid in published:
@@ -246,11 +276,46 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     bound_now = mirror_feed.adopted_maps(conn, acct)[0]
     live_bound = frozenset(c for c, i in bound_now.items()
                            if not (mirror_feed.alias_scheme(conn, acct) and i == mirror_feed.alias_id(acct, c)))   # a plain alias says nothing about being live
-    _oth_for_account(conn, ev, published, acct, on_oth, oth_stock.points, live_id_of, foreign, settings, left_out_types,
+    _oth_for_account(conn, ev, published, acct, on_oth, lambda _conn: oth_names, live_id_of, foreign, settings, left_out_types,
                      set(parsed.offers), before_dedupe)
+    for code, price in ev.oth_price.items():                              # a gone position back on its saved ad: at the own price
+        if code in ev.oth_retired:
+            ev.oth_retired[code] = ev.oth_retired[code][:2] + (price,)
     ds = decide(ev, published, store.load_suppressed(conn, acct), known_points, settings, today, now=now, already_live=live_bound,
                 removed_before=removed_before, oth=ev.oth, oth_retired={code: r[2] for code, r in ev.oth_retired.items()})
+    if ev.oth_price:
+        ds.decisions = [dataclasses.replace(d, price=ev.oth_price[d.goods_id])
+                        if d.action is Action.HOLD and d.reason.startswith("oth:") and d.goods_id in ev.oth_price and d.goods_id in ev.oth else d
+                        for d in ds.decisions]
     return published, ev, ds
+
+
+def _manual_gone(conn, parsed, on_oth: Dict[str, int], orders_oth: Dict[str, int], settings: Settings, tochki_out: Optional[int],
+                 left_out_types=frozenset()):
+    """The positions the supplier has no more whose «Свой остаток (ОТХ)» (oth_manual, the owner 2026-11-03) may put them on Avito in this
+    account: ({code: the archive's last offer, stock 0} built afresh, {code: own price} for a saved ad held or brought back,
+    {codes whose manual pieces do not count here}). Only with an own price of the account (oth_manual.gone_price): without it the manual
+    pieces are not counted. A position still sent with a broken row, of a supplier whose file failed, or of 4tochki out of its trial
+    (`tochki_out`) is not gone. A tire type the owner left out of the account stays out."""
+    from . import catalog_archive, oth_manual
+    from .cycle import feed_tire_type
+    offers, prices, drop = {}, {}, set()
+    issues, unavailable = getattr(parsed, "issues", {}) or {}, getattr(parsed, "unavailable", ()) or ()
+    for code, total in sorted(on_oth.items()):
+        if total <= orders_oth.get(code, 0) or code in parsed.offers or code in issues or supplier_of_id(code) in unavailable:
+            continue
+        if tochki_out and code.startswith("s%d-" % tochki_out):
+            drop.add(code)
+            continue
+        price = oth_manual.gone_price(conn, code, settings)
+        offer = catalog_archive.last_offer(conn, code)
+        if price is None or (offer is not None and feed_tire_type(offer) in left_out_types):
+            drop.add(code)
+        else:
+            prices[code] = price                                          # also for a fresh one held on its saved ad (an aged one)
+            if offer is not None:
+                offers[code] = offer
+    return offers, prices, drop
 
 
 def _off_by_the_owner(code: str, text: Optional[str], settings: Settings, left_out_types, aged_too: bool) -> bool:
@@ -356,6 +421,11 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
         if code not in ev.ok and code not in retired:
             continue                                                      # nothing to publish it from (hidden as same_tire and no carrier)
         ad_id = retired[code][0] if code in retired else live_id_of(code)
+        before = store.retired_ad_of(conn, acct, code) if code in getattr(ev, "oth_offers", {}) else None
+        if before and REISSUE_MARK.sub("", before[0]) != REISSUE_MARK.sub("", ad_id):
+            oth.pop(code)                                                 # a gone position built afresh never comes back under a new Id
+            points.pop(code, None)
+            continue
         if (live_ids.get(ad_id) not in (None, code)) or ad_id in set(ev.inherit.values()) or ad_id in foreign:
             oth.pop(code)                                                 # its Id is another ad's now: never two ads under one Id
             points.pop(code, None)
@@ -438,6 +508,10 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
     A position whose ad does not build is skipped, or held on its snapshot, or taken off when the wait is over.
     `live_images`: Id -> the photo links of the ad Avito reads now (live_images_of): a 4tochki position that goes on under the Id of
     another position's ad keeps that ad's photos (owner 2026-10-27)."""
+    if getattr(ev, "oth_offers", None):                                  # gone positions on «Свой остаток»: as plan_decisions saw them
+        parsed = copy.copy(parsed)
+        parsed.offers = dict(parsed.offers, **ev.oth_offers)
+    reprice = getattr(ev, "oth_price", None) or {}
     ads = []
     invalid: Dict[str, List[str]] = {}
     final = []
@@ -468,6 +542,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             _set_point(ad, d.point, settings)
             _renew_date_end(ad, settings, today)
             _show_count(ad, shown(d.goods_id))
+            if d.goods_id in reprice:
+                _set_price(ad, reprice[d.goods_id])
             ads.append(ad)
             owners.append((ad, d.goods_id))
             rendered[d.goods_id] = ad
@@ -512,6 +588,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         if d.reason.startswith("oth:"):                                   # held for weeks maybe: the saved DateEnd would close the ad on Avito
             _renew_date_end(held_ad, settings, today)
             _show_count(held_ad, shown(d.goods_id))
+            if d.goods_id in reprice and d.goods_id in on_oth:
+                _set_price(held_ad, reprice[d.goods_id])
         ads.append(held_ad)
         owners.append((held_ad, d.goods_id))
         offer = parsed.offers.get(d.goods_id)
@@ -526,6 +604,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             if d.reason.startswith("oth:"):
                 _renew_date_end(twin_ad, settings, today)
                 _show_count(twin_ad, shown(d.goods_id))
+                if d.goods_id in reprice and d.goods_id in on_oth:
+                    _set_price(twin_ad, reprice[d.goods_id] * 4)
             ads.append(twin_ad)
             owners.append((twin_ad, d.goods_id))
         final.append(d)

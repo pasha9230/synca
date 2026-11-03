@@ -3,7 +3,7 @@ stands in «На ОТХ», the ad of that position, in every account of ours, st
 the supplier's stock, is not taken off for the supplier's stock and is published again if it is not on Avito (decide, sync.plan_decisions);
 an excluded brand or a season switched off do not stop it (candidates.evaluate). When the order leaves the stage, or the whole position is
 marked «возвращено поставщику», or its return is agreed with the supplier, the next cycle applies the usual rules. Orders at a test point
-give nothing. Only reads the orders."""
+give nothing. «Свой остаток (ОТХ)» entered by hand in the catalog (oth_manual, the owner 2026-11-03) counts the same way. Only reads."""
 from __future__ import annotations
 
 import json
@@ -29,7 +29,7 @@ def _test_points(conn) -> frozenset:
     return frozenset(found)
 
 
-def _rows(conn) -> list:
+def _order_rows(conn) -> list:
     """The positions still ours on «На ОТХ» (order_oth.stock), without the test points, the tyres of a point that have no code and the orders
     whose return is agreed with the supplier (order_oth.agree, the owner 2026-10-29: they leave the ad at once, before the act МХ-3; an
     agreement cancelled — its row gone — counts them again)."""
@@ -40,8 +40,27 @@ def _rows(conn) -> list:
         agreed = {r[0] for r in conn.execute("SELECT order_id FROM oth_return_plan")}
     except sqlite3.OperationalError:                      # a base without the orders' tables
         return []
-    return [r for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test and int(r["qty"]) > 0
-            and r["order_id"] not in agreed]
+    return [dict(r, manual=None) for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test
+            and int(r["qty"]) > 0 and r["order_id"] not in agreed]
+
+
+def manual_rows(conn) -> list:
+    """«Свой остаток (ОТХ)» entered by hand (oth_manual, the owner 2026-11-03) in the shape of _order_rows: `item_id` is minus the row's id,
+    `order_id` 0, `manual` the row's id. No test point."""
+    from . import oth_manual
+    try:
+        found = oth_manual.rows(conn)
+        test = _test_points(conn)
+    except sqlite3.OperationalError:                      # a base without the table
+        return []
+    return [{"item_id": -r["id"], "order_id": 0, "goods_id": r["goods_id"], "code": "", "name": "", "ordered": r["qty"], "point_id": r["point_id"],
+             "point": r["point"], "since": r["at"], "until": "", "returned_at": None, "returned_by": None, "returned_qty": 0, "left": r["qty"],
+             "qty": r["qty"], "manual": r["id"]} for r in found if r["point_id"] not in test and int(r["qty"]) > 0]
+
+
+def _rows(conn, manual: bool = True) -> list:
+    """Our tyres at the points: those of the orders on «На ОТХ» first, then the manual ones (`manual` False: the orders' only)."""
+    return _order_rows(conn) + (manual_rows(conn) if manual else [])
 
 
 def by_point(conn) -> Dict[Tuple[str, int], int]:
@@ -53,18 +72,18 @@ def by_point(conn) -> Dict[Tuple[str, int], int]:
     return found
 
 
-def pieces(conn) -> Dict[str, int]:
-    """goods_id → the pieces of it on «На ОТХ» (all points), not returned to the supplier."""
+def pieces(conn, manual: bool = True) -> Dict[str, int]:
+    """goods_id → the pieces of it on «На ОТХ» (all points), not returned to the supplier; with the manual ones unless `manual` is False."""
     found: Dict[str, int] = {}
-    for r in _rows(conn):
+    for r in _rows(conn, manual):
         found[r["goods_id"]] = found.get(r["goods_id"], 0) + int(r["qty"])
     return found
 
 
-def points(conn) -> Dict[str, Tuple[str, ...]]:
+def points(conn, manual: bool = True) -> Dict[str, Tuple[str, ...]]:
     """goods_id → the names of the points it lies at on «На ОТХ», as the clients see them, in alphabetical order."""
     found: Dict[str, set] = {}
-    for r in _rows(conn):
+    for r in _rows(conn, manual):
         if (r["point"] or "").strip():
             found.setdefault(r["goods_id"], set()).add(r["point"].strip())
     return {code: tuple(sorted(names)) for code, names in found.items()}

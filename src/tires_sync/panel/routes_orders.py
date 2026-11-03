@@ -1404,7 +1404,9 @@ def register(app) -> None:
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
         try:
-            pieces = oth_sale.take(conn, card_id, item_id, _int(request.form.get("from_item")) or 0, local_iso(), author())
+            raw = str(request.form.get("from_item") or "").strip()      # «-N»: the manual row N of «Свой остаток (ОТХ)» (oth_stock.manual_rows)
+            source = -(_int(raw[1:]) or 0) if raw.startswith("-") else (_int(raw) or 0)
+            pieces = oth_sale.take(conn, card_id, item_id, source, local_iso(), author())
             flash("Взято с ОТХ: %d шт. В WebMIM оформится только недостающее." % pieces)
         except orders.OrderError as err:
             flash(str(err))
