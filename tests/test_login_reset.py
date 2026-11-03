@@ -97,6 +97,37 @@ def test_never_for_the_shared_owner_login_nor_an_unknown_user():
     assert users.list_login_resets(conn, NOW) == []
 
 
+def test_the_shared_login_is_refused_whatever_its_name():
+    conn = store.connect(":memory:")
+    users.add_user(conn, "boss", PASSWORD, NOW)                                              # a panel user under the AUTHOR's name
+    with pytest.raises(users.UserError):
+        users.create_login_reset(conn, "boss", NOW, "owner", "boss")
+    users.add_user(conn, "zaman", PASSWORD, NOW)
+    token = users.create_login_reset(conn, "zaman", NOW, "owner", "boss")
+    with pytest.raises(users.UserError):
+        users.use_login_reset(conn, token, "boss2", "короткий", NOW, "boss")
+    with pytest.raises(users.UserError):                                                     # the shared login is never a new login
+        users.use_login_reset(conn, token, "boss", NEW_PASSWORD, NOW, "boss")
+
+
+def test_the_same_login_with_a_new_password_ends_the_old_sessions_and_the_link(tmp_path):
+    app = make_app(tmp_path)
+    conn = conn_of(app)
+    users.add_user(conn, "zaman", PASSWORD, NOW, role="owner")
+    old_session = app.test_client()
+    sign_in(old_session, conn, "zaman")
+    owner = app.test_client()
+    path = _issue(app, owner, login(owner), "zaman")
+    guest = app.test_client()
+    tok = _csrf(guest)
+    assert guest.post(path, data={"csrf": tok, "login": "", "password": NEW_PASSWORD, "password2": NEW_PASSWORD}).status_code == 302
+    assert old_session.get("/orders").status_code == 302 and users.verify(conn, "zaman", NEW_PASSWORD) == "zaman"
+    assert guest.get(path).status_code == 404
+    tok = _csrf(guest)                                                                       # the success signed the page out
+    assert guest.post(path, data={"csrf": tok, "login": "", "password": "третий-пароль-3", "password2": "третий-пароль-3"}).status_code == 404
+    assert users.verify(conn, "zaman", NEW_PASSWORD) == "zaman"
+
+
 def test_the_password_and_the_login_follow_the_rules_of_the_invitation():
     conn = store.connect(":memory:")
     users.add_user(conn, "zaman", PASSWORD, NOW)
@@ -314,3 +345,28 @@ def test_every_setting_and_record_that_holds_the_login_moves():
     assert sorted(conn.execute("SELECT author, text FROM order_event").fetchall()) == [
         ("olya", "Ответственный: zaman"), ("zamantyres", "zamantyres сказал")]                # the history keeps the old login
     assert not users.login_taken(conn, "zamantyres") and users.login_taken(conn, "zaman")
+
+
+def test_two_uses_at_once_only_one_wins(monkeypatch):
+    """The page found the link good, another use took it meanwhile: the claim (one statement) refuses the second."""
+    conn = store.connect(":memory:")
+    users.add_user(conn, "zaman", PASSWORD, NOW)
+    token = users.create_login_reset(conn, "zaman", NOW, "owner", "owner")
+    seen = users.find_login_reset(conn, token, NOW)
+    users.use_login_reset(conn, token, "", NEW_PASSWORD, NOW, "owner")
+    monkeypatch.setattr(users, "find_login_reset", lambda *a: seen)
+    with pytest.raises(users.UserError):
+        users.use_login_reset(conn, token, "zaman2", "третий-пароль-3", NOW, "owner")
+    assert users.verify(conn, "zaman", NEW_PASSWORD) == "zaman" and not users.exists(conn, "zaman2")
+
+
+def test_the_link_of_a_removed_user_ends_and_never_opens_a_later_user_of_the_name():
+    conn = store.connect(":memory:")
+    users.add_user(conn, "bob", PASSWORD, NOW)
+    users.add_user(conn, "zaman", PASSWORD, NOW)
+    bobs = users.create_login_reset(conn, "bob", NOW, "owner", "owner")
+    users.remove_user(conn, "bob", NOW)
+    assert users.list_login_resets(conn, NOW) == []
+    token = users.create_login_reset(conn, "zaman", NOW, "owner", "owner")
+    users.use_login_reset(conn, token, "bob", NEW_PASSWORD, NOW, "owner")
+    assert users.find_login_reset(conn, bobs, NOW) is None
