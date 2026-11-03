@@ -641,38 +641,47 @@ def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional
 
 
 def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
-    """«Возврат отдал»: the tyres went back to the supplier (the owner 2026-10-25). The type, the reason and the refund are filled when empty,
-    the refund with the purchase of the tyres (order_oth.return_changes, the owner 2026-11-03); one that cannot be counted (a position without
-    the purchase) keeps the stage and the responsible gets a yellow record to finish it. An agreed return of «На возврат» is marked signed
-    with the move. The client is never written to. (outcome for the log, answer for the point)."""
+    """«Возврат отдал»: the tyres went back to the supplier (the owner 2026-10-25). The type and the reason of the return are filled when
+    empty; the amount only for the tyres of «На ОТХ» / «На возврат», with their purchase (order_oth.return_changes, the owner 2026-11-03),
+    never for another stage (the lead 2026-10-26). Without it the stage stays and the responsible gets a yellow record to finish it; the
+    tyres of «На ОТХ» / «На возврат» leave the sale then («Отдано, нужна сумма возврата»). An agreed return is marked signed with the move.
+    The client is never written to. (outcome for the log, answer for the point)."""
     from . import order_oth
+    card = orders.get_card(conn, card["id"])                     # the stage as it is now (review 2026-11-03: a stale page)
     stage = orders.get_stage(conn, _stage_id(conn, "return"))
-    changes = order_oth.return_changes(card, RETURN_REASON)
+    ours = card["stage"]["code"] in order_oth.RETURNING
+    changes = order_oth.return_changes(card, RETURN_REASON) if ours else {
+        k: v for k, v in (("return_kind", "supplier"), ("return_reason", RETURN_REASON)) if not card[k]}
     gaps = orders.missing_for(dict(card, **changes), stage)
     answer = "Заказ №%s: отмечено — %s" % (label(card), RETURNED)
     if gaps:                                       # the type and the reason are kept, so that the amount is all the manager fills (review 2026-10-26)
-        if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'point' AND text = ? AND at >= ? LIMIT 1",
-                        (card["id"], RETURN_LINE, card["entered_at"] or "")).fetchone():
+        signed = ours and (order_oth.return_plan(conn, card["id"]) or {}).get("signed_at")      # the act was pressed already
+        if signed or conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'point' AND text = ? AND at >= ? LIMIT 1",
+                                  (card["id"], RETURN_LINE, card["entered_at"] or "")).fetchone():
             return "уже отмечено: ждёт суммы возврата", "Заказ №%s уже отмечен: %s." % (label(card), RETURNED)
+        changes = order_oth.apply_refund(conn, card["id"], changes, now, who)
         if changes:
             orders.update_card(conn, card["id"], changes, now, who, commit=False)
         orders.add_event(conn, card["id"], now, who, "point", RETURN_LINE)
         orders.add_event(conn, card["id"], now, who, "point", RETURN_ASK % stage["name"] if gaps == ["сумма возврата"]
                          else RETURN_GAPS % (", ".join(gaps), stage["name"]), level="yellow")
-        if card["stage"]["code"] in order_oth.RETURNING:          # the tyres are gone: off sale, «Отдано, нужна сумма возврата» (2026-11-03)
+        if ours:                                                  # the tyres are gone: off sale, «Отдано, нужна сумма возврата» (2026-11-03)
             conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date, signed_at, signed_by) VALUES (?,?,?,?,?,?) "
                          "ON CONFLICT(order_id) DO UPDATE SET signed_at = excluded.signed_at, signed_by = excluded.signed_by "
                          "WHERE oth_return_plan.signed_at IS NULL", (card["id"], now, who, now[:10], now, who))
         if card["stage"]["code"] == "oth":
             try:
-                orders.move_card(conn, card["id"], order_oth._returning_stage(conn)["id"], now, who)
+                moved = orders.move_card(conn, card["id"], order_oth._returning_stage(conn)["id"], now, who)
             except OrderError as err:
                 return "не выполнено: %s" % err, "Не получилось: %s" % err
+            if not moved:
+                conn.rollback()
+                return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % label(card)
         conn.commit()
         return "возврат: этап не изменён, не заполнено: %s (жёлтая запись)" % ", ".join(gaps), answer
     conn.execute("UPDATE oth_return_plan SET signed_at = ?, signed_by = ? WHERE order_id = ? AND signed_at IS NULL", (now, who, card["id"]))
     try:
-        moved = orders.move_card(conn, card["id"], stage["id"], now, who, changes=changes)     # the mark of the plan goes with it
+        moved = orders.move_card(conn, card["id"], stage["id"], now, who, changes=order_oth.apply_refund(conn, card["id"], changes, now, who))
     except OrderError as err:
         return "не выполнено: %s" % err, "Не получилось: %s" % err
     if not moved:

@@ -141,12 +141,48 @@ def test_the_vk_returned_closes_na_vozvrat_with_the_purchase_and_signs_the_plan(
     assert order_oth.return_plan(conn, cid)["signed_at"] == "2026-10-27T12:00:00"
 
 
-def test_the_vk_returned_from_the_point_fills_the_purchase_too(tmp_path):
+def test_the_vk_returned_from_the_point_never_fills_the_amount(tmp_path):
+    """The lead 2026-10-26 stays for an order of a client: the purchase is the refund of «На ОТХ» / «На возврат» only."""
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
-    outcome, _answer = order_manager.returned(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-27T12:00:00")
+    order_manager.returned(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-27T12:00:00")
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == "return" and (card["return_kind"], card["return_amount"]) == ("supplier", 16000.0)
+    assert card["stage"]["code"] == "at_point" and card["return_amount"] == 0
+
+
+def test_the_journal_names_no_purchase_the_audit_keeps_it(tmp_path):
+    conn = db(tmp_path)
+    cid = returning(conn)
+    order_oth.sign_act(conn, agreed(conn, cid), "Бета", "2026-10-27T12:00:00", "менеджер Бета")
+    assert not [e for e in orders.list_events(conn, cid) if "16000" in e["text"]]
+    assert order_oth.REFUND_LINE in [e["text"] for e in orders.list_events(conn, cid)]
+    [row] = conn.execute("SELECT detail FROM audit WHERE action = 'oth_return_amount'").fetchall()
+    assert '"amount": 16000.0' in row[0]
+
+
+def test_signed_tyres_are_not_ours_on_the_oth_page_and_the_point_texts_follow_the_state(tmp_path, clock):
+    app, conn, pid, cid, mine = on_page(tmp_path)
+    press(mine, cid, "oth_here")
+    agreed(conn, cid)
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    assert 'data-return="%d"' % cid in page and "Шины отданы поставщику" not in page        # agreed: the act to sign, nothing given yet
+    conn.execute("UPDATE order_item SET supplier_price = 0 WHERE order_id = ?", (cid,))
+    conn.commit()
+    assert order_oth.sign_act(conn, orders.get_card(conn, cid), "Бета", "2026-10-27T12:00:00", "менеджер Бета") == "signed"
+    assert order_oth.stock(conn)["stock"] == [] and order_oth.goods_on_oth(conn) == {}
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    block = page[page.index('id="order-%d"' % cid):].split("</article>")[0]
+    assert "Отдано, нужна сумма возврата" in block and "Шины отданы поставщику, менеджер заполнит сумму возврата" in block
+
+
+def test_a_failed_migration_keeps_the_base_open_and_tries_again(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    old_flow(conn)
+    monkeypatch.setattr(order_oth, "return_changes", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert order_oth.migrate(conn, "2026-11-04T06:00:00") == dict.fromkeys(("renamed", "closed", "waiting_amount", "to_return_given", "skipped"), 0)
+    assert not store.get_state(conn, order_oth.FLOW_KEY) and orders.stage_name(conn, orders.RETURN_GIVEN) == order_oth.OLD_RETURN_NAME
+    monkeypatch.undo()
+    assert order_oth.migrate(conn, "2026-11-04T07:00:00")["closed"] == 1
 
 
 def test_the_vk_returned_without_a_purchase_takes_agreeing_off_sale(tmp_path):

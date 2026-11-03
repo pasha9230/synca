@@ -302,6 +302,10 @@ _MORE_TEXTS = {
     "stage_renamed": lambda d: "Этап переименован: «%s» → «%s»" % (d.get("from", "?"), d.get("to", "?")),
     "stage_names_templates": lambda d: "Шаблоны сообщений называют этапы по-старому (тексты не изменены, поправьте вручную): %s" % "; ".join(
         "№%s «%s» — %s" % (t.get("id", "?"), t.get("name", ""), ", ".join("«%s»" % n for n in t.get("stages") or ())) for t in d.get("templates") or ()),
+    "return_flow_migrated": lambda d: ("Схема возврата 2026-11-03: закрыто в «Вернули поставщику» %s, ждут суммы %s, на «На возврат» %s, пропущено %s%s"
+                                       % (d.get("closed", 0), d.get("waiting_amount", 0), d.get("to_return_given", 0), d.get("skipped", 0),
+                                          ", этап переименован" if d.get("renamed") else "")),
+    "oth_return_amount": lambda d: "Возврат поставщику: заказ №%s, сумма возврата %s ₽ — закупка шин" % (d.get("order", "?"), d.get("amount", "?")),
     "stage_off_board": lambda d: "Этап «%s» убран с доски: его заказы — в «Списке», в поиске и в фильтре «Этап»" % (d.get("name") or d.get("stage", "?")),
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
     "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",

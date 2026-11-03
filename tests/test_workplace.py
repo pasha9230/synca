@@ -294,7 +294,7 @@ def test_a_new_stay_on_oth_needs_a_new_agreement_and_the_window_never_skips_the_
     order_oth.agree(conn, orders.get_card(conn, oth), date(2026, 10, 28), NOW, "owner")
     window = _text(client.get("/orders/%d" % oth))
     assert orders.get_card(conn, oth)["stage"]["code"] == orders.RETURN_GIVEN               # 2026-11-03: agreed, «На возврат»
-    assert "Перевести в «Вернули поставщику»" in window                                     # the manager may still close it by hand
+    assert "Перевести в «Вернули поставщику»" not in window                                 # the act is the point's press, not a click
     assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "gamma") == "return"
     assert orders.get_card(conn, oth)["stage"]["code"] == "return"
     assert orders.move_card(conn, oth, _stage(conn, "oth"), NOW, "o")                       # back on «На ОТХ» (a mistake): a new stay

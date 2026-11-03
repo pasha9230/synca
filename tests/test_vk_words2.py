@@ -155,13 +155,10 @@ def test_a_return_with_the_amount_moves_the_order_to_return_and_fills_the_kind_a
 
 
 def test_a_return_without_the_amount_leaves_the_stage_and_asks_the_responsible(tmp_path):
-    """The lead 2026-10-26 (A): the kind and the reason may be filled by the bot; the amount is the purchase (the owner 2026-11-03), so one
-    that cannot be counted (no purchase) keeps the stage, the journal has the point's line and a yellow record for the responsible; the point
-    hears «отмечено»."""
+    """The lead 2026-10-26 (A): the kind and the reason may be filled by the bot, the amount never; without it the stage stays, the journal
+    has the point's line and a yellow record for the responsible; the point hears «отмечено»."""
     conn, pid, _ = setup(tmp_path)
     card = _webmim(conn, pid, 5259052, "at_point")
-    conn.execute("UPDATE order_item SET supplier_price = 0 WHERE order_id = ?", (card,))
-    conn.commit()
     answer = mgr.dispatch(conn, "r", "111", "отдал на возврат", 5259052, NOW)
     got = orders.get_card(conn, card)
     assert answer == "Заказ №5259052: отмечено — шины отданы на возврат"

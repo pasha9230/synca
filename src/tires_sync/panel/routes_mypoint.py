@@ -442,6 +442,7 @@ def register(app) -> None:
                           "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
                           "oth_asked": code == "oth" and order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
                           "ret_label": order_oth.label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
+                          "ret_state": order_oth.state_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "oth_question": order_oth.question(conn, card, now) if code == "oth" else "",
                           "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
                           "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"])),     # «Шины с ОТХ, заказ №…»
