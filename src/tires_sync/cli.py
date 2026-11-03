@@ -857,6 +857,11 @@ def _run_cycle(args) -> int:
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0
+            try:                                                    # the prices Avito has from the feed: what the cycle changes goes through the API
+                before_prices = price_push.snapshot(conn, args.feed_root)
+            except Exception:                                       # noqa: BLE001 - the prices on Avito never stop a publication
+                before_prices = {}
+            published_ids = []
             for r in results:
                 account = connections.get_account(conn, r.account_id)
                 if not r.ok or not account["live"]:
@@ -866,6 +871,7 @@ def _run_cycle(args) -> int:
                     done = promote_feed(folder, expected_removals=expected)
                     _record_state(conn, account, folder)
                     promoted += 1
+                    published_ids.append(account["id"])
                     print("%s: опубликован, объявлений: %d (было %d)" % (r.name, done["new"], done["old"]))
                 except (PublishError, store.StateError) as err:
                     print("%s: error, %s" % (r.name, err))
@@ -873,6 +879,12 @@ def _run_cycle(args) -> int:
                     failed.append(r)
             if promoted and not failed:
                 clear_expected(conn)
+            if before_prices:
+                try:                                                # sent at the end of the cycle, with what «Применить» left
+                    price_push.queue_changes(conn, args.feed_root, before_prices, published_ids, _now(), "система")
+                except Exception as err:                            # noqa: BLE001 - published already: Avito takes the price from the feed
+                    conn.rollback()
+                    print("предупреждение: цены на Авито не поставлены в очередь (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
         if failed:
             _alert(conn, box, "Tires Sync: цикл завершился с ошибками.\n" + "\n".join(
                 "%s: %s" % (r.name, r.error) for r in failed))
@@ -891,7 +903,7 @@ def _run_cycle(args) -> int:
         _load_tochki(conn, box, args, started)
     if getattr(args, "publish", False):
         avito_stock.after_cycle(conn, box, args.feed_root, parsed, results, http=_http())    # the number in stock on Avito, last: only accounts switched on
-        try:                                                    # prices queued by «Применить» that a stopped sender left
+        try:                                                    # the prices this cycle changed, and those a stopped sender left
             price_push.run(conn, box, args.feed_root, _http())
         except Exception as err:                                # noqa: BLE001 - the prices on Avito must never fail a cycle
             conn.rollback()

@@ -45,6 +45,8 @@ class Avito:
             if self.token != 200:
                 return self.token, {}, json.dumps({"error": "invalid_client"}).encode()
             return 200, {}, json.dumps({"access_token": "t", "expires_in": 3600}).encode()
+        if (method, path) == ("GET", "/core/v1/items"):                    # the cycle's own reading of the cabinet (prebind): nothing
+            return 200, {}, json.dumps({"resources": []}).encode()
         found = re.fullmatch(r"/core/v1/items/(\d+)/update_price", path)
         assert found and method == "POST", (method, url)
         answer = self.answers.pop(0) if self.answers else None
@@ -54,7 +56,7 @@ class Avito:
         return 200, {}, json.dumps({"result": {"success": True}}).encode()
 
     def price_calls(self):
-        return [c for c in self.calls if c[1] != "/token/"]
+        return [c for c in self.calls if c[1].endswith("/update_price")]
 
 
 class Box:
@@ -410,3 +412,28 @@ def test_a_token_service_down_marks_the_rows_and_says_why(tmp_path):
 def test_the_card_says_when_no_avito_ad_numbers_were_read(tmp_path):
     _, client, tok, conn, _, _ = world(tmp_path, ads={})
     assert "Номера объявлений на Авито ещё не прочитаны" in client.get("/connections/avito/1").get_data(as_text=True)
+
+
+def test_the_hourly_cycle_sends_the_prices_its_own_publication_changed(tmp_path, monkeypatch):
+    """The lead 2026-11-03: the same mechanism for the hourly cycle when the account is switched on (a new purchase price, say)."""
+    from tires_sync import cli
+    app, client, tok, conn, folder, _ = world(tmp_path)
+    before = live_prices(folder)
+    staging.set_own_price(conn, "1", [1], {"pct": 15}, T)                  # applied without publishing: the next cycle publishes it
+    from tires_sync.settings_store import confirm_draft as confirm
+    confirm(conn, staging.summary(conn)["draft_id"], T, "owner")
+    fake = Avito()
+    monkeypatch.setattr(cli, "load_box", lambda path: Box())
+    monkeypatch.setattr(cli, "_http", lambda: fake)
+    for step in ("_collect_avito_reports", "_heal_accounts", "_check_waiting", "_send_reminders", "_alert"):
+        monkeypatch.setattr(cli, step, lambda *a, **k: None)
+    monkeypatch.setattr(cli.avito_stock, "after_cycle", lambda *a, **k: None)
+    args = ["--db", app.config["DB_PATH"], "--unload", app.config["UNLOAD_PATH"], "--reference", app.config["REFERENCE_PATH"],
+            "--feed-root", str(folder.parent)]
+    cli.main(["run-cycle", "--publish"] + args)
+    after = live_prices(folder)
+    assert after["1"] != before["1"] and fake.prices == {101: after["1"]}
+    assert {k for k, v in after.items() if before.get(k) != v} == {"1"}
+    fake.prices.clear(); fake.calls.clear()
+    cli.main(["run-cycle", "--publish"] + args)                             # nothing changed since: nothing goes again
+    assert fake.prices == {} and fake.price_calls() == []

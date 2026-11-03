@@ -4,7 +4,8 @@
 schedule. So the price that goes through the item API is the one of the published feed, never computed apart: before the rebuild the
 prices of each live feed are noted, after the publication the ads whose price changed are queued (`avito_price`, one row per Avito ad).
 Only ads the feed had before and still has, with one live Avito ad (avito_ad); new ads, removed ones and the stock are never touched.
-A feed the gate stopped is not published, so it queues nothing.
+A feed the gate stopped is not published, so it queues nothing. The hourly cycle with --publish does the same for its own publication
+(the lead 2026-11-03: a new purchase price goes too).
 
 Off unless switched on per account (connection kind `avito_price`): «off» makes not a single request, «dry» queues what would go and
 sends nothing (the lead compares it with Avito before switching on), «on» sends. The queue is sent by a process of its own
