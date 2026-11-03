@@ -171,3 +171,30 @@ def test_avito_is_not_asked_without_the_keys_of_the_account(tmp_path, monkeypatc
     post(client, "/chats/%d/create-deal" % chat, tok)
     card = card_of(conn, chat)
     assert http.calls == [] and "у аккаунта нет ключей Авито" in notes(conn, card["id"])[0]
+
+
+# ---- the list every 2 hours, the statistics once a day ----------------------------------------------------------------------------------
+
+def test_avito_stats_collects_the_statistics_on_the_first_run_of_a_day_and_only_the_list_after(tmp_path, monkeypatch):
+    from tires_sync import cli
+    store.connect(tmp_path / "t.db").close()
+    asked, reports = [], []
+    monkeypatch.setattr(cli, "load_box", lambda key_file: object())
+    monkeypatch.setattr(cli.connections, "list_feed_accounts", lambda conn: [{"id": 1, "name": "A"}])
+    monkeypatch.setattr(cli.connections, "get_secret", lambda *a, **k: "x")
+    monkeypatch.setattr(cli, "AvitoClient", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_collect_avito_reports", lambda conn, box: reports.append(1))
+    fail = []
+
+    def collect(conn, client, account_id, today, days=7, now_iso="", stats=True):
+        asked.append(stats)
+        if fail:
+            raise OSError("timed out")
+        return {"ads": 0, "mapped": 0, "days": 0}
+    monkeypatch.setattr(cli.ad_stats, "collect", collect)
+    run = ["avito-stats", "--db", str(tmp_path / "t.db")]
+    fail.append(1)
+    assert cli.main(run) == 1                                               # the statistics failed: the next run tries them again
+    fail.clear()
+    assert cli.main(run) == 0 and cli.main(run) == 0 and cli.main(run + ["--stats"]) == 0
+    assert asked == [True, True, False, True] and len(reports) == 3         # Avito's upload report only with the statistics
