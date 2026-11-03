@@ -41,8 +41,8 @@ def collect(conn, client, account_id: int, today: date, days: int = 7, now_iso: 
                 conn.execute("UPDATE avito_ad SET ad_id = ? WHERE account_id = ? AND avito_id = ?", (str(ad_id), account_id, avito_id))
                 mapped += 1
     rows = 0
+    conn.commit()                                                         # the list stands even when the statistics fail below
     if not stats:
-        conn.commit()
         return {"ads": len(items), "mapped": mapped, "days": 0}
     first, last = (today - timedelta(days=days - 1)).isoformat(), today.isoformat()
     for chunk in _chunks([item["id"] for item in items], STATS_CHUNK):

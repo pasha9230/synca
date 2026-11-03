@@ -203,9 +203,10 @@ def _lookup_failure(err: BaseException) -> str:
     return "Авито не ответил (%s)" % type(err).__name__
 
 
-def _add_position(conn, chat: dict, card_id: int, provider, now: str, author: str, ad_lookup=None) -> bool:
+def _add_position(conn, chat: dict, card_id: int, provider, now: str, author: str, ad_lookup=None, hint: bool = False) -> bool:
     """The position of the ad the client wrote about, priced as the panel prices it today. Any trouble is only noted: the deal stands.
-    An ad the list of our ads does not know yet (it is read a few times a day) is asked of Avito by `ad_lookup(chat)` once. True: added."""
+    An ad the list of our ads does not know yet (it is read a few times a day) is asked of Avito by `ad_lookup(chat)` once. True: added.
+    `hint`: the note of an unknown ad names the button that repeats it (only the office has it)."""
     traced = ad_goods(conn, chat["account_id"], chat["item_id"])
     if provider is None:
         return False
@@ -224,17 +225,20 @@ def _add_position(conn, chat: dict, card_id: int, provider, now: str, author: st
                 log.warning("the ad %s of chat %s was not looked up: %s", chat["item_id"], chat["id"], type(err).__name__)
                 why = " (%s)" % _lookup_failure(err)
         if traced is None:
-            orders.add_event(conn, card_id, now, author, "chat", "Позиция не определена: объявление Авито №%s не найдено среди наших объявлений%s; %s" % (
-                chat["item_id"], why, RETRY_HINT))
+            orders.add_event(conn, card_id, now, author, "chat", "Позиция не определена: объявление Авито №%s не найдено среди наших объявлений%s%s" % (
+                chat["item_id"], why, "; " + RETRY_HINT if hint else ""))
             conn.commit()
             return False
     goods_id, pack = traced
     added = False
     try:
         args = provider(goods_id, pack)
-        if args:
-            orders.add_item(conn, card_id, qty=DEFAULT_QTY, now=now, author=author, **args)
-            added = True
+        if not args:
+            raise OrderError("позиции %s нет в выгрузке" % goods_id)
+        if ad_lookup is not None and conn.execute("SELECT 1 FROM order_item WHERE order_id = ? LIMIT 1", (card_id,)).fetchone():
+            return False                                                  # added by another press while Avito was asked: never a second one
+        orders.add_item(conn, card_id, qty=DEFAULT_QTY, now=now, author=author, **args)
+        added = True
     except OrderError as err:
         orders.add_event(conn, card_id, now, author, "chat", "Позиция не добавлена: %s" % err)
     conn.commit()
@@ -263,13 +267,15 @@ def add_ad_position(conn, card_id: int, provider, ad_lookup, now: str, author: s
         raise OrderError("Позиция из объявления уже подставляется: обновите страницу через минуту.")    # two presses at once: one position
     added = False
     try:
-        added = _add_position(conn, chat, card_id, provider, now, author, ad_lookup)
+        added = _add_position(conn, chat, card_id, provider, now, author, ad_lookup, hint=True)
     finally:
         if not added:                                                     # a press that added nothing may be repeated at once
             conn.rollback()
             store.set_state(conn, "ad_position:%d" % card_id, "")
     if added:
         return "Позиция из объявления №%s добавлена." % chat["item_id"]
+    if orders.list_items(conn, card_id):
+        raise OrderError("Позиция уже в заказе: её добавили, пока спрашивали Авито.")
     raise OrderError("Позиция не добавлена: причина в журнале заказа.")
 
 
@@ -459,7 +465,7 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
         if earlier:
             orders.add_event(conn, card_id, now, author, "chat", "Ранее писал: заказы %s" % ", ".join("№%d" % i for i in earlier))
             conn.commit()
-        _add_position(conn, chat, card_id, position_provider, now, author, ad_lookup)
+        _add_position(conn, chat, card_id, position_provider, now, author, ad_lookup, hint=ad_lookup is not None and own_point is None)
     except BaseException:
         conn.rollback()
         conn.execute("UPDATE avito_chat SET order_id = NULL WHERE id = ? AND order_id = -1", (chat_row,))        # give the claim back

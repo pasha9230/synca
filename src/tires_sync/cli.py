@@ -2566,7 +2566,7 @@ def _cmd_avito_stats(args) -> int:
             result = ad_stats.collect(conn, client, account["id"], today, days=args.days, now_iso=_now(), stats=stats)
         except (AvitoError, OSError) as err:
             conn.rollback()
-            failed += 1
+            failed += stats                                              # a missed list between the daily runs: no alert, the next run in 2 hours
             print("аккаунт «%s»: %s (%s)" % (account["name"], "статистика не собрана" if stats else "список объявлений не обновлён", err), file=sys.stderr)
             continue
         if stats:

@@ -194,7 +194,52 @@ def test_avito_stats_collects_the_statistics_on_the_first_run_of_a_day_and_only_
     monkeypatch.setattr(cli.ad_stats, "collect", collect)
     run = ["avito-stats", "--db", str(tmp_path / "t.db")]
     fail.append(1)
-    assert cli.main(run) == 1                                               # the statistics failed: the next run tries them again
+    assert cli.main(run) == 1                                               # the statistics failed: an alert, the next run tries them again
     fail.clear()
     assert cli.main(run) == 0 and cli.main(run) == 0 and cli.main(run + ["--stats"]) == 0
-    assert asked == [True, True, False, True] and len(reports) == 3         # Avito's upload report only with the statistics
+    fail.append(1)
+    assert cli.main(run) == 0                                               # a missed list between the daily runs: no alert
+    assert asked == [True, True, False, True, False] and len(reports) == 3  # Avito's upload report only with the statistics
+
+
+def test_a_failure_of_the_statistics_keeps_the_list_read_before_it(tmp_path):
+    conn, account = base(tmp_path)
+    client, _ = client_for((200, {"id": 111, "name": "Шина-Колесо"}), (200, {"resources": [{"id": AD, "title": "Gislaved", "price": 9000, "status": "active"}]}),
+                           known((AD, "100-x4")), *[(429, {"error": {"code": 429, "message": "slow"}})] * 5)   # repeats of a read
+    with pytest.raises(RateLimited):
+        ad_stats.collect(conn, client, account, date(2026, 10, 12), now_iso="2026-10-12T11:20:00")
+    conn.rollback()                                                          # as avito-stats does after a failure
+    assert conn.execute("SELECT ad_id, seen_at FROM avito_ad WHERE account_id = ? AND avito_id = ?", (account, AD)).fetchone() == (
+        "100-x4", "2026-10-12T11:20:00")
+
+
+def test_a_position_added_while_avito_was_asked_is_not_added_twice(tmp_path, monkeypatch):
+    http = ScriptedHttp(TOKEN, known((AD, "100")))
+    app, client, tok, conn, chat = panel(tmp_path, monkeypatch, http)
+    real = ad_stats.lookup_one
+
+    def slow(conn_, *a, **k):                                                # meanwhile the button of another person added the position
+        card_id = conn_.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
+        orders.add_item(conn_, card_id, goods_id="100", name="Ikon", brand_key="", season="all", diameter=16, territory="", qty=4,
+                        sale_unit=5000.0, supplier_price=4000.0, terms="", fee_pct=0, promo_pct=0, now=NOW, author="другой")
+        conn_.commit()
+        return real(conn_, *a, **k)
+    monkeypatch.setattr(ad_stats, "lookup_one", slow)
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    assert len(card_of(conn, chat)["items"]) == 1
+
+
+def test_the_button_is_the_offices_a_point_neither_sees_nor_presses_it(tmp_path, monkeypatch):
+    from test_roles import person
+    from tires_sync import order_points as points
+    http = ScriptedHttp(TOKEN, (500, {"message": "down"}))
+    app, client, tok, conn, chat = panel(tmp_path, monkeypatch, http)
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card = card_of(conn, chat)
+    point = points.save_point(conn, {"name": "Альфа", "manager_name": "А", "channel": "vk"})
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (point, card["id"]))
+    conn.commit()
+    manager, _ = person(app, "point", point)
+    assert "Подставить позицию из объявления</button>" not in manager.get("/orders/%d" % card["id"]).get_data(as_text=True)
+    assert post(manager, "/orders/%d/ad-position" % card["id"], "tok").status_code == 403
+    assert orders.get_card(conn, card["id"])["items"] == [] and len(http.calls) == 2
