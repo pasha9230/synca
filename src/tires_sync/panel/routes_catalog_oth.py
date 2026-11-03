@@ -62,16 +62,17 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
     if offer is None and not published and (not sync._removed_for_stock(conn, account_id, goods_id)
                                             or sync._off_by_the_owner(goods_id, before[1], eff, left_out, True)):
         return False, "сохранённое объявление снято настройкой (не по остатку) — так оно и остаётся снятым"
-    if offer is not None and not published and not before:
+    former = oth_manual.retired_id(conn, account_id, goods_id)          # its Id here, the saved ad kept or not
+    if offer is not None and not published and not former:
         return False, "раньше не публиковалась в этом аккаунте — на Авито не уходит (новый Id не выдаём)"
-    if offer is not None and not published and before:
+    if offer is not None and not published and former:
         id_map = dict(mirror_feed.adopted_maps(conn, account_id)[0])
         if mirror_feed.alias_scheme(conn, account_id) and goods_id not in id_map:
             id_map[goods_id] = mirror_feed.alias_id(account_id, goods_id)
         suffix = "" if account_id == connections.PRIMARY_ACCOUNT else "_a%d" % account_id
         now_id = sync._final_id(goods_id, id_map, suffix, mirror_feed.reissued_own(conn, account_id), account_id)
-        if sync.REISSUE_MARK.sub("", before[0]) != sync.REISSUE_MARK.sub("", now_id):
-            return False, "прежний Id объявления (%s) не совпадает с нынешним: новый Id не выдаём" % before[0]
+        if sync.REISSUE_MARK.sub("", former) != sync.REISSUE_MARK.sub("", now_id):
+            return False, "прежний Id объявления (%s) не совпадает с нынешним: новый Id не выдаём" % former
     return True, ("уйдёт на Авито по своей цене" + (" %d ₽" % prices[goods_id] if money else "")
                   + (" (из архива каталога)" if offer is not None else " (по сохранённому объявлению)")
                   + "; лимит возвратов ОТХ и «одна шина — одно объявление» действуют")

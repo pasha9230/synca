@@ -138,6 +138,12 @@ _NOT_SENT = {"price": (NO_PRICE_KEY, "нет своей цены — на Ави
                     "oth_manual_no_id", "no_id")}
 
 
+def retired_id(conn, account_id: int, goods_id: str) -> Optional[str]:
+    """The Id a position taken off this account's feed had (retired_ad), its saved ad kept or not (taken off before 2026-10-29)."""
+    row = conn.execute("SELECT ad_id FROM retired_ad WHERE account_id = ? AND goods_id = ?", (account_id, goods_id)).fetchone()
+    return row[0] if row and row[0] else None
+
+
 def manual_of(conn, codes) -> Dict[str, int]:
     """code → its manual pieces (no test point), for the codes given."""
     from .oth_stock import manual_rows

@@ -390,6 +390,13 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
                 continue
             retired[code] = (found[0], found[1], price)
     taken = {c for c in published if taken_by.get(live_id_of(c)) not in (None, c)}     # its Id goes to another lot in this step
+    from . import oth_manual
+    for code in sorted(c for c in oth if c in getattr(ev, "oth_offers", {}) and c not in published and c not in ev.inherit):
+        before = oth_manual.retired_id(conn, acct, code)                  # a gone position built afresh: only under the Id it had in this
+        if not before or REISSUE_MARK.sub("", before) != REISSUE_MARK.sub("", live_id_of(code)):    # account; decided before one tire's
+            oth.pop(code)                                                 # carrier is chosen, so it never takes another lot's OTH and drops it
+            points.pop(code, None)
+            ev.oth_no_id[code] = "never" if not before else before
 
     def tire(code):
         if code in ev.ok:
@@ -426,13 +433,6 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
         if code not in ev.ok and code not in retired:
             continue                                                      # nothing to publish it from (hidden as same_tire and no carrier)
         ad_id = retired[code][0] if code in retired else live_id_of(code)
-        if code in getattr(ev, "oth_offers", {}):                         # a gone position built afresh: only under the Id it had in this account
-            before = store.retired_ad_of(conn, acct, code)
-            if not before or REISSUE_MARK.sub("", before[0]) != REISSUE_MARK.sub("", ad_id):
-                oth.pop(code)                                             # never published here, or its Id was another: never a new Id
-                points.pop(code, None)
-                ev.oth_no_id[code] = "never" if not before else before[0]
-                continue
         if (live_ids.get(ad_id) not in (None, code)) or ad_id in set(ev.inherit.values()) or ad_id in foreign:
             oth.pop(code)                                                 # its Id is another ad's now: never two ads under one Id
             points.pop(code, None)

@@ -497,3 +497,26 @@ def test_the_page_of_oth_hides_test_points_and_ignores_an_unknown_one(tmp_path):
     assert "data-oth-manual-list" in page                                # an unknown point: the whole page
     only = owner.get("/oth?point=%d" % a_point(conn)).get_data(as_text=True)
     assert "Заказов на ОТХ нет" in only and "data-oth-manual-list" in only
+
+
+def test_a_never_published_lot_does_not_take_the_oth_of_a_lot_that_can_come_back(tmp_path, capsys):
+    """Review 2026-11-03: one tire, gone lot G (never on Avito here, manual stock) sorts before lot L (taken off for stock, an order on OTH):
+    G must not become the carrier and then be dropped — L comes back under its own Id."""
+    import json
+    prepared(tmp_path, accounts=("A",), price_overrides={"1:1015": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    assert run(tmp_path, AFTER) == 0                                     # 102 taken off for stock (retired_ad «102»)
+    conn = connect(tmp_path)
+    data = json.loads(conn.execute("SELECT data FROM catalog_item WHERE goods_id = '102'").fetchone()[0])
+    data.update(goods_id="1015", code="TS1015")                          # the same tire, another lot
+    conn.execute("INSERT INTO catalog_item (goods_id, supplier_id, data, first_seen, last_seen, last_stock, last_price, gone_since) "
+                 "VALUES ('1015', 1, ?, ?, ?, 0, 5000, ?)", (json.dumps(data, ensure_ascii=False), NOW, NOW, NOW))
+    conn.commit()
+    conn.close()
+    manual(tmp_path, "1015", 2)
+    on_oth(tmp_path, "102")
+    capsys.readouterr()
+    assert run(tmp_path, AFTER) == 0
+    passed(capsys)
+    ids = ads_of(public(tmp_path))
+    assert "102" in ids and not any(i.startswith("1015") for i in ids)
