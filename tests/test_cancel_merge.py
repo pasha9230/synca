@@ -1,4 +1,4 @@
-"""«Отмена» and «Отказ/невыкуп» are one stage «Отмена / невыкуп» with the reason (the owner 2026-10-29): the merge of an old pipeline by the
+"""«Отмена» and «Отказ/невыкуп» are one stage «Отмена» with the reason (the owner 2026-10-29): the merge of an old pipeline by the
 code of the pipeline (orders._merge_refused_stage), the reason chosen on the card, the question «на ОТХ?», the point's «возврат отдал»."""
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from tires_sync import order_sheet, orders, store
 
 NOW = "2026-10-29T12:00:00"
 LATER = "2026-10-30T09:00:00"
-OLD = (("new", "Новый заказ", "#7F56D9", "open"), ("at_point", "Товар на точке", "#17B26A", "open"), ("oth", "На ОТХ", "#667085", "open"),
+OLD = (("new", "Новый заказ", "#7F56D9", "open"), ("at_point", "На точке, ждём клиента", "#17B26A", "open"), ("oth", "На ОТХ", "#667085", "open"),
        ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена", "#D92D20", "lost"), ("refused", "Отказ/невыкуп", "#C01048", "lost"),
        ("return", "Возврат", "#B54708", "closed"))
 
@@ -42,7 +42,7 @@ def test_the_orders_of_refused_go_to_the_one_stage_with_the_reason(tmp_path):
     orders.ensure_pipeline(conn, LATER)
     assert sid(conn, "refused") is None and conn.execute("SELECT COUNT(*) FROM order_stage WHERE id = ?", (refused,)).fetchone()[0] == 0
     cancel = orders.get_stage(conn, sid(conn, "cancel"))
-    assert cancel["name"] == "Отмена / невыкуп" and cancel["kind"] == "lost"
+    assert cancel["name"] == "Отмена" and cancel["kind"] == "lost"
     for card, reason in ((a, "не выкупил"), (b, "не выкупил: клиент не пришёл"), (c, "передумал")):
         got = orders.get_card(conn, card)
         assert got["stage"]["code"] == "cancel" and got["cancel_reason"] == reason
@@ -102,7 +102,7 @@ def test_a_pipeline_without_cancel_gets_refused_as_it(tmp_path):
     conn.execute("INSERT INTO order_stage (code, name, color, position, kind) VALUES ('refused', 'Отказ/невыкуп', '#C01048', 1, 'lost')")
     conn.commit()
     orders.ensure_pipeline(conn, LATER)
-    assert sid(conn, "refused") is None and orders.get_stage(conn, sid(conn, "cancel"))["name"] == "Отмена / невыкуп"
+    assert sid(conn, "refused") is None and orders.get_stage(conn, sid(conn, "cancel"))["name"] == "Отмена"
 
 
 def test_a_new_pipeline_has_one_stage_of_cancel(tmp_path):
@@ -142,7 +142,7 @@ def test_a_rule_moving_into_refused_comes_switched_off_and_a_loop_is_gone(tmp_pa
 
 
 def test_a_command_of_the_point_into_the_merged_stage_gives_a_reason(tmp_path):
-    """A word of the point into «Отмена / невыкуп» gives a reason: «не выкупил» only for a word that led to «Отказ/невыкуп» before the merge
+    """A word of the point into «Отмена» gives a reason: «не выкупил» only for a word that led to «Отказ/невыкуп» before the merge
     (it lets «возврат отдал» through), a neutral one for the others (the review, round 2)."""
     from tires_sync import order_manager as mgr
     conn = old_db(tmp_path)

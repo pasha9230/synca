@@ -662,6 +662,8 @@ def _migrate(conn) -> None:
     if not conn.execute("SELECT 1 FROM client_terms WHERE subject = '*'").fetchone():          # the role's conditions: empty (no price, no brand)
         conn.execute("INSERT OR IGNORE INTO client_terms (subject, brands_mode) VALUES ('*', 'own')")
         conn.commit()
+    from . import orders                                              # the owner 2026-11-03: the new names of the stages, once
+    orders.rename_default_stages(conn, moscow_iso())
 
 
 BUSY_SECONDS = 15.0          # how long a connection waits for another one's write before «database is locked»

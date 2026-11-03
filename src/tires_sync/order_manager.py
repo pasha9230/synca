@@ -46,8 +46,9 @@ def _return_from(card: dict) -> bool:
                                                     and str(card.get("cancel_reason") or "").strip().casefold().startswith(orders.NOT_BOUGHT))
 RETURN_REASON = "точка: шины отданы поставщику"
 RETURN_LINE = "точка: шины отданы поставщику (возврат)"
-RETURN_ASK = "Точка отдала шины поставщику (возврат): заполните сумму возврата и переведите в «Возврат»."
-RETURN_GAPS = "Точка отдала шины поставщику (возврат): не заполнено — %s; заполните и переведите в «Возврат»."
+RETURN_HEAD = "Точка отдала шины поставщику (возврат): "   # the records of the manager start so (routes_alerts.is_return_ask; the old ones too)
+RETURN_ASK = RETURN_HEAD + "заполните сумму возврата и переведите в «%s»."          # the current name of «return» (orders.stage_name)
+RETURN_GAPS = RETURN_HEAD + "не заполнено — %s; заполните и переведите в «%s»."
 HERE = "на точке"                                  # the point's answer to the question of the last day of the reservation (order_reserve, 2026-10-26)
 SHIP = "передал курьеру"                           # an order to another city handed to the courier of the transport company (order_intercity,
                                                    # the owner 2026-11-02): «передал курьеру N», «передал курьеру ТК N», «отправил N»
@@ -630,7 +631,7 @@ def apply(conn, card: dict, stage_id: int, who: str, now: str, deliver: Optional
                 "Заказ №%s — отмечено: %s (теперь на этапе «%s»). %s" % (label(card), ARRIVED, stage["name"], note))
     if stage["code"] == "done":
         if card["stage"]["code"] in ARRIVE_FROM:                         # issued straight from «Заказ оформлен» / «Перемещение на точку»
-            orders.add_event(conn, card["id"], now, who, "point", "Заказ выдан, минуя «Товар на точке» (был на этапе «%s»)" % card["stage"]["name"])
+            orders.add_event(conn, card["id"], now, who, "point", "Заказ выдан, минуя «%s» (был на этапе «%s»)" % (orders.stage_name(conn, "at_point"), card["stage"]["name"]))
             conn.commit()
         return "заказ перенесён на «%s»" % stage["name"], "Заказ №%s — отмечено: %s (теперь на этапе «%s»)." % (label(card), ISSUED, stage["name"])
     if to_oth:
@@ -653,8 +654,8 @@ def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
         if changes:
             orders.update_card(conn, card["id"], changes, now, who, commit=False)
         orders.add_event(conn, card["id"], now, who, "point", RETURN_LINE)
-        orders.add_event(conn, card["id"], now, who, "point", RETURN_ASK if gaps == ["сумма возврата"] else RETURN_GAPS % ", ".join(gaps),
-                         level="yellow")
+        orders.add_event(conn, card["id"], now, who, "point", RETURN_ASK % stage["name"] if gaps == ["сумма возврата"]
+                         else RETURN_GAPS % (", ".join(gaps), stage["name"]), level="yellow")
         conn.commit()
         return "возврат: этап не изменён, не заполнено: %s (жёлтая запись)" % ", ".join(gaps), answer
     try:

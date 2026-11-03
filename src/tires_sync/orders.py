@@ -29,9 +29,13 @@ KINDS = ("open", "won", "lost", "closed")
 KIND_NAMES = {"open": "обычный", "won": "успешный", "lost": "отказ", "closed": "завершающий"}
 DEFAULT_STAGES = (
     ("new", "Новый заказ", "#7F56D9", "open"), ("talk", "Переговоры", "#2E90FA", "open"), ("wait", "Ожидает наличие", "#0BA5EC", "open"),
-    ("placed", "Заказ оформлен", "#F79009", "open"), ("moving", "Перемещение на точку", "#EF6820", "open"),
-    ("at_point", "Товар на точке", "#17B26A", "open"), ("shipped", "Отправлен", "#0E9384", "won"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "Возврат передан", "#DC6803", "open"),
-    ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена / невыкуп", "#D92D20", "lost"), ("return", "Возврат", "#B54708", "closed"))
+    ("placed", "Заказ оформлен", "#F79009", "open"), ("moving", "Едет на точку", "#EF6820", "open"),
+    ("at_point", "На точке, ждём клиента", "#17B26A", "open"), ("shipped", "Отправлен в ТК", "#0E9384", "won"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "Возврат передан", "#DC6803", "open"),
+    ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена", "#D92D20", "lost"), ("return", "Вернули поставщику", "#B54708", "closed"))
+# the owner 2026-11-03: the names of the stages before it (code: old default). A stage still called so is renamed once (rename_default_stages)
+OLD_NAMES_2026_11_03 = {"moving": "Перемещение на точку", "at_point": "Товар на точке", "shipped": "Отправлен", "cancel": "Отмена / невыкуп",
+                        "return": "Возврат"}
+RENAMED_KEY = "stage_names_2026_11_03"          # app_state: the renaming was done (an owner's later name equal to an old one is never touched)
 # «Отмена» and «Отказ/невыкуп» are one stage with the reason (the owner 2026-10-29); the reason is a text of cancel_reason
 CANCEL_KINDS = ("отменил клиент", "не выкупил", "другое")
 NOT_BOUGHT = "не выкупил"
@@ -55,6 +59,56 @@ def set_default_responsible(conn, login) -> None:
     login = _single(login, 60, "Ответственный по умолчанию")
     conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (DEFAULT_RESPONSIBLE_KEY, login))
     conn.commit()
+
+
+def stage_name(conn, code) -> str:
+    """The current name of the stage `code` (the owner may rename it), else its default name: for the texts that name a stage."""
+    row = conn.execute("SELECT name FROM order_stage WHERE code = ? ORDER BY position, id LIMIT 1", (code,)).fetchone()
+    if row:
+        return row[0]
+    return next((d[1] for d in DEFAULT_STAGES + (FROM_POINT,) if d[0] == code), code)
+
+
+def rename_default_stages(conn, now: str) -> List[str]:
+    """Once (RENAMED_KEY), in one IMMEDIATE transaction: each stage of OLD_NAMES_2026_11_03 still called by its old default name gets the new
+    default name, a record of the journal of actions each; a name the owner gave is kept. The owner's templates that still name an old stage
+    are not rewritten: their ids go to the log and the journal as a warning. Returns the codes renamed."""
+    if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (RENAMED_KEY,)).fetchone():
+        return []
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (RENAMED_KEY,)).fetchone():     # another process was first
+            conn.rollback()
+            return []
+        renamed = []
+        for code, old in OLD_NAMES_2026_11_03.items():
+            new = next(d[1] for d in DEFAULT_STAGES if d[0] == code)
+            if conn.execute("UPDATE order_stage SET name = ? WHERE code = ? AND name = ?", (new, code, old)).rowcount:
+                renamed.append(code)
+                conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, "system", "stage_renamed", json.dumps(
+                    {"stage": code, "from": old, "to": new}, ensure_ascii=False)))
+        found = old_name_templates(conn)
+        if found:
+            logging.getLogger(__name__).warning("templates still naming old stages: %s", ", ".join(str(t["id"]) for t in found))
+            conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, "system", "stage_names_templates", json.dumps(
+                {"templates": found}, ensure_ascii=False)))
+        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (RENAMED_KEY, now))
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return renamed
+
+
+def old_name_templates(conn) -> List[dict]:
+    """The owner's message templates whose text names an old stage (in «», or a name of several words as it is): [{id, name, stages}]."""
+    found = []
+    for tid, name, body in conn.execute("SELECT id, name, body FROM order_template ORDER BY id").fetchall():
+        hits = [old for old in OLD_NAMES_2026_11_03.values() if "«%s»" % old in (body or "") or (" " in old and old in (body or ""))]
+        if hits:
+            found.append({"id": tid, "name": name, "stages": hits})
+    return found
 
 
 def _stage_dict(row) -> dict:

@@ -261,7 +261,7 @@ def test_a_change_sends_only_the_columns_that_follow_the_order(table):
     update = fake.data_posts()[-1]["rows"]
     assert len(update) == 2 and not any(r["create"] for r in update) and all(set(r["fields"]) == {"Перемещение MIM", "Этап"} for r in update)
     row = next(iter(fake.rows.values()))
-    assert row["Имя"] == "Иван" and "Примечание" not in row and row["Этап"] == "Товар на точке" and row["Перемещение MIM"] == "26R-1"
+    assert row["Имя"] == "Иван" and "Примечание" not in row and row["Этап"] == "На точке, ждём клиента" and row["Перемещение MIM"] == "26R-1"
     assert events(conn, mine)[-1] == "Google-таблица обновлена: Перемещение MIM, Этап."
 
 
@@ -547,7 +547,7 @@ LATEST = "2026-10-23T13:00:00"
 
 
 def own_stage(conn, before_placed):
-    """A stage of the owner: last in the pipeline (after «Возврат»), or moved up to stand right before «Заказ оформлен»."""
+    """A stage of the owner: last in the pipeline (after «Вернули поставщику»), or moved up to stand right before «Заказ оформлен»."""
     mine = orders.add_stage(conn, "Свой этап", "#123456", "open", "", 0)
     while before_placed and [s["id"] for s in orders.list_stages(conn)].index(mine) > [s["code"] for s in orders.list_stages(conn)].index("placed"):
         orders.shift_stage(conn, mine, -1)
@@ -577,7 +577,7 @@ def test_reordering_the_system_stages_takes_no_order_out(table):
     moving, cancelled = placed(conn), placed(conn, client_name="Пётр")
     orders.move_card(conn, moving, stage(conn, "moving")["id"], NOW, "owner")
     orders.move_card(conn, cancelled, stage(conn, "cancel")["id"], NOW, "owner", {"cancel_reason": "передумал"})
-    orders.shift_stage(conn, stage(conn, "placed")["id"], +1)              # «Заказ оформлен» below «Перемещение на точку»
+    orders.shift_stage(conn, stage(conn, "placed")["id"], +1)              # «Заказ оформлен» below «Едет на точку»
     while [s["code"] for s in orders.list_stages(conn)].index("cancel") > [s["code"] for s in orders.list_stages(conn)].index("placed"):
         orders.shift_stage(conn, stage(conn, "cancel")["id"], -1)          # «Отмена» above «Заказ оформлен»
     assert sheet.listed(conn, moving) and sheet.listed(conn, cancelled)
@@ -609,7 +609,7 @@ def test_an_order_moved_back_has_its_rows_filled_grey_and_placed_again_cleared(t
     assert all(not op["create"] for op in fake.data_posts()[-1]["rows"])   # the same rows, never new ones
     orders.move_card(conn, mine, stage(conn, "cancel")["id"], LATEST, "owner", {"cancel_reason": "передумал"})
     sheet.flush(conn, box, fake, LATEST)                                   # «Отмена» stands after placing: not grey, «Реализация» empty
-    assert fake.grey == set() and {(r["Этап"], r["Реализация"]) for r in fake.rows.values()} == {("Отмена / невыкуп", "")}
+    assert fake.grey == set() and {(r["Этап"], r["Реализация"]) for r in fake.rows.values()} == {("Отмена", "")}
 
 
 def test_back_then_cancelled_loses_the_fill_and_its_letter(table):
@@ -623,7 +623,7 @@ def test_back_then_cancelled_loses_the_fill_and_its_letter(table):
     assert fake.grey == set(fake.rows) and {r["Реализация"] for r in fake.rows.values()} == {""}
     orders.move_card(conn, mine, stage(conn, "cancel")["id"], LATEST, "owner", {"cancel_reason": "передумал"})
     sheet.flush(conn, box, fake, LATEST)
-    assert fake.grey == set() and {r["Этап"] for r in fake.rows.values()} == {"Отмена / невыкуп"}
+    assert fake.grey == set() and {r["Этап"] for r in fake.rows.values()} == {"Отмена"}
 
 
 def test_an_order_back_before_its_first_send_is_written_grey(table):
@@ -771,7 +771,7 @@ def test_an_update_carries_the_cells_that_identify_the_row_and_a_rewritten_row_i
     sent = fake.data_posts()[-1]["rows"]
     assert [r["check"] for r in sent] == [{"Артикул": "111", "Телефон": "89111112233"}, {"Артикул": "222", "Телефон": "89111112233"}]
                                                                            # the code and the phone (the lead's review 2026-11-01)
-    assert fake.rows[first]["Этап"] == "Заказ оформлен" and fake.rows[sorted(fake.rows)[1]]["Этап"] == "Товар на точке"
+    assert fake.rows[first]["Этап"] == "Заказ оформлен" and fake.rows[sorted(fake.rows)[1]]["Этап"] == "На точке, ждём клиента"
     assert any("Строка Google-таблицы изменена или удалена вручную" in e for e in events(conn, mine))
 
 
@@ -783,7 +783,7 @@ def test_a_name_the_owner_corrected_keeps_the_row_up_to_date(table):
         row["Наименование"] = "Шина (поправил владелец)"
     orders.move_card(conn, mine, stage(conn, "at_point")["id"], LATER, "pavel")
     sheet.flush(conn, box, fake, LATER)
-    assert {r["Этап"] for r in fake.rows.values()} == {"Товар на точке"}
+    assert {r["Этап"] for r in fake.rows.values()} == {"На точке, ждём клиента"}
     assert {r["Наименование"] for r in fake.rows.values()} == {"Шина (поправил владелец)"}          # written once: the correction stays
 
 
@@ -824,7 +824,7 @@ def test_a_change_made_while_google_answers_goes_with_the_next_send(table):
     sheet.flush(conn, box, slow, NOW)
     assert {r["Этап"] for r in fake.rows.values()} == {"Заказ оформлен"}
     sheet.flush(conn, box, fake, LATER)                                     # the next kick, not the hourly look
-    assert {r["Этап"] for r in fake.rows.values()} == {"Товар на точке"}
+    assert {r["Этап"] for r in fake.rows.values()} == {"На точке, ждём клиента"}
 
 
 def test_a_new_address_wants_the_secret_again(panel):
@@ -985,7 +985,7 @@ out.text = {phone: sheet.raw['6,' + col['Телефон']], note: sheet.get(6, c
 out.kept = {total: sheet.get(3, col['Комментарий владельца']), sum: sheet.formulas['3,' + col['Сумма продажи']], empty: sheet.formulas['4,' + col['Прибыль ₽']],
             name3: sheet.get(3, col['Имя']), name4: sheet.get(4, col['Имя']), note5: sheet.get(5, col['Примечание']), name5: sheet.get(5, col['Имя'])};
 sheet.sortBy(col['Имя'], false);                                          // Алла, Ручная строка, Яна
-out.update = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:1:1', create: false, fields: {'Этап': 'Товар на точке'}, check: {'Артикул': '111'}}]});
+out.update = post({secret: SECRET, sheet: 'Заказы', rows: [{key: 'tires:1:1', create: false, fields: {'Этап': 'На точке, ждём клиента'}, check: {'Артикул': '111'}}]});
 out.afterSort = {};
 for (var r = 2; r <= sheet.cells.length; r++) if (sheet.get(r, col['Имя'])) out.afterSort[sheet.get(r, col['Имя'])] = sheet.get(r, col['Этап']);
 var alla = sheet.keyAt('tires:1:2');                                      // the mark moved with its row (the sort above)
@@ -1087,7 +1087,7 @@ def test_the_script_on_a_fake_of_google_sheets(tmp_path):
                            "box": "checkbox", "manual": "Ручная строка"}             # text as text: a formula of a client never runs (only
                                                                                  # «=+-@» keep the apostrophe, 2026-11-01)
     assert out["update"]["results"] == [{"key": "tires:1:1", "status": "updated"}]
-    assert out["afterSort"] == {"Алла": "Заказ оформлен", "Ручная строка": "", "Яна": "Товар на точке"}     # sorted: still the right row
+    assert out["afterSort"] == {"Алла": "Заказ оформлен", "Ручная строка": "", "Яна": "На точке, ждём клиента"}     # sorted: still the right row
     assert out["allaName"] == "Алла"                                          # the hidden mark went with its row in the sort
     assert out["rewritten"]["results"] == [{"key": "tires:1:2", "status": "missing"}] and out["allaStage"] == "Заказ оформлен"
     assert out["gone"]["results"] == [{"key": "tires:9:9", "status": "missing"}]

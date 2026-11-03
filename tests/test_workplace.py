@@ -72,7 +72,7 @@ def test_the_stages_count_the_own_orders_and_lead_to_the_list_of_the_stage(tmp_p
     assert len(counts) == len(names)                                                       # every stage of the owner's pipeline
     assert counts[str(_stage(conn, "at_point"))] == "1" and counts[str(_stage(conn, "moving"))] == "1" and counts[str(_stage(conn, "new"))] == "0"
     listed = _text(client.get("/orders?v=list&p=%d&s=%d" % (pid, _stage(conn, "at_point"))))
-    assert 'href="/orders/%d"' % here in listed and 'href="/orders/%d"' % card not in listed and "Только этап «Товар на точке»" in listed
+    assert 'href="/orders/%d"' % here in listed and 'href="/orders/%d"' % card not in listed and "Только этап «На точке, ждём клиента»" in listed
     assert 'href="/orders/%d"' % card in _text(client.get("/orders?v=list&p=%d&s=999" % pid))   # an unknown stage: no filter
 
 
@@ -196,13 +196,13 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     got = orders.get_card(conn, oth)
     assert got["stage"]["code"] == orders.RETURN_GIVEN and got["stage"]["name"] == "Возврат передан" and got["stage"]["kind"] == "open"
     assert order_oth.return_plan(conn, oth)["signed_at"]
-    assert any(e["level"] == "yellow" and e["text"] == order_oth.SIGNED_ASK for e in orders.list_events(conn, oth))
+    assert any(e["level"] == "yellow" and e["text"] == order_oth.SIGNED_ASK % orders.stage_name(conn, "return") for e in orders.list_events(conn, oth))
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (oth,)).fetchone() is None     # the refused client stays unlinked
     assert 'data-return="%d"' % oth not in _text(mine.get("/my-point"))
     assert "Акт МХ-3 подписан" in _text(client.get("/orders/%d" % oth))
     again = re.search(r'name="token" value="([0-9a-f]+)"', _all(mine)).group(1)
     post(mine, "/my-point/%d/act_signed" % oth, "tok", token=again)                        # a press of an old page: nothing more
-    assert sum(e["text"] == order_oth.SIGNED_ASK for e in orders.list_events(conn, oth)) == 1
+    assert sum(e["text"] == order_oth.SIGNED_ASK % orders.stage_name(conn, "return") for e in orders.list_events(conn, oth)) == 1
     assert [r["kind"] for r in point_log.history(conn, pid)][0] == "act_signed"
     return_stage = _stage(conn, "return")                                                  # the manager closes it with the amount, as before
     orders.move_card(conn, oth, return_stage, NOW, "o", changes={"return_kind": "supplier", "return_reason": "ОТХ", "return_amount": "20000"})
@@ -210,7 +210,7 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
 
 
 def test_the_return_button_is_gone_from_an_order_at_the_point(tmp_path):
-    """The owner 2026-11-02: no «Возврат» on «На точке» (it was in «Подробнее»); the press of an old page is refused."""
+    """The owner 2026-11-02: no «Вернули поставщику» on «На точке» (it was in «Подробнее»); the press of an old page is refused."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
@@ -287,7 +287,7 @@ def test_a_move_on_the_board_by_the_point_is_in_the_history(tmp_path):
     r = post(mine, "/orders/%d/move" % card, "tok", stage_id=str(_stage(conn, "at_point")))
     assert r.status_code == 302 and orders.get_card(conn, card)["stage"]["code"] == "at_point"
     [row] = point_log.history(conn, pid)
-    assert row["kind"] == "move" and "Товар на точке" in row["text"]
+    assert row["kind"] == "move" and "На точке, ждём клиента" in row["text"]
 
 
 def test_a_new_stay_on_oth_needs_a_new_agreement_and_the_window_never_skips_the_act(tmp_path):
@@ -297,7 +297,7 @@ def test_a_new_stay_on_oth_needs_a_new_agreement_and_the_window_never_skips_the_
     window = _text(client.get("/orders/%d" % oth))
     assert "Перевести в «Возврат передан»" not in window                                    # the act is the point's press, not a click
     assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "gamma")
-    assert "Перевести в «Возврат»" in _text(client.get("/orders/%d" % oth))                 # then the amount closes it
+    assert "Перевести в «Вернули поставщику»" in _text(client.get("/orders/%d" % oth))                 # then the amount closes it
     assert orders.move_card(conn, oth, _stage(conn, "oth"), NOW, "o")                       # back on «На ОТХ» (a mistake): a new stay
     assert order_oth.return_plan(conn, oth) is None and order_oth.to_return(conn, pid) == []
     stranger = manager(app, conn, _other(conn), login_="delta")
@@ -352,7 +352,7 @@ def test_no_to_the_question_moves_as_before_with_the_reason(tmp_path):
 
 
 def test_an_order_not_at_the_point_is_cancelled_without_the_question(tmp_path):
-    app, client, tok, conn, pid, card = ready(tmp_path)                                    # card: «Перемещение на точку»
+    app, client, tok, conn, pid, card = ready(tmp_path)                                    # card: «Едет на точку»
     post(client, "/orders/%d/move" % card, "tok", stage_id=str(_stage(conn, "cancel")), cancel_reason="передумал")
     assert orders.get_card(conn, card)["stage"]["code"] == "cancel"
     post(client, "/orders/%d/save" % card, "tok", stage_id=str(_stage(conn, "new")))       # (back to work: a window move is not asked either)
@@ -398,7 +398,7 @@ def test_the_sheet_says_nothing_for_a_return_given_and_the_point_bell_stays_quie
     order_oth.agree(conn, orders.get_card(conn, oth), date(2026, 10, 28), NOW, "owner")
     order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "gamma")
     assert order_sheet.realization(orders.get_card(conn, oth)) == ""          # the owner 2026-11-02: «О» is «На ОТХ» only
-    assert routes_alerts.is_return_ask({"kind": "point", "text": order_oth.SIGNED_ASK})
+    assert routes_alerts.is_return_ask({"kind": "point", "text": order_oth.SIGNED_ASK % "Вернули поставщику"})
     mine, order_id = _handed_over(app, conn, pid, login_="gamma3")
     post(mine, "/my-point/handoff/%d/cancel" % order_id, "tok")
     other = manager(app, conn, pid, login_="gamma4")                                         # another user of the same point
@@ -463,7 +463,7 @@ def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tm
         top, more = article.split('<details class="mp-more">')
         assert "№ " in top and "Татьяна" in top and "data-tyres" in top                        # the number, the tyres, the client (2026-10-30)
         assert 'href="tel:+79001112233"' not in top and 'href="tel:+79001112233"' in more        # the phone under «Подробнее»
-        assert "/my-point/%d/%s" % (order_id, "arrived" if order_id == card else "issued") in top   # the buttons: never folded («Возврат» is)
+        assert "/my-point/%d/%s" % (order_id, "arrived" if order_id == card else "issued") in top   # the buttons: never folded («Вернули поставщику» is)
         assert "<summary>Подробнее</summary>" in more and "Кол-во 4 шт" in more
     first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)            # the transfer is under «Подробнее» (the prototype, 2026-10-30)
     assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[1])

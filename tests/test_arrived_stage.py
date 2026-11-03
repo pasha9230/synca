@@ -1,6 +1,6 @@
 """«Приехал» while the order still stands on «Заказ оформлен» (the owner 2026-10-21, order №423): the point writes when the tyres are there,
-the stage in the panel is often not moved to «Перемещение на точку» yet. The command and the button of «Рабочее место» take it from both stages:
-«Товар на точке» and «можно забирать» once, as from «Перемещение». A new order is still doubtful, with a plain answer."""
+the stage in the panel is often not moved to «Едет на точку» yet. The command and the button of «Рабочее место» take it from both stages:
+«На точке, ждём клиента» and «можно забирать» once, as from «Перемещение». A new order is still doubtful, with a plain answer."""
 from __future__ import annotations
 
 from test_mypoint import manager, press
@@ -25,7 +25,7 @@ def test_arrived_on_placed_moves_to_the_point_and_tells_the_client_once(tmp_path
     hook(app, conn, "Приехали шины", reply=line)                                            # as order 423: an answer to the line of the order
     got = orders.get_card(conn, card)
     assert got["stage"]["code"] == "at_point" and got["reserve_until"]
-    assert len(to_client(app)) == 1 and outcome(conn)[-1].startswith("заказ перенесён на «Товар на точке»; клиенту отправлено")
+    assert len(to_client(app)) == 1 and outcome(conn)[-1].startswith("заказ перенесён на «На точке, ждём клиента»; клиенту отправлено")
     assert any("отмечено: приехал" in text for _peer, text in to_points(app))
     hook(app, conn, "Приехали шины", event="e2", reply=line)                                     # the point repeats it
     assert len(to_client(app)) == 1

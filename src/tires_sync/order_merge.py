@@ -312,7 +312,7 @@ def check(conn, ids, stage_id) -> dict:
     cards = [orders.get_card(conn, i) for i in ids]
     stage = orders.get_stage(conn, stage_id)
     if stage["kind"] != "open" or stage["code"] in ("oth", orders.RETURN_GIVEN):
-        raise MergeError("Новый заказ ставится на открытый этап (не «На ОТХ» и не «Возврат передан»).")
+        raise MergeError("Новый заказ ставится на открытый этап (не «%s» и не «%s»)." % (orders.stage_name(conn, "oth"), orders.stage_name(conn, orders.RETURN_GIVEN)))
     places = {c["point_id"] for c in cards if c["point_id"]}
     if len(places) > 1:
         raise MergeError("Объединять можно только заказы одной точки.")

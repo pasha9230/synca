@@ -49,7 +49,7 @@ def test_the_stage_shipped_stands_after_at_point_and_is_successful(tmp_path):
     codes = [s["code"] for s in stages]
     assert codes[codes.index("at_point") + 1] == "shipped"
     shipped = next(s for s in stages if s["code"] == "shipped")
-    assert shipped["name"] == "Отправлен" and shipped["kind"] == "won"
+    assert shipped["name"] == "Отправлен в ТК" and shipped["kind"] == "won"
     with pytest.raises(orders.OrderError):                                       # a system stage: renamed, never deleted
         orders.delete_stage(conn, shipped["id"])
     orders.ensure_pipeline(conn, NOW)                                            # once

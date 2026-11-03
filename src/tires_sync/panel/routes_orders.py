@@ -622,7 +622,15 @@ def register(app) -> None:
         """«Что делать сейчас» folded by the person signed in (user_pref «hint.<where>»): on the order's card and on «Рабочее место»."""
         return bool(session.get("user")) and bool(user_prefs.get(get_conn(), session["user"], onboarding_texts.PREF % where, False))
 
-    app.jinja_env.globals.update(hint_folded=hint_folded, stage_hint=onboarding_texts.stage_hint, point_hint=onboarding_texts.point_hint)
+    def stage_hint(code, point=False):
+        """onboarding_texts.stage_hint with the current names of the stages."""
+        return onboarding_texts.stage_hint(code, point, names={s["code"]: s["name"] for s in orders.list_stages(get_conn()) if s["code"]})
+
+    def stage_name(code):
+        """The current name of a system stage, for the texts of the templates that name it."""
+        return orders.stage_name(get_conn(), code)
+
+    app.jinja_env.globals.update(hint_folded=hint_folded, stage_hint=stage_hint, point_hint=onboarding_texts.point_hint, stage_name=stage_name)
 
     @app.route("/orders/hint/fold", methods=["POST"])
     @login_required
@@ -953,7 +961,7 @@ def register(app) -> None:
         conn = get_conn()
         card_or_404(conn, card_id)
         if not order_arrived.prepare(conn, card_id, local_iso(), author()):
-            flash("Заказ уже не на «Товар на точке».", "error")
+            flash("Заказ уже не на «%s»." % orders.stage_name(conn, "at_point"), "error")
             return redirect("/orders/%d" % card_id)
         return redirect("/orders/%d?messages=1#messages" % card_id)
 
@@ -969,7 +977,7 @@ def register(app) -> None:
         if order_arrived.mark_told(conn, card_id, local_iso(), author()):
             flash("Отмечено: клиенту сообщили. Сообщение «можно забирать» не отправляется.", "ok")
         else:
-            flash("Заказ уже не на «Товар на точке».", "error")
+            flash("Заказ уже не на «%s»." % orders.stage_name(conn, "at_point"), "error")
         return redirect("/orders/%d" % card_id)
 
     @app.route("/orders/<int:card_id>/oth-unagree", methods=["POST"])
@@ -1434,7 +1442,7 @@ def register(app) -> None:
         conn = get_conn()
         card = card_or_404(conn, card_id)
         if not oth_sale.all_from_oth(conn, card):
-            flash("Перевести сразу на «Товар на точке» можно, когда все шины заказа взяты с ОТХ и заказ ещё не оформлен.", "error")
+            flash("Перевести сразу на «%s» можно, когда все шины заказа взяты с ОТХ и заказ ещё не оформлен." % orders.stage_name(conn, "at_point"), "error")
             return back(card_id)
         oth_to_point(conn, card_id)
         return back(card_id)
@@ -1481,7 +1489,7 @@ def register(app) -> None:
                 else:
                     flash("Заказ уже перевели.")
             except (orders.OrderError, StopIteration) as err:
-                flash(str(err) or "Нет этапа «Товар на точке».", "error")
+                flash(str(err) or "Нет этапа «%s»." % orders.stage_name(conn, "at_point"), "error")
             return back(card_id)
         try:
             new = oth_sale.to_new_client(conn, card_id, request.form.get("client_name"), request.form.get("client_phone"), local_iso(), author())
@@ -1495,7 +1503,7 @@ def register(app) -> None:
         if oth_sale.all_from_oth(conn, orders.get_card(conn, new)):
             oth_to_point(conn, new)
         else:
-            flash("Новый заказ №%d не переведён на «Товар на точке»: не все его шины взяты с ОТХ." % new, "error")
+            flash("Новый заказ №%d не переведён на «%s»: не все его шины взяты с ОТХ." % (new, orders.stage_name(conn, "at_point")), "error")
         return redirect("/orders/%d" % new)
 
     @app.route("/orders/<int:card_id>/items/<int:item_id>/update", methods=["POST"])

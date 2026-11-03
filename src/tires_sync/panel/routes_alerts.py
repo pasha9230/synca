@@ -99,7 +99,7 @@ def is_return_ask(row: dict) -> bool:
     """The yellow «заполните сумму возврата» (or «не заполнено — …») of a return the point pressed (order_manager.returned): it asks the
     manager; the point has its green «возврат отмечен, ждёт суммы» (point_rows) instead (the owner 2026-10-27)."""
     text = str(row.get("text") or "")
-    return row.get("kind") == "point" and (text in (mgr.RETURN_ASK, order_oth.SIGNED_ASK) or text.startswith(mgr.RETURN_GAPS.split("%s")[0]))
+    return row.get("kind") == "point" and text.startswith((mgr.RETURN_HEAD, order_oth.SIGNED_HEAD))
 
 
 def is_handoff_cancel(row: dict) -> bool:
