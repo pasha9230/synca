@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import sqlite3
@@ -8,8 +9,9 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
 from werkzeug.datastructures import MultiDict
 
-from .. import catalog_archive, connections, market, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
+from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
 from ..config import own_price_value, settings_from_dict
+from ..pricing import position_price
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
 from .data import load_merged, stale_unload
@@ -74,6 +76,8 @@ PAGE_SIZES = (10, 50, 100, 200, 500)
 MARKET_SHOWN = False             # «Рынок» of the catalog (the owner 2026-10-30: not before the parser itself): the column, «Дороже рынка», «Конкуренты»
 BULK_PRICE_LIMIT = 1000          # positions of one press of «Своя цена выбранным» (the owner 2026-10-30)
 BULK_PCT_MAX = 50                # a markup or a markdown of one press, % to the purchase (the owner 2026-10-30)
+BULK_RUB_MAX = 50000             # a markup or a markdown of one press in ₽ (a typo of a zero more is refused; «Применить» asks of the rest)
+BULK_ROWS_SHOWN = 500            # rows of «было → стало» of one press listed (the risky ones first); the rest are counted
 
 
 def _ids_fp(ids) -> str:
@@ -301,6 +305,12 @@ def register(app) -> None:
             items = [i for i in items if i["scode"] == "model_needs_mapping"]
         elif status == "problem":
             items = [i for i in items if i["problem"]]
+        own_only = args.get("own") == "1" and has_right("money")
+        if own_only:                                                  # «Ручные цены» (the owner 2026-11-03): an own price in an account, applied or in the draft
+            feed_ids = {a["id"] for a in connections.list_feed_accounts(conn)}      # an account without a feed: its own prices reach no Avito
+            keyed = {k.partition(":")[2] for k in set(raw.get("price_overrides") or {}) | set({**raw, **changes}.get("price_overrides") or {})
+                     if k.partition(":")[0].isdigit() and int(k.partition(":")[0]) in feed_ids}
+            items = [i for i in items if i["goods_id"] in keyed]
         market_on = MARKET_SHOWN and has_right("money")               # the competitors' prices: the owner's, as the purchase (market.py)
         snaps = market.latest(conn) if market_on else {}
         market_over = market_on and args.get("mk") == "over"
@@ -316,12 +326,20 @@ def register(app) -> None:
         accounts = connections.list_feed_accounts(conn)
         if accounts:                                                  # the cell «Наша цена»: the base own price, the first account's (base_own_prices)
             now_own, was_own = {**raw, **changes}.get("price_overrides") or {}, raw.get("price_overrides") or {}
+            labels = {a["id"]: connections.display_name(conn, a["id"]) for a in accounts} if own_only else {}
             for i in shown:
                 keys = ["%d:%s" % (a["id"], i["goods_id"]) for a in accounts]
                 own = now_own.get(keys[0])
                 i.update(own_here=own, own_text=service.own_price_text(own) if own else "", own_some=any(now_own.get(k) for k in keys),
                          own_pending=any(now_own.get(k) != was_own.get(k) for k in keys),
-                         own_cleared=any(was_own.get(k) and not now_own.get(k) for k in keys))
+                         own_cleared=any(was_own.get(k) and not now_own.get(k) for k in keys),
+                         own_where=[{"account": labels[a["id"]], "text": service.own_price_text(now_own.get(k)),
+                                     "state": "" if now_own.get(k) == was_own.get(k) else "pending" if now_own.get(k) else "cleared"}
+                                    for a, k in zip(accounts, keys) if now_own.get(k) or was_own.get(k)] if own_only else [])
+                offer = parsed.offers.get(i["goods_id"])
+                if i["own_some"] and offer is not None and i.get("purchase"):     # «Вернуть цену по настройкам фида»: what the first account gets back
+                    i["brand_price"] = position_price(dataclasses.replace(offer, base_price=float(i["purchase"])),
+                                                      dataclasses.replace(effective, own_prices={}))
             if len(accounts) > 1 and can_post("catalog_own_price_inline"):   # the cell's line «Шины СПб 6 990 · Шина-Колесо 7 130»
                 shifts = {}
                 for i in shown:
@@ -337,7 +355,7 @@ def register(app) -> None:
                     all_ids=[i["goods_id"] for i in items],                # every position of the filter, every page («все по фильтру»)
                     market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
                     page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
-                    studs=studs or "", status=status, sort=sort, descending=descending)
+                    studs=studs or "", status=status, sort=sort, descending=descending, own_only=own_only)
 
     def table_context(args, next_url=None):
         args = MultiDict(_pairs(args, ("wait",)))                        # the window «В лист ожидания» is no filter of the table
@@ -357,7 +375,7 @@ def register(app) -> None:
                  filter_query=urlencode(_pairs(args, ("p", "n", "o", "r"))),     # what «все по фильтру» takes again when pressed
                  feed_accounts=connections.list_feed_accounts(b["conn"]) if can_post("catalog_own_price_bulk") else [],
                  page_url=("/catalog?" + urlencode(_pairs(args))).rstrip("?"),     # where the cell «Наша цена» comes back to
-                 bulk_limit=BULK_PRICE_LIMIT, bulk_pct_max=BULK_PCT_MAX, filter_fp=_ids_fp(b["all_ids"]),
+                 bulk_limit=BULK_PRICE_LIMIT, bulk_pct_max=BULK_PCT_MAX, bulk_rub_max=BULK_RUB_MAX, filter_fp=_ids_fp(b["all_ids"]),
                  wait_url="/catalog?" + urlencode(_pairs(args) + [("wait", "")]))     # + the position: the page opens with its window
         return b
 
@@ -499,8 +517,17 @@ def register(app) -> None:
                 if mode not in ("on", "off", "clear"):
                     raise ValueError("Неизвестное действие.")
                 ids = form.getlist("g")
+                skipped = []
+                if mode != "clear":                                       # a position the supplier took away (ticked for its own price) gets no
+                    offers = context(app)[2].offers                       # manual rule: it would outlive its return (the owner 2026-11-03)
+                    skipped = [g for g in dict.fromkeys(ids) if g not in offers and catalog_archive.gone_offer(conn, g) is not None]
+                    ids = [g for g in ids if g not in skipped]
+                if skipped and not ids:
+                    raise ValueError("Выбраны только позиции, которых нет у поставщика: ручное правило им не ставится, ничего не записано.")
                 staging.set_overrides(conn, ids, None if mode == "clear" else mode, now_iso())
                 message = "%s позиций: %d." % ({"on": "Добавлено вручную", "off": "Снято", "clear": "Возвращено"}[mode], len(set(ids)))
+                if skipped:
+                    message += " Пропущено, нет у поставщика: %d." % len(skipped)
             elif form.get("op"):
                 mode, _, goods_id = form["op"].partition(":")
                 if mode not in ("on", "off", "clear") or not goods_id:
@@ -546,11 +573,13 @@ def register(app) -> None:
                                          found[1]) if found else None
         if data is None:
             abort(404)
-        if has_right("money") and goods_id in parsed.offers:          # the own prices: the owner and the partner see them, the owner sets them (positions of the panel's set only)
-            general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)
-            data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), parsed.offers[goods_id],
-                                                        ref, parsed.offers)
-            data["purchase"] = parsed.offers[goods_id].base_price
+        gone = None if goods_id in parsed.offers else catalog_archive.gone_offer(conn, goods_id) if found[1] else None
+        if has_right("money") and (goods_id in parsed.offers or gone is not None):   # the own prices: the owner and the partner see them, the owner
+            general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)   # sets them: the panel's
+            offer = parsed.offers.get(goods_id) or gone                                 # set and a position the supplier took away (its last purchase)
+            data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), offer, ref, parsed.offers)
+            data["purchase"] = offer.base_price
+            data["own_gone"] = gone is not None
         if MARKET_SHOWN and has_right("money"):                       # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
             snapshot = market.latest(conn, [goods_id]).get(goods_id)
             data["market"] = {"snapshot": snapshot, "listings": market.listings_of(conn, snapshot["id"]) if snapshot else [],
@@ -579,13 +608,18 @@ def register(app) -> None:
                 if kind not in ("pct", "price") or not re.fullmatch(r"[+\-]?\d+(\.\d+)?", text):
                     raise ValueError("Введите процент к закупке или цену продажи числом.")
                 value = {"pct": float(text)} if kind == "pct" else {"price": float(text)}
-            if value is not None and goods_id not in context(app)[2].offers:          # «Как у бренда» also for a position gone
-                raise ValueError("Такой позиции нет в выгрузке.")
+            if value is not None:                                                     # the reset also for a position gone
+                offers, _purchases, gone, _other = _bulk_positions(conn, [goods_id])     # the supplier took it away: a sale price always, a percent
+                if goods_id not in offers:                                               # of its last purchase only (the owner 2026-11-03); never
+                    raise ValueError("Такой позиции нет в выгрузке.")                     # a position shown for viewing only
+                if goods_id in gone and "pct" in value and not offers[goods_id].base_price > 0:
+                    raise ValueError("Позиции нет у поставщика, и последняя закупка неизвестна: процент не от чего считать. "
+                                     "Поставьте цену продажи в рублях.")
             staging.set_own_price(conn, goods_id, accounts, value, now_iso())
         except (StaleDraftError, ValueError) as err:
             flash(str(err))
             return redirect(_item_path(goods_id))
-        flash(("Своя цена" if value else "«Как у бренда»") + " в черновике: подтвердите изменения, чтобы они попали в фид.")
+        flash(("Своя цена" if value else "Своя цена снята — цена по настройкам фида —") + " в черновике: подтвердите изменения, чтобы они попали в фид.")
         return redirect(_item_path(goods_id))
 
     @app.route("/catalog/own-price/inline", methods=["POST"])
@@ -626,7 +660,7 @@ def register(app) -> None:
             flash(str(err))
             return redirect(back)
         if value is None:
-            message = "Своя цена сброшена на всех аккаунтах (как у бренда): %s." % _names(conn, [goods_id])[0]
+            message = "Своя цена снята на всех аккаунтах — цена по настройкам фида: %s." % _names(conn, [goods_id])[0]
         else:
             names = {a["id"]: connections.display_name(conn, a["id"]) for a in accounts}
             message = "Своя цена %s · %s (%s)." % (service.own_price_text(value), _names(conn, [goods_id])[0],
@@ -637,12 +671,60 @@ def register(app) -> None:
         flash(message)
         return redirect(back)
 
+    def _bulk_positions(conn, found):
+        """The positions a press of «Своя цена выбранным» works on: the panel's set and those the supplier took away (the archive: the last
+        purchase seen), never one shown for viewing only (4tochki before its switch, an old second unload). (offers, purchases — the anchor of
+        price_guard the feed counts from —, the ids gone from the supplier, the ids skipped)."""
+        from .. import price_guard
+        _conn, settings, parsed, _ref = context(app)
+        missing = [g for g in found if g not in parsed.offers]
+        archive = {}
+        if missing:
+            base = app.config["UNLOAD_PATH"]
+            shown_only = set(tochki_feed.catalog_view(conn, parsed, base)[1]) | {o.goods_id for o, _ in _held_offers(conn, settings, base)}
+            archive = {g: catalog_archive.gone_offer(conn, g) for g in missing if g not in shown_only}
+        offers = {g: parsed.offers.get(g) or archive.get(g) for g in found}
+        other = [g for g, o in offers.items() if o is None]
+        offers = {g: o for g, o in offers.items() if o is not None}
+        guard = price_guard.load(conn)
+        purchases = {g: price_guard.base_for(guard, g, float(o.base_price))[0] for g, o in offers.items()}
+        return offers, purchases, {g for g in offers if g not in parsed.offers}, other
+
+    def _bulk_op(form):
+        """What «Своя цена выбранным» does: None takes the own prices off («Сбросить к настройкам фида»), else {"base", "unit", "delta"}
+        (own_bulk.plan); no base nor unit sent is the press of before: % to the purchase."""
+        if form.get("action") == "clear":
+            return None
+        base, unit, side = form.get("base") or "purchase", form.get("unit") or "pct", form.get("side")
+        if base not in own_bulk.BASES or unit not in own_bulk.UNITS or side not in ("up", "down"):
+            raise ValueError("Не понял, что сделать: обновите страницу и выберите ещё раз.")
+        text = str(form.get("value") or "").replace(" ", "").replace(" ", "").replace(",", ".")
+        if unit == "pct":
+            if not re.fullmatch(r"\d+(\.\d+)?", text) or not 0 < float(text) <= BULK_PCT_MAX:
+                raise ValueError("Наценка или уценка: процент %sбольше 0 и не больше %d." % ("к закупке " if base == "purchase" else "", BULK_PCT_MAX))
+            delta = float(text)
+        else:
+            if not re.fullmatch(r"\d+", text) or not 0 < int(text) <= BULK_RUB_MAX:
+                raise ValueError("Наценка или уценка в рублях: целое число больше 0 и не больше %d ₽." % BULK_RUB_MAX)
+            delta = int(text)
+        return {"base": base, "unit": unit, "delta": delta if side == "up" else -delta}
+
+    def _op_text(op) -> str:
+        if op is None:
+            return "Своя цена снята — цена по настройкам фида"
+        if op["base"] == "purchase" and op["unit"] == "pct":
+            return "Своя цена %s" % service.own_price_text({"pct": op["delta"]})
+        amount = ("%+g %%" % op["delta"]).replace(".", ",") if op["unit"] == "pct" else "%+d ₽" % op["delta"]
+        return "Своя цена %s %s" % (amount.replace("-", "−"), "от закупки" if op["base"] == "purchase" else "от своей цены")
+
     @app.route("/catalog/own-price/bulk", methods=["POST"])
     @login_required
     def catalog_own_price_bulk():
-        """«Своя цена выбранным» (the owner 2026-10-30): the positions ticked, or all the filter finds, get one markup or markdown in % to the
-        purchase in the accounts ticked, or lose their own price; into the working draft («Применить» with «было → стало»). Whom: as the own
-        price of a position (common.NEEDS). A position with its own price keeps it unless «изменить и их»; one gone from the unload is skipped."""
+        """«Своя цена выбранным» (the owner 2026-10-30, 2026-11-03): the positions ticked, or all the filter finds, in the accounts ticked —
+        from the purchase or from their own price, in % or in ₽, up or down (own_bulk.plan), or «Сбросить к настройкам фида». The first press
+        shows «было → стало» of every position and account; «В черновик» there writes just that (its mark `plan`: changed since — nothing
+        written) into the working draft («Применить» with its confirmations). Whom: as the own price of a position (common.NEEDS). A position
+        the supplier took away goes too (its last purchase); one shown for viewing only is skipped."""
         conn = get_conn()
         form = request.form
         back = _back()
@@ -657,35 +739,48 @@ def register(app) -> None:
                     raise ValueError("По фильтру сейчас другие позиции (%d), чем были на странице: обновите страницу и повторите." % len(found))
             else:
                 found = form.getlist("g")
-            offers = context(app)[2].offers
-            found = sorted({str(g) for g in found})
-            gone = [g for g in found if g not in offers]
-            goods = [g for g in found if g in offers]
-            if not goods:
-                raise ValueError("Среди выбранных нет позиций фида." if gone else "Отметьте позиции.")
-            if len(goods) > BULK_PRICE_LIMIT:
+            offers, purchases, gone, other = _bulk_positions(conn, sorted({str(g) for g in found if str(g or "").strip()}))
+            if not offers:
+                raise ValueError("Среди выбранных нет позиций фида." if other else "Отметьте позиции.")
+            if len(offers) > BULK_PRICE_LIMIT:
                 raise ValueError("Не больше %d позиций за раз: сузьте фильтр." % BULK_PRICE_LIMIT)
-            if form.get("action") == "clear":
-                value = None
+            op = _bulk_op(form)
+            redo = form.get("redo") == "1"
+            if form.get("step") != "draft":
+                if staging.summary(conn)["stale"]:
+                    raise StaleDraftError("Рабочий черновик устарел: настройки изменились. Отмените его и повторите.")
+                result = own_bulk.plan(staging.effective_raw(conn).get("price_overrides") or {}, purchases, accounts, op, redo)
+                if result["set"]:
+                    raw = staging.effective_raw(conn)
+                    general = settings_from_dict(raw, enforce_pct_limit=False)
+                    rows = own_bulk.rows(conn, general, offers, purchases, result["set"], gone, float(get_active(conn)[1]["pct_limit"]))
+                    return render_template("catalog_own_bulk.html", rows=rows, shown=BULK_ROWS_SHOWN, result=result, op_text=_op_text(op),
+                                           plan=own_bulk.fingerprint(result["set"]), positions=len({r["goods_id"] for r in rows}),
+                                           gone=len(gone), other=len(other), skips=own_bulk.SKIPS, back=back, own_price_text=service.own_price_text,
+                                           fields=[(k, v) for k, v in form.items(multi=True) if k not in ("csrf", "step", "plan")])
+                done = result
             else:
-                side = form.get("side")
-                text = str(form.get("value") or "").replace(" ", "").replace("\u00a0", "").replace(",", ".")
-                if side not in ("up", "down") or not re.fullmatch(r"\d+(\.\d+)?", text) or not 0 < float(text) <= BULK_PCT_MAX:
-                    raise ValueError("Наценка или уценка: процент к закупке больше 0 и не больше %d." % BULK_PCT_MAX)
-                value = {"pct": float(text) if side == "up" else -float(text)}
-            done = staging.set_own_prices(conn, goods, accounts, value, now_iso(), redo=form.get("redo") == "1")
+                done = {}
+
+                def planner(prices):
+                    result = own_bulk.plan(prices, purchases, accounts, op, redo)
+                    if own_bulk.fingerprint(result["set"]) != form.get("plan", ""):
+                        raise staging.DraftChangedError("Цены изменились после просмотра «было → стало» (другая вкладка, другой человек или "
+                                                        "новая выгрузка): ничего не записано, посмотрите ещё раз.")
+                    done.update(result)
+                    return result["set"]
+
+                staging.set_own_price_plan(conn, planner, now_iso())
         except (StaleDraftError, ValueError) as err:
             flash(str(err))
             return redirect(back)
-        what = ("Своя цена %s" % service.own_price_text(value)) if value else "«Как у бренда»"
-        if done["set"]:
-            parts = ["%s в черновике: %d (позиция × аккаунт)." % (what, done["set"])]
-        else:
-            parts = ["Ничего не изменилось."]
-        if done["kept"]:
-            parts.append("Уже была своя цена, не тронуто: %d (позиция × аккаунт; «изменить и их» — чтобы поменять)." % done["kept"])
-        if gone:
-            parts.append("Пропущено, не позиции фида (нет в выгрузке или только для просмотра): %d." % len(gone))
+        parts = ["%s в черновике: %d (позиция × аккаунт)." % (_op_text(op), len(done["set"]))] if done["set"] else ["Ничего не изменилось."]
+        if done.get("kept"):
+            parts.append("Уже была своя цена, не тронуто: %d (позиция × аккаунт; «изменить и их» — чтобы поменять)." % len(done["kept"]))
+        for why, keys in sorted((done.get("skipped") or {}).items()):
+            parts.append("Пропущено, %s: %d (позиция × аккаунт)." % (own_bulk.SKIPS[why], len(keys)))
+        if other:
+            parts.append("Пропущено, не позиции фида (нет в выгрузке или только для просмотра): %d." % len(other))
         flash(" ".join(parts) + (" Подтвердите изменения, чтобы они попали в фид." if done["set"] else ""))
         return redirect(back)
 

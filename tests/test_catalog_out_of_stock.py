@@ -52,7 +52,7 @@ def test_a_position_the_supplier_took_away_has_a_card_with_its_last_prices_and_t
     assert "Последний раз в наличии" in html and "10.10.2026 10:00:00" in html
     assert "Цена продажи по последней закупке (за 1 шт.)" in html
     assert "Последняя закупка (за 1 шт.)" in html and "3 100 ₽" in html
-    assert "Своя цена по аккаунтам" not in html                      # an own price is for a position of the feed only
+    assert "Своя цена по аккаунтам" in html and "data-own-gone" in html     # the owner 2026-11-03: an own price also for a position gone (test_manual_prices)
     view = viewer(app, conn).get("/catalog/item/900").get_data(as_text=True)
     assert "Нет в наличии</b>" in view and "Последняя закупка" not in view and "3 100" not in view
 

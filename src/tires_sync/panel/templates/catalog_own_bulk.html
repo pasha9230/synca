@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Своя цена выбранным · Tires Sync{% endblock %}
+{% block content %}
+{# «было → стало» of a press of «Своя цена выбранным» before «В черновик» (the owner 2026-11-03); «В черновик» writes just what is shown (`plan`) #}
+{% set risky = rows|selectattr("why")|list %}
+<header class="page-head"><div><h1>Своя цена выбранным: было → стало</h1><p class="sub">{{ op_text }} · {{ positions }} {{ plural(positions, "позиция", "позиции", "позиций") }}, {{ rows|length }} {{ plural(rows|length, "строка", "строки", "строк") }} (позиция × аккаунт). Цена за 1 шт., вверх до десятков. На Авито ничего не изменится, пока вы не нажмёте «Применить».</p></div></header>
+<section class="card"><div class="card-body stack" data-own-bulk>
+{% if risky %}<div class="flash flash--warn" data-own-bulk-risky>{{ risky|length }} {{ plural(risky|length, "строка", "строки", "строк") }} ниже закупки, дальше 30 % от цены сейчас или с процентом выше предела: при «Применить», скорее всего, попросим подтвердить ещё раз. Они в начале таблицы.</div>{% endif %}
+{% if result.kept or result.skipped or result.same or other %}<ul class="small muted">
+{% if result.kept %}<li>Уже есть своя цена, не тронуто: {{ result.kept|length }} («изменить и их» — чтобы поменять).</li>{% endif %}
+{% for why, keys in result.skipped|dictsort %}<li data-own-bulk-skip="{{ why }}">Пропущено, {{ skips[why] }}: {{ keys|length }}.</li>{% endfor %}
+{% if result.same %}<li>Цена не меняется: {{ result.same|length }}.</li>{% endif %}
+{% if other %}<li>Пропущено, не позиции фида (нет в выгрузке или только для просмотра): {{ other }}.</li>{% endif %}</ul>{% endif %}
+{% if gone %}<p class="small">Нет у поставщика: {{ gone }} {{ plural(gone, "позиция", "позиции", "позиций") }} — от последней известной закупки; на Авито такая позиция не уходит, пока её нет в выгрузке или в своём остатке.</p>{% endif %}
+<div class="table-wrap"><table class="table"><thead><tr><th>Позиция</th><th>Аккаунт</th><th class="num">Закупка</th><th class="num">Было</th><th class="num">Станет</th><th>Своя цена</th><th></th></tr></thead><tbody>
+{% for r in rows[:shown] %}<tr data-own-bulk-row="{{ r.key }}"><td>{{ r.name }} <span class="muted xs mono">{{ r.code }}</span>{% if r.gone %} <span class="badge badge--neutral">нет у поставщика</span>{% endif %}</td><td>{{ r.account }}</td>
+<td class="num">{% if r.purchase %}{{ r.purchase|money }}{% else %}—{% endif %}</td><td class="num">{% if r.was is not none %}{{ r.was|money }}{% else %}—{% endif %}</td>
+<td class="num"><b>{% if r.now is not none %}{{ r.now|money }}{% else %}—{% endif %}</b></td><td class="small">{{ own_price_text(r.value) }}</td>
+<td>{% for w in r.why %}<span class="badge badge--err">{{ w }}</span> {% endfor %}</td></tr>{% endfor %}
+</tbody></table></div>
+{% if rows|length > shown %}<p class="small muted">Показаны первые {{ shown }} строк из {{ rows|length }}; в черновик уйдут все.</p>{% endif %}
+<form method="post" action="/catalog/own-price/bulk" class="row" style="gap:var(--s-2)" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% for k, v in fields %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}<input type="hidden" name="step" value="draft"><input type="hidden" name="plan" value="{{ plan }}">
+<button class="btn btn--primary">В черновик</button><a class="btn btn--secondary" href="{{ back }}">Назад</a></form>
+</div></section>
+{% endblock %}

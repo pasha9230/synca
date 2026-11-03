@@ -28,6 +28,7 @@ def _int_or_none(value):
 
 
 PANEL_LOCK_WAIT = 60.0
+OWN_AUDIT_LINES = 2000      # lines «было → стало» of the own prices one «Применить» keeps in the audit (a press is up to 1000 positions × accounts)
 
 
 def apply_publish(app, verify=None, upload=False) -> list:
@@ -357,6 +358,10 @@ def register(app) -> None:
         except ValueError as err:
             flash(str(err))
             return redirect(stay or return_page())
+        if review["own_audit"]:                               # the own prices applied, «было → стало» (the owner 2026-11-03)
+            store.write_audit(get_conn(), now_iso(), author(), "own_price_confirmed",
+                              {"draft": draft_id, "lines": review["own_audit"][:OWN_AUDIT_LINES],
+                               "more": max(0, len(review["own_audit"]) - OWN_AUDIT_LINES)})
         if review["guard"]["gone"]:
             remember_expected(get_conn(), active_settings(get_conn()).version, review["guard"]["gone_ads"])
         lines = publish_now(app)                               # a confirmed change always goes to the feed Avito reads
