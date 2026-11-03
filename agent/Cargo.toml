@@ -10,7 +10,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "2.10", features = ["socks-proxy"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-imageproc = { version = "0.24", default-features = false }
+imageproc = { version = "0.27", default-features = false }
 rand = "0.8"
 resvg = "0.42"
 usvg = { version = "0.42", default-features = false, features = ["text"] }
