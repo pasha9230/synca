@@ -16,7 +16,7 @@ def test_every_page_except_login_requires_a_session(tmp_path):
     client = app.test_client()
     public = {"share_public", "share_photo", "account_photo", "stored_photo"}   # the client link and the photos: open by design, guarded by an unguessable token / content hash
     status = {"health"}                                          # the outside watchdog: only ok / fail and codes, no data (tests/test_health.py)
-    invite = {"invite_page"}                                     # the one-time invitation: open by design, an unknown token is a 404 (tests/test_roles.py)
+    invite = {"invite_page", "login_reset_page"}                 # the one-time invitation and «Сбросить вход»: open by design, an unknown token is a 404 (tests/test_roles.py, tests/test_login_reset.py)
     agent = {r.endpoint for r in app.url_map.iter_rules() if r.rule.startswith(("/api/image-jobs", "/api/photo-copies", "/api/review-sheet"))}
     assert len(agent) == 9                                       # the photo agent: a bearer token instead of a session, 403 without it (work, run-done: test_photo_agent_run)
     for rule in app.url_map.iter_rules():

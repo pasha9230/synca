@@ -4,7 +4,7 @@ from __future__ import annotations
 from flask import flash, redirect, render_template, request, session
 
 from .. import client_terms, order_points as points, store, users
-from .common import author, current_user, end_as_point, get_conn, login_blocked, login_failed, now_iso
+from .common import author, current_user, drop_session, end_as_point, get_conn, login_blocked, login_failed, now_iso
 
 
 def _user_field(message: str) -> str:
@@ -31,7 +31,8 @@ def register(app) -> None:
                                rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None) if not typed else None,
                                invite_rows=rows_of(brand_choices(app, conn), client_terms.active_ours(conn), {}, typed, "c_"),
                                invite_typed=bool(typed), invite_form=typed, describe=client_terms.describe, shop_resp=_shop_resp(conn),
-                               main_name=users.main_name(conn), main_login=app.config["AUTHOR"]), status
+                               main_name=users.main_name(conn), main_login=app.config["AUTHOR"],
+                               resets=users.list_login_resets(conn, now_iso()), reset_link=session.pop("reset_link", None) if not typed else None), status
 
     @app.route("/users")
     def users_page():
@@ -105,6 +106,51 @@ def register(app) -> None:
         except users.UserError as err:
             flash(str(err))
         return redirect("/users")
+
+    @app.route("/users/<login>/reset", methods=["POST"])
+    def users_login_reset(login):
+        """«Сбросить вход»: a one-time link for the user to set a new password and, if wanted, a new login (shown once, sent by nobody)."""
+        try:
+            token = users.create_login_reset(get_conn(), login, now_iso(), author(), app.config["AUTHOR"])
+        except users.UserError as err:
+            flash(str(err))
+            return redirect("/users")
+        session["reset_link"] = {"login": users.normalize(login), "url": request.host_url.rstrip("/") + "/reset/" + token}
+        return redirect("/users")
+
+    @app.route("/users/resets/<int:reset_id>/revoke", methods=["POST"])
+    def users_login_reset_revoke(reset_id):
+        try:
+            users.revoke_login_reset(get_conn(), reset_id, now_iso(), author())
+            flash("Сброс входа отозван.", "ok")
+        except users.UserError as err:
+            flash(str(err))
+        return redirect("/users")
+
+    @app.route("/reset/<token>", methods=["GET", "POST"])
+    def login_reset_page(token):
+        """Open: the person sets a new password and, if wanted, a new login from the one-time link. A wrong token sent in its form counts
+        as a failed login, like an invitation."""
+        conn = get_conn()
+        if login_blocked(conn):
+            return render_template("login_reset.html", reset=None, error="Слишком много попыток. Подождите и повторите."), 429
+        reset = users.find_login_reset(conn, token, now_iso())
+        if reset is None:
+            if request.method == "POST":
+                login_failed(conn)
+            return render_template("login_reset.html", reset=None, error=users.RESET_BAD), 404
+        if request.method == "POST":
+            typed = request.form.get("login", "")
+            if request.form.get("password", "") != request.form.get("password2", ""):
+                return render_template("login_reset.html", reset=reset, error="Пароли не совпали.", error_field="password2", login=typed), 400
+            try:
+                login = users.use_login_reset(conn, token, typed, request.form.get("password", ""), now_iso(), app.config["AUTHOR"])
+            except users.UserError as err:
+                return render_template("login_reset.html", reset=reset, error=str(err), error_field=_user_field(str(err)), login=typed), 400
+            drop_session("login_reset")                       # «Работать как точка» of this browser ends in the journal too
+            flash("Готово: войдите с логином «%s» и новым паролем." % login, "ok")
+            return redirect("/login")
+        return render_template("login_reset.html", reset=reset, error=None, login="")
 
     @app.route("/invite/<token>", methods=["GET", "POST"])
     def invite_page(token):

@@ -186,6 +186,11 @@ CREATE TABLE IF NOT EXISTS panel_invite (
     token_hash TEXT PRIMARY KEY, role TEXT NOT NULL, point_id INTEGER, display_name TEXT NOT NULL DEFAULT '', created TEXT NOT NULL,
     expires TEXT NOT NULL, created_by TEXT NOT NULL, used_at TEXT, used_by TEXT, revoked_at TEXT
 );
+-- «Сбросить вход» (the owner 2026-11-03): a one-time link for one user to set a new password and, if wanted, a new login; only the hash
+CREATE TABLE IF NOT EXISTS panel_login_reset (
+    token_hash TEXT PRIMARY KEY, login TEXT NOT NULL, created TEXT NOT NULL, expires TEXT NOT NULL, created_by TEXT NOT NULL,
+    used_at TEXT, used_as TEXT, revoked_at TEXT
+);
 -- the conditions of a client (a buyer; the owner 2026-10-29): subject '*' is the role's (the default), else a login. The price is the purchase
 -- + the % of the brand by the diameter (pct_small up to R17, pct_large from R18); NULL: the role's. client_brand is the set of brands
 -- (brands_mode 'own'; '*' always 'own') and the % of a brand (NULL: the subject's general one)

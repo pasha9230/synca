@@ -211,7 +211,7 @@ def test_the_open_pages_are_exactly_these():
     """A page open without a sign-in is a decision: the list is here, so that adding one fails a test (GET pages also fail
     test_panel_security.test_every_page_except_login_requires_a_session; a POST only this one)."""
     assert common.OPEN == {
-        "static", "login", "logout", "health", "invite_page", "account_photo", "stored_photo", "share_public", "share_photo", "vk_hook",
+        "static", "login", "logout", "health", "invite_page", "login_reset_page", "account_photo", "stored_photo", "share_public", "share_photo", "vk_hook",
         "avito_hook", "agent_jobs", "agent_fail", "agent_ref", "agent_result", "agent_copy_upload", "agent_copies_todo",
         "agent_review_sheet", "agent_work", "agent_run_done",
         "market_intake"}                                       # the prices of the competitors from the Mac: its own bearer token (tests/test_market.py)

@@ -233,6 +233,7 @@ def review_or_back(conn, back: str):
 
 OPEN = frozenset({
     "static", "login", "logout", "health", "invite_page",
+    "login_reset_page",                                    # «Сбросить вход»: the one-time link (its own token, like an invitation)
     "account_photo", "stored_photo",                       # the photos Avito reads (a token in the address)
     "share_public", "share_photo",                         # the client's page of a link (its own token)
     "vk_hook",                                             # VK's callbacks (their own secret)
@@ -290,6 +291,7 @@ for _section, _endpoints in {
               "orders_text_save", "orders_text_reset",    # «Шаблоны сообщений»: the texts that go by themselves (message_texts)
               "orders_bot_answer_delete", "orders_bot_answer_toggle", "orders_bot_answer_add", "orders_report_rates"),
     "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
+              "users_login_reset", "users_login_reset_revoke",     # «Сбросить вход»: the owner only (EDIT of «Пользователи»)
               "users_shop_responsible",                 # «Ответственный за заказы клиентов» (shop_cart.RESPONSIBLE_KEY)
               "users_main_name",                        # «Имя основного входа» (users.MAIN_NAME_KEY)
               "users_clients_page", "users_client_page", "users_client_save",     # the conditions of the clients
