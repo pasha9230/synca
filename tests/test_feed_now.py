@@ -144,3 +144,15 @@ def test_run_cycle_marks_its_start(tmp_path, monkeypatch):
     assert store.get_state(conn, feed_now.CYCLE_STARTED_KEY)
     conn.close()
     assert not feed_now.cycle_running(tmp_path / "feed")                   # let go at the end, even of a cycle that broke
+
+
+def test_run_cycle_holds_the_cycle_lock_for_all_its_run_and_the_stock_pass_does_not(tmp_path, monkeypatch):
+    from tires_sync import cli
+    root = tmp_path / "feed"
+    seen = []
+    monkeypatch.setattr(cli, "_run_cycle", lambda args: seen.append(("cycle", feed_now.cycle_running(root))) or 0)
+    monkeypatch.setattr(cli, "_cmd_stock_pass", lambda args: seen.append(("stock", feed_now.cycle_running(root))) or 0)
+    common = ["--db", str(tmp_path / "t.db"), "--unload", "u", "--reference", "r", "--feed-root", str(root)]
+    assert cli.main(["run-cycle", "--publish"] + common) == 0
+    assert cli.main(["run-cycle", "--stock-only"] + common) == 0
+    assert seen == [("cycle", True), ("stock", False)] and not feed_now.cycle_running(root)
