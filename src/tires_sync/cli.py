@@ -258,6 +258,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--db", required=True)
     pp.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     pp.add_argument("--feed-root", required=True)
+    pp.add_argument("--wait", type=float, default=0.0, help="сколько секунд ждать, пока отправляет другой процесс (по умолчанию не ждать)")
     pp.add_argument("--show", action="store_true", help="только показать последнюю очередь каждого аккаунта (в режиме проверки: что ушло бы)")
     ri = sub.add_parser("mirror-reissue", help="дать объявлениям зеркала новые Id (Авито не возвращает удалённое из кабинета под прежним Id); без --confirm только показывает")
     ri.add_argument("--db", required=True)
@@ -778,13 +779,22 @@ def _cmd_price_push(args) -> int:
                 print("  %s (Авито %s): %s → %s, %s%s" % (r["ad_id"], r["avito_id"], r["old_price"], r["price"], r["status_text"],
                                                           ", " + r["error"] if r["error"] else ""))
         return 0
-    price_push.run(conn, load_box(args.key_file), args.feed_root, _http())
+    price_push.run(conn, load_box(args.key_file), args.feed_root, _http(), wait=args.wait)
     return 0
 
 
 def _cmd_run_cycle(args) -> int:
     if getattr(args, "stock_only", False):
         return _cmd_stock_pass(args)
+    held = feed_now.hold_cycle(args.feed_root)          # «Собрать фид сейчас» is refused while a cycle runs, its tail included
+    try:
+        return _run_cycle(args)
+    finally:
+        if held is not None:
+            held.close()
+
+
+def _run_cycle(args) -> int:
     started = datetime.fromisoformat(_now())
     conn = store.connect(args.db)
     store.set_state(conn, feed_now.CYCLE_STARTED_KEY, _now())            # «Собрать фид сейчас» is refused within minutes of a cycle

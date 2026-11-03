@@ -160,7 +160,8 @@ def test_a_changed_price_is_queued_from_the_published_feed_and_the_sender_starts
     assert after["1"] == 5500 != before["1"]
     rows = queue(conn)
     assert rows == {"1": (101, 5500, before["1"], "queued", "")}            # only the changed ad; the others kept their price
-    assert len(popen.started) == 1 and popen.started[0][3:] == ["price-push", "--db", app.config["DB_PATH"], "--feed-root", str(folder.parent)]
+    assert len(popen.started) == 1 and popen.started[0][3:] == ["price-push", "--db", app.config["DB_PATH"], "--feed-root", str(folder.parent),
+                                                          "--wait", "1200"]
     assert "Цены на Авито: отправляются сразу, объявлений 1." in client.get("/publish/result").get_data(as_text=True)
 
 
@@ -365,3 +366,47 @@ def test_the_hourly_cycle_sends_what_a_stopped_sender_left(tmp_path, monkeypatch
     cli.main(["run-cycle", "--publish", "--db", app.config["DB_PATH"], "--unload", app.config["UNLOAD_PATH"],
               "--reference", app.config["REFERENCE_PATH"], "--feed-root", str(folder.parent)])
     assert fake.prices == {101: 5500} and queue(conn)["1"][3] == "sent"
+
+
+def test_a_new_apply_while_sending_is_never_overwritten_by_the_older_price(tmp_path):
+    """Review 2026-11-03: the sender read the feed once and marked rows queued again meanwhile as sent with the old price."""
+    _, client, tok, conn, folder, _ = world(tmp_path)
+    for goods_id in ("1", "2"):
+        staging.set_own_price(conn, goods_id, [1], {"price": 5600}, T)
+    post(client, "/draft/%d/confirm" % staging.summary(conn)["draft_id"], tok)
+    path = folder / "avito_feed.xml"
+
+    def publish_again(ad_id, price):                                      # another «Применить»: the feed and the queue change
+        text = re.sub(r"(<Ad>(?:(?!</Ad>).)*?<Id>%s</Id>(?:(?!</Ad>).)*?<Price>)\d+(</Price>)" % ad_id, r"\g<1>%d\2" % price,
+                      path.read_text(encoding="utf-8"), flags=re.S)
+        path.write_text(text, encoding="utf-8")
+        conn.execute("UPDATE avito_price SET price = ?, status = 'queued', queued_at = ? WHERE ad_id = ?", (price, "2026-11-03T12:00:%02d" % (price % 60), ad_id))
+        conn.commit()
+
+    class During(Avito):
+        def __call__(self, method, url, headers, body):
+            answer = super().__call__(method, url, headers, body)
+            if url.endswith("/101/update_price") and len(self.price_calls()) == 1:
+                publish_again("2", 5800)                                  # «2» not sent yet: its new price goes
+                publish_again("1", 5900)                                  # «1» sent a moment ago: it goes again
+            return answer
+
+    fake = During()
+    done, _ = run(conn, folder, fake)
+    assert fake.prices == {101: 5900, 102: 5800}
+    assert [c[1] for c in fake.price_calls()] == ["/core/v1/items/101/update_price", "/core/v1/items/102/update_price",
+                                                  "/core/v1/items/101/update_price"]
+    assert queue(conn)["1"][1:4] == (5900, 4850, "sent") and queue(conn)["2"][1] == 5800 and queue(conn)["2"][3] == "sent"
+
+
+def test_a_token_service_down_marks_the_rows_and_says_why(tmp_path):
+    _, client, tok, conn, folder, _ = world(tmp_path)
+    apply_own_price(client, tok, conn)
+    fake = Avito(token=503)
+    done, _ = run(conn, folder, fake)
+    assert fake.price_calls() == [] and done[1]["not_sent"] == 1 and queue(conn)["1"][4].startswith("токен Авито")
+
+
+def test_the_card_says_when_no_avito_ad_numbers_were_read(tmp_path):
+    _, client, tok, conn, _, _ = world(tmp_path, ads={})
+    assert "Номера объявлений на Авито ещё не прочитаны" in client.get("/connections/avito/1").get_data(as_text=True)

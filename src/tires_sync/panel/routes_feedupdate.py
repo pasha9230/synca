@@ -29,7 +29,7 @@ def register(app) -> None:
     def feed_update_page():
         data, _conn = preview()
         return render_template("feed_update.html", p=data, loaded=feed_update.unload_age(app.config["UNLOAD_PATH"]),
-                               any_live=any(a["live"] for a in data["accounts"]), feed_now=feed_now.last(_conn))
+                               any_live=any(a["live"] for a in data["accounts"]), feed_now=feed_now.last(_conn, app.config.get("FEED_ROOT")))
 
     @app.route("/feed/update/now", methods=["POST"])
     @login_required

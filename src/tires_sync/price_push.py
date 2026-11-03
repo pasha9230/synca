@@ -31,6 +31,8 @@ MODES = ("off", "dry", "on")
 MODE_LABELS = {"off": "выключено", "dry": "проверка (ничего не отправляется)", "on": "включено"}
 PAUSE = 0.5                  # seconds between two requests: at most 120 a minute, Avito allows 150 for the method
 REFUSAL_STOP = 5             # ads in a row Avito refuses: it refuses the method itself, the account stops
+PASSES = 5                   # passes over the waiting rows of an account: the rows another «Применить» queued while this one sent
+SPAWN_WAIT = 1200            # seconds a sender started by the panel waits for the one still sending, rather than leave its rows to the hour
 WAITING = ("queued", "not_sent")
 STATUS_TEXT = {"queued": "в очереди", "dry": "отправили бы (проверка)", "sent": "отправлено", "failed": "ошибка",
                "not_sent": "не отправлено, повтор", "skipped": "не отправлялось"}
@@ -125,14 +127,30 @@ def queue_changes(conn, feed_root, before: Dict[int, Dict[str, int]], published_
     return counts
 
 
-def _mark(conn, account_id: int, avito_id: int, status: str, error: str, now: str, price: Optional[int] = None) -> None:
-    if price is None:
-        conn.execute("UPDATE avito_price SET status = ?, error = ?, at = ? WHERE account_id = ? AND avito_id = ?",
-                     (status, error[:300], now, account_id, avito_id))
-    else:
-        conn.execute("UPDATE avito_price SET status = ?, error = ?, at = ?, price = ? WHERE account_id = ? AND avito_id = ?",
-                     (status, error[:300], now, price, account_id, avito_id))
+def _mark(conn, account_id: int, avito_id: int, queued_at: str, status: str, error: str, now: str, price: Optional[int] = None) -> None:
+    """The outcome of the row as it was taken: a row queued again meanwhile (another «Применить») keeps its new price and waits, unless
+    the price just sent is that new price already."""
+    same = status == "sent" and price is not None
+    conn.execute("UPDATE avito_price SET status = ?, error = ?, at = ?, price = COALESCE(?, price) WHERE account_id = ? AND avito_id = ? "
+                 "AND (queued_at = ? OR (? AND price = ?))", (status, error[:300], now, price, account_id, avito_id, queued_at, same, price))
     conn.commit()
+
+
+class _Live:
+    """The published feed's prices, read again whenever the file was replaced (a publication meanwhile): a price is always the feed's now."""
+
+    def __init__(self, path: Path):
+        self.path, self.key, self.prices = path, None, None
+
+    def get(self) -> Optional[Dict[str, int]]:
+        try:
+            st = self.path.stat()
+            key = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+        if key != self.key:
+            self.prices, self.key = feed_prices(self.path), key
+        return self.prices
 
 
 def _describe(err: BaseException) -> str:
@@ -148,53 +166,56 @@ def _refused(err: AvitoError) -> bool:
 
 def push_account(conn, client: AvitoClient, account: dict, feed_root, now: Optional[datetime] = None,
                  sleep: Callable[[float], None] = time.sleep, author: str = "система") -> Dict[str, int]:
-    """Send the waiting prices of one account (a writing client). Each price is the published feed's at the moment of sending."""
+    """Send the waiting prices of one account (a writing client). Each price is the published feed's at the moment of sending; rows queued
+    while it sends (another «Применить») are taken by another pass, up to PASSES."""
     now_iso = (now or moscow_now()).isoformat(timespec="seconds")
     counts = {"sent": 0, "failed": 0, "not_sent": 0, "skipped": 0}
-    rows = conn.execute("SELECT avito_id, ad_id, price FROM avito_price WHERE account_id = ? AND status IN (?, ?) ORDER BY ad_id",
-                        (account["id"],) + WAITING).fetchall()
-    if not rows:
-        return counts
-    live = feed_prices(_live_path(feed_root, account))
-    stopped = ""
-    if live is None:
-        stopped = "опубликованный фид не прочитан"
-    else:
-        try:
-            client._bearer()                                 # the token first: refused keys stop the account before any price
-        except (AvitoError, OSError) as err:
-            stopped = "токен Авито: %s" % _describe(err)
-    first, in_row = True, 0
-    for avito_id, ad_id, queued in rows:
-        if stopped:
-            _mark(conn, account["id"], avito_id, "not_sent", stopped, now_iso)
-            counts["not_sent"] += 1
-            continue
-        price = live.get(ad_id)
-        if price is None:
-            _mark(conn, account["id"], avito_id, "skipped", "объявления уже нет в опубликованном фиде", now_iso)
-            counts["skipped"] += 1
-            continue
-        if not first:
-            sleep(PAUSE)
-        first = False
-        try:
-            client.update_price(int(avito_id), price)
-        except (AvitoError, OSError) as err:
-            if isinstance(err, AvitoError) and _refused(err):
-                _mark(conn, account["id"], avito_id, "failed", _describe(err), now_iso, price)
-                counts["failed"] += 1
-                in_row += 1
-                if in_row >= REFUSAL_STOP:
-                    stopped = "остановлено: Авито отказывает подряд (%d раз): %s" % (in_row, _describe(err))
+    live = _Live(_live_path(feed_root, account))
+    stopped, first, in_row, token_checked = "", True, 0, False
+    for _pass in range(PASSES):
+        rows = conn.execute("SELECT avito_id, ad_id, price, queued_at FROM avito_price WHERE account_id = ? AND status IN (?, ?) "
+                            "ORDER BY ad_id", (account["id"],) + WAITING).fetchall()
+        if not rows or stopped:
+            break
+        if not token_checked:
+            token_checked = True
+            try:
+                client._bearer()                             # the token first: refused keys stop the account before any price
+            except Exception as err:                         # noqa: BLE001 - refused keys, Avito's token service down, the network
+                stopped = "токен Авито: %s" % _describe(err)
+        for avito_id, ad_id, queued, queued_at in rows:
+            prices = live.get() if not stopped else None
+            if not stopped and prices is None:
+                stopped = "опубликованный фид не прочитан"
+            if stopped:
+                _mark(conn, account["id"], avito_id, queued_at, "not_sent", stopped, now_iso)
+                counts["not_sent"] += 1
                 continue
-            _mark(conn, account["id"], avito_id, "not_sent", _describe(err), now_iso, price)
-            counts["not_sent"] += 1
-            stopped = "остановлено: %s" % _describe(err)          # 429 after the waits, the keys, 5xx, the network: the rest waits
-            continue
-        in_row = 0
-        _mark(conn, account["id"], avito_id, "sent", "" if price == queued else "цена в фиде с тех пор %d" % price, now_iso, price)
-        counts["sent"] += 1
+            price = prices.get(ad_id)
+            if price is None:
+                _mark(conn, account["id"], avito_id, queued_at, "skipped", "объявления уже нет в опубликованном фиде", now_iso)
+                counts["skipped"] += 1
+                continue
+            if not first:
+                sleep(PAUSE)
+            first = False
+            try:
+                client.update_price(int(avito_id), price)
+            except (AvitoError, OSError) as err:
+                if isinstance(err, AvitoError) and _refused(err):
+                    _mark(conn, account["id"], avito_id, queued_at, "failed", _describe(err), now_iso, price)
+                    counts["failed"] += 1
+                    in_row += 1
+                    if in_row >= REFUSAL_STOP:
+                        stopped = "остановлено: Авито отказывает подряд (%d раз): %s" % (in_row, _describe(err))
+                    continue
+                _mark(conn, account["id"], avito_id, queued_at, "not_sent", _describe(err), now_iso, price)
+                counts["not_sent"] += 1
+                stopped = "остановлено: %s" % _describe(err)      # 429 after the waits, the keys, 5xx, the network: the rest waits
+                continue
+            in_row = 0
+            _mark(conn, account["id"], avito_id, queued_at, "sent", "" if price == queued else "цена в фиде с тех пор %d" % price, now_iso, price)
+            counts["sent"] += 1
     store.write_audit(conn, now_iso, author, "avito_price_push", dict(counts, account_id=account["id"]))
     conn.commit()
     return counts
@@ -219,26 +240,32 @@ class _Lock:
             self.handle.close()
 
 
-def _try_lock(feed_root) -> Optional[_Lock]:
-    path = Path(feed_root) / ".price-push.lock"
+def _try_lock(feed_root, name: str = ".price-push.lock", wait: float = 0.0, sleep: Callable[[float], None] = time.sleep) -> Optional[_Lock]:
+    """A lock file of the feed root taken without blocking, tried again for up to `wait` seconds; None if another process holds it."""
+    path = Path(feed_root) / name
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         handle = open(str(path), "a")
     except OSError:
         return None
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        handle.close()
-        return None
-    return _Lock(handle)
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return _Lock(handle)
+        except OSError:
+            if time.monotonic() >= deadline:
+                handle.close()
+                return None
+            sleep(1.0)
 
 
-def run(conn, box, feed_root, http, now: Optional[datetime] = None, sleep: Callable[[float], None] = time.sleep, out=None) -> Dict[int, dict]:
+def run(conn, box, feed_root, http, now: Optional[datetime] = None, sleep: Callable[[float], None] = time.sleep, out=None,
+        wait: float = 0.0) -> Dict[int, dict]:
     """Every account with waiting prices: switched on → sent; switched off or on check since they were queued → nothing goes (not a
-    request). One process at a time: another one sending makes this a no-op."""
+    request). One process at a time: while another one sends, this one waits up to `wait` seconds, then gives up (the hour takes the rest)."""
     out = out or sys.stdout
-    lock = _try_lock(feed_root)
+    lock = _try_lock(feed_root, wait=wait)
     if lock is None:
         print("цены на Авито: другой процесс уже отправляет", file=out)
         return {}
@@ -279,8 +306,9 @@ def summary(conn, account_id: int, limit: int = 50) -> dict:
     """The last batch of an account for its card: counts by status and the rows that did not go (or would go, on check)."""
     row = conn.execute("SELECT MAX(queued_at) FROM avito_price WHERE account_id = ?", (account_id,)).fetchone()
     last = row[0] if row else None
+    mapped = len(_items_of(conn, account_id))
     if not last:
-        return {"at": None, "counts": {}, "rows": []}
+        return {"at": None, "counts": {}, "rows": [], "mapped": mapped}
     counts = dict(conn.execute("SELECT status, COUNT(*) FROM avito_price WHERE account_id = ? AND queued_at = ? GROUP BY status",
                                (account_id, last)).fetchall())
     rows = [dict(zip(("avito_id", "ad_id", "price", "old_price", "status", "error", "at"), r)) for r in conn.execute(
@@ -288,7 +316,7 @@ def summary(conn, account_id: int, limit: int = 50) -> dict:
         "AND status != 'sent' ORDER BY status, ad_id LIMIT ?", (account_id, last, limit))]
     for r in rows:
         r["status_text"] = STATUS_TEXT.get(r["status"], r["status"])
-    return {"at": last, "counts": counts, "rows": rows}
+    return {"at": last, "counts": counts, "rows": rows, "mapped": mapped}
 
 
 def line(counts: Dict[int, int]) -> str:
@@ -314,7 +342,7 @@ def start(args: List[str], popen=subprocess.Popen) -> Optional[int]:
 
 def spawn(db_path, feed_root, key_file: str = "", popen=subprocess.Popen) -> Optional[int]:
     """Start `tires-sync price-push` (the queue of prices) apart from the web request."""
-    args = [sys.executable, "-m", "tires_sync", "price-push", "--db", str(db_path), "--feed-root", str(feed_root)]
+    args = [sys.executable, "-m", "tires_sync", "price-push", "--db", str(db_path), "--feed-root", str(feed_root), "--wait", str(SPAWN_WAIT)]
     if key_file:
         args += ["--key-file", str(key_file)]
     return start(args, popen)

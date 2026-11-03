@@ -53,10 +53,6 @@ def test_the_button_starts_the_usual_cycle_with_publication_apart_and_says_so(tm
 def test_a_second_press_within_5_minutes_is_refused(tmp_path):
     app, client, tok, popen = setup(tmp_path)
     post(client, "/feed/update/now", tok)
-    popen.pid = 999999                                                      # the first one may have ended: the 5 minutes still hold
-    conn = store.connect(app.config["DB_PATH"])
-    store.set_state(conn, feed_now.STATE_KEY, json.dumps({"at": "x", "pid": 999999}))
-    conn.close()
     post(client, "/feed/update/now", tok)
     assert len(popen.started) == 1
     assert "запускался 0 мин назад" in client.get("/feed/update").get_data(as_text=True)
@@ -81,14 +77,30 @@ def test_a_cycle_started_by_the_timer_minutes_ago_or_one_building_now_refuses_it
     conn.close()
 
 
-def test_the_buttons_own_cycle_still_running_refuses_it(tmp_path):
-    import os
+def test_a_cycle_still_in_its_tail_refuses_it_whatever_its_pid(tmp_path):
     app, client, tok, popen = setup(tmp_path)
-    conn = store.connect(app.config["DB_PATH"])
-    store.set_state(conn, feed_now.STATE_KEY, json.dumps({"at": "2026-11-03T08:30:00", "pid": os.getpid()}))
-    conn.close()
+    held = feed_now.hold_cycle(app.config["FEED_ROOT"])                  # run-cycle holds it to its very end (reports, Avito, prices)
+    try:
+        post(client, "/feed/update/now", tok)
+        page = client.get("/feed/update").get_data(as_text=True)
+    finally:
+        held.close()
+    assert popen.started == [] and "Цикл ещё идёт" in page
     post(client, "/feed/update/now", tok)
-    assert popen.started == [] and "уже собирается" in client.get("/feed/update").get_data(as_text=True)
+    assert len(popen.started) == 1
+
+
+def test_a_process_that_did_not_start_leaves_no_mark_of_a_cycle(tmp_path):
+    app, client, tok, popen = setup(tmp_path)
+
+    def broken(args, **kwargs):
+        raise OSError("no fork")
+    app.config["POPEN"] = broken
+    post(client, "/feed/update/now", tok)
+    assert "процесс цикла не запустился" in client.get("/feed/update").get_data(as_text=True)
+    app.config["POPEN"] = popen
+    post(client, "/feed/update/now", tok)
+    assert len(popen.started) == 1
 
 
 def test_just_before_the_hourly_cycle_it_is_refused(tmp_path):
@@ -131,3 +143,4 @@ def test_run_cycle_marks_its_start(tmp_path, monkeypatch):
     conn = store.connect(tmp_path / "t.db")
     assert store.get_state(conn, feed_now.CYCLE_STARTED_KEY)
     conn.close()
+    assert not feed_now.cycle_running(tmp_path / "feed")                   # let go at the end, even of a cycle that broke
