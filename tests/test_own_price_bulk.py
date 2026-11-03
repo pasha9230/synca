@@ -21,8 +21,13 @@ def _owner(app):
 
 
 def _bulk(client, tok, goods, accounts, **form):
+    """The two presses (the owner 2026-11-03): «было → стало» first, then «В черновик» of just what it showed. A refused first press: its answer."""
     data = dict(dict(side="up", value="5"), **form)
-    return post(client, "/catalog/own-price/bulk", tok, g=list(goods), a=[str(a) for a in accounts], **data)
+    r = post(client, "/catalog/own-price/bulk", tok, g=list(goods), a=[str(a) for a in accounts], **data)
+    if r.status_code != 200:
+        return r
+    return post(client, "/catalog/own-price/bulk", tok, g=list(goods), a=[str(a) for a in accounts], step="draft",
+                plan=re.search(r'name="plan" value="([0-9a-f]+)"', r.get_data(as_text=True)).group(1), **data)
 
 
 def _changes(conn):
@@ -70,7 +75,7 @@ def test_take_off_the_own_price_of_the_ticked_positions(tmp_path):
     app, conn, (first, second) = _app(tmp_path)
     client, tok = _owner(app)
     staging.set_own_price(conn, "100", [first, second], {"pct": 5}, NOW)
-    post(client, "/catalog/own-price/bulk", tok, g=["100"], a=[str(first)], action="clear")
+    _bulk(client, tok, ["100"], [first], action="clear")
     assert _changes(conn) == {"%d:100" % second: {"pct": 5}}
 
 

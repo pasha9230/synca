@@ -45,6 +45,10 @@ def audit_text(entry: dict) -> str:
         return "Применены настройки: черновик №%s, версия %s" % (d.get("draft", "?"), d.get("to", "?"))
     if action == "settings_cancel":
         return "Отменён черновик №%s" % d.get("draft", "?")
+    if action == "own_price_confirmed":                                # «было → стало» of the own prices a «Применить» brought in
+        lines = [str(x) for x in d.get("lines") or []]
+        more = len(lines) - 5 + int(d.get("more") or 0)
+        return "Свои цены, черновик №%s: %s%s" % (d.get("draft", "?"), "; ".join(lines[:5]) or "—", "; ещё %d" % more if more > 0 else "")
     if action == "settings_rollback":
         return "Откат настроек к версии %s" % d.get("to_copy_of", "?")
     if action == "account_created":

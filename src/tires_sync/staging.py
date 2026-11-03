@@ -245,6 +245,26 @@ def set_own_prices(conn, goods_ids, accounts, value: Optional[dict], now: str, r
     return done
 
 
+def set_own_price_plan(conn, planner: Callable[[dict], dict], now: str) -> dict:
+    """Own prices of a press of «Ручные цены» (own_bulk.plan): `planner` gets the own prices as they stand now (applied, the draft on top) and
+    gives {key: value | None (taken off)}, or raises to write nothing; read and written in one change of the working draft, so nothing another
+    tab wrote in between is counted from an older value. The written map is returned."""
+    done = {}
+
+    def fn(eff):
+        prices = eff["price_overrides"]
+        for key, value in planner(copy.deepcopy(prices)).items():
+            if value is None:
+                prices.pop(key, None)
+            else:
+                kind, number = own_price_value(value)
+                prices[key] = {kind: number}
+            done[key] = value
+
+    _mutate(conn, fn, now)
+    return done
+
+
 def _pct(value, name):
     if value is None or isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError("Процент %s: нужно конечное число." % name)

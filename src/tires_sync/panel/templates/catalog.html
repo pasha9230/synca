@@ -25,6 +25,7 @@
 <label><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}><span class="spike" title="Шипы"><span>ш</span></span>Шипы</label>
 <label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div></div>
 <div class="field" style="width:140px"><span class="label">Статус</span><select class="select" name="st"><option value=""{% if status == "all" %} selected{% endif %}>Все</option><option value="feed"{% if status == "feed" %} selected{% endif %}>В фиде</option><option value="no"{% if status == "no" %} selected{% endif %}>Не в фиде</option><option value="nopair"{% if status == "nopair" %} selected{% endif %}>Нет пары</option><option value="problem"{% if status == "problem" %} selected{% endif %}>Проблемы</option><option value="gone"{% if status == "gone" %} selected{% endif %}>Нет у поставщика</option></select></div>
+{% if has_right("money") %}<div class="field"><span class="label">Цены</span><label class="check" title="Только позиции, у которых стоит своя цена хотя бы на одном аккаунте (применённая или в черновике), любой бренд и поставщик, в том числе ушедшие от поставщика"><input type="checkbox" name="own" value="1"{% if own_only %} checked{% endif %}> Ручные цены</label></div>{% endif %}
 {% if market_on %}<div class="field" style="width:160px"><span class="label">Рынок</span><select class="select" name="mk"><option value="">Все</option><option value="over"{% if market_over %} selected{% endif %}>Дороже рынка</option></select></div>{% endif %}
 <div class="field"><span class="label">Бренды</span><details class="brand-pick" data-no-autosubmit><summary class="select">{% if chosen_brands %}{{ chosen_brands|length }} {{ plural(chosen_brands|length, "бренд", "бренда", "брендов") }}{% else %}Все{% endif %}{% if without_brands %} · кроме {{ without_brands|length }}{% endif %}</summary>
 <div class="brand-pick-body"><div class="row small muted"><span class="grow">Бренд</span><span>Показать</span><span>Кроме</span></div>
@@ -47,7 +48,7 @@
 {# the buttons by rights: «менять» in the catalog puts a position in or out by hand, «отправлять клиенту» makes a link for the client #}
 {% if can_post("catalog_stage") %}<form id="stage" method="post" action="/catalog/stage" data-ajax data-scope="page" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}"></form>{% endif %}
 {% if can_post("catalog_stage") or can_post("share_new") %}<form id="bulk" method="post" action="{{ '/catalog/stage' if can_post('catalog_stage') else '/shares/new' }}" class="bulkbar" data-ajax data-scope="bulk" hidden>
-<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}">{% if feed_accounts %}<button class="sr-only" tabindex="-1" aria-hidden="true" formaction="/catalog/own-price/bulk" name="action" value="save">В черновик</button>{% endif %}{# Enter in the percent of «Своя цена выбранным» presses the first button of «bulk»: the price, never «Снять выбранные» #}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}">{% if feed_accounts %}<button class="sr-only" tabindex="-1" aria-hidden="true" formaction="/catalog/own-price/bulk" name="action" value="save">Посмотреть</button>{% endif %}{# Enter in the percent of «Своя цена выбранным» presses the first button of «bulk»: the price, never «Снять выбранные» #}
 <b><span data-count>0</span> выбрано</b><span class="sep"></span>
 {% if can_post("catalog_stage") %}<button name="bulk" value="off" class="btn btn--danger-outline btn--sm">Снять выбранные</button>
 <button name="bulk" value="on" class="btn btn--secondary btn--sm">Добавить вручную выбранные</button>
@@ -62,19 +63,22 @@
 {% if feed_accounts %}<div class="modal-backdrop" id="bulk-price" role="dialog" aria-modal="true" aria-labelledby="bulk-price-h"><div class="modal">
 <div class="modal-head"><h3 id="bulk-price-h">Своя цена выбранным</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack">
-<p class="small">Процент считается <b>к закупке</b> позиции, как своя цена в карточке: «+5 % к закупке» при закупке 5 000 ₽ — 5 250 ₽ в фиде (вверх до десятков). Цена идёт за закупкой.</p>
+<p class="small">«% от закупки» остаётся процентом к закупке, как своя цена в карточке: «+5 % к закупке» при закупке 5 000 ₽ — 5 250 ₽ в фиде, цена идёт за закупкой. Всё остальное («+300 ₽ от закупки», «−5 % от своей цены») ставится готовой ценой в рублях. Итог вверх до десятков, на каждом аккаунте свой.</p>
+<fieldset class="field"><legend class="label">От чего считать</legend><div class="row" style="gap:var(--s-3)">
+<label><input type="radio" name="base" value="purchase" form="bulk" checked> от закупки</label><label title="Текущая своя цена позиции на этом аккаунте; у кого своей цены нет — пропускаются"><input type="radio" name="base" value="own" form="bulk"> от своей цены</label></div></fieldset>
 <fieldset class="field"><legend class="label">Что сделать</legend><div class="row" style="gap:var(--s-3)">
-<label><input type="radio" name="side" value="up" form="bulk" checked> наценка</label><label><input type="radio" name="side" value="down" form="bulk"> уценка</label></div></fieldset>
-<label class="field"><span class="label">Процент к закупке (не больше {{ bulk_pct_max }})</span><input class="input input--num" name="value" form="bulk" inputmode="decimal" placeholder="5" autocomplete="off"></label>
+<label><input type="radio" name="side" value="up" form="bulk" checked> наценка (+)</label><label><input type="radio" name="side" value="down" form="bulk"> уценка (−)</label>
+<label><input type="radio" name="unit" value="pct" form="bulk" checked> в %</label><label><input type="radio" name="unit" value="rub" form="bulk"> в ₽</label></div></fieldset>
+<label class="field"><span class="label">Сколько (% не больше {{ bulk_pct_max }}, ₽ не больше {{ bulk_rub_max }})</span><input class="input input--num" name="value" form="bulk" inputmode="decimal" placeholder="5" autocomplete="off"></label>
 <fieldset class="field"><legend class="label">Аккаунты</legend><div class="row" style="gap:var(--s-3);flex-wrap:wrap">{% for a in feed_accounts %}<label><input type="checkbox" name="a" value="{{ a.id }}" form="bulk"{% if loop.first %} checked{% endif %}> {{ a.name }}</label>{% endfor %}</div><span class="hint">отметьте, где включить ту же цену</span></fieldset>
-<label class="row owin-check"><input type="checkbox" name="redo" value="1" form="bulk"><span>Изменить и позиции, у которых уже есть своя цена (иначе они не тронуты)</span></label>
+<label class="row owin-check"><input type="checkbox" name="redo" value="1" form="bulk"><span>«От закупки»: изменить и позиции, у которых уже есть своя цена (иначе они не тронуты)</span></label>
 <label class="row owin-check"><input type="checkbox" name="all" value="1" form="bulk"><span>Все {{ total }} по фильтру, не только отмеченные (не больше {{ bulk_limit }})</span></label>
 <input type="hidden" name="filter" value="{{ filter_query }}" form="bulk"><input type="hidden" name="total" value="{{ total }}" form="bulk"><input type="hidden" name="fp" value="{{ filter_fp }}" form="bulk">
-<p class="small muted">Всё уходит в черновик: на Авито ничего не изменится, пока вы не посмотрите «было → стало» и не нажмёте «Применить». Ниже закупки или дальше 30 % от цены фида — нужно подтвердить ещё раз.</p>
+<p class="small muted">Сначала покажем «было → стало» по каждой позиции и аккаунту, оттуда — в черновик; на Авито ничего не изменится, пока вы не нажмёте «Применить». Ниже закупки или дальше 30 % от цены фида — нужно подтвердить ещё раз. Ушедшие от поставщика позиции считаются от последней известной закупки.</p>
 </div>
 <div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Отмена</button>
-<button form="bulk" formaction="/catalog/own-price/bulk" name="action" value="clear" class="btn btn--secondary">Убрать свою цену («Как у бренда»)</button>
-<button form="bulk" formaction="/catalog/own-price/bulk" name="action" value="save" class="btn btn--primary">В черновик</button></div>
+<button form="bulk" formaction="/catalog/own-price/bulk" name="action" value="clear" class="btn btn--secondary" title="Убрать свою цену у выбранных на отмеченных аккаунтах: цена снова считается по % бренда и сезона; «было → стало» покажем до черновика" data-own-reset>Вернуть цену по настройкам фида</button>
+<button form="bulk" formaction="/catalog/own-price/bulk" name="action" value="save" class="btn btn--primary">Посмотреть «было → стало»</button></div>
 </div></div>{% endif %}
 {% if wait %}{% include "_catalog_wait.html" %}{% endif %}
 {% if can_post("catalog_own_price_inline") %}<script src="{{ url_for('static', filename='own_price.js') }}"></script>{% endif %}
