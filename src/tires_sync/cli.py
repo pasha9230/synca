@@ -13,7 +13,7 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import ad_stats, avito_report, avito_stock, catalog_archive, catalog_probe, chat_deals, chats, mirror_feed, order_engine, users, store
+from . import ad_stats, avito_report, avito_stock, catalog_archive, feed_now, price_push, catalog_probe, chat_deals, chats, mirror_feed, order_engine, users, store
 from .candidates import evaluate
 from .catalog import parse_reference
 from .config import load_settings
@@ -152,6 +152,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ot = sub.add_parser("orders-tick", help="часовая проверка заказов: задачи по правилам «завис на этапе» и оповещение ответственному об окончании резерва на точке (клиентам ничего не отправляет)")
     ot.add_argument("--db", required=True)
     ot.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    fr = sub.add_parser("orders-fill-responsible", help="один раз: заказам без ответственного поставить его по правилам нового заказа (аккаунт Авито, каталог клиента, кто создал); без --apply только показывает")
+    fr.add_argument("--db", required=True)
+    fr.add_argument("--apply", action="store_true", help="записать (сделайте копию базы до этого); без него ничего не пишется")
     se = sub.add_parser("sheet-enroll", help="поставить в очередь Google-таблицы открытые заказы, оформленные до её включения (строки только добавляются; запуск вручную)")
     se.add_argument("--db", required=True)
     se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «На возврат»")
@@ -254,6 +257,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=5, help="сколько объявлений читать с --info")
     sp.add_argument("--restore", action="store_true", help="вернуть числа, которые Авито показывал до нашей первой отправки (аккаунт должен быть выключен)")
     sp.add_argument("--confirm", action="store_true")
+    pp = sub.add_parser("price-push", help="отправить на Авито цены из очереди после «Применить» (только аккаунты с включённым «Цены сразу через API»); --show только показывает очередь")
+    pp.add_argument("--db", required=True)
+    pp.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    pp.add_argument("--feed-root", required=True)
+    pp.add_argument("--wait", type=float, default=0.0, help="сколько секунд ждать, пока отправляет другой процесс (по умолчанию не ждать)")
+    pp.add_argument("--show", action="store_true", help="только показать последнюю очередь каждого аккаунта (в режиме проверки: что ушло бы)")
     ri = sub.add_parser("mirror-reissue", help="дать объявлениям зеркала новые Id (Авито не возвращает удалённое из кабинета под прежним Id); без --confirm только показывает")
     ri.add_argument("--db", required=True)
     ri.add_argument("--account", type=int, required=True)
@@ -762,11 +771,36 @@ def _cmd_stock_pass(args) -> int:
     return 0
 
 
+def _cmd_price_push(args) -> int:
+    conn = store.connect(args.db)
+    if args.show:
+        for account in connections.list_feed_accounts(conn):
+            s = price_push.summary(conn, account["id"], limit=1000)
+            print("%s: режим «%s», последняя очередь %s: %s" % (account["name"], price_push.MODE_LABELS[price_push.mode(conn, account["id"])],
+                                                             s["at"] or "нет", json.dumps(s["counts"], ensure_ascii=False)))
+            for r in s["rows"]:
+                print("  %s (Авито %s): %s → %s, %s%s" % (r["ad_id"], r["avito_id"], r["old_price"], r["price"], r["status_text"],
+                                                          ", " + r["error"] if r["error"] else ""))
+        return 0
+    price_push.run(conn, load_box(args.key_file), args.feed_root, _http(), wait=args.wait)
+    return 0
+
+
 def _cmd_run_cycle(args) -> int:
     if getattr(args, "stock_only", False):
         return _cmd_stock_pass(args)
+    held = feed_now.hold_cycle(args.feed_root)          # «Собрать фид сейчас» is refused while a cycle runs, its tail included
+    try:
+        return _run_cycle(args)
+    finally:
+        if held is not None:
+            held.close()
+
+
+def _run_cycle(args) -> int:
     started = datetime.fromisoformat(_now())
     conn = store.connect(args.db)
+    store.set_state(conn, feed_now.CYCLE_STARTED_KEY, _now())            # «Собрать фид сейчас» is refused within minutes of a cycle
     box = load_box(args.key_file)
     fetch_problems = []
     if args.fetch:
@@ -826,6 +860,13 @@ def _cmd_run_cycle(args) -> int:
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0
+            try:                                                    # the prices Avito has from the feed: what the cycle changes goes through the API
+                before_prices = price_push.snapshot(conn, args.feed_root)
+            except Exception as err:                                # noqa: BLE001 - the prices on Avito never stop a publication
+                before_prices = {}
+                print("предупреждение: цены фида до публикации не прочитаны, на Авито через API не уйдут (%s: %s)" % (
+                    type(err).__name__, str(err)[:120]), file=sys.stderr)
+            published_ids = []
             for r in results:
                 account = connections.get_account(conn, r.account_id)
                 if not r.ok or not account["live"]:
@@ -833,6 +874,7 @@ def _cmd_run_cycle(args) -> int:
                 folder = Path(args.feed_root) / account["feed_token"]
                 try:
                     done = promote_feed(folder, expected_removals=expected)
+                    published_ids.append(account["id"])             # the new feed is public: its prices too, even if the state below fails
                     _record_state(conn, account, folder)
                     promoted += 1
                     print("%s: опубликован, объявлений: %d (было %d)" % (r.name, done["new"], done["old"]))
@@ -842,6 +884,12 @@ def _cmd_run_cycle(args) -> int:
                     failed.append(r)
             if promoted and not failed:
                 clear_expected(conn)
+            if before_prices:
+                try:                                                # sent at the end of the cycle, with what «Применить» left
+                    price_push.queue_changes(conn, args.feed_root, before_prices, published_ids, _now(), "система")
+                except Exception as err:                            # noqa: BLE001 - published already: Avito takes the price from the feed
+                    conn.rollback()
+                    print("предупреждение: цены на Авито не поставлены в очередь (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
         if failed:
             _alert(conn, box, "Tires Sync: цикл завершился с ошибками.\n" + "\n".join(
                 "%s: %s" % (r.name, r.error) for r in failed))
@@ -860,6 +908,11 @@ def _cmd_run_cycle(args) -> int:
         _load_tochki(conn, box, args, started)
     if getattr(args, "publish", False):
         avito_stock.after_cycle(conn, box, args.feed_root, parsed, results, http=_http())    # the number in stock on Avito, last: only accounts switched on
+        try:                                                    # the prices this cycle changed, and those a stopped sender left
+            price_push.run(conn, box, args.feed_root, _http())
+        except Exception as err:                                # noqa: BLE001 - the prices on Avito must never fail a cycle
+            conn.rollback()
+            print("предупреждение: цены на Авито не отправлены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
     return 0 if not failed and not fetch_problems and not notes and not tripped else 3
 
 
@@ -1066,6 +1119,24 @@ def _cmd_orders_tick(args) -> int:
     _daily_summary(conn, args.key_file)
     _webmim_snapshot(conn, args.key_file)
     _google_sheet(conn, args.key_file)
+    return 0
+
+
+def _cmd_orders_fill_responsible(args) -> int:
+    """orders-fill-responsible: the orders without a stored responsible get one by the rules of a new order (chat_deals.fill_responsible);
+    without --apply it only shows how many and by which rule. Run by hand after a copy of the base and after «Ответственный за заказы этого
+    аккаунта» is set on the accounts (the owner 2026-11-03)."""
+    from . import chat_deals
+    conn = store.connect(args.db)
+    try:
+        made = chat_deals.fill_responsible(conn, moscow_now().isoformat(timespec="seconds"), "cli", apply=args.apply)
+    finally:
+        conn.close()
+    for rule, count in sorted(made["by"].items()):
+        print("%s: %d" % (rule, count))
+    print("%s: %d; без ответственного осталось: %d%s" % ("записано" if args.apply else "будет записано (ничего не записано, нужен --apply)",
+                                                        len(made["set"]), len(made["left"]),
+                                                        " (№ %s)" % ", ".join(map(str, made["left"][:30])) if made["left"] else ""))
     return 0
 
 
@@ -2761,6 +2832,8 @@ def main(argv=None) -> int:
             return _cmd_avito_ids_sync(args)
         if args.command == "stock-push":
             return _cmd_stock_push(args)
+        if args.command == "price-push":
+            return _cmd_price_push(args)
         if args.command == "mirror-adopt":
             return _cmd_mirror_adopt(args)
         if args.command == "ids-alias":
@@ -2803,6 +2876,8 @@ def main(argv=None) -> int:
             return _cmd_clients_link(args)
         if args.command == "orders-tick":
             return _cmd_orders_tick(args)
+        if args.command == "orders-fill-responsible":
+            return _cmd_orders_fill_responsible(args)
         if args.command == "sheet-enroll":
             return _cmd_sheet_enroll(args)
         if args.command == "vk-catchup":

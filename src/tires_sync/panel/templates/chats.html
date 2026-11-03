@@ -114,5 +114,5 @@
 <div class="modal-body stack"><p class="small">Сообщения заказа ждут отправки (клиенту или точке): откройте их в карточке заказа.</p><div><a class="btn btn--primary btn--sm" href="{{ offer.more }}" data-messages-link>Открыть сообщения заказа</a></div></div>
 <div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Позже</button></div></div></div>{% endif %}
 <style>.chat-row.is-handed{box-shadow:inset 3px 0 0 var(--warn-500);background:var(--warn-50)}</style>
-{% if current_user().role == "point" %}{% with section="chats" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
+{% if current_user().role == "point" %}{% block point_nav %}{% with section="chats" %}{% include "_point_nav.html" %}{% endwith %}{% endblock %}{% endif %}
 {% endblock %}

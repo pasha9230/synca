@@ -334,6 +334,18 @@ class AvitoClient:
             raise AvitoError(200, None, "invalid response")
         return data["stocks"]
 
+    def update_price(self, avito_id: int, price: int) -> None:
+        """The price of one ad, in roubles (item API, operationId updatePrice: POST /core/v1/items/{item_id}/update_price, {"price": int};
+        at most 150 a minute). A write; the price is absolute, so a repeat after 429 or a 5xx changes nothing more (repeated like a read).
+        An answer without result.success true is an AvitoError."""
+        self._require_write()
+        if isinstance(price, bool) or not isinstance(price, int) or price <= 0:
+            raise ValueError("price must be a positive whole number of roubles")
+        data = self._request("POST", "/core/v1/items/%d/update_price" % int(avito_id), payload={"price": price}, safe=True)
+        result = data.get("result") if isinstance(data, dict) else None
+        if not isinstance(result, dict) or result.get("success") is not True:
+            raise AvitoError(200, None, "Авито не подтвердил цену")
+
     def avito_ids_for(self, ad_ids: List[str]) -> Dict[str, Optional[int]]:
         data = self._request("GET", "/autoload/v2/items/avito_ids", {"query": ",".join(str(i) for i in ad_ids)})
         return {item["ad_id"]: item.get("avito_id") for item in data.get("items", [])}

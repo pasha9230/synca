@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import abort, flash, redirect, render_template, request
 
-from .. import avito_stock, connections, feed as feed_module, order_notify, orders, users as panel_users
+from .. import avito_stock, connections, price_push, feed as feed_module, order_notify, orders, users as panel_users
 from ..avito import AvitoAuthError, AvitoClient, AvitoError
 from ..secretbox import SecretKeyError
 from ..settings_store import StaleDraftError, active_settings, get_active
@@ -315,7 +315,8 @@ def register(app) -> None:
                 brand_delta_text="\n".join("%s: %s" % (k, ("%g" % v)) for k, v in sorted(connections.get_brand_deltas(conn, account_id).items())),
                 title_template=connections.get_title_template(conn, account_id), photo_base=connections.get_photo_base(conn, account_id),
                 title_fields=feed_module.TITLE_FIELDS, photo_style=connections.get_photo_style(conn, account_id),
-                stock=avito_stock.config(conn, account_id), stock_summary=avito_stock.summary(conn, account_id)),
+                stock=avito_stock.config(conn, account_id), stock_summary=avito_stock.summary(conn, account_id),
+                price_mode=price_push.mode(conn, account_id), price_summary=price_push.summary(conn, account_id)),
             phones=service.phone_reconciliation(conn, app.config.get("FEED_ROOT")), tire_types=connections.TIRE_TYPES)
 
     def save_webmim(supplier_id, owner):
@@ -716,6 +717,17 @@ def register(app) -> None:
         except ValueError as err:
             flash(str(err))
         return redirect("/connections/avito/%d#stock" % account_id)
+
+    @app.route("/connections/accounts/<int:account_id>/price-push", methods=["POST"])
+    @login_required
+    def connections_account_price_push(account_id):
+        _account_or_404(account_id)
+        try:
+            value = price_push.save_mode(get_conn(), account_id, request.form.get("mode", ""), now_iso(), author())
+            flash("Цены сразу через API: %s. Действует со следующего «Применить»." % price_push.MODE_LABELS[value])
+        except ValueError as err:
+            flash(str(err))
+        return redirect("/connections/avito/%d#price-push" % account_id)
 
     @app.route("/connections/accounts/<int:account_id>/brand-pricing", methods=["POST"])
     @login_required

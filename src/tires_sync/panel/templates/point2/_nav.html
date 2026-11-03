@@ -1,0 +1,21 @@
+{% from "_ui.html" import icon %}{# The sections of a point's phone in «Новый вид» (the prototype's PM_SECS, the owner 2026-11-03): «Рабочее место», «Чаты», «Звонки»
+   and «Ещё» (Передать клиента, Переданные клиенты, Задачи, Оповещения, Что нового, Свой пароль, Выйти); the same addresses and rights as
+   _point_nav.html, a computer has the panel's menu instead. `section`: the one open. #}
+{% set n = point_nav() %}{% if n is not none %}
+{% set more_on = section in ("handed", "tasks", "whatsnew") %}
+<nav class="p2-nav" aria-label="Разделы точки" data-point-nav>
+<a href="/my-point" class="{{ 'is-active' if section == 'mypoint' else '' }}"{% if section == 'mypoint' %} aria-current="page"{% endif %} data-sec="mypoint">{{ icon("layers") }}<span>Рабочее место</span>{% if n.mypoint %}<b>{{ n.mypoint }}</b>{% endif %}</a>
+{% if can("chats") %}<a href="/chats" class="{{ 'is-active' if section == 'chats' else '' }}"{% if section == 'chats' %} aria-current="page"{% endif %} data-sec="chats">{{ icon("chat") }}<span>Чаты</span>{% if nav.chat_unread %}<b class="is-hot">{{ nav.chat_unread }}</b>{% endif %}</a>{% endif %}
+{% if can("calls") %}<a href="/calls" class="{{ 'is-active' if section == 'calls' else '' }}"{% if section == 'calls' %} aria-current="page"{% endif %} data-sec="calls">{{ icon("clock") }}<span>Звонки</span></a>{% endif %}
+<details class="p2-more" data-sec="more"><summary class="{{ 'is-active' if more_on else '' }}" aria-label="Ещё разделы">{{ icon("sliders") }}<span>Ещё</span>{% if n.handed or nav.tasks %}<b{% if nav.tasks_late %} class="is-hot"{% endif %}>{{ (n.handed or 0) + (nav.tasks or 0) }}</b>{% endif %}</summary>
+<div class="p2-more-list">
+<a href="/my-point/handed#handoff"{% if section == 'handed' %} aria-current="page"{% endif %} data-sec="handed">{{ icon("plus") }}<span>Передать клиента</span></a>
+<a href="/my-point/handed" data-sec="handed-list">{{ icon("users") }}<span>Переданные клиенты</span>{% if n.handed %}<b>{{ n.handed }}</b>{% endif %}</a>
+{% if can("orders") %}<a href="/tasks"{% if section == 'tasks' %} aria-current="page"{% endif %} data-sec="tasks">{{ icon("check") }}<span>Задачи</span>{% if nav.tasks %}<b>{{ nav.tasks }}</b>{% endif %}</a>{% endif %}
+<a href="/my-point?notes=1" data-sec="notes">{{ icon("alert") }}<span>Оповещения точки</span></a>
+{% if can("alerts") %}<a href="/alerts" data-sec="alerts">{{ icon("inbox") }}<span>Уведомления</span></a>{% endif %}
+<a href="/whats-new"{% if section == 'whatsnew' %} aria-current="page"{% endif %} data-sec="whatsnew">{{ icon("sparkle") }}<span>Что нового</span>{% if whatsnew_dot() %}<i class="wn-dot" title="Есть новое"><span class="sr-only">есть новое</span></i>{% endif %}</a>
+<a href="/account/password">{{ icon("key") }}<span>Свой пароль</span></a>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>{{ icon("logout") }}<span>Выйти</span></button></form>
+</div></details>
+</nav>{% endif %}

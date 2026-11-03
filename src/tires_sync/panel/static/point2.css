@@ -1,0 +1,228 @@
+/* «Новый вид» of the point (lane port-point; the prototype docs/ux/prototype-2026-10-30, role «Точка»: pointCard, pmCard, renderPointMobile,
+   renderPointCalls): only on the pages of templates/point2/ (body.p2, with body.ui-new and its tokens «Строгий»). A computer: the panel's
+   menu on the left, the card in one row (number and date | the order | the stage | the buttons); a phone (≤ 760 px): no menu nor top bar,
+   one line on top, compact cards, the sections at the bottom. No script of its own. */
+body.p2{
+  --p2-primary:var(--primary-600,#4F46E5);--p2-primary-hover:var(--primary-700,#4338CA);--p2-primary-bg:var(--primary-100,#EEF2FF);
+  --p2-bg:#FFFFFF;--p2-layout:#F6F8FA;--p2-fill:#F6F8FA;--p2-fill-2:#F0F2F5;--p2-border:#D0D7DE;--p2-border-2:#E4E7EB;
+  --p2-text:#1F2328;--p2-text-2:#3D444D;--p2-text-3:#59636E;--p2-ok:#1A7F37;--p2-ok-bg:#DAFBE1;--p2-warn:#9A6700;--p2-warn-bg:#FFF8C5;
+  --p2-warn-border:#E9C46A;--p2-err:#CF222E;--p2-err-bg:#FFEBE9;--p2-purple:#8250DF;--p2-purple-bg:#FBEFFF;--p2-r:6px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif
+}
+.p2w{max-width:1080px;color:var(--p2-text);font-size:14px;line-height:1.5}
+.p2w h1{font-size:22px;line-height:30px;font-weight:600;margin:0;color:var(--p2-text)}
+.p2w h2{font-size:15px;font-weight:600;margin:0;color:var(--p2-text)}
+.p2w a{color:var(--p2-primary)}
+.p2w .muted,.p2-sub{color:var(--p2-text-3);font-size:13px}
+.p2w .btn{border-radius:var(--p2-r);box-shadow:none;font-family:inherit}
+.p2w .btn--primary{background:var(--p2-primary);border-color:var(--p2-primary);color:#fff}
+.p2w .btn--primary:hover{background:var(--p2-primary-hover);border-color:var(--p2-primary-hover)}
+.p2w .btn--secondary{background:var(--p2-bg);border:1px solid var(--p2-border);color:var(--p2-text)}
+.p2w .btn--secondary:hover{border-color:var(--p2-primary);color:var(--p2-primary)}
+.p2w .input,.p2w .select,.p2w textarea{border-radius:var(--p2-r);border-color:var(--p2-border)}
+.p2-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* the head: the title, the bell, «Передать клиента» */
+.p2-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:16px}
+.p2-head .p2-title{flex:1;min-width:0}
+.p2-head-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.p2-ico{display:inline-flex;align-items:center;justify-content:center;gap:6px;position:relative;min-width:36px;height:36px;padding:0 10px;
+  border:1px solid var(--p2-border);border-radius:var(--p2-r);background:var(--p2-bg);color:var(--p2-text);text-decoration:none;cursor:pointer;font:inherit}
+.p2-ico .i{width:18px;height:18px}
+.p2-ico b{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;font-size:11px;background:var(--p2-err);color:#fff;font-weight:500}
+.p2-ico-t{display:inline}
+.p2w .p2-ico--primary{background:var(--p2-primary);border-color:var(--p2-primary);color:#fff}
+.p2w .p2-ico--primary:hover{background:var(--p2-primary-hover)}
+.p2-find > summary{list-style:none}
+.p2-find > summary::-webkit-details-marker{display:none}
+.p2-only-phone{display:none}
+
+/* the search, the line of the alerts, «Отменить отметку» */
+.p2w .mp-search{margin-bottom:12px}
+.p2w .mp-search .label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.p2-search-row{display:flex;gap:8px}
+.p2-search-row .input{flex:1;height:40px;font-size:16px}
+.p2-search-row .btn{height:40px}
+.p2-line{display:flex;align-items:center;gap:8px;padding:9px 12px;margin-bottom:12px;border:1px solid var(--p2-border-2);border-radius:var(--p2-r);
+  background:var(--p2-fill);color:var(--p2-text);text-decoration:none}
+.p2-line .i{width:16px;height:16px;flex:none}
+a.p2-line:hover{border-color:var(--p2-primary)}
+.p2-box{border:1px solid var(--p2-border-2);border-radius:var(--p2-r);background:var(--p2-bg);margin-bottom:12px}
+.p2-box > summary{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;list-style:none;font-weight:600}
+.p2-box > summary::-webkit-details-marker{display:none}
+.p2-box > summary .i{width:16px;height:16px}
+.p2-box > summary::after{content:"›";margin-left:auto;color:var(--p2-text-3);font-size:18px;line-height:1}
+.p2-box[open] > summary::after{transform:rotate(90deg)}
+.p2-box-body{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
+.p2-section{padding:12px;display:flex;flex-direction:column;gap:8px}
+.p2-count{display:inline-block;min-width:20px;height:20px;line-height:20px;padding:0 6px;border-radius:10px;background:var(--p2-fill-2);color:var(--p2-text-2);
+  font-size:12px;font-weight:400;text-align:center}
+.p2-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.p2-list > li{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--p2-border-2)}
+.p2-list > li:first-child{border-top:0}
+.p2-list .p2-grow{flex:1;min-width:0;display:flex;flex-direction:column}
+
+/* the plaque of the act МХ-3 (over every tab while tyres wait for the supplier) */
+.p2w .mp-returns{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.p2-mx3{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px 12px;padding:12px;border:1px solid var(--p2-warn-border);
+  background:var(--p2-warn-bg);border-radius:var(--p2-r)}
+.p2-mx3 .i{width:20px;height:20px;color:var(--p2-warn)}
+.p2-mx3 .p2-sub{display:block}
+.p2-mx3 form{margin:0}
+
+/* the tabs */
+.p2w .mp-tabs{display:flex;gap:4px;border-bottom:1px solid var(--p2-border-2);margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
+.p2w .mp-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:2px solid transparent;color:var(--p2-text-2);
+  text-decoration:none;white-space:nowrap}
+.p2w .mp-tab:hover{color:var(--p2-primary)}
+.p2w .mp-tab.is-active{color:var(--p2-text);font-weight:600;border-bottom-color:var(--p2-primary)}
+.p2w .mp-tab b{min-width:20px;height:20px;line-height:20px;padding:0 6px;border-radius:10px;background:var(--p2-fill-2);color:var(--p2-text-2);font-size:12px;
+  font-weight:400;text-align:center}
+.p2w .mp-tab--hot b{background:var(--p2-err);color:#fff}
+.p2-tab-s{display:none}
+.p2w .mp-block{display:flex;flex-direction:column;gap:8px}
+.p2w .mp-block > h2{font-size:13px;font-weight:400;color:var(--p2-text-3)}
+.p2w .mp-empty{color:var(--p2-text-3);padding:24px 0;text-align:center;margin:0}
+
+/* the card: a computer — number and date | the order | the stage | the buttons; the questions under it; «Подробнее» opens the facts */
+.p2w .mp-card{background:var(--p2-bg);border:1px solid var(--p2-border-2);border-radius:var(--p2-r);overflow:hidden}
+.p2-main{display:grid;grid-template-columns:150px minmax(0,1fr) auto 200px;grid-template-areas:"no info tags acts";gap:4px 16px;align-items:center;padding:12px 16px}
+.p2-no{grid-area:no;display:flex;flex-direction:column;align-items:center;text-align:center}
+.p2-no .mp-no{font-size:15px;font-weight:600;color:var(--p2-text)}
+.p2-no .mp-date{font-size:12px;color:var(--p2-text-3)}
+.p2-info{grid-area:info;min-width:0;display:flex;flex-direction:column;gap:2px}
+.p2-tags{grid-area:tags;display:flex;flex-direction:column;align-items:center;gap:4px}
+.p2-acts{grid-area:acts;display:flex;flex-direction:column;align-items:stretch;gap:6px}
+.p2-acts form{margin:0;display:flex;flex-direction:column}
+.p2-acts .mp-btn{width:100%;height:40px;justify-content:center}
+.p2-acts .mp-btn--big{font-weight:600}
+.p2-acts .mp-btn--quiet,.p2-quiet{background:none;border:0;padding:2px 0;color:var(--p2-text-3);text-decoration:underline;font-size:13px;height:auto;min-height:0;cursor:pointer;font-family:inherit}
+.p2-g{font-weight:600;color:var(--p2-text)}
+.p2-g .p2-q{font-weight:400;color:var(--p2-text-3);margin-left:6px}
+.p2-who{color:var(--p2-text-2)}
+.p2-note{display:flex;gap:6px;align-items:flex-start;font-size:13px;color:var(--p2-text-2);margin:2px 0 0}
+.p2-note .i{width:14px;height:14px;flex:none;margin-top:3px;color:var(--p2-text-3)}
+.p2-tag{display:inline-block;height:22px;line-height:20px;padding:0 7px;border-radius:4px;font-size:12px;white-space:nowrap;border:1px solid transparent}
+.p2-tag--ok{color:var(--p2-ok);background:var(--p2-ok-bg);border-color:#ACE7B8}
+.p2-tag--warn{color:var(--p2-warn);background:var(--p2-warn-bg);border-color:var(--p2-warn-border)}
+.p2-tag--grey{color:var(--p2-text-2);background:var(--p2-fill-2);border-color:var(--p2-border)}
+.p2-tag--purple{color:var(--p2-purple);background:var(--p2-purple-bg);border-color:#D8B9FF}
+.p2-tag--err{color:var(--p2-err);background:var(--p2-err-bg);border-color:#FFCECB}
+.p2w .mp-ask{display:flex;gap:8px;align-items:flex-start;margin:0 16px 12px;padding:10px 12px;border:1px solid var(--p2-warn-border);background:var(--p2-warn-bg);border-radius:var(--p2-r)}
+.p2w .mp-ask > .i{width:18px;height:18px;color:var(--p2-warn);flex:none;margin-top:1px}
+.p2w .p2-ask-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.p2w .p2-ask-acts{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+.p2w .p2-ask-acts form{margin:0}
+.p2w .p2-ask-acts .btn{height:32px}
+.p2w .mp-more{border-top:1px solid var(--p2-border-2);padding:6px 16px}
+.p2w .mp-more > summary{cursor:pointer;color:var(--p2-text-3);font-size:13px;list-style:none}
+.p2w .mp-more > summary::-webkit-details-marker{display:none}
+.p2w .mp-more > summary::after{content:" ›"}
+.p2w .mp-more[open] > summary::after{content:" ˅"}
+.p2w .mp-more-body{display:flex;flex-direction:column;gap:6px;padding:8px 0 4px}
+.p2w .mp-facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}
+.p2w .mp-facts div{display:contents}
+.p2w .mp-facts dt{color:var(--p2-text-3)}
+.p2w .mp-facts dd{margin:0}
+.p2w .mp-tel{font-weight:600;font-size:15px}
+.p2w .mp-text{white-space:pre-line;font-size:13px;color:var(--p2-text-2)}
+.p2w .mp-until--late{color:var(--p2-err);font-weight:500}
+.p2-hints{margin-top:12px}
+
+/* «Передать клиента», «Переданные клиенты», «Звонки» */
+.p2w .mp-handoff-form{display:flex;flex-direction:column;gap:12px;padding:16px}
+.p2w .mp-handoff-form .field{display:flex;flex-direction:column;gap:4px;margin:0}
+.p2w .mp-handoff-form .input{height:40px;font-size:15px}
+.p2w .mp-handoff-form textarea.input{height:auto}
+.p2-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.p2w .mp-handoff-form fieldset{border:0;padding:0}
+.p2w .mp-handoff-form .mp-btn{height:44px;width:100%}
+.p2-err{color:var(--p2-err);margin:0}
+.p2-tabs2{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--p2-border-2)}
+.p2-calls{width:100%;border-collapse:collapse}
+.p2-calls th{text-align:left;font-weight:500;color:var(--p2-text-3);font-size:12px;padding:8px 12px;border-bottom:1px solid var(--p2-border-2)}
+.p2-calls td{padding:10px 12px;border-bottom:1px solid var(--p2-border-2);vertical-align:top}
+.p2-calls .p2-call-acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.p2-calls tr.is-missed td:first-child{box-shadow:inset 3px 0 0 var(--p2-err)}
+.p2-filters{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:12px;margin-bottom:12px}
+.p2-filters .field{display:flex;flex-direction:column;gap:4px;margin:0}
+
+/* the sections of a point's phone: four at the bottom, «Ещё» opens the rest (a phone only) */
+.p2-nav{display:none}
+
+@media (max-width:760px){
+  body.p2 .sidebar,body.p2 .topbar{display:none}
+  body.p2 .app{display:block}
+  body.p2 .main,body.p2 .page{min-width:0;max-width:none;overflow:visible}
+  body.p2 .main,body.p2.p2-own .page{padding:0;margin:0}
+  body.p2 .msgs{margin:8px 12px 0}
+  body.p2 .msgs:empty{display:none}
+  body.p2.p2-own .page{gap:0}
+  body.p2{min-width:0;background:var(--p2-layout)}
+  .p2w{padding:0 0 84px}
+  .p2-only-phone{display:inline-flex}
+  body.p2:has(.p2-find:not([open])) .p2-search-folded{display:none}
+  .p2-only-desk{display:none !important}
+  .p2-head{position:sticky;top:0;z-index:20;background:var(--p2-bg);border-bottom:1px solid var(--p2-border-2);padding:8px 12px;margin:0 0 8px;align-items:center;gap:6px}
+  .p2-head h1{font-size:18px;line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .p2-head .p2-title .p2-sub{display:none}
+  .p2-head-acts{flex-wrap:nowrap;gap:6px}
+  .p2-ico{min-width:40px;height:40px;padding:0 8px}
+  .p2-ico-t{display:none}
+  .p2w > :not(.p2-head):not(.mp-tabs):not(.p2-nav){margin-left:12px;margin-right:12px}
+  .p2w .mp-tabs{margin:0 12px 10px;border:0;gap:4px}
+  .p2w .mp-tab{flex:1 1 0;justify-content:center;border:1px solid var(--p2-border);border-radius:var(--p2-r);padding:0 4px;height:36px;font-size:13px;background:var(--p2-bg)}
+  .p2w .mp-tab.is-active{border-color:var(--p2-primary);background:var(--p2-primary-bg);color:var(--p2-primary)}
+  .p2w .mp-tab b{min-width:18px;height:18px;line-height:18px;padding:0 4px;font-size:11px}
+  .p2-tab-l{display:none}
+  .p2-tab-s{display:inline}
+  .p2-main{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"no tags" "info info" "acts acts";padding:10px 12px;gap:6px 8px}
+  .p2-no{flex-direction:row;align-items:baseline;gap:8px;text-align:left;white-space:nowrap}
+  .p2-tags{flex-direction:row;justify-content:flex-end;flex-wrap:wrap}
+  .p2-acts .mp-btn{height:48px;font-size:16px}
+  .p2-acts .mp-btn--quiet{height:auto;font-size:13px}
+  .p2w .mp-ask{margin:0 12px 10px}
+  .p2w .p2-ask-acts{flex-direction:column}
+  .p2w .p2-ask-acts form,.p2w .p2-ask-acts > a{display:flex;flex-direction:column}
+  .p2w .p2-ask-acts .btn{height:44px;justify-content:center;font-size:15px}
+  .p2w .mp-more{padding:6px 12px}
+  .p2-mx3{grid-template-columns:auto 1fr;padding:10px 12px}
+  .p2-mx3 .mp-hint{display:none}
+  .p2-mx3 form{grid-column:1 / -1}
+  .p2-mx3 .btn{width:100%;height:48px;justify-content:center}
+  .p2-row2{grid-template-columns:1fr}
+  .p2w .mp-handoff-form .seg{display:grid;grid-template-columns:1fr 1fr;width:100%}
+  .p2w .mp-handoff-form .seg label{justify-content:center;height:44px;border-bottom:1px solid var(--p2-border)}
+  .p2w .mp-handoff-form .input{height:48px;font-size:16px}
+  .p2w .mp-handoff-form .mp-btn{height:48px;font-size:16px}
+  .p2-calls thead{display:none}
+  .p2-calls,.p2-calls tbody,.p2-calls tr,.p2-calls td{display:block;width:100%}
+  .p2-calls tr{border:1px solid var(--p2-border-2);border-radius:var(--p2-r);background:var(--p2-bg);margin-bottom:8px;padding:10px 12px}
+  .p2-calls td{border:0;padding:2px 0}
+  .p2-calls tr.is-missed td:first-child{box-shadow:none}
+  .p2-calls tr.is-missed{border-left:3px solid var(--p2-err)}
+  .p2-calls .p2-call-acts{justify-content:stretch;margin-top:6px}
+  .p2-calls .p2-call-acts > *{flex:1 1 0;min-height:44px;justify-content:center}
+  .p2-filters{padding:8px 0}
+  .p2-nav{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;
+    border-top:1px solid var(--p2-border-2);padding-bottom:env(safe-area-inset-bottom)}
+  .p2-nav > a,.p2-nav > details > summary{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;min-height:60px;
+    font-size:11px;line-height:13px;color:var(--p2-text-3);text-decoration:none;list-style:none;cursor:pointer}
+  .p2-nav > details > summary::-webkit-details-marker{display:none}
+  .p2-nav .is-active,.p2-nav details[open] > summary{color:var(--p2-primary);font-weight:500}
+  .p2-nav .i{width:22px;height:22px}
+  .p2-nav > a b,.p2-nav > details > summary b{position:absolute;top:4px;left:calc(50% + 6px);min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;font-size:11px;
+    background:var(--p2-text-3);color:#fff;font-weight:500}
+  .p2-nav b.is-hot{background:var(--p2-err)}
+  .p2-nav > a .wn-dot{position:absolute;top:8px;left:calc(50% + 8px);margin:0}
+  .p2-more-list .wn-dot{position:static;margin-left:auto}
+  .p2-more-list{position:fixed;left:0;right:0;bottom:calc(60px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--p2-border-2);
+    border-radius:12px 12px 0 0;box-shadow:0 -8px 24px rgba(66,74,83,.12);padding:8px 0;display:flex;flex-direction:column}
+  .p2-more-list a,.p2-more-list button{display:flex;align-items:center;gap:10px;min-height:48px;padding:0 16px;color:var(--p2-text);text-decoration:none;
+    background:none;border:0;font:inherit;font-size:15px;text-align:left;width:100%;cursor:pointer}
+  .p2-more-list .i{width:20px;height:20px;color:var(--p2-text-3)}
+  .p2-more-list b{position:static;margin-left:auto;min-width:20px;height:20px;line-height:20px;border-radius:10px;padding:0 6px;font-size:12px;background:var(--p2-fill-2);color:var(--p2-text-2);text-align:center}
+  .p2-more-list form{margin:0}
+  /* the pages of the old design under the new nav (chats, tasks, «Что нового»): the old _point_nav is not drawn there */
+  body.p2 .pt-nav{display:none}
+}

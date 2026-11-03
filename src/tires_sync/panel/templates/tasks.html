@@ -52,5 +52,5 @@
   .pt-tasks-page .content{padding-bottom:84px}
 }
 </style>
-{% with section="tasks" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
+{% block point_nav %}{% with section="tasks" %}{% include "_point_nav.html" %}{% endwith %}{% endblock %}{% endif %}
 {% endblock %}

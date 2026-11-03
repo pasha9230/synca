@@ -521,6 +521,12 @@ CREATE TABLE IF NOT EXISTS avito_stock (
     quantity INTEGER, status TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT '',
     before_quantity INTEGER, before_at TEXT, PRIMARY KEY (account_id, avito_id)
 );
+-- the prices sent to Avito through the item API right after «Применить» (price_push.py): one row per ad, the last price queued and how it went
+CREATE TABLE IF NOT EXISTS avito_price (
+    account_id INTEGER NOT NULL, avito_id INTEGER NOT NULL, ad_id TEXT NOT NULL DEFAULT '', price INTEGER NOT NULL, old_price INTEGER,
+    status TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', queued_at TEXT NOT NULL, at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (account_id, avito_id)
+);
 -- the prices of the competitors on Avito (market.py, the plan price-parser): a snapshot per position and run, the listings it was made of
 -- (no phones, no names of private sellers); the listings live 60 days, the snapshots a year. Nothing of the feed reads them.
 CREATE TABLE IF NOT EXISTS market_snapshot (

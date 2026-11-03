@@ -12,6 +12,7 @@ from flask import abort, current_app, flash, redirect, render_template, request,
 
 from .. import calls, order_manager as mgr, orders, store
 from .common import author, can, get_conn, has_right, now_iso, own_point, point_account
+from .routes_design import point_page
 from .routes_orders import from_panel, local_iso
 
 PERIODS = {"1": "сегодня и вчера", "7": "7 дней", "30": "30 дней", "90": "90 дней"}
@@ -75,7 +76,7 @@ def register(app) -> None:
             typed = session.pop("handoff_call", None)
             handoff = {"action": "/calls/%d/handoff" % typed["call"] if typed else "", "token": secrets.token_hex(12), "error": bool(typed),
                        "form": typed or {}, "seasons": mgr.SEASONS, "done": None, "back": request.full_path.rstrip("?")}
-        return render_template("calls.html", rows=rows, handed=handed, handoff=handoff, links=links, chat_links=can("chats"), order_links=can("orders"), accounts=accounts, account=account_id, days=days, periods=PERIODS, missed=missed,
+        return render_template(point_page("calls.html"), rows=rows, handed=handed, handoff=handoff, links=links, chat_links=can("chats"), order_links=can("orders"), accounts=accounts, account=account_id, days=days, periods=PERIODS, missed=missed,
                                q=phone, mine=mine, no_account=no_account, can_order=can("orders", "edit") and can("calls", "edit"), clients_link=can("clients"))
 
     @app.route("/calls/<int:call_row>/record")

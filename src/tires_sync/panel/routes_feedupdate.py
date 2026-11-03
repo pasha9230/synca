@@ -6,7 +6,7 @@ from pathlib import Path
 
 from flask import flash, redirect, render_template, request
 
-from .. import connections, store
+from .. import connections, feed_now, store
 from ..secretbox import SecretKeyError
 from ..suppliers import unload_path_for
 from ..transport import urllib_transport
@@ -29,7 +29,15 @@ def register(app) -> None:
     def feed_update_page():
         data, _conn = preview()
         return render_template("feed_update.html", p=data, loaded=feed_update.unload_age(app.config["UNLOAD_PATH"]),
-                               any_live=any(a["live"] for a in data["accounts"]))
+                               any_live=any(a["live"] for a in data["accounts"]), feed_now=feed_now.last(_conn, app.config.get("FEED_ROOT")))
+
+    @app.route("/feed/update/now", methods=["POST"])
+    @login_required
+    def feed_update_now():
+        """«Собрать фид сейчас»: the usual cycle with publication, in a process of its own (feed_now)."""
+        kwargs = {"popen": app.config["POPEN"]} if app.config.get("POPEN") else {}
+        flash(feed_now.start_cycle(get_conn(), app.config, now(), author(), **kwargs))
+        return redirect("/feed/update")
 
     @app.route("/feed/update/fetch", methods=["POST"])
     @login_required

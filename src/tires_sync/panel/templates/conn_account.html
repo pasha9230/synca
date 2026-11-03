@@ -14,7 +14,7 @@
 <div class="card-foot"><button class="btn btn--primary">Сохранить</button></div>{% if can_post("account_exclude_types") %}</form>{% else %}</fieldset>{% endif %}</section>
 <section class="card" id="responsible">
 {% if can_post("account_responsible") %}<form method="post" action="/connections/accounts/{{ a.id }}/responsible">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
-<div class="card-head"><h3>Ответственный</h3><span class="sub">Новые заказы этого аккаунта (из чата, звонка, вручную по его чату) сразу получают этого сотрудника; в заказе его можно сменить. Старые заказы не меняются. В «Чатах» аккаунт открывается у него по умолчанию.</span></div>
+<div class="card-head"><h3>Ответственный за заказы этого аккаунта</h3><span class="sub">Новые заказы этого аккаунта (из чата, звонка, вручную по его чату) сразу получают этого сотрудника; в заказе его можно сменить. Уведомления по заказу приходят только ответственному, по чатам аккаунта без заказа — этому сотруднику. В «Чатах» аккаунт открывается у него по умолчанию.</span></div>
 <div class="card-body"><select class="select" name="responsible" aria-label="Ответственный аккаунта"><option value="">— не выбран (как раньше) —</option>
 {% for login in a.staff %}<option value="{{ login }}"{% if login == a.responsible %} selected{% endif %}>{{ login }}</option>{% endfor %}
 {% if a.responsible and a.responsible not in a.staff %}<option value="{{ a.responsible }}" selected>{{ a.responsible }} (не сотрудник)</option>{% endif %}</select></div>
@@ -125,6 +125,23 @@
 </div>
 <div class="card-foot"><button class="btn btn--primary">Сохранить</button><span class="small muted">Выключили — Авито оставит последние числа; вернуть прежние: команда <code>stock-push --restore</code>.</span></div>
 {% if can_post("connections_account_stock") %}</form>{% else %}</fieldset>{% endif %}
+</section>
+<section class="card" id="price-push">
+{% if can_post("connections_account_price_push") %}<form method="post" action="/connections/accounts/{{ a.id }}/price-push">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="card-head"><h3>Цены сразу через API</h3><span class="ml-auto"><span class="badge badge--{{ 'ok' if a.price_mode == 'on' else 'neutral' }} badge--dot">{{ {"off": "выключено", "dry": "проверка", "on": "включено"}[a.price_mode] }}</span></span></div>
+<div class="card-body stack">
+<p class="small muted">После «Применить» объявления, у которых изменилась цена в фиде, сразу получают её на Авито (не дожидаясь загрузки фида). Только живые объявления: новые, снятые и остатки не трогаются. Цена — ровно та, что в опубликованном фиде.</p>
+<div class="stack">
+<label class="row" style="gap:var(--s-2)"><input type="radio" name="mode" value="off"{% if a.price_mode == 'off' %} checked{% endif %}> Выключено: на Авито ничего не уходит</label>
+<label class="row" style="gap:var(--s-2)"><input type="radio" name="mode" value="dry"{% if a.price_mode == 'dry' %} checked{% endif %}> Проверка: только список «что ушло бы», запросов к Авито нет</label>
+<label class="row" style="gap:var(--s-2)"><input type="radio" name="mode" value="on"{% if a.price_mode == 'on' %} checked{% endif %}> Включено</label>
+</div>
+{% set ps = a.price_summary %}{% if a.price_mode != 'off' and not ps.mapped %}<p class="small">Номера объявлений на Авито ещё не прочитаны из кабинета: цены отправлять некому. Они читаются каждые 2 часа.</p>{% endif %}{% if ps.at %}<p class="small">Цены на Авито ({{ ps.at|dt }}): отправлено {{ ps.counts.get("sent", 0) }}, ошибок {{ ps.counts.get("failed", 0) }}{% if ps.counts.get("not_sent") %} · ждут повтора {{ ps.counts.get("not_sent") }}{% endif %}{% if ps.counts.get("queued") %} · в очереди {{ ps.counts.get("queued") }}{% endif %}{% if ps.counts.get("dry") %} · ушло бы (проверка) {{ ps.counts.get("dry") }}{% endif %}{% if ps.counts.get("skipped") %} · не отправлялось {{ ps.counts.get("skipped") }}{% endif %}</p>
+{% for r in ps.rows %}<p class="small muted">{{ r.ad_id }}: {{ r.old_price }} → {{ r.price }} ₽ — {{ r.status_text }}{% if r.error %}: {{ r.error }}{% endif %}</p>{% endfor %}{% endif %}
+</div>
+<div class="card-foot"><button class="btn btn--primary">Сохранить</button><span class="small muted">Выключили — цены на Авито обновит загрузка фида, как раньше.</span></div>
+{% if can_post("connections_account_price_push") %}</form>{% else %}</fieldset>{% endif %}
 </section>
 <section class="card">
 {% if can_post("connections_account_brand_pricing") %}<form method="post" action="/connections/accounts/{{ a.id }}/brand-pricing">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}

@@ -17,5 +17,5 @@
 </article>{% endfor %}</div>
 </section>{% else %}<section class="card card-body"><p class="muted">Пока ничего нового.</p></section>{% endfor %}
 </div>
-{% if point %}{% with section="whatsnew" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
+{% if point %}{% block point_nav %}{% with section="whatsnew" %}{% include "_point_nav.html" %}{% endwith %}{% endblock %}{% endif %}
 {% endblock %}

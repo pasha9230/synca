@@ -298,6 +298,8 @@ _MORE_TEXTS = {
     "login_reset_used": lambda d: "Вход сброшен: %s → %s" % (_q(d.get("from")), _q(d.get("to"))),
     "shop_responsible": lambda d: ("Ответственный за заказы клиентов: %s" % d["login"]) if d.get("login")
     else "Ответственный за заказы клиентов не выбран: по умолчанию",
+    "orders_fill_responsible": lambda d: "Заказам без ответственного поставлен ответственный: %d (без ответственного осталось %d)" % (
+        len(d.get("set") or {}), len(d.get("left") or [])),
     "shop_order_cancel": lambda d: "Клиент %s отменил свой заказ №%s из каталога (этап был %s)" % (_q(d.get("login")), d.get("order", "?"), _q(d.get("stage") or "—")),
     "stage_renamed": lambda d: "Этап переименован: «%s» → «%s»" % (d.get("from", "?"), d.get("to", "?")),
     "stage_names_templates": lambda d: "Шаблоны сообщений называют этапы по-старому (тексты не изменены, поправьте вручную): %s" % "; ".join(
@@ -346,6 +348,12 @@ _MORE_TEXTS = {
         _acc(d), _pick(STOCK_MODES, d.get("mode")), _count(d.get("codes")), d.get("cap") if d.get("cap") not in (None, "") else "нет"),
     "avito_stock_push": lambda d: _stock_text("Остатки отправлены на Авито", d),
     "avito_stock_restore": lambda d: _stock_text("Остатки на Авито возвращены", d),
+    "avito_price_config": lambda d: "Цены сразу через API, %s: %s" % (_acc(d), _pick({"off": "выключено", "dry": "проверка", "on": "включено"}, d.get("mode"))),
+    "avito_price_queued": lambda d: "Цены на Авито, %s: в очереди %s%s" % (_acc(d), _count(d.get("count")), " (проверка, не отправляются)" if d.get("mode") == "dry" else ""),
+    "avito_price_push": lambda d: "Цены отправлены на Авито, %s: отправлено %s, ошибок %s, не отправлено %s, пропущено %s" % (
+        _acc(d), _count(d.get("sent")), _count(d.get("failed")), _count(d.get("not_sent")), _count(d.get("skipped"))),
+    "feed_now_started": lambda d: "Запущен сбор фида по кнопке «Собрать фид сейчас»",
+    "feed_now_refused": lambda d: "Сбор фида по кнопке не запущен: %s" % _q(d.get("why")),
     "avito_upload_started": lambda d: "Запущена загрузка на Авито, %s" % _acc(d),
     "avito_upload_refused": lambda d: "Загрузка на Авито не запущена, %s: %s" % (_acc(d), _q(d.get("text"))),
     "avito_webhook_subscribe": lambda d: "Подписка на уведомления Авито включена, %s (заменено прежних: %s)" % (_acc(d), _count(d.get("replaced") or 0)),

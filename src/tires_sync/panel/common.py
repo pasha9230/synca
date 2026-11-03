@@ -328,6 +328,12 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
          "share_create": "send"}
+SECTION_OF.update(connections_account_price_push="setup")       # «Цены сразу через API» (price_push, 2026-11-03): the owner, like «Остатки»
+NEEDS.update(connections_account_price_push="publish")
+# «Собрать фид сейчас» (feed_now, 2026-11-03): the owner and the partner (the lead's task) — exactly those who have «orders» to change and
+# the right «supplier»; the partner has no «publish» and only looks at the catalog
+SECTION_OF.update(feed_update_now="orders")
+NEEDS.update(feed_update_now="supplier")
 NEEDS["catalog_oth_manual"] = "supplier"                          # the owner and the partner only (the lead 2026-11-03), never as a point
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})

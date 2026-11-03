@@ -341,3 +341,17 @@ def test_the_sheet_marks_o_only_for_oth(tmp_path):
     assert order_sheet.realization(orders.get_card(conn, cid)) == ""
     order_oth.sign_act(conn, agreed(conn, cid), "Бета", "2026-10-27T12:00:00", "менеджер Бета")
     assert order_sheet.realization(orders.get_card(conn, cid)) == ""
+
+
+def test_the_new_view_of_the_point_shows_na_vozvrat_with_its_label(tmp_path, clock):
+    from test_point_new_view import flag, is_new
+    app, conn, pid, cid, mine = on_page(tmp_path)
+    flag(conn, "all")
+    press(mine, cid, "oth_here")
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    assert is_new(page) and 'id="order-%d"' % cid in page
+    block = page[page.index('id="order-%d"' % cid):].split("</article>")[0]
+    assert "data-return-label>Согласуем<" in block and "на возврат" in block and 'data-point-hint="returning"' in block
+    agreed(conn, cid)
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    assert 'data-return="%d"' % cid in page and "сумма возврата — закупка шин" in page

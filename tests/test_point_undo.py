@@ -65,7 +65,7 @@ def test_arrived_is_undone_back_to_the_way_and_the_office_is_told(tmp_path, cloc
     assert "Отметка «Приехал» отменена" in page and "не отзывается" in page
     assert state(conn, card) == before                                                  # the stage, the moment, the date, the reason
     assert len(to_client(app)) == 1                                                     # nothing new to the client, nothing recalled
-    assert told and told[0][0] == ["owner", "zaman"] and "отменила отметку «Приехал»" in told[0][1]
+    assert told and told[0][0] == ["owner"] and "отменила отметку «Приехал»" in told[0][1]
     [record] = [e for e in orders.list_events(conn, card) if "отменила отметку" in e["text"]]
     assert record["level"] == "yellow" and point_log.UNDO_HINT in record["text"]
     assert [r["kind"] for r in point_log.history(conn, pid)][:2] == ["undo", "arrived"]

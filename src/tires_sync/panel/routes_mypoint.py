@@ -25,6 +25,7 @@ from flask import abort, current_app, flash, g, jsonify, redirect, render_templa
 
 from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
+from .routes_design import point_page
 from .routes_orders import local_iso, local_now
 
 STAGES = ("placed", "moving", "at_point")          # placed (the panel may not say «on the way» yet), on the way to the point, at the point
@@ -412,7 +413,7 @@ def register(app) -> None:
                 return done
             error, form = done
         since = (date.fromisoformat(local_iso()[:10]) - timedelta(days=HANDED_DAYS)).isoformat()
-        return render_template("mypoint_handed.html", point=point, choose=own_point() is None, user=current_user(),
+        return render_template(point_page("mypoint_handed.html"), point=point, choose=own_point() is None, user=current_user(),
                                points=points.list_points(conn) if own_point() is None else [],
                                handed=mgr.point_handoffs(conn, point_id, since) if point_id is not None else [], seasons=mgr.SEASONS,
                                bonus=order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10]),
@@ -482,7 +483,7 @@ def register(app) -> None:
                 f["tab"] = tab_of.get(oid, "")
                 if f["tab"] in ("oth", "return"):                               # our tyres at the point: the client is gone (the owner 2026-10-30)
                     f["title"] = "Заказ №%d · шины на ОТХ" % oid
-        return render_template("mypoint.html", point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot,
+        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,

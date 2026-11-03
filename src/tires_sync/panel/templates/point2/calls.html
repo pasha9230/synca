@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% import "_inquiry.html" as inq_ui %}
+{% from "_ui.html" import icon %}
+{% from "_handoff_dialog.html" import handoff_window with context %}
+{# «Звонки» of a point in «Новый вид» (lane port-point; the prototype's renderPointCalls): routes_calls.calls_page draws it instead of
+   calls.html while routes_design.point_new(). A computer: the table; a phone: a card per call. «Передать клиента» is the main (blue) button
+   (the owner 2026-11-02); the same values, forms and windows as calls.html (the point never sees an account's name). #}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}pt-ui p2 p2-own p2-calls-page{% endblock %}
+{% block title %}Звонки · Tires Sync{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='point2.css') }}">{% endblock %}
+{% block content %}
+<div class="p2w" data-p2>
+<header class="p2-head"><div class="p2-title"><h1>Звонки</h1><span class="p2-sub">Звонки через подменные номера Авито{% if mine %} аккаунта вашей точки{% endif %}. Запись появляется до 30 минут после звонка и хранится 7 дней.</span></div></header>
+<form method="get" class="p2-box p2-filters">
+{% if not mine %}<label class="field"><span class="label">Аккаунт</span><select class="input" name="account"><option value="">Все</option>{% for a in accounts %}<option value="{{ a.id }}"{% if a.id == account %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>{% endif %}
+<label class="field"><span class="label">Период</span><select class="input" name="days">{% for k, v in periods.items() %}<option value="{{ k }}"{% if k == days %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+<label class="field" style="flex:1;min-width:140px"><span class="label">Телефон</span><input class="input" type="search" name="q" value="{{ q }}" inputmode="numeric"></label>
+<label class="row" style="gap:6px;align-items:center;min-height:40px"><input type="checkbox" name="missed" value="1"{% if missed %} checked{% endif %}> Только пропущенные</label>
+<button class="btn btn--secondary">Показать</button></form>
+<section class="p2-box"><table class="p2-calls calls-table"><thead><tr><th>Когда</th><th>Клиент</th><th>Итог</th><th>Запись</th><th></th></tr></thead><tbody>
+{% set inq = inquiry_calls(rows|map(attribute="id")|list) %}{% for c in rows %}<tr id="call-{{ c.id }}"{% if not c.answered %} class="is-missed"{% endif %}>
+<td data-label="Когда"><time title="{{ c.call_at|dt }}">{{ c.call_at|dt }}</time>{% if c.account_name or c.point_name %}<div class="p2-sub">{{ c.account_name }}{% if c.account_name and c.point_name %} · {% endif %}{{ c.point_name or "" }}</div>{% endif %}</td>
+<td data-label="Клиент"><b>{% if c.client_id and clients_link %}<a href="/clients/{{ c.client_id }}">{{ c.buyer_phone|phone }}</a>{% else %}{{ c.buyer_phone|phone if c.buyer_phone else "номер скрыт" }}{% endif %}</b>{% if c.client_name %} · {{ c.client_name }}{% endif %} {{ inq_ui.badge(inq.get(c.id)) }}
+{% set cl = links.get(c.client_id) %}{% set go_chat = chat_links and cl and cl.chat %}{% set go_order = order_links and cl and cl.order and cl.order != c.order_id %}{% if go_chat or go_order %}<div class="row" style="gap:6px;margin-top:4px">{% if go_chat %}<a class="btn btn--secondary btn--xs" href="/chats/{{ cl.chat }}">Чат</a>{% endif %}{% if go_order %}<a class="btn btn--secondary btn--xs" href="/orders/{{ cl.order }}">Заказ №{{ cl.order }}</a>{% endif %}</div>{% endif %}</td>
+<td data-label="Итог">{% if c.answered %}<span class="p2-sub">Принят, {{ "%d:%02d"|format(c.talk_seconds // 60, c.talk_seconds % 60) }}</span>{% else %}<span class="p2-tag p2-tag--err">пропущен</span>{% endif %}{% if c.wait_seconds %} <span class="p2-sub">· ждал {{ c.wait_seconds }} с</span>{% endif %}</td>
+<td data-label="Запись">{% if c.may_listen %}<audio controls preload="none" src="/calls/{{ c.id }}/record" style="max-width:100%"></audio>{% elif c.record_state == "saved" %}<span class="p2-sub">есть (слушают оператор и владельцы)</span>{% else %}<span class="p2-sub">{{ c.record_text }}</span>{% endif %}</td>
+<td class="call-actions" data-call="{{ c.id }}" data-phone="{{ c.buyer_phone }}"><div class="p2-call-acts">{% set hd = handed.get(c.id) %}{% if hd %}<a class="p2-tag p2-tag--warn" href="/orders/{{ hd.order }}">передан точкой · №{{ hd.order }}</a>{% endif %}{% if handoff and not (hd and hd.open) %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="handoff" data-handoff-action="/calls/{{ c.id }}/handoff" data-handoff-phone="{{ c.buyer_phone|phone if c.buyer_phone else '' }}">{{ icon("plus") }}Передать клиента</button>{% endif %}{% if c.order_id and c.order_id > 0 %}<a class="btn btn--secondary btn--sm" href="/orders/{{ c.order_id }}">Заказ №{{ c.order_id }}</a>{% elif can_order %}<form method="post" action="/calls/{{ c.id }}/order" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Создать заказ</button></form>{% endif %}</div></td>
+</tr>
+{% else %}<tr><td colspan="5" class="p2-sub">{% if no_account %}К вашей точке не привязан аккаунт Авито: звонков нет.{% else %}Звонков за этот период нет.{% endif %}</td></tr>{% endfor %}
+</tbody></table>{% if rows|length >= 300 %}<p class="p2-sub" style="padding:0 12px">Показаны последние 300 звонков: сузьте период или фильтр.</p>{% endif %}</section>
+{{ handoff_window(handoff) }}
+{% with section="calls" %}{% include "point2/_nav.html" %}{% endwith %}
+</div>
+{% if handoff %}<script src="{{ url_for('static', filename='handoff.js') }}"></script>{% endif %}
+{% endblock %}
