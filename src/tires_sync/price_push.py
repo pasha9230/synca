@@ -240,11 +240,14 @@ class _Lock:
             self.handle.close()
 
 
-def _try_lock(feed_root, name: str = ".price-push.lock", wait: float = 0.0, sleep: Callable[[float], None] = time.sleep) -> Optional[_Lock]:
-    """A lock file of the feed root taken without blocking, tried again for up to `wait` seconds; None if another process holds it."""
+def _try_lock(feed_root, name: str = ".price-push.lock", wait: float = 0.0, sleep: Callable[[float], None] = time.sleep,
+              create: bool = True) -> Optional[_Lock]:
+    """A lock file of the feed root taken without blocking, tried again for up to `wait` seconds; None if another process holds it
+    (or, without `create`, when the feed root is not there yet)."""
     path = Path(feed_root) / name
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if create:
+            path.parent.mkdir(parents=True, exist_ok=True)
         handle = open(str(path), "a")
     except OSError:
         return None

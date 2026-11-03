@@ -19,12 +19,13 @@ GAP = timedelta(minutes=5)
 HOURLY_MINUTE = 40                       # tires-cycle.timer: *:40 (and 06:45), up to 2 min late
 BEFORE_HOURLY = 10                       # minutes before it the button is refused
 CYCLE_LOCK = ".cycle.lock"               # held by every run-cycle from its start to its very end (feed_lock covers only the build)
+HOLD_WAIT = 5.0                          # a cycle tries it a few seconds: a page that only looked at it holds it for a moment
 
 
 def hold_cycle(feed_root):
     """Taken by run-cycle for all its run (the feeds, then the reports, the messages, the stock and the prices on Avito). None when another
     cycle holds it: that cycle goes on as before (the feed lock still orders the builds)."""
-    return _try_lock(feed_root, CYCLE_LOCK)
+    return _try_lock(feed_root, CYCLE_LOCK, wait=HOLD_WAIT, create=False)     # a cycle that stops at once leaves no feed folder
 
 
 def cycle_running(feed_root) -> bool:

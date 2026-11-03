@@ -10,7 +10,7 @@
 <span>Выгрузка основного поставщика скачана: <b>{{ loaded|dt_utc if loaded else "неизвестно" }}</b></span>
 {% if can_post("feed_update_fetch") %}<form method="post" action="/feed/update/fetch" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary">{{ icon("refresh") }}Скачать свежую выгрузку и пересчитать</button></form>{% endif %}
 {% if can_post("feed_update_now") %}<form method="post" action="/feed/update/now" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary">{{ icon("refresh") }}Собрать фид сейчас</button></form>{% endif %}
-{% if feed_now %}<span class="small muted">Сбор по кнопке: {{ feed_now.at|dt_utc }}{% if feed_now.author %}, {{ feed_now.author }}{% endif %} — {{ "идёт" if feed_now.running else "закончен" }}</span>{% endif %}
+{% if feed_now %}<span class="small muted">Последний сбор по кнопке: {{ feed_now.at|dt_utc }}{% if feed_now.author %}, {{ feed_now.author }}{% endif %}{% if feed_now.running %} · сейчас идёт цикл{% endif %}</span>{% endif %}
 </div>
 {% if can_post("feed_update_now") %}<div class="card-body"><p class="small muted">«Собрать фид сейчас» — плановый цикл раньше срока: скачает выгрузку, соберёт и опубликует фиды с теми же проверками. Не запускается, если цикл шёл меньше 5 минут назад или скоро плановый.</p></div>{% endif %}
 </section>

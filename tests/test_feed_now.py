@@ -46,7 +46,7 @@ def test_the_button_starts_the_usual_cycle_with_publication_apart_and_says_so(tm
                         "--reference", app.config["REFERENCE_PATH"], "--feed-root", app.config["FEED_ROOT"], "--key-file", "/etc/k"]
     assert kwargs["start_new_session"] is True
     page = client.get("/feed/update").get_data(as_text=True)
-    assert "Цикл запущен" in page and "Сбор по кнопке" in page
+    assert "Цикл запущен" in page and "Последний сбор по кнопке" in page
     assert audit(app, "feed_now_started") == [{"pid": 4242}]
 
 
@@ -79,6 +79,7 @@ def test_a_cycle_started_by_the_timer_minutes_ago_or_one_building_now_refuses_it
 
 def test_a_cycle_still_in_its_tail_refuses_it_whatever_its_pid(tmp_path):
     app, client, tok, popen = setup(tmp_path)
+    (tmp_path / "feed").mkdir()
     held = feed_now.hold_cycle(app.config["FEED_ROOT"])                  # run-cycle holds it to its very end (reports, Avito, prices)
     try:
         post(client, "/feed/update/now", tok)
@@ -149,6 +150,7 @@ def test_run_cycle_marks_its_start(tmp_path, monkeypatch):
 def test_run_cycle_holds_the_cycle_lock_for_all_its_run_and_the_stock_pass_does_not(tmp_path, monkeypatch):
     from tires_sync import cli
     root = tmp_path / "feed"
+    root.mkdir()
     seen = []
     monkeypatch.setattr(cli, "_run_cycle", lambda args: seen.append(("cycle", feed_now.cycle_running(root))) or 0)
     monkeypatch.setattr(cli, "_cmd_stock_pass", lambda args: seen.append(("stock", feed_now.cycle_running(root))) or 0)
