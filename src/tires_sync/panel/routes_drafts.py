@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from flask import abort, flash, jsonify, redirect, render_template, request
 
-from .. import avito_upload, client_terms, connections, staging, store
+from .. import avito_upload, client_terms, connections, price_push, staging, store
 from ..cycle import run_for_accounts
 from ..publishing import feed_lock, publish_live_accounts, remember_expected
 from ..settings_store import active_settings
@@ -47,6 +47,10 @@ def apply_publish(app, verify=None, upload=False) -> list:
             if problem:
                 return [problem]
         try:
+            before = price_push.snapshot(conn, feed_root)            # the prices Avito has from the feed: what changes goes through the API
+        except Exception:                                            # noqa: BLE001 - the prices on Avito never stop a publication
+            before = {}
+        try:
             settings = active_settings(conn)
             parsed = load_merged(conn, settings, app.config["UNLOAD_PATH"])
             if 1 in parsed.unavailable or not parsed.offers:
@@ -70,8 +74,32 @@ def apply_publish(app, verify=None, upload=False) -> list:
             lines.append("Опубликовано: %s, %s" % (res["name"], res["message"]) if res["ok"]
                          else "Не публикуется: %s, %s" % (res["name"], res["message"]) if res.get("skipped")
                          else "%s: %s" % (res["name"], res["message"]))
+        lines.extend(_queue_prices(app, conn, feed_root, before, [res["id"] for res in published]))
     if upload:
         lines.extend(_start_avito_uploads(app, conn, published))
+    return lines
+
+
+def _queue_prices(app, conn, feed_root, before, published_ids) -> list:
+    """The ads whose price the publication changed, queued for the item API, and the sender started apart from the request."""
+    if not before:
+        return []
+    try:
+        counts = price_push.queue_changes(conn, feed_root, before, published_ids, now_iso(), author())
+    except Exception as err:                                         # noqa: BLE001 - published already: only the fast price is lost
+        conn.rollback()
+        return ["Цены на Авито не поставлены в очередь (%s): Авито возьмёт их из фида." % type(err).__name__]
+    lines = []
+    sending = [a for a in counts if price_push.mode(conn, a) == "on"]
+    if sending:
+        kwargs = {"popen": app.config["POPEN"]} if app.config.get("POPEN") else {}
+        pid = price_push.spawn(app.config["DB_PATH"], feed_root, app.config.get("SECRET_KEY_FILE") or "", **kwargs)
+        total = sum(counts[a] for a in sending)
+        lines.append("Цены на Авито: отправляются сразу, объявлений %d." % total if pid
+                     else "Цены на Авито: в очереди %d, отправит ближайший цикл (процесс отправки не запустился)." % total)
+    checked = sum(n for a, n in counts.items() if a not in sending)
+    if checked:
+        lines.append("Цены на Авито (проверка, ничего не отправлено): ушло бы объявлений %d — список в «Подключения → Авито»." % checked)
     return lines
 
 
@@ -106,13 +134,16 @@ def publish_now(app):
 
 def publish_summary(lines) -> str:
     """One line for the flash after an automatic publication."""
+    prices = [line for line in lines if line.startswith("Цены на Авито")]
+    tail = "".join(" " + line for line in prices)
+    lines = [line for line in lines if not line.startswith("Цены на Авито")]
     done = [line.replace("Опубликовано: ", "", 1) for line in lines if line.startswith("Опубликовано")]
     other = [line for line in lines if not line.startswith("Опубликовано")]
     if done and not other:
-        return "Фид обновлён для Авито: " + "; ".join(done) + "."
+        return "Фид обновлён для Авито: " + "; ".join(done) + "." + tail
     if done:
-        return "Фид обновлён для Авито: " + "; ".join(done) + ". Не обновлено: " + "; ".join(other[:3]) + "."
-    return "Фид для Авито не обновлён: " + "; ".join(other[:3]) + "."
+        return "Фид обновлён для Авито: " + "; ".join(done) + ". Не обновлено: " + "; ".join(other[:3]) + "." + tail
+    return "Фид для Авито не обновлён: " + "; ".join(other[:3]) + "." + tail
 
 
 def _row_entries(form, prefix: str, brand: str) -> list:

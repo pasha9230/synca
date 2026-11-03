@@ -324,6 +324,12 @@ _MORE_TEXTS = {
         _acc(d), _pick(STOCK_MODES, d.get("mode")), _count(d.get("codes")), d.get("cap") if d.get("cap") not in (None, "") else "нет"),
     "avito_stock_push": lambda d: _stock_text("Остатки отправлены на Авито", d),
     "avito_stock_restore": lambda d: _stock_text("Остатки на Авито возвращены", d),
+    "avito_price_config": lambda d: "Цены сразу через API, %s: %s" % (_acc(d), _pick({"off": "выключено", "dry": "проверка", "on": "включено"}, d.get("mode"))),
+    "avito_price_queued": lambda d: "Цены на Авито, %s: в очереди %s%s" % (_acc(d), _count(d.get("count")), " (проверка, не отправляются)" if d.get("mode") == "dry" else ""),
+    "avito_price_push": lambda d: "Цены отправлены на Авито, %s: отправлено %s, ошибок %s, не отправлено %s, пропущено %s" % (
+        _acc(d), _count(d.get("sent")), _count(d.get("failed")), _count(d.get("not_sent")), _count(d.get("skipped"))),
+    "feed_now_started": lambda d: "Запущен сбор фида по кнопке «Собрать фид сейчас»",
+    "feed_now_refused": lambda d: "Сбор фида по кнопке не запущен: %s" % _q(d.get("why")),
     "avito_upload_started": lambda d: "Запущена загрузка на Авито, %s" % _acc(d),
     "avito_upload_refused": lambda d: "Загрузка на Авито не запущена, %s: %s" % (_acc(d), _q(d.get("text"))),
     "avito_webhook_subscribe": lambda d: "Подписка на уведомления Авито включена, %s (заменено прежних: %s)" % (_acc(d), _count(d.get("replaced") or 0)),

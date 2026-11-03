@@ -13,7 +13,7 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import ad_stats, avito_report, avito_stock, catalog_archive, catalog_probe, chat_deals, chats, mirror_feed, order_engine, users, store
+from . import ad_stats, avito_report, avito_stock, catalog_archive, feed_now, price_push, catalog_probe, chat_deals, chats, mirror_feed, order_engine, users, store
 from .candidates import evaluate
 from .catalog import parse_reference
 from .config import load_settings
@@ -254,6 +254,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=5, help="сколько объявлений читать с --info")
     sp.add_argument("--restore", action="store_true", help="вернуть числа, которые Авито показывал до нашей первой отправки (аккаунт должен быть выключен)")
     sp.add_argument("--confirm", action="store_true")
+    pp = sub.add_parser("price-push", help="отправить на Авито цены из очереди после «Применить» (только аккаунты с включённым «Цены сразу через API»); --show только показывает очередь")
+    pp.add_argument("--db", required=True)
+    pp.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    pp.add_argument("--feed-root", required=True)
+    pp.add_argument("--show", action="store_true", help="только показать последнюю очередь каждого аккаунта (в режиме проверки: что ушло бы)")
     ri = sub.add_parser("mirror-reissue", help="дать объявлениям зеркала новые Id (Авито не возвращает удалённое из кабинета под прежним Id); без --confirm только показывает")
     ri.add_argument("--db", required=True)
     ri.add_argument("--account", type=int, required=True)
@@ -762,11 +767,27 @@ def _cmd_stock_pass(args) -> int:
     return 0
 
 
+def _cmd_price_push(args) -> int:
+    conn = store.connect(args.db)
+    if args.show:
+        for account in connections.list_feed_accounts(conn):
+            s = price_push.summary(conn, account["id"], limit=1000)
+            print("%s: режим «%s», последняя очередь %s: %s" % (account["name"], price_push.MODE_LABELS[price_push.mode(conn, account["id"])],
+                                                             s["at"] or "нет", json.dumps(s["counts"], ensure_ascii=False)))
+            for r in s["rows"]:
+                print("  %s (Авито %s): %s → %s, %s%s" % (r["ad_id"], r["avito_id"], r["old_price"], r["price"], r["status_text"],
+                                                          ", " + r["error"] if r["error"] else ""))
+        return 0
+    price_push.run(conn, load_box(args.key_file), args.feed_root, _http())
+    return 0
+
+
 def _cmd_run_cycle(args) -> int:
     if getattr(args, "stock_only", False):
         return _cmd_stock_pass(args)
     started = datetime.fromisoformat(_now())
     conn = store.connect(args.db)
+    store.set_state(conn, feed_now.CYCLE_STARTED_KEY, _now())            # «Собрать фид сейчас» is refused within minutes of a cycle
     box = load_box(args.key_file)
     fetch_problems = []
     if args.fetch:
@@ -860,6 +881,11 @@ def _cmd_run_cycle(args) -> int:
         _load_tochki(conn, box, args, started)
     if getattr(args, "publish", False):
         avito_stock.after_cycle(conn, box, args.feed_root, parsed, results, http=_http())    # the number in stock on Avito, last: only accounts switched on
+        try:                                                    # prices queued by «Применить» that a stopped sender left
+            price_push.run(conn, box, args.feed_root, _http())
+        except Exception as err:                                # noqa: BLE001 - the prices on Avito must never fail a cycle
+            conn.rollback()
+            print("предупреждение: цены на Авито не отправлены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
     return 0 if not failed and not fetch_problems and not notes and not tripped else 3
 
 
@@ -2761,6 +2787,8 @@ def main(argv=None) -> int:
             return _cmd_avito_ids_sync(args)
         if args.command == "stock-push":
             return _cmd_stock_push(args)
+        if args.command == "price-push":
+            return _cmd_price_push(args)
         if args.command == "mirror-adopt":
             return _cmd_mirror_adopt(args)
         if args.command == "ids-alias":
