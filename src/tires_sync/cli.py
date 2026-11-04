@@ -599,16 +599,18 @@ def _alert_price_guard(conn, box) -> None:
 
 def _alert_own_price_falls(conn, box, offers, account_ids) -> None:
     """Own prices in percent that went down after the purchase (the owner 2026-11-04): one summary per cycle to each person, the responsible of
-    the account, else the owner; a responsible without Telegram: the owner. Only of a published feed; each change once (kept once it went, a
-    refused one is told by the next cycle). A side notice: whatever fails in it is printed and never stops the publishing of the feeds."""
-    from . import order_notify, own_price
+    the account, else the owner; the owner too for a responsible who may not see the purchase (the right «money») or whose Telegram did not take
+    it. After the publication: `account_ids`, the accounts whose feed went or needs none; each change once (kept once it went, one nobody took is
+    told by the next cycle). A side notice: whatever fails in it is printed and never stops the cycle."""
+    from . import order_notify, own_price, users
     try:
         events, keep = own_price.falls(conn, active_settings(conn), offers, account_ids)
         own_price.remember_falls(conn, keep)
         owner = order_notify.get_owner_login(conn)
         people = {}
         for event in events:
-            people.setdefault(connections.account_responsible(conn, event["account_id"]) or owner, []).append(event)
+            who = connections.account_responsible(conn, event["account_id"])
+            people.setdefault(who if who and users.has_right(users.get_role(conn, who)["role"], "money") else owner, []).append(event)
         for who, group in sorted(people.items()):
             text = own_price.falls_text(group)
             if who != owner:
@@ -617,9 +619,7 @@ def _alert_own_price_falls(conn, box, offers, account_ids) -> None:
                     store.write_audit(conn, _now(), "system", "notice", {"text": text, "to": who})
                     own_price.told_falls(conn, group)
                     continue
-                if not how.startswith("Telegram: ни у кого нет чата"):
-                    print("сводка «своя цена пошла за закупкой» (%s): %s" % (who, how), file=sys.stderr)
-                    continue
+                print("сводка «своя цена пошла за закупкой» (%s): %s, отправлено владельцу" % (who, how), file=sys.stderr)
             if _alert(conn, box, text, notice=True):
                 own_price.told_falls(conn, group)
     except Exception as err:
@@ -890,7 +890,6 @@ def _run_cycle(args) -> int:
             _alert_own_below_cost(conn, box, parsed.offers)
             if args.publish:                                        # «наша цена поднята / оставлена»: true only of a published feed
                 _alert_price_guard(conn, box)
-                _alert_own_price_falls(conn, box, parsed.offers, [r.account_id for r in results if r.ok])
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0
@@ -916,6 +915,8 @@ def _run_cycle(args) -> int:
                     print("%s: error, %s" % (r.name, err))
                     r.ok, r.error = False, str(err)
                     failed.append(r)
+            if parsed is not None and any(r.ok for r in results):   # «наша цена» only of a feed that went: a refused one is told by a later cycle
+                _alert_own_price_falls(conn, box, parsed.offers, [r.account_id for r in results if r.ok])
             if promoted and not failed:
                 clear_expected(conn)
             if before_prices:

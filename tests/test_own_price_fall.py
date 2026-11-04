@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -43,7 +44,7 @@ def test_a_fall_of_one_percent_is_told_once_and_no_price_changes_because_of_it(t
     assert published(tmp_path)["101"].price == 5450                       # 4950 × 1,1 вверх до десятков: как и без уведомления
     assert len(told(conn)) == 1
     line = told(conn)[0]
-    assert "пошла вниз за ней (1)" in line and "A · " in line
+    assert "новой закупки (1). Цены за одну шину." in line and "A · " in line
     assert "закупка 5 000 ₽ → 4 950 ₽, наша цена 5 500 ₽ → 5 450 ₽" in line
     at(tmp_path, 4950)
     at(tmp_path, 4950)
@@ -72,6 +73,70 @@ def test_a_big_fall_from_above_the_anchor_is_the_guards_only(tmp_path):
     at(tmp_path, 4000)                                                    # держим от 5000: для нашей цены это падение с 5200, но вопрос уже задан
     assert price_guard.load(conn)["anchors"]["101"]["pending"] == 4000.0
     assert told(conn) == []
+
+
+def test_after_accept_the_next_price_is_counted_from_what_was_accepted(tmp_path):
+    conn = ready(tmp_path)
+    at(tmp_path, 4000)
+    assert price_guard.accept(conn, ["101"], NOW, "owner") == 1
+    at(tmp_path, 4100)                                                    # следующий цикл уже выше принятого: от 5000 это не «падение»
+    assert told(conn) == []
+    at(tmp_path, 4000)                                                    # а теперь снова вниз: новость, хотя цена равна принятой
+    assert len(told(conn)) == 1 and "закупка 4 100 ₽ → 4 000 ₽" in told(conn)[0]
+
+
+def test_after_accept_a_lower_price_is_told_from_the_accepted_one(tmp_path):
+    conn = ready(tmp_path)
+    at(tmp_path, 4000)
+    assert price_guard.accept(conn, ["101"], NOW, "owner") == 1
+    at(tmp_path, 3950)
+    assert len(told(conn)) == 1 and "закупка 4 000 ₽ → 3 950 ₽, наша цена 4 400 ₽ → 4 350 ₽" in told(conn)[0]
+
+
+def test_a_kept_fall_says_nothing(tmp_path):
+    conn = ready(tmp_path)
+    at(tmp_path, 4000)
+    assert price_guard.keep(conn, ["101"], NOW, "owner") == 1
+    at(tmp_path, 3900)
+    assert told(conn) == [] and published(tmp_path)["101"].price == 5500
+
+
+def test_a_fall_that_rounding_hides_is_told_as_it_is(tmp_path):
+    conn = ready(tmp_path)
+    at(tmp_path, 4999)
+    assert "закупка 5 000 ₽ → 4 999 ₽, наша цена 5 500 ₽ → 5 500 ₽" in told(conn)[0]
+
+
+def test_a_feed_that_failed_to_publish_says_nothing_and_a_later_cycle_tells(tmp_path, monkeypatch):
+    from tires_sync.publish import PublishError
+    conn = ready(tmp_path)
+
+    def refuse(*args, **kw):
+        raise PublishError("диск")
+    monkeypatch.setattr(cli, "promote_feed", refuse)
+    cycle(tmp_path, rows(dict(NNOMMODIF="101", NPRICE_DELAYED="4950")))
+    assert told(conn) == []
+    monkeypatch.undo()
+    at(tmp_path, 4950)
+    assert len(told(conn)) == 1
+
+
+def test_an_ad_held_at_its_old_price_is_told_when_it_moves(tmp_path):
+    conn = ready(tmp_path)
+    assert cycle(tmp_path, rows(dict(NNOMMODIF="101", NPRICE_DELAYED="4950", NREST="1"))) in (0, 3)
+    assert published(tmp_path)["101"].price == 5500                       # низкий остаток: объявление удержано по старой цене
+    assert told(conn) == []
+    at(tmp_path, 4950)
+    assert published(tmp_path)["101"].price == 5450
+    assert len(told(conn)) == 1 and "наша цена 5 500 ₽ → 5 450 ₽" in told(conn)[0]
+
+
+def test_a_position_of_an_own_point_keeps_its_price_and_says_nothing(tmp_path):
+    conn = ready(tmp_path)
+    conn.execute("UPDATE published_state SET location = 'own'")
+    conn.commit()
+    at(tmp_path, 4950)
+    assert published(tmp_path)["101"].price == 5500 and told(conn) == []
 
 
 def test_a_fall_held_then_back_within_five_percent_is_told_from_the_price_held(tmp_path):
@@ -151,30 +216,37 @@ def _publish(conn, account):
     conn.commit()
 
 
-def _offer(base):
+def _notice(conn, base, account_ids, stock=20):
+    """Сводка после публикации: объявления уже стоят по цене этой закупки (+10 %)."""
+    conn.execute("UPDATE published_state SET price = ?", (int(math.ceil(base * 1.1 / 10)) * 10,))
+    conn.commit()
+    cli._alert_own_price_falls(conn, None, {"101": _offer(base, stock)}, account_ids)
+
+
+def _offer(base, stock=20):
     from helpers import make_offer
-    return make_offer(goods_id="101", base_price=float(base))
+    return make_offer(goods_id="101", base_price=float(base), stock=stock)
 
 
 def test_a_failed_account_keeps_its_marks_and_is_told_later(tmp_path):
     conn = ready(tmp_path)
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [])       # фид аккаунта в этом цикле не собран
+    _notice(conn, 4950, [])       # фид аккаунта в этом цикле не собран
     assert told(conn) == []
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1])
+    _notice(conn, 4950, [1])
     assert len(told(conn)) == 1
 
 
 def test_a_position_away_from_the_unload_keeps_its_mark(tmp_path):
     conn = ready(tmp_path)
     cli._alert_own_price_falls(conn, None, {}, [1])
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1])
+    _notice(conn, 4950, [1])
     assert len(told(conn)) == 1
 
 
 def test_an_account_not_live_is_not_told(tmp_path):
     conn = ready(tmp_path)
     connections.set_live(conn, 1, False, NOW, "owner")
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1])
+    _notice(conn, 4950, [1])
     assert told(conn) == []
 
 
@@ -191,7 +263,7 @@ def _two_accounts(tmp_path, monkeypatch):
     monkeypatch.setattr(order_notify, "tell_people", tell)
     for account in (1, second):
         _publish(conn, account)
-    cli._alert_own_price_falls(conn, None, {"101": _offer(5000)}, [1, second])
+    _notice(conn, 5000, [1, second])
     assert sent == []
     return conn, second, sent
 
@@ -200,7 +272,7 @@ def test_each_account_goes_to_its_responsible_else_to_the_owner(tmp_path, monkey
     conn, second, sent = _two_accounts(tmp_path, monkeypatch)
     users.add_user(conn, "olya", "Passw0rd-long-enough", NOW, role="partner")
     connections.set_responsible(conn, second, "olya", ["olya"], NOW, "owner")
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1, second])
+    _notice(conn, 4950, [1, second])
     assert [s[0] for s in sent] == [["olya"]]
     assert "· " in sent[0][1] and connections.display_name(conn, second) + " ·" in sent[0][1]
     assert connections.display_name(conn, 1) + " ·" not in sent[0][1]
@@ -209,7 +281,7 @@ def test_each_account_goes_to_its_responsible_else_to_the_owner(tmp_path, monkey
     assert [t for t in texts if connections.display_name(conn, 1) + " ·" in t and connections.display_name(conn, second) + " ·" not in t]
     assert any(e["detail"].get("to") == "olya" for e in store.list_audit(conn, 50) if e["action"] == "notice")
     sent.clear()
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1, second])
+    _notice(conn, 4950, [1, second])
     assert sent == [] and len(told(conn)) == 2
 
 
@@ -218,7 +290,7 @@ def test_two_accounts_of_one_person_are_one_summary(tmp_path, monkeypatch):
     users.add_user(conn, "olya", "Passw0rd-long-enough", NOW, role="partner")
     for account in (1, second):
         connections.set_responsible(conn, account, "olya", ["olya"], NOW, "owner")
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1, second])
+    _notice(conn, 4950, [1, second])
     assert len(sent) == 1 and "(2)" in sent[0][1]
 
 
@@ -227,15 +299,34 @@ def test_a_responsible_without_telegram_means_the_owner_and_a_refused_message_is
     users.add_user(conn, "olya", "Passw0rd-long-enough", NOW, role="partner")
     connections.set_responsible(conn, 1, "olya", ["olya"], NOW, "owner")
     connections.set_responsible(conn, second, "olya", ["olya"], NOW, "owner")
-    answers = ["Telegram не отправлен (olya: 403)", "Telegram: ни у кого нет чата (olya)"]
+    answers = ["Telegram: ни у кого нет чата (olya)", "Telegram не отправлен (olya: 403)"]
     monkeypatch.setattr(order_notify, "tell_people", lambda *a, **k: answers.pop(0))
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1, second])
-    assert told(conn) == []                                                 # отказ: метка на месте, ни журнала, ни «сказано»
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1, second])
+    _notice(conn, 4950, [1, second])
     assert len(told(conn)) == 1                                             # чата нет: ушло владельцу
+    _notice(conn, 4900, [1, second])
+    assert len(told(conn)) == 2                                             # Telegram отказал (бот заблокирован): тоже владельцу, не теряется
     assert not answers
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1, second])
-    assert len(told(conn)) == 1
+    _notice(conn, 4900, [1, second])
+    assert len(told(conn)) == 2
+
+
+def test_a_message_nobody_took_is_told_by_the_next_cycle(tmp_path, monkeypatch):
+    conn, second, sent = _two_accounts(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_alert", lambda *a, **k: False)
+    _notice(conn, 4950, [1, second])
+    monkeypatch.undo()
+    _notice(conn, 4950, [1, second])
+    assert len(told(conn)) == 1 and "5 000 ₽ → 4 950 ₽" in told(conn)[0]
+
+
+@pytest.mark.parametrize("role", ["chats", "viewer"])
+def test_a_responsible_who_may_not_see_the_purchase_never_gets_it(tmp_path, monkeypatch, role):
+    conn, second, sent = _two_accounts(tmp_path, monkeypatch)
+    users.add_user(conn, "olya", "Passw0rd-long-enough", NOW, role=role)
+    connections.set_responsible(conn, second, "olya", ["olya"], NOW, "owner")
+    assert connections.account_responsible(conn, second) == "olya"
+    _notice(conn, 4950, [1, second])
+    assert sent == [] and len(told(conn)) == 1                              # всё владельцу
 
 
 def test_a_switched_off_responsible_means_the_owner(tmp_path, monkeypatch):
@@ -244,7 +335,7 @@ def test_a_switched_off_responsible_means_the_owner(tmp_path, monkeypatch):
     connections.set_responsible(conn, second, "olya", ["olya"], NOW, "owner")
     conn.execute("UPDATE panel_user_role SET active = 0 WHERE login = 'olya'")
     conn.commit()
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1, second])
+    _notice(conn, 4950, [1, second])
     assert sent == [] and len(told(conn)) == 1
 
 
@@ -263,7 +354,7 @@ def test_a_broken_mark_is_as_no_mark(tmp_path):
     conn = ready(tmp_path)
     conn.execute("UPDATE app_state SET value = 'x' WHERE key = ?", (own_price.FALL_MARK + "1:101",))
     conn.commit()
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1])
+    _notice(conn, 4950, [1])
     assert told(conn) == []
     assert json.loads(store.get_state(conn, own_price.FALL_MARK + "1:101")) == [4950.0, 5450]
 
@@ -274,9 +365,11 @@ def test_a_mirrored_account_is_told_of_the_positions_of_its_stored_ads_only(tmp_
     conn.execute("UPDATE account SET feed_mode = 'mirror' WHERE id = 1")
     conn.execute("INSERT INTO imported_ad (account_id, ad_id, position, raw, imported_at) VALUES (1, '202_1', 1, '<Ad/>', 'x')")
     conn.commit()
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4950)}, [1])
+    _notice(conn, 4950, [1])
     assert told(conn) == []                                                 # 101 у зеркала нет
     conn.execute("INSERT INTO imported_ad (account_id, ad_id, position, raw, imported_at) VALUES (1, '101-x4_1', 2, '<Ad/>', 'x')")
     conn.commit()
-    cli._alert_own_price_falls(conn, None, {"101": _offer(4900)}, [1])
+    _notice(conn, 4900, [1], stock=1)
+    assert told(conn) == []                                                 # остаток ниже порога: объявления нет в фиде
+    _notice(conn, 4850, [1])
     assert len(told(conn)) == 1
