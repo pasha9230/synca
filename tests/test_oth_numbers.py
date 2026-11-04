@@ -464,3 +464,197 @@ def test_a_copied_number_does_not_let_a_point_bind_its_chat_to_the_manager_s_ord
     conn.commit()
     w["point"].post("/chats/%d/link" % chat, data={"csrf": "tok", "order_id": str(made["ours_new"])})
     assert conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0] is None
+
+
+# ---- a number typed by hand, a number changed at the source (the owner 2026-11-04) -----------------------------------------------------------
+
+def test_a_transfer_typed_before_the_take_equal_to_the_source_is_kept_when_a_position_is_added(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    orders.update_card(conn, cid, {"transfer_number": TRANSFER}, T, "o")
+    take(conn, cid)
+    assert numbers(conn, cid) == OLD_NUMBERS
+    add_supplier(conn, cid)
+    assert numbers(conn, cid) == ("", TRANSFER)                                     # the copied number gives way, the typed one stays
+
+
+def test_a_number_typed_when_the_journal_asked_for_it_is_kept(tmp_path):
+    """Tyres of two orders: «Впишите вручную», and the person types the number of one of them."""
+    conn = db(tmp_path)
+    first = source(conn)
+    other = source(conn, number="111", transfer="T-111")
+    cid = new_order(conn, qty=4, extra=(("1", 4),))
+    a, b = orders.get_card(conn, cid)["items"]
+    oth_sale.take(conn, cid, a["id"], orders.get_card(conn, first)["items"][0]["id"], LATER, "o")
+    oth_sale.take(conn, cid, b["id"], orders.get_card(conn, other)["items"][0]["id"], LATER, "o")
+    assert numbers(conn, cid) == ("", "") and any("Впишите вручную" in t for t in journal(conn, cid))
+    orders.update_card(conn, cid, {"webmim_number": NUMBER, "transfer_number": "T-111"}, LATER, "o")
+    add_supplier(conn, cid)
+    assert numbers(conn, cid) == (NUMBER, "T-111")
+    oth_sale.untake(conn, cid, min(oth_sale.taken_ids(conn, cid)), LATER, "o")
+    assert numbers(conn, cid) == (NUMBER, "T-111")
+
+
+def test_a_copy_changed_by_hand_to_what_the_source_became_later_is_kept(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, cid, {"webmim_number": "999"}, LATER, "o")
+    orders.update_card(conn, old, {"webmim_number": "999"}, LATER, "o")
+    add_supplier(conn, cid)
+    assert numbers(conn, cid) == ("999", "")
+
+
+def test_a_copy_changed_by_hand_and_changed_back_is_the_person_s(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, cid, {"transfer_number": "ДРУГОЙ"}, LATER, "o")
+    orders.update_card(conn, cid, {"transfer_number": TRANSFER}, LATER, "o")
+    add_supplier(conn, cid)
+    assert numbers(conn, cid) == ("", TRANSFER)
+
+
+def test_a_number_changed_at_the_source_reaches_the_new_order(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, old, {"webmim_number": "7777777"}, LATER, "o")
+    assert numbers(conn, cid) == ("7777777", TRANSFER)
+    assert oth_sale.borrowed_ids(conn, cid) == {cid}                                # still not an order of WebMIM of its own
+    assert oth_sale.why_not(conn, orders.get_card(conn, cid)) is None
+    assert "Номер WebMIM взят из заказа №%d" % old in journal(conn, cid)
+    orders.update_card(conn, old, {"transfer_number": "26R-2"}, LATER, "o")
+    assert numbers(conn, cid) == ("7777777", "26R-2")
+
+
+def test_a_number_that_appears_at_the_source_after_the_take_reaches_the_new_order(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn, number="", transfer="")
+    cid = new_order(conn)
+    take(conn, cid)
+    assert numbers(conn, cid) == ("", "")
+    orders.update_card(conn, old, {"webmim_number": NUMBER, "transfer_number": TRANSFER}, LATER, "o")
+    assert numbers(conn, cid) == OLD_NUMBERS
+
+
+def test_a_number_typed_in_the_new_order_wins_over_the_source(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, cid, {"transfer_number": "МОЙ-1"}, LATER, "o")
+    orders.update_card(conn, old, {"webmim_number": "7777777", "transfer_number": "26R-2"}, LATER, "o")
+    assert numbers(conn, cid) == ("7777777", "МОЙ-1")
+
+
+def test_a_number_taken_away_at_the_source_leaves_the_new_order_empty_not_stale(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, old, {"webmim_number": ""}, LATER, "o")
+    assert numbers(conn, cid) == ("", TRANSFER)
+    assert any("Номер WebMIM убран: в заказе №%d его больше нет" % old in t for t in journal(conn, cid))
+
+
+def test_a_closed_order_follows_a_correction_but_keeps_a_number_with_nothing_in_its_place(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "cancel"), cid))
+    conn.commit()
+    orders.update_card(conn, old, {"webmim_number": "7777777"}, LATER, "o")
+    assert numbers(conn, cid) == ("7777777", TRANSFER)                              # one order of WebMIM: its right number
+    orders.update_card(conn, old, {"webmim_number": ""}, LATER, "o")
+    assert numbers(conn, cid) == ("7777777", TRANSFER)
+
+
+def test_a_source_change_does_not_touch_a_press_of_webmim_going_on(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, author, started_at, updated_at) VALUES (?, 'prod', 'running', ?, 'o', ?, ?)", (cid, T, T, T))
+    conn.commit()
+    orders.update_card(conn, old, {"webmim_number": "7777777"}, LATER, "o")
+    assert numbers(conn, cid) == OLD_NUMBERS
+
+
+def test_a_source_change_leaves_an_order_that_gave_the_tyres_back_alone(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    gave_back = new_order(conn)
+    take(conn, gave_back)
+    untake_all(conn, gave_back)
+    orders.update_card(conn, old, {"webmim_number": "7777777"}, LATER, "o")
+    assert numbers(conn, gave_back) == ("", "")
+
+
+def test_a_chain_follows_the_order_of_purchase(tmp_path):
+    conn = db(tmp_path)
+    first = source(conn)
+    second = new_order(conn)
+    take(conn, second)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "oth"), second))
+    conn.commit()
+    third = new_order(conn, goods="1")
+    oth_sale.take(conn, third, line(conn, third)["id"], orders.get_card(conn, second)["items"][0]["id"], LATER, "o")
+    assert numbers(conn, third) == OLD_NUMBERS
+    orders.update_card(conn, first, {"webmim_number": "7777777"}, LATER, "o")
+    assert numbers(conn, third)[0] == "7777777"
+
+
+def message_task(conn, cid):
+    templates.add_samples(conn)
+    conn.execute("UPDATE point SET address = 'Улица, 1' WHERE name = 'Бета'")
+    template = next(t for t in templates.list_templates(conn) if t["name"] == "Клиенту: заказ оформлен")
+    conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (cid, -2, T, "message", str(template["id"]), stage(conn, "new"), "pending", template["name"], "",
+                                                     "", T))
+    conn.commit()
+    return next(t for t in engine.list_tasks(conn, cid) if t["kind"] == "message")["id"]
+
+
+def test_the_message_of_the_new_order_goes_with_the_current_number_never_a_stale_or_empty_one(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    task = message_task(conn, cid)
+    engine.refresh_tasks(conn, cid, LATER)
+    assert "Заказ %s оформлен" % NUMBER in engine.get_task(conn, task)["body"]
+    orders.update_card(conn, old, {"webmim_number": "7777777"}, LATER, "o")
+    sent = []
+
+    def deliver(card, text, prefer=None):
+        sent.append(text)
+        return 1
+    engine.refresh_tasks(conn, cid, LATER)
+    body = engine.get_task(conn, task)["body"]
+    assert "Заказ 7777777 оформлен" in body and NUMBER not in body
+    orders.update_card(conn, old, {"webmim_number": ""}, LATER, "o")
+    with pytest.raises(orders.OrderError):                                          # refreshed before the send: nothing leaves without the number
+        engine.send_task(conn, task, body, deliver, LATER, "o")
+    assert sent == [] and engine.get_task(conn, task)["status"] == "error"
+    orders.update_card(conn, cid, {"webmim_number": "РУКОЙ-5"}, LATER, "o")         # typed by hand: the message names it, the source does not change it
+    orders.update_card(conn, old, {"webmim_number": "8888888"}, LATER, "o")
+    engine.refresh_tasks(conn, cid, LATER)
+    assert "Заказ РУКОЙ-5 оформлен" in engine.get_task(conn, task)["body"]
+
+
+def test_the_point_is_told_the_current_number_of_the_source(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    assert templates._oth_source(conn, cid) == "Шины с ОТХ (заказ №%s)" % NUMBER
+    orders.update_card(conn, old, {"webmim_number": "7777777"}, LATER, "o")
+    assert templates._oth_source(conn, cid) == "Шины с ОТХ (заказ №7777777)"
+    orders.update_card(conn, old, {"webmim_number": ""}, LATER, "o")
+    assert templates._oth_source(conn, cid) == "Шины с ОТХ (заказ №%d)" % old       # the panel's number, never an empty one

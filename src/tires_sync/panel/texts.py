@@ -119,6 +119,9 @@ def audit_text(entry: dict) -> str:
         if d.get("manual"):
             return "ОТХ: заказ №%s вернул %s шт. в свой остаток" % (d.get("order", "?"), d.get("qty", "?"))
         return "ОТХ: заказ №%s вернул %s шт. на ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
+    if action == "oth_numbers" and d.get("typed"):
+        return "ОТХ: заказ №%s, вместо скопированного записано: %s" % (d.get("order", "?"), ", ".join(
+            "%s = %s" % ({"webmim_number": "номер", "transfer_number": "перемещение"}.get(k, k), v or "пусто") for k, v in (d.get("changes") or {}).items()))
     if action == "oth_numbers":
         return "ОТХ: заказ №%s, номера WebMIM и перемещения по заказу №%s: %s" % (d.get("order", "?"), d.get("from_order") or "—", ", ".join(
             "%s = %s" % ({"webmim_number": "номер", "transfer_number": "перемещение"}.get(k, k), v or "пусто") for k, v in (d.get("changes") or {}).items()))
