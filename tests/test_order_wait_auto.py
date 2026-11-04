@@ -14,7 +14,7 @@ from tires_sync.models import Season
 
 NOW = "2026-11-04T12:00:00"
 NEXT = "2026-11-04T13:40:00"
-WANT = dict(brand="Ikon Tyres", width=205, profile=55, radius=16, season="winter", studded="no", qty=4)
+WANT = dict(brand="Ikon Tyres", model="Test Model", width=205, profile=55, radius=16, season="winter", studded="no", qty=4)
 PRICE = {"TS1": 8500, "TS2": 6000.5}
 
 
@@ -70,7 +70,7 @@ def test_all_here_in_full_the_client_hears_the_owners_words_and_no_task_is_made(
     conn, chat_row = env
     card, sender, told = waiting(env), Sender(), []
     assert run(conn, sender, [tire()], notify=lambda *a: told.append(a))["exact"] == [card]
-    assert sender.sent == ["Здравствуйте. «Ikon Autograph 205/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽. Желаете оформить заказ?"]
+    assert sender.sent == ["Здравствуйте. «Ikon Autograph 205/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ за штуку. Желаете оформить заказ?"]
     assert tasks(conn, card) == [] and told == []
     assert order_wait.TAG_EXACT in orders.get_card(conn, card)["tags"]
     assert [t for t in events(conn, card, "green") if sender.sent[0] in t]                      # the order's history has it, word for word
@@ -216,8 +216,8 @@ def test_two_positions_all_here_are_named_with_both_prices_in_one_message(env):
     conn, _row = env
     other = dict(WANT, width=215, qty=2)
     card, sender = waiting(env, WANT, other), Sender()
-    run(conn, sender, [tire(), tire(width=215, code="TS2", name_orig="Ikon 215/55 R16", stock=2)])
-    assert sender.sent == ["Здравствуйте. «Ikon Autograph 205/55 R16, Ikon 215/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ и 6 000.50 ₽. "
+    run(conn, sender, [tire(), tire(width=215, code="TS2", goods_id="200", name_orig="Ikon 215/55 R16", stock=2)])
+    assert sender.sent == ["Здравствуйте. «Ikon Autograph 205/55 R16, Ikon 215/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ и 6 000.50 ₽ за штуку. "
                            "Желаете оформить заказ?"] and tasks(conn, card) == []
 
 
@@ -297,7 +297,7 @@ def test_one_card_without_a_chat_does_not_stop_the_others(env):
     first = waiting(env, with_chat=False)
     second = waiting(env)
     sender = Sender()
-    run(conn, sender, [tire()])
+    run(conn, sender, [tire(stock=8)])
     assert len(tasks(conn, first)) == 1 and len(sender.sent) == 1 and tasks(conn, second) == []
 
 
@@ -334,7 +334,7 @@ def test_the_cycle_hook_prices_by_the_ad_of_the_chats_account(tmp_path, monkeypa
     monkeypatch.setattr(cli, "_chat_deliver", lambda conn_, box_, now: lambda row, text, token: sent.append((text, token)))
     monkeypatch.setattr(cli, "moscow_now", lambda: __import__("datetime").datetime(2026, 11, 4, 12, 0))
     cli._check_waiting(conn, SimpleNamespace(offers=parsed.offers, issues=parsed.issues), box, REF)
-    assert len(sent) == 1 and "стоимость: 12 345 ₽." in sent[0][0] and sent[0][1].startswith("wait-%d-" % card)
+    assert len(sent) == 1 and "стоимость: 12 345 ₽ за штуку." in sent[0][0] and sent[0][1].startswith("wait-%d-" % card)
     assert order_offers.account_for(conn, card_id=card) == 1
     sent.clear()
     card2 = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "worker2")
@@ -402,9 +402,9 @@ def test_a_line_that_does_not_name_the_tire_is_a_task_not_a_message(env, want):
 
 def test_two_models_fit_the_line_the_manager_chooses(env):
     conn, _row = env
-    card, sender = waiting(env), Sender()
-    run(conn, sender, [tire(), tire(code="TS2", model_raw="Other Model")])
-    assert sender.sent == [] and "не называет" in tasks(conn, card)[0]["body"]
+    card, sender = waiting(env, dict(WANT, model="")), Sender()
+    run(conn, sender, [tire(), tire(code="TS2", goods_id="200", model_raw="Other Model")])
+    assert sender.sent == [] and "несколько моделей" in tasks(conn, card)[0]["body"]
 
 
 def test_a_code_names_the_tire_by_itself(env):
@@ -442,8 +442,8 @@ def test_three_positions_at_two_prices_keep_the_order_of_the_prices(env):
     sender = Sender()
     waiting(env, WANT, dict(WANT, width=215), dict(WANT, width=225))
     prices = {205: 5000, 215: 6000, 225: 5000}
-    run(conn, sender, [tire(), tire(width=215, code="TS2", name_orig="B"), tire(width=225, code="TS3", name_orig="C")], price=lambda o, row: prices[o.width])
-    assert "«Ikon Autograph 205/55 R16, B, C»" in sender.sent[0] and "стоимость: 5 000 ₽, 6 000 ₽ и 5 000 ₽." in sender.sent[0]
+    run(conn, sender, [tire(), tire(width=215, code="TS2", goods_id="200", name_orig="B"), tire(width=225, code="TS3", goods_id="300", name_orig="C")], price=lambda o, row: prices[o.width])
+    assert "«Ikon Autograph 205/55 R16, B, C»" in sender.sent[0] and "стоимость: 5 000 ₽, 6 000 ₽ и 5 000 ₽ за штуку." in sender.sent[0]
 
 
 def test_at_night_a_missing_price_waits_for_the_morning_it_wakes_nobody(env):
@@ -463,7 +463,7 @@ def test_an_unexpected_failure_of_one_card_does_not_stop_the_others(env, monkeyp
             raise RuntimeError("boom")
         return real(conn_, card_id, *a)
     monkeypatch.setattr(order_wait, "_tell_client", broken)
-    run(conn, Sender(), [tire()])
+    run(conn, Sender(), [tire(stock=8)])
     assert len(tasks(conn, second)) == 1
 
 
@@ -516,13 +516,216 @@ def test_the_button_that_finds_it_in_the_chat_closes_the_task_too(env):
     assert sender.sent == [] and engine.get_task(conn, task["id"])["status"] == "done"
 
 
-def test_a_price_that_is_missing_names_the_position_that_lacks_it(env):
-    conn, _row = env
-    card, sender = waiting(env), Sender()
-    run(conn, sender, [tire(), tire(code="NOPRICE", goods_id="200")])
-    assert sender.sent == [] and "у позиции NOPRICE нет цены продажи" in tasks(conn, card)[0]["body"]
-
-
 def test_the_stage_hint_says_the_client_is_written_to():
     from tires_sync import onboarding_texts
     assert "Клиенту само ничего не уходит" not in open(onboarding_texts.__file__, encoding="utf-8").read()
+
+
+# --- the owner's answers of 2026-11-05 -------------------------------------------------------------------------------------------------------
+
+def s2(**changes):
+    return tire(**{"goods_id": "s2-200", "brand_key": "S2:IKON TYRES", "code": "TS2", "name_orig": "S2 Ikon 205/55 R16", **changes})
+
+
+def test_webmim_is_quoted_and_named_when_the_other_supplier_has_another_price(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [s2(), tire()])                                                           # the order of the offers does not decide
+    assert "«Ikon Autograph 205/55 R16»" in sender.sent[0] and "8 500 ₽" in sender.sent[0] and tasks(conn, card) == []
+
+
+def test_without_a_webmim_price_the_other_supplier_is_quoted(env):
+    conn, _row = env
+    waiting(env)
+    sender = Sender()
+    run(conn, sender, [tire(code="NOPRICE"), s2()])
+    assert "«S2 Ikon 205/55 R16»" in sender.sent[0] and "6 000.50 ₽" in sender.sent[0]
+
+
+def test_the_other_suppliers_alone_at_two_prices_are_a_task(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [s2(), s2(goods_id="s3-300", code="TS1")])
+    assert sender.sent == [] and "разные цены у поставщиков" in tasks(conn, card)[0]["body"]
+
+
+def test_two_prices_inside_webmim_are_a_task(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(), tire(goods_id="200", code="TS2"), s2(code="TS1")])
+    assert sender.sent == [] and "разные цены в WebMIM" in tasks(conn, card)[0]["body"]
+
+
+def test_no_price_anywhere_is_a_task(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(code="NOPRICE"), s2(code="NOPRICE2")])
+    assert sender.sent == [] and "нет цены продажи" in tasks(conn, card)[0]["body"]
+
+
+def test_the_default_has_per_piece_and_the_owners_row_is_not_overwritten(env):
+    conn, _row = env
+    assert "{price} за штуку." in mt.entry(mt.WAIT_FOUND)["default"]
+    owners_row(conn, "Есть {name} за {price}.")
+    assert mt.body(conn, mt.WAIT_FOUND) == "Есть {name} за {price}."
+
+
+NO_MODEL = dict(WANT, model="")
+
+
+def titled(conn, chat_row, title):
+    conn.execute("UPDATE avito_chat SET item_title = ? WHERE id = ?", (title, chat_row))
+    conn.commit()
+
+
+def test_brand_and_season_go_when_the_ad_of_the_order_names_the_one_model_in_stock(env):
+    conn, chat_row = env
+    waiting(env, NO_MODEL)
+    titled(conn, chat_row, "Шины Ikon test  model 205/55 R16 зимние")
+    sender = Sender()
+    run(conn, sender, [tire()])
+    assert len(sender.sent) == 1
+
+
+def test_brand_and_season_go_when_a_position_of_the_order_names_it(env):
+    conn, chat_row = env
+    card = waiting(env, NO_MODEL)
+    titled(conn, chat_row, "")
+    orders.add_item(conn, card, now=NOW, author="worker2", qty=4, goods_id="100", code="TS1", name="Ikon Test Model 205/55 R16", brand_key="IKON TYRES", season="winter",
+                    diameter=16, territory="", sale_unit=8500, supplier_price=7000, terms={}, fee_pct=0, promo_pct=0)
+    sender = Sender()
+    run(conn, sender, [tire()])
+    assert len(sender.sent) == 1
+
+
+@pytest.mark.parametrize("title", ("", "Шины Ikon Other Model 205/55 R16", "Шины Ikon Test Models 205/55 R16"))
+def test_a_name_in_the_order_that_is_not_the_model_gives_the_task(env, title):
+    conn, chat_row = env
+    card, sender = waiting(env, NO_MODEL), Sender()
+    titled(conn, chat_row, title)
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and "не совпадает с названием в заказе" in tasks(conn, card)[0]["body"]
+
+
+def two_waiting(env, older_second=False):
+    conn, chat_row = env
+    a = waiting(env)
+    b = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "worker2")
+    order_wait.add_want(conn, b, WANT, NOW, "worker2")
+    orders.move_card(conn, b, stage(conn, "wait"), NOW, "worker2")
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at) SELECT account_id, 'c2', ?, last_at FROM avito_chat WHERE id = ?", (b, chat_row))
+    conn.execute("UPDATE order_card SET entered_at = ? WHERE id = ?", ("2026-11-01T10:00:00", b if older_second else a))
+    conn.execute("UPDATE order_card SET entered_at = ? WHERE id = ?", ("2026-11-02T10:00:00", a if older_second else b))
+    conn.commit()
+    return (b, a) if older_second else (a, b)
+
+
+def chat_of(conn, card):
+    return conn.execute("SELECT chat_id FROM avito_chat WHERE order_id = ?", (card,)).fetchone()[0]
+
+
+@pytest.mark.parametrize("older_second", (False, True))
+def test_stock_for_one_goes_to_the_order_that_waits_longest_and_both_show_a_mark(env, older_second):
+    conn, _row = env
+    old, young = two_waiting(env, older_second)
+    sender, sends = Sender(), []
+    order_wait.check(conn, [tire()], NOW, price_of=price_of, deliver=lambda row, text, token: (sends.append(token), chats.send_reply(conn, sender, row, text, token, NOW, "система")))
+    assert len(sends) == 1 and sends[0].startswith("wait-%d-" % old)
+    assert [t for t in events(conn, old, "green") if t.startswith("Сообщение о наличии отправлено")]
+    assert "Сообщение о наличии не отправлено: первым написали заказу №%d" % old in events(conn, young)
+    assert tasks(conn, young) == [] and tasks(conn, old) == []
+
+
+def test_the_mark_is_once_and_the_next_cycles_send_nothing_while_the_first_stays(env):
+    conn, _row = env
+    old, young = two_waiting(env)
+    sender = Sender()
+    run(conn, sender, [tire()])
+    before = events(conn, young)
+    run(conn, sender, [tire()], NEXT)
+    run(conn, sender, [tire()], "2026-11-04T14:40:00")
+    assert len(sender.sent) == 1 and events(conn, young) == before
+
+
+def test_the_next_order_goes_once_the_first_left_the_stage(env):
+    conn, _row = env
+    old, young = two_waiting(env)
+    sender = Sender()
+    run(conn, sender, [tire()])
+    orders.move_card(conn, old, orders.list_stages(conn)[0]["id"], "2026-11-04T12:30:00", "worker2")
+    run(conn, sender, [tire()], NEXT)
+    assert len(sender.sent) == 2 and [t for t in events(conn, young, "green") if t.startswith(order_wait.TOLD)]
+
+
+def test_the_next_order_goes_when_the_stock_no_longer_holds_for_the_first(env):
+    conn, _row = env
+    old = waiting(env)
+    young = two_small(env)
+    sender = Sender()
+    run(conn, sender, [tire(stock=4)], "2026-11-04T12:05:00")
+    assert len(sender.sent) == 1 and tasks(conn, young) == []
+    run(conn, sender, [tire(stock=2)], NEXT)                                                    # less than the first wants: it holds nothing
+    assert len(sender.sent) == 2 and [t for t in events(conn, young, "green") if t.startswith(order_wait.TOLD)]
+    assert old != young
+
+
+def two_small(env, chat_id="c2"):
+    conn, chat_row = env
+    card = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "worker2")
+    order_wait.add_want(conn, card, dict(WANT, qty=2), NOW, "worker2")
+    orders.move_card(conn, card, stage(conn, "wait"), "2026-11-04T12:01:00", "worker2")
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at) SELECT account_id, ?, ?, last_at FROM avito_chat WHERE id = ?", (chat_id, card, chat_row))
+    conn.commit()
+    return card
+
+
+def test_stock_for_all_goes_to_all(env):
+    conn, _row = env
+    old, young = two_waiting(env)
+    sender = Sender()
+    run(conn, sender, [tire(stock=8)])
+    assert len(sender.sent) == 2 and not [t for t in events(conn, young) if "первым" in t]
+
+
+def test_stock_is_counted_across_the_orders_of_one_cycle(env):
+    conn, chat_row = env
+    old, young = two_waiting(env)
+    third = two_small(env, "c3")
+    sender = Sender()
+    run(conn, sender, [tire(stock=6)], "2026-11-04T12:05:00")                                                          # 4 to the first; 2 left: not for 4, for 2 yes
+    assert len(sender.sent) == 2 and tasks(conn, young) == []
+    assert "Сообщение о наличии не отправлено: первым написали заказу №%d" % old in events(conn, young)
+    assert [t for t in events(conn, third, "green") if t.startswith(order_wait.TOLD)]
+
+
+def test_a_first_order_without_a_chat_holds_the_tires_while_its_task_is_open(env):
+    conn, chat_row = env
+    old, young = two_waiting(env)
+    conn.execute("UPDATE avito_chat SET order_id = NULL WHERE order_id = ?", (old,))
+    conn.commit()
+    sender = Sender()
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and len(tasks(conn, old)) == 1 and tasks(conn, young) == []
+    assert "Сообщение о наличии не отправлено: шины первым предлагает менеджер заказу №%d" % old in events(conn, young)
+    conn.execute("UPDATE order_task SET status = 'done' WHERE id = ?", (tasks(conn, old)[0]["id"],))
+    conn.commit()
+    run(conn, sender, [tire()], NEXT)                                                           # closed: it holds nothing
+    assert len(sender.sent) == 1 and [t for t in events(conn, young, "green") if t.startswith(order_wait.TOLD)]
+
+
+def test_at_night_nobody_is_told_and_nobody_has_a_mark(env):
+    conn, _row = env
+    old, young = two_waiting(env)
+    sender = Sender()
+    run(conn, sender, [tire()], "2026-11-04T03:40:00")
+    assert sender.sent == [] and not [t for t in events(conn, young) if "первым" in t]
+    run(conn, sender, [tire()], "2026-11-05T10:40:00")
+    assert len(sender.sent) == 1 and [t for t in events(conn, old, "green") if t.startswith(order_wait.TOLD)]
+
+
+def test_the_younger_order_takes_the_other_suppliers_stock_at_its_price(env):
+    conn, _row = env
+    old, young = two_waiting(env)
+    sender = Sender()
+    run(conn, sender, [tire(), s2()])
+    assert len(sender.sent) == 2 and "8 500 ₽" in sender.sent[0] and "6 000.50 ₽" in sender.sent[1]

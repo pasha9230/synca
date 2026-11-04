@@ -11,6 +11,7 @@ import re
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import message_texts, order_templates as templates, orders
+from .suppliers import supplier_of_id
 from .webmim import brand_key, studs_named
 
 SEASONS = ("", "winter", "summer", "all")
@@ -23,7 +24,9 @@ TASK_EXACT, TASK_ANALOG = 0, -1                      # the «rule» numbers of t
 TITLE_EXACT, TITLE_ANALOG = "Позиция появилась: предложите клиенту", "Есть аналоги: можно предложить клиенту"
 TITLE_CHECK = "Позиция появилась: проверьте чат клиента"    # the message may have gone: the same task, without the card's form «отправить клиенту»
 AUTHOR = "лист ожидания"
-TOLD = "Клиенту отправлено «появилось в наличии»: "    # the record of the journal after the send: the mark of the stay
+TOLD = "Сообщение о наличии отправлено: "             # the record of the journal after the send: the mark of the stay
+QUEUED_TOLD = "Сообщение о наличии не отправлено: первым написали заказу №%d"
+QUEUED_TASK = "Сообщение о наличии не отправлено: шины первым предлагает менеджер заказу №%d"
 NOT_SENT = "Клиенту само не отправлено: %s"
 PriceOf = Callable[..., object]                      # (offer, chat row) -> the sale price of one tyre as the client would pay it today
 COLUMNS = "id, order_id, brand, model, width, profile, radius, season, studded, qty, code, any_brand, any_size"
@@ -239,61 +242,123 @@ def _mark(conn, card_id, kind: str, found: List, now: str, notify=None, note: st
             logging.getLogger("tires_sync.order_wait").warning("alert for card %s failed", card_id, exc_info=True)
 
 
-def _short_for_two_lines(lines: List[dict], found: List) -> bool:
-    """Two lines found the same position and its stock does not cover both: the client would be promised more than there is."""
-    wanted: Dict[int, int] = {}
-    for line, offer in zip(lines, found):
-        wanted[id(offer)] = wanted.get(id(offer), 0) + line["qty"]
-    return any(wanted[id(offer)] > offer.stock for offer in found)
+def _named_in_order(conn, card: dict, offer) -> bool:
+    """The model of the offer is in a name the order has: of a position, or of the ad the client wrote about."""
+    names = [i["name"] for i in card.get("items") or []]
+    names += [r[0] for r in conn.execute("SELECT item_title FROM avito_chat WHERE order_id = ?", (card["id"],))]
+    model = " ".join(str(offer.model_raw or "").upper().split())
+    return bool(model) and any(re.search(r"(?<![0-9A-ZА-ЯЁ])%s(?![0-9A-ZА-ЯЁ])" % re.escape(model), " ".join(str(n or "").upper().split())) for n in names)
 
 
-def _one_tire(line: dict, stock: List) -> bool:
-    """The line names one tire, so it may be offered without a person: its code, or its brand and season, and every exact offer is one model.
-    An empty field of a line fits anything (_exact): «205/55 R16» of an ad's title would offer the first tire of that size of any season."""
+def _one_tire(conn, card: dict, line: dict, stock: List) -> str:
+    """Why the line does not name one tire to offer without a person, "" when it does: its code, its brand, season and model, or its brand and
+    season when the one model in stock is the one named in the order (the owner 2026-11-05). An empty field of a line fits anything (_exact):
+    «205/55 R16» of an ad's title would offer the first tire of that size of any season."""
     if not line["code"] and not (line["brand"] and line["season"]):
-        return False
-    return len({(_brand(o), _norm(o.model_raw), o.season.value, bool(o.studded), o.width, o.height, o.diameter) for o in stock if _exact(line, o)}) == 1
+        return "строка заказа не называет одну шину (нужен артикул, либо бренд и сезон)."
+    found = [o for o in stock if _exact(line, o)]
+    if len({(_brand(o), _norm(o.model_raw), o.season.value, bool(o.studded), o.width, o.height, o.diameter) for o in found}) != 1:
+        return "строка заказа не называет одну шину: подходит несколько моделей."
+    if not line["code"] and not line["model"] and not _named_in_order(conn, card, found[0]):
+        return "модель в наличии (%s) не совпадает с названием в заказе." % found[0].model_raw
+    return ""
 
 
-def _found_text(conn, lines: List[dict], found: List, stock: List, chat, price_of: PriceOf) -> Tuple[str, str]:
-    """The words for the client and "", or "" and why they cannot go: nothing goes with an empty name or price or a placeholder left, nor when
-    the same tire has two prices at two suppliers."""
-    body = message_texts.body(conn, message_texts.WAIT_FOUND)
-    if set(templates.PLACEHOLDER.findall(body)) != {"name", "price"}:
-        return "", "в шаблоне «%s» нужны {name} и {price}, других подстановок быть не может." % message_texts.entry(message_texts.WAIT_FOUND)["name"]
-    items: List[tuple] = []
-    for line, offer in zip(lines, found):
-        name = " ".join(str(offer.name_orig or offer.name or "").split())
-        if not name:
-            return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id)
-        prices = set()
-        for each in (o for o in stock if _exact(line, o)):
+def _is_mim(offer) -> bool:
+    """A position of the first supplier, WebMIM: the others' ids begin with «s<number>-» (suppliers.load_all_parsed)."""
+    return supplier_of_id(str(offer.goods_id)) == 1
+
+
+def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf) -> Tuple[object, float, str]:
+    """(the offer to name, its price, "") or (None, 0, why): the price of WebMIM (the owner 2026-11-05: «приоритет у МИМ»); the others' only when
+    WebMIM has no price or its stock went to an earlier order, and only when they agree. Two prices in the group that decides: a person chooses."""
+    found = [o for o in stock if _exact(line, o)]
+    groups = ([[o for o in found if _is_mim(o)]] if _is_mim(pick) else []) + [[o for o in found if not _is_mim(o)]]
+    for group in groups:
+        priced: Dict[float, object] = {}
+        for each in group:
             try:
                 price = float(price_of(each, chat) or 0)
             except Exception:                                      # no price is no message: the manager gets the task, the others go on
                 conn.rollback()
                 logging.getLogger("tires_sync.order_wait").warning("position %s of a waiting order has no price", each.code or each.goods_id, exc_info=True)
                 price = 0
-            if price <= 0:
-                return "", "у позиции %s нет цены продажи." % (each.code or each.goods_id)
-            prices.add(price)
-        if len(prices) > 1:
-            return "", "у поставщиков разные цены на %s: выберите сами." % name
-        if (name, prices) not in items:                            # two lines of one position: it is named once
-            items.append((name, prices))
-    shown = [templates.money(next(iter(p))) + " ₽" for _n, p in items]
+            if price > 0:
+                priced.setdefault(price, each)
+        if len(priced) > 1:
+            return None, 0, "у позиции %s разные цены%s: выберите сами." % (pick.name, " в WebMIM" if group and _is_mim(group[0]) else " у поставщиков")
+        if priced:
+            price, offer = next(iter(priced.items()))
+            return offer, price, ""
+    return None, 0, "у позиции %s нет цены продажи." % (pick.code or pick.goods_id)
+
+
+def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_of: PriceOf) -> Tuple[str, str]:
+    """The words for the client and "", or "" and why they cannot go: nothing goes with an empty name or price or a placeholder left, nor with
+    a price nobody can tell (_line_price)."""
+    body = message_texts.body(conn, message_texts.WAIT_FOUND)
+    if set(templates.PLACEHOLDER.findall(body)) != {"name", "price"}:
+        return "", "в шаблоне «%s» нужны {name} и {price}, других подстановок быть не может." % message_texts.entry(message_texts.WAIT_FOUND)["name"]
+    items: List[tuple] = []
+    for line, pick in zip(lines, picks):
+        offer, price, why = _line_price(conn, line, pick, stock, chat, price_of)
+        if why:
+            return "", why
+        name = " ".join(str(offer.name_orig or offer.name or "").split())
+        if not name:
+            return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id)
+        if (name, price) not in items:                             # two lines of one position: it is named once
+            items.append((name, price))
+    shown = [templates.money(p) + " ₽" for _n, p in items]
     if len(set(shown)) == 1:
-        price = shown[0]
+        price_text = shown[0]
     else:                                                          # in the order of the names: a price is not left out because another has it
-        price = "%s и %s" % (", ".join(shown[:-1]), shown[-1])
-    values = {"name": ", ".join(n for n, _p in items), "price": price}
+        price_text = "%s и %s" % (", ".join(shown[:-1]), shown[-1])
+    values = {"name": ", ".join(n for n, _p in items), "price": price_text}
     text = templates.PLACEHOLDER.sub(lambda m: values[m.group(1)], body)
     if "{" in text or "}" in text or templates.unfilled(text):
         return "", "в тексте осталась незаполненная подстановка."
     return text, ""
 
 
-def _tell_client(conn, card_id, lines: List[dict], found: List, stock: List, now: str, deliver, price_of: Optional[PriceOf]) -> Optional[Tuple[str, str]]:
+def _state(conn, card_id) -> str:
+    """Where this stay in the stage stands: "told" (the message went), "task" (the manager has it to offer), "closed" (the manager closed the
+    task), "" (nothing yet). "told" and "task" hold the tires against younger orders."""
+    stay = conn.execute("SELECT entered_at FROM order_card WHERE id = ?", (card_id,)).fetchone()[0] or ""
+    if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text LIKE ? AND at >= ? LIMIT 1", (card_id, TOLD + "%", stay)).fetchone():
+        return "told"
+    task = conn.execute("SELECT status FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_EXACT, stay)).fetchone()
+    return "" if task is None else "task" if task[0] == "pending" else "closed"
+
+
+def _take(lines: List[dict], stock: List, left: Dict[str, int], first: Dict[str, tuple]) -> Tuple[Optional[List], Optional[tuple]]:
+    """The offers of an order out of what earlier orders left in this cycle (`left`, per position; WebMIM first). (the offers, None); or (None, the
+    order that holds the tires), (None, None) when its own lines alone are more than there is: then nothing is taken."""
+    taken: Dict[str, int] = {}
+    picks = []
+    for line in lines:
+        found = sorted((o for o in stock if _exact(line, o)), key=lambda o: not _is_mim(o))
+        pick = next((o for o in found if left.get(o.goods_id, o.stock) - taken.get(o.goods_id, 0) >= line["qty"]), None)
+        if pick is None:
+            return None, next((first[o.goods_id] for o in found if o.goods_id in first), None)
+        picks.append(pick)
+        taken[pick.goods_id] = taken.get(pick.goods_id, 0) + line["qty"]
+    for goods_id, qty in taken.items():
+        offer = next(o for o in picks if o.goods_id == goods_id)
+        left[goods_id] = left.get(goods_id, offer.stock) - qty
+    return picks, None
+
+
+def _queued(conn, card_id, holder: tuple, now: str) -> None:
+    """The mark of an order behind another for the same tires (the owner 2026-11-05), once per stay and per the order ahead of it."""
+    text = (QUEUED_TOLD if holder[1] == "told" else QUEUED_TASK) % holder[0]
+    stay = conn.execute("SELECT entered_at FROM order_card WHERE id = ?", (card_id,)).fetchone()[0] or ""
+    if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text = ? AND at >= ? LIMIT 1", (card_id, text, stay)).fetchone():
+        orders.add_event(conn, card_id, now, AUTHOR, "chat", text, level="yellow")
+        conn.commit()
+
+
+def _tell_client(conn, card_id, lines: List[dict], picks: Optional[List], stock: List, now: str, deliver, price_of: Optional[PriceOf]) -> Optional[Tuple[str, str]]:
     """Everything the client waits for is here: «появилось в наличии» in the order's chat, by chats.send_reply, the send mark being the order
     and the moment it entered the stage. None: no task is due (it went and the journal has it; it went earlier in this stay; outside the
     working hours the next cycle looks again). Else the task is due: (the words for its body, its title): why the client was not written to
@@ -308,10 +373,12 @@ def _tell_client(conn, card_id, lines: List[dict], found: List, stock: List, now
         return "", ""
     if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text LIKE ? AND at >= ? LIMIT 1", (card_id, TOLD + "%", stay)).fetchone():
         return None
-    if _short_for_two_lines(lines, found):
+    if picks is None:
         return NOT_SENT % "остатка одной позиции не хватает на все строки заказа.", ""
-    if not all(_one_tire(line, stock) for line in lines):
-        return NOT_SENT % "строка заказа не называет одну шину (нужен артикул, либо бренд и сезон, и подходит одна модель).", ""
+    for line in lines:
+        why = _one_tire(conn, card, line, stock)
+        if why:
+            return NOT_SENT % why, ""
     chat, why = order_manager._client_chat(conn, card_id)
     if chat is None:
         return NOT_SENT % (why + "."), ""
@@ -322,7 +389,7 @@ def _tell_client(conn, card_id, lines: List[dict], found: List, stock: List, now
         return None
     if chats._unread(conn, chat):                                  # our message would count as the answer and wipe «Клиент написал»
         return NOT_SENT % "клиент написал в чат и ждёт ответа.", ""
-    text, why = _found_text(conn, lines, found, stock, chat, price_of)
+    text, why = _found_text(conn, lines, picks, stock, chat, price_of)
     if why:
         return NOT_SENT % why, ""
     token = "wait-%d-%s" % (card_id, re.sub(r"\D", "", stay))
@@ -362,29 +429,62 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
     """Look at every card in «Ожидает наличие» against the offers in stock. Returns {"exact": [card ids], "analogs": [card ids]}.
     Found exactly: the client is written to by `deliver` (chats.send_reply of the chat's account) with the price from `price_of` (_tell_client);
     the task only when that cannot go. Marking is once per stay in the stage (the task), the tag only once. `notify(card_id, title, body)` is
-    called once for each new task."""
+    called once for each new task.
+    Stock enough for fewer orders than wait for it (the owner 2026-11-05): the order that waits longest goes first and holds the tires, counted
+    across the orders of this cycle: while it stays in this stay in the stage after its message, or its task is open; left the stage, the
+    task closed or the stock no longer enough for it, the next order gets its message at the next cycle. Until then that one has the mark
+    QUEUED_TOLD or QUEUED_TASK and no task. Stock for all: all go."""
     stock = [o for o in offers if o.stock >= 1]
     out: Dict[str, List[int]] = {"exact": [], "analogs": []}
-    ids = [r[0] for r in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait' ORDER BY c.id")]
-    for card_id in ids:
+    cards = []
+    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait' ORDER BY c.entered_at, c.id").fetchall():
         lines = list_wants(conn, card_id)
         results = [_line_result(line, stock) for line in lines]
         if not lines or any(r is None for r in results):
             continue                                               # a part of the set is no sale: nothing is marked
         kind = "exact" if all(r[0] == "exact" for r in results) else "analogs"
         out[kind].append(card_id)
-        found = [r[1] for r in results]
+        cards.append((card_id, kind, lines, [r[1] for r in results]))
+    log = logging.getLogger("tires_sync.order_wait")
+    left: Dict[str, int] = {}
+    first: Dict[str, tuple] = {}
+    states: Dict[int, str] = {}
+
+    def hold(picks, card_id, state):
+        for pick in picks:
+            first.setdefault(pick.goods_id, (card_id, state))
+    for card_id, kind, lines, _found in cards:                     # those already told or being offered hold their tires, however long the others wait
+        if kind == "exact":
+            try:
+                states[card_id] = _state(conn, card_id)
+                if states[card_id] in ("told", "task"):
+                    picks, _holder = _take(lines, stock, left, first)
+                    hold(picks or [], card_id, states[card_id])
+            except Exception:
+                conn.rollback()
+                log.warning("card %s could not be looked at", card_id, exc_info=True)
+                states[card_id] = "closed"
+    for card_id, kind, lines, found in cards:
         try:
-            note, title = "", ""
-            if kind == "exact":
-                told = _tell_client(conn, card_id, lines, found, stock, now, deliver, price_of)
-                if told is None:
-                    continue
-                note, title = told
-            _mark(conn, card_id, "exact" if kind == "exact" else "analog", found, now, notify, note, title)
+            if kind == "analogs":
+                _mark(conn, card_id, "analog", found, now, notify)
+                continue
+            if states[card_id]:
+                continue
+            picks, holder = _take(lines, stock, left, first)
+            if picks is None and holder is not None:
+                if holder[1]:                                      # the order ahead waits for the working hours: nothing to say yet
+                    _queued(conn, card_id, holder, now)
+                continue
+            told = _tell_client(conn, card_id, lines, picks, stock, now, deliver, price_of)
+            if told is not None:
+                _mark(conn, card_id, "exact", picks or found, now, notify, told[0], told[1])
+            hold(picks or [], card_id, _state(conn, card_id))
         except Exception:                                          # a card that cannot be marked (ten tags already, a broken one) must not stop the others
             conn.rollback()
-            logging.getLogger("tires_sync.order_wait").warning("card %s was found but could not be marked", card_id, exc_info=True)
+            log.warning("card %s was found but could not be marked", card_id, exc_info=True)
+    out["exact"].sort()
+    out["analogs"].sort()
     return out
 
 
