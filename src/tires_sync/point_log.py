@@ -199,6 +199,7 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
         conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
         if stage["code"] == orders.RETURN_GIVEN:                          # «Выдали» linked the client; the goods go back again (2026-11-04)
             order_oth.detach(conn, card, now, author)
+            order_oth.restore_plan(conn, card["id"])                      # after detach: it drops the marks and the plan of a stay
     label = card.get("webmim_number") or str(card["id"])
     until = rec["from_until"]
     undone_issue = rec["action"] == "oth_issued"

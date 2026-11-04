@@ -228,3 +228,4 @@ a.p2-line:hover{border-color:var(--p2-primary)}
   body.p2 .pt-nav{display:none}
 }
 .mp-handover summary{list-style:none;cursor:pointer;text-align:center}.mp-handover summary::-webkit-details-marker{display:none}.mp-handover p{margin:8px 0}
+.p2-mx3>.mp-ask,.p2-mx3>.mp-handover{grid-column:1/-1}.p2-mx3>.mp-ask .mp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}

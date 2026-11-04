@@ -20,7 +20,7 @@
 {% if can_post("orders_return_task") %}<form method="post" action="/orders/settings/return-task" class="card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap" data-return-task><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0"><div class="card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% endif %}
 <label class="field"><span class="label">Срок задачи на возврат, рабочих дней</span><input class="input" type="number" name="days" min="1" max="30" step="1" required value="{{ return_task_days }}" style="width:100px"></label>
 {% if can_post("orders_return_task") %}<button class="btn btn--primary">Сохранить</button>{% endif %}
-<p class="small muted" style="flex-basis:100%">Задача «{{ return_task }}» ответственному заказа, при автоматическом и ручном переводе на «На возврат». Срок считается от перевода; суббота и воскресенье не считаются.</p>
+<p class="small muted" style="flex-basis:100%">Задача «{{ return_task }}» ответственному заказа, при автоматическом и ручном переводе на «На возврат». Срок считается от постановки задачи; суббота и воскресенье не считаются.</p>
 {% if can_post("orders_return_task") %}</form>{% else %}</div></fieldset>{% endif %}</section>
 <section class="card">
 {% for s in stages %}

@@ -394,6 +394,7 @@ HOLD_DAYS = 6
 ASK_AT = "12:30"
 ASK_KEY = "oth_ask:%d:%s"                        # per order and stay on «На ОТХ»: asked|<at> → issued|<at> / here|<at>
 RETURN_TASK = "Написать поставщику и согласовать возврат, узнать дату забора груза"     # kind «Вернуть», the responsible's (the owner 2026-11-04)
+DROPPED_KEY = "oth_dropped_plan:%d"              # app_state: the agreement «Выдали» dropped, until «Отменить» brings it back
 RETURN_TITLES = (RETURN_TASK, "Согласовать возврат")     # with the task of before 2026-11-04 still open
 SINCE_KEY = "oth_ask_since"                      # app_state: the first tick of this rule; an order that entered «На ОТХ» earlier is never asked
 
@@ -520,7 +521,10 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
     if done is None:
         conn.rollback()
         return "не выполнено: нет этапа «Выполнено»", "Не получилось: в воронке нет этапа «Выполнено».", False
+    plan = return_plan(conn, card["id"])
+    conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % card["id"],))
     if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount:
+        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (DROPPED_KEY % card["id"], json.dumps(plan, ensure_ascii=False)))     # for «Отменить» (point_log.undo)
         orders.add_event(conn, card["id"], now, who, "field", "Согласование возврата снято: точка ответила, что заказ выдали")
     reattach(conn, card["id"], now, who)
     orders.add_event(conn, card["id"], now, who, "point", "Точка ответила на 7-й день ОТХ: заказ выдали")
@@ -535,8 +539,7 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 
 
 def close_return_tasks(conn, order_id, now: str, who: str, result: str) -> int:
-    """The open tasks of the return of the order are done by themselves (the lead 2026-11-02): agreed, or the point said «Выдали». Never raises:
-    the answer stands; returns how many were closed."""
+    """The open tasks of the return of the order are done by themselves (the lead 2026-11-02): agreed. Never raises: the answer stands; returns how many were closed."""
     return _close_tasks(conn, order_id, RETURN_TITLES, "done", now, who, result)
 
 
@@ -552,6 +555,15 @@ def _close_tasks(conn, order_id, titles: tuple, how: str, now: str, who: str, re
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the return task %s of order %s was not closed", task_id, order_id)
     return closed
+
+
+def restore_plan(conn, order_id) -> None:
+    """«Отменить» of «Выдали»: the agreement it dropped is back as it was. No commit."""
+    plan = json.loads(store_value(conn, DROPPED_KEY % order_id) or "null")
+    conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % order_id,))
+    if plan:
+        conn.execute("INSERT OR REPLACE INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date, signed_at, signed_by) VALUES (?,?,?,?,NULL,'')",
+                     (order_id, plan["agreed_at"], plan["agreed_by"], plan["return_date"]))
 
 
 def left_return(conn, card_id, stage: dict, now: str, who: str) -> None:
@@ -736,7 +748,10 @@ def _return_task(conn, card: dict, now: str, who: str, what: str = "") -> int:
 def moved_by_hand(conn, before: dict, now: str, who: str) -> None:
     """A person moved the order in the panel (`before`: the card before the move; the board, the window, the chat, the button of the card).
     Into «На возврат»: the task of the return, unless the return is agreed already or that task is open: no double. Never raises: the move stands."""
-    card = orders.get_card(conn, before["id"])
+    try:
+        card = orders.get_card(conn, before["id"])
+    except orders.OrderError:                                                        # removed meanwhile
+        return
     if card["stage"]["code"] == orders.RETURN_GIVEN and before["stage"]["code"] != orders.RETURN_GIVEN:
         _ensure_task(conn, card["id"], now, who)
 
@@ -751,8 +766,11 @@ def _ensure_task(conn, card_id, now: str, who: str) -> None:
     except Exception:                                                                # noqa: BLE001
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the return task of order %s failed", card_id)
-        orders.add_event(conn, card_id, now, "система", "reserve", "Задача возврата не поставлена: поставьте её вручную — %s" % RETURN_TASK, level="yellow")
-        conn.commit()
+        try:
+            orders.add_event(conn, card_id, now, "система", "reserve", "Задача возврата не поставлена: поставьте её вручную — %s" % RETURN_TASK, level="yellow")
+            conn.commit()
+        except Exception:                                                            # noqa: BLE001 - a busy base: the log above is what is left
+            conn.rollback()
 
 
 def _item_key(item_id, entered: str) -> str:

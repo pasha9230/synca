@@ -868,7 +868,7 @@ def test_a_broken_held_row_stops_nothing(tmp_path):
 
 # ---- 8. the review of 2026-11-05 -------------------------------------------------------------------------------------------------------
 
-def _agreed_and_asked(tmp_path, *flags):
+def _agreed_and_asked(tmp_path):
     from test_mypoint import manager
     app, client, tok, conn, pid, card = ready(tmp_path)
     started(conn)
@@ -925,12 +925,10 @@ def test_a_failed_task_leaves_a_yellow_record(tmp_path, monkeypatch):
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
     assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
     assert [e for e in orders.list_events(conn, cid) if e["level"] == "yellow" and e["text"].startswith("Задача возврата не поставлена")]
-    before = orders.get_card(conn, cid)
     other = card_at(conn, "at_point", "2026-10-15T10:00:00")
     was = on_oth(conn, other)
     orders.move_card(conn, other, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, was, "2026-10-21T10:00:00", "o")
-    assert before["stage"]["code"] == orders.RETURN_GIVEN
     assert [e for e in orders.list_events(conn, other) if e["level"] == "yellow" and e["text"].startswith("Задача возврата не поставлена")]
 
 
@@ -938,4 +936,44 @@ def test_the_settings_name_the_real_task(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     page = client.get("/orders/settings").get_data(as_text=True)
     assert order_oth.RETURN_TASK in page and "Согласовать на возврат" not in page and "при ручном переводе" not in page
+
+
+def test_a_busy_base_in_the_failure_itself_raises_nothing(tmp_path, monkeypatch):
+    conn, cid, card = _held(tmp_path)
+    monkeypatch.setattr(tasks, "add", lambda **kw: (_ for _ in ()).throw(RuntimeError("busy")))
+    real = orders.add_event
+
+    def locked(conn_, id_, now, who, kind, text, level=""):
+        if text.startswith("Задача возврата не поставлена"):
+            raise RuntimeError("database is locked")
+        return real(conn_, id_, now, who, kind, text, level)
+    monkeypatch.setattr(orders, "add_event", locked)
+    told = []
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls(told)) == 1        # the alert still goes
+    assert told
+
+
+def test_moved_by_hand_never_raises_for_an_order_gone(tmp_path):
+    conn, cid, card = _held(tmp_path)
+    order_oth.moved_by_hand(conn, dict(card, id=999999), "2026-10-21T10:00:00", "o")
+
+
+def test_the_undo_of_issued_brings_the_agreement_back(tmp_path):
+    from test_mypoint import press
+    app, conn, cid, mine = _agreed_and_asked(tmp_path)
+    plan = order_oth.return_plan(conn, cid)
+    press(mine, cid, "oth_issued")
+    assert order_oth.return_plan(conn, cid) is None
+    r = post(mine, "/my-point/%d/undo" % cid, "tok")
+    assert r.status_code == 302
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.return_plan(conn, cid) == plan
+    assert open_tasks(conn, cid) == []                                                      # agreed: nothing to agree
+
+
+def test_issued_without_an_agreement_leaves_nothing_to_bring_back(tmp_path):
+    from tires_sync import store
+    conn, cid = _moved_on_day7(tmp_path)
+    order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")
+    assert not store.get_state(conn, order_oth.DROPPED_KEY % cid)
 
