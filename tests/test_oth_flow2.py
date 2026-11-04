@@ -1387,3 +1387,46 @@ def test_the_bulk_undo_puts_the_task_back(tmp_path):
     assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
 
+
+# ---- 12. the review of 53d735f ----------------------------------------------------------------------------------------------------------
+
+def test_an_agreement_of_an_earlier_stay_does_not_survive_a_return_to_work(tmp_path):
+    from test_vk_commands import hook
+    app, conn, cid = _vk_order(tmp_path, orders.RETURN_GIVEN)
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-21"), "2026-10-21T11:00:00", "owner")
+    orders.move_card(conn, cid, _stage(conn, "at_point"), "2026-10-22T10:00:00", "o")          # the client came back
+    assert order_oth.return_plan(conn, cid) is None
+    assert [e for e in orders.list_events(conn, cid) if e["text"].startswith("Согласование возврата снято")]
+    before = orders.get_card(conn, cid)
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-23T10:00:00", "o")  # refused again, straight back by hand
+    order_oth.moved_by_hand(conn, before, "2026-10-23T10:00:00", "o")
+    assert order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласуем"
+    assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
+    told = []
+    assert order_oth.remind_handover(conn, "2026-10-26T09:00:00", calls(told)) == 0
+    hook(app, conn, "№700300 возврат отдал подтверждаю")
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+
+
+def test_a_closed_stage_keeps_the_agreement_for_the_undo(tmp_path):
+    from tires_sync import order_bulk
+    conn, cid = _moved_on_day7(tmp_path)
+    path = str(tmp_path / "x.db")
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T13:00:00", "owner")
+    plan = order_oth.return_plan(conn, cid)
+    target = stage(conn, "cancel")
+    order_bulk.run(conn, path, [cid], target, "Чистка", order_bulk.check(conn, [cid], target, "Чистка")["sign"], "2026-10-27T10:00:00", "o")
+    assert order_oth.return_plan(conn, cid) == plan
+    audit = conn.execute("SELECT id FROM audit WHERE action = 'orders_bulk_move' ORDER BY id DESC").fetchone()[0]
+    order_bulk.undo(conn, path, audit, [cid], "2026-10-27T11:00:00", "o")
+    assert order_oth.return_plan(conn, cid) == plan
+
+
+def test_a_position_with_a_real_return_cannot_be_marked_by_hand(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    item = card["items"][0]["id"]
+    order_oth.mark_returned(conn, item, "2026-10-21T10:00:00", "o", 1)
+    with pytest.raises(order_oth.OthError, match="возвращено поставщику"):
+        order_oth.item_to_return(conn, item, "2026-10-21T11:00:00", "o", "2")
+    assert open_tasks(conn, cid) == [] and order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0   # the real mark still keeps it
+

@@ -65,9 +65,12 @@ def reattach(conn, card_id, now: str, author: str) -> Optional[int]:
 
 def leave(conn, card: dict, stage: dict, now: str, author: str) -> None:
     """A move of the order (orders.move_card): an unlinked order that goes into an open stage gives the client back — straight from «На ОТХ»
-    or after a closed stage set by mistake (no other way to link it again); a closed stage keeps it unlinked."""
+    or after a closed stage set by mistake (no other way to link it again); a closed stage keeps it unlinked. Back to work, an unsigned agreement of the
+    return is over (review 2026-11-05: a later «На возврат» is a new one); a closed stage keeps it, its undo comes back."""
     if stage["code"] not in ("oth", orders.RETURN_GIVEN) and stage["kind"] == "open":      # «На возврат»: the goods go back, no client
         reattach(conn, card["id"], now, author)
+        if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount:
+            orders.add_event(conn, card["id"], now, author, "field", "Согласование возврата снято: заказ снова в работе")
 
 
 _STOCK_SQL = ("SELECT i.id, i.order_id, i.goods_id, i.code, i.name, i.qty, c.point_id, COALESCE(p.name, ''), c.entered_at, c.reserve_until, "
@@ -911,6 +914,8 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
     key = _item_key(item["item_id"], item["since"])
     if key in item_marks(conn):
         return False
+    if item["returned_qty"] and not store_value(conn, key):                          # one row of oth_return: _HELD_SQL would take the real return for a mark
+        raise OthError("У позиции уже есть отметка «возвращено поставщику»: снимите её или верните остаток той же кнопкой.")
     conn.execute("DELETE FROM app_state WHERE key = ?", (key,))                       # a task closed earlier in this stay: the mark is over
     mark = {"qty": pieces, "at": now, "by": who, "task": 0}
     if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(mark, ensure_ascii=False))).rowcount != 1:
