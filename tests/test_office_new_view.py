@@ -164,6 +164,8 @@ def test_the_chats_are_two_columns_and_keep_the_hooks_of_app_js(w):
     assert 'action="/chats/%d/assign"' % w["chat"] in html and 'action="/chats/%d/status"' % w["chat"] in html
     assert 'action="/chats/%d/stage"' % w["chat"] in html and "data-item-find" in html and 'action="/chats/%d/wait"' % w["chat"] in html
     assert "Можно в субботу?" in html
+    tasks_block = html.split('class="chat-wait o2-panel-tasks"', 1)[1].split("</details>", 1)[0]      # «Задачи» of the chat, folded: the chat stays in sight
+    assert 'action="/tasks/new"' in tasks_block and 'name="chat_row" value="%d"' % w["chat"] in tasks_block
 
 
 def test_the_catalog_has_the_filters_in_rows_the_season_tags_and_the_bulk_panels(w):

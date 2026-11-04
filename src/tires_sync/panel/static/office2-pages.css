@@ -79,7 +79,11 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2 .o2-panel-side .chat-pick{border-top:0;padding-top:0}
 .o2 .o2-cl-panel .suggest{left:auto;right:0;width:min(440px,60vw)}   /* the panel has no scroll of its own: the list is never clipped */
 .o2-panel-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-top:8px}
-.o2-panel-foot>*{flex:1 1 320px;min-width:0}
+.o2-panel-foot>*{flex:0 1 auto;min-width:0}
+.o2-panel-foot>[open]{flex:1 1 100%}
+.o2-panel-tasks>summary{list-style:none;display:inline-flex}
+.o2-panel-tasks>summary::-webkit-details-marker{display:none}
+.o2-panel-tasks .entity-sec{margin-top:8px}
 .o2-panel-foot .chat-wait>summary{list-style:none;display:inline-flex}
 .o2-panel-foot .chat-wait>summary::-webkit-details-marker{display:none}
 
@@ -205,6 +209,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-tk-empty{text-align:center;padding:32px 16px!important}
 .o2-tk-modal{width:min(760px,96vw);max-width:none}
 .o2-tk-modal form{align-items:flex-end}
+.o2-tk-modal form .field.grow{flex:1 1 100%}          /* «Текст» and «Комментарий» on lines of their own */
 
 /* ── Что нового: a timeline ─────────────────────────────────────────────────────────────────────────────────────────── */
 .o2-wn{display:flex;flex-direction:column;gap:16px;max-width:980px}
