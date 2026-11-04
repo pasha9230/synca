@@ -77,7 +77,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-panel-row p{margin:0}
 .o2 .o2-kv{margin:0}
 .o2 .o2-panel-side .chat-pick{border-top:0;padding-top:0}
-.o2 .o2-cl-panel .suggest{left:auto;right:0;width:min(440px,60vw)}   /* the panel has no scroll of its own: the list is never clipped */
+.o2 .o2-cl-panel .suggest{left:auto;right:0;width:min(440px,40vw)}   /* the panel has no scroll of its own: the list is never clipped */
 .o2-panel-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-top:8px}
 .o2-panel-foot>*{flex:0 1 auto;min-width:0}
 .o2-panel-foot>[open]{flex:1 1 100%}
@@ -105,7 +105,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-cl-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--o2-text-3)}
 .o2-cl-empty .i{width:40px;height:40px}
 @media (max-width:1100px){
-  .o2 .chats-layout.o2-cl,.o2 .chats-layout.o2-cl.is-deal-folded{grid-template-columns:320px minmax(0,1fr)}
+  .o2 .chats-layout.o2-cl,.o2 .chats-layout.o2-cl.is-deal-folded{grid-template-columns:280px minmax(0,1fr)}
   .o2-panel-body{grid-template-columns:minmax(0,1fr)}
 }
 
@@ -206,6 +206,12 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-tk-acts{min-width:170px;text-align:right}
 .o2-tk-acts form.row{flex-wrap:wrap;justify-content:flex-end}
 .o2-tk-acts .input{width:100%!important;min-width:0}
+@media (max-width:1100px){                          /* 1024: the actions stay in sight, the cells wrap */
+  .o2-tk-what{min-width:120px}
+  .o2-tk-acts{min-width:120px}
+  .o2 .o2-tk-list td.nowrap,.o2 .o2-tk-list th{white-space:normal}
+  .o2 .o2-tk-list td,.o2 .o2-tk-list th{padding-left:8px;padding-right:8px}
+}
 .o2-tk-empty{text-align:center;padding:32px 16px!important}
 .o2-tk-modal{width:min(760px,96vw);max-width:none}
 .o2-tk-modal form{align-items:flex-end}
