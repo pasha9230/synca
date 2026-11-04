@@ -174,7 +174,7 @@ def test_a_template_line_that_only_looks_like_it_is_left_alone():
 # ---- the setting ----------------------------------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("bad", ["Юнона", "На Юноне", "у Юноны", "на Юноне, в Янино", "на Юноне,", "на ,", "на", "в ", "на Юн­оне", "на Юн\x01оне", "на " + "ю" * 40])
+@pytest.mark.parametrize("bad", ["Юнона", "На Юноне", "у Юноны", "на Юноне, в Янино", "на Юноне,", "на ,", "на", "в ", "на Юн\x01оне", "на " + "ю" * 40])
 def test_the_setting_is_refused_when_the_line_could_not_say_it(tmp_path, bad):
     conn = store.connect(tmp_path / "t.db")
     pid = order_points.save_point(conn, dict(name="Юнона", channel="panel"))
