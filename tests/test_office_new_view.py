@@ -161,7 +161,7 @@ def test_the_chats_are_two_columns_and_keep_the_hooks_of_app_js(w):
     assert bar.endswith('</span></div>\n</div>\n')                                 # and puts the fresh rows right after the bar
     assert 'class="o2-chip is-on"' in html and ">Ждут ответа</a>" in html                      # the state as chips
     assert 'class="card-head chat-head o2-cl-head"' in html and 'class="chat-thread o2-cl-msgs"' in html
-    assert 'class="chats-deal o2-cl-panel" id="chats-deal"' in html and "data-deal-fold" in html and "data-deal-unfold" in html
+    assert 'class="chats-deal o2-cl-panel" id="chats-deal"' in html and "data-order-panel" in html     # a panel on the right (the owner 2026-11-04), no folding
     assert 'action="/chats/%d/send"' % w["chat"] in html and "data-photo-form" in html and 'name="reply_token"' in html
     assert 'action="/chats/%d/assign"' % w["chat"] in html and 'action="/chats/%d/status"' % w["chat"] in html
     assert 'action="/chats/%d/stage"' % w["chat"] in html and "data-item-find" in html and 'action="/chats/%d/wait"' % w["chat"] in html
