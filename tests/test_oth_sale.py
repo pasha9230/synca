@@ -627,6 +627,14 @@ def test_the_new_variable_passes_the_check_and_an_unknown_one_still_does_not(tmp
         order_templates.add_template(conn, "Свой 2", "manager", "{items_row}")
 
 
+def test_the_lines_of_a_note_stay_lines_on_the_workplace_of_the_new_view():
+    """point2/mypoint.html has point2.css only: without its own rule the block of the note runs together in one paragraph."""
+    from pathlib import Path
+    from tires_sync import panel
+    css = (Path(panel.__file__).parent / "static" / "point2.css").read_text(encoding="utf-8")
+    assert re.search(r"\.p2w \.mp-note-text\{[^}]*white-space:pre-line", css)
+
+
 def oth_sale_template():
     from tires_sync import order_templates
     return order_templates.OTH_POINT_SAMPLE[0]

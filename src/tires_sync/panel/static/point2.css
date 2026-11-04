@@ -126,6 +126,7 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .p2w .mp-facts dd{margin:0}
 .p2w .mp-tel{font-weight:600;font-size:15px}
 .p2w .mp-text{white-space:pre-line;font-size:13px;color:var(--p2-text-2)}
+.p2w .mp-note-text{white-space:pre-line;overflow-wrap:anywhere}
 .p2w .mp-until--late{color:var(--p2-err);font-weight:500}
 .p2-hints{margin-top:12px}
 
