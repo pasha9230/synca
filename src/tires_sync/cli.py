@@ -934,7 +934,7 @@ def _avito_client(args, write: bool):
 def _record_state(conn, account, folder: Path) -> None:
     feed_bytes = (folder / "avito_feed.xml").read_bytes()
     if account["feed_mode"] == "mirror" and not store.pending_matches(conn, account["id"], feed_bytes):
-        oth_manual.published_without_plan(conn, account["id"])
+        oth_manual.published_without_plan(conn, account["id"], feed_bytes)
         return                                    # a plan left by another feed (an older cycle) is not this feed's plan
     if not store.has_pending(conn, account["id"]):
         print("предупреждение: нет ожидающего состояния цикла, учёт опубликованного не обновлён")

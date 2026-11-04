@@ -221,10 +221,13 @@ def publish_carried(conn, account_id: int, published_feed: bytes) -> None:
         _set(conn, CARRIED_KEY % int(account_id), json.dumps(found["ids"], ensure_ascii=False))
 
 
-def published_without_plan(conn, account_id: int) -> None:
-    """A mirror's file went out with no plan of new positions: only those ads carry pieces, so the feed shows none. Commits."""
-    if carried_by(conn, account_id):
-        _set(conn, CARRIED_KEY % int(account_id), "{}")
+def published_without_plan(conn, account_id: int, published_feed: bytes) -> None:
+    """A mirror's file went out with no plan of new positions: only those ads carry pieces, so the feed shows none; unless it is the feed of
+    the last cycle published again (the plan went with its first publication, the draft stays). Commits."""
+    found = _next(conn, account_id)
+    ids = found["ids"] if found is not None and found.get("sha") == _feed_sha(published_feed) else {}
+    if carried_by(conn, account_id) != ids:
+        _set(conn, CARRIED_KEY % int(account_id), json.dumps(ids, ensure_ascii=False))
         conn.commit()
 
 

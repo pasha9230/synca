@@ -701,3 +701,33 @@ def test_a_mirror_published_without_its_new_positions_shows_no_pieces(tmp_path):
     cli._record_state(conn, {"id": 1, "feed_mode": "mirror"}, tmp_path)
     assert oth_manual.carried_by(conn, 1) == {}
     conn.close()
+
+
+def test_a_mirror_published_again_with_the_same_feed_keeps_what_it_shows(tmp_path):
+    """The plan went with the first publication; the same draft published by hand has no plan and the same ads."""
+    from tires_sync import cli
+    conn = connect(tmp_path)
+    oth_manual.remember_carried(conn, 1, {"G": "104"}, b"cycle")
+    oth_manual.publish_carried(conn, 1, b"cycle")
+    conn.commit()
+    (tmp_path / "avito_feed.xml").write_bytes(b"cycle")
+    cli._record_state(conn, {"id": 1, "feed_mode": "mirror"}, tmp_path)
+    assert oth_manual.carried_by(conn, 1) == {"G": "104"}
+    conn.close()
+
+
+def test_the_publication_of_the_panel_tells_a_mirror_without_a_plan_too(tmp_path, monkeypatch):
+    from tires_sync import connections, publishing
+    conn = connect(tmp_path)
+    oth_manual.remember_carried(conn, 1, {"G": "104"}, b"cycle")
+    oth_manual.publish_carried(conn, 1, b"cycle")
+    conn.commit()
+    folder = tmp_path / "tok"
+    folder.mkdir()
+    (folder / "avito_feed.xml").write_bytes(b"the file alone")
+    monkeypatch.setattr(connections, "list_feed_accounts", lambda c: [{"id": 1, "live": True, "feed_token": "tok", "feed_mode": "mirror"}])
+    monkeypatch.setattr(publishing, "promote_feed", lambda *a, **k: {"new": 1, "old": 1})
+    assert publishing.publish_live_accounts(conn, tmp_path)[0]["ok"] is True
+    assert oth_manual.carried_by(conn, 1) == {}
+    conn.close()
+

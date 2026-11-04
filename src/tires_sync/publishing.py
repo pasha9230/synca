@@ -115,7 +115,7 @@ def publish_live_accounts(conn, feed_root, skip_ids=()) -> List[dict]:
             if store.has_pending(conn, account["id"]) and (account["feed_mode"] != "mirror" or store.pending_matches(conn, account["id"], feed_bytes)):
                 store.commit_pending(conn, account["id"], feed_bytes)
             elif account["feed_mode"] == "mirror":
-                oth_manual.published_without_plan(conn, account["id"])
+                oth_manual.published_without_plan(conn, account["id"], feed_bytes)
             clear_expected(conn)
             results.append({"id": account["id"], "name": name, "ok": True, "skipped": False,
                             "message": "объявлений %d (было %d)" % (done["new"], done["old"])})
