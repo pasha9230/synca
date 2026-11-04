@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from urllib.parse import urlencode
 
-from .routes_design import point_page
+from .routes_design import office_page, point_page
 from .routes_main import context
 from .routes_orders import local_iso, local_now, offer_send, send_offer
 
@@ -366,7 +366,7 @@ def register(app) -> None:
         stages = orders.list_stages(conn)
         if deal and own_point() is not None and deal["id"] in points.own_sales(conn, own_point()):     # its own sale: the four (and where it is)
             stages = [s for s in stages if s["code"] in points.POINT_STAGES or s["id"] == deal["stage_id"]]
-        return render_template(point_page("chats.html"), offer=offer, handoff=handoff, handed=handed, take=take, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=chats.pending_sends(conn, [current["id"]], local_iso()) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
+        return render_template(office_page(point_page("chats.html")), offer=offer, handoff=handoff, handed=handed, take=take, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=chats.pending_sends(conn, [current["id"]], local_iso()) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
                                accounts=accounts, stages=stages, statuses=chats.STATUSES, q=q, answerers=answerers, answer_names=dict(answerers),
                                unsearch="/chats" + ("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every)) if kv[1]]) if (flt or acc or every) else ""), every=every,
                                query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every), ("q", q)) if kv[1]])) if (flt or acc or every or q) else "")

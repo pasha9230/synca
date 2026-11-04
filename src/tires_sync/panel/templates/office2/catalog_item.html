@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{# The card of a position in «Новый вид» (lane port-office-rest): routes draw it instead of catalog_item.html while
+   routes_design.office_new(). Two columns: what the position is (photo, fields, the ads, the competitors, the orders, the ad now) and
+   what is set by hand (own price, «Свой остаток (ОТХ)»). The same blocks, forms and scripts as catalog_item.html. #}
+{% from "_ui.html" import icon %}
+{% import "_entity.html" as entity_ui %}
+{% block title %}{{ entity.title }} · Tires Sync{% endblock %}
+{% block body_class %}o2 o2-item-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
+{% block content %}
+<div class="entity-page o2-item">
+<header>{{ entity_ui.crumbs(entity.crumbs) }}{% if can_post("catalog_wait") %}{% call entity_ui.head(entity) %}<a class="btn btn--secondary btn--sm" href="{{ wait_url }}" title="Клиент ждёт эту шину: заказ на этапе «Ожидает наличие» с именем и телефоном клиента">В лист ожидания</a>{% endcall %}{% else %}{{ entity_ui.head(entity) }}{% endif %}</header>
+{% if entity.out_of_stock %}<div class="flash flash--warn" data-out-of-stock>{{ icon("warn") }}<div class="flash-text"><b>Нет в наличии</b>{% if entity.out_note %}: {{ entity.out_note }}{% endif %}. Ниже последние известные цены и когда позиция последний раз была в наличии.</div></div>
+{% elif not entity.built %}<div class="flash flash--warn">{{ icon("warn") }}<div class="flash-text">Объявление не собирается: {{ entity.reason }}.{% if entity.price_note %} Цена: {{ entity.price_note }}.{% endif %}</div></div>{% endif %}
+<div class="o2-item-cols"><div class="o2-item-main">
+<section class="card card-body"><div class="entity-media">{% if entity.image %}<img src="{{ entity.image }}" alt="" width="160" loading="lazy" referrerpolicy="no-referrer">{% else %}<div class="photo">нет фото</div>{% endif %}
+{{ entity_ui.fields(entity.fields) }}</div></section>
+{% call entity_ui.section("Объявления по аккаунтам", sub="по последнему опубликованному фиду") %}{{ entity_ui.listing([{"key": "account", "label": "Аккаунт"}, {"key": "ad_id", "label": "Id объявления"}, {"key": "price", "label": "Цена", "num": true}, {"key": "point", "label": "Точка"}], entity.ads, "Ни в одном опубликованном фиде этой позиции нет.") }}{% endcall %}
+{% if entity.market is defined %}{% set ms = entity.market.snapshot %}{% call entity_ui.section("Конкуренты", sub="цены на Авито за 1 шт. по последнему прогону парсера; фид и цены от них не меняются") %}<div class="card-body stack" data-market>{% if not ms %}<p class="muted">Данных пока нет: парсер цен ещё не присылал снимков по этой позиции.</p>{% else %}<p class="small">Прогон {{ entity.market.at }} ({{ "утро" if ms.slot == "morning" else "вечер" }}): {% if ms.status == "ok" %}аналогов {{ ms.count }}, мин {{ ms.min|money }}, нижняя четверть {{ ms.q1|money }}, медиана {{ ms.median|money }}, макс {{ ms.max|money }}{% else %}мало данных (аналогов {{ ms.count }}, нужно не меньше трёх){% endif %}{% if ms.note %} <span class="muted">({{ ms.note }})</span>{% endif %}</p>{% if entity.market.listings %}<div class="table-wrap"><table class="table"><thead><tr><th>Объявление</th><th>Продавец</th><th class="num">Цена</th><th class="num">За 1 шт.</th><th>Размещено</th><th>Учтено</th></tr></thead><tbody>{% for l in entity.market.listings %}<tr{% if l.reason %} class="muted"{% endif %}><td>{% if l.url %}<a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">{{ l.title or l.avito_id }}</a>{% else %}{{ l.title or l.avito_id }}{% endif %}</td><td>{{ l.seller }}</td><td class="num">{{ l.price|money }}{% if l.lot > 1 %} <span class="muted xs">за {{ l.lot }} шт.</span>{% endif %}</td><td class="num">{{ l.per_unit|money }}</td><td>{{ l.listed_at|day }}</td><td>{% if l.reason %}нет: {{ l.reason }}{% else %}да{% if l.weight < 1 %} (вес {{ l.weight }}){% endif %}{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% endif %}{% endif %}</div>{% endcall %}{% endif %}
+{% if entity.orders is not none %}{% call entity_ui.section("Заказы с этой позицией") %}{{ entity_ui.listing([{"key": "ref", "label": "№"}, {"key": "client", "label": "Клиент"}, {"key": "stage", "label": "Этап"}, {"key": "qty", "label": "Шт.", "num": true}, {"key": "unit", "label": "Цена за шт.", "num": true}, {"key": "created", "label": "Создан"}], entity.orders, "Заказов с этой позицией нет.") }}{% endcall %}{% endif %}
+{% call entity_ui.section("Объявление сейчас", sub="как оно собралось бы для первого аккаунта") %}<div class="card-body stack">
+<p><b>{{ entity.ad_title }}</b> <span class="muted xs">(Авито может сформировать свой заголовок из бренда, модели и размеров)</span></p>
+<pre style="white-space:pre-wrap;font-family:inherit;margin:0">{{ entity.description }}</pre></div>{% endcall %}
+</div>
+<aside class="o2-item-side">
+{% if entity.own_prices is defined %}{% call entity_ui.section("Своя цена по аккаунтам", sub="вместо процента бренда; применяется через «Применить», как остальные настройки") %}<div class="card-body stack">
+{% for r in entity.own_prices if r.held_by %}<div class="flash flash--warn" data-held-by>{{ icon("warn") }}<div class="flash-text"><b>Эта цена не попадёт на Авито.</b>{% if entity.own_prices|length > 1 %} <span class="muted">({{ r.account }})</span>{% endif %}<br>Объявление этой шины сейчас берёт цену с другой позиции: код {{ r.held_by.code }}{% if r.held_by.where %}, {{ r.held_by.where }}{% endif %}. Чтобы изменить цену на Авито, поставьте её на той позиции.<br><a class="btn btn--secondary btn--sm" href="/catalog/item/{{ r.held_by.goods_id|urlencode }}">Открыть позицию {{ r.held_by.code }}</a></div></div>{% endfor %}
+{% if entity.own_gone %}<p class="small" data-own-gone>Позиции нет у поставщика. Цену продажи в рублях можно поставить всегда, процент — {% if entity.purchase and entity.purchase > 0 %}от последней известной закупки {{ entity.purchase|money }}{% else %}нельзя: последняя закупка неизвестна{% endif %}. На Авито позиция уйдёт, только когда снова появится у поставщика или в своём остатке.</p>{% endif %}
+<table class="table"><thead><tr><th>Аккаунт</th><th class="num">Цена сейчас</th><th class="num">По бренду</th><th>Своя</th></tr></thead><tbody>
+{% for r in entity.own_prices %}<tr><td>{{ r.account }}</td><td class="num">{% if r.price is not none %}<b>{{ r.price|money }}</b>{% else %}—{% endif %}{% if r.below %} <span class="badge badge--err" title="Своя цена ниже закупки: цена держится, как вы поставили">ниже закупки</span>{% endif %}</td><td class="num">{% if r.brand_price is not none %}{{ r.brand_price|money }}{% else %}—{% endif %}</td><td>{{ r.own_text or "по настройкам фида" }}{% if r.pending %} <span class="badge badge--pend">не применено</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+{% if can_post("catalog_own_price") and entity.own_prices %}<form method="post" action="/catalog/item/{{ entity.goods_id|urlencode }}/own-price" class="stack" data-own-price data-purchase="{{ entity.purchase }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div><label><input type="radio" name="kind" value="pct" checked> % к закупке</label> <label><input type="radio" name="kind" value="price"> цена продажи, ₽</label></div>
+<div><input class="input" name="value" inputmode="decimal" autocomplete="off" placeholder="например 12,5 или 6990" aria-label="Значение"> <span class="muted" data-own-result></span></div>
+<div>На аккаунтах: {% for r in entity.own_prices %}<label><input type="checkbox" name="a" value="{{ r.account_id }}"{% if loop.first %} checked{% endif %}> {{ r.account }}</label> {% endfor %}<span class="muted xs">— отметьте, где включить ту же цену</span></div>
+<div><button class="btn btn--primary btn--sm" name="action" value="save">В черновик</button> <button class="btn btn--secondary btn--sm" name="action" value="clear" title="Убрать свою цену: цена снова считается по % бренда и сезона; {% for r in entity.own_prices if r.own %}{{ r.account }}: было {{ r.price|money if r.price is not none else "—" }} → станет {{ r.brand_price|money if r.brand_price is not none else "—" }}{% if not loop.last %}; {% endif %}{% endfor %}" data-own-reset>Вернуть цену по настройкам фида</button></div>
+</form><script src="{{ url_for('static', filename='own_price.js') }}"></script>{% endif %}</div>{% endcall %}{% endif %}
+{% include "_oth_manual.html" %}
+</aside></div>
+</div>
+{% if wait %}{% include "_catalog_wait.html" %}{% endif %}
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{# «Каталог» of the office in «Новый вид» (lane port-office-rest; the prototype's index renderCatalog): routes draw it instead of
+   catalog.html while routes_design.office_new(). The filters in two rows, the sort and the page size as segments, the table of
+   office2/_catalog_table.html; the same fields, forms, ids and scripts as catalog.html (app.js: #items, #stage, #bulk, #bulk-price, #pv). #}
+{% from "_ui.html" import icon, season %}
+{% from "office2/_o2.html" import stud %}
+{% block title %}Каталог · Tires Sync{% endblock %}
+{% block page_class %} page--wide{% endblock %}
+{% block body_class %}o2 o2-catalog-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Каталог</h1><p class="sub">Все позиции поставщика и то, попадают ли они в фид. Здесь можно вручную добавить или снять отдельную позицию. Наценки и публикация брендов: <a href="/settings/brands">Настройки → Бренды и наценки</a>, сопоставление моделей: <a href="/mappings">Сопоставления</a>.</p></div>
+<div class="actions">{% if can_post("feed_update_fetch") %}<form method="post" action="/feed/update/fetch" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary" title="Скачать выгрузку поставщика, показать изменения, обновить фид и запустить загрузку на Авито">{{ icon("refresh") }}Принудительная синхронизация</button></form>{% endif %}</div></header>
+{% if supplier_tabs %}<nav class="tabs o2-tabs">{% for t in supplier_tabs %}<a{% if t.on %} class="is-active"{% endif %} href="{{ t.url }}">{{ t.label }} <span class="badge badge--neutral">{{ t.count }}</span></a>{% endfor %}</nav>{% endif %}
+<section class="card o2-cat-filters">
+<form method="get" action="/catalog" class="filters o2-filters" data-autosubmit>
+<input type="hidden" name="o" value="{{ sort }}">{% if descending %}<input type="hidden" name="r" value="1">{% endif %}{% if sup %}<input type="hidden" name="sup" value="{{ sup }}">{% endif %}{% if page_size != 100 %}<input type="hidden" name="n" value="{{ page_size }}">{% endif %}
+<div class="o2-frow o2-frow--1"><div class="field"><span class="label">Размер</span><div class="ig">
+<input name="w" value="{{ size.w }}" title="Можно несколько значений через пробел, например 225 205 195: покажутся все сочетания" placeholder="Шир." aria-label="Ширина" list="dl-w" inputmode="numeric"><span class="ig-sep">/</span>
+<input name="h" value="{{ size.h }}" title="Можно несколько значений через пробел, например 55 60" placeholder="Проф." aria-label="Профиль" list="dl-h" inputmode="numeric"><span class="ig-sep">R</span>
+<input name="d" value="{{ size.d }}" title="Можно несколько значений через пробел, например 16 17" placeholder="Диам." aria-label="Диаметр" list="dl-d" inputmode="numeric"></div></div>
+<div class="field o2-fwide"><span class="label">Размеры</span><input class="input" name="size" value="{{ size_text }}" placeholder="205/55R16 225/45R18" title="Несколько размеров целиком через пробел, как в каталоге клиента">{% if size_unknown %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}</div>
+<datalist id="dl-w">{% for v in size_options.w %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-h">{% for v in size_options.h %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-d">{% for v in size_options.d %}<option value="{{ v }}">{% endfor %}</datalist>
+<div class="field o2-fwide"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ q }}" placeholder="Размер, название, артикул" title="Например: 205/55 R16, Ikon, часть названия или артикул"></div></div></div>
+<div class="o2-frow o2-frow--2"><div class="field"><span class="label">Сезон</span><div class="seg">
+<label><input type="radio" name="s" value=""{% if not season %} checked{% endif %}>Все</label>
+<label title="Лето"><input type="radio" name="s" value="summer"{% if season == "summer" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span>Лето</label>
+<label title="Зима"><input type="radio" name="s" value="winter"{% if season == "winter" %} checked{% endif %}><span class="ico-snow">{{ icon("snow") }}</span>Зима</label></div></div>
+<div class="field"><span class="label">Шипы</span><div class="seg">
+<label><input type="radio" name="t" value=""{% if not studs %} checked{% endif %}>Все</label>
+<label><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}>{{ stud() }}Шипы</label>
+<label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div></div>
+<div class="field o2-fsel"><span class="label">Статус</span><select class="select" name="st"><option value=""{% if status == "all" %} selected{% endif %}>Все</option><option value="feed"{% if status == "feed" %} selected{% endif %}>В фиде</option><option value="no"{% if status == "no" %} selected{% endif %}>Не в фиде</option><option value="nopair"{% if status == "nopair" %} selected{% endif %}>Нет пары</option><option value="problem"{% if status == "problem" %} selected{% endif %}>Проблемы</option><option value="gone"{% if status == "gone" %} selected{% endif %}>Нет у поставщика</option></select></div>
+{% if has_right("money") %}<div class="field"><span class="label">Цены</span><label class="check" title="Только позиции, у которых стоит своя цена хотя бы на одном аккаунте (применённая или в черновике), любой бренд и поставщик, в том числе ушедшие от поставщика"><input type="checkbox" name="own" value="1"{% if own_only %} checked{% endif %}> Ручные цены</label></div>{% endif %}
+{% if market_on %}<div class="field o2-fsel"><span class="label">Рынок</span><select class="select" name="mk"><option value="">Все</option><option value="over"{% if market_over %} selected{% endif %}>Дороже рынка</option></select></div>{% endif %}
+<div class="field"><span class="label">Бренды</span><details class="brand-pick" data-no-autosubmit><summary class="select">{% if chosen_brands %}{{ chosen_brands|length }} {{ plural(chosen_brands|length, "бренд", "бренда", "брендов") }}{% else %}Все{% endif %}{% if without_brands %} · кроме {{ without_brands|length }}{% endif %}</summary>
+<div class="brand-pick-body"><div class="row small muted"><span class="grow">Бренд</span><span>Показать</span><span>Кроме</span></div>
+{% for c in brand_choices %}<div class="row"><span class="grow">{{ c.label }} <span class="muted xs">{{ c.count }}</span></span><label class="check" title="Показать только отмеченные бренды"><input type="checkbox" name="b" value="{{ c.key }}"{% if c.key in chosen_brands %} checked{% endif %} aria-label="Показать {{ c.label }}"></label><label class="check" title="Не показывать этот бренд"><input type="checkbox" name="xb" value="{{ c.key }}"{% if c.key in without_brands %} checked{% endif %} aria-label="Кроме {{ c.label }}"></label></div>{% endfor %}
+<button class="btn btn--secondary btn--sm">Показать</button> <span class="muted xs">Только вид каталога: фид не меняется.</span></div></details></div>
+<noscript><button class="btn btn--secondary">Показать</button></noscript>
+<a class="btn btn--secondary o2-reset" href="/catalog{% if sup %}?sup={{ sup }}{% endif %}">Сбросить</a></div>
+</form>
+</section>
+{% if market_on and can_post("catalog_market_token") %}<details class="card" data-market-parser style="margin-top:12px"><summary class="card-head"><h3>Парсер цен конкурентов</h3><span class="muted small">{{ "приём снимков остановлен" if market_stopped else "приём снимков включён" }}</span></summary><div class="card-body stack"><p class="muted small">Парсер работает на Маке и присылает сюда цены конкурентов по нашим позициям. Сервер сам к Авито не ходит, фид и цены от этого не меняются.</p><div class="row"><form method="post" action="/catalog/market-token" class="inline" data-once data-confirm-title="Выпустить новый токен?" data-confirm="Прежний токен парсера перестанет работать." data-confirm-ok="Выпустить"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Выпустить токен парсера</button></form> <form method="post" action="/catalog/market-switch" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stop" value="{{ '0' if market_stopped else '1' }}"><button class="btn btn--secondary btn--sm">{{ "Включить приём" if market_stopped else "Остановить приём" }}</button></form></div></div></details>{% endif %}
+{% if feed_brands is not none %}{% for sid in feed_brands|map(attribute="supplier")|unique %}<form id="brand-feed-{{ sid }}" method="post" action="/connections/suppliers/{{ sid }}/excluded" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}"></form>{% endfor %}
+<details class="card" data-feed-brands style="margin-top:12px"><summary class="card-head"><h3>Бренды в фиде</h3><span class="muted small">Снять бренд с фида или вернуть его: как на «Настройки → Исключения». Правка ложится в черновик и применяется кнопкой «Применить» в полосе сверху.</span></summary>
+<div class="card-body"><table class="table"><thead><tr><th>Бренд</th><th class="num">Позиций</th><th>Состояние</th><th></th></tr></thead><tbody>
+{% for r in feed_brands %}<tr><td>{{ r.bare }}{% if r.supplier_name %} <span class="muted xs">· {{ r.supplier_name }}</span>{% endif %}</td><td class="num">{{ r.count }}</td><td>{% if r.state %}<span class="badge {{ 'badge--pend-soft' if 'не примен' in r.state else 'badge--neutral' }}">{{ r.state }}</span>{% endif %}</td>
+<td>{% if r.off %}<button class="btn btn--secondary btn--xs" form="brand-feed-{{ r.supplier }}" name="remove" value="{{ r.key }}" data-brand-on="{{ r.key }}">Вернуть в фид</button>{% else %}<button class="btn btn--danger-outline btn--xs" form="brand-feed-{{ r.supplier }}" name="brand" value="{{ r.bare }}" data-brand-off="{{ r.key }}">Снять с фида</button>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></details>{% endif %}
+<div id="items" data-url="{{ table_url }}">{% include "office2/_catalog_table.html" %}</div>
+
+
+{# the buttons by rights: «менять» in the catalog puts a position in or out by hand, «отправлять клиенту» makes a link for the client #}
+{% if can_post("catalog_stage") %}<form id="stage" method="post" action="/catalog/stage" data-ajax data-scope="page" hidden><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}"></form>{% endif %}
+{% if can_post("catalog_stage") or can_post("share_new") %}<form id="bulk" method="post" action="{{ '/catalog/stage' if can_post('catalog_stage') else '/shares/new' }}" class="bulkbar o2-bulkbar" data-ajax data-scope="bulk" hidden>
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next_url }}">{% if feed_accounts %}<button class="sr-only" tabindex="-1" aria-hidden="true" formaction="/catalog/own-price/bulk" name="action" value="save">Посмотреть</button>{% endif %}{# Enter in the percent of «Своя цена выбранным» presses the first button of «bulk»: the price, never «Снять выбранные» #}
+<b><span data-count>0</span> выбрано</b><span class="sep"></span>
+{% if can_post("catalog_stage") %}<button name="bulk" value="off" class="btn btn--danger-outline btn--sm">Снять выбранные</button>
+<button name="bulk" value="on" class="btn btn--secondary btn--sm">Добавить вручную выбранные</button>
+<button name="bulk" value="clear" class="btn btn--secondary btn--sm" title="Ручные добавления и снятия у выбранных отменятся: позиции снова пойдут по правилам фида">Вернуть выбранные по правилам</button>{% endif %}
+{% if feed_accounts %}<button type="button" class="btn btn--secondary btn--sm" data-open-modal="bulk-price">Своя цена выбранным…</button>{% endif %}
+{% if can_post("share_new") %}<button type="submit" formaction="/shares/new" class="btn btn--primary btn--sm" title="Страница для клиента: фото, название, характеристики и цена продажи">{{ icon("send", "i-sm") }}Ссылка для клиента</button>{% endif %}
+<button type="button" id="bulk-clear" class="btn btn--ghost btn--sm">Снять выделение</button>
+</form>{% endif %}
+{# «Своя цена выбранным» (the owner 2026-10-30): one markup or markdown in % to the purchase for the ticked positions or all of the filter; its
+   fields belong to the form «bulk» (the ticks are there), «В черновик» posts it to its own page. No field is required: the other buttons of
+   «bulk» post the same form. #}
+{% if feed_accounts %}<div class="modal-backdrop" id="bulk-price" role="dialog" aria-modal="true" aria-labelledby="bulk-price-h"><div class="modal">
+<div class="modal-head"><h3 id="bulk-price-h">Своя цена выбранным</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
+<div class="modal-body stack">
+<p class="small">«% от закупки» остаётся процентом к закупке, как своя цена в карточке: «+5 % к закупке» при закупке 5 000 ₽ — 5 250 ₽ в фиде, цена идёт за закупкой. Всё остальное («+300 ₽ от закупки», «−5 % от своей цены») ставится готовой ценой в рублях. Итог вверх до десятков, на каждом аккаунте свой.</p>
+<fieldset class="field"><legend class="label">От чего считать</legend><div class="row" style="gap:var(--s-3)">
+<label><input type="radio" name="base" value="purchase" form="bulk" checked> от закупки</label><label title="Текущая своя цена позиции на этом аккаунте; у кого своей цены нет — пропускаются"><input type="radio" name="base" value="own" form="bulk"> от своей цены</label></div></fieldset>
+<fieldset class="field"><legend class="label">Что сделать</legend><div class="row" style="gap:var(--s-3)">
+<label><input type="radio" name="side" value="up" form="bulk" checked> наценка (+)</label><label><input type="radio" name="side" value="down" form="bulk"> уценка (−)</label>
+<label><input type="radio" name="unit" value="pct" form="bulk" checked> в %</label><label><input type="radio" name="unit" value="rub" form="bulk"> в ₽</label></div></fieldset>
+<label class="field"><span class="label">Сколько (% не больше {{ bulk_pct_max }}, ₽ не больше {{ bulk_rub_max }})</span><input class="input input--num" name="value" form="bulk" inputmode="decimal" placeholder="5" autocomplete="off"></label>
+<fieldset class="field"><legend class="label">Аккаунты</legend><div class="row" style="gap:var(--s-3);flex-wrap:wrap">{% for a in feed_accounts %}<label><input type="checkbox" name="a" value="{{ a.id }}" form="bulk"{% if loop.first %} checked{% endif %}> {{ a.name }}</label>{% endfor %}</div><span class="hint">отметьте, где включить ту же цену</span></fieldset>
+<label class="row owin-check"><input type="checkbox" name="redo" value="1" form="bulk"><span>«От закупки»: изменить и позиции, у которых уже есть своя цена (иначе они не тронуты)</span></label>
+<label class="row owin-check"><input type="checkbox" name="all" value="1" form="bulk"><span>Все {{ total }} по фильтру, не только отмеченные (не больше {{ bulk_limit }})</span></label>
+<input type="hidden" name="filter" value="{{ filter_query }}" form="bulk"><input type="hidden" name="total" value="{{ total }}" form="bulk"><input type="hidden" name="fp" value="{{ filter_fp }}" form="bulk">
+<p class="small muted">Сначала покажем «было → стало» по каждой позиции и аккаунту, оттуда — в черновик; на Авито ничего не изменится, пока вы не нажмёте «Применить». Ниже закупки или дальше 30 % от цены фида — нужно подтвердить ещё раз. Ушедшие от поставщика позиции считаются от последней известной закупки.</p>
+</div>
+<div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Отмена</button>
+<button form="bulk" formaction="/catalog/own-price/bulk" name="action" value="clear" class="btn btn--secondary" title="Убрать свою цену у выбранных на отмеченных аккаунтах: цена снова считается по % бренда и сезона; «было → стало» покажем до черновика" data-own-reset>Вернуть цену по настройкам фида</button>
+<button form="bulk" formaction="/catalog/own-price/bulk" name="action" value="save" class="btn btn--primary">Посмотреть «было → стало»</button></div>
+</div></div>{% endif %}
+{% if wait %}{% include "_catalog_wait.html" %}{% endif %}
+{% if can_post("catalog_own_price_inline") %}<script src="{{ url_for('static', filename='own_price.js') }}"></script>{% endif %}
+<div class="modal-backdrop" id="pv"><div class="modal"><div class="modal-head"><h3>Предпросмотр объявления</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div><div class="modal-body" id="pvbody"></div><div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Закрыть</button></div></div></div>
+{% endblock %}

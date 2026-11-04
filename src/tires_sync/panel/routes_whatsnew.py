@@ -9,7 +9,7 @@ from flask import current_app, g, make_response, render_template
 
 from .. import users, whatsnew
 from .common import current_user, get_conn, now_iso
-from .routes_design import point_page
+from .routes_design import office_page, point_page
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +45,6 @@ def register(app) -> None:
             g.whatsnew_dot = False
         except Exception:                                                    # a busy database: the page still opens, the dot stays
             log.exception("whatsnew: the mark of %s not saved", user["login"])
-        response = make_response(render_template(point_page("whatsnew.html"), **values))
+        response = make_response(render_template(office_page(point_page("whatsnew.html")), **values))
         response.headers["Cache-Control"] = "private, no-store"
         return response
