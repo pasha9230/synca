@@ -138,6 +138,15 @@ def register(app) -> None:
         `?point=<id>` shows one point (both lists)."""
         conn = get_conn()
         data = order_oth.stock(conn)
+        dates, marks = order_oth.reserve_dates(conn), order_oth.item_marks(conn)
+        codes = {r[0]: r[1] for r in conn.execute("SELECT c.id, s.code FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_given')")}
+        agreed = order_oth.plans(conn)
+        for row in data["stock"]:
+            when = dates.get(row["order_id"], {})
+            on_oth = codes.get(row["order_id"]) == "oth"
+            mark = order_oth.item_mark(marks, row["item_id"], row["since"]) if on_oth else None
+            row.update(arrived=when.get("arrived", ""), reserve_last=when.get("until", ""), to_return=mark,
+                       can_to_return=on_oth and mark is None and row["order_id"] not in agreed)
         own = manual_list(conn)
         test = oth_stock._test_points(conn)
         places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"] and r["point_id"] not in test}
@@ -148,6 +157,21 @@ def register(app) -> None:
             data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
             own = [r for r in own if r["point_id"] == point]
         return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, **data)
+
+    @app.route("/oth/to-return", methods=["POST"])
+    @login_required
+    def oth_to_return():
+        """«На возврат» of one position (the owner 2026-11-04, order_oth.item_to_return): the order stays on «На ОТХ»; the label and the task."""
+        from .routes_orders import local_iso                              # Moscow time: the due date of the task and the journal
+        conn = get_conn()
+        try:
+            if order_oth.item_to_return(conn, int(request.form.get("item") or 0), local_iso(), author(), request.form.get("qty")):
+                flash("Позиция на возврат: метка «Согласуем», ответственному поставлена задача. Шины в продаже до отметки «Вернуть поставщику».")
+            else:
+                flash("Эта позиция уже на возврат.")
+        except (order_oth.OthError, ValueError) as err:
+            flash(str(err) if isinstance(err, order_oth.OthError) else "Неизвестная позиция.")
+        return redirect("/oth")
 
     @app.route("/oth/return", methods=["POST"])
     @login_required

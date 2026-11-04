@@ -975,6 +975,7 @@ def _fire_rules(conn, card_id, now: str, chain: tuple, of_point=None) -> None:
 RESERVE_DAYS = 3                                 # the point keeps the reservation three days from the day the goods arrive there
 OTH_ENTERED = "На ОТХ: шины на точке, срока продажи нет"     # the owner 2026-10-30: whether they go back to the supplier is the owner's call
 OTH_MARKS = ("На ОТХ: срок продажи до %", OTH_ENTERED)       # the record of entering «На ОТХ», before 2026-10-30 (with a date) and since
+RESERVE_WAS = "Резерв был до %s"                             # the date cleared on entering «На ОТХ»: its column «Крайняя дата резерва» (order_oth.reserve_dates)
 
 
 def _start_reserve(conn, card: dict, now: str, author: str) -> None:
@@ -997,6 +998,8 @@ def _start_oth(conn, card: dict, now: str, author: str) -> None:
     """The client refused and we bought the goods out: they lie at the point with no time to sell them (the owner 2026-10-30: whether they
     go back to the supplier is the owner's call). The reservation date left from «Товар на точке» says nothing about this stay: cleared.
     The client refused: the order is no longer theirs (order_oth.detach), the goods are our stock."""
+    if card["reserve_until"]:
+        add_event(conn, card["id"], now, author, "field", RESERVE_WAS % card["reserve_until"])
     conn.execute("UPDATE order_card SET reserve_until = '' WHERE id = ?", (card["id"],))
     add_event(conn, card["id"], now, author, "field", OTH_ENTERED)
     from . import order_oth
@@ -1220,6 +1223,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     from . import oth_sale, order_oth
     stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке» (open stages only)
     plans = order_oth.plans(conn)                                               # the labels of «На возврат» (2026-11-03)
+    on_oth = order_oth.reserve_dates(conn)                                      # the dates of «На ОТХ» and «На возврат» (2026-11-04)
     intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
@@ -1242,7 +1246,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
-                                      "returning": order_oth.label_of(plans.get(cid)) if state else ""})
+                                      "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid)})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":

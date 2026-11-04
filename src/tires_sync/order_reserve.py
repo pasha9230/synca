@@ -19,6 +19,7 @@ The owner 2026-11-02: the client no longer waits for the point's answer: on the 
 reminder goes by itself (`_client_step`); the point is still asked as before («на точке» / «выдан» on its «Рабочее место»), its «на точке»
 only marks the answer. When the reminder went and the client wrote nothing in that chat for 12 hours (NO_ANSWER), the order goes to «На ОТХ»
 by itself (`_no_answer_step`): not when the date was moved since, the order left «Товар на точке» or the reminder did not go.
+The owner 2026-11-04: that move tells the order's responsible «Позвонить клиенту» with a line of the order's data (order_oth.call_line).
 """
 from __future__ import annotations
 
@@ -319,17 +320,18 @@ def _client_step(conn, card: dict, today: date, now: str, hours, deliver) -> Non
     tell_client(conn, card, deliver, now)
 
 
-def _tell_moved(conn, card: dict, notify: Optional[Notify], now: str) -> None:
+def _tell_moved(conn, card: dict, call: str, notify: Optional[Notify], now: str) -> None:
     """The owner 2026-11-02: the move to «На ОТХ» is told to the point (its «Рабочее место» or VK, as the alerts of the order go to a point)
-    and to its responsible (order_alerts.told_people, the owner 2026-11-03), through the tick's own alerts; each says how it went in the journal (order_notify)."""
+    and to its responsible (order_alerts.told_people, the owner 2026-11-03), through the tick's own alerts; each says how it went in the journal (order_notify).
+    The owner 2026-11-04: the responsible's alert is `call` («Позвонить клиенту»); the point's stays the note."""
     if notify is None:
         return
     from . import order_alerts, order_oth
-    text = message_texts.text(conn, message_texts.MOVED_NOTE, order_label=order_manager.label(card))
+    moved = message_texts.text(conn, message_texts.MOVED_NOTE, order_label=order_manager.label(card))
     for who in [""] + order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)):
         # "": nobody of the staff answers, so the alert goes to the point; then its responsible only (2026-11-03)
         try:
-            notify(dict(card, responsible=who, to_staff=bool(who)), text)
+            notify(dict(card, responsible=who, to_staff=bool(who)), call if who else moved)
         except Exception:                                       # noqa: BLE001 - the move is done; the journal has its record
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the alert of the move to OTH of card %s failed", card["id"])
@@ -380,9 +382,14 @@ def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None)
     if not moved:
         return False
     orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент не ответил за 12 часов на напоминание о сроке резерва: заказ переведён на "
-                     "«%s» %s" % (oth["name"], marker))
+                     "«%s» %s" % (oth["name"], marker), level="grey")         # the one record of the alerts is «Позвонить клиенту»
+    from . import order_oth
+    moved = orders.get_card(conn, card["id"])
+    line = order_oth.call_line(moved, card["reserve_until"])                  # the date as it was: the move clears it
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Позвонить клиенту: %s" % line, level="yellow")
     conn.commit()
-    _tell_moved(conn, orders.get_card(conn, card["id"]), notify, now)
+    call = message_texts.text(conn, message_texts.CALL_CLIENT, order_label=order_manager.label(moved), line=line, link="/orders/%d" % card["id"])
+    _tell_moved(conn, moved, call, notify, now)
     return True
 
 
@@ -407,6 +414,11 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the question of the seventh day on OTH failed")
+    try:
+        order_oth.tell_agree_due(conn, now, notify)           # the owner 2026-11-04: 6 days 12 hours on «На ОТХ», the responsible is told
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the alert of 6 days 12 hours on OTH failed")
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s) AND c.reserve_until != ''"
                                    % ",".join("?" * len(STAGE_CODES)), STAGE_CODES).fetchall():
         try:
