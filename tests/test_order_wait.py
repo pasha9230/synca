@@ -285,7 +285,7 @@ def test_the_publishing_cycle_runs_the_check_and_a_draft_cycle_does_not(tmp_path
     monkeypatch.setattr(cli, "_http", lambda: ScriptedHttp(OK, OK, OK, OK))
     monkeypatch.setattr(cli, "moscow_now", lambda: datetime(2026, 10, 7, 12, 0))
     calls = []
-    monkeypatch.setattr(cli, "_check_waiting", lambda conn, parsed, box=None: calls.append(len(parsed.offers)))
+    monkeypatch.setattr(cli, "_check_waiting", lambda conn, parsed, box=None, ref=None: calls.append(len(parsed.offers)))
     args = ["--db", str(tmp_path / "t.db"), "--unload", str(tmp_path / "unload.xml"), "--reference", str(tmp_path / "reference.txt"),
             "--feed-root", str(tmp_path / "feed"), "--key-file", str(key_file)]
     cli.main(["run-cycle"] + args)

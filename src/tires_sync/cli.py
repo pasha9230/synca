@@ -899,7 +899,7 @@ def _run_cycle(args) -> int:
     if getattr(args, "publish", False):
         _heal_accounts(conn, box, getattr(args, "feed_root", None))
         if not fetch_problems and not tripped:                       # the waiting clients are not judged by a cycle that was stopped or lacked a fresh unload (without --fetch the file is the last one)
-            _check_waiting(conn, parsed, box)
+            _check_waiting(conn, parsed, box, ref)
     try:
         _send_reminders(conn, box)
     except Exception as err:                                      # a reminder must never fail a cycle
@@ -1256,6 +1256,21 @@ def _arrived_alerts(conn, key_file) -> None:
         print("предупреждение: «клиенту не сообщили» не проверено (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
+def _chat_deliver(conn, box, now: str):
+    """A message of the system to the client: (chat row, text, send mark) -> chats.send_reply as the bot's channel (panel.routes_vk.channel),
+    by the chat's own account."""
+    def deliver(chat_row, text, token):
+        chat = chats.get_chat(conn, chat_row)
+        if chat is None:
+            raise chats.ChatError("Чат не найден.")
+        client_id = connections.get_secret(conn, box, "avito", chat["account_id"], "client_id")
+        client_secret = connections.get_secret(conn, box, "avito", chat["account_id"], "client_secret")
+        if not client_id or not client_secret:
+            raise chats.ChatError("У аккаунта не заданы ключи Авито.")
+        chats.send_reply(conn, AvitoClient(client_id, client_secret, http=_http(), now=_epoch, allow_write=True), chat_row, text, token, now, "система")
+    return deliver
+
+
 def _reserve_alerts(conn, key_file) -> None:
     """The responsible manager is told the day before the reservation at the point ends and on the day; on the day the point is asked in VK
     whether the order is still there, and its «на точке» asks the client once in the order's Avito chat (order_reserve). A failure is only a warning."""
@@ -1267,16 +1282,7 @@ def _reserve_alerts(conn, key_file) -> None:
             return
         now = moscow_now().isoformat(timespec="seconds")
 
-        def deliver(chat_row, text, token):                     # as the bot's channel (panel.routes_vk.channel): the chat's own account
-            chat = chats.get_chat(conn, chat_row)
-            if chat is None:
-                raise chats.ChatError("Чат не найден.")
-            client_id = connections.get_secret(conn, box, "avito", chat["account_id"], "client_id")
-            client_secret = connections.get_secret(conn, box, "avito", chat["account_id"], "client_secret")
-            if not client_id or not client_secret:
-                raise chats.ChatError("У аккаунта не заданы ключи Авито.")
-            chats.send_reply(conn, AvitoClient(client_id, client_secret, http=_http(), now=_epoch, allow_write=True), chat_row, text, token, now, "система")
-        made = order_reserve.check(conn, now, lambda card, text: order_notify.deliver(conn, box, card, text, now, tg_http=_http(), vk_http=_http()), deliver,
+        made = order_reserve.check(conn, now, lambda card, text: order_notify.deliver(conn, box, card, text, now, tg_http=_http(), vk_http=_http()), _chat_deliver(conn, box, now),
                                    vk_send.sender_for(conn, box, http=_http()))     # the point is asked first, through the community (2026-10-26)
         print("оповещений о конце резерва: %d" % made)
     except Exception as err:      # noqa: BLE001
@@ -1994,15 +2000,21 @@ def _heal_accounts(conn, box, feed_root) -> None:
         store.set_state(conn, key, json.dumps(codes, ensure_ascii=False))
 
 
-def _check_waiting(conn, parsed, box=None) -> None:
-    """After a publishing cycle: the cards in «Ожидает наличие» are looked at against every offer of every supplier (tags and tasks for the
-    responsible manager; nothing is sent). A failure is only a warning: it never fails a cycle."""
+def _check_waiting(conn, parsed, box=None, ref=None) -> None:
+    """After a publishing cycle: the cards in «Ожидает наличие» are looked at against every offer of every supplier: a client whose tires are
+    all here is written to at the price of the order form, by the account of the chat (order_wait.check); else tags and tasks for the
+    responsible manager. No key or no reference: only the tasks. A failure is only a warning: it never fails a cycle."""
     try:
-        from . import order_notify, order_wait, orders
+        from . import order_notify, order_offers, order_wait, orders
         now = moscow_now().isoformat(timespec="seconds")
         notify = None if box is None else (lambda card_id, title, body: order_notify.deliver(
             conn, box, orders.get_card(conn, card_id), "%s\n%s" % (title, body), now, tg_http=_http(), vk_http=_http()))
-        found = order_wait.check(conn, list(parsed.offers.values()), now, notify=notify)
+
+        def price_of(offer, chat_row):
+            account = order_offers.account_for(conn, chat_row=chat_row)
+            return order_offers.item_args(conn, active_settings(conn), parsed, ref, offer.goods_id, now[:10], account)["sale_unit"]
+        found = order_wait.check(conn, list(parsed.offers.values()), now, notify=notify, deliver=None if box is None else _chat_deliver(conn, box, now),
+                                 price_of=None if ref is None else price_of)
         if found["exact"] or found["analogs"]:
             print("лист ожидания: появилось (заказы %s), есть аналоги (заказы %s)" % (
                 ", ".join(map(str, found["exact"])) or "—", ", ".join(map(str, found["analogs"])) or "—"))

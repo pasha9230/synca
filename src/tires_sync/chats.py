@@ -674,7 +674,7 @@ def _resume_interrupted(conn, client, chat: dict, token: str, now: str, author: 
     return "retaken"
 
 
-OWN_RECORD_TOKENS = ("reserve-",)                 # the order's journal has the green record of these sends already (order_reserve.tell_client):
+OWN_RECORD_TOKENS = ("reserve-", "wait-")         # the order's journal has the green record of these sends already (order_reserve.tell_client, order_wait):
                                                    # no second «Отправлен ответ клиенту» (хвост З18)
 
 
@@ -1204,7 +1204,7 @@ def _claim_by_sync(conn, token: str, status: str, at: str, now: str, **more) -> 
     return done.rowcount == 1
 
 
-AUTO_TOKENS = ("task-", "reserve-", "arrived-")    # the order's own messages (a task, «срок резерва», «можно забирать»)
+AUTO_TOKENS = ("task-", "reserve-", "arrived-", "wait-")    # the order's own messages (a task, «срок резерва», «можно забирать», «появилось в наличии»)
 
 
 def _stopped(conn, chat: dict, token: str) -> str:
@@ -1226,7 +1226,7 @@ def _stopped(conn, chat: dict, token: str) -> str:
             return "задача пропущена" if task["status"] == "skipped" else "задача уже закрыта"
         card_id, stay = task["order_id"], (task["stage_id"], task["entered_at"])
     else:
-        own = re.match(r"(?:reserve|arrived)-(\d+)-", token)
+        own = re.match(r"(?:reserve|arrived|wait)-(\d+)-", token)
         card_id = int(own.group(1)) if own else card_id
         if token.startswith("arrived-"):                              # «можно забирать» that waited in the card (order_engine.task_token)
             from . import order_engine
@@ -1241,6 +1241,8 @@ def _stopped(conn, chat: dict, token: str) -> str:
         return "заказ удалён"
     if stay is not None and (stage[2], stage[3]) == stay:
         return ""                                     # the task of that very stage («Клиенту: заказ отменён» on «Отмена»): it is what the person sent
+    if token.startswith("wait-") and not token.endswith("-" + re.sub(r"\D", "", stage[3] or "")):
+        return "заказ ушёл с этапа ожидания"           # «появилось в наличии» belongs to one stay in the stage (order_wait)
     return "заказ в «%s»" % stage[1] if stage[0] in ("lost", "closed") else ""
 
 
