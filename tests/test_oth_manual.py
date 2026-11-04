@@ -216,6 +216,33 @@ def manual_db(tmp_path, qty=3, point="Бета"):
     return conn
 
 
+def manual_offer(conn, cid):
+    return next(o for o in oth_sale.offers(conn, orders.get_card(conn, cid))[line(conn, cid)["id"]] if o["from_order"] == 0)
+
+
+def test_the_point_text_of_tyres_of_the_own_stock_says_so_and_has_no_number(tmp_path):
+    from tires_sync import order_templates
+    conn = manual_db(tmp_path)
+    cid = new_order(conn, qty=2)
+    oth_sale.take(conn, cid, line(conn, cid)["id"], manual_offer(conn, cid)["from_item"], LATER, "o")
+    card = orders.get_card(conn, cid)
+    assert oth_sale.point_text(conn, card, LATER).startswith("Шины со своего остатка отложены под нового клиента:\n\nNokian 205/55 R16\nКол-во 2\n")
+    assert "заказ №" not in oth_sale.point_text(conn, card, LATER)
+    assert order_templates._oth_orders(conn, cid) == "" and order_oth.act_orders(conn, cid) == ""       # never «заказ №0»: a template of the owner, the card's mark, the act
+
+
+def test_the_point_text_of_tyres_of_an_order_and_of_the_own_stock_names_both(tmp_path):
+    conn = manual_db(tmp_path)
+    old = card_at(conn, "oth", T)
+    cid = new_order(conn, qty=6)
+    offer = next(o for o in oth_sale.offers(conn, orders.get_card(conn, cid))[line(conn, cid)["id"]] if o["from_order"] == old)
+    oth_sale.take(conn, cid, line(conn, cid)["id"], offer["from_item"], LATER, "o")
+    oth_sale.take(conn, cid, line(conn, cid)["id"], manual_offer(conn, cid)["from_item"], LATER, "o")
+    text = oth_sale.point_text(conn, orders.get_card(conn, cid), LATER)
+    number = orders.get_card(conn, old)["webmim_number"]
+    assert text.startswith("Шины с ОТХ (заказ №%s) и со своего остатка отложены под нового клиента:\n\n" % number) and "№0" not in text
+
+
 def test_the_manual_stock_is_offered_after_the_orders_and_taken_and_given_back(tmp_path):
     conn = manual_db(tmp_path)
     old = card_at(conn, "oth", T)                                        # 4 of an order on OTH at «Бета»

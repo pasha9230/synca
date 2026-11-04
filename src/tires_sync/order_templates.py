@@ -14,7 +14,7 @@ VARIABLES = {
     "point_address": "Адрес точки", "manager": "Менеджер", "delivery_date": "Дата доставки", "delivery_time": "Время доставки",
     "items_full": "Позиции подробно", "webmim_number": "Номер заказа WebMIM", "transfer_number": "Номер перемещения", "hold_until": "Резерв до", "order_date": "Дата оформления",
     "point_hours": "График точки", "point_map": "Точка на Яндекс Картах", "oth_orders": "Заказ, с ОТХ которого шины",
-    "items_lines": "Позиции построчно"}
+    "items_lines": "Позиции построчно", "oth_source": "Откуда шины с ОТХ"}
 HOLD_DAYS = 3                                    # the point keeps the reservation three days from the arrival of the goods
 SAMPLES = (
     ("Клиенту: заказ оформлен", "client",
@@ -33,9 +33,9 @@ RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "c
                   "Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — спасибо, "
                   "не обращайте внимания. Если нужно продлить ожидание, напишите нам.")
 # goes to the point when an order whose tyres all come from «На ОТХ» is moved straight to «Товар на точке» (oth_sale, the owner 2026-10-30);
-# the owner's text 2026-11-04, without the panel's number of the new order
+# the owner's text 2026-11-04, without the panel's number of the new order; {oth_source}: «Шины с ОТХ (заказ №…)», «Шины со своего остатка» or both
 OTH_POINT_SAMPLE = ("Точке: шины с ОТХ отложены под клиента", "manager",
-                    "Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента:\n\n{items_lines}\n\n"
+                    "{oth_source} отложены под нового клиента:\n\n{items_lines}\n\n"
                     "Покупатель: {client_name}\nТелефон: {client_phone}\nНе продавать другим, резерв до {hold_until}.")
 # the question to the point on the seventh day of «На ОТХ», a banner of its «Рабочее место» (order_oth.ask_seventh_day, the owner 2026-11-02)
 OTH_ASK_SAMPLE = ("Точке: ОТХ 7-й день", "manager", "Заказ выдали или он на точке?")
@@ -170,7 +170,7 @@ def values(conn, card: dict, now=None) -> dict:
         "delivery_date": _date(card.get("delivery_date", "")) or (IN_STOCK if card.get("in_stock") else ""), "delivery_time": card.get("delivery_time") or point.get("default_time") or "",
         "items_full": full, "webmim_number": card.get("webmim_number", ""), "transfer_number": card.get("transfer_number", ""), "hold_until": hold, "order_date": _order_date(conn, card, now),
         "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or "",
-        "oth_orders": _oth_orders(conn, card["id"]), "items_lines": lines, **_intercity(card)}
+        "oth_orders": _oth_orders(conn, card["id"]), "items_lines": lines, "oth_source": _oth_source(conn, card["id"]), **_intercity(card)}
 
 
 def _intercity(card: dict) -> dict:
@@ -181,19 +181,34 @@ def _intercity(card: dict) -> dict:
             "track_line": "\nТрек-номер: %s" % track if track else ""}
 
 
-def _oth_orders(conn, card_id) -> str:
-    """The orders the tyres «с ОТХ» of the order lie at the point for, by the number the point knows (order_manager.label: WebMIM's, else the
-    panel's) — the first order of a chain, the one the tyres were bought by."""
+def _oth_taken(conn, card_id) -> Tuple[List[str], bool]:
+    """Where the tyres «с ОТХ» of the order come from: the numbers of their orders, as the point knows them (order_manager.label: WebMIM's, else
+    the panel's) — the first order of a chain, the one the tyres were bought by; and whether some are of «Свой остаток (ОТХ)», which has no order."""
     from .oth_sale import first_order
-    found = []
+    found, own = [], False
     for (item_id,) in conn.execute("SELECT t.item_id FROM order_item_oth t JOIN order_item i ON i.id = t.item_id WHERE t.order_id = ? "
                                    "AND t.undone_at = '' AND i.qty >= 1 ORDER BY t.item_id", (card_id,)):     # a position given on (A → B → C) is not here
         first = first_order(conn, item_id)
+        if not first:
+            own = True
+            continue
         row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (first,)).fetchone()
         number = str((row[0] if row else "") or first)
         if number not in found:
             found.append(number)
-    return ", ".join(found)
+    return found, own
+
+
+def _oth_orders(conn, card_id) -> str:
+    """The orders the tyres «с ОТХ» of the order lie at the point for (_oth_taken); never a number for those of the own stock."""
+    return ", ".join(_oth_taken(conn, card_id)[0])
+
+
+def _oth_source(conn, card_id) -> str:
+    """The start of the point's message (the owner 2026-11-04): what the tyres are, by where they come from; '' for an order with none «с ОТХ»."""
+    numbers, own = _oth_taken(conn, card_id)
+    parts = (["с ОТХ (заказ №%s)" % ", ".join(numbers)] if numbers else []) + (["со своего остатка"] if own else [])
+    return "Шины " + " и ".join(parts) if parts else ""
 
 
 def render(conn, card: dict, body: str, now=None, mark: bool = False) -> Tuple[str, List[str]]:
