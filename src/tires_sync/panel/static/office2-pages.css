@@ -214,7 +214,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
   .o2-tk-what{min-width:120px}
   .o2-tk-acts{min-width:120px}
   .o2 .o2-tk-list td.nowrap,.o2 .o2-tk-list th{white-space:normal}
-  .o2 .o2-tk-list td,.o2 .o2-tk-list th{padding-left:8px;padding-right:8px}
+  .o2 .o2-tk-list td,.o2 .o2-tk-list th{padding:6px 8px}
 }
 .o2-tk-empty{text-align:center;padding:32px 16px!important}
 .o2-tk-modal{width:min(760px,96vw);max-width:none}

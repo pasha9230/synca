@@ -4,6 +4,7 @@ templates/office2/; off — the same pages as before. The forms keep their route
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 import pytest
 
@@ -27,6 +28,7 @@ def w(tmp_path):
     """Two feed accounts (own prices), chats of the first with their orders and clients, a point with «Свой остаток (ОТХ)», two tasks, a
     deleted order of a client (its «удалён» in the purchases), and the people: the chats' manager, the partner, a point's manager."""
     app, conn, (first, second) = _app(tmp_path)
+    app.config["NOW"] = lambda: datetime(2026, 10, 29, 10, 0, 0)            # the terms of the tasks below never pass by themselves
     orders.ensure_pipeline(conn, NOW)
     connections.set_modes(conn, first, True, True, NOW, "o")
     connections.set_chats_send(conn, first, True, NOW, "o")
@@ -165,14 +167,13 @@ def test_the_chats_are_two_columns_and_keep_the_hooks_of_app_js(w):
     assert 'action="/chats/%d/stage"' % w["chat"] in html and "data-item-find" in html and 'action="/chats/%d/wait"' % w["chat"] in html
     assert "Можно в субботу?" in html
     tasks_block = html.split('<div class="o2-panel-tasks">', 1)[1].split("</section>", 1)[0]          # «Задачи» of the chat, folded: the chat stays in sight
-    assert 'class="o2-toggle" type="checkbox" id="o2-tasks-open" aria-label' in tasks_block            # no <details>, not checked: see the next line
+    assert 'class="o2-toggle" type="checkbox" id="o2-tasks-open">' in tasks_block                      # not checked; its label names it
     assert "<details" not in tasks_block       # an open <details> is `open` in innerHTML: the live refill of app.js would wipe what is typed here
     assert 'action="/tasks/new"' in tasks_block and 'name="chat_row" value="%d"' % w["chat"] in tasks_block
     assert 'name="back" value="/chats/%d"' % w["chat"] in tasks_block
 
 
 def test_a_late_task_of_the_chat_shows_on_the_folded_button(w):
-    from datetime import datetime
     flag(w, "all")
     tasks.add(w["conn"], kind="other", title="Ответить про шипы", due_at="2026-11-20T15:00", note="", now=NOW, author="owner", assignee="owner", chat_row=w["chat"])
     w["conn"].commit()
