@@ -2017,16 +2017,14 @@ def _wait_price_of(conn, parsed, ref, now: str):
 
 def _cmd_wait_count(args) -> int:
     """How many messages «появилось в наличии» the next cycle would send, for a look before a release: the check runs on a throw-away copy of the
-    base (the base itself is opened read-only), nothing is sent to anybody. Only numbers of orders are printed."""
+    base (the base itself is only read), nothing is sent to anybody. Only numbers of orders are printed."""
     from . import order_wait
     import tempfile
-    from urllib.parse import quote
     with tempfile.TemporaryDirectory() as folder:
         copy = str(Path(folder) / "copy.db")
-        source = sqlite3.connect("file:%s?mode=ro" % quote(str(Path(args.db).resolve())), uri=True)
-        target = sqlite3.connect(copy)
-        with target:
-            source.backup(target)
+        source, target = store.open_db(args.db), store.open_db(copy)
+        source.execute("PRAGMA query_only=ON")
+        source.backup(target)
         source.close()
         target.close()
         conn = store.connect(copy)

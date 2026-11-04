@@ -1170,3 +1170,36 @@ def test_two_lines_named_from_the_other_supplier_need_its_stock_for_both(env):
     card, sender = waiting(env, dict(WANT, qty=2), dict(WANT, qty=2)), Sender()
     run(conn, sender, [tire(code="NOPRICE", stock=8), s2(stock=3)])
     assert sender.sent == [] and "не хватает на все строки" in tasks(conn, card)[0]["body"]
+
+
+# --- the review of a3b2cc0 --------------------------------------------------------------------------------------------------------------------
+
+def test_two_lines_named_from_the_other_supplier_count_what_an_earlier_order_took(env):
+    conn, chat_row = env
+    first, second = two_waiting(env)
+    conn.execute("UPDATE order_want SET qty = 2 WHERE order_id = ?", (first,))
+    conn.execute("UPDATE order_want SET qty = 2 WHERE order_id = ?", (second,))
+    order_wait.add_want(conn, second, dict(WANT, qty=2), NOW, "worker2")
+    sender = Sender()
+    run(conn, sender, [tire(code="NOPRICE"), s2()])                                             # 4 of the second supplier: 2 + 2 + 2 are too many
+    assert len(sender.sent) == 1 and "не хватает на все строки" in tasks(conn, second)[0]["body"]
+
+
+def test_studs_are_checked_against_every_name_of_the_order(env):
+    conn, chat_row = env
+    card, sender = waiting(env, dict(NO_MODEL, studded="")), Sender()
+    orders.add_item(conn, card, now=NOW, author="worker2", qty=4, goods_id="100", code="TS1", name="Ikon Test Model 205/55 R16", brand_key="IKON TYRES", season="winter",
+                    diameter=16, territory="", sale_unit=8500, supplier_price=7000, terms={}, fee_pct=0, promo_pct=0)
+    titled(conn, chat_row, "Ikon Test Model 205/55 R16 шипованная")
+    run(conn, sender, [tire(studded=False)])
+    assert sender.sent == [] and "шипы" in tasks(conn, card)[0]["body"]
+
+
+def test_the_task_of_a_cut_off_send_does_not_say_an_empty_stock(env):
+    conn, chat_row = env
+    card = waiting(env)
+    token = order_wait._token(card, orders.get_card(conn, card)["entered_at"])
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status, text) VALUES (?,?,?,?,'sending','слова')", (token, chat_row, NOW, "система"))
+    conn.commit()
+    run(conn, Sender(), [], NEXT)
+    assert "В наличии: ." not in tasks(conn, card)[0]["body"]

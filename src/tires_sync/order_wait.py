@@ -232,7 +232,7 @@ def _mark(conn, card_id, kind: str, found: List, now: str, notify=None, note: st
     card = orders.get_card(conn, card_id)
     rule, title = (TASK_EXACT, title or TITLE_EXACT) if kind == "exact" else (TASK_ANALOG, TITLE_ANALOG)
     wanted = "; ".join(describe(w) for w in card["wants"])
-    shown = "; ".join("%s (%d шт.)" % (o.name, o.stock) for o in found[:3])
+    shown = "; ".join("%s (%d шт.)" % (o.name, o.stock) for o in found[:3]) or "см. чат заказа"
     body = "Заказ №%d, клиент %s. Ответственный: %s. Нужно: %s. В наличии: %s." % (
         card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], wanted, shown)
     if note:
@@ -275,12 +275,12 @@ def _names_only_this_model(name: str, brand: str, model: str) -> bool:
             and all(NAME_WORDS.fullmatch(w) for w in text[found.end():].split()))
 
 
-def _name_in_order(conn, card: dict, offer) -> Optional[str]:
-    """The name the order has that names the model of the offer: of a position, or of the ad the client wrote about. None: no name does."""
+def _names_in_order(conn, card: dict, offer) -> List[str]:
+    """The names the order has that name the model of the offer: of its positions, or of the ad the client wrote about."""
     names = [i["name"] for i in card.get("items") or []]
     names += [r[0] for r in conn.execute("SELECT item_title FROM avito_chat WHERE order_id = ?", (card["id"],))]
     model = " ".join(str(offer.model_raw or "").upper().split())
-    return next((str(n) for n in names if model and _names_only_this_model(n, _brand(offer), model)), None)
+    return [str(n) for n in names if model and _names_only_this_model(n, _brand(offer), model)]
 
 
 def _one_tire(conn, card: dict, line: dict, stock: List) -> str:
@@ -301,11 +301,10 @@ def _one_tire(conn, card: dict, line: dict, stock: List) -> str:
     if not _norm(found[0].model_raw):
         return "у позиции %s не указана модель." % (found[0].code or found[0].goods_id)
     if not line["model"]:
-        name = _name_in_order(conn, card, found[0])
-        if name is None:
+        names = _names_in_order(conn, card, found[0])
+        if not names:
             return "модель в наличии (%s) не совпадает с названием в заказе." % found[0].model_raw
-        said = studs_named(name)
-        if said is not None and said != bool(found[0].studded):
+        if any(studs_named(n) is not None and studs_named(n) != bool(found[0].studded) for n in names):
             return "шипы шины в наличии (%s) не те, что в названии в заказе." % found[0].model_raw
     return ""
 
@@ -356,7 +355,8 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
         if not name:
             return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id), []
         held[offer.goods_id] = held.get(offer.goods_id, 0) + line["qty"]
-        if held[offer.goods_id] > offer.stock:                     # two lines of one tire, named from the other supplier
+        own = sum(l["qty"] for l, p in zip(lines, picks) if p is offer)    # what this order took of it itself; the rest is what earlier orders left
+        if held[offer.goods_id] > left.get(offer.goods_id, offer.stock) + own:     # two lines of one tire, named from the other supplier
             return "", "остатка позиции %s не хватает на все строки заказа." % (offer.code or offer.goods_id), []
         if (name, price) not in items:                             # two lines of one position: it is named once
             items.append((name, price))
