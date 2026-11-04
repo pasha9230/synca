@@ -221,6 +221,13 @@ def publish_carried(conn, account_id: int, published_feed: bytes) -> None:
         _set(conn, CARRIED_KEY % int(account_id), json.dumps(found["ids"], ensure_ascii=False))
 
 
+def published_without_plan(conn, account_id: int) -> None:
+    """A mirror's file went out with no plan of new positions: only those ads carry pieces, so the feed shows none. Commits."""
+    if carried_by(conn, account_id):
+        _set(conn, CARRIED_KEY % int(account_id), "{}")
+        conn.commit()
+
+
 def carried_by(conn, account_id: int) -> Dict[str, str]:
     """{code: the Id} in the feed published now."""
     from . import store

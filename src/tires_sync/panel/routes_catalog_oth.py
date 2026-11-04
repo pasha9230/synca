@@ -85,19 +85,9 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
             return False, "прежний Id объявления (%s) не совпадает с нынешним: новый Id не выдаём" % former
     rules = "; лимит возвратов ОТХ и «одна шина — одно объявление» действуют"
     if published:
-        return True, "сейчас в фиде" + (_feed_price(conn, goods_id, account_id, prices[goods_id]) if money else "") + rules
+        return True, "сейчас в фиде" + ("; своя цена %d ₽ (её изменение попадёт в фид со следующим циклом)" % prices[goods_id] if money else "") + rules
     return True, ("в фиде сейчас нет; со следующим циклом уйдёт на Авито по своей цене" + (" %d ₽" % prices[goods_id] if money else "")
                   + (" (из архива каталога)" if offer is not None else " (по сохранённому объявлению)") + rules)
-
-
-def _feed_price(conn, goods_id: str, account_id: int, own: int) -> str:
-    """The price of the published ad, and the own price if the next cycle brings another."""
-    import xml.etree.ElementTree as ET
-    try:
-        price = int((ET.fromstring(store.get_snapshot(conn, goods_id, account_id) or "").findtext("Price") or "").strip())
-    except (ET.ParseError, ValueError):
-        return "; своя цена %d ₽" % own
-    return " по цене %d ₽" % price + ("; со следующим циклом %d ₽" % own if price != own else "")
 
 
 def manual_list(conn) -> list:

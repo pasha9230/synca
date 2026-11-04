@@ -658,3 +658,38 @@ def test_the_point_is_told_the_current_number_of_the_source(tmp_path):
     assert templates._oth_source(conn, cid) == "Шины с ОТХ (заказ №7777777)"
     orders.update_card(conn, old, {"webmim_number": ""}, LATER, "o")
     assert templates._oth_source(conn, cid) == "Шины с ОТХ (заказ №%d)" % old       # the panel's number, never an empty one
+
+
+def test_an_order_that_gave_all_its_tyres_on_follows_the_source_and_stays_borrowed(tmp_path):
+    """A → B → C, B gave everything: it has no pieces, its copy still means A's order of WebMIM."""
+    conn = db(tmp_path)
+    first = source(conn)
+    second = new_order(conn)
+    take(conn, second)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "oth"), second))
+    conn.commit()
+    third = new_order(conn, goods="1")
+    oth_sale.take(conn, third, line(conn, third)["id"], orders.get_card(conn, second)["items"][0]["id"], LATER, "o")
+    orders.update_card(conn, first, {"webmim_number": "7777777"}, LATER, "o")
+    assert numbers(conn, second)[0] == "7777777" and second in oth_sale.borrowed_ids(conn)
+
+
+def test_a_copy_left_on_a_closed_order_is_still_not_its_own_order_of_webmim(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "cancel"), cid))
+    conn.commit()
+    orders.update_card(conn, old, {"webmim_number": ""}, LATER, "o")
+    assert numbers(conn, cid)[0] == NUMBER and oth_sale.borrowed_ids(conn, cid) == {cid}
+
+
+def test_a_number_typed_by_hand_that_differs_from_the_source_is_the_order_s_own(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, cid, {"webmim_number": "РУКОЙ"}, LATER, "o")
+    assert oth_sale.borrowed_ids(conn, cid) == set()
+

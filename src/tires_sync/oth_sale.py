@@ -101,7 +101,7 @@ def borrowed_ids(conn, card_id=None) -> Set[int]:
                                                   (card_id,) if card_id is not None else ()).fetchall():
         if order_id not in found:
             row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (first_order(conn, item_id),)).fetchone()
-            if row and row[0] == number:
+            if (row and row[0] == number) or _copied(conn, order_id).get("webmim_number") == number:     # a copy left behind on a closed order too
                 found.add(order_id)
     return found
 
@@ -151,7 +151,8 @@ def _copied(conn, card_id) -> Dict[str, str]:
 def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, note: bool = False, closed: bool = False) -> bool:
     """Bring the two numbers in line with the tyres «с ОТХ» the order holds now, in the caller's transaction. An empty field gets the number of
     the one order of purchase; a copy (_copied) follows that order, and goes when no order gives the numbers; anything else was written by a
-    person and stays. `note`: say why nothing was taken. `closed`: a closed order, only a copy that has a new value changes. True: a field changed."""
+    person and stays. `note`: say why nothing was taken. `closed`: a closed order, or one that gave all its tyres on (they still came from `before`):
+    only a copy that has a new value changes. True: a field changed."""
     row = conn.execute("SELECT webmim_id, webmim_number, transfer_number FROM order_card WHERE id = ?", (card_id,)).fetchone()
     if row is None or row[0]:
         return False
@@ -159,7 +160,7 @@ def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, n
     if order_merge.is_target(conn, card_id):                            # a merged order has its sources' numbers, by position (order_merge)
         return False
     firsts = _firsts(conn, card_id)
-    source, why = _numbers_source(conn, orders.get_card(conn, card_id), firsts)
+    source, why = _numbers_source(conn, orders.get_card(conn, card_id), firsts) if firsts or not closed else (next(iter(before)), "")
     numbers = {}
     for order_id in (set(before) | set(firsts)) - {0}:
         got = conn.execute("SELECT webmim_number, transfer_number FROM order_card WHERE id = ?", (order_id,)).fetchone()
@@ -208,13 +209,13 @@ def numbers_written(conn, card_id, fields: Iterable[str], now: str, author: str)
 def _follow_source(conn, source_id, now: str, author: str, seen: Set[int]) -> None:
     """The orders whose tyres «с ОТХ» were bought by `source_id`, and on along a copy that changed. A press of «Оформить в WebMIM» going on writes
     its own (items_changed)."""
-    held = conn.execute("SELECT t.order_id, t.item_id FROM order_item_oth t JOIN order_item i ON i.id = t.item_id WHERE t." + _LIVE + " AND i.qty >= 1").fetchall()
+    held = conn.execute("SELECT t.order_id, t.item_id FROM order_item_oth t WHERE t." + _LIVE).fetchall()     # a position given on too: its copy means the same order
     for order_id in sorted({o for o, item_id in held if first_order(conn, item_id) == source_id} - seen):
         seen.add(order_id)
         state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (order_id,)).fetchone()
         if state and state[0] != "refused":
             continue
-        if _sync_numbers(conn, order_id, [source_id], now, author, closed=orders.get_card(conn, order_id)["stage"]["kind"] != "open"):
+        if _sync_numbers(conn, order_id, [source_id], now, author, closed=orders.get_card(conn, order_id)["stage"]["kind"] != "open" or not _firsts(conn, order_id)):
             _follow_source(conn, order_id, now, author, seen)
 
 

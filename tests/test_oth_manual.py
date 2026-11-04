@@ -681,10 +681,23 @@ def test_the_card_says_a_position_is_in_the_feed_and_what_price_comes_next(tmp_p
     capsys.readouterr()
     assert run(tmp_path, AFTER) == 0
     passed(capsys)
-    assert card_says(tmp_path, "102", AFTER_PARSED())[1].startswith("сейчас в фиде по цене 7000 ₽; лимит")
     own(tmp_path, {"1:102": {"price": 7500}})
-    assert card_says(tmp_path, "102", AFTER_PARSED())[1].startswith("сейчас в фиде по цене 7000 ₽; со следующим циклом 7500 ₽")
+    text = card_says(tmp_path, "102", AFTER_PARSED())[1]                 # the saved ad may be older than the feed (a held one): no price is read from it
+    assert text.startswith("сейчас в фиде; своя цена 7500 ₽ (её изменение попадёт в фид со следующим циклом)") and "7000" not in text
     conn = connect(tmp_path)
     from tires_sync.panel.routes_catalog_oth import account_status
     assert not account_status(conn, "102", 1, AFTER_PARSED(), False)[1].count("₽")      # no right to see the money
+    conn.close()
+
+
+def test_a_mirror_published_without_its_new_positions_shows_no_pieces(tmp_path):
+    """A mirror's own ads never carry pieces: a feed with no plan of new positions has none of them, the card must not go on naming one."""
+    from tires_sync import cli
+    conn = connect(tmp_path)
+    oth_manual.remember_carried(conn, 1, {"G": "104"}, b"cycle")
+    oth_manual.publish_carried(conn, 1, b"cycle")
+    conn.commit()
+    (tmp_path / "avito_feed.xml").write_bytes(b"the file alone")
+    cli._record_state(conn, {"id": 1, "feed_mode": "mirror"}, tmp_path)
+    assert oth_manual.carried_by(conn, 1) == {}
     conn.close()
