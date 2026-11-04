@@ -1033,8 +1033,9 @@ def test_the_loop_reads_the_order_again_before_the_move(tmp_path, monkeypatch):
 
     def moving(conn_, card_id, stage_id, now, author, *a, **k):                             # the first move: the second order leaves meanwhile
         done = real(conn_, card_id, stage_id, now, author, *a, **k)
-        if card_id == first:
-            real(conn_, second, stage(conn, "done"), now, "o")
+        if card_id == first:                                                                # the stage changed, the moment not: only the check of the stage holds
+            conn_.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "done"), second))
+            conn_.commit()
         return done
     monkeypatch.setattr(orders, "move_card", moving)
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:31:00") == 1
