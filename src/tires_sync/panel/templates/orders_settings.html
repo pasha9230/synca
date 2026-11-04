@@ -16,11 +16,11 @@
 <label class="field"><span class="label">до</span><input class="input" type="number" name="end" min="1" max="24" value="{{ duty.hours[1] }}" style="width:80px"></label>
 <button class="btn btn--primary">Сохранить</button>
 <p class="small muted" style="flex-basis:100%">Клиент, переданный точкой командой ВК «клиент &lt;телефон&gt; &lt;что нужно&gt;», попадает на этап «Передано с точки» к дежурному; не взят за 15 минут рабочего времени — красная запись. Без дежурного — «ответственный по умолчанию».</p>{% if can_post("orders_duty") %}</form>{% else %}</fieldset>{% endif %}</section>
-<section class="card"><div class="card-head"><h3>Задача при ручном переводе на возврат</h3></div>
+<section class="card"><div class="card-head"><h3>Задача на возврат</h3></div>
 {% if can_post("orders_return_task") %}<form method="post" action="/orders/settings/return-task" class="card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap" data-return-task><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0"><div class="card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap">{% endif %}
 <label class="field"><span class="label">Срок задачи на возврат, рабочих дней</span><input class="input" type="number" name="days" min="1" max="30" step="1" required value="{{ return_task_days }}" style="width:100px"></label>
 {% if can_post("orders_return_task") %}<button class="btn btn--primary">Сохранить</button>{% endif %}
-<p class="small muted" style="flex-basis:100%">Задача «Согласовать на возврат» ответственному заказа. Рабочие дни: понедельник–пятница.</p>
+<p class="small muted" style="flex-basis:100%">Задача «{{ return_task }}» ответственному заказа, при автоматическом и ручном переводе на «На возврат». Срок считается от перевода; суббота и воскресенье не считаются.</p>
 {% if can_post("orders_return_task") %}</form>{% else %}</div></fieldset>{% endif %}</section>
 <section class="card">
 {% for s in stages %}

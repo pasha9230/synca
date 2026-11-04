@@ -468,6 +468,8 @@ def register(app) -> None:
         returning = {r["card"]["id"] for r in returns}
         for row in cards:
             row["returning"] = row["card"]["id"] in returning
+        for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
+            ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
         tab = request.args.get("tab", "")
         tab = tab if tab in TABS else DEFAULT_TAB
         shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not (r["asked"] or r["oth_asked"]))     # the questions first

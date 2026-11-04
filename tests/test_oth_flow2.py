@@ -342,11 +342,14 @@ def test_no_double_task_the_seventh_day_after_a_move_by_hand(tmp_path):
     before = on_oth(conn, cid)
     orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
-    orders.move_card(conn, cid, stage(conn, "oth"), "2026-10-21T11:00:00", "o")            # back; the task stays: the return is still on
-    order_oth.moved_by_hand(conn, orders.get_card(conn, cid), "2026-10-21T11:00:00", "o")
     assert len(open_tasks(conn, cid)) == 1
-    assert order_oth.ask_seventh_day(conn, "2026-10-27T12:30:00") == 1
-    assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
+    order_oth.ask_seventh_day(conn, "2026-10-21T13:00:00")                                 # not on «На ОТХ»: nothing more
+    assert len(open_tasks(conn, cid)) == 1
+    orders.move_card(conn, cid, stage(conn, "oth"), "2026-10-21T14:00:00", "o")            # back on sale: that task is over (review D3)
+    assert open_tasks(conn, cid) == []
+    assert order_oth.ask_seventh_day(conn, "2026-10-27T12:30:00") == 1                     # the new stay has its own, with its own due
+    [task] = open_tasks(conn, cid)
+    assert task["title"] == order_oth.RETURN_TASK and task["due_at"] == "2026-10-29T12:30"
 
 
 def test_a_task_of_before_counts_and_closes(tmp_path):
@@ -758,13 +761,10 @@ def test_any_manual_move_out_closes_the_task(tmp_path, code, column):
     assert conn.execute("SELECT %s FROM callback_task WHERE order_id = ?" % column, (cid,)).fetchone()[0] == "2026-10-27T10:00:00"
 
 
-def test_the_way_out_through_the_panel_and_back_and_forth_inside_keeps_it(tmp_path):
+def test_the_way_out_after_a_move_through_the_panel(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
     post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
     assert open_tasks(conn, cid)
-    orders.move_card(conn, cid, _stage(conn, "oth"), "2026-10-27T10:00:00", "o")           # between the two: the return goes on
-    assert open_tasks(conn, cid)
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, "at_point")), answer="same")
     orders.move_card(conn, cid, _stage(conn, "at_point"), "2026-10-27T11:00:00", "o")
     assert open_tasks(conn, cid) == []
     assert [e for e in orders.list_events(conn, cid) if e["text"].startswith("Задача отменена: Вернуть")]
@@ -864,4 +864,78 @@ def test_a_broken_held_row_stops_nothing(tmp_path):
     conn.commit()
     reserve.check(conn, NEXT + "T09:07:00", calls([]), deliver, vk)
     assert conn.execute("SELECT 1 FROM app_state WHERE key LIKE 'reserve_moved_tell:%'").fetchone() is None
+
+
+# ---- 8. the review of 2026-11-05 -------------------------------------------------------------------------------------------------------
+
+def _agreed_and_asked(tmp_path, *flags):
+    from test_mypoint import manager
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    started(conn)
+    cid = _card(conn, pid, webmim="700200", code="at_point")
+    orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T13:00:00", "owner")
+    return app, conn, cid, manager(app, conn, pid)
+
+
+@pytest.mark.parametrize("new_view", [False, True])
+def test_the_question_stays_on_the_page_after_the_agreement_and_issued_drops_the_plan(tmp_path, new_view):
+    from test_mypoint import press
+    app, conn, cid, mine = _agreed_and_asked(tmp_path)
+    if new_view:
+        from test_point_new_view import flag
+        flag(conn, "all")
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    assert 'data-oth-question="%d"' % cid in page and "/my-point/%d/oth_issued" % cid in page and "/my-point/%d/act_signed" % cid in page
+    press(mine, cid, "oth_issued")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "done" and order_oth.return_plan(conn, cid) is None
+    assert open_tasks(conn, cid) == []
+
+
+def test_here_on_the_plaque_closes_only_the_question(tmp_path):
+    from test_mypoint import press
+    app, conn, cid, mine = _agreed_and_asked(tmp_path)
+    press(mine, cid, "oth_here")
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    assert 'data-oth-question="%d"' % cid not in page and "/my-point/%d/act_signed" % cid in page
+    assert order_oth.return_plan(conn, cid) is not None
+
+
+def test_the_cancel_of_the_agreement_does_not_promise_the_ad(tmp_path):
+    from pathlib import Path
+    root = Path(__file__).parent.parent / "src" / "tires_sync" / "panel" / "templates"
+    for name in ("order_card.html", "office2/order_card.html"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "снова будут в объявлении" not in text and "шины останутся снятыми с продажи" in text
+
+
+def test_the_cancel_of_the_agreement_puts_the_task_back_once(tmp_path):
+    conn, cid = _moved_on_day7(tmp_path)
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T13:00:00", "owner")
+    assert open_tasks(conn, cid) == []
+    assert order_oth.unagree(conn, orders.get_card(conn, cid), "2026-10-26T14:00:00", "owner")
+    [task] = open_tasks(conn, cid)
+    assert task["title"] == order_oth.RETURN_TASK and task["assignee"] == "ivan" and task["due_at"] == "2026-10-28T14:00"
+
+
+def test_a_failed_task_leaves_a_yellow_record(tmp_path, monkeypatch):
+    conn, cid, card = _held(tmp_path)
+    monkeypatch.setattr(tasks, "add", lambda **kw: (_ for _ in ()).throw(RuntimeError("busy")))
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert [e for e in orders.list_events(conn, cid) if e["level"] == "yellow" and e["text"].startswith("Задача возврата не поставлена")]
+    before = orders.get_card(conn, cid)
+    other = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    was = on_oth(conn, other)
+    orders.move_card(conn, other, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    order_oth.moved_by_hand(conn, was, "2026-10-21T10:00:00", "o")
+    assert before["stage"]["code"] == orders.RETURN_GIVEN
+    assert [e for e in orders.list_events(conn, other) if e["level"] == "yellow" and e["text"].startswith("Задача возврата не поставлена")]
+
+
+def test_the_settings_name_the_real_task(tmp_path):
+    app, client, tok, conn, pid, card = ready(tmp_path)
+    page = client.get("/orders/settings").get_data(as_text=True)
+    assert order_oth.RETURN_TASK in page and "Согласовать на возврат" not in page and "при ручном переводе" not in page
 

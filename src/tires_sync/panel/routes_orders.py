@@ -1762,7 +1762,7 @@ def register(app) -> None:
             commands_by_stage={s["id"]: rules.list_commands(conn, s["id"]) for s in stages}, stage_names={s["id"]: s["name"] for s in stages},
             template_names={t["id"]: t["name"] for t in templates.list_templates(conn)}, point_names={p["id"]: p["name"] for p in points.list_points(conn)},
             default_responsible=orders.default_responsible(conn), responsible_options=_responsible_options(app, conn, orders.default_responsible(conn)),
-            duty=manager.duty_settings(conn), weekdays=manager.WEEKDAYS, today=local_now().date().isoformat(), return_task_days=order_oth.task_days(conn))
+            duty=manager.duty_settings(conn), weekdays=manager.WEEKDAYS, today=local_now().date().isoformat(), return_task_days=order_oth.task_days(conn), return_task=order_oth.RETURN_TASK)
 
     def _settings_back():
         return redirect("/orders/settings")

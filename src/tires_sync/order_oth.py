@@ -329,6 +329,8 @@ def unagree(conn, card: dict, now: str, author: str) -> bool:
     orders.add_event(conn, card["id"], now, author, "field", "Согласование возврата с поставщиком отменено: «%s», шины не в продаже." % LABELS[AGREE])
     _audit(conn, now, author, "oth_return_unagreed", {"order": int(card["id"])})
     conn.commit()
+    if card["stage"]["code"] == orders.RETURN_GIVEN:                                  # «Согласуем» again: agree closed the task, somebody has to agree it again
+        _ensure_task(conn, card["id"], now, author)
     return True
 
 
@@ -448,13 +450,7 @@ def ask_seventh_day(conn, now: str, notify=None) -> int:
             _stuck(conn, card, now, str(err))
             continue
         moved += 1
-        try:
-            if not _open_return_task(conn, card_id):
-                _return_task(conn, orders.get_card(conn, card_id), now, "система")
-                conn.commit()
-        except Exception:                                                            # noqa: BLE001 - the move stands
-            conn.rollback()
-            logging.getLogger("tires_sync.orders").exception("the return task of order %s failed", card_id)
+        _ensure_task(conn, card_id, now, "система")
         if notify is not None:
             _tell_agree(conn, card, now, notify)
     return moved
@@ -535,7 +531,6 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
     if not moved:
         conn.rollback()
         return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % label, False
-    close_return_tasks(conn, card["id"], now, who, "точка: заказ выдали")
     return "заказ перенесён на «%s»" % done["name"], "Заказ №%s — отмечено: выдан (теперь на этапе «%s»)." % (label, done["name"]), True
 
 
@@ -560,8 +555,8 @@ def _close_tasks(conn, order_id, titles: tuple, how: str, now: str, who: str, re
 
 
 def left_return(conn, card_id, stage: dict, now: str, who: str) -> None:
-    """The order left «На ОТХ» / «На возврат» by any path (orders.move_card, in its transaction: no commit, the owner 2026-11-04): the open tasks of the return
-    close by themselves — done when the order closes (won, closed), cancelled when it goes back to work or is lost."""
+    """The order left «На ОТХ» / «На возврат» by any path, or went from «На возврат» back on sale on «На ОТХ» (orders.move_card, in its transaction: no commit, the
+    owner 2026-11-04): the open tasks of the return close by themselves — done when the order closes (won, closed), cancelled when it goes back to work or is lost."""
     from . import tasks
     done = stage["kind"] in ("won", "closed")
     for task_id, kind, title in conn.execute("SELECT id, kind, title FROM callback_task WHERE order_id = ? AND title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL",
@@ -741,16 +736,23 @@ def _return_task(conn, card: dict, now: str, who: str, what: str = "") -> int:
 def moved_by_hand(conn, before: dict, now: str, who: str) -> None:
     """A person moved the order in the panel (`before`: the card before the move; the board, the window, the chat, the button of the card).
     Into «На возврат»: the task of the return, unless the return is agreed already or that task is open: no double. Never raises: the move stands."""
+    card = orders.get_card(conn, before["id"])
+    if card["stage"]["code"] == orders.RETURN_GIVEN and before["stage"]["code"] != orders.RETURN_GIVEN:
+        _ensure_task(conn, card["id"], now, who)
+
+
+def _ensure_task(conn, card_id, now: str, who: str) -> None:
+    """The one task of the return of an order on «Согласуем»: made unless agreed or open. Never raises: what was done stands; a failure is a yellow record
+    (no tick would make it again)."""
     try:
-        card = orders.get_card(conn, before["id"])
-        was, code = before["stage"]["code"], card["stage"]["code"]
-        if code == orders.RETURN_GIVEN and was != code:
-            if return_plan(conn, card["id"]) is None and not _open_return_task(conn, card["id"]):
-                _return_task(conn, card, now, who)
-                conn.commit()
+        if return_plan(conn, card_id) is None and not _open_return_task(conn, card_id):
+            _return_task(conn, orders.get_card(conn, card_id), now, who)
+            conn.commit()
     except Exception:                                                                # noqa: BLE001
         conn.rollback()
-        logging.getLogger("tires_sync.orders").exception("the return task of order %s moved by hand failed", before["id"])
+        logging.getLogger("tires_sync.orders").exception("the return task of order %s failed", card_id)
+        orders.add_event(conn, card_id, now, "система", "reserve", "Задача возврата не поставлена: поставьте её вручную — %s" % RETURN_TASK, level="yellow")
+        conn.commit()
 
 
 def _item_key(item_id, entered: str) -> str:

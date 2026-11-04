@@ -1070,7 +1070,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     elif stage["code"] == "oth":
         _start_oth(conn, card, now, author)
     _leave_oth(conn, card, stage, now, author)
-    if card["stage"].get("code") in ("oth", RETURN_GIVEN) and stage["code"] not in ("oth", RETURN_GIVEN):
+    was_code = card["stage"].get("code")
+    if (was_code in ("oth", RETURN_GIVEN) and stage["code"] not in ("oth", RETURN_GIVEN)) or (was_code == RETURN_GIVEN and stage["code"] == "oth"):
         from . import order_oth
         order_oth.left_return(conn, card_id, stage, now, author)
     from_oth = card["stage"].get("code") == "oth"
