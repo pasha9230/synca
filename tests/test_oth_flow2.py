@@ -1289,3 +1289,59 @@ def test_the_bell_of_a_leftover_question_goes_to_the_oth_tab(tmp_path):
     [item] = [i for i in mine.get("/my-point/feed").get_json()["items"] if i["key"].startswith("oth-question-")]
     assert item["href"] == "/my-point?tab=oth"
 
+
+# ---- 10. the review of 85bf858 ----------------------------------------------------------------------------------------------------------
+
+def _asked_vk(tmp_path, agreed=True):
+    app, conn, cid = _vk_order(tmp_path)
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls([]))
+    if agreed:
+        order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T13:00:00", "owner")
+    return app, conn, cid
+
+
+@pytest.mark.parametrize("text", ["отдал 700300", "отдали 700300", "700300 забрали", "забрал 700300"])
+@pytest.mark.parametrize("agreed", [True, False])
+def test_given_to_the_driver_never_closes_the_return_as_issued(tmp_path, text, agreed):
+    from test_vk_commands import hook
+    app, conn, cid = _asked_vk(tmp_path, agreed)
+    plan = order_oth.return_plan(conn, cid)
+    hook(app, conn, text)
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.return_plan(conn, cid) == plan
+    assert order_oth.question_open(conn, card)                                              # the question is still open, the owner sees the message
+    assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (cid,)).fetchone() is None
+    assert conn.execute("SELECT 1 FROM manager_message WHERE text LIKE ?", (text + "%",)).fetchone() is not None
+
+
+@pytest.mark.parametrize("text", ["выдал 700300", "выдали 700300", "№700300 выдала", "отдал клиенту 700300"])
+def test_the_words_of_the_question_close_it_as_issued(tmp_path, text):
+    from test_vk_commands import hook
+    app, conn, cid = _asked_vk(tmp_path)
+    hook(app, conn, text)
+    assert orders.get_card(conn, cid)["stage"]["code"] == "done" and order_oth.return_plan(conn, cid) is None
+
+
+def test_a_closed_task_of_a_move_by_hand_does_not_come_back(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    before = on_oth(conn, cid)
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T19:00:00", "o")
+    order_oth.moved_by_hand(conn, before, "2026-10-21T19:00:00", "o")
+    [task_id] = [r[0] for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (cid,))]
+    tasks.close(conn, task_id, "done", "2026-10-21T19:05:00", "o")
+    for when in ("2026-10-21T19:07:00", "2026-10-21T20:07:00", "2026-10-22T09:07:00"):
+        reserve.check(conn, when, calls([]))
+    assert open_tasks(conn, cid) == []
+
+
+def test_a_closed_task_of_the_seventh_day_held_at_night_does_not_come_back(tmp_path):
+    conn, cid, card = _held(tmp_path)
+    reserve.check(conn, "2026-10-26T23:07:00", calls([]))
+    [task_id] = [r[0] for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (cid,))]
+    tasks.close(conn, task_id, "done", "2026-10-26T23:30:00", "o")
+    told = []
+    reserve.check(conn, "2026-10-27T09:07:00", calls(told))
+    assert open_tasks(conn, cid) == []
+    assert [t for _w, t in told if t.startswith("Нужно согласовать")]                       # the alert still goes
+

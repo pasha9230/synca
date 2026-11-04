@@ -38,6 +38,7 @@ NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её
 # supplier. No typo is guessed («лтправлен» stays a question). The client is never written to.
 RETURN, RETURNED = "возврат отдал", "шины отданы на возврат"   # the command is a phrase only: a bare «возврат» is not it
 RETURN_SURE = "подтверждаю"                                    # the second step of «возврат отдал» of the tyres of «На ОТХ» / «На возврат» (the owner 2026-11-04)
+OTH_ISSUED = ("выдал", "выдали", "выдала", ISSUE_PHRASE)        # the words of that question: «отдал», «забрали» here may mean the supplier's driver, the owner decides
 RETURN_FROM = ("at_point", "oth", orders.RETURN_GIVEN)   # the stages where the tyres are at the point (the lead 2026-10-26; «На возврат» 2026-11-03),
                                                   # and «Отмена / невыкуп»
                                                   # with the reason «не выкупил» (it was «Отказ/невыкуп» before the merge, the owner 2026-10-29)
@@ -388,7 +389,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return dispute(point, "«%s», а заказ в другой город" % word,
                        "Заказ №%s — в другой город, клиент за ним не придёт: если отдали шины курьеру ТК, напишите «передал курьеру %s». "
                        "Сообщение передано владельцу." % (label(card), label(card)))
-    if code in ("oth", orders.RETURN_GIVEN) and (word == HERE or BUILTIN.get(word, ((), None))[1] == "done"):     # the answer of a VK point to the seventh day
+    if code in ("oth", orders.RETURN_GIVEN) and (word == HERE or word in OTH_ISSUED):  # the answer of a VK point to the seventh day
         from . import order_oth
         if order_oth.question_open(conn, card) or (word != HERE and (order_oth.return_plan(conn, card["id"]) or {}).get("signed_at")):
             who = "менеджер %s" % point["name"]

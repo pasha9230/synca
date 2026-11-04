@@ -395,7 +395,7 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> str:
 # responsible has one task, RETURN_TASK; «Согласовано с поставщиком» (agree) starts the act МХ-3.
 HOLD_DAYS = 6
 ALERT_FROM = 9                                   # order_reserve.FIRST_HOUR: no alert before 09:00
-PENDING_KEY = "oth_moved_pending:%d"             # app_state, saved with the move to «На возврат»: {"since", "entered", "auto", "who"}, what follows it (finish_moved)
+PENDING_KEY = "oth_moved_pending:%d"             # app_state, saved with the move to «На возврат»: {"since", "entered", "auto", "who", "task"}, what follows it (finish_moved)
 TOLD_KEY = "oth_point_told:%d:%s"                # per order and stay on «На возврат»: a VK point has its status
 AGREED_KEY = "oth_agreed_tell:%d"                # a VK point is to hear this date (tell_agreed)
 ASK_AT = "12:30"
@@ -499,7 +499,10 @@ def _finish_one(conn, key: str, value: str, now: str, notify) -> None:
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
         return
-    made = _ensure_task(conn, card_id, now, held.get("who") or "система")
+    made = held.get("task") or _ensure_task(conn, card_id, now, held.get("who") or "система")
+    if made and not held.get("task"):                                                # once: a person may close it before the alerts go
+        conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(dict(held, task=True), ensure_ascii=False), key))
+        conn.commit()
     if notify is None or not in_alert_hours(conn, now):
         return
     if held.get("auto"):
@@ -853,10 +856,10 @@ def moved_by_hand(conn, before: dict, now: str, who: str) -> None:
     except orders.OrderError:                                                        # removed meanwhile
         return
     if card["stage"]["code"] == orders.RETURN_GIVEN and before["stage"]["code"] != orders.RETURN_GIVEN:
-        _ensure_task(conn, card["id"], now, who)
+        made = _ensure_task(conn, card["id"], now, who)
         try:                                                                         # a VK point hears the status, a failed task is made again (finish_moved)
             conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (PENDING_KEY % card["id"], json.dumps(
-                {"since": before["entered_at"], "entered": card["entered_at"], "auto": False, "who": who}, ensure_ascii=False)))
+                {"since": before["entered_at"], "entered": card["entered_at"], "auto": False, "who": who, "task": made}, ensure_ascii=False)))
             conn.commit()
         except Exception:                                                            # noqa: BLE001 - the move stands
             conn.rollback()
