@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import sqlite3
 
 import pytest
 
@@ -365,3 +366,32 @@ def test_the_layout_is_not_saved_working_as_a_point(w):
     r = owner.post("/orders/card/layout", data={"csrf": csrf(owner), "layout": json.dumps({"w": [1, 1, 1], "off": [False] * 3})})
     assert r.status_code in (403, 409)
     assert user_prefs.get(w["conn"], "owner", "order.card.layout") is None
+
+
+# --- after the second review ---------------------------------------------------------------------------------------------------------
+
+def test_a_locked_database_mid_delete_says_what_is_left_and_keeps_the_record(w, monkeypatch):
+    flag(w, "all")
+    real, calls = trash.delete_order, []
+
+    def locked_on_the_second(conn, card_id, *args, **kwargs):
+        calls.append(card_id)
+        if len(calls) == 2:
+            raise sqlite3.OperationalError("database is locked")
+        return real(conn, card_id, *args, **kwargs)
+    monkeypatch.setattr(trash, "delete_order", locked_on_the_second)
+    partner = client_of(w, "zaman")
+    r = partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a", "b", "c"), "confirmed": "1"}, follow_redirects=True)
+    assert r.status_code == 200 and "База была занята" in r.get_data(as_text=True)
+    assert calls == sorted(calls)[:2] and len(calls) == 2                 # stopped at once, the third was not tried
+    assert w["conn"].execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 2
+    whole = [json.loads(x[0]) for x in w["conn"].execute("SELECT detail FROM audit WHERE action = 'orders_bulk_delete'")]
+    assert whole == [{"orders": [min(w["ids"].values())], "refused": 0, "stopped": True}]
+
+
+def test_a_press_on_orders_already_gone_leaves_no_record(w):
+    flag(w, "all")
+    partner = client_of(w, "zaman")
+    for _ in range(2):                                                    # «Назад» and the same press again
+        partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a"), "confirmed": "1"})
+    assert w["conn"].execute("SELECT COUNT(*) FROM audit WHERE action = 'orders_bulk_delete'").fetchone()[0] == 1

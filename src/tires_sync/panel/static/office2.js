@@ -54,6 +54,9 @@
     if (all) all.addEventListener("change", function () { boxes.forEach(function (b) { b.checked = all.checked; }); draw(); });
     var none = panel && panel.querySelector("[data-bulk-none]");
     if (none) none.addEventListener("click", function () { boxes.forEach(function (b) { b.checked = false; }); draw(); });
+    wrap.addEventListener("click", function (e) {                 // beside a checkbox in a tall row: never the row's «open the order» (app.js)
+      if (e.target.closest && e.target.closest(".o2-chk")) e.stopPropagation();
+    });
     draw();                                                       // after «Назад» the browser may keep the ticks
   }
 

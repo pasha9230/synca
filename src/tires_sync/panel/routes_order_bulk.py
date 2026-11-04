@@ -1,6 +1,9 @@
 """«Закрыть заказы разом»: pick the cards and the stage, see what moves and what does not, confirm. See order_bulk."""
 from __future__ import annotations
 
+import logging
+import sqlite3
+
 from flask import abort, flash, redirect, render_template, request
 
 from .. import order_bulk, orders, oth_sale, store, trash
@@ -9,6 +12,7 @@ from .common import author, get_conn, has_right, login_required, safe_path
 from .routes_design import office_new
 from .routes_orders import _int, check_responsible, local_iso
 
+log = logging.getLogger(__name__)
 PANEL_LIMIT = 200                                     # the side panel of «Список»: at most this many orders a press (the lead 2026-11-04)
 
 
@@ -40,7 +44,8 @@ def _picked():
 
 
 def _each(ids, change) -> tuple:
-    """`change(card)` for every picked order still there (deleted meanwhile: skipped): (done, [refusals «№N: why»])."""
+    """`change(card)` for every picked order still there (deleted meanwhile: skipped): (done, [refusals «№N: why»], stopped). The base busy too
+    long: stop, what is done stays done (as order_bulk.run)."""
     done, refused = 0, []
     for card_id in ids:
         try:
@@ -51,11 +56,17 @@ def _each(ids, change) -> tuple:
             done += 1 if change(card) else 0
         except OrderError as err:
             refused.append("№%d: %s" % (card_id, err))
-    return done, refused
+        except sqlite3.Error:
+            get_conn().rollback()
+            log.exception("bulk action stopped at order %s", card_id)
+            return done, refused, True
+    return done, refused, False
 
 
-def _said(what: str, done: int, refused: list) -> None:
+def _said(what: str, done: int, refused: list, stopped: bool) -> None:
     flash("%s: %d." % (what, done), "ok" if done else "info")
+    if stopped:
+        flash("База была занята: остальные заказы не изменены. Откройте список и повторите.", "error")
     if refused:
         flash("Не изменены (%d): %s" % (len(refused), "; ".join(refused[:10]) + (" …" if len(refused) > 10 else "")), "error")
 
@@ -82,8 +93,8 @@ def register(app) -> None:
             if tags == card["tags"]:
                 return False
             return bool(orders.update_card(get_conn(), card["id"], {"tags": ",".join(tags)}, local_iso(), author()))
-        done, refused = _each(ids, change)
-        _said(("Поставлен тег «%s»" if on else "Снят тег «%s»") % tag, done, refused)
+        done, refused, stopped = _each(ids, change)
+        _said(("Поставлен тег «%s»" if on else "Снят тег «%s»") % tag, done, refused, stopped)
         return _back()
 
     @app.route("/orders/bulk/responsible", methods=["POST"])
@@ -101,8 +112,8 @@ def register(app) -> None:
                 return False
             check_responsible(app, get_conn(), login, card["responsible"])
             return bool(orders.update_card(get_conn(), card["id"], {"responsible": login}, local_iso(), author()))
-        done, refused = _each(ids, change)
-        _said("Ответственный сменён", done, refused)
+        done, refused, stopped = _each(ids, change)
+        _said("Ответственный сменён", done, refused, stopped)
         return _back()
 
     @app.route("/orders/bulk/delete", methods=["POST"])
@@ -134,10 +145,15 @@ def register(app) -> None:
             trash.delete_order(conn, card["id"], local_iso(), author(), only_if=lambda c, _card: oth_sale.why_not_delete(c, card["id"]))
             deleted.append(card["id"])
             return True
-        done, refused = _each(ids, change)
-        store.write_audit(conn, local_iso(), author(), "orders_bulk_delete", {"orders": deleted, "refused": len(refused)})
-        conn.commit()
-        _said("Удалено в «Удалённые» (вернуть можно там)", done, refused)
+        done, refused, stopped = _each(ids, change)
+        if deleted or refused or stopped:                                # the same press again on orders already gone: nothing to record
+            try:
+                store.write_audit(conn, local_iso(), author(), "orders_bulk_delete",
+                                  dict({"orders": deleted, "refused": len(refused)}, **({"stopped": True} if stopped else {})))
+            except sqlite3.Error:                                        # each order has its own record of order_delete
+                conn.rollback()
+                log.exception("the record of a bulk delete is not written")
+        _said("Удалено в «Удалённые» (вернуть можно там)", done, refused, stopped)
         return _back()
 
     @app.route("/orders/bulk")

@@ -396,8 +396,9 @@ _MORE_TEXTS = {
     "order_chat_link": lambda d: "Чат Ч-%s привязан к заказу №%s" % (_q(d.get("chat")), _q(d.get("order"))),
     "order_chat_unlink": lambda d: "Чат Ч-%s отвязан от заказа №%s" % (_q(d.get("chat")), _q(d.get("order"))),
     "order_item_purchase": lambda d: "Заказ №%s: закупочная цена позиции %s → %s" % (_q(d.get("order")), _rub(d.get("from")), _rub(d.get("to"))),
-    "orders_bulk_delete": lambda d: "Удаление разом (новый вид, «Список»): в «Удалённые» %d (№%s), не удалены %s" % (
-        len(d.get("orders") or []), ", №".join(str(i) for i in (d.get("orders") or [])[:50]) or "—", _q(d.get("refused"))),
+    "orders_bulk_delete": lambda d: "Удаление разом (новый вид, «Список»): в «Удалённые» %d (№%s), не удалены %s%s" % (
+        len(d.get("orders") or []), ", №".join(str(i) for i in (d.get("orders") or [])[:50]) or "—", _q(d.get("refused")),
+        "; остановлено: база была занята" if d.get("stopped") else ""),
     "orders_bulk_move": lambda d: "Массовый перенос заказов: перенесено %s, пропущено %s, осталось %s%s" % (
         _count(d.get("moved") or 0), _count(d.get("skipped") or 0), _count(d.get("left") or 0), _stopped(d)),
     "orders_bulk_undo": lambda d: "Отмена массового переноса №%s: возвращено %s, пропущено %s, осталось %s%s" % (
