@@ -59,7 +59,7 @@ def run(conn, sender, offers, now=NOW, notify=None, price=price_of):
 
 
 def tasks(conn, card):
-    return [t for t in engine.list_tasks(conn, card) if t["title"] in (order_wait.TITLE_EXACT, order_wait.TITLE_ANALOG)]
+    return [t for t in engine.list_tasks(conn, card) if t["title"] in (order_wait.TITLE_EXACT, order_wait.TITLE_CHECK, order_wait.TITLE_ANALOG)]
 
 
 def events(conn, card, level=None):
@@ -344,3 +344,141 @@ def test_the_cycle_hook_prices_by_the_ad_of_the_chats_account(tmp_path, monkeypa
     conn.commit()
     cli._check_waiting(conn, SimpleNamespace(offers=parsed.offers, issues=parsed.issues), box)                 # no reference: only the task
     assert sent == [] and tasks(conn, card2)[0]["title"] == order_wait.TITLE_EXACT
+
+
+# --- the review of 2026-11-04 ----------------------------------------------------------------------------------------------------------------
+
+def refused_then(conn, card):
+    """The first try refused with a 402: the sync sends it again."""
+    from test_chat_send_refusal import Refusing
+    from test_send_settle import refused402
+    return Refusing(refused402())
+
+
+def test_a_402_gives_a_task_without_the_send_form_and_the_sync_that_delivers_closes_it(env):
+    conn, _row = env
+    card = waiting(env)
+    sender = refused_then(conn, card)
+    order_wait.check(conn, [tire()], NOW, deliver=lambda row, text, token: chats.send_reply(conn, sender, row, text, token, NOW, "система"), price_of=price_of)
+    [task] = tasks(conn, card)
+    assert task["title"] == order_wait.TITLE_CHECK != order_wait.TITLE_EXACT and task["status"] == "pending"     # no form: the card shows it for TITLE_EXACT
+    assert [t for t in events(conn, card, "yellow") if "402" in t] and not [t for t in events(conn, card, "red") if "402" in t and "появилось" in t]
+    assert chats.settle_sends(conn, sender, lambda: sender, 1, "2026-11-04T12:02:00") == {"sent": 1}
+    assert engine.get_task(conn, task["id"])["status"] == "done"
+    assert [t for t in events(conn, card, "green") if t.startswith(order_wait.TOLD)]
+    order_wait.check(conn, [tire()], NEXT, deliver=lambda *a: pytest.fail("a second one"), price_of=price_of)
+
+
+def test_a_failed_send_keeps_the_task_with_the_form_a_person_writes(env):
+    conn, _row = env
+    card = waiting(env)
+
+    def refuse(row, text, token):
+        raise chats.ChatError("Авито отказал")
+    order_wait.check(conn, [tire()], NOW, deliver=refuse, price_of=price_of)
+    assert tasks(conn, card)[0]["title"] == order_wait.TITLE_EXACT
+
+
+def test_the_closing_of_the_sync_touches_only_the_task_of_that_stay(env):
+    conn, _row = env
+    card = waiting(env, with_chat=False)
+    order_wait.check(conn, [tire()], NOW)
+    [task] = tasks(conn, card)
+    order_wait.delivered(conn, "wait-%d-20200101000000" % card, "текст", NEXT, "повтор")        # another stay
+    assert engine.get_task(conn, task["id"])["status"] == "pending"
+
+
+@pytest.mark.parametrize("want", (
+    dict(width=205, profile=55, radius=16, qty=4),                                              # only a size
+    dict(WANT, season=""),                                                                      # a title that does not name the season
+    dict(WANT, brand=""),
+))
+def test_a_line_that_does_not_name_the_tire_is_a_task_not_a_message(env, want):
+    conn, _row = env
+    card, sender = waiting(env, want), Sender()
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and "не называет" in tasks(conn, card)[0]["body"]
+
+
+def test_two_models_fit_the_line_the_manager_chooses(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(), tire(code="TS2", model_raw="Other Model")])
+    assert sender.sent == [] and "не называет" in tasks(conn, card)[0]["body"]
+
+
+def test_a_code_names_the_tire_by_itself(env):
+    conn, _row = env
+    waiting(env, dict(code="TS1", qty=4))
+    sender = Sender()
+    run(conn, sender, [tire()])
+    assert len(sender.sent) == 1
+
+
+def test_the_same_tire_at_two_prices_is_a_task_at_one_price_a_message(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    two = [tire(), tire(code="TS2", goods_id="200")]
+    run(conn, sender, two)                                                                      # 8 500 and 6 000.50
+    assert sender.sent == [] and "разные цены" in tasks(conn, card)[0]["body"]
+    other = waiting(env, dict(WANT, width=225))
+    conn.execute("UPDATE avito_chat SET order_id = ?", (other,))
+    conn.commit()
+    run(conn, sender, [tire(width=225), tire(width=225, code="TS2", goods_id="200")], price=lambda offer, row: 7000)
+    assert len(sender.sent) == 1 and "7 000 ₽" in sender.sent[0]
+
+
+def test_a_question_of_the_client_nobody_answered_is_not_wiped_by_the_message(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    conn.execute("UPDATE avito_message SET is_read = 0, kind = 'text', direction = 'in' WHERE chat_row = ?", (chat_row,))
+    conn.commit()
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and "ждёт ответа" in tasks(conn, card)[0]["body"]
+
+
+def test_three_positions_at_two_prices_keep_the_order_of_the_prices(env):
+    conn, _row = env
+    sender = Sender()
+    waiting(env, WANT, dict(WANT, width=215), dict(WANT, width=225))
+    prices = {205: 5000, 215: 6000, 225: 5000}
+    run(conn, sender, [tire(), tire(width=215, code="TS2", name_orig="B"), tire(width=225, code="TS3", name_orig="C")], price=lambda o, row: prices[o.width])
+    assert "«Ikon Autograph 205/55 R16, B, C»" in sender.sent[0] and "стоимость: 5 000 ₽, 6 000 ₽ и 5 000 ₽." in sender.sent[0]
+
+
+def test_at_night_a_missing_price_waits_for_the_morning_it_wakes_nobody(env):
+    conn, _row = env
+    card, sender, told = waiting(env), Sender(), []
+    run(conn, sender, [tire()], "2026-11-04T03:40:00", notify=lambda *a: told.append(a), price=lambda o, row: None)
+    assert tasks(conn, card) == [] and told == []
+
+
+def test_an_unexpected_failure_of_one_card_does_not_stop_the_others(env, monkeypatch):
+    conn, _row = env
+    first, second = waiting(env), waiting(env, with_chat=False)
+    real = order_wait._tell_client
+
+    def broken(conn_, card_id, *a):
+        if card_id == first:
+            raise RuntimeError("boom")
+        return real(conn_, card_id, *a)
+    monkeypatch.setattr(order_wait, "_tell_client", broken)
+    run(conn, Sender(), [tire()])
+    assert len(tasks(conn, second)) == 1
+
+
+def test_an_unknown_send_found_in_the_chat_closes_the_task(env):
+    from datetime import datetime
+
+    from test_chat_send_refusal import Refusing
+    from test_send_settle import out
+    conn, _row = env
+    card = waiting(env)
+    sender = Refusing(TimeoutError())
+    order_wait.check(conn, [tire()], NOW, deliver=lambda row, text, token: chats.send_reply(conn, sender, row, text, token, NOW, "система"), price_of=price_of)
+    [task] = tasks(conn, card)
+    assert task["title"] == order_wait.TITLE_CHECK and "повторно не отправляйте" in task["body"]
+    words = conn.execute("SELECT text FROM chat_send_log WHERE token LIKE 'wait-%'").fetchone()[0]
+    sender.history = [out("m9", words, int(datetime.fromisoformat(NOW).timestamp()) + 5)]
+    chats.settle_sends(conn, sender, lambda: sender, 1, "2026-11-04T12:02:00")
+    assert engine.get_task(conn, task["id"])["status"] == "done" and [t for t in events(conn, card, "green") if t.startswith(order_wait.TOLD)]

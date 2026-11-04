@@ -1263,10 +1263,13 @@ def _halt(conn, chat: dict, row: dict, status: str, now: str, why: str, head: st
 def _close_task(conn, token: str, text: str, now: str, how: str) -> None:
     """The task of a `task-…` mark (or the waiting «можно забирать» of an `arrived-…` one) is done once the sync delivered its message or found it in the chat: it is not left «ждёт». A failure here
     never touches the send."""
-    if not str(token or "").startswith(("task-", "arrived-")):         # «arrived-…»: the waiting «можно забирать» of the card, if any
+    if not str(token or "").startswith(("task-", "arrived-", "wait-")):    # «arrived-…»: the waiting «можно забирать» of the card, if any
         return
     try:
-        from . import order_engine
+        from . import order_engine, order_wait
+        if str(token).startswith("wait-"):                             # «появилось в наличии»: the task made while it was not known
+            order_wait.delivered(conn, token, text, now, how)
+            return
         order_engine.close_after_send(conn, token, text, now, how)
     except Exception:      # noqa: BLE001
         conn.rollback()
