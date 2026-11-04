@@ -10,7 +10,7 @@
 {% for m in messages %}{% set t = m.task %}<div class="stack messages-item" data-message="{{ t.id }}">
 <div class="strong">{{ {"client": "Клиенту", "manager": "Точке"}.get(m.whom, "Сообщение") }}{% if m.where %} · {{ m.where }}{% endif %} · {{ t.title }}</div>
 {% if m.lacking %}<p class="small text-err" data-lacking>Не хватает данных. {{ m.lacking }}{% if can_post("order_save") %}{% for name, label in m.fields %} <button type="button" class="btn btn--secondary btn--xs" data-focus-field="{{ name }}">Вписать «{{ label }}»</button>{% endfor %}{% endif %}</p>{% endif %}
-{% if t.status == "error" and m.draft %}<label class="field"><span class="label">Черновик: недостающее в [скобках] — впишите сами, если отправляете вручную</span><textarea class="textarea" id="draft-{{ t.id }}" rows="8" readonly data-draft>{{ m.draft }}</textarea></label>{% endif %}
+{% if t.status == "error" and m.draft %}<p class="small text-err" data-draft-warning>Не отправляйте этот текст: сначала заполните {{ m.lacking_names }}.</p><label class="field"><span class="label">Черновик, только для чтения</span><textarea class="textarea" rows="8" readonly data-draft>{{ m.draft }}</textarea></label>{% endif %}
 {% if t.status == "running" %}<p class="small muted">Отправляется. Если зависло, через 10 минут сообщение вернётся сюда.</p>{% endif %}
 {% if t.status != "error" or t.body %}<label class="field"><span class="label">{{ "Текст (можно поправить)" if m.can and t.status != "error" else "Текст" }}</span><textarea class="textarea" id="message-{{ t.id }}" name="text_{{ t.id }}" rows="8" maxlength="{{ 2000 if m.whom == 'client' else 4000 }}"{% if not m.can or t.status == "error" %} readonly{% endif %}>{{ t.body }}</textarea></label>{% endif %}
 <input type="hidden" name="whom_{{ t.id }}" value="{{ m.whom }}">{% if m.chat %}<input type="hidden" name="chat_{{ t.id }}" value="{{ m.chat }}">{% endif %}{% if m.point %}<input type="hidden" name="point_{{ t.id }}" value="{{ m.point }}">{% endif %}
@@ -18,7 +18,7 @@
 <p class="small" data-send-error role="alert" hidden></p>
 <div class="row" style="gap:var(--s-2);flex-wrap:wrap">
 {% if m.whom in ("client", "manager") and can_post("order_messages_send") %}<button class="btn btn--primary btn--sm" name="task" value="{{ t.id }}" data-send-one{% if not m.can %} disabled{% endif %}>{{ "Отправить клиенту в Авито" if m.whom == "client" else "Отправить точке в ВК" }}</button>{% endif %}
-{% if t.status == "error" and m.draft %}<button type="button" class="btn btn--secondary btn--sm" data-copy="#draft-{{ t.id }}">Скопировать</button>{% elif t.body %}<button type="button" class="btn btn--secondary btn--sm" data-copy="#message-{{ t.id }}">Скопировать</button>{% endif %}
+{% if t.body and t.status != "error" %}<button type="button" class="btn btn--secondary btn--sm" data-copy="#message-{{ t.id }}">Скопировать</button>{% endif %}
 {% if t.status in ("pending", "error") and can_post("order_task_run") %}<button class="btn btn--secondary btn--sm" formaction="/orders/{{ c.id }}/task/{{ t.id }}/run" formnovalidate data-plain>Отправлено вручную</button>{% endif %}
 {% if t.status != "running" and can_post("order_task_skip") %}<button class="btn btn--secondary btn--sm" formaction="/orders/{{ c.id }}/task/{{ t.id }}/skip" formnovalidate data-plain>Пропустить</button>{% endif %}
 </div></div>{% endfor %}

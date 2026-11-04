@@ -254,6 +254,8 @@ def _pairs(conn, snap: List[dict]) -> Dict[str, List[int]]:
     by_id, by_number = _index(snap)
     out: Dict[str, List[int]] = {}
     elsewhere = made_elsewhere(conn, snap[0]["server"]) if snap else set()
+    from . import oth_sale
+    elsewhere |= oth_sale.borrowed_ids(conn)                     # the number of tyres taken from OTH: the WebMIM order is the first order's
     for card in _cards(conn, "WHERE webmim_id != '' OR webmim_number != ''"):
         if card["id"] in elsewhere:
             continue
@@ -362,17 +364,18 @@ def card_block(conn, card: dict, with_hints: bool = True) -> dict:
     snap = snapshot(conn, server)
     by_id, by_number = _index(snap)
     test_order = card.get("id") in made_elsewhere(conn, server)
-    order = None if test_order else paired(card, by_id, by_number)
-    out = {"server": webmim_orders.SERVER_NAMES[server], "seen_at": seen_at(conn, server), "order": order, "differences": [], "hints": [], "purchase": {},
-           "test": server != "prod", "test_order": test_order,
-           "not_found": bool(order is None and not test_order and (card.get("webmim_number") or card.get("webmim_id")))}
     from . import oth_sale
+    borrowed = card.get("id") is not None and card["id"] in oth_sale.borrowed_ids(conn, card["id"])     # the number of its tyres, no order of its own
+    order = None if test_order or borrowed else paired(card, by_id, by_number)
+    out = {"server": webmim_orders.SERVER_NAMES[server], "seen_at": seen_at(conn, server), "order": order, "differences": [], "hints": [], "purchase": {},
+           "test": server != "prod", "test_order": test_order, "borrowed": borrowed,
+           "not_found": bool(order is None and not test_order and not borrowed and (card.get("webmim_number") or card.get("webmim_id")))}
     ordered = oth_sale.supplier_items(conn, card) if card.get("id") is not None else card.get("items") or []     # «с ОТХ»: not WebMIM's
     items = [{"goods_id": str(i["goods_id"]), "name": i["name"], "qty": i["qty"]} for i in ordered]
     if order is not None:
         out["differences"] = differences(items, order)
         out["purchase"] = purchase_check(ordered, order)
-    elif with_hints and server == "prod" and not out["not_found"] and not test_order and card.get("deal_kind") != "stock":
+    elif with_hints and server == "prod" and not out["not_found"] and not test_order and not borrowed and card.get("deal_kind") != "stock":
         out["hints"] = hints(card, items, snap, taken(conn, snap))
     return out
 
@@ -394,7 +397,8 @@ def reconcile(conn, today: date, days: int = DAYS) -> dict:
     goods = _goods(conn, {c["id"] for c in cards})
     stages = {s["id"]: s for s in orders.list_stages(conn)}
     unpaired, not_found = [], []
-    elsewhere = made_elsewhere(conn, server)
+    from . import oth_sale
+    elsewhere = made_elsewhere(conn, server) | oth_sale.borrowed_ids(conn)     # neither a pair of their own to look for
     for card in cards:
         if card["id"] in elsewhere:
             continue

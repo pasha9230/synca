@@ -12,11 +12,13 @@ tyres stay in the order, and a refusal sends it to «На ОТХ» with them: it
 first order), the ad holds them and a third order may take them (a chain). An order whose tyres all come from «На ОТХ» goes straight to
 «Товар на точке» (at_point). «Свой остаток (ОТХ)» entered by hand (oth_manual) is offered and taken the same way, after the orders' tyres:
 its row loses the pieces (from_item is minus the row's id, from_order 0), «Вернуть на ОТХ» gives them back to it, the purchase is the one of
-the order's own position. The rows: order_item_oth (store.py)."""
+the order's own position. The rows: order_item_oth (store.py).
+The numbers (the owner 2026-11-04, the order 515): an order whose tyres all come from one order of purchase has that order's WebMIM number and
+transfer number (its client's messages name them), no order of WebMIM of its own: _sync_numbers, borrowed_ids."""
 from __future__ import annotations
 
 import json
-from typing import Dict, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from . import orders, oth_stock
 
@@ -81,6 +83,114 @@ def from_number(conn, card_id) -> Dict[int, str]:
     return out
 
 
+def _firsts(conn, card_id) -> List[int]:
+    """The orders of purchase of the tyres «с ОТХ» the order holds now (0: «Свой остаток (ОТХ)»)."""
+    return sorted({first_order(conn, r[0]) or 0 for r in conn.execute(
+        "SELECT t.item_id FROM order_item_oth t JOIN order_item i ON i.id = t.item_id WHERE t.order_id = ? AND t." + _LIVE + " AND i.qty >= 1",
+        (card_id,)).fetchall()})
+
+
+def borrowed_ids(conn, card_id=None) -> Set[int]:
+    """The orders whose WebMIM number is the one of the order their tyres «с ОТХ» were bought by: not an order of WebMIM of their own, so it
+    is never paired, reconciled or counted for them (the first order keeps its pair). `card_id` None: every order. No id of WebMIM is ever
+    copied, and a number on an order that took nothing from OTH is never here."""
+    sql = ("SELECT c.id, c.webmim_number, t.item_id FROM order_item_oth t JOIN order_card c ON c.id = t.order_id "
+           "WHERE t." + _LIVE + " AND c.webmim_id = '' AND c.webmim_number != ''")
+    found: Set[int] = set()
+    for order_id, number, item_id in conn.execute(sql + (" AND c.id = ?" if card_id is not None else ""),
+                                                  (card_id,) if card_id is not None else ()).fetchall():
+        if order_id not in found:
+            row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (first_order(conn, item_id),)).fetchone()
+            if row and row[0] == number:
+                found.add(order_id)
+    return found
+
+
+def given_away(conn, card_ids) -> Set[int]:
+    """Those of the orders closed by a take: their tyres are in another order, and a number they share with it means that one."""
+    ids = [int(c) for c in card_ids]
+    return {r[0] for r in conn.execute(
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'cancel' AND c.cancel_reason LIKE ? AND c.id IN (%s)"
+        % ",".join("?" * len(ids)), [TAKEN_REASON.split("%")[0] + "%"] + ids)} if ids else set()
+
+
+NUMBERS = ("webmim_number", "transfer_number")
+_NUMBER_NAMES = ("Номер WebMIM", "Номер перемещения")
+
+
+def _number_names(fields: Iterable[str], one: str, both: str) -> str:
+    """«Номер WebMIM и перемещение <both>» or the one number «<one>»."""
+    fields = list(fields)
+    return "Номер WebMIM и перемещение " + both if len(fields) == 2 else "%s %s" % (_NUMBER_NAMES[NUMBERS.index(fields[0])], one)
+
+
+def _numbers_source(conn, card: dict, firsts: List[int]) -> Tuple[Optional[int], str]:
+    """The order whose numbers this one has: (its id, ""); (None, why not, "" when there is nothing to say). Never a guess: tyres of several
+    orders, of the point's own stock too, or positions of the supplier (their own order of WebMIM is coming) leave the numbers to a person.
+    A deal of the point's stock and the point's own sale have no WebMIM (a number would take the sale from the point: order_points.own_sales)."""
+    from . import order_points
+    if not firsts or firsts == [0] or card.get("deal_kind") == "stock" or (card["point_id"] and card["id"] in order_points.own_sales(conn, card["point_id"])):
+        return None, ""
+    if len(firsts) > 1:
+        return None, "шины из разных источников (%s)" % ", ".join("заказ №%d" % n if n else "свой остаток" for n in firsts)
+    if [i for i in supplier_items(conn, card) if int(i["qty"]) >= 1]:
+        return None, "в заказе есть позиции поставщика"
+    return firsts[0], ""
+
+
+def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, note: bool = False) -> None:
+    """Bring the two numbers in line with the tyres «с ОТХ» the order holds now, in the caller's transaction. An empty field gets the number of
+    the one order of purchase; a value equal to a number of an order the tyres came from (`before`, the orders of purchase before this change)
+    goes when that order no longer gives the numbers; anything else was written by a person and stays. `note`: say why nothing was taken."""
+    row = conn.execute("SELECT webmim_id, webmim_number, transfer_number FROM order_card WHERE id = ?", (card_id,)).fetchone()
+    if row is None or row[0]:
+        return
+    from . import order_merge
+    if order_merge.is_target(conn, card_id):                            # a merged order has its sources' numbers, by position (order_merge)
+        return
+    firsts = _firsts(conn, card_id)
+    source, why = _numbers_source(conn, orders.get_card(conn, card_id), firsts)
+    numbers = {}
+    for order_id in (set(before) | set(firsts)) - {0}:
+        got = conn.execute("SELECT webmim_number, transfer_number FROM order_card WHERE id = ?", (order_id,)).fetchone()
+        numbers[order_id] = tuple(got) if got else ("", "")
+    wanted = numbers.get(source, ("", ""))
+    taken_now, gone = {}, {}
+    for at, field in enumerate(NUMBERS):
+        value = row[at + 1]
+        if value and value != wanted[at] and any(n[at] == value for n in numbers.values()):
+            gone[field], value = "", ""
+        if not value and wanted[at]:
+            taken_now[field] = wanted[at]
+    changes = {**gone, **taken_now}
+    if changes:
+        conn.execute("UPDATE order_card SET %s, updated_at = ? WHERE id = ?" % ", ".join("%s = ?" % f for f in changes),
+                     list(changes.values()) + [now, card_id])
+        _audit(conn, now, author, "oth_numbers", {"order": int(card_id), "from_order": source, "changes": changes})
+    if [f for f in gone if f not in taken_now]:
+        orders.add_event(conn, card_id, now, author, "field", "%s: %s." % (
+            _number_names([f for f in gone if f not in taken_now], "убран", "убраны"), why or "заказ больше не держит шины того заказа, или в нём другие позиции"))
+    if taken_now:
+        orders.add_event(conn, card_id, now, author, "field", "%s из заказа №%d" % (_number_names(taken_now, "взят", "взяты"), source))
+    elif note and why and not (row[1] and row[2]) and any(any(n) for n in numbers.values()):
+        orders.add_event(conn, card_id, now, author, "field", "%s: %s.%s" % (_number_names(
+            [f for at, f in enumerate(NUMBERS) if not row[at + 1]], "не взят", "не взяты"), why,
+            " Впишите вручную." if len(firsts) > 1 else ""))                   # the supplier's position: its own order brings the number, or the next take
+
+
+def items_changed(conn, card_id, now: str, author: str) -> None:
+    """A position of the supplier was added or removed by a person (orders, in their transaction): at any stage of work the numbers of the tyres
+    «с ОТХ» follow, so «Оформить в WebMIM» is there when the supplier has to be asked (the copy would hide it and nothing would say the tyres
+    are not ordered). A closed order stays as it is, a press of «Оформить в WebMIM» going on writes its own (_write_order would not write over a
+    copy), a number written by a person stays."""
+    firsts = _firsts(conn, card_id)
+    if not firsts:
+        return
+    state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card_id,)).fetchone()
+    if orders.get_card(conn, card_id)["stage"]["kind"] == "open" and not (state and state[0] != "refused"):
+        _sync_numbers(conn, card_id, firsts, now, author)
+
+
 IN_STOCK = "Товар в наличии на точке"     # in place of the date of delivery of an order whose tyres all lie at the point (the owner 2026-10-30)
 _IN_STOCK_SQL = ("SELECT i.order_id FROM order_item i LEFT JOIN order_item_oth t ON t.item_id = i.id AND t." + _LIVE + " WHERE i.qty >= 1 %s "
                  "GROUP BY i.order_id HAVING COUNT(t.item_id) = COUNT(*)")
@@ -135,7 +245,7 @@ def why_not(conn, card: dict) -> Optional[str]:
         return "Брать с ОТХ можно только до «Заказ оформлен»: заказ уже на этапе «%s»." % stage["name"]
     if card["sale_ids"]:
         return "По заказу записана продажа."
-    if card["webmim_id"] or card["webmim_number"]:
+    if card["webmim_id"] or (card["webmim_number"] and card["id"] not in borrowed_ids(conn, card["id"])):     # the number of its tyres: not its own
         return "Заказ уже есть в WebMIM: шины с ОТХ к нему не добавить."
     placed = conn.execute("SELECT supplier_number FROM order_card WHERE id = ?", (card["id"],)).fetchone()
     if placed and str(placed[0] or "").strip():                        # «Оформил вручную» of 4 Точки (order_supplier), the move may have failed
@@ -213,8 +323,9 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     if card["point_id"] and card["point_id"] != source["point_id"]:
         raise OthSaleError("Шины лежат на «%s», а заказ на другой точке: взять нельзя. Другую точку не предлагаем." % _point_name(source))
     pieces = min(int(source["qty"]), int(line["qty"]))
+    before = _firsts(conn, card_id)
     if source["manual"]:
-        return _take_manual(conn, card, line, source, pieces, now, author)
+        return _take_manual(conn, card, line, source, pieces, before, now, author)
     old = orders.get_card(conn, source["order_id"])
     item = next(i for i in old["items"] if i["id"] == source["item_id"])
     cancel = _stage(conn, "cancel")
@@ -251,6 +362,7 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     orders.add_event(conn, card_id, now, author, "item", "Взято с ОТХ (заказ №%d, %s): %s × %d" % (old["id"], _point_name(source), line["name"], pieces))
     orders.add_event(conn, old["id"], now, author, "item", "Передано с ОТХ в заказ №%d: %s × %d" % (card_id, item["name"], pieces))
     _audit(conn, now, author, "oth_take", {"order": int(card_id), "item": cur.lastrowid, "from_order": old["id"], "from_item": item["id"], "qty": pieces})
+    _sync_numbers(conn, card_id, before, now, author, note=True)
     left = conn.execute("SELECT COALESCE(SUM(qty), 0) FROM order_item WHERE order_id = ?", (old["id"],)).fetchone()[0]
     if left > 0:
         conn.commit()
@@ -265,7 +377,7 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     return pieces
 
 
-def _take_manual(conn, card: dict, line: dict, source: dict, pieces: int, now: str, author: str) -> int:
+def _take_manual(conn, card: dict, line: dict, source: dict, pieces: int, before: List[int], now: str, author: str) -> int:
     """take() from a row of «Свой остаток (ОТХ)»: the row loses the pieces (never below 0, in the statement), the order gets a position «с ОТХ»
     at the purchase of its own position (no old order). One transaction."""
     from . import oth_manual
@@ -297,6 +409,7 @@ def _take_manual(conn, card: dict, line: dict, source: dict, pieces: int, now: s
                  (cur.lastrowid, card_id, -int(source["manual"]), pieces, now, author))
     orders.add_event(conn, card_id, now, author, "item", "Взято с ОТХ (свой остаток, %s): %s × %d" % (_point_name(source), line["name"], pieces))
     _audit(conn, now, author, "oth_take", {"order": int(card_id), "item": cur.lastrowid, "manual": int(source["manual"]), "qty": pieces})
+    _sync_numbers(conn, card_id, before, now, author, note=True)
     conn.commit()
     return pieces
 
@@ -370,8 +483,9 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     if why:
         raise OthSaleError(why.replace("Брать с ОТХ", "Вернуть на ОТХ"))
     line = next(i for i in card["items"] if i["id"] == int(item_id))
+    before = _firsts(conn, card_id)
     if not link["from_order"]:
-        return _untake_manual(conn, card, line, link, now, author)
+        return _untake_manual(conn, card, line, link, before, now, author)
     if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (link["from_order"],)).fetchone():
         raise OthSaleError("По заказу №%d согласован возврат поставщику: шины в него не вернуть (акт МХ-3 разойдётся). " % link["from_order"] + NO_BACK)
     old = conn.execute("SELECT c.id, s.code, c.cancel_reason FROM order_item i JOIN order_card c ON c.id = i.order_id JOIN order_stage s ON s.id = c.stage_id "
@@ -388,6 +502,7 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     orders.add_event(conn, card_id, now, author, "item", "Возвращено на ОТХ (заказ №%d): %s × %d" % (link["from_order"], line["name"], pieces))
     orders.add_event(conn, link["from_order"], now, author, "item", "Шины вернулись на ОТХ из заказа №%d: %s × %d" % (card_id, line["name"], pieces))
     _audit(conn, now, author, "oth_untake", {"order": int(card_id), "item": line["id"], "from_order": link["from_order"], "qty": pieces})
+    _sync_numbers(conn, card_id, before, now, author)
     if not reopen:
         conn.commit()
         return pieces
@@ -401,7 +516,7 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     return pieces
 
 
-def _untake_manual(conn, card: dict, line: dict, link: dict, now: str, author: str) -> int:
+def _untake_manual(conn, card: dict, line: dict, link: dict, before: List[int], now: str, author: str) -> int:
     """untake() of tyres taken from «Свой остаток (ОТХ)»: they lie at the order's point again, as a manual row of it."""
     from . import oth_manual
     pieces = int(line["qty"])
@@ -416,6 +531,7 @@ def _untake_manual(conn, card: dict, line: dict, link: dict, now: str, author: s
         oth_manual.give_back(conn, str(line["goods_id"]), int(point_id), pieces, now, author, card["id"])
     orders.add_event(conn, card["id"], now, author, "item", "Возвращено на ОТХ (свой остаток): %s × %d" % (line["name"], pieces))
     _audit(conn, now, author, "oth_untake", {"order": int(card["id"]), "item": line["id"], "manual": -int(link["from_item"]), "qty": pieces})
+    _sync_numbers(conn, card["id"], before, now, author)
     conn.commit()
     return pieces
 

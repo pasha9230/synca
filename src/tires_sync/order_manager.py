@@ -206,8 +206,13 @@ def find_orders(conn, number) -> List[int]:
     All of them: the caller never picks one."""
     found = sorted({r[0] for r in conn.execute("SELECT id, webmim_number FROM order_card WHERE webmim_number != ''")
                     if re.sub(r"[\s№#]", "", r[1]).isdigit() and int(re.sub(r"[\s№#]", "", r[1])) == number})
-    if number not in found and conn.execute("SELECT 1 FROM order_card WHERE id = ? AND webmim_number = ''", (number,)).fetchone():
+    from .oth_sale import borrowed_ids
+    if number not in found and (conn.execute("SELECT 1 FROM order_card WHERE id = ? AND webmim_number = ''", (number,)).fetchone()
+                                or borrowed_ids(conn, number)):  # a number taken with the tyres from OTH may be another order's too: the panel's still names it
         found.append(number)                                     # an order with a WebMIM number is known to the points by that one only
+    if len(found) > 1:                                           # a number taken with the tyres from OTH: the order that gave them away is not meant
+        from .oth_sale import given_away
+        found = [i for i in found if i not in given_away(conn, found)] or found
     from .order_merge import moved_into
     return sorted({moved_into(conn, i) or i for i in found})     # a source of a merge: its merged order (order_merge, этап 2)
 
@@ -807,7 +812,7 @@ def send_to_client(conn, card: dict, body: str, token: str, deliver: Optional[De
 def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """The point says the goods came: «можно забирать» to the client (_tell_arrived) and «Поступили шины» for the bell (note_arrival), once per
     stay at the point each. Every «приехал» of a point comes here (the command, the button of «Рабочее место», the owner's confirmation), and
-    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}», it has none).
+    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}» when it has none).
     An order to another city (order_intercity): the client does not come, nothing to the client."""
     from . import order_intercity
     if order_intercity.is_on(conn, card_id):

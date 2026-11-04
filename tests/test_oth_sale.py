@@ -811,7 +811,9 @@ def test_the_arrival_message_of_an_order_all_from_oth_waits_without_the_webmim_n
 def test_the_point_arrived_of_an_order_all_from_oth_uses_the_text_without_the_number_too(tmp_path):
     from tires_sync import order_manager
     conn = db(tmp_path)
-    card_at(conn, "oth", T)
+    old = card_at(conn, "oth", T)
+    conn.execute("UPDATE order_card SET webmim_number = '' WHERE id = ?", (old,))   # with a number the new order has it (test_oth_numbers): the text names it
+    conn.commit()
     cid = new_order(conn, qty=2)
     take(conn, cid)
     orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")

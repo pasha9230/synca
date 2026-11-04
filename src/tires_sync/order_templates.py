@@ -213,7 +213,7 @@ def _oth_source(conn, card_id) -> str:
 
 def render(conn, card: dict, body: str, now=None, mark: bool = False) -> Tuple[str, List[str]]:
     """The text of a template for a card and the names of the values it lacks (those variables are left out of the text; `mark`: put
-    «[name]» in their place, the draft a person copies while a value is lacking)."""
+    «[name]» in their place, the draft a person reads while a value is lacking, never sent: unfilled)."""
     data = values(conn, card, now)
     missing: List[str] = []
 
@@ -228,6 +228,12 @@ def render(conn, card: dict, body: str, now=None, mark: bool = False) -> Tuple[s
             return "[%s]" % label if mark else ""
         return data[key]
     return PLACEHOLDER.sub(put, body), missing
+
+
+def unfilled(text: str) -> List[str]:
+    """The marks of a draft left in a text («[Номер заказа WebMIM]», render(mark=True)): such a text never goes to anybody."""
+    labels = "|".join(re.escape(label) for label in sorted(VARIABLES.values(), key=len, reverse=True))
+    return re.findall(r"\[(?:%s|Номер[^\]\n]*)\]" % labels, str(text or ""))
 
 
 def add_samples(conn) -> int:
