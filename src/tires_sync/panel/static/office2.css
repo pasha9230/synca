@@ -45,7 +45,8 @@ body.o2 .o2-foot{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-t
 /* ---- «Список»: the stage first, the selection, the side panel (variant 3) ---- */
 body.o2 .o2-stage{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;border-radius:var(--r-sm);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);background:color-mix(in srgb,var(--c) 12%,#fff);font-size:12px;white-space:nowrap}
 body.o2 .o2-stage::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--c)}
-body.o2 .o2-chk{width:36px}
+body.o2 .o2-chk{width:36px;padding:0}
+body.o2 .o2-chk-hit{display:flex;align-items:center;justify-content:center;min-height:36px;cursor:pointer}
 body.o2 .o2-wm-link{font-weight:600}
 body.o2 .o2-sheet tr.is-sel td{background:var(--primary-25)}
 body.o2 .o2-listwrap{display:flex;gap:var(--s-3);align-items:flex-start}

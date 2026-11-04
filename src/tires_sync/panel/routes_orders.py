@@ -595,14 +595,13 @@ def register(app) -> None:
             data = point_board(conn, data, own_point())                   # the point's own sales on four stages (the owner 2026-10-30)
         rows = sorted(({"card": c, "stage": col["stage"]} for col in data["columns"] for c in col["cards"]), key=lambda r: -r["card"]["id"])
         labels = orders.origin_labels(conn, own_point(), [r["card"]["id"] for r in rows]) if own_point() else {}   # not from the point's account
-        table = list_table(conn, rows, only) if view == "list" else None
-        notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
-                                   clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
         start, end = (_day(request.args.get(k)) for k in ("from", "to")) if office_new() else ("", "")
         if start or end:                                         # «Дата создания» (the new view only): the list and the file the same
             data = in_dates(data, start, end)
             rows = [r for r in rows if (not start or r["card"]["created"] >= start) and (not end or r["card"]["created"] <= end)]
-            table = list_table(conn, rows, only) if view == "list" else None
+        table = list_table(conn, rows, only) if view == "list" else None
+        notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
+                                   clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
         total = sum(col["count"] for col in data["columns"])
         if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03),
             found = bool(query or tag or returning)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
@@ -698,7 +697,7 @@ def register(app) -> None:
         """The columns of the order's card in «Новый вид» folded and widened: one's own setting (user_pref), sent by the page as JSON in `layout`."""
         try:
             layout = clean_layout(json.loads(request.form.get("layout", "")))
-        except ValueError:
+        except (ValueError, RecursionError):                             # a deeply nested value is not one either
             layout = None
         if layout is None:
             return jsonify(ok=False), 400
@@ -725,10 +724,11 @@ def register(app) -> None:
         orders.ensure_pipeline(conn, local_iso())
         stamp = local_now()
         try:
-            ids = {i for i in (_int(x) for x in request.args.get("ids", "").split(",")) if i} or None     # «Excel» of the selected (new view)
+            new = office_new()                                       # «Excel» of the selected and «Дата создания»: the new view's only
+            ids = ({i for i in (_int(x) for x in request.args.get("ids", "").split(",")) if i} or None) if new else None
             data = orders_export.build(conn, stamp, point_id=own_point() or _int(request.args.get("p")), tag=request.args.get("t", "").strip()[:30],
                                        query=request.args.get("q", "").strip()[:80], money=own_point() is None,   # a point: no sums
-                                       only=ids, start=_day(request.args.get("from")), end=_day(request.args.get("to")))
+                                       only=ids, start=_day(request.args.get("from")) if new else "", end=_day(request.args.get("to")) if new else "")
         except ImportError:                                           # the library of Excel files is not installed on this machine
             flash("Выгрузка в Excel недоступна: на сервере не установлена библиотека openpyxl.")
             return redirect("/orders")

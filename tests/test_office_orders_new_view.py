@@ -188,6 +188,7 @@ def _ids(w, *keys):
 
 
 def test_bulk_tag_on_and_off(w):
+    flag(w, "all")
     client = client_of(w, "zaman")
     r = client.post("/orders/bulk/tag", data={"csrf": csrf(client), "id": _ids(w, "a", "b"), "tag": "предоплата", "mode": "on",
                                               "back": "/orders?v=list&q=x"})
@@ -201,6 +202,7 @@ def test_bulk_tag_on_and_off(w):
 
 
 def test_bulk_responsible_names_only_staff(w):
+    flag(w, "all")
     client = client_of(w, "zaman")
     client.post("/orders/bulk/responsible", data={"csrf": csrf(client), "id": _ids(w, "a", "c"), "responsible": "chat1"})
     assert [orders.get_card(w["conn"], w["ids"][k])["responsible"] for k in "ac"] == ["chat1", "chat1"]
@@ -210,6 +212,7 @@ def test_bulk_responsible_names_only_staff(w):
 
 
 def test_bulk_delete_goes_to_the_trash_and_needs_both_rights(w):
+    flag(w, "all")
     chats = client_of(w, "chat1")
     r = chats.post("/orders/bulk/delete", data={"csrf": csrf(chats), "id": _ids(w, "a")})
     assert r.status_code == 403
@@ -218,7 +221,7 @@ def test_bulk_delete_goes_to_the_trash_and_needs_both_rights(w):
     point = client_of(w, "pt1")
     assert point.post("/orders/bulk/tag", data={"csrf": csrf(point), "id": _ids(w, "a"), "tag": "x"}).status_code == 403
     partner = client_of(w, "zaman")
-    partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a", "b")})
+    partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a", "b"), "confirmed": "1"})
     left = {r[0] for r in w["conn"].execute("SELECT id FROM order_card")}
     assert w["ids"]["a"] not in left and w["ids"]["b"] not in left and w["ids"]["c"] in left
     assert len(trash.list_deleted(w["conn"], "order")) == 2
@@ -233,6 +236,7 @@ def test_bulk_stage_is_the_check_of_close_at_once(w):
 
 def test_excel_of_the_selected_only(w):
     openpyxl = pytest.importorskip("openpyxl")
+    flag(w, "all")
     client = client_of(w, "owner")
     r = client.get("/orders/export.xlsx?ids=%s" % ",".join(_ids(w, "a", "c")))
     assert r.status_code == 200
@@ -273,3 +277,91 @@ def test_the_columns_are_one_s_own(w):
         assert r.status_code == 400, bad
     assert user_prefs.get(w["conn"], "owner", "order.card.layout") == layout
     assert owner.post("/orders/card/layout", data={"layout": json.dumps(layout)}).status_code == 400       # no csrf
+
+
+# --- after the review ----------------------------------------------------------------------------------------------------------------
+
+def test_a_date_that_finds_nothing_is_not_an_empty_panel(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders?from=2030-01-01")
+    assert "Заказов пока нет" not in text and "Фильтр включён: 1" in text
+
+
+def test_bulk_tag_with_a_comma_is_refused(w):
+    flag(w, "all")
+    client = client_of(w, "zaman")
+    client.post("/orders/bulk/tag", data={"csrf": csrf(client), "id": _ids(w, "a"), "tag": "a,b", "mode": "on"})
+    assert orders.get_card(w["conn"], w["ids"]["a"])["tags"] == []
+
+
+def test_a_deeply_nested_layout_is_a_400_not_a_500(w):
+    flag(w, "all")
+    owner = client_of(w, "owner")
+    r = owner.post("/orders/card/layout", data={"csrf": csrf(owner), "layout": "[" * 50000 + "]" * 50000})
+    assert r.status_code == 400
+
+
+# --- the lead's conditions (2026-11-04) ------------------------------------------------------------------------------------------------
+
+def test_the_bulk_actions_are_the_new_view_s_only(w):
+    partner = client_of(w, "zaman")                                      # «Офис» off: no panel, no bulk, the file as before
+    for url, extra in (("/orders/bulk/tag", {"tag": "x"}), ("/orders/bulk/responsible", {"responsible": "chat1"}),
+                       ("/orders/bulk/delete", {"confirmed": "1"})):
+        assert partner.post(url, data=dict(extra, csrf=csrf(partner), id=_ids(w, "a"))).status_code == 403, url
+    assert orders.get_card(w["conn"], w["ids"]["a"])["tags"] == []
+    assert "data-bulk" not in html(partner, "/orders?v=list")
+    openpyxl = pytest.importorskip("openpyxl")
+    sheet = openpyxl.load_workbook(io.BytesIO(partner.get("/orders/export.xlsx?ids=%s&from=2030-01-01" % w["ids"]["a"]).data)).active
+    assert sheet.max_row == 4                                            # ids and the date are ignored: every order, as before
+
+
+def test_bulk_delete_asks_with_the_numbers_first(w):
+    flag(w, "all")
+    partner = client_of(w, "zaman")
+    r = partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a", "b"), "back": "/orders?v=list"})
+    page = r.get_data(as_text=True)
+    assert r.status_code == 200 and "Удалить 2 заказа?" in page
+    listed = re.search(r"<table[^>]*data-bulk-delete-list.*?</table>", page, re.S).group(0)
+    assert "7712345" in listed and "№%d" % w["ids"]["a"] in listed and "№%d" % w["ids"]["b"] in listed and "Вера" not in listed
+    assert 'name="confirmed" value="1"' in page
+    assert w["conn"].execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 3        # nothing deleted by the question
+    partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a", "b"), "confirmed": "1"})
+    assert w["conn"].execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 1
+    each = w["conn"].execute("SELECT COUNT(*) FROM audit WHERE action = 'order_delete'").fetchone()[0]
+    whole = [json.loads(r[0]) for r in w["conn"].execute("SELECT detail FROM audit WHERE action = 'orders_bulk_delete'")]
+    assert each == 2 and whole == [{"orders": sorted([w["ids"]["a"], w["ids"]["b"]]), "refused": 0}]
+    restored = trash.list_deleted(w["conn"], "order")
+    assert len(restored) == 2                                            # restorable from «Удалённые»
+
+
+def test_a_refused_delete_leaves_the_order_and_says_why(w):
+    flag(w, "all")
+    orders.move_card(w["conn"], w["ids"]["a"], next(s["id"] for s in orders.list_stages(w["conn"]) if s["code"] == "talk"), NOW, "o")
+    w["conn"].execute("UPDATE order_card SET sale_ids = '[1]' WHERE id = ?", (w["ids"]["a"],))
+    w["conn"].commit()
+    partner = client_of(w, "zaman")
+    r = partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a", "b"), "confirmed": "1"}, follow_redirects=True)
+    text = r.get_data(as_text=True)
+    left = {r[0] for r in w["conn"].execute("SELECT id FROM order_card")}
+    assert w["ids"]["a"] in left and w["ids"]["b"] not in left
+    assert "Не изменены (1)" in text and "продажа" in text
+
+
+def test_at_most_200_orders_a_press(w):
+    flag(w, "all")
+    partner = client_of(w, "zaman")
+    many = [str(i) for i in range(1, 202)]
+    r = partner.post("/orders/bulk/tag", data={"csrf": csrf(partner), "id": many, "tag": "x"}, follow_redirects=True)
+    assert "не больше 200" in r.get_data(as_text=True)
+    assert all("x" not in orders.get_card(w["conn"], i)["tags"] for i in w["ids"].values())
+    r = partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": many, "confirmed": "1"}, follow_redirects=True)
+    assert w["conn"].execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 3
+
+
+def test_the_layout_is_not_saved_working_as_a_point(w):
+    flag(w, "all")
+    owner = client_of(w, "owner")
+    owner.post("/as-point", data={"csrf": csrf(owner), "point_id": str(w["pid"])})
+    r = owner.post("/orders/card/layout", data={"csrf": csrf(owner), "layout": json.dumps({"w": [1, 1, 1], "off": [False] * 3})})
+    assert r.status_code in (403, 409)
+    assert user_prefs.get(w["conn"], "owner", "order.card.layout") is None

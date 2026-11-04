@@ -85,6 +85,8 @@
         col.classList.toggle("is-off", !!layout.off[i]);
         col.style.setProperty("--w", String(layout.w[i]));
         col.querySelectorAll("[data-cc-toggle]").forEach(function (b) { b.setAttribute("aria-expanded", layout.off[i] ? "false" : "true"); });
+        var strip = col.querySelector(".o2c-strip");               // the strip shows while the column is folded: it opens it (expanded «false»)
+        if (strip) strip.setAttribute("aria-expanded", "false");
       });
       splits.forEach(function (s, i) { s.classList.toggle("is-idle", !near(i)); });
     };

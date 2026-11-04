@@ -1,12 +1,15 @@
 """«Закрыть заказы разом»: pick the cards and the stage, see what moves and what does not, confirm. See order_bulk."""
 from __future__ import annotations
 
-from flask import flash, redirect, render_template, request
+from flask import abort, flash, redirect, render_template, request
 
-from .. import order_bulk, orders, oth_sale, trash
+from .. import order_bulk, orders, oth_sale, store, trash
 from ..orders import OrderError
 from .common import author, get_conn, has_right, login_required, safe_path
+from .routes_design import office_new
 from .routes_orders import _int, check_responsible, local_iso
+
+PANEL_LIMIT = 200                                     # the side panel of «Список»: at most this many orders a press (the lead 2026-11-04)
 
 
 def _ids(values) -> list:
@@ -25,10 +28,21 @@ def _back():
     return redirect(target if target.startswith("/orders") else "/orders?v=list")
 
 
+def _picked():
+    """The selected orders of the side panel: the new view only (the old one has no panel; the lead 2026-11-04), PANEL_LIMIT at most."""
+    if not office_new():
+        abort(403)
+    ids = sorted(set(_ids(request.form.getlist("id"))))
+    if len(ids) > PANEL_LIMIT:
+        flash("Разом — не больше %d заказов: выбрано %d." % (PANEL_LIMIT, len(ids)), "error")
+        return None
+    return ids
+
+
 def _each(ids, change) -> tuple:
     """`change(card)` for every picked order still there (deleted meanwhile: skipped): (done, [refusals «№N: why»])."""
     done, refused = 0, []
-    for card_id in sorted(set(ids))[:order_bulk.LIMIT]:
+    for card_id in ids:
         try:
             card = orders.get_card(get_conn(), card_id)
         except OrderError:
@@ -53,9 +67,14 @@ def register(app) -> None:
     @app.route("/orders/bulk/tag", methods=["POST"])
     @login_required
     def orders_bulk_tag():
-        ids, tag, on = _ids(request.form.getlist("id")), " ".join(request.form.get("tag", "").split()), request.form.get("mode") != "off"
+        ids, tag, on = _picked(), " ".join(request.form.get("tag", "").split()), request.form.get("mode") != "off"
+        if ids is None:
+            return _back()
         if not ids or not tag:
             flash("Отметьте заказы и впишите тег.", "error")
+            return _back()
+        if "," in tag:                                                   # a comma would make two tags of it (orders.tag_list)
+            flash("Тег без запятой: один тег за раз.", "error")
             return _back()
 
         def change(card):
@@ -70,7 +89,9 @@ def register(app) -> None:
     @app.route("/orders/bulk/responsible", methods=["POST"])
     @login_required
     def orders_bulk_responsible():
-        ids, login = _ids(request.form.getlist("id")), request.form.get("responsible", "").strip()
+        ids, login = _picked(), request.form.get("responsible", "").strip()
+        if ids is None:
+            return _back()
         if not ids or not login:
             flash("Отметьте заказы и выберите ответственного.", "error")
             return _back()
@@ -87,18 +108,35 @@ def register(app) -> None:
     @app.route("/orders/bulk/delete", methods=["POST"])
     @login_required
     def orders_bulk_delete():
+        """«Удалить» of the side panel: first the list of the numbers to confirm, then each order to «Удалённые» as its own card does
+        (trash.delete_order: the order's own record in the audit, restorable), and one record of the whole press (the lead 2026-11-04)."""
         if not has_right("bulk"):                                        # check_access asked «delete» (NEEDS); many at once: «bulk» too
             flash("Удалять разом может тот, у кого есть право массовых действий.", "error")
             return _back()
-        ids = _ids(request.form.getlist("id"))
+        ids = _picked()
+        if ids is None:
+            return _back()
         if not ids:
             flash("Отметьте заказы.", "error")
             return _back()
+        conn = get_conn()
+        if request.form.get("confirmed") != "1":
+            cards = []
+            for card_id in ids:
+                try:
+                    cards.append(orders.get_card(conn, card_id))
+                except OrderError:
+                    continue
+            return render_template("office2/orders_bulk_delete.html", cards=cards, back=safe_path(request.form.get("back", "")) or "/orders?v=list")
+        deleted = []
 
         def change(card):
-            trash.delete_order(get_conn(), card["id"], local_iso(), author(), only_if=lambda c, _card: oth_sale.why_not_delete(c, card["id"]))
+            trash.delete_order(conn, card["id"], local_iso(), author(), only_if=lambda c, _card: oth_sale.why_not_delete(c, card["id"]))
+            deleted.append(card["id"])
             return True
         done, refused = _each(ids, change)
+        store.write_audit(conn, local_iso(), author(), "orders_bulk_delete", {"orders": deleted, "refused": len(refused)})
+        conn.commit()
         _said("Удалено в «Удалённые» (вернуть можно там)", done, refused)
         return _back()
 

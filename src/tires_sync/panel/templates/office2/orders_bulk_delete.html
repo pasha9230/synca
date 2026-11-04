@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{# «Удалить» of the side panel of «Список» in «Новый вид» (lane port-office-orders; the lead 2026-11-04): the numbers to confirm before
+   routes_order_bulk.orders_bulk_delete sends each order to «Удалённые». Nothing is deleted by this page itself. #}
+{% block title %}Удалить заказы · Tires Sync{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}o2 o2-orders{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Удалить {{ cards|length }} {{ plural(cards|length, "заказ", "заказа", "заказов") }}?</h1>
+<p class="sub">Заказы уйдут в «Удалённые» — оттуда их можно вернуть. В Авито и WebMIM ничего не меняется, клиентам ничего не отправится. Заказ с записанной продажей или с шинами с ОТХ не удалится: панель скажет, какой и почему.</p></div></header>
+<section class="card"><div class="table-wrap"><table class="table table--plain" data-bulk-delete-list>
+<thead><tr><th>№ WebMIM</th><th>внутр. №</th><th>Клиент</th><th>Этап</th></tr></thead>
+<tbody>{% for c in cards %}<tr><td><b>{{ c.webmim_number or "—" }}</b></td><td>№{{ c.id }}</td><td>{{ c.client_name or c.client_phone or "Без имени" }}</td><td><span class="o2-stage" style="--c:{{ c.stage.color }}">{{ c.stage.name }}</span></td></tr>
+{% else %}<tr><td colspan="4" class="muted">Выбранных заказов уже нет.</td></tr>{% endfor %}</tbody></table></div></section>
+<form method="post" action="/orders/bulk/delete" class="row" style="gap:var(--s-2)" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="confirmed" value="1"><input type="hidden" name="back" value="{{ back }}">
+{% for c in cards %}<input type="hidden" name="id" value="{{ c.id }}">{% endfor %}
+<a class="btn btn--secondary" href="{{ back }}">Отмена</a>{% if cards %}<button class="btn btn--danger">{{ icon("x", "i-sm") }}Удалить {{ cards|length }}</button>{% endif %}</form>
+{% endblock %}
