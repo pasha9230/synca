@@ -158,8 +158,8 @@ def message_body(conn, task: dict, card: dict) -> Optional[str]:
 
 
 def draft(conn, task: dict, now: str) -> str:
-    """The text of a message that lacks values, «[name]» in place of each (copied and sent by hand while the value is not there); ''
-    when it has no template text. Never raises."""
+    """The text of a message that lacks values, «[name]» in place of each: shown to read, never to send (the owner 2026-11-04: a client got
+    the marks); '' when it has no template text. Never raises."""
     try:
         card = orders.get_card(conn, task["order_id"])
         body = message_body(conn, task, card)
@@ -291,6 +291,13 @@ def audience(conn, task: dict) -> str:
         return ""
 
 
+def _no_marks(text: str) -> None:
+    """A text with a mark of a draft left in it is never sent, whoever pressed what."""
+    left = templates.unfilled(text)
+    if left:
+        raise OrderError("Текст не отправлен: в нём остались незаполненные поля %s. Заполните их." % ", ".join(left))
+
+
 def send_target(conn, task: dict, prefer=None) -> Tuple[Optional[dict], str]:
     """The Avito chat a message to the client goes to (the preferred chat when it is the order's and may write, else the newest that may),
     and why it cannot go when there is none. Messages to the manager never go to a chat of the client."""
@@ -351,6 +358,7 @@ def send_point_task(conn, task_id, text: str, send, now: str, author: str, point
             raise OrderError(task["result"])
     if task["status"] != "pending":
         raise OrderError("Эта задача уже выполняется или выполнена.")
+    _no_marks(text)
     point, why = point_target(conn, task)
     if point is None:
         raise OrderError(why)
@@ -426,6 +434,7 @@ def send_task(conn, task_id, text: str, deliver, now: str, author: str, prefer=N
             raise OrderError(task["result"])
     if task["status"] != "pending":
         raise OrderError("Эта задача уже выполняется или выполнена.")
+    _no_marks(text)
     chat, why = send_target(conn, task, prefer)
     if chat is None:
         raise OrderError(why)
@@ -495,7 +504,7 @@ def close_after_send(conn, token, text: str, now: str, how: str) -> bool:
 
 
 def sent_by_hand(conn, task_id, now: str, author: str) -> None:
-    """«Отправлено вручную» of a message: a person wrote it themselves — also while it lacks a value (the draft was copied); never sent by
+    """«Отправлено вручную» of a message: a person wrote it themselves — also while it lacks a value; never sent by
     the panel after it. Its «Не дошло клиенту» (order_unsent) is closed and the lines of «Входящие» about its send mark are answered (as
     unsent.sent_by_hand): nobody writes it to the client a second time."""
     task = get_task(conn, task_id)

@@ -912,6 +912,10 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
         raise ChatError("Такого чата нет.")
     if not text or len(text) > MAX_REPLY:
         raise ChatError("Текст ответа: от 1 до %d знаков." % MAX_REPLY)
+    from .order_templates import unfilled
+    left = unfilled(text)
+    if left:                                                                     # a draft of «Сообщения по заказу» pasted: never to a client
+        raise ChatError("Текст не отправлен: в нём остались незаполненные поля %s. Заполните их." % ", ".join(left))
     allowed = conn.execute("SELECT chats_enabled, chats_send FROM account WHERE id = ?", (chat["account_id"],)).fetchone()
     if not allowed or not allowed[0]:
         raise ChatError("У аккаунта выключено чтение чатов: включите его в «Подключения → Авито → аккаунт».")

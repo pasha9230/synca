@@ -208,6 +208,12 @@ def render(conn, card: dict, body: str, now=None, mark: bool = False) -> Tuple[s
     return PLACEHOLDER.sub(put, body), missing
 
 
+def unfilled(text: str) -> List[str]:
+    """The marks of a draft left in a text («[Номер заказа WebMIM]», render(mark=True)): such a text never goes to anybody."""
+    labels = "|".join(re.escape(label) for label in sorted(VARIABLES.values(), key=len, reverse=True))
+    return re.findall(r"\[(?:%s|Номер[^\]\n]*)\]" % labels, str(text or ""))
+
+
 def add_samples(conn) -> int:
     """The owner's texts as templates (a template of the same name is left alone, unless it still has a retired sample's text word for word).
     Returns how many were added."""

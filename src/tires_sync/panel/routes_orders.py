@@ -329,6 +329,11 @@ def _lacking(result: str) -> str:
 ORDER_FIELDS = ("webmim_number", "transfer_number", "client_name", "client_phone", "delivery_date")    # the order window's own fields
 
 
+def _lacking_names(result) -> str:
+    """The values a message lacks, in words, for «Не отправляйте этот текст»."""
+    return ", ".join(n.strip() for n in str(result or "").rsplit(":", 1)[-1].rstrip(".").split(",") if n.strip())
+
+
 def _lacking_fields(result) -> list:
     """The fields of the order window a message lacks: [(name of the field, its label)], for «Вписать …» next to «Не хватает»."""
     names = [n.strip() for n in str(result or "").rsplit(":", 1)[-1].rstrip(".").split(",")]
@@ -361,6 +366,7 @@ def messages_view(conn, card_id, vk_ready: bool, now: Optional[str] = None) -> l
         if task["status"] == "error":
             view["lacking"] = _lacking(task["result"])
             view["draft"] = engine.draft(conn, task, now or local_iso())
+            view["lacking_names"] = _lacking_names(task["result"])
             view["fields"] = _lacking_fields(task["result"])
         view["can"] = task["status"] == "pending" and bool(view["chat"] or view["point"]) and not view["why"]
         out.append(view)
@@ -1829,7 +1835,7 @@ def register(app) -> None:
         conn = get_conn()
         task = _task_or_404(conn, card_id, task_id)
         try:
-            if task["kind"] == "message":                           # «Отправлено вручную»: also while it lacks a value (the draft was copied)
+            if task["kind"] == "message":                           # «Отправлено вручную»: also while it lacks a value
                 engine.sent_by_hand(conn, task_id, local_iso(), author())
                 flash("Готово.", "ok")
                 return back(card_id)
