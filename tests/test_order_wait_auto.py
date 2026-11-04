@@ -518,7 +518,8 @@ def test_the_button_that_finds_it_in_the_chat_closes_the_task_too(env):
 
 def test_the_stage_hint_says_the_client_is_written_to():
     from tires_sync import onboarding_texts
-    assert "Клиенту само ничего не уходит" not in open(onboarding_texts.__file__, encoding="utf-8").read()
+    words = " ".join(onboarding_texts.STAGES["wait"]["auto"])
+    assert "сама пишет клиенту" in words and "Клиенту само ничего не уходит" not in words
 
 
 # --- the owner's answers of 2026-11-05 -------------------------------------------------------------------------------------------------------
@@ -709,7 +710,11 @@ def test_a_first_order_without_a_chat_holds_the_tires_while_its_task_is_open(env
     assert "Сообщение о наличии не отправлено: шины первым предлагает менеджер заказу №%d" % old in events(conn, young)
     conn.execute("UPDATE order_task SET status = 'done' WHERE id = ?", (tasks(conn, old)[0]["id"],))
     conn.commit()
-    run(conn, sender, [tire()], NEXT)                                                           # closed: it holds nothing
+    run(conn, sender, [tire()], NEXT)                                                           # done: the manager offered them, still on the stage
+    assert sender.sent == []
+    conn.execute("UPDATE order_task SET status = 'skipped' WHERE id = ?", (tasks(conn, old)[0]["id"],))
+    conn.commit()
+    run(conn, sender, [tire()], "2026-11-04T14:40:00")                                          # skipped: it holds nothing
     assert len(sender.sent) == 1 and [t for t in events(conn, young, "green") if t.startswith(order_wait.TOLD)]
 
 
@@ -729,3 +734,293 @@ def test_the_younger_order_takes_the_other_suppliers_stock_at_its_price(env):
     sender = Sender()
     run(conn, sender, [tire(), s2()])
     assert len(sender.sent) == 2 and "8 500 ₽" in sender.sent[0] and "6 000.50 ₽" in sender.sent[1]
+
+
+# --- the review of 8c11c0d --------------------------------------------------------------------------------------------------------------------
+
+def test_a_code_not_in_stock_is_a_task_even_when_the_size_fits(env):
+    conn, _row = env
+    card, sender = waiting(env, dict(WANT, code="ZZ9")), Sender()
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and "артикула ZZ9 нет в наличии" in tasks(conn, card)[0]["body"]
+
+
+def test_a_code_in_stock_offers_that_position_not_another_of_the_size(env):
+    conn, _row = env
+    PRICE["ZZ9"] = 9900
+    waiting(env, dict(WANT, code="ZZ9"))
+    sender = Sender()
+    try:
+        run(conn, sender, [tire(), tire(goods_id="200", code="ZZ9", name_orig="Та самая"), s2(code="OTHER")])
+    finally:
+        del PRICE["ZZ9"]
+    assert "«Та самая»" in sender.sent[0] and "9 900 ₽" in sender.sent[0]
+
+
+@pytest.mark.parametrize("other", (dict(speed="H"), dict(load="91"), dict(runflat=True), dict(xl=True)))
+def test_another_index_runflat_or_xl_is_another_tire_the_manager_chooses(env, other):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(speed="T", load="94", runflat=False, xl=False), tire(**{"goods_id": "200", "code": "TS2", "speed": "T", "load": "94", "runflat": False, "xl": False, **other})])
+    assert sender.sent == [] and "несколько моделей или индексов" in tasks(conn, card)[0]["body"]
+
+
+def test_an_empty_model_without_a_code_is_a_task(env):
+    conn, _row = env
+    card, sender = waiting(env, NO_MODEL), Sender()
+    run(conn, sender, [tire(model_raw="")])
+    assert sender.sent == [] and "не указана модель" in tasks(conn, card)[0]["body"]
+
+
+def test_a_line_of_the_catalog_keeps_the_code_of_the_position():
+    line = order_wait.catalog_line(tire(code="TS7"), {"qty": 4})
+    assert line["code"] == "TS7"
+    assert order_wait._clean(line)["code"] == "TS7"
+
+
+def test_a_lone_other_brand_model_is_not_the_one_of_the_title(env):
+    conn, chat_row = env
+    card, sender = waiting(env, dict(NO_MODEL, brand="Nordman")), Sender()
+    titled(conn, chat_row, "Nokian Hakkapeliitta R5 205/55 R16")
+    run(conn, sender, [tire(brand_key="NORDMAN", model_raw="Nordman 8")])
+    assert sender.sent == [] and "не совпадает с названием в заказе" in tasks(conn, card)[0]["body"]
+
+
+def test_studs_named_in_the_order_must_be_the_studs_in_stock(env):
+    conn, chat_row = env
+    card, sender = waiting(env, dict(NO_MODEL, studded="")), Sender()
+    titled(conn, chat_row, "Ikon Test Model 205/55 R16 шипованная")
+    run(conn, sender, [tire(studded=False)])
+    assert sender.sent == [] and "шипы" in tasks(conn, card)[0]["body"]
+    titled(conn, chat_row, "Ikon Test Model 205/55 R16 шипованная")
+    other = waiting(env, dict(NO_MODEL, width=225, studded=""))
+    conn.execute("UPDATE avito_chat SET order_id = ?", (other,))
+    conn.commit()
+    run(conn, sender, [tire(width=225, studded=True)])
+    assert len(sender.sent) == 1
+
+
+def many_waiting(env, count):
+    conn, chat_row = env
+    cards = []
+    for n in range(count):
+        card = orders.create_card(conn, {"client_name": "К%d" % n}, NOW, "worker2")
+        order_wait.add_want(conn, card, WANT, NOW, "worker2")
+        orders.move_card(conn, card, stage(conn, "wait"), NOW, "worker2")
+        conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at) SELECT account_id, ?, ?, last_at FROM avito_chat WHERE id = ?", ("m%d" % n, card, chat_row))
+        cards.append(card)
+    conn.commit()
+    return cards
+
+
+def test_at_most_twenty_messages_a_cycle_the_rest_go_at_the_next(env):
+    conn, _row = env
+    cards = many_waiting(env, 23)
+    sender = Sender()
+    run(conn, sender, [tire(stock=200)])
+    assert len(sender.sent) == order_wait.MAX_SENDS == 20
+    assert not [c for c in cards if tasks(conn, c)] and not [t for t in events(conn, cards[-1]) if "первым" in t]
+    assert [t for t in events(conn, cards[19], "green") if t.startswith(order_wait.TOLD)] and not [t for t in events(conn, cards[20], "green") if t.startswith(order_wait.TOLD)]
+    run(conn, sender, [tire(stock=200)], NEXT)
+    assert len(sender.sent) == 23
+
+
+def test_the_count_command_counts_on_a_copy_and_changes_nothing(tmp_path, capsys, monkeypatch):
+    import hashlib
+
+    from test_review4_fixes import goods, published_ten
+    from tires_sync import cli
+    from tires_sync.webmim import parse_unload
+    conn, _key, _box = published_ten(tmp_path)
+    offer = next(iter(parse_unload(goods(10), cli.active_settings(conn).territory_rn).offers.values()))
+    conn.execute("UPDATE account SET chats_enabled = 1, chats_send = 1 WHERE id = 1")
+    orders.ensure_pipeline(conn, NOW)
+    card = orders.create_card(conn, {"client_name": "Иван"}, NOW, "worker2")
+    order_wait.add_want(conn, card, {"code": offer.code, "qty": 1}, NOW, "worker2")
+    orders.move_card(conn, card, stage(conn, "wait"), NOW, "worker2")
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id) VALUES (1, 'c1', ?)", (card,))
+    conn.commit()
+    conn.close()
+    db = tmp_path / "t.db"
+    (tmp_path / "unload.xml").write_bytes(goods(10))
+    (tmp_path / "reference.txt").write_text('<Shiny>\n<make name="Ikon Tyres">\n<model name="Test Model"/>\n</make>\n</Shiny>', encoding="utf-8")
+    monkeypatch.setattr(cli, "_chat_deliver", lambda *a: pytest.fail("the real channel"))
+    before = hashlib.sha256(db.read_bytes()).hexdigest()
+    args = SimpleNamespace(db=str(db), unload=str(tmp_path / "unload.xml"), reference=str(tmp_path / "reference.txt"), at="2026-11-04T12:00:00")
+    assert cli._cmd_wait_count(args) == 0
+    out = capsys.readouterr().out
+    assert "сообщений в первом цикле 1" in out and "заказы, которым ушло бы: %d" % card in out
+    assert hashlib.sha256(db.read_bytes()).hexdigest() == before
+
+
+def test_the_history_keeps_the_words_that_went_not_the_price_of_the_next_cycle(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    real = orders.add_event
+
+    def lost(conn_, card_id, now, author, kind, text, **more):
+        if text.startswith(order_wait.TOLD):
+            raise orders.OrderError("killed")
+        return real(conn_, card_id, now, author, kind, text, **more)
+    orders.add_event = lost
+    try:
+        run(conn, sender, [tire()])
+    finally:
+        orders.add_event = real
+    conn.rollback()
+    run(conn, sender, [tire()], NEXT, price=lambda o, row: 1)                                   # the price changed meanwhile
+    told = [t for t in events(conn, card) if t.startswith(order_wait.TOLD)]
+    assert len(sender.sent) == 1 and len(told) == 1 and "8 500 ₽" in told[0]
+
+
+def test_delivered_writes_the_history_once_also_without_a_task_and_not_for_another_stay(env):
+    conn, _row = env
+    card = waiting(env)
+    token = order_wait._token(card, orders.get_card(conn, card)["entered_at"])
+    order_wait.delivered(conn, token, "слова", NEXT, "повтор")
+    order_wait.delivered(conn, token, "слова", NEXT, "повтор")
+    assert [t for t in events(conn, card) if t.startswith(order_wait.TOLD)] == [order_wait.TOLD + "слова"]
+    other = waiting(env)
+    order_wait.delivered(conn, "wait-%d-20200101000000" % other, "слова", NEXT, "повтор")
+    assert not [t for t in events(conn, other) if t.startswith(order_wait.TOLD)]
+
+
+def test_the_settings_warn_when_the_template_lacks_the_name_or_the_price():
+    assert "{price}" in " ".join(mt.check(mt.entry(mt.WAIT_FOUND), "Есть {name}.")[1])
+    assert "{name}" in " ".join(mt.check(mt.entry(mt.WAIT_FOUND), "Цена {price}.")[1])
+    assert mt.check(mt.entry(mt.WAIT_FOUND), "Есть {name} за {price}.")[1] == []
+
+
+# --- the client's reply (the owner 2026-11-05) -------------------------------------------------------------------------------------------------
+
+def said(conn, chat_row, mid, at):
+    from datetime import datetime
+    chats._store_message(conn, chat_row, {"id": mid, "created": int(datetime.fromisoformat(at + "+03:00").timestamp()), "direction": "in", "type": "text",
+                                          "content": {"text": "да"}, "isRead": False})
+    conn.commit()
+
+
+def reply_tasks(conn, card):
+    return [t for t in engine.list_tasks(conn, card) if t["title"] == order_wait.TITLE_REPLY]
+
+
+def test_the_first_reply_makes_one_task_with_the_link_a_second_reply_none(env):
+    conn, chat_row = env
+    card, sender, told = waiting(env), Sender(), []
+    run(conn, sender, [tire()])
+    assert order_wait.replies(conn, "2026-11-04T12:01:00") == 0
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00")
+    assert order_wait.replies(conn, "2026-11-04T12:31:00", lambda *a: told.append(a)) == 1
+    [task] = reply_tasks(conn, card)
+    assert "/orders/%d" % card in task["body"] and len(told) == 1
+    said(conn, chat_row, "r2", "2026-11-04T12:40:00")
+    assert order_wait.replies(conn, "2026-11-04T12:41:00", lambda *a: told.append(a)) == 0
+    assert len(reply_tasks(conn, card)) == 1 and len(told) == 1
+    assert orders.get_card(conn, card)["stage"]["code"] == "wait"                               # not read as consent
+
+
+def test_a_reply_after_the_stage_changed_makes_no_task(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire()])
+    orders.move_card(conn, card, orders.list_stages(conn)[0]["id"], "2026-11-04T12:10:00", "worker2")
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00")
+    assert order_wait.replies(conn, "2026-11-04T12:31:00") == 0 and reply_tasks(conn, card) == []
+
+
+def test_a_message_of_the_client_before_ours_makes_no_task(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    said(conn, chat_row, "r0", "2026-11-04T11:00:00")
+    conn.execute("UPDATE avito_message SET is_read = 1")
+    conn.commit()
+    run(conn, sender, [tire()])
+    assert len(sender.sent) == 1 and order_wait.replies(conn, "2026-11-04T12:31:00") == 0
+
+
+def test_no_message_went_no_reply_task(env):
+    conn, chat_row = env
+    card = waiting(env)
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00")
+    assert order_wait.replies(conn, "2026-11-04T12:31:00") == 0
+
+
+def test_a_new_stay_has_its_own_reply_task(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire()])
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00")
+    order_wait.replies(conn, "2026-11-04T12:31:00")
+    orders.move_card(conn, card, orders.list_stages(conn)[0]["id"], "2026-11-04T12:35:00", "worker2")
+    orders.move_card(conn, card, stage(conn, "wait"), "2026-11-04T12:40:00", "worker2")
+    conn.execute("UPDATE avito_message SET is_read = 1")
+    conn.commit()
+    run(conn, sender, [tire()], "2026-11-04T12:50:00")
+    assert len(sender.sent) == 2
+    said(conn, chat_row, "r2", "2026-11-04T13:30:00")
+    assert order_wait.replies(conn, "2026-11-04T13:31:00") == 1 and len(reply_tasks(conn, card)) == 2
+
+
+def test_a_failing_alert_does_not_stop_the_look_at_the_replies_nor_repeat_the_task(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire()])
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00")
+
+    def boom(*a):
+        raise RuntimeError("boom")
+    assert order_wait.replies(conn, "2026-11-04T12:31:00", boom) == 1
+    assert order_wait.replies(conn, "2026-11-04T12:32:00", boom) == 0 and len(reply_tasks(conn, card)) == 1
+
+
+# --- the review of cb0e3c0 --------------------------------------------------------------------------------------------------------------------
+
+def test_a_vague_line_is_the_managers_and_holds_no_tire_of_the_order_that_named_it(env):
+    conn, chat_row = env
+    vague, exact = two_waiting(env)
+    conn.execute("UPDATE order_want SET model = '' WHERE order_id = ?", (vague,))
+    conn.commit()
+    sender = Sender()
+    run(conn, sender, [tire(goods_id="100"), tire(goods_id="200", code="TS2", model_raw="Other Model")])
+    assert "несколько моделей" in tasks(conn, vague)[0]["body"]
+    assert len(sender.sent) == 1 and [t for t in events(conn, exact, "green") if t.startswith(order_wait.TOLD)]
+    assert not [t for t in events(conn, exact) if "первым" in t]
+    run(conn, sender, [tire(goods_id="100"), tire(goods_id="200", code="TS2", model_raw="Other Model")], NEXT)
+    assert len(sender.sent) == 1
+
+
+@pytest.mark.parametrize("title", ("Ikon Test Model 2 205/55 R16", "Ikon Test Model FR 205/55 R16", "Ikon Super Test Model 205/55 R16", "Ikon Test Model-2 205/55 R16"))
+def test_a_longer_name_is_another_model(env, title):
+    conn, chat_row = env
+    card, sender = waiting(env, NO_MODEL), Sender()
+    titled(conn, chat_row, title)
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and "не совпадает с названием в заказе" in tasks(conn, card)[0]["body"]
+
+
+@pytest.mark.parametrize("title", ("Зимние шины Ikon Test Model 205/55 R16", "Ikon Test Model 205/55 R16 94T XL", "IKON 205/55/16 T 94 Test Model", "Ikon Test Model, 205/55 R16, 4 шт"))
+def test_the_usual_forms_of_a_name_name_the_model(env, title):
+    conn, chat_row = env
+    waiting(env, NO_MODEL)
+    sender = Sender()
+    titled(conn, chat_row, title)
+    run(conn, sender, [tire()])
+    assert len(sender.sent) == 1
+
+
+def test_a_failure_after_the_tires_were_taken_keeps_them_the_next_order_is_not_told_a_wrong_reason(env, monkeypatch):
+    conn, _row = env
+    old, young = two_waiting(env)
+    real = order_wait._tell_client
+
+    def broken(conn_, card_id, *a, **k):
+        if card_id == old:
+            raise RuntimeError("database is locked")
+        return real(conn_, card_id, *a, **k)
+    monkeypatch.setattr(order_wait, "_tell_client", broken)
+    sender = Sender()
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and tasks(conn, young) == [] and not [t for t in events(conn, young) if "первым" in t]
+    monkeypatch.setattr(order_wait, "_tell_client", real)
+    run(conn, sender, [tire()], NEXT)
+    assert len(sender.sent) == 1 and [t for t in events(conn, old, "green") if t.startswith(order_wait.TOLD)]

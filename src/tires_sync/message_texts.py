@@ -25,9 +25,10 @@ def _sample(key: str, sample: tuple, to: str, when: str, keep=(), needs_row: boo
             "variables": dict(templates.VARIABLES), "keep": tuple(keep), "needs_row": needs_row}
 
 
-def _code(key: str, name: str, audience: str, to: str, when: str, default: str, variables: Dict[str, str], keep=()) -> dict:
+def _code(key: str, name: str, audience: str, to: str, when: str, default: str, variables: Dict[str, str], keep=(), needs=()) -> dict:
+    """`needs`: the variables without which the sender does not send this text (a warning when they are left out)."""
     return {"key": key, "name": name, "audience": audience, "to": to, "when": when, "default": default, "kind": "code",
-            "variables": variables, "keep": tuple(keep), "needs_row": False}
+            "variables": variables, "keep": tuple(keep), "needs_row": False, "needs": tuple(needs)}
 
 
 PLACED_CLIENT, PLACED_MANAGER = templates.SAMPLES[0], templates.SAMPLES[1]
@@ -56,7 +57,7 @@ TEXTS = (
           "Сам, когда на этапе «Ожидает наличие» все нужные шины есть в полном количестве: один раз за пребывание на этапе, в рабочие часы, "
           "в чат Авито заказа. Без {name} или {price} текст не уходит: менеджеру ставится задача.",
           "Здравствуйте. «{name}» появилось в наличии у нас на складе, стоимость: {price} за штуку. Желаете оформить заказ?",
-          {"name": "Наименование шины", "price": "Цена за штуку"}),
+          {"name": "Наименование шины", "price": "Цена за штуку"}, needs=("{name}", "{price}")),
     _code(RESERVE_ASK, "Точке: заказ ещё на точке? (последний день резерва)", "manager", "point",
           "В последний день резерва, в начале рабочего дня, в ВК точки. Ответ точки читается: «выдал N» или «на точке N». "
           "Точке в панели вопрос показывается на «Рабочем месте» своими словами, этот текст туда не идёт.",
@@ -136,6 +137,9 @@ def check(item: dict, value) -> tuple:
             ", ".join("{%s}" % u for u in unknown), ", ".join("{%s}" % v for v in item["variables"])))
     lost = [w for w in item["keep"] if w.lower() not in value.lower()]
     warnings = ["В тексте нет «%s»: ответ точки читается по этим словам, без них точка может ответить не так." % "», «".join(lost)] if lost else []
+    gone = [w for w in item.get("needs", ()) if w not in value]
+    if gone:
+        warnings.append("В тексте нет %s: такой текст клиенту не уйдёт, менеджеру будет ставиться задача." % ", ".join(gone))
     return value, warnings
 
 

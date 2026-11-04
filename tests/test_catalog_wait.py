@@ -74,7 +74,7 @@ def test_the_window_makes_an_order_in_the_waiting_stage_with_the_line_of_the_pos
     [line] = card["wants"]
     assert (line["brand"], line["model"], line["width"], line["profile"], line["radius"], line["season"], line["studded"], line["qty"]) == (
         "IKON TYRES", "Test Model", 205, 55, 16, "winter", "no", 2)
-    assert line["any_size"] and not line["any_brand"] and line["code"] == ""
+    assert line["any_size"] and not line["any_brand"] and line["code"] == "C1"          # the position itself (review of 2026-11-05): indexes, runflat and XL are not in the line
     texts = [e["text"] for e in orders.list_events(conn, cid)]
     assert "Заказ создан на этапе «Ожидает наличие»" in texts
     assert any(t.startswith("Что нужно клиенту: IKON TYRES Test Model 205/55 R16") for t in texts)
