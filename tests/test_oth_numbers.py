@@ -302,11 +302,46 @@ def test_a_deal_of_the_point_stock_keeps_a_transfer_typed_by_a_person(tmp_path):
     conn = db(tmp_path)
     source(conn)
     cid = new_order(conn)
-    conn.execute("UPDATE order_card SET deal_kind = 'stock', transfer_number = ? WHERE id = ?", (TRANSFER, cid))
+    conn.execute("UPDATE order_card SET deal_kind = 'stock', transfer_number = 'МОЙ-1' WHERE id = ?", (cid,))
     conn.commit()
     take(conn, cid)
     untake_all(conn, cid)
-    assert numbers(conn, cid) == ("", TRANSFER)
+    assert numbers(conn, cid) == ("", "МОЙ-1")
+
+
+def test_a_copy_goes_with_the_tyres_after_the_deal_became_the_point_stock(tmp_path):
+    """Left behind it would be the order's «own» number: two orders on one order of WebMIM, and no price for either."""
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, cid, {"deal_kind": "stock"}, LATER, "o")
+    untake_all(conn, cid)
+    assert numbers(conn, cid) == ("", "")
+
+
+def test_a_press_of_webmim_going_on_is_not_given_a_copy(tmp_path):
+    """_write_order would not write the made order over it: it would stay unbound to the card."""
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn, qty=6)
+    take(conn, cid)
+    assert numbers(conn, cid) == ("", "")
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, author, started_at, updated_at) VALUES (?, 'prod', 'running', ?, 'o', ?, ?)", (cid, T, T, T))
+    conn.commit()
+    orders.remove_item(conn, line(conn, cid)["id"], LATER, "o")
+    assert numbers(conn, cid) == ("", "")
+
+
+def test_a_position_added_on_oth_takes_the_copy_away_too(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "oth"), cid))
+    conn.commit()
+    add_supplier(conn, cid)
+    assert numbers(conn, cid) == ("", "")
 
 
 # ---- the message --------------------------------------------------------------------------------------------------------------------------

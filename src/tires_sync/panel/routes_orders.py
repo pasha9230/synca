@@ -1549,7 +1549,7 @@ def register(app) -> None:
             flash(str(err), "error")
             return False
         card = orders.get_card(conn, card_id)
-        sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author())     # the text without the WebMIM number: order_manager
+        sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author())     # without a WebMIM number, the text without it: order_manager
         told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, oth_sale.point_text(conn, card, now), now,
                                        vk_http=app.config.get("VK_HTTP") or urllib_transport)
         flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")

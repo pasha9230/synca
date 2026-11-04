@@ -262,7 +262,8 @@ def test_the_window_shows_the_draft_the_field_and_the_manual_mark(panel):
     [task] = client_tasks(conn, mine)
     assert task["status"] == "error"
     _, win = _window(page(client, mine, messages=1))
-    assert "[Номер перемещения]" in win and 'data-focus-field="transfer_number"' in win and 'data-copy="#draft-%d"' % task["id"] in win
+    # the owner 2026-11-04: a client got the marks copied by hand, so the draft is to read, «Скопировать» waits for the value (test_order_draft_safety)
+    assert "[Номер перемещения]" in win and 'data-focus-field="transfer_number"' in win and "data-copy" not in win
     assert 'formaction="/orders/%d/task/%d/run"' % (mine, task["id"]) in win
     post(client, "/orders/%d/task/%d/run" % (mine, task["id"]), "tok")
     assert client_tasks(conn, mine)[0]["status"] == "done" and client_tasks(conn, mine)[0]["result"] == "отправлено вручную"

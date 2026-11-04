@@ -124,18 +124,12 @@ def _number_names(fields: Iterable[str], one: str, both: str) -> str:
     return "Номер WebMIM и перемещение " + both if len(fields) == 2 else "%s %s" % (_NUMBER_NAMES[NUMBERS.index(fields[0])], one)
 
 
-def _keeps_numbers(conn, card: dict) -> bool:
-    """The numbers of the order are never touched: a deal of the point's stock and the point's own sale have no WebMIM (a number would take the
-    sale from the point: order_points.own_sales), a merged order has its sources' (order_merge)."""
-    from . import order_merge, order_points
-    return (card.get("deal_kind") == "stock" or bool(card["point_id"] and card["id"] in order_points.own_sales(conn, card["point_id"]))
-            or order_merge.is_target(conn, card["id"]))
-
-
 def _numbers_source(conn, card: dict, firsts: List[int]) -> Tuple[Optional[int], str]:
     """The order whose numbers this one has: (its id, ""); (None, why not, "" when there is nothing to say). Never a guess: tyres of several
-    orders, of the point's own stock too, or positions of the supplier (their own order of WebMIM is coming) leave the numbers to a person."""
-    if not firsts or firsts == [0]:
+    orders, of the point's own stock too, or positions of the supplier (their own order of WebMIM is coming) leave the numbers to a person.
+    A deal of the point's stock and the point's own sale have no WebMIM (a number would take the sale from the point: order_points.own_sales)."""
+    from . import order_points
+    if not firsts or firsts == [0] or card.get("deal_kind") == "stock" or (card["point_id"] and card["id"] in order_points.own_sales(conn, card["point_id"])):
         return None, ""
     if len(firsts) > 1:
         return None, "шины из разных источников (%s)" % ", ".join("заказ №%d" % n if n else "свой остаток" for n in firsts)
@@ -151,11 +145,11 @@ def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, n
     row = conn.execute("SELECT webmim_id, webmim_number, transfer_number FROM order_card WHERE id = ?", (card_id,)).fetchone()
     if row is None or row[0]:
         return
-    card = orders.get_card(conn, card_id)
-    if _keeps_numbers(conn, card):
+    from . import order_merge
+    if order_merge.is_target(conn, card_id):                            # a merged order has its sources' numbers, by position (order_merge)
         return
     firsts = _firsts(conn, card_id)
-    source, why = _numbers_source(conn, card, firsts)
+    source, why = _numbers_source(conn, orders.get_card(conn, card_id), firsts)
     numbers = {}
     for order_id in (set(before) | set(firsts)) - {0}:
         got = conn.execute("SELECT webmim_number, transfer_number FROM order_card WHERE id = ?", (order_id,)).fetchone()
@@ -187,12 +181,13 @@ def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, n
 def items_changed(conn, card_id, now: str, author: str) -> None:
     """A position of the supplier was added or removed by a person (orders, in their transaction): at any stage of work the numbers of the tyres
     «с ОТХ» follow, so «Оформить в WebMIM» is there when the supplier has to be asked (the copy would hide it and nothing would say the tyres
-    are not ordered). A closed order stays as it is; a number written by a person stays."""
+    are not ordered). A closed order stays as it is, a press of «Оформить в WebMIM» going on writes its own (_write_order would not write over a
+    copy), a number written by a person stays."""
     firsts = _firsts(conn, card_id)
     if not firsts:
         return
-    stage = orders.get_card(conn, card_id)["stage"]
-    if stage["kind"] == "open" and stage["code"] not in ("oth", orders.RETURN_GIVEN):
+    state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card_id,)).fetchone()
+    if orders.get_card(conn, card_id)["stage"]["kind"] == "open" and not (state and state[0] != "refused"):
         _sync_numbers(conn, card_id, firsts, now, author)
 
 

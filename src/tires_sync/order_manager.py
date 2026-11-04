@@ -812,7 +812,7 @@ def send_to_client(conn, card: dict, body: str, token: str, deliver: Optional[De
 def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """The point says the goods came: «можно забирать» to the client (_tell_arrived) and «Поступили шины» for the bell (note_arrival), once per
     stay at the point each. Every «приехал» of a point comes here (the command, the button of «Рабочее место», the owner's confirmation), and
-    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}», it has none).
+    «Шины уже на точке» of an order whose tyres all come from «На ОТХ» (its `body`: the template without «№{webmim_number}» when it has none).
     An order to another city (order_intercity): the client does not come, nothing to the client."""
     from . import order_intercity
     if order_intercity.is_on(conn, card_id):

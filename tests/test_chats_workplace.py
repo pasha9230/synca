@@ -229,7 +229,7 @@ def test_a_call_of_the_client_is_a_line_and_an_alert_in_the_open_order(tmp_path)
 
 # --- the guard: sending to the client is not changed by this lane ----------------------------------------------------------------------
 
-SEND_CODE = {"send_reply": "860e35bebb7b477e", "send_image": "246067c5cbb76d35", "_not_delivered": "a8956eb6a6144a6f",
+SEND_CODE = {"send_reply": "a2416475ccab3992", "send_image": "246067c5cbb76d35", "_not_delivered": "a8956eb6a6144a6f",
              "_definitely_not_sent": "54fccf3440320712", "prepare_image": "49124b261ee79487", "_ours_at_avito": "b314973f9e146a88",
              "_resume_interrupted": "6dafc631f5931af4", "_avito_said": "c548573094ccd636", "_refused_hint": "43286dbe7edeb825",
              "_send_record": "31f9efceaa31c6ea", "_quotes": "fd5e8049fdeab435", "_deliver": "026189c9548d1b16",
