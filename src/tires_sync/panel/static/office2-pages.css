@@ -67,18 +67,42 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-cl-more hr{border:0;border-top:1px solid var(--o2-border-2);margin:6px 0}
 .o2-dd-sec{display:flex;flex-direction:column;gap:4px;padding:4px 8px}
 .o2-dd-sec .select{width:100%;max-width:none}
-.o2 .o2-cl-product{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;padding:6px 16px;border-bottom:1px solid var(--o2-border-2);background:var(--o2-fill);font-size:13px}
+.o2 .o2-cl-product{display:flex;gap:8px;align-items:center;padding:4px 16px;border-bottom:1px solid var(--o2-border-2);background:var(--o2-fill);font-size:13px}
+.o2-cl-product>.muted{flex:none}
+.o2-ad-name{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.o2-ad-links{flex:none;display:inline-flex;align-items:center;gap:8px;margin-left:auto}
+.o2-order-line{flex:none;display:flex;align-items:center;gap:8px;padding:4px 16px;border-bottom:1px solid var(--o2-border-2);font-size:13px}
+.o2-ol-text{flex:1 1 auto;min-width:0}                  /* a narrow chat wraps it: the sum is never cut */
+.o2-order-line form{flex:none;margin:0}
+.o2-order-line .btn{flex:none}
 
-.o2 .o2-cl-panel{flex:none;border-bottom:1px solid var(--o2-border-2);background:var(--o2-fill);padding:10px 16px}
-.o2 .chats-layout.is-deal-folded .o2-cl-panel{display:none}
-.o2-panel-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.o2-panel-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 24px;align-items:start}
+/* the order of the chat: a panel on the right, the chat keeps working beside it (no backdrop); on a phone it takes the whole screen */
+body.o2{--o2-op-w:clamp(360px,28vw,460px)}
+.o2-order-panel{position:fixed;top:40px;right:0;bottom:0;z-index:25;width:var(--o2-op-w);display:flex;flex-direction:column;background:var(--o2-bg);
+  border-left:1px solid var(--o2-border);box-shadow:-8px 0 24px rgba(15,23,42,.12);transform:translateX(100%);visibility:hidden;
+  transition:transform .18s ease,visibility 0s .18s}
+.o2-order-panel.is-open{transform:none;visibility:visible;transition:transform .18s ease}   /* visible at once: the focus goes to its × */
+.o2-op-close{position:absolute;top:10px;right:10px;z-index:1}
+.o2-order-panel>.msgs{flex:none;padding:44px 12px 0}
+.o2 .o2-cl-panel{flex:1 1 auto;min-height:0;overflow-y:auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:10px}
+.o2 .chats-layout.is-deal-folded .o2-cl-panel{display:flex}   /* «Свернуть» of the old view may be remembered on this computer: it has no say here */
+.o2-panel-open .page{padding-right:calc(var(--o2-op-w) + var(--s-3))}
+.o2-panel-open .chats-layout.o2-cl,.o2-panel-open .chats-layout.o2-cl.is-deal-folded{grid-template-columns:clamp(220px,18vw,320px) minmax(0,1fr)}
+.o2-panel-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;padding-right:32px}
+.o2-panel-head h3{margin:0;font-size:16px;line-height:22px;font-weight:600}
+.o2 .o2-cl-panel .o2-dd-sec{padding:0}
+.o2-panel-body{display:flex;flex-direction:column;gap:12px}
 .o2-panel-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
 .o2-panel-row p{margin:0}
 .o2 .o2-kv{margin:0}
 .o2 .o2-panel-side .chat-pick{border-top:0;padding-top:0}
-.o2 .o2-cl-panel .suggest{left:auto;right:0;width:min(440px,40vw)}   /* the panel has no scroll of its own: the list is never clipped */
-.o2-panel-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-top:8px}
+.o2 .o2-cl-panel .suggest{left:0;right:0;width:auto}
+.o2 .o2-cl-panel .suggest li{flex-wrap:wrap;gap:0 var(--s-3)}
+.o2 .o2-cl-panel .suggest .s-name{flex:1 1 100%}
+.o2 .o2-cl-panel .suggest .s-meta{flex:1 1 auto}
+.o2 .o2-kv .kv-phone{flex-wrap:nowrap}
+.o2 .o2-kv .kv-phone .input{flex:1 1 110px;min-width:110px}
+.o2-panel-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
 .o2-panel-foot>*{flex:0 1 auto;min-width:0}
 .o2-panel-foot>[open]{flex:1 1 100%}
 .o2-panel-foot>.o2-panel-tasks:has(.o2-toggle:checked){flex:1 1 100%}
@@ -110,8 +134,17 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-cl-empty .i{width:40px;height:40px}
 @media (max-width:1100px){
   .o2 .chats-layout.o2-cl,.o2 .chats-layout.o2-cl.is-deal-folded{grid-template-columns:280px minmax(0,1fr)}
-  .o2-panel-body{grid-template-columns:minmax(0,1fr)}
 }
+@media (max-width:1279px){                          /* no room for three columns: beside the panel only the chat, the list comes back when it closes */
+  .o2-panel-open .chats-layout.o2-cl,.o2-panel-open .chats-layout.o2-cl.is-deal-folded{grid-template-columns:minmax(0,1fr);grid-template-areas:"main"}
+  .o2-panel-open .o2-cl-list{display:none}
+}
+@media (max-width:767px){
+  body.o2.o2-panel-open{min-width:0;overflow:hidden}
+  .o2-order-panel{top:0;left:0;width:auto;z-index:45}
+  .o2-panel-open .page{padding-right:var(--s-6)}
+}
+@media (prefers-reduced-motion:reduce){.o2-order-panel{transition:none}}
 
 /* ── Каталог: the filters in two rows, segments, «Название · код», the season tag, the status as a tag ────────────────────────── */
 .o2-catalog-page .page{gap:var(--s-4)}

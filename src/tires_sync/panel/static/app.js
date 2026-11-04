@@ -630,6 +630,7 @@
     if (typeof mark === "number") list.scrollTop = mark;
     reveal();
     window.addEventListener("pagehide", function () {    // each list (state, account, search) keeps its own place in this tab
+      if (!list.getClientRects().length) return;      // hidden beside the order panel: its scroll reads 0, the place it had stays
       var all = places();
       if (!(place in all) && Object.keys(all).length >= 20) all = {};
       all[place] = list.scrollTop;
@@ -721,9 +722,11 @@
         thread.innerHTML = fresh.innerHTML;
         thread.scrollTop = atEnd ? thread.scrollHeight : top;
       }
-      [".chats-main .card-head", ".chats-deal"].forEach(function (sel) {      // the head and the deal block follow too, unless a hand is in them
+      var held = false;
+      [".chats-main .card-head", ".o2-order-line", ".chats-deal"].forEach(function (sel) {      // the head and the deal block follow too, unless a hand is in them
         var mine = document.querySelector(sel), fresh = doc.querySelector(sel);
         if (!(mine && fresh && mine.innerHTML !== fresh.innerHTML && !mine.contains(document.activeElement))) return;
+        if (mine.closest("[data-order-panel]") && mine.querySelector("details[open], .o2-toggle:checked")) { held = true; return; }   // the panel stands beside the chat: what is half typed in it waits while the reply is written
         var picker = mine.querySelector(".chat-pick");             // «Подобрать позицию» stays as it is (what is typed, its list of suggestions)
         mine.innerHTML = fresh.innerHTML;
         var slot = mine.querySelector(".chat-pick");
@@ -735,7 +738,7 @@
       });
       document.dispatchEvent(new Event("chats:refilled"));
       var live = doc.getElementById("chats-live");
-      if (live) sig = box.dataset.sig = live.dataset.sig;
+      if (live && !held) sig = box.dataset.sig = live.dataset.sig;           // held: the next poll asks again, the panel catches up once nothing is half typed
     }
     function ask() {
       if (busy || document.hidden) return;
@@ -759,6 +762,78 @@
         .then(function () { busy = false; });
     }
     window.setInterval(ask, 15000);
+  })();
+  (function () {                                    // «Чаты» of the new view: the order in a panel on the right (the owner 2026-11-04); #order in the address, so «Назад» closes it
+    var panel = document.querySelector("[data-order-panel]");
+    if (!panel) return;
+    var KEY = "chat-order-panel", MARK = "#order", WITHIN = 30000, pushed = false, chat = panel.getAttribute("data-chat");
+    var viewport = document.querySelector("meta[name=viewport]"), wide = null, loading = true;
+    function isOpen() { return panel.classList.contains("is-open"); }
+    function phone(on) {                                                   // the page is laid out at width=1280: on a phone the open panel takes the real screen
+      if (!viewport) return;
+      if (on && window.screen.width < 768) { wide = viewport.content; viewport.content = "width=device-width, initial-scale=1"; }
+      else if (!on && wide) { viewport.content = wide; wide = null; }
+    }
+    function flashes() {                                                   // on a phone the panel covers the page: what the panel's form answered is read in the panel
+      var note = document.querySelector(".page .msgs");
+      if (wide && note && note.children.length) panel.insertBefore(note, panel.querySelector(".chats-deal"));
+    }
+    function show(on) {
+      if (on === isOpen()) return;
+      var wasIn = panel.contains(document.activeElement);
+      phone(on);
+      panel.classList.toggle("is-open", on);
+      document.body.classList.toggle("o2-panel-open", on);
+      if (on && !loading) panel.querySelector("[data-order-panel-close]").focus();    // a page back after a form leaves the focus to the person (the reply)
+      if (!on) { var read = panel.querySelector(".msgs"); if (read) read.parentNode.removeChild(read); }
+      if (!on && wasIn) { var opener = document.querySelector("[data-order-panel-open]"); if (opener) opener.focus(); }
+    }
+    function open() {
+      if (window.location.hash !== MARK) { history.pushState(history.state, "", MARK); pushed = true; }
+      show(true);
+    }
+    function close() {
+      if (window.location.hash === MARK) {
+        if (pushed) { pushed = false; history.back(); return; }             // the step «open» goes away: popstate below folds the panel
+        history.replaceState(history.state, "", window.location.pathname + window.location.search);
+      }
+      show(false);
+    }
+    function sync() { show(window.location.hash === MARK); }
+    function remember() {                                                  // a form of the panel comes back as a new page: the panel opens once more, on this chat only
+      try { sessionStorage.setItem(KEY, chat + ":" + Date.now()); } catch (e) { /* private mode: the panel stays closed */ }
+    }
+    function comesBack() {
+      try {
+        var left = (sessionStorage.getItem(KEY) || "").split(":");
+        sessionStorage.removeItem(KEY);
+        return left[0] === chat && Date.now() - Number(left[1]) < WITHIN;
+      } catch (e) { return false; }
+    }
+    function ours(form) { return form && (isOpen() || form.hasAttribute("data-order-panel-after")); }     // a reply to the client with the panel open: the panel stays too
+    document.addEventListener("submit", function (e) { if (ours(e.target)) remember(); }, true);
+    document.addEventListener("change", function (e) {                     // data-autosubmit calls form.submit(): no submit event
+      var form = e.target.closest && e.target.closest("form[data-autosubmit]");
+      if (ours(form)) remember();
+    }, true);
+    document.addEventListener("click", function (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;        // a link in a new tab stays a link
+      if (e.target.closest && e.target.closest("[data-order-panel-open]")) { e.preventDefault(); open(); }
+      else if (e.target.closest && e.target.closest("[data-order-panel-close]")) close();
+    });
+    document.addEventListener("keydown", function (e) {                    // first of all the Esc listeners: an open window, menu or list of suggestions closes first
+      if (e.key !== "Escape" || !isOpen()) return;
+      if (document.querySelector(".modal-backdrop.is-open, details.menu[open], #bell-pop:not([hidden])") || panel.querySelector(".suggest:not([hidden]) li:not(.s-empty)")) return;
+      if (e.target.closest && e.target.closest(".topbar")) return;         // the search of the top bar has its own Esc
+      close();
+    }, true);
+    window.addEventListener("popstate", sync);
+    if (comesBack() && window.location.hash !== MARK) history.replaceState(history.state, "", MARK);
+    panel.style.transition = "none";                                       // a page that opens with the panel does not slide it in
+    sync();
+    flashes();
+    loading = false;
+    window.requestAnimationFrame(function () { window.requestAnimationFrame(function () { panel.style.transition = ""; }); });
   })();
   // 11) Заказ: поиск позиции по коду или названию. Подсказки с остатком и ценой объявления; выбор подставляет код и цену (её можно поменять).
   document.querySelectorAll("[data-item-find]").forEach(function (wrap) {
