@@ -8,8 +8,9 @@ import pytest
 
 from tests.test_order_reserve import card_at, db, stage
 from tests.test_oth_sale import LATER, T, line, new_order, offer, take
-from tires_sync import oth_manual, order_engine as engine, order_manager, order_points, order_report, \
-    order_templates as templates, orders, oth_sale, sales as sales_store, webmim_match
+from test_point_orders import ACCOUNT, _order, cheap_hashes, w  # noqa: F401  (fixtures)
+from tires_sync import oth_manual, order_engine as engine, order_manager, order_merge, order_points, order_report, \
+    order_templates as templates, orders, oth_sale, sales as sales_store, webmim_create, webmim_match
 
 NUMBER, TRANSFER = "5254033", "26R-1400424"
 OLD_NUMBERS = (NUMBER, TRANSFER)
@@ -79,6 +80,7 @@ def test_positions_of_the_supplier_keep_it_empty_and_it_is_said(tmp_path):
     take(conn, cid)
     assert numbers(conn, cid) == ("", "")
     assert any("не взяты: в заказе есть позиции поставщика" in t for t in journal(conn, cid))
+    assert not any("Впишите" in t for t in journal(conn, cid))                      # the next take may bring them: nobody is asked to type
 
 
 def test_tyres_of_two_orders_keep_it_empty_and_a_number_taken_before_goes(tmp_path):
@@ -90,7 +92,7 @@ def test_tyres_of_two_orders_keep_it_empty_and_a_number_taken_before_goes(tmp_pa
     oth_sale.take(conn, cid, lines[0]["id"], orders.get_card(conn, first)["items"][0]["id"], LATER, "o")
     assert numbers(conn, cid) == ("", "")                                           # the second position is still the supplier's
     oth_sale.take(conn, cid, lines[1]["id"], orders.get_card(conn, second)["items"][0]["id"], LATER, "o")
-    assert numbers(conn, cid) == ("", "") and any("разных источников" in t and "№%d" % first in t for t in journal(conn, cid))
+    assert numbers(conn, cid) == ("", "") and any("разных источников" in t and "№%d" % first in t and "Впишите вручную" in t for t in journal(conn, cid))
     # one source first, then a second: what was taken goes
     one = new_order(conn, qty=2)
     third = source(conn, number="5254055", transfer="26R-3")
@@ -256,15 +258,55 @@ def test_a_position_of_the_supplier_added_takes_the_copy_away_and_removing_it_br
     assert numbers(conn, cid) == OLD_NUMBERS
 
 
-def test_past_placed_a_position_added_leaves_the_numbers(tmp_path):
+def test_past_placed_a_position_added_can_still_be_ordered(tmp_path):
+    """The tyres of the supplier need their own order of WebMIM: the copy never hides the button, at any open stage."""
     conn = db(tmp_path)
     source(conn)
     cid = new_order(conn)
     take(conn, cid)
-    orders.move_card(conn, cid, stage(conn, "placed"), LATER, "o")
-    assert orders.get_card(conn, cid)["stage"]["code"] == "placed"
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "at_point"), cid))
+    conn.commit()
+    assert webmim_create.button(conn, orders.get_card(conn, cid), "prod") is None
     add_supplier(conn, cid)
-    assert numbers(conn, cid) == OLD_NUMBERS                                        # the client may have heard it
+    assert numbers(conn, cid) == ("", "")
+    assert webmim_create.button(conn, orders.get_card(conn, cid), "prod")["label"] == "Оформить в WebMIM"
+
+
+def test_a_closed_order_keeps_its_numbers(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "cancel"), cid))
+    conn.commit()
+    add_supplier(conn, cid)
+    assert numbers(conn, cid) == OLD_NUMBERS
+
+
+def test_a_merged_order_keeps_the_transfer_it_got_from_its_source(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    merged = new_order(conn, qty=1, goods="9")
+    conn.execute("UPDATE order_card SET transfer_number = ? WHERE id = ?", (TRANSFER, merged))
+    item = orders.get_card(conn, merged)["items"][0]["id"]
+    conn.execute("INSERT INTO order_merge (into_order, at, author) VALUES (?, ?, 'o')", (merged, T))
+    conn.execute("INSERT INTO order_item_oth (item_id, order_id, from_item, from_order, qty, at, author) VALUES (?,?,?,?,1,?, 'o')",
+                 (item, merged, orders.get_card(conn, old)["items"][0]["id"], old, T))
+    conn.commit()
+    assert order_merge.is_target(conn, merged)
+    add_supplier(conn, merged)
+    assert numbers(conn, merged) == ("", TRANSFER)
+
+
+def test_a_deal_of_the_point_stock_keeps_a_transfer_typed_by_a_person(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    conn.execute("UPDATE order_card SET deal_kind = 'stock', transfer_number = ? WHERE id = ?", (TRANSFER, cid))
+    conn.commit()
+    take(conn, cid)
+    untake_all(conn, cid)
+    assert numbers(conn, cid) == ("", TRANSFER)
 
 
 # ---- the message --------------------------------------------------------------------------------------------------------------------------
@@ -352,9 +394,38 @@ def test_the_point_s_word_means_the_new_order_when_the_old_one_gave_all_its_tyre
     assert order_manager.find_orders(conn, int(NUMBER)) == [cid]
 
 
+def test_two_orders_of_one_number_are_a_dispute_but_the_panel_number_still_names_each(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    b = new_order(conn, qty=2)
+    take(conn, b)
+    c = new_order(conn, qty=2)
+    take(conn, c)
+    assert orders.get_card(conn, old)["stage"]["code"] == "cancel"
+    assert order_manager.find_orders(conn, int(NUMBER)) == [b, c]
+    assert order_manager.find_orders(conn, b) == [b] and order_manager.find_orders(conn, c) == [c]
+    assert order_manager.find_orders(conn, old) == []                               # its number is its own: the panel's is not known
+
+
 def test_the_point_s_word_stays_a_dispute_while_the_old_one_holds_tyres(tmp_path):
     conn = db(tmp_path)
     old = source(conn)
     cid = new_order(conn, qty=2)
     take(conn, cid)
     assert order_manager.find_orders(conn, int(NUMBER)) == sorted([old, cid])
+
+
+def test_a_copied_number_does_not_let_a_point_bind_its_chat_to_the_manager_s_order(w):
+    conn, made, alfa = w["conn"], w["made"], w["alfa"]
+    goods = dict(goods_id="1", name="Шина", brand_key="b", season="winter", diameter=16, territory="1", qty=4, sale_unit=6000, supplier_price=4500,
+                 terms=None, fee_pct=0, promo_pct=0, now=T, author="o")
+    old = _order(conn, w["stages"], alfa, "oth", "Старый", webmim_number=NUMBER)
+    orders.add_item(conn, old, **goods)
+    orders.add_item(conn, made["ours_new"], **goods)
+    conn.commit()
+    take(conn, made["ours_new"])
+    assert numbers(conn, made["ours_new"])[0] == NUMBER and made["ours_new"] not in order_points.own_sales(conn, alfa)
+    chat = conn.execute("INSERT INTO avito_chat (account_id, chat_id, peer_id, peer_name, unread) VALUES (?, 'c9', 'p9', 'К', 0)", (ACCOUNT,)).lastrowid
+    conn.commit()
+    w["point"].post("/chats/%d/link" % chat, data={"csrf": "tok", "order_id": str(made["ours_new"])})
+    assert conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0] is None

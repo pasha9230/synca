@@ -8,6 +8,7 @@ from pathlib import Path
 from flask import abort, flash, jsonify, redirect, render_template, request, session
 
 from .. import ad_stats, catalog_archive, chat_deals as deals, chat_handover, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
+from .. import oth_sale
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
@@ -625,7 +626,8 @@ def register(app) -> None:
             if own_point() is not None and orders.get_card(conn, order_id)["point_id"] != own_point():
                 raise orders.OrderError("Заказ №%d не вашей точки: привязать к нему чат нельзя." % order_id)
             row = orders._row(conn, order_id)
-            if own_point() is not None and not (row["webmim_number"] or row["webmim_id"]) and order_id not in points.own_sales(conn, own_point()):
+            copied = order_id in oth_sale.borrowed_ids(conn, order_id)      # the number of tyres from OTH: the order is still the manager's, no order of WebMIM
+            if own_point() is not None and (copied or not (row["webmim_number"] or row["webmim_id"])) and order_id not in points.own_sales(conn, own_point()):
                 # the chat of the point's account would make our order the point's own sale, its to edit (the review 2026-10-30): the manager links it
                 raise orders.OrderError("Заказ №%d ведёт менеджер: привязать к нему чат может только он." % order_id)
             deals.link_chat(conn, chat_row, order_id, local_iso(), author())

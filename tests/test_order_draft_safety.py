@@ -97,3 +97,17 @@ def test_a_reply_in_the_chat_refuses_a_pasted_draft_and_marks_nothing(tmp_path):
     with pytest.raises(chats.ChatError, match="незаполненные поля"):
         chats.send_reply(conn, NoClient(), tanya["id"], "Заказ [Номер заказа WebMIM] оформлен", "tok-1", LATER, "o")
     assert conn.execute("SELECT COUNT(*) FROM chat_send_log WHERE token = 'tok-1'").fetchone()[0] == 0
+
+
+def test_an_answer_to_a_point_in_the_inbox_refuses_a_pasted_draft(tmp_path):
+    from tires_sync import order_manager as mgr, order_points as points
+    app, client, tok, conn, _tanya = _sendable_page(tmp_path)
+    pid = points.save_point(conn, dict(name="Бета", channel="vk"))
+    conn.execute("UPDATE point SET vk_peer_id = '111' WHERE id = ?", (pid,))
+    conn.commit()
+    mgr.handle_message(conn, "q1", "111", "Когда завоз?", "2026-10-12T12:00:00")
+    [m] = mgr.list_inbox(conn)
+    post(client, "/orders/inbox/%d/answer" % m["id"], tok, text="Заказ [Номер заказа WebMIM]")
+    assert not mgr.list_inbox(conn)[0]["answer"]
+    post(client, "/orders/inbox/%d/answer" % m["id"], tok, text="Завтра")
+    assert mgr.list_inbox(conn)[0]["answer"] == "Завтра"

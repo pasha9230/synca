@@ -2092,6 +2092,7 @@ def register(app) -> None:
         conn = get_conn()
         try:
             item = manager.get_message(conn, message_id)
+            engine._no_marks(request.form.get("text"))                  # refused before the answer is written: the person still has the question
             manager.answer(conn, message_id, request.form.get("text"), local_iso())
             flash(("Ответ записан. " + _to_point(conn, item, str(request.form.get("text")).strip())).strip())
         except orders.OrderError as err:
