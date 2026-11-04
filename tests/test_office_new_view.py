@@ -164,8 +164,23 @@ def test_the_chats_are_two_columns_and_keep_the_hooks_of_app_js(w):
     assert 'action="/chats/%d/assign"' % w["chat"] in html and 'action="/chats/%d/status"' % w["chat"] in html
     assert 'action="/chats/%d/stage"' % w["chat"] in html and "data-item-find" in html and 'action="/chats/%d/wait"' % w["chat"] in html
     assert "Можно в субботу?" in html
-    tasks_block = html.split('class="chat-wait o2-panel-tasks"', 1)[1].split("</details>", 1)[0]      # «Задачи» of the chat, folded: the chat stays in sight
+    tasks_block = html.split('<div class="o2-panel-tasks">', 1)[1].split("</section>", 1)[0]          # «Задачи» of the chat, folded: the chat stays in sight
+    assert 'class="o2-toggle" type="checkbox" id="o2-tasks-open" aria-label' in tasks_block            # no <details>, not checked: see the next line
+    assert "<details" not in tasks_block       # an open <details> is `open` in innerHTML: the live refill of app.js would wipe what is typed here
     assert 'action="/tasks/new"' in tasks_block and 'name="chat_row" value="%d"' % w["chat"] in tasks_block
+    assert 'name="back" value="/chats/%d"' % w["chat"] in tasks_block
+
+
+def test_a_late_task_of_the_chat_shows_on_the_folded_button(w):
+    from datetime import datetime
+    flag(w, "all")
+    tasks.add(w["conn"], kind="other", title="Ответить про шипы", due_at="2026-11-20T15:00", note="", now=NOW, author="owner", assignee="owner", chat_row=w["chat"])
+    w["conn"].commit()
+    late = '<span class="badge badge--err" title="Просроченные">1</span>'
+    assert "Задачи (1)" in w["owner"].get("/chats/%d" % w["chat"]).get_data(as_text=True)
+    assert late not in w["owner"].get("/chats/%d" % w["chat"]).get_data(as_text=True)
+    w["app"].config["NOW"] = lambda: datetime(2026, 12, 1, 12, 0, 0)
+    assert late in w["owner"].get("/chats/%d" % w["chat"]).get_data(as_text=True)
 
 
 def test_the_catalog_has_the_filters_in_rows_the_season_tags_and_the_bulk_panels(w):

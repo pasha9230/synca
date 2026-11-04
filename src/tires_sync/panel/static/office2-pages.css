@@ -81,9 +81,13 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-panel-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-top:8px}
 .o2-panel-foot>*{flex:0 1 auto;min-width:0}
 .o2-panel-foot>[open]{flex:1 1 100%}
-.o2-panel-tasks>summary{list-style:none;display:inline-flex}
-.o2-panel-tasks>summary::-webkit-details-marker{display:none}
-.o2-panel-tasks .entity-sec{margin-top:8px}
+.o2-panel-foot>.o2-panel-tasks:has(.o2-toggle:checked){flex:1 1 100%}
+.o2-panel-tasks{position:relative}
+.o2-toggle{position:absolute;width:1px;height:1px;opacity:0;margin:0}
+.o2-toggle:focus-visible+label{box-shadow:var(--ring)}
+.o2-toggle:checked+label{border-color:var(--o2-primary);color:var(--o2-primary)}
+.o2-panel-tasks-body{display:none;margin-top:8px}
+.o2-toggle:checked~.o2-panel-tasks-body{display:block}
 .o2-panel-foot .chat-wait>summary{list-style:none;display:inline-flex}
 .o2-panel-foot .chat-wait>summary::-webkit-details-marker{display:none}
 
