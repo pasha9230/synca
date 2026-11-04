@@ -630,6 +630,7 @@
     if (typeof mark === "number") list.scrollTop = mark;
     reveal();
     window.addEventListener("pagehide", function () {    // each list (state, account, search) keeps its own place in this tab
+      if (!list.getClientRects().length) return;      // hidden beside the order panel: its scroll reads 0, the place it had stays
       var all = places();
       if (!(place in all) && Object.keys(all).length >= 20) all = {};
       all[place] = list.scrollTop;
@@ -766,7 +767,7 @@
     var panel = document.querySelector("[data-order-panel]");
     if (!panel) return;
     var KEY = "chat-order-panel", MARK = "#order", WITHIN = 30000, pushed = false, chat = panel.getAttribute("data-chat");
-    var viewport = document.querySelector("meta[name=viewport]"), wide = null;
+    var viewport = document.querySelector("meta[name=viewport]"), wide = null, loading = true;
     function isOpen() { return panel.classList.contains("is-open"); }
     function phone(on) {                                                   // the page is laid out at width=1280: on a phone the open panel takes the real screen
       if (!viewport) return;
@@ -783,8 +784,9 @@
       phone(on);
       panel.classList.toggle("is-open", on);
       document.body.classList.toggle("o2-panel-open", on);
-      if (on) panel.querySelector("[data-order-panel-close]").focus();
-      else if (wasIn) { var opener = document.querySelector("[data-order-panel-open]"); if (opener) opener.focus(); }
+      if (on && !loading) panel.querySelector("[data-order-panel-close]").focus();    // a page back after a form leaves the focus to the person (the reply)
+      if (!on) { var read = panel.querySelector(".msgs"); if (read) read.parentNode.removeChild(read); }
+      if (!on && wasIn) { var opener = document.querySelector("[data-order-panel-open]"); if (opener) opener.focus(); }
     }
     function open() {
       if (window.location.hash !== MARK) { history.pushState(history.state, "", MARK); pushed = true; }
@@ -830,6 +832,7 @@
     panel.style.transition = "none";                                       // a page that opens with the panel does not slide it in
     sync();
     flashes();
+    loading = false;
     window.requestAnimationFrame(function () { window.requestAnimationFrame(function () { panel.style.transition = ""; }); });
   })();
   // 11) Заказ: поиск позиции по коду или названию. Подсказки с остатком и ценой объявления; выбор подставляет код и цену (её можно поменять).
