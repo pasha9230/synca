@@ -75,7 +75,7 @@ def address(w, page):
 
 
 def is_new(html: str) -> bool:
-    return "office2.css" in html and re.search(r'<body class="[^"]*\bo2\b', html) is not None
+    return "office2-pages.css" in html and re.search(r'<body class="[^"]*\bo2\b', html) is not None
 
 
 def snap(w, client, pages=PAGES):
@@ -132,7 +132,7 @@ def test_a_point_never_gets_the_office_screens(w, state, point_state):
     for page in ("/chats", "/tasks", "/whats-new"):
         r = point.get(page)
         html = r.get_data(as_text=True)
-        assert r.status_code == 200 and not is_new(html) and "office2.css" not in html, page
+        assert r.status_code == 200 and not is_new(html) and "office2-pages.css" not in html, page
         assert ("point2.css" in html) == (point_state == "all"), page
 
 

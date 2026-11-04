@@ -8,7 +8,7 @@
 {% from "_handoff_dialog.html" import handoff_button with context %}
 {% block title %}Чаты · Tires Sync{% endblock %}
 {% block body_class %}o2 o2-chats-page{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
 {% block page_class %} page--wide{% endblock %}
 {% block content %}
 <div id="chats-live" data-sig="{{ live_sig }}" data-place="{{ query }}" data-chat="{{ current.id if current else '' }}" data-csrf="{{ csrf_token() }}" hidden></div>

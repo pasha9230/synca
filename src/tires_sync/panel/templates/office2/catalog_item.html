@@ -6,7 +6,7 @@
 {% import "_entity.html" as entity_ui %}
 {% block title %}{{ entity.title }} · Tires Sync{% endblock %}
 {% block body_class %}o2 o2-item-page{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
 {% block content %}
 <div class="entity-page o2-item">
 <header>{{ entity_ui.crumbs(entity.crumbs) }}{% if can_post("catalog_wait") %}{% call entity_ui.head(entity) %}<a class="btn btn--secondary btn--sm" href="{{ wait_url }}" title="Клиент ждёт эту шину: заказ на этапе «Ожидает наличие» с именем и телефоном клиента">В лист ожидания</a>{% endcall %}{% else %}{{ entity_ui.head(entity) }}{% endif %}</header>

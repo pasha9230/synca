@@ -6,7 +6,7 @@
 {% from "_ui.html" import icon %}
 {% block title %}Задачи · Tires Sync{% endblock %}
 {% block body_class %}o2 o2-tasks-page{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Задачи</h1><p class="sub">Задача никому ничего не отправляет: это напоминание, кому что сделать и к какому сроку. Просроченные — красным.</p></div>
 {% if may_task() %}<div class="actions"><button type="button" class="btn btn--primary" data-open-modal="o2-newtask">{{ icon("plus") }}Новая задача</button></div>{% endif %}</header>

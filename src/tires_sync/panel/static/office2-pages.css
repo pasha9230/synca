@@ -1,5 +1,5 @@
 /* «Новый вид» of the office (lane port-office-rest; the prototype docs/ux/prototype-2026-10-30, role «Офис»: owner-daily renderChats,
-   renderCrm, renderTasks; index renderCatalog): only on the pages of templates/office2/ (body.o2, with body.ui-new and its tokens «Строгий»).
+   renderCrm, renderTasks; index renderCatalog): only on the pages of templates/office2/ of this lane (body.o2; office2.css is the orders lane's, with body.ui-new and its tokens «Строгий»).
    Light theme only. No script of its own: app.js and own_price.js work on the same hooks as on the old pages. */
 body.o2{
   --o2-primary:var(--primary-600,#4F46E5);--o2-primary-bg:var(--primary-100,#EEF2FF);--o2-bg:#FFFFFF;--o2-fill:#F6F8FA;--o2-hover:#F3F4F6;

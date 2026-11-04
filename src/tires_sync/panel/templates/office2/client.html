@@ -7,7 +7,7 @@
 {% import "_entity.html" as entity_ui %}
 {% block title %}Клиент №{{ c.id }} · CRM · Tires Sync{% endblock %}
 {% block body_class %}o2 o2-client-page{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
 {% block content %}
 {% set edit = can("clients", "edit") and not narrow %}{# narrow: the manager of a point, its own part of the client only (routes_clients) #}
 {% set split = edit and c.orders|length + c.chats|length > 1 %}

@@ -46,13 +46,13 @@ def point_page(template: str) -> str:
 
 
 def office_new() -> bool:
-    """The office's screens of the new design (lanes port-office-*, the prototype's role «Офис»): a person of the office group (the owner,
-    the partner, the chats' manager, the viewer) with «Офис» on for them. Off: the pages exactly as before."""
+    """The office's screens of the new design (lane port-office-orders, the prototype's role «Офис»: «Заказы», «Список», the card variant C):
+    anybody but a point and a client with «Офис» on for them («только у владельца»: the owner and the partner). Off: the pages as before."""
     return ui_group(current_user()["role"]) == "office" and ui_new()
 
 
 def office_page(template: str) -> str:
-    """The template of an office's page: office2/<template> while office_new(), the old one otherwise (the same values, the same forms)."""
+    """The template of an office page: office2/<template> while office_new(), the old one otherwise (the same values, the same forms)."""
     return "office2/" + template if office_new() else template
 
 
