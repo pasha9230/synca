@@ -38,6 +38,7 @@ TOLD = "Сообщение о наличии отправлено: "            
 QUEUED_TOLD = "Сообщение о наличии не отправлено: первым написали заказу №%d"
 QUEUED_TASK = "Сообщение о наличии не отправлено: шины первым предлагает менеджер заказу №%d"
 NOT_SENT = "Клиенту само не отправлено: %s"
+CUT_OFF = "Сообщение клиенту «появилось в наличии»: неизвестно, ушло ли. Проверьте чат Авито заказа: если сообщения там нет, напишите клиенту, повторно не отправляйте."
 PriceOf = Callable[..., object]                      # (offer, chat row) -> the sale price of one tyre as the client would pay it today
 COLUMNS = "id, order_id, brand, model, width, profile, radius, season, studded, qty, code, any_brand, any_size"
 
@@ -318,9 +319,8 @@ def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, le
     """(the offer to name, its price, "") or (None, 0, why): the price of WebMIM (the owner 2026-11-05: «приоритет у МИМ»); the others' only when
     WebMIM has no price or its stock went to an earlier order, and only when they agree and have what earlier orders left. Two prices in the
     group that decides: a person chooses."""
-    found = _matches(line, stock)
-    others = [o for o in found if not _is_mim(o) and (o is pick or left.get(o.goods_id, o.stock) >= line["qty"])]
-    groups = ([[o for o in found if _is_mim(o)]] if _is_mim(pick) else []) + [others]
+    found = sorted((o for o in _matches(line, stock) if o is pick or left.get(o.goods_id, o.stock) >= line["qty"]), key=lambda o: o is not pick)      # the taken one first
+    groups = ([[o for o in found if _is_mim(o)]] if _is_mim(pick) else []) + [[o for o in found if not _is_mim(o)]]
     for group in groups:
         priced: Dict[float, object] = {}
         for each in group:
@@ -356,6 +356,8 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
         if not name:
             return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id), []
         held[offer.goods_id] = held.get(offer.goods_id, 0) + line["qty"]
+        if held[offer.goods_id] > offer.stock:                     # two lines of one tire, named from the other supplier
+            return "", "остатка позиции %s не хватает на все строки заказа." % (offer.code or offer.goods_id), []
         if (name, price) not in items:                             # two lines of one position: it is named once
             items.append((name, price))
     shown = [templates.money(p) + " ₽" for _n, p in items]
@@ -427,9 +429,6 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
         return "", ""
     if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text LIKE ? AND at >= ? LIMIT 1", (card_id, TOLD + "%", stay)).fetchone():
         return None
-    log = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (_token(card_id, stay),)).fetchone()
-    if log and log[0] in ("sending", "unknown", "retry", "lost"):  # a cycle cut off in the send: it may have gone, whatever else is true now
-        return "Сообщение клиенту «появилось в наличии»: неизвестно, ушло ли. Проверьте чат Авито заказа: если сообщения там нет, напишите клиенту, повторно не отправляйте.", TITLE_CHECK
     for line in lines:
         why = _one_tire(conn, card, line, stock)
         if why:
@@ -538,12 +537,15 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
     cards = []
     stays: Dict[int, str] = {}
     for card_id, stay in conn.execute("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait' ORDER BY c.entered_at, c.id").fetchall():
-        try:                                                       # gone out, the history cut off with the cycle: written whatever the stock is now
-            if conn.execute("SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent'", (_token(card_id, stay),)).fetchone() and _state(conn, card_id) != "told":
+        try:                                                       # a cycle cut off in the send: settled whatever the stock is now
+            log = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (_token(card_id, stay),)).fetchone()
+            if log and log[0] == "sent" and _state(conn, card_id) != "told":
                 delivered(conn, _token(card_id, stay), "", now, "отправлено")
+            elif log and log[0] in ("sending", "unknown", "retry", "lost") and not _state(conn, card_id):      # it may have gone: never the form
+                _mark(conn, card_id, "exact", [], now, notify, CUT_OFF, TITLE_CHECK)
         except Exception:
             conn.rollback()
-            logging.getLogger("tires_sync.order_wait").warning("the history of card %s could not be written", card_id, exc_info=True)
+            logging.getLogger("tires_sync.order_wait").warning("the send of card %s could not be settled", card_id, exc_info=True)
         lines = list_wants(conn, card_id)
         results = [_line_result(line, stock) for line in lines]
         if not lines or any(r is None for r in results):

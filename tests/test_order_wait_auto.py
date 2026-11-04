@@ -1118,8 +1118,9 @@ def test_gone_out_with_the_history_cut_off_is_written_when_the_stock_is_gone(env
     assert [t for t in events(conn, card) if t.startswith(order_wait.TOLD) and "8 500 ₽" in t] and tasks(conn, card) == []
 
 
+@pytest.mark.parametrize("offers", ([tire()], []))
 @pytest.mark.parametrize("status", ("sending", "unknown"))
-def test_a_cycle_cut_off_in_the_send_gives_the_task_without_the_form_whatever_else_is_true(env, status):
+def test_a_cycle_cut_off_in_the_send_gives_the_task_without_the_form_whatever_else_is_true(env, status, offers):
     conn, chat_row = env
     card = waiting(env)
     token = order_wait._token(card, orders.get_card(conn, card)["entered_at"])
@@ -1127,7 +1128,7 @@ def test_a_cycle_cut_off_in_the_send_gives_the_task_without_the_form_whatever_el
     conn.execute("UPDATE avito_message SET is_read = 0, direction = 'in', kind = 'text' WHERE chat_row = ?", (chat_row,))
     conn.commit()
     sender = Sender()
-    run(conn, sender, [tire()], NEXT)
+    run(conn, sender, offers, NEXT)
     assert sender.sent == [] and tasks(conn, card)[0]["title"] == order_wait.TITLE_CHECK
 
 
@@ -1142,3 +1143,30 @@ def test_the_sync_stops_repeating_when_the_task_was_closed_or_skipped(env):
     assert "пропущена" in chats._stopped(conn, row, token)
     conn.execute("UPDATE order_task SET status = 'done' WHERE order_id = ?", (card,))
     assert "закрыта" in chats._stopped(conn, row, token)
+
+
+# --- the review of c7f3252 --------------------------------------------------------------------------------------------------------------------
+
+def test_two_webmim_positions_of_one_tire_at_one_price_hold_each_its_own(env):
+    conn, chat_row = env
+    a, b = two_waiting(env)
+    third = two_small(env, "c3")
+    conn.execute("UPDATE order_want SET qty = 4 WHERE order_id = ?", (third,))
+    conn.commit()
+    offers = [tire(goods_id="100", code="M1"), tire(goods_id="200", code="M2")]
+    same = lambda o, row: 7000
+    sender = Sender()
+    run(conn, sender, offers, "2026-11-04T12:05:00", price=same)
+    assert len(sender.sent) == 2
+    assert [t for t in events(conn, third) if "первым написали" in t] and tasks(conn, third) == []
+    run(conn, sender, offers, NEXT, price=same)
+    assert len(sender.sent) == 2
+    tok = order_wait._token(b, orders.get_card(conn, b)["entered_at"])
+    assert store.get_state(conn, order_wait.HELD % tok) == '[["200", 4]]'
+
+
+def test_two_lines_named_from_the_other_supplier_need_its_stock_for_both(env):
+    conn, _row = env
+    card, sender = waiting(env, dict(WANT, qty=2), dict(WANT, qty=2)), Sender()
+    run(conn, sender, [tire(code="NOPRICE", stock=8), s2(stock=3)])
+    assert sender.sent == [] and "не хватает на все строки" in tasks(conn, card)[0]["body"]
