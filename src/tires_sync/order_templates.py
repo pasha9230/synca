@@ -13,7 +13,8 @@ VARIABLES = {
     "client_name": "Клиент", "client_phone": "Телефон", "order_no": "Номер заказа", "items": "Позиции", "total": "Сумма", "point": "Точка",
     "point_address": "Адрес точки", "manager": "Менеджер", "delivery_date": "Дата доставки", "delivery_time": "Время доставки",
     "items_full": "Позиции подробно", "webmim_number": "Номер заказа WebMIM", "transfer_number": "Номер перемещения", "hold_until": "Резерв до", "order_date": "Дата оформления",
-    "point_hours": "График точки", "point_map": "Точка на Яндекс Картах", "oth_orders": "Заказ, с ОТХ которого шины"}
+    "point_hours": "График точки", "point_map": "Точка на Яндекс Картах", "oth_orders": "Заказ, с ОТХ которого шины",
+    "items_lines": "Позиции построчно"}
 HOLD_DAYS = 3                                    # the point keeps the reservation three days from the arrival of the goods
 SAMPLES = (
     ("Клиенту: заказ оформлен", "client",
@@ -31,10 +32,11 @@ ARRIVED_SAMPLE = ("Клиенту: товар на точке, можно заб
 RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "client",
                   "Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — спасибо, "
                   "не обращайте внимания. Если нужно продлить ожидание, напишите нам.")
-# goes to the point when an order whose tyres all come from «На ОТХ» is moved straight to «Товар на точке» (oth_sale, the owner 2026-10-30)
+# goes to the point when an order whose tyres all come from «На ОТХ» is moved straight to «Товар на точке» (oth_sale, the owner 2026-10-30);
+# the owner's text 2026-11-04, without the panel's number of the new order
 OTH_POINT_SAMPLE = ("Точке: шины с ОТХ отложены под клиента", "manager",
-                    "Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента: заказ №{order_no}, {client_name}, {client_phone}, {items}. "
-                    "Не продавать другим, резерв до {hold_until}.")
+                    "Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента:\n\n{items_lines}\n\n"
+                    "Покупатель: {client_name}\nТелефон: {client_phone}\nНе продавать другим, резерв до {hold_until}.")
 # the question to the point on the seventh day of «На ОТХ», a banner of its «Рабочее место» (order_oth.ask_seventh_day, the owner 2026-11-02)
 OTH_ASK_SAMPLE = ("Точке: ОТХ 7-й день", "manager", "Заказ выдали или он на точке?")
 SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE, OTH_POINT_SAMPLE, OTH_ASK_SAMPLE)
@@ -49,7 +51,9 @@ INTERCITY_SHIPPED_SAMPLE = ("Клиенту: заказ отправлен", "cl
                             "Заказ {webmim_number} отправлен в город {city} транспортной компанией {carrier}.{track_line}\n\nСпасибо за покупку!")
 SAMPLES = SAMPLES + (INTERCITY_PLACED_SAMPLE, INTERCITY_SHIPPED_SAMPLE)
 RETIRED = {RESERVE_SAMPLE[0]: ("Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "   # the owner
-                               "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",)}                                       # 2026-10-23
+                               "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",),                                       # 2026-10-23
+           OTH_POINT_SAMPLE[0]: ("Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента: заказ №{order_no}, {client_name}, {client_phone}, "
+                                 "{items}. Не продавать другим, резерв до {hold_until}.",)}                                           # 2026-11-04
 FIELDS = "id, name, audience, body"
 MAX_NAME, MAX_BODY = 80, 2000
 PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
@@ -145,6 +149,9 @@ def values(conn, card: dict, now=None) -> dict:
     full = "\n\n".join("Товар %s\n%sКол-во %d шт\nЦена ед. %s ₽\nСумма %s ₽" % (
         i["name"], "" if i["goods_id"] == POINT_GOODS else "Код %s\n" % (i.get("code") or i["goods_id"]), i["qty"], money(i["sale_unit"]),
         money(float(i["sale_unit"]) * i["qty"])) for i in items)                    # a tyre of the point has no code: no line «Код»
+    lines = "\n\n".join("%s\nКол-во %d\n%sЦена %s ₽" % (
+        i["name"], i["qty"], "" if i["goods_id"] == POINT_GOODS else "Код %s\n" % (i.get("code") or i["goods_id"]), money(i["sale_unit"]))
+        for i in items if int(i["qty"]) >= 1)                                       # a position given on to another order (0 pieces) is not here
     try:                                  # the reserve runs from the day the goods arrive at the point; before they arrive: the planned delivery day + 3
         base = card.get("reserve_until") or ""
         if (card.get("stage") or {}).get("code") == "oth":
@@ -163,7 +170,7 @@ def values(conn, card: dict, now=None) -> dict:
         "delivery_date": _date(card.get("delivery_date", "")) or (IN_STOCK if card.get("in_stock") else ""), "delivery_time": card.get("delivery_time") or point.get("default_time") or "",
         "items_full": full, "webmim_number": card.get("webmim_number", ""), "transfer_number": card.get("transfer_number", ""), "hold_until": hold, "order_date": _order_date(conn, card, now),
         "point_hours": point.get("hours") or "", "point_map": point.get("map_url") or "",
-        "oth_orders": _oth_orders(conn, card["id"]), **_intercity(card)}
+        "oth_orders": _oth_orders(conn, card["id"]), "items_lines": lines, **_intercity(card)}
 
 
 def _intercity(card: dict) -> dict:

@@ -444,11 +444,12 @@ def all_from_oth(conn, card: dict) -> bool:
 
 def point_text(conn, card: dict, now: str) -> str:
     """The point's message of «Шины уже на точке»: the owner's template «Точке: шины с ОТХ отложены под клиента» if there is one, else the
-    sample; the values it lacks are left out."""
+    sample (also in place of a retired sample kept word for word); the values it lacks are left out."""
     from . import order_templates as templates
     row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = 'manager' ORDER BY id LIMIT 1",
                        (templates.OTH_POINT_SAMPLE[0],)).fetchone()
-    return templates.render(conn, card, row[0] if row else templates.OTH_POINT_SAMPLE[2], now)[0]
+    kept = row and row[0] not in templates.RETIRED.get(templates.OTH_POINT_SAMPLE[0], ())
+    return templates.render(conn, card, row[0] if kept else templates.OTH_POINT_SAMPLE[2], now)[0]
 
 
 def note_sales(conn, card: dict, items: List[dict], ids: List[int]) -> None:

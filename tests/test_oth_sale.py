@@ -544,19 +544,87 @@ def test_only_an_order_whose_tyres_all_come_from_oth_is_offered_the_move_to_the_
     assert not oth_sale.all_from_oth(conn, orders.get_card(conn, whole))
 
 
-def test_the_point_text_names_the_old_order_the_client_and_the_reservation(tmp_path):
+def point_text_of(conn, *lots):
+    """The point's text of an order all from «На ОТХ»: `lots` are the goods of the order, each taken from its own order on OTH."""
+    olds = []
+    for g, _q in lots:
+        olds.append(card_at(conn, "oth", T))
+        conn.execute("UPDATE order_item SET goods_id = ? WHERE order_id = ?", (g, olds[-1]))
+    conn.commit()
+    cid = new_order(conn, qty=lots[0][1], goods=lots[0][0], extra=lots[1:])
+    for g, _q in lots:
+        take(conn, cid, g)
+    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    return cid, olds, oth_sale.point_text(conn, orders.get_card(conn, cid), LATER)
+
+
+def test_the_point_text_is_the_owners_word_for_word_with_one_position(tmp_path):
+    conn = db(tmp_path)
+    cid, olds, text = point_text_of(conn, ("1", 2))
+    card = orders.get_card(conn, cid)
+    number = orders.get_card(conn, olds[0])["webmim_number"]
+    assert text == ("Шины с ОТХ (заказ №%s) отложены под нового клиента:\n\n"
+                    "Nokian 205/55 R16\nКол-во 2\nКод 1\nЦена 6 000 ₽\n\n"
+                    "Покупатель: Пётр\nТелефон: %s\nНе продавать другим, резерв до 01.11.2026." % (number, card["client_phone"]))
+    assert "заказ №%d" % cid not in text                                             # never the panel's number of the new order
+
+
+def test_the_point_text_repeats_the_block_for_two_positions(tmp_path):
+    conn = db(tmp_path)
+    _cid, olds, text = point_text_of(conn, ("1", 2), ("2", 1))
+    assert ("Nokian 205/55 R16\nКол-во 2\nКод 1\nЦена 6 000 ₽\n\nШина 2\nКол-во 1\nКод 2\nЦена 6 000 ₽\n\nПокупатель: Пётр\n") in text
+    numbers = ", ".join(orders.get_card(conn, old)["webmim_number"] for old in olds)
+    assert text.startswith("Шины с ОТХ (заказ №%s) отложены" % numbers)
+
+
+def test_the_point_text_names_the_panels_number_of_an_old_order_without_webmim_one(tmp_path):
     conn = db(tmp_path)
     old = card_at(conn, "oth", T)
+    conn.execute("UPDATE order_card SET webmim_number = '' WHERE id = ?", (old,))
+    conn.commit()
     cid = new_order(conn, qty=2)
     take(conn, cid)
-    orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
     text = oth_sale.point_text(conn, orders.get_card(conn, cid), LATER)
+    assert text.startswith("Шины с ОТХ (заказ №%d) отложены" % old) and "№%d" % cid not in text
+
+
+def test_the_lines_leave_out_a_position_without_pieces_and_a_code_of_a_tyre_of_the_point(tmp_path):
+    from tires_sync import order_templates
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=2, extra=(("2", 1),))
     card = orders.get_card(conn, cid)
-    assert text == ("Шины с ОТХ (заказ №%s) отложены под нового клиента: заказ №%d, Пётр, %s, Nokian 205/55 R16 × 2. Не продавать другим, "
-                    "резерв до 01.11.2026." % (orders.get_card(conn, old)["webmim_number"], cid, card["client_phone"]))     # the number the point knows
-    conn.execute("INSERT INTO order_template (name, audience, body) VALUES (?, 'manager', ?)", (oth_sale_template(), "Свой текст №{order_no}"))
+    card["items"][1]["qty"] = 0
+    card["items"][0]["goods_id"] = orders.POINT_GOODS
+    assert order_templates.values(conn, card)["items_lines"] == "Nokian 205/55 R16\nКол-во 2\nЦена 6 000 ₽"
+
+
+def test_the_old_sample_gives_way_and_a_text_the_owner_changed_stays(tmp_path):
+    from tires_sync import message_texts, order_templates
+    conn = db(tmp_path)
+    cid, _olds, new_text = point_text_of(conn, ("1", 2))
+    card = orders.get_card(conn, cid)
+    old_body = order_templates.RETIRED[oth_sale_template()][0]
+    assert old_body == ("Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента: заказ №{order_no}, {client_name}, {client_phone}, {items}. "
+                        "Не продавать другим, резерв до {hold_until}.")
+    conn.execute("INSERT INTO order_template (name, audience, body) VALUES (?, 'manager', ?)", (oth_sale_template(), old_body))
     conn.commit()
-    assert oth_sale.point_text(conn, card, LATER) == "Свой текст №%d" % cid                  # the owner's template wins
+    assert oth_sale.point_text(conn, card, LATER) == new_text                         # before anybody presses «Добавить образцы»
+    assert message_texts.body(conn, "oth_point") == order_templates.OTH_POINT_SAMPLE[2]
+    order_templates.add_samples(conn)
+    assert conn.execute("SELECT body FROM order_template WHERE name = ?", (oth_sale_template(),)).fetchone()[0] == order_templates.OTH_POINT_SAMPLE[2]
+    conn.execute("UPDATE order_template SET body = 'Свой текст №{order_no}' WHERE name = ?", (oth_sale_template(),))
+    conn.commit()
+    order_templates.add_samples(conn)
+    assert oth_sale.point_text(conn, card, LATER) == "Свой текст №%d" % cid           # the owner's template wins
+
+
+def test_the_new_variable_passes_the_check_and_an_unknown_one_still_does_not(tmp_path):
+    from tires_sync import order_templates
+    conn = db(tmp_path)
+    assert order_templates.VARIABLES["items_lines"] == "Позиции построчно"
+    assert order_templates.add_template(conn, "Свой", "manager", "{items_lines}")
+    with pytest.raises(orders.OrderError, match="Неизвестная подстановка: \\{items_row\\}"):
+        order_templates.add_template(conn, "Свой 2", "manager", "{items_row}")
 
 
 def oth_sale_template():
@@ -582,7 +650,7 @@ def test_the_button_moves_to_the_point_past_placed_and_tells_the_client_once_and
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == "at_point" and card["reserve_until"]                # the reservation of the stage, three days
     assert told_client == [(cid, None)]                                              # the text without the WebMIM number: order_manager._oth_arrived_body
-    assert len(told_point) == 1 and told_point[0].startswith("Шины с ОТХ (заказ №") and "заказ №%d" % cid in told_point[0]
+    assert len(told_point) == 1 and told_point[0].startswith("Шины с ОТХ (заказ №") and "Покупатель: Пётр\n" in told_point[0]
     stages = [e["text"] for e in orders.list_events(conn, cid) if e["kind"] == "stage"]
     assert len(stages) == 1 and "Заказ оформлен" not in stages[0]                         # straight from «Новый»: no «Заказ оформлен» and its message
     assert not webmim_create_state(conn, cid)
