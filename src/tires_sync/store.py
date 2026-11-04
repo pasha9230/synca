@@ -790,6 +790,8 @@ def save_pending(conn, account_id: int, feed_bytes: bytes, items: List[dict]) ->
 def rebind_pending(conn, account_id: int, feed_bytes: bytes) -> None:
     """The plan of a cycle stays, but is now the plan of this (larger) feed: a mirror adds its own ads to the generated ones."""
     conn.execute("UPDATE pending_state SET feed_sha = ? WHERE account_id = ?", (hashlib.sha256(feed_bytes).hexdigest(), account_id))
+    from . import oth_manual
+    oth_manual.rebind_carried(conn, account_id, feed_bytes)
     conn.commit()
 
 
@@ -898,6 +900,8 @@ def commit_pending(conn, account_id: int, published_feed: bytes, at: Optional[st
                     (item.get("first_hold"), account_id, gid))
                 if before is not None and not before[0]:
                     record_event(conn, at, account_id, gid, _title(before[1]), "waiting", item.get("reason", ""))
+        from . import oth_manual
+        oth_manual.publish_carried(conn, account_id, published_feed)
         conn.execute("DELETE FROM pending_state WHERE account_id = ?", (account_id,))
         conn.commit()
     except BaseException:

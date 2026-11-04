@@ -585,3 +585,152 @@ def test_a_never_published_lot_on_own_stock_is_carried_by_the_live_ad_of_the_sam
     conn = connect(tmp_path)
     assert oth_manual.carried_by(conn, 1) == {}
     conn.close()
+
+
+def card_says(tmp_path, code, parsed):
+    from tires_sync.panel.routes_catalog_oth import account_status
+    conn = connect(tmp_path)
+    try:
+        return account_status(conn, code, 1, parsed)
+    finally:
+        conn.close()
+
+
+def a_lot_of(tmp_path, code, lot):
+    import json
+    conn = connect(tmp_path)
+    data = json.loads(conn.execute("SELECT data FROM catalog_item WHERE goods_id = ?", (code,)).fetchone()[0])
+    data.update(goods_id=lot, code="TS" + lot)
+    conn.execute("INSERT INTO catalog_item (goods_id, supplier_id, data, first_seen, last_seen, last_stock, last_price, gone_since) "
+                 "VALUES (?, 1, ?, ?, ?, 0, 5000, ?)", (lot, json.dumps(data, ensure_ascii=False), NOW, NOW, NOW))
+    conn.commit()
+    conn.close()
+
+
+def test_the_card_names_the_id_the_feed_has_not_a_former_mark(tmp_path, capsys):
+    """The ad brought back has lost its old mark and has the one the position has now: the card says the same."""
+    import json
+    from tires_sync import mirror_feed
+    prepared(tmp_path, accounts=("A",), price_overrides={"1:1015": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    assert run(tmp_path, AFTER) == 0
+    a_lot_of(tmp_path, "102", "1015")
+    conn = connect(tmp_path)
+    conn.execute("UPDATE retired_ad SET ad_id = '102_r20261001' WHERE goods_id = '102'")
+    store.set_state(conn, mirror_feed._own_key(1), json.dumps({"102": "r20261101"}))
+    conn.commit()
+    conn.close()
+    manual(tmp_path, "1015", 2)
+    on_oth(tmp_path, "102")
+    capsys.readouterr()
+    assert run(tmp_path, AFTER) == 0
+    passed(capsys)
+    assert "102_r20261101" in ads_of(public(tmp_path))
+    conn = connect(tmp_path)
+    assert oth_manual.carried_by(conn, 1) == {"1015": "102_r20261101"}
+    conn.close()
+
+
+def test_the_card_tells_the_published_feed_from_the_next_cycle(tmp_path, capsys):
+    """A cycle not published (a check stopped it, or no --publish): the feed Avito reads has not got it, the card does not say it has."""
+    from tests.test_stock_pass import args_of
+    from tires_sync.cli import main
+    from tires_sync.webmim import parse_unload
+    prepared(tmp_path, accounts=("A",), price_overrides={"1:1035": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    feed_before = public(tmp_path)
+    a_lot_of(tmp_path, "103", "1035")
+    manual(tmp_path, "1035", 2)
+    parsed = parse_unload(FIVE, "T1")
+    capsys.readouterr()
+    assert main(["run-cycle"] + args_of(tmp_path)) == 0
+    assert public(tmp_path) == feed_before
+    assert card_says(tmp_path, "1035", parsed) == (True, "в фиде сейчас не показаны; со следующим циклом — в объявлении 103 (та же шина)")
+    assert run(tmp_path, FIVE) == 0
+    assert card_says(tmp_path, "1035", parsed) == (True, "штуки показаны в объявлении 103 (та же шина)")
+    manual(tmp_path, "1035", 0)
+    manual(tmp_path, "1035", 3)
+    conn = connect(tmp_path)
+    oth_manual.remember_carried(conn, 1, {}, b"draft")
+    conn.close()
+    assert card_says(tmp_path, "1035", parsed)[1] == "сейчас штуки показаны в объявлении 103 (та же шина); со следующим циклом их там не будет"
+
+
+def test_only_the_feed_of_the_cycle_moves_the_card():
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT)")
+    oth_manual.remember_carried(conn, 1, {"G": "103"}, b"cycle")
+    assert oth_manual.carried_by(conn, 1) == {} and oth_manual.carried_next(conn, 1) == {"G": "103"}
+    oth_manual.publish_carried(conn, 1, b"the light pass")                 # a feed of its own
+    assert oth_manual.carried_by(conn, 1) == {}
+    oth_manual.publish_carried(conn, 1, b"cycle")
+    assert oth_manual.carried_by(conn, 1) == {"G": "103"}
+    oth_manual.remember_carried(conn, 1, {"G": "104"}, b"cycle 2")
+    oth_manual.rebind_carried(conn, 1, b"cycle 2 with the file")           # a mirror
+    oth_manual.publish_carried(conn, 1, b"cycle 2 with the file")
+    assert oth_manual.carried_by(conn, 1) == {"G": "104"}
+
+
+def test_the_card_says_a_position_is_in_the_feed_and_what_price_comes_next(tmp_path, capsys):
+    prepared(tmp_path, accounts=("A",), price_overrides={"1:102": {"price": 7000}})
+    assert run(tmp_path, FIVE) == 0
+    assert run(tmp_path, AFTER) == 0
+    manual(tmp_path, "102", 2)
+    assert card_says(tmp_path, "102", AFTER_PARSED())[1].startswith("в фиде сейчас нет; со следующим циклом уйдёт на Авито по своей цене 7000 ₽")
+    capsys.readouterr()
+    assert run(tmp_path, AFTER) == 0
+    passed(capsys)
+    own(tmp_path, {"1:102": {"price": 7500}})
+    text = card_says(tmp_path, "102", AFTER_PARSED())[1]                 # the saved ad may be older than the feed (a held one): no price is read from it
+    assert text.startswith("сейчас в фиде; своя цена 7500 ₽ (её изменение попадёт в фид со следующим циклом)") and "7000" not in text
+    conn = connect(tmp_path)
+    from tires_sync.panel.routes_catalog_oth import account_status
+    assert not account_status(conn, "102", 1, AFTER_PARSED(), False)[1].count("₽")      # no right to see the money
+    conn.close()
+
+
+def test_a_mirror_published_without_its_new_positions_shows_no_pieces(tmp_path):
+    """A mirror's own ads never carry pieces: a feed with no plan of new positions has none of them, the card must not go on naming one."""
+    from tires_sync import cli
+    conn = connect(tmp_path)
+    oth_manual.remember_carried(conn, 1, {"G": "104"}, b"cycle")
+    oth_manual.publish_carried(conn, 1, b"cycle")
+    conn.commit()
+    (tmp_path / "avito_feed.xml").write_bytes(b"the file alone")
+    cli._record_state(conn, {"id": 1, "feed_mode": "mirror"}, tmp_path)
+    assert oth_manual.carried_by(conn, 1) == {}
+    conn.close()
+
+
+def test_a_mirror_published_again_with_the_same_feed_keeps_what_it_shows(tmp_path):
+    """The plan went with the first publication; the same draft published by hand has no plan and the same ads."""
+    from tires_sync import cli
+    conn = connect(tmp_path)
+    oth_manual.remember_carried(conn, 1, {"G": "104"}, b"cycle")
+    oth_manual.publish_carried(conn, 1, b"cycle")
+    conn.commit()
+    (tmp_path / "avito_feed.xml").write_bytes(b"cycle")
+    cli._record_state(conn, {"id": 1, "feed_mode": "mirror"}, tmp_path)
+    assert oth_manual.carried_by(conn, 1) == {"G": "104"}
+    conn.close()
+
+
+def test_the_publication_of_the_panel_tells_a_mirror_without_a_plan_too(tmp_path, monkeypatch):
+    from tires_sync import connections, publishing
+    conn = connect(tmp_path)
+    oth_manual.remember_carried(conn, 1, {"G": "104"}, b"cycle")
+    oth_manual.publish_carried(conn, 1, b"cycle")
+    conn.commit()
+    folder = tmp_path / "tok"
+    folder.mkdir()
+    (folder / "avito_feed.xml").write_bytes(b"the file alone")
+    monkeypatch.setattr(connections, "list_feed_accounts", lambda c: [{"id": 1, "live": True, "feed_token": "tok", "feed_mode": "mirror"}])
+    monkeypatch.setattr(publishing, "promote_feed", lambda *a, **k: {"new": 1, "old": 1})
+    monkeypatch.setattr(publishing, "active_settings", lambda c: None)
+    monkeypatch.setattr(publishing, "expected_for", lambda c, settings: 0)
+    monkeypatch.setattr(connections, "display_name", lambda c, account_id: "A")
+    assert publishing.publish_live_accounts(conn, tmp_path)[0]["ok"] is True
+    assert oth_manual.carried_by(conn, 1) == {}
+    conn.close()
+

@@ -44,18 +44,19 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
     left_out = frozenset(connections.get_excluded_types(conn, account_id))
     offers, prices, drop, no_price = sync._manual_gone(conn, parsed, {goods_id: total}, by_orders, eff,
                                                       tochki if tochki_feed.trial(conn, account_id) is None else None, left_out)
+    published = goods_id in store.load_published(conn, account_id)
+    still = "сейчас объявление ещё в фиде; " if published else ""
     if goods_id in no_price:
         own = (eff.own_prices or {}).get(goods_id)
-        return False, ("своя цена в процентах к закупке, а последней закупки в архиве каталога нет: поставьте готовую цену" if own
-                       else "нужна своя цена: без неё позиция, которой нет у поставщика, на Авито не уходит")
+        return False, still + ("своя цена в процентах к закупке, а последней закупки в архиве каталога нет: поставьте готовую цену" if own
+                               else "нужна своя цена: без неё позиция, которой нет у поставщика, на Авито не уходит")
     if goods_id in drop:
-        return False, "позиция снята настройкой аккаунта (исключённый тип шин или 4 точки вне пробы)"
+        return False, still + "позиция снята настройкой аккаунта (исключённый тип шин или 4 точки вне пробы)"
     if goods_id not in prices:
         return None
     if eff.overrides.get(override_key(goods_id)) == "off":
-        return False, "на позиции стоит ручное «выкл»"
+        return False, still + "на позиции стоит ручное «выкл»"
     offer = offers.get(goods_id)
-    published = goods_id in store.load_published(conn, account_id)
     before = store.retired_ad_of(conn, account_id, goods_id)
     if offer is None and not (published or before):
         return False, "не из чего собрать объявление: позиции нет ни в архиве каталога, ни среди сохранённых объявлений"
@@ -63,9 +64,15 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
                                             or sync._off_by_the_owner(goods_id, before[1], eff, left_out, True)):
         return False, "сохранённое объявление снято настройкой (не по остатку) — так оно и остаётся снятым"
     former = oth_manual.retired_id(conn, account_id, goods_id)          # its Id here, the saved ad kept or not
-    carrier = oth_manual.carried_by(conn, account_id).get(goods_id) if not published else None
-    if carrier:                                                         # one tire, one ad: the last cycle showed its pieces there
-        return True, "штуки показаны в объявлении %s (та же шина)" % carrier
+    if not published:                                                   # one tire, one ad: what the feed shows now, what the last cycle built
+        shown, coming = oth_manual.carried_by(conn, account_id).get(goods_id), oth_manual.carried_next(conn, account_id).get(goods_id)
+        if shown and shown == coming:
+            return True, "штуки показаны в объявлении %s (та же шина)" % shown
+        if shown:
+            return True, "сейчас штуки показаны в объявлении %s (та же шина); со следующим циклом %s" % (
+                shown, "— в объявлении %s" % coming if coming else "их там не будет")
+        if coming:
+            return True, "в фиде сейчас не показаны; со следующим циклом — в объявлении %s (та же шина)" % coming
     if offer is not None and not published and not former:
         return False, "раньше не публиковалась в этом аккаунте — на Авито не уходит (новый Id не выдаём)"
     if offer is not None and not published and former:
@@ -76,9 +83,11 @@ def account_status(conn, goods_id: str, account_id: int, parsed, money: bool = T
         now_id = sync._final_id(goods_id, id_map, suffix, mirror_feed.reissued_own(conn, account_id), account_id)
         if sync.REISSUE_MARK.sub("", former) != sync.REISSUE_MARK.sub("", now_id):
             return False, "прежний Id объявления (%s) не совпадает с нынешним: новый Id не выдаём" % former
-    return True, ("уйдёт на Авито по своей цене" + (" %d ₽" % prices[goods_id] if money else "")
-                  + (" (из архива каталога)" if offer is not None else " (по сохранённому объявлению)")
-                  + "; лимит возвратов ОТХ и «одна шина — одно объявление» действуют")
+    rules = "; лимит возвратов ОТХ и «одна шина — одно объявление» действуют"
+    if published:
+        return True, "сейчас в фиде" + ("; своя цена %d ₽ (её изменение попадёт в фид со следующим циклом)" % prices[goods_id] if money else "") + rules
+    return True, ("в фиде сейчас нет; со следующим циклом уйдёт на Авито по своей цене" + (" %d ₽" % prices[goods_id] if money else "")
+                  + (" (из архива каталога)" if offer is not None else " (по сохранённому объявлению)") + rules)
 
 
 def manual_list(conn) -> list:

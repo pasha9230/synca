@@ -710,6 +710,8 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
         link_client = (conn.execute("SELECT code FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone() or [""])[0] not in ("oth", RETURN_GIVEN)
     if "client_phone" in changed and link_client:
         _attach_client(conn, card_id, now, author)
+    from . import oth_sale
+    oth_sale.numbers_written(conn, card_id, changed, now, author)
     if commit:
         conn.commit()
     return list(changed)

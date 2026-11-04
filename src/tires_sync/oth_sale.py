@@ -101,7 +101,7 @@ def borrowed_ids(conn, card_id=None) -> Set[int]:
                                                   (card_id,) if card_id is not None else ()).fetchall():
         if order_id not in found:
             row = conn.execute("SELECT webmim_number FROM order_card WHERE id = ?", (first_order(conn, item_id),)).fetchone()
-            if row and row[0] == number:
+            if (row and row[0] == number) or _copied(conn, order_id).get("webmim_number") == number:     # a copy left behind on a closed order too
                 found.add(order_id)
     return found
 
@@ -138,44 +138,85 @@ def _numbers_source(conn, card: dict, firsts: List[int]) -> Tuple[Optional[int],
     return firsts[0], ""
 
 
-def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, note: bool = False) -> None:
+def _copied(conn, card_id) -> Dict[str, str]:
+    """Field → the value the system copied into it and nobody wrote over since (the journal of actions, oldest first: a value equal to the
+    source's proves nothing, a person may have typed it). No journal line: the field is a person's, so it is never taken away."""
+    found: Dict[str, str] = {}
+    for (detail,) in conn.execute("SELECT detail FROM audit WHERE action = 'oth_numbers' AND json_extract(detail, '$.order') = ? ORDER BY id", (int(card_id),)).fetchall():
+        data = json.loads(detail)
+        found.update({k: "" if data.get("typed") else v for k, v in (data.get("changes") or {}).items()})
+    return found
+
+
+def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, note: bool = False, closed: bool = False) -> bool:
     """Bring the two numbers in line with the tyres «с ОТХ» the order holds now, in the caller's transaction. An empty field gets the number of
-    the one order of purchase; a value equal to a number of an order the tyres came from (`before`, the orders of purchase before this change)
-    goes when that order no longer gives the numbers; anything else was written by a person and stays. `note`: say why nothing was taken."""
+    the one order of purchase; a copy (_copied) follows that order, and goes when no order gives the numbers; anything else was written by a
+    person and stays. `note`: say why nothing was taken. `closed`: a closed order, or one that gave all its tyres on (they still came from `before`):
+    only a copy that has a new value changes. True: a field changed."""
     row = conn.execute("SELECT webmim_id, webmim_number, transfer_number FROM order_card WHERE id = ?", (card_id,)).fetchone()
     if row is None or row[0]:
-        return
+        return False
     from . import order_merge
     if order_merge.is_target(conn, card_id):                            # a merged order has its sources' numbers, by position (order_merge)
-        return
+        return False
     firsts = _firsts(conn, card_id)
-    source, why = _numbers_source(conn, orders.get_card(conn, card_id), firsts)
+    source, why = _numbers_source(conn, orders.get_card(conn, card_id), firsts) if firsts or not closed else (next(iter(before)), "")
     numbers = {}
     for order_id in (set(before) | set(firsts)) - {0}:
         got = conn.execute("SELECT webmim_number, transfer_number FROM order_card WHERE id = ?", (order_id,)).fetchone()
         numbers[order_id] = tuple(got) if got else ("", "")
     wanted = numbers.get(source, ("", ""))
     taken_now, gone = {}, {}
+    copied = _copied(conn, card_id)
     for at, field in enumerate(NUMBERS):
         value = row[at + 1]
-        if value and value != wanted[at] and any(n[at] == value for n in numbers.values()):
+        if value and value != wanted[at] and copied.get(field) == value and (wanted[at] or not closed):
             gone[field], value = "", ""
-        if not value and wanted[at]:
+        if not value and wanted[at] and (field in gone or not closed):
             taken_now[field] = wanted[at]
     changes = {**gone, **taken_now}
     if changes:
         conn.execute("UPDATE order_card SET %s, updated_at = ? WHERE id = ?" % ", ".join("%s = ?" % f for f in changes),
                      list(changes.values()) + [now, card_id])
         _audit(conn, now, author, "oth_numbers", {"order": int(card_id), "from_order": source, "changes": changes})
-    if [f for f in gone if f not in taken_now]:
-        orders.add_event(conn, card_id, now, author, "field", "%s: %s." % (
-            _number_names([f for f in gone if f not in taken_now], "убран", "убраны"), why or "заказ больше не держит шины того заказа, или в нём другие позиции"))
+    left = [f for f in gone if f not in taken_now]
+    if left:
+        why_gone = why or ("в заказе №%d %s больше нет" % (source, "их" if len(left) == 2 else "его") if source
+                           else "заказ больше не держит шины того заказа, или в нём другие позиции")
+        orders.add_event(conn, card_id, now, author, "field", "%s: %s." % (_number_names(left, "убран", "убраны"), why_gone))
     if taken_now:
         orders.add_event(conn, card_id, now, author, "field", "%s из заказа №%d" % (_number_names(taken_now, "взят", "взяты"), source))
     elif note and why and not (row[1] and row[2]) and any(any(n) for n in numbers.values()):
         orders.add_event(conn, card_id, now, author, "field", "%s: %s.%s" % (_number_names(
             [f for at, f in enumerate(NUMBERS) if not row[at + 1]], "не взят", "не взяты"), why,
             " Впишите вручную." if len(firsts) > 1 else ""))                   # the supplier's position: its own order brings the number, or the next take
+    return bool(changes)
+
+
+def numbers_written(conn, card_id, fields: Iterable[str], now: str, author: str) -> None:
+    """A number was written through the order's fields (orders.update_card, in its transaction). Over a copy: it is a person's from now on.
+    The orders holding tyres bought by this one follow it (the owner 2026-11-04): they show its number now, unless a person typed their own."""
+    fields = [f for f in fields if f in NUMBERS]
+    if not fields:
+        return
+    copied = _copied(conn, card_id)
+    typed = {f: orders._row(conn, card_id)[f] for f in fields if copied.get(f)}
+    if typed:
+        _audit(conn, now, author, "oth_numbers", {"order": int(card_id), "typed": True, "changes": typed})
+    _follow_source(conn, card_id, now, author, {int(card_id)})
+
+
+def _follow_source(conn, source_id, now: str, author: str, seen: Set[int]) -> None:
+    """The orders whose tyres «с ОТХ» were bought by `source_id`, and on along a copy that changed. A press of «Оформить в WebMIM» going on writes
+    its own (items_changed)."""
+    held = conn.execute("SELECT t.order_id, t.item_id FROM order_item_oth t WHERE t." + _LIVE).fetchall()     # a position given on too: its copy means the same order
+    for order_id in sorted({o for o, item_id in held if first_order(conn, item_id) == source_id} - seen):
+        seen.add(order_id)
+        state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (order_id,)).fetchone()
+        if state and state[0] != "refused":
+            continue
+        if _sync_numbers(conn, order_id, [source_id], now, author, closed=orders.get_card(conn, order_id)["stage"]["kind"] != "open" or not _firsts(conn, order_id)):
+            _follow_source(conn, order_id, now, author, seen)
 
 
 def items_changed(conn, card_id, now: str, author: str) -> None:

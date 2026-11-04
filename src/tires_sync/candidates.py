@@ -35,7 +35,7 @@ class Evaluation:
     oth_gave: Dict[str, str] = field(default_factory=dict)     # code -> the lot it handed its OTH over to (one tire, one ad): that ad names its points too
     oth_retired: Dict[str, Tuple[str, str, int]] = field(default_factory=dict)   # code -> (former Id, saved ad, price): published again from it
     oth_offers: Dict[str, Offer] = field(default_factory=dict)  # code -> its last offer from the archive (gone, «Свой остаток» and an own price)
-    oth_carried: Dict[str, str] = field(default_factory=dict)   # code -> the Id of the ad of the same tire that shows its «Свой остаток»
+    oth_carried: Dict[str, str] = field(default_factory=dict)   # code -> the lot of the same tire whose ad shows its «Свой остаток»
     oth_no_id: Dict[str, str] = field(default_factory=dict)     # code -> "never" (not published here before) or its former other Id: not sent
     oth_no_price: Dict[str, int] = field(default_factory=dict)  # code -> manual pieces not counted in this account: gone, no own price
     oth_price: Dict[str, int] = field(default_factory=dict)    # code -> own price of a gone position on «Свой остаток» held or back on its saved ad

@@ -447,7 +447,7 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
             oth.pop(code)                                                 # its Id is another ad's now: never two ads under one Id
             points.pop(code, None)
             retired.pop(code, None)
-    carried: Dict[str, str] = {}                                          # «Свой остаток» of a gone lot shown in another lot's ad: that ad's Id
+    carried: Dict[str, str] = {}                                          # «Свой остаток» of a gone lot shown in another lot's ad: that lot
     for code in gave:
         if code not in getattr(ev, "oth_offers", {}):
             continue
@@ -456,7 +456,7 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
             seen.add(taker)
             taker = gave[taker]
         if taker in oth:
-            carried[code] = retired[taker][0] if taker in retired else (ev.inherit.get(taker) or live_id_of(taker))
+            carried[code] = taker
     ev.oth_carried = carried
     ev.oth, ev.oth_points, ev.oth_retired, ev.oth_gave = oth, points, retired, gave
 
@@ -892,7 +892,6 @@ def run_cycle(
         from . import oth_manual
         oth_manual.note_no_price(conn, acct, ev.oth_no_price, store.moscow_iso())
         oth_manual.note_no_price(conn, acct, oth_manual.manual_of(conn, ev.oth_no_id), store.moscow_iso(), kind="id")
-        oth_manual.remember_carried(conn, acct, ev.oth_carried)
     live = live_titles_of(out_dir)
     titles = dict(mirror_feed.bound_titles(conn, acct), **live)
     live_unread = not live and out_dir is not None and (Path(out_dir).parent / "avito_feed.xml").exists()   # a broken file: do not forget renames
@@ -933,6 +932,11 @@ def run_cycle(
                         item["back_only"] = True          # it only stops waiting: its set of four stays as it is
                     pending.append(item)
             store.save_pending(conn, account_id, feed_bytes, pending)
+            built: Dict[str, str] = {}                                     # the Id of the single ad of each position, as this feed has it
+            for a, c in owners:
+                if not re.search(r"-x\d+$", (a.findtext("Id") or "").split("_")[0]):
+                    built.setdefault(c, a.findtext("Id"))
+            oth_manual.remember_carried(conn, acct, {c: built[t] for c, t in ev.oth_carried.items() if t in built}, feed_bytes)
             new_basis = next_title_basis(basis, titles, ads, _fresh_names(owners, rendered, rendered4, ev))
             if titles and new_basis != basis and not live_unread and not title_guard.get("held"):   # held renames are not forgotten
                 store.set_state(conn, _basis_key(acct), json.dumps(new_basis, ensure_ascii=False))
