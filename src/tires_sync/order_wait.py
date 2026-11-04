@@ -319,7 +319,7 @@ def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, le
     """(the offer to name, its price, "") or (None, 0, why): the price of WebMIM (the owner 2026-11-05: «приоритет у МИМ»); the others' only when
     WebMIM has no price or its stock went to an earlier order, and only when they agree and have what earlier orders left. Two prices in the
     group that decides: a person chooses."""
-    found = sorted((o for o in _matches(line, stock) if o is pick or left.get(o.goods_id, o.stock) >= line["qty"]), key=lambda o: o is not pick)      # the taken one first
+    found = [o for o in _matches(line, stock) if o is pick or left.get(o.goods_id, o.stock) >= line["qty"]]
     groups = ([[o for o in found if _is_mim(o)]] if _is_mim(pick) else []) + [[o for o in found if not _is_mim(o)]]
     for group in groups:
         priced: Dict[float, object] = {}
