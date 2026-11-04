@@ -6,6 +6,7 @@ Found exactly, the client is written to by itself in the order's Avito chat, in 
 2026-11-04, `_tell_client`); when it cannot go the responsible manager gets the task instead. Found with analogs: only the task."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -25,9 +26,10 @@ TASK_EXACT, TASK_ANALOG = 0, -1                      # the «rule» numbers of t
 TASK_REPLY = -5                                      # «Клиент ответил…» (order_engine: −2 placed, −3 arrived; order_intercity: −4 shipped)
 TITLE_REPLY = "Клиент ответил на сообщение о наличии"
 MAX_SENDS = 20                                       # messages per cycle: the rest go at the next one, an hour later
-NAME_WORDS = re.compile(r"\d{3}[/ ]?\d{2}([/ ]?Z?R?\d{2}C?)?|Z?R\d{2}C?|\d{2,3}(/\d{2,3})?[A-Z]{1,2}|XL|RF|RFT|RUNFLAT|-|"
+NAME_WORDS = re.compile(r"\d{3}[/ ]?\d{2}([/ ]?Z?R?\d{2}C?)?|Z?R\d{2}C?|\d{2,3}(/\d{2,3})?[H-Z]|XL|RF|RFT|RUNFLAT|-|"
                         r"ШИН[АЫ]?|РЕЗИНА|НОВ\w*|ЗИМН\w*|ЗИМА|ЛЕТН\w*|ЛЕТО|ВСЕСЕЗОН\w*|ШИП\w*|НЕШИП\w*|БЕЗ|ЛИПУЧКА")
 BEFORE_MODEL = re.compile(r"\d{2,3}|[A-Z]")                 # in WebMIM's own names the indexes stand before the model: «IKON 205/55/16 T 94 Test Model»
+HELD = "wait_held:%s"                                # app_state, per send mark: the positions the client was told of, [[position, pieces]]: they are held
 SENT_TEXT = "wait_text:%s"                           # app_state, per send mark: the words of a send until it is known to have gone
 TITLE_EXACT, TITLE_ANALOG = "Позиция появилась: предложите клиенту", "Есть аналоги: можно предложить клиенту"
 TITLE_CHECK = "Позиция появилась: проверьте чат клиента"    # the message may have gone: the same task, without the card's form «отправить клиенту»
@@ -312,11 +314,13 @@ def _is_mim(offer) -> bool:
     return supplier_of_id(str(offer.goods_id)) == 1
 
 
-def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf) -> Tuple[object, float, str]:
+def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, left: Dict[str, int]) -> Tuple[object, float, str]:
     """(the offer to name, its price, "") or (None, 0, why): the price of WebMIM (the owner 2026-11-05: «приоритет у МИМ»); the others' only when
-    WebMIM has no price or its stock went to an earlier order, and only when they agree. Two prices in the group that decides: a person chooses."""
+    WebMIM has no price or its stock went to an earlier order, and only when they agree and have what earlier orders left. Two prices in the
+    group that decides: a person chooses."""
     found = _matches(line, stock)
-    groups = ([[o for o in found if _is_mim(o)]] if _is_mim(pick) else []) + [[o for o in found if not _is_mim(o)]]
+    others = [o for o in found if not _is_mim(o) and (o is pick or left.get(o.goods_id, o.stock) >= line["qty"])]
+    groups = ([[o for o in found if _is_mim(o)]] if _is_mim(pick) else []) + [others]
     for group in groups:
         priced: Dict[float, object] = {}
         for each in group:
@@ -336,20 +340,22 @@ def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf) ->
     return None, 0, "у позиции %s нет цены продажи." % (pick.code or pick.goods_id)
 
 
-def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_of: PriceOf) -> Tuple[str, str]:
-    """The words for the client and "", or "" and why they cannot go: nothing goes with an empty name or price or a placeholder left, nor with
-    a price nobody can tell (_line_price)."""
+def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_of: PriceOf, left: Dict[str, int]) -> Tuple[str, str, list]:
+    """The words for the client, "" and the positions they name [[position, pieces]]; or "", why they cannot go and []: nothing goes with an
+    empty name or price or a placeholder left, nor with a price nobody can tell (_line_price)."""
     body = message_texts.body(conn, message_texts.WAIT_FOUND)
     if set(templates.PLACEHOLDER.findall(body)) != {"name", "price"}:
-        return "", "в шаблоне «%s» нужны {name} и {price}, других подстановок быть не может." % message_texts.entry(message_texts.WAIT_FOUND)["name"]
+        return "", "в шаблоне «%s» нужны {name} и {price}, других подстановок быть не может." % message_texts.entry(message_texts.WAIT_FOUND)["name"], []
     items: List[tuple] = []
+    held: Dict[str, int] = {}
     for line, pick in zip(lines, picks):
-        offer, price, why = _line_price(conn, line, pick, stock, chat, price_of)
+        offer, price, why = _line_price(conn, line, pick, stock, chat, price_of, left)
         if why:
-            return "", why
+            return "", why, []
         name = " ".join(str(offer.name_orig or offer.name or "").split())
         if not name:
-            return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id)
+            return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id), []
+        held[offer.goods_id] = held.get(offer.goods_id, 0) + line["qty"]
         if (name, price) not in items:                             # two lines of one position: it is named once
             items.append((name, price))
     shown = [templates.money(p) + " ₽" for _n, p in items]
@@ -360,8 +366,8 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
     values = {"name": ", ".join(n for n, _p in items), "price": price_text}
     text = templates.PLACEHOLDER.sub(lambda m: values[m.group(1)], body)
     if "{" in text or "}" in text or templates.unfilled(text):
-        return "", "в тексте осталась незаполненная подстановка."
-    return text, ""
+        return "", "в тексте осталась незаполненная подстановка.", []
+    return text, "", [[g, q] for g, q in held.items()]
 
 
 def _token(card_id, stay) -> str:
@@ -405,7 +411,8 @@ def _queued(conn, card_id, holder: tuple, now: str) -> None:
         conn.commit()
 
 
-def _tell_client(conn, card_id, lines: List[dict], picks: Optional[List], stock: List, now: str, deliver, price_of: Optional[PriceOf], may_send: bool = True) -> Optional[Tuple[str, str]]:
+def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now: str, deliver, price_of: Optional[PriceOf], may_send: bool = True,
+                 left: Optional[Dict[str, int]] = None) -> Optional[Tuple[str, str]]:
     """Everything the client waits for is here: «появилось в наличии» in the order's chat, by chats.send_reply, the send mark being the order
     and the moment it entered the stage. None: no task is due (it went and the journal has it; it went earlier in this stay; outside the
     working hours, or past the limit of a cycle (not `may_send`), the next cycle looks again). Else the task is due: (the words for its body, its title): why the client was not written to
@@ -420,8 +427,9 @@ def _tell_client(conn, card_id, lines: List[dict], picks: Optional[List], stock:
         return "", ""
     if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text LIKE ? AND at >= ? LIMIT 1", (card_id, TOLD + "%", stay)).fetchone():
         return None
-    if picks is None:
-        return NOT_SENT % "остатка одной позиции не хватает на все строки заказа.", ""
+    log = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (_token(card_id, stay),)).fetchone()
+    if log and log[0] in ("sending", "unknown", "retry", "lost"):  # a cycle cut off in the send: it may have gone, whatever else is true now
+        return "Сообщение клиенту «появилось в наличии»: неизвестно, ушло ли. Проверьте чат Авито заказа: если сообщения там нет, напишите клиенту, повторно не отправляйте.", TITLE_CHECK
     for line in lines:
         why = _one_tire(conn, card, line, stock)
         if why:
@@ -436,14 +444,13 @@ def _tell_client(conn, card_id, lines: List[dict], picks: Optional[List], stock:
         return None
     if chats._unread(conn, chat):                                  # our message would count as the answer and wipe «Клиент написал»
         return NOT_SENT % "клиент написал в чат и ждёт ответа.", ""
-    text, why = _found_text(conn, lines, picks, stock, chat, price_of)
+    text, why, held = _found_text(conn, lines, picks, stock, chat, price_of, left or {})
     if why:
         return NOT_SENT % why, ""
     token = _token(card_id, stay)
-    key = SENT_TEXT % token                                        # the words that go: an interrupted send ends with these, the price may have changed since
-    if conn.execute("SELECT 1 FROM chat_send_log WHERE token = ?", (token,)).fetchone():
-        text = store.get_state(conn, key) or text
+    key = SENT_TEXT % token                                        # the words that go: the history has these, the price may change before it is written
     store.set_state(conn, key, text)
+    store.set_state(conn, HELD % token, json.dumps(held))
     status, why, _copy = order_manager.send_to_client(conn, card, text, token, deliver, now)
     if status == "sent":
         orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD + text, level="green")
@@ -452,7 +459,7 @@ def _tell_client(conn, card_id, lines: List[dict], picks: Optional[List], stock:
         _tag(conn, card_id, card, "exact", now)
         return None
     if status == "failed":
-        conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+        conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (key, HELD % token))
         orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение клиенту «появилось в наличии» не отправлено: %s" % why, level="red")
         conn.commit()
         return NOT_SENT % why, ""
@@ -498,8 +505,9 @@ def replies(conn, now: str, notify=None) -> int:
                                 (log[0], since)).fetchone():
                 continue
             card = orders.get_card(conn, card_id)
-            body = "Заказ №%d, клиент %s. Ответственный: %s. Ответ клиента в чате заказа: /orders/%d" % (
-                card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], card_id)
+            from . import order_arrived
+            body = "Заказ №%d, клиент %s. Ответственный: %s. Ответ клиента в чате заказа: %s" % (
+                card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], order_arrived._link(conn, card_id))
             if conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
                             "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card_id, TASK_REPLY, stay, "remind", "", card["stage_id"], "pending", TITLE_REPLY, body, "", now)).rowcount:
                 orders.add_event(conn, card_id, now, AUTHOR, "rule", "Задача создана: %s" % TITLE_REPLY)
@@ -528,7 +536,14 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
     stock = [o for o in offers if o.stock >= 1]
     out: Dict[str, List[int]] = {"exact": [], "analogs": []}
     cards = []
-    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait' ORDER BY c.entered_at, c.id").fetchall():
+    stays: Dict[int, str] = {}
+    for card_id, stay in conn.execute("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait' ORDER BY c.entered_at, c.id").fetchall():
+        try:                                                       # gone out, the history cut off with the cycle: written whatever the stock is now
+            if conn.execute("SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent'", (_token(card_id, stay),)).fetchone() and _state(conn, card_id) != "told":
+                delivered(conn, _token(card_id, stay), "", now, "отправлено")
+        except Exception:
+            conn.rollback()
+            logging.getLogger("tires_sync.order_wait").warning("the history of card %s could not be written", card_id, exc_info=True)
         lines = list_wants(conn, card_id)
         results = [_line_result(line, stock) for line in lines]
         if not lines or any(r is None for r in results):
@@ -536,6 +551,7 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
         kind = "exact" if all(r[0] == "exact" for r in results) else "analogs"
         out[kind].append(card_id)
         cards.append((card_id, kind, lines, [r[1] for r in results]))
+        stays[card_id] = stay
     log = logging.getLogger("tires_sync.order_wait")
     left: Dict[str, int] = {}
     first: Dict[str, tuple] = {}
@@ -552,6 +568,13 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
             if first.setdefault(pick.goods_id, (card_id, state))[0] == card_id:
                 first[pick.goods_id] = (card_id, state)
 
+    def take_held(said, card_id, state):
+        for goods_id, qty in json.loads(said):
+            offer = next((o for o in stock if o.goods_id == goods_id), None)
+            if offer is not None and left.get(goods_id, offer.stock) >= qty:
+                left[goods_id] = left.get(goods_id, offer.stock) - qty
+                first.setdefault(goods_id, (card_id, state))
+
     def named(card_id, lines):
         card = orders.get_card(conn, card_id)
         return not any(_one_tire(conn, card, line, stock) for line in lines)
@@ -559,7 +582,10 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
         if kind == "exact":
             try:
                 states[card_id] = _state(conn, card_id)
-                if states[card_id] in ("told", "task") and named(card_id, lines):
+                said = store.get_state(conn, HELD % _token(card_id, stays[card_id]))
+                if states[card_id] in ("told", "task") and said:     # the client was told of these, whatever else fits the line by now
+                    take_held(said, card_id, states[card_id])
+                elif states[card_id] == "task" and named(card_id, lines):
                     picks, _holder = _take(lines, stock, left, first)
                     hold(picks or [], card_id, states[card_id])
             except Exception:
@@ -575,17 +601,23 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
                 continue
             clear = named(card_id, lines)
             picks, holder = _take(lines, stock, left, first) if clear else (found, None)
-            if picks is None and holder is not None:
-                if holder[1]:                                      # the order ahead waits for the working hours: nothing to say yet
+            if picks is None:                                      # no holder: its own lines are more than there is, short stock: nothing
+                if holder is not None and holder[1]:               # the order ahead waits for the working hours: nothing to say yet
                     _queued(conn, card_id, holder, now)
                 continue
             if clear:
                 hold(picks or [], card_id, "")
-            told = _tell_client(conn, card_id, lines, picks, stock, now, None if deliver is None else counted, price_of, sends[0] < max_sends)
+            told = _tell_client(conn, card_id, lines, picks, stock, now, None if deliver is None else counted, price_of, sends[0] < max_sends, left)
             if told is not None:
                 _mark(conn, card_id, "exact", picks or found, now, notify, told[0], told[1])
             if clear:
-                hold(picks or [], card_id, _state(conn, card_id))
+                state = _state(conn, card_id)
+                hold(picks or [], card_id, state)
+                said = store.get_state(conn, HELD % _token(card_id, stays[card_id]))
+                if said:                                           # named another position than the one taken (WebMIM had no price): that one is what is held
+                    for pick, line in zip(picks, lines):
+                        left[pick.goods_id] += line["qty"]
+                    take_held(said, card_id, state)
         except Exception:                                          # a card that cannot be marked (ten tags already, a broken one) must not stop the others
             conn.rollback()
             log.warning("card %s was found but could not be marked", card_id, exc_info=True)

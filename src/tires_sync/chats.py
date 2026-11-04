@@ -1245,6 +1245,10 @@ def _stopped(conn, chat: dict, token: str) -> str:
         return ""                                     # the task of that very stage («Клиенту: заказ отменён» on «Отмена»): it is what the person sent
     if token.startswith("wait-") and not token.endswith("-" + re.sub(r"\D", "", stage[3] or "")):
         return "заказ ушёл с этапа ожидания"           # «появилось в наличии» belongs to one stay in the stage (order_wait)
+    if token.startswith("wait-"):                      # its task closed or skipped by a person: as for a `task-…` mark
+        task = conn.execute("SELECT status FROM order_task WHERE order_id = ? AND rule_id = 0 AND entered_at = ?", (card_id, stage[3])).fetchone()
+        if task and task[0] in ("skipped", "done"):
+            return "задача пропущена" if task[0] == "skipped" else "задача уже закрыта"
     return "заказ в «%s»" % stage[1] if stage[0] in ("lost", "closed") else ""
 
 
