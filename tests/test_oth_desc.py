@@ -8,8 +8,9 @@ import pytest
 from panel_helpers import login, make_app, post
 from tests.test_feed_check import ad as check_ad, ctx as check_ctx, rules_of
 from tests.test_oth_feed import connect, description, move, on_oth, passed, snapshot
-from tests.test_stock_pass import AFTER, FIVE, ads_of, prepared, public, rows, run
-from tires_sync import connections, cycle, feed_check, order_points, oth_manual, oth_stock, store
+from tests.test_stock_pass import AFTER, FIVE, ads_of, args_of, prepared, public, rows, run
+from tires_sync import connections, cycle, feed_check, order_points, oth_manual, oth_stock, store, sync
+from tires_sync.cli import main
 from tires_sync.description import set_stock
 
 MAIN = "{title}\n\nЦена за 1 шину: {price} руб.\nОстаток на складе: {stock} шт.\n\nАртикул: {code}"
@@ -292,3 +293,37 @@ def test_the_light_pass_is_not_stopped_by_a_line_the_last_cycle_wrote(tmp_path, 
     assert run(tmp_path, FIVE) == 0                                            # the next hourly cycle puts it right
     passed(capsys)
     assert not description(public(tmp_path), "103").startswith(oth_stock.FIRST_LINE)
+
+
+def test_outside_the_cycle_a_line_out_of_date_is_told_and_does_not_fail_the_deploy(tmp_path, capsys):
+    prepared(tmp_path, accounts=("A",))
+    assert run(tmp_path, FIVE) == 0
+    cid = on_oth(tmp_path, "103", point="Юнона")
+    where(tmp_path, Юнона="на Юноне")
+    assert run(tmp_path, FIVE) == 0
+    move(tmp_path, cid, "done")                                                # or a deploy before the first hourly cycle: old lines in the file
+    capsys.readouterr()
+    code = main(["feed-check", "--published"] + args_of(tmp_path))
+    out = capsys.readouterr().out
+    assert code == 0 and "[warning] oth_line_point" in out and "на Юноне" in out
+
+
+def test_the_bare_line_is_not_read_as_a_count_with_the_next_line():
+    node = check_ad(Id="s9-100")
+    node.find("Description").text = "Шины в наличии\n205/55 R16\nВ наличии: 12 шт."
+    found = judged(node, tochki_prefix="s9-", tochki_trial=True, oth=frozenset({"s9-100"}), oth_places={})
+    assert "tochki_stock" not in rules_of(found)
+    node.find("Description").text = "В наличии: 41 шт."
+    assert "tochki_stock" in rules_of(judged(node, tochki_prefix="s9-", tochki_trial=True))
+
+
+def test_a_fresh_ad_that_fails_its_validation_is_held_with_the_count_of_now(tmp_path, capsys, monkeypatch):
+    prepared(tmp_path, accounts=("A",))
+    templates(tmp_path, MAIN)
+    assert run(tmp_path, FIVE) == 0
+    on_oth(tmp_path, "101")
+    monkeypatch.setattr(sync, "validate_ad", lambda _ad: ["broken"])
+    capsys.readouterr()
+    assert run(tmp_path, rows(dict(NNOMMODIF="101", NREST="0"), *(dict(NNOMMODIF=str(n)) for n in range(102, 106)))) == 0
+    passed(capsys)
+    assert "Остаток на складе: 4 шт." in description(public(tmp_path), "101")

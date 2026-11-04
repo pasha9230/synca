@@ -618,6 +618,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             _show_count(held_ad, shown(d.goods_id), description_template)
             if d.goods_id in reprice and d.goods_id in on_oth:
                 _set_price(held_ad, reprice[d.goods_id])
+        elif d.action is Action.HOLD and d.goods_id in on_oth:           # a fresh ad of OTH that failed validate_ad: on its saved one, the count of now
+            _show_count(held_ad, shown(d.goods_id), description_template)
         ads.append(held_ad)
         owners.append((held_ad, d.goods_id))
         offer = parsed.offers.get(d.goods_id)
@@ -634,6 +636,8 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
                 _show_count(twin_ad, shown(d.goods_id), description_template)
                 if d.goods_id in reprice and d.goods_id in on_oth:
                     _set_price(twin_ad, reprice[d.goods_id] * 4)
+            elif d.action is Action.HOLD and d.goods_id in on_oth:
+                _show_count(twin_ad, shown(d.goods_id), description_template)
             ads.append(twin_ad)
             owners.append((twin_ad, d.goods_id))
         final.append(d)

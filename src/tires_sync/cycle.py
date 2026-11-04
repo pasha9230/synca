@@ -247,7 +247,7 @@ def _saved_gave(conn, account_id: int) -> dict:
         return {}
 
 
-def _new_positions(conn, account, eff, xml_bytes, ref, today, feed_root, parsed, input_sha, now, expected) -> list:
+def _new_positions(conn, account, eff, xml_bytes, ref, today, feed_root, parsed, input_sha, now, expected) -> tuple:
     """Ads for the supplier's positions that the account's file does not have: the usual cycle (rules, points, prices, state) over only those
     positions, with the text template of the account. The file's own ads are never touched by it."""
     codes = mirror_feed.stored_codes(conn, account["id"])
