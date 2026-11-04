@@ -105,7 +105,7 @@ def test_the_dates_survive_entering_oth_and_a_date_moved_by_hand_counts(tmp_path
     assert order_oth.reserve_dates(conn) == {}                                            # still at the point
     card = on_oth(conn, cid)
     assert card["reserve_until"] == ""
-    assert order_oth.reserve_dates(conn)[cid] == {"arrived": "2026-10-15", "until": "2026-10-22"}
+    assert order_oth.reserve_dates(conn)[cid] == {"arrived": "2026-10-15", "until": "2026-10-22", "oth_since": "2026-10-20"}
 
 
 def test_the_old_orders_on_oth_get_their_dates_from_the_journal(tmp_path):
@@ -114,14 +114,14 @@ def test_the_old_orders_on_oth_get_their_dates_from_the_journal(tmp_path):
     on_oth(conn, cid)
     conn.execute("DELETE FROM order_event WHERE order_id = ? AND text LIKE 'Резерв был до%'", (cid,))     # before this rule
     conn.commit()
-    assert order_oth.reserve_dates(conn)[cid] == {"arrived": "2026-10-15", "until": "2026-10-18"}
+    assert order_oth.reserve_dates(conn)[cid] == {"arrived": "2026-10-15", "until": "2026-10-18", "oth_since": "2026-10-20"}
 
 
 def test_an_order_never_at_the_point_has_no_dates_and_the_page_shows_dashes(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     cid = _card(conn, pid, webmim="700200", code="moving")
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
-    assert cid not in order_oth.reserve_dates(conn)
+    assert order_oth.reserve_dates(conn)[cid] == {"arrived": "", "until": "", "oth_since": "2026-10-20"}
     page = client.get("/oth").get_data(as_text=True)
     assert "<th>Товар на точке</th><th>Крайняя дата резерва</th>" in page
     assert "data-oth-arrived>—<" in page and "data-oth-until>—<" in page
@@ -191,7 +191,7 @@ def test_6d12h_first_then_the_move_tells_nothing_more(tmp_path):
     told = []
     assert order_oth.tell_agree_due(conn, "2026-10-26T12:10:00", calls(told)) == 1 and orders.get_card(conn, cid)["stage"]["code"] == "oth"
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls(told)) == 1
-    assert len(told) == 1
+    assert len([t for _w, t in told if t.startswith("Нужно согласовать")]) == 1
 
 
 def test_an_order_without_a_point_is_told_at_6d12h_and_stays(tmp_path):
@@ -447,8 +447,10 @@ def test_a_position_keeps_the_stage_leaves_the_sale_has_the_label_and_the_task(t
     assert task["kind"] == "return" and task["assignee"] == "ivan" and "Nokian 205/55 R16, 3 шт." in task["note"]
     assert order_oth.item_to_return(conn, item, "2026-10-21T11:00:00", "o", "1") is False  # once while its task is open
     assert len(open_tasks(conn, cid)) == 1
-    order_oth.item_to_return(conn, card["items"][1]["id"], "2026-10-21T12:00:00", "o")     # another position: its own
-    assert len(open_tasks(conn, cid)) == 2
+    order_oth.item_to_return(conn, card["items"][1]["id"], "2026-10-21T12:00:00", "o")     # another position: one open task per order (the owner 2026-11-05)
+    [task] = open_tasks(conn, cid)
+    assert "Nokian 205/55 R16, 3 шт." in task["note"] and "Michelin 225/45 R17, 2 шт." in task["note"]
+    assert order_oth.item_mark(order_oth.item_marks(conn), card["items"][1]["id"], now["entered_at"])
 
 
 def test_the_undo_of_the_mark_cancels_the_task_and_the_label(tmp_path):
@@ -727,14 +729,38 @@ def test_the_act_needs_the_second_step_on_the_server(tmp_path):
     assert orders.get_card(conn, cid)["stage"]["code"] == "return"
 
 
-def test_the_vk_return_of_the_tyres_of_oth_asks_first(tmp_path):
-    from test_vk_commands import hook
+def _vk_order(tmp_path, code="oth"):
     app, client, tok, conn, pid, card = ready(tmp_path)
+    started(conn)
     cid = _card(conn, pid, webmim="700300", code="at_point")
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
+    if code == orders.RETURN_GIVEN:
+        orders.move_card(conn, cid, _stage(conn, code), "2026-10-21T10:00:00", "o")
+    return app, conn, cid
+
+
+def _outcomes(conn, cid):
+    return [r[0] for r in conn.execute("SELECT outcome FROM order_command_log WHERE order_id = ? ORDER BY rowid", (cid,))]
+
+
+@pytest.mark.parametrize("code", ["oth", orders.RETURN_GIVEN])
+@pytest.mark.parametrize("text", ["возврат отдал 700300", "№700300 возврат отдал подтверждаю"])
+def test_the_vk_return_without_an_agreement_is_refused(tmp_path, code, text):
+    from test_vk_commands import hook
+    app, conn, cid = _vk_order(tmp_path, code)
+    hook(app, conn, text)
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == code and not float(card["return_amount"] or 0) and order_oth.return_plan(conn, cid) is None
+    assert _outcomes(conn, cid) == ["не выполнено: возврат ещё не согласован"]
+
+
+def test_the_vk_return_of_an_agreed_order_asks_first(tmp_path):
+    from test_vk_commands import hook
+    app, conn, cid = _vk_order(tmp_path, orders.RETURN_GIVEN)
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-21"), "2026-10-21T11:00:00", "owner")
     hook(app, conn, "возврат отдал 700300", event="e1")
-    assert orders.get_card(conn, cid)["stage"]["code"] == "oth"
-    assert any("подтверждаете передачу" in str(r[0]).lower() or "ждёт подтверждения" in str(r[0]) for r in conn.execute("SELECT outcome FROM order_command_log WHERE order_id = ?", (cid,)))
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert _outcomes(conn, cid) == ["ждёт подтверждения: шины не отмечены отданными"]
     hook(app, conn, "№700300 возврат отдал подтверждаю", event="e2")
     assert orders.get_card(conn, cid)["stage"]["code"] == "return"
     assert mgr.RETURN_SURE == "подтверждаю"
@@ -976,4 +1002,289 @@ def test_issued_without_an_agreement_leaves_nothing_to_bring_back(tmp_path):
     conn, cid = _moved_on_day7(tmp_path)
     order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")
     assert not store.get_state(conn, order_oth.DROPPED_KEY % cid)
+
+
+# ---- 9. the independent review of 2026-11-05 ---------------------------------------------------------------------------------------------
+
+def test_the_seventh_day_never_pulls_back_an_order_that_left_during_the_alerts(tmp_path):
+    conn = db(tmp_path)
+    first, second = (card_at(conn, "at_point", "2026-10-15T10:00:00") for _ in range(2))
+    for cid in (first, second):
+        on_oth(conn, cid)
+
+    def notify(card, text):
+        if orders.get_card(conn, second)["stage"]["code"] == "oth":
+            orders.move_card(conn, second, stage(conn, "done"), "2026-10-26T12:30:30", "o")
+        return "ok"
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:31:00", notify)
+    assert orders.get_card(conn, second)["stage"]["code"] in ("done", orders.RETURN_GIVEN)
+    if orders.get_card(conn, second)["stage"]["code"] == orders.RETURN_GIVEN:      # moved before the alerts: left afterwards by the person
+        orders.move_card(conn, second, stage(conn, "done"), "2026-10-26T12:32:00", "o")
+    order_oth.ask_seventh_day(conn, "2026-10-26T13:07:00", notify)
+    assert orders.get_card(conn, second)["stage"]["code"] == "done" and open_tasks(conn, second) == []
+
+
+def test_the_loop_reads_the_order_again_before_the_move(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    first, second = (card_at(conn, "at_point", "2026-10-15T10:00:00") for _ in range(2))
+    for cid in (first, second):
+        on_oth(conn, cid)
+    real = orders.move_card
+
+    def moving(conn_, card_id, stage_id, now, author, *a, **k):                             # the first move: the second order leaves meanwhile
+        done = real(conn_, card_id, stage_id, now, author, *a, **k)
+        if card_id == first:
+            real(conn_, second, stage(conn, "done"), now, "o")
+        return done
+    monkeypatch.setattr(orders, "move_card", moving)
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:31:00") == 1
+    assert orders.get_card(conn, second)["stage"]["code"] == "done"
+
+
+def test_a_late_catch_up_moves_on_time_and_tells_in_the_morning(tmp_path):
+    conn, cid, card = _held(tmp_path)
+    told = []
+    reserve.check(conn, "2026-10-26T23:40:00", calls(told))
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN and len(open_tasks(conn, cid)) == 1      # the move and the task: on time
+    assert told == []
+    reserve.check(conn, "2026-10-27T08:59:00", calls(told))
+    assert told == []
+    reserve.check(conn, "2026-10-27T09:07:00", calls(told))
+    assert [t for _w, t in told if t.startswith("Нужно согласовать")] and len(told) == len({t for _w, t in told})
+    before = len(told)
+    reserve.check(conn, "2026-10-27T10:07:00", calls(told))
+    assert len(told) == before
+
+
+def test_the_6d12h_alert_late_at_night_waits(tmp_path):
+    conn, cid, card = _held(tmp_path)
+    conn.execute("UPDATE order_card SET point_id = NULL WHERE id = ?", (cid,))
+    conn.commit()
+    told = []
+    reserve.check(conn, DUE, calls(told))                                                   # 23:00
+    assert told == []
+    reserve.check(conn, "2026-10-27T09:07:00", calls(told))
+    assert len(told) == 1
+
+
+def test_the_silent_move_late_in_the_evening_holds_its_alerts(tmp_path):
+    conn, cid, deliver, vk = _silent(tmp_path)
+    told = []
+    conn.execute("UPDATE chat_send_log SET at = ? WHERE status = 'sent'", (DAY + "T12:30:00",))
+    conn.commit()
+    reserve.check(conn, NEXT + "T00:37:00", calls(told), deliver, vk)
+    assert told == []
+    (tmp_path / "b").mkdir()
+    other_conn, other, deliver2, vk2 = _silent(tmp_path / "b")
+    late = []
+    assert reserve._no_answer_step(other_conn, orders.get_card(other_conn, other), NEXT + "T23:07:00", calls(late))
+    assert late == []
+    reserve.check(other_conn, "2026-10-20T09:07:00", calls(late), deliver2, vk2)
+    assert any(t.startswith("Позвонить клиенту") for _w, t in late)
+
+
+def test_the_end_of_the_reservation_alert_waits_for_the_morning(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    told = []
+    reserve.check(conn, "2026-10-18T23:07:00", calls(told))
+    assert told == []
+    reserve.check(conn, "2026-10-19T09:07:00", calls(told))
+    assert len(told) == 1 and orders.get_card(conn, cid)["stage"]["code"] == "at_point"
+
+
+def test_a_position_mark_does_not_keep_the_order_from_the_seventh_day(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    order_oth.item_to_return(conn, card["items"][0]["id"], "2026-10-21T10:00:00", "o", "1")
+    told = []
+    assert order_oth.tell_agree_due(conn, "2026-10-26T12:00:00", calls(told)) == 0
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls(told)) == 1
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN and len(open_tasks(conn, cid)) == 1
+    assert [t for _w, t in told if t.startswith("Нужно согласовать")]
+
+
+def test_a_real_return_mark_still_keeps_it_and_a_real_press_on_a_marked_position_counts(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    order_oth.item_to_return(conn, card["items"][0]["id"], "2026-10-21T10:00:00", "o", "1")
+    order_oth.mark_returned(conn, card["items"][0]["id"], "2026-10-22T10:00:00", "o", 1)
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0
+    (tmp_path / "b").mkdir()
+    other_conn, other, other_card = _two_positions(tmp_path / "b")
+    order_oth.mark_returned(other_conn, other_card["items"][1]["id"], "2026-10-22T10:00:00", "o", 1)
+    assert order_oth.ask_seventh_day(other_conn, "2026-10-26T12:30:00") == 0
+
+
+def test_the_undo_of_one_position_keeps_the_task_of_the_other(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    one, two = card["items"][0]["id"], card["items"][1]["id"]
+    order_oth.item_to_return(conn, one, "2026-10-21T10:00:00", "o")
+    order_oth.item_to_return(conn, two, "2026-10-21T11:00:00", "o")
+    order_oth.unmark_returned(conn, one, "2026-10-21T12:00:00", "o")
+    assert len(open_tasks(conn, cid)) == 1 and order_oth.item_mark(order_oth.item_marks(conn), two, card["entered_at"])
+    order_oth.unmark_returned(conn, two, "2026-10-21T13:00:00", "o")
+    assert open_tasks(conn, cid) == []
+
+
+def test_a_vk_point_gets_the_status_and_the_question_and_answers_issued(tmp_path):
+    from test_vk_commands import hook
+    app, conn, cid = _vk_order(tmp_path)
+    told = []
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls(told))
+    [to_point] = [t for who, t in told if who == ""]
+    assert "Ожидает согласование возврата" in to_point and "выдал 700300" in to_point and "на точке 700300" in to_point
+    assert not [e for e in orders.list_events(conn, cid) if "она может не увидеть" in e["text"]]
+    hook(app, conn, "выдал 700300")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "done" and open_tasks(conn, cid) == []
+    assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (cid,)).fetchone() is not None
+
+
+def test_a_vk_point_answers_here_and_a_second_word_goes_to_the_owner(tmp_path):
+    from test_vk_commands import hook
+    app, conn, cid = _vk_order(tmp_path)
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls([]))
+    hook(app, conn, "на точке 700300", event="e1")
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and not order_oth.question_open(conn, card)
+    assert _outcomes(conn, cid)[-1] == "отмечено: шины на точке"
+    hook(app, conn, "выдал 700300", event="e2")                                             # answered: no question open
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+
+
+def test_a_vk_issued_after_the_act_is_refused_clearly(tmp_path):
+    from test_vk_commands import hook
+    app, conn, cid = _vk_order(tmp_path)
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls([]))
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T13:00:00", "owner")
+    conn.execute("UPDATE order_item SET supplier_price = 0 WHERE order_id = ?", (cid,))
+    conn.commit()
+    assert order_oth.sign_act(conn, orders.get_card(conn, cid), "Бета", "2026-10-26T14:00:00", "точка") == "signed"
+    hook(app, conn, "выдал 700300")
+    assert _outcomes(conn, cid)[-1] == "не выполнено: акт МХ-3 подписан"
+
+
+def test_a_vk_point_hears_the_agreed_date_and_a_cancelled_one_is_not_sent(tmp_path):
+    app, conn, cid = _vk_order(tmp_path, orders.RETURN_GIVEN)
+    told = []
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T10:00:00", "owner")
+    reserve.check(conn, "2026-10-26T11:07:00", calls(told))
+    [text] = [t for who, t in told if who == "" and "Согласовано на возврат" in t]
+    assert "26.10" in text and "№700300 возврат отдал подтверждаю" in text
+    reserve.check(conn, "2026-10-26T12:07:00", calls(told))
+    assert len([t for who, t in told if "Согласовано на возврат" in t]) == 1
+    (tmp_path / "b").mkdir()
+    app2, conn2, cid2 = _vk_order(tmp_path / "b", orders.RETURN_GIVEN)
+    order_oth.agree(conn2, orders.get_card(conn2, cid2), orders.date.fromisoformat("2026-10-26"), "2026-10-26T10:00:00", "owner")
+    order_oth.unagree(conn2, orders.get_card(conn2, cid2), "2026-10-26T10:10:00", "owner")
+    late = []
+    reserve.check(conn2, "2026-10-26T11:07:00", calls(late))
+    assert not [t for who, t in late if "Согласовано на возврат" in t]
+
+
+def test_a_manual_move_tells_a_vk_point_the_status_by_the_tick(tmp_path):
+    app, conn, cid = _vk_order(tmp_path)
+    before = orders.get_card(conn, cid)
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
+    told = []
+    reserve.check(conn, "2026-10-21T11:07:00", calls(told))
+    [text] = [t for who, t in told if who == ""]
+    assert "Ожидает согласование возврата" in text and "выдал" not in text                  # by hand: no question
+    assert not [t for _w, t in told if t.startswith("Нужно согласовать")]
+
+
+def test_a_panel_point_gets_no_vk_status(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    conn.execute("UPDATE point SET channel = 'panel'")
+    conn.commit()
+    on_oth(conn, cid)
+    told = []
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls(told))
+    assert not [t for who, t in told if who == ""]
+
+
+def test_the_0859_reminder_goes_the_vk_way(tmp_path):
+    from tires_sync import order_notify
+    conn, cid = _late_return(tmp_path)
+    assert order_notify.route(conn, dict(orders.get_card(conn, cid), responsible="", to_staff=False))["channel"] == "vk"
+    told = []
+    reserve.check(conn, "2026-11-04T08:59:00", calls(told))
+    assert [who for who, t in told if "передать поставщику" in t] == [""]
+
+
+def test_a_crash_after_the_move_is_repaired_by_the_next_tick_once(tmp_path, monkeypatch):
+    conn, cid, card = _held(tmp_path)
+    second = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    on_oth(conn, second)
+    from tires_sync import order_alerts as alerts
+    told_real = alerts.told_people
+    calls_seen = []
+
+    def broken(conn_, order_id, usual):
+        calls_seen.append(order_id)
+        if order_id == cid and len(calls_seen) <= 1:
+            raise RuntimeError("boom")
+        return told_real(conn_, order_id, usual)
+    monkeypatch.setattr(alerts, "told_people", broken)
+    told = []
+    reserve.check(conn, "2026-10-26T12:30:00", calls(told))
+    assert [t for _w, t in told if "№%d" % (5200000 + second) in t and t.startswith("Нужно согласовать")]    # the other order is not stopped
+    assert not [t for _w, t in told if "№%d" % (5200000 + cid) in t and t.startswith("Нужно согласовать")]
+    reserve.check(conn, "2026-10-26T13:07:00", calls(told))
+    assert len([t for _w, t in told if "№%d" % (5200000 + cid) in t and t.startswith("Нужно согласовать")]) == 1
+    reserve.check(conn, "2026-10-26T14:07:00", calls(told))
+    assert len([t for _w, t in told if "№%d" % (5200000 + cid) in t and t.startswith("Нужно согласовать")]) == 1
+
+
+def test_a_failed_task_is_made_by_the_next_tick(tmp_path, monkeypatch):
+    conn, cid, card = _held(tmp_path)
+    real = tasks.add
+    monkeypatch.setattr(tasks, "add", lambda **kw: (_ for _ in ()).throw(RuntimeError("busy")))
+    reserve.check(conn, "2026-10-26T12:30:00", calls([]))
+    assert open_tasks(conn, cid) == []
+    reserve.check(conn, "2026-10-26T13:07:00", calls([]))
+    assert len([e for e in orders.list_events(conn, cid) if e["text"].startswith("Задача возврата не поставлена")]) == 1
+    monkeypatch.setattr(tasks, "add", real)
+    reserve.check(conn, "2026-10-26T14:07:00", calls([]))
+    assert len(open_tasks(conn, cid)) == 1
+    reserve.check(conn, "2026-10-26T15:07:00", calls([]))
+    assert len(open_tasks(conn, cid)) == 1
+
+
+def test_a_responsible_of_a_point_the_task_goes_to_the_owner(tmp_path):
+    conn = db(tmp_path)
+    users.add_user(conn, "pointuser", "password-123", ENTERED, role="point", point_id=orders.get_card(conn, card_at(conn, "at_point", "2026-10-15T10:00:00"))["point_id"])
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    conn.execute("UPDATE order_card SET responsible = 'pointuser' WHERE id = ?", (cid,))
+    conn.commit()
+    on_oth(conn, cid)
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
+    assert open_tasks(conn, cid)[0]["assignee"] == "owner"
+
+
+def test_the_link_is_full_when_the_base_is_set(tmp_path):
+    from tires_sync import store
+    conn, cid, card = _held(tmp_path)
+    store.set_state(conn, "public_base", "https://panel.example/")
+    told = []
+    order_oth.tell_agree_due(conn, DUE, calls(told))
+    assert told[0][1].endswith("— https://panel.example/orders/%d" % cid)
+
+
+def test_the_page_shows_the_day_it_came_to_oth_on_a_return_row(tmp_path):
+    app, client, tok, conn, cid = _on_oth_page(tmp_path)
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-27T10:00:00", "o")
+    page = client.get("/oth").get_data(as_text=True)
+    assert re.search(r"<td data-oth-since>20\.10(\.2026)?<", page)
+
+
+def test_the_bell_of_a_leftover_question_goes_to_the_oth_tab(tmp_path):
+    from test_mypoint import manager
+    app, client, tok, conn, cid = _on_oth_page(tmp_path)
+    card = orders.get_card(conn, cid)
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, 'asked|2026-10-22T12:30:00')", (order_oth._ask_key(card),))
+    conn.commit()
+    mine = manager(app, conn, card["point_id"])
+    [item] = [i for i in mine.get("/my-point/feed").get_json()["items"] if i["key"].startswith("oth-question-")]
+    assert item["href"] == "/my-point?tab=oth"
 

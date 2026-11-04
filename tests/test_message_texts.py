@@ -65,7 +65,7 @@ def test_the_return_alert_goes_with_the_owners_text(tmp_path):
     on_oth(conn, cid)
     mt.save(conn, mt.AGREE_DUE, "Возврат: заказ {order_label}, {point}, {since}, {link}", "owner", NOW)
     told = []
-    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append(text))     # the alert goes with the move (2026-11-04)
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append(text) if card["responsible"] else None)     # the alert goes with the move (2026-11-04)
     assert told == ["Возврат: заказ 5200001, Бета, 20.10.2026, /orders/%d" % cid]
 
 

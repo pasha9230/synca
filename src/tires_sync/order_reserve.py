@@ -20,7 +20,8 @@ reminder goes by itself (`_client_step`); the point is still asked as before («
 only marks the answer. When the reminder went and the client wrote nothing in that chat for 12 hours (NO_ANSWER), the order goes to «На ОТХ»
 by itself (`_no_answer_step`): not when the date was moved since, the order left «Товар на точке» or the reminder did not go.
 The owner 2026-11-04: that move tells the order's responsible «Позвонить клиенту» with a line of the order's data (order_oth.call_line). The 12 hours
-end at night (12:30 + 12 h): the move is made at the first tick after them, its alerts wait for FIRST_HOUR (HELD_KEY, `_release_held`): nobody is woken.
+end at night (12:30 + 12 h): the move is made at the first tick after them, its alerts wait for the alert hours (order_oth.in_alert_hours; HELD_KEY,
+`_release_held`): nobody is woken, a catch-up late in the evening neither.
 """
 from __future__ import annotations
 
@@ -391,8 +392,8 @@ def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None)
     line = order_oth.call_line(moved, card["reserve_until"])                  # the date as it was: the move clears it
     orders.add_event(conn, card["id"], now, "система", "reserve", "Позвонить клиенту: %s" % line, level="yellow")
     conn.commit()
-    call = message_texts.text(conn, message_texts.CALL_CLIENT, order_label=order_manager.label(moved), line=line, link="/orders/%d" % card["id"])
-    if datetime.fromisoformat(now).hour < FIRST_HOUR:
+    call = message_texts.text(conn, message_texts.CALL_CLIENT, order_label=order_manager.label(moved), line=line, link=order_oth.order_link(conn, card["id"]))
+    if not order_oth.in_alert_hours(conn, now):
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (HELD_KEY % card["id"], json.dumps(
             {"call": call, "entered": moved["entered_at"]}, ensure_ascii=False)))
         conn.commit()
@@ -402,7 +403,7 @@ def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None)
 
 
 def _release_held(conn, now: str, notify: Notify) -> None:
-    """The first tick from FIRST_HOUR: the alerts of the moves made at night go, once (the key goes first). An order that left that stay of «На ОТХ» meanwhile: no call to make."""
+    """The first tick of the alert hours: the alerts of the moves made at night go, once (the key goes first). An order that left that stay of «На ОТХ» meanwhile: no call to make."""
     for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'reserve_moved_tell:%'").fetchall():
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
@@ -444,24 +445,26 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the reminder of the returns to give failed")
     _silent_moves(conn, now, notify)
+    try:
+        order_oth.ask_seventh_day(conn, now, notify)          # any hour: the moves and the tasks on time, their alerts in the alert hours (2026-11-05)
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the seventh day on OTH failed")
     moment = datetime.fromisoformat(now)
     if moment.hour < FIRST_HOUR:
         return 0
-    _release_held(conn, now, notify)
+    alerts_on = order_oth.in_alert_hours(conn, now)
+    if alerts_on:
+        for step in (_release_held, order_oth.tell_agree_due, order_oth.tell_agreed):
+            try:
+                step(conn, now, notify)
+            except Exception:
+                conn.rollback()
+                logging.getLogger("tires_sync.orders").exception("%s failed", step.__name__)
     today = moment.date()
     hours = order_manager.duty_settings(conn)["hours"]
     working = hours[0] <= moment.hour < hours[1]
     made = 0
-    try:
-        order_oth.ask_seventh_day(conn, now, notify)          # the owner 2026-11-04: «На ОТХ» 6 days, then «На возврат» and the point's question
-    except Exception:
-        conn.rollback()
-        logging.getLogger("tires_sync.orders").exception("the question of the seventh day on OTH failed")
-    try:
-        order_oth.tell_agree_due(conn, now, notify)           # the owner 2026-11-04: 6 days 12 hours on «На ОТХ», the responsible is told
-    except Exception:
-        conn.rollback()
-        logging.getLogger("tires_sync.orders").exception("the alert of 6 days 12 hours on OTH failed")
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s) AND c.reserve_until != ''"
                                    % ",".join("?" * len(STAGE_CODES)), STAGE_CODES).fetchall():
         try:
@@ -480,7 +483,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
                 conn.rollback()
                 logging.getLogger("tires_sync.orders").exception("the reserve reminder to the client of card %s failed", card_id)
             kind = "due" if until <= today else ("before" if until - timedelta(days=1) == today else "")
-            if not kind:
+            if not kind or not alerts_on:                     # a tick late in the evening: the next morning's tells it (the mark is not set)
                 continue
             marker = _marker(kind, card["reserve_until"])
             if _done(conn, card_id, marker):

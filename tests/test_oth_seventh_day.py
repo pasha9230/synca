@@ -47,9 +47,7 @@ def test_the_question_comes_on_the_seventh_day_at_12_30_not_on_the_sixth_nor_at_
     assert order_oth.ask_seventh_day(conn, "2026-10-26T13:07:00") == 0                   # once per stay on «На ОТХ»
     assert order_oth.ask_seventh_day(conn, "2026-10-27T13:07:00") == 0
     [asked] = [e for e in orders.list_events(conn, cid) if "задан вопрос" in e["text"]]
-    assert asked["text"] == "Точке «Бета» задан вопрос на «Рабочем месте»: «Заказ выдали или он на точке?»"
-    [vk_only] = [e for e in orders.list_events(conn, cid) if e["level"] == "yellow" and "7-го дня" in e["text"]]   # review D7: Бета is on VK
-    assert vk_only["text"].startswith("Точка «Бета» работает в ВК")
+    assert asked["text"] == "Точке «Бета» задан вопрос: «Заказ выдали или он на точке?»"     # the point on VK gets it there too (2026-11-05)
 
 
 def test_a_later_day_still_asks_and_an_agreed_return_is_never_asked(tmp_path):
@@ -94,6 +92,9 @@ def test_the_seventh_day_moves_the_order_with_one_task_of_the_responsible_and_he
     on_oth(conn, cid)
     told = []
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append((card["responsible"], text))) == 1
+    to_point = [t for who, t in told if who == ""]                                       # Бета is on VK: the status and the question (2026-11-05)
+    assert len(to_point) == 1 and "на точке 5200001" in to_point[0]
+    told = [(who, t) for who, t in told if who]
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and card["entered_at"] == "2026-10-26T12:30:00"
     assert order_oth.to_agree(conn, card) and order_oth.question_open(conn, card)

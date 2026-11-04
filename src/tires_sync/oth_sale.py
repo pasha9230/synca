@@ -491,7 +491,7 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     old = conn.execute("SELECT c.id, s.code, c.cancel_reason FROM order_item i JOIN order_card c ON c.id = i.order_id JOIN order_stage s ON s.id = c.stage_id "
                        "WHERE i.id = ? AND c.id = ?", (link["from_item"], link["from_order"])).fetchone()
     reopen = old is not None and old[1] == "cancel" and str(old[2]).startswith(TAKEN_REASON.split("%")[0])
-    if old is None or (old[1] not in ("oth", orders.RETURN_GIVEN) and not reopen):     # «На возврат» before the agreement: still ours
+    if old is None or (old[1] not in ("oth", orders.RETURN_GIVEN) and not reopen):     # «На возврат» before the agreement: ours until the act, back in that order (never on sale)
         raise OthSaleError("Заказ №%d ушёл с ОТХ: вернуть шины в него нельзя. " % link["from_order"] + NO_BACK)
     pieces = int(line["qty"])
     conn.execute("UPDATE order_item SET qty = qty + ? WHERE id = ?", (pieces, link["from_item"]))

@@ -388,6 +388,11 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return dispute(point, "«%s», а заказ в другой город" % word,
                        "Заказ №%s — в другой город, клиент за ним не придёт: если отдали шины курьеру ТК, напишите «передал курьеру %s». "
                        "Сообщение передано владельцу." % (label(card), label(card)))
+    if code in ("oth", orders.RETURN_GIVEN) and (word == HERE or BUILTIN.get(word, ((), None))[1] == "done"):     # the answer of a VK point to the seventh day
+        from . import order_oth
+        if order_oth.question_open(conn, card) or (word != HERE and (order_oth.return_plan(conn, card["id"]) or {}).get("signed_at")):
+            who = "менеджер %s" % point["name"]
+            return finish(*(order_oth.answer_here(conn, card, who, now) if word == HERE else order_oth.answer_issued(conn, card, who, now))[:2])
     if word == HERE:                                   # the client hears «срок резерва истекает» only when the bot asked (order_reserve.here)
         from . import order_reserve
         if code != "at_point":
@@ -412,7 +417,13 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
             return dispute(point, "«%s», а заказ на этапе «%s»" % (RETURN, card["stage"]["name"]),
                            CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
-        if code in ("oth", orders.RETURN_GIVEN) and RETURN_SURE not in str(text or "").lower():
+        if code in ("oth", orders.RETURN_GIVEN):
+            from . import order_oth
+            plan = order_oth.return_plan(conn, card["id"])
+            if plan is None:                                   # the office agrees first (the lead 2026-11-05): nobody closes a refund nobody agreed
+                return finish("не выполнено: возврат ещё не согласован", "Заказ №%s: возврат ещё не согласован с поставщиком, ничего не отмечено. "
+                              "Шины пока не отдавайте, дату сообщим." % label(card))
+        if code in ("oth", orders.RETURN_GIVEN) and not plan["signed_at"] and RETURN_SURE not in str(text or "").lower():
             return finish("ждёт подтверждения: шины не отмечены отданными", "Заказ №%s: подтверждаете передачу поставщику (водителю)? Если да, напишите: "
                           "№%s возврат отдал %s" % (label(card), label(card), RETURN_SURE))
         return finish(*returned(conn, card, "менеджер %s" % point["name"], now))

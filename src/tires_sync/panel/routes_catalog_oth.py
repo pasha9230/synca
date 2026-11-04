@@ -144,7 +144,7 @@ def register(app) -> None:
         for row in data["stock"]:
             when = dates.get(row["order_id"], {})
             on_oth = codes.get(row["order_id"]) == "oth"
-            row.update(arrived=when.get("arrived", ""), reserve_last=when.get("until", ""),
+            row.update(arrived=when.get("arrived", ""), reserve_last=when.get("until", ""), oth_since=when.get("oth_since") or row["since"],
                        return_label="" if on_oth else order_oth.label_of(agreed.get(row["order_id"])),
                        can_to_return=on_oth and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
         for row in data["returned"]:
