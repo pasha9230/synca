@@ -597,6 +597,39 @@ def _alert_price_guard(conn, box) -> None:
         print("сводка «цена поставщика изменилась» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
 
 
+def _alert_own_price_falls(conn, box, offers, account_ids) -> None:
+    """Own prices in percent that went down after the purchase (the owner 2026-11-04): one summary per cycle to each person, the responsible of
+    the account, else the owner; a responsible without Telegram: the owner. Only of a published feed; each change once (kept once it went, a
+    refused one is told by the next cycle). A side notice: whatever fails in it is printed and never stops the publishing of the feeds."""
+    from . import order_notify, own_price
+    try:
+        events, keep = own_price.falls(conn, active_settings(conn), offers, account_ids)
+        own_price.remember_falls(conn, keep)
+        owner = order_notify.get_owner_login(conn)
+        people = {}
+        for event in events:
+            people.setdefault(connections.account_responsible(conn, event["account_id"]) or owner, []).append(event)
+        for who, group in sorted(people.items()):
+            text = own_price.falls_text(group)
+            if who != owner:
+                how = order_notify.tell_people(conn, box, [who], text, tg_http=_http())
+                if how.startswith("Telegram: отправлено"):
+                    store.write_audit(conn, _now(), "system", "notice", {"text": text, "to": who})
+                    own_price.told_falls(conn, group)
+                    continue
+                if not how.startswith("Telegram: ни у кого нет чата"):
+                    print("сводка «своя цена пошла за закупкой» (%s): %s" % (who, how), file=sys.stderr)
+                    continue
+            if _alert(conn, box, text, notice=True):
+                own_price.told_falls(conn, group)
+    except Exception as err:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("сводка «своя цена пошла за закупкой» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
+
+
 def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
     """Download the unload of every supplier. The first one failing stops the cycle (as before); a secondary
     supplier failing is reported and its previous unload stays in use. Returns the problems of secondary suppliers.
@@ -857,6 +890,7 @@ def _run_cycle(args) -> int:
             _alert_own_below_cost(conn, box, parsed.offers)
             if args.publish:                                        # «наша цена поднята / оставлена»: true only of a published feed
                 _alert_price_guard(conn, box)
+                _alert_own_price_falls(conn, box, parsed.offers, [r.account_id for r in results if r.ok])
         if args.publish:
             expected = expected_for(conn, active_settings(conn))
             promoted = 0
