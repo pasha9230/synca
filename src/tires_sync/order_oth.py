@@ -495,7 +495,8 @@ def _finish_one(conn, key: str, value: str, now: str, notify) -> None:
         card = orders.get_card(conn, card_id)
     except orders.OrderError:
         card = None
-    if card is None or card["stage"]["code"] != orders.RETURN_GIVEN or card["entered_at"] != held["entered"]:
+    if (card is None or card["stage"]["code"] != orders.RETURN_GIVEN or card["entered_at"] != held["entered"]
+            or return_plan(conn, card_id) is not None):                              # agreed while the alerts waited: tell_agreed says what is true now
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
         return

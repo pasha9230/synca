@@ -1345,3 +1345,45 @@ def test_a_closed_task_of_the_seventh_day_held_at_night_does_not_come_back(tmp_p
     assert open_tasks(conn, cid) == []
     assert [t for _w, t in told if t.startswith("Нужно согласовать")]                       # the alert still goes
 
+
+# ---- 11. the review of 7afd3f9 ----------------------------------------------------------------------------------------------------------
+
+def test_the_alerts_of_a_move_agreed_meanwhile_are_not_sent(tmp_path):
+    app, conn, cid = _vk_order(tmp_path)
+    before = orders.get_card(conn, cid)
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-21T22:00:00", "o")
+    order_oth.moved_by_hand(conn, before, "2026-10-21T22:00:00", "o")
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-21"), "2026-10-21T22:05:00", "owner")
+    told = []
+    reserve.check(conn, "2026-10-22T09:07:00", calls(told))
+    assert not [t for _w, t in told if "Ожидает согласование" in t]
+    assert [t for _w, t in told if "Согласовано на возврат" in t]
+    assert conn.execute("SELECT 1 FROM app_state WHERE key = ?", (order_oth.PENDING_KEY % cid,)).fetchone() is None
+
+
+def test_day_7_agreed_before_the_morning_tells_nobody_to_agree(tmp_path):
+    conn, cid, card = _held(tmp_path)
+    reserve.check(conn, "2026-10-26T23:07:00", calls([]))
+    order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T23:30:00", "owner")
+    told = []
+    reserve.check(conn, "2026-10-27T09:07:00", calls(told))
+    assert not [t for _w, t in told if t.startswith("Нужно согласовать") or "Ожидает согласование" in t]
+
+
+def test_the_bulk_undo_puts_the_task_back(tmp_path):
+    from tires_sync import order_bulk
+    conn = db(tmp_path)
+    path = str(tmp_path / "x.db")
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    before = on_oth(conn, cid)
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
+    assert open_tasks(conn, cid)
+    target = stage(conn, "cancel")
+    order_bulk.run(conn, path, [cid], target, "Чистка", order_bulk.check(conn, [cid], target, "Чистка")["sign"], "2026-10-22T10:00:00", "o")
+    assert open_tasks(conn, cid) == []
+    audit = conn.execute("SELECT id FROM audit WHERE action = 'orders_bulk_move' ORDER BY id DESC").fetchone()[0]
+    order_bulk.undo(conn, path, audit, [cid], "2026-10-22T11:00:00", "o")
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
+
