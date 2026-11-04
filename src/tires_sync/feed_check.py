@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
+from . import oth_stock
 from .catalog import normalize_model, resolve_brand
 from .feed import validate_ad
 from .photo_library import is_library_link
@@ -21,7 +22,7 @@ PACK = re.compile(r"-x(\d+)$")
 COMMERCIAL = re.compile(r"\b\d{2,3}/\d{2,3}\s*C\b")
 STUDS_WORD = re.compile(r"[а-яё]*шип[а-яё]*", re.I)
 REISSUE_MARK = re.compile(r"_r\d{8}(?!\d)")                          # a renewal mark of an Id (mirror-reissue, `_r20261020`)
-STOCK_SHOWN = re.compile(r"наличии\s*:?\s*(\d+)", re.I)               # «В наличии: 40 шт.» of the description
+STOCK_SHOWN = re.compile(r"наличии[^\S\n]*:?[^\S\n]*(\d+)", re.I)     # «В наличии: 40 шт.» of the description, in one line: the bare «Шины в наличии» of OTH is no count
 TOCHKI_REST_SHOWN = 40
 TITLE_AGE_WORD = re.compile(r"(?<![^\W\d_])старше(?![^\W\d_])", re.I)   # «старше» as a whole word: not «старшее», but also «(старше)», «старше,»
 SUMMARY_BY_TEXT = frozenset({"template_missing"})       # rules summarized by their text, not by a count of ads
@@ -59,6 +60,7 @@ class Context:
     tochki_trial: bool = False                          # the account is in the 4tochki trial (tochki_feed.trial)
     tire_ids: Dict[str, str] = field(default_factory=dict)      # code -> its tire (tire_match.identity_text), for the codes of the feed
     oth: FrozenSet[str] = frozenset()                   # positions on «На ОТХ» (oth_stock.pieces): our own tires at a point, not judged by stock
+    oth_places: Optional[Dict[str, FrozenSet[str]]] = None      # code -> what its first line may name (points with its tyres, cycle._oth_places); None: not judged
     live_models: Dict[str, str] = field(default_factory=dict)   # Id -> Model of the ad Avito reads now (the published file)
 
 
@@ -154,6 +156,10 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
             add("stock", ad_id, "нет у поставщика")
         elif stock < ctx.min_stock:
             add("stock", ad_id, "остаток %d, порог %d" % (stock, ctx.min_stock))
+        if ctx.oth_places is not None:
+            wrong = [n for n in oth_stock.named_in(ad.findtext("Description") or "") if n not in ctx.oth_places.get(code_of(ad_id), ())]
+            if wrong:
+                add("oth_line_point", ad_id, ", ".join(wrong))
         price = (ad.findtext("Price") or "").strip()
         if not price.isdigit() or int(price) <= 0:
             add("price", ad_id, price or "пусто")

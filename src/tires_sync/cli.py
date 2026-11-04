@@ -1301,6 +1301,8 @@ def _cmd_feed_check(args) -> int:
         source = "published" if args.published else "next"
         held, id_codes = cycle.check_inputs(conn, account, args.feed_root, source) if mode == "generated" else ((), None)   # as the cycle judged it
         findings = cycle.gate(conn, account, mode, eff, parsed, ref, args.feed_root, source=source, held=held, id_codes=id_codes)
+        # the first line of OTH is as the last cycle wrote it, the next one puts it right: told, not an error of this check (or of a deploy)
+        findings = [feed_check.Finding(f.rule, "warning", f.ad_id, f.text) if f.rule == "oth_line_point" else f for f in findings]
         bad = feed_check.critical(findings)
         status = "ОШИБКИ" if bad else ("предупреждения" if findings else "чисто")
         print("аккаунт №%d «%s» (%s): %s" % (account["id"], account["name"], mode, status))

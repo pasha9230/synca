@@ -247,6 +247,7 @@ def test_goods_on_oth_change_only_the_first_line_of_their_ad_in_the_feed(tmp_pat
         conn = db(folder)
         if with_oth:
             card_at(conn, "oth", T)
+            conn.execute("UPDATE point SET where_text = 'на Бета'")                            # «Где (для описания)» of the point: the name of the line
             assert order_oth.goods_on_oth(conn) == {"1": 4}
         run_cycle(catalog_xml(*ROWS), make_settings(), REF, conn, date(2026, 10, 17), out_dir=folder)
         feeds.append((folder / "avito_feed.xml").read_text(encoding="utf-8"))

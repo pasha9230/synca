@@ -11,7 +11,7 @@ from .common import can_post, get_conn, login_required
 
 POINT_FIELDS = (("Название точки", "name"), ("Точка с таким названием", "name"), ("Менеджер", "manager_name"),
                 ("Телефон менеджера", "manager_phone"), ("Канал связи", "channel"), ("Адрес доставки WebMIM", "webmim_address_id"),
-                ("Этот ВК", "vk_peer_id"), ("Время доставки", "default_time"), ("Адрес Авито", "avito_address_id"))      # message → field
+                ("Этот ВК", "vk_peer_id"), ("Время доставки", "default_time"), ("Адрес Авито", "avito_address_id"), ("Где (для описания)", "where_text"))      # message → field
 
 
 def register(app) -> None:

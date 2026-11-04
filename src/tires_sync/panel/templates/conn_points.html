@@ -34,6 +34,9 @@
 <label class="field"><span class="label">Адрес точки для клиента</span><input class="input" name="address" value="{{ r.address }}" maxlength="200" placeholder="Город, улица, дом"></label>
 </div>
 <div class="grid-2">
+<label class="field"><span class="label">Где (для описания)</span><input class="input" name="where_text" value="{{ r.where_text }}" maxlength="40" placeholder="на Юноне"><span class="hint">Первая строка объявления, когда шины лежат на ОТХ: «Шины в наличии на Юноне». Пусто: точка не называется.</span></label>
+</div>
+<div class="grid-2">
 <label class="field"><span class="label">График работы</span><input class="input" name="hours" value="{{ r.hours }}" maxlength="120" placeholder="ежедневно 10:00–20:00"></label>
 <label class="field"><span class="label">Ссылка на Яндекс Карты</span><input class="input mono" name="map_url" value="{{ r.map_url }}" maxlength="300" placeholder="https://yandex.ru/maps/-/…"></label>
 </div>
@@ -66,6 +69,9 @@
 <div class="grid-2">
 <label class="field"><span class="label">ВК менеджера (номер или адрес страницы)</span><input class="input mono" name="vk_peer_id" maxlength="60" placeholder="vk.com/id123456"></label>
 <label class="field"><span class="label">Адрес точки для клиента</span><input class="input" name="address" maxlength="200"></label>
+</div>
+<div class="grid-2">
+<label class="field"><span class="label">Где (для описания)</span><input class="input" name="where_text" maxlength="40" placeholder="на Юноне"><span class="hint">Первая строка объявления, когда шины лежат на ОТХ: «Шины в наличии на Юноне». Пусто: точка не называется.</span></label>
 </div>
 <div class="grid-2">
 <label class="field"><span class="label">График работы</span><input class="input" name="hours" maxlength="120" placeholder="ежедневно 10:00–20:00"></label>

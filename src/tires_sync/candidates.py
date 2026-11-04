@@ -31,7 +31,8 @@ class Evaluation:
     inherit: Dict[str, str] = field(default_factory=dict)      # code -> the Id of the oldest ad of the same tire (see same_tire.py)
     match: Optional[object] = None                             # tire_match.MatchResult the cycle merged by (the switch on); None: off
     oth: Dict[str, int] = field(default_factory=dict)          # code -> pieces on «На ОТХ» for this account (sync.plan_decisions): kept, «Шины в наличии»
-    oth_points: Dict[str, Tuple[str, ...]] = field(default_factory=dict)   # code -> the names of its points on OTH (the first line)
+    oth_points: Dict[str, Tuple[str, ...]] = field(default_factory=dict)   # code -> the «Где» of its points on OTH (the first line)
+    oth_gave: Dict[str, str] = field(default_factory=dict)     # code -> the lot it handed its OTH over to (one tire, one ad): that ad names its points too
     oth_retired: Dict[str, Tuple[str, str, int]] = field(default_factory=dict)   # code -> (former Id, saved ad, price): published again from it
     oth_offers: Dict[str, Offer] = field(default_factory=dict)  # code -> its last offer from the archive (gone, «Свой остаток» and an own price)
     oth_carried: Dict[str, str] = field(default_factory=dict)   # code -> the Id of the ad of the same tire that shows its «Свой остаток»

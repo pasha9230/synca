@@ -12,7 +12,7 @@ PANEL = "panel"                                           # the owner 2026-10-23
 CHANNELS = ("", "vk", "telegram", PANEL)
 CHANNEL_NAMES = {"": "не выбран", "vk": "ВК", "telegram": "Telegram", PANEL: "Панель (бот в ВК не пишет)"}
 FIELDS = ("id, name, avito_address_id, manager_name, manager_phone, channel, webmim_address_id, default_time, bind_code, vk_peer_id, "
-          "address, hours, map_url, avito_account_id")
+          "address, hours, map_url, avito_account_id, where_text")
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"        # no 0, 1, O, I, L
 
 
@@ -201,6 +201,16 @@ def _kept(conn, data: dict, point_id, key: str, clean):
     return get_point(conn, point_id)[key] if point_id else ''
 
 
+def _where_text(value) -> str:
+    """«Где (для описания)»: how the first line of an ad says the point («Шины в наличии на Юноне, в Янино», oth_stock); empty: not named."""
+    from .description import CONTROL_CHARS
+    from .oth_stock import WHERE
+    text = _single(value, 40, "Где (для описания)")
+    if text and (not WHERE.fullmatch(text) or CONTROL_CHARS.search(text)):
+        raise PointError("Где (для описания): с предлога «на», «в» или «во», без запятых, например «на Юноне» или «в Янино».")
+    return text
+
+
 def _account(conn, value) -> Optional[int]:
     """«Аккаунт Авито точки»: an existing account or nothing (its manager then sees no chat)."""
     text = str(value or "").strip()
@@ -237,6 +247,7 @@ def save_point(conn, data: dict, point_id: Optional[int] = None) -> int:
     address = _kept(conn, data, point_id, "address", lambda v: _single(v, 200, "Адрес точки"))
     hours = _kept(conn, data, point_id, "hours", lambda v: _single(v, 120, "График работы"))
     map_url = _kept(conn, data, point_id, "map_url", _map_url)
+    where = _kept(conn, data, point_id, "where_text", _where_text)
     account = _kept(conn, data, point_id, "avito_account_id", lambda v: _account(conn, v)) if point_id or "avito_account_id" in data else None
     taken = conn.execute("SELECT name FROM point WHERE vk_peer_id = ? AND id != ?", (vk, point_id or 0)).fetchone() if vk else None
     if taken:                                                   # one VK, one point: the bot must know whose message it is
@@ -244,15 +255,15 @@ def save_point(conn, data: dict, point_id: Optional[int] = None) -> int:
     clash = conn.execute("SELECT id FROM point WHERE name = ?", (name,)).fetchone()
     if clash and clash[0] != point_id:
         raise PointError("Точка с таким названием уже есть.")
-    values = (name, avito, manager, phone, channel, webmim, default_time, vk, address, hours, map_url, account)
+    values = (name, avito, manager, phone, channel, webmim, default_time, vk, address, hours, map_url, account, where)
     if point_id is None:
         cur = conn.execute("INSERT INTO point (name, avito_address_id, manager_name, manager_phone, channel, webmim_address_id, default_time, vk_peer_id,"
-                           " address, hours, map_url, avito_account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", values)
+                           " address, hours, map_url, avito_account_id, where_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
         point_id = cur.lastrowid
     else:
         get_point(conn, point_id)
         conn.execute("UPDATE point SET name = ?, avito_address_id = ?, manager_name = ?, manager_phone = ?, channel = ?, webmim_address_id = ?,"
-                     " default_time = ?, vk_peer_id = ?, address = ?, hours = ?, map_url = ?, avito_account_id = ? WHERE id = ?", values + (point_id,))
+                     " default_time = ?, vk_peer_id = ?, address = ?, hours = ?, map_url = ?, avito_account_id = ?, where_text = ? WHERE id = ?", values + (point_id,))
     conn.commit()
     return point_id
 

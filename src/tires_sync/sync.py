@@ -46,6 +46,7 @@ class CycleReport:
     id_codes: Dict[str, str] = field(default_factory=dict)    # the Id of every ad of the feed -> the code of the position behind it
     titles_held: int = 0                                         # the supplier renamed this many tires at once: their titles are kept (guard)
     oth: FrozenSet[str] = frozenset()                            # the codes on «На ОТХ» this cycle (ev.oth, handed over too): the check knows them
+    oth_gave: Dict[str, str] = field(default_factory=dict)       # ev.oth_gave: whose points an ad may name besides its own (rule `oth_line_point`)
 
 
 def _final_id(code: str, id_map, id_suffix: str, reissued, acct=None) -> str:
@@ -102,11 +103,11 @@ def _set_point(ad, point: str, settings: Settings) -> None:
         ad.remove(gone)
 
 
-def _show_count(ad, count: int) -> None:
+def _show_count(ad, count: int, template: Optional[str] = None) -> None:
     from . import oth_stock
     node = ad.find("Description")
     if node is not None:
-        node.text = oth_stock.with_count(node.text or "", count)
+        node.text = oth_stock.with_count(node.text or "", count, template)
 
 
 _PRICE_IN_TEXT = r"(Цена:[^\S\n]*)%s(?=[^\S\n]*(?:руб|₽))"           # the price line of the template («💰 Цена: {price} руб. за 1 шт.») only
@@ -180,7 +181,7 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     if gone_offers:                                                       # this account's view only: the cycle's unload and archive never see them
         parsed = copy.copy(parsed)
         parsed.offers = dict(parsed.offers, **gone_offers)
-    all_names, order_names = oth_stock.points(conn), oth_stock.points(conn, manual=False)
+    all_names, order_names = oth_stock.places(conn), oth_stock.places(conn, manual=False)
     oth_names = {code: (order_names.get(code, ()) if code in no_manual else names) for code, names in all_names.items()}
     ev = evaluate(parsed.offers, parsed.issues, settings, ref, store.load_confirmed_mappings(conn),
                   store.load_brand_map(conn), oth=frozenset(on_oth))
@@ -360,7 +361,7 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
     brought back, with the pieces and points of the first line. One tire, one ad: when its ad is under another code (a lot that took its Id,
     or the same tire published under another code), that code carries the line and nothing is published for this one; an Id another ad or
     account has now is never published again. A position gone from the unload and taken off comes back on its last ad (retired_ad), if kept."""
-    from . import same_tire
+    from . import oth_stock, same_tire
     if not on_oth:
         return                                                            # nothing on OTH: nothing read
     min_stock = settings.min_stock
@@ -376,7 +377,7 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
     def hand_over(code, taker):
         gave[code] = taker
         oth[taker] = oth.get(taker, 0) + oth.pop(code)
-        points[taker] = tuple(sorted(set(points.get(taker, ())) | set(points.pop(code, ()))))
+        points[taker] = oth_stock.in_order(conn, set(points.get(taker, ())) | set(points.pop(code, ())))
 
     taken_by = {ad_id: code for code, ad_id in ev.inherit.items()}
     for code in sorted(oth):
@@ -457,7 +458,7 @@ def _oth_for_account(conn, ev, published, acct: int, on_oth: Dict[str, int], nam
         if taker in oth:
             carried[code] = retired[taker][0] if taker in retired else (ev.inherit.get(taker) or live_id_of(taker))
     ev.oth_carried = carried
-    ev.oth, ev.oth_points, ev.oth_retired = oth, points, retired
+    ev.oth, ev.oth_points, ev.oth_retired, ev.oth_gave = oth, points, retired, gave
 
 
 def live_titles_of(out_dir) -> Dict[str, str]:
@@ -568,7 +569,7 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             ad.find("Id").text = REISSUE_MARK.sub("", ad_id)              # the mark the position has now is put back below (reissued_own)
             _set_point(ad, d.point, settings)
             _renew_date_end(ad, settings, today)
-            _show_count(ad, shown(d.goods_id))
+            _show_count(ad, shown(d.goods_id), description_template)
             if d.goods_id in reprice:
                 _set_price(ad, reprice[d.goods_id])
             ads.append(ad)
@@ -614,9 +615,11 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         held_ad = ad_from_text(snapshot)
         if d.reason.startswith("oth:"):                                   # held for weeks maybe: the saved DateEnd would close the ad on Avito
             _renew_date_end(held_ad, settings, today)
-            _show_count(held_ad, shown(d.goods_id))
+            _show_count(held_ad, shown(d.goods_id), description_template)
             if d.goods_id in reprice and d.goods_id in on_oth:
                 _set_price(held_ad, reprice[d.goods_id])
+        elif d.action is Action.HOLD and d.goods_id in on_oth:           # a fresh ad of OTH that failed validate_ad: on its saved one, the count of now
+            _show_count(held_ad, shown(d.goods_id), description_template)
         ads.append(held_ad)
         owners.append((held_ad, d.goods_id))
         offer = parsed.offers.get(d.goods_id)
@@ -630,9 +633,11 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
             twin_ad = ad_from_text(twin)
             if d.reason.startswith("oth:"):
                 _renew_date_end(twin_ad, settings, today)
-                _show_count(twin_ad, shown(d.goods_id))
+                _show_count(twin_ad, shown(d.goods_id), description_template)
                 if d.goods_id in reprice and d.goods_id in on_oth:
                     _set_price(twin_ad, reprice[d.goods_id] * 4)
+            elif d.action is Action.HOLD and d.goods_id in on_oth:
+                _show_count(twin_ad, shown(d.goods_id), description_template)
             ads.append(twin_ad)
             owners.append((twin_ad, d.goods_id))
         final.append(d)
@@ -945,5 +950,5 @@ def run_cycle(
         store.record_seen(conn, run_id, parsed.offers.values())
     return CycleReport(
         counts, ds.guard_tripped, unmatched, parsed.other_territories, invalid, feed_path, len(ads), run_id,
-        ds.decisions, id_codes, title_guard.get("held", 0), frozenset(ev.oth),
+        ds.decisions, id_codes, title_guard.get("held", 0), frozenset(ev.oth), dict(ev.oth_gave),
     )
