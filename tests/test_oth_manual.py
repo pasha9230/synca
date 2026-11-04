@@ -21,6 +21,12 @@ NOW = "2026-11-03T10:00:00"
 AT_YUNONA = oth_stock.FIRST_LINE + " на Юнона"
 
 
+@pytest.fixture(autouse=True)
+def every_point_is_named(monkeypatch):
+    """These tests are about the ad on OTH, not about the wording: every point says «на <название>». The setting «Где» is in test_oth_desc."""
+    monkeypatch.setattr(oth_stock, "_where", lambda conn: {r[0]: "на " + r[1] for r in conn.execute("SELECT id, name FROM point ORDER BY id")})
+
+
 def connect(tmp_path):
     return store.connect(tmp_path / "t.db")
 
@@ -186,7 +192,7 @@ def test_manual_stock_of_a_position_in_the_unload_below_the_threshold_publishes_
     assert run(tmp_path, AFTER) == 0
     passed(capsys)
     text = description(public(tmp_path), "101")
-    assert text.startswith(oth_stock.FIRST_LINE + " на Бета, Юнона\n") and shown(text) == count(3 + 4 + 2)
+    assert text.startswith(oth_stock.FIRST_LINE + " на Юнона, на Бета\n") and shown(text) == count(3 + 4 + 2)
 
 
 def test_a_manual_off_still_keeps_a_gone_position_with_manual_stock_off(tmp_path):

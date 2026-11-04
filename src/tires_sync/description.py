@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .candidates import Candidate
 from .models import Season
@@ -99,6 +99,39 @@ def stock_text(stock: int) -> str:
     """{stock}: the exact count up to 4, «более 4» above it (the owner 2026-11-02: «В наличии: более 4 шт.»)."""
     stock = int(stock or 0)
     return "более %d" % STOCK_SHOWN_MAX if stock > STOCK_SHOWN_MAX else str(stock)
+
+
+def _stock_line(line: str) -> Optional[re.Pattern]:
+    """A line of the template with {stock}, as a pattern of that line rendered: its other values any, the value of {stock} a group. None without
+    {stock}, or with nothing but values in the line: such a pattern could be any line of a text."""
+    parts = _PLACEHOLDER.split(_NEW_ONLY_MARK.sub("", line).strip())
+    names, words = parts[1::2], parts[0::2]
+    if "stock" not in names or not any(ch.isalpha() for word in words for ch in word):
+        return None
+    pattern = re.escape(words[0])
+    for name, word in zip(names, words[1:]):
+        pattern += (r"((?:более\s+)?\d+)" if name == "stock" else r"[^\n]*?") + re.escape(word)
+    return re.compile(r"^[ \t]*" + pattern + r"[ \t]*$", re.MULTILINE)
+
+
+def set_stock(text: str, template: str, stock: int) -> Optional[str]:
+    """A rendered text with the value of {stock} written anew (stock_text), found by the lines of the template that rendered it, whatever their
+    wording. None when no such line is in the text (saved under another template); the text as it is when a line reads twice (which is it?)."""
+    patterns = [p for p in map(_stock_line, template.splitlines()) if p is not None]
+    hits = [(p, len(p.findall(text))) for p in patterns]
+    if any(n > 1 for _p, n in hits):
+        return text
+    if not any(n for _p, n in hits):
+        return None
+
+    def written(m):
+        whole, start = m.group(0), m.start()
+        for group in reversed(range(1, m.lastindex + 1)):
+            whole = whole[:m.start(group) - start] + stock_text(stock) + whole[m.end(group) - start:]
+        return whole
+    for pattern, _n in hits:
+        text = pattern.sub(written, text)
+    return text
 
 
 def _starts_with_words(name: str) -> bool:

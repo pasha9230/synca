@@ -83,9 +83,11 @@ def _bound_codes(bound_ids: dict, offers: dict, min_stock: int = 0, published=()
     return out
 
 
-def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), source: str = "next", id_codes=None, oth=None) -> list:
+def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), source: str = "next", id_codes=None, oth=None,
+         oth_gave=None, oth_line: bool = True) -> list:
     """The findings of the check of this account's draft feed (`next/avito_feed.xml`). Empty list when the draft cannot be read: the build
-    itself reports that. The rules are in feed_check_rules.json (docs/feed-check-rules.md)."""
+    itself reports that. The rules are in feed_check_rules.json (docs/feed-check-rules.md). `oth_line` False: the first line of OTH is not judged
+    (the light pass leaves the texts as the last cycle wrote them: an order that left OTH since must not stop its removals)."""
     folder = Path(feed_root) / account["feed_token"]
     try:
         path = folder / "avito_feed.xml" if source == "published" else folder / "next" / "avito_feed.xml"
@@ -118,10 +120,25 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
         owner_phone="" if account["id"] == connections.PRIMARY_ACCOUNT else feed_check._phone(active_settings(conn).contact_phone),
         foreign_addresses=foreign, allowed_photos=own.allowed if own is not None else frozenset(),
         known_stocks=dict(getattr(parsed, "stocks", {}) or {}), template_problem=template_problem,
-        oth=frozenset(oth_stock.pieces(conn, manual=False)) | frozenset(oth if oth is not None else _saved_oth(conn, account["id"])), **tochki)
+        oth=frozenset(oth_stock.pieces(conn, manual=False)) | frozenset(oth if oth is not None else _saved_oth(conn, account["id"])),
+        oth_places=_oth_places(conn, oth_gave if oth_gave is not None else _saved_gave(conn, account["id"])) if oth_line else None, **tochki)
     # the positions on OTH read from the base (a mirror's new positions too), and the codes the cycle handed them over to (another lot
     # of the same tire under their Id): known to the cycle, saved for `feed-check`
     return feed_check.check_feed(ads, ctx)
+
+
+def _oth_places(conn, gave: dict) -> dict:
+    """code -> what the first line of its ad may name, read anew from the base (not from what the build wrote): the points with its tyres on OTH
+    and with those of the lots that handed theirs over to it (`gave`, one tire, one ad)."""
+    places = oth_stock.places(conn)
+    found = {code: set(named) for code, named in places.items()}
+    for code in gave:
+        taker, seen = gave[code], {code}
+        while taker not in seen:
+            seen.add(taker)
+            found.setdefault(taker, set()).update(places.get(code, ()))
+            taker = gave.get(taker, taker)
+    return found
 
 
 def _tochki_context(conn, account, ads, id_code, offers, folder, source) -> dict:
@@ -162,12 +179,12 @@ def _sha_of(path) -> str:
         return ""
 
 
-def save_check_inputs(conn, account_id: int, feed_path, held, id_codes, oth=()) -> None:
+def save_check_inputs(conn, account_id: int, feed_path, held, id_codes, oth=(), oth_gave=None) -> None:
     """Remember what the cycle gave the check of this draft (the held positions, the Ids that do not carry their code, the codes on OTH),
     with the draft's fingerprint: `feed-check` then judges the same file by the same rules as the cycle did (check_inputs)."""
     store.set_state(conn, _inputs_key(account_id), json.dumps({
         "sha": _sha_of(feed_path), "held": sorted({str(h) for h in held}),
-        "id_codes": dict(id_codes or {}), "oth": sorted({str(c) for c in oth})}, ensure_ascii=False))     # all of them: an Id read as its own code overrides a binding to another
+        "id_codes": dict(id_codes or {}), "oth": sorted({str(c) for c in oth}), "oth_gave": dict(oth_gave or {})}, ensure_ascii=False))     # all of them: an Id read as its own code overrides a binding to another
 
 
 def _saved_oth(conn, account_id: int) -> FrozenSet[str]:
@@ -222,6 +239,14 @@ def _verdict(result, findings):
     return result
 
 
+def _saved_gave(conn, account_id: int) -> dict:
+    """The hand-overs of OTH the last cycle of the account gave its check: for `feed-check` outside the cycle."""
+    try:
+        return dict(json.loads(store.get_state(conn, _inputs_key(account_id)) or "{}").get("oth_gave") or {})
+    except (ValueError, TypeError, AttributeError):
+        return {}
+
+
 def _new_positions(conn, account, eff, xml_bytes, ref, today, feed_root, parsed, input_sha, now, expected) -> list:
     """Ads for the supplier's positions that the account's file does not have: the usual cycle (rules, points, prices, state) over only those
     positions, with the text template of the account. The file's own ads are never touched by it."""
@@ -239,7 +264,7 @@ def _new_positions(conn, account, eff, xml_bytes, ref, today, feed_root, parsed,
                        now=now, check_size=False, own_photos=_own_photos(conn, account))
     ads = list(ET.parse(out_dir / "avito_feed.xml").getroot().findall("Ad"))
     mirror_feed.match_shape(conn, account["id"], ads)
-    return ads, report.oth                                                    # the codes on OTH of the new positions: the mirror's check knows them
+    return ads, report.oth, report.oth_gave                                   # the codes on OTH of the new positions: the mirror's check knows them
 
 
 def run_for_accounts(
@@ -298,6 +323,7 @@ def run_for_accounts(
                 runflat = mirror_feed.runflat_for(conn, account["id"], getattr(parsed, "offers", {}) or {}) if parsed is not None else {}
                 extra: list = []
                 extra_oth: FrozenSet[str] = frozenset()
+                extra_gave: dict = {}
                 note = ""
                 try:
                     models = mirror_feed.models_for(conn, account["id"], ref) if ref else {}
@@ -306,7 +332,7 @@ def run_for_accounts(
                     note = "модели не проверены (%s: %s)" % (type(err).__name__, err)
                 if parsed is not None:
                     try:
-                        extra, extra_oth = _new_positions(conn, account, eff, xml_bytes or b"", ref, today, feed_root, parsed, input_sha, now, expected)
+                        extra, extra_oth, extra_gave = _new_positions(conn, account, eff, xml_bytes or b"", ref, today, feed_root, parsed, input_sha, now, expected)
                         mirror_feed.apply_reissued_own(conn, account["id"], extra)
                     except Exception as err:                               # the file's ads must reach Avito even if the new positions did not build
                         note = (note + "; " if note else "") + "новые позиции не добавлены (%s: %s)" % (type(err).__name__, err)
@@ -319,7 +345,7 @@ def run_for_accounts(
                 if extra and store.has_pending(conn, account["id"]):
                     store.rebind_pending(conn, account["id"], (Path(feed_root) / account["feed_token"] / "next" / "avito_feed.xml").read_bytes())
                 results.append(_verdict(AccountResult(account["id"], connections.display_name(conn, account["id"]), True, note, {}, count),
-                                        gate(conn, account, "mirror", eff, parsed, ref, feed_root, today, oth=extra_oth)))
+                                        gate(conn, account, "mirror", eff, parsed, ref, feed_root, today, oth=extra_oth, oth_gave=extra_gave)))
             except Exception as err:
                 results.append(AccountResult(account["id"], connections.display_name(conn, account["id"]), False, "%s: %s" % (type(err).__name__, err)))
             continue
@@ -352,11 +378,11 @@ def run_for_accounts(
                                          if d.action is Action.HOLD and d.reason.startswith("guard:")), lately)
             held = [d.goods_id for d in report.decisions if d.action is Action.HOLD]
             try:
-                save_check_inputs(conn, account["id"], out_dir / "avito_feed.xml", held, report.id_codes, report.oth)
+                save_check_inputs(conn, account["id"], out_dir / "avito_feed.xml", held, report.id_codes, report.oth, report.oth_gave)
             except Exception as err:                                 # only `feed-check` reads it: it never stops the account's publication
                 result.error = "запись для feed-check не сохранена (%s: %s)" % (type(err).__name__, err)
             results.append(_verdict(result, gate(conn, account, "generated", connections.effective_settings(conn, account["id"], settings),
-                                                 parsed, ref, feed_root, today, held=held, id_codes=report.id_codes, oth=report.oth)))
+                                                 parsed, ref, feed_root, today, held=held, id_codes=report.id_codes, oth=report.oth, oth_gave=report.oth_gave)))
         except Exception as err:
             results.append(AccountResult(account["id"], connections.display_name(conn, account["id"]), False, "%s: %s" % (type(err).__name__, err)))
     return results
@@ -491,10 +517,10 @@ def stock_pass(conn, parsed, ref, today: date, feed_root, settings: Optional[Set
             # what stays in the file as the last cycle left it (held, or to be taken off by the hourly cycle for another reason) is not judged by stock
             held = set(held_before) | {d.goods_id for d in ds.decisions
                                        if d.action is Action.HOLD or (d.action is Action.REMOVE and d.goods_id not in found)}
-            save_check_inputs(conn, account["id"], draft, held, id_codes, ev.oth)
+            save_check_inputs(conn, account["id"], draft, held, id_codes, ev.oth, ev.oth_gave)
             result.removed, result.feed_count = tuple(sorted(found)), len(kept)
             results.append(_verdict(result, gate(conn, account, "generated", eff, parsed, ref, feed_root, today, held=held, id_codes=id_codes,
-                                                 oth=ev.oth)))
+                                                 oth=ev.oth, oth_gave=ev.oth_gave, oth_line=False)))
         except Exception as err:
             result.ok, result.error, result.broken = False, "%s: %s" % (type(err).__name__, err), True
             results.append(result)

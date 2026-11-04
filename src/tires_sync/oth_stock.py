@@ -1,5 +1,5 @@
 """«На ОТХ» in the feed (the owner 2026-10-29): the tires of an order refused by its client lie at the point, they are ours. While the order
-stands in «На ОТХ» or «На возврат» (the owner 2026-11-03: until the return is agreed), the ad of that position, in every account of ours, starts with «Шины в наличии на <точка>», shows the pieces on OTH plus
+stands in «На ОТХ» or «На возврат» (the owner 2026-11-03: until the return is agreed), the ad of that position, in every account of ours, starts with «Шины в наличии на Юноне, в Янино» (the setting «Где» of each point; the owner 2026-11-02), shows the pieces on OTH plus
 the supplier's stock, is not taken off for the supplier's stock and is published again if it is not on Avito (decide, sync.plan_decisions);
 an excluded brand or a season switched off do not stop it (candidates.evaluate). When the order leaves the stage, or the whole position is
 marked «возвращено поставщику», or its return is agreed with the supplier, the next cycle applies the usual rules. Orders at a test point
@@ -14,7 +14,8 @@ from typing import Dict, Iterable, Tuple
 FIRST_LINE = "Шины в наличии"
 MAX_DESCRIPTION = 7500                                    # feed.validate_ad: a longer description is refused by Avito
 TEST_POINTS_KEY = "oth_test_points"                       # state: JSON list of the ids of test points, besides the names that start with «тест»
-_LINE = re.compile(r"Шины в наличии(?: на [^\n]*)?\n")
+_LINE = re.compile(r"Шины в наличии(?: (?:на|во?) [^\n]*)?\n")
+WHERE = re.compile(r"(?:на|во?) [^,\n]*[^,\s]")              # «Где (для описания)» of a point: what the line says and drop_line takes back
 _COUNT = re.compile(r"(В наличии:\s*)(?:более\s+)?\d+(\s*шт)")      # a count of {stock}: «6» or «более 4» (description.stock_text)
 
 
@@ -89,15 +90,48 @@ def points(conn, manual: bool = True) -> Dict[str, Tuple[str, ...]]:
     return {code: tuple(sorted(names)) for code, names in found.items()}
 
 
-def line_of(names: Iterable[str]) -> str:
-    named = sorted({n.strip() for n in names or () if n and n.strip()})
-    return "%s на %s" % (FIRST_LINE, ", ".join(named)) if named else FIRST_LINE
+def _where(conn) -> Dict[int, str]:
+    """Point id → its «Где» («на Юноне», order_points), in the order of the points; a point without one is not named."""
+    try:
+        rows = conn.execute("SELECT id, where_text FROM point ORDER BY id").fetchall()
+    except sqlite3.OperationalError:                      # a base without the table
+        return {}
+    return {r[0]: r[1].strip() for r in rows if WHERE.fullmatch((r[1] or "").strip())}
 
 
-def add_line(text: str, names: Iterable[str] = ()) -> str:
-    """The description with «Шины в наличии на <точки>» as its first line (once); left whole when the line would make it too long for Avito."""
+def places(conn, manual: bool = True) -> Dict[str, Tuple[str, ...]]:
+    """goods_id → the «Где» of the points it lies at on «На ОТХ» now: the names of the first line of its ad, in the order of the points."""
+    rows = _rows(conn, manual)
+    where = _where(conn) if rows else {}
+    found: Dict[str, set] = {}
+    for r in rows:
+        if r["point_id"] in where:
+            found.setdefault(r["goods_id"], set()).add(r["point_id"])
+    return {code: tuple(dict.fromkeys(where[p] for p in sorted(ids))) for code, ids in found.items()}
+
+
+def in_order(conn, named: Iterable[str]) -> Tuple[str, ...]:
+    """The «Где» of several lots of one tire together, in the order of the points."""
+    order = {p: i for i, p in reversed(list(enumerate(_where(conn).values())))}
+    return tuple(sorted(set(named), key=lambda p: (order.get(p, len(order)), p)))
+
+
+def line_of(named: Iterable[str]) -> str:
+    named = list(dict.fromkeys(n.strip() for n in named or () if n and n.strip()))
+    return "%s %s" % (FIRST_LINE, ", ".join(named)) if named else FIRST_LINE
+
+
+def named_in(text: str) -> Tuple[str, ...]:
+    """What the first line of a description names: () without the line or with the bare «Шины в наличии». Pure: for the check of a feed."""
+    match = _LINE.match(text or "")
+    tail = match.group(0)[len(FIRST_LINE):].strip() if match else ""
+    return tuple(n.strip() for n in tail.split(",") if n.strip())
+
+
+def add_line(text: str, named: Iterable[str] = ()) -> str:
+    """The description with «Шины в наличии на Юноне, в Янино» as its first line (once); left whole when the line would make it too long for Avito."""
     text = drop_line(text or "")
-    marked = line_of(names) + "\n" + text
+    marked = line_of(named) + "\n" + text
     return marked if len(marked) <= MAX_DESCRIPTION else text
 
 
@@ -106,10 +140,13 @@ def drop_line(text: str) -> str:
     return text[match.end():] if match else (text or "")
 
 
-def with_count(text: str, count: int) -> str:
-    """«В наличии: N шт.» of a saved ad with `count` written as {stock} writes it («более 4» above 4), when the text says it exactly once;
-    otherwise as it is (a template of the owner's own)."""
-    from .description import stock_text
+def with_count(text: str, count: int, template: str = None) -> str:
+    """A saved ad with `count` written as {stock} writes it («более 4» above 4): in the lines of the account's template, whatever their wording
+    (description.set_stock). Saved under another template: «В наличии: N шт.» when the text says it exactly once, otherwise as it is."""
+    from .description import DEFAULT_TEMPLATE, set_stock, stock_text
+    found = set_stock(text or "", template or DEFAULT_TEMPLATE, count)
+    if found is not None:
+        return found
     if len(_COUNT.findall(text or "")) != 1:
         return text
     return _COUNT.sub(lambda m: "%s%s%s" % (m.group(1), stock_text(count), m.group(2)), text)

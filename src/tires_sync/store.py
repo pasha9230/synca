@@ -665,6 +665,7 @@ def _migrate(conn) -> None:
         _add_column(conn, "shop_order", column, "TEXT NOT NULL DEFAULT ''")
     for column in ("address", "hours", "map_url"):                     # what the client is told on the arrival (order_templates)
         _add_column(conn, "point", column, "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "point", "where_text", "TEXT NOT NULL DEFAULT ''")   # «Где (для описания)»: the first line of an ad with its tyres on OTH (oth_stock)
     _add_column(conn, "point", "avito_account_id", "INTEGER")          # the Avito account of the point: its manager sees its chats (none: no chat)
     _add_sale_point_id(conn)
     for column, ddl in (("car_brand", "TEXT NOT NULL DEFAULT ''"), ("car_model", "TEXT NOT NULL DEFAULT ''"), ("car_year", "INTEGER")):

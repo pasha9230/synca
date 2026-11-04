@@ -8,6 +8,8 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import date
 
+import pytest
+
 from helpers import make_offer, make_settings
 from tires_sync import feed_check, oth_stock, order_points, orders, store
 from tires_sync.candidates import Candidate, Evaluation, evaluate
@@ -23,6 +25,12 @@ TODAY = date(2026, 10, 29)
 S = make_settings()
 LINE = oth_stock.FIRST_LINE
 AT_BETA = LINE + " на Бета"                       # card_at puts its orders at the point «Бета»
+
+
+@pytest.fixture(autouse=True)
+def every_point_is_named(monkeypatch):
+    """These tests are about the ad on OTH, not about the wording: every point says «на <название>». The setting «Где» is in test_oth_desc."""
+    monkeypatch.setattr(oth_stock, "_where", lambda conn: {r[0]: "на " + r[1] for r in conn.execute("SELECT id, name FROM point ORDER BY id")})
 
 
 def cand(gid="100", stock=10, price=4810):
@@ -100,11 +108,11 @@ def test_holds_for_oth_are_not_removals_for_the_guard():
 
 def test_the_first_line_names_the_points_and_the_count_is_put_in_the_text():
     text = "🔥 Ikon\n▸ В наличии: 6 шт.\nНОВЫЕ ШИНЫ"
-    assert oth_stock.add_line(text, ("Янино", "Девяткино", "Янино")) == "Шины в наличии на Девяткино, Янино\n" + text
+    assert oth_stock.add_line(text, ("в Янино", "на Юноне", "в Янино")) == "Шины в наличии в Янино, на Юноне\n" + text     # as given: the order of the points
     assert oth_stock.add_line(text, ()) == LINE + "\n" + text
-    marked = oth_stock.add_line(text, ("Янино",))
-    assert oth_stock.add_line(marked, ("Юнона",)) == "Шины в наличии на Юнона\n" + text and oth_stock.drop_line(marked) == text
-    assert oth_stock.drop_line(text) == text and oth_stock.add_line("x" * 7495, ("Янино",)) == "x" * 7495
+    marked = oth_stock.add_line(text, ("в Янино",))
+    assert oth_stock.add_line(marked, ("на Юноне",)) == "Шины в наличии на Юноне\n" + text and oth_stock.drop_line(marked) == text
+    assert oth_stock.drop_line(text) == text and oth_stock.add_line("x" * 7495, ("в Янино",)) == "x" * 7495
     assert oth_stock.with_count(text, 9) == text.replace("6 шт", "более 4 шт")                        # above 4: as {stock} writes it
     assert oth_stock.with_count(text, 3) == text.replace("6 шт", "3 шт")
     assert oth_stock.with_count(text.replace("6 шт", "более 4 шт"), 2) == text.replace("6 шт", "2 шт")    # a saved ad already says «более 4»
@@ -229,7 +237,7 @@ def test_two_points_are_named_in_order_and_a_test_point_gives_nothing(tmp_path, 
     assert run(tmp_path, FIVE) == 0
     passed(capsys)
     text = description(public(tmp_path), "103")
-    assert text.startswith("Шины в наличии на Девяткино, Янино\n") and shown(text) == count(4 + 4 + 10) and "Тест" not in text
+    assert text.startswith("Шины в наличии на Янино, на Девяткино\n") and shown(text) == count(4 + 4 + 10) and "Тест" not in text
     assert not description(public(tmp_path), "104").startswith(LINE)
     conn = connect(tmp_path)
     try:
