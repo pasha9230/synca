@@ -190,7 +190,7 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     agree_return(client, oth)                                     # twice: one plan, one record
     assert sum("согласован с поставщиком" in e["text"] for e in orders.list_events(conn, oth)) == 1
     page = _text(mine.get("/my-point"))
-    assert 'data-return="%d"' % oth in page and "Возврат %s" % day.strftime("%d.%m") in page and "Подпишите акт МХ-3" in page
+    assert 'data-return="%d"' % oth in page and "Согласовано на возврат, %s" % day.strftime("%d.%m") in page and "Подпишите акт МХ-3" in page
     token = re.search(r'action="/my-point/%d/act_signed".*?name="token" value="([0-9a-f]+)"' % oth, page, re.S).group(1)
     r = post(mine, "/my-point/%d/act_signed" % oth, "tok", token=token, handover="yes")
     assert r.status_code == 302

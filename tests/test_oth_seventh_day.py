@@ -163,6 +163,7 @@ def test_issued_on_the_page_closes_it_and_can_be_undone_with_the_question_open_a
     assert card["stage"]["code"] == orders.RETURN_GIVEN and card["entered_at"] == "2026-10-26T12:30:00" and order_oth.question_open(conn, card)
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (here,)).fetchone() is None      # unlinked again on «На возврат»
     assert store.get_state(conn, order_oth._ask_key(card)).startswith("asked|")
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (here,)).fetchone()[0] == 1     # on again
 
 
 def test_issued_after_a_partial_return_cannot_be_undone(tmp_path, clock):

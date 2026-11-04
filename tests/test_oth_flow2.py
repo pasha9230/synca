@@ -691,8 +691,8 @@ def test_the_reminder_goes_on_the_next_supplier_days_from_08_59_once_a_day_until
     assert order_oth.remind_handover(conn, "2026-11-05T09:07:00", calls(told)) == 0        # Thursday
     assert order_oth.remind_handover(conn, "2026-11-06T09:07:00", calls(told)) == 1        # Friday (a late tick still tells)
     assert [who for who, _t in told] == ["", ""]                                           # the point's way
-    assert told[0][1] == ("Заказ №%d: шины нужно передать поставщику (водителю), дата возврата была 02.11. Когда отдадите, нажмите «Подписал акт и отдал» на «Рабочем месте»."
-                          % (5200000 + cid))
+    assert told[0][1] == ("Заказ №%d: шины нужно передать поставщику (водителю), дата возврата была 02.11. Когда отдадите, нажмите «Подписал акт и отдал» на «Рабочем месте» (в ВК напишите: №%d возврат отдал подтверждаю)."
+                          % (5200000 + cid, 5200000 + cid))
     assert order_oth.sign_act(conn, orders.get_card(conn, cid), "Бета", "2026-11-06T10:00:00", "точка") == "return"
     assert order_oth.remind_handover(conn, "2026-11-09T09:07:00", calls(told)) == 0
 
