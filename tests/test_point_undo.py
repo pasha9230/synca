@@ -134,7 +134,7 @@ def test_a_vk_command_after_the_press_makes_it_final(tmp_path, clock, told):
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     mine = manager(app, conn, pid)
     no_show_then_oth(mine, card, clock)
-    hook(app, conn, "возврат отдал 5000100")                                            # the point's own VK, after the press
+    hook(app, conn, "№5000100 возврат отдал подтверждаю")                                            # the point's own VK, after the press
     assert "уже не отменить" in undo(mine, card)
 
 

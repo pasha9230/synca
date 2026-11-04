@@ -1,5 +1,5 @@
 """«На ОТХ» in the feed (the owner 2026-10-29): the tires of an order refused by its client lie at the point, they are ours. While the order
-stands in «На ОТХ» or «На возврат» (the owner 2026-11-03: until the return is agreed), the ad of that position, in every account of ours, starts with «Шины в наличии на Юноне, в Янино» (the setting «Где» of each point; the owner 2026-11-02), shows the pieces on OTH plus
+stands in «На ОТХ» (the owner 2026-11-04: not on «На возврат»), the ad of that position, in every account of ours, starts with «Шины в наличии на Юноне, в Янино» (the setting «Где» of each point; the owner 2026-11-02), shows the pieces on OTH plus
 the supplier's stock, is not taken off for the supplier's stock and is published again if it is not on Avito (decide, sync.plan_decisions);
 an excluded brand or a season switched off do not stop it (candidates.evaluate). When the order leaves the stage, or the whole position is
 marked «возвращено поставщику», or its return is agreed with the supplier, the next cycle applies the usual rules. Orders at a test point
@@ -31,9 +31,9 @@ def _test_points(conn) -> frozenset:
 
 
 def _order_rows(conn) -> list:
-    """The positions still ours on «На ОТХ» (order_oth.stock), without the test points, the tyres of a point that have no code and the orders
-    whose return is agreed with the supplier (order_oth.agree, the owner 2026-10-29: they leave the ad at once, before the act МХ-3; an
-    agreement cancelled — its row gone — counts them again)."""
+    """The positions still ours on «На ОТХ» (order_oth.stock), without the test points, the tyres of a point that have no code, the orders on
+    «На возврат» in any label (the owner 2026-11-04: from «Согласуем», an agreement cancelled too) and the orders on «На ОТХ» whose return is agreed
+    with the supplier (the orders of before the stage came)."""
     from . import order_oth, orders
     try:
         rows = order_oth.stock(conn)["stock"]
@@ -42,7 +42,7 @@ def _order_rows(conn) -> list:
     except sqlite3.OperationalError:                      # a base without the orders' tables
         return []
     return [dict(r, manual=None) for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test
-            and int(r["qty"]) > 0 and r["order_id"] not in agreed]
+            and int(r["qty"]) > 0 and r["order_id"] not in agreed and r["stage_code"] == "oth"]
 
 
 def manual_rows(conn) -> list:

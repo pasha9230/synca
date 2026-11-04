@@ -985,12 +985,12 @@ def register(app) -> None:
     @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
     @login_required
     def order_oth_agreed(card_id):
-        """«Согласовано с поставщиком» for an order on «На возврат» or «На ОТХ» (the owner and the partner): the date of the return, the point
-        sees it; the tyres leave the ad."""
+        """«Согласовано с поставщиком» for an order on «На возврат» or «На ОТХ» (the owner and the partner): the date of the return the operator
+        entered (Monday, Wednesday, Friday; order_oth.check_return_day), the point sees it."""
         conn = get_conn()
         card = card_or_404(conn, card_id)
         try:
-            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author())
+            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author(), request.form.get("return_date", ""))
             flash("Возврат согласован: точка передаст шины поставщику %s.%s и подпишет акт МХ-3." % (day[8:10], day[5:7]), "ok")
         except (order_oth.OthError, orders.OrderError) as err:
             flash(str(err), "error")
@@ -1091,7 +1091,7 @@ def register(app) -> None:
         if order_oth.unagree(conn, card, now, author()):
             told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, message_texts.text(conn, message_texts.UNAGREED, order_label=manager.label(card)), now,
                                            vk_http=app.config.get("VK_HTTP") or urllib_transport)
-            flash("Согласование отменено: метка «%s», шины снова в продаже, точка возврат не видит. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
+            flash("Согласование отменено: метка «%s», шины не в продаже, точка не видит дату. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
         else:
             flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
         return redirect("/orders/%d" % card_id)
@@ -1146,7 +1146,7 @@ def register(app) -> None:
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card),
-            to_return_stage=_to_return_stage(conn, card),
+            to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),

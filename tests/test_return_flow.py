@@ -20,11 +20,10 @@ DAY7 = "2026-10-26T13:00:00"
 
 
 def returning(conn, cid=None):
-    """An order on «На возврат» («Согласуем»): the point said «На точке» on the seventh day."""
+    """An order on «На возврат» («Согласуем»): the seventh day moved it (the owner 2026-11-04)."""
     cid = cid or card_at(conn, "at_point", "2026-10-15T10:00:00")
     on_oth(conn, cid)
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
-    assert order_oth.answer_here(conn, orders.get_card(conn, cid), "менеджер Бета", DAY7)[2]
     return cid
 
 
@@ -39,13 +38,13 @@ def label(conn, cid):
 
 # ---- 1, 2: the stage and its label; the sale ------------------------------------------------------------------------------------
 
-def test_here_moves_the_order_to_na_vozvrat_agreeing_and_the_tyres_stay_on_sale(tmp_path):
+def test_the_seventh_day_moves_the_order_to_na_vozvrat_agreeing_and_the_tyres_leave_the_sale(tmp_path):
     conn = db(tmp_path)
     cid = returning(conn)
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and card["stage"]["name"] == "На возврат"
     assert label(conn, cid) == "Согласуем" and order_oth.to_agree(conn, card)
-    assert oth_stock.pieces(conn, manual=False) == {"1": 4}                              # the feed: «Шины в наличии»
+    assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: off sale from «Согласуем»
     assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND title = ?", (cid, order_oth.RETURN_TASK)).fetchone()[0] == 1
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (cid,)).fetchone() is None     # still not the client's
 
@@ -54,13 +53,13 @@ def test_agreed_keeps_the_stage_takes_the_tyres_off_sale_and_unagree_gives_agree
     conn = db(tmp_path)
     cid = returning(conn)
     card = agreed(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласовано, отдать до 27.10"
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласовано, отдать до 28.10"
     assert oth_stock.pieces(conn, manual=False) == {} and not order_oth.to_agree(conn, card)
     assert [r["card"]["id"] for r in order_oth.to_return(conn, card["point_id"])] == [cid]
     assert order_oth.unagree(conn, card, "2026-10-27T11:00:00", "owner")
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласуем"
-    assert oth_stock.pieces(conn, manual=False) == {"1": 4}
+    assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: stays off sale
 
 
 def test_agreed_from_oth_moves_the_order_to_na_vozvrat(tmp_path):
@@ -68,20 +67,22 @@ def test_agreed_from_oth_moves_the_order_to_na_vozvrat(tmp_path):
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     on_oth(conn, cid)
     card = agreed(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласовано, отдать до 27.10"
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласовано, отдать до 28.10"
     assert oth_stock.pieces(conn, manual=False) == {}
 
 
-def test_take_from_oth_works_on_agreeing_and_not_on_agreed(tmp_path):
+def test_take_from_oth_works_on_oth_and_not_on_na_vozvrat(tmp_path):
     conn = db(tmp_path)
-    cid = returning(conn)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    on_oth(conn, cid)
     new = new_order(conn)
     line = orders.list_items(conn, new)[0]
     [offer] = oth_sale.offers(conn, orders.get_card(conn, new))[line["id"]]
     assert offer["from_order"] == cid and offer["qty"] == 4
-    other = returning(conn)
-    agreed(conn, other)
-    assert all(o["from_order"] != other for o in oth_sale.offers(conn, orders.get_card(conn, new))[line["id"]])
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
+    assert not oth_sale.offers(conn, orders.get_card(conn, new)).get(line["id"])         # the owner 2026-11-04: «Согласуем» is off sale
+    with pytest.raises(oth_sale.OthSaleError):
+        oth_sale.take(conn, new, line["id"], orders.list_items(conn, cid)[0]["id"], "2026-10-26T15:00:00", "owner")
 
 
 # ---- 3: the act МХ-3 closes it with the purchase ------------------------------------------------------------------------------------
@@ -100,10 +101,12 @@ def test_sign_act_closes_the_order_with_the_purchase_as_the_refund(tmp_path):
 
 def test_a_partial_return_counts_only_the_pieces_given_back(tmp_path):
     conn = db(tmp_path)
-    cid = returning(conn)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    on_oth(conn, cid)
     new = new_order(conn, qty=1)
     line = orders.list_items(conn, new)[0]
-    assert oth_sale.take(conn, new, line["id"], orders.list_items(conn, cid)[0]["id"], "2026-10-26T15:00:00", "owner") == 1
+    assert oth_sale.take(conn, new, line["id"], orders.list_items(conn, cid)[0]["id"], "2026-10-25T15:00:00", "owner") == 1     # still on «На ОТХ»
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
     card = agreed(conn, cid)
     assert order_oth.sign_act(conn, card, "Бета", "2026-10-27T12:00:00", "менеджер Бета") == "return"
     assert orders.get_card(conn, cid)["return_amount"] == 12000.0                        # 3 × 4000
@@ -208,9 +211,9 @@ def test_the_board_shows_the_label_and_filters_by_it(tmp_path):
         data = orders.board(conn, orders.datetime.fromisoformat("2026-10-27T12:00:00"), **kw)
         return {c["id"]: c["returning"] for col in data["columns"] for c in col["cards"]}
     shown = cards()
-    assert shown[wait] == "Согласуем" and shown[done] == "Согласовано, отдать до 27.10" and shown[plain] == ""
+    assert shown[wait] == "Согласуем" and shown[done] == "Согласовано, отдать до 28.10" and shown[plain] == ""
     assert cards(returning=order_oth.AGREE) == {wait: "Согласуем"}
-    assert cards(returning=order_oth.AGREED) == {done: "Согласовано, отдать до 27.10"}
+    assert cards(returning=order_oth.AGREED) == {done: "Согласовано, отдать до 28.10"}
 
 
 def test_the_board_page_filter(tmp_path):
@@ -244,11 +247,11 @@ def on_page(tmp_path):
 
 def test_the_point_s_return_tab_shows_the_stage_and_its_label(tmp_path, clock):
     app, conn, pid, cid, mine = on_page(tmp_path)
-    press(mine, cid, "oth_here")
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN             # from the start, the question or not (2026-11-04)
     assert 'id="order-%d"' % cid not in mine.get("/my-point?tab=oth").get_data(as_text=True)
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
-    assert 'id="order-%d"' % cid in page and "data-return-label>Согласуем<" in page
+    assert 'id="order-%d"' % cid in page and "data-return-label>Ожидает согласование возврата<" in page
+    assert "/act_signed" not in page                                                      # no hand-over before the agreement
 
 
 def test_the_act_on_the_page_closes_it_and_the_undo_puts_it_back(tmp_path, clock):
@@ -265,7 +268,7 @@ def test_the_act_on_the_page_closes_it_and_the_undo_puts_it_back(tmp_path, clock
     assert "отменена" in mine.get(r.headers["Location"]).get_data(as_text=True)
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and card["return_amount"] == 0 and not card["return_kind"] and not card["return_reason"]
-    assert order_oth.return_plan(conn, cid)["signed_at"] is None and label(conn, cid) == "Согласовано, отдать до 27.10"
+    assert order_oth.return_plan(conn, cid)["signed_at"] is None and label(conn, cid) == "Согласовано, отдать до 28.10"
     assert 'data-return="%d"' % cid in mine.get("/my-point?tab=return").get_data(as_text=True)     # «Подписал акт и отдал» again
 
 
@@ -305,7 +308,7 @@ def test_the_migration_moves_the_old_flow_once(tmp_path):
     assert code(here) == orders.RETURN_GIVEN and label(conn, here) == "Согласуем"
     assert code(agreed_) == orders.RETURN_GIVEN and label(conn, agreed_) == "Согласовано, отдать до 21.10"
     assert code(asked) == "oth" and code(plain) == "oth"
-    assert oth_stock.pieces(conn, manual=False) == {"1": 12}                             # here, asked, plain: on sale
+    assert oth_stock.pieces(conn, manual=False) == {"1": 8}                              # asked, plain: on sale; «На возврат» never (2026-11-04)
     assert conn.execute("SELECT COUNT(*) FROM chat_send_log").fetchone()[0] == 0
     assert order_oth.migrate(conn, "2026-11-04T07:00:00") == {"renamed": 0, "closed": 0, "waiting_amount": 0, "to_return_given": 0, "skipped": 0}
     assert code(here) == orders.RETURN_GIVEN
@@ -351,7 +354,7 @@ def test_the_new_view_of_the_point_shows_na_vozvrat_with_its_label(tmp_path, clo
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     assert is_new(page) and 'id="order-%d"' % cid in page
     block = page[page.index('id="order-%d"' % cid):].split("</article>")[0]
-    assert "data-return-label>Согласуем<" in block and "на возврат" in block and 'data-point-hint="returning"' in block
+    assert "data-return-label>Ожидает согласование возврата<" in block and "на возврат" in block and 'data-point-hint="returning"' in block
     agreed(conn, cid)
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     assert 'data-return="%d"' % cid in page and "сумма возврата — закупка шин" in page

@@ -337,7 +337,7 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
             raise
     # the limit in the statement itself: a take a moment ago in another tab never lets the pieces go below the ones marked returned
     if conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ? AND qty - ? >= COALESCE((SELECT qty FROM oth_return WHERE item_id = ?), 0) "
-                    "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_given')) "
+                    "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth') "
                     "AND order_id NOT IN (SELECT order_id FROM oth_return_plan)",
                     (pieces, item["id"], pieces, item["id"])).rowcount != 1:
         conn.rollback()

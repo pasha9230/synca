@@ -127,7 +127,7 @@ def test_the_workplace_cards_tabs_and_questions(w):
     assert 'href="/orders/%d/labels/' % ids["far"] in here and "data-intercity-tag" in here
     # the act МХ-3 over every tab
     assert 'data-return="%d"' % ids["ret"] in here and "/my-point/%d/act_signed" % ids["ret"] in here
-    oth = w["point"].get("/my-point?tab=oth").get_data(as_text=True)
+    oth = w["point"].get("/my-point?tab=oth").get_data(as_text=True)                  # an «asked» left on «На ОТХ» by the old rule still works
     assert 'data-oth-question="%d"' % ids["oth"] in oth and "/my-point/%d/oth_issued" % ids["oth"] in oth
     assert 'data-return="%d"' % ids["ret"] in oth
     moving = w["point"].get("/my-point?tab=moving").get_data(as_text=True)
@@ -154,7 +154,7 @@ def test_the_presses_of_the_new_workplace_move_the_orders_as_before(w):
     press(pt, ids["asked"], "reserve_here")
     assert orders.get_card(conn, ids["asked"])["stage"]["code"] == "at_point"
     press(pt, ids["oth"], "oth_here")
-    assert order_oth.to_agree(conn, orders.get_card(conn, ids["oth"]))
+    assert not order_oth.question_open(conn, orders.get_card(conn, ids["oth"]))         # the owner 2026-11-04: «На точке» only marks the answer
     press(pt, ids["ret"], "act_signed")
     assert orders.get_card(conn, ids["ret"])["stage"]["code"] == "return"           # 2026-11-03: the act closes it with the purchase
 

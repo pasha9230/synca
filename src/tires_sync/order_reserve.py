@@ -401,6 +401,12 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     the community); its «на точке» tells the client (`here`). A date that is already past asks nobody."""
     if notify is None:
         return 0
+    from . import order_oth
+    try:
+        order_oth.remind_handover(conn, now, notify)          # from 08:59 (the owner 2026-11-04): before the first hour of the others
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the reminder of the returns to give failed")
     moment = datetime.fromisoformat(now)
     if moment.hour < FIRST_HOUR:
         return 0
@@ -409,8 +415,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     working = hours[0] <= moment.hour < hours[1]
     made = 0
     try:
-        from . import order_oth
-        order_oth.ask_seventh_day(conn, now)                  # the owner 2026-11-02: «На ОТХ» 6 days, then the point is asked
+        order_oth.ask_seventh_day(conn, now, notify)          # the owner 2026-11-04: «На ОТХ» 6 days, then «На возврат» and the point's question
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the question of the seventh day on OTH failed")

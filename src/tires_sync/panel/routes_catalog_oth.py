@@ -144,9 +144,11 @@ def register(app) -> None:
         for row in data["stock"]:
             when = dates.get(row["order_id"], {})
             on_oth = codes.get(row["order_id"]) == "oth"
-            mark = order_oth.item_mark(marks, row["item_id"], row["since"]) if on_oth else None
-            row.update(arrived=when.get("arrived", ""), reserve_last=when.get("until", ""), to_return=mark,
-                       can_to_return=on_oth and mark is None and row["order_id"] not in agreed)
+            row.update(arrived=when.get("arrived", ""), reserve_last=when.get("until", ""),
+                       return_label="" if on_oth else order_oth.label_of(agreed.get(row["order_id"])),
+                       can_to_return=on_oth and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
+        for row in data["returned"]:
+            row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) == "oth" else None
         own = manual_list(conn)
         test = oth_stock._test_points(conn)
         places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"] and r["point_id"] not in test}
@@ -166,7 +168,7 @@ def register(app) -> None:
         conn = get_conn()
         try:
             if order_oth.item_to_return(conn, int(request.form.get("item") or 0), local_iso(), author(), request.form.get("qty")):
-                flash("Позиция на возврат: метка «Согласуем», ответственному поставлена задача. Шины в продаже до отметки «Вернуть поставщику».")
+                flash("Позиция на возврат: метка «Согласуем», шины сняты с продажи, ответственному поставлена задача.")
             else:
                 flash("Эта позиция уже на возврат.")
         except (order_oth.OthError, ValueError) as err:

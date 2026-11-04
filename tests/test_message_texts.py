@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from panel_helpers import login, make_app, post
+from panel_helpers import agree_return, login, make_app, post
 from test_oth_seventh_day import office, on_oth
 from test_arrived_wait import env  # noqa: F401  (the fixture)
 from test_reserve_ask_point import at
@@ -27,7 +27,7 @@ def test_the_list_has_every_text_that_goes_by_itself_with_whom_and_when():
     names = {t["name"] for t in mt.TEXTS}
     for sample in (tpl.SAMPLES[0], tpl.SAMPLES[1], tpl.ARRIVED_SAMPLE, tpl.RESERVE_SAMPLE, tpl.OTH_POINT_SAMPLE, tpl.OTH_ASK_SAMPLE):
         assert sample[0] in names
-    assert {mt.RESERVE_ASK, mt.ASK_NUMBER, mt.MOVED_NOTE, mt.UNAGREED, mt.RETURN_AGREE, mt.UNTOLD_POINT} <= set(mt.BY_KEY)
+    assert {mt.RESERVE_ASK, mt.ASK_NUMBER, mt.MOVED_NOTE, mt.UNAGREED, mt.CALL_CLIENT, mt.AGREE_DUE, mt.HANDOVER_REMIND, mt.UNTOLD_POINT} <= set(mt.BY_KEY)
     for t in mt.TEXTS:
         assert t["to"] in mt.TO and t["when"] and t["default"] and t["audience"] in tpl.AUDIENCES
         assert set(tpl.PLACEHOLDER.findall(t["default"])) <= set(t["variables"]), t["key"]     # the default passes its own check
@@ -63,11 +63,10 @@ def test_the_return_alert_goes_with_the_owners_text(tmp_path):
     office(conn)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     on_oth(conn, cid)
-    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
-    mt.save(conn, mt.RETURN_AGREE, "Возврат: заказ {order_label}, {point}, {link}", "owner", NOW)
+    mt.save(conn, mt.AGREE_DUE, "Возврат: заказ {order_label}, {point}, {since}, {link}", "owner", NOW)
     told = []
-    order_oth.answer_here(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-26T13:00:00", lambda logins, text: told.append(text))
-    assert told == ["Возврат: заказ 5200001, Бета, /orders/%d" % cid]
+    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append(text))     # the alert goes with the move (2026-11-04)
+    assert told == ["Возврат: заказ 5200001, Бета, 20.10.2026, /orders/%d" % cid]
 
 
 def test_a_sample_template_is_edited_in_its_own_row_and_reset_to_the_sample(tmp_path):
@@ -164,7 +163,7 @@ def test_the_cancelled_return_goes_to_the_point_with_the_owners_text(tmp_path, m
     oth = card_at(conn, "oth", T)
     told = _quiet(monkeypatch)
     mt.save(conn, mt.UNAGREED, "Отбой возврата №{order_label}", "owner", NOW)
-    post(owner, "/orders/%d/oth-agreed" % oth, tok)
+    agree_return(owner, oth, tok)
     post(owner, "/orders/%d/oth-unagree" % oth, tok)
     assert told == [(oth, "Отбой возврата №%s" % _webmim(conn, oth))]
 
@@ -180,10 +179,10 @@ def test_the_untold_arrival_goes_to_the_point_with_the_owners_text(env, monkeypa
     assert len(point) == 1 and point[0].startswith("№") and point[0].endswith(")") and ": не ушло (" in point[0]
 
 
-def test_return_agree_default_is_the_old_text(tmp_path):
+def test_agree_due_default(tmp_path):
     conn = store.connect(str(tmp_path / "x.db"))
-    assert mt.text(conn, mt.RETURN_AGREE, order_label="77", point="Бета", link="/orders/3") == \
-        "Заказ №77 (точка «Бета») 7 дней на ОТХ, шины на точке: согласуйте возврат с поставщиком — /orders/3"
+    assert mt.text(conn, mt.AGREE_DUE, order_label="77", point="Бета", since="20.10.2026", link="/orders/3") == \
+        "Нужно согласовать на возврат: заказ №77 (точка «Бета») на ОТХ с 20.10.2026 — /orders/3"
 
 
 def test_a_placed_template_without_its_row_is_shown_as_not_sent_and_save_brings_it_back(tmp_path):

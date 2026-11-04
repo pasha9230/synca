@@ -93,3 +93,10 @@ def post(client, url, tok, **data):
         if found:
             data["sale_token"] = found.group(1)
     return client.post(url, data=dict({"csrf": tok}, **data))
+
+
+def agree_return(client, card, tok="tok"):
+    """«Согласовано с поставщиком» as a person presses it: with the date the form offers (nothing to offer: agreed already)."""
+    import re
+    found = re.search(r'name="return_date" value="([0-9-]+)"', client.get("/orders/%d" % card).get_data(as_text=True))
+    return post(client, "/orders/%d/oth-agreed" % card, tok, return_date=found.group(1) if found else "")

@@ -146,7 +146,10 @@ def test_a_return_with_the_amount_moves_the_order_to_return_and_fills_the_kind_a
     if code == "cancel":
         orders.move_card(conn, card, _stage_id(conn, "cancel"), NOW, "o", {"cancel_reason": orders.NOT_BOUGHT})
     _with_amount(conn, card)
-    answer = mgr.dispatch(conn, "r", "111", "№5259052 возврат отдал", None, NOW)
+    if code == "oth":                                                                              # the owner 2026-11-04: the tyres of «На ОТХ»: asked first
+        asked = mgr.dispatch(conn, "q", "111", "№5259052 возврат отдал", None, NOW)
+        assert asked.startswith("Заказ №5259052: подтверждаете передачу поставщику (водителю)?") and orders.get_card(conn, card)["stage"]["code"] == "oth"
+    answer = mgr.dispatch(conn, "r", "111", "№5259052 возврат отдал подтверждаю" if code == "oth" else "№5259052 возврат отдал", None, NOW)
     got = orders.get_card(conn, card)
     assert answer == "Заказ №5259052: отмечено — шины отданы на возврат"
     assert got["stage"]["code"] == "return" and got["return_kind"] == "supplier" and got["return_reason"] == mgr.RETURN_REASON

@@ -39,6 +39,8 @@ def workplace(client, p=None):
 def press(client, card, action, tok="tok", p=None, again=None):
     page = workplace(client, p)
     data = dict(token=again or token(page, card, action))
+    if action == "act_signed":
+        data["handover"] = "yes"                                                 # the second step of the button (the owner 2026-11-04)
     if p:
         data["p"] = str(p)
     r = post(client, "/my-point/%d/%s" % (card, action), tok, **data)
