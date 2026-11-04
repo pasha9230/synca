@@ -5,6 +5,7 @@ to Avito on them only with an own price of the account (sync.plan_decisions). On
 (panel/routes_catalog_oth). Every change is in oth_manual_log and the journal of actions. The rows: oth_manual (store.py)."""
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Dict, List, Optional
 
@@ -177,23 +178,60 @@ def note_no_price(conn, account_id: int, found: Dict[str, int], now: str, kind: 
     conn.commit()
 
 
-CARRIED_KEY = "oth_manual_carried:%d"           # app_state: {code: the Id of the ad of the same tire that shows its manual pieces} of the last cycle
+CARRIED_KEY = "oth_manual_carried:%d"           # app_state: {code: the Id of the ad of the same tire that shows its manual pieces} in the published feed
+CARRIED_NEXT_KEY = "oth_manual_carried_next:%d"  # app_state: {"sha": the feed the last cycle built, "ids": the same in that feed}
 
 
-def remember_carried(conn, account_id: int, carried: Dict[str, str]) -> None:
-    """What the last cycle of the account did with «Свой остаток» of gone lots handed to another lot of the same tire: the card says it."""
+def _feed_sha(feed_bytes: bytes) -> str:
+    return hashlib.sha256(feed_bytes).hexdigest()
+
+
+def _set(conn, key: str, value: str) -> None:
+    conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, value))
+
+
+def _next(conn, account_id: int) -> Optional[dict]:
     from . import store
-    key = CARRIED_KEY % int(account_id)
-    value = json.dumps(dict(sorted(carried.items())), ensure_ascii=False)
-    if (store.get_state(conn, key) or "{}") != value:
-        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, value))
-        conn.commit()
+    try:
+        found = json.loads(store.get_state(conn, CARRIED_NEXT_KEY % int(account_id)) or "null")
+    except (TypeError, ValueError):
+        return None
+    return found if isinstance(found, dict) and isinstance(found.get("ids"), dict) else None
+
+
+def remember_carried(conn, account_id: int, carried: Dict[str, str], feed_bytes: bytes) -> None:
+    """What the feed a cycle just built does with «Свой остаток» of gone lots handed to another lot of the same tire (its Ids as the feed has
+    them). Not on Avito yet: publish_carried, when this very feed is published. The feed itself never reads it."""
+    _set(conn, CARRIED_NEXT_KEY % int(account_id), json.dumps({"sha": _feed_sha(feed_bytes), "ids": dict(sorted(carried.items()))}, ensure_ascii=False))
+    conn.commit()
+
+
+def rebind_carried(conn, account_id: int, feed_bytes: bytes) -> None:
+    """A mirror added the file's ads to the feed of the cycle: the same plan, the larger feed (store.rebind_pending). No commit."""
+    found = _next(conn, account_id)
+    if found is not None:
+        _set(conn, CARRIED_NEXT_KEY % int(account_id), json.dumps(dict(found, sha=_feed_sha(feed_bytes)), ensure_ascii=False))
+
+
+def publish_carried(conn, account_id: int, published_feed: bytes) -> None:
+    """The feed went out (store.commit_pending): if it is the one the last cycle built, what that cycle remembered is what the feed shows now.
+    The light stock pass publishes a feed of its own, which leaves it as it was. No commit."""
+    found = _next(conn, account_id)
+    if found is not None and found.get("sha") == _feed_sha(published_feed):
+        _set(conn, CARRIED_KEY % int(account_id), json.dumps(found["ids"], ensure_ascii=False))
 
 
 def carried_by(conn, account_id: int) -> Dict[str, str]:
+    """{code: the Id} in the feed published now."""
     from . import store
     try:
         found = json.loads(store.get_state(conn, CARRIED_KEY % int(account_id)) or "{}")
     except (TypeError, ValueError):
         return {}
     return found if isinstance(found, dict) else {}
+
+
+def carried_next(conn, account_id: int) -> Dict[str, str]:
+    """{code: the Id} in the feed of the last cycle; no such cycle yet: as published."""
+    found = _next(conn, account_id)
+    return found["ids"] if found is not None else carried_by(conn, account_id)
