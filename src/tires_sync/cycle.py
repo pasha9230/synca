@@ -181,7 +181,7 @@ def _sha_of(path) -> str:
 
 def save_check_inputs(conn, account_id: int, feed_path, held, id_codes, oth=(), oth_gave=None) -> None:
     """Remember what the cycle gave the check of this draft (the held positions, the Ids that do not carry their code, the codes on OTH),
-    with the draft's fingerprint: `feed-check` then judges the same file by the same rules as the cycle did (check_inputs)."""
+    with the draft's fingerprint: `feed-check` then judges the same file by the same rules as the cycle did (check_inputs; `oth_line_point` it only tells)."""
     store.set_state(conn, _inputs_key(account_id), json.dumps({
         "sha": _sha_of(feed_path), "held": sorted({str(h) for h in held}),
         "id_codes": dict(id_codes or {}), "oth": sorted({str(c) for c in oth}), "oth_gave": dict(oth_gave or {})}, ensure_ascii=False))     # all of them: an Id read as its own code overrides a binding to another
