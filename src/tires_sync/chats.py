@@ -939,6 +939,7 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
             raise ChatSendLost(_lost_said(bool(row[3])))
         if row[0] == "lost" and _lost_is_there(conn, client, chat, token, row[6] or row[4], text):    # from the first start (M1)
             _inbox_close(conn, token, now, FOUND_AGAIN, alerts=True)
+            _close_wait_task(conn, token, text, now, "найдено в чате")
             return "found"                                                           # «Отправить снова» of a message that came meanwhile
         resumed = _resume_interrupted(conn, client, chat, token, now, author, "Сообщение", text) if row[0] == "sending" else ""
         if resumed == "sent":
@@ -975,6 +976,7 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
     _deliver(conn, client, chat, user_id, token, now, author, 0, text)
     if claim.rowcount != 1:                                                          # a new press of its mark: the lines about the old one
         _inbox_close(conn, token, now, DELIVERED_AGAIN, alerts=True)                 # are answered, nobody copies it by hand (tails-answers 2)
+        _close_wait_task(conn, token, text, now, "отправлено снова")
 
 
 MAX_IMAGE_BYTES = 15 * 1024 * 1024        # what we accept from the manager
@@ -1258,6 +1260,12 @@ def _halt(conn, chat: dict, row: dict, status: str, now: str, why: str, head: st
     _note_order(conn, chat, now, "%s: %s — система больше не повторяет." % (head, why), "yellow")
     _inbox_close(conn, row["token"], now, "Итог: система больше не повторяет: %s — писать клиенту не нужно." % why, alerts=True)
     return "stopped"
+
+
+def _close_wait_task(conn, token: str, text: str, now: str, how: str) -> None:
+    """«Появилось в наличии» sent by a press of «Отправить снова»: its task and its record are the same as after the sync (order_wait.delivered)."""
+    if str(token or "").startswith("wait-"):
+        _close_task(conn, token, text, now, how)
 
 
 def _close_task(conn, token: str, text: str, now: str, how: str) -> None:

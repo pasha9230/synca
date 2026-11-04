@@ -264,16 +264,19 @@ def _found_text(conn, lines: List[dict], found: List, stock: List, chat, price_o
     items: List[tuple] = []
     for line, offer in zip(lines, found):
         name = " ".join(str(offer.name_orig or offer.name or "").split())
+        if not name:
+            return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id)
         prices = set()
         for each in (o for o in stock if _exact(line, o)):
             try:
-                prices.add(float(price_of(each, chat) or 0))
+                price = float(price_of(each, chat) or 0)
             except Exception:                                      # no price is no message: the manager gets the task, the others go on
                 conn.rollback()
                 logging.getLogger("tires_sync.order_wait").warning("position %s of a waiting order has no price", each.code or each.goods_id, exc_info=True)
-                prices.add(0.0)
-        if not name or min(prices) <= 0:
-            return "", "у позиции %s нет %s." % (offer.code or offer.goods_id, "наименования" if not name else "цены продажи")
+                price = 0
+            if price <= 0:
+                return "", "у позиции %s нет цены продажи." % (each.code or each.goods_id)
+            prices.add(price)
         if len(prices) > 1:
             return "", "у поставщиков разные цены на %s: выберите сами." % name
         if (name, prices) not in items:                            # two lines of one position: it is named once

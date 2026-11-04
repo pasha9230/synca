@@ -362,7 +362,7 @@ def test_a_402_gives_a_task_without_the_send_form_and_the_sync_that_delivers_clo
     order_wait.check(conn, [tire()], NOW, deliver=lambda row, text, token: chats.send_reply(conn, sender, row, text, token, NOW, "система"), price_of=price_of)
     [task] = tasks(conn, card)
     assert task["title"] == order_wait.TITLE_CHECK != order_wait.TITLE_EXACT and task["status"] == "pending"     # no form: the card shows it for TITLE_EXACT
-    assert [t for t in events(conn, card, "yellow") if "402" in t] and not [t for t in events(conn, card, "red") if "402" in t and "появилось" in t]
+    assert [t for t in events(conn, card, "yellow") if "402" in t and "появилось" in t]         # our record; the send's own red one is as for every 402
     assert chats.settle_sends(conn, sender, lambda: sender, 1, "2026-11-04T12:02:00") == {"sent": 1}
     assert engine.get_task(conn, task["id"])["status"] == "done"
     assert [t for t in events(conn, card, "green") if t.startswith(order_wait.TOLD)]
@@ -482,3 +482,47 @@ def test_an_unknown_send_found_in_the_chat_closes_the_task(env):
     sender.history = [out("m9", words, int(datetime.fromisoformat(NOW).timestamp()) + 5)]
     chats.settle_sends(conn, sender, lambda: sender, 1, "2026-11-04T12:02:00")
     assert engine.get_task(conn, task["id"])["status"] == "done" and [t for t in events(conn, card, "green") if t.startswith(order_wait.TOLD)]
+
+
+def lost_one(env):
+    from test_chat_send_refusal import Refusing
+    conn, chat_row = env
+    card = waiting(env)
+    sender = Refusing(TimeoutError())
+    order_wait.check(conn, [tire()], NOW, deliver=lambda row, text, token: chats.send_reply(conn, sender, row, text, token, NOW, "система"), price_of=price_of)
+    token, words = conn.execute("SELECT token, text FROM chat_send_log WHERE token LIKE 'wait-%'").fetchone()
+    conn.execute("UPDATE chat_send_log SET status = 'lost' WHERE token = ?", (token,))
+    conn.commit()
+    return conn, chat_row, card, token, words
+
+
+def test_sent_again_by_the_button_after_it_was_lost_closes_the_task_and_the_history_has_it(env):
+    conn, chat_row, card, token, words = lost_one(env)
+    task = tasks(conn, card)[0]
+    sender = Sender()
+    chats.send_reply(conn, sender, chat_row, words, token, "2026-11-04T12:10:00", "worker2", again=True)
+    assert sender.sent == [words] and engine.get_task(conn, task["id"])["status"] == "done"
+    assert [t for t in events(conn, card, "green") if t.startswith(order_wait.TOLD)]
+
+
+def test_the_button_that_finds_it_in_the_chat_closes_the_task_too(env):
+    from datetime import datetime
+
+    from test_send_settle import out
+    conn, chat_row, card, token, words = lost_one(env)
+    task = tasks(conn, card)[0]
+    sender = Sender(history=[out("m9", words, int(datetime.fromisoformat(NOW).timestamp()) + 5)])
+    assert chats.send_reply(conn, sender, chat_row, words, token, "2026-11-04T12:10:00", "worker2", again=True) == "found"
+    assert sender.sent == [] and engine.get_task(conn, task["id"])["status"] == "done"
+
+
+def test_a_price_that_is_missing_names_the_position_that_lacks_it(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(), tire(code="NOPRICE", goods_id="200")])
+    assert sender.sent == [] and "у позиции NOPRICE нет цены продажи" in tasks(conn, card)[0]["body"]
+
+
+def test_the_stage_hint_says_the_client_is_written_to():
+    from tires_sync import onboarding_texts
+    assert "Клиенту само ничего не уходит" not in open(onboarding_texts.__file__, encoding="utf-8").read()
