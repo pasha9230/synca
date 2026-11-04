@@ -149,7 +149,7 @@ def test_a_cycle_where_the_guard_tripped_does_not_judge_the_waiting_clients(tmp_
     monkeypatch.setattr(cli, "_http", lambda: ScriptedHttp(OK, OK, OK, OK))
     monkeypatch.setattr(cli, "moscow_now", lambda: datetime(2026, 10, 7, 12, 0))
     calls = []
-    monkeypatch.setattr(cli, "_check_waiting", lambda conn, parsed, box=None: calls.append(1))
+    monkeypatch.setattr(cli, "_check_waiting", lambda conn, parsed, box=None, ref=None: calls.append(1))
     args = ["--db", str(tmp_path / "t.db"), "--unload", str(tmp_path / "unload.xml"), "--reference", str(tmp_path / "reference.txt"),
             "--feed-root", str(tmp_path / "feed"), "--key-file", str(key_file)]
     assert cli.main(["run-cycle", "--publish"] + args) == 3

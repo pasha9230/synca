@@ -173,6 +173,11 @@ def _build_parser() -> argparse.ArgumentParser:
     fi.add_argument("--db", required=True)
     fi.add_argument("--account", type=int, required=True)
     fi.add_argument("--file", required=True)
+    wc = sub.add_parser("wait-count", help="сколько сообщений «появилось в наличии» ушло бы в первом цикле: считает на временной копии базы, ничего не меняет и никому не пишет")
+    wc.add_argument("--db", required=True)
+    wc.add_argument("--unload", required=True)
+    wc.add_argument("--reference", required=True)
+    wc.add_argument("--at", default="", help="момент по Москве, ISO; по умолчанию сегодня 12:00")
     fc = sub.add_parser("feed-check", help="проверить фиды аккаунтов по правилам проверки (feed_check_rules.json); ничего не меняет и не отправляет")
     fc.add_argument("--db", required=True)
     fc.add_argument("--unload", required=True)
@@ -934,7 +939,7 @@ def _run_cycle(args) -> int:
     if getattr(args, "publish", False):
         _heal_accounts(conn, box, getattr(args, "feed_root", None))
         if not fetch_problems and not tripped:                       # the waiting clients are not judged by a cycle that was stopped or lacked a fresh unload (without --fetch the file is the last one)
-            _check_waiting(conn, parsed, box)
+            _check_waiting(conn, parsed, box, ref)
     try:
         _send_reminders(conn, box)
     except Exception as err:                                      # a reminder must never fail a cycle
@@ -1292,6 +1297,21 @@ def _arrived_alerts(conn, key_file) -> None:
         print("предупреждение: «клиенту не сообщили» не проверено (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
+def _chat_deliver(conn, box, now: str):
+    """A message of the system to the client: (chat row, text, send mark) -> chats.send_reply as the bot's channel (panel.routes_vk.channel),
+    by the chat's own account."""
+    def deliver(chat_row, text, token):
+        chat = chats.get_chat(conn, chat_row)
+        if chat is None:
+            raise chats.ChatError("Чат не найден.")
+        client_id = connections.get_secret(conn, box, "avito", chat["account_id"], "client_id")
+        client_secret = connections.get_secret(conn, box, "avito", chat["account_id"], "client_secret")
+        if not client_id or not client_secret:
+            raise chats.ChatError("У аккаунта не заданы ключи Авито.")
+        chats.send_reply(conn, AvitoClient(client_id, client_secret, http=_http(), now=_epoch, allow_write=True), chat_row, text, token, now, "система")
+    return deliver
+
+
 def _reserve_alerts(conn, key_file) -> None:
     """The responsible manager is told the day before the reservation at the point ends and on the day; on the day the point is asked in VK
     whether the order is still there, and its «на точке» asks the client once in the order's Avito chat (order_reserve). A failure is only a warning."""
@@ -1303,16 +1323,7 @@ def _reserve_alerts(conn, key_file) -> None:
             return
         now = moscow_now().isoformat(timespec="seconds")
 
-        def deliver(chat_row, text, token):                     # as the bot's channel (panel.routes_vk.channel): the chat's own account
-            chat = chats.get_chat(conn, chat_row)
-            if chat is None:
-                raise chats.ChatError("Чат не найден.")
-            client_id = connections.get_secret(conn, box, "avito", chat["account_id"], "client_id")
-            client_secret = connections.get_secret(conn, box, "avito", chat["account_id"], "client_secret")
-            if not client_id or not client_secret:
-                raise chats.ChatError("У аккаунта не заданы ключи Авито.")
-            chats.send_reply(conn, AvitoClient(client_id, client_secret, http=_http(), now=_epoch, allow_write=True), chat_row, text, token, now, "система")
-        made = order_reserve.check(conn, now, lambda card, text: order_notify.deliver(conn, box, card, text, now, tg_http=_http(), vk_http=_http()), deliver,
+        made = order_reserve.check(conn, now, lambda card, text: order_notify.deliver(conn, box, card, text, now, tg_http=_http(), vk_http=_http()), _chat_deliver(conn, box, now),
                                    vk_send.sender_for(conn, box, http=_http()))     # the point is asked first, through the community (2026-10-26)
         print("оповещений о конце резерва: %d" % made)
     except Exception as err:      # noqa: BLE001
@@ -2030,15 +2041,58 @@ def _heal_accounts(conn, box, feed_root) -> None:
         store.set_state(conn, key, json.dumps(codes, ensure_ascii=False))
 
 
-def _check_waiting(conn, parsed, box=None) -> None:
-    """After a publishing cycle: the cards in «Ожидает наличие» are looked at against every offer of every supplier (tags and tasks for the
-    responsible manager; nothing is sent). A failure is only a warning: it never fails a cycle."""
+def _wait_price_of(conn, parsed, ref, now: str):
+    """The price for «появилось в наличии»: of the order form, by the account of the chat."""
+    from . import order_offers
+
+    def price_of(offer, chat_row):
+        account = order_offers.account_for(conn, chat_row=chat_row)
+        return order_offers.item_args(conn, active_settings(conn), parsed, ref, offer.goods_id, now[:10], account)["sale_unit"]
+    return price_of
+
+
+def _cmd_wait_count(args) -> int:
+    """How many messages «появилось в наличии» the next cycle would send, for a look before a release: the check runs on a throw-away copy of the
+    base (the base itself is only read), nothing is sent to anybody. Only numbers of orders are printed."""
+    from . import order_wait
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        copy = str(Path(folder) / "copy.db")
+        source, target = store.open_db(args.db), store.open_db(copy)
+        source.execute("PRAGMA query_only=ON")
+        source.backup(target)
+        source.close()
+        target.close()
+        conn = store.connect(copy)
+        parsed, _, notes = load_all_parsed(conn, active_settings(conn), Path(args.unload))
+        for note in notes:
+            print(note)
+        ref = parse_reference(Path(args.reference).read_text(encoding="utf-8"))
+        now = args.at or moscow_now().replace(hour=12, minute=0, second=0, microsecond=0).isoformat(timespec="seconds")      # by default a moment of the working hours
+        before = conn.execute("SELECT COUNT(*) FROM order_task WHERE rule_id = ?", (order_wait.TASK_EXACT,)).fetchone()[0]
+        told = []
+        found = order_wait.check(conn, list(parsed.offers.values()), now, deliver=lambda row, text, token: told.append(token),
+                                 price_of=_wait_price_of(conn, parsed, ref, now), max_sends=len(parsed.offers) + 1000)
+        tasks = conn.execute("SELECT COUNT(*) FROM order_task WHERE rule_id = ?", (order_wait.TASK_EXACT,)).fetchone()[0] - before
+        behind = conn.execute("SELECT COUNT(*) FROM order_event WHERE kind = 'chat' AND at = ? AND text LIKE 'Сообщение о наличии не отправлено: %'", (now,)).fetchone()[0]
+        conn.close()
+    print("момент %s: сообщений в первом цикле %d (лимит %d), всего готово %d; новых задач вместо сообщения %d; в очереди за другим заказом %d; нашлось точно %d, с аналогами %d" % (
+        now, min(len(told), order_wait.MAX_SENDS), order_wait.MAX_SENDS, len(told), tasks, behind, len(found["exact"]), len(found["analogs"])))
+    print("заказы, которым ушло бы: %s" % (", ".join(t.split("-")[1] for t in told) or "—"))
+    return 0
+
+
+def _check_waiting(conn, parsed, box=None, ref=None) -> None:
+    """After a publishing cycle: the cards in «Ожидает наличие» are looked at against every offer of every supplier: a client whose tires are
+    all here is written to at the price of the order form, by the account of the chat (order_wait.check); else tags and tasks for the
+    responsible manager. No key or no reference: only the tasks. A failure is only a warning: it never fails a cycle."""
     try:
         from . import order_notify, order_wait, orders
         now = moscow_now().isoformat(timespec="seconds")
         notify = None if box is None else (lambda card_id, title, body: order_notify.deliver(
             conn, box, orders.get_card(conn, card_id), "%s\n%s" % (title, body), now, tg_http=_http(), vk_http=_http()))
-        found = order_wait.check(conn, list(parsed.offers.values()), now, notify=notify)
+        found = order_wait.check(conn, list(parsed.offers.values()), now, notify=notify, deliver=None if box is None else _chat_deliver(conn, box, now),
+                                 price_of=None if ref is None else _wait_price_of(conn, parsed, ref, now))
         if found["exact"] or found["analogs"]:
             print("лист ожидания: появилось (заказы %s), есть аналоги (заказы %s)" % (
                 ", ".join(map(str, found["exact"])) or "—", ", ".join(map(str, found["analogs"])) or "—"))
@@ -2363,6 +2417,17 @@ def _cmd_telegram_inbox(args) -> int:
     return 0
 
 
+def _wait_replies(conn, box, now: str) -> None:
+    """The client answered «появилось в наличии»: a task and an alert for the responsible (order_wait.replies). A failure is only a warning."""
+    try:
+        from . import order_notify, order_wait, orders
+        order_wait.replies(conn, now, lambda card_id, title, body: order_notify.deliver(
+            conn, box, orders.get_card(conn, card_id), "%s\n%s" % (title, body), now, tg_http=_http(), vk_http=_http()))
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: ответы на сообщение о наличии не проверены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
+
+
 def _cmd_chats_sync(args) -> int:
     box = load_box(args.key_file)
     if box is None:
@@ -2535,6 +2600,7 @@ def _chats_sync_locked(conn, box, args, now) -> int:
         print("аккаунт «%s»: чатов %d, новых %d, сообщений %d, ошибок %d" % (account["name"], stats["chats"], stats["new_chats"], stats["messages"], stats["errors"]))
         _settle_look(conn, client, account, client_id, client_secret, now)
     made = chat_deals.process_all(conn, now)
+    _wait_replies(conn, box, now)
     _handoff_look(conn, box, now)
     _inquiry_look(conn, box, now)
     if full:
@@ -2906,6 +2972,8 @@ def main(argv=None) -> int:
             return _cmd_avito_webhook_unsubscribe(args)
         if args.command == "avito-webhook-status":
             return _cmd_avito_webhook_status(args)
+        if args.command == "wait-count":
+            return _cmd_wait_count(args)
         if args.command == "chats-sync":
             return _cmd_chats_sync(args)
         if args.command == "calls-sync":
