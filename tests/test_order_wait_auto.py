@@ -1024,3 +1024,15 @@ def test_a_failure_after_the_tires_were_taken_keeps_them_the_next_order_is_not_t
     monkeypatch.setattr(order_wait, "_tell_client", real)
     run(conn, sender, [tire()], NEXT)
     assert len(sender.sent) == 1 and [t for t in events(conn, old, "green") if t.startswith(order_wait.TOLD)]
+
+
+def test_a_vague_line_with_a_task_from_an_earlier_cycle_holds_nothing_either(env):
+    conn, chat_row = env
+    vague = waiting(env, NO_MODEL, with_chat=False)
+    two = [tire(goods_id="100"), tire(goods_id="200", code="TS2", model_raw="Other Model")]
+    sender = Sender()
+    run(conn, sender, two)
+    assert len(tasks(conn, vague)) == 1
+    named = waiting(env)
+    run(conn, sender, two, NEXT)
+    assert len(sender.sent) == 1 and [t for t in events(conn, named, "green") if t.startswith(order_wait.TOLD)]
