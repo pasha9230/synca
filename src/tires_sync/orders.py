@@ -1070,6 +1070,9 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     elif stage["code"] == "oth":
         _start_oth(conn, card, now, author)
     _leave_oth(conn, card, stage, now, author)
+    if card["stage"].get("code") in ("oth", RETURN_GIVEN) and stage["code"] not in ("oth", RETURN_GIVEN):
+        from . import order_oth
+        order_oth.left_return(conn, card_id, stage, now, author)
     from_oth = card["stage"].get("code") == "oth"
     after_oth = from_oth or (card["stage"].get("kind") != "open" and conn.execute(          # «На ОТХ», then a finished stage, then open again
         "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND (text LIKE ? OR text = ?) LIMIT 1", (card_id,) + OTH_MARKS).fetchone())

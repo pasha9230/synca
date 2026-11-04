@@ -51,6 +51,8 @@ def _moved(tmp_path):
     tick(conn, DAY + "T12:30:00", deliver, vk)
     told = []
     assert reserve._no_answer_step(conn, orders.get_card(conn, cid), NEXT + "T00:30:00", calls(told))
+    assert told == []                                                                      # at night: held
+    reserve._release_held(conn, NEXT + "T09:07:00", calls(told))
     return conn, cid, told
 
 
@@ -84,13 +86,13 @@ def test_the_call_goes_once_and_the_rules_of_the_move_are_the_same(tmp_path):
 
 def test_nobody_answers_both_owners_are_told(tmp_path):
     conn, cid, chat, deliver, vk = reserve_ready(tmp_path)
-    fresh(conn, chat, NEXT + "T00:29:00")
+    fresh(conn, chat, NEXT + "T09:29:00")
     users.add_user(conn, "zaman", "password-123", ENTERED, role="owner")
     conn.execute("UPDATE order_card SET responsible = '', created_by = 'робот' WHERE id = ?", (cid,))
     conn.commit()
     tick(conn, DAY + "T12:30:00", deliver, vk)
     told = []
-    assert reserve._no_answer_step(conn, orders.get_card(conn, cid), NEXT + "T00:30:00", calls(told))
+    assert reserve._no_answer_step(conn, orders.get_card(conn, cid), NEXT + "T09:30:00", calls(told))      # by day: at once
     assert sorted(who for who, t in told if t.startswith("Позвонить")) == sorted(order_alerts.owner_people(conn))
 
 
@@ -252,14 +254,15 @@ def test_working_days(now, days, due):
 
 def test_the_setting_has_a_default_is_checked_and_a_broken_value_falls_back(tmp_path):
     conn = db(tmp_path)
-    assert order_oth.task_days(conn) == 1
+    assert order_oth.task_days(conn) == 2                                                  # the owner 2026-11-04
+    assert order_oth.working_due("2026-11-06T12:30:00", order_oth.task_days(conn)) == "2026-11-10T12:30"     # Friday → Tuesday
     assert order_oth.set_task_days(conn, " 3 ") == 3 and order_oth.task_days(conn) == 3
     for bad in ("0", "31", "", "1.5", "-1", "два", None, "٣"):
         with pytest.raises(order_oth.OthError):
             order_oth.set_task_days(conn, bad)
     assert order_oth.task_days(conn) == 3
     conn.execute("UPDATE app_state SET value = 'x' WHERE key = ?", (order_oth.TASK_DAYS_KEY,))
-    assert order_oth.task_days(conn) == 1
+    assert order_oth.task_days(conn) == 2
 
 
 def test_the_settings_page_changes_it(tmp_path):
@@ -732,4 +735,133 @@ def test_the_vk_return_of_the_tyres_of_oth_asks_first(tmp_path):
     hook(app, conn, "№700300 возврат отдал подтверждаю", event="e2")
     assert orders.get_card(conn, cid)["stage"]["code"] == "return"
     assert mgr.RETURN_SURE == "подтверждаю"
+
+
+def test_the_task_of_the_seventh_day_is_due_in_two_working_days(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    started(conn)
+    orders.move_card(conn, cid, stage(conn, "oth"), "2026-10-24T11:00:00", "o", changes={"cancel_reason": "Отказ"})
+    assert order_oth.ask_seventh_day(conn, "2026-10-30T12:30:00") == 1                     # a Friday
+    assert open_tasks(conn, cid)[0]["due_at"] == "2026-11-03T12:30"
+
+
+# ---- 6. the task closes by itself on any way out ---------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("code, column", [("at_point", "cancelled_at"), ("done", "done_at"), ("return", "done_at")])
+def test_any_manual_move_out_closes_the_task(tmp_path, code, column):
+    conn, cid = _moved_on_day7(tmp_path)
+    assert open_tasks(conn, cid)
+    orders.move_card(conn, cid, stage(conn, code), "2026-10-27T10:00:00", "o",
+                     changes={"return_kind": "supplier", "return_reason": "x", "return_amount": 1} if code == "return" else None)
+    assert open_tasks(conn, cid) == []
+    assert conn.execute("SELECT %s FROM callback_task WHERE order_id = ?" % column, (cid,)).fetchone()[0] == "2026-10-27T10:00:00"
+
+
+def test_the_way_out_through_the_panel_and_back_and_forth_inside_keeps_it(tmp_path):
+    app, client, tok, conn, cid = _on_oth_page(tmp_path)
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
+    assert open_tasks(conn, cid)
+    orders.move_card(conn, cid, _stage(conn, "oth"), "2026-10-27T10:00:00", "o")           # between the two: the return goes on
+    assert open_tasks(conn, cid)
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, "at_point")), answer="same")
+    orders.move_card(conn, cid, _stage(conn, "at_point"), "2026-10-27T11:00:00", "o")
+    assert open_tasks(conn, cid) == []
+    assert [e for e in orders.list_events(conn, cid) if e["text"].startswith("Задача отменена: Вернуть")]
+
+
+def test_issued_still_closes_it_as_done(tmp_path):
+    conn, cid = _moved_on_day7(tmp_path)
+    assert order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")[2]
+    assert conn.execute("SELECT done_at FROM callback_task WHERE order_id = ?", (cid,)).fetchone()[0] == "2026-10-26T13:00:00"
+
+
+# ---- 7. the timer: extra ticks are harmless, windows hold ------------------------------------------------------------------------------
+
+def test_the_timer_has_the_exact_times_and_no_delay():
+    from pathlib import Path
+    text = (Path(__file__).parent.parent / "deploy" / "tires-orders.timer").read_text(encoding="ascii")
+    assert "OnCalendar=*:07:00\n" in text
+    assert "OnCalendar=Mon,Wed,Fri *-*-* 08:59:00 Europe/Moscow\n" in text and "OnCalendar=*-*-* 12:30:00 Europe/Moscow\n" in text
+    assert "RandomizedDelaySec=0\n" in text and "AccuracySec=1s\n" in text and "Persistent=true\n" in text
+
+
+def test_a_late_catch_up_never_reminds_at_night_nor_out_of_hours(tmp_path):
+    conn, cid = _late_return(tmp_path)
+    told = []
+    for when in ("2026-11-04T03:00:00", "2026-11-04T20:00:00", "2026-11-04T23:40:00"):     # the working hours end at 20
+        reserve.check(conn, when, calls(told))
+    assert told == []
+    assert order_oth.remind_handover(conn, "2026-11-04T19:59:00", calls(told)) == 1        # late, in the hours: still that day, once
+    assert order_oth.remind_handover(conn, "2026-11-04T19:59:30", calls(told)) == 0
+
+
+def test_the_extra_ticks_repeat_nothing(tmp_path):
+    conn, cid, _chat, deliver, vk = reserve_ready(tmp_path)
+    told = []
+
+    def go(when):
+        deliver.at = when
+        reserve.check(conn, when, calls(told), deliver, vk)
+    go("2026-10-17T08:59:00")                                                               # before the first hour: nothing
+    assert told == [] and deliver.sent == [] and vk.sent == []
+    go("2026-10-17T09:07:00")
+    before = len(told)
+    go("2026-10-17T12:30:00")                                                               # the day before: told at 09:07 already
+    assert len(told) == before and deliver.sent == []
+    go(DAY + "T12:30:00")
+    assert len(deliver.sent) == 1                                                           # the client's reminder exactly at 12:30
+    go(DAY + "T13:07:00")
+    assert len(deliver.sent) == 1
+
+
+def test_the_client_reminder_is_not_earlier_nor_out_of_hours_after_a_catch_up(tmp_path):
+    conn, cid, _chat, deliver, vk = reserve_ready(tmp_path)
+    for when in (DAY + "T12:29:59", DAY + "T21:00:00", DAY + "T02:00:00"):
+        deliver.at = when
+        reserve.check(conn, when, calls([]), deliver, vk)
+    assert deliver.sent == []
+
+
+def _silent(tmp_path):
+    conn, cid, chat, deliver, vk = reserve_ready(tmp_path)
+    staff(conn)
+    conn.execute("UPDATE order_card SET responsible = 'ivan' WHERE id = ?", (cid,))
+    conn.commit()
+    tick(conn, DAY + "T12:30:00", deliver, vk)
+    conn.execute("UPDATE avito_chat SET synced_at = '2099-01-01T00:00:00'")
+    conn.commit()
+    return conn, cid, deliver, vk
+
+
+def test_the_night_move_is_on_time_and_its_alerts_wait_for_nine_once(tmp_path):
+    conn, cid, deliver, vk = _silent(tmp_path)
+    told = []
+    reserve.check(conn, NEXT + "T00:29:00", calls(told), deliver, vk)
+    assert orders.get_card(conn, cid)["stage"]["code"] == "at_point"
+    reserve.check(conn, NEXT + "T00:37:00", calls(told), deliver, vk)
+    assert orders.get_card(conn, cid)["stage"]["code"] == "oth" and told == []              # nobody is woken
+    reserve.check(conn, NEXT + "T08:59:00", calls(told), deliver, vk)
+    assert told == []
+    reserve.check(conn, NEXT + "T09:07:00", calls(told), deliver, vk)
+    assert sorted(who for who, _t in told) == ["", "ivan"] and any(t.startswith("Позвонить клиенту") for _w, t in told)
+    reserve.check(conn, NEXT + "T10:07:00", calls(told), deliver, vk)
+    assert len(told) == 2
+
+
+def test_an_order_taken_back_before_nine_has_no_call(tmp_path):
+    conn, cid, deliver, vk = _silent(tmp_path)
+    told = []
+    reserve.check(conn, NEXT + "T01:07:00", calls(told), deliver, vk)
+    orders.move_card(conn, cid, stage(conn, "at_point"), NEXT + "T08:00:00", "o")
+    reserve.check(conn, NEXT + "T09:07:00", calls(told), deliver, vk)
+    assert not [t for _w, t in told if t.startswith("Позвонить")]
+
+
+def test_a_broken_held_row_stops_nothing(tmp_path):
+    conn, cid, deliver, vk = _silent(tmp_path)
+    conn.execute("INSERT INTO app_state (key, value) VALUES ('reserve_moved_tell:999999', 'x')")
+    conn.commit()
+    reserve.check(conn, NEXT + "T09:07:00", calls([]), deliver, vk)
+    assert conn.execute("SELECT 1 FROM app_state WHERE key LIKE 'reserve_moved_tell:%'").fetchone() is None
 

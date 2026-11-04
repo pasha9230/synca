@@ -19,10 +19,12 @@ The owner 2026-11-02: the client no longer waits for the point's answer: on the 
 reminder goes by itself (`_client_step`); the point is still asked as before («на точке» / «выдан» on its «Рабочее место»), its «на точке»
 only marks the answer. When the reminder went and the client wrote nothing in that chat for 12 hours (NO_ANSWER), the order goes to «На ОТХ»
 by itself (`_no_answer_step`): not when the date was moved since, the order left «Товар на точке» or the reminder did not go.
-The owner 2026-11-04: that move tells the order's responsible «Позвонить клиенту» with a line of the order's data (order_oth.call_line).
+The owner 2026-11-04: that move tells the order's responsible «Позвонить клиенту» with a line of the order's data (order_oth.call_line). The 12 hours
+end at night (12:30 + 12 h): the move is made at the first tick after them, its alerts wait for FIRST_HOUR (HELD_KEY, `_release_held`): nobody is woken.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import date, datetime, timedelta
@@ -48,6 +50,7 @@ NO_ANSWER_MAX = timedelta(hours=48)               # an older reminder moves noth
 CHATS_FRESH = timedelta(minutes=30)               # the chats of the account read this lately, or «no answer» is not known (they are read every minute)
 STALE_AFTER = timedelta(hours=24)                 # the move held up this long after its window by chats not read: one yellow record (the lead 2026-11-02)
 STALE_MARK = "[резерв:чаты-не-читаются:%s]"
+HELD_KEY = "reserve_moved_tell:%d"                # app_state: the alerts of a move made at night: {"call", "entered"}
 
 
 def _marker(kind: str, until: str) -> str:
@@ -389,8 +392,41 @@ def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None)
     orders.add_event(conn, card["id"], now, "система", "reserve", "Позвонить клиенту: %s" % line, level="yellow")
     conn.commit()
     call = message_texts.text(conn, message_texts.CALL_CLIENT, order_label=order_manager.label(moved), line=line, link="/orders/%d" % card["id"])
+    if datetime.fromisoformat(now).hour < FIRST_HOUR:
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (HELD_KEY % card["id"], json.dumps(
+            {"call": call, "entered": moved["entered_at"]}, ensure_ascii=False)))
+        conn.commit()
+        return True
     _tell_moved(conn, moved, call, notify, now)
     return True
+
+
+def _release_held(conn, now: str, notify: Notify) -> None:
+    """The first tick from FIRST_HOUR: the alerts of the moves made at night go, once (the key goes first). An order that left that stay of «На ОТХ» meanwhile: no call to make."""
+    for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'reserve_moved_tell:%'").fetchall():
+        conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+        conn.commit()
+        try:
+            held = json.loads(value)
+            card = orders.get_card(conn, int(key.rsplit(":", 1)[1]))
+            if card["stage"]["code"] == "oth" and card["entered_at"] == held["entered"]:
+                _tell_moved(conn, card, held["call"], notify, now)
+        except Exception:                                       # one broken row must not stop the others
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the held alert %s failed", key)
+
+
+def _silent_moves(conn, now: str, notify: Notify) -> None:
+    """Every tick, at night too: the orders whose client stayed silent 12 hours after the reminder go to «На ОТХ» (`_no_answer_step`)."""
+    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s) AND c.reserve_until != ''"
+                                   % ",".join("?" * len(STAGE_CODES)), STAGE_CODES).fetchall():
+        try:
+            card = orders.get_card(conn, card_id)
+            if not (card.get("intercity") or {}).get("on"):   # to another city (order_intercity): no reservation, no reminder, no «На ОТХ»
+                _no_answer_step(conn, card, now, notify)
+        except Exception:
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the move to OTH of card %s after the reminder failed", card_id)
 
 
 def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_manager.Deliver] = None,
@@ -407,9 +443,11 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the reminder of the returns to give failed")
+    _silent_moves(conn, now, notify)
     moment = datetime.fromisoformat(now)
     if moment.hour < FIRST_HOUR:
         return 0
+    _release_held(conn, now, notify)
     today = moment.date()
     hours = order_manager.duty_settings(conn)["hours"]
     working = hours[0] <= moment.hour < hours[1]
@@ -431,12 +469,6 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
             if (card.get("intercity") or {}).get("on"):      # to another city (order_intercity): no reservation, no reminder, no «На ОТХ»
                 continue
             until = date.fromisoformat(card["reserve_until"])
-            try:
-                if _no_answer_step(conn, card, now, notify):
-                    continue                                  # on «На ОТХ» now: no alert of the end of the reservation
-            except Exception:
-                conn.rollback()
-                logging.getLogger("tires_sync.orders").exception("the move to OTH of card %s after the reminder failed", card_id)
             try:
                 _point_step(conn, card, today, now, hours, working, deliver, point_send, notify)
             except Exception:                                 # the alert of the manager still goes

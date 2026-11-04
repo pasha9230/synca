@@ -559,6 +559,18 @@ def _close_tasks(conn, order_id, titles: tuple, how: str, now: str, who: str, re
     return closed
 
 
+def left_return(conn, card_id, stage: dict, now: str, who: str) -> None:
+    """The order left «На ОТХ» / «На возврат» by any path (orders.move_card, in its transaction: no commit, the owner 2026-11-04): the open tasks of the return
+    close by themselves — done when the order closes (won, closed), cancelled when it goes back to work or is lost."""
+    from . import tasks
+    done = stage["kind"] in ("won", "closed")
+    for task_id, kind, title in conn.execute("SELECT id, kind, title FROM callback_task WHERE order_id = ? AND title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL",
+                                             (card_id,) + RETURN_TITLES).fetchall():
+        conn.execute("UPDATE callback_task SET %s = ?, done_by = ? WHERE id = ?" % ("done_at" if done else "cancelled_at"), (now, who, task_id))
+        orders.add_event(conn, card_id, now, who, "task", "Задача %s: %s — заказ на этапе «%s»" % ("выполнена" if done else "отменена", tasks._what(kind, title), stage["name"]), level="grey")
+        _audit(conn, now, who, "callback_done" if done else "callback_cancel", {"task": int(task_id)})
+
+
 def _open_return_task(conn, order_id) -> bool:
     return conn.execute("SELECT 1 FROM callback_task WHERE order_id = ? AND title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL LIMIT 1",
                         (order_id,) + RETURN_TITLES).fetchone() is not None
@@ -580,7 +592,7 @@ def answer_here(conn, card: dict, who: str, now: str) -> tuple:
 AGREE_AFTER = timedelta(days=6, hours=12)
 AGREE_KEY = "oth_agree_due:%d:%s"                # per order and stay on «На ОТХ»: told|<at>
 TASK_DAYS_KEY = "orders.return_task_days"        # «Срок задачи на возврат», working days; the owner sets it (orders_settings)
-TASK_DAYS_DEFAULT, TASK_DAYS_MAX = 1, 30
+TASK_DAYS_DEFAULT, TASK_DAYS_MAX = 2, 30      # the owner 2026-11-04: 2 working days from the move
 ITEM_KEY = "oth_item_return:%d:%s"               # per position and stay on «На ОТХ»: {"qty", "at", "by", "task"} — a position moved by hand, «Согласуем» while its task is open
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -667,12 +679,12 @@ REMIND_KEY = "oth_handover_remind:%d:%s"         # per order and day
 
 
 def remind_handover(conn, now: str, notify) -> int:
-    """The point did not press «Подписал акт и отдал» by the agreed date: on every later Monday, Wednesday and Friday from 08:59 it is told again, once a
-    day, until it presses. Returns how many were told."""
+    """The point did not press «Подписал акт и отдал» by the agreed date: on every later Monday, Wednesday and Friday from 08:59 to the end of the working
+    hours it is told again, once a day, until it presses. Returns how many were told."""
     from . import message_texts, order_manager
     today = date.fromisoformat(now[:10])
-    if today.weekday() not in RETURN_DAYS or now[11:16] < HANDOVER_AT:
-        return 0
+    if today.weekday() not in RETURN_DAYS or now[11:16] < HANDOVER_AT or int(now[11:13]) >= order_manager.duty_settings(conn)["hours"][1]:
+        return 0                                                                     # a late catch-up of the timer never tells at night
     told = 0
     for card_id, day in conn.execute("SELECT c.id, r.return_date FROM oth_return_plan r JOIN order_card c ON c.id = r.order_id JOIN order_stage s ON s.id = c.stage_id "
                                      "WHERE r.signed_at IS NULL AND r.return_date < ? AND c.point_id IS NOT NULL AND s.code IN (?, ?) ORDER BY c.id",
@@ -728,8 +740,7 @@ def _return_task(conn, card: dict, now: str, who: str, what: str = "") -> int:
 
 def moved_by_hand(conn, before: dict, now: str, who: str) -> None:
     """A person moved the order in the panel (`before`: the card before the move; the board, the window, the chat, the button of the card).
-    Into «На возврат»: the task of the return, unless the return is agreed already or that task is open: no double. Out of the return to a stage of work:
-    the task is cancelled. Never raises: the move stands."""
+    Into «На возврат»: the task of the return, unless the return is agreed already or that task is open: no double. Never raises: the move stands."""
     try:
         card = orders.get_card(conn, before["id"])
         was, code = before["stage"]["code"], card["stage"]["code"]
@@ -737,8 +748,6 @@ def moved_by_hand(conn, before: dict, now: str, who: str) -> None:
             if return_plan(conn, card["id"]) is None and not _open_return_task(conn, card["id"]):
                 _return_task(conn, card, now, who)
                 conn.commit()
-        elif was in RETURNING and code not in RETURNING:
-            _close_tasks(conn, card["id"], RETURN_TITLES, "cancel", now, who)
     except Exception:                                                                # noqa: BLE001
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the return task of order %s moved by hand failed", before["id"])
