@@ -130,7 +130,11 @@ def test_rights_cut_the_forms_of_the_panel_not_the_view(w):
 
 def test_a_point_never_gets_the_panel(w):
     flag(w, "all")
-    html = person(w, "pt1").get("/chats").get_data(as_text=True)
+    w["conn"].execute("UPDATE point SET avito_account_id = ? WHERE id = ?", (w["accounts"][0], w["pid"]))         # the chat is of the point's account: it opens
+    w["conn"].commit()
+    r = person(w, "pt1").get("/chats/%d" % w["chat"])
+    html = r.get_data(as_text=True)
+    assert r.status_code == 200 and 'class="chat-thread' in html
     assert "data-order-panel" not in html and "o2-order-line" not in html and "office2-pages.css" not in html
 
 
@@ -138,10 +142,20 @@ def test_the_script_and_the_style_keep_their_contract():
     js = (PANEL / "static" / "app.js").read_text(encoding="utf-8")
     block = js.split("«Чаты» of the new view: the order in a panel", 1)[1].split("// 11) Заказ: поиск позиции", 1)[0]
     assert 'MARK = "#order"' in block and "history.pushState" in block and "history.back()" in block and 'addEventListener("popstate", sync)' in block
-    assert '".modal-backdrop.is-open, details.menu[open]"' in block and '.suggest:not([hidden])' in block            # Esc: what is on top closes first
+    assert '".modal-backdrop.is-open, details.menu[open], #bell-pop:not([hidden])"' in block and 'closest(".topbar")' in block and '.suggest:not([hidden])' in block            # Esc: what is on top closes first
+    assert "form && (isOpen() ||" in block                                                                            # a reply to the client keeps the panel open
+    assert "if (live && !held)" in js                                                                                 # held back: the next poll asks again
     assert "sessionStorage" in block and "localStorage" not in block                                                  # no state is kept beyond the tab
     assert '[".chats-main .card-head", ".o2-order-line", ".chats-deal"]' in js                                        # the live refill follows the line
     assert 'mine.closest("[data-order-panel]") && mine.querySelector("details[open], .o2-toggle:checked")' in js      # and leaves what is half typed in the panel
     css = (PANEL / "static" / "office2-pages.css").read_text(encoding="utf-8")
     assert ".o2 .chats-layout.is-deal-folded .o2-cl-panel{display:flex}" in css    # a «Свернуть» remembered from the old view never hides the panel
+    assert "z-index:25;" in css.split(".o2-order-panel{position:fixed", 1)[1].split("}", 1)[0]    # under the top bar's bell and search (30), under the windows (50)
+    assert ".o2-panel-open .o2-cl-list{display:none}" in css                       # narrow screens: the chat beside the panel keeps the room
     assert ".o2-order-panel{top:0;left:0;width:auto;" in css                       # the phone: the whole screen
+
+
+def test_a_chat_without_an_order_keeps_the_code_and_the_stock_of_the_ad_in_the_panel():
+    html = (PANEL / "templates" / "office2" / "chats.html").read_text(encoding="utf-8")
+    branches = html.split('<h3 id="order-panel-h">')
+    assert "{% if current.product %}" in branches[1] and "{% if current.product %}" in branches[2]        # with an order and without

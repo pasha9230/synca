@@ -92,6 +92,7 @@
 {% if deal.gaps %}<p class="small text-warn chat-deal-gaps">Чтобы перевести в «Заказ оформлен» и дальше, не хватает: <b>{{ deal.gaps|join(", ") }}</b>. <a href="/orders/{{ deal.id }}{{ '#items' if 'позиции' in deal.gaps else '' }}">Заполнить в заказе</a></p>{% endif %}
 </div></div>
 {% else %}<div class="o2-panel-head"><h3 id="order-panel-h">Заказ по чату</h3></div>
+{% if current.product %}<p class="small muted">Артикул {{ current.product.code }}{% if current.product.stock is not none %} · у поставщика по последней выгрузке: {{ current.product.stock }} шт.{% else %} · в последней выгрузке не найден{% endif %}</p>{% endif %}
 <div class="o2-panel-body o2-panel-row"><p class="muted">Чат не привязан к заказу.{% set cl = chat_client(current.id) %}{% if cl and can("clients") %} Клиент: <a href="/clients/{{ cl.id }}">{{ cl.name or "карточка клиента" }}</a>.{% endif %}</p>
 {% if can_post("chat_create_deal") %}<form method="post" action="/chats/{{ current.id }}/create-deal">{{ keep }}<button class="btn btn--primary btn--sm">Создать заказ</button></form>{% endif %}
 {% if can_post("chat_link") %}<form method="post" action="/chats/{{ current.id }}/link" class="row" style="gap:var(--s-2)">{{ keep }}<input class="input input--sm input--num" name="order_id" placeholder="№ заказа" style="width:110px" inputmode="numeric" aria-label="Номер заказа"><button class="btn btn--secondary btn--sm">Привязать</button></form>{% endif %}</div>

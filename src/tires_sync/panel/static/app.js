@@ -721,10 +721,11 @@
         thread.innerHTML = fresh.innerHTML;
         thread.scrollTop = atEnd ? thread.scrollHeight : top;
       }
+      var held = false;
       [".chats-main .card-head", ".o2-order-line", ".chats-deal"].forEach(function (sel) {      // the head and the deal block follow too, unless a hand is in them
         var mine = document.querySelector(sel), fresh = doc.querySelector(sel);
         if (!(mine && fresh && mine.innerHTML !== fresh.innerHTML && !mine.contains(document.activeElement))) return;
-        if (mine.closest("[data-order-panel]") && mine.querySelector("details[open], .o2-toggle:checked")) return;   // the panel stands beside the chat: what is half typed in it waits while the reply is written
+        if (mine.closest("[data-order-panel]") && mine.querySelector("details[open], .o2-toggle:checked")) { held = true; return; }   // the panel stands beside the chat: what is half typed in it waits while the reply is written
         var picker = mine.querySelector(".chat-pick");             // «Подобрать позицию» stays as it is (what is typed, its list of suggestions)
         mine.innerHTML = fresh.innerHTML;
         var slot = mine.querySelector(".chat-pick");
@@ -736,7 +737,7 @@
       });
       document.dispatchEvent(new Event("chats:refilled"));
       var live = doc.getElementById("chats-live");
-      if (live) sig = box.dataset.sig = live.dataset.sig;
+      if (live && !held) sig = box.dataset.sig = live.dataset.sig;           // held: the next poll asks again, the panel catches up once nothing is half typed
     }
     function ask() {
       if (busy || document.hidden) return;
@@ -772,6 +773,10 @@
       if (on && window.screen.width < 768) { wide = viewport.content; viewport.content = "width=device-width, initial-scale=1"; }
       else if (!on && wide) { viewport.content = wide; wide = null; }
     }
+    function flashes() {                                                   // on a phone the panel covers the page: what the panel's form answered is read in the panel
+      var note = document.querySelector(".page .msgs");
+      if (wide && note && note.children.length) panel.insertBefore(note, panel.querySelector(".chats-deal"));
+    }
     function show(on) {
       if (on === isOpen()) return;
       var wasIn = panel.contains(document.activeElement);
@@ -803,7 +808,7 @@
         return left[0] === chat && Date.now() - Number(left[1]) < WITHIN;
       } catch (e) { return false; }
     }
-    function ours(form) { return form && (panel.contains(form) || form.hasAttribute("data-order-panel-after")); }
+    function ours(form) { return form && (isOpen() || form.hasAttribute("data-order-panel-after")); }     // a reply to the client with the panel open: the panel stays too
     document.addEventListener("submit", function (e) { if (ours(e.target)) remember(); }, true);
     document.addEventListener("change", function (e) {                     // data-autosubmit calls form.submit(): no submit event
       var form = e.target.closest && e.target.closest("form[data-autosubmit]");
@@ -816,13 +821,15 @@
     });
     document.addEventListener("keydown", function (e) {                    // first of all the Esc listeners: an open window, menu or list of suggestions closes first
       if (e.key !== "Escape" || !isOpen()) return;
-      if (document.querySelector(".modal-backdrop.is-open, details.menu[open]") || panel.querySelector(".suggest:not([hidden])")) return;
+      if (document.querySelector(".modal-backdrop.is-open, details.menu[open], #bell-pop:not([hidden])") || panel.querySelector(".suggest:not([hidden]) li:not(.s-empty)")) return;
+      if (e.target.closest && e.target.closest(".topbar")) return;         // the search of the top bar has its own Esc
       close();
     }, true);
     window.addEventListener("popstate", sync);
     if (comesBack() && window.location.hash !== MARK) history.replaceState(history.state, "", MARK);
     panel.style.transition = "none";                                       // a page that opens with the panel does not slide it in
     sync();
+    flashes();
     window.requestAnimationFrame(function () { window.requestAnimationFrame(function () { panel.style.transition = ""; }); });
   })();
   // 11) Заказ: поиск позиции по коду или названию. Подсказки с остатком и ценой объявления; выбор подставляет код и цену (её можно поменять).
