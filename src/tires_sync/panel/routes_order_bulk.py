@@ -49,10 +49,10 @@ def _each(ids, change) -> tuple:
     done, refused = 0, []
     for card_id in ids:
         try:
-            card = orders.get_card(get_conn(), card_id)
-        except OrderError:
-            continue
-        try:
+            try:
+                card = orders.get_card(get_conn(), card_id)
+            except OrderError:
+                continue
             done += 1 if change(card) else 0
         except OrderError as err:
             refused.append("№%d: %s" % (card_id, err))

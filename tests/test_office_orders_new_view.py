@@ -7,6 +7,7 @@ import io
 import json
 import re
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -395,3 +396,27 @@ def test_a_press_on_orders_already_gone_leaves_no_record(w):
     for _ in range(2):                                                    # «Назад» and the same press again
         partner.post("/orders/bulk/delete", data={"csrf": csrf(partner), "id": _ids(w, "a"), "confirmed": "1"})
     assert w["conn"].execute("SELECT COUNT(*) FROM audit WHERE action = 'orders_bulk_delete'").fetchone()[0] == 1
+
+
+def test_a_locked_database_on_reading_an_order_stops_the_press_too(w, monkeypatch):
+    flag(w, "all")
+    real, second, thrown = orders.get_card, w["ids"]["b"], []
+
+    def locked_once(conn, card_id, *args, **kwargs):
+        if card_id == second and not thrown:
+            thrown.append(card_id)
+            raise sqlite3.OperationalError("database is locked")
+        return real(conn, card_id, *args, **kwargs)
+    monkeypatch.setattr(orders, "get_card", locked_once)
+    partner = client_of(w, "zaman")
+    r = partner.post("/orders/bulk/tag", data={"csrf": csrf(partner), "id": _ids(w, "a", "b", "c"), "tag": "срочно", "mode": "on"}, follow_redirects=True)
+    assert r.status_code == 200 and "База была занята" in r.get_data(as_text=True)
+    monkeypatch.undo()
+    assert "срочно" in orders.get_card(w["conn"], w["ids"]["a"])["tags"]               # what is done stays done
+    assert "срочно" not in orders.get_card(w["conn"], w["ids"]["c"])["tags"]           # the rest is not touched
+
+
+def test_a_click_beside_the_checkbox_is_skipped_by_the_row_handler_itself():
+    root = Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static"
+    assert 't.closest("a,button,input,label,select,.o2-chk")' in (root / "app.js").read_text(encoding="utf-8")
+    assert "stopPropagation" not in (root / "office2.js").read_text(encoding="utf-8")    # the menus close on a click outside

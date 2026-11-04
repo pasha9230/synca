@@ -1289,7 +1289,7 @@
       return;
     }
     var row = t.closest("[data-href]");                 // every list of orders: a row or a card of an order (the owner 2026-10-29)
-    if (!row || t.closest("a,button,input,label,select") || String(window.getSelection ? window.getSelection() : "")) return;
+    if (!row || t.closest("a,button,input,label,select,.o2-chk") || String(window.getSelection ? window.getSelection() : "")) return;
     if (e.ctrlKey || e.metaKey) window.open(row.getAttribute("data-href"), "_blank");
     else window.location.href = row.getAttribute("data-href");
   });
