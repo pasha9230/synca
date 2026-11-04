@@ -216,6 +216,8 @@ def webmim_prices(conn, card_ids) -> Dict[int, Dict[str, float]]:
     pairs: Dict[str, List[int]] = {}
     orders: Dict[int, dict] = {}
     elsewhere = webmim_match.made_elsewhere(conn, WEBMIM_SERVER)           # a test order made by the button is never a live one
+    from . import oth_sale
+    elsewhere |= oth_sale.borrowed_ids(conn)                               # the number of tyres from OTH: the WebMIM order is the first order's
     for cid, webmim_id, webmim_number in conn.execute("SELECT id, webmim_id, webmim_number FROM order_card WHERE webmim_id != '' OR webmim_number != ''"):
         if cid in elsewhere:
             continue

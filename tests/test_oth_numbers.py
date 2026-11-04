@@ -1,0 +1,360 @@
+"""The numbers of tyres taken from «На ОТХ» (the owner 2026-11-04, the order 515): the new order has the WebMIM number and the transfer number of
+the order its tyres were bought by, no order of WebMIM of its own."""
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from tests.test_order_reserve import card_at, db, stage
+from tests.test_oth_sale import LATER, T, line, new_order, offer, take
+from tires_sync import oth_manual, order_engine as engine, order_manager, order_points, order_report, \
+    order_templates as templates, orders, oth_sale, sales as sales_store, webmim_match
+
+NUMBER, TRANSFER = "5254033", "26R-1400424"
+OLD_NUMBERS = (NUMBER, TRANSFER)
+
+
+def source(conn, number=NUMBER, transfer=TRANSFER, code="oth"):
+    cid = card_at(conn, code, T)
+    conn.execute("UPDATE order_card SET webmim_number = ?, transfer_number = ? WHERE id = ?", (number, transfer, cid))
+    conn.commit()
+    return cid
+
+
+def numbers(conn, cid):
+    return tuple(conn.execute("SELECT webmim_number, transfer_number FROM order_card WHERE id = ?", (cid,)).fetchone())
+
+
+def journal(conn, cid):
+    return [e["text"] for e in orders.list_events(conn, cid)]
+
+
+def add_supplier(conn, cid, goods="2"):
+    return orders.add_item(conn, cid, goods_id=goods, name="Шина " + goods, brand_key="b", season="winter", diameter=16, territory="1", qty=4,
+                           sale_unit=6000, supplier_price=4500, terms=None, fee_pct=0, promo_pct=0, now=LATER, author="o")
+
+
+def untake_all(conn, cid):
+    for item_id in list(oth_sale.taken(conn, cid)):
+        oth_sale.untake(conn, cid, item_id, LATER, "o")
+
+
+# ---- the copy --------------------------------------------------------------------------------------------------------------------------
+
+def test_a_take_gives_the_new_order_the_numbers_of_the_old_one_with_a_journal_line(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    assert take(conn, cid) == 4
+    assert numbers(conn, cid) == OLD_NUMBERS and numbers(conn, old) == OLD_NUMBERS
+    assert "Номер WebMIM и перемещение взяты из заказа №%d" % old in journal(conn, cid)
+    card = orders.get_card(conn, cid)
+    assert card["webmim_id"] == ""                                                  # no id of WebMIM: the order is the old one's
+    assert oth_sale.borrowed_ids(conn) == {cid} and oth_sale.borrowed_ids(conn, cid) == {cid} and oth_sale.borrowed_ids(conn, old) == set()
+
+
+def test_a_field_filled_in_is_left_and_only_the_empty_one_is_taken(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    orders.update_card(conn, cid, {"transfer_number": "МОЙ-1"}, T, "o")
+    take(conn, cid)
+    assert numbers(conn, cid) == (NUMBER, "МОЙ-1")
+    assert "Номер WebMIM взят из заказа №%d" % old in journal(conn, cid)
+
+
+def test_a_source_without_a_transfer_gives_the_number_alone(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn, transfer="")
+    cid = new_order(conn)
+    take(conn, cid)
+    assert numbers(conn, cid) == (NUMBER, "") and "Номер WebMIM взят из заказа №%d" % old in journal(conn, cid)
+
+
+def test_positions_of_the_supplier_keep_it_empty_and_it_is_said(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn, qty=6)                                                    # 4 from OTH, 2 stay the supplier's
+    take(conn, cid)
+    assert numbers(conn, cid) == ("", "")
+    assert any("не взяты: в заказе есть позиции поставщика" in t for t in journal(conn, cid))
+
+
+def test_tyres_of_two_orders_keep_it_empty_and_a_number_taken_before_goes(tmp_path):
+    conn = db(tmp_path)
+    first = source(conn)
+    second = source(conn, number="5254044", transfer="26R-2")
+    cid = new_order(conn, qty=4, extra=(("1", 4),))                                 # two positions of the same tyre
+    lines = [i for i in orders.get_card(conn, cid)["items"]]
+    oth_sale.take(conn, cid, lines[0]["id"], orders.get_card(conn, first)["items"][0]["id"], LATER, "o")
+    assert numbers(conn, cid) == ("", "")                                           # the second position is still the supplier's
+    oth_sale.take(conn, cid, lines[1]["id"], orders.get_card(conn, second)["items"][0]["id"], LATER, "o")
+    assert numbers(conn, cid) == ("", "") and any("разных источников" in t and "№%d" % first in t for t in journal(conn, cid))
+    # one source first, then a second: what was taken goes
+    one = new_order(conn, qty=2)
+    third = source(conn, number="5254055", transfer="26R-3")
+    oth_sale.take(conn, one, line(conn, one)["id"], orders.get_card(conn, third)["items"][0]["id"], LATER, "o")
+    assert numbers(conn, one) == ("5254055", "26R-3")
+    fourth = source(conn, number="5254066", transfer="26R-4")
+    add_id = add_supplier(conn, one, goods="1")                                     # a new position: the number gives way at once
+    assert numbers(conn, one) == ("", "")
+    oth_sale.take(conn, one, add_id, orders.get_card(conn, fourth)["items"][0]["id"], LATER, "o")
+    assert numbers(conn, one) == ("", "") and not oth_sale.borrowed_ids(conn, one)
+
+
+def test_the_point_own_stock_has_no_numbers_and_nothing_is_said(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn)
+    oth_manual.set_qty(conn, "1", orders.get_card(conn, cid)["point_id"], 4, T, "owner")
+    take(conn, cid)
+    assert numbers(conn, cid) == ("", "") and oth_sale.taken_ids(conn, cid)
+    assert not any("Номер" in t for t in journal(conn, cid))
+
+
+def test_the_point_own_stock_and_an_order_together_are_not_guessed(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn, qty=4, extra=(("1", 2),))
+    a, b = orders.get_card(conn, cid)["items"]
+    oth_sale.take(conn, cid, a["id"], orders.get_card(conn, old)["items"][0]["id"], LATER, "o")
+    oth_manual.set_qty(conn, "1", orders.get_card(conn, cid)["point_id"], 2, T, "owner")
+    oth_sale.take(conn, cid, b["id"], offer(conn, cid)["from_item"], LATER, "o")
+    assert numbers(conn, cid) == ("", "") and any("свой остаток" in t for t in journal(conn, cid))
+
+
+def test_a_deal_of_the_point_stock_and_the_point_own_sale_get_no_number(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    source(conn)
+    source(conn, number="5254044", transfer="26R-2")
+    stock = new_order(conn)
+    conn.execute("UPDATE order_card SET deal_kind = 'stock' WHERE id = ?", (stock,))
+    conn.commit()
+    take(conn, stock)
+    assert numbers(conn, stock) == ("", "")
+    own = new_order(conn)
+    monkeypatch.setattr(order_points, "account_orders", lambda _c: {own})           # the order of the point's own Avito account
+    pid = orders.get_card(conn, own)["point_id"]
+    assert own in order_points.own_sales(conn, pid)
+    take(conn, own)
+    assert numbers(conn, own) == ("", "") and own in order_points.own_sales(conn, pid)       # still the point's
+
+
+def test_a_chain_takes_the_number_of_the_order_of_purchase(tmp_path):
+    conn = db(tmp_path)
+    first = source(conn)
+    middle = new_order(conn)
+    take(conn, middle)
+    conn.execute("UPDATE order_card SET webmim_number = '', transfer_number = '' WHERE id = ?", (middle,))     # B without a number
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "oth"), middle))
+    conn.commit()
+    last = new_order(conn)
+    oth_sale.take(conn, last, line(conn, last)["id"], next(iter(oth_sale.taken_ids(conn, middle))), LATER, "o")
+    assert numbers(conn, last) == OLD_NUMBERS and "Номер WebMIM и перемещение взяты из заказа №%d" % first in journal(conn, last)
+
+
+# ---- what the number must not change -----------------------------------------------------------------------------------------------------
+
+def test_the_copied_number_lets_the_order_take_more_and_give_back(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    card = orders.get_card(conn, cid)
+    assert numbers(conn, cid)[0] == NUMBER and oth_sale.why_not(conn, card) is None and oth_sale.all_from_oth(conn, card)
+    assert oth_sale.can_untake(conn, cid, next(iter(oth_sale.taken_ids(conn, cid))))
+
+
+def test_a_number_written_by_a_person_still_blocks(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    orders.update_card(conn, cid, {"webmim_number": "777"}, T, "o")
+    assert "уже есть в WebMIM" in oth_sale.why_not(conn, orders.get_card(conn, cid))
+    with pytest.raises(orders.OrderError):
+        take(conn, cid)
+    assert numbers(conn, cid)[0] == "777"
+
+
+def test_the_same_number_without_a_take_is_a_person_s_and_is_kept(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    orders.update_card(conn, cid, {"webmim_number": NUMBER}, T, "o")
+    assert oth_sale.borrowed_ids(conn, cid) == set() and "уже есть в WebMIM" in oth_sale.why_not(conn, orders.get_card(conn, cid))
+    add_supplier(conn, cid)
+    assert numbers(conn, cid)[0] == NUMBER
+
+
+# ---- untake ------------------------------------------------------------------------------------------------------------------------------
+
+def test_untake_removes_what_was_taken(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    untake_all(conn, cid)
+    assert numbers(conn, cid) == ("", "") and numbers(conn, old) == OLD_NUMBERS
+    assert any("Номер WebMIM и перемещение убраны" in t for t in journal(conn, cid))
+    assert orders.get_card(conn, old)["stage"]["code"] == "oth"
+
+
+def test_untake_keeps_a_transfer_changed_by_a_person(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.update_card(conn, cid, {"transfer_number": "ИСПРАВЛЕН"}, LATER, "o")
+    untake_all(conn, cid)
+    assert numbers(conn, cid) == ("", "ИСПРАВЛЕН")
+
+
+def test_untake_keeps_them_while_another_line_needs_them(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn, qty=2, extra=(("1", 2),))
+    a, b = orders.get_card(conn, cid)["items"]
+    from_item = orders.get_card(conn, old)["items"][0]["id"]
+    oth_sale.take(conn, cid, a["id"], from_item, LATER, "o")
+    oth_sale.take(conn, cid, b["id"], from_item, LATER, "o")
+    assert numbers(conn, cid) == OLD_NUMBERS
+    item_ids = sorted(oth_sale.taken_ids(conn, cid))
+    oth_sale.untake(conn, cid, item_ids[0], LATER, "o")
+    assert numbers(conn, cid) == OLD_NUMBERS
+    oth_sale.untake(conn, cid, item_ids[1], LATER, "o")
+    assert numbers(conn, cid) == ("", "")
+
+
+def test_a_failed_take_leaves_no_number(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    real = orders.move_card
+    def refuse(*_a, **_k):
+        conn.rollback()
+        return False
+    orders.move_card = refuse
+    try:
+        with pytest.raises(oth_sale.OthSaleError):
+            take(conn, cid)
+    finally:
+        orders.move_card = real
+    assert numbers(conn, cid) == ("", "") and numbers(conn, old) == OLD_NUMBERS
+
+
+# ---- positions added later -----------------------------------------------------------------------------------------------------------------
+
+def test_a_position_of_the_supplier_added_takes_the_copy_away_and_removing_it_brings_it_back(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    item = add_supplier(conn, cid)
+    assert numbers(conn, cid) == ("", "")
+    assert any("убраны: в заказе есть позиции поставщика" in t for t in journal(conn, cid))
+    orders.remove_item(conn, item, LATER, "o")
+    assert numbers(conn, cid) == OLD_NUMBERS
+
+
+def test_past_placed_a_position_added_leaves_the_numbers(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    orders.move_card(conn, cid, stage(conn, "placed"), LATER, "o")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "placed"
+    add_supplier(conn, cid)
+    assert numbers(conn, cid) == OLD_NUMBERS                                        # the client may have heard it
+
+
+# ---- the message --------------------------------------------------------------------------------------------------------------------------
+
+def test_the_waiting_message_becomes_sendable_with_the_right_numbers(tmp_path):
+    conn = db(tmp_path)
+    source(conn)
+    templates.add_samples(conn)
+    conn.execute("UPDATE point SET address = 'Улица, 1' WHERE name = 'Бета'")
+    conn.commit()
+    template = next(t for t in templates.list_templates(conn) if t["name"] == "Клиенту: заказ оформлен")
+    cid = new_order(conn)
+    conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (cid, -2, T, "message", str(template["id"]), stage(conn, "new"), "error", template["name"], "",
+                                                     "Не хватает: Номер заказа WebMIM.", T))
+    conn.commit()
+    task = next(t for t in engine.list_tasks(conn, cid) if t["kind"] == "message")
+    engine.refresh_tasks(conn, cid, T)
+    assert engine.get_task(conn, task["id"])["status"] == "error"
+    take(conn, cid)
+    engine.refresh_tasks(conn, cid, LATER)
+    done = engine.get_task(conn, task["id"])
+    assert done["status"] == "pending" and done["result"] == "" and "Заказ %s оформлен" % NUMBER in done["body"] and "[" not in done["body"]
+    text, missing = templates.render(conn, orders.get_card(conn, cid), template["body"], LATER)
+    assert missing == [] and NUMBER in text
+
+
+# ---- the rest of the system -------------------------------------------------------------------------------------------------------------
+
+def webmim_snapshot(conn, order_id="900", number=NUMBER, goods="1", price=5000.0):
+    connections_config(conn)
+    conn.execute("INSERT INTO webmim_order (server, id, number, items, seen_at, items_at, create_date) VALUES ('prod',?,?,?,?,?,?)",
+                 (order_id, number, json.dumps([{"goods_id": goods, "name": "Nokian", "qty": 4, "price": price}]), T, T, "2026-10-29T10:00:00"))
+    conn.commit()
+
+
+def connections_config(conn):
+    from tires_sync import connections
+    connections.set_config(conn, "webmim_orders", 0, {"server": "prod"}, T, "owner")
+
+
+def test_the_webmim_order_stays_paired_with_the_first_order_only(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    webmim_snapshot(conn)
+    snap = webmim_match.snapshot(conn, "prod")
+    assert webmim_match.shared(conn, snap) == {} and webmim_match.taken(conn, snap) == {"900": old}
+    block = webmim_match.card_block(conn, orders.get_card(conn, cid))
+    assert block["borrowed"] and block["order"] is None and not block["not_found"] and block["differences"] == [] and block["hints"] == []
+    assert webmim_match.card_block(conn, orders.get_card(conn, old))["order"]["id"] == "900"
+    from datetime import date
+    report = webmim_match.reconcile(conn, date(2026, 10, 29))
+    assert report["shared"] == [] and cid not in {c["id"] for c in report["not_found"] + report["unpaired"]}
+
+
+def test_no_purchase_is_counted_twice_or_lost(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn, qty=2)                                                    # 2 of 4: the old order keeps the other two
+    take(conn, cid)
+    assert numbers(conn, cid)[0] == NUMBER
+    webmim_snapshot(conn)
+    assert order_report.webmim_prices(conn, {old, cid}) == {old: {"1": 5000.0}}     # the old order's price stays, the new one has none
+    # the sale of the new order: at the purchase written, one sale per position, never at WebMIM's price
+    monkeypatch.setattr(order_report, "WEBMIM_FROM", "2000-01-01")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "done"), cid))
+    conn.commit()
+    ids = orders.record_sales(conn, cid, "2026-11-04", T, "o", "2026-11-04")
+    names = [c.strip() for c in sales_store.COLUMNS.split(",")]
+    rows = [dict(zip(names, r)) for r in conn.execute("SELECT %s FROM sale ORDER BY id" % sales_store.COLUMNS)]
+    assert len(rows) == 1 and rows[0]["pieces"] == 2 and ids
+    counted = order_report._counted(conn, rows)
+    assert len(counted) == 1 and not counted[0].get("webmim") and counted[0]["price_total"] == rows[0]["price_total"]
+    assert orders.get_card(conn, old)["sale_ids"] == []
+
+
+def test_the_point_s_word_means_the_new_order_when_the_old_one_gave_all_its_tyres(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    assert orders.get_card(conn, old)["stage"]["code"] == "cancel"
+    assert order_manager.find_orders(conn, int(NUMBER)) == [cid]
+
+
+def test_the_point_s_word_stays_a_dispute_while_the_old_one_holds_tyres(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn, qty=2)
+    take(conn, cid)
+    assert order_manager.find_orders(conn, int(NUMBER)) == sorted([old, cid])

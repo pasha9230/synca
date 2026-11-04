@@ -208,6 +208,9 @@ def find_orders(conn, number) -> List[int]:
                     if re.sub(r"[\s№#]", "", r[1]).isdigit() and int(re.sub(r"[\s№#]", "", r[1])) == number})
     if number not in found and conn.execute("SELECT 1 FROM order_card WHERE id = ? AND webmim_number = ''", (number,)).fetchone():
         found.append(number)                                     # an order with a WebMIM number is known to the points by that one only
+    if len(found) > 1:                                           # a number taken with the tyres from OTH: the order that gave them away is not meant
+        from .oth_sale import given_away
+        found = [i for i in found if i not in given_away(conn, found)] or found
     from .order_merge import moved_into
     return sorted({moved_into(conn, i) or i for i in found})     # a source of a merge: its merged order (order_merge, этап 2)
 
