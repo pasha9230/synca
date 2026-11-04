@@ -727,6 +727,9 @@ def test_the_publication_of_the_panel_tells_a_mirror_without_a_plan_too(tmp_path
     (folder / "avito_feed.xml").write_bytes(b"the file alone")
     monkeypatch.setattr(connections, "list_feed_accounts", lambda c: [{"id": 1, "live": True, "feed_token": "tok", "feed_mode": "mirror"}])
     monkeypatch.setattr(publishing, "promote_feed", lambda *a, **k: {"new": 1, "old": 1})
+    monkeypatch.setattr(publishing, "active_settings", lambda c: None)
+    monkeypatch.setattr(publishing, "expected_for", lambda c, settings: 0)
+    monkeypatch.setattr(connections, "display_name", lambda c, account_id: "A")
     assert publishing.publish_live_accounts(conn, tmp_path)[0]["ok"] is True
     assert oth_manual.carried_by(conn, 1) == {}
     conn.close()
