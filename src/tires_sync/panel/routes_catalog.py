@@ -581,8 +581,9 @@ def register(app) -> None:
             data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), offer, ref, parsed.offers)
             data["purchase"] = offer.base_price
             data["own_gone"] = gone is not None
-        elif has_right("money"):                                      # never at the supplier (or shown for viewing only): no own price, said why
-            data["own_closed"] = "never" if catalog_archive.item_info(conn, goods_id) is None else "view"
+        elif has_right("money"):                                      # shown for viewing only (4tochki before its switch, an old second unload):
+            data["own_closed"] = True                                 # not in the unload prices are counted from — no own price, said why
+            data["own_never"] = catalog_archive.item_info(conn, goods_id) is None
         if has_right("money"):                                        # the history of the supplier's purchase: who may see the purchase
             data["price_history"], data["price_history_since"] = catalog_archive.price_history(conn, goods_id)
         if MARKET_SHOWN and has_right("money"):                       # «Конкуренты»: the last snapshot of the competitors' prices (market.py)

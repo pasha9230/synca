@@ -29,6 +29,8 @@ def _history(conn, goods_id):
 
 def test_the_first_cycle_only_remembers_and_a_row_is_written_only_when_the_purchase_changed(tmp_path):
     conn = store.connect(tmp_path / "t.db")
+    _cycle(conn, "2026-11-05T09:00:00")                                  # ни одной позиции (поставщики недоступны) — не начало истории
+    assert catalog_archive.price_history(conn, "a")[1] == ""
     conn.execute("INSERT INTO catalog_item (goods_id, data, first_seen, last_seen, last_price) VALUES ('a', '{}', 'x', 'x', 4000)")
     conn.commit()                                       # архив был и до истории: его закупка — не «было» первого цикла
     _cycle(conn, "2026-11-05T10:00:00", a=5000.0, b=3000.0)
@@ -111,10 +113,13 @@ def test_a_position_never_at_the_supplier_has_the_own_price_closed_with_a_clear_
     client = app_of(tmp_path).test_client()
     tok = login(client)
     page = client.get("/catalog/item/s2-5").get_data(as_text=True)
-    assert "data-own-closed" in page and "никогда не было у поставщика" in page
+    assert "data-own-closed" in page and "только для просмотра" in page and "её нет и не было" in page
+    assert "никогда не было у поставщика" not in page                     # она у поставщика есть, только не в нашей выгрузке
     assert 'action="/catalog/item/s2-5/own-price"' not in page
     r = post(client, "/catalog/item/s2-5/own-price", tok, kind="price", value="4500", a=[str(first)], action="save")
-    assert "никогда не было у поставщика" in _flash(client, r)
+    assert "нет в выгрузке" in _flash(client, r)
+    r = post(client, "/catalog/item/s2-77/own-price", tok, kind="price", value="4500", a=[str(first)], action="save")
+    assert "никогда не было у поставщика" in _flash(client, r)                # Id, которого не было нигде
     conn = store.connect(tmp_path / "t.db")
     from tires_sync import staging
     assert not (staging.summary(conn)["changes"] or {}).get("price_overrides")

@@ -60,7 +60,7 @@ def record(conn, parsed, now: str) -> dict:
             (goods_id, _supplier(goods_id), _dump(offer), now, now, int(offer.stock), float(offer.base_price)))
         stats["seen"] += 1
     conn.executemany("INSERT INTO supplier_price_change (at, goods_id, was, price) VALUES (?,?,?,?)", changes)
-    if not since:
+    if not since and parsed.offers:                                 # a cycle with nothing usable is no start of the history
         conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (HISTORY_SINCE, now))
     stats["returned"] = len(returned)
     present_now = {}
