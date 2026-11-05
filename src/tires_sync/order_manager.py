@@ -740,7 +740,13 @@ def parse_refuse(text) -> Optional[Tuple[Optional[int], str]]:
     found = REFUSE_TEXT.match(text)
     if found is None:
         return None
-    return (int(found.group(1)) if found.group(1) else None), found.group(2)
+    number, reason = found.group(1), found.group(2)
+    if number and YEAR_AFTER.match(reason) and not MARKED_NUMBER.search(text[:found.start(2)]):
+        return None, "%s %s" % (number, reason)       # «отказ 2019 года»: the year of the tyres, not the order 2019 (review 2026-11-05)
+    return (int(number) if number else None), reason
+
+
+YEAR_AFTER = re.compile(r"(?:гг?|год[а-я]*)(?![^\W\d_])", re.I)
 
 
 def refuse_reason(reason) -> str:

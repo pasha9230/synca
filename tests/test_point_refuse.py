@@ -225,3 +225,27 @@ def test_the_undo_of_refuse_closes_its_red_record(tmp_path):
     post(mine, "/my-point/%d/undo" % card, "tok")
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
     assert red["id"] not in {a["id"] for a in order_alerts.open_alerts(conn, "owner", card)}
+
+
+# --- review round 2 ---------------------------------------------------------------------------------------------------------------
+
+def test_the_vk_refusal_of_an_order_to_another_city_waits_for_the_owner(tmp_path):
+    from tires_sync import order_intercity
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    order_intercity.save(conn, card, {"enabled": "1", "city": "Казань", "carrier": "ПЭК", "track": ""}, "2026-10-13T12:30:00", "o")
+    conn.commit()
+    answer = mgr.dispatch(conn, "c1", PEER, "отказ 5000100 старый год производства", None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and "в другой город" in answer and mgr.list_inbox(conn)
+
+
+@pytest.mark.parametrize("text", ["отказ 2019 года", "отказ 2019 год выпуска", "Отказ 2021г старый"])
+def test_a_year_is_never_taken_for_the_order(tmp_path, text):
+    """«отказ 2019 года» names the year of the tyres, not the order 2019 (review round 2): no order is moved, the point is asked which."""
+    app, _client, conn, pid, card = at_point(tmp_path)
+    year = orders.create_card(conn, dict(client_name="Год"), "2026-10-13T12:00:00", "o")
+    conn.execute("UPDATE order_card SET id = 2019 WHERE id = ?", (year,))
+    conn.commit()
+    assert mgr.parse_refuse(text)[0] is None
+    answer = mgr.dispatch(conn, "y1", PEER, text, None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and "О каком заказе" in answer
+    assert mgr.parse_refuse("отказ 5000100 2019 года")[0] == 5000100 and mgr.parse_refuse("отказ №2019 размер")[0] == 2019

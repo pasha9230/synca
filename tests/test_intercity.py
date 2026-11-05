@@ -256,11 +256,11 @@ def test_the_workplace_card_shows_the_tag_the_labels_and_the_courier_button(tmp_
     block = block[:block.index("</article>")]
     assert "В другой город" in block and intercity.HINT in block and "/orders/%d/labels/%d" % (card, label) in block
     assert "Скачать этикетки" in block and "Передал курьеру ТК" in block
-    assert "/my-point/%d/issued" % card not in block and "/my-point/%d/no_show" % card not in block
+    assert "/my-point/%d/issued" % card not in block and "/my-point/%d/refuse" % card not in block
     r = post(mine, "/my-point/%d/issued" % card, "tok", token="a" * 24)            # a crafted «Выдал»: refused
     assert r.status_code == 302 and code(conn, card) == "at_point"
-    r = post(mine, "/my-point/%d/no_show" % card, "tok", token="b" * 24)
-    assert code(conn, card) == "at_point" and not any("не пришёл" in e["text"] and e["level"] == "red" for e in orders.list_events(conn, card))
+    r = post(mine, "/my-point/%d/refuse" % card, "tok", token="b" * 24, reason="year")   # a crafted «ОТКАЗ» (2026-11-05): refused
+    assert code(conn, card) == "at_point" and not any(e["level"] == "red" and e["kind"] == "point" for e in orders.list_events(conn, card))
     press(mine, card, "shipped")
     assert code(conn, card) == "done" and len(to_client(app)) == 1
     assert told and "курьеру ТК" in told[0][1]
