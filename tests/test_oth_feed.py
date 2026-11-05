@@ -585,7 +585,7 @@ def test_the_check_of_a_mirror_knows_the_new_position_that_carries_oth(tmp_path)
     conn.close()
 
 
-def test_a_return_agreed_with_the_supplier_takes_the_tires_out_of_the_ad_at_once_and_a_cancelled_one_brings_them_back(tmp_path, capsys):
+def test_a_return_agreed_with_the_supplier_takes_the_tires_out_of_the_ad_at_once_and_a_cancelled_one_keeps_them_out(tmp_path, capsys):
     """The owner 2026-10-29: «Согласовано с поставщиком» (order_oth.agree) — the tires are no longer ours to sell, before the act МХ-3."""
     from tires_sync import order_oth
     prepared(tmp_path, accounts=("A",))
@@ -605,9 +605,9 @@ def test_a_return_agreed_with_the_supplier_takes_the_tires_out_of_the_ad_at_once
     try:
         conn.execute("DELETE FROM oth_return_plan WHERE order_id = ?", (cid,))   # the agreement cancelled before the act
         conn.commit()
-        assert oth_stock.pieces(conn) == {"101": 4}
+        assert oth_stock.pieces(conn) == {}                              # the owner 2026-11-04: «На возврат» is off sale in every label
     finally:
         conn.close()
-    assert run(tmp_path, AFTER) == 0                                     # ours again: it comes back under its Id, with the line
+    assert run(tmp_path, AFTER) == 0
     passed(capsys)
-    assert description(public(tmp_path), "101").startswith(AT_BETA + "\n")
+    assert "101" not in ads_of(public(tmp_path))

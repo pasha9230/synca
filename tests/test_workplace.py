@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from panel_helpers import post
+from panel_helpers import agree_return, post
 from test_mypoint import hand_over, handed, manager
 from test_roles import person
 from test_vk_commands import NOW, _card, _stage, ready
@@ -160,11 +160,12 @@ def test_the_cancel_and_a_take_at_once_one_wins(tmp_path):
 
 # ---- 6. the return of «На ОТХ» -------------------------------------------------------------------------------------------------
 
-def test_the_nearest_odd_date():
-    assert order_oth.return_date(date(2026, 10, 29)) == "2026-10-29"                       # odd: today
-    assert order_oth.return_date(date(2026, 10, 28)) == "2026-10-29"
-    assert order_oth.return_date(date(2026, 4, 30)) == "2026-05-01"                        # the end of a month: the 1st
-    assert order_oth.return_date(date(2026, 2, 28)) == "2026-03-01"
+def test_the_nearest_day_of_the_supplier():
+    assert order_oth.return_date(date(2026, 11, 2)) == "2026-11-02"                        # Monday: today
+    assert order_oth.return_date(date(2026, 11, 3)) == "2026-11-04"                        # Tuesday → Wednesday
+    assert order_oth.return_date(date(2026, 11, 6)) == "2026-11-06"                        # Friday: today
+    assert order_oth.return_date(date(2026, 11, 7)) == "2026-11-09"                        # Saturday → Monday
+    assert order_oth.return_date(date(2026, 11, 8)) == "2026-11-09"                        # Sunday → Monday
 
 
 def _on_oth(conn, pid, webmim="700500"):
@@ -180,18 +181,18 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     assert "Подписал акт и отдал" not in _text(mine.get("/my-point"))                     # not agreed: nothing to sign
     assert "Согласовано с поставщиком" in _text(client.get("/orders/%d" % oth))
     assert post(mine, "/orders/%d/oth-agreed" % oth, "tok").status_code == 403            # the point never agrees
-    r = post(client, "/orders/%d/oth-agreed" % oth, "tok")
+    r = agree_return(client, oth)
     assert r.status_code == 302
     plan = order_oth.return_plan(conn, oth)
     day = date.fromisoformat(plan["return_date"])
-    assert day.day % 2 == 1 and plan["signed_at"] is None
+    assert day.weekday() in (0, 2, 4) and plan["signed_at"] is None
     assert "Передать на возврат %s" % day.strftime("%d.%m") in _text(client.get("/orders/%d" % oth))     # marked in the card
-    post(client, "/orders/%d/oth-agreed" % oth, "tok")                                     # twice: one plan, one record
+    agree_return(client, oth)                                     # twice: one plan, one record
     assert sum("согласован с поставщиком" in e["text"] for e in orders.list_events(conn, oth)) == 1
     page = _text(mine.get("/my-point"))
-    assert 'data-return="%d"' % oth in page and "Возврат %s" % day.strftime("%d.%m") in page and "Подпишите акт МХ-3" in page
+    assert 'data-return="%d"' % oth in page and "Согласовано на возврат, %s" % day.strftime("%d.%m") in page and "Подпишите акт МХ-3" in page
     token = re.search(r'action="/my-point/%d/act_signed".*?name="token" value="([0-9a-f]+)"' % oth, page, re.S).group(1)
-    r = post(mine, "/my-point/%d/act_signed" % oth, "tok", token=token)
+    r = post(mine, "/my-point/%d/act_signed" % oth, "tok", token=token, handover="yes")
     assert r.status_code == 302
     got = orders.get_card(conn, oth)
     assert got["stage"]["code"] == "return" and got["stage"]["kind"] == "closed"        # 2026-11-03: closed with the purchase as the refund
@@ -202,7 +203,7 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     assert 'data-return="%d"' % oth not in _text(mine.get("/my-point"))
     assert "Акт МХ-3 подписан" in _text(client.get("/orders/%d" % oth))
     again = re.search(r'name="token" value="([0-9a-f]+)"', _all(mine)).group(1)
-    post(mine, "/my-point/%d/act_signed" % oth, "tok", token=again)                        # a press of an old page: nothing more
+    post(mine, "/my-point/%d/act_signed" % oth, "tok", token=again, handover="yes")                        # a press of an old page: nothing more
     assert sum(order_oth.SIGNED_LINE % ("Бета", order_oth.ACT) == e["text"] for e in orders.list_events(conn, oth)) == 1
     assert [r["kind"] for r in point_log.history(conn, pid)][0] == "act_signed"
 
@@ -479,7 +480,7 @@ def test_a_press_brings_back_to_the_tab_it_came_from(tmp_path):
     assert 'name="tab" value="moving"' in page                                               # the search keeps the tab too
 
 
-def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_are_on_oth_again(tmp_path):
+def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_stay_off_sale(tmp_path):
     from tires_sync import oth_stock
     app, client, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid, webmim="700502")
@@ -487,13 +488,13 @@ def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_are_on_oth_agai
     goods = orders.get_card(conn, oth)["items"][0]["goods_id"]
     assert goods in oth_stock.pieces(conn)
     assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))             # nothing agreed yet
-    post(client, "/orders/%d/oth-agreed" % oth, "tok")
+    agree_return(client, oth)
     assert goods not in oth_stock.pieces(conn) and 'data-return="%d"' % oth in _text(mine.get("/my-point"))
     assert "Отменить согласование" in _text(client.get("/orders/%d" % oth))
     assert post(mine, "/orders/%d/oth-unagree" % oth, "tok").status_code == 403             # the point never cancels it
     assert order_oth.return_plan(conn, oth) is not None
     assert post(client, "/orders/%d/oth-unagree" % oth, "tok").status_code == 302
-    assert order_oth.return_plan(conn, oth) is None and goods in oth_stock.pieces(conn)     # «Шины в наличии» comes back in the cycle
+    assert order_oth.return_plan(conn, oth) is None and goods not in oth_stock.pieces(conn)     # the owner 2026-11-04: «Согласуем» stays off sale
     assert 'data-return="%d"' % oth not in _text(mine.get("/my-point"))
     assert any("Согласование возврата с поставщиком отменено" in e["text"] for e in orders.list_events(conn, oth))
     assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_return_unagreed'").fetchone()[0] == 1
@@ -503,7 +504,7 @@ def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_are_on_oth_agai
 def test_no_cancel_once_the_act_is_signed(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid, webmim="700503")
-    post(client, "/orders/%d/oth-agreed" % oth, "tok")
+    agree_return(client, oth)
     assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "point")
     assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))
     assert not order_oth.unagree(conn, orders.get_card(conn, oth), NOW, "o") and order_oth.return_plan(conn, oth)["signed_at"]
@@ -512,7 +513,7 @@ def test_no_cancel_once_the_act_is_signed(tmp_path):
 def test_no_cancel_for_an_order_that_left_oth(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid, webmim="700504")
-    post(client, "/orders/%d/oth-agreed" % oth, "tok")
+    agree_return(client, oth)
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (_stage(conn, "at_point"), oth))      # moved off by hand, the plan unsigned
     conn.commit()
     assert not order_oth.unagree(conn, orders.get_card(conn, oth), NOW, "o") and order_oth.return_plan(conn, oth)

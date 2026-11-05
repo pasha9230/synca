@@ -7,7 +7,7 @@ import pytest
 
 from test_mypoint import manager
 from test_oth_sale import LATER, T, new_order, panel, point_id, stage, take
-from panel_helpers import post
+from panel_helpers import agree_return, post
 from tests.test_order_reserve import card_at, db
 from tires_sync import order_manager, order_notify, order_oth, order_templates, orders
 
@@ -89,7 +89,7 @@ def test_the_plaque_of_the_return_names_the_webmim_order_the_tyres_were_bought_b
     orders.move_card(conn, cid, stage(conn, "oth"), LATER, "o")                                   # the new client refused too
     plain = card_at(conn, "oth", T)
     for order in (cid, plain):
-        assert post(owner, "/orders/%d/oth-agreed" % order, tok).status_code == 302
+        assert agree_return(owner, order, tok).status_code == 302
     page = manager(app, conn, point_id(conn)).get("/my-point").get_data(as_text=True)
     plaque = page.split('data-return="%d"' % cid)[1].split("</article>")[0]
     assert "Подпишите акт МХ-3" in plaque and "по исходному заказу №%s" % _webmim(conn, old) in plaque
@@ -105,7 +105,7 @@ def test_the_cancelled_agreement_is_told_to_the_point_once(tmp_path, monkeypatch
     told = _quiet(monkeypatch)
     post(owner, "/orders/%d/oth-unagree" % oth, tok)                                              # nothing agreed: nothing to tell
     assert told == []
-    post(owner, "/orders/%d/oth-agreed" % oth, tok)
+    agree_return(owner, oth, tok)
     assert told == []                                                                              # the agreement is the plaque, as before
     assert post(owner, "/orders/%d/oth-unagree" % oth, tok).status_code == 302
     assert told == [(oth, "Возврат по заказу №%s поставщику отменён, шины остаются на точке" % _webmim(conn, oth))]

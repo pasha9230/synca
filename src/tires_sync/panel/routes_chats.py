@@ -746,6 +746,8 @@ def register(app) -> None:
             before = orders.get_card(conn, chat["order_id"])
             moved = orders.move_card(conn, chat["order_id"], stage_id, stamp, author())
             if moved:
+                from .. import order_oth                                   # «На возврат» by hand: the task (2026-11-04)
+                order_oth.moved_by_hand(conn, before, stamp, author())
                 from .. import order_manager                               # «Товар на точке» from the chat: «можно забирать» (2026-10-30)
                 send = lambda row, text, token: chats.send_reply(conn, _writer(conn, chats.get_chat(conn, row)), row, text, token, stamp, author())
                 arrived = order_manager.arrived_by_move(conn, before, send, stamp, author())

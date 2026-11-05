@@ -263,7 +263,7 @@ for _section, _endpoints in {
     "clients": ("clients_page", "client_page", "client_save", "client_merge", "client_split_order", "client_split_chat",
                 "clients_duplicates", "client_tag", "client_unmerge", "client_skip"),
     "catalog": ("price_changes_page", "price_changes", "feeds_page", "new_positions", "new_positions_seen", "mappings", "accept_confident", "confirm_brand", "export_mappings", "import_mappings",
-                "confirm_model", "save_old_model_name", "catalog", "catalog_cancel", "catalog_item_page", "catalog_market_switch", "catalog_market_token", "catalog_own_price", "catalog_own_price_bulk", "catalog_own_price_inline", "catalog_preview", "catalog_stage", "catalog_table", "brands", "oth_page", "oth_return",
+                "confirm_model", "save_old_model_name", "catalog", "catalog_cancel", "catalog_item_page", "catalog_market_switch", "catalog_market_token", "catalog_own_price", "catalog_own_price_bulk", "catalog_own_price_inline", "catalog_preview", "catalog_stage", "catalog_table", "brands", "oth_page", "oth_return", "oth_to_return",
                 "pairs_page", "pairs_forget", "pairs_not_pair",    # «Пары поставщиков»: who sees the catalog sees it; «Забыть пару», «Это не пара» need «менять»
                 "feed_update_page", "feed_update_confirm", "feed_update_fetch",
                 "history_ads", "history_catalog", "photos_feed", "photos_frame_action", "photos_generate", "photos_priority", "photos_queue_switch", "photos_ref", "photos_review", "photos_switch"),
@@ -285,7 +285,7 @@ for _section, _endpoints in {
               "addresses_save", "point_rules", "connections_points_page", "connections_points_code", "connections_points_delete",
               "connections_points_save", "connections_vk_page", "connections_vk", "connections_openai_page", "connections_openai",
               "connections_openai_clear", "connections_sheet_page", "connections_sheet", "connections_sheet_check",
-              "photos_agent_token", "orders_settings_page", "orders_duty",
+              "photos_agent_token", "orders_settings_page", "orders_duty", "orders_return_task",
               "orders_command_delete", "orders_command_add", "orders_default_responsible", "orders_rule_delete", "orders_rule_toggle",
               "orders_rule_add", "orders_stage_delete", "orders_stage_shift", "orders_stage_update", "orders_stage_add",
               "orders_templates_page", "orders_template_delete", "orders_template_samples", "orders_template_save",

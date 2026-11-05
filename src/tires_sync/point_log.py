@@ -197,8 +197,12 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
         conn.execute("UPDATE oth_return_plan SET signed_at = NULL, signed_by = '' WHERE order_id = ?", (card["id"],))
     if rec["action"] == "oth_issued":                                     # the question of the seventh day is open again
         conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
+        if stage["code"] == orders.RETURN_GIVEN:                          # «Выдали» linked the client; the goods go back again (2026-11-04)
+            order_oth.detach(conn, card, now, author)
+            order_oth.restore_plan(conn, card["id"])                      # after detach: it drops the marks and the plan of a stay
     label = card.get("webmim_number") or str(card["id"])
     until = rec["from_until"]
+    undone_issue = rec["action"] == "oth_issued"
     text = "Точка «%s» отменила отметку %s по заказу №%s (%s): заказ снова на этапе «%s»%s. %s" % (
         point["name"], rec["name"], label, who, stage["name"],
         ", резерв до %s.%s.%s" % (until[8:10], until[5:7], until[:4]) if stage["code"] == "at_point" and len(until) == 10 else "", UNDO_HINT)
@@ -215,4 +219,6 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
             tell(order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)), text)     # its responsible only (2026-11-03)
         except Exception:                                                 # noqa: BLE001 - the undo is done; the journal has the record
             logging.getLogger("tires_sync.panel").exception("the alert of the undo of order %s failed", card["id"])
+    if undone_issue:                                                      # «Выдали» closed the task of the return: it is on again
+        order_oth.moved_by_hand(conn, card, now, author)
     return "Отметка %s отменена: заказ №%s снова на этапе «%s». %s" % (rec["name"], label, stage["name"], UNDO_HINT)

@@ -8,7 +8,7 @@ from html.parser import HTMLParser
 
 import pytest
 
-from panel_helpers import login, make_app, post
+from panel_helpers import agree_return, login, make_app, post
 from test_mypoint import manager
 from test_roles import person
 from test_shop import make_shop
@@ -137,7 +137,7 @@ def test_every_step_of_the_staff_lights_an_element_of_the_home_page_and_only_its
 def test_every_step_of_the_point_lights_an_element_of_its_workplace(tmp_path):
     app, owner, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid)
-    assert post(owner, "/orders/%d/oth-agreed" % oth, "tok").status_code == 302            # a return with the act МХ-3 on the page
+    assert agree_return(owner, oth).status_code == 302            # a return with the act МХ-3 on the page
     assert order_oth.return_plan(conn, oth)
     orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")                    # a card on «На точке», the tab the page opens on
     mine = manager(app, conn, pid)

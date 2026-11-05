@@ -911,6 +911,8 @@ def register(app) -> None:
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
+            if moved:
+                order_oth.moved_by_hand(conn, card, stamp, author())      # «На возврат» by hand: the task (2026-11-04)
             if moved:                                                     # «Товар на точке» by hand: «можно забирать» as «приехал» (2026-10-30)
                 note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())
                 note = note or order_intercity.shipped_by_hand(conn, card, author(), stamp, avito_deliver(conn, stamp), people_tell(conn, stamp))
@@ -966,15 +968,29 @@ def register(app) -> None:
             return None
         return {"target": target, "oth": oth, "cancel_reason": asked.get("cancel_reason", ""), "question": OTH_QUESTION}
 
+    def _oth_item_marks(conn, card: dict) -> dict:
+        """Item → its «На возврат» by hand (order_oth.item_to_return), while the order is on «На ОТХ»."""
+        if card["stage"]["code"] != "oth":
+            return {}
+        marks = order_oth.item_marks(conn)
+        found = {i["id"]: order_oth.item_mark(marks, i["id"], card["entered_at"]) for i in card["items"]}
+        return {k: v for k, v in found.items() if v}
+
+    def _to_return_stage(conn, card: dict):
+        """The stage of the button «На возврат» of the card: the office, on «На ОТХ», the return not agreed."""
+        if card["stage"]["code"] != "oth" or own_point() is not None or not can_post("order_move") or order_oth.return_plan(conn, card["id"]):
+            return None
+        return next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN), None)
+
     @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
     @login_required
     def order_oth_agreed(card_id):
-        """«Согласовано с поставщиком» for an order on «На возврат» or «На ОТХ» (the owner and the partner): the date of the return, the point
-        sees it; the tyres leave the ad."""
+        """«Согласовано с поставщиком» for an order on «На возврат» or «На ОТХ» (the owner and the partner): the date of the return the operator
+        entered (Monday, Wednesday, Friday; order_oth.check_return_day), the point sees it."""
         conn = get_conn()
         card = card_or_404(conn, card_id)
         try:
-            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author())
+            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author(), request.form.get("return_date", ""))
             flash("Возврат согласован: точка передаст шины поставщику %s.%s и подпишет акт МХ-3." % (day[8:10], day[5:7]), "ok")
         except (order_oth.OthError, orders.OrderError) as err:
             flash(str(err), "error")
@@ -1075,7 +1091,7 @@ def register(app) -> None:
         if order_oth.unagree(conn, card, now, author()):
             told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, message_texts.text(conn, message_texts.UNAGREED, order_label=manager.label(card)), now,
                                            vk_http=app.config.get("VK_HTTP") or urllib_transport)
-            flash("Согласование отменено: метка «%s», шины снова в продаже, точка возврат не видит. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
+            flash("Согласование отменено: метка «%s», шины не в продаже, точка не видит дату. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
         else:
             flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
         return redirect("/orders/%d" % card_id)
@@ -1129,6 +1145,8 @@ def register(app) -> None:
             **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=orders.card_view(card), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
+            oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card),
+            to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
@@ -1278,6 +1296,7 @@ def register(app) -> None:
                     raise orders.OrderError("Этап выбран неверно.")
                 stamp = local_iso()
                 if orders.move_card(conn, card_id, stage_id, stamp, author()):
+                    order_oth.moved_by_hand(conn, card, stamp, author())
                     note = manager.arrived_by_move(conn, card, avito_deliver(conn, stamp), stamp, author())     # as it was before the press
                     note = note or order_intercity.shipped_by_hand(conn, card, author(), stamp, avito_deliver(conn, stamp), people_tell(conn, stamp))
                     flash("Заказ перенесён." + (" " + note if note else ""))
@@ -1572,6 +1591,7 @@ def register(app) -> None:
                 stage = next(s for s in orders.list_stages(conn) if s["code"] == "at_point")
                 stamp = local_iso()
                 if orders.move_card(conn, card_id, stage["id"], stamp, author()):
+                    order_oth.moved_by_hand(conn, card, stamp, author())
                     flash("Заказ перенесён: тот же клиент.")
                     offer_send(conn, card_id, stamp)                       # the messages of the stage, as any move of the card
                 else:
@@ -1742,7 +1762,7 @@ def register(app) -> None:
             commands_by_stage={s["id"]: rules.list_commands(conn, s["id"]) for s in stages}, stage_names={s["id"]: s["name"] for s in stages},
             template_names={t["id"]: t["name"] for t in templates.list_templates(conn)}, point_names={p["id"]: p["name"] for p in points.list_points(conn)},
             default_responsible=orders.default_responsible(conn), responsible_options=_responsible_options(app, conn, orders.default_responsible(conn)),
-            duty=manager.duty_settings(conn), weekdays=manager.WEEKDAYS, today=local_now().date().isoformat())
+            duty=manager.duty_settings(conn), weekdays=manager.WEEKDAYS, today=local_now().date().isoformat(), return_task_days=order_oth.task_days(conn), return_task=order_oth.RETURN_TASK)
 
     def _settings_back():
         return redirect("/orders/settings")
@@ -1773,6 +1793,17 @@ def register(app) -> None:
                              f.get("today", ""), local_now().date().isoformat())
             flash("Дежурные сохранены.")
         except (orders.OrderError, ValueError) as err:
+            flash(str(err))
+        return _settings_back()
+
+    @app.route("/orders/settings/return-task", methods=["POST"])
+    @login_required
+    def orders_return_task():
+        """«Срок задачи на возврат» (the owner 2026-11-04): working days of the task of a move to «На возврат» by hand."""
+        try:
+            days = order_oth.set_task_days(get_conn(), request.form.get("days"))
+            flash("Срок задачи на возврат: %d раб. дн." % days)
+        except order_oth.OthError as err:
             flash(str(err))
         return _settings_back()
 

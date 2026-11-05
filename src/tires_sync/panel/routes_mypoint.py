@@ -148,7 +148,7 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
     if action == "oth_issued":                                                  # «Выдали» to «Заказ выдали или он на точке?»
         return order_oth.answer_issued(conn, card, who, now)
     if action == "oth_here":
-        return order_oth.answer_here(conn, card, who, now, tell)
+        return order_oth.answer_here(conn, card, who, now)
     if action == "reserve_issued":                                              # «Выдан» to the question is «выдал»
         action = "issued"
     if action == "reserve_here":                                                # the VK «на точке»: marks the answer (the reminder: at 12:30, 2026-11-02)
@@ -441,10 +441,10 @@ def register(app) -> None:
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
-                          "oth_asked": code == "oth" and order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
-                          "ret_label": order_oth.label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
+                          "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
+                          "ret_label": order_oth.point_label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "ret_state": order_oth.state_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
-                          "oth_question": order_oth.question(conn, card, now) if code == "oth" else "",
+                          "oth_question": order_oth.question(conn, card, now) if code in order_oth.RETURNING else "",
                           "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
                           "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"])),     # «Шины с ОТХ, заказ №…»
                           "intercity": order_intercity.on(card) and code not in order_oth.RETURNING,     # «В другой город» (2026-11-02)
@@ -468,12 +468,14 @@ def register(app) -> None:
         returning = {r["card"]["id"] for r in returns}
         for row in cards:
             row["returning"] = row["card"]["id"] in returning
+        for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
+            ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
         tab = request.args.get("tab", "")
         tab = tab if tab in TABS else DEFAULT_TAB
         shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not (r["asked"] or r["oth_asked"]))     # the questions first
         counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
-        hot = {"here": any(r["asked"] for r in cards), "oth": any(r["oth_asked"] for r in cards),
-               "return": any(r.get("returning") for r in cards)}                                   # the tabs that wait for the point
+        hot = {"here": any(r["asked"] for r in cards), "oth": any(r["oth_asked"] and r["card"]["stage"]["code"] == "oth" for r in cards),
+               "return": any(r.get("returning") or (r["oth_asked"] and r["card"]["stage"]["code"] == orders.RETURN_GIVEN) for r in cards)}                                   # the tabs that wait for the point
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
         found = _found(conn, query, point_id) if query and point_id is not None else None
         if found:                                                                # the search looks at every order of the point: say its tab
@@ -530,6 +532,9 @@ def register(app) -> None:
         token = str(request.form.get("token") or "").strip()[:64]
         if not re.fullmatch(r"[0-9a-f]{24}", token):
             flash("Отметка не выполнена: обновите страницу.")
+            return redirect(back)
+        if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
+            flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
         now = local_iso()
         claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,'обрабатывается')",
@@ -616,7 +621,7 @@ def register(app) -> None:
         items = [{"key": "question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
                   "href": "/my-point"} for card in cards if reserve.question_open(conn, card, now)]      # of the stay: a new stay rings again
         items += [{"key": "oth-question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Заказ № %s: выдали или на точке?"
-                   % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=oth"} for card in _oth_cards(conn, point_id)
+                   % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in _oth_cards(conn, point_id)
                   if order_oth.question_open(conn, card)]
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
                    else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "", "href": "/my-point"} for card in cards]

@@ -1,6 +1,6 @@
-"""The owner 2026-11-02: «На ОТХ» is held six days; on the seventh from 12:30 the point is asked on its «Рабочее место» «Заказ выдали или он
-на точке?». «Выдали» closes the order as issued (its client linked again); «На точке» moves it to «На возврат» (2026-11-03): the point's tab
-«На возврат», an alert and a task «Согласовать возврат» for the owner and the partner (Заман: found by the role, never by the login)."""
+"""The owner 2026-11-02: «На ОТХ» is held six days. The owner 2026-11-04: on the seventh from 12:30 the order goes to «На возврат» by itself and the
+point is asked on its «Рабочее место» «Заказ выдали или он на точке?». «Выдали» closes the order as issued (its client linked again); «На точке» only marks
+the answer. The order's responsible has one task."""
 from __future__ import annotations
 
 import re
@@ -47,9 +47,7 @@ def test_the_question_comes_on_the_seventh_day_at_12_30_not_on_the_sixth_nor_at_
     assert order_oth.ask_seventh_day(conn, "2026-10-26T13:07:00") == 0                   # once per stay on «На ОТХ»
     assert order_oth.ask_seventh_day(conn, "2026-10-27T13:07:00") == 0
     [asked] = [e for e in orders.list_events(conn, cid) if "задан вопрос" in e["text"]]
-    assert asked["text"] == "Точке «Бета» задан вопрос на «Рабочем месте»: «Заказ выдали или он на точке?»"
-    [vk_only] = [e for e in orders.list_events(conn, cid) if e["level"] == "yellow" and "7-го дня" in e["text"]]   # review D7: Бета is on VK
-    assert vk_only["text"].startswith("Точка «Бета» работает в ВК")
+    assert asked["text"] == "Точке «Бета» задан вопрос: «Заказ выдали или он на точке?»"     # the point on VK gets it there too (2026-11-05)
 
 
 def test_a_later_day_still_asks_and_an_agreed_return_is_never_asked(tmp_path):
@@ -87,23 +85,28 @@ def test_no_answer_without_the_question(tmp_path):
     assert orders.get_card(conn, cid)["stage"]["code"] == "oth"
 
 
-def test_here_is_for_the_return_a_task_and_an_alert_for_the_owner_and_the_partner(tmp_path):
+def test_the_seventh_day_moves_the_order_with_one_task_of_the_responsible_and_here_only_marks(tmp_path):
     conn = db(tmp_path)
     office(conn)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     on_oth(conn, cid)
-    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
     told = []
-    outcome, answer, done = order_oth.answer_here(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-26T13:00:00",
-                                                  lambda logins, text: told.append((logins, text)))
-    assert done and "Возврат согласуют" in answer
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append((card["responsible"], text))) == 1
+    to_point = [t for who, t in told if who == ""]                                       # Бета is on VK: the status and the question (2026-11-05)
+    assert len(to_point) == 1 and "на точке 5200001" in to_point[0]
+    told = [(who, t) for who, t in told if who]
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.to_agree(conn, card) and not order_oth.question_open(conn, card)   # 2026-11-03
-    assert told == [(["owner"], "Заказ №5200001 (точка «Бета») 7 дней на ОТХ, шины на точке: согласуйте возврат с поставщиком — /orders/%d" % cid)]
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and card["entered_at"] == "2026-10-26T12:30:00"
+    assert order_oth.to_agree(conn, card) and order_oth.question_open(conn, card)
+    assert told == [("owner", "Нужно согласовать на возврат: заказ №5200001 (точка «Бета») на ОТХ с 20.10.2026 — /orders/%d" % cid)]
     made = [tasks.get(conn, r[0]) for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ? ORDER BY id", (cid,))]
-    assert [(t["assignee"], t["title"], t["kind"]) for t in made] == [("owner", "Согласовать возврат", "other"), ("zaman", "Согласовать возврат", "other")]
-    assert made[0]["note"] == "Заказ №5200001, точка «Бета», /orders/%d" % cid
-    assert any(e["level"] == "yellow" and "шины на точке" in e["text"] for e in orders.list_events(conn, cid))
+    assert [(t["assignee"], t["title"], t["kind"]) for t in made] == [("owner", order_oth.RETURN_TASK, "return")]     # one, not the owner's and the partner's
+    assert order_oth.RETURN_TASK == "Написать поставщику и согласовать возврат, узнать дату забора груза"
+    outcome, answer, done = order_oth.answer_here(conn, card, "менеджер Бета", "2026-10-26T13:00:00")
+    assert done and "Возврат поставщику идёт дальше" in answer and outcome == "отмечено: шины на точке"
+    card = orders.get_card(conn, cid)
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and not order_oth.question_open(conn, card)
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ?", (cid,)).fetchone()[0] == 1     # no second task
     order_oth.agree(conn, card, orders.date.fromisoformat("2026-10-27"), "2026-10-27T10:00:00", "owner")
     assert not order_oth.to_agree(conn, orders.get_card(conn, cid))                      # agreed: the plaque of the act МХ-3 as before
 
@@ -126,27 +129,25 @@ def asked_on_page(tmp_path):
     return app, conn, pid, here, manager(app, conn, pid)
 
 
-def test_the_banner_is_on_the_oth_tab_and_its_feed_rings(tmp_path, clock):
+def test_the_banner_is_on_the_return_tab_and_its_feed_rings(tmp_path, clock):
     app, conn, pid, here, mine = asked_on_page(tmp_path)
-    page = mine.get("/my-point?tab=oth").get_data(as_text=True)
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
     block = page[page.index('data-oth-question="%d"' % here):].split("</div></div>")[0]
     assert "Заказ выдали или он на точке?" in block
     assert "/my-point/%d/oth_issued" % here in block and "/my-point/%d/oth_here" % here in block
-    assert 'data-tab="oth"' in page and re.search(r'mp-tab--hot" href="/my-point\?tab=oth', page)
+    assert re.search(r'mp-tab--hot" href="/my-point\?tab=return', page)
     keys = [i["key"] for i in mine.get("/my-point/feed").get_json()["items"]]
     assert any(k.startswith("oth-question-%d-" % here) for k in keys)
 
 
-def test_here_on_the_page_moves_the_card_to_the_return_tab(tmp_path, clock, monkeypatch):
-    from tires_sync import order_notify
-    sent = []
-    monkeypatch.setattr(order_notify, "tell_people", lambda conn, box, logins, text, **k: sent.append((logins, text)) or "ok")
+def test_here_on_the_page_only_closes_the_question(tmp_path, clock):
     app, conn, pid, here, mine = asked_on_page(tmp_path)
     _t, page = press(mine, here, "oth_here")
-    assert "Возврат согласуют с поставщиком" in page and sent and sent[0][0][0] == "owner"
-    assert 'id="order-%d"' % here not in mine.get("/my-point?tab=oth").get_data(as_text=True)
+    assert "Возврат поставщику идёт дальше" in page
+    assert orders.get_card(conn, here)["stage"]["code"] == orders.RETURN_GIVEN
     back = mine.get("/my-point?tab=return").get_data(as_text=True)
     assert "Ждут согласования возврата" in back and 'id="order-%d"' % here in back and "возврат согласуют с поставщиком" in back
+    assert 'data-oth-question="%d"' % here not in back
     assert [r["kind"] for r in point_log.history(conn, pid)][0] == "oth_here"
 
 
@@ -160,9 +161,10 @@ def test_issued_on_the_page_closes_it_and_can_be_undone_with_the_question_open_a
     r = post(mine, "/my-point/%d/undo" % here, "tok")
     assert "отменена" in mine.get(r.headers["Location"]).get_data(as_text=True)
     card = orders.get_card(conn, here)
-    assert card["stage"]["code"] == "oth" and card["entered_at"] == ENTERED and order_oth.question_open(conn, card)
-    assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (here,)).fetchone() is None      # unlinked again on «На ОТХ»
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and card["entered_at"] == "2026-10-26T12:30:00" and order_oth.question_open(conn, card)
+    assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (here,)).fetchone() is None      # unlinked again on «На возврат»
     assert store.get_state(conn, order_oth._ask_key(card)).startswith("asked|")
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (here,)).fetchone()[0] == 1     # on again
 
 
 def test_issued_after_a_partial_return_cannot_be_undone(tmp_path, clock):
@@ -211,13 +213,9 @@ def test_the_tasks_close_by_themselves_on_the_agreement_or_on_issued(tmp_path):
         on_oth(conn, cid)
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
     for cid in (agreed, issued):
-        order_oth.answer_here(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-26T13:00:00")
-        assert open_tasks(conn, cid) == 2
+        assert open_tasks(conn, cid) == 1                                               # the responsible's only (the owner 2026-11-04)
     order_oth.agree(conn, orders.get_card(conn, agreed), orders.date.fromisoformat("2026-10-27"), "2026-10-27T10:00:00", "owner")
     assert open_tasks(conn, agreed) == 0
-    orders.move_card(conn, issued, stage(conn, "oth"), "2026-10-27T10:30:00", "owner")      # 2026-11-03: «На точке» moved it to «На возврат»;
-    conn.execute("INSERT INTO app_state (key, value) VALUES (?, 'asked|2026-10-27T10:30:00')", (order_oth._ask_key(orders.get_card(conn, issued)),))
-    conn.commit()                                                                       # the office puts it back, the point is asked again
     assert order_oth.answer_issued(conn, orders.get_card(conn, issued), "менеджер Бета", "2026-10-27T11:00:00")[2]
     assert open_tasks(conn, issued) == 0
-    assert any(e["text"].startswith("Задача выполнена: Другое: Согласовать возврат — согласовано с поставщиком") for e in orders.list_events(conn, agreed))
+    assert any(e["text"].startswith("Задача выполнена: Вернуть: %s — согласовано с поставщиком" % order_oth.RETURN_TASK) for e in orders.list_events(conn, agreed))

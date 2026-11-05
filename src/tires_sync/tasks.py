@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 
 from . import store, users
 
-KINDS = {"callback": "Перезвонить", "order": "Оформить заказ", "oth": "Переместить на ОТХ", "other": "Другое"}
+KINDS = {"callback": "Перезвонить", "order": "Оформить заказ", "oth": "Переместить на ОТХ", "return": "Вернуть", "other": "Другое"}
 FIELDS = ("id", "client_id", "order_id", "chat_row", "due_at", "assignee", "note", "created_at", "created_by", "done_at", "done_by",
           "cancelled_at", "kind", "title")
 TITLE_MAX, NOTE_MAX, RESULT_MAX = 200, 300, 300

@@ -83,3 +83,4 @@ body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) 
 .mp-more-body{display:flex;flex-direction:column;gap:var(--s-2);margin-top:var(--s-2)}
 .mp-stages summary{cursor:pointer;list-style:none}
 .mp-stages summary h2{display:inline;margin:0}
+.mp-handover summary{list-style:none;cursor:pointer;text-align:center}.mp-handover summary::-webkit-details-marker{display:none}.mp-handover p{margin:8px 0}

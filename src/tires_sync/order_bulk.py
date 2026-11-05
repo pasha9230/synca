@@ -9,7 +9,7 @@ import sqlite3
 from datetime import datetime
 from typing import List
 
-from . import order_engine, orders
+from . import order_engine, order_oth, orders
 from .order_cleanup import backup, sign
 from .orders import OrderError
 
@@ -209,6 +209,7 @@ def undo(conn, db_path, audit_id, card_ids, now_local: str, author: str) -> dict
                 orders.add_event(conn, card["id"], now_local, author, "note", "Возвращён после массового перевода от %s%s" % (
                     run["at"].replace("T", " ")[:16], ", задачи снова ждут: %d" % cur.rowcount if cur.rowcount else ""))
                 conn.commit()
+                order_oth.moved_by_hand(conn, card, now_local, author)      # back on «На возврат»: its task is on again (2026-11-05)
                 back.append(card["id"])
             else:
                 skipped += 1
