@@ -740,6 +740,147 @@ def test_the_label_is_typed_on_the_account_page(panel):
         connections.set_sheet_label(conn, mine, "x" * 41, NOW, "owner")
 
 
+# ---- «Аккаунт»: the responsible first (the owner 2026-11-05) ---------------------------------------------------------------------------
+
+def responsible_of(conn, order_id, login, created_by=None):
+    conn.execute("UPDATE order_card SET responsible = ? WHERE id = ?", (login, order_id))
+    if created_by is not None:
+        conn.execute("UPDATE order_card SET created_by = ? WHERE id = ?", (created_by, order_id))
+    conn.commit()
+
+
+def label_of(conn, order_id):
+    labels = {r["Аккаунт"] for r in sheet.rows_of(conn, order_id, NOW).values()}
+    assert len(labels) == 1
+    return labels.pop()
+
+
+def person_with_label(conn, login, label, role="partner"):
+    users.add_user(conn, login, "пароль-для-теста-1", NOW, role=role)
+    users.set_sheet_label(conn, login, label, NOW, "owner")
+
+
+def test_the_label_of_the_responsible_goes_before_the_account_s(table):
+    conn, box, fake = table
+    person_with_label(conn, "zaman1", "Подпись-Зам")
+    users.set_sheet_label(conn, "owner", "Подпись-Влад", NOW, "owner", main_login="owner")
+    by_account = account(conn, "Основной", "Подпись-Акк")
+    order = placed(conn)
+    chat_of(conn, by_account, order)
+    responsible_of(conn, order, "zaman1")
+    assert label_of(conn, order) == "Подпись-Зам"                          # they differ: the responsible wins
+    alone = placed(conn, client_name="Пётр")
+    responsible_of(conn, alone, "zaman1")
+    assert label_of(conn, alone) == "Подпись-Зам"                          # no account at all: the responsible still names the row
+    main = placed(conn, client_name="Олег")
+    responsible_of(conn, main, "owner")
+    assert label_of(conn, main) == "Подпись-Влад"                          # the main login is no panel user and has its label too
+
+
+def test_a_responsible_without_a_label_leaves_the_account_s_label(table):
+    conn, box, fake = table
+    users.add_user(conn, "point_login", "пароль-для-теста-1", NOW, role="partner")
+    by_account = account(conn, "Основной", "Подпись-Акк")
+    order, bare = placed(conn), placed(conn, client_name="Пётр")
+    chat_of(conn, by_account, order)
+    responsible_of(conn, order, "point_login")
+    responsible_of(conn, bare, "point_login")
+    assert label_of(conn, order) == "Подпись-Акк"
+    assert label_of(conn, bare) == ""                                      # no label of anybody: empty
+
+
+def test_an_empty_responsible_reads_as_the_panel_shows_it(table):
+    conn, box, fake = table
+    person_with_label(conn, "zaman1", "Подпись-Зам")
+    by_account = account(conn, "Основной", "Подпись-Акк")
+    nobody, nobody_bare, maker = placed(conn), placed(conn, client_name="Пётр"), placed(conn, client_name="Олег")
+    chat_of(conn, by_account, nobody)
+    responsible_of(conn, nobody, "", created_by="")
+    responsible_of(conn, nobody_bare, "", created_by="")
+    assert label_of(conn, nobody) == "Подпись-Акк" and label_of(conn, nobody_bare) == ""
+    responsible_of(conn, maker, "", created_by="zaman1")                   # orders.get_card: whoever made the card answers for it
+    assert orders.get_card(conn, maker)["responsible"] == "zaman1" and label_of(conn, maker) == "Подпись-Зам"
+
+
+def test_the_label_of_a_person_is_checked_like_the_account_s(table):
+    conn, box, fake = table
+    users.add_user(conn, "zaman1", "пароль-для-теста-1", NOW, role="partner")
+    assert users.get_sheet_label(conn, "zaman1") == "" and users.get_sheet_label(conn, "") == ""       # empty by default
+    users.set_sheet_label(conn, "ZAMAN1", "  Два   слова ", NOW, "owner")
+    assert users.get_sheet_label(conn, "zaman1") == "Два слова" and users.get_sheet_label(conn, "Zaman1") == "Два слова"
+    for wrong in ("x" * 41, "=СУММ(A1)", "a\x01b"):
+        with pytest.raises(users.UserError):
+            users.set_sheet_label(conn, "zaman1", wrong, NOW, "owner")
+    assert users.get_sheet_label(conn, "zaman1") == "Два слова"
+    with pytest.raises(users.UserError):
+        users.set_sheet_label(conn, "nobody", "Кто-то", NOW, "owner")      # a login that is nobody's
+    assert users.get_sheet_label(conn, "nobody") == ""
+    users.set_sheet_label(conn, "zaman1", "", NOW, "owner")
+    assert users.get_sheet_label(conn, "zaman1") == ""
+
+
+def test_the_label_follows_a_new_login_and_goes_with_the_user(table):
+    conn, box, fake = table
+    person_with_label(conn, "zaman1", "Подпись-Зам")
+    users.rename_login(conn, "zaman1", "zaman2")
+    conn.commit()
+    assert users.get_sheet_label(conn, "zaman2") == "Подпись-Зам" and users.get_sheet_label(conn, "zaman1") == ""
+    users.remove_user(conn, "zaman2", NOW)
+    conn.commit()
+    users.add_user(conn, "zaman2", "пароль-для-теста-1", NOW, role="partner")
+    assert users.get_sheet_label(conn, "zaman2") == ""                     # somebody else under the old name does not inherit it
+
+
+def test_the_owner_types_the_label_of_a_person_and_of_the_main_login(panel):
+    app, conn, box, fake, client = panel
+    users.add_user(conn, "zaman1", "пароль-для-теста-1", NOW, role="partner")
+    page = client.get("/users").get_data(as_text=True)
+    assert 'action="/users/zaman1/sheet-label"' in page and 'action="/users/owner/sheet-label"' in page
+    assert post(client, "/users/zaman1/sheet-label", "tok", sheet_label="Подпись-Зам").status_code == 302
+    assert post(client, "/users/owner/sheet-label", "tok", sheet_label="Подпись-Влад").status_code == 302
+    assert users.get_sheet_label(conn, "zaman1") == "Подпись-Зам" and users.get_sheet_label(conn, "owner") == "Подпись-Влад"
+    page = client.get("/users").get_data(as_text=True)
+    assert 'value="Подпись-Зам"' in page and 'value="Подпись-Влад"' in page
+    assert post(client, "/users/zaman1/sheet-label", "tok", sheet_label="=1+1").status_code == 302     # refused: said, nothing changed
+    assert users.get_sheet_label(conn, "zaman1") == "Подпись-Зам"
+    assert post(client, "/users/nobody/sheet-label", "tok", sheet_label="Кто-то").status_code == 302
+    assert users.get_sheet_label(conn, "nobody") == ""
+    assert "Подпись в таблице заказов у «zaman1»" in client.get("/history").get_data(as_text=True)
+
+
+@pytest.mark.parametrize("role", ["partner", "chats", "point", "viewer", "client"])
+def test_nobody_but_the_owner_sets_or_reads_the_label_of_a_person(tmp_path, role):
+    from tires_sync import order_points as points
+    app = make_app(tmp_path)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    pid = points.save_point(conn, {"name": "Альфа", "manager_name": "А", "channel": "panel"}) if role == "point" else None
+    users.add_user(conn, "zaman1", "пароль-для-теста-1", NOW, role="partner")
+    users.set_sheet_label(conn, "zaman1", "Подпись-Зам", NOW, "owner")
+    users.set_sheet_label(conn, "owner", "Подпись-Влад", NOW, "owner", main_login="owner")
+    order = orders.create_card(conn, {"client_name": "Иван", "client_phone": "+79001112233", "point_id": pid}, NOW, "owner")
+    responsible_of(conn, order, "zaman1")
+    client, _ = person(app, role, pid)
+    with client.session_transaction() as session:
+        session["csrf"] = "tok"
+    r = client.post("/users/zaman1/sheet-label", data={"csrf": "tok", "sheet_label": "Чужой"})
+    assert r.status_code in (302, 403) and users.get_sheet_label(conn, "zaman1") == "Подпись-Зам"
+    for path in ("/users", "/history", "/orders", "/orders/%d" % order, "/my-point", "/my-point/orders/%d" % order):
+        text = client.get(path, follow_redirects=True).get_data(as_text=True)
+        assert "Подпись-Зам" not in text and "Подпись-Влад" not in text, path
+
+
+def test_the_label_of_a_person_is_only_in_the_table(panel):
+    app, conn, box, fake, client = panel
+    orders.ensure_pipeline(conn, NOW)
+    person_with_label(conn, "zaman1", "Подпись-Зам")
+    order = placed(conn)
+    responsible_of(conn, order, "zaman1")
+    for path in ("/orders", "/orders/%d" % order):
+        assert "Подпись-Зам" not in client.get(path, follow_redirects=True).get_data(as_text=True), path
+    assert "Подпись-Зам" not in str(orders.get_card(conn, order))
+
+
 def test_a_sheet_without_the_account_column_takes_the_rows_and_the_check_warns(table):
     conn, box, fake = table
     fake.columns = [c for c in fake.columns if c != "Аккаунт"]

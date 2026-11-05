@@ -1,5 +1,6 @@
 """A person's own settings of the panel (table user_pref): a value of JSON under a key, for the login signed in only. Small by design: a
-key of a few letters, a value of PREF_BYTES at most; nothing here ever reads another login's settings."""
+key of a few letters, a value of PREF_BYTES at most; nothing here ever reads another login's settings (only users.get_sheet_label does, a
+setting the owner gives, never the person)."""
 from __future__ import annotations
 
 import json

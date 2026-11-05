@@ -518,12 +518,18 @@ def get_sheet_label(conn, account_id: int) -> str:
     return str(get_config(conn, "avito", account_id).get("sheet_label") or "")
 
 
-def set_sheet_label(conn, account_id: int, label: str, now: str, author: str) -> None:
+def check_sheet_label(label) -> str:
+    """The label as it is kept (an account's and a person's, users.set_sheet_label); ValueError: not one the table may take."""
     label = " ".join(str(label or "").split())
     if len(label) > SHEET_LABEL_MAX:
         raise ValueError("Подпись в таблице заказов: не длиннее %d знаков." % SHEET_LABEL_MAX)
     if any(ord(ch) < 32 for ch in label) or label.startswith("="):
         raise ValueError("Подпись в таблице заказов: обычный текст, без «=» в начале.")
+    return label
+
+
+def set_sheet_label(conn, account_id: int, label: str, now: str, author: str) -> None:
+    label = check_sheet_label(label)
     config = get_config(conn, "avito", account_id)
     if label:
         config["sheet_label"] = label

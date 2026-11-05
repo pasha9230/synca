@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import client_terms, store
+from . import client_terms, connections, store, user_prefs
 
 RESERVED = frozenset({"owner", "server", "system", "cli"})      # names of the shared password and of server-side actions in the journal
 LOGIN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
@@ -204,6 +204,34 @@ def person_name(conn, login: str, main_login: str = "") -> str:
     if not shown and main_login and login == main_login:
         shown = main_name(conn)
     return shown or login
+
+
+SHEET_LABEL_PREF = "sheet.label"          # user_pref: rename_login and remove_user take it along with the person's other settings
+
+
+def get_sheet_label(conn, login: str) -> str:
+    """«Подпись в таблице заказов» of a person (the owner 2026-11-05): what the column «Аккаунт» says for the orders this person answers
+    for (order_sheet.account_label); empty: the label of the order's account. Never the display name: only the people the owner signs."""
+    return str(user_prefs.get(conn, normalize(login), SHEET_LABEL_PREF, "") or "")
+
+
+def set_sheet_label(conn, login: str, label: str, now: str, author: str, main_login: str = "") -> None:
+    """The owner signs a panel user, or the main login (`main_login`, the panel's AUTHOR: not a panel user). The label stays out of the
+    audit: the partner reads the history, and the label is a name for the table only."""
+    login = normalize(login)
+    if not exists(conn, login) and login != normalize(main_login):
+        raise UserError("Пользователя «%s» нет." % login)
+    try:
+        label = connections.check_sheet_label(label)
+    except ValueError as err:
+        raise UserError(str(err))
+    if label == get_sheet_label(conn, login):
+        return
+    store.write_audit(conn, now, author, "user_sheet_label", {"login": login})
+    if label:
+        user_prefs.put(conn, login, SHEET_LABEL_PREF, label, now)
+    else:
+        user_prefs.drop(conn, login, SHEET_LABEL_PREF)
 
 
 def get_role(conn, login: str) -> dict:

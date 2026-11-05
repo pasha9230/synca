@@ -295,6 +295,7 @@ for _section, _endpoints in {
               "users_login_reset", "users_login_reset_revoke",     # «Сбросить вход»: the owner only (EDIT of «Пользователи»)
               "users_shop_responsible",                 # «Ответственный за заказы клиентов» (shop_cart.RESPONSIBLE_KEY)
               "users_main_name",                        # «Имя основного входа» (users.MAIN_NAME_KEY)
+              "users_sheet_label",                      # «Подпись в таблице заказов» of a person (users.SHEET_LABEL_PREF)
               "users_clients_page", "users_client_page", "users_client_save",     # the conditions of the clients
               "users_client_preview",                   # «Каталог глазами клиента»
               "points_history", "history_points"),     # «История → Точки» (and its old address): the owner and the partner only (users: nobody else looks)

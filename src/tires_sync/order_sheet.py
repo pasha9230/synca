@@ -22,7 +22,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 
-from . import connections, order_engine as engine, order_merge, order_report, orders, oth_sale, sales as sales_store, store
+from . import connections, order_engine as engine, order_merge, order_report, orders, oth_sale, sales as sales_store, store, users
 
 KIND = "gsheet"
 SHEET = "Заказы"
@@ -305,16 +305,20 @@ def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
     """The rows of the order now, as they go to the table: mark → {column of SENT: value}. Numbers are numbers, days are «YYYY-MM-DD» (the
     script makes them dates); the phone is sheet_phone. «Список» of the panel shows card_rows (the comment, the panel's phone)."""
     card = orders.get_card(conn, card_id)
-    phone, account = sheet_phone(card["client_phone"]), account_label(conn, card_id)
+    phone, account = sheet_phone(card["client_phone"]), account_label(conn, card)
     return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone, "Аккаунт": account})
             for mark, row in card_rows(conn, card, placed_at, _sent(conn, card_id)).items()}
 
 
-def account_label(conn, card_id: int) -> str:
-    """«Аккаунт» (the owner 2026-11-02): «Подпись в таблице заказов» of the order's Avito account — the account of its first chat, else of
-    its first call. No account, or an account without the label: empty. Only the table has it: the list of «Заказы» and a point never do."""
-    row = (conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? ORDER BY id LIMIT 1", (int(card_id),)).fetchone()
-           or conn.execute("SELECT account_id FROM avito_call WHERE order_id = ? ORDER BY call_at, id LIMIT 1", (int(card_id),)).fetchone())
+def account_label(conn, card: dict) -> str:
+    """«Аккаунт»: the label of the order's responsible, as the card shows it (the owner 2026-11-05: they differ, the responsible wins); else
+    (the owner 2026-11-02) «Подпись в таблице заказов» of the order's Avito account — the account of its first chat, else of its first call.
+    No account, or an account without the label: empty. Only the table has it: the list of «Заказы» and a point never do."""
+    signed = users.get_sheet_label(conn, card["responsible"])
+    if signed:
+        return signed
+    row = (conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? ORDER BY id LIMIT 1", (card["id"],)).fetchone()
+           or conn.execute("SELECT account_id FROM avito_call WHERE order_id = ? ORDER BY call_at, id LIMIT 1", (card["id"],)).fetchone())
     return connections.get_sheet_label(conn, row[0]) if row and row[0] is not None else ""
 
 
