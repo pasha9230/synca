@@ -845,8 +845,8 @@ def test_the_label_of_a_person_is_checked_like_the_account_s(table):
     conn, box, fake = table
     users.add_user(conn, "person1", "пароль-для-теста-1", NOW, role="partner")
     assert users.get_sheet_label(conn, "person1") == "" and users.get_sheet_label(conn, "") == ""       # empty by default
-    users.set_sheet_label(conn, "ZAMAN1", "  Два   слова ", NOW, "owner")
-    assert users.get_sheet_label(conn, "person1") == "Два слова" and users.get_sheet_label(conn, "Zaman1") == "Два слова"
+    users.set_sheet_label(conn, "PERSON1", "  Два   слова ", NOW, "owner")
+    assert users.get_sheet_label(conn, "person1") == "Два слова" and users.get_sheet_label(conn, "Person1") == "Два слова"
     for wrong in ("x" * 41, "=СУММ(A1)", "a\x01b"):
         with pytest.raises(users.UserError):
             users.set_sheet_label(conn, "person1", wrong, NOW, "owner")
