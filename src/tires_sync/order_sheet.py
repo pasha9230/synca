@@ -441,7 +441,7 @@ def check(conn, box, http: Transport) -> str:
     said = "Таблица отвечает: лист «%s», все колонки на месте." % SHEET
     if missing:                                                            # the owner 2026-11-02: a warning, the rows go all the same
         said = ("Таблица отвечает: лист «%s», нужные колонки на месте. Нет колонки %s: добавьте её в первую строку листа, иначе она не "
-                "заполняется (остальное пишется и без неё; строки, отправленные без неё, заполнятся, только когда подпись аккаунта изменится)."
+                "заполняется (остальное пишется и без неё; строки, отправленные без неё, заполнятся, только когда значение колонки у заказа изменится)."
                 % (SHEET, ", ".join("«%s»" % c for c in missing)))
     number = lambda name: answer.get(name) if isinstance(answer.get(name), int) and not isinstance(answer.get(name), bool) else None
     marked, moved, blocked = number("marked"), number("moved"), number("blocked")

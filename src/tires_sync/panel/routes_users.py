@@ -55,7 +55,8 @@ def register(app) -> None:
         """«Подпись в таблице заказов» of a person or of the main login; the owner only."""
         try:
             users.set_sheet_label(get_conn(), login, request.form.get("sheet_label", ""), now_iso(), author(), app.config["AUTHOR"])
-            flash("Подпись в таблице заказов сохранена.", "ok")
+            flash("Подпись в таблице заказов сохранена: колонка «Аккаунт» обновится у заказов этого человека за последние 45 дней в течение часа, "
+                  "у более старых — при следующем изменении заказа.", "ok")
         except users.UserError as err:
             flash(str(err), "error")
         return redirect("/users")
