@@ -333,7 +333,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     refused = parse_refuse(text)                       # «отказ <номер> <причина>»: the reason is text, so not the parser of the other words
     word = REFUSE if refused else _word(text)
     written = refused[0] if refused else order_number(text)
-    doubt = refuse_doubt(text, refused[1]) if refused else ""
+    doubt = refuse_doubt(text, refused[1], conn) if refused else ""
     if doubt:                                          # the owner reads it in «Входящие»: the order is not moved on a guess
         return dispute(point, "«%s»: %s" % (REFUSE, doubt), "Команда «%s» не выполнена (%s): сообщение передано владельцу. Если клиент "
                        "отказался, напишите: «отказ 123456 причина»." % (REFUSE, doubt))
@@ -763,7 +763,10 @@ def refuse_reason(reason) -> str:
     return next((r for r in REFUSE_REASONS if r.casefold().replace("ё", "е") == plain), text)
 
 
-def refuse_doubt(text, reason) -> str:
+PHRASE_INSIDE = tuple(re.compile(p.pattern.replace(r"^\W*", r"(?<![^\W\d_])", 1), re.I) for p, _w in PHRASES)
+
+
+def refuse_doubt(text, reason, conn=None) -> str:
     """Why «отказ …» of VK is not unambiguous (as is_command for the other words: never a guess), '' when it is: a question, a reason that
     starts with a negation («отказ не нужен», «нет, приедет»), another order's number in the reason («отказ 5000100 5000200 …»)."""
     if re.search(r"[?？]", str(text or "")):
@@ -779,8 +782,11 @@ def refuse_doubt(text, reason) -> str:
         return "отрицание"
     if PART.search(str(reason or "")):
         return "отказ от части заказа"                         # «забрали 2 из 4», «только 2», «частично»: the order is not all refused
-    if any(t in BUILTIN or t in GIVE for t in tokens):
-        return "в причине другая отметка"                      # «клиент забрал», «остальные выдал»: not a refusal of the order
+    plain = " ".join(tokens)
+    words = [rules.normalise_word(c["word"]) for c in rules.list_commands(conn)] if conn is not None else []
+    if (any(t in BUILTIN or t in GIVE or t.startswith("возврат") for t in tokens) or any(p.search(str(reason or "")) for p in PHRASE_INSIDE)
+            or any(w and re.search(r"(?<![^\W\d_])%s(?![^\W\d_])" % re.escape(w), plain) for w in words)):
+        return "в причине другая отметка"                      # «клиент забрал», «на точке», «возврат», a word of «Команды»
     reason = str(reason or "")
     if LONG_NUMBER.search(reason) or MARKED_NUMBER.search(reason) or any(len(re.sub(r"\D", "", n)) >= 5 for n in SPACED_NUMBER.findall(reason)):
         return "ещё один номер заказа"
@@ -810,7 +816,7 @@ def refuse(conn, card: dict, reason: str, who: str, now: str, notify: Optional[N
             point, reason, orders.stage_name(conn, "oth"), err)
         orders.add_event(conn, card["id"], now, who, "point", text, level="red")
         conn.commit()
-        told = _tell_staff(conn, card, text, notify)
+        told = _tell_office(conn, card, text, notify)
         return ("отказ: не выполнено: %s; %s" % (err, told),
                 "Не получилось перевести заказ №%s на «%s»: %s Отказ передан менеджеру." % (label(card), orders.stage_name(conn, "oth"), err), False)
     if not moved:
@@ -825,18 +831,16 @@ def refuse(conn, card: dict, reason: str, who: str, now: str, notify: Optional[N
         conn.rollback()
         logging.getLogger("tires_sync.orders").warning("the red record of the refusal of order %s was not saved", card["id"])
         red = "красная запись не сохранена"
-    told = _tell_staff(conn, card, text, notify)
+    told = _tell_office(conn, card, text, notify)
     return ("отказ (%s): заказ перенесён на «%s», %s, %s" % (reason, name, red, told),
             "Заказ №%s — отказ отмечен (причина: %s). Заказ на «%s»: шины остаются на точке нашим товаром." % (label(card), reason, name), True)
 
 
-def _tell_staff(conn, card: dict, text: str, notify: Optional[Notify]) -> str:
-    """The alert of a point's mark to whoever answers for the order (as no_show): for an order of the point's own account, the staff."""
+def _tell_office(conn, card: dict, text: str, notify: Optional[Notify]) -> str:
+    """The alert of a point's mark to the staff (staff_card), with the order's number; the delivery's status for the log."""
     if notify is None:
         return "оповещение не отправлено: канал не настроен"
-    if points.of_account(conn, card["id"]) is not None:
-        card = staff_card(conn, card)
-    return notify(card, "Заказ №%d: %s" % (card["id"], text))
+    return notify(staff_card(conn, card), "Заказ №%d: %s" % (card["id"], text))     # the point reported it: never back to the point
 
 
 def no_show(conn, card: dict, who: str, now: str, notify: Optional[Notify]) -> Tuple[str, str]:

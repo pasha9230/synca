@@ -305,9 +305,12 @@ def test_a_short_panel_number_with_a_plain_reason_still_works(tmp_path):
 
 @pytest.mark.parametrize("text", ["отказ 5000100 забрали 2 из 4, две не подошли", "отказ 5000100 одну шину, остальные выдал",
                                   "отказ 5000100 взял только 2", "отказ 5000100 частично, 2 шины", "отказ 5000100 клиент забрал",
-                                  "отказ 5000100 старый год, но забрал"])
+                                  "отказ 5000100 старый год, но забрал", "отказ 5000100 клиент не пришёл", "отказ 5000100 на точке",
+                                  "отказ 5000100 передал курьеру", "отказ 5000100 возврат", "отказ 5000100 невыкуп"])
 def test_a_partial_refusal_or_another_command_in_the_reason_waits_for_the_owner(tmp_path, text):
+    from tires_sync import order_rules as rules
     app, _client, conn, _pid, card = at_point(tmp_path)
+    rules.add_command(conn, _stage(conn, "at_point"), "невыкуп", _stage(conn, "cancel"))     # a word of the owner's «Команды»
     answer = mgr.dispatch(conn, "p1", PEER, text, None, "2026-10-13T13:00:00", None, None)
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and linked(conn, card), answer
     assert mgr.list_inbox(conn) and mgr.list_inbox(conn)[0]["dispute"]
@@ -323,3 +326,18 @@ def test_refuse_by_the_order_works(tmp_path, text):
 @pytest.mark.parametrize("reason", ["брак", "порез на боковине", "клиент нашёл дешевле", "ошиблись размером", "клиенту не подошёл год"])
 def test_ordinary_reasons_are_not_doubtful(reason):
     assert mgr.refuse_doubt("отказ 5000100 " + reason, reason) == ""
+
+
+# --- review round 6: the office alert names the order -------------------------------------------------------------------------------
+
+def test_the_office_alert_names_the_order_when_moved_and_when_not(tmp_path):
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    told = []
+    notify = lambda c, t: told.append(t) or "отправлено"
+    outcome, _a, ok = mgr.refuse(conn, orders.get_card(conn, card), "размер", "менеджер Бета", "2026-10-13T13:00:00", notify)
+    assert ok and told[-1].startswith("Заказ №%d: Отказ клиента" % card) and outcome.endswith("отправлено") and "None" not in outcome
+    orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T13:10:00", "o")
+    conn.execute("UPDATE order_card SET client_phone = '' WHERE id = ?", (card,))
+    conn.commit()
+    outcome, _a, ok = mgr.refuse(conn, orders.get_card(conn, card), "размер", "менеджер Бета", "2026-10-13T13:20:00", notify)
+    assert not ok and told[-1].startswith("Заказ №%d: Точка «Бета» отметила отказ" % card) and "None" not in outcome
