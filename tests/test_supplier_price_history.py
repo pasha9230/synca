@@ -162,6 +162,15 @@ def test_the_cycle_keeps_the_history_of_4tochki_shown_for_viewing_only_without_p
     price["s3-1"] = 2100.0
     cli._record_archive(conn, None, parsed, tmp_path / "unload.xml")
     assert [(r["was"], r["price"]) for r in catalog_archive.price_history(conn, "s3-1")[0]] == [(2000.0, 2100.0)]
+    assert catalog_archive.price_history(conn, "s3-1")[1] >= catalog_archive.price_history(conn, "100")[1] != ""
+
+
+def test_since_is_the_first_cycle_that_saw_the_position_not_the_first_cycle_at_all(tmp_path):
+    conn = store.connect(tmp_path / "t.db")
+    _cycle(conn, "2026-11-05T10:00:00", a=5000.0)
+    _cycle(conn, "2026-12-01T10:00:00", a=5100.0, b=3000.0)               # b появилась (или её поставщик подключён) через месяц
+    assert catalog_archive.price_history(conn, "b")[1] == "2026-12-01T10:00:00"
+    assert catalog_archive.price_history(conn, "a")[1] == "2026-11-05T10:00:00"
     assert catalog_archive.item_info(conn, "s3-1") is None                  # в архив каталога не попала: своей цены и «пропавшей» у неё нет
 
 

@@ -144,8 +144,9 @@ def record_prices(conn, offers, now: str) -> int:
         last.update(conn.execute("SELECT goods_id, price FROM supplier_price_last WHERE goods_id IN (%s)" % ",".join("?" * len(chunk)), chunk))
     changes = [(now, g, last[g], p) for g, p in known.items() if since and g in last and last[g] != p]
     conn.executemany("INSERT INTO supplier_price_change (at, goods_id, was, price) VALUES (?,?,?,?)", changes)
-    conn.executemany("INSERT OR REPLACE INTO supplier_price_last (goods_id, price) VALUES (?,?)",
-                     [(g, p) for g, p in known.items() if last.get(g) != p])
+    conn.executemany("INSERT INTO supplier_price_last (goods_id, price, since) VALUES (?,?,?) "
+                     "ON CONFLICT(goods_id) DO UPDATE SET price = excluded.price",      # «since»: the first cycle that saw the position
+                     [(g, p, now) for g, p in known.items() if last.get(g) != p])
     if not since:
         conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (HISTORY_SINCE, now))
     return len(changes)
@@ -158,7 +159,8 @@ def price_tracked(conn, goods_id: str) -> bool:
 
 def price_history(conn, goods_id: str, limit: int = HISTORY_SHOWN):
     """The latest changes of the supplier's purchase price of one position, newest first ({"at", "was", "price"}), and the cycle the history
-    is kept from ("" while no cycle wrote it). Only a change is a row; there is no history before that cycle (the owner 2026-11-05)."""
+    of this position is kept from: the first one that saw a known purchase of it ("" while none did). Only a change is a row; there is no history before that cycle (the owner 2026-11-05)."""
     rows = [{"at": at, "was": was, "price": price} for at, was, price in conn.execute(
         "SELECT at, was, price FROM supplier_price_change WHERE goods_id = ? ORDER BY id DESC LIMIT ?", (goods_id, int(limit)))]
-    return rows, store.get_state(conn, HISTORY_SINCE) or ""
+    seen = conn.execute("SELECT since FROM supplier_price_last WHERE goods_id = ?", (goods_id,)).fetchone()
+    return rows, (seen[0] if seen else "") or ""
