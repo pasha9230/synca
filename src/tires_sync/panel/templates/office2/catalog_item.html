@@ -35,6 +35,7 @@
 <div>На аккаунтах: {% for r in entity.own_prices %}<label><input type="checkbox" name="a" value="{{ r.account_id }}"{% if loop.first %} checked{% endif %}> {{ r.account }}</label> {% endfor %}<span class="muted xs">— отметьте, где включить ту же цену</span></div>
 <div><button class="btn btn--primary btn--sm" name="action" value="save">В черновик</button> <button class="btn btn--secondary btn--sm" name="action" value="clear" title="Убрать свою цену: цена снова считается по % бренда и сезона; {% for r in entity.own_prices if r.own %}{{ r.account }}: было {{ r.price|money if r.price is not none else "—" }} → станет {{ r.brand_price|money if r.brand_price is not none else "—" }}{% if not loop.last %}; {% endif %}{% endfor %}" data-own-reset>Вернуть цену по настройкам фида</button></div>
 </form><script src="{{ url_for('static', filename='own_price.js') }}"></script>{% endif %}</div>{% endcall %}{% endif %}
+{% include "_price_history.html" %}
 {% include "_oth_manual.html" %}
 </aside></div>
 </div>

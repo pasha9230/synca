@@ -581,6 +581,8 @@ def register(app) -> None:
             data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), offer, ref, parsed.offers)
             data["purchase"] = offer.base_price
             data["own_gone"] = gone is not None
+        elif has_right("money"):                                      # never at the supplier (or shown for viewing only): no own price, said why
+            data["own_closed"] = "never" if catalog_archive.item_info(conn, goods_id) is None else "view"
         if MARKET_SHOWN and has_right("money"):                       # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
             snapshot = market.latest(conn, [goods_id]).get(goods_id)
             data["market"] = {"snapshot": snapshot, "listings": market.listings_of(conn, snapshot["id"]) if snapshot else [],
@@ -612,7 +614,9 @@ def register(app) -> None:
             if value is not None:                                                     # the reset also for a position gone
                 offers, _purchases, gone, _other = _bulk_positions(conn, [goods_id])     # the supplier took it away: a sale price always, a percent
                 if goods_id not in offers:                                               # of its last purchase only (the owner 2026-11-03); never
-                    raise ValueError("Такой позиции нет в выгрузке.")                     # a position shown for viewing only
+                    if catalog_archive.item_info(conn, goods_id) is None:                # a position shown for viewing only, nor one never at the
+                        raise ValueError("Такой позиции нет в выгрузке, и её никогда не было у поставщика: свою цену поставить нельзя.")
+                    raise ValueError("Такой позиции нет в выгрузке.")                     # supplier (the owner 2026-11-05)
                 if goods_id in gone and "pct" in value and not offers[goods_id].base_price > 0:
                     raise ValueError("Позиции нет у поставщика, и последняя закупка неизвестна: процент не от чего считать. "
                                      "Поставьте цену продажи в рублях.")
