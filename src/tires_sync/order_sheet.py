@@ -324,6 +324,7 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
     card_id, profits = card["id"], _profits(conn, card)
     common = common_of(conn, card, placed_at, sent)
     from_oth = oth_sale.from_number(conn, card_id)                 # the positions taken from «На ОТХ»: «Б», the WebMIM order they came from
+    typed = oth_sale.typed_numbers(conn, card) if from_oth else set()
     merged = order_merge.items_of(conn, card_id)                   # a merge (the owner 2026-10-30); its links are in the panel's history only
     out = {}
     for item in card["items"]:
@@ -333,7 +334,7 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
         if item["id"] in from_oth:
             source = conn.execute("SELECT from_order FROM order_item_oth WHERE item_id = ?", (item["id"],)).fetchone()[0]
             where = "заказ №%d" % source if source else "свой остаток"     # «Свой остаток (ОТХ)» (oth_manual): no old order
-            row = dict(common, **{"№ заказа MIM": from_oth[item["id"]], "Примечание": " ".join(
+            row = dict(common, **_oth_values(conn, card, item["id"], from_oth[item["id"]], typed), **{"Примечание": " ".join(
                 ("с ОТХ, %s. %s" % (where, common["Примечание"] or "")).split()),
                 "Реализация": FROM_STOCK if common["Реализация"] == REALIZED else common["Реализация"]})
         elif item["id"] in merged and merged[item["id"]]["placed"]:  # a placed source: its WebMIM order, transfer and invoice; else the new order's
@@ -344,6 +345,34 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
             "Артикул": item["code"] or item["goods_id"], "Наименование": item["name"], "Кол-во": qty, "Цена MIM": buy,
             "Сумма MIM": round(buy * qty, 2), "Цена продажи": sell, "Сумма продажи": round(sell * qty, 2),
             "Прибыль ₽": profit[0] if profit else "", "Прибыль %": profit[1] if profit else ""})
+    return out
+
+
+def _oth_values(conn, card: dict, item_id: int, number: str, typed: set) -> dict:
+    """«№ заказа MIM», «Перемещение MIM», «Дата счета» of a position «с ОТХ» (the owner 2026-11-05): those of the order its tyres were bought by
+    (`number`: oth_sale.from_number), never of the order's own order of WebMIM; own stock has none. What a person wrote stays (`typed`:
+    oth_sale.typed_numbers), and a number typed brings its own day."""
+    first = oth_sale.first_order(conn, item_id)
+    row = conn.execute("SELECT id, webmim_id, webmim_number, transfer_number FROM order_card WHERE id = ?", (first,)).fetchone() if first else None
+    source = dict(zip(("id", "webmim_id", "webmim_number", "transfer_number"), row)) if row else None
+    return {"№ заказа MIM": card["webmim_number"] if "webmim_number" in typed else number,
+            "Перемещение MIM": card["transfer_number"] if "transfer_number" in typed else (source["transfer_number"] if source else ""),
+            "Дата счета": _invoice_day(conn, card) if "webmim_number" in typed else (_invoice_day(conn, source) if source else "")}
+
+
+def oth_invoice(conn, card: dict) -> List[dict]:
+    """«Дата счета» of an order holding tyres «с ОТХ», for its card: [{order: the order of purchase (0: a number typed here), day}], one per order, as
+    its rows say. Own stock has no invoice: []. An order that took nothing: []."""
+    numbers = oth_sale.from_number(conn, card["id"])
+    typed = oth_sale.typed_numbers(conn, card) if numbers else set()
+    out: List[dict] = []
+    for item in card["items"]:
+        first = oth_sale.first_order(conn, item["id"]) if item["id"] in numbers and int(item["qty"]) >= 1 else None
+        if first:
+            found = {"order": 0 if "webmim_number" in typed else first,
+                     "day": _oth_values(conn, card, item["id"], numbers[item["id"]], typed)["Дата счета"]}
+            if found not in out:
+                out.append(found)
     return out
 
 

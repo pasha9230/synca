@@ -14,7 +14,8 @@ first order), the ad holds them and a third order may take them (a chain). An or
 its row loses the pieces (from_item is minus the row's id, from_order 0), «Вернуть на ОТХ» gives them back to it, the purchase is the one of
 the order's own position. The rows: order_item_oth (store.py).
 The numbers (the owner 2026-11-04, the order 515): an order whose tyres all come from one order of purchase has that order's WebMIM number and
-transfer number (its client's messages name them), no order of WebMIM of its own: _sync_numbers, borrowed_ids."""
+transfer number (its client's messages name them), no order of WebMIM of its own: _sync_numbers, borrowed_ids. «Дата счета» (the owner 2026-11-05) is
+never stored: order_sheet counts it from the order of purchase, with the two numbers, by position."""
 from __future__ import annotations
 
 import json
@@ -148,6 +149,16 @@ def _copied(conn, card_id) -> Dict[str, str]:
     return found
 
 
+def typed_numbers(conn, card: dict) -> Set[str]:
+    """The two numbers a person wrote on an order holding tyres «с ОТХ»: its rows of the table keep them (order_sheet). A number of an order with an
+    order of WebMIM of its own, with positions of the supplier (it is theirs), or of a merged order (by position, order_merge) says nothing of these tyres."""
+    from . import order_merge
+    if card["webmim_id"] or order_merge.is_target(conn, card["id"]) or [i for i in supplier_items(conn, card) if int(i["qty"]) >= 1]:
+        return set()
+    copied = _copied(conn, card["id"])
+    return {f for f in NUMBERS if card[f] and copied.get(f) != card[f]}
+
+
 def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, note: bool = False, closed: bool = False) -> bool:
     """Bring the two numbers in line with the tyres «с ОТХ» the order holds now, in the caller's transaction. An empty field gets the number of
     the one order of purchase; a copy (_copied) follows that order, and goes when no order gives the numbers; anything else was written by a
@@ -195,7 +206,11 @@ def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, n
 
 def numbers_written(conn, card_id, fields: Iterable[str], now: str, author: str) -> None:
     """A number was written through the order's fields (orders.update_card, in its transaction). Over a copy: it is a person's from now on.
-    The orders holding tyres bought by this one follow it (the owner 2026-11-04): they show its number now, unless a person typed their own."""
+    The orders holding tyres bought by this one follow it (the owner 2026-11-04): they show its number now, unless a person typed their own.
+    An id of WebMIM alone changes no copy, but the rows of those orders: the number or the day they show may come by it."""
+    fields = list(fields)
+    if "webmim_id" in fields:
+        _look_again(conn, _holders(conn, card_id))
     fields = [f for f in fields if f in NUMBERS]
     if not fields:
         return
@@ -206,11 +221,25 @@ def numbers_written(conn, card_id, fields: Iterable[str], now: str, author: str)
     _follow_source(conn, card_id, now, author, {int(card_id)})
 
 
+def _holders(conn, source_id) -> Set[int]:
+    """The orders whose tyres «с ОТХ» were bought by `source_id`."""
+    held = conn.execute("SELECT t.order_id, t.item_id FROM order_item_oth t WHERE t." + _LIVE).fetchall()     # a position given on too: its copy means the same order
+    return {o for o, item_id in held if first_order(conn, item_id) == source_id}
+
+
+def _look_again(conn, card_ids: Iterable[int]) -> None:
+    """The rows of these orders in the Google table show their source's values: the next send looks at them though nothing of their own changed
+    (order_sheet._due: no record in their journal when nothing is copied, several sources, a press going on)."""
+    for order_id in card_ids:
+        conn.execute("UPDATE sheet_order SET seen_event = 0 WHERE order_id = ?", (order_id,))
+
+
 def _follow_source(conn, source_id, now: str, author: str, seen: Set[int]) -> None:
     """The orders whose tyres «с ОТХ» were bought by `source_id`, and on along a copy that changed. A press of «Оформить в WebMIM» going on writes
     its own (items_changed)."""
-    held = conn.execute("SELECT t.order_id, t.item_id FROM order_item_oth t WHERE t." + _LIVE).fetchall()     # a position given on too: its copy means the same order
-    for order_id in sorted({o for o, item_id in held if first_order(conn, item_id) == source_id} - seen):
+    holders = _holders(conn, source_id)
+    _look_again(conn, holders)
+    for order_id in sorted(holders - seen):
         seen.add(order_id)
         state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (order_id,)).fetchone()
         if state and state[0] != "refused":
