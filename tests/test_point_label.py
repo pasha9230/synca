@@ -144,7 +144,7 @@ def test_the_chat_of_another_account_and_the_clients_words_are_hidden_from_a_poi
     card = text(manager, "/orders/%d" % w["away"])
     assert 'href="/chats/%d"' % w["away_chat"] not in card and "Чаты Авито" not in card
     assert "секретные слова" not in card and "тайный звонок" not in card
-    assert "тайный звонок" in text(w["owner"], "/alerts")              # the owner's alerts as before (one row per order: the newest record)
+    assert "тайный звонок" not in text(w["owner"], "/alerts")          # the owner's alerts: no chat rows since 2026-11-05
     for role in ("owner", "partner", "chats"):                           # nobody else: as before
         client = w["owner"] if role == "owner" else person(w["app"], role)[0]
         page = text(client, "/orders/%d" % w["away"])
@@ -157,7 +157,7 @@ def test_the_chat_of_the_points_own_account_and_its_words_are_shown(w):
     orders.add_event(conn, w["mine"], NOW, chats.CLIENT_WROTE_AUTHOR, "chat", "Клиент написал: свои слова", level="yellow")
     conn.commit()
     manager, _ = person(w["app"], "point", w["rust"])
-    assert "свои слова" in text(manager, "/alerts")                                              # before the card: it marks them seen
+    assert "свои слова" not in text(manager, "/alerts")                                          # a chat record: no row since 2026-11-05
     card = text(manager, "/orders/%d" % w["mine"])
     assert 'href="/chats/%d"' % w["petr"]["id"] in card and "свои слова" in card
 

@@ -64,8 +64,8 @@ def test_an_answer_or_no_reply_or_closing_puts_it_out(tmp_path):
     assert urgent(conn) == []
     other = chat(conn, peer="p2")
     message(conn, other, at(-90))
-    page = client.get("/alerts").get_data(as_text=True).split("<tbody>")[1]
-    assert "Срочно ответить" in page and 'action="/chats/%d/status"' % other in page and "Разобрался" not in page
+    assert len(urgent(conn)) == 1
+    assert "Срочно ответить" not in client.get("/alerts").get_data(as_text=True)      # a chat: no row of the page since 2026-11-05
     r = post(client, "/chats/%d/status" % other, tok, status="no_reply", back="alerts")
     assert r.status_code == 302 and r.headers["Location"].endswith("/alerts")
     assert urgent(conn) == []
@@ -88,13 +88,15 @@ def test_point_accounts_closed_chats_and_waits_from_before_the_release_are_not_u
     assert urgent(conn) == []                                                    # the look of every minute has not started it yet
 
 
-def test_the_bell_shows_urgent_and_never_a_task(tmp_path):
-    """The owner 2026-10-31: a due task is not in «Уведомления» nor in the bell — only the counter and the light of «Задачи»."""
+def test_the_bell_shows_neither_urgent_nor_a_task(tmp_path):
+    """The owner 2026-10-31: a due task is not in «Уведомления» nor in the bell — only the counter and the light of «Задачи».
+    The owner 2026-11-05 «чаты не нужны там»: «Срочно ответить» is no row of the bell either (page_rows still has it)."""
     app, client, tok, conn = setup(tmp_path)
     message(conn, chat(conn), at(-90))
     inquiry.add_callback(conn, at(-5)[:16], "", at(-30), "owner", chat_row=chat(conn, peer="p9", name="Олег"))
     feed = client.get("/alerts/feed").get_json()
-    assert feed["red"] is True and [i["title"] for i in feed["items"]] == ["Чат"] and not any("Перезвонить" in i["text"] for i in feed["items"])
+    assert len(urgent(conn)) == 1
+    assert feed == {"count": 0, "red": False, "items": []}
 
 
 # ---- «Перезвонить» -------------------------------------------------------------------------------------------------------------------

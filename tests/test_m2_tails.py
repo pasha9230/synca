@@ -211,7 +211,7 @@ def test_the_bell_counts_the_rows_of_the_page_and_not_those_of_a_deleted_order(t
     conn.commit()
     data = client.get("/alerts/feed").get_json()
     rows = _ids_on_page(client)
-    assert data["count"] == len(rows) == len(data["items"]) == counter(client.get("/").get_data(as_text=True))[0] == 2      # keep: created + red
+    assert data["count"] == len(rows) == len(data["items"]) == counter(client.get("/").get_data(as_text=True))[0] == 1      # keep: red («Заказ создан» is no row since 2026-11-05)
     assert {int(n) for _k, n in rows} == {keep}
 
 
@@ -234,15 +234,15 @@ def test_a_green_alert_older_than_seven_days_is_not_shown_but_stays_in_the_journ
     from tires_sync import orders
     app, client, tok, conn = setup(tmp_path)                                     # the panel clock: 2026-10-20 12:00 Moscow
     cid = card(conn, "Ольга")
-    orders.add_event(conn, cid, "2026-10-13T11:59:00", "система", "field", "Резерв: товар на точке (старое)", level="green")
-    orders.add_event(conn, cid, "2026-10-13T12:01:00", "система", "field", "Резерв: товар на точке (неделя без минуты)", level="green")
+    orders.add_event(conn, cid, "2026-10-13T11:59:00", "система", "sale", "Продажа проведена (старое)", level="green")
+    orders.add_event(conn, cid, "2026-10-13T12:01:00", "система", "sale", "Продажа проведена (неделя без минуты)", level="green")
     orders.add_event(conn, cid, "2026-10-01T10:00:00", "система", "reserve", "Оповещение о конце резерва (старое)", level="yellow")
     conn.commit()
     texts = [i["text"] for i in client.get("/alerts/feed").get_json()["items"]]
-    assert "Резерв: товар на точке (старое)" not in texts and "Резерв: товар на точке (неделя без минуты)" in texts
+    assert "Продажа проведена (старое)" not in texts and "Продажа проведена (неделя без минуты)" in texts
     assert "Оповещение о конце резерва (старое)" in texts                                    # only green ones expire
-    assert "Резерв: товар на точке (старое)" not in client.get("/alerts").get_data(as_text=True)
-    assert "Резерв: товар на точке (старое)" in [e["text"] for e in orders.list_events(conn, cid)]  # the journal keeps it
+    assert "Продажа проведена (старое)" not in client.get("/alerts").get_data(as_text=True)
+    assert "Продажа проведена (старое)" in [e["text"] for e in orders.list_events(conn, cid)]  # the journal keeps it
 
 
 # --- 1: a chat without an order whose client waits is a row «Клиент написал» -------------------------------------------------------
@@ -262,27 +262,27 @@ def _unlinked_chat(app, conn):
     return account, client, chats.list_chats(conn)[0]["id"]
 
 
-def test_a_chat_without_an_order_is_one_row_in_the_page_the_bell_and_the_counter_until_it_is_answered(tmp_path):
+def test_a_chat_without_an_order_is_one_row_of_page_rows_until_it_is_answered_and_no_row_of_the_bell(tmp_path):
+    """order_alerts.page_rows keeps the row; the page, the bell and the counter show no chat since 2026-11-05 (order_alerts.bell_row)."""
     from test_alerts_page import counter, setup
     from test_chats_sync import TS, msg
-    from tires_sync import chats
+    from tires_sync import chats, order_alerts
     app, client, tok, conn = setup(tmp_path)
     account, avito, chat_row = _unlinked_chat(app, conn)
-    assert client.get("/alerts/feed").get_json()["count"] == 0                             # what was there before the first read is the past
+    waiting = lambda: [r for r in order_alerts.page_rows(conn, "owner") if r.get("chat_row") == chat_row]     # noqa: E731
+    assert waiting() == []                                                               # what was there before the first read is the past
     chats.sync_account(conn, avito, account, "2026-10-20T11:00:00")
     conn.execute("UPDATE avito_message SET at = '2026-10-20T11:00:00' WHERE message_id = 'm2'")
     conn.commit()
-    data = client.get("/alerts/feed").get_json()
-    [item] = data["items"]
-    assert data["count"] == 1 and counter(client.get("/").get_data(as_text=True))[0] == 1
-    assert item["href"] == "/chats/%d" % chat_row and item["title"] == "Чат без заказа" and item["text"] == "Клиент написал: Есть 205/55 R16?"
-    assert item["level"] == "yellow" and item["more"] == 1 and item["client"] == "Татьяна"           # two messages wait: one row
-    page = client.get("/alerts").get_data(as_text=True)
-    assert '<a href="/chats/%d">Чат без заказа</a>' % chat_row in page and "/ack" not in page
+    [item] = waiting()
+    assert item["text"] == "Клиент написал: Есть 205/55 R16?" and item["level"] == "yellow" and item["more"] == 1 and item["client"] == "Татьяна"
+    assert client.get("/alerts/feed").get_json() == {"count": 0, "red": False, "items": []}
+    assert counter(client.get("/").get_data(as_text=True))[0] == 0
+    assert '/chats/%d"' % chat_row not in client.get("/alerts").get_data(as_text=True)
     avito.chat_pages[0][0]["updated"] = TS + 30
     avito.messages["c1"] = avito.messages["c1"] + [msg("m3", "Да, есть", direction="out", created=TS + 30)]
     chats.sync_account(conn, avito, account, "2026-10-20T11:05:00")                        # answered: nobody waits
-    assert client.get("/alerts/feed").get_json()["count"] == 0
+    assert waiting() == []
 
 
 def test_a_chat_marked_no_reply_or_with_an_order_has_no_chat_row(tmp_path):

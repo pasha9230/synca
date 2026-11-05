@@ -34,7 +34,7 @@ def event(conn, cid, kind, text, level=""):
 
 
 def three(conn):
-    """A red, a yellow and a green record on three orders (the cards' own «Заказ создан» are green too)."""
+    """A red and a yellow record on two orders (the cards' own green «Заказ создан» are no rows since 2026-11-05: order_alerts.bell_row)."""
     a, b = card(conn, "Ольга"), card(conn, "Пётр")
     return event(conn, a, "notify", "Оповещение не отправлено: нет ВК"), event(conn, b, "reserve", "Оповещение о конце резерва"), a, b
 
@@ -54,6 +54,11 @@ def other_user(app, conn, name="worker2", **kw):
     return c
 
 
+def created(conn, cid):
+    """The id of the order's own «Заказ создан» (green, kind «created»)."""
+    return conn.execute("SELECT id FROM order_event WHERE order_id = ? AND kind = 'created'", (cid,)).fetchone()[0]
+
+
 def open_ids(conn, name="owner"):
     return sorted(e["id"] for e in alerts.open_alerts(conn, name))
 
@@ -64,7 +69,7 @@ def test_the_button_asks_on_the_page_and_the_second_button_names_the_count(tmp_p
     page = client.get("/alerts").get_data(as_text=True)
     assert "Принять все" in page and "Да, принять" not in page and 'name="ids"' not in page
     ids, html = shown(client)
-    assert "Да, принять %d уведомл" % len(ids) in html and len(ids) == 4        # red + yellow + two green «Заказ создан»
+    assert "Да, принять %d уведомл" % len(ids) in html and len(ids) == 2        # red + yellow; «Заказ создан» is no row (2026-11-05)
     assert 'action="/alerts/accept-all"' in html and "confirm(" not in html
     assert alerts.open_alerts(conn, "owner")                                     # the question changed nothing
 
@@ -77,11 +82,11 @@ def test_red_is_acked_and_yellow_green_are_seen_for_this_user_only(tmp_path):
     ids, _ = shown(client)
     r = client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
     assert r.status_code == 302 and r.headers["Location"].endswith("/alerts")
-    assert open_ids(conn, "owner") == []
+    assert open_ids(conn, "owner") == [created(conn, a)]                         # not on the page, so not accepted: the record is as it was
     assert conn.execute("SELECT login, author FROM order_event_ack WHERE event_id = ?", (red,)).fetchall() == [("owner", "owner")]   # as the single press
     assert open_ids(conn, "worker2") == before                                    # the other user keeps everything, red included
     assert "Новых уведомлений нет" in client.get("/alerts").get_data(as_text=True)
-    assert worker2.get("/alerts").get_data(as_text=True).count("<tr>") >= 4
+    assert worker2.get("/alerts").get_data(as_text=True).count("<tr>") == 3     # the head, the red and the yellow
 
 
 def test_a_new_alert_after_loading_the_page_stays(tmp_path):
@@ -91,7 +96,7 @@ def test_a_new_alert_after_loading_the_page_stays(tmp_path):
     late_red = event(conn, a, "notify", "Оповещение не отправлено: опоздало")   # ... a record comes ...
     late_yellow = event(conn, b, "reserve", "Ещё одно оповещение о резерве")    # ... on an order with an accepted row
     client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
-    assert open_ids(conn) == sorted([late_red, late_yellow])
+    assert open_ids(conn) == sorted([created(conn, a), late_red, late_yellow])
 
 
 def test_rows_of_other_users_and_ids_not_on_their_page_are_untouched(tmp_path):
@@ -105,7 +110,7 @@ def test_rows_of_other_users_and_ids_not_on_their_page_are_untouched(tmp_path):
     client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids + [grey, 999999, "x"]})
     assert conn.execute("SELECT COUNT(*) FROM order_event_ack WHERE event_id IN (?, ?)", (grey, 999999)).fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM order_event_ack WHERE login != 'owner'").fetchone()[0] == 0
-    assert open_ids(conn) == []
+    assert open_ids(conn) == [created(conn, a)]
 
 
 def test_rows_of_a_point_stay_for_a_point_manager_and_a_point_user_accepts_only_its_own(tmp_path):
@@ -131,12 +136,13 @@ def test_chat_based_rows_and_handoffs_are_left_out(tmp_path):
     red, yellow, a, b = three(conn)
     from tires_sync import order_manager as mgr
     hand = event(conn, a, "handoff", mgr.ASK + " Иван", level="yellow")
-    note = event(conn, b, "chat", "Клиент написал после закрытия: привет")                      # a record of the order journal: seen as by opening the order
+    note = event(conn, b, "chat", "Клиент написал после закрытия: привет")       # a chat record: no row of the page since 2026-11-05
     assert hand in [e["id"] for e in alerts.open_alerts(conn, "owner")]            # it is an alert ...
     ids, _ = shown(client)
-    assert hand not in ids and note in ids                                       # ... that this button leaves alone
+    assert hand not in ids and note not in ids                                   # ... that this button leaves alone
     client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
-    assert open_ids(conn) == [hand]                                              # «Взять в работу» stays its own button
+    assert open_ids(conn) == [created(conn, a), hand, note]                      # «Взять в работу» stays its own button; the
+                                                                                 # records not on the page are as they were
 
 
 def test_csrf_login_and_rights(tmp_path, monkeypatch):
@@ -163,7 +169,7 @@ def test_a_handoff_below_an_accepted_green_row_is_not_swallowed(tmp_path):
     from tires_sync import order_manager as mgr
     a = card(conn)
     hand = event(conn, a, "handoff", mgr.ASK + " Иван", level="yellow")
-    later = event(conn, a, "stage", "Этап изменён", level="green")                # a newer, acceptable record of the same order
+    later = event(conn, a, "reserve", "Оповещение о конце резерва")              # a newer, acceptable record of the same order
     ids, _ = shown(client)
     assert later in ids and hand not in ids
     client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
@@ -200,7 +206,8 @@ def test_a_point_manager_accepts_a_yellow_row_of_its_order_and_a_handoff_blocks_
     pt = other_user(app, conn, "yun", role="point", point_id=mine)
     pt.post("/alerts/accept-all", data={"csrf": "tok2", "ids": [yellow]})
     assert yellow not in open_ids(conn, "yun")                                    # no block for a point: it never sees the handoff row
-    # the staff: the green «Заказ создан» below the handoff goes, the yellow above it stays
+    # the staff: the yellow above the handoff stays; the green «Заказ создан» below it is no row since 2026-11-05 and stays as it was
     ids, _ = shown(client)
+    assert ids == [yellow]
     client.post("/alerts/accept-all", data={"csrf": tok, "ids": ids})
-    assert open_ids(conn) == sorted([hand, yellow])
+    assert open_ids(conn) == sorted([created(conn, a), hand, yellow])

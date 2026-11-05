@@ -61,12 +61,14 @@ def test_the_page_and_ack_need_a_login_and_csrf(tmp_path):
 
 def test_the_page_lists_coloured_alerts_and_the_menu_counts_them(tmp_path):
     app, client, tok, conn = setup(tmp_path)
-    cid = card(conn, "Ольга")                                  # «Заказ создан» is green
+    cid = card(conn, "Ольга")                                  # «Заказ создан» is green, but no row (a stage: order_alerts.bell_row)
     event(conn, cid, "notify", "Оповещение не отправлено: у точки нет ВК")
     event(conn, cid, "reserve", "Оповещение о конце резерва")
+    event(conn, cid, "sale", "Продажа проведена: 5 000 ₽")                     # green
     event(conn, cid, "notify", "Оповещение отправлено: Telegram")        # grey: never an alert
     html = client.get("/alerts").get_data(as_text=True)
-    assert "Оповещение не отправлено" in html and "Оповещение о конце резерва" in html and "Заказ создан" in html
+    assert "Оповещение не отправлено" in html and "Оповещение о конце резерва" in html and "Продажа проведена" in html
+    assert "Заказ создан" not in html
     assert "Оповещение отправлено: Telegram" not in html
     assert 'href="/orders/%d"' % cid in html and "Ольга" in html
     assert "badge--err" in html and "badge--warn" in html and "badge--ok" in html
@@ -119,6 +121,7 @@ def test_ack_on_a_record_that_is_not_red_is_refused(tmp_path):
 
 
 def test_client_messages_are_one_alert_per_order(tmp_path):
+    """The folding is of page_rows (the dots by the order numbers still see the chat records); the page keeps of them the red only."""
     app, client, tok, conn = setup(tmp_path)
     cid = card(conn)
     other = card(conn, "Пётр")
@@ -129,13 +132,14 @@ def test_client_messages_are_one_alert_per_order(tmp_path):
     event(conn, cid, "chat", "Отправлен ответ клиенту: да", level="green")
     event(conn, other, "chat", "Клиент написал после закрытия сделки (3)")
     red = event(conn, cid, "chat", "Позиция не добавлена: нет кода")             # red stays on its own
-    html = client.get("/alerts").get_data(as_text=True)
-    assert "Отправлен ответ клиенту: да" in html and "ещё 2" in html and "(1)" not in html and "(2)" not in html
-    assert "(3)" in html and "Позиция не добавлена" in html
-    assert counter(client.get("/").get_data(as_text=True)) == (3, True)
-    rows = re.findall(r"<tr>(.*?)</tr>", html, re.S)
-    folded = [r for r in rows if "Отправлен ответ клиенту" in r][0]
-    assert "badge--warn" in folded                                            # the most important colour of the folded records
+    rows = alerts.page_rows(conn, "owner", NOW)
+    folded = [r for r in rows if r["text"].startswith("Отправлен ответ клиенту")]
+    assert [(r["more"], r["level"]) for r in folded] == [(2, "yellow")]         # the most important colour of the folded records
+    assert [r["text"] for r in rows if r["order_id"] == other] == ["Клиент написал после закрытия сделки (3)"]
+    assert [r["id"] for r in rows if r["level"] == "red"] == [red]
+    html = client.get("/alerts").get_data(as_text=True)                         # the page: the red failure only (2026-11-05)
+    assert "Позиция не добавлена" in html and "Отправлен ответ клиенту" not in html and "Клиент написал" not in html
+    assert counter(client.get("/").get_data(as_text=True)) == (1, True)
     client.get("/orders/%d" % cid)
     assert [e["id"] for e in alerts.open_alerts(conn, "owner", cid)] == [red]
 
@@ -155,8 +159,9 @@ def test_the_users_own_records_are_not_alerts_for_them_except_red(tmp_path):
     conn.execute("UPDATE order_card SET responsible = 'worker2' WHERE id = ?", (cid,))
     conn.commit()
     html = worker2.get("/alerts").get_data(as_text=True)                        # somebody else's records are alerts
-    assert "Отправлен ответ клиенту: да" in html and "сбой" in html and "Заказ создан" in html
-    assert counter(worker2.get("/").get_data(as_text=True)) == (4, True)
+    assert "Резерв кончается" in html and "сбой" in html                       # a chat and a stage are no rows (2026-11-05)
+    assert "Отправлен ответ клиенту" not in html and "Заказ создан" not in html
+    assert counter(worker2.get("/").get_data(as_text=True)) == (2, True)
 
 
 def test_a_broken_counter_does_not_break_the_pages(tmp_path, monkeypatch):
