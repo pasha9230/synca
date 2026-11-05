@@ -41,6 +41,8 @@ def press(client, card, action, tok="tok", p=None, again=None):
     data = dict(token=again or token(page, card, action))
     if action == "act_signed":
         data["handover"] = "yes"                                                 # the second step of the button (the owner 2026-11-04)
+    if action == "refuse":
+        data["reason"] = "year"                                                  # «ОТКАЗ» needs its reason (the owner 2026-11-05)
     if p:
         data["p"] = str(p)
     r = post(client, "/my-point/%d/%s" % (card, action), tok, **data)
@@ -75,9 +77,9 @@ def test_the_manager_sees_the_orders_of_the_own_point_only_with_phone_items_and_
     assert "Хранение до" in page                                                          # the order at the point has its term
     assert 'class="sidebar"' in page and "mypoint.css" in page                             # in the panel's frame with the menu (the owner 2026-10-29)
     assert page.index("700200") < page.index("5000100")                                   # newest first (same last event: the later order)
-    assert '/my-point/%d/arrived' % card in page and '/my-point/%d/issued' % here in page and '/my-point/%d/no_show' % here in page
-    assert '/my-point/%d/no_show' % card not in page                                      # only the marks that fit the stage («выдал» fits on the way too: owner 2026-10-21)
-    assert 'data-confirm-title="Выдать заказ' in page and 'data-confirm-title="Точно клиент не пришёл?"' in page       # the panel's window (UX 1.0g; the words: the owner 2026-11-02)
+    assert '/my-point/%d/arrived' % card in page and '/my-point/%d/issued' % here in page and '/my-point/%d/refuse' % here in page
+    assert '/my-point/%d/refuse' % card not in page                                       # only the marks that fit the stage («выдал» fits on the way too: owner 2026-10-21)
+    assert 'data-confirm-title="Выдать заказ' in page and 'data-confirm-title="Отказ по заказу № 700200?"' in page     # the panel's window (UX 1.0g; «ОТКАЗ»: the owner 2026-11-05)
 
 
 def test_an_order_of_another_point_cannot_be_marked_even_by_its_address(tmp_path):
@@ -162,22 +164,23 @@ def test_issued_closes_the_order_and_tells_the_client_nothing(tmp_path):
     assert 'action="/my-point/%d/undo"' % card in page                                    # its «Выдал» can be undone (the owner 2026-11-02)
 
 
-def test_no_show_writes_the_red_record_as_the_vk_command_and_the_client_hears_nothing(tmp_path):
+def test_refuse_writes_the_red_record_as_the_vk_command_and_the_client_hears_nothing(tmp_path):
+    """«ОТКАЗ» instead of «Клиент не пришёл» (the owner 2026-11-05): the button and «отказ <номер> <причина>» do the same."""
     (vk_app, _c, _t, vk_conn, _p, vk_card), (app, client, tok, conn, pid, card) = two(tmp_path)
     orders.move_card(vk_conn, vk_card, _stage(vk_conn, "at_point"), "2026-10-13T12:00:00", "o")
-    hook(vk_app, vk_conn, "клиент не пришёл 5000100")
+    hook(vk_app, vk_conn, "отказ 5000100 старый год производства")
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     conn.commit()
     mine = manager(app, conn, pid)
-    _t, page = press(mine, card, "no_show")
+    _t, page = press(mine, card, "refuse")
     red = [(k, t) for k, t, l in journal(conn, card) if l == "red"]
     assert red and red == [(k, t) for k, t, l in journal(vk_conn, vk_card) if l == "red"]
-    assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and to_client(app) == []
-    assert "отмечено: клиент не пришёл" in page
+    assert orders.get_card(conn, card)["stage"]["code"] == "oth" == orders.get_card(vk_conn, vk_card)["stage"]["code"] and to_client(app) == []
+    assert "отказ отмечен" in page
 
 
-def test_no_show_of_the_point_account_order_tells_the_staff_and_not_the_point_by_vk_and_by_button(tmp_path):
-    """The owner 2026-10-26: the point says «клиент не пришёл» about an order of its own Avito account; the staff call the client."""
+def test_refuse_of_the_point_account_order_tells_the_staff_and_not_the_point_by_vk_and_by_button(tmp_path):
+    """The owner 2026-10-26: the point marks a mark about an order of its own Avito account; the staff are told (since 2026-11-05 «ОТКАЗ»)."""
     (vk_app, _c, _t, vk_conn, vk_pid, vk_card), (app, client, tok, conn, pid, card) = two(tmp_path)
     for c, point_id, order in ((vk_conn, vk_pid, vk_card), (conn, pid, card)):
         account = c.execute("SELECT account_id FROM avito_chat WHERE order_id = ?", (order,)).fetchone()[0]
@@ -185,11 +188,11 @@ def test_no_show_of_the_point_account_order_tells_the_staff_and_not_the_point_by
         orders.move_card(c, order, _stage(c, "at_point"), "2026-10-13T12:00:00", "o")
         c.commit()
         assert points.of_account(c, order) is not None
-    hook(vk_app, vk_conn, "клиент не пришёл 5000100")
+    hook(vk_app, vk_conn, "отказ 5000100 ошиблись размером")
     said = [text for _peer, text in to_points(vk_app)]
-    assert said and all("Клиент не пришёл за заказом" not in t for t in said) and any("С клиентом свяжутся" in t for t in said)
-    _t, page = press(manager(app, conn, pid), card, "no_show")
-    assert "отмечено: клиент не пришёл" in page and points.unseen_alerts(conn, pid, "") == []
+    assert said and all("Отказ клиента на точке" not in t for t in said) and any("отказ отмечен" in t for t in said)
+    _t, page = press(manager(app, conn, pid), card, "refuse")
+    assert "отказ отмечен" in page and points.unseen_alerts(conn, pid, "") == []
     for c, order in ((vk_conn, vk_card), (conn, card)):
         told = [t for k, t, _l in journal(c, order) if k == "notify"]
         assert told and not any("точк" in t for t in told), told
@@ -198,8 +201,8 @@ def test_no_show_of_the_point_account_order_tells_the_staff_and_not_the_point_by
 def test_a_mark_that_does_not_fit_the_stage_changes_nothing(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path, SENT)
     mine = manager(app, conn, pid)
-    for action in ("no_show",):                                                              # the order is still on its way («выдал» fits it: test_issued_stage.py)
-        r = post(mine, "/my-point/%d/%s" % (card, action), "tok", token=("c%d" % len(action)).ljust(24, "0"))
+    for action in ("refuse",):                                                               # the order is still on its way («выдал» fits it: test_issued_stage.py)
+        r = post(mine, "/my-point/%d/%s" % (card, action), "tok", token=("c%d" % len(action)).ljust(24, "0"), reason="year")
         page = mine.get(r.headers["Location"]).get_data(as_text=True)
         assert "не подходит" in page or "отмечают, когда заказ на точке" in page
     assert orders.get_card(conn, card)["stage"]["code"] == "moving" and to_client(app) == []
@@ -224,14 +227,14 @@ def test_the_vk_command_then_the_button_tell_the_client_once(tmp_path):
 
 
 def test_each_button_of_a_card_is_its_own_press(tmp_path):
-    """«Клиент не пришёл», then the client came: «Выдал» from the same page is a new press, not «уже выполнена» (it would leave the order)."""
+    """«ОТКАЗ» pressed without its reason (nothing done), then the client took it: «Выдал» from the same page is a new press, not «уже выполнена»."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     conn.commit()
     mine = manager(app, conn, pid)
     page = mine.get("/my-point").get_data(as_text=True)
-    assert token(page, card, "no_show") != token(page, card, "issued")
-    post(mine, "/my-point/%d/no_show" % card, "tok", token=token(page, card, "no_show"))
+    assert token(page, card, "refuse") != token(page, card, "issued")
+    post(mine, "/my-point/%d/refuse" % card, "tok", token=token(page, card, "refuse"))
     r = post(mine, "/my-point/%d/issued" % card, "tok", token=token(page, card, "issued"))
     assert "отмечено: выдан" in mine.get(r.headers["Location"]).get_data(as_text=True)
     assert orders.get_card(conn, card)["stage"]["code"] == "done"

@@ -91,7 +91,7 @@ def test_the_question_of_the_last_day_is_a_line_of_its_card_and_first(w, monkeyp
     card = page[page.index('id="order-%d"' % asked):].split("</article>")[0]
     assert "Клиент забрал заказ № " in card and "/my-point/%d/reserve_issued" % asked in card and "/my-point/%d/reserve_here" % asked in card
     assert 'class="mp-ask"' in card
-    assert "/my-point/%d/issued" % asked in card and "/my-point/%d/no_show" % asked in card              # the card's own presses stay
+    assert "/my-point/%d/issued" % asked in card and "/my-point/%d/refuse" % asked in card               # the card's own presses stay
     assert "mp-tab--hot" in page.split('data-tab="here"')[0].rsplit("<a", 1)[-1]                       # «На точке» waits for the point
 
 

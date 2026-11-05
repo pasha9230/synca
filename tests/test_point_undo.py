@@ -31,12 +31,17 @@ def told(monkeypatch):
     return sent
 
 
-def no_show_then_oth(mine, card, clock):
-    """«Клиент не пришёл», then «Да, на «На ОТХ»» of the page it leads to (?oth=<order>)."""
-    _t, page = press(mine, card, "no_show")
+def refuse_to_oth(mine, card, clock):
+    """«ОТКАЗ» with its reason: the order goes to «На ОТХ» (the owner 2026-11-05; it was «Клиент не пришёл», then «Да, на «На ОТХ»»)."""
     clock["now"] = T2
-    r = post(mine, "/my-point/%d/to_oth" % card, "tok", token=token(page, card, "to_oth"))
-    assert r.status_code == 302
+    press(mine, card, "refuse")
+
+
+def refused_move(conn, mine, card):
+    """A press of the point that moves nothing: «ОТКАЗ» of an order without the client's phone (its red record is the point's action)."""
+    conn.execute("UPDATE order_card SET client_phone = '' WHERE id = ?", (card,))
+    conn.commit()
+    press(mine, card, "refuse")
 
 
 def undo(mine, card):
@@ -95,10 +100,10 @@ def test_to_oth_is_undone_with_the_reason_and_the_reservation(tmp_path, clock, t
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     before = state(conn, card)
     mine = manager(app, conn, pid)
-    no_show_then_oth(mine, card, clock)
+    refuse_to_oth(mine, card, clock)
     assert orders.get_card(conn, card)["stage"]["code"] == "oth"
     clock["now"] = T3
-    assert "«На ОТХ» отменена" in undo(mine, card)
+    assert "«ОТКАЗ» отменена" in undo(mine, card)
     assert state(conn, card) == before
 
 
@@ -107,7 +112,7 @@ def test_a_later_action_or_move_or_sale_makes_it_final(tmp_path, clock, told):
     mine = manager(app, conn, pid)
     press(mine, card, "arrived")
     clock["now"] = T2
-    press(mine, card, "no_show")                                                        # a later press of the point
+    refused_move(conn, mine, card)                                                      # a later press of the point
     assert 'action="/my-point/%d/undo"' % card not in workplace(mine)
     assert "уже не отменить" in undo(mine, card) and orders.get_card(conn, card)["stage"]["code"] == "at_point"
 
@@ -133,7 +138,7 @@ def test_a_vk_command_after_the_press_makes_it_final(tmp_path, clock, told):
     app, client, tok, conn, pid, card = ready(tmp_path, SENT)
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     mine = manager(app, conn, pid)
-    no_show_then_oth(mine, card, clock)
+    refuse_to_oth(mine, card, clock)
     from tires_sync import order_oth
     order_oth.agree(conn, orders.get_card(conn, card), orders.date.fromisoformat("2026-10-14"), "2026-10-14T10:00:00", "owner")     # the lead 2026-11-05: agreed first
     hook(app, conn, "№5000100 возврат отдал подтверждаю")                                            # the point's own VK, after the press
@@ -147,7 +152,7 @@ def test_another_points_order_and_a_press_that_moved_nothing_have_no_undo(tmp_pa
     mine = manager(app, conn, pid)
     assert post(mine, "/my-point/%d/undo" % theirs, "tok").status_code in (403, 404)     # never another point's order
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
-    press(mine, card, "no_show")                                                        # the stage stays: nothing to undo
+    refused_move(conn, mine, card)                                                      # the stage stays: nothing to undo
     assert point_log.undo_list(conn, pid) == []
 
 
@@ -161,17 +166,17 @@ def test_the_undo_is_kept_without_a_time_limit(tmp_path, clock, told):
 
 # ---- the card and the menu of 2026-11-02 ---------------------------------------------------------------------------------------------
 
-def test_the_card_has_the_date_under_the_number_a_big_issue_and_a_quiet_no_show(tmp_path, clock):
+def test_the_card_has_the_date_under_the_number_a_big_issue_and_refuse_with_its_window(tmp_path, clock):
     app, client, tok, conn, pid, card = ready(tmp_path, SENT)
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
     head = re.search(r'<div class="mp-card-head">(.*?)</div>', page[page.index('id="order-%d"' % card):], re.S).group(1)
     assert head.index("№ 5000100") < head.index("от 13.10.2026") < head.index("на точке")    # one under another, centred by .mp-card-head
     issued = re.search(r'action="/my-point/%d/issued".*?<button class="([^"]+)"' % card, page, re.S).group(1)
-    no_show = re.search(r'action="/my-point/%d/no_show"([^>]*)>.*?<button class="([^"]+)"' % card, page, re.S)
+    refuse = re.search(r'action="/my-point/%d/refuse"([^>]*)>.*?<button class="([^"]+)"' % card, page, re.S)
     assert "btn--primary" in issued and "mp-btn--big" in issued
-    assert "mp-btn--quiet" in no_show.group(2) and "btn--danger-outline" not in no_show.group(2)
-    assert 'data-confirm-title="Точно клиент не пришёл?"' in no_show.group(1)          # the panel's own window, never alert()
+    assert "btn--danger" in refuse.group(2) and "mp-btn--big" not in refuse.group(2)      # «ОТКАЗ» (the owner 2026-11-05)
+    assert 'data-confirm-title="Отказ по заказу № 5000100?"' in refuse.group(1) and "data-confirm-danger" in refuse.group(1)   # never alert()
 
 
 def test_the_sidebar_of_the_point_has_calls_and_no_orders(tmp_path, clock):
