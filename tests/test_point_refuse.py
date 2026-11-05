@@ -274,3 +274,28 @@ def test_a_busy_base_after_the_move_still_says_moved(tmp_path, monkeypatch):
     monkeypatch.setattr(orders, "add_event", busy)
     outcome, answer, ok = mgr.refuse(conn, orders.get_card(conn, card), "размер", "менеджер Бета", "2026-10-13T13:00:00", None)
     assert ok and "отказ отмечен" in answer and orders.get_card(conn, card)["stage"]["code"] == "oth" and "запись не сохранена" in outcome
+
+
+# --- review round 4: a size or a year range after «отказ» is never an order number --------------------------------------------------
+
+@pytest.mark.parametrize("number,text", [(205, "отказ 205/55 R16 мал"), (205, "отказ 205 55 16 размер мал"), (2018, "отказ 2018/2019 год"),
+                                         (2019, "отказ 2019-2020 года"), (2019, "отказ 2019 выпуск"), (205, "отказ 205.55 r16")])
+def test_a_size_or_a_year_after_the_word_moves_no_order(tmp_path, number, text):
+    app, _client, conn, pid, card = at_point(tmp_path)
+    panel = orders.create_card(conn, dict(client_name="Панель"), "2026-10-13T12:00:00", "o")
+    conn.execute("UPDATE order_card SET id = ? WHERE id = ?", (number, panel))
+    conn.commit()
+    _card(conn, pid, card=number, code="at_point", webmim="")                     # the point's order known by its panel number
+    answer = mgr.dispatch(conn, "s1", PEER, text, None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, number)["stage"]["code"] == "at_point", answer
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
+
+
+def test_a_short_panel_number_with_a_plain_reason_still_works(tmp_path):
+    app, _client, conn, pid, card = at_point(tmp_path)
+    panel = orders.create_card(conn, dict(client_name="Панель"), "2026-10-13T12:00:00", "o")
+    conn.execute("UPDATE order_card SET id = 423 WHERE id = ?", (panel,))
+    conn.commit()
+    _card(conn, pid, card=423, code="at_point", webmim="")
+    mgr.dispatch(conn, "s2", PEER, "отказ 423 ошиблись размером", None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, 423)["stage"]["code"] == "oth"

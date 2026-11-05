@@ -731,13 +731,18 @@ def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
     return "заказ перенесён на «%s»" % stage["name"], answer
 
 
-def parse_refuse(text) -> Optional[Tuple[Optional[int], str]]:
-    """(the order's number or None, the reason as written) for «отказ <номер> <причина>», else None. A greeting in front is not read."""
+def _refuse_match(text):
+    """(the match of REFUSE_TEXT or None, the text it was matched on): without a greeting in front."""
     text = str(text or "")[:MAX_COMMAND]
     greeting = GREETING.match(text)
     if greeting and text[greeting.end():].strip():
         text = text[greeting.end():]
-    found = REFUSE_TEXT.match(text)
+    return REFUSE_TEXT.match(text), text
+
+
+def parse_refuse(text) -> Optional[Tuple[Optional[int], str]]:
+    """(the order's number or None, the reason as written) for «отказ <номер> <причина>», else None. A greeting in front is not read."""
+    found, text = _refuse_match(text)
     if found is None:
         return None
     number, reason = found.group(1), found.group(2)
@@ -763,6 +768,12 @@ def refuse_doubt(text, reason) -> str:
     starts with a negation («отказ не нужен», «нет, приедет»), another order's number in the reason («отказ 5000100 5000200 …»)."""
     if re.search(r"[?？]", str(text or "")):
         return "вопрос"
+    found, raw = _refuse_match(text)
+    number = found.group(1) if found is not None and (parse_refuse(text) or (None,))[0] is not None else None   # a year kept as the reason: no number
+    if number and re.match(r"\s*(?:[/\\.,:\-–—]\s*)?\d", raw[found.end(1):]):
+        return "размер или год вместо номера заказа"          # «отказ 205/55 R16», «отказ 2019-2020 года» (review 2026-11-05)
+    if number and len(number) == 4 and 1990 <= int(number) <= 2099 and not MARKED_NUMBER.search(raw[:found.start(2)]):
+        return "похоже на год, а не на номер заказа"           # «отказ 2019 выпуск»; the order 2019 is written «отказ №2019 …»
     tokens = WORD_PART.findall(rules.normalise_word(reason))
     if tokens and tokens[0] in NEGATION:
         return "отрицание"
