@@ -5,12 +5,18 @@ are files of the code, data/whatsnew/NNNN.md, and go out with the deploy:
     date: 02.11.2026
     title: Обновление панели №1
 
-    ## ✅ Заголовок
+    ## Раздел: короткое название изменения
     roles: owner, partner, point
-    Текст: абзацы через пустую строку, строки «- » — список, **жирный**.
+    **Что сделано:** простыми словами, что изменилось для человека.
 
-A file that does not read (a header missing, a number not the file's, a role nobody has, an item without roles or text) is skipped and
-logged; the panel never falls over a text. The owner and the partner see every item; anyone else the items naming their role (working
+    **Как работает:**
+    - правило: когда срабатывает, кто что видит, что система делает сама, исключения
+
+    **Затрагивает разделы:** какие ещё разделы панели это меняет, или «другие разделы не затрагивает».
+
+«Раздел» is the name of a section of the panel; one item, one change. The text: paragraphs through an empty line, «- » lines a list, **bold**.
+A file that does not read (a header missing, a number not the file's, a role nobody has, an item without roles or text, or without one of
+the three parts, each once, with its words and in this order, the rules a list) is skipped and logged; the panel never falls over a text. The owner and the partner see every item; anyone else the items naming their role (working
 as a point: the point's). New for a person = an update with items for their role newer than the number they last saw for that role
 (user_pref whatsnew.seen, {role: number}); opening the page marks it seen."""
 from __future__ import annotations
@@ -29,6 +35,7 @@ DIR = Path(__file__).resolve().parent / "data" / "whatsnew"
 NAME = re.compile(r"^(\d{4})\.md$")
 SEEN_KEY = "whatsnew.seen"
 SEES_ALL = frozenset({"owner", "partner"})
+PARTS = ("**Что сделано:**", "**Как работает:**", "**Затрагивает разделы:**")      # every item, in this order (the owner 2026-11-05)
 log = logging.getLogger(__name__)
 
 
@@ -66,6 +73,26 @@ def _body(lines: list) -> Markup:
     return Markup("".join(out))
 
 
+def _check_parts(title: str, lines: list) -> None:
+    """BadFile unless the item is the three parts in their order, once each, each with words of its own, the rules a list."""
+    text = "\n" + "\n".join(line.strip() for line in lines)
+    start = 0
+    found = []
+    for part in PARTS:
+        at = text.find("\n" + part, start)
+        if at < 0 or text.count("\n" + part) != 1:
+            raise BadFile("item %r: part %s missing, repeated or not in its place" % (title, part))
+        found.append(at + 1)
+        start = at + 1 + len(part)
+    if text[:found[0]].strip():
+        raise BadFile("item %r: text before %s" % (title, PARTS[0]))
+    if "\n- " not in text[found[1]:found[2]]:
+        raise BadFile("item %r: the rules of %s are not a list" % (title, PARTS[1]))
+    for part, at, end in zip(PARTS, found, found[1:] + [len(text)]):
+        if not text[at + len(part):end].strip():
+            raise BadFile("item %r: part %s has no text" % (title, part))
+
+
 def parse(text: str, number: int) -> dict:
     """{"number", "date", "title", "items": [{"title", "roles", "body"}]} of a file; BadFile with the reason."""
     head, _, rest = text.replace("\r\n", "\n").partition("\n## ")
@@ -100,6 +127,7 @@ def parse(text: str, number: int) -> dict:
             raise BadFile("item %r: roles %s" % (title, unknown or "missing"))
         if not any(line.strip() for line in body):
             raise BadFile("item %r: no text" % title)
+        _check_parts(title, body)
         items.append({"title": title, "roles": frozenset(roles), "body": _body(body)})
     if not items:
         raise BadFile("no items")

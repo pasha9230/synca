@@ -5,8 +5,10 @@ reads it; the client's page in its frame, without scripts."""
 from __future__ import annotations
 
 import logging
+import re
 
 import pytest
+from markupsafe import escape
 
 from panel_helpers import login, make_app, post
 from test_roles import conn_of, person
@@ -21,10 +23,13 @@ def cheap_hashes(monkeypatch):
     monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
 
 
+BODY = "**Что сделано:** %s.\n\n**Как работает:**\n- правило.\n\n**Затрагивает разделы:** другие разделы не затрагивает.\n"
+
+
 def update(number, *items, date="02.11.2026", title=None):
     text = "number: %d\ndate: %s\ntitle: %s\n" % (number, date, title or "Обновление панели №%d" % number)
     for head, roles in items:
-        text += "\n## ✅ %s\nroles: %s\nТекст про %s.\n" % (head, roles, head)
+        text += "\n## %s\nroles: %s\n%s" % (head, roles, BODY % head)
     return text
 
 
@@ -54,6 +59,18 @@ def dot_on(client, url):
 
 # --- the files --------------------------------------------------------------------------------------------------------------------------
 
+# what a section of the panel is called, in the titles of the items: the menus (base.html, _point_nav.html), and the menu itself
+SECTIONS = {"Главная", "Заказы", "Задачи", "Чаты", "Звонки", "CRM", "Уведомления", "Каталог", "Каталог для клиента", "Генерация", "Фиды", "На ОТХ",
+            "Подключения", "Настройки заказов", "Шаблоны сообщений", "История", "Новый вид", "Пользователи", "Рабочее место", "Меню"}
+# never in an item a point or a client reads (the owner 2026-11-05); and in no item at all, the repository is public
+NOT_FOR_POINT = re.compile(r"закуп|наценк|прибыл|маржа|логин|аккаунт", re.IGNORECASE)
+PUBLIC_NEVER = re.compile(r"\+?\d[\d ()-]{9,}\d|https?://|\b[\w-]+\.(?:ru|com|net|org)\b", re.IGNORECASE)
+
+
+def shipped_items():
+    return [(u["number"], item) for u in whatsnew.load() for item in u["items"]]
+
+
 def test_every_shipped_file_reads_and_numbers_follow_one_another():
     names = sorted(p.name for p in whatsnew.DIR.glob("*"))
     shipped = whatsnew.load()
@@ -63,25 +80,86 @@ def test_every_shipped_file_reads_and_numbers_follow_one_another():
     assert first["title"] == "Обновление панели №1" and first["date"] == "02.11.2026"
     for u in shipped:
         for item in u["items"]:
-            assert item["title"].startswith("✅ ") and item["roles"] and str(item["body"]).strip()
+            assert item["roles"] and str(item["body"]).strip()
+
+
+def test_every_shipped_item_has_the_three_parts_and_a_real_section():
+    for number, item in shipped_items():
+        body = str(item["body"])
+        assert all(body.count("<b>%s</b>" % part.strip("*")) == 1 for part in whatsnew.PARTS), (number, item["title"])
+        section, sep, name = item["title"].partition(": ")
+        assert sep and name.strip() and section in SECTIONS, (number, item["title"])
+
+
+def test_no_shipped_item_tells_a_point_or_a_client_about_money_or_logins():
+    for number, item in shipped_items():
+        if item["roles"] & {"point", "client"}:
+            assert not NOT_FOR_POINT.search(item["title"] + " " + str(item["body"])), (number, item["title"])
+
+
+def test_no_shipped_text_holds_a_phone_or_an_address():
+    for path in whatsnew.DIR.glob("*.md"):
+        assert not PUBLIC_NEVER.search(path.read_text(encoding="utf-8")), path.name
 
 
 def test_the_first_update_is_tagged_as_decided():
-    first = {i["title"].removeprefix("✅ "): i["roles"] for i in whatsnew.load()[-1]["items"]}
-    assert first["Цена в фиде округляется вверх до 50 ₽"] == {"owner", "partner"}
-    assert first["«Передать клиента» из чатов точки"] == {"owner", "partner", "point"}
-    assert first["«Отдал» в ВК — это выдача"] == {"owner", "partner", "point"}
+    first = {i["title"]: i["roles"] for i in whatsnew.load()[-1]["items"]}
+    assert first["Каталог: цена в фиде округляется вверх до 50 ₽"] == {"owner", "partner"}
+    assert first["Чаты: «Передать клиента» у точки"] == {"owner", "partner", "point"}
+    assert first["Рабочее место: «отдал» в ВК значит выдачу"] == {"owner", "partner", "point"}
+    assert first["Рабочее место: «Работать как точка»"] == {"owner", "partner"}
+    assert first["Новый вид: оформление по группам"] == {"owner", "partner"}
     assert not any("client" in roles for roles in first.values())
 
 
+def test_the_new_view_is_not_promised_to_those_who_may_not_have_it():
+    """Off by default (routes_design.ui_state): an item about a look that is off does not go to the people who would not see it, and says it is off."""
+    found = 0
+    for number, item in shipped_items():
+        if re.search(r"нов(ый|ом|ого|ые|ая|ую) вид", item["title"] + " " + str(item["body"]), re.IGNORECASE):
+            found += 1
+            assert item["roles"] == {"owner", "partner"}, (number, item["title"])
+            assert "выкл" in str(item["body"]).lower(), (number, item["title"])
+    assert found >= 5
+
+
+@pytest.mark.parametrize("role", ["owner", "partner", "point", "client", "chats", "viewer"])
+def test_the_shipped_page_opens_for_a_role_with_its_own_items_only(tmp_path, role):
+    app = make_app(tmp_path)
+    if role == "owner":
+        client = app.test_client()
+        login(client)
+    elif role == "point":
+        pid = points.save_point(conn_of(app), {"name": "Янино", "manager_name": "А", "channel": "vk"})
+        client, _conn = person(app, "point", point_id=pid)
+    else:
+        client, _conn = person(app, role)
+    html = page(client)
+    for _number, item in shipped_items():
+        title = str(escape(item["title"]))
+        assert (title in html) == (role in whatsnew.SEES_ALL or role in item["roles"]), (role, item["title"])
+
+
 @pytest.mark.parametrize("text, why", [
-    ("date: 02.11.2026\ntitle: Т\n\n## ✅ А\nroles: owner\nТекст\n", "no number"),
-    ("number: 2\ndate: 02.11.2026\ntitle: Т\n\n## ✅ А\nroles: owner\nТекст\n", "number not the file's"),
-    ("number: 3\ndate: 2026-11-02\ntitle: Т\n\n## ✅ А\nroles: owner\nТекст\n", "date"),
-    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## ✅ А\nroles: owner, boss\nТекст\n", "unknown role"),
-    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## ✅ А\nТекст\n", "no roles line"),
-    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## ✅ А\nroles: owner\n\n", "no text"),
+    ("date: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\nТекст\n", "no number"),
+    ("number: 2\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\nТекст\n", "number not the file's"),
+    ("number: 3\ndate: 2026-11-02\ntitle: Т\n\n## А\nroles: owner\nТекст\n", "date"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner, boss\nТекст\n", "unknown role"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nТекст\n", "no roles line"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n\n", "no text"),
     ("number: 3\ndate: 02.11.2026\ntitle: Т\n", "no items"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\nПросто текст без частей.\n", "no parts at all"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Как работает:**\n- п\n\n**Затрагивает разделы:** нет\n", "no «Что сделано»"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Затрагивает разделы:** нет\n", "no «Как работает»"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Как работает:**\n- п\n", "no «Затрагивает разделы»"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Как работает:**\n- п\n\n**Что сделано:** т\n\n**Затрагивает разделы:** нет\n", "parts out of order"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:**\n\n**Как работает:**\n- п\n\n**Затрагивает разделы:** нет\n", "«Что сделано» empty"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Как работает:**\n\n**Затрагивает разделы:** нет\n", "«Как работает» empty"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Как работает:**\n- п\n\n**Затрагивает разделы:**\n", "«Затрагивает разделы» empty"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\nв тексте **Что сделано:** т, **Как работает:** п, **Затрагивает разделы:** нет\n", "the words inside a line are no parts"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\nДо частей.\n\n**Что сделано:** т\n\n**Как работает:**\n- п\n\n**Затрагивает разделы:** нет\n", "text before the parts"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Что сделано:** ещё\n\n**Как работает:**\n- п\n\n**Затрагивает разделы:** нет\n", "a part twice"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Как работает:** абзац, а не список\n\n**Затрагивает разделы:** нет\n", "the rules not a list"),
 ])
 def test_a_bad_file_is_skipped_and_logged_the_rest_shows(tmp_path, folder, caplog, text, why):
     (folder / "0003.md").write_text(text, encoding="utf-8")
@@ -101,10 +179,11 @@ def test_a_file_that_is_not_text_is_skipped(folder):
 
 
 def test_the_text_is_escaped_and_only_the_small_markup_works(folder):
-    (folder / "0003.md").write_text("number: 3\ndate: 02.11.2026\ntitle: <b>Т</b>\n\n## ✅ <img src=x onerror=alert(1)>\nroles: owner\n"
-                                    "**жирный** <script>alert(1)</script>\n\n- раз\n- два\n", encoding="utf-8")
+    (folder / "0003.md").write_text("number: 3\ndate: 02.11.2026\ntitle: <b>Т</b>\n\n## <img src=x onerror=alert(1)>\nroles: owner\n"
+                                    "**Что сделано:** <script>alert(1)</script>\n\n**Как работает:**\n- раз\n- два\n\n**Затрагивает разделы:** нет\n", encoding="utf-8")
     client_app_body = str(whatsnew.load(folder)[0]["items"][0]["body"])
-    assert client_app_body == "<p><b>жирный</b> &lt;script&gt;alert(1)&lt;/script&gt;</p><ul><li>раз</li><li>два</li></ul>"
+    assert client_app_body == ("<p><b>Что сделано:</b> &lt;script&gt;alert(1)&lt;/script&gt;</p><p><b>Как работает:</b></p><ul><li>раз</li><li>два</li></ul>"
+                               "<p><b>Затрагивает разделы:</b> нет</p>")
 
 
 def test_titles_are_escaped_on_the_page(tmp_path, folder):
@@ -225,7 +304,7 @@ def test_the_shipped_updates_light_the_dot_of_the_office(tmp_path):
 def test_a_file_with_a_bom_and_windows_line_ends_reads(folder):
     (folder / "0003.md").write_bytes(("﻿" + update(3, ("А", "owner"), ("Б", "chats"))).replace("\n", "\r\n").encode("utf-8"))
     third = whatsnew.load(folder)[0]
-    assert third["number"] == 3 and [i["title"] for i in third["items"]] == ["✅ А", "✅ Б"] and "\r" not in str(third["items"][1]["body"])
+    assert third["number"] == 3 and [i["title"] for i in third["items"]] == ["А", "Б"] and "\r" not in str(third["items"][1]["body"])
 
 
 @pytest.mark.parametrize("role", ["chats", "viewer"])
