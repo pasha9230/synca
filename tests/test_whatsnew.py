@@ -113,11 +113,14 @@ def test_the_first_update_is_tagged_as_decided():
 
 
 def test_the_new_view_is_not_promised_to_those_who_may_not_have_it():
-    """Off by default (routes_design.ui_state): an item about a look that is off does not go to the people who would not see it."""
+    """Off by default (routes_design.ui_state): an item about a look that is off does not go to the people who would not see it, and says it is off."""
+    found = 0
     for number, item in shipped_items():
-        if "новый вид" in item["title"]:        # the section «Новый вид» itself has a capital
+        if re.search(r"нов(ый|ом|ого|ые|ая|ую) вид", item["title"] + " " + str(item["body"]), re.IGNORECASE):
+            found += 1
             assert item["roles"] == {"owner", "partner"}, (number, item["title"])
-            assert "выключен" in str(item["body"]), (number, item["title"])
+            assert "выкл" in str(item["body"]).lower(), (number, item["title"])
+    assert found >= 5
 
 
 @pytest.mark.parametrize("role", ["owner", "partner", "point", "client", "chats", "viewer"])
@@ -154,6 +157,9 @@ def test_the_shipped_page_opens_for_a_role_with_its_own_items_only(tmp_path, rol
     ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Как работает:**\n\n**Затрагивает разделы:** нет\n", "«Как работает» empty"),
     ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Как работает:**\n- п\n\n**Затрагивает разделы:**\n", "«Затрагивает разделы» empty"),
     ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\nв тексте **Что сделано:** т, **Как работает:** п, **Затрагивает разделы:** нет\n", "the words inside a line are no parts"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\nДо частей.\n\n**Что сделано:** т\n\n**Как работает:**\n- п\n\n**Затрагивает разделы:** нет\n", "text before the parts"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Что сделано:** ещё\n\n**Как работает:**\n- п\n\n**Затрагивает разделы:** нет\n", "a part twice"),
+    ("number: 3\ndate: 02.11.2026\ntitle: Т\n\n## А\nroles: owner\n**Что сделано:** т\n\n**Как работает:** абзац, а не список\n\n**Затрагивает разделы:** нет\n", "the rules not a list"),
 ])
 def test_a_bad_file_is_skipped_and_logged_the_rest_shows(tmp_path, folder, caplog, text, why):
     (folder / "0003.md").write_text(text, encoding="utf-8")

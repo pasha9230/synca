@@ -16,7 +16,7 @@ are files of the code, data/whatsnew/NNNN.md, and go out with the deploy:
 
 «Раздел» is the name of a section of the panel; one item, one change. The text: paragraphs through an empty line, «- » lines a list, **bold**.
 A file that does not read (a header missing, a number not the file's, a role nobody has, an item without roles or text, or without one of
-the three parts, each with its words and in this order) is skipped and logged; the panel never falls over a text. The owner and the partner see every item; anyone else the items naming their role (working
+the three parts, each once, with its words and in this order, the rules a list) is skipped and logged; the panel never falls over a text. The owner and the partner see every item; anyone else the items naming their role (working
 as a point: the point's). New for a person = an update with items for their role newer than the number they last saw for that role
 (user_pref whatsnew.seen, {role: number}); opening the page marks it seen."""
 from __future__ import annotations
@@ -74,16 +74,20 @@ def _body(lines: list) -> Markup:
 
 
 def _check_parts(title: str, lines: list) -> None:
-    """BadFile unless the item has the three parts in their order, each with words of its own."""
+    """BadFile unless the item is the three parts in their order, once each, each with words of its own, the rules a list."""
     text = "\n" + "\n".join(line.strip() for line in lines)
     start = 0
     found = []
     for part in PARTS:
         at = text.find("\n" + part, start)
-        if at < 0:
-            raise BadFile("item %r: no part %s, or not in its place" % (title, part))
+        if at < 0 or text.count("\n" + part) != 1:
+            raise BadFile("item %r: part %s missing, repeated or not in its place" % (title, part))
         found.append(at + 1)
         start = at + 1 + len(part)
+    if text[:found[0]].strip():
+        raise BadFile("item %r: text before %s" % (title, PARTS[0]))
+    if "\n- " not in text[found[1]:found[2]]:
+        raise BadFile("item %r: the rules of %s are not a list" % (title, PARTS[1]))
     for part, at, end in zip(PARTS, found, found[1:] + [len(text)]):
         if not text[at + len(part):end].strip():
             raise BadFile("item %r: part %s has no text" % (title, part))
