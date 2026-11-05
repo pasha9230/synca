@@ -43,7 +43,7 @@ python -m pytest tests/test_feed_check.py -q --tb=short
 | Цикл по аккаунтам, проверка перед публикацией | `cycle.py` (`run_for_accounts`, `gate`) |
 | Правила проверки фида | `feed_check.py`, `feed_check_rules.json` |
 | Аккаунты, телефоны, адреса | `connections.py` |
-| Публикация, блокировка | `publishing.py` |
+| Публикация, блокировка | `publish.py`, `publishing.py` |
 | Перенос чужого файла, Id | `mirror_feed.py` |
 | Команды | `cli.py` (`python -m tires_sync …`) |
 | Панель: маршруты, шаблоны | `panel/routes_*.py`, `panel/templates/`, `panel/service.py` |
@@ -53,6 +53,7 @@ python -m pytest tests/test_feed_check.py -q --tb=short
 | Чаты и ответы клиентам | `chats.py`, `chat_deals.py`, `panel/routes_chats.py` |
 | Заказы, сделки | `orders.py`, `order_*.py`, `panel/routes_orders.py` |
 | Суммы, деньги | `amounts.py`, `economics.py`, `sales.py` |
+| Цены | `pricing.py`, `own_price.py`, `price_guard.py`, `price_push.py` |
 | Клиент Авито | `avito.py`, `avito_report.py`, `avito_upload.py` |
 
 Правила продукта: `docs/feed-rules.md` (что в фиде), `docs/feed-check-rules.md` (проверка). Других документов в `docs/` нет.

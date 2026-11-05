@@ -64,6 +64,7 @@
 /src/tires_sync/data/avito-templates/ @pasha9230
 /src/tires_sync/panel/routes_drafts.py @pasha9230
 /src/tires_sync/panel/routes_feedupdate.py @pasha9230
+/src/tires_sync/panel/routes_history.py @pasha9230
 
 # База и данные
 /src/tires_sync/panel/routes_order_cleanup.py @pasha9230
