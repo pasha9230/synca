@@ -584,9 +584,9 @@ def register(app) -> None:
         elif has_right("money"):                                      # shown for viewing only (4tochki before its switch, an old second unload):
             data["own_closed"] = True                                 # not in the unload prices are counted from — no own price, said why
             data["own_never"] = catalog_archive.item_info(conn, goods_id) is None
-        if has_right("money") and catalog_archive.item_info(conn, goods_id) is not None:   # the history of the supplier's purchase: who may
-            data["price_history"], data["price_history_since"] = catalog_archive.price_history(conn, goods_id)   # see the purchase; a position
-                                                                      # the cycle never had (viewing only) has none
+        if has_right("money") and catalog_archive.price_tracked(conn, goods_id):  # the history of the supplier's purchase: who may
+            data["price_history"], data["price_history_since"] = catalog_archive.price_history(conn, goods_id)   # see the purchase; of every
+                                                                      # supplier the cycle saw (4tochki shown for viewing only too)
         if MARKET_SHOWN and has_right("money"):                       # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
             snapshot = market.latest(conn, [goods_id]).get(goods_id)
             data["market"] = {"snapshot": snapshot, "listings": market.listings_of(conn, snapshot["id"]) if snapshot else [],

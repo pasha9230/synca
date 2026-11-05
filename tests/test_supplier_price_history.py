@@ -38,9 +38,9 @@ def test_the_first_cycle_only_remembers_and_a_row_is_written_only_when_the_purch
     _cycle(conn, "2026-11-05T11:00:00", a=5000.0, b=3000.0)                     # не изменилась — записи нет
     _cycle(conn, "2026-11-05T12:00:00", a=5200.0, b=3000.0, c=1000.0)           # новая позиция c — без «было»
     _cycle(conn, "2026-11-05T13:00:00", b=0.0, c=1000.0)                        # a пропала; у b закупка неизвестна — не запись
-    _cycle(conn, "2026-11-05T14:00:00", a=4900.0, b=3100.0, c=1000.0)           # a вернулась с другой ценой; b: от неизвестной — не запись
+    _cycle(conn, "2026-11-05T14:00:00", a=4900.0, b=3100.0, c=1000.0)           # a вернулась с другой ценой; b: от последней известной 3 000
     assert _history(conn, "a") == [("2026-11-05T14:00:00", 5200.0, 4900.0), ("2026-11-05T12:00:00", 5000.0, 5200.0)]
-    assert _history(conn, "b") == [] and _history(conn, "c") == []
+    assert _history(conn, "b") == [("2026-11-05T14:00:00", 3000.0, 3100.0)] and _history(conn, "c") == []   # 0 не записывается (владелец 05.11)
     assert catalog_archive.price_history(conn, "a")[1] == "2026-11-05T10:00:00"   # с какого цикла ведётся — не меняется
 
 
@@ -56,11 +56,13 @@ def test_the_table_is_made_on_a_database_that_did_not_have_it_and_nothing_else_i
     conn = store.connect(tmp_path / "t.db")
     _cycle(conn, "2026-11-05T10:00:00", a=5000.0)
     conn.execute("DROP TABLE supplier_price_change")
+    conn.execute("DROP TABLE supplier_price_last")
     conn.commit()
     conn.close()
     conn = store.connect(tmp_path / "t.db")
     assert conn.execute("SELECT goods_id, last_price FROM catalog_item").fetchall() == [("a", 5000.0)]
     assert conn.execute("SELECT COUNT(*) FROM supplier_price_change").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM supplier_price_last").fetchone()[0] == 0
 
 
 def test_the_cycle_writes_the_history_and_an_own_price_alone_does_not_put_a_gone_position_on_avito(tmp_path):
@@ -142,3 +144,37 @@ def test_a_position_known_but_not_marked_gone_yet_is_told_so_not_never(tmp_path)
     r = post(client, "/catalog/item/%s/own-price" % GONE, tok, kind="price", value="4500", a=[str(first)], action="save")
     said = _flash(client, r)
     assert "Позиции сейчас нет в выгрузке" in said and "не было" not in said
+
+
+# --- все поставщики: 4tochki до включения «в фид» (владелец 05.11: «Храни историю по всем поставщикам») -----------------------------------
+
+def test_the_cycle_keeps_the_history_of_4tochki_shown_for_viewing_only_without_putting_it_into_the_archive(tmp_path, monkeypatch):
+    from tires_sync import cli, tochki_feed
+    conn = store.connect(tmp_path / "t.db")
+    price = {"s3-1": 2000.0}
+
+    def view(conn_, parsed, base):
+        only = {g: make_offer(goods_id=g, base_price=p) for g, p in price.items()}
+        return ParseResult(offers={**parsed.offers, **only}), frozenset(only)
+    monkeypatch.setattr(tochki_feed, "catalog_view", view)
+    parsed = ParseResult(offers={"100": make_offer()})
+    cli._record_archive(conn, None, parsed, tmp_path / "unload.xml")
+    price["s3-1"] = 2100.0
+    cli._record_archive(conn, None, parsed, tmp_path / "unload.xml")
+    assert [(r["was"], r["price"]) for r in catalog_archive.price_history(conn, "s3-1")[0]] == [(2000.0, 2100.0)]
+    assert catalog_archive.item_info(conn, "s3-1") is None                  # в архив каталога не попала: своей цены и «пропавшей» у неё нет
+
+
+def test_the_card_of_a_position_shown_for_viewing_only_shows_its_history_to_who_may_see_the_purchase(tmp_path):
+    stale_setup(tmp_path)
+    conn = store.connect(tmp_path / "t.db")
+    catalog_archive.record_prices(conn, {"s2-5": make_offer(goods_id="s2-5", base_price=3000.0)}, "2026-11-05T10:00:00")
+    catalog_archive.record_prices(conn, {"s2-5": make_offer(goods_id="s2-5", base_price=3300.0)}, "2026-11-05T11:00:00")
+    conn.commit()
+    conn.close()
+    client = app_of(tmp_path).test_client()
+    login(client)
+    page = client.get("/catalog/item/s2-5").get_data(as_text=True).replace("\xa0", " ")
+    assert "data-price-history" in page and "3 300 ₽" in page and "data-own-closed" in page
+    page = person(app_of(tmp_path), "chats")[0].get("/catalog/item/s2-5").get_data(as_text=True)
+    assert "data-price-history" not in page and "3 300" not in page

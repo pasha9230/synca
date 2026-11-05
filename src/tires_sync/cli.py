@@ -857,7 +857,7 @@ def _run_cycle(args) -> int:
     if notes:
         _alert(conn, box, "Tires Sync: поставщик не используется в этом цикле, его объявления удерживаются.\n" + "\n".join(notes))
     _record_probe(conn, parsed, "cycle")
-    _record_archive(conn, box, parsed)
+    _record_archive(conn, box, parsed, args.unload)
     with feed_lock(args.feed_root):
         results = run_for_accounts(conn, None, ref, date.today(), args.feed_root, parsed=parsed, input_sha=input_sha, now=moscow_now())
         if args.publish:
@@ -1090,10 +1090,26 @@ def _record_probe(conn, parsed, source: str) -> None:
         print("предупреждение: проверка полноты каталога не записана (%s)" % err, file=sys.stderr)
 
 
-def _record_archive(conn, box, parsed) -> None:
+def _record_view_prices(conn, parsed, base, at: str) -> None:
+    """The history of the purchase of 4tochki shown for viewing only while its switch «в фид» is off (the owner 2026-11-05: of every supplier).
+    Never into the archive of the catalog: such a position gets no own price and is never «gone». Its trouble never stops a cycle."""
+    try:
+        view, only = tochki_feed.catalog_view(conn, parsed, Path(base))
+        if only:
+            catalog_archive.record_prices(conn, {g: view.offers[g] for g in only if g in view.offers}, at)
+            conn.commit()
+    except Exception as err:
+        conn.rollback()
+        print("предупреждение: история закупки 4tochki не записана (%s)" % err, file=sys.stderr)
+
+
+def _record_archive(conn, box, parsed, base=None) -> None:
     """The permanent base of catalog positions follows every cycle; its trouble is only noted, never stops a cycle."""
     try:
-        stats = catalog_archive.record(conn, parsed, moscow_now().isoformat(timespec="seconds"))
+        at = moscow_now().isoformat(timespec="seconds")
+        stats = catalog_archive.record(conn, parsed, at)
+        if base is not None:
+            _record_view_prices(conn, parsed, base, at)
         for supplier in stats["suspicious"]:
             left = catalog_archive.BELIEVE_AFTER - stats["streak"].get(supplier, 1)
             text = "у поставщика №%d пропала большая часть позиций разом; в базе каталога они пока не помечены пропавшими (если так будет ещё в %d циклах подряд, пометятся)" % (

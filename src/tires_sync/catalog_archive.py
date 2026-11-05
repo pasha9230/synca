@@ -46,22 +46,14 @@ def record(conn, parsed, now: str) -> dict:
     """Write the positions of the unload and mark those that are no longer in it. Returns counts and the suppliers whose drop was not believed."""
     stats = {"seen": 0, "gone": 0, "returned": 0, "suspicious": [], "believed": [], "streak": {}}
     returned = {r[0] for r in conn.execute("SELECT goods_id FROM catalog_item WHERE gone_since != ''")} & set(parsed.offers)
-    since = store.get_state(conn, HISTORY_SINCE)
-    before = dict(conn.execute("SELECT goods_id, last_price FROM catalog_item")) if since else {}   # the first cycle only remembers
-    changes = []
+    record_prices(conn, parsed.offers, now)
     for goods_id, offer in parsed.offers.items():
-        was, price = round(float(before.get(goods_id) or 0), 2), round(float(offer.base_price or 0), 2)
-        if was > 0 and price > 0 and was != price:                 # an unknown purchase (0) is no «было» and no «стало»
-            changes.append((now, goods_id, was, price))
         conn.execute(
             "INSERT INTO catalog_item (goods_id, supplier_id, data, first_seen, last_seen, last_stock, last_price, gone_since) VALUES (?,?,?,?,?,?,?, '') "
             "ON CONFLICT(goods_id) DO UPDATE SET data = excluded.data, last_seen = excluded.last_seen, last_stock = excluded.last_stock, "
             "last_price = excluded.last_price, gone_since = ''",
             (goods_id, _supplier(goods_id), _dump(offer), now, now, int(offer.stock), float(offer.base_price)))
         stats["seen"] += 1
-    conn.executemany("INSERT INTO supplier_price_change (at, goods_id, was, price) VALUES (?,?,?,?)", changes)
-    if not since and parsed.offers:                                 # a cycle with nothing usable is no start of the history
-        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (HISTORY_SINCE, now))
     stats["returned"] = len(returned)
     present_now = {}
     for goods_id in parsed.offers:
@@ -135,6 +127,33 @@ def gone_offers(conn) -> List[Tuple[Offer, dict]]:
             continue
         out.append((offer, {"gone_since": gone, "last_stock": stock, "last_price": price, "last_seen": last, "first_seen": first}))
     return out
+
+
+def record_prices(conn, offers, now: str) -> int:
+    """The history of the supplier's purchase prices (the owner 2026-11-05: of every supplier, also 4tochki shown for viewing only): a row only
+    when the purchase changed from the last known one; an unknown purchase (0) is never written and never the last known one. The very first
+    call only remembers. No commit of its own (the caller commits). Returns the rows written."""
+    since = store.get_state(conn, HISTORY_SINCE)
+    known = {g: p for g, p in ((g, round(float(o.base_price or 0), 2)) for g, o in offers.items()) if p > 0}
+    if not known:
+        return 0                                                  # a cycle with nothing usable is no start of the history
+    last = {}
+    ids = list(known)
+    for n in range(0, len(ids), 500):
+        chunk = ids[n:n + 500]
+        last.update(conn.execute("SELECT goods_id, price FROM supplier_price_last WHERE goods_id IN (%s)" % ",".join("?" * len(chunk)), chunk))
+    changes = [(now, g, last[g], p) for g, p in known.items() if since and g in last and last[g] != p]
+    conn.executemany("INSERT INTO supplier_price_change (at, goods_id, was, price) VALUES (?,?,?,?)", changes)
+    conn.executemany("INSERT OR REPLACE INTO supplier_price_last (goods_id, price) VALUES (?,?)",
+                     [(g, p) for g, p in known.items() if last.get(g) != p])
+    if not since:
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (HISTORY_SINCE, now))
+    return len(changes)
+
+
+def price_tracked(conn, goods_id: str) -> bool:
+    """The cycle keeps the history of this position's purchase (it saw a known purchase of it)."""
+    return conn.execute("SELECT 1 FROM supplier_price_last WHERE goods_id = ?", (goods_id,)).fetchone() is not None
 
 
 def price_history(conn, goods_id: str, limit: int = HISTORY_SHOWN):
