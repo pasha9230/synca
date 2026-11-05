@@ -249,3 +249,28 @@ def test_a_year_is_never_taken_for_the_order(tmp_path, text):
     answer = mgr.dispatch(conn, "y1", PEER, text, None, "2026-10-13T13:00:00", None, None)
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and "О каком заказе" in answer
     assert mgr.parse_refuse("отказ 5000100 2019 года")[0] == 5000100 and mgr.parse_refuse("отказ №2019 размер")[0] == 2019
+
+
+# --- review round 3 ---------------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", ["отказ 5000100 год выпуска старый", "отказ 5000100 года 2019", "отказ 5000100 г.в. 2019"])
+def test_the_order_number_before_the_word_year_is_still_the_order(tmp_path, text):
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    assert mgr.parse_refuse(text)[0] == 5000100
+    mgr.dispatch(conn, "y2", PEER, text, None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, card)["stage"]["code"] == "oth"
+
+
+def test_a_busy_base_after_the_move_still_says_moved(tmp_path, monkeypatch):
+    """The move is saved first; a failure of its red record after it must not tell the point «не получилось» (review round 3)."""
+    import sqlite3
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    real = orders.add_event
+
+    def busy(c, order_id, now, author, kind, text, **k):
+        if kind == "point" and text.startswith("Отказ клиента на точке"):
+            raise sqlite3.OperationalError("database is locked")
+        return real(c, order_id, now, author, kind, text, **k)
+    monkeypatch.setattr(orders, "add_event", busy)
+    outcome, answer, ok = mgr.refuse(conn, orders.get_card(conn, card), "размер", "менеджер Бета", "2026-10-13T13:00:00", None)
+    assert ok and "отказ отмечен" in answer and orders.get_card(conn, card)["stage"]["code"] == "oth" and "запись не сохранена" in outcome

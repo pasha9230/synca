@@ -741,7 +741,7 @@ def parse_refuse(text) -> Optional[Tuple[Optional[int], str]]:
     if found is None:
         return None
     number, reason = found.group(1), found.group(2)
-    if number and YEAR_AFTER.match(reason) and not MARKED_NUMBER.search(text[:found.start(2)]):
+    if number and len(number) == 4 and 1990 <= int(number) <= 2099 and YEAR_AFTER.match(reason) and not MARKED_NUMBER.search(text[:found.start(2)]):
         return None, "%s %s" % (number, reason)       # «отказ 2019 года»: the year of the tyres, not the order 2019 (review 2026-11-05)
     return (int(number) if number else None), reason
 
@@ -802,10 +802,16 @@ def refuse(conn, card: dict, reason: str, who: str, now: str, notify: Optional[N
         return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % label(card), False
     name = orders.stage_name(conn, "oth")
     text = "Отказ клиента на точке «%s»: %s. Заказ переведён на «%s», шины остаются на точке нашим товаром." % (point, reason, name)
-    orders.add_event(conn, card["id"], now, who, "point", text, level="red")
-    conn.commit()
+    try:                                               # the move is saved: what follows must not turn the answer into «не получилось»
+        orders.add_event(conn, card["id"], now, who, "point", text, level="red")
+        conn.commit()
+        red = "красная запись"
+    except sqlite3.Error:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").warning("the red record of the refusal of order %s was not saved", card["id"])
+        red = "красная запись не сохранена"
     told = _tell_staff(conn, card, text, notify)
-    return ("отказ (%s): заказ перенесён на «%s», красная запись, %s" % (reason, name, told),
+    return ("отказ (%s): заказ перенесён на «%s», %s, %s" % (reason, name, red, told),
             "Заказ №%s — отказ отмечен (причина: %s). Заказ на «%s»: шины остаются на точке нашим товаром." % (label(card), reason, name), True)
 
 
