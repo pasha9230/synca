@@ -333,6 +333,10 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     refused = parse_refuse(text)                       # «отказ <номер> <причина>»: the reason is text, so not the parser of the other words
     word = REFUSE if refused else _word(text)
     written = refused[0] if refused else order_number(text)
+    doubt = refuse_doubt(text, refused[1]) if refused else ""
+    if doubt:                                          # the owner reads it in «Входящие»: the order is not moved on a guess
+        return dispute(point, "«%s»: %s" % (REFUSE, doubt), "Команда «%s» не выполнена (%s): сообщение передано владельцу. Если клиент "
+                       "отказался, напишите: «отказ 123456 причина»." % (REFUSE, doubt))
     if written is not None and written < 100 and not reply_order_no and not MARKED_NUMBER.search(_command_text(text)):
         written = None                                 # «приехали 2»: a quantity, not an order (the lead 2026-10-25); «№5», «заказ 17» are orders
     if reply_order_no and written and find_named(conn, reply_order_no) != find_orders(conn, written):
@@ -741,9 +745,25 @@ def parse_refuse(text) -> Optional[Tuple[Optional[int], str]]:
 
 def refuse_reason(reason) -> str:
     """The reason of «ОТКАЗ» as kept: one of REFUSE_REASONS by its own spelling, else the text typed («Другой»), its spaces squeezed; '' for none."""
-    text = " ".join(str(reason or "").split()).strip(" .,;:!-")[:REFUSE_MAX]
+    text = " ".join(str(reason or "").split()).strip(" .,;:!?-—–")[:REFUSE_MAX]
+    if not re.search(r"[^\W\d_]", text):                    # «—», «?!», «123»: no reason (review 2026-11-05)
+        return ""
     plain = text.casefold().replace("ё", "е")
     return next((r for r in REFUSE_REASONS if r.casefold().replace("ё", "е") == plain), text)
+
+
+def refuse_doubt(text, reason) -> str:
+    """Why «отказ …» of VK is not unambiguous (as is_command for the other words: never a guess), '' when it is: a question, a reason that
+    starts with a negation («отказ не нужен», «нет, приедет»), another order's number in the reason («отказ 5000100 5000200 …»)."""
+    if re.search(r"[?？]", str(text or "")):
+        return "вопрос"
+    tokens = WORD_PART.findall(rules.normalise_word(reason))
+    if tokens and tokens[0] in NEGATION:
+        return "отрицание"
+    reason = str(reason or "")
+    if LONG_NUMBER.search(reason) or MARKED_NUMBER.search(reason) or any(len(re.sub(r"\D", "", n)) >= 5 for n in SPACED_NUMBER.findall(reason)):
+        return "ещё один номер заказа"
+    return ""
 
 
 def refuse(conn, card: dict, reason: str, who: str, now: str, notify: Optional[Notify]) -> Tuple[str, str, bool]:
@@ -1375,8 +1395,8 @@ def dispatch(conn, message_id, sender, text, reply_order_no, now: str, deliver: 
         return handle_message(conn, message_id, sender, "(голосовое) %s" % transcript, now)
     refused = parse_refuse(text)
     if refused is not None and _point_of(conn, sender) is not None:     # «отказ <номер> <причина>» (2026-11-05): with several of the bot's
-        if len(reply_nos) > 1 and refused[0] is None:                   # lines forwarded and no number, the point is asked which order
-            reply_order_no = None
+        if len(reply_nos) > 1 and refused[0] is not None:               # lines forwarded: a number not among them waits for the owner
+            reply_order_no = refused[0] if refused[0] in reply_nos else reply_nos[0]     # («в ответе №…, в тексте №…»); none: asked which
         return handle_command(conn, message_id, sender, text, reply_order_no, now, deliver, notify)
     if len(reply_nos) > 1 and is_command(conn, text):                  # the word with several of the bot's lines forwarded
         written = order_number(text)

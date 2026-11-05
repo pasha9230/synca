@@ -177,3 +177,51 @@ def test_the_binding_names_the_new_command_and_not_the_old_one(tmp_path):
 def test_the_hint_of_the_card_names_refuse():
     from tires_sync import onboarding_texts
     assert "[ОТКАЗ]" in onboarding_texts.POINT["here"] and "не пришёл" not in onboarding_texts.POINT["here"]
+
+
+# --- review round 1: a doubtful «отказ» never moves the order; «Отменить» closes the red record -----------------------------------
+
+@pytest.mark.parametrize("text,reply", [("отказ 5000100?", None), ("Отказ?", 5000100), ("отказ не нужен, клиент приедет завтра", 5000100),
+                                        ("Отказ от заказа 5999999, передумал", 5000100), ("отказ 5000100 5000200 размер", None),
+                                        ("отказ 5000100 нет, приедет", None)])
+def test_a_doubtful_vk_refusal_waits_for_the_owner_and_moves_nothing(tmp_path, text, reply):
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    answer = mgr.dispatch(conn, "d1", PEER, text, reply, "2026-10-13T13:00:00", None, None)
+    got = orders.get_card(conn, card)
+    assert got["stage"]["code"] == "at_point" and got["cancel_reason"] == "" and linked(conn, card), answer
+    assert mgr.list_inbox(conn) and mgr.list_inbox(conn)[0]["dispute"], answer
+    assert "владельцу" in answer
+
+
+@pytest.mark.parametrize("text", ["отказ 5000100 —", "отказ 5000100 ?!", "отказ 5000100 123"])
+def test_a_reason_without_letters_is_no_reason(tmp_path, text):
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    mgr.dispatch(conn, "l1", PEER, text, None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
+    assert mgr.refuse_reason("—") == "" and mgr.refuse_reason(" – ? ") == "" and mgr.refuse_reason("12") == ""
+
+
+def test_a_reason_with_a_negation_inside_is_still_a_reason(tmp_path):
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    mgr.dispatch(conn, "g1", PEER, "отказ 5000100 клиенту не подошёл год", None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, card)["cancel_reason"] == mgr.REFUSE_REASON % "клиенту не подошёл год"
+
+
+def test_several_forwarded_lines_and_a_number_not_among_them_waits_for_the_owner(tmp_path):
+    app, _client, conn, pid, card = at_point(tmp_path)
+    other = _card(conn, pid, webmim="5999999", code="at_point")
+    mgr.dispatch(conn, "m1", PEER, "отказ 5999999 ошиблись размером", None, "2026-10-13T13:00:00", None, None, reply_nos=(5000100, 5000200))
+    assert orders.get_card(conn, other)["stage"]["code"] == "at_point" and orders.get_card(conn, card)["stage"]["code"] == "at_point"
+    assert mgr.list_inbox(conn)[0]["dispute"]
+
+
+def test_the_undo_of_refuse_closes_its_red_record(tmp_path):
+    from tires_sync import order_alerts
+    app, _client, conn, pid, card = at_point(tmp_path)
+    mine = manager(app, conn, pid)
+    refuse(mine, card, "size")
+    [red] = [e for e in orders.list_events(conn, card) if e["level"] == "red" and e["kind"] == "point"]
+    assert red["id"] in {a["id"] for a in order_alerts.open_alerts(conn, "owner", card)}
+    post(mine, "/my-point/%d/undo" % card, "tok")
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
+    assert red["id"] not in {a["id"] for a in order_alerts.open_alerts(conn, "owner", card)}

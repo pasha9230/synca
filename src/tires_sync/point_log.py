@@ -195,6 +195,11 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
         kind, reason, amount = (rec.get("from_return") or ["", "", 0.0])[:3]
         conn.execute("UPDATE order_card SET return_kind = ?, return_reason = ?, return_amount = ? WHERE id = ?", (kind, reason, amount, card["id"]))
         conn.execute("UPDATE oth_return_plan SET signed_at = NULL, signed_by = '' WHERE order_id = ?", (card["id"],))
+    if rec["action"] == "refuse":                                         # its red «Отказ клиента на точке …» told of a move that is undone
+        from . import order_alerts
+        for (red,) in conn.execute("SELECT id FROM order_event WHERE order_id = ? AND kind = 'point' AND level = 'red' AND text LIKE ? AND id <= ? ORDER BY id",
+                                   (card["id"], "Отказ клиента на точке%", int(rec.get("last_event") or 0))).fetchall()[-1:]:
+            order_alerts.resolve(conn, red, now, author)
     if rec["action"] == "oth_issued":                                     # the question of the seventh day is open again
         conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
         if stage["code"] == orders.RETURN_GIVEN:                          # «Выдали» linked the client; the goods go back again (2026-11-04)

@@ -227,14 +227,20 @@ def test_the_vk_command_then_the_button_tell_the_client_once(tmp_path):
 
 
 def test_each_button_of_a_card_is_its_own_press(tmp_path):
-    """«ОТКАЗ» pressed without its reason (nothing done), then the client took it: «Выдал» from the same page is a new press, not «уже выполнена»."""
+    """«ОТКАЗ» pressed (taken, its move refused: no phone), then the client took it: «Выдал» from the same page is a new press, not «уже выполнена»."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     conn.commit()
     mine = manager(app, conn, pid)
     page = mine.get("/my-point").get_data(as_text=True)
     assert token(page, card, "refuse") != token(page, card, "issued")
-    post(mine, "/my-point/%d/refuse" % card, "tok", token=token(page, card, "refuse"))
+    conn.execute("UPDATE order_card SET client_phone = '' WHERE id = ?", (card,))   # «На ОТХ» refused: the press is taken, the order stays
+    conn.commit()
+    r = post(mine, "/my-point/%d/refuse" % card, "tok", token=token(page, card, "refuse"), reason="year")
+    assert "Не получилось" in mine.get(r.headers["Location"]).get_data(as_text=True)
+    assert conn.execute("SELECT 1 FROM order_command_log WHERE message_id = ?", ("page-" + token(page, card, "refuse"),)).fetchone()
+    conn.execute("UPDATE order_card SET client_phone = '+7 900 111 22 33' WHERE id = ?", (card,))
+    conn.commit()
     r = post(mine, "/my-point/%d/issued" % card, "tok", token=token(page, card, "issued"))
     assert "отмечено: выдан" in mine.get(r.headers["Location"]).get_data(as_text=True)
     assert orders.get_card(conn, card)["stage"]["code"] == "done"
