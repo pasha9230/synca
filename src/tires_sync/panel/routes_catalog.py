@@ -583,6 +583,8 @@ def register(app) -> None:
             data["own_gone"] = gone is not None
         elif has_right("money"):                                      # never at the supplier (or shown for viewing only): no own price, said why
             data["own_closed"] = "never" if catalog_archive.item_info(conn, goods_id) is None else "view"
+        if has_right("money"):                                        # the history of the supplier's purchase: who may see the purchase
+            data["price_history"], data["price_history_since"] = catalog_archive.price_history(conn, goods_id)
         if MARKET_SHOWN and has_right("money"):                       # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
             snapshot = market.latest(conn, [goods_id]).get(goods_id)
             data["market"] = {"snapshot": snapshot, "listings": market.listings_of(conn, snapshot["id"]) if snapshot else [],

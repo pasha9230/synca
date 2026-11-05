@@ -25,6 +25,81 @@ def _history(conn, goods_id):
     return [(r["at"], r["was"], r["price"]) for r in catalog_archive.price_history(conn, goods_id)[0]]
 
 
+# --- запись -------------------------------------------------------------------------------------------------------------------------
+
+def test_the_first_cycle_only_remembers_and_a_row_is_written_only_when_the_purchase_changed(tmp_path):
+    conn = store.connect(tmp_path / "t.db")
+    conn.execute("INSERT INTO catalog_item (goods_id, data, first_seen, last_seen, last_price) VALUES ('a', '{}', 'x', 'x', 4000)")
+    conn.commit()                                       # архив был и до истории: его закупка — не «было» первого цикла
+    _cycle(conn, "2026-11-05T10:00:00", a=5000.0, b=3000.0)
+    assert _history(conn, "a") == [] and catalog_archive.price_history(conn, "a")[1] == "2026-11-05T10:00:00"
+    _cycle(conn, "2026-11-05T11:00:00", a=5000.0, b=3000.0)                     # не изменилась — записи нет
+    _cycle(conn, "2026-11-05T12:00:00", a=5200.0, b=3000.0, c=1000.0)           # новая позиция c — без «было»
+    _cycle(conn, "2026-11-05T13:00:00", b=0.0, c=1000.0)                        # a пропала; у b закупка неизвестна — не запись
+    _cycle(conn, "2026-11-05T14:00:00", a=4900.0, b=3100.0, c=1000.0)           # a вернулась с другой ценой; b: от неизвестной — не запись
+    assert _history(conn, "a") == [("2026-11-05T14:00:00", 5200.0, 4900.0), ("2026-11-05T12:00:00", 5000.0, 5200.0)]
+    assert _history(conn, "b") == [] and _history(conn, "c") == []
+    assert catalog_archive.price_history(conn, "a")[1] == "2026-11-05T10:00:00"   # с какого цикла ведётся — не меняется
+
+
+def test_the_list_is_limited_newest_first(tmp_path):
+    conn = store.connect(tmp_path / "t.db")
+    for n in range(catalog_archive.HISTORY_SHOWN + 5):
+        _cycle(conn, "2026-11-05T%02d:00:00" % n, a=1000.0 + n)
+    rows = _history(conn, "a")
+    assert len(rows) == catalog_archive.HISTORY_SHOWN and rows[0][2] == 1000.0 + catalog_archive.HISTORY_SHOWN + 4
+
+
+def test_the_table_is_made_on_a_database_that_did_not_have_it_and_nothing_else_is_touched(tmp_path):
+    conn = store.connect(tmp_path / "t.db")
+    _cycle(conn, "2026-11-05T10:00:00", a=5000.0)
+    conn.execute("DROP TABLE supplier_price_change")
+    conn.commit()
+    conn.close()
+    conn = store.connect(tmp_path / "t.db")
+    assert conn.execute("SELECT goods_id, last_price FROM catalog_item").fetchall() == [("a", 5000.0)]
+    assert conn.execute("SELECT COUNT(*) FROM supplier_price_change").fetchone()[0] == 0
+
+
+def test_the_cycle_writes_the_history_and_an_own_price_alone_does_not_put_a_gone_position_on_avito(tmp_path):
+    prepared(tmp_path, price_overrides={"1:102": {"price": 7000}, "2:102": {"pct": 10}})
+    assert run(tmp_path, FIVE) == 0
+    conn = sqlite3.connect(tmp_path / "t.db")
+    conn.row_factory = sqlite3.Row
+    before = conn.execute("SELECT last_price FROM catalog_item WHERE goods_id = '103'").fetchone()[0]
+    assert conn.execute("SELECT COUNT(*) FROM supplier_price_change").fetchone()[0] == 0       # первый цикл только запоминает
+    conn.close()
+    assert run(tmp_path, AFTER) == 0                                     # 102 ушла, своего остатка нет; у 103 другая закупка
+    assert "102" not in ads_of(public(tmp_path, 1)) and "102_a2" not in ads_of(public(tmp_path, 2))
+    conn = store.connect(tmp_path / "t.db")
+    rows = conn.execute("SELECT goods_id, was, price FROM supplier_price_change").fetchall()
+    assert rows == [("103", before, 6000.0)]
+
+
+# --- карточка: показ и права ----------------------------------------------------------------------------------------------------------
+
+def test_the_card_shows_the_history_to_who_may_see_the_purchase_only(tmp_path):
+    app, conn, _ids = _gone_app(tmp_path)
+    _cycle(conn, "2026-11-05T12:00:00", **{GONE: 4000.0})                     # пропавшая вернулась ненадолго…
+    _cycle(conn, "2026-11-05T13:00:00", **{GONE: 4400.0})
+    _cycle(conn, "2026-11-05T14:00:00", **{"100": 5000.0})                    # …и ушла снова
+    for role in ("owner", "partner"):
+        client = _owner(app)[0] if role == "owner" else person(app, role)[0]
+        page = client.get("/catalog/item/%s" % GONE).get_data(as_text=True).replace("\xa0", " ")
+        assert "data-price-history" in page and "4 000 ₽" in page and "4 400 ₽" in page, role
+    for role in ("chats", "viewer"):                                         # каталог видят, закупку — нет
+        client = person(app, role)[0]
+        page = client.get("/catalog/item/%s" % GONE).get_data(as_text=True)
+        assert client.get("/catalog/item/%s" % GONE).status_code == 200
+        assert "data-price-history" not in page and "4 400" not in page, role
+
+
+def test_a_card_without_changes_says_since_when_it_is_kept(tmp_path):
+    app, conn, _ids = _gone_app(tmp_path)
+    page = _owner(app)[0].get("/catalog/item/%s" % GONE).get_data(as_text=True)
+    assert "data-price-history" in page and "Закупка не менялась" in page
+
+
 # --- позиция, которой никогда не было у поставщика ------------------------------------------------------------------------------------
 
 def test_a_position_never_at_the_supplier_has_the_own_price_closed_with_a_clear_reason(tmp_path):
@@ -49,4 +124,4 @@ def test_the_closed_note_is_not_shown_to_a_role_without_the_purchase(tmp_path):
     stale_setup(tmp_path)
     client = person(app_of(tmp_path), "chats")[0]
     page = client.get("/catalog/item/s2-5").get_data(as_text=True)
-    assert "data-own-closed" not in page
+    assert "data-own-closed" not in page and "data-price-history" not in page

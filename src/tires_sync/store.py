@@ -274,6 +274,10 @@ CREATE TABLE IF NOT EXISTS catalog_item (
     last_stock INTEGER NOT NULL DEFAULT 0, last_price REAL NOT NULL DEFAULT 0, gone_since TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS catalog_item_gone ON catalog_item (gone_since);
+CREATE TABLE IF NOT EXISTS supplier_price_change (
+    id INTEGER PRIMARY KEY, at TEXT NOT NULL, goods_id TEXT NOT NULL, was REAL NOT NULL, price REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS supplier_price_change_goods ON supplier_price_change (goods_id, id);
 CREATE TABLE IF NOT EXISTS order_stage (
     id INTEGER PRIMARY KEY AUTOINCREMENT, pipeline_id INTEGER NOT NULL DEFAULT 1, code TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#98A2B3', position INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'open',
