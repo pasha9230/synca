@@ -159,6 +159,10 @@ def _build_parser() -> argparse.ArgumentParser:
     se.add_argument("--db", required=True)
     se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «На возврат»")
     se.add_argument("--dry-run", action="store_true", help="только показать список, ничего не ставить в очередь")
+    of = sub.add_parser("oth-numbers-fill", help="вписать номер WebMIM и перемещение из заказа-источника заказам, взявшим шины с ОТХ до правила 2026-11-04: только перечисленным; вписанное человеком остаётся, никому ничего не отправляется")
+    of.add_argument("--db", required=True)
+    of.add_argument("--order", type=int, action="append", required=True, help="номер заказа панели; можно несколько раз")
+    of.add_argument("--dry-run", action="store_true", help="только показать «было → стало» или причину, ничего не записывать")
     vc = sub.add_parser("vk-catchup", help="подборщик ВК: прочитать переписку с точками и выполнить их сообщения, о которых ВК не прислал уведомление (не старше суток, каждое один раз); для таймера каждые 10–15 минут")
     vc.add_argument("--db", required=True)
     vc.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
@@ -1178,6 +1182,23 @@ def _cmd_orders_fill_responsible(args) -> int:
     print("%s: %d; без ответственного осталось: %d%s" % ("записано" if args.apply else "будет записано (ничего не записано, нужен --apply)",
                                                         len(made["set"]), len(made["left"]),
                                                         " (№ %s)" % ", ".join(map(str, made["left"][:30])) if made["left"] else ""))
+    return 0
+
+
+def _cmd_oth_numbers_fill(args) -> int:
+    """oth-numbers-fill: the orders named only, by oth_sale.fill_numbers. Run by hand after a copy of the base (the owner 2026-11-05)."""
+    from . import oth_sale
+    conn = store.connect(args.db)
+    now = moscow_now().isoformat(timespec="seconds")
+    names = ("номер WebMIM", "перемещение")
+    for order_id in dict.fromkeys(args.order):
+        done = oth_sale.fill_numbers(conn, order_id, now, "система", write=not args.dry_run)
+        if done["why"]:
+            print("№%d: не заполнится: %s" % (order_id, done["why"]))
+            continue
+        print("№%d: %s (из заказа №%d)" % (order_id, ", ".join("%s «%s» → «%s»" % (n, b, a) for n, b, a in zip(names, done["before"], done["after"]) if b != a), done["source"]))
+    if args.dry_run:
+        print("проверка: ничего не записано")
     return 0
 
 
@@ -2986,6 +3007,8 @@ def main(argv=None) -> int:
             return _cmd_orders_fill_responsible(args)
         if args.command == "sheet-enroll":
             return _cmd_sheet_enroll(args)
+        if args.command == "oth-numbers-fill":
+            return _cmd_oth_numbers_fill(args)
         if args.command == "vk-catchup":
             return _cmd_vk_catchup(args)
         if args.command == "webmim-orders-sync":

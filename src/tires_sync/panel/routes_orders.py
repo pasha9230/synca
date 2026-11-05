@@ -1148,6 +1148,7 @@ def register(app) -> None:
             oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card),
             to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
+            oth_invoice=order_sheet.oth_invoice(conn, card),
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
