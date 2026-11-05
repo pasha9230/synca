@@ -115,11 +115,13 @@ def test_a_position_never_at_the_supplier_has_the_own_price_closed_with_a_clear_
     page = client.get("/catalog/item/s2-5").get_data(as_text=True)
     assert "data-own-closed" in page and "только для просмотра" in page and "её нет и не было" in page
     assert "никогда не было у поставщика" not in page                     # она у поставщика есть, только не в нашей выгрузке
+    assert "data-price-history" not in page                               # её закупку цикл не пишет: истории нет
     assert 'action="/catalog/item/s2-5/own-price"' not in page
     r = post(client, "/catalog/item/s2-5/own-price", tok, kind="price", value="4500", a=[str(first)], action="save")
-    assert "нет в выгрузке" in _flash(client, r)
+    said = _flash(client, r)
+    assert "по которой считаются цены: она показана только для просмотра" in said and "никогда не было у поставщика" not in said
     r = post(client, "/catalog/item/s2-77/own-price", tok, kind="price", value="4500", a=[str(first)], action="save")
-    assert "никогда не было у поставщика" in _flash(client, r)                # Id, которого не было нигде
+    assert "нет в выгрузке и не было в ней раньше" in _flash(client, r)       # Id, которого не было нигде
     conn = store.connect(tmp_path / "t.db")
     from tires_sync import staging
     assert not (staging.summary(conn)["changes"] or {}).get("price_overrides")

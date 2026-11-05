@@ -584,8 +584,9 @@ def register(app) -> None:
         elif has_right("money"):                                      # shown for viewing only (4tochki before its switch, an old second unload):
             data["own_closed"] = True                                 # not in the unload prices are counted from — no own price, said why
             data["own_never"] = catalog_archive.item_info(conn, goods_id) is None
-        if has_right("money"):                                        # the history of the supplier's purchase: who may see the purchase
-            data["price_history"], data["price_history_since"] = catalog_archive.price_history(conn, goods_id)
+        if has_right("money") and catalog_archive.item_info(conn, goods_id) is not None:   # the history of the supplier's purchase: who may
+            data["price_history"], data["price_history_since"] = catalog_archive.price_history(conn, goods_id)   # see the purchase; a position
+                                                                      # the cycle never had (viewing only) has none
         if MARKET_SHOWN and has_right("money"):                       # «Конкуренты»: the last snapshot of the competitors' prices (market.py)
             snapshot = market.latest(conn, [goods_id]).get(goods_id)
             data["market"] = {"snapshot": snapshot, "listings": market.listings_of(conn, snapshot["id"]) if snapshot else [],
@@ -617,9 +618,11 @@ def register(app) -> None:
             if value is not None:                                                     # the reset also for a position gone
                 offers, _purchases, gone, _other = _bulk_positions(conn, [goods_id])     # the supplier took it away: a sale price always, a percent
                 if goods_id not in offers:                                               # of its last purchase only (the owner 2026-11-03); never
-                    if catalog_archive.item_info(conn, goods_id) is None:                # a position shown for viewing only, nor one never at the
-                        raise ValueError("Такой позиции нет в выгрузке, и её никогда не было у поставщика: свою цену поставить нельзя.")
-                    raise ValueError("Такой позиции нет в выгрузке.")                     # supplier (the owner 2026-11-05)
+                    _c, settings, parsed, _r = context(app)                              # a position shown for viewing only, nor one never in
+                    if _locate(conn, settings, parsed, goods_id, app.config["UNLOAD_PATH"]) is not None:     # the unload (the owner 2026-11-05)
+                        raise ValueError("Такой позиции нет в выгрузке, по которой считаются цены: она показана только для просмотра. "
+                                         "Свою цену ей поставить нельзя.")
+                    raise ValueError("Такой позиции нет в выгрузке и не было в ней раньше: свою цену поставить нельзя.")
                 if goods_id in gone and "pct" in value and not offers[goods_id].base_price > 0:
                     raise ValueError("Позиции нет у поставщика, и последняя закупка неизвестна: процент не от чего считать. "
                                      "Поставьте цену продажи в рублях.")
