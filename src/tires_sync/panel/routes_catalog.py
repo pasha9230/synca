@@ -622,6 +622,9 @@ def register(app) -> None:
                     if _locate(conn, settings, parsed, goods_id, app.config["UNLOAD_PATH"]) is not None:     # the unload (the owner 2026-11-05)
                         raise ValueError("Такой позиции нет в выгрузке, по которой считаются цены: она показана только для просмотра. "
                                          "Свою цену ей поставить нельзя.")
+                    if catalog_archive.item_info(conn, goods_id) is not None:            # known, not marked gone yet (a collapse not believed,
+                        raise ValueError("Позиции сейчас нет в выгрузке: свою цену можно будет поставить, когда она вернётся "   # the file
+                                         "или каталог отметит её пропавшей у поставщика.")                                       # unusable)
                     raise ValueError("Такой позиции нет в выгрузке и не было в ней раньше: свою цену поставить нельзя.")
                 if goods_id in gone and "pct" in value and not offers[goods_id].base_price > 0:
                     raise ValueError("Позиции нет у поставщика, и последняя закупка неизвестна: процент не от чего считать. "

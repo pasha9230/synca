@@ -132,3 +132,13 @@ def test_the_closed_note_is_not_shown_to_a_role_without_the_purchase(tmp_path):
     client = person(app_of(tmp_path), "chats")[0]
     page = client.get("/catalog/item/s2-5").get_data(as_text=True)
     assert "data-own-closed" not in page and "data-price-history" not in page
+
+
+def test_a_position_known_but_not_marked_gone_yet_is_told_so_not_never(tmp_path):
+    app, conn, (first, _) = _gone_app(tmp_path)
+    conn.execute("UPDATE catalog_item SET gone_since = '' WHERE goods_id = ?", (GONE,))    # пропажа ещё не принята (обвал, битый файл)
+    conn.commit()
+    client, tok = _owner(app)
+    r = post(client, "/catalog/item/%s/own-price" % GONE, tok, kind="price", value="4500", a=[str(first)], action="save")
+    said = _flash(client, r)
+    assert "Позиции сейчас нет в выгрузке" in said and "не было" not in said
