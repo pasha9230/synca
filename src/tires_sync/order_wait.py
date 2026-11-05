@@ -115,7 +115,7 @@ def client_text(card: dict) -> str:
             parts.append(SEASON_NAMES[line["season"]])
         if line["studded"]:
             parts.append(STUD_NAMES[line["studded"]])
-        lines.append("%s, %d шт." % (", ".join(parts), line["qty"]))
+        lines.append("%s, %d шт" % (", ".join(parts), line["qty"]))                # the dot is the sentence's: «4 шт. Подскажите»
     return "Здравствуйте! Шины, которые вы ждали, появились в наличии: %s. Подскажите, оформляем заказ?" % "; ".join(lines)
 
 
@@ -373,6 +373,29 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
     if "{" in text or "}" in text or templates.unfilled(text):
         return "", "в тексте осталась незаполненная подстановка.", []
     return text, "", [[g, q] for g, q in held.items()]
+
+
+def form_text(conn, card: dict, offers: Iterable, price_of: Optional[PriceOf], chat_row=None) -> str:
+    """The words of the form of the task «Позиция появилась: предложите клиенту» (the owner 2026-11-05): those the message by itself would have,
+    the name and the price of a piece (_found_text), priced for the chat `chat_row` the form sends to; the words of the lines (client_text) when
+    the tire or its price cannot be told now. A person may change them; nothing goes without the press."""
+    fallback = client_text(card)
+    if price_of is None or not card["wants"]:
+        return fallback
+    try:
+        stock = [o for o in offers if o.stock >= 1]
+        lines = card["wants"]
+        if any(_one_tire(conn, card, line, stock) for line in lines):
+            return fallback
+        picks, _holder = _take(lines, stock, {}, {})
+        if picks is None:
+            return fallback
+        text, _why, _held = _found_text(conn, lines, picks, stock, chat_row, price_of, {})
+        return text or fallback
+    except Exception:                                              # a form is never broken by its words
+        conn.rollback()
+        logging.getLogger("tires_sync.order_wait").warning("the words of the form of card %s", card.get("id"), exc_info=True)
+        return fallback
 
 
 def _token(card_id, stay) -> str:

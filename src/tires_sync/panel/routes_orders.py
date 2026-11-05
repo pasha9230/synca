@@ -1140,6 +1140,8 @@ def register(app) -> None:
                 chat_ref = None                                          # «Открыть чат» of the field: a chat of another account
             if bind:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
+        sendable = [ch for ch in links if ch["account_id"] in {                                      # (a point: its own account's only)
+            a["id"] for a in connections.list_accounts(conn) if a["chats_enabled"] and a["chats_send"]}]
         return render_template(
             office_page("order_card.html"), messages=messages, open_messages=open_messages,
             **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
@@ -1161,10 +1163,9 @@ def register(app) -> None:
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),
             chat_ref=chat_ref, responsible_options=_responsible_options(app, conn, card["responsible"]),
             want_seasons=order_wait.SEASON_NAMES, want_studs=order_wait.STUD_NAMES, want_text=order_wait.describe,
-            client_text=order_wait.client_text(card) if card["wants"] and any(
+            client_text=wait_form_text(conn, card, sendable) if card["wants"] and any(
                 t["title"] == order_wait.TITLE_EXACT for t in engine.list_tasks(conn, card_id, ("pending",))) else "",
-            send_chats=[ch for ch in links if ch["account_id"] in {                                 # (a point: its own account's only)
-                a["id"] for a in connections.list_accounts(conn) if a["chats_enabled"] and a["chats_send"]}],
+            send_chats=sendable,
             exact_title=order_wait.TITLE_EXACT, webmim=webmim_match.card_block(conn, card, with_hints=own_point() is None),
             webmim_cost=order_report.order_webmim(conn, card_id) if has_right("money") else None,                # the purchase is money
             webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn)) if can_post("order_webmim_create") else None,
@@ -1172,6 +1173,21 @@ def register(app) -> None:
             supplier_number=order_supplier.number_of(conn, card_id),
             ad_position=deals.ad_position_chat(conn, card) if own_point() is None and can_post("order_ad_position") else None), status, {
             "Cache-Control": "no-store"}            # «Назад» reads the order again: the positions a press added are shown (хвост З6)
+
+    def wait_form_text(conn, card, sendable):
+        """The words of the form «Позиция появилась»: those the message by itself has, priced as order_wait.check prices them (by the order
+        form, for the account of the chat the form sends to: cli._wait_price_of); the words of the lines when the unload cannot be read."""
+        try:
+            _conn, settings, parsed, ref = context(app)
+        except Exception:
+            log.exception("the unload for the form of order %s", card["id"])
+            return order_wait.client_text(card)
+        day = local_now().date().isoformat()
+
+        def price_of(offer, chat_row):
+            account = order_offers.account_for(conn, chat_row=chat_row)
+            return order_offers.item_args(conn, settings, parsed, ref, offer.goods_id, day, account)["sale_unit"]
+        return order_wait.form_text(conn, card, list(parsed.offers.values()), price_of, sendable[0]["id"] if sendable else None)
 
     def back(card_id, part=""):
         return redirect("/orders/%d%s" % (card_id, "#" + part if part else ""))

@@ -1235,3 +1235,59 @@ def test_webmim_with_no_price_and_two_other_prices_stays_a_task(env):
     card, sender = waiting(env), Sender()
     run(conn, sender, [tire(code="NOPRICE"), s2(), s2(goods_id="s3-300", code="TS1")])
     assert sender.sent == [] and "разные цены у поставщиков" in tasks(conn, card)[0]["body"]
+
+
+# --- the owner 2026-11-05: the form of the task has the words of the message by itself -----------------------------------------------------------
+
+AUTO_WORDS = "Здравствуйте. «Ikon Autograph 205/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ за штуку. Желаете оформить заказ?"
+
+
+def unread(conn, chat_row):
+    conn.execute("UPDATE avito_message SET is_read = 0, kind = 'text', direction = 'in' WHERE chat_row = ?", (chat_row,))
+    conn.commit()
+
+
+def test_the_form_of_the_task_has_the_words_of_the_message_that_goes_by_itself(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    unread(conn, chat_row)                                                                      # the client waits for an answer: the task with the form
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and tasks(conn, card)[0]["title"] == order_wait.TITLE_EXACT
+    assert order_wait.form_text(conn, orders.get_card(conn, card), [tire()], price_of, chat_row) == AUTO_WORDS
+    assert sender.sent == []                                                                    # the form sends nothing by itself
+
+
+def test_the_form_follows_the_owners_template(env):
+    conn, chat_row = env
+    card = waiting(env)
+    owners_row(conn, "Есть {name} за {price}.")
+    assert order_wait.form_text(conn, orders.get_card(conn, card), [tire()], price_of, chat_row) == "Есть Ikon Autograph 205/55 R16 за 8 500 ₽."
+
+
+def test_the_form_quotes_the_higher_of_two_webmim_prices(env):
+    conn, chat_row = env
+    card = waiting(env)
+    words = order_wait.form_text(conn, orders.get_card(conn, card), [tire(code="TS2", goods_id="200"), tire()], price_of, chat_row)
+    assert "8 500 ₽" in words and "6 000" not in words
+
+
+@pytest.mark.parametrize("offers, price, want", (
+    ([tire()], lambda o, row: None, WANT),                                                      # no price
+    ([tire()], lambda o, row: 1 / 0, WANT),                                                     # the price fails
+    ([tire()], None, WANT),                                                                     # no unload or reference: no price at all
+    ([tire()], price_of, dict(WANT, model="", season="")),                                      # the line does not name one tire
+    ([s2(), s2(goods_id="s3-300", code="TS1")], price_of, WANT),                                # two other suppliers at two prices
+    ([tire(stock=2)], price_of, WANT),                                                          # not in full
+))
+def test_without_a_tire_or_a_price_the_form_has_the_words_of_the_lines_with_one_dot(env, offers, price, want):
+    conn, chat_row = env
+    card = waiting(env, want)
+    words = order_wait.form_text(conn, orders.get_card(conn, card), offers, price, chat_row)
+    assert words == order_wait.client_text(orders.get_card(conn, card))
+    assert "4 шт. Подскажите" in words and ".." not in words
+
+
+def test_the_words_of_the_lines_have_no_double_dot():
+    card = {"wants": [dict(WANT, code="", any_brand=False, any_size=False), dict(WANT, code="", width=215, qty=2, any_brand=False, any_size=False)]}
+    assert order_wait.client_text(card) == ("Здравствуйте! Шины, которые вы ждали, появились в наличии: Ikon Tyres Test Model 205/55 R16, зима, без шипов, 4 шт; "
+                                            "Ikon Tyres Test Model 215/55 R16, зима, без шипов, 2 шт. Подскажите, оформляем заказ?")
