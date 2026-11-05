@@ -229,3 +229,10 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 }
 .mp-handover summary{list-style:none;cursor:pointer;text-align:center}.mp-handover summary::-webkit-details-marker{display:none}.mp-handover p{margin:8px 0}
 .p2-mx3>.mp-ask,.p2-mx3>.mp-handover{grid-column:1/-1}.p2-mx3>.mp-ask .mp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+/* «ОТКАЗ» with its reason (the owner 2026-11-05) */
+.mp-refuse > summary{list-style:none;cursor:pointer;text-align:center}
+.mp-refuse > summary::-webkit-details-marker{display:none}
+.mp-refuse-why{border:1px solid var(--p2-line,#e4e7ec);border-radius:8px;padding:8px 10px;margin:8px 0;display:flex;flex-direction:column;gap:6px}
+.mp-refuse-why legend{font-weight:600;padding:0 4px}
+.mp-refuse-why label{display:flex;align-items:center;gap:6px;min-height:32px}
+.mp-refuse-why input[type=text]{width:100%;min-height:36px;box-sizing:border-box}

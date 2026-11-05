@@ -20,7 +20,7 @@ from typing import Callable, List, Optional
 from . import order_points as points, orders
 
 ACTION = "point_action"
-NAMES = {"arrived": "принял заказ (приехал)", "issued": "выдал заказ", "no_show": "клиент не пришёл", "returned": "отдал на возврат",
+NAMES = {"arrived": "принял заказ (приехал)", "issued": "выдал заказ", "no_show": "клиент не пришёл", "refuse": "отказ клиента (на ОТХ)", "returned": "отдал на возврат",
          "reserve_issued": "выдал (ответ на резерв)", "reserve_here": "на точке (ответ на резерв)", "handoff": "передал клиента",
          "handoff_cancel": "отменил передачу", "act_signed": "подписал акт МХ-3 и отдал", "to_oth": "оставил шины на ОТХ", "move": "сменил этап", "vk": "команда ВК",
          "oth_issued": "выдал (7-й день ОТХ)", "oth_here": "шины на точке (7-й день ОТХ)", "undo": "отменил отметку",
@@ -79,7 +79,7 @@ def history(conn, point_id: Optional[int] = None, limit: int = SHOWN) -> List[di
 
 
 UNDO_KEY = "point_undo:%d"
-UNDOABLE = {"arrived": "«Приехал»", "issued": "«Выдал»", "reserve_issued": "«Выдан»", "oth_issued": "«Выдали»", "to_oth": "«На ОТХ»",
+UNDOABLE = {"arrived": "«Приехал»", "issued": "«Выдал»", "reserve_issued": "«Выдан»", "oth_issued": "«Выдали»", "to_oth": "«На ОТХ»", "refuse": "«ОТКАЗ»",
             "shipped": "«Передал курьеру ТК»", "act_signed": "«Подписал акт и отдал»"}
 UNDO_HINT = "Сообщение, которое уже ушло клиенту, не отзывается."
 UNDO_SHOWN = 10
