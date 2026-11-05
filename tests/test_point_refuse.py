@@ -299,3 +299,27 @@ def test_a_short_panel_number_with_a_plain_reason_still_works(tmp_path):
     _card(conn, pid, card=423, code="at_point", webmim="")
     mgr.dispatch(conn, "s2", PEER, "отказ 423 ошиблись размером", None, "2026-10-13T13:00:00", None, None)
     assert orders.get_card(conn, 423)["stage"]["code"] == "oth"
+
+
+# --- review round 5: a partial refusal or «забрал» in the reason waits for the owner; «отказ по заказу N» -----------------------------
+
+@pytest.mark.parametrize("text", ["отказ 5000100 забрали 2 из 4, две не подошли", "отказ 5000100 одну шину, остальные выдал",
+                                  "отказ 5000100 взял только 2", "отказ 5000100 частично, 2 шины", "отказ 5000100 клиент забрал",
+                                  "отказ 5000100 старый год, но забрал"])
+def test_a_partial_refusal_or_another_command_in_the_reason_waits_for_the_owner(tmp_path, text):
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    answer = mgr.dispatch(conn, "p1", PEER, text, None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and linked(conn, card), answer
+    assert mgr.list_inbox(conn) and mgr.list_inbox(conn)[0]["dispute"]
+
+
+@pytest.mark.parametrize("text", ["Отказ по заказу 5000100 старый год производства", "отказ по 5000100 старый год производства"])
+def test_refuse_by_the_order_works(tmp_path, text):
+    app, _client, conn, _pid, card = at_point(tmp_path)
+    mgr.dispatch(conn, "p2", PEER, text, None, "2026-10-13T13:00:00", None, None)
+    assert orders.get_card(conn, card)["cancel_reason"] == mgr.REFUSE_REASON % "Старый год производства"
+
+
+@pytest.mark.parametrize("reason", ["брак", "порез на боковине", "клиент нашёл дешевле", "ошиблись размером", "клиенту не подошёл год"])
+def test_ordinary_reasons_are_not_doubtful(reason):
+    assert mgr.refuse_doubt("отказ 5000100 " + reason, reason) == ""

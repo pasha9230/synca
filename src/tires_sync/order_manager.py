@@ -38,7 +38,7 @@ REFUSE = "отказ"
 REFUSE_REASONS = ("Старый год производства", "Ошиблись размером")      # and «Другой»: the point types it
 REFUSE_REASON = "Отказ клиента на точке: %s"                          # the order's «Причина отмены»
 REFUSE_MAX = 200
-REFUSE_TEXT = re.compile(r"^\W*отказ(?![^\W\d_])[\s,.:;!-]*(?:" + ORDER_MARK + r")?[\s№#:.-]*(\d{1,9})?(?!\d)[\s,.:;!-]*(.*)$", re.I | re.S)
+REFUSE_TEXT = re.compile(r"^\W*отказ(?![^\W\d_])[\s,.:;!-]*(?:по\s+)?(?:" + ORDER_MARK + r")?[\s№#:.-]*(\d{1,9})?(?!\d)[\s,.:;!-]*(.*)$", re.I | re.S)
 REFUSE_ASK = ("Заказ №%s: укажите причину отказа, ничего не изменено. Напишите, например: «отказ %s старый год производства», "
               "«отказ %s ошиблись размером» или «отказ %s <своя причина>».")
 NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её]л|ла|ли)(?![а-я])", re.I)       # «не пришёл заказ» is about goods: not this
@@ -777,6 +777,10 @@ def refuse_doubt(text, reason) -> str:
     tokens = WORD_PART.findall(rules.normalise_word(reason))
     if tokens and tokens[0] in NEGATION:
         return "отрицание"
+    if PART.search(str(reason or "")):
+        return "отказ от части заказа"                         # «забрали 2 из 4», «только 2», «частично»: the order is not all refused
+    if any(t in BUILTIN or t in GIVE for t in tokens):
+        return "в причине другая отметка"                      # «клиент забрал», «остальные выдал»: not a refusal of the order
     reason = str(reason or "")
     if LONG_NUMBER.search(reason) or MARKED_NUMBER.search(reason) or any(len(re.sub(r"\D", "", n)) >= 5 for n in SPACED_NUMBER.findall(reason)):
         return "ещё один номер заказа"
