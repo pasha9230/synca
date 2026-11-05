@@ -2,10 +2,12 @@
 MIM», «Дата счета» in its row of the table; the day is never stored, the card shows it read-only."""
 from __future__ import annotations
 
-from tests.test_order_reserve import db
+import json
+
+from tests.test_order_reserve import db, stage
 from tests.test_oth_numbers import NUMBER, TRANSFER, numbers, source
 from tests.test_oth_sale import LATER, line, new_order, panel, take
-from tires_sync import oth_manual, order_sheet as sheet, orders, oth_sale
+from tires_sync import cli, oth_manual, order_sheet as sheet, orders, oth_sale, store
 
 DAY = "2026-10-21"
 COLUMNS = ("№ заказа MIM", "Перемещение MIM", "Дата счета")
@@ -303,7 +305,7 @@ def test_the_card_of_own_stock_shows_no_day(tmp_path):
 # ---- a merge ----------------------------------------------------------------------------------------------------------------------------
 
 def test_a_merged_order_gives_the_tyres_of_a_source_on_oth_that_source_s_values(tmp_path):
-    from tests.test_order_reserve import card_at, stage
+    from tests.test_order_reserve import card_at
     from tires_sync import order_merge
     conn = db(tmp_path)
     on_oth = source(conn)
@@ -313,3 +315,118 @@ def test_a_merged_order_gives_the_tyres_of_a_source_on_oth_that_source_s_values(
     conn.commit()
     new = order_merge.merge(conn, [placed, on_oth], stage(conn, "moving"), LATER, "o", client_from=placed)
     assert row_of(conn, new) == (NUMBER, TRANSFER, DAY)                             # not the number the merged order was given by its base
+
+
+# ---- oth-numbers-fill (the owner 2026-11-05: the orders 509 and 515) -----------------------------------------------------------------------
+
+def before_the_rule(conn, cid):
+    """The order took its tyres before the numbers were copied."""
+    conn.execute("UPDATE order_card SET webmim_number = '', transfer_number = '' WHERE id = ?", (cid,))
+    conn.execute("DELETE FROM audit WHERE action = 'oth_numbers'")
+    conn.execute("DELETE FROM order_event WHERE order_id = ? AND text LIKE 'Номер%'", (cid,))
+    conn.commit()
+
+
+def old_order(conn):
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    before_the_rule(conn, cid)
+    return old, cid
+
+
+def fill(tmp_path, capsys, *orders_named, dry=False):
+    argv = ["oth-numbers-fill", "--db", str(tmp_path / "x.db")] + [x for o in orders_named for x in ("--order", str(o))] + (["--dry-run"] if dry else [])
+    assert cli.main(argv) == 0
+    return capsys.readouterr().out
+
+
+def traces(conn, cid):
+    return (numbers(conn, cid), conn.execute("SELECT COUNT(*) FROM audit").fetchone()[0], conn.execute("SELECT COUNT(*) FROM order_event").fetchone()[0])
+
+
+def sends(conn):
+    return (conn.execute("SELECT COUNT(*) FROM order_task").fetchone()[0],)
+
+
+def test_the_command_fills_the_named_order_with_journal_and_audit_and_sends_nothing(tmp_path, capsys):
+    conn = db(tmp_path)
+    old, cid = old_order(conn)
+    other = new_order(conn, qty=4, goods="9")
+    tasks = sends(conn)
+    out = fill(tmp_path, capsys, cid)
+    conn = store.connect(str(tmp_path / "x.db"))
+    assert numbers(conn, cid) == (NUMBER, TRANSFER) and numbers(conn, other) == ("", "")
+    assert "№%d" % cid in out and "«» → «%s»" % NUMBER in out and "«» → «%s»" % TRANSFER in out and "заказа №%d" % old in out
+    events = [(e["author"], e["text"]) for e in orders.list_events(conn, cid)]
+    assert ("система", "Номер WebMIM и перемещение взяты из заказа №%d" % old) in events
+    author, detail = conn.execute("SELECT author, detail FROM audit WHERE action = 'oth_numbers' ORDER BY id DESC").fetchone()
+    assert author == "система" and json.loads(detail) == {"order": cid, "from_order": old, "changes": {"webmim_number": NUMBER, "transfer_number": TRANSFER}}
+    assert sends(conn) == tasks and oth_sale.borrowed_ids(conn, cid) == {cid}
+
+
+def test_the_dry_run_says_the_same_and_writes_nothing(tmp_path, capsys):
+    conn = db(tmp_path)
+    old, cid = old_order(conn)
+    was = traces(conn, cid)
+    out = fill(tmp_path, capsys, cid, dry=True)
+    conn = store.connect(str(tmp_path / "x.db"))
+    assert traces(conn, cid) == was and numbers(conn, cid) == ("", "")
+    assert "«» → «%s»" % NUMBER in out and "заказа №%d" % old in out and "ничего не записано" in out
+
+
+def test_the_command_keeps_a_typed_value_and_a_second_run_changes_nothing(tmp_path, capsys):
+    conn = db(tmp_path)
+    old, cid = old_order(conn)
+    conn.execute("UPDATE order_card SET transfer_number = '26R-МОЙ' WHERE id = ?", (cid,))
+    conn.commit()
+    out = fill(tmp_path, capsys, cid)
+    conn = store.connect(str(tmp_path / "x.db"))
+    assert numbers(conn, cid) == (NUMBER, "26R-МОЙ") and "26R-МОЙ" not in out
+    was = traces(conn, cid)
+    assert "не заполнится: менять нечего" in fill(tmp_path, capsys, cid)
+    assert traces(conn, cid) == was
+
+
+def test_the_command_refuses_what_the_rules_refuse_and_says_why(tmp_path, capsys):
+    conn = db(tmp_path)
+    two = (source(conn), source(conn, number="5254044", transfer="26R-2"))
+    several = new_order(conn, qty=4, extra=(("1", 4),))
+    for at, line_of in enumerate(orders.get_card(conn, several)["items"]):
+        oth_sale.take(conn, several, line_of["id"], orders.get_card(conn, two[at])["items"][0]["id"], LATER, "o")
+    plain = new_order(conn, goods="9")
+    source(conn)
+    with_supplier = new_order(conn, qty=6)
+    take(conn, with_supplier)
+    source(conn)
+    closed = new_order(conn)
+    take(conn, closed)
+    before_the_rule(conn, closed)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "done"), closed))
+    conn.commit()
+    was = conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_numbers'").fetchone()[0]
+    out = fill(tmp_path, capsys, several, plain, with_supplier, closed, 99999)
+    lines = dict(zip((several, plain, with_supplier, closed, 99999), out.strip().split("\n")))
+    assert "разных источников" in lines[several] and "не держит шин" in lines[plain] and "позиции поставщика" in lines[with_supplier]
+    assert "заказ закрыт" in lines[closed] and "заказа нет" in lines[99999]
+    conn = store.connect(str(tmp_path / "x.db"))
+    assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_numbers'").fetchone()[0] == was
+    assert numbers(conn, closed) == ("", "") and numbers(conn, several) == ("", "")
+
+
+def test_the_command_refuses_with_an_order_of_webmim_a_press_going_on_and_own_stock(tmp_path, capsys):
+    conn = db(tmp_path)
+    source(conn)
+    own = new_order(conn)
+    take(conn, own)
+    before_the_rule(conn, own)
+    orders.update_card(conn, own, {"webmim_id": "1"}, LATER, "o")
+    source(conn)
+    pressed = new_order(conn)
+    take(conn, pressed)
+    before_the_rule(conn, pressed)
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, updated_at) VALUES (?, 'prod', 'running', ?, ?, 'o', ?)", (pressed, LATER, LATER, LATER))
+    conn.commit()
+    stock = own_stock_order(conn)
+    out = fill(tmp_path, capsys, own, pressed, stock).strip().split("\n")
+    assert "свой заказ WebMIM" in out[0] and "оформляется" in out[1] and "номера не нужны" in out[2]

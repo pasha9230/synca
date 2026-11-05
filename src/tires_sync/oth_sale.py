@@ -204,6 +204,51 @@ def _sync_numbers(conn, card_id, before: Iterable[int], now: str, author: str, n
     return bool(changes)
 
 
+def fill_numbers(conn, card_id, now: str, author: str, write: bool = True) -> dict:
+    """`oth-numbers-fill` (the owner 2026-11-05): an order that took its tyres before the numbers were copied gets them now, by _sync_numbers and only
+    where it would act today; a person's value stays, nobody is written to. `write` False: the same work, rolled back. {order, before, after, source, why}:
+    `why` says why nothing changes. Commits or rolls back its own transaction."""
+    done = {"order": int(card_id), "before": ("", ""), "after": ("", ""), "source": None, "why": ""}
+    if conn.execute("SELECT 1 FROM order_card WHERE id = ?", (card_id,)).fetchone() is None:
+        return dict(done, why="заказа нет (удалён или неверный номер)")
+    card = orders.get_card(conn, card_id)
+    done["before"] = done["after"] = (card["webmim_number"], card["transfer_number"])
+    firsts = _firsts(conn, card_id)
+    from . import order_merge
+    state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (card_id,)).fetchone()
+    source, why = _numbers_source(conn, card, firsts)
+    if card["webmim_id"]:
+        why = "у заказа свой заказ WebMIM"
+    elif order_merge.is_target(conn, card_id):
+        why = "заказ объединённый: номера у него по позициям"
+    elif not firsts:
+        why = "заказ не держит шин с ОТХ"
+    elif card["stage"]["kind"] != "open":
+        why = "заказ закрыт (этап «%s»): номера закрытому заказу не вписываются" % card["stage"]["name"]
+    elif state and state[0] != "refused":
+        why = "заказ оформляется в WebMIM: номер придёт оттуда"
+    elif source is None:
+        why = why or "сделка из наличия, своя продажа точки или свой остаток: номера не нужны"
+    if why:
+        return dict(done, why=why)
+    done["source"] = source
+    try:
+        changed = _sync_numbers(conn, card_id, firsts, now, author)
+        got = conn.execute("SELECT webmim_number, transfer_number FROM order_card WHERE id = ?", (card_id,)).fetchone()
+        done["after"] = (got[0], got[1])
+    except Exception:
+        conn.rollback()
+        raise
+    if not changed:
+        conn.rollback()
+        return dict(done, why="менять нечего: поля заполнены или у заказа №%d нет этих номеров" % source)
+    if write:
+        conn.commit()
+    else:
+        conn.rollback()
+    return done
+
+
 def numbers_written(conn, card_id, fields: Iterable[str], now: str, author: str) -> None:
     """A number was written through the order's fields (orders.update_card, in its transaction). Over a copy: it is a person's from now on.
     The orders holding tyres bought by this one follow it (the owner 2026-11-04): they show its number now, unless a person typed their own.
