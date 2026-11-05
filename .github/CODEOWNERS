@@ -1,6 +1,7 @@
 # Критичные файлы: вливаются только после одобрения владельца. Остальное без обязательного одобрения.
 # Правило работает, когда в защите master включено «Require review from Code Owners».
-# Новый модуль, который меняет фид, цены, права или рассылку, добавлять сюда в той же правке.
+# Новый модуль, который меняет фид, данные, вход или секреты, добавлять сюда в той же правке.
+# Цены, деньги и сообщения клиентам здесь намеренно нет: GitHub их не остановит, порядок в CLAUDE.md.
 
 # Настройка и правила
 /.github/ @pasha9230
@@ -33,7 +34,6 @@
 /src/tires_sync/panel/routes_photos.py @pasha9230
 /src/tires_sync/panel/routes_pairs.py @pasha9230
 /src/tires_sync/panel/routes_connections.py @pasha9230
-/src/tires_sync/panel/routes_catalog_oth.py @pasha9230
 /src/tires_sync/feed.py @pasha9230
 /src/tires_sync/feed_now.py @pasha9230
 /src/tires_sync/sync.py @pasha9230
@@ -50,7 +50,6 @@
 /src/tires_sync/heal.py @pasha9230
 /src/tires_sync/same_tire.py @pasha9230
 /src/tires_sync/oth_stock.py @pasha9230
-/src/tires_sync/oth_manual.py @pasha9230
 /src/tires_sync/description.py @pasha9230
 /src/tires_sync/mappings.py @pasha9230
 /src/tires_sync/connections.py @pasha9230
@@ -65,29 +64,6 @@
 /src/tires_sync/data/avito-templates/ @pasha9230
 /src/tires_sync/panel/routes_drafts.py @pasha9230
 /src/tires_sync/panel/routes_feedupdate.py @pasha9230
-
-# Цены и деньги
-/src/tires_sync/order_report.py @pasha9230
-/src/tires_sync/order_offers.py @pasha9230
-/src/tires_sync/shop_cart.py @pasha9230
-/src/tires_sync/panel/client_catalog.py @pasha9230
-/src/tires_sync/panel/economics_view.py @pasha9230
-/src/tires_sync/panel/routes_economics.py @pasha9230
-/src/tires_sync/panel/routes_client_terms.py @pasha9230
-/src/tires_sync/pricing.py @pasha9230
-/src/tires_sync/price_guard.py @pasha9230
-/src/tires_sync/price_push.py @pasha9230
-/src/tires_sync/own_price.py @pasha9230
-/src/tires_sync/own_bulk.py @pasha9230
-/src/tires_sync/economics.py @pasha9230
-/src/tires_sync/amounts.py @pasha9230
-/src/tires_sync/sales.py @pasha9230
-/src/tires_sync/oth_sale.py @pasha9230
-/src/tires_sync/orders.py @pasha9230
-/src/tires_sync/terms.py @pasha9230
-/src/tires_sync/client_terms.py @pasha9230
-/src/tires_sync/webmim_create.py @pasha9230
-/src/tires_sync/panel/routes_catalog.py @pasha9230
 
 # База и данные
 /src/tires_sync/panel/routes_order_cleanup.py @pasha9230
@@ -114,20 +90,3 @@
 /src/tires_sync/panel/__init__.py @pasha9230
 /src/tires_sync/panel/routes_users.py @pasha9230
 /src/tires_sync/panel/routes_avito_webhook.py @pasha9230
-
-# Сообщения
-/src/tires_sync/order_placed.py @pasha9230
-/src/tires_sync/order_wait.py @pasha9230
-/src/tires_sync/order_reserve.py @pasha9230
-/src/tires_sync/vk_catchup.py @pasha9230
-/src/tires_sync/order_rules.py @pasha9230
-/src/tires_sync/order_arrived.py @pasha9230
-/src/tires_sync/order_intercity.py @pasha9230
-/src/tires_sync/message_texts.py @pasha9230
-/src/tires_sync/notify.py @pasha9230
-/src/tires_sync/order_notify.py @pasha9230
-/src/tires_sync/order_manager.py @pasha9230
-/src/tires_sync/order_engine.py @pasha9230
-/src/tires_sync/order_templates.py @pasha9230
-/src/tires_sync/chats.py @pasha9230
-/src/tires_sync/vk_send.py @pasha9230
