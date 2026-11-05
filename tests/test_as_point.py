@@ -437,6 +437,20 @@ def test_tasks_as_a_point_are_exactly_the_points_managers(w, staff):
     assert "владельцу по заказу точки" in client.get("/tasks").get_data(as_text=True)          # back after «Выйти»
 
 
+def test_the_done_tasks_as_a_point_are_exactly_the_points_managers(w, staff):
+    conn = w["conn"]
+    client = owner(w)
+    conn.execute("UPDATE callback_task SET done_at = ?, done_by = 'owner'", (NOW,))
+    conn.commit()
+    as_point(client, w["pa"])
+    for tab in ("mine", "by_me", "all"):
+        text = client.get("/tasks?tab=%s&view=done" % tab).get_data(as_text=True)
+        assert "менеджеру точки по заказу" in text and "менеджеру точки без заказа" in text, tab
+        assert "владельцу по заказу точки" not in text and "другой точке" not in text, tab
+    post(client, "/as-point/stop", "tok")
+    assert "владельцу по заказу точки" in client.get("/tasks?view=done").get_data(as_text=True)     # back after «Выйти»
+
+
 def test_a_point_without_a_manager_has_no_tasks_and_sets_none(w):
     client = owner(w)
     as_point(client, w["pa"])
