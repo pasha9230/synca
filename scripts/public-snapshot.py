@@ -2,7 +2,7 @@
 """Снимок кода для публичного репозитория и его проверка (этап 5 docs/plans/2026-10-24-open-repo.md).
 
 Сборка: из коммита (по умолчанию origin/master) в пустую папку попадают только файлы публичного набора
-(«закрыто всё, кроме разрешённого»: KEEP_DIRS и KEEP_FILES). Всё остальное (CLAUDE.md, .claude/, документы,
+(«закрыто всё, кроме разрешённого»: KEEP_DIRS и KEEP_FILES). Всё остальное (CLAUDE.local.md, .claude/, документы,
 снимок сервера, .DS_Store) в папку не попадает и печатается списком: это состав tires-private.
 
     python3 scripts/public-snapshot.py --out ../synca-snapshot [--commit origin/master] [--removed-list FILE]
@@ -31,7 +31,7 @@ from pathlib import Path
 # ---- публичный набор (всё остальное приватное) ----
 KEEP_DIRS = ("src/", "tests/", "agent/", "scripts/", "deploy/", ".github/")
 KEEP_FILES = {
-    "pyproject.toml", "README.md", "SECURITY.md", "CONTRIBUTING.md", "LICENSE",
+    "pyproject.toml", "README.md", "SECURITY.md", "CONTRIBUTING.md", "LICENSE", "CLAUDE.md",
     ".gitignore", ".gitleaks.toml",
     "docs/feed-rules.md", "docs/feed-check-rules.md",
 }
