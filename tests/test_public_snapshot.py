@@ -12,7 +12,7 @@ PHONE = "+7 912 " + "345-67-89"
 TOKEN = "gh" + "p_" + "A1b2C3d4" * 5
 
 PRIVATE = {
-    "CLAUDE.md": "rules\n",
+    "CLAUDE.local.md": "rules\n",
     ".claude/settings.json": "{}\n",
     "docs/STATE.md": "state\n",
     "docs/DECISIONS.md": "decisions\n",
@@ -35,6 +35,7 @@ PUBLIC = {
     "docs/feed-rules.md": "rules\n",
     "pyproject.toml": "[project]\n",
     "README.md": "readme\n",
+    "CLAUDE.md": "rules\n",
 }
 
 
@@ -83,7 +84,7 @@ def test_private_removed_public_kept(tmp_path):
     moved = (tmp_path / "private.txt").read_text(encoding="utf-8").split()
     # the private set goes to tires-private; the old server copy and .DS_Store are not carried over
     assert sorted(moved) == sorted(p for p in PRIVATE if not p.startswith("tires-server/") and not p.endswith(".DS_Store"))
-    assert "в снимке 8, убрано 13 (в tires-private 10, не переносится 3)" in r.stdout
+    assert "в снимке 9, убрано 13 (в tires-private 10, не переносится 3)" in r.stdout
 
 
 def test_out_must_be_empty(tmp_path):
@@ -139,12 +140,24 @@ def test_check_finds_deny_values_unknown_domain_and_secret(tmp_path):
 
 def test_check_finds_private_and_forbidden_files(tmp_path):
     out, _ = build(tmp_path, PUBLIC)
-    (out / "CLAUDE.md").write_text("rules\n", encoding="utf-8")
+    (out / "CLAUDE.local.md").write_text("rules\n", encoding="utf-8")
     (out / "src" / "pkg" / ".env").write_text("A=1\n", encoding="utf-8")
     r = check(out)
     assert r.returncode == 1
-    assert "CLAUDE.md:0: файл вне публичного набора" in r.stdout
+    assert "CLAUDE.local.md:0: файл вне публичного набора" in r.stdout
     assert "src/pkg/.env:0: запрещённый файл (секреты, база, данные)" in r.stdout
+
+
+def test_shared_claude_md_is_in_the_snapshot_and_its_text_is_checked(tmp_path):
+    out, _ = build(tmp_path, {**PUBLIC, "CLAUDE.md": f"call {PHONE}\nhttps://{DOMAIN}/\n"})
+    deny = tmp_path / "deny.txt"
+    deny.write_text(f"{PHONE}\n", encoding="utf-8")
+    r = check(out, deny)
+    assert r.returncode == 1
+    lines = r.stdout.splitlines()
+    assert "CLAUDE.md:1: значение из --deny, строка 1 (телефон)" in lines
+    assert "CLAUDE.md:2: адрес вне списка известных (свой домен?)" in lines
+    assert "CLAUDE.md:0: файл вне публичного набора" not in lines
 
 
 def test_strict_needs_deny_file(tmp_path):

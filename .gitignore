@@ -18,9 +18,9 @@ agent/target/
 *.log
 docs/integrations/*.gs
 private/
-# публичный репозиторий (open5): инструкции сессий и документы — в tires-private; в публичном только два правила фида.
+# публичный репозиторий (open5): закрытые инструкции сессий и документы — в tires-private; в публичном общий CLAUDE.md и два правила фида.
 # Уже отслеживаемые файлы старого репозитория это не трогает; новые файлы в docs/ там добавляются через git add -f.
-CLAUDE.md
+CLAUDE.local.md
 .claude/
 docs/*
 !docs/feed-rules.md

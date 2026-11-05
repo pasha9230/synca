@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Выкладка Tires Sync на сервере: тот же порядок, что в CLAUDE.md («Выкладка») и docs/deploy-prompt.md.
+# Выкладка Tires Sync на сервере: порядок описан в deploy/AUTODEPLOY.md («Как работает»).
 # Ставит владелец вручную, от root (обновление скрипта тоже только вручную, не из workflow):
 #   install -o root -g root -m 0755 deploy/tires-deploy.sh /usr/local/sbin/tires-deploy
 # Раннер GitHub (пользователь tires-deploy) вызывает его через sudo (deploy/sudoers-tires-deploy).

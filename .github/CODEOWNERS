@@ -1,2 +1,93 @@
-* @pasha9230
+# Критичные файлы: вливаются только после одобрения владельца. Остальное без обязательного одобрения.
+# Правило работает, когда в защите master включено «Require review from Code Owners».
+# Новый модуль, который меняет фид, данные, вход или секреты, добавлять сюда в той же правке.
+# Цены, деньги и сообщения клиентам здесь намеренно нет: GitHub их не остановит, порядок в CLAUDE.md.
+
+# Настройка и правила
 /.github/ @pasha9230
+/deploy/ @pasha9230
+/scripts/ @pasha9230
+/agent/ @pasha9230
+/CLAUDE.md @pasha9230
+/pyproject.toml @pasha9230
+/.gitignore @pasha9230
+/.gitleaks.toml @pasha9230
+/docs/feed-rules.md @pasha9230
+/docs/feed-check-rules.md @pasha9230
+
+# Фид и Авито
+/src/tires_sync/reconcile.py @pasha9230
+/src/tires_sync/tire_match.py @pasha9230
+/src/tires_sync/catalog.py @pasha9230
+/src/tires_sync/catalog_archive.py @pasha9230
+/src/tires_sync/models.py @pasha9230
+/src/tires_sync/points.py @pasha9230
+/src/tires_sync/brands.py @pasha9230
+/src/tires_sync/overrides_clear.py @pasha9230
+/src/tires_sync/photo_library.py @pasha9230
+/src/tires_sync/photo_cache.py @pasha9230
+/src/tires_sync/photo_style.py @pasha9230
+/src/tires_sync/panel/routes_img.py @pasha9230
+/src/tires_sync/panel/routes_mappings.py @pasha9230
+/src/tires_sync/panel/routes_description.py @pasha9230
+/src/tires_sync/panel/routes_addresses.py @pasha9230
+/src/tires_sync/panel/routes_photos.py @pasha9230
+/src/tires_sync/panel/routes_pairs.py @pasha9230
+/src/tires_sync/panel/routes_connections.py @pasha9230
+/src/tires_sync/feed.py @pasha9230
+/src/tires_sync/feed_now.py @pasha9230
+/src/tires_sync/sync.py @pasha9230
+/src/tires_sync/cycle.py @pasha9230
+/src/tires_sync/decide.py @pasha9230
+/src/tires_sync/candidates.py @pasha9230
+/src/tires_sync/filters.py @pasha9230
+/src/tires_sync/overrides.py @pasha9230
+/src/tires_sync/publish.py @pasha9230
+/src/tires_sync/publishing.py @pasha9230
+/src/tires_sync/feed_check.py @pasha9230
+/src/tires_sync/feed_check_rules.json @pasha9230
+/src/tires_sync/mirror_feed.py @pasha9230
+/src/tires_sync/heal.py @pasha9230
+/src/tires_sync/same_tire.py @pasha9230
+/src/tires_sync/oth_stock.py @pasha9230
+/src/tires_sync/description.py @pasha9230
+/src/tires_sync/mappings.py @pasha9230
+/src/tires_sync/connections.py @pasha9230
+/src/tires_sync/webmim.py @pasha9230
+/src/tires_sync/suppliers.py @pasha9230
+/src/tires_sync/tochki_feed.py @pasha9230
+/src/tires_sync/staging.py @pasha9230
+/src/tires_sync/settings_store.py @pasha9230
+/src/tires_sync/config.py @pasha9230
+/src/tires_sync/cli.py @pasha9230
+/src/tires_sync/avito*.py @pasha9230
+/src/tires_sync/data/avito-templates/ @pasha9230
+/src/tires_sync/panel/routes_drafts.py @pasha9230
+/src/tires_sync/panel/routes_feedupdate.py @pasha9230
+/src/tires_sync/panel/routes_history.py @pasha9230
+
+# База и данные
+/src/tires_sync/panel/routes_order_cleanup.py @pasha9230
+/src/tires_sync/store.py @pasha9230
+/src/tires_sync/backup.py @pasha9230
+/src/tires_sync/offsite.py @pasha9230
+/src/tires_sync/trash.py @pasha9230
+/src/tires_sync/order_cleanup.py @pasha9230
+
+# Вход, права, секреты
+/src/tires_sync/panel/routes_vk.py @pasha9230
+/src/tires_sync/panel/routes_sheet.py @pasha9230
+/src/tires_sync/transport.py @pasha9230
+/src/tires_sync/panel/routes.py @pasha9230
+/src/tires_sync/panel/routes_design.py @pasha9230
+/src/tires_sync/panel/routes_agent.py @pasha9230
+/src/tires_sync/panel/routes_share.py @pasha9230
+/src/tires_sync/panel/wsgi.py @pasha9230
+/src/tires_sync/users.py @pasha9230
+/src/tires_sync/secretbox.py @pasha9230
+/src/tires_sync/share.py @pasha9230
+/src/tires_sync/vk_callback.py @pasha9230
+/src/tires_sync/panel/common.py @pasha9230
+/src/tires_sync/panel/__init__.py @pasha9230
+/src/tires_sync/panel/routes_users.py @pasha9230
+/src/tires_sync/panel/routes_avito_webhook.py @pasha9230
