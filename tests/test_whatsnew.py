@@ -123,6 +123,13 @@ def test_the_new_view_is_not_promised_to_those_who_may_not_have_it():
     assert found >= 5
 
 
+def test_the_item_of_the_column_account_goes_to_the_owner_and_the_partner_only():
+    """Names of people for the table (the lead 2026-11-05): nobody else reads about them."""
+    [item] = [i for n, i in shipped_items() if n == 3 and "колонка «Аккаунт»" in i["title"]]
+    assert item["roles"] == {"owner", "partner"}
+    assert "Подпись в таблице заказов" in str(item["body"])
+
+
 @pytest.mark.parametrize("role", ["owner", "partner", "point", "client", "chats", "viewer"])
 def test_the_shipped_page_opens_for_a_role_with_its_own_items_only(tmp_path, role):
     app = make_app(tmp_path)
