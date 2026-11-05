@@ -1696,7 +1696,7 @@ def register(app) -> None:
             flash("Продажа записана в «Продажи».", "ok")
         except orders.OrderError as err:
             flash(str(err))
-        return back(card_id)
+        return back(card_id, "money")
 
     @app.route("/orders/<int:card_id>/sale/reverse", methods=["POST"])
     @login_required
@@ -1705,7 +1705,7 @@ def register(app) -> None:
         card_or_404(conn, card_id)
         count = orders.reverse_sales(conn, card_id, local_iso(), author())
         flash("Продажа сторнирована." if count else "Записанной продажи нет.")
-        return back(card_id)
+        return back(card_id, "money")
 
     @app.route("/orders/<int:card_id>/delete", methods=["POST"])
     @login_required

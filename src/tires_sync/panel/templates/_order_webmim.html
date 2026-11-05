@@ -4,7 +4,7 @@
    в МИМ» of «Заказ поставщику» (_order_supplier.html, its window «Подтверждение»). #}
 {% set w = webmim %}{% set point_view = current_user().role == "point" %}
 {% if w and not point_view %}{# the manager of a point: no WebMIM at all (the owner 2026-10-30: the point orders nothing from the supplier) #}
-{% call entity_ui.section("WebMIM", id="webmim", sub=w.server ~ (" · снимок " ~ (w.seen_at|short_dt_utc) if w.seen_at else " · снимка ещё нет"), fold=true, open=part == "webmim") %}{# folded (the owner 2026-11-05) #}<div class="card-body stack" data-webmim>
+{% call entity_ui.section("WebMIM", id="webmim", sub=w.server ~ (" · снимок " ~ (w.seen_at|short_dt_utc) if w.seen_at else " · снимка ещё нет"), fold=true, open=part == "webmim" or (webmim_create and webmim_create.state and webmim_create.state.result and webmim_create.state.state not in ("done", "running"))) %}{# folded (the owner 2026-11-05); open with the red result of «Досоздать» #}<div class="card-body stack" data-webmim>
 {% if w.test and w.order %}<p class="small text-err">Тестовый сервер WebMIM: номер совпал с тестовым заказом, это может быть не наш заказ.</p>{% endif %}
 {% if w.order %}{% set o = w.order %}
 <div class="row" style="gap:var(--s-3);flex-wrap:wrap"><b>Заказ WebMIM №{{ o.number or o.id }}</b><span class="badge badge--neutral" data-webmim-status>{{ o.status_text or ("статус " ~ o.status_code if o.status_code else "статус не указан") }}</span>

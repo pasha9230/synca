@@ -119,3 +119,30 @@ def test_a_point_sees_the_same_folded_content(w):
     assert is_folded(text, "intercity") and "Город: <b>Псков</b>" in block(text, "intercity")
     assert 'id="webmim"' not in text                                      # a point never had WebMIM: still not
     assert 'name="city"' not in text                                      # nor the office's form
+
+
+@pytest.mark.parametrize("new_view", [False, True], ids=["old", "new"])
+def test_a_stored_red_result_keeps_its_part_open(w, new_view):
+    """The red line of a part is kept, not only flashed: «Досоздать в WebMIM» refused, the sale not fully written. Its part opens by itself."""
+    conn, card = w["conn"], w["card"]
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
+                 "VALUES (?, 'prod', 'refused', ?, ?, 'owner', '', 'WebMIM отказал: нет позиций', ?)", (card, NOW, NOW, NOW))
+    conn.execute("UPDATE order_card SET sale_ids = '[-1]' WHERE id = ?", (card,))
+    conn.commit()
+    client, _ = owner(w, new_view)
+    text = page(client, "/orders/%d" % card)
+    assert "WebMIM отказал: нет позиций" in block(text, "webmim") and is_open(text, "webmim")
+    assert "Запись продажи не завершена" in block(text, "money") and is_open(text, "money")
+    assert is_folded(text, "intercity")
+
+
+def test_the_sale_buttons_come_back_to_the_money_part(w):
+    client, tok = owner(w)
+    for url in ("/orders/%d/sale", "/orders/%d/sale/reverse"):
+        r = post(client, url % w["card"], tok)
+        assert r.status_code == 302 and r.headers["Location"].endswith("#money"), url
+
+
+def test_a_second_click_on_the_same_anchor_opens_the_part_again():
+    js = APP_JS.read_text(encoding="utf-8")
+    assert 'a[href^="#"]' in js

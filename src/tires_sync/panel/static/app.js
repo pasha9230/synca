@@ -1020,6 +1020,10 @@
     }
     openPart();
     window.addEventListener("hashchange", openPart);
+    document.addEventListener("click", function (e) {                 // the same #part again: no hashchange, the part folded by hand opens
+      var a = e.target.closest && e.target.closest('a[href^="#"]');
+      if (a && a.getAttribute("href") === location.hash) openPart();
+    });
   })();
 
   // 13b) Новый заказ: «+» переносит позицию из полей в список (код, текст, шт., цена уходят скрытыми полями), ✕ убирает, итог пересчитывается.
