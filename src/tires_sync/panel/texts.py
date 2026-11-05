@@ -317,6 +317,7 @@ _MORE_TEXTS = {
     "oth_return_amount": lambda d: "Возврат поставщику: заказ №%s, сумма возврата %s ₽ — закупка шин" % (d.get("order", "?"), d.get("amount", "?")),
     "stage_off_board": lambda d: "Этап «%s» убран с доски: его заказы — в «Списке», в поиске и в фильтре «Этап»" % (d.get("name") or d.get("stage", "?")),
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
+    "user_sheet_label": lambda d: "Подпись в таблице заказов у «%s» изменена" % _q(d.get("login")),
     "main_display_name": lambda d: ("Имя основного входа: %s" % d["name"]) if d.get("name") else "Имя основного входа убрано: показывается логин",
     "client_terms_changed": lambda d: _client_terms_text(d),
     "ui_new": lambda d: "Новый вид, %s: %s → %s" % (_ui_group(d.get("group")), _ui_state(d.get("from")), _ui_state(d.get("to"))),

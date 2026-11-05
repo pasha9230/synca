@@ -22,7 +22,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 
-from . import connections, order_engine as engine, order_merge, order_report, orders, oth_sale, sales as sales_store, store
+from . import connections, order_engine as engine, order_merge, order_report, orders, oth_sale, sales as sales_store, store, users
 
 KIND = "gsheet"
 SHEET = "Заказы"
@@ -31,7 +31,8 @@ COLUMNS = ("Дата счета", "№ заказа MIM", "Перемещени�
            "Уведомление точке", "Уведомление клиенту", "Аккаунт", "Примечание")
 OWNERS = ("Примечание",)                    # never filled (the owner 2026-10-30): «Примечание» is the people's; «Дата» is gone (2026-11-01)
 OPTIONAL = ("Аккаунт",)                     # the owner 2026-11-02: sent apart («extra»), written only where the sheet has the column; a sheet
-                                            # without it (or a script before 2026-11-02, which never reads «extra») takes the rest all the same
+                                            # without it (or a script before 2026-11-02, which never reads «extra») takes the rest all the same.
+                                            # Not written once: when the value changes (changes) a written row follows it, over a correction in the cell
 SENT = tuple(c for c in COLUMNS if c not in OWNERS + OPTIONAL)  # what a new row is written with (a sheet without «Примечание» still takes it)
 ASKED = tuple(c for c in COLUMNS if c != "Примечание" and c not in OPTIONAL)   # what «Проверить» needs; never «tires_id» (the script's KEY_COLUMN:
                                                                # it adds the hidden column by itself, the panel never sends nor reads it)
@@ -305,16 +306,20 @@ def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
     """The rows of the order now, as they go to the table: mark → {column of SENT: value}. Numbers are numbers, days are «YYYY-MM-DD» (the
     script makes them dates); the phone is sheet_phone. «Список» of the panel shows card_rows (the comment, the panel's phone)."""
     card = orders.get_card(conn, card_id)
-    phone, account = sheet_phone(card["client_phone"]), account_label(conn, card_id)
+    phone, account = sheet_phone(card["client_phone"]), account_label(conn, card)
     return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone, "Аккаунт": account})
             for mark, row in card_rows(conn, card, placed_at, _sent(conn, card_id)).items()}
 
 
-def account_label(conn, card_id: int) -> str:
-    """«Аккаунт» (the owner 2026-11-02): «Подпись в таблице заказов» of the order's Avito account — the account of its first chat, else of
-    its first call. No account, or an account without the label: empty. Only the table has it: the list of «Заказы» and a point never do."""
-    row = (conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? ORDER BY id LIMIT 1", (int(card_id),)).fetchone()
-           or conn.execute("SELECT account_id FROM avito_call WHERE order_id = ? ORDER BY call_at, id LIMIT 1", (int(card_id),)).fetchone())
+def account_label(conn, card: dict) -> str:
+    """«Аккаунт»: the label of the order's responsible, as the card shows it (the owner 2026-11-05: they differ, the responsible wins); else
+    (the owner 2026-11-02) «Подпись в таблице заказов» of the order's Avito account — the account of its first chat, else of its first call.
+    No account, or an account without the label: empty. Only the table has it: the list of «Заказы» and a point never do."""
+    signed = users.get_sheet_label(conn, card["responsible"])
+    if signed:
+        return signed
+    row = (conn.execute("SELECT account_id FROM avito_chat WHERE order_id = ? ORDER BY id LIMIT 1", (card["id"],)).fetchone()
+           or conn.execute("SELECT account_id FROM avito_call WHERE order_id = ? ORDER BY call_at, id LIMIT 1", (card["id"],)).fetchone())
     return connections.get_sheet_label(conn, row[0]) if row and row[0] is not None else ""
 
 
@@ -472,7 +477,7 @@ def check(conn, box, http: Transport) -> str:
     said = "Таблица отвечает: лист «%s», все колонки на месте." % SHEET
     if missing:                                                            # the owner 2026-11-02: a warning, the rows go all the same
         said = ("Таблица отвечает: лист «%s», нужные колонки на месте. Нет колонки %s: добавьте её в первую строку листа, иначе она не "
-                "заполняется (остальное пишется и без неё; строки, отправленные без неё, заполнятся, только когда подпись аккаунта изменится)."
+                "заполняется (остальное пишется и без неё; строки, отправленные без неё, заполнятся, только когда значение колонки у заказа изменится)."
                 % (SHEET, ", ".join("«%s»" % c for c in missing)))
     number = lambda name: answer.get(name) if isinstance(answer.get(name), int) and not isinstance(answer.get(name), bool) else None
     marked, moved, blocked = number("marked"), number("moved"), number("blocked")

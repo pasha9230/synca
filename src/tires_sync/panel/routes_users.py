@@ -4,7 +4,7 @@ from __future__ import annotations
 from flask import flash, redirect, render_template, request, session
 
 from .. import client_terms, order_points as points, store, users
-from .common import author, current_user, drop_session, end_as_point, get_conn, login_blocked, login_failed, now_iso
+from .common import author, can_post, current_user, drop_session, end_as_point, get_conn, login_blocked, login_failed, now_iso
 
 
 def _user_field(message: str) -> str:
@@ -31,7 +31,7 @@ def register(app) -> None:
                                rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None) if not typed else None,
                                invite_rows=rows_of(brand_choices(app, conn), client_terms.active_ours(conn), {}, typed, "c_"),
                                invite_typed=bool(typed), invite_form=typed, describe=client_terms.describe, shop_resp=_shop_resp(conn),
-                               main_name=users.main_name(conn), main_login=app.config["AUTHOR"],
+                               main_name=users.main_name(conn), main_login=app.config["AUTHOR"], sheet_labels=_sheet_labels(conn), unsigned=users.UNSIGNED,
                                resets=users.list_login_resets(conn, now_iso()), reset_link=session.pop("reset_link", None) if not typed else None), status
 
     @app.route("/users")
@@ -43,6 +43,23 @@ def register(app) -> None:
         from .. import shop_cart
         staff = [u for u in users.list_users(conn) if u["active"] and u["role"] not in ("client", "point")]
         return {"chosen": shop_cart.responsible_setting(conn), "now": shop_cart.responsible(conn), "staff": staff}
+
+    def _sheet_labels(conn):
+        """«Подпись в таблице заказов» of the people: the owner's page only (common: the partner reads «Пользователи», never these names)."""
+        if not can_post("users_sheet_label"):
+            return {}
+        return {login: users.get_sheet_label(conn, login) for login in [app.config["AUTHOR"]] + [u["login"] for u in users.list_users(conn)]}
+
+    @app.route("/users/<login>/sheet-label", methods=["POST"])
+    def users_sheet_label(login):
+        """«Подпись в таблице заказов» of a person or of the main login; the owner only."""
+        try:
+            users.set_sheet_label(get_conn(), login, request.form.get("sheet_label", ""), now_iso(), author(), app.config["AUTHOR"])
+            flash("Подпись в таблице заказов сохранена: колонка «Аккаунт» обновится у заказов этого человека за последние 45 дней в течение часа, "
+                  "у более старых — при следующем изменении заказа.", "ok")
+        except users.UserError as err:
+            flash(str(err), "error")
+        return redirect("/users")
 
     @app.route("/users/main-name", methods=["POST"])
     def users_main_name():
