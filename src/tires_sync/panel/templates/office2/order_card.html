@@ -23,7 +23,7 @@
 <header class="o2c-head">
 <a class="o2c-back" href="/orders">{{ icon("arrow-left", "i-sm") }}Заказы</a>
 <div class="o2c-title"><span class="o2c-wm">{% if c.webmim_number %}WebMIM № {{ c.webmim_number }}{% else %}<span class="o2c-wm-none">№ WebMIM ещё нет</span>{% endif %}</span><span class="o2c-inner">внутр. № {{ c.id }}</span>{% if c.client_name %}<span class="o2c-client">· {{ c.client_name }}</span>{% endif %}{% if c.client_phone %}<a class="o2c-phone" href="tel:{{ c.client_phone }}">{{ c.client_phone|phone }}</a>{% endif %}</div>
-<span class="o2c-stage" style="--c:{{ c.stage.color }}">{{ c.stage.name }} · {{ days }} дн.</span>
+<span class="o2c-stage" style="--c:{{ c.stage.color }}">{{ c.stage.name }}{% if stage_day %} {{ stage_day|day }}{% endif %} · {{ days }} дн.</span>
 <button type="button" class="btn btn--link-gray btn--sm ml-auto" data-cc-reset title="Ширина и свёрнутые колонки — как по умолчанию">Колонки по умолчанию</button>
 </header>
 {% include "_order_unsent.html" %}

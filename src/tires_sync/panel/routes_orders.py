@@ -657,9 +657,9 @@ def register(app) -> None:
             lines = [r for r in found if r["order"] in shown]
         else:
             found = lines = orders_list.rows(conn, [i for i in ids if i in shown], money, point=own_point() is not None)
-        stage = {r["card"]["id"]: r["stage"] for r in rows}
+        row_of = {r["card"]["id"]: r for r in rows}
         for line in lines:
-            line["stage"] = stage[line["order"]]
+            line["stage"], line["stage_day"] = row_of[line["order"]]["stage"], row_of[line["order"]]["card"]["stage_day"]
         columns = orders_list.choice(conn, session["user"], money, point=own_point() is not None)
         keep = {k: v for k, v in (("v", "list"), ("p", request.args.get("p", "")), ("t", request.args.get("t", "")),
                                   ("q", request.args.get("q", "")), ("s", only or ""), ("from", _day(request.args.get("from")) if office_new() else ""),
@@ -1154,7 +1154,7 @@ def register(app) -> None:
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id), merge_unordered=order_merge_store.unordered(conn, card),
             oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
-            oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stages=orders.list_stages(conn), points=points.list_points(conn),
+            oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stage_day=orders.stage_day(card["entered_at"]), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()),

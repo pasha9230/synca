@@ -727,6 +727,8 @@ button.owin-stage:focus-visible{outline:0;box-shadow:var(--ring)}
 .entity-actions{display:flex;align-items:center;gap:var(--s-2);flex-wrap:wrap;margin-left:auto}
 .owin-head .entity-eyebrow{color:var(--gray-400)}
 .owin-head .entity-title{font-size:var(--fs-xl);color:var(--gray-0)}
+.entity-under{margin-top:2px;font-size:var(--fs-sm);color:var(--gray-500);font-variant-numeric:tabular-nums}
+.owin-head .entity-under{color:var(--gray-300)}
 .entity-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--s-3) var(--s-5);margin:0}
 .entity-field{min-width:0}
 .entity-field.is-wide{grid-column:1/-1}

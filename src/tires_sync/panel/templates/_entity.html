@@ -10,9 +10,9 @@
 {% macro crumbs(items) %}<div class="crumbs">{% for c in items %}{% if not loop.first %}{{ icon("chev", "i-sm") }}{% endif %}{% if c.href and not loop.last %}<a href="{{ c.href }}">{{ c.label }}</a>{% else %}<span>{{ c.label }}</span>{% endif %}{% endfor %}</div>{% endmacro %}
 
 {# the head: «Заказ №5» and the status above the title, the actions (the caller) on the right #}
-{% macro head(e, id=none, title_class="", extra="", level=1) %}<div class="entity-head {{ extra }}">
-<div class="entity-id">{% if e.kind or e.status %}<div class="entity-eyebrow"><span class="entity-kind"{% if id %} id="{{ id }}-kind"{% endif %}>{{ e.kind }}{% if e.ref %} {{ e.ref }}{% endif %}</span>{% if e.status %}<span class="badge badge--{{ e.status.tone or 'neutral' }}">{{ e.status.text }}</span>{% endif %}</div>{% endif %}
-<h{{ level }} class="entity-title {{ title_class }}"{% if id %} id="{{ id }}"{% endif %}{% if e.hint %} title="{{ e.hint }}"{% endif %}>{{ e.title }}</h{{ level }}></div>
+{% macro head(e, id=none, title_class="", extra="", level=1, under="") %}<div class="entity-head {{ extra }}">
+<div class="entity-id">{% if e.kind or e.status %}<div class="entity-eyebrow"><span class="entity-kind"{% if id %} id="{{ id }}-kind"{% endif %}>{{ e.kind }}{% if e.ref %} {{ e.ref }}{% endif %}</span>{% if e.status %}<span class="badge badge--{{ e.status.tone or 'neutral' }}">{{ e.status.text }}{% if e.status.since %} {{ e.status.since|day }}{% endif %}</span>{% endif %}</div>{% endif %}
+<h{{ level }} class="entity-title {{ title_class }}"{% if id %} id="{{ id }}"{% endif %}{% if e.hint %} title="{{ e.hint }}"{% endif %}>{{ e.title }}</h{{ level }}>{% if under %}<div class="entity-under">{{ under }}</div>{% endif %}</div>
 {% if caller is defined %}<div class="entity-actions">{{ caller() }}</div>{% endif %}</div>{% endmacro %}
 
 {# «поле — значение» in a grid; one column on a phone #}

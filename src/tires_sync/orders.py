@@ -654,7 +654,7 @@ def card_view(card: dict) -> dict:
     tone = {"won": "ok", "open": "neutral", "closed": "warn"}.get(stage["kind"], "err")
     name = card["client_name"] or "Клиент без имени"
     return {"type": "order", "kind": "Заказ", "ref": "№%d" % card["id"], "title": name, "hint": "Заказ №%d · %s" % (card["id"], name),
-            "status": {"text": stage["name"], "tone": tone},
+            "status": {"text": stage["name"], "tone": tone, "since": stage_day(card["entered_at"])},
             "crumbs": [{"label": "Заказы", "href": "/orders"}, {"label": "№%d" % card["id"]}]}
 
 
@@ -1104,6 +1104,14 @@ def _seconds_on_stage(entered_at: str, now: datetime) -> float:
         return 0.0
 
 
+def stage_day(entered_at) -> str:
+    """The day the card came to its stage, "2026-11-04" (the stamps of the orders are Moscow time, as for _seconds_on_stage); "" with no such moment."""
+    try:
+        return datetime.fromisoformat(entered_at).date().isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
 BOARD_PHONE = re.compile(r"\+?[\d\s()\-.]+")          # a query of ten digits and more written so is a phone (search.py too)
 
 
@@ -1250,7 +1258,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
-                                      "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "overdue": overdue,
+                                      "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(entered), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
                                       "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid)})
         columns[sid]["count"] += 1
