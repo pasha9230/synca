@@ -25,6 +25,9 @@ TAG_EXACT, TAG_ANALOG = "Появилось", "Есть аналоги"
 TASK_EXACT, TASK_ANALOG = 0, -1                      # the «rule» numbers of the two system tasks (a task is one per card per stay in the stage)
 TASK_REPLY = -5                                      # «Клиент ответил…» (order_engine: −2 placed, −3 arrived; order_intercity: −4 shipped)
 TITLE_REPLY = "Клиент ответил на сообщение о наличии"
+TASK_SILENT = -6                                     # «Клиент молчит…»: no answer to «появилось в наличии» (the owner 2026-11-05)
+TITLE_SILENT = "Клиент молчит 3 дня: снять с него шины?"
+SILENT_DAYS = 3                                      # calendar days from the send
 MAX_SENDS = 20                                       # messages per cycle: the rest go at the next one, an hour later
 NAME_WORDS = re.compile(r"\d{3}[/ ]?\d{2}([/ ]?Z?R?\d{2}C?)?|Z?R\d{2}C?|\d{2,3}(/\d{2,3})?[H-Z]|XL|RF|RFT|RUNFLAT|-|"
                         r"ШИН[АЫ]?|РЕЗИНА|НОВ\w*|ЗИМН\w*|ЗИМА|ЛЕТН\w*|ЛЕТО|ВСЕСЕЗОН\w*|ШИП\w*|НЕШИП\w*|БЕЗ|ЛИПУЧКА")
@@ -513,6 +516,14 @@ def delivered(conn, token: str, text: str, now: str, how: str) -> None:
     conn.commit()
 
 
+def _answered(conn, log) -> bool:
+    """A message of the client in the chat after ours (`log`: chat_row, message_id, at of the send)."""
+    ours = conn.execute("SELECT ts FROM avito_message WHERE chat_row = ? AND message_id = ?", (log[0], log[1])).fetchone() if log[1] else None
+    since = max(ours[0] if ours else 0, int(datetime.fromisoformat(log[2]).replace(tzinfo=timezone(timedelta(hours=3))).timestamp()))
+    return conn.execute("SELECT 1 FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND ts > ? LIMIT 1",
+                        (log[0], since)).fetchone() is not None
+
+
 def replies(conn, now: str, notify=None) -> int:
     """Any message of the client in the chat after «появилось в наличии», while the order is still in that stay in the stage: one task per message
     for the responsible (the owner 2026-11-05; the words are not read as consent), run by the minute's sync. `notify(card_id, title, body)` once
@@ -524,10 +535,7 @@ def replies(conn, now: str, notify=None) -> int:
             log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", (_token(card_id, stay),)).fetchone()
             if log is None or conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_REPLY, stay)).fetchone():
                 continue
-            ours = conn.execute("SELECT ts FROM avito_message WHERE chat_row = ? AND message_id = ?", (log[0], log[1])).fetchone() if log[1] else None
-            since = max(ours[0] if ours else 0, int(datetime.fromisoformat(log[2]).replace(tzinfo=timezone(timedelta(hours=3))).timestamp()))
-            if not conn.execute("SELECT 1 FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND ts > ? LIMIT 1",
-                                (log[0], since)).fetchone():
+            if not _answered(conn, log):
                 continue
             card = orders.get_card(conn, card_id)
             from . import order_arrived
@@ -544,6 +552,47 @@ def replies(conn, now: str, notify=None) -> int:
         except Exception:                                          # one card, or an alert that fails, never stops the others nor the sync
             conn.rollback()
             logging.getLogger("tires_sync.order_wait").warning("the reply of the client of card %s could not be looked at", card_id, exc_info=True)
+    return made
+
+
+def silent(conn, now: str, notify=None) -> int:
+    """«Клиент молчит 3 дня» (the owner 2026-11-05): «появилось в наличии» went, the tires are held for the order, and the client has not
+    written in the chat since, SILENT_DAYS calendar days after the send: one task for the responsible per stay in the stage, made and told only
+    in the working hours. The tires are not let go and the client is sent nothing. Run by the minute's sync. Returns how many were made."""
+    from . import order_arrived, order_manager
+    hours = order_manager.duty_settings(conn)["hours"]
+    if not hours[0] <= int(now[11:13]) < hours[1]:
+        return 0
+    made = 0
+    rows = conn.execute("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait'").fetchall()
+    for card_id, stay in rows:
+        try:
+            token = _token(card_id, stay)
+            log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", (token,)).fetchone()
+            if log is None or _state(conn, card_id) != "told" or not store.get_state(conn, HELD % token):
+                continue
+            if (datetime.fromisoformat(now[:10]) - datetime.fromisoformat(log[2][:10])).days < SILENT_DAYS:
+                continue
+            if conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id IN (?, ?) AND entered_at = ?", (card_id, TASK_SILENT, TASK_REPLY, stay)).fetchone():
+                continue
+            if _answered(conn, log):
+                continue
+            card = orders.get_card(conn, card_id)
+            body = ("Заказ №%d, клиент %s. Ответственный: %s. Сообщение о наличии ушло %s.%s.%s, клиент не ответил. Шины придержаны за ним и сами не "
+                    "снимаются: пока заказ на этапе «%s», они его. Чат заказа: %s") % (
+                card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], log[2][8:10], log[2][5:7], log[2][:4],
+                card["stage"]["name"], order_arrived._link(conn, card_id))
+            if conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card_id, TASK_SILENT, stay, "remind", "", card["stage_id"], "pending", TITLE_SILENT, body, "", now)).rowcount:
+                orders.add_event(conn, card_id, now, AUTHOR, "rule", "Задача создана: %s" % TITLE_SILENT)
+                conn.commit()
+                made += 1
+                if notify is not None:
+                    notify(card_id, TITLE_SILENT, body)
+            conn.commit()
+        except Exception:                                          # one card, or an alert that fails, never stops the others nor the sync
+            conn.rollback()
+            logging.getLogger("tires_sync.order_wait").warning("the silence of the client of card %s could not be looked at", card_id, exc_info=True)
     return made
 
 

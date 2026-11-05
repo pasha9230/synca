@@ -1291,3 +1291,125 @@ def test_the_words_of_the_lines_have_no_double_dot():
     card = {"wants": [dict(WANT, code="", any_brand=False, any_size=False), dict(WANT, code="", width=215, qty=2, any_brand=False, any_size=False)]}
     assert order_wait.client_text(card) == ("Здравствуйте! Шины, которые вы ждали, появились в наличии: Ikon Tyres Test Model 205/55 R16, зима, без шипов, 4 шт; "
                                             "Ikon Tyres Test Model 215/55 R16, зима, без шипов, 2 шт. Подскажите, оформляем заказ?")
+
+
+# --- the owner 2026-11-05: the client silent three days ------------------------------------------------------------------------------------------
+
+def silent_tasks(conn, card):
+    return [t for t in engine.list_tasks(conn, card) if t["title"] == order_wait.TITLE_SILENT]
+
+
+def told(env, at=NOW):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire()], at)
+    assert len(sender.sent) == 1
+    return card, sender
+
+
+def test_the_client_silent_three_days_gives_one_task_and_nothing_else(env):
+    conn, _row = env
+    card, sender = told(env)
+    alerts = []
+    assert order_wait.silent(conn, "2026-11-06T12:00:00", lambda *a: alerts.append(a)) == 0      # two days
+    assert order_wait.silent(conn, "2026-11-07T12:00:00", lambda *a: alerts.append(a)) == 1      # the third
+    [task] = silent_tasks(conn, card)
+    assert task["title"] == "Клиент молчит 3 дня: снять с него шины?" and task["status"] == "pending" and len(alerts) == 1
+    assert "Заказ №%d" % card in task["body"] and "сами не снимаются" in task["body"]
+    assert order_wait.silent(conn, "2026-11-08T12:00:00", lambda *a: alerts.append(a)) == 0      # once per stay
+    run(conn, sender, [tire()], "2026-11-08T12:00:00")
+    assert len(sender.sent) == 1 and orders.get_card(conn, card)["stage"]["code"] == "wait"     # nothing to the client, the tires stay held
+    tok = order_wait._token(card, orders.get_card(conn, card)["entered_at"])
+    assert store.get_state(conn, order_wait.HELD % tok) == '[["100", 4]]'
+
+
+def test_the_days_are_calendar_days_from_the_send(env):
+    conn, _row = env
+    card, _sender = told(env, "2026-11-04T19:50:00")
+    assert order_wait.silent(conn, "2026-11-06T19:59:00") == 0
+    assert order_wait.silent(conn, "2026-11-07T10:05:00") == 1                                  # less than 72 hours, the third calendar day
+
+
+def test_the_task_waits_for_the_working_hours(env):
+    conn, _row = env
+    card, _sender = told(env)
+    alerts = []
+    assert order_wait.silent(conn, "2026-11-07T03:00:00", lambda *a: alerts.append(a)) == 0
+    assert order_wait.silent(conn, "2026-11-07T20:30:00", lambda *a: alerts.append(a)) == 0
+    assert silent_tasks(conn, card) == [] and alerts == []
+    assert order_wait.silent(conn, "2026-11-08T10:00:00", lambda *a: alerts.append(a)) == 1
+
+
+def test_a_client_who_answered_is_not_silent(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    said(conn, chat_row, "r1", "2026-11-05T09:00:00")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+def test_a_message_of_the_client_before_ours_does_not_count_as_an_answer(env):
+    conn, chat_row = env
+    said(conn, chat_row, "r0", "2026-11-04T11:00:00")
+    conn.execute("UPDATE avito_message SET is_read = 1")
+    conn.commit()
+    card, _sender = told(env)
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+
+
+def test_an_order_that_left_the_stage_or_was_never_told_gets_no_task(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    quiet = waiting(env, with_chat=False)                                                       # no chat: the manager's task, nothing went
+    run(conn, Sender(), [tire(stock=8)])
+    orders.move_card(conn, card, orders.list_stages(conn)[0]["id"], "2026-11-05T12:00:00", "worker2")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0
+    assert silent_tasks(conn, card) == [] and silent_tasks(conn, quiet) == []
+
+
+def test_without_held_tires_there_is_no_task(env):
+    conn, _row = env
+    card, _sender = told(env)
+    conn.execute("DELETE FROM app_state WHERE key LIKE 'wait_held:%'")
+    conn.commit()
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0
+
+
+def test_a_closed_task_is_not_made_again_and_a_new_stay_counts_anew(env):
+    conn, _row = env
+    card, sender = told(env)
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+    conn.execute("UPDATE order_task SET status = 'done' WHERE rule_id = ?", (order_wait.TASK_SILENT,))
+    conn.commit()
+    assert order_wait.silent(conn, "2026-11-07T13:00:00") == 0
+    orders.move_card(conn, card, orders.list_stages(conn)[0]["id"], "2026-11-07T14:00:00", "worker2")
+    orders.move_card(conn, card, stage(conn, "wait"), "2026-11-07T14:05:00", "worker2")
+    run(conn, sender, [tire()], "2026-11-07T14:10:00")
+    assert len(sender.sent) == 2
+    assert order_wait.silent(conn, "2026-11-09T14:00:00") == 0
+    assert order_wait.silent(conn, "2026-11-10T14:00:00") == 1 and len(silent_tasks(conn, card)) == 2
+
+
+def test_a_failing_alert_does_not_repeat_the_silent_task(env):
+    conn, _row = env
+    card, _sender = told(env)
+
+    def boom(*a):
+        raise RuntimeError("boom")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00", boom) == 1
+    assert order_wait.silent(conn, "2026-11-07T12:01:00", boom) == 0 and len(silent_tasks(conn, card)) == 1
+
+
+def test_the_minute_sync_looks_at_the_silent_clients(env, monkeypatch):
+    from tires_sync import cli
+    conn, _row = env
+    calls = []
+    monkeypatch.setattr(order_wait, "replies", lambda *a, **k: 0)
+    monkeypatch.setattr(order_wait, "silent", lambda c, now, notify=None: calls.append(now) or 0)
+    cli._wait_replies(conn, None, "2026-11-07T12:00:00")
+    assert calls == ["2026-11-07T12:00:00"]
+
+
+def test_the_stage_hint_names_the_task_of_the_silent_client():
+    from tires_sync import onboarding_texts
+    words = " ".join(onboarding_texts.STAGES["wait"]["auto"])
+    assert order_wait.TITLE_SILENT in words and "Шины сами не снимаются" in words
