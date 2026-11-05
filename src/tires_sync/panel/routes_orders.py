@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 AUTOSAVED = ("client_name", "client_phone", "point_id", "deal_kind", "responsible")     # saved by themselves on change (order_autosave)
-ORDER_PARTS = ("items", "wants", "money")        # the parts of the order page a form comes back to (old links name them as ?tab=)
+ORDER_PARTS = ("items", "wants", "money", "intercity", "webmim")        # the parts of the order page a form comes back to (old links name them as ?tab=)
 
 
 def local_now():

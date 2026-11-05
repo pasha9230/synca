@@ -2,8 +2,8 @@
    the track number and the labels (PDF); whoever else sees the order (the point, the observer) sees them and downloads the labels. #}
 {% set ic = c.intercity %}{% set ic_labels = intercity_labels(c.id) if ic.on else [] %}{% set ic_edit = can_post("order_intercity_save") %}
 {% if ic_edit or ic.on %}
-<section class="card" id="intercity" data-intercity><div class="card-body stack" style="gap:var(--s-3)">
-<h3 style="margin:0">Доставка в другой город{% if ic.on %} <span class="badge badge--warn" data-intercity-tag>В другой город</span>{% endif %}</h3>
+{# folded (the owner 2026-11-05): opens by a click, by ?tab=intercity or #intercity (app.js 13a) #}
+<details class="card ocard-part" id="intercity" data-intercity{% if part == "intercity" %} open{% endif %}><summary class="card-head"><h3 style="white-space:normal">Доставка в другой город{% if ic.on %} <span class="badge badge--warn" data-intercity-tag>В другой город</span>{% endif %}</h3>{{ icon("chev", "ml-auto") }}</summary><div class="card-body stack" style="gap:var(--s-3)">
 {% if ic_edit %}
 <form method="post" action="/orders/{{ c.id }}/intercity" class="stack" style="gap:var(--s-2)" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <label class="row owin-check"><input type="checkbox" name="enabled" value="1"{% if ic.on %} checked{% endif %}><span>Доставка в другой город (точка отдаёт шины курьеру ТК)</span></label>
@@ -26,5 +26,5 @@
 <input type="file" name="file" accept="application/pdf,.pdf" required aria-label="Файл этикеток (PDF)"><button class="btn btn--secondary btn--sm">Загрузить этикетки</button><span class="small muted">PDF до 1,9 МБ, не больше 10 файлов</span></form>{% endif %}
 </div>
 {% endif %}
-</div></section>
+</div></details>
 {% endif %}

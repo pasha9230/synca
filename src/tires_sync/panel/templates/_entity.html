@@ -18,8 +18,9 @@
 {# «поле — значение» in a grid; one column on a phone #}
 {% macro fields(rows) %}<dl class="entity-fields">{% for f in rows %}<div class="entity-field{{ ' is-wide' if f.wide }}"><dt>{{ f.label }}</dt><dd{% if f.mono %} class="mono"{% endif %}>{% if f.href and f.value not in (none, "") %}<a href="{{ f.href }}">{{ value(f.value, f.fmt) }}</a>{% else %}{{ value(f.value, f.fmt) }}{% endif %}</dd></div>{% endfor %}</dl>{% endmacro %}
 
-{# a block of the card: a .card with a head; the content is the caller #}
-{% macro section(title, id=none, sub=none, extra="") %}<section class="card entity-sec {{ extra }}"{% if id %} id="{{ id }}"{% endif %}><div class="card-head"><h3>{{ title }}</h3>{% if sub %}<span class="sub">{{ sub }}</span>{% endif %}</div>{{ caller() }}</section>{% endmacro %}
+{# a block of the card: a .card with a head; the content is the caller. fold: a <details> that opens by a click on the head (open: shown
+   open, as a link to the part); folded fields stay in the page and in their forms #}
+{% macro section(title, id=none, sub=none, extra="", fold=false, open=false) %}{% if fold %}<details class="card entity-sec ocard-part {{ extra }}"{% if id %} id="{{ id }}"{% endif %}{% if open %} open{% endif %}><summary class="card-head"><h3>{{ title }}</h3>{% if sub %}<span class="sub">{{ sub }}</span>{% endif %}{{ icon("chev", "ml-auto") }}</summary>{{ caller() }}</details>{% else %}<section class="card entity-sec {{ extra }}"{% if id %} id="{{ id }}"{% endif %}><div class="card-head"><h3>{{ title }}</h3>{% if sub %}<span class="sub">{{ sub }}</span>{% endif %}</div>{{ caller() }}</section>{% endif %}{% endmacro %}
 
 {# a list (orders, chats, events): columns [{"key", "label", "num", "fmt"}], a cell is a value or {"text", "fmt", "href", "mono"};
    the caller, if any, draws one more cell per row (its actions) #}

@@ -88,7 +88,7 @@
 </div></details>
 {% include "_order_supplier.html" %}
 {% include "_order_webmim.html" %}
-{% call entity_ui.section("Продажа и расчёты", id="money") %}<div class="card-body stack">
+{% call entity_ui.section("Продажа и расчёты", id="money", fold=true, open=part == "money") %}{# folded (the owner 2026-11-05) #}<div class="card-body stack">
 <p class="ocard-sum">Сумма заказа <b>{{ totals.sale|money }}</b>{% if c['items'] %} · {{ c['items']|length }} поз.{% endif %}</p>
 {% if webmim_cost and has_right("money") %}<p class="small" data-webmim-analytics>В аналитике закупка по WebMIM: <b>{{ webmim_cost.cost|money }}</b> ({{ webmim_cost.count }} из {{ webmim_cost.positions }} поз.; по цене из заказа WebMIM с учётом скидки поставщика). В заказ и продажи не записывается.</p>{% endif %}
 {% if c.stage.kind == "won" and not c.sale_ids and can_post("order_sale") %}<div class="row" style="gap:var(--s-3)"><span class="small muted">Продажа не записана</span><form method="post" action="/orders/{{ c.id }}/sale" data-once>{{ csrf }}<button class="btn btn--primary btn--sm">Записать продажу</button></form></div>{% endif %}

@@ -1012,9 +1012,14 @@
     });
   });
   // 13a) Заказ: ссылка на часть страницы (#wants после правки строки «Что нужно клиенту») раскрывает её, если она свёрнута
+  //      и при щелчке по ссылке на этой же странице (#intercity у метки «В другой город»)
   (function () {
-    var part = location.hash && document.getElementById(location.hash.slice(1));
-    if (part && part.tagName === "DETAILS") part.open = true;
+    function openPart() {
+      var part = location.hash && document.getElementById(location.hash.slice(1));
+      if (part && part.tagName === "DETAILS") part.open = true;
+    }
+    openPart();
+    window.addEventListener("hashchange", openPart);
   })();
 
   // 13b) Новый заказ: «+» переносит позицию из полей в список (код, текст, шт., цена уходят скрытыми полями), ✕ убирает, итог пересчитывается.
