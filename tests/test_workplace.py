@@ -367,25 +367,19 @@ def test_the_window_asks_too_and_the_reason_typed_is_kept(tmp_path):
     assert orders.get_card(conn, here)["cancel_reason"] == "дорого"                          # the window's fields are saved
 
 
-def test_the_point_after_no_show_is_asked_and_moves_the_order_to_oth(tmp_path):
+def test_the_point_refuses_and_the_order_goes_to_oth_without_a_question(tmp_path):
+    """The owner 2026-11-05: «ОТКАЗ» with its reason moves the order to «На ОТХ» at once (it was «Клиент не пришёл», then «на ОТХ?»)."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
     page = _text(mine.get("/my-point"))
-    assert 'action="/my-point/%d/to_oth"' % here not in page                                 # only after «Клиент не пришёл»
-    bad = re.search(r'action="/my-point/%d/no_show".*?name="token" value="([0-9a-f]+)"' % here, page, re.S).group(1)
-    r = post(mine, "/my-point/%d/to_oth" % here, "tok", token=bad[::-1])                      # no «не пришёл» yet: refused
-    assert orders.get_card(conn, here)["stage"]["code"] == "at_point"
-    r = post(mine, "/my-point/%d/no_show" % here, "tok", token=bad)
-    assert "oth=%d" % here in r.headers["Location"]
-    page = _text(mine.get(r.headers["Location"]))
-    assert 'data-oth-offer="%d"' % here in page and "Шины остаются на точке — перевести на «На ОТХ»?" in page
-    assert 'data-oth-offer' not in _text(mine.get("/my-point"))                              # «Нет»: the page without the question
-    token = re.search(r'action="/my-point/%d/to_oth".*?name="token" value="([0-9a-f]+)"' % here, page, re.S).group(1)
-    post(mine, "/my-point/%d/to_oth" % here, "tok", token=token)
+    assert 'action="/my-point/%d/to_oth"' % here not in page and "data-oth-offer" not in page
+    token = re.search(r'action="/my-point/%d/refuse".*?name="token" value="([0-9a-f]+)"' % here, page, re.S).group(1)
+    r = post(mine, "/my-point/%d/refuse" % here, "tok", token=token, reason="size")
+    assert "oth=" not in r.headers["Location"]
     got = orders.get_card(conn, here)
-    assert got["stage"]["code"] == "oth" and got["cancel_reason"] == "Клиент не пришёл"
-    assert point_log.history(conn, pid)[0]["kind"] == "to_oth"
+    assert got["stage"]["code"] == "oth" and got["cancel_reason"] == "Отказ клиента на точке: Ошиблись размером"
+    assert point_log.history(conn, pid)[0]["kind"] == "refuse"
 
 
 # ---- review fixes -------------------------------------------------------------------------------------------------------------------
@@ -467,7 +461,7 @@ def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tm
         assert "<summary>Подробнее</summary>" in more and "Кол-во 4 шт" in more
     first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)            # the transfer is under «Подробнее» (the prototype, 2026-10-30)
     assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[1])
-    assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split("<details")[1]
+    assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split('<details class="mp-more"')[1]   # «ОТКАЗ» is a <details> of its own (2026-11-05)
 
 
 def test_a_press_brings_back_to_the_tab_it_came_from(tmp_path):

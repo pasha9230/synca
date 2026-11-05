@@ -33,6 +33,14 @@ GIVE = ("отдал", "отдала", "отдали")               # the owner 
 BUILTIN = dict([(w, (ARRIVE_FROM, "at_point")) for w in ("приехал", "приехали", "приехала", "привезли", "пришли")] +   # the words of the
                [(w, (ISSUE_FROM, "done")) for w in ("выдал", "выдали", "выдала", "забрал", "забрали", "забрала", ISSUE_PHRASE) + GIVE])   # decisions
 #  2026-10-19 and of the owner 2026-10-25 (the audit of «Входящие»): they work without being set up in «Команды»
+# «ОТКАЗ» of the point (the owner 2026-11-05, instead of «Клиент не пришёл»): «отказ <номер> <причина>»; the order goes to «На ОТХ»
+REFUSE = "отказ"
+REFUSE_REASONS = ("Старый год производства", "Ошиблись размером")      # and «Другой»: the point types it
+REFUSE_REASON = "Отказ клиента на точке: %s"                          # the order's «Причина отмены»
+REFUSE_MAX = 200
+REFUSE_TEXT = re.compile(r"^\W*отказ(?![^\W\d_])[\s,.:;!-]*(?:по\s+)?(?:" + ORDER_MARK + r")?[\s№#:.-]*(\d{1,9})?(?!\d)[\s,.:;!-]*(.*)$", re.I | re.S)
+REFUSE_ASK = ("Заказ №%s: укажите причину отказа, ничего не изменено. Напишите, например: «отказ %s старый год производства», "
+              "«отказ %s ошиблись размером» или «отказ %s <своя причина>».")
 NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её]л|ла|ли)(?![а-я])", re.I)       # «не пришёл заказ» is about goods: not this
 # the owner 2026-10-25: «Возврат отдал», «отдал на возврат», «отправлен(о) на возврат», «отправили на возврат» — the tyres went back to the
 # supplier. No typo is guessed («лтправлен» stays a question). The client is never written to.
@@ -322,8 +330,13 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     point = _point_of(conn, sender)
     if point is None:
         return finish("отправитель не привязан ни к одной точке", "")
-    word = _word(text)
-    written = order_number(text)
+    refused = parse_refuse(text)                       # «отказ <номер> <причина>»: the reason is text, so not the parser of the other words
+    word = REFUSE if refused else _word(text)
+    written = refused[0] if refused else order_number(text)
+    doubt = refuse_doubt(text, refused[1], conn) if refused else ""
+    if doubt:                                          # the owner reads it in «Входящие»: the order is not moved on a guess
+        return dispute(point, "«%s»: %s" % (REFUSE, doubt), "Команда «%s» не выполнена (%s): сообщение передано владельцу. Если клиент "
+                       "отказался, напишите: «отказ 123456 причина»." % (REFUSE, doubt))
     if written is not None and written < 100 and not reply_order_no and not MARKED_NUMBER.search(_command_text(text)):
         written = None                                 # «приехали 2»: a quantity, not an order (the lead 2026-10-25); «№5», «заказ 17» are orders
     if reply_order_no and written and find_named(conn, reply_order_no) != find_orders(conn, written):
@@ -385,7 +398,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
             return dispute(point, "«%s», а заказ на этапе «%s»" % (SHIP, card["stage"]["name"]), CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
         return finish(*order_intercity.ship(conn, card, "менеджер %s" % point["name"], now, deliver, getattr(notify, "tell", None)))
-    if order_intercity.on(card) and (word in (NO_SHOW, HERE) or BUILTIN.get(word, ((), None))[1] == "done"):
+    if order_intercity.on(card) and (word in (NO_SHOW, HERE, REFUSE) or BUILTIN.get(word, ((), None))[1] == "done"):
         return dispute(point, "«%s», а заказ в другой город" % word,
                        "Заказ №%s — в другой город, клиент за ним не придёт: если отдали шины курьеру ТК, напишите «передал курьеру %s». "
                        "Сообщение передано владельцу." % (label(card), label(card)))
@@ -405,6 +418,12 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                            "Про заказ №%s бот не спрашивал, ничего не изменено; сообщение передано владельцу. Если шины приехали, напишите «приехал %s»."
                            % (label(card), label(card)))
         return finish(*order_reserve.here(conn, card, "менеджер %s" % point["name"], now, deliver))
+    if word == REFUSE:
+        if code != "at_point":
+            return dispute(point, "«%s», а заказ на этапе «%s»" % (REFUSE, card["stage"]["name"]),
+                           CANCELLED % label(card) if code == "cancel" else
+                           "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
+        return finish(*refuse(conn, card, refused[1], "менеджер %s" % point["name"], now, notify)[:2])
     if word == NO_SHOW:
         if code != "at_point":
             return dispute(point, "«%s», а заказ на этапе «%s»" % (NO_SHOW, card["stage"]["name"]),
@@ -710,6 +729,118 @@ def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
     orders.add_event(conn, card["id"], now, who, "point", RETURN_LINE)
     conn.commit()
     return "заказ перенесён на «%s»" % stage["name"], answer
+
+
+def _refuse_match(text):
+    """(the match of REFUSE_TEXT or None, the text it was matched on): without a greeting in front."""
+    text = str(text or "")[:MAX_COMMAND]
+    greeting = GREETING.match(text)
+    if greeting and text[greeting.end():].strip():
+        text = text[greeting.end():]
+    return REFUSE_TEXT.match(text), text
+
+
+def parse_refuse(text) -> Optional[Tuple[Optional[int], str]]:
+    """(the order's number or None, the reason as written) for «отказ <номер> <причина>», else None. A greeting in front is not read."""
+    found, text = _refuse_match(text)
+    if found is None:
+        return None
+    number, reason = found.group(1), found.group(2)
+    if number and len(number) == 4 and 1990 <= int(number) <= 2099 and YEAR_AFTER.match(reason) and not MARKED_NUMBER.search(text[:found.start(2)]):
+        return None, "%s %s" % (number, reason)       # «отказ 2019 года»: the year of the tyres, not the order 2019 (review 2026-11-05)
+    return (int(number) if number else None), reason
+
+
+YEAR_AFTER = re.compile(r"(?:гг?|год[а-я]*)(?![^\W\d_])", re.I)
+
+
+def refuse_reason(reason) -> str:
+    """The reason of «ОТКАЗ» as kept: one of REFUSE_REASONS by its own spelling, else the text typed («Другой»), its spaces squeezed; '' for none."""
+    text = " ".join(str(reason or "").split()).strip(" .,;:!?-—–")[:REFUSE_MAX]
+    if not re.search(r"[^\W\d_]", text):                    # «—», «?!», «123»: no reason (review 2026-11-05)
+        return ""
+    plain = text.casefold().replace("ё", "е")
+    return next((r for r in REFUSE_REASONS if r.casefold().replace("ё", "е") == plain), text)
+
+
+PHRASE_INSIDE = tuple(re.compile(p.pattern.replace(r"^\W*", r"(?<![^\W\d_])", 1), re.I) for p, _w in PHRASES)
+
+
+def refuse_doubt(text, reason, conn=None) -> str:
+    """Why «отказ …» of VK is not unambiguous (as is_command for the other words: never a guess), '' when it is: a question, a reason that
+    starts with a negation («отказ не нужен», «нет, приедет»), another order's number in the reason («отказ 5000100 5000200 …»)."""
+    if re.search(r"[?？]", str(text or "")):
+        return "вопрос"
+    found, raw = _refuse_match(text)
+    number = found.group(1) if found is not None and (parse_refuse(text) or (None,))[0] is not None else None   # a year kept as the reason: no number
+    if number and re.match(r"\s*(?:[/\\.,:\-–—]\s*)?\d", raw[found.end(1):]):
+        return "размер или год вместо номера заказа"          # «отказ 205/55 R16», «отказ 2019-2020 года» (review 2026-11-05)
+    if number and len(number) == 4 and 1990 <= int(number) <= 2099 and not MARKED_NUMBER.search(raw[:found.start(2)]):
+        return "похоже на год, а не на номер заказа"           # «отказ 2019 выпуск»; the order 2019 is written «отказ №2019 …»
+    tokens = WORD_PART.findall(rules.normalise_word(reason))
+    if tokens and tokens[0] in NEGATION:
+        return "отрицание"
+    if PART.search(str(reason or "")):
+        return "отказ от части заказа"                         # «забрали 2 из 4», «только 2», «частично»: the order is not all refused
+    plain = " ".join(tokens)
+    words = [rules.normalise_word(c["word"]) for c in rules.list_commands(conn)] if conn is not None else []
+    if (any(t in BUILTIN or t in GIVE or t.startswith("возврат") for t in tokens) or any(p.search(str(reason or "")) for p in PHRASE_INSIDE)
+            or any(w and re.search(r"(?<![^\W\d_])%s(?![^\W\d_])" % re.escape(w), plain) for w in words)):
+        return "в причине другая отметка"                      # «клиент забрал», «на точке», «возврат», a word of «Команды»
+    reason = str(reason or "")
+    if LONG_NUMBER.search(reason) or MARKED_NUMBER.search(reason) or any(len(re.sub(r"\D", "", n)) >= 5 for n in SPACED_NUMBER.findall(reason)):
+        return "ещё один номер заказа"
+    return ""
+
+
+def refuse(conn, card: dict, reason: str, who: str, now: str, notify: Optional[Notify]) -> Tuple[str, str, bool]:
+    """«ОТКАЗ» of the point (the owner 2026-11-05): the client refused the order at the point. With a reason the order goes to «На ОТХ» by the
+    usual move (orders.move_card: the client unlinked, the tyres ours at the point), «Причина отмены» is the reason, a red record with it and
+    an alert to whoever answers for the order. The client is not written to. Without a reason nothing changes; a move refused (data missing,
+    a sale recorded) leaves the order at the point with a red record and the alert. (outcome for the log, answer for the point, done)."""
+    reason = refuse_reason(reason)
+    if card["stage"]["code"] != "at_point":
+        return ("не подходит: заказ на этапе «%s»" % card["stage"]["name"],
+                "Заказ №%s сейчас на этапе «%s»: отказ отмечают, когда заказ на точке." % (label(card), card["stage"]["name"]), False)
+    if not reason:
+        n = label(card)
+        return "нет причины отказа: не выполнено", REFUSE_ASK % (n, n, n, n), False
+    if card["point_id"] is not None and card["id"] in points.own_sales(conn, card["point_id"]):
+        return ("не подходит: продажа точки", "Заказ №%s — продажа точки: его этап меняется в «Заказах»." % label(card), False)
+    point = (card.get("point") or {}).get("name") or "точка не указана"
+    oth = _stage_id(conn, "oth")
+    try:
+        moved = orders.move_card(conn, card["id"], oth, now, who, changes={"cancel_reason": REFUSE_REASON % reason}, journal=False)
+    except OrderError as err:
+        text = "Точка «%s» отметила отказ клиента (причина: %s), но перевод на «%s» не выполнен: %s Переведите заказ вручную." % (
+            point, reason, orders.stage_name(conn, "oth"), err)
+        orders.add_event(conn, card["id"], now, who, "point", text, level="red")
+        conn.commit()
+        told = _tell_office(conn, card, text, notify)
+        return ("отказ: не выполнено: %s; %s" % (err, told),
+                "Не получилось перевести заказ №%s на «%s»: %s Отказ передан менеджеру." % (label(card), orders.stage_name(conn, "oth"), err), False)
+    if not moved:
+        return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % label(card), False
+    name = orders.stage_name(conn, "oth")
+    text = "Отказ клиента на точке «%s»: %s. Заказ переведён на «%s», шины остаются на точке нашим товаром." % (point, reason, name)
+    try:                                               # the move is saved: what follows must not turn the answer into «не получилось»
+        orders.add_event(conn, card["id"], now, who, "point", text, level="red")
+        conn.commit()
+        red = "красная запись"
+    except sqlite3.Error:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").warning("the red record of the refusal of order %s was not saved", card["id"])
+        red = "красная запись не сохранена"
+    told = _tell_office(conn, card, text, notify)
+    return ("отказ (%s): заказ перенесён на «%s», %s, %s" % (reason, name, red, told),
+            "Заказ №%s — отказ отмечен (причина: %s). Заказ на «%s»: шины остаются на точке нашим товаром." % (label(card), reason, name), True)
+
+
+def _tell_office(conn, card: dict, text: str, notify: Optional[Notify]) -> str:
+    """The alert of a point's mark to the staff (staff_card), with the order's number; the delivery's status for the log."""
+    if notify is None:
+        return "оповещение не отправлено: канал не настроен"
+    return notify(staff_card(conn, card), "Заказ №%d: %s" % (card["id"], text))     # the point reported it: never back to the point
 
 
 def no_show(conn, card: dict, who: str, now: str, notify: Optional[Notify]) -> Tuple[str, str]:
@@ -1253,7 +1384,10 @@ def bind(conn, code: str, sender) -> str:
         point = points.bind_vk(conn, code, sender)
     except points.PointError as err:
         return str(err)
-    return "ВК привязан к точке «%s». Команды: «приехал 123456», «выдал 123456» (или «отдал 123456»), «клиент не пришёл 123456»." % point["name"]
+    return BOUND % point["name"]
+
+
+BOUND = "ВК привязан к точке «%s». Команды: «приехал 123456», «выдал 123456» (или «отдал 123456»), «отказ 123456 <причина>»."
 
 
 def dispatch(conn, message_id, sender, text, reply_order_no, now: str, deliver: Optional[Deliver] = None, notify: Optional[Notify] = None,
@@ -1290,6 +1424,11 @@ def dispatch(conn, message_id, sender, text, reply_order_no, now: str, deliver: 
         return reply
     if voice == "done" and not str(text or "").strip():                 # any other voice is a question for the owner, with its transcript
         return handle_message(conn, message_id, sender, "(голосовое) %s" % transcript, now)
+    refused = parse_refuse(text)
+    if refused is not None and _point_of(conn, sender) is not None:     # «отказ <номер> <причина>» (2026-11-05): with several of the bot's
+        if len(reply_nos) > 1 and refused[0] is not None:               # lines forwarded: a number not among them waits for the owner
+            reply_order_no = refused[0] if refused[0] in reply_nos else reply_nos[0]     # («в ответе №…, в тексте №…»); none: asked which
+        return handle_command(conn, message_id, sender, text, reply_order_no, now, deliver, notify)
     if len(reply_nos) > 1 and is_command(conn, text):                  # the word with several of the bot's lines forwarded
         written = order_number(text)
         if not written:

@@ -2,8 +2,8 @@
 channel; 2026-10-29: in the panel's own frame with the menu, the stages of the point's orders, one search line, «Отменить передачу» of a
 client not taken yet, the return of «На ОТХ» with the act МХ-3; every action goes to «История точки», point_log).
 
-The orders of the point that lie there («На точке») and are on their way («Едут к нам», with what «Менеджеру: заказ оформлен» says), with «Приехал», «Выдал», «Клиент не пришёл»: the same functions as the VK
-commands (order_manager.apply, no_show, tell_client_arrived) with the same checks of the stage, so the result is the same; the client hears
+The orders of the point that lie there («На точке») and are on their way («Едут к нам», with what «Менеджеру: заказ оформлен» says), with «Приехал», «Выдал», «ОТКАЗ» (with its reason, to «На ОТХ»; the owner 2026-11-05): the same functions as the VK
+commands (order_manager.apply, refuse, tell_client_arrived) with the same checks of the stage, so the result is the same; the client hears
 «можно забирать» on the arrival only, once per arrival. The point is taken in the query (the manager's own; the owner and the partner pick
 one), never in the template. «Передать клиента» (a POST to the page itself) is order_manager.handoff, the function of the VK command
 «клиент <телефон> <что нужно>»: an order on «Передано с точки» for the person on duty; nothing goes to the client; the point needs no VK for
@@ -29,14 +29,14 @@ from .routes_design import point_page
 from .routes_orders import local_iso, local_now
 
 STAGES = ("placed", "moving", "at_point")          # placed (the panel may not say «on the way» yet), on the way to the point, at the point
-ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "no_show": mgr.NO_SHOW,     # «Возврат» of an order at the point: no button since 2026-11-02
-           "reserve_issued": "выдал", "reserve_here": mgr.HERE,         # the two answers to «Клиент забрал?» (the question of the reservation)
+ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "refuse": mgr.REFUSE,       # «Возврат» of an order at the point: no button since 2026-11-02;
+           "reserve_issued": "выдал", "reserve_here": mgr.HERE,         # «ОТКАЗ» with its reason instead of «Клиент не пришёл» and «Да, на ОТХ»
+                                                                        # (the owner 2026-11-05); the two answers to «Клиент забрал?»
            "act_signed": "акт МХ-3 подписан",                           # «Подписал акт и отдал»: the return of «На ОТХ» (order_oth.sign_act)
-           "to_oth": "на ОТХ",                                          # after «Клиент не пришёл»: the tyres stay at the point (the owner 2026-10-29)
            "oth_issued": "выдали (ОТХ)", "oth_here": "на точке (ОТХ)",  # the two answers to the seventh day on «На ОТХ» (the owner 2026-11-02)
            "shipped": mgr.SHIP}                                         # «Передал курьеру ТК»: an order to another city (order_intercity, 2026-11-02)
-PICKUP = ("issued", "reserve_issued", "reserve_here", "no_show", "to_oth")    # what a client's pickup means: never for an order to another city
-NO_SHOW_REASON = "Клиент не пришёл"
+PICKUP = ("issued", "reserve_issued", "reserve_here", "refuse")    # what a client's pickup means: never for an order to another city
+REFUSE_CHOICES = {"year": mgr.REFUSE_REASONS[0], "size": mgr.REFUSE_REASONS[1], "other": ""}    # «Другой»: the text typed
 UNDO = "undo"                                      # /my-point/<order>/undo: «Отменить» a press (point_log.undo, the owner 2026-11-02)
 BUILTIN = {"arrived": (mgr.ARRIVE_FROM, "at_point"), "issued": (mgr.ISSUE_FROM, "done")}
 
@@ -105,9 +105,9 @@ def _not_here(card: dict, what: str):
             "Заказ №%s сейчас на этапе «%s»: «%s» отмечают, когда заказ на точке." % (mgr.label(card), card["stage"]["name"], what), False)
 
 
-def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell=None):
+def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell=None, reason: str = ""):
     """What the VK command of the same word does for an order of the point (order_manager._command for the built-in words): returns
-    (outcome for the log, answer for the manager, done). A word that does not fit the stage changes nothing."""
+    (outcome for the log, answer for the manager, done). A word that does not fit the stage changes nothing. `reason`: of «ОТКАЗ»."""
     code = card["stage"]["code"]
     if action == "shipped":                                                     # the courier of the transport company took it
         outcome, answer = order_intercity.ship(conn, card, who, now, deliver, tell)
@@ -133,18 +133,6 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
                     "Заказ №%s: акт МХ-3 подписан, шины отданы. Менеджер заполнит сумму возврата." % mgr.label(card), True)
         return ("заказ перенесён на «%s»" % orders.stage_name(conn, "return"),
                 "Заказ №%s: акт МХ-3 подписан, шины отданы, возврат закрыт." % mgr.label(card), True)
-    if action == "to_oth":                                                      # «Шины остаются на точке — на ОТХ?» after «Клиент не пришёл»
-        if code != "at_point" or not no_show_now(conn, card):
-            return _not_here(card, "на ОТХ") if code != "at_point" else (
-                "не подходит: клиент не отмечен «не пришёл»", "Заказ №%s: сначала отметьте «Клиент не пришёл»." % mgr.label(card), False)
-        oth = next(s for s in orders.list_stages(conn) if s["code"] == "oth")
-        try:
-            moved = orders.move_card(conn, card["id"], oth["id"], now, who, changes={} if card["cancel_reason"] else {"cancel_reason": NO_SHOW_REASON})
-        except orders.OrderError as err:
-            return "не выполнено: %s" % err, "Не получилось: %s" % err, False
-        if not moved:
-            return "не перенесён: заказ уже на другом этапе", "Заказ №%s уже переместили, проверьте его в панели." % mgr.label(card), False
-        return "заказ перенесён на «%s»" % oth["name"], "Заказ №%s на «%s»: шины остаются на точке нашим товаром." % (mgr.label(card), oth["name"]), True
     if action == "oth_issued":                                                  # «Выдали» to «Заказ выдали или он на точке?»
         return order_oth.answer_issued(conn, card, who, now)
     if action == "oth_here":
@@ -156,12 +144,8 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
             return _not_here(card, "на точке")
         outcome, answer = reserve.here(conn, card, who, now, deliver)
         return outcome, answer, not outcome.startswith("«")
-    if action == "no_show":
-        if code != "at_point":
-            return ("не подходит: заказ на этапе «%s»" % card["stage"]["name"],
-                    "Заказ №%s сейчас на этапе «%s»: «клиент не пришёл» отмечают, когда заказ на точке." % (mgr.label(card), card["stage"]["name"]), False)
-        outcome, answer = mgr.no_show(conn, card, who, now, notify)
-        return outcome, answer, True
+    if action == "refuse":                                                      # «ОТКАЗ» with its reason: to «На ОТХ» (the owner 2026-11-05)
+        return mgr.refuse(conn, card, reason, who, now, notify)
     sources, target = BUILTIN[action]
     if code == target:                                                          # marked already: the client still hears «приехал» once
         sent, note = mgr.tell_client_arrived(conn, card["id"], deliver, now, who) if target == "at_point" else (False, "")
@@ -175,6 +159,14 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
     return outcome, answer, not outcome.startswith("не ")
 
 
+def _refuse_reason() -> str:
+    """The reason of «ОТКАЗ» from its form: one of the two given, or the text of «Другой»; '' for none (order_manager.refuse_reason)."""
+    choice = str(request.form.get("reason") or "")
+    if choice not in REFUSE_CHOICES:
+        return ""
+    return mgr.refuse_reason(REFUSE_CHOICES[choice] or str(request.form.get("other") or "")[:mgr.REFUSE_MAX * 2])
+
+
 def _tell(conn, now: str):
     """The owner's and the partner's Telegram for a press of the point (order_notify.tell_people with the panel's keys); never raises. Never
     to the person who pressed it working as the point (common.own_logins)."""
@@ -186,12 +178,6 @@ def _tell(conn, now: str):
         return order_notify.tell_people(conn, current_app.config.get("SECRET_BOX"), logins, text,
                                         tg_http=current_app.config.get("TG_HTTP") or order_notify.urllib_transport, now=now, skip_logins=skip)
     return tell
-
-
-def no_show_now(conn, card: dict) -> bool:
-    """«Клиент не пришёл» was marked in this stay at the point (mgr.no_show's red record after the arrival)."""
-    return conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'point' AND text LIKE 'Клиент не пришёл за заказом%' AND at >= ? LIMIT 1",
-                        (card["id"], card["entered_at"] or "")).fetchone() is not None
 
 
 NEED_MAX = 500
@@ -349,13 +335,6 @@ def _found(conn, query: str, point_id: int) -> list:
     return groups[0]["items"] if groups else []
 
 
-def _oth_ask(conn, cards: list) -> dict:
-    """?oth=<order>: the order just marked «Клиент не пришёл», still at the point: its card asks «Шины остаются на точке — на ОТХ?»."""
-    wanted = str(request.args.get("oth") or "")
-    row = next((r for r in cards if wanted.isdigit() and r["card"]["id"] == int(wanted) and r["here"]), None)
-    return {row["card"]["id"]: True} if row is not None and no_show_now(conn, row["card"]) else {}
-
-
 def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
@@ -491,7 +470,6 @@ def register(app) -> None:
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns,
-                               oth_ask=_oth_ask(conn, cards),
                                undo=[dict(u, label=mgr.label(u["card"])) for u in point_log.undo_list(conn, point_id)]
                                if point_id is not None else [], undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
 
@@ -533,6 +511,10 @@ def register(app) -> None:
         if not re.fullmatch(r"[0-9a-f]{24}", token):
             flash("Отметка не выполнена: обновите страницу.")
             return redirect(back)
+        reason = _refuse_reason() if action == "refuse" else ""
+        if action == "refuse" and not reason:                                   # checked before the press is taken: the same form may go again
+            flash("Отказ не отмечен: укажите причину отказа («Другой» — впишите её).", "error")
+            return redirect(back)
         if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
             flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
@@ -546,7 +528,7 @@ def register(app) -> None:
         try:
             from . import routes_vk
             _send, deliver, notify = routes_vk.channel(current_app, conn, now)
-            outcome, answer, ok = act(conn, card, action, author(), now, deliver, notify, _tell(conn, now))
+            outcome, answer, ok = act(conn, card, action, author(), now, deliver, notify, _tell(conn, now), reason)
         except Exception:                                                        # the press must not stay «обрабатывается»
             conn.rollback()
             current_app.logger.exception("«Рабочее место»: %s of order %s failed", action, card_id)
@@ -557,8 +539,6 @@ def register(app) -> None:
             point_log.record(conn, now, author(), point_id, action, card["id"], outcome)
             point_log.remember(conn, card, action, point_id, author(), now)     # «Отменить» of a press that moved the order (2026-11-02)
         flash(answer, "info" if ok else "error")
-        if action == "no_show" and ok:                                         # the question «Шины остаются на точке — на ОТХ?» (2026-10-29)
-            return redirect(back + ("&" if "?" in back else "?") + "oth=%d#oth-%d" % (card["id"], card["id"]))
         return redirect(back)
 
     @app.route("/my-point/handoff/<int:card_id>/cancel", methods=["POST"])

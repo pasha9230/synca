@@ -115,13 +115,13 @@ def test_the_workplace_cards_tabs_and_questions(w):
     here = w["point"].get("/my-point").get_data(as_text=True)
     assert 'data-tab-count="here">3<' in here and 'data-tab-count="moving">1<' in here and 'data-tab-count="oth">1<' in here
     assert "mp-tab--hot" in here
-    # «Клиент забрал?»: its answers in the question, «Выдал» and «Клиент не пришёл» hidden while it hangs (the owner 2026-11-02)
+    # «Клиент забрал?»: its answers in the question, «Выдал» and «ОТКАЗ» hidden while it hangs (the owner 2026-11-02, 2026-11-05)
     assert 'data-question="%d"' % ids["asked"] in here
     assert "/my-point/%d/reserve_issued" % ids["asked"] in here and "/my-point/%d/reserve_here" % ids["asked"] in here
-    assert "/my-point/%d/issued\"" % ids["asked"] not in here and "/my-point/%d/no_show" % ids["asked"] not in here
+    assert "/my-point/%d/issued\"" % ids["asked"] not in here and "/my-point/%d/refuse" % ids["asked"] not in here
     assert here.index('data-order="%d"' % ids["asked"]) < here.index('data-order="%d"' % ids["here"])        # the question first
-    assert "/my-point/%d/issued\"" % ids["here"] in here and "/my-point/%d/no_show" % ids["here"] in here
-    assert 'data-confirm-title="Точно клиент не пришёл?"' in here
+    assert "/my-point/%d/issued\"" % ids["here"] in here and "/my-point/%d/refuse" % ids["here"] in here
+    assert 'data-confirm-title="Отказ по заказу № 700202?"' in here
     # «В другой город»: «Передал курьеру ТК» and the labels, no «Выдал»
     assert "/my-point/%d/shipped" % ids["far"] in here and "/my-point/%d/issued\"" % ids["far"] not in here
     assert 'href="/orders/%d/labels/' % ids["far"] in here and "data-intercity-tag" in here
@@ -159,16 +159,13 @@ def test_the_presses_of_the_new_workplace_move_the_orders_as_before(w):
     assert orders.get_card(conn, ids["ret"])["stage"]["code"] == "return"           # 2026-11-03: the act closes it with the purchase
 
 
-def test_no_show_then_the_question_of_oth_then_to_oth(w):
+def test_refuse_from_the_new_workplace_goes_to_oth(w):
+    """«ОТКАЗ» with its reason (the owner 2026-11-05; it was «Клиент не пришёл», then the question «на ОТХ?»)."""
     flag(w["conn"], "all")
     conn, ids, pt = w["conn"], w["ids"], w["point"]
     press(pt, ids["moving"], "arrived")
-    _tok, page = press(pt, ids["moving"], "no_show")                                   # back on ?oth=<order>: the question in the card
-    assert 'data-oth-offer="%d"' % ids["moving"] in page and is_new(page)
-    card = re.search(r'<article[^>]*data-order="%d".*?</article>' % ids["moving"], page, re.S).group(0)
-    assert "/issued\"" not in card                                                       # «Выдал» hidden while the question hangs
-    r = post(pt, "/my-point/%d/to_oth" % ids["moving"], "tok", token=token(page, ids["moving"], "to_oth"))
-    assert r.status_code == 302
+    _tok, page = press(pt, ids["moving"], "refuse")
+    assert is_new(page) and "data-oth-offer" not in page
     assert orders.get_card(conn, ids["moving"])["stage"]["code"] == "oth"
 
 
