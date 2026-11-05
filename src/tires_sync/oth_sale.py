@@ -64,14 +64,31 @@ def given(conn, card_id) -> Set[int]:
     return {r[0] for r in conn.execute("SELECT DISTINCT from_item FROM order_item_oth WHERE from_order = ?", (card_id,))}
 
 
-def first_order(conn, item_id) -> Optional[int]:
-    """The order the tyres of a position «с ОТХ» were bought for: along a chain (A → B → C) to its first order."""
-    found, seen = None, set()
+def _chain_end(conn, item_id) -> Tuple[Optional[int], Optional[int]]:
+    """The last link of a chain (A → B → C) of a position «с ОТХ»: (the position of the first order, that order)."""
+    end, found, seen = None, None, set()
     row = conn.execute("SELECT from_item, from_order FROM order_item_oth WHERE item_id = ?", (item_id,)).fetchone()
     while row is not None and row[0] not in seen:
         seen.add(row[0])
-        found = row[1]
+        end, found = row
         row = conn.execute("SELECT from_item, from_order FROM order_item_oth WHERE item_id = ?", (row[0],)).fetchone()
+    return end, found
+
+
+def first_order(conn, item_id) -> Optional[int]:
+    """The order the tyres of a position «с ОТХ» were bought for: along a chain (A → B → C) to its first order."""
+    return _chain_end(conn, item_id)[1]
+
+
+def purchase_order(conn, item_id) -> Optional[int]:
+    """first_order, and past a merge: the tyres of a merged order that a placed source gave were bought by that source, its number and invoice are
+    theirs (order_merge.items_of), the merged order only has the transfer of its base. What the row of the Google table shows."""
+    end, found = _chain_end(conn, item_id)
+    if found:
+        from . import order_merge
+        merged = order_merge.items_of(conn, found).get(end)
+        if merged and merged["placed"]:
+            return merged["from_order"]
     return found
 
 
@@ -79,7 +96,7 @@ def from_number(conn, card_id) -> Dict[int, str]:
     """Item id of a position «с ОТХ» → the WebMIM number of the order its tyres were bought by (the Google table; the first of a chain)."""
     out = {}
     for item_id in taken(conn, card_id):
-        row = conn.execute("SELECT webmim_number, webmim_id FROM order_card WHERE id = ?", (first_order(conn, item_id),)).fetchone()
+        row = conn.execute("SELECT webmim_number, webmim_id FROM order_card WHERE id = ?", (purchase_order(conn, item_id),)).fetchone()
         out[item_id] = (row[0] or row[1] or "") if row else ""
     return out
 
@@ -255,7 +272,7 @@ def numbers_written(conn, card_id, fields: Iterable[str], now: str, author: str)
     An id of WebMIM alone changes no copy, but the rows of those orders: the number or the day they show may come by it."""
     fields = list(fields)
     if "webmim_id" in fields:
-        _look_again(conn, _holders(conn, card_id))
+        _look_again(conn, card_id)
     fields = [f for f in fields if f in NUMBERS]
     if not fields:
         return
@@ -272,19 +289,19 @@ def _holders(conn, source_id) -> Set[int]:
     return {o for o, item_id in held if first_order(conn, item_id) == source_id}
 
 
-def _look_again(conn, card_ids: Iterable[int]) -> None:
-    """The rows of these orders in the Google table show their source's values: the next send looks at them though nothing of their own changed
-    (order_sheet._due: no record in their journal when nothing is copied, several sources, a press going on)."""
-    for order_id in card_ids:
+def _look_again(conn, source_id) -> None:
+    """The rows of the orders holding this order's tyres show its values: the next send of the Google table looks at them though nothing of their own
+    changed (order_sheet._due: no record in their journal when nothing is copied, several sources, a press going on)."""
+    held = conn.execute("SELECT t.order_id, t.item_id FROM order_item_oth t WHERE t." + _LIVE).fetchall()
+    for order_id in {o for o, item_id in held if source_id in (first_order(conn, item_id), purchase_order(conn, item_id))}:
         conn.execute("UPDATE sheet_order SET seen_event = 0 WHERE order_id = ?", (order_id,))
 
 
 def _follow_source(conn, source_id, now: str, author: str, seen: Set[int]) -> None:
     """The orders whose tyres «с ОТХ» were bought by `source_id`, and on along a copy that changed. A press of «Оформить в WebMIM» going on writes
     its own (items_changed)."""
-    holders = _holders(conn, source_id)
-    _look_again(conn, holders)
-    for order_id in sorted(holders - seen):
+    _look_again(conn, source_id)
+    for order_id in sorted(_holders(conn, source_id) - seen):
         seen.add(order_id)
         state = conn.execute("SELECT state FROM webmim_create WHERE order_id = ?", (order_id,)).fetchone()
         if state and state[0] != "refused":

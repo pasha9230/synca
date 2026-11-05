@@ -430,3 +430,73 @@ def test_the_command_refuses_with_an_order_of_webmim_a_press_going_on_and_own_st
     stock = own_stock_order(conn)
     out = fill(tmp_path, capsys, own, pressed, stock).strip().split("\n")
     assert "свой заказ WebMIM" in out[0] and "оформляется" in out[1] and "номера не нужны" in out[2]
+
+
+# ---- the review of 6bce7a7 --------------------------------------------------------------------------------------------------------------
+
+def merged_on_oth(conn):
+    """Two placed orders merged, the new order refused: its tyres lie on «На ОТХ», their numbers are its sources' (order_merge)."""
+    from tests.test_order_reserve import card_at
+    from tires_sync import order_merge
+    one = card_at(conn, "moving", LATER)
+    two = card_at(conn, "moving", LATER)
+    conn.execute("UPDATE order_item SET goods_id = '2', name = 'Шина 2' WHERE order_id = ?", (two,))
+    conn.execute("UPDATE order_card SET webmim_number = '6000001', transfer_number = '26R-A' WHERE id = ?", (one,))
+    conn.execute("UPDATE order_card SET webmim_number = '6000002', transfer_number = '26R-B' WHERE id = ?", (two,))
+    conn.commit()
+    invoice(conn, two, day="2026-10-02")
+    target = order_merge.merge(conn, [one, two], stage(conn, "moving"), LATER, "o", client_from=one)
+    orders.move_card(conn, target, stage(conn, "oth"), LATER, "o", fire_rules=False)
+    return one, two, target
+
+
+def test_tyres_of_a_merged_order_on_oth_have_the_values_of_the_order_that_bought_them(tmp_path):
+    conn = db(tmp_path)
+    one, two, target = merged_on_oth(conn)
+    cid = new_order(conn, goods="2")
+    take(conn, cid, goods="2")
+    assert row_of(conn, cid, goods="2") == ("6000002", "26R-B", "2026-10-02")       # not the transfer of the merged order's base
+    assert sheet.oth_invoice(conn, orders.get_card(conn, cid)) == [{"order": two, "day": "2026-10-02"}]
+
+
+def test_a_new_number_of_the_order_behind_a_merge_wakes_the_row(tmp_path):
+    conn = db(tmp_path)
+    one, two, target = merged_on_oth(conn)
+    cid = new_order(conn, goods="2")
+    take(conn, cid, goods="2")
+    enrolled(conn, cid)
+    orders.update_card(conn, two, {"transfer_number": "26R-C"}, LATER, "o")
+    assert cid in sheet._due(conn, LATER, False) and row_of(conn, cid, goods="2")[1] == "26R-C"
+
+
+def test_a_source_gone_from_the_base_leaves_the_row_what_the_order_has(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    cid = new_order(conn)
+    take(conn, cid)
+    conn.execute("DELETE FROM order_card WHERE id = ?", (old,))                     # «Удалённые»: a chain lets the first order go
+    conn.commit()
+    assert row_of(conn, cid)[:2] == (NUMBER, TRANSFER)                              # the copy, never an empty cell
+    assert sheet.oth_invoice(conn, orders.get_card(conn, cid)) == [{"order": 0, "day": ""}]
+
+
+def test_a_typed_number_on_own_stock_shows_its_day_in_the_card_too(tmp_path):
+    conn = db(tmp_path)
+    conn.execute("INSERT INTO webmim_order (server, id, number, create_date, seen_at) VALUES ('prod','x1','5999999','2026-09-09T10:00:00',?)", (LATER,))
+    conn.commit()
+    cid = own_stock_order(conn)
+    orders.update_card(conn, cid, {"webmim_number": "5999999"}, LATER, "o")
+    assert row_of(conn, cid) == ("5999999", "", "2026-09-09")
+    assert sheet.oth_invoice(conn, orders.get_card(conn, cid)) == [{"order": 0, "day": "2026-09-09"}]
+
+
+def test_a_number_typed_equal_to_the_source_s_keeps_the_source_s_day(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn)
+    by_button(conn, old)
+    cid = new_order(conn)
+    take(conn, cid)
+    conn.execute("DELETE FROM audit WHERE action = 'oth_numbers'")                  # no journal of the copy: a person's as far as anybody knows
+    conn.commit()
+    assert row_of(conn, cid) == (NUMBER, TRANSFER, "2026-10-22")
+    assert sheet.oth_invoice(conn, orders.get_card(conn, cid)) == [{"order": old, "day": "2026-10-22"}]

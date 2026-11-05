@@ -351,25 +351,32 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
 def _oth_values(conn, card: dict, item_id: int, number: str, typed: set) -> dict:
     """«№ заказа MIM», «Перемещение MIM», «Дата счета» of a position «с ОТХ» (the owner 2026-11-05): those of the order its tyres were bought by
     (`number`: oth_sale.from_number), never of the order's own order of WebMIM; own stock has none. What a person wrote stays (`typed`:
-    oth_sale.typed_numbers), and a number typed brings its own day."""
-    first = oth_sale.first_order(conn, item_id)
+    oth_sale.typed_numbers), and a number typed brings its own day. A source gone from the base («Удалённые»): what the order has."""
+    first = oth_sale.purchase_order(conn, item_id)
     row = conn.execute("SELECT id, webmim_id, webmim_number, transfer_number FROM order_card WHERE id = ?", (first,)).fetchone() if first else None
+    if first and row is None:
+        return {"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"], "Дата счета": _invoice_day(conn, card)}
     source = dict(zip(("id", "webmim_id", "webmim_number", "transfer_number"), row)) if row else None
-    return {"№ заказа MIM": card["webmim_number"] if "webmim_number" in typed else number,
+    own_number = "webmim_number" in typed and card["webmim_number"] != number        # typed equal to the source's: the source's order all the same
+    return {"№ заказа MIM": card["webmim_number"] if own_number else number,
             "Перемещение MIM": card["transfer_number"] if "transfer_number" in typed else (source["transfer_number"] if source else ""),
-            "Дата счета": _invoice_day(conn, card) if "webmim_number" in typed else (_invoice_day(conn, source) if source else "")}
+            "Дата счета": _invoice_day(conn, card) if own_number else (_invoice_day(conn, source) if source else "")}
 
 
 def oth_invoice(conn, card: dict) -> List[dict]:
-    """«Дата счета» of an order holding tyres «с ОТХ», for its card: [{order: the order of purchase (0: a number typed here), day}], one per order, as
-    its rows say. Own stock has no invoice: []. An order that took nothing: []."""
+    """«Дата счета» of an order holding tyres «с ОТХ», for its card: [{order: the order of purchase (0: the order's own, a number typed here or the
+    source gone), day}], one per order, as its rows say. Own stock without a typed number has no invoice: []. An order that took nothing: []."""
     numbers = oth_sale.from_number(conn, card["id"])
     typed = oth_sale.typed_numbers(conn, card) if numbers else set()
     out: List[dict] = []
     for item in card["items"]:
-        first = oth_sale.first_order(conn, item["id"]) if item["id"] in numbers and int(item["qty"]) >= 1 else None
-        if first:
-            found = {"order": 0 if "webmim_number" in typed else first,
+        if item["id"] not in numbers or int(item["qty"]) < 1:
+            continue
+        first = oth_sale.purchase_order(conn, item["id"])
+        known = first and conn.execute("SELECT 1 FROM order_card WHERE id = ?", (first,)).fetchone()
+        own_number = "webmim_number" in typed and card["webmim_number"] != numbers[item["id"]]
+        if first or own_number:
+            found = {"order": first if known and not own_number else 0,
                      "day": _oth_values(conn, card, item["id"], numbers[item["id"]], typed)["Дата счета"]}
             if found not in out:
                 out.append(found)
