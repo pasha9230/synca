@@ -31,7 +31,7 @@ def register(app) -> None:
                                rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None) if not typed else None,
                                invite_rows=rows_of(brand_choices(app, conn), client_terms.active_ours(conn), {}, typed, "c_"),
                                invite_typed=bool(typed), invite_form=typed, describe=client_terms.describe, shop_resp=_shop_resp(conn),
-                               main_name=users.main_name(conn), main_login=app.config["AUTHOR"], sheet_labels=_sheet_labels(conn),
+                               main_name=users.main_name(conn), main_login=app.config["AUTHOR"], sheet_labels=_sheet_labels(conn), unsigned=users.UNSIGNED,
                                resets=users.list_login_resets(conn, now_iso()), reset_link=session.pop("reset_link", None) if not typed else None), status
 
     @app.route("/users")

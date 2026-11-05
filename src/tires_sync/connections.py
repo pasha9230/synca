@@ -514,7 +514,7 @@ SHEET_LABEL_MAX = 40
 
 def get_sheet_label(conn, account_id: int) -> str:
     """«Подпись в таблице заказов» (the owner 2026-11-02): what the column «Аккаунт» of the Google table says for this account's orders
-    (order_sheet.account_label); empty: the column stays empty."""
+    whose responsible has no label of its own (order_sheet.account_label); both empty: the column stays empty."""
     return str(get_config(conn, "avito", account_id).get("sheet_label") or "")
 
 

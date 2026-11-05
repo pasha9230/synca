@@ -17,7 +17,7 @@
 <select class="select" name="role" aria-label="Роль">{% for key, label in roles.items() %}<option value="{{ key }}"{% if key == u.role %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
 <select class="select" name="point_id" aria-label="Точка (для менеджера точки)"><option value="">точка —</option>{% for pid, name in points.items() %}<option value="{{ pid }}"{% if pid == u.point_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select>
 <button class="btn btn--secondary btn--sm">Сохранить</button>{% if can_post("users_role") %}</form>{% else %}</fieldset>{% endif %}</td>
-{% if can_post("users_sheet_label") %}<td>{% if u.role not in ("client", "point") %}<form method="post" action="/users/{{ u.login }}/sheet-label" class="row" style="gap:var(--s-2)"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% if can_post("users_sheet_label") %}<td>{% if u.role not in unsigned %}<form method="post" action="/users/{{ u.login }}/sheet-label" class="row" style="gap:var(--s-2)"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <input class="input" name="sheet_label" maxlength="40" value="{{ sheet_labels.get(u.login, '') }}" aria-label="Подпись в таблице заказов" autocomplete="off" style="max-width:120px"><button class="btn btn--secondary btn--sm">Сохранить</button></form>{% endif %}</td>{% endif %}
 <td>{% if u.active %}<span class="badge badge--ok">включён</span>{% else %}<span class="badge badge--neutral">выключен</span>{% endif %}</td>
 <td>{{ u.created|dt_utc }}</td>

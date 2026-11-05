@@ -207,11 +207,15 @@ def person_name(conn, login: str, main_login: str = "") -> str:
 
 
 SHEET_LABEL_PREF = "sheet.label"          # user_pref: rename_login and remove_user take it along with the person's other settings
+UNSIGNED = ("point", "client")
 
 
 def get_sheet_label(conn, login: str) -> str:
     """«Подпись в таблице заказов» of a person (the owner 2026-11-05): what the column «Аккаунт» says for the orders this person answers
-    for (order_sheet.account_label); empty: the label of the order's account. Never the display name: only the people the owner signs."""
+    for (order_sheet.account_label); empty: the label of the order's account. Never the display name: only the people the owner signs.
+    A manager of a point or a client has none (UNSIGNED), whatever was typed before the role changed."""
+    if get_role(conn, login)["role"] in UNSIGNED:
+        return ""
     return str(user_prefs.get(conn, normalize(login), SHEET_LABEL_PREF, "") or "")
 
 
@@ -221,6 +225,8 @@ def set_sheet_label(conn, login: str, label: str, now: str, author: str, main_lo
     login = normalize(login)
     if not exists(conn, login) and login != normalize(main_login):
         raise UserError("Пользователя «%s» нет." % login)
+    if get_role(conn, login)["role"] in UNSIGNED:
+        raise UserError("Подпись в таблице заказов: только у сотрудников, не у менеджера точки и не у клиента.")
     try:
         label = connections.check_sheet_label(label)
     except ValueError as err:
