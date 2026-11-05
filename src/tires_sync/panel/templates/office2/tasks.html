@@ -8,15 +8,16 @@
 {% block body_class %}o2 o2-tasks-page{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Задачи</h1><p class="sub">Задача никому ничего не отправляет: это напоминание, кому что сделать и к какому сроку. Просроченные — красным.</p></div>
+<header class="page-head"><div><h1>Задачи</h1><p class="sub">{% if view %}Выполненные задачи: кто поставил, кто сделал и сколько это заняло.{% else %}Задача никому ничего не отправляет: это напоминание, кому что сделать и к какому сроку. Просроченные — красным.{% endif %}</p></div>
 {% if may_task() %}<div class="actions"><button type="button" class="btn btn--primary" data-open-modal="o2-newtask">{{ icon("plus") }}Новая задача</button></div>{% endif %}</header>
-<nav class="tabs o2-tabs" aria-label="Задачи">{% for key, name in tabs.items() %}<a class="tab{% if key == tab %} is-active{% endif %}" href="/tasks?tab={{ key }}"{% if key == tab %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}</nav>
-<form method="get" action="/tasks" class="o2-tk-filters" data-autosubmit><input type="hidden" name="tab" value="{{ tab }}"><input type="hidden" name="due" value="{{ due }}">
-<div class="seg seg--sm o2-seg" aria-label="Срок">{% for key, name in dues.items() %}<a href="/tasks?{{ {'tab': tab, 'to': to, 'due': key, 'kind': kind}|urlencode }}"{% if key == due %} class="is-active" aria-current="true"{% endif %}>{% if key == "overdue" %}<span class="o2-dot-red" aria-hidden="true"></span>{% endif %}{{ name }}</a>{% endfor %}</div>
+{% include "_tasks_views.html" %}
+<nav class="tabs o2-tabs" aria-label="Задачи">{% for key, name in tabs.items() %}<a class="tab{% if key == tab %} is-active{% endif %}" href="/tasks?tab={{ key }}{% if view %}&amp;view=done{% endif %}"{% if key == tab %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}</nav>
+<form method="get" action="/tasks" class="o2-tk-filters" data-autosubmit><input type="hidden" name="tab" value="{{ tab }}">{% if view %}<input type="hidden" name="view" value="done">{% else %}<input type="hidden" name="due" value="{{ due }}">
+<div class="seg seg--sm o2-seg" aria-label="Срок">{% for key, name in dues.items() %}<a href="/tasks?{{ {'tab': tab, 'to': to, 'due': key, 'kind': kind}|urlencode }}"{% if key == due %} class="is-active" aria-current="true"{% endif %}>{% if key == "overdue" %}<span class="o2-dot-red" aria-hidden="true"></span>{% endif %}{{ name }}</a>{% endfor %}</div>{% endif %}
 <select class="select select--sm" name="to" aria-label="Кому"><option value="">Кому: все</option>{% for p in people %}<option value="{{ p.login }}"{% if p.login == to %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
 <select class="select select--sm" name="kind" aria-label="Тип"><option value="">Все типы</option>{% for key, name in task_kinds.items() %}<option value="{{ key }}"{% if key == kind %} selected{% endif %}>{{ name }}</option>{% endfor %}</select>
-<noscript><button class="btn btn--secondary btn--sm">Показать</button></noscript>{% if to or due or kind %}<a class="small" href="/tasks?tab={{ tab }}">Сбросить</a>{% endif %}</form>
-<section class="card o2-tk-list"><div class="table-wrap">
+<noscript><button class="btn btn--secondary btn--sm">Показать</button></noscript>{% if to or due or kind %}<a class="small" href="/tasks?tab={{ tab }}{% if view %}&amp;view=done{% endif %}">Сбросить</a>{% endif %}</form>
+{% if view %}{% include "_tasks_done.html" %}{% else %}<section class="card o2-tk-list"><div class="table-wrap">
 <table class="table"><thead><tr><th>Тип</th><th>Что сделать</th><th>Кому</th><th>Поставил</th><th>Срок</th><th>Заказ / клиент</th><th></th></tr></thead><tbody>
 {% for t in rows %}<tr data-task="{{ t.id }}"{% if t.late %} class="is-late o2-tk-late"{% endif %}>
 <td class="nowrap"><span class="badge badge--neutral">{{ t.kind_label }}</span></td>
@@ -26,7 +27,7 @@
 <td class="nowrap">{% if t.order_id %}<a href="/orders/{{ t.order_id }}">Заказ №{{ t.order_id }}</a>{% elif t.chat_row %}<a href="/chats/{{ t.chat_row }}">Чат</a>{% elif t.client_id %}<a href="/clients/{{ t.client_id }}">Клиент</a>{% else %}<span class="muted">—</span>{% endif %}{% if t.who or t.phone %}<div class="small muted">{{ t.who }}{% if t.who and t.phone %}, {% endif %}{{ t.phone|phone if t.phone else "" }}</div>{% endif %}</td>
 <td class="o2-tk-acts">{% if may_task() %}<form method="post" action="/tasks/{{ t.id }}/done" class="inline row" style="gap:var(--s-1)"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="{{ request.full_path }}"><input class="input input--xs" name="result" maxlength="300" placeholder="Результат" aria-label="Результат" style="width:150px"><button class="btn btn--secondary btn--xs">{{ icon("check", "i-sm") }}Выполнено</button></form> <form method="post" action="/tasks/{{ t.id }}/cancel" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="{{ request.full_path }}"><button class="btn btn--link btn--xs">Отменить</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7" class="o2-tk-empty"><b>{{ "Под фильтр задач нет" if to or due or kind else "Открытых задач нет" }}</b><div class="small muted">{{ "Сбросьте фильтр." if to or due or kind else "Нажмите «Новая задача», чтобы поставить себе или другому." }}</div></td></tr>{% endfor %}
-</tbody></table></div></section>
+</tbody></table></div></section>{% endif %}
 {% if may_task() %}<div class="modal-backdrop" id="o2-newtask" role="dialog" aria-modal="true" aria-labelledby="o2-newtask-h"><div class="modal o2-tk-modal">
 <div class="modal-head"><h3 id="o2-newtask-h">Новая задача</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack"><p class="small muted">Без заказа. Задачу по заказу ставят в карточке заказа.</p>{{ inq_ui.task_form(back="/tasks", label="Поставить") }}</div></div></div>{% endif %}

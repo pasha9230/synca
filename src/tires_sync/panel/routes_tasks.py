@@ -1,5 +1,6 @@
 """«Задачи» of the panel (the owner 2026-10-31; tasks.py): the page with «Мне», «Поставил я», «Все» (the office only), the filters «Кому»,
-«Срок», «Тип»; «Новая задача» with or without an order; «Выполнено» with what came of it and «Отменить»; the block «Задачи» of an order,
+«Срок», «Тип»; «Новая задача» with or without an order; «Выполнено» with what came of it and «Отменить»; the sub-section «Выполненные» (?view=done, the
+owner 2026-11-04: the same rights and filters, with pages); the block «Задачи» of an order,
 a chat and a client card (the same form). Section «Заказы»: to look — «смотреть», to set or close — «менять» (so never the observer nor the
 client). A manager of a point is checked here, on the server, not by the buttons only: it sees and closes only the tasks set to itself,
 and sets a task only to itself, of an order of its own point or of none (never a chat nor a client)."""
@@ -104,19 +105,27 @@ def register(app) -> None:
         due = due if due in DUES else ""
         kind = request.args.get("kind", "")
         kind = kind if kind in tasks.KINDS else ""
-        rows = tasks.listing(conn, tab=tab, login=me, owner_login=_owner(conn), now=local_iso(), point=point, to=to, due=due, kind=kind,
-                             as_point=current_user()["as_point"])
-        from .. import inquiry
-        for t in rows:                                    # whom to call: the name and the phone, as the reminder had them
-            t["who"], t["phone"] = inquiry._who_called(conn, t)
+        view = "done" if request.args.get("view") == "done" else ""
+        done = None
+        if view:
+            due = ""                                      # «Срок» says nothing of a done task
+            done = tasks.done_listing(conn, tab=tab, login=me, owner_login=_owner(conn), point=point, to=to, kind=kind,
+                                      as_point=current_user()["as_point"], page=request.args.get("page", 1, type=int))
+            rows = done["rows"]
+        else:
+            rows = tasks.listing(conn, tab=tab, login=me, owner_login=_owner(conn), now=local_iso(), point=point, to=to, due=due, kind=kind,
+                                 as_point=current_user()["as_point"])
+            from .. import inquiry
+            for t in rows:                                # whom to call: the name and the phone, as the reminder had them
+                t["who"], t["phone"] = inquiry._who_called(conn, t)
         names = {}
         for t in rows:
-            for login in (t["assignee"], t["created_by"]):
+            for login in (t["assignee"], t["created_by"], t["done_by"]):
                 if login not in names:
                     names[login] = users.person_name(conn, login, _main(app))
         tabs = {k: v for k, v in TABS.items() if office or k != "all"}
         return render_template(office_page(point_page("tasks.html")), rows=rows, names=names, tab=tab, tabs=tabs, to=to, due=due, kind=kind, dues=DUES,
-                               people=task_people(), point=point)
+                               people=task_people(), point=point, view=view, done=done)
 
     @app.route("/tasks/new", methods=["POST"])
     @login_required

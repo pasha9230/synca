@@ -1,0 +1,2 @@
+{# «Задачи»: the open tasks or «Выполненные» (routes_tasks, the owner 2026-11-04); outside .tabs: a point's phone hides those. #}
+<nav class="seg seg--sm tasks-views" aria-label="Открытые или выполненные" style="margin-bottom:var(--s-3);width:fit-content"><a href="/tasks?tab={{ tab }}"{% if not view %} class="is-active" aria-current="true"{% endif %}>Открытые</a><a href="/tasks?tab={{ tab }}&amp;view=done"{% if view %} class="is-active" aria-current="true"{% endif %}>Выполненные</a></nav>

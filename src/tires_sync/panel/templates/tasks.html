@@ -7,14 +7,16 @@
 {% block head %}{% if point %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block title %}Задачи · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Задачи</h1><p class="sub">Задача никому ничего не отправляет: это напоминание, кому что сделать и к какому сроку. Просроченные — красным.</p></div></header>
-<nav class="tabs" aria-label="Задачи">{% for key, name in tabs.items() %}<a class="tab{% if key == tab %} is-active{% endif %}" href="/tasks?tab={{ key }}"{% if key == tab %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}</nav>
-<form method="get" action="/tasks" class="row filters" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end;margin:var(--s-3) 0"><input type="hidden" name="tab" value="{{ tab }}">
+<header class="page-head"><div><h1>Задачи</h1><p class="sub">{% if view %}Выполненные задачи: кто поставил, кто сделал и сколько это заняло.{% else %}Задача никому ничего не отправляет: это напоминание, кому что сделать и к какому сроку. Просроченные — красным.{% endif %}</p></div></header>
+{% include "_tasks_views.html" %}
+<nav class="tabs" aria-label="Задачи">{% for key, name in tabs.items() %}<a class="tab{% if key == tab %} is-active{% endif %}" href="/tasks?tab={{ key }}{% if view %}&amp;view=done{% endif %}"{% if key == tab %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}</nav>
+<form method="get" action="/tasks" class="row filters" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end;margin:var(--s-3) 0"><input type="hidden" name="tab" value="{{ tab }}">{% if view %}<input type="hidden" name="view" value="done">{% endif %}
 {% if not point %}<label class="field"><span class="label">Кому</span><select class="select select--sm" name="to"><option value="">Все</option>{% for p in people %}<option value="{{ p.login }}"{% if p.login == to %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>{% endif %}
-<label class="field"><span class="label">Срок</span><select class="select select--sm" name="due">{% for key, name in dues.items() %}<option value="{{ key }}"{% if key == due %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+{% if not view %}<label class="field"><span class="label">Срок</span><select class="select select--sm" name="due">{% for key, name in dues.items() %}<option value="{{ key }}"{% if key == due %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>{% endif %}
 <label class="field"><span class="label">Тип</span><select class="select select--sm" name="kind"><option value="">Все</option>{% for key, name in task_kinds.items() %}<option value="{{ key }}"{% if key == kind %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
 <button class="btn btn--secondary btn--sm">Показать</button></form>
-{% if point %}{# the point works from a phone (the lead 2026-10-31): one column of cards, big buttons #}
+{% if view %}{% include "_tasks_done.html" %}
+{% elif point %}{# the point works from a phone (the lead 2026-10-31): one column of cards, big buttons #}
 <div class="pt-tasks">{% for t in rows %}<article class="card pt-task{% if t.late %} is-late{% endif %}" data-task="{{ t.id }}">
 <div class="pt-task-head"><b class="{{ 'text-err' if t.late else '' }}">{{ (t.due_at ~ ':00')|short_dt }}</b><span class="badge badge--neutral">{{ t.kind_label }}</span></div>
 {% if t.title %}<div class="pt-task-title">{{ t.title }}</div>{% endif %}
@@ -35,7 +37,7 @@
 {% else %}<tr><td colspan="7" class="muted">Задач нет.</td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endif %}
-{% if may_task() %}<section class="card card-body" style="margin-top:var(--s-4)"><h2>Новая задача</h2><p class="small muted">Без заказа. Задачу по заказу ставят в карточке заказа.</p>{{ inq_ui.task_form(back="/tasks", label="Поставить") }}</section>{% endif %}
+{% if may_task() and not view %}<section class="card card-body" style="margin-top:var(--s-4)"><h2>Новая задача</h2><p class="small muted">Без заказа. Задачу по заказу ставят в карточке заказа.</p>{{ inq_ui.task_form(back="/tasks", label="Поставить") }}</section>{% endif %}
 {% if point %}<style>
 .pt-tasks-page .pt-tasks{display:flex;flex-direction:column;gap:12px}
 .pt-tasks-page .pt-task{padding:14px;display:flex;flex-direction:column;gap:8px}

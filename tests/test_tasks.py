@@ -5,6 +5,7 @@ gets a grey line when a task is set, done or cancelled; a merge keeps the kind a
 alert and sends nothing."""
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime
 
@@ -280,3 +281,174 @@ def test_a_direct_post_of_a_point_with_a_chat_is_refused(tmp_path):
     h = chat(conn)
     assert new(gamma, chat_row=str(h), kind="callback", title="").status_code == 403
     assert conn.execute("SELECT COUNT(*) FROM callback_task").fetchone()[0] == 0
+
+
+# ---- «Выполненные» (the owner 2026-11-04) ------------------------------------------------------------------------------------------------
+
+def done_row(conn, title="Сделанная", created_at=NOW, created_by="owner", done_at="2026-10-23T14:15:00", done_by="owner", assignee="owner",
+             order_id=None, chat_row=None, client_id=None, note=""):
+    """A done task as the base has it, with whatever an old row may lack."""
+    task_id = conn.execute("INSERT INTO callback_task (due_at, assignee, note, created_at, created_by, done_at, done_by, kind, title, order_id, chat_row, client_id) "
+                           "VALUES ('2026-10-24T10:00',?,?,?,?,?,?,'other',?,?,?,?)",
+                           (assignee, note, created_at, created_by, done_at, done_by, title, order_id, chat_row, client_id)).lastrowid
+    conn.commit()
+    return task_id
+
+
+def done_ids(html):
+    return [int(n) for n in re.findall(r'data-done-task="(\d+)"', html)]
+
+
+def test_spent_in_plain_words():
+    at = "2026-10-23T12:00:00"
+    for end, words in (("2026-10-23T12:00:40", "меньше минуты"), ("2026-10-23T12:40:59", "40 мин"), ("2026-10-23T14:15:00", "2 ч 15 мин"),
+                       ("2026-10-23T14:00:00", "2 ч"), ("2026-10-24T12:00:00", "1 день"), ("2026-10-24T16:30:00", "1 день 4 ч"),
+                       ("2026-10-26T12:00:00", "3 дня"), ("2026-10-28T12:00:00", "5 дней"), ("2026-11-04T12:00:00", "12 дней"),
+                       ("2026-11-13T12:00:00", "21 день"), ("2026-10-23T14:15", "2 ч 15 мин"), ("2026-10-23 14:15:00", "2 ч 15 мин")):
+        assert tasks.spent(at, end) == words, end
+    for start, end in (("", at), (None, at), (at, ""), (at, None), ("вчера", at), (at, "2026-10-23T11:59:00")):
+        assert tasks.spent(start, end) == "—", (start, end)
+
+
+def test_the_done_rows_newest_first_who_when_and_the_time_spent(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    order_id = card(conn)
+    new(client, tok, title="Закрою кнопкой", assignee="zaman", order_id=str(order_id))
+    [pressed] = open_ids(conn)
+    zaman = as_user(app, conn, "zaman")
+    app.config["NOW"] = lambda: datetime(2026, 10, 23, 11, 15, 0)                            # 14:15 in Moscow: 2 ч 15 мин after NOW
+    assert post(zaman, "/tasks/%d/done" % pressed, "tok", result="Не показывать это").status_code == 302
+    older = done_row(conn, title="Старая", done_at="2026-10-20T09:00:00", created_at="2026-10-17T09:00:00", assignee="zaman")
+    html = client.get("/tasks?tab=all&view=done").get_data(as_text=True)
+    assert done_ids(html) == [pressed, older]                                                  # the newest first
+    row = html[html.index('data-done-task="%d"' % pressed):html.index('data-done-task="%d"' % older)]
+    assert "Закрою кнопкой" in row and "Заказ №%d" % order_id in row
+    assert "23.10 12:00" in row and "23.10 14:15" in row and "2 ч 15 мин" in row and "Заман" in row
+    assert "3 дня" in html[html.index('data-done-task="%d"' % older):]
+    assert "Не показывать это" not in html and "Результат" not in html                         # no «результат»: the owner's decision
+
+
+def test_a_long_text_is_short_and_a_note_stands_in_for_no_title(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    done_row(conn, title="Очень длинный текст задачи " * 6)
+    done_row(conn, title="", note="Только комментарий")
+    html = client.get("/tasks?view=done").get_data(as_text=True)
+    assert "Только комментарий" in html
+    assert re.search(r">[^<]{70,80}…</span>", html)
+
+
+def test_old_done_rows_with_nothing_known_show_a_dash_and_never_fall(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    blank = done_row(conn, title="Без автора", created_by="", created_at="", done_by="")
+    empty_end = done_row(conn, title="Без времени", done_at="", done_by="owner")
+    broken = done_row(conn, title="Кривое время", created_at="не дата")
+    response = client.get("/tasks?view=done")
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200 and set(done_ids(html)) == {blank, empty_end, broken}
+    row = html[html.index('data-done-task="%d"' % blank):html.index('data-done-task="%d"' % empty_end)]
+    assert row.count("—") >= 4                                                                 # who set, when, how long; who did has its name missing too
+    assert done_ids(html)[-1] == empty_end                                                     # no time: last, not lost
+
+
+def test_cancelled_and_open_tasks_are_not_done_and_the_open_list_keeps_its_own(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    new(client, tok, title="Открытая")
+    new(client, tok, title="Отменённая")
+    [_opened, cancelled] = open_ids(conn)
+    post(client, "/tasks/%d/cancel" % cancelled, tok)
+    done_row(conn, title="Сделанная")
+    done = client.get("/tasks?view=done").get_data(as_text=True)
+    assert "Сделанная" in done and "Открытая" not in done and "Отменённая" not in done
+    assert 'action="/tasks/new"' not in done and "/done" not in done.split("</nav>", 1)[1].split("<form", 1)[0]
+    opened = client.get("/tasks").get_data(as_text=True)
+    assert "Открытая" in opened and "Сделанная" not in opened and "data-done-task" not in opened
+    assert 'action="/tasks/new"' in opened and 'name="due"' in opened and 'name="due"' not in done
+    assert 'href="/tasks?tab=mine&amp;view=done"' in opened                                    # the way in
+
+
+def test_the_tabs_and_the_filters_of_the_done(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    mine = done_row(conn, title="Мне")
+    to_zaman = done_row(conn, title="Заману", assignee="zaman")
+    theirs = done_row(conn, title="От Замана мне", created_by="zaman")
+    conn.execute("UPDATE callback_task SET kind = 'order' WHERE id = ?", (to_zaman,))
+    conn.commit()
+    assert done_ids(client.get("/tasks?view=done").get_data(as_text=True)) == [theirs, mine]
+    assert done_ids(client.get("/tasks?tab=by_me&view=done").get_data(as_text=True)) == [to_zaman, mine]
+    assert done_ids(client.get("/tasks?tab=all&view=done&to=zaman").get_data(as_text=True)) == [to_zaman]
+    assert done_ids(client.get("/tasks?tab=all&view=done&kind=order").get_data(as_text=True)) == [to_zaman]
+    assert done_ids(client.get("/tasks?tab=all&view=done&due=overdue").get_data(as_text=True)) == [theirs, to_zaman, mine]     # «Срок» is not here
+
+
+def test_the_done_of_a_point_are_its_own_on_whatever_tab(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    gamma = manager(app, conn, alpha)
+    delta = manager(app, conn, beta, "delta")
+    own = done_row(conn, title="Гаммы", assignee="gamma")
+    other = done_row(conn, title="Дельты", assignee="delta")
+    office_one = done_row(conn, title="Офиса", assignee="zaman", done_by="gamma", created_by="gamma")    # even set and done by it: not assigned
+    for tab in ("mine", "by_me", "all"):
+        page = gamma.get("/tasks?tab=%s&view=done" % tab).get_data(as_text=True)
+        assert other not in done_ids(page) and office_one not in done_ids(page), tab
+    assert done_ids(gamma.get("/tasks?view=done").get_data(as_text=True)) == [own]
+    assert done_ids(gamma.get("/tasks?view=done&to=delta").get_data(as_text=True)) == [own]    # «Кому» is not the point's
+    assert done_ids(delta.get("/tasks?view=done").get_data(as_text=True)) == [other]
+    page = gamma.get("/tasks?view=done").get_data(as_text=True)
+    assert 'class="card pt-task"' in page and "<table" not in page.split("pt-tasks", 2)[-1].split("</article>")[0]    # its phone: cards
+    assert "tasks-views" in page and 'tasks-views' not in page[page.index('class="tabs"'):]    # the way in is not in .tabs (hidden on a phone)
+
+
+def test_a_point_never_gets_a_link_to_a_chat_or_a_client_from_the_done(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    gamma = manager(app, conn, alpha)
+    done_row(conn, title="Со старым чатом", assignee="gamma", chat_row=7)
+    done_row(conn, title="Со старым клиентом", assignee="gamma", client_id=8)
+    page = gamma.get("/tasks?view=done").get_data(as_text=True)
+    assert "/chats/7" not in page and "/clients/8" not in page
+    office = client.get("/tasks?tab=all&view=done").get_data(as_text=True)
+    assert "/chats/7" in office and "/clients/8" in office
+
+
+def test_the_observer_and_the_client_on_the_done(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    users.add_user(conn, "watcher", PASSWORD, NOW, role="viewer")
+    users.add_user(conn, "buyer", PASSWORD, NOW, role="client")
+    conn.commit()
+    task_id = done_row(conn, title="Чья-то")
+    watcher, buyer = as_user(app, conn, "watcher"), as_user(app, conn, "buyer")
+    assert buyer.get("/tasks?view=done").status_code == 403
+    assert done_ids(watcher.get("/tasks?tab=all&view=done").get_data(as_text=True)) == []      # «Все» is the office's: as the open list
+    assert task_id in done_ids(client.get("/tasks?tab=all&view=done").get_data(as_text=True))
+
+
+def test_the_done_go_by_pages_and_a_wrong_page_never_falls(tmp_path, monkeypatch):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    monkeypatch.setitem(tasks.done_listing.__kwdefaults__, "per_page", 2)
+    ids = [done_row(conn, title="№%d" % n, done_at="2026-10-23T14:%02d:00" % n) for n in range(5)]
+    first = client.get("/tasks?view=done").get_data(as_text=True)
+    assert done_ids(first) == [ids[4], ids[3]] and "Страница 1 из 3, всего 5" in first and "← Новее" not in first
+    assert "Старее →" in first and "page=2" in first and "view=done" in first
+    assert done_ids(client.get("/tasks?view=done&page=2").get_data(as_text=True)) == [ids[2], ids[1]]
+    last = client.get("/tasks?view=done&page=3").get_data(as_text=True)
+    assert done_ids(last) == [ids[0]] and "← Новее" in last and "Старее →" not in last
+    assert done_ids(client.get("/tasks?view=done&page=999").get_data(as_text=True)) == [ids[0]]
+    for bad in ("0", "-4", "abc", ""):
+        assert done_ids(client.get("/tasks?view=done&page=%s" % bad).get_data(as_text=True)) == [ids[4], ids[3]], bad
+
+
+def test_the_done_in_the_new_views_of_the_office_and_of_a_point(tmp_path):
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    gamma = manager(app, conn, alpha)
+    office_one = done_row(conn, title="Офисная", created_by="", done_by="")
+    point_one = done_row(conn, title="Точечная", assignee="gamma", created_at="2026-10-20T14:15:00")
+    store.set_state(conn, "ui_new.office", "all")
+    store.set_state(conn, "ui_new.point", "all")
+    conn.commit()
+    html = client.get("/tasks?tab=all&view=done").get_data(as_text=True)
+    assert "office2-pages.css" in html and "o2-tasks-page" in html and done_ids(html) == [point_one, office_one]
+    assert "3 дня" in html and "—" in html and "Результат" not in html and 'name="due"' not in html
+    assert 'name="view" value="done"' in html and 'href="/tasks?tab=by_me&amp;view=done"' in html
+    opened = client.get("/tasks?tab=all").get_data(as_text=True)
+    assert "data-done-task" not in opened and "Открытых задач нет" in opened and 'name="due"' in opened
+    html = gamma.get("/tasks?view=done").get_data(as_text=True)
+    assert "point2.css" in html and done_ids(html) == [point_one] and "3 дня" in html

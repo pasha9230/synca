@@ -21,6 +21,7 @@ KINDS = {"callback": "Перезвонить", "order": "Оформить зак
 FIELDS = ("id", "client_id", "order_id", "chat_row", "due_at", "assignee", "note", "created_at", "created_by", "done_at", "done_by",
           "cancelled_at", "kind", "title")
 TITLE_MAX, NOTE_MAX, RESULT_MAX = 200, 300, 300
+BRIEF_MAX, DONE_PER_PAGE = 80, 50
 DUE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 OFFICE_ROLES = ("owner", "partner", "chats")
 
@@ -195,13 +196,9 @@ def of_place(conn, client_id=None, order_id=None, chat_row=None, only: Optional[
                                           % (", ".join(FIELDS), sql), args)]
 
 
-def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bool, to: str = "", due: str = "", kind: str = "",
-            as_point=None) -> List[dict]:
-    """The open tasks of the page «Задачи»: `tab` mine (to me), by_me (set by me), all (the office only); a point gets only its own
-    whatever the tab. Filters: `to` (a login), `due` overdue|today|week, `kind`. Each task knows if it is late. `as_point`: the owner or
-    the partner working as that point (panel/common.current_user) sees what its managers see: the tasks set to them (the lead 2026-11-02),
-    never the person's own (those come back with «Выйти»)."""
-    where, args = ["done_at IS NULL", "cancelled_at IS NULL"], []
+def _scope(conn, *, tab: str, login: str, owner_login: str, point: bool, to: str, kind: str, as_point) -> tuple:
+    """The conditions of the open list and of «Выполненные» alike: whose tasks the person sees (the rules in listing), `tab`, `to`, `kind`."""
+    where, args = [], []
     if as_point is not None:
         where.append("assignee IN (%s)" % MANAGERS)
         args.append(as_point)
@@ -221,6 +218,17 @@ def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bo
     if kind in KINDS:
         where.append("kind = ?")
         args.append(kind)
+    return where, args
+
+
+def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bool, to: str = "", due: str = "", kind: str = "",
+            as_point=None) -> List[dict]:
+    """The open tasks of the page «Задачи»: `tab` mine (to me), by_me (set by me), all (the office only); a point gets only its own
+    whatever the tab. Filters: `to` (a login), `due` overdue|today|week, `kind`. Each task knows if it is late. `as_point`: the owner or
+    the partner working as that point (panel/common.current_user) sees what its managers see: the tasks set to them (the lead 2026-11-02),
+    never the person's own (those come back with «Выйти»)."""
+    where, args = _scope(conn, tab=tab, login=login, owner_login=owner_login, point=point, to=to, kind=kind, as_point=as_point)
+    where = ["done_at IS NULL", "cancelled_at IS NULL"] + where
     today_end = _day_end(now)
     if due == "overdue":
         where.append("due_at < ?")
@@ -237,6 +245,61 @@ def listing(conn, *, tab: str, login: str, owner_login: str, now: str, point: bo
         task["late"] = task["due_at"] < now[:16]
         out.append(task)
     return out
+
+
+def done_listing(conn, *, tab: str, login: str, owner_login: str, point: bool, to: str = "", kind: str = "", as_point=None, page: int = 1,
+                 per_page: int = DONE_PER_PAGE) -> dict:
+    """«Выполненные» (the owner 2026-11-04): the done tasks the person may see (the same rules as listing), the newest first, one page:
+    {"rows", "total", "page", "pages"}; a page past the end is the last one. Each row knows its `brief` and `spent`."""
+    where, args = _scope(conn, tab=tab, login=login, owner_login=owner_login, point=point, to=to, kind=kind, as_point=as_point)
+    where = " AND ".join(["done_at IS NOT NULL", "cancelled_at IS NULL"] + where)
+    total = conn.execute("SELECT COUNT(*) FROM callback_task WHERE %s" % where, args).fetchone()[0]
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(max(1, page), pages)
+    rows = []
+    for row in conn.execute("SELECT %s FROM callback_task WHERE %s ORDER BY done_at DESC, id DESC LIMIT ? OFFSET ?" % (", ".join(FIELDS), where),
+                            args + [per_page, (page - 1) * per_page]):
+        task = _row(row)
+        task["brief"] = _brief(task["title"] or task["note"])
+        task["spent"] = spent(task["created_at"], task["done_at"])
+        rows.append(task)
+    return {"rows": rows, "total": total, "page": page, "pages": pages}
+
+
+def _brief(text) -> str:
+    text = _one_line(text, NOTE_MAX)
+    return text if len(text) <= BRIEF_MAX else text[:BRIEF_MAX - 1].rstrip() + "…"
+
+
+def _stamp(text) -> Optional[datetime]:
+    text = str(text or "").strip().replace(" ", "T")
+    for size, pattern in ((19, "%Y-%m-%dT%H:%M:%S"), (16, "%Y-%m-%dT%H:%M")):
+        try:
+            return datetime.strptime(text[:size], pattern)
+        except ValueError:
+            continue
+    return None
+
+
+def spent(start, end) -> str:
+    """From setting to doing in plain words: «меньше минуты», «40 мин», «2 ч 15 мин», «3 дня», «1 день 4 ч»; a stamp missing or broken, or
+    the end before the start: «—»."""
+    begun, ended = _stamp(start), _stamp(end)
+    if begun is None or ended is None or ended < begun:
+        return "—"
+    minutes = int((ended - begun).total_seconds()) // 60
+    days, hours, minutes = minutes // 1440, minutes // 60 % 24, minutes % 60
+    if days:
+        return "%d %s" % (days, _days_word(days)) + (" %d ч" % hours if hours else "")
+    if hours:
+        return "%d ч" % hours + (" %d мин" % minutes if minutes else "")
+    return "%d мин" % minutes if minutes else "меньше минуты"
+
+
+def _days_word(days: int) -> str:
+    if days % 10 == 1 and days % 100 != 11:
+        return "день"
+    return "дня" if days % 10 in (2, 3, 4) and days % 100 not in (12, 13, 14) else "дней"
 
 
 MANAGERS = "SELECT login FROM panel_user_role WHERE role = 'point' AND point_id = ?"     # the managers of a point (one argument)
