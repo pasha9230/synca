@@ -64,7 +64,7 @@ SECTIONS = {"Главная", "Заказы", "Задачи", "Чаты", "Зв�
             "Подключения", "Настройки заказов", "Шаблоны сообщений", "История", "Новый вид", "Пользователи", "Рабочее место", "Меню"}
 # never in an item a point or a client reads (the owner 2026-11-05); and in no item at all, the repository is public
 NOT_FOR_POINT = re.compile(r"закуп|наценк|прибыл|маржа|логин|аккаунт", re.IGNORECASE)
-PUBLIC_NEVER = re.compile(r"\+?\d[\d ()-]{9,}\d|https?://|\b[\w-]+\.(?:ru|com|net|org)\b|\bfrom_login\b", re.IGNORECASE)
+PUBLIC_NEVER = re.compile(r"\+?\d[\d ()-]{9,}\d|https?://|\b[\w-]+\.(?:ru|com|net|org)\b", re.IGNORECASE)
 
 
 def shipped_items():
