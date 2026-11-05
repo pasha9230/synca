@@ -420,16 +420,17 @@ def test_a_code_names_the_tire_by_itself(env):
 
 
 def test_the_same_tire_at_two_prices_is_a_task_at_one_price_a_message(env):
+    """Two WebMIM positions at two prices: the higher one goes, no task (the owner 2026-11-05, «Две позиции МИМ… цена выше»)."""
     conn, _row = env
     card, sender = waiting(env), Sender()
     two = [tire(), tire(code="TS2", goods_id="200")]
     run(conn, sender, two)                                                                      # 8 500 and 6 000.50
-    assert sender.sent == [] and "разные цены" in tasks(conn, card)[0]["body"]
+    assert len(sender.sent) == 1 and "8 500 ₽" in sender.sent[0] and tasks(conn, card) == []
     other = waiting(env, dict(WANT, width=225))
     conn.execute("UPDATE avito_chat SET order_id = ?", (other,))
     conn.commit()
     run(conn, sender, [tire(width=225), tire(width=225, code="TS2", goods_id="200")], price=lambda offer, row: 7000)
-    assert len(sender.sent) == 1 and "7 000 ₽" in sender.sent[0]
+    assert len(sender.sent) == 2 and "7 000 ₽" in sender.sent[1]                                 # the first went at the first cycle
 
 
 def test_a_question_of_the_client_nobody_answered_is_not_wiped_by_the_message(env):
@@ -554,11 +555,12 @@ def test_the_other_suppliers_alone_at_two_prices_are_a_task(env):
     assert sender.sent == [] and "разные цены у поставщиков" in tasks(conn, card)[0]["body"]
 
 
-def test_two_prices_inside_webmim_are_a_task(env):
+def test_two_prices_inside_webmim_quote_the_higher_one(env):
+    """Was a task «разные цены в WebMIM»; the owner 2026-11-05: the higher price goes, no task."""
     conn, _row = env
     card, sender = waiting(env), Sender()
-    run(conn, sender, [tire(), tire(goods_id="200", code="TS2"), s2(code="TS1")])
-    assert sender.sent == [] and "разные цены в WebMIM" in tasks(conn, card)[0]["body"]
+    run(conn, sender, [tire(goods_id="200", code="TS2"), tire(), s2(code="TS1")])
+    assert len(sender.sent) == 1 and "8 500 ₽" in sender.sent[0] and "6 000" not in sender.sent[0] and tasks(conn, card) == []
 
 
 def test_no_price_anywhere_is_a_task(env):
@@ -1203,3 +1205,33 @@ def test_the_task_of_a_cut_off_send_does_not_say_an_empty_stock(env):
     conn.commit()
     run(conn, Sender(), [], NEXT)
     assert "В наличии: ." not in tasks(conn, card)[0]["body"]
+
+
+# --- the owner 2026-11-05: two WebMIM prices of one tire, the higher one goes --------------------------------------------------------------------
+
+def test_two_webmim_prices_do_not_take_the_higher_position_from_an_earlier_order(env):
+    conn, _row = env
+    a, b = two_waiting(env)
+    sender, sends = Sender(), []
+    offers = [tire(code="TS2", goods_id="200"), tire()]                                         # 6 000.50 and 8 500, four of each
+    order_wait.check(conn, offers, NOW, price_of=price_of,
+                     deliver=lambda row, text, token: (sends.append((token, text)), chats.send_reply(conn, sender, row, text, token, NOW, "система"))[1])
+    said = dict((t.split("-")[1], w) for t, w in sends)
+    assert "8 500 ₽" in said[str(a)] and "6 000.50 ₽" in said[str(b)]
+    assert tasks(conn, a) == [] and tasks(conn, b) == []
+    assert store.get_state(conn, order_wait.HELD % order_wait._token(a, orders.get_card(conn, a)["entered_at"])) == '[["100", 4]]'
+    assert store.get_state(conn, order_wait.HELD % order_wait._token(b, orders.get_card(conn, b)["entered_at"])) == '[["200", 4]]'
+
+
+def test_the_higher_webmim_price_without_the_stock_is_not_quoted(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(stock=2), tire(code="TS2", goods_id="200")])
+    assert "6 000.50 ₽" in sender.sent[0] and tasks(conn, card) == []
+
+
+def test_webmim_with_no_price_and_two_other_prices_stays_a_task(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(code="NOPRICE"), s2(), s2(goods_id="s3-300", code="TS1")])
+    assert sender.sent == [] and "разные цены у поставщиков" in tasks(conn, card)[0]["body"]

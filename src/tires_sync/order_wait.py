@@ -331,8 +331,11 @@ def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, le
                 price = 0
             if price > 0:
                 priced.setdefault(price, each)
+        if len(priced) > 1 and _is_mim(group[0]):                  # two WebMIM positions of one tire: the higher price (the owner 2026-11-05)
+            price = max(priced)
+            return priced[price], price, ""
         if len(priced) > 1:
-            return None, 0, "у позиции %s разные цены%s: выберите сами." % (pick.name, " в WebMIM" if group and _is_mim(group[0]) else " у поставщиков")
+            return None, 0, "у позиции %s разные цены у поставщиков: выберите сами." % pick.name
         if priced:
             price, offer = next(iter(priced.items()))
             return offer, price, ""
