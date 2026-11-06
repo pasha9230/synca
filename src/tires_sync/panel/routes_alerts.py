@@ -219,6 +219,18 @@ def register(app):
         conn.commit()
         return redirect("/alerts")
 
+    @app.route("/alerts/critical/<int:row_id>/ack", methods=["POST"])
+    @login_required
+    def alerts_critical_ack(row_id):
+        """«Разобрался» on «Критичное» (critical.py): it and the older ones leave this person's bell."""
+        from .. import critical
+        conn = get_conn()
+        if not critical.bell_rows(conn, session["user"]):
+            abort(404)
+        critical.ack(conn, row_id, session["user"])
+        conn.commit()
+        return redirect("/alerts")
+
     @app.route("/alerts/accept-all", methods=["POST"])
     @login_required
     def alerts_accept_all():

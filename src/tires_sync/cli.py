@@ -433,16 +433,21 @@ REPEAT_PAUSE_SECONDS = 6 * 3600     # the same text again: the cycle runs every 
 SAID_PREFIX = "alert-said:"         # app_state: the moment each text was last said (epoch); a text said within six hours is not said again
 
 
-def _alert(conn, box, text: str, service: bool = False, notice: bool = False, recovery: bool = False) -> bool:
+def _alert(conn, box, text: str, service: bool = False, notice: bool = False, recovery: bool = False, critical: bool = False,
+           people=None, bell: bool = True) -> bool:
     """Record the message in the journal and send it to Telegram. The same failure text is not repeated within six hours, whatever went
     between (each text keeps its own mark, taken in one statement: of two processes with the same text, one sends it); the
     service's own failure alert (service=True) is skipped if any message went out meanwhile, since the cycle has just
     said the same. notice=True marks information (not a failure: new models without a pair, a reminder): it keeps no mark of its own (only
     the same text twice in a row is quiet). recovery=True is a notice that a failure is over («снова отвечает», «таблица снова принимает»):
     only it, once handled, frees the failures' marks — the next failure after a recovery is told; any other notice leaves them (хвост N1).
-    True: handled (sent, recorded or already said). False: Telegram refused it; the marks are given back, so the next call sends it again."""
+    True: handled (sent, recorded or already said). False: Telegram refused it; the marks are given back, so the next call sends it again.
+    critical=True (critical.py, the owner 2026-11-06): it also goes to VK of `people` (default: both owners, order_alerts.owner_people) and
+    to their bell (`bell`); it is handled once recorded, whatever Telegram did: never twice in VK. Not critical: the journal only, no
+    Telegram (critical.TELEGRAM_ONLY_CRITICAL)."""
+    from . import critical as crit
     notice = notice or recovery
-    notify = notifier_for(conn, box, http=_http())
+    notify = notifier_for(conn, box, http=_http()) if crit.telegram_allowed(critical) else None
     last = store.get_state(conn, "last_alert_at")
     since = _epoch() - float(last) if last else None
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
@@ -462,11 +467,16 @@ def _alert(conn, box, text: str, service: bool = False, notice: bool = False, re
     store.set_state(conn, "last_alert_text", digest)
     store.write_audit(conn, _now(), "system", "notice" if notice else "alert", {"text": text})   # the journal keeps it without Telegram
     if notify is None:
+        if critical:
+            _tell_critical(conn, box, text, people, bell, telegram_ok=False)
         return _told(conn, recovery)
     try:
         notify(text)
     except NotifyError as err:
         print("не удалось отправить уведомление: %s" % err, file=sys.stderr)
+        if critical:                                                     # VK and the bell took it: handled, never twice in VK
+            _tell_critical(conn, box, text, people, bell, telegram_ok=False)
+            return _told(conn, recovery)
         if (store.get_state(conn, "last_alert_at"), store.get_state(conn, "last_alert_text")) == (stamp, digest):   # not another process's since
             store.set_state(conn, "last_alert_at", before[0] or "")  # not said: the next call sends it, never «said already»
             store.set_state(conn, "last_alert_text", before[1] or "")
@@ -474,7 +484,23 @@ def _alert(conn, box, text: str, service: bool = False, notice: bool = False, re
             conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value = ?", (earlier or "0", said_key, stamp))   # not said: free again
         conn.commit()
         return False
+    if critical:
+        _tell_critical(conn, box, text, people, bell, telegram_ok=True)
     return _told(conn, recovery)
+
+
+def _tell_critical(conn, box, text: str, people, bell: bool, telegram_ok: bool) -> None:
+    """VK and the bell of a critical alert (critical.tell); whatever fails in it is printed, never a new alert."""
+    from . import critical, order_alerts
+    try:
+        who = list(people) if people is not None else order_alerts.owner_people(conn)
+        critical.tell(conn, box, who, text, moscow_now().isoformat(timespec="seconds"), vk_http=_http(), telegram_ok=telegram_ok, bell=bell)
+    except Exception as err:                                             # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:                                                # noqa: BLE001
+            pass
+        print("критичное: ВК и колокольчик не записаны (%s)" % type(err).__name__, file=sys.stderr)
 
 
 def _told(conn, recovery: bool) -> bool:
@@ -580,19 +606,20 @@ def _alert_own_below_cost(conn, box, offers, settings=None) -> None:
         print("проверка «своя цена ниже закупки» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
 
 
-def _tell_important(conn, box, logins, text: str, others_anyway: bool = False) -> bool:
+def _tell_important(conn, box, logins, text: str, others_anyway: bool = False, critical: bool = False, bell: bool = True) -> bool:
     """The one channel of the important news (the summaries of the prices; the owner 2026-11-06: it may change later, so only here): the owner's
     chat of the alerts through _alert (journal, Telegram, its failure printed as always) and the same text in Telegram to each other person of
     `logins` who has a chat, once the owner's is handled (as before), or whatever came of it with `others_anyway` (a message sent once).
-    True when the owner's message is handled (_alert); False: Telegram refused it (printed by _alert)."""
-    from . import order_notify
-    told = _alert(conn, box, text, notice=True)
+    `critical` (critical.py): also VK to every person of `logins` with a page bound and their bell (`bell`); not critical: the journal only,
+    no Telegram. True when the owner's message is handled (_alert); False: Telegram refused it (printed by _alert)."""
+    from . import critical as crit, order_notify
+    told = _alert(conn, box, text, notice=True, critical=critical, people=list(logins), bell=bell)
     if not told and not others_anyway:
         return False
     owner = order_notify.get_owner_login(conn)
     others = [login for login in logins if login != owner]
-    if others:
-        how = order_notify.tell_people(conn, box, others, text, tg_http=_http())
+    if others and crit.telegram_allowed(critical):
+        how = order_notify.tell_people(conn, box, others, text, tg_http=_http(), critical=critical)
         if "не отправлен" in how:
             print("сводка не отправлена в Telegram: %s" % how, file=sys.stderr)
     return told
@@ -647,7 +674,8 @@ def _alert_purchase(conn, box, parsed=None, base=None, now: str = "") -> None:
         if alert is None:
             return
         link = _panel_link(conn, "%s/%d" % (purchase_alert.PAGE, alert["id"]), "панель → Уведомления → «Закупка изменилась»")
-        _tell_important(conn, box, purchase_alert.people(conn), purchase_alert.text(alert["rows"], link), others_anyway=True)
+        _tell_important(conn, box, purchase_alert.people(conn), purchase_alert.text(alert["rows"], link), others_anyway=True,
+                        critical=True, bell=False)                      # its own red row of the bell (purchase_alert.bell_rows)
     except Exception as err:
         try:
             conn.rollback()
@@ -671,7 +699,8 @@ def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
             meta = fetch_for_connection(conn, box, dest, _now(), http=_http(), supplier_id=sid)
         except (WebmimError, SecretKeyError, OSError, ValueError) as err:
             if not quiet:
-                _alert(conn, box, "Tires Sync: не удалось скачать выгрузку WebMIM (%s). %s" % (supplier["name"], err))
+                _alert(conn, box, "Tires Sync: не удалось скачать выгрузку WebMIM (%s). %s" % (supplier["name"], err),
+                       critical=sid == 1)                               # the first supplier: the cycle stops, no feed is published
             if sid == 1:
                 raise
             print("error: поставщик «%s»: %s" % (supplier["name"], err), file=sys.stderr)
@@ -756,7 +785,7 @@ def _watch_stock_pass(conn, box, results) -> None:
     for key in sorted(failing):
         if now - marks[key][0] >= STOCK_PASS_SILENT:
             _alert(conn, box, "Tires Sync: проверка остатков между циклами больше часа не может опубликовать фид (%s): снимает только "
-                   "часовой цикл. Причина в журнале tires-stock." % failing[key].name)
+                   "часовой цикл. Причина в журнале tires-stock." % failing[key].name, critical=True)
 
 
 def _cmd_stock_pass(args) -> int:
@@ -823,7 +852,7 @@ def _cmd_stock_pass(args) -> int:
         broken = [r for r in failed if r.broken]
         if broken:
             _alert(conn, box, "Tires Sync: проверка остатков между циклами не работает (%s), снимает только часовой цикл. Подробности в журнале "
-                   "tires-stock." % ", ".join("%s: %s" % (r.name, r.error.split(":")[0]) for r in broken))
+                   "tires-stock." % ", ".join("%s: %s" % (r.name, r.error.split(":")[0]) for r in broken), critical=True)
         _watch_stock_pass(conn, box, results)
     if sent:                                                          # the number in stock on Avito: only accounts switched on, outside the lock
         avito_stock.after_cycle(conn, box if box is not None else load_box(args.key_file), args.feed_root, parsed, sent, http=_http())
@@ -897,7 +926,7 @@ def _run_cycle(args) -> int:
         for r in tripped:
             print("%s: сработала защита от массового снятия, объявления удерживаются" % r.name)
         if tripped:
-            _alert(conn, box, _guard_alert_text(conn, tripped, parsed))
+            _alert(conn, box, _guard_alert_text(conn, tripped, parsed), critical=True)     # the removals of the account are stopped
         for r in results:
             if r.ok and not r.guard_tripped and r.new_waiting:
                 st = active_settings(conn)
@@ -951,7 +980,7 @@ def _run_cycle(args) -> int:
                     print("предупреждение: цены на Авито не поставлены в очередь (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
         if failed:
             _alert(conn, box, "Tires Sync: цикл завершился с ошибками.\n" + "\n".join(
-                "%s: %s" % (r.name, r.error) for r in failed))
+                "%s: %s" % (r.name, r.error) for r in failed), critical=True)     # a feed not published or its check with an error
     if results and not failed and not tripped:                      # a broken unload must not leave a dip in the dynamics
         _record_economics(conn, parsed, ref)
     _collect_avito_reports(conn, box)
@@ -1913,10 +1942,11 @@ def _gone_everywhere(ad: dict, offers, on_oth, unavailable=frozenset()) -> bool:
 
 
 def _person_telegram(conn, box, login: str):
-    """A function that sends text to the person's own Telegram chat (order_notify.user_chats) by the owner's bot; None without one."""
-    from . import order_notify
+    """A function that sends text to the person's own Telegram chat (order_notify.user_chats) by the owner's bot; None without one, and None
+    while only the critical news go to Telegram (critical.py: these notices are not; the journal keeps them)."""
+    from . import critical, order_notify
     chat = order_notify.user_chats(conn).get(login) if login else None
-    if not chat or box is None:
+    if not chat or box is None or not critical.telegram_allowed(False):
         return None
     try:
         token = connections.get_secret(conn, box, "telegram", 0, "bot_token")
@@ -2560,6 +2590,19 @@ def _handoff_look(conn, box, now: str) -> None:
         print("предупреждение: клиенты с точек не проверены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
+def _critical_look(conn, box, now: str) -> None:
+    """Every minute with the chats: the red failures of the orders that are critical (a send to a client, a rule) go to Telegram and VK once
+    (critical.forward_red). In its own guard: a failure here is printed, never a failed reading nor a new alert."""
+    try:
+        from . import critical
+        passed = critical.forward_red(conn, box, now, tg_http=_http(), vk_http=_http())
+        if passed:
+            print("критичное: сбоев по заказам передано: %d" % passed)
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: критичные сбои по заказам не переданы (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
+
+
 def _inquiry_look(conn, box, now: str) -> None:
     """Every minute with the chats: the statuses of the inquiries (three days to «отказ»), the start of «Срочно ответить», and the safety
     net of the points in the panel (an alert nobody opened in 15 working minutes goes to the owner). In its own guard, as _handoff_look."""
@@ -2660,6 +2703,7 @@ def _chats_sync_locked(conn, box, args, now) -> int:
     _wait_replies(conn, box, now)
     _handoff_look(conn, box, now)
     _inquiry_look(conn, box, now)
+    _critical_look(conn, box, now)
     if full:
         chats.clean_old(conn, now)
     print("сделок создано %d, чатов привязано %d, телефонов записано %d, имён из чата %d" % (made["created"], made["linked"], made["phones"], made.get("names", 0)))
@@ -2904,7 +2948,7 @@ def _cmd_alert(args) -> int:
     box = load_box(args.key_file) if args.key_file else None
     if box is None:
         return 0
-    _alert(conn, box, args.message, service=True)
+    _alert(conn, box, args.message, service=True, critical=True)       # a failed service or deploy (tires-alert@, OnFailure)
     return 0
 
 

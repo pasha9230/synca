@@ -135,8 +135,15 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
             vk_http: Transport = urllib_transport, owner_login: Optional[str] = None, way: Optional[dict] = None) -> str:
     """Write the alert; never raises. Returns «отправлено …» or «не отправлено …» (the owner is told in the second case when possible).
     `way`: where it goes, when not to the responsible (tell_point)."""
+    from . import critical
     way = way or route(conn, card, owner_login)
     failure = way["why"] if way["channel"] == "owner" else ""
+    if way["channel"] == "telegram" and not critical.telegram_allowed(False):
+        # the owner 2026-11-06: an order's alert is not critical, Telegram gets it no more; the person reads it in the bell (a yellow record)
+        orders.add_event(conn, card["id"], now, AUTHOR, "notify", "Оповещение для %s (в Telegram не отправляется: туда только критичное): %s"
+                         % (way["why"], text), level="yellow")
+        conn.commit()
+        return "в колокольчике (%s)" % way["why"]
     if way["channel"] == "telegram":
         key = "order|%s|%s|%s" % (card["id"], way["to"], text)
         if notify.sent_recently(conn, key, now):                  # a repeat of the same alert (its caller failed after it): Telegram has no key
@@ -181,6 +188,9 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
         _event(conn, card["id"], now, "Оповещение не отправлено: %s; ответственному (%s) — в «Уведомлениях»" % (failure, who))
         return "не отправлено: %s; ответственному — в «Уведомлениях»" % failure
     told = ""
+    if not critical.telegram_allowed(False):                       # a failed alert is no critical news: the red record and the journal
+        _event(conn, card["id"], now, "Оповещение не отправлено: %s; в Telegram не пишется (туда только критичное)" % failure)
+        return "не отправлено: %s" % failure
     key = "owner|%s|%s|%s" % (card["id"], failure, text)
     try:
         owner = notify.notifier_for(conn, box, http=tg_http)
@@ -224,9 +234,13 @@ def missing_order_people(conn) -> List[str]:
 
 
 def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg_http: Transport = urllib_transport, now: str = "",
-                skip_logins=()) -> str:
+                skip_logins=(), critical: bool = False) -> str:
     """The same text in Telegram to each of these panel users who has a chat (the owner's login: the chat of the failure alerts), once per chat.
-    With `now`, the same text to the same chat within the hour is a repeat and is not sent again. Never raises; returns how it went."""
+    With `now`, the same text to the same chat within the hour is a repeat and is not sent again. Never raises; returns how it went.
+    Not `critical` (critical.py): nothing goes while only the critical news go to Telegram; the bell and the journal keep it."""
+    from . import critical as crit
+    if not crit.telegram_allowed(critical):
+        return "Telegram: не отправляется, туда только критичное (%s)" % ", ".join(logins)
     owner = get_owner_login(conn)
     owner_chat = str(connections.get_config(conn, "telegram", 0).get("chat_id") or "")
     mine = user_chats(conn)
@@ -264,6 +278,10 @@ def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg
     return "; ".join(parts)
 
 
+class _NotSent(Exception):
+    pass
+
+
 UNSEEN_MINUTES = 15
 UNSEEN_START_KEY = "point_unseen_start"           # app_state: the notes written before the safety net came are the past
 
@@ -297,6 +315,9 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
                 point["name"], " по заказу №%d" % note["order_id"] if note.get("order_id") else "", UNSEEN_MINUTES, note.get("text") or "")
             key = "unseen|%s" % note["id"]
             try:
+                from . import critical
+                if not critical.telegram_allowed(False):           # not critical: the yellow record of the order below and the journal
+                    raise _NotSent("в Telegram не пишется (туда только критичное)")
                 owner = notify.notifier_for(conn, box, http=tg_http)
                 if owner is None:
                     raise notify.NotifyError("Telegram не настроен")
@@ -305,6 +326,8 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
                     notify.remember_sent(conn, key, now)
                     conn.commit()                                  # kept even when the mark below fails
                 outcome = "владельцу написано в Telegram"
+            except _NotSent as err:
+                outcome = "владельцу: %s" % err
             except (notify.NotifyError, SecretKeyError) as err:
                 outcome = "владельцу написать не удалось: %s" % err
             if not points.mark_escalated(conn, note["id"], now, outcome):

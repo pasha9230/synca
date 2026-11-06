@@ -337,6 +337,7 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
                                                                                           # with an order too
     rows += missing_rows(conn, login)
     rows += purchase_rows(conn, login)
+    rows += critical_rows(conn, login, now)
     for row in rows:
         shown = stub_text(row.get("text"))
         if shown:
@@ -459,6 +460,17 @@ def purchase_rows(conn, login: str) -> List[dict]:
         return purchase_alert.bell_rows(conn, login)
     except Exception:                                                            # noqa: BLE001 - the bell must stay
         logging.getLogger("tires_sync.orders").exception("the purchase alert row failed")
+        return []
+
+
+def critical_rows(conn, login: str, now: Optional[str] = None) -> List[dict]:
+    """«Критичное» (critical.py, the owner 2026-11-06): red, for the people it was told to, until «Разобрался». Its trouble never takes the
+    bell down."""
+    from . import critical
+    try:
+        return critical.bell_rows(conn, login, now)
+    except Exception:                                                            # noqa: BLE001 - the bell must stay
+        logging.getLogger("tires_sync.orders").exception("the critical row failed")
         return []
 
 
