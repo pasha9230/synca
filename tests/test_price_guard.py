@@ -238,8 +238,8 @@ def test_the_page_is_the_owners_only(tmp_path):
 def test_the_cycle_sends_the_summary_once_with_the_link(tmp_path, monkeypatch):
     from tires_sync import cli
     sent = []
-    monkeypatch.setattr(cli, "_alert", lambda conn, box, text, **kw: (sent.append(text), True)[1])
-    monkeypatch.setenv("TIRES_PUBLIC_BASE", "https://panel.test")
+    monkeypatch.setattr(cli, "_alert", lambda conn, box, text, **kw: (sent.append(text), True)[1] if "Закупка у поставщика" not in text else True)
+    monkeypatch.setenv("TIRES_PUBLIC_BASE", "https://panel.test")              # «Закупка изменилась» is its own message (test_purchase_alert)
     prepared(tmp_path)
     at(tmp_path, 5000)
     sent.clear()
