@@ -533,9 +533,9 @@ def test_a_point_sees_that_the_client_was_written_to_but_not_the_text(panel):
     them = app.test_client()
     sign_in(them, conn, "point1")
     alerts = them.get("/alerts").get_data(as_text=True)                  # «Уведомления» before the card (opening it puts its green records out)
-    assert "Клиенту-секрет" not in alerts and "Отправлен ответ клиенту" in alerts                # the chat's green record, named only
+    assert "Клиенту-секрет" not in alerts and "Отправлен ответ клиенту" not in alerts            # a chat record: no row since 2026-11-05
     feed = json.dumps(them.get("/alerts/feed").get_json(), ensure_ascii=False)                  # the bell: the same rows
-    assert "Клиенту-секрет" not in feed and "Отправлен ответ клиенту" in feed
+    assert "Клиенту-секрет" not in feed and "Отправлен ответ клиенту" not in feed
     html = them.get("/orders/%d" % mine).get_data(as_text=True)
     assert "Клиенту-секрет" not in html                                                         # neither the task's record nor the chat's
     assert "Клиенту отправлено сообщение «Клиенту: заказ оформлен»" in html and "Отправлен ответ клиенту" in html
@@ -560,7 +560,7 @@ def test_the_records_of_the_journal_as_a_point_sees_them():
 def test_a_point_reads_the_clients_texts_only_in_an_order_of_its_own_account(panel, own):
     """The owner 2026-10-22 («Права точек»): in an order not from the point's own Avito account the point does not read the client's
     correspondence — neither the client's words nor what was written to the client (named only); in an order of its own account it reads
-    them as before. The card and «Уведомления» alike; the message to the point itself is always whole."""
+    them as before. The card (in «Уведомления» the chat records are no rows since 2026-11-05); the message to the point itself is always whole."""
     from tires_sync import chats
     app, conn, fake, avito, box, client = panel
     mine = placed_waiting(panel)
@@ -579,7 +579,7 @@ def test_a_point_reads_the_clients_texts_only_in_an_order_of_its_own_account(pan
     sign_in(them, conn, "point1")
     alerts = them.get("/alerts").get_data(as_text=True) + json.dumps(them.get("/alerts/feed").get_json(), ensure_ascii=False)   # before the card
     card = them.get("/orders/%d" % mine).get_data(as_text=True)
-    assert ("входящий-секрет" in alerts) == own and ("входящий-секрет" in card) == own
+    assert "входящий-секрет" not in alerts and ("входящий-секрет" in card) == own              # «Уведомления»: no chat rows since 2026-11-05
     assert ("Клиенту-секрет" in card) == own and ("Клиенту отправлено сообщение «Клиенту: заказ оформлен»" in card) == (not own)
     assert "Заказ 5001, перемещение 26R-922352" in card                                          # the message to the point: always its own
     owner = page(client, mine)

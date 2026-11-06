@@ -569,7 +569,7 @@ def register(app) -> None:
             from .routes_alerts import grouped
             order = order_alerts.ALERT_LEVELS
             found = {}
-            for row in grouped(conn, session["user"]):
+            for row in grouped(conn, session["user"], everything=True):   # the dots: the chats and the stages too
                 order_id = row["order_id"] if row["order_id"] is not None else row.get("of_order")   # «Срочно ответить» of the order's chat
                 have = found.get(order_id)
                 if have is None or order.index(row["level"]) < order.index(have):

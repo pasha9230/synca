@@ -20,7 +20,7 @@ def test_the_bell_is_on_every_page_with_the_menu_number(tmp_path):
     for url in ("/", "/alerts", "/orders", "/chats"):
         html = client.get(url).get_data(as_text=True)
         assert 'id="bell-btn"' in html and "bell.js" in html and "bell.css" in html, url
-        assert bell_count(html) == counter(html)[0] == 2, url
+        assert bell_count(html) == counter(html)[0] == 1, url                # «Заказ создан» is no row (2026-11-05)
 
 
 def test_no_alerts_no_number_and_no_bell_when_logged_out(tmp_path):
@@ -37,9 +37,9 @@ def test_the_feed_needs_a_login(tmp_path):
 
 def test_the_feed_is_the_page_rows_folded_and_limited(tmp_path):
     app, client, tok, conn = setup(tmp_path)
-    cid = card(conn, "Ольга")                                           # «Заказ создан» (green)
+    cid = card(conn, "Ольга")                                           # «Заказ создан» (green): no row (2026-11-05)
     for i in range(3):
-        event(conn, cid, "chat", "Клиент написал %d" % i, level="green")  # folds into one row
+        event(conn, cid, "point", "Точка ответила %d" % i, level="green")
     red = event(conn, cid, "notify", "Оповещение не отправлено: нет ВК")
     data = client.get("/alerts/feed").get_json()
     page = client.get("/alerts").get_data(as_text=True)
@@ -48,7 +48,7 @@ def test_the_feed_is_the_page_rows_folded_and_limited(tmp_path):
     assert {"id", "order_id", "level", "client", "text", "more", "at"} <= set(data["items"][0])
     assert all(i["order_id"] == cid and i["client"] == "Ольга" for i in data["items"])
     assert any(i["id"] == red and i["level"] == "red" for i in data["items"])
-    assert any(i["more"] == 2 for i in data["items"])
+    assert len(data["items"]) == data["count"] == 4
     for i in range(15):
         event(conn, card(conn, "К%d" % i), "reserve", "Оповещение о конце резерва")
     data = client.get("/alerts/feed").get_json()
