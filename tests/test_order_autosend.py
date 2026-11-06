@@ -205,6 +205,8 @@ def test_a_402_of_ask_is_not_retried_after_the_client_answered(env):
     auto.run(conn, "2026-11-11T15:02:30", lambda *a: pytest.fail("no send"))
     item = auto.get(conn, aid)
     assert item["status"] == "cancelled" and "клиент ответил" in item["reason"]
+    [task] = open_tasks(conn, card)
+    assert task[4] is not None                                               # its task is cancelled with it: nobody writes it by hand
 
 
 def test_a_402_for_good_ends_failed_with_its_task(env):
@@ -304,3 +306,67 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     r = post(client, "/orders/%d/autosend" % card, tok, kind="ask", due_at=due, text="Из чата", chat=str(row))
     assert r.status_code == 302 and r.headers["Location"].endswith("/chats/%d#autosend" % row)
     assert [i["text"] for i in auto.of_order(conn, card) if i["status"] == "pending"] == ["Из чата"]
+
+
+# --- the review of 2026-11-06 ----------------------------------------------------------------------------------------------------------
+
+def point_visible(conn, card):
+    """The records of the order's journal a manager of a point is shown (the card's filter, panel/routes_orders.card_page)."""
+    return [e["text"] for e in orders.list_events(conn, card) if not auto.for_office(e)]
+
+
+def test_a_send_writes_one_green_record_and_none_a_point_sees(env):
+    conn, _row, card = env
+    before = point_visible(conn, card)
+    auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    auto.run(conn, AT, deliver_by(conn, Sender(), AT))
+    greens = [e for e in orders.list_events(conn, card) if e["level"] == "green" and e["kind"] in ("chat", auto.EVENT)]
+    assert len(greens) == 1 and greens[0]["kind"] == auto.EVENT
+    assert point_visible(conn, card) == before
+
+
+def test_through_a_402_and_its_retry_a_point_sees_nothing_either(env):
+    conn, _row, card = env
+    before = point_visible(conn, card)
+    sender = Refusing(refused402())
+    auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    auto.run(conn, AT, deliver_by(conn, sender, AT))
+    chats.settle_sends(conn, sender, lambda: sender, 1, "2026-11-11T15:02:00")
+    auto.run(conn, "2026-11-11T15:02:30", lambda *a: pytest.fail("no second one"))
+    assert point_visible(conn, card) == before
+    reds = [e for e in orders.list_events(conn, card) if e["level"] == "red"]
+    assert all(e["kind"] == auto.EVENT for e in reds)                        # the office still has the send's own red record of the 402
+
+
+def test_a_lost_one_ends_failed_and_never_goes_by_itself(env):
+    conn, _row, card = env
+    aid = auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    auto.run(conn, AT, lambda row, text, token: (_ for _ in ()).throw(chats.ChatSendUnknown("таймаут")))
+    assert auto.get(conn, aid)["status"] == "waiting"
+    conn.execute("INSERT OR REPLACE INTO chat_send_log (token, chat_row, at, author, status) VALUES (?, 1, ?, 'система', 'lost')",
+                 (auto.TOKEN % (card, aid), AT))                              # the sync did not find it in the chat
+    conn.commit()
+    auto.run(conn, LATER, lambda *a: pytest.fail("never by itself"))
+    item = auto.get(conn, aid)
+    assert item["status"] == "failed" and "Отправить снова" in item["reason"] and len(open_tasks(conn, card)) == 1
+
+
+def test_a_stopped_run_after_a_refusal_does_not_try_again(env):
+    conn, _row, card = env
+    aid = auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    conn.execute("UPDATE order_autosend SET status = 'sending', updated_at = ? WHERE id = ?", (AT, aid))      # the run died after the refusal
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status, error) VALUES (?, 1, ?, 'система', 'failed', 'HTTP 400')",
+                 (auto.TOKEN % (card, aid), AT))
+    conn.commit()
+    auto.run(conn, "2026-11-11T15:30:00", lambda *a: pytest.fail("no new try"))
+    assert auto.get(conn, aid)["status"] == "failed"
+
+
+def test_it_goes_and_comes_back_with_the_order(env):
+    from tires_sync import trash
+    conn, _row, card = env
+    aid = auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    record = trash.delete_order(conn, card, "2026-11-10T11:00:00", "owner")
+    auto.run(conn, "2026-11-10T11:01:00", lambda *a: pytest.fail("no order"))
+    trash.restore_order(conn, record, "2026-11-10T12:00:00", "owner")
+    assert auto.get(conn, aid)["status"] == "pending"

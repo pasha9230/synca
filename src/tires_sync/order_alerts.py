@@ -28,7 +28,7 @@ def level_for(kind: str, text: str) -> str:
         return "green"
     if kind == "sale":
         return "yellow" if text.startswith("Продажа сторнирована") else "green"
-    if kind == "chat":
+    if kind in ("chat", "autosend"):                                 # «autosend»: a send of order_autosend, coloured as any send
         if text.startswith(("Позиция не", "Сообщение клиенту не", "Фото клиенту не")):
             return "red"
         if text.startswith(("Отправлен ответ клиенту", "Отправлено фото клиенту")):

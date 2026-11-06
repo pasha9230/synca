@@ -204,7 +204,7 @@ def _task(conn, item: dict, why: str, note: str, now: str) -> None:
     try:
         owner = order_notify.get_owner_login(conn)
         task_id = tasks.add(conn, kind="other", title="%s: заказ №%d" % (TASK_TITLE, item["order_id"]), due_at=now[:16],
-                            note="%s. %s Текст: %s" % (why, note, item["text"]), now=now, author=AUTHOR, owner_login=owner,
+                            note="%s. %s Текст: %s" % (why.rstrip(". "), note, item["text"]), now=now, author=AUTHOR, owner_login=owner,
                             assignee=tasks.default_assignee(conn, owner, owner, item["order_id"]), order_id=item["order_id"])
         conn.execute("UPDATE order_autosend SET task_id = ? WHERE id = ?", (task_id, item["id"]))
         conn.commit()
@@ -215,8 +215,8 @@ def _task(conn, item: dict, why: str, note: str, now: str) -> None:
 
 BY_HAND = "Проверьте чат Авито заказа и напишите клиенту вручную."
 NOT_TWICE = "Проверьте чат Авито заказа: если сообщения там нет, напишите клиенту вручную. Повторно само не отправится."
-RETRY = "Авито отказал (402). Система повторит сама несколько раз в течение 30 минут; если не выйдет, в ленте заказа будет «не отправлено». " \
-        "Вручную не дублируйте, пока не проверите чат."
+RETRY = "Система повторит сама в течение 30 минут; если не выйдет, в ленте заказа будет «не отправлено». Вручную не дублируйте, пока не проверите чат."
+LOST = "не дошло (в чате Авито его нет): отправьте его кнопкой «Отправить снова» в чате или напишите клиенту вручную"
 
 
 def _send(conn, item: dict, deliver: Optional[Deliver], now: str, started: bool) -> str:
@@ -232,6 +232,12 @@ def _send(conn, item: dict, deliver: Optional[Deliver], now: str, started: bool)
     card = orders.get_card(conn, item["order_id"])
     if not started and datetime.fromisoformat(now[:16]) - datetime.fromisoformat(item["due_at"]) > LATE:
         return _failed(conn, item, "не ушло вовремя: система не отправляла сообщения с %s" % _shown(item["due_at"]), BY_HAND, now)
+    if started:                                                      # a refusal or «не дошло» already settled by its mark: final, no new try
+        mark = conn.execute("SELECT status, error FROM chat_send_log WHERE token = ?", (item["token"],)).fetchone()
+        if mark and mark[0] == "failed":
+            return _failed(conn, item, "Авито не принял сообщение%s" % (": " + str(mark[1])[:200] if mark[1] else ""), BY_HAND, now)
+        if mark and mark[0] == "lost":
+            return _failed(conn, item, LOST, BY_HAND, now)
     status, why, _copy = order_manager.send_to_client(conn, card, item["text"], item["token"], deliver, now)
     if status == "sent":
         return _sent(conn, item, now)
@@ -252,14 +258,20 @@ def _sent(conn, item: dict, now: str) -> str:
     orders.add_event(conn, item["order_id"], now, AUTHOR, EVENT, "Автосообщение клиенту отправлено («%s» на %s, поставил(а) %s): %s" % (
         item["kind_name"], _shown(item["due_at"]), item["created_by"], item["text"]), level="green")
     conn.commit()
-    if item.get("task_id"):
-        from . import tasks
-        try:
-            tasks.close(conn, item["task_id"], "done", now, AUTHOR, "ушло само")
-            conn.commit()
-        except Exception:                                            # closed by a person already
-            conn.rollback()
+    _close_task(conn, item, "done", "ушло само", now)
     return "sent"
+
+
+def _close_task(conn, item: dict, how: str, result: str, now: str) -> None:
+    """The task of the responsible about this message, once it went by itself or may no longer go. No raise (closed by a person already)."""
+    if not item.get("task_id"):
+        return
+    from . import tasks
+    try:
+        tasks.close(conn, item["task_id"], how, now, AUTHOR, result)
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
 
 def _failed(conn, item: dict, why: str, note: str, now: str) -> str:
@@ -274,6 +286,8 @@ def _failed(conn, item: dict, why: str, note: str, now: str) -> str:
 def _settle(conn, item: dict, now: str) -> str:
     """A message whose outcome was not known (a 402 the sync sends again, a lost answer): what its send mark says now."""
     mark = conn.execute("SELECT status, error FROM chat_send_log WHERE token = ?", (item["token"],)).fetchone()
+    if mark is not None and mark[0] == "lost":                       # not in the chat: it goes again only by a person's «Отправить снова»
+        return _failed(conn, item, LOST, BY_HAND, now)
     if mark is None or mark[0] not in ("sent", "failed"):
         return ""
     if mark[0] == "sent":
@@ -282,6 +296,7 @@ def _settle(conn, item: dict, now: str) -> str:
     if error.startswith("остановлено: "):                            # the sync stopped it: cancelled or the order closed (stop_reason)
         if _cancel(conn, item, error[len("остановлено: "):], now, AUTHOR, ("waiting",)):
             conn.commit()
+            _close_task(conn, item, "cancel", "автосообщение отменено: " + error[len("остановлено: "):], now)
             return "cancelled"
         return ""
     return _failed(conn, item, "Авито не принял сообщение и система больше не повторяет%s" % (": " + error[:200] if error else ""), BY_HAND, now)

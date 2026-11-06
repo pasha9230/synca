@@ -38,6 +38,8 @@ def base(tmp_path):
                  "'o', 'order', 'Оформить')", (card, NOW))                       # «Задачи» of the order (2026-10-31): go and come back with it
     conn.execute("INSERT INTO order_unsent (order_id, token, at, why, text) VALUES (?, 'tok-unsent', ?, 'Авито отказал', 'Добрый день')",
                  (card, NOW))                                                    # «Не дошло клиенту» (2026-10-31): goes and comes back with it
+    conn.execute("INSERT INTO order_autosend (order_id, kind, due_at, text, created_at, created_by, updated_at) VALUES (?, 'deal', "
+                 "'2026-10-24T10:00', 'Добрый день', ?, 'o', ?)", (card, NOW, NOW))   # «Автосообщение клиенту» (2026-11-06): the same
     conn.commit()
     return conn, fake, account, chats.get_chat(conn, chat["id"]), card
 
