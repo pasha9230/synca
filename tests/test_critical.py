@@ -378,3 +378,35 @@ def test_a_purchase_notice_does_not_silence_a_failed_service(tmp_path, monkeypat
     cli._alert(conn, box, "Tires Sync: Закупка у поставщика изменилась: 1 позиция", notice=True, critical=True)
     cli._alert(conn, box, "Tires Sync: служба tires-pull.service завершилась с ошибкой.", service=True, critical=True)
     assert http.tg == ["1000", "1000"]
+
+
+# --- по третьему ревью ---------------------------------------------------------------------------------------------------------------
+
+def test_a_failed_message_to_a_point_is_not_critical_even_naming_the_client_field(tmp_path, monkeypatch):
+    conn, box, http = env(tmp_path, monkeypatch)
+    critical.forward_red(conn, box, NOW, tg_http=http, vk_http=http)
+    card_id = orders.create_card(conn, {"client_name": "Иван", "responsible": "robot"}, NOW, "robot")
+    for text in ("Сообщение точке «Менеджеру: заказ оформлен» не отправлено: не хватает: Клиент.",
+                 "Позиция не определена: клиенту нужна другая шина"):
+        orders.add_event(conn, card_id, NOW, "система", "chat", text, level="red")
+    conn.commit()
+    assert critical.forward_red(conn, box, NOW, tg_http=http, vk_http=http) == 0 and http.tg == [] and http.vk == []
+
+
+def test_each_order_note_is_its_own_row_and_goes_on_its_own_разобрался(tmp_path, monkeypatch):
+    conn, box, http = env(tmp_path, monkeypatch)
+    for n in range(3):
+        critical.note(conn, ["zaman"], "Заказ №%d: резерв заканчивается" % n, NOW)
+    rows = critical.bell_rows(conn, "zaman", action=critical.NOTE)
+    assert [r["text"] for r in rows] == ["Заказ №2: резерв заканчивается", "Заказ №1: резерв заканчивается", "Заказ №0: резерв заканчивается"]
+    critical.ack(conn, int(rows[0]["ack_href"].split("/")[3]), "zaman")
+    conn.commit()
+    assert [r["text"] for r in critical.bell_rows(conn, "zaman", action=critical.NOTE)] == [
+        "Заказ №1: резерв заканчивается", "Заказ №0: резерв заканчивается"]
+
+
+def test_a_login_named_on_a_bell_row_is_not_free_for_another_person(tmp_path, monkeypatch):
+    conn, _box, _http = env(tmp_path, monkeypatch)
+    assert not users.login_taken(conn, "gone")
+    critical.note(conn, ["gone"], "Заказ №5: клиент не пришёл", NOW)
+    assert users.login_taken(conn, "gone")

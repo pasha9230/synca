@@ -2611,7 +2611,10 @@ def _critical_look(conn, box, now: str) -> None:
         if passed:
             print("критичное: сбоев по заказам передано: %d" % passed)
     except Exception as err:      # noqa: BLE001
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:         # noqa: BLE001 - never into the reading of the chats
+            pass
         print("предупреждение: критичные сбои по заказам не переданы (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 

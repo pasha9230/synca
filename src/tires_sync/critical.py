@@ -161,31 +161,73 @@ def note(conn, logins: Iterable[str], text: str, now: str) -> bool:
         return False
 
 
+NOTE_SHOWN = 20                    # the bell shows this many own notes one by one (the rest: «more» on the last one)
+NOTE_ACKED = "staff_note_acked:"   # app_state: "<NOTE_ACKED><login>" -> JSON list of the notes this person pressed «Разобрался» on
+
+
+def _acked_notes(conn, login: str) -> List[int]:
+    try:
+        return [int(x) for x in json.loads(store.get_state(conn, NOTE_ACKED + login) or "[]")]
+    except (ValueError, TypeError):
+        return []
+
+
 def bell_rows(conn, login: str, now: Optional[str] = None, action: str = BELL) -> List[dict]:
-    """The red row of the bell of this kind (BELLS): the newest news of this person not yet «Разобрался» (younger than BELL_DAYS with `now`);
-    the older ones are counted in it («more») and go with it."""
+    """The red rows of the bell of this kind (BELLS), younger than BELL_DAYS with `now`. «Критичное»: one row, the newest not yet «Разобрался»,
+    the older ones counted in it («more») and going with it. «Оповещение» (an order's alert that a person once read in Telegram one by one):
+    a row each, the NOTE_SHOWN newest, each until its own «Разобрался»."""
     prefix, title, mark = BELLS[action]
     seen = int(store.get_state(conn, mark + login) or 0)
+    acked = set(_acked_notes(conn, login)) if action == NOTE else set()
     border = _border(now, timedelta(days=BELL_DAYS)) if now else ""
     found = []
     for row_id, at, detail in conn.execute("SELECT id, at, detail FROM audit WHERE action = ? AND id > ? ORDER BY id DESC", (action, seen)):
+        if row_id in acked:
+            continue
         try:
             data = json.loads(detail or "{}")
         except ValueError:
             continue
         if login in (data.get("to") or []) and (at or "") >= border:
             found.append((row_id, at, str(data.get("text") or "")))
-    if not found:
-        return []
-    row_id, at, text = found[0]
-    return [{"id": "%s-%d" % (prefix, row_id), "order_id": None, "chat_row": None, "client": "", "at": at, "author": "", "kind": prefix,
-             "level": "red", "more": len(found) - 1, "title": title, "text": text[:300], "href": "/alerts",
-             "ack_href": "/alerts/critical/%d/ack" % row_id}]
+    shown = found[:NOTE_SHOWN] if action == NOTE else found[:1]
+    rows = [{"id": "%s-%d" % (prefix, row_id), "order_id": None, "chat_row": None, "client": "", "at": at, "author": "", "kind": prefix,
+             "level": "red", "more": 0, "title": title, "text": text[:300], "href": "/alerts", "ack_href": "/alerts/critical/%d/ack" % row_id}
+            for row_id, at, text in shown]
+    if rows:
+        rows[-1]["more"] = len(found) - len(shown)
+    return rows
+
+
+def ack(conn, row_id: int, login: str) -> None:
+    """«Разобрался»: «Критичное» — this news and every older one leave this person's bell; «Оповещение» — this one only. No commit of its own."""
+    action = action_of(conn, row_id)
+    if action is None:
+        return
+    if action == NOTE:
+        kept = [x for x in _acked_notes(conn, login) if x != int(row_id)][-499:] + [int(row_id)]     # the newest 500: never pile up
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (NOTE_ACKED + login, json.dumps(kept)))
+        return
+    mark = BELLS[action][2] + login
+    if int(row_id) > int(store.get_state(conn, mark) or 0):
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (mark, str(int(row_id))))
+
+
+def names_login(conn, login: str) -> bool:
+    """Is this login among the people of a bell row (users.login_taken: a new person of the name must not get them)."""
+    for (detail,) in conn.execute("SELECT detail FROM audit WHERE action IN (%s) AND detail LIKE ?" % ",".join("?" * len(BELLS)),
+                                  list(BELLS) + ['%' + json.dumps(login, ensure_ascii=False) + '%']):
+        try:
+            if login in (json.loads(detail or "{}").get("to") or []):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def rename_login(conn, old: str, new: str) -> None:
     """Inside the caller's transaction (users.rename_login): the person's rows of the bell and their «Разобрался» marks follow the new login."""
-    for _prefix, _title, mark in BELLS.values():
+    for mark in [m for _p, _t, m in BELLS.values()] + [NOTE_ACKED]:
         conn.execute("DELETE FROM app_state WHERE key = ?", (mark + new,))
         conn.execute("UPDATE app_state SET key = ? WHERE key = ?", (mark + new, mark + old))
     for row_id, detail in conn.execute("SELECT id, detail FROM audit WHERE action IN (%s) AND detail LIKE ?" % ",".join("?" * len(BELLS)),
@@ -205,21 +247,12 @@ def action_of(conn, row_id: int) -> Optional[str]:
     return row[0] if row and row[0] in BELLS else None
 
 
-def ack(conn, row_id: int, login: str) -> None:
-    """«Разобрался»: this news and every older one of its kind leave this person's bell. No commit of its own."""
-    action = action_of(conn, row_id)
-    if action is None:
-        return
-    mark = BELLS[action][2] + login
-    if int(row_id) > int(store.get_state(conn, mark) or 0):
-        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (mark, str(int(row_id))))
-
-
 def _critical_red(kind: str, text: str) -> bool:
     """A red record that is critical: every red failure of a rule; of the chat records only a send to a client that failed (not «Позиция не
     определена», not a message to a point)."""
     text = str(text or "")
-    return kind == "rule" or ("клиент" in text.lower() and not text.startswith("Позиция не"))
+    low = text.lower()
+    return kind == "rule" or ("клиенту" in low and not low.startswith(("позиция не", "сообщение точке", "точке")))
 
 
 def forward_red(conn, box, now: str, tg_http: Transport = urllib_transport, vk_http: Transport = urllib_transport) -> int:

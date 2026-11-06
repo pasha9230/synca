@@ -550,7 +550,8 @@ def login_taken(conn, login: str) -> bool:
             return True
     if conn.execute("SELECT 1 FROM order_event WHERE kind = 'field' AND text = ? LIMIT 1", (RESPONSIBLE_MARK + login,)).fetchone():
         return True
-    return _json_places(conn, login, None) > 0
+    from . import critical
+    return _json_places(conn, login, None) > 0 or critical.names_login(conn, login)
 
 
 def rename_login(conn, old: str, new: str) -> None:

@@ -226,7 +226,8 @@ def register(app):
         from .. import critical
         conn = get_conn()
         action = critical.action_of(conn, row_id)
-        if action is None or not critical.bell_rows(conn, session["user"], action=action):
+        if action is None or not any(r["ack_href"] == "/alerts/critical/%d/ack" % row_id
+                                     for r in critical.bell_rows(conn, session["user"], action=action)):
             abort(404)
         critical.ack(conn, row_id, session["user"])
         conn.commit()
