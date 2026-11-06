@@ -193,12 +193,16 @@ class OrdersClient:
         return (data if isinstance(data, list) else []), _int_header(headers, "x-pagination-page-count")
 
     def items(self, order_id, per_page: int = 100, max_pages: int = 5) -> list:
-        """The positions of a WebMIM order as WebMIM gives them (goodsId, quantity, price, sum, goodsName), every page up to `max_pages`."""
+        """The positions of a WebMIM order as WebMIM gives them (goodsId, quantity, price, sum, goodsName), every page up to `max_pages`.
+        An answer 200 that is not a list of rows: OrdersError (status 200) — read as «no positions» it would make «Досоздать» send them all again."""
         text = _order_id(order_id)
         rows: list = []
         for page in range(1, max_pages + 1):
-            data, headers = self.get_with_headers("/api/v2/orders/%s/items" % text, {"page": page, "per-page": int(per_page)})
-            rows.extend(row for row in (data if isinstance(data, list) else []) if isinstance(row, dict))
+            path = "/api/v2/orders/%s/items" % text
+            data, headers = self.get_with_headers(path, {"page": page, "per-page": int(per_page)})
+            if not isinstance(data, list) or not all(isinstance(row, dict) for row in data):
+                raise OrdersError("%s: ответ WebMIM не список позиций." % path, 200)
+            rows.extend(data)
             if page >= _int_header(headers, "x-pagination-page-count") or not data:
                 break
         return rows

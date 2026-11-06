@@ -114,9 +114,7 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
                 "tochki_text": "", "items": [], "late_text": LATE_TEXT}
     mine = dict(card, items=own)
     kind = supplier_of(conn, card)
-    state = webmim_create.get_state(conn, card["id"])
-    lost = bool(state and not state["webmim_id"] and state["state"] in ("unknown", "running"))       # as _claim: it looks for the order first
-    found = webmim_create.checks(conn, card, today, "lost" if lost else "new") if kind != "tochki" else _tochki_checks(conn, card, today)
+    found = webmim_create.checks(conn, card, today) if kind != "tochki" else _tochki_checks(conn, card, today)
     if kind == "mixed":
         found.append(("territory", "В заказе позиции разных поставщиков: оформите их отдельными заказами."))
     bad = {}
@@ -133,8 +131,8 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
             "point": ("«%s», адрес WebMIM %s" % (point["name"], point["webmim_address_id"]) if kind == "webmim" else
                       "«%s», %s" % (point["name"], point["address"])) if point else "",
             "phone": webmim_create.webmim_phone(point["manager_phone"]) if point else "",
-            "time": (card.get("delivery_time") or point["default_time"]) if point else "",
-            "contact": "%s · «%s»" % (webmim_create.CONTACT, webmim_create.NOTE_FOR_SUPPLIER),
+            "time": webmim_create.MIM_TIME if kind != "tochki" else (card.get("delivery_time") or point["default_time"]) if point else "",
+            "contact": "%s · «%s»" % (webmim_create.CONTACT, webmim_create.MIM_NOTE if kind != "tochki" else webmim_create.NOTE_FOR_SUPPLIER),
             "date": _day(card.get("delivery_date")), "stage": "данных хватает"}
     lines = []
     for key, label in LINES:
@@ -146,6 +144,7 @@ def view(conn, card: dict, parsed, now: str) -> Optional[dict]:
     out = {"supplier": kind, "lines": lines, "blocked": blocked, "late": late, "fields": None, "fingerprint": "", "tochki_text": "",
            "tomorrow": (today + timedelta(days=1)).isoformat(), "late_text": LATE_TEXT, "all_oth": False, "oth": oth,
            "items": [i for i in own if int(i["qty"] or 0) > 0]}
+    out["sum"] = round(sum(float(i["supplier_price"] or 0) * int(i["qty"]) for i in out["items"]), 2)     # the purchase of the window (the panel's price)
     if not blocked:
         out["fields"] = webmim_create.fields(conn, card)
         out["fingerprint"] = webmim_create.fingerprint(conn, card)

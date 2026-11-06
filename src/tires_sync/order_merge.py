@@ -221,6 +221,9 @@ def _why_not_source(conn, card: dict) -> Optional[str]:
         return "Заказ №%s сейчас оформляется в WebMIM: дождитесь итога." % label
     if state and state[0] not in ("refused", "done"):                   # «partial»: part of it is not in WebMIM yet («Досоздать»)
         return "Заказ №%s оформлен в WebMIM не полностью: сначала досоздайте его." % label
+    if state and state[0] == "done" and not _placed(conn, card["id"]):  # made by the button, its id cleared from the card: without a number
+        return ("Заказ №%s оформлен в WebMIM кнопкой, а поля WebMIM в карточке очищены: впишите ID заказа WebMIM (блок «WebMIM») "
+                "или подтвердите, что его там нет, затем объединяйте." % label)  # its tyres would look unordered and be bought again
     if card["stage"]["code"] == "oth":
         if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (card["id"],)).fetchone():
             return "По заказу №%s согласован возврат поставщику: объединить его нельзя." % label
