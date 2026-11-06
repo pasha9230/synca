@@ -37,6 +37,59 @@ def other_chat(conn, chat_row, order_id=None):
     return row
 
 
+# --- 3. the price is never below the ad -------------------------------------------------------------------------------------------------------
+
+def test_a_price_below_the_ad_names_the_price_of_the_ad(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    published(conn, chat_row, "100", 9100)
+    run(conn, sender, [tire()])
+    assert sender.sent and "9 100 ₽" in sender.sent[0] and "8 500" not in sender.sent[0]
+    assert order_wait.form_text(conn, orders.get_card(conn, card), [tire()], price_of, chat_row).count("9 100 ₽") == 1
+
+
+def test_a_price_above_the_ad_stays(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    published(conn, chat_row, "100", 7000)
+    run(conn, sender, [tire()])
+    assert "8 500 ₽" in sender.sent[0]
+
+
+def test_the_ad_of_another_position_of_the_same_tire_counts_and_held_tires_do_not_stop_the_form(env):
+    conn, chat_row = env
+    published(conn, chat_row, "100", 9300)                                                      # the WebMIM position the client saw
+    first = waiting(env)
+    run(conn, Sender(), [tire()])                                                               # the WebMIM tires go to the first order
+    second = waiting(env)
+    conn.execute("UPDATE avito_chat SET order_id = ? WHERE id = ?", (second, chat_row))
+    conn.commit()
+    words = order_wait.form_text(conn, orders.get_card(conn, second), [tire(), s2()], price_of, chat_row)
+    assert "9 300 ₽" in words and orders.get_card(conn, first)["stage"]["code"] == "wait"
+
+
+def s2(**changes):
+    return tire(**{"goods_id": "s2-200", "brand_key": "S2:IKON TYRES", "code": "TS2", "name_orig": "S2 Ikon 205/55 R16", **changes})
+
+
+def test_without_the_price_of_the_ad_the_price_stays_and_the_journal_says_so(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire()])
+    assert "8 500 ₽" in sender.sent[0]
+    notes = [e["text"] for e in orders.list_events(conn, card) if "цена объявления" in e["text"].lower()]
+    assert len(notes) == 1 and "8 500" in notes[0]
+
+
+def test_the_ad_floor_leaves_the_files_of_the_feed_alone(env):
+    conn, chat_row = env
+    published(conn, chat_row, "100", 9100)
+    before = conn.execute("SELECT * FROM published_state").fetchall()
+    card = waiting(env)
+    run(conn, Sender(), [tire()])
+    assert conn.execute("SELECT * FROM published_state").fetchall() == before
+
+
 # --- 4. one dot ----------------------------------------------------------------------------------------------------------------------------------
 
 def test_the_body_of_the_task_has_no_double_dot(env):

@@ -345,9 +345,22 @@ def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, le
     return None, 0, "у позиции %s нет цены продажи." % (pick.code or pick.goods_id)
 
 
-def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_of: PriceOf, left: Dict[str, int]) -> Tuple[str, str, list]:
+def _ad_price(conn, line: dict, stock: List, chat) -> Optional[float]:
+    """The price of one tyre of the line in the ad of the account of the chat (order_offers.ad_prices, what the feed published; the files of the
+    feed are only read): the highest of the positions of this tire in stock, whichever of them the client saw and whatever other orders hold
+    of them. None when no ad of the account has it."""
+    from . import order_offers
+    found = _matches(line, stock)
+    prices = order_offers.ad_prices(conn, order_offers.account_for(conn, chat_row=chat), [o.goods_id for o in found]) if found else {}
+    return float(max(prices.values())) if prices else None
+
+
+def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_of: PriceOf, left: Dict[str, int],
+                notes: Optional[List[str]] = None) -> Tuple[str, str, list]:
     """The words for the client, "" and the positions they name [[position, pieces]]; or "", why they cannot go and []: nothing goes with an
-    empty name or price or a placeholder left, nor with a price nobody can tell (_line_price)."""
+    empty name or price or a placeholder left, nor with a price nobody can tell (_line_price). The price of a piece is never below the price of
+    the ad of the account of the chat (the owner 2026-11-05: «можем продавать дороже», never cheaper than the ad): below it, the ad's; the ad
+    not known, the price as it is and a line in `notes` for the order's journal."""
     body = message_texts.body(conn, message_texts.WAIT_FOUND)
     if set(templates.PLACEHOLDER.findall(body)) != {"name", "price"}:
         return "", "в шаблоне «%s» нужны {name} и {price}, других подстановок быть не может." % message_texts.entry(message_texts.WAIT_FOUND)["name"], []
@@ -357,6 +370,12 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
         offer, price, why = _line_price(conn, line, pick, stock, chat, price_of, left)
         if why:
             return "", why, []
+        floor = _ad_price(conn, line, stock, chat)
+        if floor is None and notes is not None:
+            notes.append("Цена объявления позиции %s не определена: в сообщении о наличии расчётная цена %s ₽." % (
+                offer.code or offer.goods_id, templates.money(price)))
+        elif floor is not None and price < floor:
+            price = floor
         name = " ".join(str(offer.name_orig or offer.name or "").split())
         if not name:
             return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id), []
@@ -472,9 +491,14 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
         return None
     if chats._unread(conn, chat):                                  # our message would count as the answer and wipe «Клиент написал»
         return NOT_SENT % "клиент написал в чат и ждёт ответа.", ""
-    text, why, held = _found_text(conn, lines, picks, stock, chat, price_of, left or {})
+    notes: List[str] = []
+    text, why, held = _found_text(conn, lines, picks, stock, chat, price_of, left or {}, notes)
     if why:
         return NOT_SENT % why, ""
+    for note in dict.fromkeys(notes):                              # the ad's price not known: the price as it is, and the journal says so
+        if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text = ? AND at >= ? LIMIT 1", (card_id, note, stay)).fetchone():
+            orders.add_event(conn, card_id, now, AUTHOR, "chat", note, level="yellow")
+    conn.commit()
     token = _token(card_id, stay)
     key = SENT_TEXT % token                                        # the words that go: the history has these, the price may change before it is written
     store.set_state(conn, key, text)
