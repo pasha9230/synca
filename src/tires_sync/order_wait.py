@@ -34,6 +34,7 @@ NAME_WORDS = re.compile(r"\d{3}[/ ]?\d{2}([/ ]?Z?R?\d{2}C?)?|Z?R\d{2}C?|\d{2,3}(
 BEFORE_MODEL = re.compile(r"\d{2,3}|[A-Z]")                 # in WebMIM's own names the indexes stand before the model: «IKON 205/55/16 T 94 Test Model»
 HELD = "wait_held:%s"                                # app_state, per send mark: the positions the client was told of, [[position, pieces]]: they are held
 SENT_TEXT = "wait_text:%s"                           # app_state, per send mark: the words of a send until it is known to have gone
+NOTES = "wait_notes:%s"                              # app_state, per send mark: the journal lines that wait for the send to go (_note)
 TITLE_EXACT, TITLE_ANALOG = "Позиция появилась: предложите клиенту", "Есть аналоги: можно предложить клиенту"
 TITLE_CHECK = "Позиция появилась: проверьте чат клиента"    # the message may have gone: the same task, without the card's form «отправить клиенту»
 AUTHOR = "лист ожидания"
@@ -500,18 +501,18 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
     key = SENT_TEXT % token                                        # the words that go: the history has these, the price may change before it is written
     store.set_state(conn, key, text)
     store.set_state(conn, HELD % token, json.dumps(held))
+    if notes:                                                      # an unknown outcome delivered later (`delivered`) writes them then
+        store.set_state(conn, NOTES % token, json.dumps(list(dict.fromkeys(notes))))
     status, why, _copy = order_manager.send_to_client(conn, card, text, token, deliver, now)
     if status == "sent":
         orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD + text, level="green")
-        for note in dict.fromkeys(notes):                          # the ad's price not known: the price as it is; the journal says so once it went
-            if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text = ? AND at >= ? LIMIT 1", (card_id, note, stay)).fetchone():
-                orders.add_event(conn, card_id, now, AUTHOR, "chat", note, level="yellow")
+        _notes(conn, card_id, token, stay, now)
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
         _tag(conn, card_id, card, "exact", now)
         return None
     if status == "failed":
-        conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (key, HELD % token))
+        conn.execute("DELETE FROM app_state WHERE key IN (?, ?, ?)", (key, HELD % token, NOTES % token))
         orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение клиенту «появилось в наличии» не отправлено: %s" % why, level="red")
         conn.commit()
         return NOT_SENT % why, ""
@@ -521,6 +522,15 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
     orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение клиенту «появилось в наличии»: %s" % said, level="yellow" if mark == "retry" else "red")
     conn.commit()
     return "Сообщение клиенту «появилось в наличии»: %s" % said, TITLE_CHECK
+
+
+def _notes(conn, card_id, token: str, stay: str, now: str) -> None:
+    """The journal lines kept for a send (the ad's price not known: the price as it is), written once it went (the owner 2026-11-06), once per
+    stay; then forgotten. No commit."""
+    for note in json.loads(store.get_state(conn, NOTES % token) or "[]"):
+        if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text = ? AND at >= ? LIMIT 1", (card_id, note, stay)).fetchone():
+            orders.add_event(conn, card_id, now, AUTHOR, "chat", note, level="yellow")
+    conn.execute("DELETE FROM app_state WHERE key = ?", (NOTES % token,))
 
 
 def delivered(conn, token: str, text: str, now: str, how: str) -> None:
@@ -536,6 +546,7 @@ def delivered(conn, token: str, text: str, now: str, how: str) -> None:
     row = conn.execute("SELECT entered_at FROM order_card WHERE id = ?", (card_id,)).fetchone()
     if row and re.sub(r"\D", "", row[0] or "") == found.group(2) and _state(conn, card_id) != "told":     # another stay: its own marks
         orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD + (text or store.get_state(conn, SENT_TEXT % token) or how), level="green")
+        _notes(conn, card_id, token, row[0] or "", now)
     conn.execute("DELETE FROM app_state WHERE key = ?", (SENT_TEXT % token,))
     conn.commit()
 
