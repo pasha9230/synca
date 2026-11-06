@@ -2,8 +2,10 @@
 takes (owner, 2026-10-29)."""
 from __future__ import annotations
 
+import pytest
+
 from test_same_tire import setup
-from tires_sync import cli, connections, mirror_feed, notify
+from tires_sync import cli, connections, critical, mirror_feed, notify
 
 
 def manual(conn, account, count, title="Шина %d", ad_id=None):
@@ -16,6 +18,7 @@ def manual(conn, account, count, title="Шина %d", ad_id=None):
 def report(conn, tmp_path, monkeypatch, *accounts):
     said = []
     monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: said.append((text, k)) or True)
+    monkeypatch.setattr(critical, "note", lambda c, to, text, now: said.append((text, {"notice": True})) or True)   # the bell (critical.py)
     cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, a), [], True) for a in accounts])
     return said
 
@@ -43,6 +46,7 @@ def test_all_17_ads_are_listed_each_with_its_link(tmp_path, monkeypatch):
     assert "и ещё" not in text and text.count("https://www.avito.ru/") == 17
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_long_list_goes_in_parts_telegram_takes_each_one_said(tmp_path, monkeypatch):
     conn, account = setup(tmp_path)
     other = connections.create_account(conn, "Шина-Колесо", "2026-10-14T12:00:00", "o")
@@ -100,6 +104,7 @@ def test_an_ad_the_supplier_has_not_and_not_on_oth_is_marked_and_first(tmp_path,
     monkeypatch.setattr(order_oth, "goods_on_oth", lambda conn: {"901": 2})
     said = []
     monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: said.append(text) or True)
+    monkeypatch.setattr(critical, "note", lambda c, to, text, now: said.append(text) or True)                    # the bell (critical.py)
     cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, account), [], True)], offers={"100": object()})
     text = "\n".join(said)
     lines = [l for l in text.split("\n") if l.startswith("   ")]
@@ -107,6 +112,7 @@ def test_an_ad_the_supplier_has_not_and_not_on_oth_is_marked_and_first(tmp_path,
     assert sum("нет у поставщика" in l for l in lines) == 1                       # on «На ОТХ», at the supplier, or no code: not marked
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_list_of_a_cabinet_goes_to_its_responsible_and_the_owners_to_the_owner(tmp_path, monkeypatch):
     from tires_sync import order_notify, users
     conn, first = _fresh(tmp_path)
@@ -125,6 +131,7 @@ def test_the_list_of_a_cabinet_goes_to_its_responsible_and_the_owners_to_the_own
     assert [login for login, _t in to_person] == ["zaman"] and "Заманова 0" in to_person[0][1] and "Своя 0" not in to_person[0][1]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_responsible_without_a_chat_leaves_the_list_with_the_owner(tmp_path, monkeypatch):
     from tires_sync import users
     conn, first = _fresh(tmp_path)

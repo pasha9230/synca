@@ -529,11 +529,12 @@ def _json_places(conn, old: str, new: Optional[str]) -> int:
                 hits += 1
                 if new:
                     value[field] = new
-        chats = value.get("chats") if kind == TELEGRAM_KIND else None
-        if isinstance(chats, dict) and old in chats:
-            hits += 1
-            if new:
-                value["chats"] = {(new if k == old else k): v for k, v in chats.items()}
+        for field in (("chats", "vk_peers") if kind == TELEGRAM_KIND else ()):    # vk_peers: critical.py, the VK page of the person
+            mapping = value.get(field)
+            if isinstance(mapping, dict) and old in mapping:
+                hits += 1
+                if new:
+                    value[field] = {(new if k == old else k): v for k, v in mapping.items()}
         found += hits
         if hits and new:
             conn.execute("UPDATE connection SET config = ? WHERE kind = ? AND owner_id = ?", (json.dumps(value, ensure_ascii=False), kind, owner_id))
@@ -549,7 +550,8 @@ def login_taken(conn, login: str) -> bool:
             return True
     if conn.execute("SELECT 1 FROM order_event WHERE kind = 'field' AND text = ? LIMIT 1", (RESPONSIBLE_MARK + login,)).fetchone():
         return True
-    return _json_places(conn, login, None) > 0
+    from . import critical
+    return _json_places(conn, login, None) > 0 or critical.names_login(conn, login)
 
 
 def rename_login(conn, old: str, new: str) -> None:
@@ -559,6 +561,8 @@ def rename_login(conn, old: str, new: str) -> None:
         conn.execute("UPDATE %s SET %s = ? WHERE %s = ?" % (table, column, column), (new, old))
     conn.execute("UPDATE order_event SET text = ? WHERE kind = 'field' AND text = ?", (RESPONSIBLE_MARK + new, RESPONSIBLE_MARK + old))
     _json_places(conn, old, new)
+    from . import critical
+    critical.rename_login(conn, old, new)
 
 
 def _end_sessions(conn, old: str, new: str) -> None:

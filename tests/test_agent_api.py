@@ -247,6 +247,7 @@ def telegram(conn, box):
     connections.set_secret(conn, box, "telegram", 0, "bot_token", BOT, NOW, "owner")
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_review_sheet_sends_to_telegram(tmp_path):
     http = ScriptedHttp((200, {"ok": True, "result": {}}))
     box = SecretBox(Fernet.generate_key())
@@ -269,6 +270,7 @@ def test_review_sheet_without_telegram_is_204(tmp_path):
     assert client.post("/api/review-sheet", headers=auth, data={"set_key": "nope", "file": (io.BytesIO(jpeg()), "s.jpg")}).status_code == 404
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_display_names_from_a_second_supplier_set(tmp_path):
     from tires_sync.candidates import Candidate
     from helpers import make_offer

@@ -2,6 +2,8 @@
 goes to the owner in Telegram, once; the answer to a binding code goes to VK even for a point in the panel. Fakes only."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from http_fakes import ScriptedHttp
@@ -26,6 +28,7 @@ def alert(conn, box, pid):
     return order
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_alert_nobody_opened_in_15_working_minutes_goes_to_the_owner_once(tmp_path):
     conn, box = env(tmp_path)
     pid = point(conn, channel="panel")
@@ -89,6 +92,7 @@ def test_a_point_on_vk_and_notes_from_before_the_safety_net_are_left_alone(tmp_p
     assert order_notify.escalate_unseen(conn, box, later(120), tg_http=tg) == 0
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_no_telegram_is_kept_in_the_journal_and_not_retried(tmp_path):
     conn, box = env(tmp_path)
     pid = point(conn, channel="panel")

@@ -3,6 +3,8 @@
 (before it is placed with the supplier) with a confirmation, the manager told, a line of the audit; later — «напишите менеджеру»."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from panel_helpers import login, post
@@ -82,6 +84,7 @@ def test_an_order_at_the_point_says_until_when_it_is_kept(tmp_path):
 
 # ---- «Отменить заказ» ---------------------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_client_cancels_an_early_order_after_a_confirmation(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path)
     order = _order(client)

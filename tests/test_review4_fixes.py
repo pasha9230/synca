@@ -40,6 +40,7 @@ def env(tmp_path, **settings):
 
 # --- 3: alerts of different content are not swallowed by each other --------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_two_different_alerts_in_one_run_are_both_sent_but_a_repeat_is_not(tmp_path, monkeypatch):
     conn, key_file, box = env(tmp_path)
     http = ScriptedHttp(OK, OK, OK)

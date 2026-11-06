@@ -150,6 +150,10 @@ def audit_text(entry: dict) -> str:
                                                                  d.get("why") or "без причины")
     if action in ("alert", "notice"):
         return d.get("text", "Сбой").replace("Tires Sync: ", "", 1).replace("\n", " ")
+    if action == "staff_note":                                     # critical.note: an order's alert on the person's own bell
+        return "Оповещение в колокольчик (%s): %s" % (", ".join(d.get("to") or []), (d.get("text") or "")[:200])
+    if action == "critical":                                       # critical.py: the bell of a critical news, the text is in «alert»/«notice»
+        return "Критичное в колокольчик (%s)" % ", ".join(d.get("to") or []) if d.get("to") else "Критичное в колокольчик"
     if action == "service_pause":
         return (d.get("text") or "Служба приостановлена").replace("Tires Sync: ", "", 1).replace("\n", " ")
     words = _MORE_TEXTS.get(action)

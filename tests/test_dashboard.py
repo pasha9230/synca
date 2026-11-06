@@ -146,6 +146,7 @@ def _telegram(conn):
     return box
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_summary_is_off_by_default_and_goes_once_a_day_after_nine(tmp_path):
     conn = store.connect(str(tmp_path / "x.db"))
     fill(conn)
@@ -187,6 +188,7 @@ def test_the_owner_switches_the_summary_on_the_main_page(tmp_path):
 
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_partner_sharing_the_owners_chat_gets_one_summary(tmp_path):
     conn = store.connect(str(tmp_path / "x.db"))
     fill(conn)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from helpers import catalog_xml, commodity_xml, settings_dict
@@ -22,6 +24,7 @@ def texts(http):
     return [json.loads(c[3])["text"] for c in http.calls]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_new_models_without_a_pair_are_announced_once(tmp_path, monkeypatch):
     conn, key_file, box = env(tmp_path, territory_rn="T1")
     conn.close()
@@ -45,6 +48,7 @@ def test_no_message_when_everything_is_paired(tmp_path, monkeypatch):
     assert http.calls == []
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_failed_cycle_says_nothing_and_does_not_forget_what_was_announced(tmp_path, monkeypatch):
     from tires_sync.cycle import AccountResult
     conn, key_file, box = env(tmp_path, territory_rn="T1")
@@ -57,6 +61,7 @@ def test_a_failed_cycle_says_nothing_and_does_not_forget_what_was_announced(tmp_
     assert len(http.calls) == 1
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_message_that_telegram_refused_is_tried_again_next_time(tmp_path, monkeypatch):
     from tires_sync.cycle import AccountResult
     conn, key_file, box = env(tmp_path, territory_rn="T1")
@@ -71,6 +76,7 @@ def test_a_message_that_telegram_refused_is_tried_again_next_time(tmp_path, monk
     assert len(http.calls) == 2
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_list_is_cut_to_ten_and_models_of_every_account_count(tmp_path, monkeypatch):
     from tires_sync.cycle import AccountResult
     conn, key_file, box = env(tmp_path, territory_rn="T1")
@@ -114,6 +120,7 @@ def test_a_failed_cycle_leaves_no_dip_in_the_economics_dynamics(tmp_path, monkey
     assert store.connect(tmp_path / "t.db").execute("SELECT COUNT(*) FROM economics_snapshot").fetchone()[0] == 0
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_same_alert_is_told_again_only_after_six_hours_and_another_one_at_once(tmp_path, monkeypatch):
     """The cycle runs every hour since 2026-10-20: a lasting failure is told as often as before (every 6 hours), not every cycle."""
     conn, key_file, box = env(tmp_path, territory_rn="T1")

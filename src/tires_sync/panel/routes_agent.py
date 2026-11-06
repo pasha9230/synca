@@ -324,7 +324,9 @@ def register(app) -> None:
         brand, model, season, studded, cls = row
         what = _season_line(season, bool(studded)) or season
         caption = "Фото на проверке: %s %s, %s, %s\n%s/photos/review" % (brand, model, what, cls, _base(conn))
-        send = notify.notifier_photo_for(conn, current_app.config.get("SECRET_BOX"), http=current_app.config.get("TELEGRAM_HTTP") or urllib_transport)
+        from .. import critical
+        send = notify.notifier_photo_for(conn, current_app.config.get("SECRET_BOX"), http=current_app.config.get("TELEGRAM_HTTP") or urllib_transport) \
+            if critical.telegram_allowed(False) else None                # not critical (2026-11-06): the page «Фото на проверке» has it
         if send is None:
             current_app.logger.info("review sheet for %s not sent: Telegram is not configured", request.form.get("set_key"))
             return "", 204
