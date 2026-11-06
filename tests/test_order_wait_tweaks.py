@@ -258,6 +258,27 @@ def test_the_note_of_an_unknown_ad_price_comes_after_the_message(env):
     assert told_at < note_at
 
 
+def test_the_ad_of_webmim_only_when_the_message_names_webmim(env):
+    """The owner 2026-11-06: «работаем по МИМ, бери только их цену»: the ad of the other supplier's position of the tire is not the floor."""
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    published(conn, chat_row, "100", 9100)                                                      # WebMIM
+    published(conn, chat_row, "s2-200", 12000)                                                  # the second supplier
+    run(conn, sender, [tire(), s2()])
+    assert sender.sent and "9 100 ₽" in sender.sent[0] and "12 000" not in sender.sent[0]
+    assert "9 100 ₽" in order_wait.form_text(conn, orders.get_card(conn, card), [tire(), s2()], price_of, chat_row)
+
+
+def test_webmim_named_without_its_ad_the_other_ad_is_not_taken(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    published(conn, chat_row, "s2-200", 12000)
+    run(conn, sender, [tire(), s2()])
+    assert "8 500 ₽" in sender.sent[0] and "12 000" not in sender.sent[0]
+    notes = [e["text"] for e in orders.list_events(conn, card) if "цена объявления" in e["text"].lower()]
+    assert len(notes) == 1 and "TS1" in notes[0]
+
+
 def test_the_ad_floor_leaves_the_files_of_the_feed_alone(env):
     conn, chat_row = env
     published(conn, chat_row, "100", 9100)

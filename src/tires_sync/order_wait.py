@@ -345,12 +345,13 @@ def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, le
     return None, 0, "у позиции %s нет цены продажи." % (pick.code or pick.goods_id)
 
 
-def _ad_price(conn, line: dict, stock: List, chat) -> Optional[float]:
+def _ad_price(conn, line: dict, offer, stock: List, chat) -> Optional[float]:
     """The price of one tyre of the line in the ad of the account of the chat (order_offers.ad_prices, what the feed published; the files of the
-    feed are only read): the highest of the positions of this tire in stock, whichever of them the client saw and whatever other orders hold
-    of them. None when no ad of the account has it."""
+    feed are only read). The message names a WebMIM position: the ad of that position only (the owner 2026-11-06: «работаем по МИМ, бери только
+    их цену»). Else the highest of the positions of this tire in stock, whichever of them the client saw and whatever other orders hold of them.
+    None when no ad of the account has it."""
     from . import order_offers
-    found = _matches(line, stock)
+    found = [offer] if _is_mim(offer) else _matches(line, stock)
     prices = order_offers.ad_prices(conn, order_offers.account_for(conn, chat_row=chat), [o.goods_id for o in found]) if found else {}
     return float(max(prices.values())) if prices else None
 
@@ -370,7 +371,7 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
         offer, price, why = _line_price(conn, line, pick, stock, chat, price_of, left)
         if why:
             return "", why, []
-        floor = _ad_price(conn, line, stock, chat)
+        floor = _ad_price(conn, line, offer, stock, chat)
         if floor is None and notes is not None:
             notes.append("Цена объявления позиции %s не определена: в сообщении о наличии расчётная цена %s ₽." % (
                 offer.code or offer.goods_id, templates.money(price)))
