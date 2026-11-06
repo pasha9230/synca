@@ -279,6 +279,10 @@ CREATE TABLE IF NOT EXISTS supplier_price_change (
 );
 CREATE INDEX IF NOT EXISTS supplier_price_change_goods ON supplier_price_change (goods_id, id);
 CREATE TABLE IF NOT EXISTS supplier_price_last (goods_id TEXT PRIMARY KEY, price REAL NOT NULL, since TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS purchase_alert (
+    id INTEGER PRIMARY KEY, at TEXT NOT NULL, first_change INTEGER NOT NULL, last_change INTEGER NOT NULL, total INTEGER NOT NULL, head TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '[]'
+);
 CREATE TABLE IF NOT EXISTS order_stage (
     id INTEGER PRIMARY KEY AUTOINCREMENT, pipeline_id INTEGER NOT NULL DEFAULT 1, code TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#98A2B3', position INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'open',
