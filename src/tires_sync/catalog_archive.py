@@ -16,6 +16,8 @@ MIN_KNOWN_FOR_GUARD = 20          # a supplier with fewer known positions is jud
 MAX_DROP = 0.5                    # more than this share of a supplier's known positions gone at once is not believed...
 BELIEVE_AFTER = 18                # ...until it has been so in this many cycles in a row (the end of a season, a renumbering): then they are marked;
                                   # about 18 hours with the cycle every hour (2026-10-20; it was 3 cycles of 6 hours)
+HISTORY_SINCE = "supplier_price_history_since"   # app_state: the cycle the history of the supplier's prices is kept from (the owner 2026-11-05)
+HISTORY_SHOWN = 20                # the card lists this many latest changes
 
 
 def _supplier(goods_id: str) -> int:
@@ -44,6 +46,7 @@ def record(conn, parsed, now: str) -> dict:
     """Write the positions of the unload and mark those that are no longer in it. Returns counts and the suppliers whose drop was not believed."""
     stats = {"seen": 0, "gone": 0, "returned": 0, "suspicious": [], "believed": [], "streak": {}}
     returned = {r[0] for r in conn.execute("SELECT goods_id FROM catalog_item WHERE gone_since != ''")} & set(parsed.offers)
+    record_prices(conn, parsed.offers, now)
     for goods_id, offer in parsed.offers.items():
         conn.execute(
             "INSERT INTO catalog_item (goods_id, supplier_id, data, first_seen, last_seen, last_stock, last_price, gone_since) VALUES (?,?,?,?,?,?,?, '') "
@@ -124,3 +127,40 @@ def gone_offers(conn) -> List[Tuple[Offer, dict]]:
             continue
         out.append((offer, {"gone_since": gone, "last_stock": stock, "last_price": price, "last_seen": last, "first_seen": first}))
     return out
+
+
+def record_prices(conn, offers, now: str) -> int:
+    """The history of the supplier's purchase prices (the owner 2026-11-05: of every supplier, also 4tochki shown for viewing only): a row only
+    when the purchase changed from the last known one; an unknown purchase (0) is never written and never the last known one. The very first
+    call only remembers. No commit of its own (the caller commits). Returns the rows written."""
+    since = store.get_state(conn, HISTORY_SINCE)
+    known = {g: p for g, p in ((g, round(float(o.base_price or 0), 2)) for g, o in offers.items()) if p > 0}
+    if not known:
+        return 0                                                  # a cycle with nothing usable is no start of the history
+    last = {}
+    ids = list(known)
+    for n in range(0, len(ids), 500):
+        chunk = ids[n:n + 500]
+        last.update(conn.execute("SELECT goods_id, price FROM supplier_price_last WHERE goods_id IN (%s)" % ",".join("?" * len(chunk)), chunk))
+    changes = [(now, g, last[g], p) for g, p in known.items() if since and g in last and last[g] != p]
+    conn.executemany("INSERT INTO supplier_price_change (at, goods_id, was, price) VALUES (?,?,?,?)", changes)
+    conn.executemany("INSERT INTO supplier_price_last (goods_id, price, since) VALUES (?,?,?) "
+                     "ON CONFLICT(goods_id) DO UPDATE SET price = excluded.price",      # «since»: the first cycle that saw the position
+                     [(g, p, now) for g, p in known.items() if last.get(g) != p])
+    if not since:
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (HISTORY_SINCE, now))
+    return len(changes)
+
+
+def price_tracked(conn, goods_id: str) -> bool:
+    """The cycle keeps the history of this position's purchase (it saw a known purchase of it)."""
+    return conn.execute("SELECT 1 FROM supplier_price_last WHERE goods_id = ?", (goods_id,)).fetchone() is not None
+
+
+def price_history(conn, goods_id: str, limit: int = HISTORY_SHOWN):
+    """The latest changes of the supplier's purchase price of one position, newest first ({"at", "was", "price"}), and the cycle the history
+    of this position is kept from: the first one that saw a known purchase of it ("" while none did). Only a change is a row; there is no history before that cycle (the owner 2026-11-05)."""
+    rows = [{"at": at, "was": was, "price": price} for at, was, price in conn.execute(
+        "SELECT at, was, price FROM supplier_price_change WHERE goods_id = ? ORDER BY id DESC LIMIT ?", (goods_id, int(limit)))]
+    seen = conn.execute("SELECT since FROM supplier_price_last WHERE goods_id = ?", (goods_id,)).fetchone()
+    return rows, (seen[0] if seen else "") or ""
