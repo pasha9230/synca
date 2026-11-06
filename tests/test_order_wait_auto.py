@@ -420,16 +420,17 @@ def test_a_code_names_the_tire_by_itself(env):
 
 
 def test_the_same_tire_at_two_prices_is_a_task_at_one_price_a_message(env):
+    """Two WebMIM positions at two prices: the higher one goes, no task (the owner 2026-11-05, «Две позиции МИМ… цена выше»)."""
     conn, _row = env
     card, sender = waiting(env), Sender()
     two = [tire(), tire(code="TS2", goods_id="200")]
     run(conn, sender, two)                                                                      # 8 500 and 6 000.50
-    assert sender.sent == [] and "разные цены" in tasks(conn, card)[0]["body"]
+    assert len(sender.sent) == 1 and "8 500 ₽" in sender.sent[0] and tasks(conn, card) == []
     other = waiting(env, dict(WANT, width=225))
     conn.execute("UPDATE avito_chat SET order_id = ?", (other,))
     conn.commit()
     run(conn, sender, [tire(width=225), tire(width=225, code="TS2", goods_id="200")], price=lambda offer, row: 7000)
-    assert len(sender.sent) == 1 and "7 000 ₽" in sender.sent[0]
+    assert len(sender.sent) == 2 and "7 000 ₽" in sender.sent[1]                                 # the first went at the first cycle
 
 
 def test_a_question_of_the_client_nobody_answered_is_not_wiped_by_the_message(env):
@@ -554,11 +555,12 @@ def test_the_other_suppliers_alone_at_two_prices_are_a_task(env):
     assert sender.sent == [] and "разные цены у поставщиков" in tasks(conn, card)[0]["body"]
 
 
-def test_two_prices_inside_webmim_are_a_task(env):
+def test_two_prices_inside_webmim_quote_the_higher_one(env):
+    """Was a task «разные цены в WebMIM»; the owner 2026-11-05: the higher price goes, no task."""
     conn, _row = env
     card, sender = waiting(env), Sender()
-    run(conn, sender, [tire(), tire(goods_id="200", code="TS2"), s2(code="TS1")])
-    assert sender.sent == [] and "разные цены в WebMIM" in tasks(conn, card)[0]["body"]
+    run(conn, sender, [tire(goods_id="200", code="TS2"), tire(), s2(code="TS1")])
+    assert len(sender.sent) == 1 and "8 500 ₽" in sender.sent[0] and "6 000" not in sender.sent[0] and tasks(conn, card) == []
 
 
 def test_no_price_anywhere_is_a_task(env):
@@ -1203,3 +1205,211 @@ def test_the_task_of_a_cut_off_send_does_not_say_an_empty_stock(env):
     conn.commit()
     run(conn, Sender(), [], NEXT)
     assert "В наличии: ." not in tasks(conn, card)[0]["body"]
+
+
+# --- the owner 2026-11-05: two WebMIM prices of one tire, the higher one goes --------------------------------------------------------------------
+
+def test_two_webmim_prices_do_not_take_the_higher_position_from_an_earlier_order(env):
+    conn, _row = env
+    a, b = two_waiting(env)
+    sender, sends = Sender(), []
+    offers = [tire(code="TS2", goods_id="200"), tire()]                                         # 6 000.50 and 8 500, four of each
+    order_wait.check(conn, offers, NOW, price_of=price_of,
+                     deliver=lambda row, text, token: (sends.append((token, text)), chats.send_reply(conn, sender, row, text, token, NOW, "система"))[1])
+    said = dict((t.split("-")[1], w) for t, w in sends)
+    assert "8 500 ₽" in said[str(a)] and "6 000.50 ₽" in said[str(b)]
+    assert tasks(conn, a) == [] and tasks(conn, b) == []
+    assert store.get_state(conn, order_wait.HELD % order_wait._token(a, orders.get_card(conn, a)["entered_at"])) == '[["100", 4]]'
+    assert store.get_state(conn, order_wait.HELD % order_wait._token(b, orders.get_card(conn, b)["entered_at"])) == '[["200", 4]]'
+
+
+def test_the_higher_webmim_price_without_the_stock_is_not_quoted(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(stock=2), tire(code="TS2", goods_id="200")])
+    assert "6 000.50 ₽" in sender.sent[0] and tasks(conn, card) == []
+
+
+def test_webmim_with_no_price_and_two_other_prices_stays_a_task(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire(code="NOPRICE"), s2(), s2(goods_id="s3-300", code="TS1")])
+    assert sender.sent == [] and "разные цены у поставщиков" in tasks(conn, card)[0]["body"]
+
+
+# --- the owner 2026-11-05: the form of the task has the words of the message by itself -----------------------------------------------------------
+
+AUTO_WORDS = "Здравствуйте. «Ikon Autograph 205/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ за штуку. Желаете оформить заказ?"
+
+
+def unread(conn, chat_row):
+    conn.execute("UPDATE avito_message SET is_read = 0, kind = 'text', direction = 'in' WHERE chat_row = ?", (chat_row,))
+    conn.commit()
+
+
+def test_the_form_of_the_task_has_the_words_of_the_message_that_goes_by_itself(env):
+    conn, chat_row = env
+    card, sender = waiting(env), Sender()
+    unread(conn, chat_row)                                                                      # the client waits for an answer: the task with the form
+    run(conn, sender, [tire()])
+    assert sender.sent == [] and tasks(conn, card)[0]["title"] == order_wait.TITLE_EXACT
+    assert order_wait.form_text(conn, orders.get_card(conn, card), [tire()], price_of, chat_row) == AUTO_WORDS
+    assert sender.sent == []                                                                    # the form sends nothing by itself
+
+
+def test_the_form_follows_the_owners_template(env):
+    conn, chat_row = env
+    card = waiting(env)
+    owners_row(conn, "Есть {name} за {price}.")
+    assert order_wait.form_text(conn, orders.get_card(conn, card), [tire()], price_of, chat_row) == "Есть Ikon Autograph 205/55 R16 за 8 500 ₽."
+
+
+def test_the_form_quotes_the_higher_of_two_webmim_prices(env):
+    conn, chat_row = env
+    card = waiting(env)
+    words = order_wait.form_text(conn, orders.get_card(conn, card), [tire(code="TS2", goods_id="200"), tire()], price_of, chat_row)
+    assert "8 500 ₽" in words and "6 000" not in words
+
+
+@pytest.mark.parametrize("offers, price, want", (
+    ([tire()], lambda o, row: None, WANT),                                                      # no price
+    ([tire()], lambda o, row: 1 / 0, WANT),                                                     # the price fails
+    ([tire()], None, WANT),                                                                     # no unload or reference: no price at all
+    ([tire()], price_of, dict(WANT, model="", season="")),                                      # the line does not name one tire
+    ([s2(), s2(goods_id="s3-300", code="TS1")], price_of, WANT),                                # two other suppliers at two prices
+    ([tire(stock=2)], price_of, WANT),                                                          # not in full
+))
+def test_without_a_tire_or_a_price_the_form_has_the_words_of_the_lines_with_one_dot(env, offers, price, want):
+    conn, chat_row = env
+    card = waiting(env, want)
+    words = order_wait.form_text(conn, orders.get_card(conn, card), offers, price, chat_row)
+    assert words == order_wait.client_text(orders.get_card(conn, card))
+    assert "4 шт. Подскажите" in words and ".." not in words
+
+
+def test_the_words_of_the_lines_have_no_double_dot():
+    card = {"wants": [dict(WANT, code="", any_brand=False, any_size=False), dict(WANT, code="", width=215, qty=2, any_brand=False, any_size=False)]}
+    assert order_wait.client_text(card) == ("Здравствуйте! Шины, которые вы ждали, появились в наличии: Ikon Tyres Test Model 205/55 R16, зима, без шипов, 4 шт; "
+                                            "Ikon Tyres Test Model 215/55 R16, зима, без шипов, 2 шт. Подскажите, оформляем заказ?")
+
+
+# --- the owner 2026-11-05: the client silent three days ------------------------------------------------------------------------------------------
+
+def silent_tasks(conn, card):
+    return [t for t in engine.list_tasks(conn, card) if t["title"] == order_wait.TITLE_SILENT]
+
+
+def told(env, at=NOW):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire()], at)
+    assert len(sender.sent) == 1
+    return card, sender
+
+
+def test_the_client_silent_three_days_gives_one_task_and_nothing_else(env):
+    conn, _row = env
+    card, sender = told(env)
+    alerts = []
+    assert order_wait.silent(conn, "2026-11-06T12:00:00", lambda *a: alerts.append(a)) == 0      # two days
+    assert order_wait.silent(conn, "2026-11-07T12:00:00", lambda *a: alerts.append(a)) == 1      # the third
+    [task] = silent_tasks(conn, card)
+    assert task["title"] == "Клиент молчит 3 дня: снять с него шины?" and task["status"] == "pending" and len(alerts) == 1
+    assert "Заказ №%d" % card in task["body"] and "сами не снимаются" in task["body"]
+    assert order_wait.silent(conn, "2026-11-08T12:00:00", lambda *a: alerts.append(a)) == 0      # once per stay
+    run(conn, sender, [tire()], "2026-11-08T12:00:00")
+    assert len(sender.sent) == 1 and orders.get_card(conn, card)["stage"]["code"] == "wait"     # nothing to the client, the tires stay held
+    tok = order_wait._token(card, orders.get_card(conn, card)["entered_at"])
+    assert store.get_state(conn, order_wait.HELD % tok) == '[["100", 4]]'
+
+
+def test_the_days_are_calendar_days_from_the_send(env):
+    conn, _row = env
+    card, _sender = told(env, "2026-11-04T19:50:00")
+    assert order_wait.silent(conn, "2026-11-06T19:59:00") == 0
+    assert order_wait.silent(conn, "2026-11-07T10:05:00") == 1                                  # less than 72 hours, the third calendar day
+
+
+def test_the_task_waits_for_the_working_hours(env):
+    conn, _row = env
+    card, _sender = told(env)
+    alerts = []
+    assert order_wait.silent(conn, "2026-11-07T03:00:00", lambda *a: alerts.append(a)) == 0
+    assert order_wait.silent(conn, "2026-11-07T20:30:00", lambda *a: alerts.append(a)) == 0
+    assert silent_tasks(conn, card) == [] and alerts == []
+    assert order_wait.silent(conn, "2026-11-08T10:00:00", lambda *a: alerts.append(a)) == 1
+
+
+def test_a_client_who_answered_is_not_silent(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    said(conn, chat_row, "r1", "2026-11-05T09:00:00")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+def test_a_message_of_the_client_before_ours_does_not_count_as_an_answer(env):
+    conn, chat_row = env
+    said(conn, chat_row, "r0", "2026-11-04T11:00:00")
+    conn.execute("UPDATE avito_message SET is_read = 1")
+    conn.commit()
+    card, _sender = told(env)
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+
+
+def test_an_order_that_left_the_stage_or_was_never_told_gets_no_task(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    quiet = waiting(env, with_chat=False)                                                       # no chat: the manager's task, nothing went
+    run(conn, Sender(), [tire(stock=8)])
+    orders.move_card(conn, card, orders.list_stages(conn)[0]["id"], "2026-11-05T12:00:00", "worker2")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0
+    assert silent_tasks(conn, card) == [] and silent_tasks(conn, quiet) == []
+
+
+def test_without_held_tires_there_is_no_task(env):
+    conn, _row = env
+    card, _sender = told(env)
+    conn.execute("DELETE FROM app_state WHERE key LIKE 'wait_held:%'")
+    conn.commit()
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0
+
+
+def test_a_closed_task_is_not_made_again_and_a_new_stay_counts_anew(env):
+    conn, _row = env
+    card, sender = told(env)
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+    conn.execute("UPDATE order_task SET status = 'done' WHERE rule_id = ?", (order_wait.TASK_SILENT,))
+    conn.commit()
+    assert order_wait.silent(conn, "2026-11-07T13:00:00") == 0
+    orders.move_card(conn, card, orders.list_stages(conn)[0]["id"], "2026-11-07T14:00:00", "worker2")
+    orders.move_card(conn, card, stage(conn, "wait"), "2026-11-07T14:05:00", "worker2")
+    run(conn, sender, [tire()], "2026-11-07T14:10:00")
+    assert len(sender.sent) == 2
+    assert order_wait.silent(conn, "2026-11-09T14:00:00") == 0
+    assert order_wait.silent(conn, "2026-11-10T14:00:00") == 1 and len(silent_tasks(conn, card)) == 2
+
+
+def test_a_failing_alert_does_not_repeat_the_silent_task(env):
+    conn, _row = env
+    card, _sender = told(env)
+
+    def boom(*a):
+        raise RuntimeError("boom")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00", boom) == 1
+    assert order_wait.silent(conn, "2026-11-07T12:01:00", boom) == 0 and len(silent_tasks(conn, card)) == 1
+
+
+def test_the_minute_sync_looks_at_the_silent_clients(env, monkeypatch):
+    from tires_sync import cli
+    conn, _row = env
+    calls = []
+    monkeypatch.setattr(order_wait, "replies", lambda *a, **k: 0)
+    monkeypatch.setattr(order_wait, "silent", lambda c, now, notify=None: calls.append(now) or 0)
+    cli._wait_replies(conn, None, "2026-11-07T12:00:00")
+    assert calls == ["2026-11-07T12:00:00"]
+
+
+def test_the_stage_hint_names_the_task_of_the_silent_client():
+    from tires_sync import onboarding_texts
+    words = " ".join(onboarding_texts.STAGES["wait"]["auto"])
+    assert order_wait.TITLE_SILENT in words and "Шины сами не снимаются" in words

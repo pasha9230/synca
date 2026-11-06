@@ -2439,11 +2439,15 @@ def _cmd_telegram_inbox(args) -> int:
 
 
 def _wait_replies(conn, box, now: str) -> None:
-    """The client answered «появилось в наличии»: a task and an alert for the responsible (order_wait.replies). A failure is only a warning."""
+    """The client answered «появилось в наличии», or has been silent three days: a task and an alert for the responsible (order_wait.replies,
+    order_wait.silent). A failure is only a warning."""
     try:
         from . import order_notify, order_wait, orders
-        order_wait.replies(conn, now, lambda card_id, title, body: order_notify.deliver(
-            conn, box, orders.get_card(conn, card_id), "%s\n%s" % (title, body), now, tg_http=_http(), vk_http=_http()))
+
+        def notify(card_id, title, body):
+            order_notify.deliver(conn, box, orders.get_card(conn, card_id), "%s\n%s" % (title, body), now, tg_http=_http(), vk_http=_http())
+        order_wait.replies(conn, now, notify)
+        order_wait.silent(conn, now, notify)
     except Exception as err:      # noqa: BLE001
         conn.rollback()
         print("предупреждение: ответы на сообщение о наличии не проверены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)

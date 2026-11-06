@@ -215,3 +215,27 @@ def test_the_send_mark_of_the_message_to_the_client_is_the_same_on_every_visit_s
     client, conn, card_id, chat = chat_with_order(tmp_path)
     marks = {re.search(r'name="reply_token" value="([^"]+)"', text(client, "/orders/%d" % card_id)).group(1) for _ in range(3)}
     assert len(marks) == 1                                                                                      # chats.send_reply sends one message per mark
+
+
+def test_the_form_of_the_found_tire_has_the_words_and_the_price_of_the_message_by_itself(tmp_path):
+    """The owner 2026-11-05: the form of «Позиция появилась» has the name and the price of a piece, as the message that goes by itself."""
+    import re
+    from helpers import catalog_xml, commodity_xml
+    from tires_sync import message_texts
+    client, conn, card_id, chat = chat_with_order(tmp_path, want=dict(WANT, code="TS1"))
+    app_unload = client.application.config["UNLOAD_PATH"]
+    open(app_unload, "wb").write(catalog_xml(commodity_xml(NREST="8")))
+    page = text(client, "/orders/%d" % card_id)
+    words = re.search(r'<textarea class="textarea" name="text"[^>]*>([^<]*)</textarea>', page).group(1)
+    assert words.startswith("Здравствуйте. «Ikon 205/55/16 T 94 Test Model» появилось в наличии у нас на складе, стоимость: ")
+    assert re.search(r"стоимость: [\d  ]+ ₽ за штуку\. Желаете оформить заказ\?$", words)
+    assert message_texts.body(conn, message_texts.WAIT_FOUND).startswith("Здравствуйте. «{name}»")
+
+
+def test_the_form_keeps_the_words_of_the_lines_when_the_unload_cannot_be_read(tmp_path):
+    client, conn, card_id, chat = chat_with_order(tmp_path, want=dict(WANT, code="TS1"))
+    open(client.application.config["UNLOAD_PATH"], "wb").write(b"<broken")
+    import re
+    page = text(client, "/orders/%d" % card_id)
+    words = re.search(r'<textarea class="textarea" name="text"[^>]*>([^<]*)</textarea>', page).group(1)
+    assert "Шины, которые вы ждали, появились в наличии" in words and words.endswith("4 шт. Подскажите, оформляем заказ?") and ".." not in words
