@@ -1887,6 +1887,10 @@ def register(app) -> None:
                 order_wait.client_answered(conn, task_id, local_iso(), author())
                 flash("Готово: клиент ответил, задача закрыта.", "ok")
                 return back(card_id)
+            if request.form.get("refused"):                        # «Клиент отказался» of «Клиент молчит» after the words sent by hand
+                order_wait.client_refused(conn, task_id, local_iso(), author())
+                flash("Готово: клиент отказался, шины за заказом сняты.", "ok")
+                return back(card_id)
             if task["kind"] == "message":                           # «Отправлено вручную»: also while it lacks a value
                 engine.sent_by_hand(conn, task_id, local_iso(), author())
                 flash("Готово.", "ok")

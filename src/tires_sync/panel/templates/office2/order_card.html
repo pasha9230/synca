@@ -69,6 +69,7 @@
 {% if t.status == "running" %}<p class="small muted">Выполняется. Если зависло, через 10 минут задача вернётся в список.</p>{% endif %}
 <div class="row" style="gap:var(--s-2)">{% if t.status == "pending" and can_post("order_task_run") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/run"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">{{ "Готово" if t.kind == "remind" else "Выполнить" }}</button></form>{% endif %}
 {% if t.title == silent_title and t.status == "pending" and can_post("order_task_run") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/run"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="answered" value="1"><button class="btn btn--secondary btn--sm">Клиент ответил</button></form>{% endif %}
+{% if t.title == silent_title and t.arg == "manual" and t.status == "pending" and can_post("order_task_run") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/run"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="refused" value="1"><button class="btn btn--secondary btn--sm">Клиент отказался</button></form>{% endif %}
 {% if t.status != "running" and can_post("order_task_skip") %}<form method="post" action="/orders/{{ c.id }}/task/{{ t.id }}/skip"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Пропустить</button></form>{% endif %}</div></div>{% endfor %}
 </div>{% endcall %}
 {% endif %}

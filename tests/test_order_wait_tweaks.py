@@ -46,7 +46,8 @@ def test_the_words_sent_from_the_form_start_the_three_days_too(env):
     assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
     [task] = silent_tasks(conn, card)
     assert "вручную" in task["body"] and "04.11.2026" in task["body"]
-    assert "придержаны за ним" not in task["body"] and "не придержаны" in task["body"]           # nothing promises the tires are his
+    assert "не придержаны" not in task["body"] and "придержаны за этим заказом, пока менеджер не снимет" in task["body"]   # the owner 2026-11-06
+    assert task["arg"] == order_wait.BY_HAND and "«Клиент отказался»" in task["body"]
     assert order_wait.silent(conn, "2026-11-08T12:00:00") == 0                                  # once per stay
 
 
@@ -321,16 +322,6 @@ def test_the_body_of_the_task_has_no_double_dot(env):
     assert "4 шт. В наличии" in task["body"] and ".." not in task["body"]
 
 
-# --- 4. a call in the chat is not an answer (the owner 2026-11-06) -------------------------------------------------------------------------------
-
-def test_the_body_of_the_task_has_no_double_dot(env):
-    conn, _row = env
-    card = waiting(env, with_chat=False)
-    run(conn, Sender(), [tire()])
-    [task] = tasks(conn, card)
-    assert "4 шт. В наличии" in task["body"] and ".." not in task["body"]
-
-
 # --- 4. a call in the chat is not an answer; «Клиент отказался» lets the tires go (the owner 2026-11-06) ---------------------------------------
 
 def call_in_chat(conn, chat_row, mid, at, status):
@@ -358,4 +349,69 @@ def test_a_call_that_took_place_is_an_answer_by_the_calls(env, how):
     call_in_chat(conn, chat_row, "k1", "2026-11-05T10:00:00", "finished")
     call(conn, chat_row, "2026-11-05T10:00:00", order_id=card)                                  # the panel's calls have the talk
     assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+def second_order(env):
+    """An order younger than the first for the same tires, with its own chat."""
+    conn, chat_row = env
+    card = waiting(env)
+    other_chat(conn, chat_row, card)
+    return card
+
+
+def test_the_client_refused_lets_the_tires_go_to_the_next_order(env):
+    conn, chat_row = env
+    first = manual(env)
+    second = second_order(env)
+    sender = Sender()
+    run(conn, sender, [tire()], "2026-11-05T12:00:00")
+    assert sender.sent == [] and order_wait.QUEUED_TASK % first in [e["text"] for e in orders.list_events(conn, second)]   # the first holds them
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+    [task] = silent_tasks(conn, first)
+    stage_before, tags_before = orders.get_card(conn, first)["stage_id"], orders.get_card(conn, first)["tags"]
+    order_wait.client_refused(conn, task["id"], "2026-11-07T12:10:00", "worker2")
+    task = engine.get_task(conn, task["id"])
+    assert task["status"] == "done" and task["result"] == order_wait.REFUSED
+    assert [e for e in orders.list_events(conn, first) if "Клиент отказался" in e["text"] and e["author"] == "worker2"]
+    card = orders.get_card(conn, first)
+    assert (card["stage_id"], card["tags"]) == (stage_before, tags_before) and sender.sent == []   # nothing else moves, nothing goes
+    run(conn, sender, [tire()], "2026-11-07T13:00:00")
+    assert len(sender.sent) == 1                                                                # the next order is told at the next pass
+    assert [e for e in orders.list_events(conn, second) if e["text"].startswith(order_wait.TOLD)]
+    assert [e for e in orders.list_events(conn, first) if e["text"].startswith(order_wait.TOLD)] == []
+    run(conn, sender, [tire()], "2026-11-07T14:00:00")
+    assert len(sender.sent) == 1                                                                # and the first is not told after it
+    with pytest.raises(orders.OrderError):                                                      # a second press: nothing twice
+        order_wait.client_refused(conn, task["id"], "2026-11-07T12:11:00", "worker2")
+
+
+def test_the_client_refused_is_only_after_the_words_sent_by_hand(env):
+    conn, _row = env
+    card, _sender = told(env)                                                                   # went by itself: held while in the stage
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+    [task] = silent_tasks(conn, card)
+    assert task["arg"] != order_wait.BY_HAND and "«Клиент отказался»" not in task["body"]
+    with pytest.raises(orders.OrderError):
+        order_wait.client_refused(conn, task["id"], "2026-11-07T12:10:00", "worker2")
+    assert engine.get_task(conn, task["id"])["status"] == "pending"
+
+
+def test_the_card_shows_the_button_client_refused_and_the_press_closes_the_task(tmp_path):
+    from panel_helpers import post
+    from test_order_wait_pages import WANT as PAGE_WANT, new_card, setup, text
+    _app, client, tok, conn = setup(tmp_path)
+    card = new_card(conn)
+    order_wait.add_want(conn, card, PAGE_WANT, "2026-10-15T12:00:00", "owner")
+    orders.move_card(conn, card, {s["code"]: s["id"] for s in orders.list_stages(conn)}["wait"], "2026-10-15T12:00:00", "owner")
+    c = orders.get_card(conn, card)
+    ids = [conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                        "VALUES (?, ?, ?, 'remind', ?, ?, 'pending', ?, 'тело', '', ?)",
+                        (card, order_wait.TASK_SILENT, entered, arg, c["stage_id"], order_wait.TITLE_SILENT, "2026-10-15T12:00:00")).lastrowid
+           for entered, arg in ((c["entered_at"], order_wait.BY_HAND), ("2026-10-01T00:00:00", ""))]
+    conn.commit()
+    page = text(client, "/orders/%d" % card)
+    assert page.count('name="refused"') == 1 and "Клиент отказался</button>" in page            # only the task after the words sent by hand
+    assert post(client, "/orders/%d/task/%d/run" % (card, ids[0]), tok, refused="1").status_code == 302
+    assert engine.get_task(conn, ids[0])["result"] == order_wait.REFUSED
+    assert [e for e in orders.list_events(conn, card) if "Клиент отказался" in e["text"]]
 

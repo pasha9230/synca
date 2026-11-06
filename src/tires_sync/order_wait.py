@@ -428,12 +428,18 @@ def _token(card_id, stay) -> str:
 
 def _state(conn, card_id) -> str:
     """Where this stay in the stage stands: "told" (the message went), "task" (the manager has it to offer, or closed it having offered),
-    "closed" (the task was skipped), "" (nothing yet). "told" and "task" hold the tires against younger orders."""
+    "closed" (the task was skipped, or the manager pressed «Клиент отказался» after sending its words), "" (nothing yet). "told" and "task" hold
+    the tires against younger orders."""
     stay = conn.execute("SELECT entered_at FROM order_card WHERE id = ?", (card_id,)).fetchone()[0] or ""
     if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text LIKE ? AND at >= ? LIMIT 1", (card_id, TOLD + "%", stay)).fetchone():
         return "told"
     task = conn.execute("SELECT status FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_EXACT, stay)).fetchone()
-    return "" if task is None else "closed" if task[0] == "skipped" else "task"
+    if task is None:
+        return ""
+    if task[0] == "skipped" or conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ? AND result = ?",
+                                            (card_id, TASK_SILENT, stay, REFUSED)).fetchone():    # «Клиент отказался» (client_refused)
+        return "closed"
+    return "task"
 
 
 def _take(lines: List[dict], stock: List, left: Dict[str, int], first: Dict[str, tuple]) -> Tuple[Optional[List], Optional[tuple]]:
@@ -623,7 +629,7 @@ def _answered_anywhere(conn, card: dict, log) -> bool:
 def _silent_send(conn, card_id, stay) -> Tuple[Optional[tuple], bool]:
     """The send «Клиент молчит» counts from in this stay: ((chat_row, message_id, at), True) for «появилось в наличии» that went by itself and
     holds the tires; ((…), False) for the words a manager sent from the form of the task «Позиция появилась» (its mark «o<order>t<task>»: the
-    tires are not held for it); (None, False) when nothing went."""
+    tires are held by that task, _state «task», until «Клиент отказался»); (None, False) when nothing went."""
     token = _token(card_id, stay)
     log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", (token,)).fetchone()
     if log is not None:
@@ -639,7 +645,8 @@ def silent(conn, now: str, notify=None) -> int:
     """«Клиент молчит 3 дня» (the owner 2026-11-05): «появилось в наличии» went by itself and the tires are held for the order, or a manager sent
     the words of the form of the task (the tires are not held then), and the client has not answered since (_answered_anywhere), SILENT_DAYS
     calendar days after the send: one task for the responsible per stay in the stage, made and told only in the working hours. The tires are not
-    let go and the client is sent nothing. Run by the minute's sync. Returns how many were made."""
+    let go and the client is sent nothing; after the words sent by hand the task is BY_HAND and has «Клиент отказался» (client_refused). Run by
+    the minute's sync. Returns how many were made."""
     from . import order_arrived, order_manager
     hours = order_manager.duty_settings(conn)["hours"]
     if not hours[0] <= int(now[11:13]) < hours[1]:
@@ -662,13 +669,14 @@ def silent(conn, now: str, notify=None) -> int:
             if held:
                 said = ("Сообщение о наличии ушло %s, клиент не ответил. Шины придержаны за ним и сами не снимаются: пока заказ на этапе «%s», они его."
                         % (day, card["stage"]["name"]))
-            else:
-                said = ("Сообщение о наличии отправлено вручную %s, клиент не ответил. Шины за ним не придержаны: их может взять другой заказ "
-                        "этапа «%s»." % (day, card["stage"]["name"]))
+            else:                                                  # the owner 2026-11-06: held too, until the manager lets them go
+                said = ("Сообщение о наличии отправлено вручную %s, клиент не ответил. Шины придержаны за этим заказом, пока менеджер не снимет: "
+                        "если клиент отказался, нажмите «Клиент отказался», и их получит следующий заказ в очереди." % day)
             body = "Заказ №%d, клиент %s. Ответственный: %s. %s Если клиент ответил по телефону или в другом чате, нажмите «Клиент ответил». Чат заказа: %s" % (
                 card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], said, order_arrived._link(conn, card_id))
             if conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card_id, TASK_SILENT, stay, "remind", "", card["stage_id"], "pending", TITLE_SILENT, body, "", now)).rowcount:
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card_id, TASK_SILENT, stay, "remind", "" if held else BY_HAND, card["stage_id"], "pending",
+                                                              TITLE_SILENT, body, "", now)).rowcount:
                 orders.add_event(conn, card_id, now, AUTHOR, "rule", "Задача создана: %s" % TITLE_SILENT)
                 conn.commit()
                 made += 1
@@ -682,6 +690,8 @@ def silent(conn, now: str, notify=None) -> int:
 
 
 ANSWERED = "клиент ответил по телефону или в другом чате"
+BY_HAND = "manual"                                   # order_task.arg of «Клиент молчит» after the words sent by hand: it has «Клиент отказался»
+REFUSED = "клиент отказался, шины за заказом сняты"  # order_task.result of «Клиент отказался»: _state lets the tires go
 
 
 def client_answered(conn, task_id, now: str, author: str) -> None:
@@ -698,6 +708,25 @@ def client_answered(conn, task_id, now: str, author: str) -> None:
         conn.commit()
         raise orders.OrderError("Эта задача уже обработана.")
     orders.add_event(conn, task["order_id"], now, author, "rule", "%s: Клиент ответил (по телефону или в другом чате), задача закрыта." % TITLE_SILENT)
+    conn.commit()
+
+
+def client_refused(conn, task_id, now: str, author: str) -> None:
+    """«Клиент отказался» of the task «Клиент молчит» after the words sent by hand (the owner 2026-11-06): the task is done, the order's journal
+    has who pressed it, and the tires are no longer held for this order in this stay (_state «closed»): the next order in the queue is told the
+    usual way at the next pass of check. The stage, the tags and the tires of the order stay; the client is sent nothing. Raises OrderError for
+    another task, the task after a message that went by itself, or one already closed."""
+    from . import order_engine
+    task = order_engine.get_task(conn, task_id)
+    if task["rule_id"] != TASK_SILENT or task["arg"] != BY_HAND:
+        raise orders.OrderError("«Клиент отказался» есть только у задачи «%s» после сообщения, отправленного вручную." % TITLE_SILENT)
+    if task["status"] != "pending":
+        raise orders.OrderError("Эта задача уже обработана.")
+    done = conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status = 'pending'", (REFUSED, now, task_id))
+    if done.rowcount != 1:
+        conn.commit()
+        raise orders.OrderError("Эта задача уже обработана.")
+    orders.add_event(conn, task["order_id"], now, author, "rule", "%s: Клиент отказался, шины за заказом сняты, задача закрыта." % TITLE_SILENT)
     conn.commit()
 
 
