@@ -85,9 +85,11 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     if chats:                                                         # a retry of a message to the old client's chat is never sent again
         stopped = conn.execute("UPDATE chat_send_log SET status = 'failed', next_at = '', text = '', error = 'клиент сменён' WHERE status = 'retry' "
                                "AND chat_row IN (%s)" % ",".join("?" * len(chats)), chats).rowcount
-    callbacks = [r[0] for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (a,))]
-    if callbacks:                                                     # «перезвонить» the old client: not the new one's
+    callbacks = [r[0] for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ? AND kind = 'callback' AND done_at IS NULL "
+                                            "AND cancelled_at IS NULL", (a,))]
+    if callbacks:                                                     # «Перезвонить» the old client: not the new one's; other tasks stay
         conn.execute("UPDATE callback_task SET cancelled_at = ? WHERE id IN (%s)" % ",".join("?" * len(callbacks)), [now] + callbacks)
+        orders.add_event(conn, a, now, author, "field", "Снято задач «Перезвонить» прежнему клиенту: %d" % len(callbacks))
     for row in chats:
         orders.add_event(conn, a, now, author, "chat", "Отвязан чат Ч-%d: клиент сменён" % row)
     fee = handed_fee(conn, a)
@@ -166,7 +168,8 @@ def take_target(conn, card_id, line_id, from_item) -> Optional[int]:
         return None
     a = orders.get_card(conn, source["order_id"])
     from .clients import normalize
-    aside = conn.execute("SELECT client_id FROM order_oth_client WHERE order_id = ?", (a["id"],)).fetchone()
+    aside = conn.execute("SELECT client_id FROM order_oth_client WHERE order_id = ? UNION ALL SELECT client_id FROM client_order WHERE order_id = ?",
+                         (a["id"], a["id"])).fetchone()                # an order on «На ОТХ» of before the stage keeps its link in client_order
     mine = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (b["id"],)).fetchone()
     if normalize(b["client_phone"]) == normalize(a["client_phone"]) or (aside and mine and aside[0] == mine[0]):
         return None                                                   # the same client came back: no swap, the take as before
@@ -199,7 +202,8 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
         chats = [r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ? ORDER BY id", (b["id"],))]
         conn.execute("UPDATE avito_chat SET order_id = ? WHERE order_id = ?", (a_id, b["id"]))
         calls = conn.execute("UPDATE avito_call SET order_id = ? WHERE order_id = ?", (a_id, b["id"])).rowcount
-        moved_callbacks = conn.execute("UPDATE callback_task SET order_id = ? WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL",
+        moved_callbacks = conn.execute("UPDATE callback_task SET order_id = ? WHERE order_id = ? AND kind = 'callback' AND done_at IS NULL "
+                                       "AND cancelled_at IS NULL",
                                        (a_id, b["id"])).rowcount
         if b["avito_chat"]:
             orders.update_card(conn, a_id, {"avito_chat": b["avito_chat"]}, now, author, commit=False, link_client=False)

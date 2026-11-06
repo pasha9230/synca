@@ -349,11 +349,13 @@ def test_what_was_left_for_the_old_client_is_closed(tmp_path):
     unsent.record(conn, a, "tok-a", T, "нет связи", "Иван, шины на точке")
     conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES ('retry-a', ?, ?, 'o', 'retry')", (row, T))
     conn.execute("INSERT INTO callback_task (order_id, due_at, created_at, created_by) VALUES (?, ?, ?, 'o')", (a, T, T))
+    conn.execute("INSERT INTO callback_task (order_id, due_at, created_at, created_by, kind) VALUES (?, ?, ?, 'o', 'return')", (a, T, T))
     conn.commit()
     oth_sale.to_new_client(conn, a, "Пётр", NEW_PHONE, LATER, "o")
+    assert conn.execute("SELECT cancelled_at FROM callback_task WHERE kind = 'return'").fetchone() == (None,)      # not the client's: stays
     assert unsent.of_order(conn, a) == []
     assert conn.execute("SELECT status FROM chat_send_log WHERE token = 'retry-a'").fetchone() == ("failed",)
-    assert conn.execute("SELECT cancelled_at FROM callback_task WHERE order_id = ?", (a,)).fetchone() == (LATER,)
+    assert conn.execute("SELECT cancelled_at FROM callback_task WHERE kind = 'callback'").fetchone() == (LATER,)
 
 
 def test_the_callbacks_of_b_go_with_its_client(tmp_path):
