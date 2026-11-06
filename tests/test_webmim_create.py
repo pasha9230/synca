@@ -653,9 +653,9 @@ def test_cleared_webmim_fields_shut_the_button_until_a_person_says(tmp_path):
     assert orders._row(conn, mine)["webmim_id"] == "1001"
     assert place(conn, mine, fake, now="2026-10-23T12:07:00")["state"] == "done" and len(fake.orders) == 1 and not fake.posts("/items")[2:]
     orders.update_card(conn, mine, {"webmim_id": "", "webmim_number": "", "webmim_status": ""}, NOW, "owner")
-    fake.orders.clear()                                                                # deleted in mimtest's cabinet
+    fake.orders[0]["id"] = 9001                                                        # 1001 deleted in mimtest's cabinet, another order is there
     webmim_create.resolve(conn, mine, False, "2026-10-23T12:08:00", "owner", client=client_of(fake), sleep=lambda _s: None)
-    assert place(conn, mine, fake, now="2026-10-23T12:09:00")["state"] == "done" and len(fake.orders) == 1
+    assert place(conn, mine, fake, now="2026-10-23T12:09:00")["state"] == "done" and [o["id"] for o in fake.orders] == [9001, 1002]
 
 
 def cleared(conn, fake):
@@ -712,6 +712,47 @@ def test_no_order_is_said_only_after_the_known_id_is_read_in_the_cabinet(tmp_pat
     text = webmim_create.resolve(conn, mine, False, NOW, "owner", client=client_of(fake), sleep=lambda _s: None)
     assert "отменён" in text and webmim_create.get_state(conn, mine)["state"] == "refused"
     assert len(fake.posts()) == posts
+
+
+def test_no_order_is_never_said_on_a_reading_that_is_empty_odd_or_cut(tmp_path, monkeypatch):
+    """Review 2026-11-06 (the second look): «not found» is «not there» only after the whole cabinet is read strictly. An answer 200 that is
+    not a list, an empty first page, more pages than the panel reads, a status «cancel requested»: the mark stays."""
+    conn = db(tmp_path)
+    fake = FakeWebmim()
+    mine = cleared(conn, fake)
+    fake.add_order(None)                                                                # 1002: another order, the newest
+    before = (webmim_create.get_state(conn, mine), dict(orders._row(conn, mine)), events(conn, mine))
+
+    def refused(words):
+        with pytest.raises(orders.OrderError, match=words):
+            webmim_create.resolve(conn, mine, False, NOW, "owner", client=client_of(fake), sleep=lambda _s: None)
+        assert (webmim_create.get_state(conn, mine), dict(orders._row(conn, mine)), events(conn, mine)) == before
+    fake.fail[("GET", "/api/v2/orders")] = ["not-a-list", "not-a-list"]
+    refused("не прочитан")
+    fake.fail[("GET", "/api/v2/orders")] = []
+    kept = list(fake.orders)
+    fake.orders[:] = []
+    refused("не прочитан")
+    fake.orders[:] = kept
+    fake.orders[0]["statusDescription"] = "Запрошена отмена"                            # not cancelled yet: still a purchase
+    refused("есть в кабинете")
+    fake.orders[0]["statusDescription"] = "создано"
+    fake.orders[0]["id"] = 9001                                                         # 1001 gone, but the reading is cut short
+    monkeypatch.setattr(webmim_match, "PER_PAGE", 1)
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 1)
+    refused("не прочитан целиком")
+    monkeypatch.setattr(webmim_match, "MAX_PAGES", 2)                                   # every page read: no order 1001
+    assert "не найден в кабинете" in webmim_create.resolve(conn, mine, False, NOW, "owner", client=client_of(fake), sleep=lambda _s: None)
+
+
+def test_the_mark_changed_while_the_cabinet_was_read_is_not_taken_off(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    fake = FakeWebmim()
+    mine = cleared(conn, fake)
+    monkeypatch.setattr(webmim_create, "_gone", lambda *_a: ("999", ""))                # another known id read than the one at the write
+    with pytest.raises(orders.OrderError, match="Отметка изменилась"):
+        webmim_create.resolve(conn, mine, False, NOW, "owner", client=client_of(fake), sleep=lambda _s: None)
+    assert webmim_create.get_state(conn, mine)["webmim_id"] == "1001"
 
 
 def test_a_cancelled_order_of_the_cabinet_is_never_bound(tmp_path):

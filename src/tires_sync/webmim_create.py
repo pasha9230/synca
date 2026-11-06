@@ -279,11 +279,56 @@ def _cabinet_order(client, webmim_id: str, number: str, sleep: Callable[[float],
     return None
 
 
+CANCELLED = ("отменен", "отменено", "аннулирован", "аннулировано")   # the whole status text of an order surely cancelled (no codes known here)
+
+
+def _status(order: dict) -> str:
+    return " ".join(str(order.get("status_text") or "").casefold().replace("ё", "е").split())
+
+
 def cancelled(order: dict) -> bool:
-    """A WebMIM order cancelled in the cabinet (its status «Отменён», «отменен клиентом», «Аннулирован»): not the purchase, never bound
-    (review 2026-11-06). The status codes of WebMIM are not known here: the text decides."""
-    text = str(order.get("status_text") or "").casefold().replace("ё", "е")
+    """A WebMIM order whose status speaks of a cancel at all («Отменён», «отменен клиентом», «Запрошена отмена», «Аннулирован»): never bound
+    by «Заказ есть» (review 2026-11-06). Refusing is the safe side, so any such word stops it. The status codes of WebMIM are not known here."""
+    text = _status(order)
     return "отмен" in text or "аннулир" in text
+
+
+def surely_cancelled(order: dict) -> bool:
+    """Cancelled for good (the whole status is one of CANCELLED): only this lets «Заказа нет» through while the order is in the cabinet —
+    «Запрошена отмена» or «частично отменён» may still be a purchase."""
+    return _status(order) in CANCELLED
+
+
+class _Unread(Exception):
+    """The cabinet was not read in full: «not found» would not mean «not there»."""
+
+
+def _in_cabinet(client, webmim_id: str, sleep: Callable[[float], None]) -> Optional[dict]:
+    """The order with this id among every order of WebMIM's cabinet (GET /api/v2/orders), read strictly for «Заказа нет»: unlike the
+    snapshot (webmim_match._every_page) an answer that is not a list or an empty first page is OrdersError, and a cabinet of more pages
+    than webmim_match.MAX_PAGES (or no count and a full last page) is _Unread. None: read in full, not there."""
+    page, total = 1, 0
+    while True:
+        if page > 1:
+            sleep(webmim_match.PAUSE)
+        data, headers = client.get_with_headers("/api/v2/orders", {"page": page, "per-page": webmim_match.PER_PAGE})
+        if not isinstance(data, list):
+            raise webmim_orders.OrdersError("/api/v2/orders: ответ не список заказов.", 200)
+        if page == 1:
+            if not data:
+                raise webmim_orders.OrdersError("/api/v2/orders: кабинет прочитан пустым.", 200)
+            total = webmim_orders._int_header(headers, "x-pagination-page-count")
+            if total > webmim_match.MAX_PAGES:
+                raise _Unread()
+        for raw in data:
+            order = webmim_match._order(raw)
+            if order and order["id"] == webmim_id:
+                return order
+        if (page >= total) if total else (len(data) < webmim_match.PER_PAGE):
+            return None
+        if page >= webmim_match.MAX_PAGES:
+            raise _Unread()
+        page += 1
 
 
 def _seen_text(order: dict, where: str) -> str:
@@ -365,16 +410,21 @@ def _gone(conn, card_id, client, now: str, sleep: Callable[[float], None]) -> Tu
         return "", ""
     where = webmim_orders.SERVER_NAMES.get(state["server"], state["server"])
     if client is None:
-        raise orders.OrderError("API-пользователь WebMIM не настроен (Подключения → WebMIM → Заказы в WebMIM): заказ id %s, созданный кнопкой, "
-                                "не проверить в кабинете. Отметка не снята." % known)
+        raise orders.OrderError("Кабинет WebMIM недоступен панели (не настроен API-пользователь в Подключения → WebMIM → Заказы в WebMIM, "
+                                "не читаются секреты или сервер закрыт для кнопки): заказ id %s, созданный кнопкой, не проверить. Отметка не "
+                                "снята." % known)
     try:
-        order = _cabinet_order(client, known, "", sleep)
+        order = _in_cabinet(client, known, sleep)
     except (OSError, webmim_orders.OrdersError) as err:
         raise orders.OrderError("Заказ WebMIM id %s, созданный кнопкой, не прочитан (%s, %s): отметка не снята, ничего не изменено."
                                 % (known, where, _why(err))) from None
+    except _Unread:
+        raise orders.OrderError("Кабинет WebMIM (%s) не прочитан целиком (больше %d заказов): нельзя убедиться, что заказа id %s, созданного "
+                                "кнопкой, там нет. Отметка не снята; если он есть, нажмите «Заказ есть»." % (
+                                    where, webmim_match.MAX_PAGES * webmim_match.PER_PAGE, known)) from None
     if order is None:
         return known, ""
-    if cancelled(order):
+    if surely_cancelled(order):
         return known, " (прежний заказ %s отменён в кабинете)" % _seen_text(order, where)
     raise orders.OrderError("Заказ WebMIM %s, созданный кнопкой, есть в кабинете: отметка не снята, новый заказ не откроется. Это он — "
                             "нажмите «Заказ есть: проверить в WebMIM» (его ID уже вписан). Удалите или отмените его в кабинете, если он не "
