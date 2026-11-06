@@ -60,8 +60,8 @@ def bell_row(row: dict) -> bool:
         return False
     if kind == "field":
         return not text.startswith(QUIET_FIELD)
-    if kind == "chat":
-        return isinstance(row.get("id"), int) and row.get("level") == "red"
+    if kind == "chat" or (kind == "autosend" and row.get("author") == "система"):    # the send mechanism's own records of an auto message
+        return isinstance(row.get("id"), int) and row.get("level") == "red"            # (chats.SYSTEM): as those of any send
     return True
 
 

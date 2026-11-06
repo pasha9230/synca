@@ -207,6 +207,8 @@ def test_a_402_of_ask_is_not_retried_after_the_client_answered(env):
     assert item["status"] == "cancelled" and "клиент ответил" in item["reason"]
     [task] = open_tasks(conn, card)
     assert task[4] is not None                                               # its task is cancelled with it: nobody writes it by hand
+    halted = [e for e in orders.list_events(conn, card) if e["author"] == "система" and e["level"] == "yellow"]
+    assert halted and not any(order_alerts.bell_row(e) for e in halted)     # «не отправлено повторно»: no bell, as for any send
 
 
 def test_a_402_for_good_ends_failed_with_its_task(env):
@@ -370,3 +372,48 @@ def test_it_goes_and_comes_back_with_the_order(env):
     auto.run(conn, "2026-11-10T11:01:00", lambda *a: pytest.fail("no order"))
     trash.restore_order(conn, record, "2026-11-10T12:00:00", "owner")
     assert auto.get(conn, aid)["status"] == "pending"
+
+
+# --- the second review of 2026-11-06 ---------------------------------------------------------------------------------------------------
+
+def test_a_lost_one_sent_again_by_a_press_is_sent_with_its_task_closed(env):
+    conn, row, card = env
+    aid = auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    auto.run(conn, AT, lambda r, text, token: (_ for _ in ()).throw(chats.ChatSendUnknown("таймаут")))
+    token = auto.TOKEN % (card, aid)
+    conn.execute("INSERT OR REPLACE INTO chat_send_log (token, chat_row, at, author, status, text) VALUES (?, ?, ?, 'система', 'lost', 'Текст')",
+                 (token, row, AT))
+    conn.commit()
+    auto.run(conn, LATER, lambda *a: pytest.fail("never by itself"))
+    assert auto.get(conn, aid)["status"] == "failed" and "Отправить снова" in open_tasks(conn, card)[0][2]   # the task says what to do now
+    sender = Sender()
+    chats.send_reply(conn, sender, row, "Текст", token, "2026-11-11T15:10:00", "worker2", again=True)        # «Отправить снова» in the chat
+    auto.run(conn, "2026-11-11T15:11:00", lambda *a: pytest.fail("never by itself"))
+    assert sender.sent == ["Текст"] and auto.get(conn, aid)["status"] == "sent"
+    assert open_tasks(conn, card)[0][3] is not None
+    greens = [e for e in orders.list_events(conn, card) if e["level"] == "green" and e["kind"] in ("chat", auto.EVENT)]
+    assert len(greens) == 1
+
+
+def test_through_a_402_one_green_record_and_the_bell_hears_only_the_modules(env):
+    conn, _row, card = env
+    sender = Refusing(refused402())
+    auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    auto.run(conn, AT, deliver_by(conn, sender, AT))
+    chats.settle_sends(conn, sender, lambda: sender, 1, "2026-11-11T15:02:00")
+    auto.run(conn, "2026-11-11T15:02:30", lambda *a: pytest.fail("no second one"))
+    events = orders.list_events(conn, card)
+    greens = [e for e in events if e["level"] == "green" and e["kind"] in ("chat", auto.EVENT)]
+    assert len(greens) == 1 and greens[0]["author"] == auto.AUTHOR
+    rung = [e for e in events if e["kind"] == auto.EVENT and order_alerts.bell_row(e)]
+    assert rung and all(e["author"] != "система" or e["level"] == "red" for e in rung)    # the send mechanism's records: as for any send
+
+
+def test_the_unsettled_line_above_the_chat_is_not_a_points(env):
+    conn, row, card = env
+    sender = Refusing(refused402())
+    aid = auto.add(conn, card, "deal", DUE, "Текст", SET, "worker2")
+    auto.run(conn, AT, deliver_by(conn, sender, AT))
+    sends = chats.pending_sends(conn, [row], "2026-11-11T15:00:30")
+    assert [s["token"] for s in auto.office_sends(sends, False)] == [auto.TOKEN % (card, aid)]
+    assert auto.office_sends(sends, True) == []

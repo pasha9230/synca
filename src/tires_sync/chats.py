@@ -834,7 +834,8 @@ def _deliver(conn, client, chat: dict, user_id, token: str, now: str, author: st
             again = note or (" (с повтора: Авито до этого отказал, код 402)" if tries else "")
             if photo:
                 orders.add_event(conn, chat["order_id"], now, author, "chat", "Отправлено фото клиенту" + again)
-            elif again or not str(token or "").startswith(OWN_RECORD_TOKENS):     # a send of the sync: its caller wrote «не отправлено» only
+            elif not str(token or "").startswith(OFFICE_TOKENS) and (again or not str(token or "").startswith(OWN_RECORD_TOKENS)):
+                # a send of the sync: its caller wrote «не отправлено» only; «Автосообщение клиенту» writes its own green record even after a 402
                 orders.add_event(conn, chat["order_id"], now, author, _order_kind(chat), "Отправлен ответ клиенту%s: %s" % (again, text[:80] + ("…" if len(text) > 80 else "")))
             conn.commit()
     except Exception:

@@ -47,6 +47,11 @@ def for_office(event: dict) -> bool:
     return event.get("kind") == EVENT or (event.get("kind") == "task" and TASK_TITLE in str(event.get("text") or ""))
 
 
+def office_sends(sends: List[dict], point: bool) -> List[dict]:
+    """The unsettled sends shown above a chat and in the card (chats.pending_sends): without this module's for a manager of a point."""
+    return [s for s in sends if not str(s.get("token") or "").startswith("autosend-")] if point else sends
+
+
 def _row(row) -> dict:
     item = dict(zip([f.strip() for f in FIELDS.split(",")], row))
     item["kind_name"] = KINDS.get(item["kind"], item["kind"])
@@ -276,6 +281,9 @@ def _close_task(conn, item: dict, how: str, result: str, now: str) -> None:
 
 def _failed(conn, item: dict, why: str, note: str, now: str) -> str:
     conn.execute("UPDATE order_autosend SET status = 'failed', reason = ?, updated_at = ?, done_at = ? WHERE id = ?", (why, now, now, item["id"]))
+    if item.get("task_id"):                                          # its task from «неизвестно, ушло ли» says now what to do
+        conn.execute("UPDATE callback_task SET note = ? WHERE id = ? AND done_at IS NULL AND cancelled_at IS NULL",
+                     (("Не отправлено: %s. %s Текст: %s" % (why.rstrip(". "), note, item["text"]))[:300], item["task_id"]))
     orders.add_event(conn, item["order_id"], now, AUTHOR, EVENT, "Автосообщение клиенту не отправлено («%s» на %s): %s" % (
         item["kind_name"], _shown(item["due_at"]), why), level="red")
     conn.commit()
@@ -308,9 +316,14 @@ def run(conn, now: str, deliver: Optional[Deliver]) -> dict:
     from . import chats
     made = {"sent": 0, "failed": 0, "waiting": 0, "cancelled": 0}
     rows = [_row(r) for r in conn.execute("SELECT %s FROM order_autosend WHERE status IN ('pending', 'sending', 'waiting') ORDER BY due_at, id" % FIELDS)]
+    rows += [_row(r) for r in conn.execute(                          # «не отправлено», then sent by a person's «Отправить снова» under its mark
+        "SELECT %s FROM order_autosend a WHERE a.status = 'failed' AND EXISTS (SELECT 1 FROM chat_send_log l WHERE l.status = 'sent' AND "
+        "l.token = 'autosend-' || a.order_id || '-' || a.id) ORDER BY a.id" % FIELDS)]
     for item in rows:
         try:
-            if item["status"] == "waiting":
+            if item["status"] == "failed":                           # went after all: one green record, its task closed
+                outcome = _sent(conn, item, now)
+            elif item["status"] == "waiting":
                 outcome = _settle(conn, item, now)
             elif item["status"] == "sending" and not chats.sending_is_stale(item["updated_at"], now):
                 continue                                             # another run is at it
