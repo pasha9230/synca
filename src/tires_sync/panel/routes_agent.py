@@ -126,6 +126,22 @@ def _season_line(season: str, studded: bool):
     return None
 
 
+SHEET_BELL = "review_sheet_bell:"     # app_state: "<SHEET_BELL><set key>" -> the fingerprint of the last sheet written to the owners' bell
+
+
+def _sheet_to_bell(conn, set_key: str, caption: str, data: bytes):
+    """A sheet of «Фото на проверке» as a row «Оповещение» of both owners' bell (lane/digest-bell), never Telegram nor VK: once per sheet (the
+    set and the fingerprint of the picture: the agent's repeat of the same sheet writes nothing, a new sheet of the set does). 200 when it is
+    in the bell (now or before), 204 when the base was busy (the agent's next sheet is written; the page «Фото на проверке» has the set)."""
+    from .. import critical, order_alerts
+    done = critical.note_once(conn, SHEET_BELL + set_key, hashlib.sha256(data).hexdigest()[:32], order_alerts.owner_people(conn), caption,
+                              store.moscow_iso())
+    if done == "failed":
+        current_app.logger.warning("review sheet for %s not written to the bell: the base is busy", set_key)
+        return "", 204
+    return jsonify({"ok": True, "bell": done == "written"})
+
+
 def register(app) -> None:
     @app.route("/api/image-jobs")
     @agent_required
@@ -325,6 +341,8 @@ def register(app) -> None:
         what = _season_line(season, bool(studded)) or season
         caption = "Фото на проверке: %s %s, %s, %s\n%s/photos/review" % (brand, model, what, cls, _base(conn))
         from .. import critical
+        if not critical.telegram_allowed(False):                         # not critical (2026-11-06): a row of the owners' bell, once per sheet
+            return _sheet_to_bell(conn, request.form.get("set_key", ""), caption, data)
         send = notify.notifier_photo_for(conn, current_app.config.get("SECRET_BOX"), http=current_app.config.get("TELEGRAM_HTTP") or urllib_transport) \
             if critical.telegram_allowed(False) else None                # not critical (2026-11-06): the page «Фото на проверке» has it
         if send is None:

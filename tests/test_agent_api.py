@@ -262,6 +262,7 @@ def test_review_sheet_sends_to_telegram(tmp_path):
     assert "Фото на проверке: ".encode() in body and b"http://localhost/photos/review" in body and b"1000" in body
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the Telegram way (everything to Telegram); with only the critical: the bell (test_digest_bell)
 def test_review_sheet_without_telegram_is_204(tmp_path):
     app, conn, client, auth = setup(tmp_path, SECRET_BOX=SecretBox(Fernet.generate_key()))
     key = add_set(app, conn)
