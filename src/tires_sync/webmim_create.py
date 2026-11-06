@@ -510,28 +510,41 @@ def _why(err) -> str:
     return str(err)[:200] or "ошибка"
 
 
-def _positions(conn, card: dict, client, webmim_id: str, where: str, chosen: str, now: str, author: str, start: float, clock) -> dict:
-    """Add what lacks: our quantity of each position less what WebMIM's order holds. More in WebMIM than ours is left as it is and said."""
+def _wanted(conn, card: dict) -> Tuple[Dict[str, int], Dict[str, str], str]:
+    """(goods id → our quantity, goods id → name, the territory) of the supplier's positions: the positions «с ОТХ» are never ordered."""
     wanted: Dict[str, int] = {}
     names: Dict[str, str] = {}
     territory = ""
-    for item in oth_sale.supplier_items(conn, card):              # only what lacks: the positions «с ОТХ» are never ordered
+    for item in oth_sale.supplier_items(conn, card):
         if int(item["qty"] or 0) > 0:
             goods = str(item["goods_id"])
             wanted[goods] = wanted.get(goods, 0) + int(item["qty"])
             names.setdefault(goods, item["name"])
             territory = str(item["territory"])
+    return wanted, names, territory
+
+
+def _held(rows: list) -> Dict[str, int]:
+    """goods id → the quantity WebMIM's order holds. A row not read (no goodsId, a quantity not a number) is OrdersError, never skipped:
+    counted as none, «Досоздать» would send it again and WebMIM adds it to what is there (4 become 8)."""
     held: Dict[str, int] = {}
-    for row in client.items(webmim_id):
-        goods = str(row.get("goodsId", "")).strip()
+    for row in rows:
+        goods = str(row.get("goodsId", "") if isinstance(row, dict) else "").strip()
         if not goods:
-            continue
+            raise webmim_orders.OrdersError("позиции заказа WebMIM: строка без кода товара (goodsId) не разобрана, ничего не добавлено")
         qty = row.get("quantity")
         if isinstance(qty, str) and qty.strip().isascii() and qty.strip().isdigit():
             qty = int(qty.strip())
         if not isinstance(qty, (int, float)) or isinstance(qty, bool):      # unread, it would count as none and be sent again: WebMIM adds it
             raise webmim_orders.OrdersError("позиции заказа WebMIM: количество не разобрано")
         held[goods] = held.get(goods, 0) + int(qty)
+    return held
+
+
+def _positions(conn, card: dict, client, webmim_id: str, where: str, chosen: str, now: str, author: str, start: float, clock) -> dict:
+    """Add what lacks: our quantity of each position less what WebMIM's order holds. More in WebMIM than ours is left as it is and said."""
+    wanted, names, territory = _wanted(conn, card)
+    held = _held(client.items(webmim_id))
     refused, more = [], []
     for goods, qty in wanted.items():
         need = qty - held.get(goods, 0)

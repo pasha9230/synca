@@ -52,6 +52,9 @@ class FakeWebmim:
             raise OSError("timed out")
         if action == "500":
             return 500, {}, b"{}"
+        if action == "not-a-list":                                                  # 200, but the rows wrapped in an object
+            status, data, extra = self._answer(method, path, query, payload)
+            return status, extra, json.dumps({"items": data}, ensure_ascii=False).encode("utf-8")
         if action and action != "made-then-timeout":
             return 422, {}, json.dumps({"field": "checkMessage", "message": action}, ensure_ascii=False).encode("utf-8")
         status, data, extra = self._answer(method, path, query, payload)
@@ -715,6 +718,29 @@ def test_finishing_a_part_made_the_next_day_is_not_stopped_by_the_date(tmp_path)
     assert place(conn, mine, fake)["state"] == "partial"
     later = place(conn, mine, fake, now="2026-10-25T10:00:00", today=date(2026, 10, 25))          # the delivery date (24th) has passed
     assert later["state"] == "done" and fake.held(1001) == {"111": 4, "222": 2}
+
+
+@pytest.mark.parametrize("answer", ["not-a-list", "no-goods-id"])
+def test_positions_webmim_gives_unread_never_double_the_quantity(tmp_path, answer):
+    """«Досоздать» after a part made: WebMIM's answer 200 with the positions not as a list, or a row without goodsId, must not read as «none
+    there» — all would be sent again and WebMIM adds them to what is there (4 become 8). Nothing is added, the text says why."""
+    import copy
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = FakeWebmim()
+    fake.fail[("POST", "/api/v2/orders/{id}/items")] = ["timeout"]
+    place(conn, mine, fake)
+    fake.items["1001"] = [{"goodsId": "111", "territoryId": TERRITORY, "stockType": 0, "quantity": 4},
+                          {"goodsId": "222", "territoryId": TERRITORY, "stockType": 0, "quantity": 2}]
+    if answer == "not-a-list":
+        fake.fail[("GET", "/api/v2/orders/{id}/items")] = ["not-a-list", "not-a-list"]
+    else:
+        fake.items["1001"][1].pop("goodsId")
+    held, posts = copy.deepcopy(fake.items["1001"]), len(fake.posts("/items"))
+    result = place(conn, mine, fake, now="2026-10-23T12:05:00")
+    assert result["state"] == "partial" and not result["ok"] and len(fake.posts("/items")) == posts and fake.items["1001"] == held
+    assert ("не список позиций" if answer == "not-a-list" else "без кода товара") in result["text"]
+    assert webmim_create.get_state(conn, mine)["webmim_id"] == "1001"                  # the state as before: «Досоздать» again later
 
 
 def test_an_order_found_after_its_date_is_finished(tmp_path):
