@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import urllib.parse
 
+import pytest
+
 from panel_helpers import post
 from test_mypoint import manager
 from test_return_flow import on_page
@@ -37,7 +39,7 @@ def test_the_letter_has_the_number_the_invoice_day_the_positions_and_no_money(tm
     assert "4000" not in body and "4 000" not in body and "5000" not in body and "5 000" not in body      # no purchase, no sale
     assert "прибыл" not in body.lower() and "закуп" not in body.lower()
     href = mail["href"]
-    assert href.startswith("mailto:" + urllib.parse.quote(EMAIL) + "?")
+    assert href.startswith("mailto:" + EMAIL + "?")
     query = urllib.parse.parse_qs(href.split("?", 1)[1])
     assert query["subject"] == [mail["subject"]] and query["body"] == [body.replace("\n", "\r\n")]     # RFC 6068: CRLF
 
@@ -83,7 +85,7 @@ def test_the_card_on_na_vozvrat_has_the_button_and_the_copy_and_a_press_is_journ
     client, tok = owner_client(app)
     supplier_mail.set_email(conn, 1, EMAIL, NOW, "owner")
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
-    assert "Письмо поставщику" in page and 'href="mailto:' + urllib.parse.quote(EMAIL) in page.replace("&amp;", "&")
+    assert "Письмо поставщику" in page and 'href="mailto:' + EMAIL in page.replace("&amp;", "&")
     assert "Скопировать текст" in page and 'data-mail-log="/orders/%d/supplier-mail"' % cid in page
     stage_before = orders.get_card(conn, cid)["stage"]["code"]
     tasks_before = conn.execute("SELECT id, done_at, cancelled_at FROM callback_task WHERE order_id = ?", (cid,)).fetchall()
@@ -102,21 +104,28 @@ def test_a_card_on_another_stage_has_no_button(tmp_path):
     assert post(client, "/orders/%d/supplier-mail" % cid, tok).status_code == 409
 
 
-def test_the_return_task_in_tasks_has_the_button(tmp_path):
+@pytest.mark.parametrize("view", ("off", "all"))                                # the old look and «Новый вид» of the office
+def test_the_return_task_in_tasks_has_the_button(tmp_path, view):
+    from tires_sync.panel.routes_design import UI_KEY
     app, conn, pid, cid, point = on_page(tmp_path)
+    store.set_state(conn, UI_KEY % "office", view)
     client, tok = owner_client(app)
     assert conn.execute("SELECT 1 FROM callback_task WHERE order_id = ? AND title = ?", (cid, order_oth.RETURN_TASK)).fetchone()
     page = client.get("/tasks?tab=all").get_data(as_text=True)
+    assert ("o2-tk-what" in page) == (view == "all")
     assert order_oth.RETURN_TASK in page and "Письмо поставщику" in page and 'data-mail-log="/orders/%d/supplier-mail"' % cid in page
 
 
 def test_a_point_sees_no_button_and_cannot_press_it(tmp_path):
     app, conn, pid, cid, point = on_page(tmp_path)
     supplier_mail.set_email(conn, 1, EMAIL, NOW, "owner")
+    client, tok = owner_client(app)
+    assert post(client, "/orders/%d/supplier-mail" % cid, tok).status_code == 204          # the office pressed: the record is not the point's
+    events = len(orders.list_events(conn, cid))
     page = point.get("/orders/%d" % cid).get_data(as_text=True)
     assert "Письмо поставщику" not in page and EMAIL not in page and "mailto:" not in page
     assert post(point, "/orders/%d/supplier-mail" % cid, "tok").status_code == 403
-    assert not any("Письмо поставщику" in e["text"] for e in orders.list_events(conn, cid))
+    assert len(orders.list_events(conn, cid)) == events                         # nothing written by the point's press
 
 
 def test_the_supplier_page_saves_the_address(tmp_path):

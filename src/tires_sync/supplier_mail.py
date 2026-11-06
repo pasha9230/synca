@@ -71,7 +71,7 @@ def draft(conn, card: dict) -> dict:
         if not to:
             warning = "У поставщика «%s» не указана почта для возвратов (Подключения → WebMIM): письмо откроется без адреса." % supplier["name"]
     query = urllib.parse.urlencode({"subject": subject, "body": body.replace("\n", "\r\n")}, quote_via=urllib.parse.quote)
-    href = "mailto:%s?%s" % (urllib.parse.quote(to), query)
+    href = "mailto:%s?%s" % (urllib.parse.quote(to, safe="@"), query)     # «@» as it is: older mail clients
     return {"to": to, "subject": subject, "body": body, "href": href, "warning": warning, "supplier": supplier["name"] if supplier else ""}
 
 
