@@ -563,14 +563,17 @@ def register(app) -> None:
         return jsonify({"items": items})
 
     def _dots(conn):
-        """{order: colour of its most important open alert} for the dots by the numbers. Same rows as the «Уведомления» page
-        (one's own records are skipped, except red). A failure here never breaks the page of orders."""
+        """{order: colour of its most important open alert} for the dots by the numbers. The same rows as the «Уведомления» page and
+        the bell (one's own records are skipped, except red; no chats, no stages: order_alerts.bell_row, the owner 2026-11-06), so a dot
+        never burns for a record «Принять все» cannot take. A failure here never breaks the page of orders."""
         try:
             from .routes_alerts import grouped
             order = order_alerts.ALERT_LEVELS
             found = {}
-            for row in grouped(conn, session["user"], everything=True):   # the dots: the chats and the stages too
-                order_id = row["order_id"] if row["order_id"] is not None else row.get("of_order")   # «Срочно ответить» of the order's chat
+            for row in grouped(conn, session["user"]):
+                order_id = row["order_id"]
+                if order_id is None:
+                    continue
                 have = found.get(order_id)
                 if have is None or order.index(row["level"]) < order.index(have):
                     found[order_id] = row["level"]

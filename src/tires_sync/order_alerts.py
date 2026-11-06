@@ -53,7 +53,7 @@ def bell_row(row: dict) -> bool:
     """A row of «Уведомления», of the bell, of its counter and of notify.js (the owner 2026-11-05: «из уведомлений убери весь мусор, чаты не
     нужны там», «этапы тоже»). Not: a chat's record or row (the client's words, «Клиент написал» of a chat without an order, «Срочно
     ответить»), except a red record of the order journal (a failed send to the client); a stage (QUIET_KINDS); «Резерв: товар на точке».
-    Only the showing: the records stay in the journal with their colour, the dots by the order numbers still count them."""
+    Only the showing: the records stay in the journal with their colour; the dots by the order numbers count the same rows (2026-11-06)."""
     kind, text = row.get("kind"), str(row.get("text") or "")
     if kind in QUIET_KINDS:
         return False

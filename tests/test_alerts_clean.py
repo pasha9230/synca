@@ -1,7 +1,7 @@
 """«Уведомления» without the noise (the owner 2026-11-05: «из уведомлений убери весь мусор, чаты не нужны там», «этапы тоже там не нужны»):
 the chat records but the red failures of a send to the client, the stages and «Резерв: товар на точке» are no rows of the page, of the bell,
-of its counter and of notify.js. Only the showing changes: the records stay in the journal of the order with their colour, the dots by the
-order numbers still see them, nothing is written, the counter of «Чаты» is as it was, the point keeps its question and its return row."""
+of its counter, of notify.js and (2026-11-06) of the dots by the order numbers. Only the showing changes: the records stay in the journal of the
+order with their colour, nothing is written, the counter of «Чаты» is as it was, the point keeps its question and its return row."""
 from __future__ import annotations
 
 import re
@@ -75,7 +75,7 @@ def test_a_noise_record_is_no_row_of_the_page_nor_of_the_bell_and_stays_in_the_j
     assert bell(client) == {"count": 0, "red": False, "items": []}               # nor of the bell
     assert counter(client.get("/").get_data(as_text=True)) == (0, False)         # nor of the menu counter
     assert state(conn) == before                                                 # nothing is written by the showing
-    assert dots(client.get("/orders?v=list").get_data(as_text=True))[cid][0] == stored     # the dot by the number: as before
+    assert cid not in dots(client.get("/orders?v=list").get_data(as_text=True))     # nor of the dot by the number (the owner 2026-11-06)
     journal = orders.list_events(conn, cid)
     assert [(e["kind"], e["level"]) for e in journal if e["id"] == eid] == [(kind, stored)]  # the journal: the record, its colour
     assert text in client.get("/orders/%d" % cid).get_data(as_text=True)          # seen in the order
@@ -145,6 +145,35 @@ def test_chats_without_an_order_and_urgent_are_no_rows_and_the_chats_counter_sta
     assert counter(html) == (0, False)
     chats = re.search(r'href="/chats">.*?Чаты(?:<span class="sb-count">(\d+)</span>)?</a>', html)
     assert chats and chats.group(1) == "2"                                       # «Чаты» counts its unread as before
+
+
+@pytest.mark.parametrize("kind,text,level,shown", KEPT)
+def test_a_kept_record_lights_the_dot_by_the_number(tmp_path, kind, text, level, shown):
+    app, client, tok, conn = setup(tmp_path)
+    cid = card(conn, "Ольга")
+    event(conn, cid, kind, text, level=level)
+    for url in ("/orders?v=list", "/orders"):
+        assert dots(client.get(url).get_data(as_text=True))[cid][0] == shown
+
+
+def test_after_accept_all_no_dot_burns_for_hidden_records(tmp_path):
+    """The owner 2026-11-06: the dots by the numbers count what the bell counts; after «Принять все» a chat or a stage of the order
+    (hidden, never accepted) lights nothing."""
+    app, client, tok, conn = setup(tmp_path)
+    cid, other = card(conn, "Ольга"), card(conn, "Пётр")
+    kept = event(conn, cid, "reserve", "Резерв кончается завтра")
+    red = event(conn, other, "chat", "Сообщение клиенту не отправлено («Шины на точке»): нет чата", level="red")
+    for kind, text, level in HIDDEN:
+        event(conn, cid, kind, text, level=level)
+    event(conn, cid, "stage", "Этап: «В работе» → «Заказ оформлен»")       # a hidden record newer than the kept one
+    html = client.get("/orders?v=list").get_data(as_text=True)
+    assert dots(html)[cid][0] == "yellow" and dots(html)[other][0] == "red"
+    client.post("/alerts/accept-all", data={"csrf": tok, "ids": [kept, red]})
+    for url in ("/orders?v=list", "/orders"):
+        shown = dots(client.get(url).get_data(as_text=True))
+        assert cid not in shown and other not in shown
+    assert bell(client)["count"] == 0
+    assert any(e["id"] > kept for e in alerts.open_alerts(conn, "owner", cid))   # the hidden records are still open alerts: only the showing
 
 
 def test_bell_row_by_its_kind_and_text():
