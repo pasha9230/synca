@@ -213,3 +213,50 @@ def test_the_whole_list_is_for_who_may_see_the_purchase_only(tmp_path):
         assert client.get("/prices/purchase/%d" % alert["id"]).status_code == 403, role
         assert client.get("/prices/purchase").status_code == 403, role
     assert _owner(app)[0].get("/prices/purchase/999").status_code == 404
+
+
+# --- по ревью ------------------------------------------------------------------------------------------------------------------------
+
+def test_two_overlapping_cycles_make_one_alert(tmp_path, monkeypatch):
+    """Цикл по таймеру и цикл с кнопки панели могут идти одновременно (feed_now.hold_cycle): то же изменение не уходит дважды."""
+    first = _ready(tmp_path, a=1000.0)
+    second = store.connect(tmp_path / "t.db")
+    _cycle(first, "2026-11-06T09:00:00", a=1200.0)
+    real, made = store.get_state, []
+
+    def stale(conn, key):
+        value = real(conn, key)                                                  # второй прочитал отметку…
+        if conn is second and key == purchase_alert.UPTO and not made:
+            made.append(purchase_alert.collect(first, DAY))                      # …а первый успел сделать сообщение
+        return value
+    monkeypatch.setattr(purchase_alert.store, "get_state", stale)
+    assert purchase_alert.collect(second, DAY) is None
+    assert made[0] is not None and first.execute("SELECT COUNT(*) FROM purchase_alert").fetchone()[0] == 1
+
+
+def test_a_position_of_4tochki_shown_for_viewing_only_is_told_by_its_name(tmp_path, monkeypatch):
+    from tires_sync import tochki_feed
+    conn = store.connect(tmp_path / "t.db")
+    price = {"s3-1": 2000.0}
+
+    def view(conn_, parsed, base):
+        only = {g: make_offer(goods_id=g, name="Шина 4tochki", base_price=p) for g, p in price.items()}
+        return ParseResult(offers={**parsed.offers, **only}), frozenset(only)
+    monkeypatch.setattr(tochki_feed, "catalog_view", view)
+    sent = _sent(monkeypatch)
+    parsed = ParseResult(offers={"100": make_offer()})
+    for value in (2000.0, 2100.0):
+        price["s3-1"] = value
+        cli._record_archive(conn, None, parsed, tmp_path / "unload.xml")
+        cli._alert_purchase(conn, None, parsed, tmp_path / "unload.xml", now=DAY)
+    assert len(sent["owner"]) == 1 and "Шина 4tochki: 2 000 → 2 100 (+5 %)" in sent["owner"][0]
+    assert purchase_alert.get(conn)["rows"][0]["name"] == "Шина 4tochki"           # и на странице списка
+
+
+def test_a_refused_owner_telegram_still_tells_the_partner(tmp_path, monkeypatch):
+    conn = _ready(tmp_path, a=1000.0)
+    users.add_user(conn, "zaman", "Passw0rd-long-enough", DAY, role="partner")
+    sent = _sent(monkeypatch, ok=False)
+    _cycle(conn, "2026-11-06T09:00:00", a=1200.0)
+    cli._alert_purchase(conn, None, now=DAY)
+    assert [p[0] for p in sent["people"]] == [["zaman"]]

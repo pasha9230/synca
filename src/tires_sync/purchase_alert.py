@@ -5,6 +5,7 @@ outside the alert hours (order_oth.in_alert_hours) nothing is made: the changes 
 in one message. Read-only for the prices and the feeds; the sending is the caller's (cli._tell_important, the one channel of such news)."""
 from __future__ import annotations
 
+import json
 from typing import Dict, List, Optional
 
 from . import store
@@ -108,33 +109,43 @@ def text(rows: List[dict], link: str) -> str:
 
 def collect(conn, now: str, offers=None) -> Optional[dict]:
     """The new alert of this cycle, or None: nothing new, the first run (it only remembers where the history is) or a change that came back.
-    The alert and the mark UPTO are written in one commit: a change is never in two alerts. The time `now` is the caller's (alert hours)."""
+    The mark UPTO moves only from the value read (one statement: of two cycles at once, one makes the alert) and in the same commit as the
+    alert: a change is never in two alerts. The lines are kept with the alert as they were told (the name, our price of then).
+    The time `now` is the caller's (alert hours)."""
     top = conn.execute("SELECT COALESCE(MAX(id), 0) FROM supplier_price_change").fetchone()[0]
     upto = store.get_state(conn, UPTO)
     if upto is None or upto == "":
-        store.set_state(conn, UPTO, str(top))
+        conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (UPTO, str(top)))
+        conn.commit()
         return None
     after = int(upto)
     if top <= after:
         return None
+    if conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value = ?", (str(top), UPTO, upto)).rowcount != 1:
+        conn.rollback()
+        return None                                                     # another cycle took these changes
     rows = _changes(conn, after, top)
     alert = None
     if rows:
-        cur = conn.execute("INSERT INTO purchase_alert (at, first_change, last_change, total, head) VALUES (?,?,?,?,?)",
-                           (now, after, top, len(rows), head(rows)))
-        alert = {"id": cur.lastrowid, "at": now, "rows": _named(conn, rows, offers)}
-    conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (UPTO, str(top)))
+        rows = _named(conn, rows, offers)
+        cur = conn.execute("INSERT INTO purchase_alert (at, first_change, last_change, total, head, data) VALUES (?,?,?,?,?,?)",
+                           (now, after, top, len(rows), head(rows), json.dumps(rows, ensure_ascii=False)))
+        alert = {"id": cur.lastrowid, "at": now, "rows": rows}
     conn.commit()
     return alert
 
 
 def get(conn, alert_id: Optional[int] = None) -> Optional[dict]:
-    """One alert with its whole list (the latest when no id), or None."""
-    sql = "SELECT id, at, first_change, last_change FROM purchase_alert " + ("WHERE id = ?" if alert_id is not None else "ORDER BY id DESC LIMIT 1")
+    """One alert with its whole list as it was told (the latest when no id), or None."""
+    sql = "SELECT id, at, data FROM purchase_alert " + ("WHERE id = ?" if alert_id is not None else "ORDER BY id DESC LIMIT 1")
     row = conn.execute(sql, (alert_id,) if alert_id is not None else ()).fetchone()
     if row is None:
         return None
-    return {"id": row[0], "at": row[1], "rows": _named(conn, _changes(conn, row[2], row[3]))}
+    try:
+        rows = json.loads(row[2] or "[]")
+    except ValueError:
+        rows = []
+    return {"id": row[0], "at": row[1], "rows": rows}
 
 
 def recent(conn, limit: int = 30) -> List[dict]:

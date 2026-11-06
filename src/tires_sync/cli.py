@@ -580,13 +580,14 @@ def _alert_own_below_cost(conn, box, offers, settings=None) -> None:
         print("проверка «своя цена ниже закупки» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
 
 
-def _tell_important(conn, box, logins, text: str) -> bool:
+def _tell_important(conn, box, logins, text: str, others_anyway: bool = False) -> bool:
     """The one channel of the important news (the summaries of the prices; the owner 2026-11-06: it may change later, so only here): the owner's
     chat of the alerts through _alert (journal, Telegram, its failure printed as always) and the same text in Telegram to each other person of
-    `logins` who has a chat, once the owner's is handled (as before). True when the owner's message is handled (_alert); False: Telegram
-    refused it (printed by _alert), nobody else was told."""
+    `logins` who has a chat, once the owner's is handled (as before), or whatever came of it with `others_anyway` (a message sent once).
+    True when the owner's message is handled (_alert); False: Telegram refused it (printed by _alert)."""
     from . import order_notify
-    if not _alert(conn, box, text, notice=True):
+    told = _alert(conn, box, text, notice=True)
+    if not told and not others_anyway:
         return False
     owner = order_notify.get_owner_login(conn)
     others = [login for login in logins if login != owner]
@@ -594,7 +595,7 @@ def _tell_important(conn, box, logins, text: str) -> bool:
         how = order_notify.tell_people(conn, box, others, text, tg_http=_http())
         if "не отправлен" in how:
             print("сводка не отправлена в Telegram: %s" % how, file=sys.stderr)
-    return True
+    return told
 
 
 def _alert_price_guard(conn, box) -> None:
@@ -626,7 +627,7 @@ def _panel_link(conn, path: str, otherwise: str) -> str:
     return base + path if base else otherwise
 
 
-def _alert_purchase(conn, box, offers=None, now: str = "") -> None:
+def _alert_purchase(conn, box, parsed=None, base=None, now: str = "") -> None:
     """«Закупка изменилась» (purchase_alert, the owner 2026-11-06): after the cycle, one message on every change of the supplier's purchase
     since the last one, to the people who may see the purchase, and a red row of their bell. Outside the alert hours nothing is made: the
     changes wait for the first cycle of the working hours. Sent once: a refused Telegram is printed (as every alert) and the bell keeps it.
@@ -636,11 +637,17 @@ def _alert_purchase(conn, box, offers=None, now: str = "") -> None:
         now = now or moscow_now().isoformat(timespec="seconds")
         if not order_oth.in_alert_hours(conn, now):
             return
+        offers = dict(getattr(parsed, "offers", None) or {})
+        if parsed is not None and base is not None:
+            try:                                                # 4tochki shown for viewing only: its history is kept, so are its names
+                offers = dict(tochki_feed.catalog_view(conn, parsed, Path(base))[0].offers)
+            except Exception as err:                            # noqa: BLE001 - without them the line says the Id
+                print("предупреждение: названия 4tochki для сводки закупки не прочитаны (%s)" % err, file=sys.stderr)
         alert = purchase_alert.collect(conn, now, offers)
         if alert is None:
             return
-        link = _panel_link(conn, "%s/%d" % (purchase_alert.PAGE, alert["id"]), "панель → Товар и фид → Закупка изменилась")
-        _tell_important(conn, box, purchase_alert.people(conn), purchase_alert.text(alert["rows"], link))
+        link = _panel_link(conn, "%s/%d" % (purchase_alert.PAGE, alert["id"]), "панель → Уведомления → «Закупка изменилась»")
+        _tell_important(conn, box, purchase_alert.people(conn), purchase_alert.text(alert["rows"], link), others_anyway=True)
     except Exception as err:
         try:
             conn.rollback()
@@ -958,7 +965,7 @@ def _run_cycle(args) -> int:
         print("напоминания не отправлены (%s)" % err, file=sys.stderr)
     if args.fetch:
         _load_tochki(conn, box, args, started)
-    _alert_purchase(conn, box, getattr(parsed, "offers", None))       # «Закупка изменилась»: after the publication, with our prices of now
+    _alert_purchase(conn, box, parsed, args.unload)                   # «Закупка изменилась»: after the publication, with our prices of now
     if getattr(args, "publish", False):
         avito_stock.after_cycle(conn, box, args.feed_root, parsed, results, http=_http())    # the number in stock on Avito, last: only accounts switched on
         try:                                                    # the prices this cycle changed, and those a stopped sender left
