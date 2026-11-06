@@ -487,6 +487,7 @@ LOGIN_COLUMNS = (("panel_user", "login"), ("panel_user_role", "login"), ("user_p
                  ("order_event_seen", "login"), ("order_event_ack", "login"),                   # the alerts read; '*' is «for everybody»
                  ("order_card", "responsible"), ("order_card", "created_by"),                   # created_by: the responsible when none (orders.py)
                  ("avito_chat", "responsible"), ("callback_task", "assignee"), ("callback_task", "created_by"),   # «Мне», «Поставил я»
+                 ("callback_task", "done_by"),                                                  # «Выполнил» (the owner 2026-11-05)
                  ("chat_handover", "taken_by"))                                                 # order_points.office_taken
 LOGIN_STATE_KEYS = ("orders_default_responsible", "shop_orders_responsible")   # orders.DEFAULT_RESPONSIBLE_KEY, shop_cart.RESPONSIBLE_KEY
 DUTY_KEY, DUTY_TODAY_KEY = "handoff_duty", "handoff_duty_today"               # order_manager: {"0".."6": login}, {"date", "login"}
