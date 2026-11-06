@@ -106,15 +106,17 @@ def test_an_order_with_no_moment_shows_the_status_without_a_date(w, value):
 def test_the_card_shows_the_tyres_sum_under_the_clients_name_the_same_as_in_the_money_part(w):
     add_item(w)
     text = page(w, "/orders/%d" % w["cid"]).replace("\xa0", " ")
-    head = re.search(r'id="ow-title"[^>]*>Анна</h1><div class="entity-under">Сумма шин <b data-order-sum>([^<]+)</b></div>', text)
+    head = re.search(r'id="ow-title"[^>]*>Анна</h1><div class="entity-under">Итого <b data-order-sum>([^<]+)</b></div>', text)
     assert head and head.group(1).startswith("20 000")
-    assert "Сумма заказа <b>%s</b>" % head.group(1) in text
+    assert '<p class="ocard-sum">Итого <b>%s</b>' % head.group(1) in text
+    assert "Итого: <b>%s</b>" % head.group(1) in text                 # the line under the positions: the same number, the same word
+    assert "Сумма шин" not in text and "Сумма заказа" not in text      # one word for the one sum (the owner 2026-11-06)
 
 
 def test_an_order_with_no_positions_has_no_sum_under_the_name(w):
     text = page(w, "/orders/%d" % w["cid"])
     assert "data-order-sum" not in text and "entity-under" not in text
-    assert "Сумма заказа" in text                                    # the money part is as it was
+    assert '<p class="ocard-sum">Итого <b>' in text                  # the money part is as it was, «Итого» (2026-11-06)
 
 
 def test_the_new_order_window_has_no_sum_and_no_date(w):
