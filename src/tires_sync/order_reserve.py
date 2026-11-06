@@ -60,6 +60,8 @@ STALE_MARK = "[резерв:чаты-не-читаются:%s]"
 HELD_KEY = "reserve_moved_tell:%d"                # app_state: the alerts of a move made at night: {"call", "entered"}
 WROTE_BEFORE = timedelta(days=3)                  # the owner 2026-11-06: a client who wrote this lately gets no reminder, the responsible a task
 NOT_A_MESSAGE = "('system', 'deleted', 'call')"   # avito_message.kind: a call in the chat (missed, rejected) is no message of the client
+ANSWER_KINDS = "('system', 'deleted')"            # after the reminder a call in the chat is read too: it keeps the order at the point (as
+                                                  # _no_answer_step), so the responsible is told (no date in it)
 WROTE_MARK = "[резерв:клиент-писал:%s]"           # once per stay at the point
 WROTE_TASK = "Клиент писал, проверьте заказ №%s"   # the owner's words
 NOT_SENT_TASK = "Напоминание о сроке резерва по заказу №%s клиенту не ушло (%s). Свяжитесь с клиентом."
@@ -361,6 +363,8 @@ def _client_step(conn, card: dict, today: date, now: str, hours, deliver, notify
     if _returned(conn, card):
         return
     stay = card["entered_at"] or ""
+    if _done(conn, card["id"], WROTE_MARK % stay):              # the task went: no reminder this stay, even when the 3 days run out later
+        return
     if not _done(conn, card["id"], "[резерв:клиенту:%s]" % stay) and _wrote_lately(conn, card, now):
         if not _done(conn, card["id"], WROTE_MARK % stay):       # the owner 2026-11-06: the responsible looks, the client gets nothing
             task = WROTE_TASK % order_manager.label(card)
@@ -469,7 +473,7 @@ def _reply_step(conn, card: dict, now: str, notify: Optional[Notify]) -> None:
     seen = store.get_state(conn, key) or "0"
     rows = [r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ? OR id = ? AND order_id IS NULL", (card["id"], sent[1]))]
     found = conn.execute("SELECT id, at, text FROM avito_message WHERE chat_row IN (%s) AND direction = 'in' AND kind NOT IN %s AND at > ? AND at <= ? "
-                         "AND id > ? ORDER BY id" % (",".join("?" * len(rows)), NOT_A_MESSAGE), rows + [sent[0], now, int(seen)]).fetchall() if rows else []
+                         "AND id > ? ORDER BY id" % (",".join("?" * len(rows)), ANSWER_KINDS), rows + [sent[0], now, int(seen)]).fetchall() if rows else []
     if not found:
         conn.commit()
         return

@@ -165,7 +165,8 @@ def test_the_dates_a_client_writes(text, expected):
     ("забрал и поставил", "none"), ("ок", "none"), ("", "none"), ("15.11 или 16.11", "many"), ("сегодня не смогу, в пятницу", "refused"),
     ("заберу 25.12", "far"), ("05.11", "far"), ("в 12.30 подъеду", "none"), ("8 900 123 45 67", "none"), ("31.02", "none"),
     ("Сегодня не успею", "refused"), ("завтра не смогу", "refused"), ("перезвоню завтра", "refused"), ("Отказываюсь, завтра не надо", "refused"),
-    ("нет, 20.11", "refused"), ("отмените заказ", "refused"), ("Передумал", "refused"),
+    ("нет, 20.11", "refused"), ("Сегодня никак", "refused"), ("сегодня уже нельзя", "refused"), ("подъеду в 17.11", "none"),
+    ("к 12.11 буду", "none"), ("отмените заказ", "refused"), ("Передумал", "refused"),
 ])
 def test_no_date_two_dates_and_a_far_one(text, status):
     assert reply_date.parse(text, date(2026, 11, 6))[0] == status
@@ -241,7 +242,7 @@ def test_an_issued_or_closed_order_gets_no_reminder(tmp_path, to):
     assert deliver.sent == [] and not [t for _c, t in notify.sent if "Клиент писал" in t]
 
 
-def test_an_order_to_another_city_and_the_points_own_sale_are_outside(tmp_path):
+def test_an_order_to_another_city_is_outside(tmp_path):
     conn, cid, chat, deliver, notify = ready(tmp_path)
     said(conn, chat, "2026-10-17T20:00:00", "здравствуйте")
     tpl.add_samples(conn)
@@ -328,3 +329,21 @@ def test_after_the_date_moved_the_answers_are_the_managers(tmp_path):
     said(conn, chat, DAY + "T16:01:00", "сегодня")
     tick(conn, DAY + "T17:07:00", deliver, notify)
     assert until(conn, cid) == "2026-10-20" and not [t for _c, t in notify.sent if "Клиент ответил" in t]
+
+
+def test_the_task_once_given_no_reminder_goes_when_the_3_days_run_out_later_that_day(tmp_path):
+    conn, cid, chat, deliver, notify = ready(tmp_path)
+    said(conn, chat, "2026-10-15T13:00:00", "здравствуйте")             # within 3 days at 12:30, older at 13:07
+    tick(conn, DAY + "T12:30:00", deliver, notify)
+    tick(conn, DAY + "T13:07:00", deliver, notify)
+    assert deliver.sent == [] and len([t for _c, t in notify.sent if "Клиент писал" in t]) == 1
+
+
+def test_a_call_in_the_chat_after_the_reminder_is_told_to_the_responsible(tmp_path):
+    conn, cid, chat, deliver, notify = told(tmp_path)
+    said(conn, chat, DAY + "T20:30:00", "Звонок через Авито: пропущен", kind="call")
+    tick(conn, NEXT + "T03:07:00", deliver, notify)
+    assert code(conn, cid) == "at_point"                                # a call keeps it at the point, as before
+    tick(conn, NEXT + "T10:07:00", deliver, notify)
+    [alert] = [t for _c, t in notify.sent if "Клиент ответил" in t]
+    assert "Звонок через Авито: пропущен" in alert and until(conn, cid) == DAY

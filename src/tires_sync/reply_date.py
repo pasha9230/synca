@@ -2,6 +2,7 @@
 «сегодня», «завтра», «послезавтра», «в пятницу». Only today and the next 30 days are a date (`ok`); one before or later is `far`; two
 different dates are `many`; nothing, `none`; a «не», «нет», «отказ…», «перезвон…», «передума…», «отмен…» is `refused` whatever date is in it
 («сегодня не успею», «завтра не смогу»: the review 2026-11-06, the responsible's, never a date). A weekday is the next one after the day of the message (on a Friday «в пятницу» is a week later).
+«в 17.11», «к 12.30» is a time, not a date (`none`: the responsible's).
 A day without a year is this year's, or the next year's when it has passed. «12.30», a phone, a price are no date (no such month)."""
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ WEEKDAYS = ("понедельник", "вторник", "сред[ау]", "че�
 NUMERIC = re.compile(r"(?<![\d.,/:])(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?(?![\d/:]|[.,]\d)")
 WORDS = re.compile(r"(?<!\d)(\d{1,2})(?:-?го)?\s+(%s)[а-я]*" % "|".join("(%s)" % m for m in MONTHS))
 RELATIVE = re.compile(r"(?<![а-я])(послезавтра|завтра|сегодня)(?![а-я])")
-REFUSAL = re.compile(r"(?<![а-я])(не|нет|отказ[а-я]*|перезвон[а-я]*|передума[а-я]*|отмен[а-я]*)(?![а-я])")
+REFUSAL = re.compile(r"(?<![а-я])(не|нет|отказ[а-я]*|перезвон[а-я]*|передума[а-я]*|отмен[а-я]*|никак|нельзя|вряд)(?![а-я])")
 WEEKDAY = re.compile(r"(?<![а-я])(%s)(?![а-я])" % "|".join("(%s)" % w for w in WEEKDAYS))
 
 
@@ -36,7 +37,10 @@ def found_dates(text: str, day: date) -> Set[date]:
     """Every date the text names, counted from `day` (the day the client wrote it)."""
     text = str(text or "").lower().replace("ё", "е")
     dates: Set[date] = set()
-    for dd, mm, yy in NUMERIC.findall(text):
+    for match in NUMERIC.finditer(text):
+        dd, mm, yy = match.groups()
+        if not yy and re.search(r"(?<![а-я])[вк]\s*$", text[:match.start()]):
+            continue                                            # «в 17.11», «к 12.30»: a time
         year = None if not yy else int(yy) + (2000 if len(yy) == 2 else 0)
         found = _day(day, int(dd), int(mm), year)
         if found is not None:
