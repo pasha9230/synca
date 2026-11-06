@@ -35,8 +35,9 @@ def test_a_whole_order_of_webmim_is_all_green_and_ready(tmp_path):
     assert all(state == "ok" for state, _ in lines(view).values()), lines(view)
     assert view["fields"] == webmim_create.fields(conn, orders.get_card(conn, mine))
     assert view["fingerprint"] == webmim_create.fingerprint(conn, orders.get_card(conn, mine))
-    assert "Админ" in lines(view)["contact"][1] and "Грузим на ОТХ" in lines(view)["contact"][1]
-    assert "+7(911)222-33-44" in lines(view)["phone"][1] and "10:00-18:00" in lines(view)["time"][1]
+    assert "Админ" in lines(view)["contact"][1] and "«грузим на ОТХ»" in lines(view)["contact"][1]            # the owner 2026-11-06
+    assert "+7(911)222-33-44" in lines(view)["phone"][1] and lines(view)["time"][1] == "10:00-17:00"          # not the point's 10:00-18:00
+    assert view["sum"] == 24000                                                          # 4 + 2 tyres × 4 000: the window shows it
 
 
 def test_the_stock_and_the_price_of_the_unload_only_warn(tmp_path):
@@ -54,7 +55,6 @@ def test_the_stock_and_the_price_of_the_unload_only_warn(tmp_path):
 @pytest.mark.parametrize("make, key", [
     (lambda conn: card(conn, point_id=point(conn, name="Без адреса", webmim_address_id="")), "point"),
     (lambda conn: card(conn, point_id=point(conn, name="Телефон", manager_phone="+44 20 7946 0958")), "phone"),
-    (lambda conn: card(conn, point_id=point(conn, name="Без времени", default_time="")), "time"),
     (lambda conn: card(conn, delivery_date="2026-10-22"), "date"),
     (lambda conn: card(conn, delivery_date=""), "date"),
     (lambda conn: card(conn, goods=(("x-0123456789ab", 4),)), "items"),
@@ -172,7 +172,8 @@ def test_the_page_shows_the_lines_and_the_window(panel):
     html = owner_client(app).get("/orders/%d" % mine).get_data(as_text=True)
     assert "Заказ поставщику" in html and "data-supplier-check" in html and "Заказать в МИМ</button>" in html
     for words in ("Признак оплаты</dt><dd>Отсрочка", "Вид оплаты</dt><dd>безнал", "Контактное лицо</dt><dd>Админ", "Контактный телефон</dt><dd>+7(911)222-33-44",
-                  "Примечание для поставщика</dt><dd>Грузим на ОТХ", "Время работы клиента</dt><dd>10:00-18:00", "Подтвердить</button>"):
+                  "Примечание для поставщика</dt><dd>грузим на ОТХ", "Время работы клиента</dt><dd>10:00-17:00", "Примечание к заказу</dt><dd>грузим на ОТХ",
+                  "Собственный номер</dt><dd>пусто", "Сумма закупки", "Подтвердить</button>"):
         assert words in html, words
     assert re.search(r'name="seen" value="[0-9a-f]{16}"', html)
     assert fake.calls == []                                                              # the page asks WebMIM nothing
@@ -183,7 +184,7 @@ def test_a_changed_order_after_the_window_is_refused_on_the_page(panel):
     mine = card(conn, delivery_date="2026-10-08")
     client = owner_client(app)
     seen = re.search(r'name="seen" value="([0-9a-f]+)"', client.get("/orders/%d" % mine).get_data(as_text=True)).group(1)
-    orders.update_card(conn, mine, {"delivery_time": "после 12"}, NOW, "owner")
+    orders.update_card(conn, mine, {"delivery_date": "2026-10-09"}, NOW, "owner")
     post(client, "/orders/%d/webmim/create" % mine, "tok", seen=seen)
     assert "изменились после открытия окна" in client.get("/orders/%d" % mine).get_data(as_text=True)
     assert not fake.posts() and orders._row(conn, mine)["webmim_id"] == ""
@@ -214,15 +215,26 @@ def test_the_others_see_no_block_and_are_refused(panel):
     assert order_supplier.number_of(conn, mine) == ""
 
 
-def test_a_lost_answer_is_checked_as_the_press_checks_it(tmp_path):
-    """Д5: after a lost answer a past date does not stop the press (it looks for the order first): «Сверка» agrees."""
+def test_a_point_without_its_own_time_is_no_red_line_for_webmim_but_is_for_4tochki(tmp_path):
+    """WebMIM gets 10:00-17:00 for every point (the owner 2026-11-06); the text for 4 Точки keeps the point's time and needs it."""
     conn = db(tmp_path)
-    mine = card(conn, delivery_date="2026-10-22")
-    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
-                 "VALUES (?, 'test', 'unknown', ?, ?, 'owner', '', '', ?)", (mine, NOW, NOW, NOW))
-    conn.commit()
+    mine = card(conn, point_id=point(conn, name="Без времени", default_time=""))
     view = order_supplier.view(conn, orders.get_card(conn, mine), unload(), NOW)
-    assert lines(view)["date"][0] != "bad" and not view["blocked"]
+    assert lines(view)["time"] == ("ok", "10:00-17:00") and not view["blocked"]
+    assert ("time", "У точки «Без времени» не указано время доставки по умолчанию (Подключения → Точки).") in \
+        order_supplier._tochki_checks(conn, orders.get_card(conn, mine), TODAY)
+
+
+def test_a_lost_answer_shuts_the_button_on_the_page(panel):
+    """No number goes to WebMIM: after a lost answer «Заказать в МИМ» is shut and says where to look (the block «WebMIM»)."""
+    app, conn, fake = panel
+    mine = card(conn, delivery_date="2026-10-08")
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
+                 "VALUES (?, 'test', 'unknown', ?, ?, 'owner', '', 'потерян', ?)", (mine, NOW, NOW, NOW))
+    conn.commit()
+    html = owner_client(app).get("/orders/%d" % mine).get_data(as_text=True)
+    assert 'data-open-modal="supplier-window">Заказать в МИМ' not in html and "Кнопка закрыта: итог прошлого нажатия неизвестен" in html
+    assert fake.calls == []
 
 
 def test_one_other_supplier_is_not_called_several(tmp_path):

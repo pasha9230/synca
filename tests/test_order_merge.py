@@ -419,6 +419,22 @@ def test_a_source_placed_in_part_is_not_merged(tmp_path):
         _merge(conn, [a, b])
 
 
+def test_a_source_made_by_the_button_with_its_fields_cleared_is_not_merged(tmp_path):
+    """«done» with the card's WebMIM fields cleared: its tyres would look unordered in the new order and its button would buy them again."""
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, updated_at) "
+                 "VALUES (?, 'prod', 'done', ?, ?, 'o', '1001', ?)", (b, T, T, T))
+    conn.execute("UPDATE order_card SET webmim_id = '', webmim_number = '', supplier_number = '' WHERE id = ?", (b,))     # cleared by hand
+    conn.commit()
+    with pytest.raises(orders.OrderError, match="поля WebMIM в карточке очищены"):
+        _merge(conn, [a, b])
+    orders.update_card(conn, b, {"webmim_id": "1001"}, T, "o")                         # the id back on the card: ordered, merged as placed
+    conn.commit()
+    assert order_merge._why_not_source(conn, orders.get_card(conn, b)) is None
+
+
 def test_tyres_not_ordered_yet_keep_the_purchase_webmim_gives(tmp_path):
     conn = db(tmp_path)
     cid = new_order(conn, qty=2, goods="2")

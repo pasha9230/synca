@@ -351,7 +351,8 @@ CREATE TABLE IF NOT EXISTS webmim_order (
 CREATE INDEX IF NOT EXISTS webmim_order_number ON webmim_order (server, number);
 -- «Оформить в WebMIM» (webmim_create): one row per order of the panel. server: test / prod, where it is made; state: running (a press is at work),
 -- unknown (the answer to the order was lost: it may be made), refused (WebMIM or a check said no, nothing made), partial (made, positions lacking),
--- done. first_at: the first press whose order may be made (the search by our number looks from it); webmim_id: the order made by the button.
+-- done. first_at: the first press whose order may be made (kept by «Досоздать»; the WebMIM order carries no number of the panel, nothing looks
+-- for it by one: a lost answer waits for a person, webmim_create.resolve); webmim_id: the order made by the button.
 CREATE TABLE IF NOT EXISTS webmim_create (
     order_id INTEGER PRIMARY KEY, server TEXT NOT NULL, state TEXT NOT NULL, first_at TEXT NOT NULL, started_at TEXT NOT NULL,
     author TEXT NOT NULL, webmim_id TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
