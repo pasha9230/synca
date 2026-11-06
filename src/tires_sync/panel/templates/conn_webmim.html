@@ -28,6 +28,12 @@
 {% if webmim_check %}<span class="ml-auto"><span class="row small {{ 'text-ok' if webmim_check.status.startswith('ok') else 'text-err' }}" style="gap:6px">{{ icon("check-circle" if webmim_check.status.startswith('ok') else "x-circle", "i-sm") }}{{ webmim_check.status }} · {{ webmim_check.at|dt_utc }}</span></span>{% endif %}</div>
 {% if can_post("connections_webmim") %}</form>{% else %}</fieldset>{% endif %}
 </section>
+<section class="card" id="return-email"><div class="card-head"><h3>Почта для возвратов</h3></div>
+{% if can_post("connections_supplier_email") %}<form method="post" action="/connections/suppliers/{{ supplier.id }}/email" class="card-body stack">{% else %}<fieldset disabled class="ro-form card-body stack" style="border:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<p class="muted small">Адрес, на который кнопка «Письмо поставщику» (задача возврата и заказ на «На возврат») открывает письмо в вашей почте. Панель сама ничего не отправляет. Пусто — письмо откроется без адреса.</p>
+<label class="field"><span class="label">Email поставщика</span><input class="input" type="email" name="return_email" value="{{ return_email }}" maxlength="254" autocomplete="off" placeholder="returns@example.com"></label>
+<div><button class="btn btn--primary">Сохранить</button></div>
+{% if can_post("connections_supplier_email") %}</form>{% else %}</fieldset>{% endif %}</section>
 <section class="card" id="orders">
 <div class="card-head"><h3>Заказы в WebMIM</h3>{% if orders_check %}<span class="ml-auto"><span class="badge badge--{{ 'ok' if orders_check.status.startswith('ok') else 'err' }} badge--dot">{{ "доступ есть" if orders_check.status.startswith('ok') else "нет доступа" }}</span></span>{% endif %}</div>
 {% if can_post("connections_webmim_orders") %}<form method="post" action="/connections/webmim/orders">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}

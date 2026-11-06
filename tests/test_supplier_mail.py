@@ -39,7 +39,7 @@ def test_the_letter_has_the_number_the_invoice_day_the_positions_and_no_money(tm
     href = mail["href"]
     assert href.startswith("mailto:" + urllib.parse.quote(EMAIL) + "?")
     query = urllib.parse.parse_qs(href.split("?", 1)[1])
-    assert query["subject"] == [mail["subject"]] and query["body"] == [body]
+    assert query["subject"] == [mail["subject"]] and query["body"] == [body.replace("\n", "\r\n")]     # RFC 6068: CRLF
 
 
 def test_without_an_address_the_letter_opens_empty_with_a_warning(tmp_path):

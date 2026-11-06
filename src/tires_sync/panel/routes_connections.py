@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import abort, flash, redirect, render_template, request
 
-from .. import avito_stock, connections, price_push, feed as feed_module, order_notify, orders, users as panel_users
+from .. import avito_stock, connections, price_push, feed as feed_module, order_notify, orders, supplier_mail, users as panel_users
 from ..avito import AvitoAuthError, AvitoClient, AvitoError
 from ..secretbox import SecretKeyError
 from ..settings_store import StaleDraftError, active_settings, get_active
@@ -184,7 +184,8 @@ def register(app) -> None:
             orders_check=connections.get_check(conn, "webmim_orders", owner),
             orders_cfg=dict({"server": webmim_orders.DEFAULT_SERVER, "login": "", "auth": "login"}, **connections.get_config(conn, "webmim_orders", owner)),
             orders_secrets=connections.secret_status(conn, box, "webmim_orders", owner),
-            orders_servers=[(key, webmim_orders.SERVER_NAMES[key]) for key in webmim_orders.SERVERS])
+            orders_servers=[(key, webmim_orders.SERVER_NAMES[key]) for key in webmim_orders.SERVERS],
+            return_email=supplier_mail.email_of(conn, supplier_id))
 
     @app.route("/connections/tochki")
     @login_required

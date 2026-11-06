@@ -205,6 +205,18 @@
     });
   })();
 
+  // «Письмо поставщику» (supplier_mail): the mailto link opens the letter by itself; the press is noted in the order's journal on the side
+  document.addEventListener("click", function (e) {
+    var link = e.target.closest && e.target.closest("a[data-mail-log]");
+    if (!link) return;
+    var data = new FormData();
+    data.append("csrf", link.getAttribute("data-csrf") || "");
+    try {
+      fetch(link.getAttribute("data-mail-log"), {method: "POST", body: data, credentials: "same-origin", keepalive: true,
+                                                 headers: {"X-Requested-With": "fetch"}}).catch(function () {});
+    } catch (err) { /* the letter still opens */ }
+  });
+
   // 7) Кнопка «Скопировать»: берёт значение поля, на которое указывает data-copy
   document.addEventListener("click", function (e) {
     var btn = e.target.closest && e.target.closest("[data-copy]");

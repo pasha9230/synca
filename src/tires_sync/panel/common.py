@@ -318,6 +318,7 @@ for _section, _endpoints in {
 SECTION_OF.update(tasks_page="orders", task_new="orders", task_close="orders")      # «Задачи» (routes_tasks, 2026-10-31): «менять» to set
 SECTION_OF.update(catalog_oth_manual="orders")                   # «Свой остаток (ОТХ)» of the catalog card (2026-11-03): stock of OTH, NEEDS below
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
+SECTION_OF.update(order_supplier_mail="orders", connections_supplier_email="setup")   # «Письмо поставщику» (routes_supplier_mail, 2026-11-07)
 SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
                   order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
 SECTION_OF.update(ui_new_page="setup",                           # «Новый вид» (routes_design, 2026-11-02): the owner changes, the partner looks
