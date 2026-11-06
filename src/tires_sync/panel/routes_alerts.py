@@ -222,10 +222,11 @@ def register(app):
     @app.route("/alerts/critical/<int:row_id>/ack", methods=["POST"])
     @login_required
     def alerts_critical_ack(row_id):
-        """«Разобрался» on «Критичное» (critical.py): it and the older ones leave this person's bell."""
+        """«Разобрался» on «Критичное» or «Оповещение» (critical.py): it and the older ones of its kind leave this person's bell."""
         from .. import critical
         conn = get_conn()
-        if not critical.bell_rows(conn, session["user"]):
+        action = critical.action_of(conn, row_id)
+        if action is None or not critical.bell_rows(conn, session["user"], action=action):
             abort(404)
         critical.ack(conn, row_id, session["user"])
         conn.commit()

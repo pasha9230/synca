@@ -142,6 +142,7 @@ def test_the_backstop_of_vk_reads_the_forwards_too(tmp_path):
 
 # ---- review, round 1 ------------------------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_unknown_forwarded_number_reaches_the_partner_in_telegram_once(tmp_path):
     import datetime as dt
     from http_fakes import ScriptedHttp
@@ -194,7 +195,3 @@ def test_a_number_in_the_text_not_among_the_forwards_waits(tmp_path):
     assert stage(conn, card) == "moving" and stage(conn, second) == "moving" and to_client(app) == []
     [item] = mgr.list_inbox(conn)
     assert "5000200" in item["dispute"]
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

@@ -504,6 +504,7 @@ def test_the_arrival_is_a_yellow_record_for_the_bell_once(tmp_path):
     assert any(r["text"].startswith("Поступили шины по заказу №5000100") for r in order_alerts.page_rows(conn, "owner", NOW))
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_unknown_number_tells_the_owner_in_the_bell_until_the_inbox_line_is_dealt_with(tmp_path):
     from tires_sync import order_alerts, users
     app, client, tok, conn, pid, card = ready(tmp_path)
@@ -524,6 +525,7 @@ def test_an_unknown_number_tells_the_owner_in_the_bell_until_the_inbox_line_is_d
     assert [r for r in order_alerts.page_rows(conn, "worker2", NOW) if r["kind"] == "inbox"] == []
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_unknown_number_reaches_the_partner_in_telegram_once(tmp_path):
     import datetime as dt
     from tires_sync import connections, order_notify, users
@@ -555,7 +557,3 @@ def test_arrived_after_a_move_by_hand_still_tells_the_bell_once(tmp_path):
     hook(app, conn, "приехал 5000100", event="h2")
     notes = [e for e in orders.list_events(conn, card) if e["text"].startswith("Поступили шины")]
     assert len(notes) == 1 and notes[0]["level"] == "yellow" and len(to_client(app)) == 1
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

@@ -84,6 +84,7 @@ def test_an_order_at_the_point_says_until_when_it_is_kept(tmp_path):
 
 # ---- «Отменить заказ» ---------------------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_client_cancels_an_early_order_after_a_confirmation(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path)
     order = _order(client)
@@ -300,7 +301,3 @@ def test_an_unmerged_order_is_the_clients_own_again(tmp_path):
     order_merge.unmerge(conn, new, NOW, "zaman1")
     view = shop_cart.my_order(conn, "buyer", first)
     assert not view["merged"] and view["status"] == "Принят" and view["can_cancel"]
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

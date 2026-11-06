@@ -87,9 +87,11 @@ def test_telegram_down_the_critical_still_reaches_vk_and_the_bell_once(tmp_path,
     assert cli._alert(conn, box, text, service=True, critical=True) is True
     assert "Telegram недоступен" in capsys.readouterr().err
     assert http.vk == [("501", text)] and len(audit(conn, "critical")) == 1
-    store.set_state(conn, "last_alert_at", "")                                   # другой текст между ними: прежняя пауза не мешает
-    cli._alert(conn, box, text, critical=True)
-    cli._alert(conn, box, text, critical=True)
+    for _ in range(2):                                                          # снять собственные паузы _alert: остаётся только метка ВК
+        store.set_state(conn, "last_alert_at", "")
+        conn.execute("DELETE FROM app_state WHERE key LIKE ?", (cli.SAID_PREFIX + "%",))
+        conn.commit()
+        cli._alert(conn, box, text, critical=True)
     assert http.vk == [("501", text)]                                            # один и тот же текст дважды в ВК не шлём
     assert len(audit(conn, "critical")) == 1
 
@@ -134,15 +136,103 @@ def test_the_vk_page_is_checked_and_can_be_removed(tmp_path, monkeypatch):
 
 # --- остальное в Telegram больше не идёт ---------------------------------------------------------------------------------------------
 
-def test_an_order_alert_is_no_longer_sent_to_telegram_it_is_in_the_bell(tmp_path, monkeypatch):
+def test_an_order_alert_is_no_longer_sent_to_telegram_it_is_on_the_persons_own_bell(tmp_path, monkeypatch):
     conn, box, http = env(tmp_path, monkeypatch)
     users.add_user(conn, "worker2", "пароль-для-партнёра-1", NOW)
     order_notify.set_user_chat(conn, "worker2", "555", NOW, "owner")
     card = orders.get_card(conn, orders.create_card(conn, {"client_name": "Иван", "responsible": "worker2"}, NOW, "owner"))
     how = order_notify.deliver(conn, box, card, "Резерв на точке заканчивается", NOW, tg_http=http, vk_http=http)
     assert how == "в колокольчике (worker2)" and http.tg == []
-    rows = order_alerts.page_rows(conn, "worker2", NOW)
-    assert any(r["level"] == "yellow" and "Резерв на точке заканчивается" in r["text"] for r in rows)
+    rows = [r for r in order_alerts.page_rows(conn, "worker2", NOW) if r["kind"] == "staffnote"]
+    assert [(r["level"], r["text"]) for r in rows] == [("red", "Заказ №%d: Резерв на точке заканчивается" % card["id"])]
+    assert order_alerts.page_rows(conn, "zaman", NOW) == []                          # не его
+    journal = [e["text"] for e in orders.list_events(conn, card["id"]) if e["kind"] == "notify"]
+    assert journal == ["Оповещение в колокольчике: worker2 (в Telegram только критичное)"]   # без текста: журнал может читать точка
+    assert order_notify.deliver(conn, box, card, "Резерв на точке заканчивается", NOW).endswith("повтор не записан)")
+    assert len(audit(conn, critical.NOTE)) == 1
+
+
+def test_an_alert_of_a_point_account_order_for_the_staff_reaches_them_and_not_the_point(tmp_path, monkeypatch):
+    """Ревью: записи заказа аккаунта точки сотрудники не видят, а точка видит; оповещение для сотрудников идёт в их колокольчик."""
+    from test_alerts_owner import POINT_ACCOUNT, card, chat, point, setup
+    from tires_sync import order_manager
+    conn, box = setup(tmp_path)
+    http = Http()
+    pid = point(conn)
+    theirs = card(conn, "zamantyres", pid)
+    chat(conn, POINT_ACCOUNT, theirs["id"])
+    order_notify.set_user_chat(conn, "zamantyres", "555", NOW, "owner")
+    how = order_notify.deliver(conn, box, order_manager.staff_card(conn, theirs), "Клиент не пришёл", NOW, tg_http=http, vk_http=http)
+    assert how == "в колокольчике (zamantyres)" and http.tg == [] and http.vk == []          # ни Telegram, ни ВК точки
+    assert [r["text"] for r in order_alerts.page_rows(conn, "zamantyres", NOW) if r["kind"] == "staffnote"] == [
+        "Заказ №%d: Клиент не пришёл" % theirs["id"]]
+    assert all("Клиент не пришёл" not in e["text"] for e in orders.list_events(conn, theirs["id"]))
+
+
+def test_a_person_without_a_telegram_chat_gets_the_order_alert_on_the_bell_too(tmp_path, monkeypatch):
+    from test_alerts_owner import POINT_ACCOUNT, card, chat, point, setup
+    from tires_sync import order_manager
+    conn, box = setup(tmp_path)
+    http = Http()
+    pid = point(conn)
+    theirs = card(conn, "zamantyres", pid)                                        # у Замана нет чата Telegram
+    chat(conn, POINT_ACCOUNT, theirs["id"])
+    how = order_notify.deliver(conn, box, order_manager.staff_card(conn, theirs), "Клиент не пришёл", NOW, tg_http=http, vk_http=http)
+    assert how == "в колокольчике (zamantyres)" and http.tg == []
+    assert any(r["kind"] == "staffnote" and "Клиент не пришёл" in r["text"] for r in order_alerts.page_rows(conn, "zamantyres", NOW))
+
+
+def test_a_failed_alert_of_a_point_account_order_reaches_both_owners_bell(tmp_path, monkeypatch):
+    """Колокольчик человека не записался (база занята): заказ аккаунта точки, его записи сотрудники не видят, поэтому обоим владельцам."""
+    from test_alerts_owner import POINT_ACCOUNT, card, chat, point, setup
+    from tires_sync import order_manager
+    conn, box = setup(tmp_path)
+    http = Http()
+    theirs = card(conn, "zamantyres", point(conn))
+    chat(conn, POINT_ACCOUNT, theirs["id"])
+    real, calls = critical.note, []
+
+    def busy_once(conn, logins, text, now):
+        calls.append(list(logins))
+        return False if len(calls) == 1 else real(conn, logins, text, now)
+    monkeypatch.setattr(critical, "note", busy_once)
+    how = order_notify.deliver(conn, box, order_manager.staff_card(conn, theirs), "Клиент не пришёл", NOW, tg_http=http, vk_http=http)
+    assert "владельцам — в колокольчике" in how and http.tg == [] and http.vk == []
+    assert calls == [["zamantyres"], ["owner", "zamantyres"]]
+    for login in ("owner", "zamantyres"):
+        assert any(r["kind"] == "staffnote" and "Клиент не пришёл" in r["text"] for r in order_alerts.page_rows(conn, login, NOW))
+
+
+def test_a_point_that_did_not_open_an_alert_reaches_the_owners_bell(tmp_path):
+    from test_point_unseen import alert, env as unseen_env, later, point
+    conn, box = unseen_env(tmp_path)
+    pid = point(conn, channel="panel")
+    order = alert(conn, box, pid)
+    http = Http()
+    assert order_notify.escalate_unseen(conn, box, later(15), tg_http=http) == 1 and http.tg == []
+    rows = [r for r in order_alerts.page_rows(conn, "owner", later(15)) if r["kind"] == "staffnote"]
+    assert len(rows) == 1 and "не открыла оповещение по заказу №%d" % order["id"] in rows[0]["text"]
+
+
+def test_messages_to_a_point_in_vk_do_not_change(tmp_path, monkeypatch):
+    from test_order_notify import point
+    conn, box, http = env(tmp_path, monkeypatch)
+    pid = point(conn, peer="777")
+    card = orders.get_card(conn, orders.create_card(conn, {"client_name": "Иван", "responsible": "", "point_id": str(pid)}, NOW, "чаты"))
+    assert order_notify.deliver(conn, box, card, "Шина появилась", NOW, tg_http=http, vk_http=http).startswith("отправлено в ВК")
+    assert http.vk == [("777", "(бот) Шина появилась")] and http.tg == []
+
+
+def test_the_service_alert_is_not_lost_after_a_note_of_the_journal(tmp_path, monkeypatch):
+    """Ревью: пауза «служба уже сказала» считается от критичного, а не от записи в журнал, которую никто не получил."""
+    conn, box, http = env(tmp_path, monkeypatch)
+    cli._alert(conn, box, "Tires Sync: новые модели не сопоставлены (1): X.", notice=True)      # только журнал
+    cli._alert(conn, box, "Tires Sync: служба tires-cycle.service завершилась с ошибкой.", service=True, critical=True)
+    assert http.tg == ["1000"] and len(audit(conn, "critical")) == 1
+    cli._alert(conn, box, "Tires Sync: цикл завершился с ошибками.", critical=True)
+    store.set_state(conn, "last_critical_alert_at", store.get_state(conn, "last_alert_at"))
+    cli._alert(conn, box, "Tires Sync: служба tires-stock.service завершилась с ошибкой.", service=True, critical=True)
+    assert http.tg == ["1000", "1000"]                                             # сразу после критичного цикла служба молчит
 
 
 def test_nobody_to_write_to_is_not_told_in_telegram_either(tmp_path, monkeypatch):

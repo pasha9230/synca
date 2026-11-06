@@ -88,6 +88,7 @@ def told(monkeypatch):
     return said
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_many_failures_from_everywhere_tell_the_owner_once_and_lock_nobody(tmp_path, monkeypatch):
     said = told(monkeypatch)
     client = make_app(tmp_path, TRUST_PROXY=1).test_client()
@@ -98,6 +99,7 @@ def test_many_failures_from_everywhere_tell_the_owner_once_and_lock_nobody(tmp_p
     assert sign(client, tok, "pw", address="10.9.9.9").status_code == 302              # an address of its own still signs in
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_alert_is_not_lost_when_another_worker_counted_past_the_threshold(tmp_path, monkeypatch):
     said = told(monkeypatch)
     app = make_app(tmp_path, TRUST_PROXY=1)
@@ -233,7 +235,3 @@ def test_every_changing_method_needs_the_csrf_token_not_only_post(tmp_path, meth
     tok = login(client)
     assert client.open("/probe", method=method).status_code == 400
     assert client.open("/probe", method=method, data={"csrf": tok}).status_code == 403          # past the token: no right to a page nobody named
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

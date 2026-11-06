@@ -97,6 +97,7 @@ def sent_text(call) -> str:
     return json.loads(body)["text"] if body.startswith("{") else urllib.parse.parse_qs(body)["message"][0]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_alert_is_delivered_by_the_chosen_channel_and_written_in_the_feed_of_the_order(tmp_path):
     conn, box = env(tmp_path)
     order_notify.set_user_chat(conn, "worker2", "555", NOW, "owner")
@@ -111,6 +112,7 @@ def test_the_alert_is_delivered_by_the_chosen_channel_and_written_in_the_feed_of
     assert tg2.calls == [] and urllib.parse.parse_qs(vk2.calls[0][3].decode("utf-8"))["peer_id"] == ["777"]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_refusal_of_the_channel_falls_back_to_the_owner_and_never_raises(tmp_path):
     conn, box = env(tmp_path)
     order_notify.set_user_chat(conn, "worker2", "555", NOW, "owner")
@@ -221,6 +223,7 @@ def test_no_key_of_telegram_or_vk_reaches_the_feed_or_the_message_to_the_owner(t
         assert BOT not in feed + owner_message and VK_KEY not in feed + owner_message
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_owner_login_comes_from_the_panel_setting_and_is_owner_by_default(tmp_path):
     conn, box = env(tmp_path)
     assert order_notify.get_owner_login(conn) == "owner"
@@ -270,6 +273,7 @@ def test_with_no_active_partner_the_owners_are_told_so_that_it_is_never_lost(tmp
     assert order_notify.missing_order_people(conn) == ["owner"]                             # the owner's login of the alerts; never a point
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_telegram_goes_once_per_chat_to_the_people_who_have_one(tmp_path):
     conn, box = env(tmp_path)
     users.add_user(conn, "pasha", "пароль-для-паши-123", NOW)
@@ -281,7 +285,3 @@ def test_telegram_goes_once_per_chat_to_the_people_who_have_one(tmp_path):
     assert how == "Telegram: отправлено (owner, pasha, worker2)"
     assert order_notify.tell_people(conn, box, ["nobody"], "x", ScriptedHttp()) == "Telegram: ни у кого нет чата (nobody)"
     assert order_notify.tell_people(conn, box, ["worker2"], "x", ScriptedHttp((403, {}))).startswith("Telegram не отправлен (worker2:")
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

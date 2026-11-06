@@ -45,6 +45,7 @@ def test_all_17_ads_are_listed_each_with_its_link(tmp_path, monkeypatch):
     assert "и ещё" not in text and text.count("https://www.avito.ru/") == 17
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_long_list_goes_in_parts_telegram_takes_each_one_said(tmp_path, monkeypatch):
     conn, account = setup(tmp_path)
     other = connections.create_account(conn, "Шина-Колесо", "2026-10-14T12:00:00", "o")
@@ -160,7 +161,3 @@ def test_a_supplier_not_used_this_cycle_marks_none_of_its_ads(tmp_path, monkeypa
     monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: said.append(text) or True)
     cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, account), [], True)], offers={"100": object()}, unavailable={2})
     assert "нет у поставщика" not in "\n".join(said)
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

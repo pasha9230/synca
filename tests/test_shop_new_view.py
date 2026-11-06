@@ -238,6 +238,7 @@ def test_on_the_staff_still_has_no_page_of_the_client(tmp_path):
 
 # ---- the review of 2026-11-02 ---------------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_on_a_failed_save_of_the_delivery_never_silences_the_order(tmp_path, monkeypatch):
     app, client, conn, tg, pid = shop(tmp_path)
     new_view(conn)
@@ -338,7 +339,3 @@ def test_on_my_orders_shows_how_many_are_open(tmp_path):
     conn.execute("UPDATE order_card SET sale_ids = 'not json' WHERE id = 1")                 # an order the card cannot read
     conn.commit()
     assert shop_cart.open_orders(conn, "buyer") == 1                                          # the count never reads the card
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

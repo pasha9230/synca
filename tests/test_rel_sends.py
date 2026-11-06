@@ -61,6 +61,7 @@ def test_the_bots_answer_without_the_keyboard_has_a_random_id_of_its_own_and_bot
 
 # ---- Telegram: no repeat within the hour ------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_repeat_of_the_same_telegram_alert_within_the_hour_is_not_sent_and_the_order_says_so(tmp_path):
     conn, box = env(tmp_path)
     order_notify.set_user_chat(conn, "worker2", "555", NOW, "owner")
@@ -87,6 +88,7 @@ def test_the_marks_against_a_repeat_older_than_the_hour_are_removed(tmp_path):
     assert not notify.sent_recently(conn, "k1", "2026-10-15T12:10:00")
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_fallback_to_the_owner_is_not_repeated_within_the_hour(tmp_path):
     conn, box = env(tmp_path)
     mine = card(conn, "ghost")                                               # no point: nobody to write to, the owner is told
@@ -96,6 +98,7 @@ def test_the_fallback_to_the_owner_is_not_repeated_within_the_hour(tmp_path):
     assert len(tg.calls) == 1 and "Некому отправить" in sent_text(tg.calls[0])
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_failed_mark_after_the_owner_was_told_of_an_unseen_alert_does_not_tell_him_twice(tmp_path, monkeypatch):
     conn, box = env(tmp_path)
     pid = point(conn, channel="panel")
@@ -117,6 +120,7 @@ def test_a_failed_mark_after_the_owner_was_told_of_an_unseen_alert_does_not_tell
     assert len(tg.calls) == 1                                                # the next minute marks it, without a second message
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_news_to_people_is_not_repeated_within_the_hour_with_the_time_and_is_without_it(tmp_path):
     conn, box = env(tmp_path)
     order_notify.set_user_chat(conn, "worker2", "555", NOW, "owner")
@@ -160,6 +164,7 @@ def test_no_key_of_the_community_is_the_same_alert_with_its_own_reason(tmp_path,
     assert vk_callback._reason(KeyError("x")) == "сбой панели (KeyError)"
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_alarm_of_the_bot_is_the_alert_of_the_commands(tmp_path, monkeypatch):
     conn, box = env(tmp_path)
     tg = ScriptedHttp(TG_OK)
@@ -241,6 +246,7 @@ def test_an_alert_of_the_table_that_did_not_go_is_said_again_the_next_hour(tmp_p
 
 # ---- cli._alert: a refused Telegram is not «said already» --------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_alert_telegram_refused_goes_the_next_hour_and_true_comes_only_after_a_real_sending(tmp_path, monkeypatch):
     conn, box = env(tmp_path)
     tg = ScriptedHttp((502, {}), TG_OK, TG_OK)
@@ -256,6 +262,7 @@ def test_an_alert_telegram_refused_goes_the_next_hour_and_true_comes_only_after_
     assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'alert'").fetchone()[0] == 2            # the journal keeps both tries
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_refused_alert_gives_back_the_moment_of_the_last_one_that_went(tmp_path, monkeypatch):
     conn, box = env(tmp_path)
     tg = ScriptedHttp(TG_OK, (502, {}))
@@ -269,6 +276,7 @@ def test_a_refused_alert_gives_back_the_moment_of_the_last_one_that_went(tmp_pat
     assert cli._alert(conn, box, "первая") is True and len(tg.calls) == 2                                # the first is still said
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_services_alert_goes_right_after_a_cycle_alert_telegram_refused(tmp_path, monkeypatch):
     conn, box = env(tmp_path)
     tg = ScriptedHttp((502, {}), TG_OK)
@@ -279,6 +287,7 @@ def test_the_services_alert_goes_right_after_a_cycle_alert_telegram_refused(tmp_
     assert cli._alert(conn, box, "служба упала", service=True) is True and len(tg.calls) == 2       # nothing went: the service is not quieted
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_refused_alert_does_not_wipe_the_marks_another_process_wrote_meanwhile(tmp_path, monkeypatch):
     conn, box = env(tmp_path)
 
@@ -290,7 +299,3 @@ def test_a_refused_alert_does_not_wipe_the_marks_another_process_wrote_meanwhile
     monkeypatch.setattr(cli, "_epoch", lambda: 1_000_000.0)
     assert cli._alert(conn, box, "A") is False
     assert (store.get_state(conn, "last_alert_at"), store.get_state(conn, "last_alert_text")) == ("1000050.0", "b-digest")
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

@@ -28,7 +28,9 @@ KIND = "telegram_users"            # order_notify.KIND: the chats and the VK pag
 VK_KEY = "vk_peers"                # {login: the number of the person's VK page}
 VK_MARK = "critical-vk:"           # app_state: "<VK_MARK><hash of page and text>" -> when it went
 BELL = "critical"                  # audit action: a critical news for the bell, {"text", "to": [logins]}
-SEEN = "critical_seen:"            # app_state: "<SEEN><login>" -> the id of the last critical news this person pressed «Разобрался» on
+NOTE = "staff_note"                # audit action: a news of an order that went to Telegram before 2026-11-06, now the person's bell only
+BELLS = {BELL: ("critical", "Критичное", "critical_seen:"),         # action -> (the prefix of the row id, its title, its app_state mark of
+         NOTE: ("staffnote", "Оповещение", "staff_note_seen:")}    # «Разобрался»: "<mark><login>" -> the last id pressed on)
 BELL_DAYS = 7                      # older critical news are no longer rows of the bell (the journal keeps them)
 RED_UPTO = "critical_red_upto"     # app_state: the last order_event already passed on by forward_red
 RED_SHOWN = 10
@@ -88,7 +90,10 @@ def tell(conn, box, logins: Iterable[str], text: str, now: str, vk_http: Transpo
         return out
     if bell:
         try:
-            store.write_audit(conn, now[:19], "system", BELL, {"text": text[:4000], "to": people})
+            key = _mark("bell:" + ",".join(people), text)              # the same news to the same people within VK_REPEAT: one row
+            if not (store.get_state(conn, key) and store.get_state(conn, key) > _border(now, VK_REPEAT)):
+                store.write_audit(conn, now[:19], "system", BELL, {"text": text[:4000], "to": people})
+                store.set_state(conn, key, now[:19])
             out["bell"] = True
         except Exception as err:                                  # noqa: BLE001 - a busy base: printed, never a new alert
             _rollback(conn)
@@ -141,13 +146,29 @@ def _rollback(conn) -> None:
         pass
 
 
-def bell_rows(conn, login: str, now: Optional[str] = None) -> List[dict]:
-    """The red row of the bell: the newest critical news of this person not yet «Разобрался» (younger than BELL_DAYS with `now`); the older
-    ones are counted in it («more») and go with it."""
-    seen = int(store.get_state(conn, SEEN + login) or 0)
+def note(conn, logins: Iterable[str], text: str, now: str) -> bool:
+    """A news that is not critical but went to a person's Telegram before (an order's alert, «точка не открыла»): a red row of their own bell
+    until «Разобрался», never in the journal of the order (a point may read that). Never raises; False when it could not be written."""
+    people = sorted({str(x) for x in logins if x})
+    if not people or not str(text or "").strip():
+        return False
+    try:
+        store.write_audit(conn, now[:19], "system", NOTE, {"text": text[:4000], "to": people})
+        return True
+    except Exception as err:                                      # noqa: BLE001 - a busy base: printed, never a new alert
+        _rollback(conn)
+        print("оповещение: колокольчик не записан (%s)" % type(err).__name__, file=sys.stderr)
+        return False
+
+
+def bell_rows(conn, login: str, now: Optional[str] = None, action: str = BELL) -> List[dict]:
+    """The red row of the bell of this kind (BELLS): the newest news of this person not yet «Разобрался» (younger than BELL_DAYS with `now`);
+    the older ones are counted in it («more») and go with it."""
+    prefix, title, mark = BELLS[action]
+    seen = int(store.get_state(conn, mark + login) or 0)
     border = _border(now, timedelta(days=BELL_DAYS)) if now else ""
     found = []
-    for row_id, at, detail in conn.execute("SELECT id, at, detail FROM audit WHERE action = ? AND id > ? ORDER BY id DESC", (BELL, seen)):
+    for row_id, at, detail in conn.execute("SELECT id, at, detail FROM audit WHERE action = ? AND id > ? ORDER BY id DESC", (action, seen)):
         try:
             data = json.loads(detail or "{}")
         except ValueError:
@@ -157,15 +178,32 @@ def bell_rows(conn, login: str, now: Optional[str] = None) -> List[dict]:
     if not found:
         return []
     row_id, at, text = found[0]
-    return [{"id": "critical-%d" % row_id, "order_id": None, "chat_row": None, "client": "", "at": at, "author": "", "kind": "critical",
-             "level": "red", "more": len(found) - 1, "title": "Критичное", "text": text[:300], "href": "/alerts",
+    return [{"id": "%s-%d" % (prefix, row_id), "order_id": None, "chat_row": None, "client": "", "at": at, "author": "", "kind": prefix,
+             "level": "red", "more": len(found) - 1, "title": title, "text": text[:300], "href": "/alerts",
              "ack_href": "/alerts/critical/%d/ack" % row_id}]
 
 
+def action_of(conn, row_id: int) -> Optional[str]:
+    """The kind of the bell (BELLS) of this record of the journal, or None when it is no row of a bell."""
+    row = conn.execute("SELECT action FROM audit WHERE id = ?", (int(row_id),)).fetchone()
+    return row[0] if row and row[0] in BELLS else None
+
+
 def ack(conn, row_id: int, login: str) -> None:
-    """«Разобрался»: this critical news and every older one leave this person's bell. No commit of its own."""
-    if int(row_id) > int(store.get_state(conn, SEEN + login) or 0):
-        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (SEEN + login, str(int(row_id))))
+    """«Разобрался»: this news and every older one of its kind leave this person's bell. No commit of its own."""
+    action = action_of(conn, row_id)
+    if action is None:
+        return
+    mark = BELLS[action][2] + login
+    if int(row_id) > int(store.get_state(conn, mark) or 0):
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (mark, str(int(row_id))))
+
+
+def _critical_red(kind: str, text: str) -> bool:
+    """A red record that is critical: every red failure of a rule; of the chat records only a send to a client that failed (not «Позиция не
+    определена», not a message to a point)."""
+    text = str(text or "")
+    return kind == "rule" or ("клиент" in text.lower() and not text.startswith("Позиция не"))
 
 
 def forward_red(conn, box, now: str, tg_http: Transport = urllib_transport, vk_http: Transport = urllib_transport) -> int:
@@ -186,8 +224,8 @@ def forward_red(conn, box, now: str, tg_http: Transport = urllib_transport, vk_h
     if conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value = ?", (str(top), RED_UPTO, upto)).rowcount != 1:
         conn.rollback()
         return 0
-    rows = conn.execute("SELECT id, order_id, kind, text FROM order_event WHERE id > ? AND id <= ? AND level = 'red' AND kind IN ('chat', 'rule') "
-                        "ORDER BY id", (int(upto), top)).fetchall()
+    rows = [r for r in conn.execute("SELECT id, order_id, kind, text FROM order_event WHERE id > ? AND id <= ? AND level = 'red' "
+                                    "AND kind IN ('chat', 'rule') ORDER BY id", (int(upto), top)) if _critical_red(r[2], r[3])]
     conn.commit()
     groups: Dict[tuple, List[str]] = {}
     for _id, order_id, _kind, text in rows:

@@ -367,6 +367,7 @@ def _tg(monkeypatch, *replies):
     return tg
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_f12_a_text_said_is_not_said_again_after_another_alert_within_six_hours(tmp_path, monkeypatch):
     from test_order_notify import env as order_env
     from tires_sync import cli
@@ -383,6 +384,7 @@ def test_f12_a_text_said_is_not_said_again_after_another_alert_within_six_hours(
     assert cli._alert(conn, box, "Бот ВК не может ответить точкам") is True and len(tg.calls) == 3       # six hours later: told again
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_f12_of_two_processes_with_the_same_text_one_sends_it(tmp_path, monkeypatch):
     from test_order_notify import env as order_env
     from tires_sync import cli, store
@@ -398,6 +400,7 @@ def test_f12_of_two_processes_with_the_same_text_one_sends_it(tmp_path, monkeypa
     assert cli._alert(conn, box, "Служба упала") is True and len(tg.calls) == 1
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_f12_a_text_telegram_refused_is_free_again_and_the_marks_do_not_pile_up(tmp_path, monkeypatch):
     from test_order_notify import TG_OK, env as order_env
     from tires_sync import cli
@@ -413,6 +416,7 @@ def test_f12_a_text_telegram_refused_is_free_again_and_the_marks_do_not_pile_up(
     assert len(marks) == 1                                                                                 # A's mark, older than six hours, is gone
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_f12_review_a_failure_after_its_recovery_is_told_again_and_the_recovery_too(tmp_path, monkeypatch):
     """Review 1 (D1): «не отвечает» → «снова отвечает» → «не отвечает» within six hours: each half of the second episode is told, so the
     owner's last message is always the true state."""
@@ -432,6 +436,7 @@ def test_f12_review_a_failure_after_its_recovery_is_told_again_and_the_recovery_
     assert cli._alert(conn, box, up, recovery=True) is True and len(tg.calls) == 4                       # the same news twice in a row: quiet
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_f12_review_a_notice_telegram_refused_keeps_the_failures_quiet(tmp_path, monkeypatch):
     from test_order_notify import TG_OK, env as order_env
     from tires_sync import cli
@@ -443,6 +448,7 @@ def test_f12_review_a_notice_telegram_refused_keeps_the_failures_quiet(tmp_path,
     assert cli._alert(conn, box, "сбой") is True and len(tg.calls) == 2                                  # the recovery was not told: still quiet
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_n1_other_news_leaves_a_lasting_failure_quiet(tmp_path, monkeypatch):
     """Хвост N1 (match3): news that is not a recovery (new models without a pair, manual ads…) no longer frees the failures' marks, so a
     failure of hours is not told again every cycle next to it."""
@@ -463,6 +469,7 @@ def test_n1_other_news_leaves_a_lasting_failure_quiet(tmp_path, monkeypatch):
                                                                          "Tires Sync: объявления, сделанные вручную: Y"]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_n1_a_service_back_through_the_breakers_alert_frees_the_marks(tmp_path, monkeypatch):
     from test_order_notify import env as order_env
     from tires_sync import cli, reliability
@@ -480,6 +487,7 @@ def test_n1_a_service_back_through_the_breakers_alert_frees_the_marks(tmp_path, 
     assert [__import__("json").loads(c[3])["text"] for c in tg.calls] == [down, up, down]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_n1_the_table_back_frees_the_marks_and_its_failure_alert_does_not(tmp_path, monkeypatch):
     from test_order_notify import env as order_env
     from tires_sync import cli, order_sheet
@@ -550,7 +558,3 @@ def test_ch8_review_without_the_key_of_the_community_the_hint_keeps_its_pause(tm
     hook(app, conn, "ау", event="n2")
     assert conn.execute("SELECT value FROM app_state WHERE key = ?", (mgr.HINT_KEY % pid,)).fetchone()[0]
     assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'vk_answer_failed'").fetchone()[0] == 1
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

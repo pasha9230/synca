@@ -34,6 +34,7 @@ def panel(tmp_path, clock):
     return app, guess
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_one_series_is_one_alert_however_long_it_goes(tmp_path, monkeypatch):
     said = told(monkeypatch)
     clock = [datetime(2026, 10, 7, 12, 0, 0)]
@@ -43,6 +44,7 @@ def test_one_series_is_one_alert_however_long_it_goes(tmp_path, monkeypatch):
     assert len(said) == 1
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_second_series_within_the_hour_is_reported_again(tmp_path, monkeypatch):
     said = told(monkeypatch)
     clock = [datetime(2026, 10, 7, 12, 0, 0)]
@@ -56,6 +58,7 @@ def test_a_second_series_within_the_hour_is_reported_again(tmp_path, monkeypatch
     assert len(said) == 2 and all("больше 30 неудачных входов" in s for s in said)
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_series_that_never_fell_to_half_stays_one_even_after_an_hour(tmp_path, monkeypatch):
     """Hovering around the threshold (about 31 failures in any 15 minutes for two hours) is one series, not an alert per failure."""
     said = told(monkeypatch)
@@ -67,6 +70,7 @@ def test_a_series_that_never_fell_to_half_stays_one_even_after_an_hour(tmp_path,
     assert len(said) == 1
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_count_that_fell_to_half_starts_a_new_series(tmp_path, monkeypatch):
     said = told(monkeypatch)
     clock = [datetime(2026, 10, 7, 12, 0, 0)]
@@ -107,7 +111,3 @@ def test_the_address_lock_and_a_journal_without_passwords_stay(tmp_path, monkeyp
     assert codes[-1] == 429 and codes[0] == 401
     rows = store.connect(app.config["DB_PATH"]).execute("SELECT detail FROM audit").fetchall()
     assert rows and not any("секрет" in (r[0] or "") for r in rows)
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

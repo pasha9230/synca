@@ -146,6 +146,7 @@ def _telegram(conn):
     return box
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_summary_is_off_by_default_and_goes_once_a_day_after_nine(tmp_path):
     conn = store.connect(str(tmp_path / "x.db"))
     fill(conn)
@@ -187,6 +188,7 @@ def test_the_owner_switches_the_summary_on_the_main_page(tmp_path):
 
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_partner_sharing_the_owners_chat_gets_one_summary(tmp_path):
     conn = store.connect(str(tmp_path / "x.db"))
     fill(conn)
@@ -290,7 +292,3 @@ def test_a_client_who_keeps_writing_still_waits_and_since_their_first_message(tm
     got = {w["peer_name"]: w["minutes"] for w in analytics.day_numbers(conn, NOW, without_points=True)["waiting"]}
     assert got["keeps-writing"] == analytics.working_minutes(datetime(2026, 10, 13, 19), NOW, (10, 20))
     assert got["old-thread"] == analytics.working_minutes(datetime(2026, 10, 12, 15), NOW, (10, 20))      # from the first read of the account
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

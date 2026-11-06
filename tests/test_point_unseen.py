@@ -28,6 +28,7 @@ def alert(conn, box, pid):
     return order
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_alert_nobody_opened_in_15_working_minutes_goes_to_the_owner_once(tmp_path):
     conn, box = env(tmp_path)
     pid = point(conn, channel="panel")
@@ -91,6 +92,7 @@ def test_a_point_on_vk_and_notes_from_before_the_safety_net_are_left_alone(tmp_p
     assert order_notify.escalate_unseen(conn, box, later(120), tg_http=tg) == 0
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_no_telegram_is_kept_in_the_journal_and_not_retried(tmp_path):
     conn, box = env(tmp_path)
     pid = point(conn, channel="panel")
@@ -115,7 +117,3 @@ def test_the_answer_to_a_binding_code_goes_to_vk_even_for_a_point_in_the_panel(t
     assert [n["text"][:16] for n in points.notes(conn, pid)] == ["ВК привязан к то"]
     hook(app, conn, "привет", event="e2", sender="999")                                         # anything else: still nothing in VK
     assert len(to_points(app)) == 1
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

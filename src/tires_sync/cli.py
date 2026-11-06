@@ -433,6 +433,9 @@ REPEAT_PAUSE_SECONDS = 6 * 3600     # the same text again: the cycle runs every 
 SAID_PREFIX = "alert-said:"         # app_state: the moment each text was last said (epoch); a text said within six hours is not said again
 
 
+LAST_SAID_KEY = "last_critical_alert_at"      # app_state: when the last critical alert went (Telegram, VK, the bell)
+
+
 def _alert(conn, box, text: str, service: bool = False, notice: bool = False, recovery: bool = False, critical: bool = False,
            people=None, bell: bool = True) -> bool:
     """Record the message in the journal and send it to Telegram. The same failure text is not repeated within six hours, whatever went
@@ -451,8 +454,10 @@ def _alert(conn, box, text: str, service: bool = False, notice: bool = False, re
     last = store.get_state(conn, "last_alert_at")
     since = _epoch() - float(last) if last else None
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-    if since is not None and ((service and since < ALERT_PAUSE_SECONDS)
-                              or (since < REPEAT_PAUSE_SECONDS and store.get_state(conn, "last_alert_text") == digest)):   # also the marks of before
+    said = store.get_state(conn, LAST_SAID_KEY) if crit.TELEGRAM_ONLY_CRITICAL else last   # what people got: a note of the journal is not it
+    since_said = _epoch() - float(said) if said else None
+    if (service and since_said is not None and since_said < ALERT_PAUSE_SECONDS) or (
+            since is not None and since < REPEAT_PAUSE_SECONDS and store.get_state(conn, "last_alert_text") == digest):   # also the marks of before
         return True
     before, stamp = (last, store.get_state(conn, "last_alert_text")), str(_epoch())
     said_key, window = SAID_PREFIX + digest, _epoch() - REPEAT_PAUSE_SECONDS
@@ -465,6 +470,8 @@ def _alert(conn, box, text: str, service: bool = False, notice: bool = False, re
         return True                                                      # said within six hours, here or by another process
     store.set_state(conn, "last_alert_at", stamp)
     store.set_state(conn, "last_alert_text", digest)
+    if critical:
+        store.set_state(conn, LAST_SAID_KEY, stamp)               # the pause of the service's own alert counts from a news people got
     store.write_audit(conn, _now(), "system", "notice" if notice else "alert", {"text": text})   # the journal keeps it without Telegram
     if notify is None:
         if critical:

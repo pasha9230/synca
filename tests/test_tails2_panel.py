@@ -154,6 +154,7 @@ def test_a_busy_base_during_the_alert_answers_401_and_the_failure_is_counted(tmp
     assert store.connect(app.config["DB_PATH"]).execute("SELECT COUNT(*) FROM login_attempt").fetchone()[0] == common.LOGIN_ALERT_FAILURES + 2
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_refused_telegram_is_tried_again_in_five_minutes_not_in_an_hour(tmp_path, monkeypatch):
     from tires_sync import notify
     tries = []
@@ -177,6 +178,7 @@ def test_a_refused_telegram_is_tried_again_in_five_minutes_not_in_an_hour(tmp_pa
     assert len(tries) == 2
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_sent_alert_is_not_repeated_while_its_series_goes_on(tmp_path, monkeypatch):
     from tires_sync import notify
     said = []
@@ -359,6 +361,7 @@ def test_the_journal_page_shows_the_text_of_a_new_share_label(tmp_path):
     assert "Подписи долей в отчёте по заказам: «Павлу» и «Ивану»" in page and "· share_labels<" not in page
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_busy_journal_never_costs_the_alert_message(tmp_path, monkeypatch):
     from tires_sync import notify
     said = []
@@ -374,7 +377,3 @@ def test_a_busy_journal_never_costs_the_alert_message(tmp_path, monkeypatch):
     tok = csrf_of(client)
     codes = {guess(client, tok, n) for n in range(common.LOGIN_ALERT_FAILURES + 2)}
     assert codes == {401} and len(said) == 1
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")

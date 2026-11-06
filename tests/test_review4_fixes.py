@@ -40,6 +40,7 @@ def env(tmp_path, **settings):
 
 # --- 3: alerts of different content are not swallowed by each other --------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_two_different_alerts_in_one_run_are_both_sent_but_a_repeat_is_not(tmp_path, monkeypatch):
     conn, key_file, box = env(tmp_path)
     http = ScriptedHttp(OK, OK, OK)
@@ -450,7 +451,3 @@ def test_a_held_ad_is_published_from_its_snapshot_without_the_tag_the_category_n
     folder = next((tmp_path / "feed").iterdir())
     draft = (folder / "next" / "avito_feed.xml").read_text(encoding="utf-8")
     assert "<Id>1</Id>" in draft and "<Quantity>" not in draft
-
-# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
-# the rule «only the critical» is test_critical.py.
-pytestmark = pytest.mark.usefixtures("telegram_for_everything")
