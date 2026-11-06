@@ -18,7 +18,7 @@
 {% if s.supplier == "webmim" %}
 {% if mim_ready and not s.blocked %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="supplier-window">Заказать в МИМ</button>
 {% else %}<button type="button" class="btn btn--primary btn--sm" disabled>Заказать в МИМ</button>{% endif %}
-<span class="small muted">{% if s.blocked %}Исправьте строки с ✗: кнопка откроется.{% elif not b %}На тестовом сервере WebMIM оформляются только заказы с тегом «тест».{% elif not b.live %}Выбран боевой сервер WebMIM: оформление кнопкой только по слову владельца.{% elif b.state and b.state.state == "running" %}Заказ уже оформляется в WebMIM: обновите страницу через минуту.{% elif b.test %}{{ b.server }}{% endif %}</span>
+<span class="small muted">{% if s.blocked %}Исправьте строки с ✗: кнопка откроется.{% elif not b %}На тестовом сервере WebMIM оформляются только заказы с тегом «тест».{% elif b.held %}Кнопка закрыта: итог прошлого нажатия неизвестен, проверьте кабинет WebMIM (блок «WebMIM» ниже).{% elif not b.live %}Этот сервер WebMIM закрыт для кнопки.{% elif b.state and b.state.state == "running" %}Заказ уже оформляется в WebMIM: обновите страницу через минуту.{% elif b.test %}{{ b.server }}{% endif %}</span>
 {% elif s.supplier == "tochki" %}
 {% if not s.blocked %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="supplier-window">Заказать в 4 Точки</button>
 {% else %}<button type="button" class="btn btn--primary btn--sm" disabled>Заказать в 4 Точки</button><span class="small muted">Исправьте строки с ✗: кнопка откроется.</span>{% endif %}
@@ -34,15 +34,16 @@
 <div class="modal-body stack" data-supplier-window>
 {% if s.late %}<p class="small text-warn" data-supplier-late>{{ s.late_text }} Сейчас позже: лучше перенести дату на завтра.</p>{% endif %}
 {% if s.supplier == "webmim" %}
-<p class="small">Уйдёт в WebMIM ({{ b.server }}).</p>
+<p class="small">Уйдёт в WebMIM ({{ b.server }}){% if not b.test %}: настоящий заказ у поставщика, закупка с отсрочкой{% endif %}.</p>
 {% if s.oth %}<p class="small" data-supplier-window-oth>Уже на точке (с ОТХ), поставщику не уходит: {% for o in s.oth %}{{ o.name }} — {{ o.qty }} шт{% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
 <table class="table small"><thead><tr><th>Позиция</th><th>Код</th><th class="num">Кол-во</th>{% if has_right("money") %}<th class="num">Закупка за 1 шт</th>{% endif %}</tr></thead><tbody>
-{% for i in s['items'] %}<tr><td>{{ i.name }}</td><td class="mono">{{ i.goods_id }}</td><td class="num">{{ i.qty }}</td>{% if has_right("money") %}<td class="num">{{ i.supplier_price|money }}</td>{% endif %}</tr>{% endfor %}</tbody></table>
+{% for i in s['items'] %}<tr><td>{{ i.name }}</td><td class="mono">{{ i.goods_id }}</td><td class="num">{{ i.qty }}</td>{% if has_right("money") %}<td class="num">{{ i.supplier_price|money }}</td>{% endif %}</tr>{% endfor %}</tbody>
+{% if has_right("money") %}<tfoot><tr data-supplier-sum><th colspan="3">Сумма закупки (по цене панели; итог считает WebMIM)</th><th class="num">{{ s.sum|money }}</th></tr></tfoot>{% endif %}</table>
 <dl class="supplier-fields">
 <dt>Вид оплаты</dt><dd>{{ f.kind }}</dd><dt>Признак оплаты</dt><dd>{{ f.terms }}</dd><dt>Способ</dt><dd>{{ f.shipment }}</dd>
-<dt>Адрес</dt><dd>адрес WebMIM {{ f.address_id }} (точка «{{ f.point }}»)</dd><dt>Дата доставки</dt><dd>{{ f.date[8:10] }}.{{ f.date[5:7] }}.{{ f.date[:4] }}</dd>
+<dt>Адрес</dt><dd>{% if f.address %}{{ f.address }}, {% endif %}адрес WebMIM {{ f.address_id }} (точка «{{ f.point }}»)</dd><dt>Дата доставки</dt><dd>{{ f.date[8:10] }}.{{ f.date[5:7] }}.{{ f.date[:4] }}</dd>
 <dt>Время работы клиента</dt><dd>{{ f.time }}</dd><dt>Контактное лицо</dt><dd>{{ f.person }}</dd><dt>Контактный телефон</dt><dd>{{ f.phone }}</dd>
-<dt>Примечание для поставщика</dt><dd>{{ f.note }}</dd><dt>Номер в вашей системе</dt><dd>{{ f.external }}</dd><dt>Заметка для себя</dt><dd>{{ f.self_note }}</dd></dl>
+<dt>Примечание для поставщика</dt><dd>{{ f.note }}</dd><dt>Примечание к заказу</dt><dd>{{ f.self_note }}</dd><dt>Собственный номер</dt><dd>пусто</dd></dl>
 <p class="small muted">Заказ на более раннем этапе перейдёт в «Заказ оформлен». Когда заказ будет создан полностью, сообщения об оформлении уйдут сами: клиенту в чат Авито и менеджеру точки в ВК, если хватает данных. Сообщение подождёт в задачах заказа, если не хватает данных (например, номера перемещения) или нет чата Авито (у точки — ВК); не уйдёт второй раз, если уже отправлено, и не уйдёт, если его пропустили вручную.{% if b.test %} Это тестовый сервер: у поставщика ничего не заказывается, но номер тестового заказа впишется в карточку и может уйти в сообщениях. Ушедшее сообщение не удалить; поля WebMIM в карточке после проверки можно очистить.{% endif %}</p>
 <form method="post" action="/orders/{{ c.id }}/webmim/create" data-once data-supplier-go class="row" style="gap:var(--s-3)"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="seen" value="{{ s.fingerprint }}">
 <button type="button" class="btn btn--secondary btn--sm" data-close-modal>Отмена</button><button class="btn btn--primary btn--sm ml-auto">Подтвердить</button></form>

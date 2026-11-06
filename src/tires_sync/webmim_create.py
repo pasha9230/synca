@@ -1,15 +1,18 @@
-"""«Оформить в WebMIM»: an order of the panel made in WebMIM by a person's button (the owner and the partner; docs/integrations/webmim-orders-api-v2.md).
+"""«Оформить в WebMIM»: an order of the panel made in WebMIM by a person's button (the owner and the partner), on the test and the live server
+(the owner 2026-11-06: «Сделай так, чтобы можно было Заказ МИМ кнопкой»). A real purchase on the live server: the money goes.
 Delivery to the address of the order's point, the fields as the owner fills WebMIM's form by hand (2026-10-29: «безнал», «Отсрочка», contact
-«Админ», the point's phone and time, «Грузим на ОТХ»; fields()), `externalNumber` = the order's number in the panel.
-No approve, no rule of a stage presses it. The first full success moves an order standing before «Заказ оформлен» there the ordinary way
+«Админ», the point's phone; 2026-11-06: the working hours 10:00-17:00 for every point, both notes «грузим на ОТХ», «Собственный номер» empty —
+no `externalNumber`; fields()). No approve, no rule of a stage, no timer presses it. The first full success moves an order standing before «Заказ оформлен» there the ordinary way
 (the owner 2026-10-23: its checks, journal and rules of the stage); then the route calls order_placed.on_placed (the client's message
 «Клиенту: заказ оформлен», the owner 2026-10-23): the move first, so the hook sends the message the rule of the stage has just prepared, never a
 second one (order_placed._earlier).
 
-No doubles: the order is taken («оформляется») in one IMMEDIATE transaction before WebMIM is asked; a lost answer to the order is never sent again
-blindly: the next press looks for our number in WebMIM's list first; positions are read before any is added (the same position again adds to its
-quantity in WebMIM), only the difference goes. A part made (the order without some positions) keeps the order's id and number: the next press
-adds what lacks. The state of the presses: the table webmim_create (store.py)."""
+No doubles: the order is taken («оформляется») in one IMMEDIATE transaction before WebMIM is asked. The WebMIM order carries no number of the
+panel, so a lost answer to the order (state «unknown», or a worker killed meanwhile) is never looked for nor sent again: the button stays shut
+(held_back) until the owner or the partner checks WebMIM's cabinet and says which (resolve: the order found — its id goes to the card and
+«Досоздать» adds what lacks; or no order there — a new press is open again), with a record of the journal. Positions are read before any is
+added (the same position again adds to its quantity in WebMIM), only the difference goes. A part made (the order without some positions) keeps
+the order's id and number: the next press adds what lacks. The state of the presses: the table webmim_create (store.py)."""
 from __future__ import annotations
 
 import hashlib
@@ -23,16 +26,17 @@ from typing import Callable, Dict, List, Optional, Tuple
 from . import orders, oth_sale, reliability, webmim_match, webmim_orders
 from .order_points import PointError, get_point
 
-# The servers the button may write to. The live one only by the owner's word: add "prod" here (a change of the code, reviewed and deployed),
-# after the owner has confirmed the values below against the live dictionaries.
-CREATE_SERVERS = ("test",)
+# The servers the button may write to: the live one by the owner's word 2026-11-06 (he checked the values below against WebMIM's form).
+CREATE_SERVERS = ("test", "prod")
 # What is taken from WebMIM's dictionaries (names, compared without case), as the owner fills the form by hand (2026-10-29): the type «безнал»,
 # the terms «Отсрочка», the shipment «Доставка». Nothing fits: the button refuses and lists the values.
 SHIPMENT = "доставка"
 PAYMENT_TERMS = "отсрочка"
 PAYMENT_TYPES = ("безнал",)
 CONTACT = "Админ"                    # the contact person of the delivery (the owner 2026-10-29); the phone is the point's
-NOTE_FOR_SUPPLIER = "Грузим на ОТХ"  # «Примечание для поставщика», always (the owner 2026-10-29)
+NOTE_FOR_SUPPLIER = "Грузим на ОТХ"  # the note of the text for 4 Точки (order_supplier.tochki_text; the owner 2026-10-29)
+MIM_NOTE = "грузим на ОТХ"           # WebMIM: «Примечание для поставщика» and «Примечание к заказу», as written (the owner 2026-11-06)
+MIM_TIME = "10:00-17:00"             # WebMIM: «Время работы клиента» of every point; the point's and the order's own time never go there (2026-11-06)
 LATE_HOUR = 16                       # WebMIM: an order for today goes to work before 16:00 (its own warning in the form)
 
 NO_ADDRESS = "не указан адрес доставки WebMIM"   # the refusal that lists the server's addresses (_addresses_hint)
@@ -40,6 +44,7 @@ ALL_OTH = "Все позиции взяты с ОТХ: заказ в WebMIM не
 TEST_TAG = "тест"            # the test server makes only the orders with this tag (the team lead's R2 2026-10-23: the owner's own test orders)
 STALE = 600                 # seconds: a «running» mark older than this is of a killed worker (order_engine.RUNNING_TIMEOUT)
 BUDGET = 45.0               # seconds a press may spend on positions (nginx gives the page 60)
+RESOLVE_LEN = 20            # digits of an id or a number of WebMIM typed by resolve()
 STATE_NAMES = {"running": "оформляется", "unknown": "ответ WebMIM потерян", "refused": "не оформлен", "partial": "недосоздан", "done": "оформлен"}
 FIELDS = ("order_id", "server", "state", "first_at", "started_at", "author", "webmim_id", "result", "updated_at")
 
@@ -64,13 +69,13 @@ def _goods_ok(goods_id: str) -> bool:
 
 
 def problems(conn, card: dict, today: date, mode: str = "new") -> List[str]:
-    """What keeps the order from WebMIM, before WebMIM is asked (the order's own data). `mode`: «new»; «lost» (an earlier press may have made it:
-    a date passed since is no reason not to look for it); «made» (the order is in WebMIM: only the positions to add are checked)."""
+    """What keeps the order from WebMIM, before WebMIM is asked (the order's own data). `mode`: «new»; «made» (the order is in WebMIM: only the
+    positions to add are checked). The working hours are MIM_TIME: neither the point's time nor the order's is needed."""
     return [text for _key, text in checks(conn, card, today, mode)]
 
 
 def checks(conn, card: dict, today: date, mode: str = "new") -> List[Tuple[str, str]]:
-    """problems() with the line of «Сверка» each one belongs to (order_supplier): items, territory, point, address, phone, time, date."""
+    """problems() with the line of «Сверка» each one belongs to (order_supplier): items, territory, point, address, phone, date."""
     out = []
     if card.get("deal_kind") == "stock":
         return [("items", "Сделка из наличия точки: заказ в WebMIM для неё не нужен.")]
@@ -102,8 +107,6 @@ def checks(conn, card: dict, today: date, mode: str = "new") -> List[Tuple[str, 
             out.append(("address", "У точки «%s» %s (Подключения → Точки)." % (point["name"], NO_ADDRESS)))
         if not webmim_phone(point["manager_phone"]):
             out.append(("phone", "У точки «%s» телефон не российский мобильный или не указан: он контактный телефон доставки." % point["name"]))
-        if not (card.get("delivery_time") or point["default_time"]):
-            out.append(("time", "У точки «%s» не указано время доставки по умолчанию (Подключения → Точки)." % point["name"]))
     if not card.get("delivery_date"):
         out.append(("date", "Не указана дата доставки."))
     elif card["delivery_date"] < today.isoformat() and mode == "new":
@@ -121,13 +124,12 @@ def late(card: dict, now: str) -> bool:
 
 def fields(conn, card: dict) -> dict:
     """What the order of WebMIM gets from the panel, the dictionaries aside: the same for the window «Подтверждение» and for POST /orders
-    (what the person saw is what goes). The card passed problems() (a point, its address and phone, a date)."""
+    (what the person saw is what goes). The card passed problems() (a point, its address and phone, a date). No number of the panel goes
+    («Собственный номер» empty, the owner 2026-11-06); the time and both notes are the same for every order."""
     point = get_point(conn, card["point_id"])
-    return {"date": card["delivery_date"], "address_id": point["webmim_address_id"], "point": point["name"],
-            "time": (card.get("delivery_time") or point["default_time"])[:200], "person": CONTACT,
-            "phone": webmim_phone(point["manager_phone"]), "note": NOTE_FOR_SUPPLIER, "external": str(card["id"]),
-            "self_note": "Tires Sync, заказ №%d" % card["id"], "kind": PAYMENT_TYPES[0], "terms": PAYMENT_TERMS.capitalize(),
-            "shipment": SHIPMENT.capitalize()}
+    return {"date": card["delivery_date"], "address_id": point["webmim_address_id"], "point": point["name"], "address": point["address"] or "",
+            "time": MIM_TIME, "person": CONTACT, "phone": webmim_phone(point["manager_phone"]), "note": MIM_NOTE, "self_note": MIM_NOTE,
+            "kind": PAYMENT_TYPES[0], "terms": PAYMENT_TERMS.capitalize(), "shipment": SHIPMENT.capitalize()}
 
 
 def fingerprint(conn, card: dict) -> str:
@@ -153,9 +155,47 @@ def _age(now: str, then: str) -> float:
         return STALE + 1
 
 
-def _claim(conn, card_id, server: str, now: str, today: date, author: str, seen: Optional[str] = None) -> Tuple[dict, str, bool]:
+def held_back(conn, card: dict, state: Optional[dict], now: Optional[str] = None) -> str:
+    """Why a new press might buy twice: '' when it may not. The WebMIM order carries no number of the panel, so the button never looks for it:
+    an earlier press whose answer was lost («unknown»; «running» older than STALE: a worker killed) or an order the button made whose id was
+    cleared from the card leaves the button shut until a person says what is in WebMIM's cabinet (resolve). `now` None: a «running» mark counts
+    as at work."""
+    if not state:
+        return ""
+    if state["webmim_id"]:
+        if card.get("webmim_id") or card.get("webmim_number"):
+            return ""
+        return ("Кнопка уже создала заказ WebMIM (id %s, %s), а поля WebMIM в карточке очищены: новое нажатие создало бы второй заказ у "
+                "поставщика. Проверьте кабинет WebMIM: заказ есть — впишите его ID ниже и снимите отметку; удалён — подтвердите «Заказа в "
+                "WebMIM нет»." % (state["webmim_id"], webmim_orders.SERVER_NAMES.get(state["server"], state["server"])))
+    stale = state["state"] == "running" and now is not None and _age(now, state["started_at"]) >= STALE
+    if state["state"] != "unknown" and not stale:
+        return ""
+    return ("Итог нажатия %s (%s, %s) неизвестен: заказ мог создаться в WebMIM. Повторное нажатие заблокировано, чтобы не купить дважды. "
+            "Проверьте кабинет WebMIM: заказ на %s, адрес %s, позиций %d. Заказ есть — впишите его ID ниже и снимите отметку; нет — подтвердите "
+            "«Заказа в WebMIM нет»." % (str(state["started_at"])[:16].replace("T", " "), state["author"],
+                                         webmim_orders.SERVER_NAMES.get(state["server"], state["server"]), _day(card.get("delivery_date")),
+                                         _address_of(conn, card), len([i for i in oth_sale.supplier_items(conn, card) if int(i["qty"] or 0) > 0])))
+
+
+def _day(value) -> str:
+    try:
+        return date.fromisoformat(str(value or "")).strftime("%d.%m.%Y")
+    except ValueError:
+        return "(дата не указана)"
+
+
+def _address_of(conn, card: dict) -> str:
+    try:
+        point = get_point(conn, card["point_id"]) if card.get("point_id") else None
+    except PointError:
+        point = None
+    return "WebMIM %s (точка «%s»)" % (point["webmim_address_id"] or "?", point["name"]) if point else "(точка не выбрана)"
+
+
+def _claim(conn, card_id, server: str, now: str, today: date, author: str, seen: Optional[str] = None) -> Tuple[dict, str]:
     """Take the order for this press, or raise OrderError (nothing asked of WebMIM). Returns (the card, the id of the WebMIM order the button made
-    and the card still holds, whether an earlier press may have made one whose answer was lost)."""
+    and the card still holds)."""
     conn.commit()
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -163,9 +203,10 @@ def _claim(conn, card_id, server: str, now: str, today: date, author: str, seen:
         before = get_state(conn, card_id)
         if before and before["state"] == "running" and _age(now, before["started_at"]) < STALE:
             raise orders.OrderError("Заказ уже оформляется в WebMIM (нажал %s в %s): дождитесь итога." % (before["author"], before["started_at"][11:16]))
+        held = held_back(conn, card, before, now)
+        if held:
+            raise orders.OrderError(held)
         made = before["webmim_id"] if before else ""
-        if made and not card["webmim_id"] and not card["webmim_number"]:
-            made, before = "", None                          # the person cleared the WebMIM fields (a rollback): a press starts anew
         if made:
             if before["server"] != server:
                 raise orders.OrderError("Заказ оформлен в WebMIM на другом сервере (%s): выбран %s, продолжать нельзя."
@@ -174,16 +215,11 @@ def _claim(conn, card_id, server: str, now: str, today: date, author: str, seen:
                 raise orders.OrderError("ID заказа WebMIM в карточке изменён вручную: оформление кнопкой не продолжается.")
             if before["state"] == "done":
                 raise orders.OrderError("Заказ уже оформлен в WebMIM (№%s)." % (card["webmim_number"] or made))
-        else:
-            if card["webmim_id"] or card["webmim_number"]:
-                raise orders.OrderError("У заказа уже есть номер WebMIM: оформление не нужно.")
-            if before and before["state"] in ("unknown", "running") and before["server"] != server:
-                raise orders.OrderError("Прошлое нажатие было на другом сервере (%s) и его итог неизвестен: верните тот сервер."
-                                        % webmim_orders.SERVER_NAMES[before["server"]])
-        lost = bool(before and not made and before["state"] in ("unknown", "running"))     # the order of an earlier press may be made
+        elif card["webmim_id"] or card["webmim_number"]:
+            raise orders.OrderError("У заказа уже есть номер WebMIM: оформление не нужно.")
         if server == "test" and not _tagged(card):
             raise orders.OrderError("На тестовом сервере WebMIM оформляются только заказы с тегом «%s»." % TEST_TAG)
-        found = problems(conn, card, today, "made" if made else "lost" if lost else "new")
+        found = problems(conn, card, today, "made" if made else "new")
         if found:
             raise orders.OrderError(" ".join(found))
         if seen == "" and not made:                          # the page's press of a new order comes from the window only
@@ -191,7 +227,7 @@ def _claim(conn, card_id, server: str, now: str, today: date, author: str, seen:
         if seen is not None and not made and seen != fingerprint(conn, card):
             raise orders.OrderError("Данные заказа изменились после открытия окна подтверждения: проверьте их снова и подтвердите ещё раз. "
                                     "В WebMIM ничего не отправлено.")
-        first_at = before["first_at"] if (lost or made) else now
+        first_at = before["first_at"] if made else now
         conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
                      "VALUES (?, ?, 'running', ?, ?, ?, ?, '', ?) ON CONFLICT (order_id) DO UPDATE SET server = excluded.server, "
                      "state = 'running', first_at = excluded.first_at, started_at = excluded.started_at, author = excluded.author, "
@@ -200,15 +236,69 @@ def _claim(conn, card_id, server: str, now: str, today: date, author: str, seen:
         conn.rollback()
         raise
     conn.commit()
-    return card, made, lost
+    return card, made
+
+
+def resolve(conn, card_id, found: bool, now: str, author: str, webmim_id: str = "", number: str = "") -> str:
+    """A person's way out of held_back (the owner and the partner: the route's right «supplier»), after a look at WebMIM's cabinet. `found`:
+    the order is there — its id (typed, or found by the typed number in the snapshot of the server of the press) and number go to the card,
+    the mark becomes «недосоздан» with that id, so «Досоздать» reads what WebMIM's order holds and adds only what lacks. Not found: the mark
+    becomes «не оформлен» without an id, a new press makes a new order. A record of the journal either way; OrderError: nothing written."""
+    webmim_id, number = str(webmim_id or "").strip(), str(number or "").strip()
+    for label, value in (("ID", webmim_id), ("Номер", number)):
+        if value and not (value.isascii() and value.isdigit() and len(value) <= RESOLVE_LEN):
+            raise orders.OrderError("%s заказа WebMIM: только цифры, не больше %d." % (label, RESOLVE_LEN))
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        card = orders.get_card(conn, card_id)
+        state = get_state(conn, card_id)
+        if state and state["state"] == "running" and _age(now, state["started_at"]) < STALE:
+            raise orders.OrderError("Заказ сейчас оформляется в WebMIM: дождитесь итога.")
+        if not held_back(conn, card, state, now):
+            raise orders.OrderError("Кнопка не заблокирована: снимать нечего.")
+        where = webmim_orders.SERVER_NAMES.get(state["server"], state["server"])
+        if found:
+            if not webmim_id and number:
+                row = conn.execute("SELECT id FROM webmim_order WHERE server = ? AND number = ?", (state["server"], number)).fetchall()
+                if len(row) != 1:
+                    raise orders.OrderError("Заказа WebMIM №%s нет в снимке (%s): впишите его ID из кабинета WebMIM или обновите снимок." % (number, where))
+                webmim_id = str(row[0][0])
+            if not webmim_id:
+                raise orders.OrderError("Впишите ID или номер заказа WebMIM из кабинета.")
+            if not number:
+                row = conn.execute("SELECT number FROM webmim_order WHERE server = ? AND id = ?", (state["server"], webmim_id)).fetchone()
+                number = str(row[0]) if row and row[0] else ""
+            typed = str(card["webmim_id"] or "")
+            if typed and typed != webmim_id:
+                raise orders.OrderError("В карточке уже вписан другой ID заказа WebMIM (%s): поправьте его в карточке." % typed)
+            other = conn.execute("SELECT id FROM order_card WHERE webmim_id = ? AND id != ?", (webmim_id, card_id)).fetchone()
+            if other:
+                raise orders.OrderError("Заказ WebMIM с ID %s уже у заказа №%d: проверьте ID." % (webmim_id, other[0]))
+            change = {"webmim_id": webmim_id}
+            if number and not card["webmim_number"]:
+                change["webmim_number"] = number
+            orders.update_card(conn, card_id, change, now, author, commit=False)
+            text = ("Отметка снята вручную (%s): заказ WebMIM %s(id %s, %s) найден в кабинете. Если в нём не все позиции, нажмите «Досоздать в "
+                    "WebMIM»: панель прочитает, что в нём есть, и добавит только недостающее." % (author, "№%s " % number if number else "", webmim_id, where))
+            conn.execute("UPDATE webmim_create SET state = 'partial', webmim_id = ?, result = ?, updated_at = ? WHERE order_id = ?",
+                         (webmim_id, text, now, card_id))
+        else:
+            if card["webmim_id"] or card["webmim_number"]:
+                raise orders.OrderError("В карточке вписан номер WebMIM: заказ есть. Впишите его ID ниже или очистите поля карточки.")
+            text = ("Отметка снята вручную (%s): в кабинете WebMIM (%s) заказа нет%s. Кнопка снова создаст новый заказ у поставщика."
+                    % (author, where, " (прежний id %s удалён)" % state["webmim_id"] if state["webmim_id"] else ""))
+            conn.execute("UPDATE webmim_create SET state = 'refused', webmim_id = '', result = ?, updated_at = ? WHERE order_id = ?", (text, now, card_id))
+        orders.add_event(conn, card_id, now, author, "webmim", text, "grey")
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return text
 
 
 class _OutOfTime(Exception):
     """The press has spent its BUDGET: the positions left wait for the next press."""
-
-
-class _Incomplete(Exception):
-    """The list of WebMIM's orders is longer than the pages read (webmim_match.MAX_PAGES): our number is not looked for everywhere."""
 
 
 def _finish(conn, card_id, state: str, text: str, now: str, author: str, level: str) -> dict:
@@ -269,32 +359,11 @@ def _payload(conn, card: dict, client) -> Tuple[dict, str]:
     day = date.fromisoformat(data["date"])
     body = {"orderDate": day.strftime("%d.%m.%y"), "paymentType": _number(kind[0]), "paymentTerms": _number(terms[0]),
             "shipmentType": _number(shipment[0]), "deliveryAddressId": data["address_id"], "deliveryTime": data["time"],
-            "deliveryPerson": data["person"], "deliveryPhone": data["phone"], "externalNumber": data["external"],
+            "deliveryPerson": data["person"], "deliveryPhone": data["phone"],
             "noteForSupplier": data["note"], "noteForSelf": data["self_note"]}
     chosen = "оплата: %s (id %s), признак оплаты: %s (id %s), отгрузка: %s (id %s), адрес %s" % (
         kind[1], kind[0], terms[1], terms[0], shipment[1], shipment[0], data["address_id"])
     return body, chosen
-
-
-def _ours(conn, client, card: dict, now: str, sleep, out_of_time: Callable[[], bool] = lambda: False) -> List[dict]:
-    """Every order of WebMIM with our number on every page of the list (up to webmim_match.MAX_PAGES; the rows are not by the creation date,
-    so no date stops the reading); «taken»: the order is in another order of the panel."""
-    taken = {r[0] for r in conn.execute("SELECT webmim_id FROM order_card WHERE webmim_id != '' AND id != ?", (card["id"],))}
-    found, counts, read, last = {}, {}, 0, 0
-    for rows in webmim_match._every_page(client, sleep, counts):  # every page: WebMIM's rows are not by date (2026-10-28)
-        if (counts.get("pages_total") or 0) > webmim_match.MAX_PAGES:
-            raise _Incomplete()                             # known from the first page: no need to read the rest
-        if out_of_time():                                   # the page must answer before nginx gives up (60 s)
-            raise _OutOfTime()
-        read, last = read + 1, len(rows)
-        for row in rows:
-            order = webmim_match._order(row)
-            if order and order["external_number"] == str(card["id"]):               # one order once: the pages may shift while read
-                found[order["id"]] = dict(order, status_text=order["status_text"] or order["status_code"], taken=order["id"] in taken)
-    total = counts.get("pages_total") or 0
-    if total > webmim_match.MAX_PAGES or (not total and read >= webmim_match.MAX_PAGES and last >= webmim_match.PER_PAGE):
-        raise _Incomplete()                                 # our number may be on a page not read: nothing is made
-    return list(found.values())
 
 
 def _write_order(conn, card_id, order: dict, now: str, author: str, line: str) -> bool:
@@ -353,11 +422,11 @@ def _to_placed(conn, card_id, now: str, author: str) -> Tuple[str, str]:
 def _press(conn, card_id, client, server: str, now: str, today: date, author: str, sleep: Callable[[float], None], clock: Callable[[], float],
            seen: Optional[str] = None) -> dict:
     if server not in CREATE_SERVERS:
-        raise orders.OrderError("Выбран боевой сервер WebMIM: оформление заказа кнопкой на нём только по слову владельца.")
+        raise orders.OrderError("Сервер WebMIM «%s» закрыт для кнопки." % webmim_orders.SERVER_NAMES.get(server, server))
     if client is None:
         raise orders.OrderError("API-пользователь WebMIM не настроен (Подключения → WebMIM → Заказы в WebMIM).")
     try:
-        card, webmim_id, lost = _claim(conn, card_id, server, now, today, author, seen)
+        card, webmim_id = _claim(conn, card_id, server, now, today, author, seen)
     except orders.OrderError as err:
         raise orders.OrderError(str(err) + _addresses_hint(client, server, str(err))) from None
     where = "тестовый сервер" if server == "test" else "боевой сервер"
@@ -366,47 +435,31 @@ def _press(conn, card_id, client, server: str, now: str, today: date, author: st
     try:
         try:
             if not webmim_id:
-                found = _ours(conn, client, card, now, sleep, lambda: clock() - start > BUDGET)                 # first: an order an earlier press made is never made again
-                if found and (len(found) > 1 or found[0]["taken"] or not lost):
-                    numbers = ", ".join("№%s (id %s%s)" % (o["number"], o["id"], ", уже в другом заказе панели" if o["taken"] else "") for o in found)
-                    return _finish(conn, card_id, "unknown" if lost else "refused", "В WebMIM уже есть заказ с номером панели %d: %s. Ничего не "
-                                   "создано: сверьте и сопоставьте вручную (Сверка с WebMIM или поля карточки)." % (card_id, numbers), now, author, "red")
-                if found:
-                    order = found[0]
-                    line = "Найден заказ WebMIM №%s (id %s), созданный прошлым нажатием (%s): повторно не создаётся." % (order["number"], order["id"], where)
-                else:
-                    body, chosen = _payload(conn, card, client)
-                    try:
-                        made = client.create_order(body)
-                    except (OSError, webmim_orders.OrdersError) as err:
-                        if isinstance(err, webmim_orders.OrdersRefused):
-                            raise
-                        return _finish(conn, card_id, "unknown", "WebMIM не ответил на создание заказа (%s): заказ мог создаться. Нажмите ещё раз через "
-                                       "минуту: панель сначала поищет его в WebMIM по номеру %d и не создаст второй." % (_why(err), card_id),
-                                       now, author, "red")
-                    if server == "test":                     # which fields WebMIM answers with (names only): is the transfer number among them
-                        orders.add_event(conn, card_id, now, author, "webmim", "Поля ответа WebMIM на создание заказа (тестовый сервер, без значений): %s."
-                                         % ", ".join(field_names(made)), "grey")
-                    order = {"id": str(made["id"]), "number": str(made.get("number") or ""),
-                             "status_text": str(made.get("statusDescription") or made.get("statusCode") or "")}
-                    line = "Создан заказ WebMIM №%s (id %s, %s); %s." % (order["number"], order["id"], where, chosen)
+                body, chosen = _payload(conn, card, client)
+                try:
+                    made = client.create_order(body)
+                except (OSError, webmim_orders.OrdersError) as err:
+                    if isinstance(err, (webmim_orders.OrdersRefused, reliability.ServiceUnavailable)):
+                        raise                                # refused, or not asked at all (the pause after failures): nothing made
+                    return _finish(conn, card_id, "unknown", "WebMIM не ответил на создание заказа (%s): заказ мог создаться. Не нажимайте снова: "
+                                   "проверьте кабинет WebMIM (заказ на %s, адрес %s) и скажите панели, есть ли он (блок «WebMIM» заказа)."
+                                   % (_why(err), _day(card.get("delivery_date")), _address_of(conn, card)), now, author, "red")
+                if server == "test":                     # which fields WebMIM answers with (names only): is the transfer number among them
+                    orders.add_event(conn, card_id, now, author, "webmim", "Поля ответа WebMIM на создание заказа (тестовый сервер, без значений): %s."
+                                     % ", ".join(field_names(made)), "grey")
+                order = {"id": str(made["id"]), "number": str(made.get("number") or ""),
+                         "status_text": str(made.get("statusDescription") or made.get("statusCode") or "")}
+                line = "Создан заказ WebMIM №%s (id %s, %s); %s." % (order["number"], order["id"], where, chosen)
                 if not _write_order(conn, card_id, order, now, author, line):
                     return _finish(conn, card_id, "partial", "%s Но в карточке уже вписан другой номер WebMIM (вручную, пока шло нажатие): позиции не "
                                    "добавлены, кнопка остановлена. Сверьте: созданный заказ №%s (id %s)." % (line, order["number"], order["id"]),
                                    now, author, "red")
                 webmim_id, created = order["id"], True
             return _positions(conn, card, client, webmim_id, where, chosen, now, author, start, clock)
-        except _Incomplete as err:                           # before any order is made (webmim_id is empty): a repeat does not help
-            return _finish(conn, card_id, "unknown" if lost else "refused", "Заказ в WebMIM не создан: %s. Сверьте в кабинете WebMIM по номеру "
-                           "панели %d и оформите вручную%s." % (_why(err), card_id, " (итог прошлого нажатия неизвестен: заказ мог создаться)" if lost else ""),
-                           now, author, "red")
         except (OSError, webmim_orders.OrdersError, _OutOfTime) as err:
             if webmim_id:
                 return _finish(conn, card_id, "partial", "Заказ WebMIM недосоздан (%s). Нажмите «Досоздать в WebMIM»: панель прочитает, что уже есть "
                                "в заказе WebMIM, и добавит только недостающее." % _why(err), now, author, "red")
-            if lost:                                         # an earlier press may have made it: the next press must still look for it first
-                return _finish(conn, card_id, "unknown", "Итог прошлого нажатия всё ещё неизвестен (%s): нажмите ещё раз позже, панель сначала "
-                               "поищет заказ в WebMIM по номеру %d." % (_why(err), card_id), now, author, "red")
             if isinstance(err, webmim_orders.OrdersRefused):
                 return _finish(conn, card_id, "refused", "Заказ в WebMIM не оформлен: %s" % err, now, author, "red")
             return _finish(conn, card_id, "refused", "WebMIM %s (%s): ничего не создано." % ("не ответил вовремя" if _slow(err) else "недоступен", _why(err)),
@@ -445,8 +498,6 @@ def _slow(err) -> bool:
 def _why(err) -> str:
     if isinstance(err, _OutOfTime):
         return "время нажатия вышло"
-    if isinstance(err, _Incomplete):
-        return "прочитаны не все страницы списка заказов WebMIM (больше %d): свой номер найден бы не наверняка" % webmim_match.MAX_PAGES
     if _slow(err):
         status = getattr(err, "status", None) if isinstance(err, webmim_orders.OrdersError) else None
         return "время ожидания ответа вышло" + (" (код %s)" % status if status else "")
@@ -504,18 +555,21 @@ def _positions(conn, card: dict, client, webmim_id: str, where: str, chosen: str
     return _finish(conn, card["id"], "done", text, now, author, "green")
 
 
-def button(conn, card: dict, server: str) -> Optional[dict]:
+def button(conn, card: dict, server: str, now: Optional[str] = None) -> Optional[dict]:
     """What the card shows next to the block «WebMIM»: the button's label and the last result; None when the button has nothing to do
-    (a number typed by hand, a deal from the point's stock, an order made)."""
+    (a number typed by hand, a deal from the point's stock, an order made). «held»: why the button is shut (held_back) — the person's way out
+    is resolve() (the form of the block «WebMIM»)."""
     state = get_state(conn, card["id"])
     if card.get("deal_kind") == "stock" or (server == "test" and not _tagged(card)):
         return None
     typed = bool(card.get("webmim_id") or card.get("webmim_number"))
-    if state and state["webmim_id"] and not typed:
-        state = None                                                    # the fields were cleared: a press starts anew (_claim)
     where = "в тестовом WebMIM" if server == "test" else "в WebMIM"
+    held = held_back(conn, card, state, now)
     out = {"label": "", "state": state, "state_name": STATE_NAMES.get(state["state"], "") if state else "", "live": server in CREATE_SERVERS,
-           "server": webmim_orders.SERVER_NAMES[server], "test": server == "test"}
+           "server": webmim_orders.SERVER_NAMES[server], "test": server == "test", "held": held,
+           "held_id": str(card.get("webmim_id") or ""), "held_number": str(card.get("webmim_number") or "")}
+    if held:
+        return out
     if state and state["webmim_id"]:
         if state["state"] != "done" and str(card.get("webmim_id") or "") == state["webmim_id"] and (card.get("stage") or {}).get("kind", "open") == "open":
             out["label"] = "Досоздать " + where

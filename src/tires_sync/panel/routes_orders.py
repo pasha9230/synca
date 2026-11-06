@@ -1168,7 +1168,7 @@ def register(app) -> None:
             send_chats=sendable,
             exact_title=order_wait.TITLE_EXACT, webmim=webmim_match.card_block(conn, card, with_hints=own_point() is None),
             webmim_cost=order_report.order_webmim(conn, card_id) if has_right("money") else None,                # the purchase is money
-            webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn)) if can_post("order_webmim_create") else None,
+            webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn), local_iso()) if can_post("order_webmim_create") else None,
             supplier=supplier_view(conn, card) if can_post("order_webmim_create") and own_point() is None else None,
             supplier_number=order_supplier.number_of(conn, card_id),
             ad_position=deals.ad_position_chat(conn, card) if own_point() is None and can_post("order_ad_position") else None), status, {
@@ -1413,8 +1413,8 @@ def register(app) -> None:
     @app.route("/orders/<int:card_id>/webmim/create", methods=["POST"])
     @login_required
     def order_webmim_create(card_id):
-        """«Оформить в WebMIM» / «Досоздать в WebMIM»: a person's press makes the order in WebMIM (webmim_create; the test server only, the owner
-        and the partner). The result is shown and is a record of the order's journal; the stage stays. After the first full success: order_placed.on_placed
+        """«Оформить в WebMIM» / «Досоздать в WebMIM»: a person's press makes the order in WebMIM (webmim_create; the test and the live server, the
+        owner and the partner). The result is shown and is a record of the order's journal; the stage stays. After the first full success: order_placed.on_placed
         (the client's message)."""
         conn = get_conn()
         card_or_404(conn, card_id)
@@ -1445,8 +1445,26 @@ def register(app) -> None:
         except SecretKeyError:
             flash("Секреты не читаются: проверьте мастер-ключ.", "error")
         except sqlite3.OperationalError:                                  # the base is busy longer than its wait (before or after WebMIM)
-            flash("База занята: итог нажатия мог не сохраниться. Нажмите ещё раз через минуту: панель сначала поищет заказ в WebMIM "
-                  "по номеру заказа и не создаст второй.", "error")
+            flash("База занята: итог нажатия мог не сохраниться. Обновите страницу через минуту: если итог неизвестен, кнопка закрыта, "
+                  "пока вы не проверите кабинет WebMIM (блок «WebMIM» заказа).", "error")
+        return back(card_id, "webmim")
+
+    @app.route("/orders/<int:card_id>/webmim/resolve", methods=["POST"])
+    @login_required
+    def order_webmim_resolve(card_id):
+        """The way out of a shut button (webmim_create.held_back: a lost answer, a made order's id cleared): after a look at WebMIM's cabinet
+        the owner or the partner says «заказ есть» (its id or number go to the card, «Досоздать» adds what lacks) or «заказа нет» (a new press
+        is open). A record of the journal; nothing is asked of WebMIM."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        try:
+            text = webmim_create.resolve(conn, card_id, request.form.get("found") == "1", local_iso(), author(),
+                                         webmim_id=request.form.get("webmim_id", ""), number=request.form.get("webmim_number", ""))
+            flash(text, "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        except sqlite3.OperationalError:
+            flash("База занята, попробуйте ещё раз.", "error")
         return back(card_id, "webmim")
 
     @app.route("/orders/<int:card_id>/note", methods=["POST"])
