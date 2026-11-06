@@ -279,11 +279,71 @@ def _cabinet_order(client, webmim_id: str, number: str, sleep: Callable[[float],
     return None
 
 
-def check(conn, card_id, client, now: str, webmim_id: str = "", number: str = "", sleep: Callable[[float], None] = time.sleep) -> dict:
+CANCELLED = ("отменен", "отменено", "аннулирован", "аннулировано")   # the whole status text of an order surely cancelled (no codes known here)
+
+
+def _status(order: dict) -> str:
+    return " ".join(str(order.get("status_text") or "").casefold().replace("ё", "е").split())
+
+
+def cancelled(order: dict) -> bool:
+    """A WebMIM order whose status speaks of a cancel at all («Отменён», «отменен клиентом», «Запрошена отмена», «Аннулирован»): never bound
+    by «Заказ есть» (review 2026-11-06). Refusing is the safe side, so any such word stops it. The status codes of WebMIM are not known here."""
+    text = _status(order)
+    return "отмен" in text or "аннулир" in text
+
+
+def surely_cancelled(order: dict) -> bool:
+    """Cancelled for good (the whole status is one of CANCELLED): only this lets «Заказа нет» through while the order is in the cabinet —
+    «Запрошена отмена» or «частично отменён» may still be a purchase."""
+    return _status(order) in CANCELLED
+
+
+class _Unread(Exception):
+    """The cabinet was not read in full: «not found» would not mean «not there»."""
+
+
+def _in_cabinet(client, webmim_id: str, sleep: Callable[[float], None]) -> Optional[dict]:
+    """The order with this id among every order of WebMIM's cabinet (GET /api/v2/orders), read strictly for «Заказа нет»: unlike the
+    snapshot (webmim_match._every_page) an answer that is not a list or an empty first page is OrdersError, and a cabinet of more pages
+    than webmim_match.MAX_PAGES (or no count and a full last page) is _Unread. None: read in full, not there."""
+    page, total = 1, 0
+    while True:
+        if page > 1:
+            sleep(webmim_match.PAUSE)
+        data, headers = client.get_with_headers("/api/v2/orders", {"page": page, "per-page": webmim_match.PER_PAGE})
+        if not isinstance(data, list):
+            raise webmim_orders.OrdersError("/api/v2/orders: ответ не список заказов.", 200)
+        if page == 1:
+            if not data:
+                raise webmim_orders.OrdersError("/api/v2/orders: кабинет прочитан пустым.", 200)
+            total = webmim_orders._int_header(headers, "x-pagination-page-count")
+            if total > webmim_match.MAX_PAGES:
+                raise _Unread()
+        for raw in data:
+            order = webmim_match._order(raw)
+            if order and order["id"] == webmim_id:
+                return order
+        if (page >= total) if total else (len(data) < webmim_match.PER_PAGE):
+            return None
+        if page >= webmim_match.MAX_PAGES:
+            raise _Unread()
+        page += 1
+
+
+def _seen_text(order: dict, where: str) -> str:
+    return "%s(id %s, %s), создан %s%s" % ("№%s " % order["number"] if order["number"] else "", order["id"], where,
+                                         order["create_date"][:16].replace("T", " ") or "(дата не указана)",
+                                         ", статус «%s»" % order["status_text"] if order["status_text"] else "")
+
+
+def check(conn, card_id, client, now: str, webmim_id: str = "", number: str = "", sleep: Callable[[float], None] = time.sleep,
+          other: bool = False) -> dict:
     """«Заказ есть»: the order typed is read from WebMIM's cabinet (GETs only, nothing written anywhere) before the mark is taken off, so a
-    wrong digit never sends «Досоздать» into somebody else's order. OrderError: not there, not read, or it does not fit — nothing changes.
-    Returns what the person confirms: {"id", "number", "created", "status", "positions", "add", "more", "server", "token"}; `token` binds
-    the confirmation to this reading (resolve reads again and compares)."""
+    wrong digit never sends «Досоздать» into somebody else's order. OrderError: not there, not read, cancelled, or it does not fit — nothing
+    changes. The panel knows the id of the order its button made (review 2026-11-06): another order is taken only with `other` (the person's
+    own confirmation that it is another order). Returns what the person confirms: {"id", "number", "created", "status", "positions", "add",
+    "more", "server", "token", "early", "other"}; `token` binds the confirmation to this reading (resolve reads again and compares)."""
     webmim_id, number = _typed(webmim_id, number)
     if not webmim_id and not number:
         raise orders.OrderError("Впишите ID или номер заказа WebMIM из кабинета.")
@@ -300,6 +360,14 @@ def check(conn, card_id, client, now: str, webmim_id: str = "", number: str = ""
             raise orders.OrderError("Заказа WebMIM с %s нет в кабинете (%s): проверьте цифры. Отметка не снята, ничего не изменено." % (typed, where))
         if webmim_id and number and order["number"] != number:
             raise orders.OrderError("Заказ WebMIM с ID %s имеет №%s, а вписан №%s: проверьте цифры. Отметка не снята." % (webmim_id, order["number"], number))
+        if cancelled(order):
+            raise orders.OrderError("Заказ WebMIM %s отменён: отменённый заказ не привязывается и не досоздаётся. Отметка не снята. Если "
+                                    "действующего заказа в кабинете нет, подтвердите «Заказа в WebMIM нет»." % _seen_text(order, where))
+        known = state["webmim_id"]
+        if known and order["id"] != known and not other:
+            raise orders.OrderError("Кнопка создала заказ WebMIM id %s, а вписан другой: %s. Ошибка в цифре привязала бы чужой заказ, и "
+                                    "«Досоздать» дописал бы в него все позиции. Проверьте цифры; если это правда другой заказ, отметьте «Это "
+                                    "другой заказ» и проверьте снова. Отметка не снята." % (known, _seen_text(order, where)))
         rows = client.items(order["id"])
         held = _held(rows)
     except (OSError, webmim_orders.OrdersError) as err:
@@ -312,34 +380,73 @@ def check(conn, card_id, client, now: str, webmim_id: str = "", number: str = ""
     more = ["«%s»: в WebMIM %d шт, в заказе %d" % (names[g], held[g], q) for g, q in wanted.items() if held.get(g, 0) > q]
     created = order["create_date"][:16].replace("T", " ")
     early = bool(order["create_date"]) and _age(state["first_at"], order["create_date"]) > EARLY
-    token = hashlib.sha256(json.dumps([card_id, order["id"], order["number"], order["create_date"], sorted(held.items()), sorted(wanted.items())])
-                           .encode("utf-8")).hexdigest()[:20]
+    differs = bool(known) and order["id"] != known
+    token = hashlib.sha256(json.dumps([card_id, order["id"], order["number"], order["create_date"], sorted(held.items()), sorted(wanted.items()),
+                                       known if differs else ""]).encode("utf-8")).hexdigest()[:20]
     return {"id": order["id"], "number": order["number"], "created": created, "status": order["status_text"], "positions": positions,
             "add": add, "more": more, "server": where, "token": token,
             "early": ("Внимание: заказ создан раньше нажатия кнопки (%s): похоже, это другой, старый заказ." % state["first_at"][:16].replace("T", " "))
-            if early else ""}
+            if early else "",
+            "other": ("Внимание: кнопка создала заказ WebMIM id %s, а это другой заказ (id %s). «Досоздать» допишет позиции в него."
+                      % (known, order["id"])) if differs else ""}
 
 
 def _found_text(seen: dict) -> str:
     return "%s(id %s, %s), создан %s%s; в нём: %s. «Досоздать» добавит: %s.%s%s" % (
         "№%s " % seen["number"] if seen["number"] else "", seen["id"], seen["server"], seen["created"] or "(дата не указана)",
         ", %s" % seen["status"] if seen["status"] else "", "; ".join(seen["positions"]) or "позиций нет", "; ".join(seen["add"]) or "ничего",
-        (" В WebMIM больше, чем в заказе: %s." % "; ".join(seen["more"])) if seen["more"] else "", (" " + seen["early"]) if seen["early"] else "")
+        (" В WebMIM больше, чем в заказе: %s." % "; ".join(seen["more"])) if seen["more"] else "",
+        "".join(" " + seen[k] for k in ("early", "other") if seen.get(k)))
+
+
+def _gone(conn, card_id, client, now: str, sleep: Callable[[float], None]) -> Tuple[str, str]:
+    """«Заказа нет» while the panel knows the id the button made (review 2026-11-06): that order is read from WebMIM's cabinet first (GETs
+    only). Returns (the id read, a note of the journal); OrderError (nothing changes): it is there and not cancelled, not read, no client."""
+    card = orders.get_card(conn, card_id)
+    state = get_state(conn, card_id)
+    _may_resolve(conn, card, state, now)
+    known = state["webmim_id"]
+    if not known:
+        return "", ""
+    where = webmim_orders.SERVER_NAMES.get(state["server"], state["server"])
+    if client is None:
+        raise orders.OrderError("Кабинет WebMIM недоступен панели (не настроен API-пользователь в Подключения → WebMIM → Заказы в WebMIM, "
+                                "не читаются секреты или сервер закрыт для кнопки): заказ id %s, созданный кнопкой, не проверить. Отметка не "
+                                "снята." % known)
+    try:
+        order = _in_cabinet(client, known, sleep)
+    except (OSError, webmim_orders.OrdersError) as err:
+        raise orders.OrderError("Заказ WebMIM id %s, созданный кнопкой, не прочитан (%s, %s): отметка не снята, ничего не изменено."
+                                % (known, where, _why(err))) from None
+    except _Unread:
+        raise orders.OrderError("Кабинет WebMIM (%s) не прочитан целиком (больше %d заказов): нельзя убедиться, что заказа id %s, созданного "
+                                "кнопкой, там нет. Отметка не снята; если он есть, нажмите «Заказ есть»." % (
+                                    where, webmim_match.MAX_PAGES * webmim_match.PER_PAGE, known)) from None
+    if order is None:
+        return known, ""
+    if surely_cancelled(order):
+        return known, " (прежний заказ %s отменён в кабинете)" % _seen_text(order, where)
+    raise orders.OrderError("Заказ WebMIM %s, созданный кнопкой, есть в кабинете: отметка не снята, новый заказ не откроется. Это он — "
+                            "нажмите «Заказ есть: проверить в WebMIM» (его ID уже вписан). Удалите или отмените его в кабинете, если он не "
+                            "нужен, и подтвердите «Заказа нет» снова." % _seen_text(order, where))
 
 
 def resolve(conn, card_id, found: bool, now: str, author: str, webmim_id: str = "", number: str = "", client=None, confirm: str = "",
-            sleep: Callable[[float], None] = time.sleep) -> str:
+            sleep: Callable[[float], None] = time.sleep, other: bool = False) -> str:
     """A person's way out of held_back (the owner and the partner: the route's right «supplier»), after a look at WebMIM's cabinet. `found`:
     the order is there — it is read from WebMIM again (check) and must be what the person confirmed (`confirm`: the token check gave);
     its id and number go to the card, the mark becomes «недосоздан» with that id, so «Досоздать» reads what WebMIM's order holds and adds
-    only what lacks. Not found: the mark becomes «не оформлен» without an id, a new press makes a new order. A record of the journal either
-    way; OrderError: nothing written."""
-    seen = None
+    only what lacks; an id other than the one the button made needs `other` (check). Not found: when the panel knows the id the button made,
+    that order is read from the cabinet first (_gone: there and not cancelled — refused); then the mark becomes «не оформлен» without an id,
+    a new press makes a new order. A record of the journal either way; OrderError: nothing written."""
+    seen, read, note = None, "", ""
     if found:
-        seen = check(conn, card_id, client, now, webmim_id, number, sleep)       # GETs only, before the write lock
+        seen = check(conn, card_id, client, now, webmim_id, number, sleep, other)   # GETs only, before the write lock
         if not confirm or str(confirm) != seen["token"]:
             raise orders.OrderError("Заказ WebMIM %s изменился после проверки или не был показан: проверьте его снова и подтвердите. Отметка не снята."
                                     % ("№" + seen["number"] if seen["number"] else "id " + seen["id"]))
+    else:
+        read, note = _gone(conn, card_id, client, now, sleep)                       # GETs only, before the write lock
     conn.commit()
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -360,8 +467,10 @@ def resolve(conn, card_id, found: bool, now: str, author: str, webmim_id: str = 
         else:
             if card["webmim_id"] or card["webmim_number"]:
                 raise orders.OrderError("В карточке вписан номер WebMIM: заказ есть. Впишите его ID ниже или очистите поля карточки.")
+            if state["webmim_id"] != read:                                  # the mark changed after the cabinet was read
+                raise orders.OrderError("Отметка изменилась, пока читался кабинет WebMIM: обновите страницу и проверьте снова.")
             text = ("Отметка снята вручную (%s): в кабинете WebMIM (%s) заказа нет%s. Кнопка снова создаст новый заказ у поставщика."
-                    % (author, where, " (прежний id %s удалён)" % state["webmim_id"] if state["webmim_id"] else ""))
+                    % (author, where, note or (" (прежний id %s не найден в кабинете)" % read if read else "")))
             conn.execute("UPDATE webmim_create SET state = 'refused', webmim_id = '', result = ?, updated_at = ? WHERE order_id = ?", (text, now, card_id))
         orders.add_event(conn, card_id, now, author, "webmim", text, "grey")
     except Exception:
@@ -665,7 +774,8 @@ def button(conn, card: dict, server: str, now: Optional[str] = None) -> Optional
     held = held_back(conn, card, state, now)
     out = {"label": "", "state": state, "state_name": STATE_NAMES.get(state["state"], "") if state else "", "live": server in CREATE_SERVERS,
            "server": webmim_orders.SERVER_NAMES[server], "test": server == "test", "held": held,
-           "held_id": str(card.get("webmim_id") or ""), "held_number": str(card.get("webmim_number") or "")}
+           "held_id": str(card.get("webmim_id") or (state["webmim_id"] if state and held else "") or ""),
+           "held_number": str(card.get("webmim_number") or ""), "known_id": state["webmim_id"] if state and held else ""}
     if held:
         return out
     if state and state["webmim_id"]:

@@ -1459,22 +1459,23 @@ def register(app) -> None:
         of the journal; nothing is written to WebMIM."""
         conn = get_conn()
         card_or_404(conn, card_id)
-        found, confirm = request.form.get("found") == "1", request.form.get("confirm", "")
+        found, confirm, other = request.form.get("found") == "1", request.form.get("confirm", ""), request.form.get("other") == "1"
         session.pop("webmim_check", None)
         state = webmim_create.get_state(conn, card_id)
         server = state["server"] if state else webmim_match.current_server(conn)    # the cabinet of the press, not of today's choice
         client = None
         try:
-            if found and server in webmim_create.CREATE_SERVERS and app.config.get("SECRET_BOX") is not None:
+            known = bool(state and state["webmim_id"])           # «Заказа нет» reads the order the button made first (webmim_create._gone)
+            if (found or known) and server in webmim_create.CREATE_SERVERS and app.config.get("SECRET_BOX") is not None:
                 client = webmim_match.client_for(conn, app.config["SECRET_BOX"], app.config.get("WEBMIM_HTTP") or urllib_transport, server)
             if found and not confirm:
                 seen = webmim_create.check(conn, card_id, client, local_iso(), webmim_id=request.form.get("webmim_id", ""),
-                                           number=request.form.get("webmim_number", ""))
-                session["webmim_check"] = dict(seen, card=card_id)
+                                           number=request.form.get("webmim_number", ""), other=other)
+                session["webmim_check"] = dict(seen, card=card_id, other_ok=other)
                 flash("Заказ WebMIM прочитан: сверьте дату и позиции в блоке «WebMIM» и подтвердите.", "ok")
             else:
                 text = webmim_create.resolve(conn, card_id, found, local_iso(), author(), webmim_id=request.form.get("webmim_id", ""),
-                                             number=request.form.get("webmim_number", ""), client=client, confirm=confirm)
+                                             number=request.form.get("webmim_number", ""), client=client, confirm=confirm, other=other)
                 flash(text, "ok")
         except orders.OrderError as err:
             flash(str(err), "error")
