@@ -495,10 +495,6 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
     text, why, held = _found_text(conn, lines, picks, stock, chat, price_of, left or {}, notes)
     if why:
         return NOT_SENT % why, ""
-    for note in dict.fromkeys(notes):                              # the ad's price not known: the price as it is, and the journal says so
-        if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text = ? AND at >= ? LIMIT 1", (card_id, note, stay)).fetchone():
-            orders.add_event(conn, card_id, now, AUTHOR, "chat", note, level="yellow")
-    conn.commit()
     token = _token(card_id, stay)
     key = SENT_TEXT % token                                        # the words that go: the history has these, the price may change before it is written
     store.set_state(conn, key, text)
@@ -506,6 +502,9 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
     status, why, _copy = order_manager.send_to_client(conn, card, text, token, deliver, now)
     if status == "sent":
         orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD + text, level="green")
+        for note in dict.fromkeys(notes):                          # the ad's price not known: the price as it is; the journal says so once it went
+            if not conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text = ? AND at >= ? LIMIT 1", (card_id, note, stay)).fetchone():
+                orders.add_event(conn, card_id, now, AUTHOR, "chat", note, level="yellow")
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
         _tag(conn, card_id, card, "exact", now)

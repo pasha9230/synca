@@ -237,6 +237,27 @@ def test_without_the_price_of_the_ad_the_price_stays_and_the_journal_says_so(env
     assert len(notes) == 1 and "8 500" in notes[0]
 
 
+def test_the_note_of_an_unknown_ad_price_is_not_written_when_the_send_failed(env):
+    """The owner 2026-11-06: the note goes to the journal after the message went, not before."""
+    conn, _row = env
+    card = waiting(env)
+
+    def refuse(row, text, token):
+        raise chats.ChatError("Авито отказал")
+    order_wait.check(conn, [tire()], NOW, deliver=refuse, price_of=price_of)
+    assert not [e for e in orders.list_events(conn, card) if "цена объявления" in e["text"].lower()]
+
+
+def test_the_note_of_an_unknown_ad_price_comes_after_the_message(env):
+    conn, _row = env
+    card, sender = waiting(env), Sender()
+    run(conn, sender, [tire()])
+    texts = [e["text"] for e in sorted(orders.list_events(conn, card), key=lambda e: e["id"])]
+    told_at = next(i for i, t in enumerate(texts) if t.startswith(order_wait.TOLD))
+    note_at = next(i for i, t in enumerate(texts) if "цена объявления" in t.lower())
+    assert told_at < note_at
+
+
 def test_the_ad_floor_leaves_the_files_of_the_feed_alone(env):
     conn, chat_row = env
     published(conn, chat_row, "100", 9100)
