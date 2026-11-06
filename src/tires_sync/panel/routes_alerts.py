@@ -13,12 +13,11 @@ from .routes_orders import from_panel, local_iso
 log = logging.getLogger(__name__)
 
 
-def grouped(conn, login: str, everything: bool = False) -> list:
+def grouped(conn, login: str) -> list:
     """The rows of the page, newest first: `order_alerts.page_rows` (one source with the bell, its counter and the dots by the order numbers),
     at the panel's local time, so that old green alerts are left out. Without the chats, the stages and «Резерв: товар на точке»
-    (order_alerts.bell_row, the owner 2026-11-05); `everything`: with them (the dots by the order numbers, as before)."""
-    rows = _grouped(conn, login)
-    return rows if everything else [r for r in rows if order_alerts.bell_row(r)]
+    (order_alerts.bell_row, the owner 2026-11-05; the dots too, 2026-11-06)."""
+    return [r for r in _grouped(conn, login) if order_alerts.bell_row(r)]
 
 
 def _grouped(conn, login: str) -> list:

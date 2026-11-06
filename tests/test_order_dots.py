@@ -85,7 +85,7 @@ def test_an_older_red_beats_a_newer_yellow_and_green_has_its_colour(tmp_path):
     conn.commit()
     event(conn, mixed, "notify", "Оповещение не отправлено: у точки нет ВК", level="red")    # older
     event(conn, mixed, "reserve", "Оповещение о конце резерва")                              # newer, yellow
-    event(conn, calm, "stage", "Заказ создан", level="green")
+    event(conn, calm, "sale", "Продажа проведена: 20 000 ₽")                                 # green (a stage is no dot: 2026-11-06)
     for url in ("/orders?v=list", "/orders"):
         found = dots(client.get(url).get_data(as_text=True))
         assert found[mixed] == ("red", "Нужно действие")

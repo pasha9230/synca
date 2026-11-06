@@ -216,7 +216,7 @@ def test_a_chat_silent_for_a_week_is_no_longer_urgent(tmp_path):
 
 def test_for_a_chat_with_an_order_urgent_takes_the_place_of_the_yellow_record(tmp_path):
     """Хвост З13 (c): «Срочно ответить» of a chat with an order replaces the order's yellow «Клиент написал», as for a chat without one;
-    the order's dot is red. Other records of the order stay."""
+    other records of the order stay. The order's dot: none, a chat is no dot by the number (the owner 2026-11-06, as for the bell)."""
     app, client, tok, conn = setup(tmp_path)
     users.add_user(conn, "worker", "password-123", NOW, role="owner")         # an order nobody answers for: both owners' (2026-11-03)
     cid = orders.create_card(conn, {"client_name": "Татьяна"}, NOW, "система")
@@ -226,7 +226,7 @@ def test_for_a_chat_with_an_order_urgent_takes_the_place_of_the_yellow_record(tm
     conn.execute("DELETE FROM order_event WHERE order_id = ? AND kind = 'created'", (cid,))
     conn.commit()
     from test_order_dots import dots
-    assert dots(client.get("/orders?v=list").get_data(as_text=True)).get(cid, ("",))[0] == "red"       # the dot by the number: red, not gone
+    assert cid not in dots(client.get("/orders?v=list").get_data(as_text=True))                     # the dot by the number: no chat (2026-11-06)
     orders.add_event(conn, cid, at(-60), "owner", "note", "Позвонить завтра", level="red")
     conn.commit()
     rows = alerts.page_rows(conn, "worker", NOW)

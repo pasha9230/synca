@@ -187,7 +187,7 @@ def test_the_card_shows_no_profit_and_the_purchase_only_in_the_rows(tmp_path, mo
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     body = page[page.index('<main'):] if '<main' in page else page
     assert body.lower().count("закупк") == 2 and "Закупка за 1 шт" in body and "прибыл" not in body.lower()   # the label and its aria-label of the one row
-    assert "Сумма заказа <b>23\u00a0500" in body and "Записать продажу" in body
+    assert '<p class="ocard-sum">Итого <b>23\u00a0500' in body and "Записать продажу" in body   # «Итого», the one word of the sum (2026-11-06)
 
 
 def test_a_stage_of_the_window_sends_who_answers_now_and_that_names_nobody_new(tmp_path, monkeypatch):
