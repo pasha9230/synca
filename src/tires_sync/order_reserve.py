@@ -478,12 +478,14 @@ def _reply_step(conn, card: dict, now: str, notify: Optional[Notify]) -> None:
     if not found:
         conn.commit()
         return
+    cursor = str(max(m[0] for m in found))                    # read up to the newest row; the sync may store a page newest first
+    found = sorted(found, key=lambda m: (m[1], m[0]))          # the decision goes by the time the client wrote (the review 2026-11-06)
     told = [(m, status, d) for m, (status, d) in ((m, reply_date.parse(m[2], date.fromisoformat(m[1][:10]))) for m in found) if status != "none"]
     dated = [(m, d) for m, status, d in told[-1:] if status == "ok"]     # the newest that says something decides: a later refusal or far date wins
     if not dated and not order_oth.in_alert_hours(conn, now):
         conn.commit()                                           # the responsible is told in the alert hours: read then
         return
-    if not _move(conn, key, seen, str(found[-1][0])):           # another tick read them
+    if not _move(conn, key, seen, cursor):           # another tick read them
         return
     who = card["client_name"] or card["client_phone"] or "клиент"
     if dated:

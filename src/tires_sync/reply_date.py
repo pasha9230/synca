@@ -1,7 +1,7 @@
 """The date a client names in an answer to the reminder of the reservation (the owner 2026-11-06): «12.11», «12/11», «12.11.2026», «12 ноября»,
 «сегодня», «завтра», «послезавтра», «в пятницу». Only today and the next 30 days are a date (`ok`); one before or later is `far`; two
 different dates are `many`; nothing, `none`; a «не», «нет», «отказ…», «перезвон…», «передума…», «отмен…», «откаж…», a promise to tell later («завтра сообщу / напишу / позвоню / скажу / уточню /
-подумаю») is `refused` whatever date is in it
+подумаю»), a pickup already done («забрал», «выкупил», «поставил») is `refused` whatever date is in it
 («сегодня не успею», «завтра не смогу»: the review 2026-11-06, the responsible's, never a date). A weekday is the next one after the day of the message (on a Friday «в пятницу» is a week later).
 «в 17.11», «к 12.30» is a time, not a date (`none`: the responsible's).
 A day without a year is this year's, or the next year's when it has passed. «12.30», a phone, a price are no date (no such month)."""
@@ -17,7 +17,7 @@ WEEKDAYS = ("понедельник", "вторник", "сред[ау]", "че�
 NUMERIC = re.compile(r"(?<![\d.,/:])(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?(?![\d/:]|[.,]\d)")
 WORDS = re.compile(r"(?<!\d)(\d{1,2})(?:-?го)?\s+(%s)[а-я]*" % "|".join("(%s)" % m for m in MONTHS))
 RELATIVE = re.compile(r"(?<![а-я])(послезавтра|завтра|сегодня)(?![а-я])")
-REFUSAL = re.compile(r"(?<![а-я])(не|нет|отказ[а-я]*|перезвон[а-я]*|передума[а-я]*|отмен[а-я]*|никак|нельзя|вряд|откаж[а-я]*|позвон[а-я]*|напиш[а-я]*|скаж[а-я]*|сообщ[а-я]*|уточн[а-я]*|подума[а-я]*|решу|реш[иа]м)(?![а-я])")
+REFUSAL = re.compile(r"(?<![а-я])(не|нет|отказ[а-я]*|перезвон[а-я]*|передума[а-я]*|отмен[а-я]*|никак|нельзя|вряд|откаж[а-я]*|позвон[а-я]*|напиш[а-я]*|скаж[а-я]*|сообщ[а-я]*|уточн[а-я]*|подума[а-я]*|решу|реш[иа]м|забрал[а-я]*|выкупил[а-я]*|поставил[а-я]*)(?![а-я])")
 WEEKDAY = re.compile(r"(?<![а-я])(%s)(?![а-я])" % "|".join("(%s)" % w for w in WEEKDAYS))
 
 

@@ -162,12 +162,12 @@ def test_the_dates_a_client_writes(text, expected):
 
 
 @pytest.mark.parametrize("text, status", [
-    ("забрал и поставил", "none"), ("ок", "none"), ("", "none"), ("15.11 или 16.11", "many"), ("сегодня не смогу, в пятницу", "refused"),
+    ("забрал и поставил", "refused"), ("ок", "none"), ("", "none"), ("15.11 или 16.11", "many"), ("сегодня не смогу, в пятницу", "refused"),
     ("заберу 25.12", "far"), ("05.11", "far"), ("в 12.30 подъеду", "none"), ("8 900 123 45 67", "none"), ("31.02", "none"),
     ("Сегодня не успею", "refused"), ("завтра не смогу", "refused"), ("перезвоню завтра", "refused"), ("Отказываюсь, завтра не надо", "refused"),
     ("нет, 20.11", "refused"), ("Сегодня никак", "refused"), ("сегодня уже нельзя", "refused"), ("подъеду в 17.11", "none"),
     ("к 12.11 буду", "none"), ("Завтра сообщу", "refused"), ("завтра напишу", "refused"), ("завтра позвоню", "refused"),
-    ("скажу завтра", "refused"), ("откажусь наверное, завтра скажу", "refused"), ("уточню и в пятницу отвечу", "refused"), ("отмените заказ", "refused"), ("Передумал", "refused"),
+    ("скажу завтра", "refused"), ("Забрали в понедельник, спасибо", "refused"), ("уже выкупил", "refused"), ("откажусь наверное, завтра скажу", "refused"), ("уточню и в пятницу отвечу", "refused"), ("отмените заказ", "refused"), ("Передумал", "refused"),
 ])
 def test_no_date_two_dates_and_a_far_one(text, status):
     assert reply_date.parse(text, date(2026, 11, 6))[0] == status
@@ -359,3 +359,11 @@ def test_answers_without_a_date_are_told_to_the_responsible_once(tmp_path):
     said(conn, chat, DAY + "T17:00:00", "заберу 20.10")                 # a date still moves the reservation
     tick(conn, DAY + "T17:50:00", deliver, notify)
     assert until(conn, cid) == "2026-10-20"
+
+
+def test_the_time_the_client_wrote_decides_not_the_order_the_sync_stored_them(tmp_path):
+    conn, cid, chat, deliver, notify = told(tmp_path)
+    said(conn, chat, DAY + "T13:05:00", "Ой, не смогу, напишу позже")    # a page stored newest first: the later one has the lower id
+    said(conn, chat, DAY + "T13:00:00", "Заберу завтра")
+    tick(conn, DAY + "T14:07:00", deliver, notify)
+    assert until(conn, cid) == DAY and len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1
