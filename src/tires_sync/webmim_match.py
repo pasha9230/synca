@@ -288,7 +288,7 @@ def score(card: dict, items: List[dict], order: dict) -> Tuple[int, List[str]]:
     points, why = 0, []
     if digits(order.get("external_number")) and digits(order["external_number"]) == str(card["id"]) \
             and re.fullmatch(r"\D{0,3}\d+", order["external_number"].strip()):
-        points += 70                                           # a small number of another system may be the same: not sure alone
+        points += 70        # «Собственный номер» typed by hand (the button sends none since 2026-11-06); another system's may be the same: not sure alone
         why.append("внешний номер в WebMIM — №%d панели" % card["id"])
     phone, theirs_phone = phone_tail(card.get("client_phone")), order.get("customer_phone_norm") or ""
     if phone and phone == theirs_phone:
