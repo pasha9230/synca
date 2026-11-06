@@ -567,3 +567,7 @@ def test_a_staff_member_made_a_client_gets_nothing_of_an_order_in_telegram(tmp_p
     assert "olya" in owner.get("/connections/telegram").get_data(as_text=True)               # the stale chat is shown, to be cleared
     post(owner, "/connections/telegram/user-chat", tok, login="olya", chat_id="")
     assert "olya" not in order_notify.user_chats(conn_of(app))
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

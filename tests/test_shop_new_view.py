@@ -4,6 +4,8 @@ templates/shop2/ only when «Новый вид» of the group «Клиент» i
 delivery (the city, the street, the house, the recipient, a word for the driver) is kept in the client's own profile only."""
 from __future__ import annotations
 
+import pytest
+
 import re
 
 from panel_helpers import login, post
@@ -336,3 +338,7 @@ def test_on_my_orders_shows_how_many_are_open(tmp_path):
     conn.execute("UPDATE order_card SET sale_ids = 'not json' WHERE id = 1")                 # an order the card cannot read
     conn.commit()
     assert shop_cart.open_orders(conn, "buyer") == 1                                          # the count never reads the card
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

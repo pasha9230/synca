@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from helpers import catalog_xml, commodity_xml, settings_dict
@@ -134,3 +136,7 @@ def test_the_same_alert_is_told_again_only_after_six_hours_and_another_one_at_on
     clock[0] += 60
     assert cli._alert(conn, box, "служба упала", service=True) is True                   # the service's own alert right after the cycle said it
     assert len(http.calls) == 3
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

@@ -3,6 +3,8 @@ hour. One series is one alert: it goes on while the failed sign-ins of the windo
 the count fell to half or lower. The lock of an address and the journal without passwords stay as they are."""
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta
 
 from panel_helpers import make_app
@@ -105,3 +107,7 @@ def test_the_address_lock_and_a_journal_without_passwords_stay(tmp_path, monkeyp
     assert codes[-1] == 429 and codes[0] == 401
     rows = store.connect(app.config["DB_PATH"]).execute("SELECT detail FROM audit").fetchall()
     assert rows and not any("секрет" in (r[0] or "") for r in rows)
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

@@ -3,6 +3,8 @@
 (before it is placed with the supplier) with a confirmation, the manager told, a line of the audit; later — «напишите менеджеру»."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from panel_helpers import login, post
@@ -298,3 +300,7 @@ def test_an_unmerged_order_is_the_clients_own_again(tmp_path):
     order_merge.unmerge(conn, new, NOW, "zaman1")
     view = shop_cart.my_order(conn, "buyer", first)
     assert not view["merged"] and view["status"] == "Принят" and view["can_cancel"]
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

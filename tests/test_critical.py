@@ -236,3 +236,21 @@ def test_the_vk_page_is_saved_with_the_chat_on_the_telegram_page(tmp_path):
     post(client, "/connections/telegram/user-chat", tok, login="zaman", chat_id="555", vk_peer="502")
     assert critical.vk_peers(conn) == {"zaman": "502"} and order_notify.user_chats(conn) == {"zaman": "555"}
     assert 'value="502"' in client.get("/connections/telegram").get_data(as_text=True)
+
+
+def test_a_purchase_change_goes_to_vk_of_who_may_see_it_with_its_own_bell_row_only(tmp_path, monkeypatch):
+    from helpers import make_offer
+    from tires_sync import catalog_archive, purchase_alert
+    from tires_sync.webmim import ParseResult
+    conn, box, http = env(tmp_path, monkeypatch, tg_down=True)
+    users.add_user(conn, "partner1", "пароль-партнёра-длинный", NOW, role="partner")
+    critical.set_user_vk(conn, "partner1", "504", NOW, "owner")
+    critical.set_user_vk(conn, "owner", "501", NOW, "owner")
+    for at, price in (("2026-11-05T10:00:00", 1000.0), ("2026-11-05T11:00:00", 1100.0)):
+        catalog_archive.record(conn, ParseResult(offers={"a": make_offer(goods_id="a", name="Шина a", base_price=price)}), at)
+    assert purchase_alert.collect(conn, NOW) is None                            # первый запуск только запоминает
+    catalog_archive.record(conn, ParseResult(offers={"a": make_offer(goods_id="a", name="Шина a", base_price=1300.0)}), "2026-11-06T11:00:00")
+    cli._alert_purchase(conn, box, now=NOW)
+    assert sorted(p for p, _ in http.vk) == ["501", "504"] and all("Закупка у поставщика изменилась" in t for _, t in http.vk)
+    assert audit(conn, "critical") == []                                         # своя красная строка у закупки, второй не нужно
+    assert [r["kind"] for r in order_alerts.page_rows(conn, "partner1", NOW) if r["level"] == "red"] == ["purchase"]

@@ -362,3 +362,7 @@ def test_fail_with_requeue_and_no_cost_is_not_an_attempt(tmp_path):
     job2 = queue(conn, key, kind="set4", status="running")              # money spent: it is an attempt whatever the agent says
     client.post("/api/image-jobs/%d/fail" % job2, headers=auth, data={"error": "upload lost", "cost_usd": "0.07", "requeue": "1"})
     assert conn.execute("SELECT status FROM image_job WHERE id=?", (job2,)).fetchone() == ("failed",)
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

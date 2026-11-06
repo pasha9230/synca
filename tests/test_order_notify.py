@@ -281,3 +281,7 @@ def test_telegram_goes_once_per_chat_to_the_people_who_have_one(tmp_path):
     assert how == "Telegram: отправлено (owner, pasha, worker2)"
     assert order_notify.tell_people(conn, box, ["nobody"], "x", ScriptedHttp()) == "Telegram: ни у кого нет чата (nobody)"
     assert order_notify.tell_people(conn, box, ["worker2"], "x", ScriptedHttp((403, {}))).startswith("Telegram не отправлен (worker2:")
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

@@ -3,6 +3,8 @@ the random_id of VK made from what the message is, a mark against a repeat in Te
 failure of the Google table and for a bot that cannot answer the points. Fakes only: no request leaves the tests."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import urllib.parse
 
@@ -288,3 +290,7 @@ def test_a_refused_alert_does_not_wipe_the_marks_another_process_wrote_meanwhile
     monkeypatch.setattr(cli, "_epoch", lambda: 1_000_000.0)
     assert cli._alert(conn, box, "A") is False
     assert (store.get_state(conn, "last_alert_at"), store.get_state(conn, "last_alert_text")) == ("1000050.0", "b-digest")
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

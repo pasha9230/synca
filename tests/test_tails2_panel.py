@@ -374,3 +374,7 @@ def test_a_busy_journal_never_costs_the_alert_message(tmp_path, monkeypatch):
     tok = csrf_of(client)
     codes = {guess(client, tok, n) for n in range(common.LOGIN_ALERT_FAILURES + 2)}
     assert codes == {401} and len(said) == 1
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

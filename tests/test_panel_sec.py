@@ -234,3 +234,6 @@ def test_every_changing_method_needs_the_csrf_token_not_only_post(tmp_path, meth
     assert client.open("/probe", method=method).status_code == 400
     assert client.open("/probe", method=method, data={"csrf": tok}).status_code == 403          # past the token: no right to a page nobody named
 
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

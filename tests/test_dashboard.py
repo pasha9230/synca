@@ -290,3 +290,7 @@ def test_a_client_who_keeps_writing_still_waits_and_since_their_first_message(tm
     got = {w["peer_name"]: w["minutes"] for w in analytics.day_numbers(conn, NOW, without_points=True)["waiting"]}
     assert got["keeps-writing"] == analytics.working_minutes(datetime(2026, 10, 13, 19), NOW, (10, 20))
     assert got["old-thread"] == analytics.working_minutes(datetime(2026, 10, 12, 15), NOW, (10, 20))      # from the first read of the account
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

@@ -2,6 +2,8 @@
 tells the client «можно забирать» on the arrival only; anything doubtful waits in «Входящие» for the owner and reaches no client."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import urllib.parse
 
@@ -553,3 +555,7 @@ def test_arrived_after_a_move_by_hand_still_tells_the_bell_once(tmp_path):
     hook(app, conn, "приехал 5000100", event="h2")
     notes = [e for e in orders.list_events(conn, card) if e["text"].startswith("Поступили шины")]
     assert len(notes) == 1 and notes[0]["level"] == "yellow" and len(to_client(app)) == 1
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

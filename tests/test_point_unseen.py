@@ -2,6 +2,8 @@
 goes to the owner in Telegram, once; the answer to a binding code goes to VK even for a point in the panel. Fakes only."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from http_fakes import ScriptedHttp
@@ -113,3 +115,7 @@ def test_the_answer_to_a_binding_code_goes_to_vk_even_for_a_point_in_the_panel(t
     assert [n["text"][:16] for n in points.notes(conn, pid)] == ["ВК привязан к то"]
     hook(app, conn, "привет", event="e2", sender="999")                                         # anything else: still nothing in VK
     assert len(to_points(app)) == 1
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

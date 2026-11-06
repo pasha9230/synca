@@ -550,3 +550,7 @@ def test_ch8_review_without_the_key_of_the_community_the_hint_keeps_its_pause(tm
     hook(app, conn, "ау", event="n2")
     assert conn.execute("SELECT value FROM app_state WHERE key = ?", (mgr.HINT_KEY % pid,)).fetchone()[0]
     assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'vk_answer_failed'").fetchone()[0] == 1
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

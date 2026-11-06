@@ -2,6 +2,8 @@
 manager of the clients' orders, the message in Telegram, «Мои заказы» — and one client never reaching another's cart or orders."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import re
 
@@ -368,3 +370,7 @@ def test_a_position_a_manager_added_shows_no_code_to_the_client(tmp_path):
                     promo_pct=0, now=NOW, author="zaman1")
     html = page(client, "/shop/orders/%d" % card_id)
     assert "SECRETCODE" not in html and "54321" not in html and "IKON 245/45/18 Test Model" in html
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

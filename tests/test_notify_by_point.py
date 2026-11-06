@@ -2,6 +2,8 @@
 the bell or on «Уведомления». The accounts of no point, and their orders delivered to a point, are as before."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import urllib.parse
 
@@ -368,3 +370,7 @@ def test_a_user_of_a_deleted_point_gets_no_telegram_either(tmp_path):
     points.delete_point(conn, pid)
     way = order_notify.route(conn, mine)
     assert way["channel"] == "owner" and way["to"] == ""
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

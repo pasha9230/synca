@@ -4,6 +4,8 @@ one command, the client hears «можно забирать» once per order, th
 unknown or of another point waits in «Входящие» and the others go on."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from test_vk_commands import GROUP, PEER, SECRET, SENT, _card, _stage, ready, to_client, to_points
@@ -192,3 +194,7 @@ def test_a_number_in_the_text_not_among_the_forwards_waits(tmp_path):
     assert stage(conn, card) == "moving" and stage(conn, second) == "moving" and to_client(app) == []
     [item] = mgr.list_inbox(conn)
     assert "5000200" in item["dispute"]
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

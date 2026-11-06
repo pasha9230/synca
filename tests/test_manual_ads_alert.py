@@ -2,6 +2,8 @@
 takes (owner, 2026-10-29)."""
 from __future__ import annotations
 
+import pytest
+
 from test_same_tire import setup
 from tires_sync import cli, connections, mirror_feed, notify
 
@@ -158,3 +160,7 @@ def test_a_supplier_not_used_this_cycle_marks_none_of_its_ads(tmp_path, monkeypa
     monkeypatch.setattr(cli, "_alert", lambda c, b, text, **k: said.append(text) or True)
     cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, account), [], True)], offers={"100": object()}, unavailable={2})
     assert "нет у поставщика" not in "\n".join(said)
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

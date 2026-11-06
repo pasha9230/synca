@@ -253,3 +253,7 @@ def test_the_notes_are_shown_only_while_the_point_works_in_the_panel(tmp_path):
 def test_the_feed_names_whose_it_is_for_the_memory_of_the_browser(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     assert manager(app, conn, pid).get("/my-point/feed").get_json()["who"] == "gamma"
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")

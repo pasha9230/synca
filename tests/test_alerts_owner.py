@@ -4,6 +4,8 @@ of an order nobody answers for; «Срочно ответить» never of a clo
 orders without a stored responsible."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from test_inquiry import message
@@ -271,3 +273,7 @@ def test_a_viewer_as_the_account_responsible_is_nobody(tmp_path):
     message(conn, row, "2026-10-15T10:30:00", text="Есть шины?")
     for login in ("owner", "zamantyres", "olga"):
         assert row in chats_seen(conn, login)
+
+# The setting of critical.py off (everything to Telegram, as before 2026-11-06): these tests are of the mechanics of the sending;
+# the rule «only the critical» is test_critical.py.
+pytestmark = pytest.mark.usefixtures("telegram_for_everything")
