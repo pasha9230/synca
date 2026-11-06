@@ -268,8 +268,8 @@ def _critical_red(kind: str, text: str) -> bool:
 
 
 def forward_red(conn, box, now: str, tg_http: Transport = urllib_transport, vk_http: Transport = urllib_transport) -> int:
-    """The red failures of the orders that are critical (a send to a client that failed: a red «chat» record; a red failure of a rule: a red
-    «rule» record), passed on once: one message per set of people to Telegram and VK (they are in the bell already as red records). Who: the
+    """The red failures of the orders that are critical (a send to a client that failed: a red «chat» record, or the red record of a failed
+    «Автосообщение клиенту», kind «autosend» of order_autosend; a red failure of a rule: a red «rule» record), passed on once: one message per set of people to Telegram and VK (they are in the bell already as red records). Who: the
     one who answers for the order, both owners when nobody does (order_alerts.told_people); never of an order of a point's Avito account nor
     of one a point user answers for (the point has its bell). The first run only remembers where the journal is. The mark moves before the
     sending, from the value read (of two ticks, one sends): a failed sending is printed, not repeated. Returns how many records were passed."""
@@ -286,7 +286,9 @@ def forward_red(conn, box, now: str, tg_http: Transport = urllib_transport, vk_h
         conn.rollback()
         return 0
     rows = [r for r in conn.execute("SELECT id, order_id, kind, text FROM order_event WHERE id > ? AND id <= ? AND level = 'red' "
-                                    "AND kind IN ('chat', 'rule') ORDER BY id", (int(upto), top)) if _critical_red(r[2], r[3])]
+                                    "AND (kind IN ('chat', 'rule') OR kind = 'autosend' AND author = 'автосообщение') ORDER BY id",
+                                    (int(upto), top)) if _critical_red(r[2], r[3])]
+    # «Автосообщение клиенту» (order_autosend): its own red record, one per failure (the send mechanism's own of it is not passed twice)
     conn.commit()
     groups: Dict[tuple, List[str]] = {}
     for _id, order_id, _kind, text in rows:
