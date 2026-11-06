@@ -518,6 +518,16 @@ CREATE TABLE IF NOT EXISTS callback_task (
     done_at TEXT, done_by TEXT NOT NULL DEFAULT '', cancelled_at TEXT
 );
 CREATE INDEX IF NOT EXISTS callback_task_open ON callback_task (done_at, cancelled_at, due_at);
+-- «Автосообщение клиенту» (order_autosend.py, the owner 2026-11-05/06): a message the manager set to go by itself at due_at (Moscow,
+-- YYYY-MM-DDTHH:MM) into the order's Avito chat. kind ask|deal; status pending|sending|waiting|sent|cancelled|failed; reason: why it was
+-- cancelled or did not go; task_id: the «Задачи» row of the responsible when it did not go. Only added to the base, never changes other tables
+CREATE TABLE IF NOT EXISTS order_autosend (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, kind TEXT NOT NULL, due_at TEXT NOT NULL, text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, created_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL, updated_by TEXT NOT NULL DEFAULT '', done_at TEXT NOT NULL DEFAULT '', task_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS order_autosend_open ON order_autosend (status, due_at);
+CREATE INDEX IF NOT EXISTS order_autosend_order ON order_autosend (order_id);
 -- «Не дошло клиенту» (unsent.py, the owner 2026-10-31): a message to the client that did not go, with its text (chat_send_log drops it on
 -- «failed») and why, one per send token; closed by «Отправил вручную». Goes and comes back with the order (trash), moves with a merge
 CREATE TABLE IF NOT EXISTS order_unsent (

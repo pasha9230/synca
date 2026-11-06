@@ -1206,7 +1206,8 @@ def _claim_by_sync(conn, token: str, status: str, at: str, now: str, **more) -> 
     return done.rowcount == 1
 
 
-AUTO_TOKENS = ("task-", "reserve-", "arrived-", "wait-")    # the order's own messages (a task, «срок резерва», «можно забирать», «появилось в наличии»)
+AUTO_TOKENS = ("task-", "reserve-", "arrived-", "wait-", "autosend-")    # the order's own messages (a task, «срок резерва», «можно забирать»,
+                                                                         # «появилось в наличии», «Автосообщение клиенту»)
 
 
 def _stopped(conn, chat: dict, token: str) -> str:
@@ -1227,6 +1228,9 @@ def _stopped(conn, chat: dict, token: str) -> str:
         if task["status"] in ("skipped", "done"):
             return "задача пропущена" if task["status"] == "skipped" else "задача уже закрыта"
         card_id, stay = task["order_id"], (task["stage_id"], task["entered_at"])
+    elif token.startswith("autosend-"):                              # cancelled, the order closed, «ask» answered (order_autosend)
+        from . import order_autosend
+        return order_autosend.stop_reason(conn, token)
     else:
         own = re.match(r"(?:reserve|arrived|wait)-(\d+)-", token)
         card_id = int(own.group(1)) if own else card_id

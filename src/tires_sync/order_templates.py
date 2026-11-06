@@ -50,6 +50,13 @@ INTERCITY_PLACED_SAMPLE = ("Клиенту: заказ в другой горо�
 INTERCITY_SHIPPED_SAMPLE = ("Клиенту: заказ отправлен", "client",
                             "Заказ {webmim_number} отправлен в город {city} транспортной компанией {carrier}.{track_line}\n\nСпасибо за покупку!")
 SAMPLES = SAMPLES + (INTERCITY_PLACED_SAMPLE, INTERCITY_SHIPPED_SAMPLE)
+# «Автосообщение клиенту» (order_autosend, the owner 2026-11-05/06): the default text of the form, the manager may change it before it goes;
+# no variables, so that nothing is lacking when it goes. The words wait for the owner's own (the report of lane/autotask-date).
+AUTOSEND_ASK_SAMPLE = ("Клиенту: автосообщение «решили ли брать»", "client",
+                       "Здравствуйте! Подскажите, пожалуйста, вы решили, будете брать шины? Если остались вопросы, напишите, мы ответим.")
+AUTOSEND_DEAL_SAMPLE = ("Клиенту: автосообщение по договорённости", "client",
+                        "Здравствуйте! Пишем, как договаривались. Подскажите, пожалуйста, всё в силе?")
+SAMPLES = SAMPLES + (AUTOSEND_ASK_SAMPLE, AUTOSEND_DEAL_SAMPLE)
 RETIRED = {RESERVE_SAMPLE[0]: ("Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "   # the owner
                                "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",),                                       # 2026-10-23
            OTH_POINT_SAMPLE[0]: ("Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента: заказ №{order_no}, {client_name}, {client_phone}, "

@@ -68,7 +68,7 @@ def of_order(conn, order_id) -> List[dict]:
     for rid, token, at, why, text, source in conn.execute(
             "SELECT u.id, u.token, u.at, u.why, u.text, u.source FROM order_unsent u WHERE u.order_id IN (%s) AND u.closed_at IS NULL AND NOT EXISTS "
             "(SELECT 1 FROM chat_send_log l WHERE l.token = u.token AND l.status = 'sent') ORDER BY u.at, u.id" % ",".join("?" * len(ids)), ids):
-        out.append({"kind": "send", "id": rid, "at": at, "why": why, "text": text, "source": SOURCES.get(source, source)})
+        out.append({"kind": "send", "id": rid, "at": at, "why": why, "text": text, "source": SOURCES.get(source, source), "token": token})
     from . import order_engine
     for task in order_engine.list_tasks(conn, order_id, ("error", "pending")):
         if task["kind"] != "message" or not (task["body"] or "").strip() or order_engine.audience(conn, task) != "client":

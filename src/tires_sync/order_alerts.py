@@ -167,8 +167,8 @@ def _quiet(conn, login: str, staff: bool) -> dict:
     (chats.POINT_WROTE_AUTHOR) and «Срочно ответить» of their chats (2026-11-03), except a client they took from the point
     (order_points.office_taken): of it they are told as usual, «Срочно ответить» of a point's chat too."""
     from . import order_points
-    if not staff:
-        return {"all": set(), "words": set(), "chats": set(), "on": False, "taken": set(), "taken_chats": set()}
+    if not staff:                                                    # a point: «Автосообщение клиенту» is not its (order_autosend)
+        return {"all": set(), "words": set(), "chats": set(), "on": False, "taken": set(), "taken_chats": set(), "point": True}
     every, chats = order_points.account_orders(conn), order_points.account_chats(conn)
     if not _quiet_of_point_work(conn, login):
         return {"all": every, "words": set(), "chats": chats, "on": False, "taken": set(), "taken_chats": set()}
@@ -179,6 +179,9 @@ def _quiet(conn, login: str, staff: bool) -> dict:
 
 def _hidden(event: dict, quiet: dict) -> bool:
     from .chats import POINT_WROTE_AUTHOR
+    from .order_autosend import for_office
+    if quiet.get("point") and for_office(event):
+        return True
     if event["order_id"] in quiet["all"]:
         return True
     return point_words(event) and (event["order_id"] in quiet["words"] or (

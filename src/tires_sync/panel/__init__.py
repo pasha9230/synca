@@ -373,6 +373,8 @@ def create_app(config: dict) -> Flask:
     routes_tasks.register(app)
     from . import routes_unsent
     routes_unsent.register(app)
+    from . import routes_autosend
+    routes_autosend.register(app)
     from . import routes_intercity
     routes_intercity.register(app)
     routes_shop.register(app)

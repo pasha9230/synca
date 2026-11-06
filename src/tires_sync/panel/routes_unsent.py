@@ -6,14 +6,17 @@ from __future__ import annotations
 from flask import abort, flash, redirect
 
 from .. import unsent
-from .common import author, get_conn, login_required
+from .common import author, get_conn, login_required, own_point
 from .routes_orders import local_iso
 
 
 def register(app) -> None:
     def unsent_for(order_id) -> list:
         try:
-            return unsent.of_order(get_conn(), order_id)
+            rows = unsent.of_order(get_conn(), order_id)
+            if own_point() is not None:                    # «Автосообщение клиенту» is not the point's (order_autosend)
+                rows = [r for r in rows if not str(r.get("token") or "").startswith("autosend-")]
+            return rows
         except Exception:                                  # the block never takes the card down
             get_conn().rollback()
             app.logger.exception("the unsent messages of order %s could not be read", order_id)
