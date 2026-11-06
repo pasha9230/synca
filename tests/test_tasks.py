@@ -452,3 +452,25 @@ def test_the_done_in_the_new_views_of_the_office_and_of_a_point(tmp_path):
     assert "data-done-task" not in opened and "Открытых задач нет" in opened and 'name="due"' in opened
     html = gamma.get("/tasks?view=done").get_data(as_text=True)
     assert "point2.css" in html and done_ids(html) == [point_one] and "3 дня" in html
+
+
+def test_a_point_never_sees_an_office_login_who_set_or_did_its_task_in_both_views(tmp_path):
+    """The owner 2026-11-05: «Поставил» and «Выполнил» of an office person without a name are «Офис» to a point, never the login; the
+    names stay; the office sees as before."""
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    gamma = manager(app, conn, alpha)
+    users.add_user(conn, "olya.office", PASSWORD, NOW, role="chats")                      # an office person with no name
+    conn.commit()
+    nameless = done_row(conn, title="Безымянная", assignee="gamma", created_by="olya.office", done_by="olya.office")
+    named = done_row(conn, title="Именная", assignee="gamma", created_by="zaman", done_by="gamma")
+    for new_view in ("", "all"):
+        store.set_state(conn, "ui_new.point", new_view)
+        conn.commit()
+        page = gamma.get("/tasks?view=done").get_data(as_text=True)
+        assert done_ids(page) == [named, nameless], new_view
+        assert "olya.office" not in page and "Поставил: Офис" in page and "Выполнил: Офис" in page, new_view
+        assert "Поставил: Заман" in page and "Выполнил: gamma" in page, new_view          # a name stays; its own manager as before
+    store.set_state(conn, "ui_new.office", "")
+    conn.commit()
+    office = client.get("/tasks?tab=all&view=done").get_data(as_text=True)
+    assert "olya.office" in office and "Офис<" not in office

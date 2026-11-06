@@ -15,6 +15,7 @@ from .routes_design import office_page, point_page
 from .routes_orders import local_iso
 
 TABS = {"mine": "Мне", "by_me": "Поставил я", "all": "Все"}
+POINT_OFFICE = "Офис"                                     # who set or did a point's task, to the point, when the office person has no name
 DUES = {"": "Все сроки", "overdue": "Просроченные", "today": "До конца сегодня", "week": "До конца недели"}
 
 
@@ -119,10 +120,13 @@ def register(app) -> None:
             for t in rows:                                # whom to call: the name and the phone, as the reminder had them
                 t["who"], t["phone"] = inquiry._who_called(conn, t)
         names = {}
+        own = set(tasks.point_managers(conn, own_point())) if point else set()
         for t in rows:
             for login in (t["assignee"], t["created_by"], t["done_by"]):
                 if login not in names:
                     names[login] = users.person_name(conn, login, _main(app))
+                    if point and login and login not in own and names[login] == login:
+                        names[login] = POINT_OFFICE        # a point never sees an office login (the owner 2026-11-05)
         tabs = {k: v for k, v in TABS.items() if office or k != "all"}
         return render_template(office_page(point_page("tasks.html")), rows=rows, names=names, tab=tab, tabs=tabs, to=to, due=due, kind=kind, dues=DUES,
                                people=task_people(), point=point, view=view, done=done)
