@@ -294,3 +294,13 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     assert auto.get(conn, item["id"])["status"] == "pending"
     r = post(client, "/orders/%d/autosend/%d/cancel" % (card, item["id"]), tok)
     assert r.status_code == 302 and auto.get(conn, item["id"])["status"] == "cancelled"
+    from tires_sync import connections
+    account = connections.create_account(conn, "Основной", SET, "o")
+    conn.execute("UPDATE account SET chats_enabled = 1, chats_send = 1 WHERE id = ?", (account,))
+    row = conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at) VALUES (?, 'c-9', ?, ?)", (account, card, SET)).lastrowid
+    conn.commit()
+    chat_page = client.get("/chats/%d" % row).get_data(as_text=True)
+    assert 'id="autosend"' in chat_page and 'name="chat" value="%d"' % row in chat_page
+    r = post(client, "/orders/%d/autosend" % card, tok, kind="ask", due_at=due, text="Из чата", chat=str(row))
+    assert r.status_code == 302 and r.headers["Location"].endswith("/chats/%d#autosend" % row)
+    assert [i["text"] for i in auto.of_order(conn, card) if i["status"] == "pending"] == ["Из чата"]
