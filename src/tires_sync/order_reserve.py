@@ -22,6 +22,12 @@ by itself (`_no_answer_step`): not when the date was moved since, the order left
 The owner 2026-11-04: that move tells the order's responsible «Позвонить клиенту» with a line of the order's data (order_oth.call_line). The 12 hours
 end at night (12:30 + 12 h): the move is made at the first tick after them, its alerts wait for the alert hours (order_oth.in_alert_hours; HELD_KEY,
 `_release_held`): nobody is woken, a catch-up late in the evening neither.
+The owner 2026-11-06 (a client who had written «забрал и поставил» got the reminder the next day): a client who wrote in the last 3 days
+(WROTE_BEFORE) in a chat of the order or another chat of the same client gets no reminder; the responsible gets «Клиент писал, проверьте
+заказ №…» once per stay (`_wrote_lately`; a call Avito puts in the chat is no message). A date in the client's answer (reply_date: today
+and the next 30 days) moves the reservation to it with a record of who, what and the new date, nothing to the client (`_reply_step`); no
+date or a far one is the responsible's, nothing moves. A reminder that did not go by itself (a 402 the sync sends again included) starts no
+12 hours and is the responsible's (`tell_client`). The point's own sale (order_points.own_sales) is outside all of it.
 """
 from __future__ import annotations
 
@@ -52,6 +58,15 @@ CHATS_FRESH = timedelta(minutes=30)               # the chats of the account rea
 STALE_AFTER = timedelta(hours=24)                 # the move held up this long after its window by chats not read: one yellow record (the lead 2026-11-02)
 STALE_MARK = "[резерв:чаты-не-читаются:%s]"
 HELD_KEY = "reserve_moved_tell:%d"                # app_state: the alerts of a move made at night: {"call", "entered"}
+WROTE_BEFORE = timedelta(days=3)                  # the owner 2026-11-06: a client who wrote this lately gets no reminder, the responsible a task
+NOT_A_MESSAGE = "('system', 'deleted', 'call')"   # avito_message.kind: a call in the chat (missed, rejected) is no message of the client
+WROTE_MARK = "[резерв:клиент-писал:%s]"           # once per stay at the point
+WROTE_TASK = "Клиент писал, проверьте заказ №%s"   # the owner's words
+NOT_SENT_TASK = "Напоминание о сроке резерва по заказу №%s клиенту не ушло (%s). Свяжитесь с клиентом."
+REPLY_KEY = "reserve_reply:%d:%s"                 # app_state, per order and stay: the last avito_message.id of the client's answers read
+REPLY_MARK = "[резерв:ответ:%d]"                  # a record of an answer read: the id of its message
+NO_DATE_TASK = ("Клиент ответил на напоминание о сроке резерва по заказу №%s: «%s». Дата не распознана или дальше 30 дней: проверьте заказ, "
+                "резерв не изменён.")
 
 
 def _marker(kind: str, until: str) -> str:
@@ -79,7 +94,7 @@ def _arrived_today(conn, card: dict, now: str) -> bool:
     return bool(arrived) and str(arrived[0])[:10] == now[:10]
 
 
-def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now: str) -> str:
+def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now: str, notify: Optional[Notify] = None) -> str:
     """«Срок резерва истекает» to the client, once per stay at the point (the mark in the journal and the send token both carry the moment the
     card reached «Товар на точке»). The outcome is a record of the journal: green when it went, red when somebody has to write by hand
     (never asked to send again when it is not known whether it went). Returns "sent", "failed", "unknown" or "" (told already)."""
@@ -105,6 +120,9 @@ def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now:
                        "не отправляйте %s" % (CLIENT_TEMPLATE, why, marker)), "red"
     else:
         text, level = "Сообщение клиенту не отправлено («%s»): %s. Напишите клиенту вручную %s" % (CLIENT_TEMPLATE, why, marker), "red"
+    if status != "sent" and notify is not None:                  # the owner 2026-11-06: no 12 hours from it, the responsible's task
+        task = NOT_SENT_TASK % (order_manager.label(card), why or "неизвестно, ушло ли")
+        text += ". Ответственному: «%s»: %s" % (task, notify(card, task))
     orders.add_event(conn, card["id"], now, "система", "reserve", text, level=level)
     if status != "sent":                                         # хвост З17: «Входящие» get the line and the text to send by hand, as «можно забирать»
         by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."
@@ -114,6 +132,27 @@ def tell_client(conn, card: dict, deliver: Optional[order_manager.Deliver], now:
                          card.get("webmim_number") or card["id"], CLIENT_TEMPLATE, said) + (order_manager.COPY_MARK + copy if copy else ""), token))
     conn.commit()
     return status
+
+
+def _sent_by_itself(conn, card: dict) -> bool:
+    """The reminder of this stay went at once (tell_client's green record): only then the 12 hours count and the answers are read."""
+    return _done(conn, card["id"], "Клиенту отправлено «%s» [резерв:клиенту:%s]" % (CLIENT_TEMPLATE, card["entered_at"] or ""))
+
+
+def _client_rows(conn, card_id: int) -> list:
+    """The chats of the order and the other chats of its client (client_chat)."""
+    rows = {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ?", (card_id,))}
+    rows |= {r[0] for r in conn.execute("SELECT l.chat_row FROM client_order o JOIN client_chat l ON l.client_id = o.client_id WHERE o.order_id = ?",
+                                        (card_id,))}
+    return sorted(rows)
+
+
+def _wrote_lately(conn, card: dict, now: str) -> bool:
+    """The client wrote in the last 3 days (WROTE_BEFORE) in a chat of the order or another chat of theirs; a call in the chat does not count."""
+    rows = _client_rows(conn, card["id"])
+    since = (datetime.fromisoformat(now) - WROTE_BEFORE).isoformat(timespec="seconds")
+    return bool(rows) and conn.execute("SELECT 1 FROM avito_message WHERE chat_row IN (%s) AND direction = 'in' AND kind NOT IN %s AND at > ? "
+                                       "AND at <= ? LIMIT 1" % (",".join("?" * len(rows)), NOT_A_MESSAGE), rows + [since, now]).fetchone() is not None
 
 
 def _client_body(conn, card: dict) -> str:
@@ -311,7 +350,7 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
     ask_point(conn, card, point_send, now)
 
 
-def _client_step(conn, card: dict, today: date, now: str, hours, deliver) -> None:
+def _client_step(conn, card: dict, today: date, now: str, hours, deliver, notify: Optional[Notify] = None) -> None:
     """The owner 2026-11-02: the last day of the reservation, from 12:30 to the end of the working hours, «срок резерва истекает» goes to the
     client by itself, whatever the point answered (tell_client: once per stay; not on the day «можно забирать» went). Not after a return."""
     moment = datetime.fromisoformat(now)
@@ -321,7 +360,16 @@ def _client_step(conn, card: dict, today: date, now: str, hours, deliver) -> Non
         return
     if _returned(conn, card):
         return
-    tell_client(conn, card, deliver, now)
+    stay = card["entered_at"] or ""
+    if not _done(conn, card["id"], "[резерв:клиенту:%s]" % stay) and _wrote_lately(conn, card, now):
+        if not _done(conn, card["id"], WROTE_MARK % stay):       # the owner 2026-11-06: the responsible looks, the client gets nothing
+            task = WROTE_TASK % order_manager.label(card)
+            said = notify(card, task) if notify is not None else "оповещение не отправлено"
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Клиенту «%s» не отправлено: клиент писал в чат за последние 3 дня. "
+                             "Ответственному: «%s»: %s %s" % (CLIENT_TEMPLATE, task, said, WROTE_MARK % stay), level="yellow")
+            conn.commit()
+        return
+    tell_client(conn, card, deliver, now, notify)
 
 
 def _tell_moved(conn, card: dict, call: str, notify: Optional[Notify], now: str) -> None:
@@ -350,6 +398,8 @@ def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None)
     sent = conn.execute("SELECT at, chat_row FROM chat_send_log WHERE token = ? AND status = 'sent'",
                         ("reserve-%d-%s" % (card["id"], re.sub(r"\D", "", stay)),)).fetchone()
     if sent is None or now < (datetime.fromisoformat(sent[0]) + NO_ANSWER).isoformat(timespec="seconds") or _done(conn, card["id"], marker):
+        return False
+    if not _sent_by_itself(conn, card):                         # the owner 2026-11-06: a 402 sent again later, an unknown one: no 12 hours
         return False
     if now > (datetime.fromisoformat(sent[0]) + NO_ANSWER_MAX).isoformat(timespec="seconds"):
         return False                                            # a reminder of days ago: the order was forgotten, not left by the client
@@ -402,6 +452,55 @@ def _no_answer_step(conn, card: dict, now: str, notify: Optional[Notify] = None)
     return True
 
 
+def _reply_step(conn, card: dict, now: str, notify: Optional[Notify]) -> None:
+    """The owner 2026-11-06: the client's answers to the reminder (in its chat or another chat of the order, after it, within NO_ANSWER_MAX),
+    each read once (REPLY_KEY). The newest with one date of today or the next 30 days moves the reservation to it: a record of who, what and
+    the date, nothing to the client. None with such a date: the responsible's alert in the alert hours (till then nothing is read), nothing moves."""
+    from . import order_oth, reply_date
+    stay = card["entered_at"] or ""
+    sent = conn.execute("SELECT at, chat_row FROM chat_send_log WHERE token = ? AND status = 'sent'",
+                        ("reserve-%d-%s" % (card["id"], re.sub(r"\D", "", stay)),)).fetchone()
+    if sent is None or not _sent_by_itself(conn, card) or now > (datetime.fromisoformat(sent[0]) + NO_ANSWER_MAX).isoformat(timespec="seconds"):
+        return
+    key = REPLY_KEY % (card["id"], re.sub(r"\D", "", stay))
+    conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, '0')", (key,))
+    seen = store.get_state(conn, key) or "0"
+    rows = [r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ? OR id = ? AND order_id IS NULL", (card["id"], sent[1]))]
+    found = conn.execute("SELECT id, at, text FROM avito_message WHERE chat_row IN (%s) AND direction = 'in' AND kind NOT IN %s AND at > ? AND at <= ? "
+                         "AND id > ? ORDER BY id" % (",".join("?" * len(rows)), NOT_A_MESSAGE), rows + [sent[0], now, int(seen)]).fetchall() if rows else []
+    if not found:
+        conn.commit()
+        return
+    dated = [(m, d) for m, (status, d) in ((m, reply_date.parse(m[2], date.fromisoformat(m[1][:10]))) for m in found) if status == "ok"]
+    if not dated and not order_oth.in_alert_hours(conn, now):
+        conn.commit()                                           # the responsible is told in the alert hours: read then
+        return
+    if not _move(conn, key, seen, str(found[-1][0])):           # another tick read them
+        return
+    who = card["client_name"] or card["client_phone"] or "клиент"
+    if dated:
+        message, day = dated[-1]
+        new = day.isoformat()
+        try:
+            if new != card["reserve_until"]:
+                orders.update_card(conn, card["id"], {"reserve_until": new}, now, "система", commit=False)
+        except orders.OrderError as err:
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент %s ответил на напоминание о сроке резерва: «%s», но резерв не продлён: %s %s"
+                             % (who, message[2][:200], err, REPLY_MARK % message[0]), level="red")
+            conn.commit()
+            return
+        orders.add_event(conn, card["id"], now, "система", "reserve", "Клиент %s ответил на напоминание о сроке резерва: «%s». Резерв %s до %s %s" % (
+            who, message[2][:200], "продлён" if new != card["reserve_until"] else "и так", day.strftime("%d.%m.%Y"), REPLY_MARK % message[0]), level="green")
+        conn.commit()
+        logging.getLogger("tires_sync.orders").info("card %s: the client named %s in the answer to the reminder", card["id"], new)
+        return
+    text = " / ".join((m[2] or "без текста")[:200] for m in found)
+    task = NO_DATE_TASK % (order_manager.label(card), text)
+    said = notify(card, task) if notify is not None else "оповещение не отправлено"
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Ответственному: «%s»: %s %s" % (task, said, REPLY_MARK % found[-1][0]), level="yellow")
+    conn.commit()
+
+
 def _release_held(conn, now: str, notify: Notify) -> None:
     """The first tick of the alert hours: the alerts of the moves made at night go, once (the key goes first). An order that left that stay of «На ОТХ» meanwhile: no call to make."""
     for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'reserve_moved_tell:%'").fetchall():
@@ -417,14 +516,27 @@ def _release_held(conn, now: str, notify: Notify) -> None:
             logging.getLogger("tires_sync.orders").exception("the held alert %s failed", key)
 
 
+def _own_sale(conn, card: dict, cache: dict) -> bool:
+    """The point's own sale (order_points.own_sales, read once per point and tick): no reminder, no answer read, no «На ОТХ» (2026-11-06)."""
+    from .order_points import own_sales
+    if card["point_id"] is None:
+        return False
+    if card["point_id"] not in cache:
+        cache[card["point_id"]] = own_sales(conn, card["point_id"])
+    return card["id"] in cache[card["point_id"]]
+
+
 def _silent_moves(conn, now: str, notify: Notify) -> None:
-    """Every tick, at night too: the orders whose client stayed silent 12 hours after the reminder go to «На ОТХ» (`_no_answer_step`)."""
+    """Every tick, at night too: the client's answers to the reminder (`_reply_step`); the orders whose client stayed silent 12 hours after
+    it go to «На ОТХ» (`_no_answer_step`)."""
+    own: dict = {}
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s) AND c.reserve_until != ''"
                                    % ",".join("?" * len(STAGE_CODES)), STAGE_CODES).fetchall():
         try:
             card = orders.get_card(conn, card_id)
-            if not (card.get("intercity") or {}).get("on"):   # to another city (order_intercity): no reservation, no reminder, no «На ОТХ»
-                _no_answer_step(conn, card, now, notify)
+            if not (card.get("intercity") or {}).get("on") and not _own_sale(conn, card, own):   # to another city (order_intercity): no
+                _reply_step(conn, card, now, notify)          # reservation, no reminder, no «На ОТХ»; the point's own sale neither
+                _no_answer_step(conn, orders.get_card(conn, card_id), now, notify)
         except Exception:
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the move to OTH of card %s after the reminder failed", card_id)
@@ -464,7 +576,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     today = moment.date()
     hours = order_manager.duty_settings(conn)["hours"]
     working = hours[0] <= moment.hour < hours[1]
-    made = 0
+    made, own = 0, {}
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s) AND c.reserve_until != ''"
                                    % ",".join("?" * len(STAGE_CODES)), STAGE_CODES).fetchall():
         try:
@@ -478,7 +590,8 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
                 conn.rollback()
                 logging.getLogger("tires_sync.orders").exception("the reserve question to the point of card %s failed", card_id)
             try:
-                _client_step(conn, orders.get_card(conn, card_id), today, now, hours, deliver)
+                if not _own_sale(conn, card, own):
+                    _client_step(conn, orders.get_card(conn, card_id), today, now, hours, deliver, notify)
             except Exception:
                 conn.rollback()
                 logging.getLogger("tires_sync.orders").exception("the reserve reminder to the client of card %s failed", card_id)

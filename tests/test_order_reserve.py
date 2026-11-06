@@ -157,9 +157,13 @@ OLD_TEXT = ("Добрый день. Срок резерва истекает. В
             "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?")
 
 
+PREVIOUS_TEXT = ("Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — спасибо, "
+                 "не обращайте внимания. Если нужно продлить ожидание, напишите нам.")       # the owner 2026-10-26, retired 2026-11-06
+
+
 def owner_text(cid=1, until="18.10.2026"):
-    return ("Добрый день. Срок хранения вашего заказа №%d истекает %s. Если вы уже забрали заказ — спасибо, не обращайте внимания. "
-            "Если нужно продлить ожидание, напишите нам." % (5200000 + cid, until))
+    """The owner 2026-11-06, word for word: no number and no date in it (`cid`, `until` kept for the callers)."""
+    return "Здравствуйте! Планируете забрать заказ? резерв истекает сегодня. Если планируете забрать, сообщите дату"
 
 
 OWNER_TEXT = owner_text()
@@ -311,7 +315,7 @@ def test_the_sample_is_offered_among_the_templates(tmp_path):
     conn = db(tmp_path)
     tpl.add_samples(conn)
     assert any(t["name"] == "Клиенту: срок резерва истекает" and t["body"] == tpl.RESERVE_SAMPLE[2] for t in tpl.list_templates(conn))
-    assert "предоплат" not in tpl.RESERVE_SAMPLE[2] and "{webmim_number}" in tpl.RESERVE_SAMPLE[2] and "{hold_until}" in tpl.RESERVE_SAMPLE[2]
+    assert "предоплат" not in tpl.RESERVE_SAMPLE[2] and "сообщите дату" in tpl.RESERVE_SAMPLE[2]     # the owner 2026-11-06: no number, no date
 
 
 def _inbox(conn):
