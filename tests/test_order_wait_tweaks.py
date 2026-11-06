@@ -319,3 +319,43 @@ def test_the_body_of_the_task_has_no_double_dot(env):
     run(conn, Sender(), [tire()])
     [task] = tasks(conn, card)
     assert "4 шт. В наличии" in task["body"] and ".." not in task["body"]
+
+
+# --- 4. a call in the chat is not an answer (the owner 2026-11-06) -------------------------------------------------------------------------------
+
+def test_the_body_of_the_task_has_no_double_dot(env):
+    conn, _row = env
+    card = waiting(env, with_chat=False)
+    run(conn, Sender(), [tire()])
+    [task] = tasks(conn, card)
+    assert "4 шт. В наличии" in task["body"] and ".." not in task["body"]
+
+
+# --- 4. a call in the chat is not an answer; «Клиент отказался» lets the tires go (the owner 2026-11-06) ---------------------------------------
+
+def call_in_chat(conn, chat_row, mid, at, status):
+    """A call as Avito puts it in the chat too: a message of type «call» from the client, how it went in content.call.status."""
+    from datetime import datetime
+    chats._store_message(conn, chat_row, {"id": mid, "created": int(datetime.fromisoformat(at + "+03:00").timestamp()), "direction": "in", "type": "call",
+                                          "content": {"call": {"status": status}}, "isRead": False})
+    conn.commit()
+
+
+@pytest.mark.parametrize("how", ("auto", "manual"))
+@pytest.mark.parametrize("status", ("missed", "rejected"))
+def test_a_missed_or_rejected_call_in_the_chat_is_not_an_answer(env, how, status):
+    conn, chat_row = env
+    card = told(env)[0] if how == "auto" else manual(env)
+    call_in_chat(conn, chat_row, "k1", "2026-11-05T10:00:00", status)
+    assert order_wait.replies(conn, "2026-11-05T10:01:00") == 0                                 # not «Клиент ответил на сообщение» either
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1 and len(silent_tasks(conn, card)) == 1
+
+
+@pytest.mark.parametrize("how", ("auto", "manual"))
+def test_a_call_that_took_place_is_an_answer_by_the_calls(env, how):
+    conn, chat_row = env
+    card = told(env)[0] if how == "auto" else manual(env)
+    call_in_chat(conn, chat_row, "k1", "2026-11-05T10:00:00", "finished")
+    call(conn, chat_row, "2026-11-05T10:00:00", order_id=card)                                  # the panel's calls have the talk
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+

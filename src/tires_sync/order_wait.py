@@ -551,11 +551,15 @@ def delivered(conn, token: str, text: str, now: str, how: str) -> None:
     conn.commit()
 
 
+NOT_AN_ANSWER = "('system', 'deleted', 'call')"    # avito_message.kind: a call in the chat («Звонок через Авито»: missed, rejected or one that took
+                                                   # place, the status only in its words) is no answer; the talk is, by the calls (avito_call.answered)
+
+
 def _answered(conn, log) -> bool:
-    """A message of the client in the chat after ours (`log`: chat_row, message_id, at of the send)."""
+    """A message of the client in the chat after ours (`log`: chat_row, message_id, at of the send); a call in the chat is not one."""
     ours = conn.execute("SELECT ts FROM avito_message WHERE chat_row = ? AND message_id = ?", (log[0], log[1])).fetchone() if log[1] else None
     since = max(ours[0] if ours else 0, int(datetime.fromisoformat(log[2]).replace(tzinfo=timezone(timedelta(hours=3))).timestamp()))
-    return conn.execute("SELECT 1 FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND ts > ? LIMIT 1",
+    return conn.execute("SELECT 1 FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind NOT IN %s AND ts > ? LIMIT 1" % NOT_AN_ANSWER,
                         (log[0], since)).fetchone() is not None
 
 
@@ -600,13 +604,13 @@ def _answered_anywhere(conn, card: dict, log) -> bool:
     """The client answered after the send (the owner 2026-11-05): a message in the chat of the send, in another chat of the order or of the
     order's client (client_chat), or a call the panel has (avito_call) of the order, of its client (client_call) or from the order's phone.
     A call is an answer only when the talk took place (`answered`: calls._keep sets it from talkDuration > 0; the owner 2026-11-06): a missed
-    call, or one seen still ringing, is not."""
+    call, or one seen still ringing, is not; nor is the record of a call Avito puts in the chat (NOT_AN_ANSWER)."""
     from . import connections
     ts, at = _since(conn, log)
     rows = {log[0]} | {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ?", (card["id"],))}
     rows |= {r[0] for r in conn.execute("SELECT l.chat_row FROM client_order o JOIN client_chat l ON l.client_id = o.client_id WHERE o.order_id = ?", (card["id"],))}
-    if conn.execute("SELECT 1 FROM avito_message WHERE chat_row IN (%s) AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND ts > ? LIMIT 1"
-                    % ",".join("?" * len(rows)), sorted(rows) + [ts]).fetchone():
+    if conn.execute("SELECT 1 FROM avito_message WHERE chat_row IN (%s) AND direction = 'in' AND kind NOT IN %s AND ts > ? LIMIT 1"
+                    % (",".join("?" * len(rows)), NOT_AN_ANSWER), sorted(rows) + [ts]).fetchone():
         return True
     if conn.execute("SELECT 1 FROM avito_call k WHERE k.answered = 1 AND k.call_at > ? AND (k.order_id = ? OR k.id IN (SELECT l.call_row FROM client_order o JOIN client_call l "
                     "ON l.client_id = o.client_id WHERE o.order_id = ?)) LIMIT 1", (at, card["id"], card["id"])).fetchone():
