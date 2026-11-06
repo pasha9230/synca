@@ -5,6 +5,7 @@ the other colours close when the user opens the order. Records written before th
 Nothing here writes to Avito, WebMIM or a client."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -335,6 +336,7 @@ def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool]
                                                                                           # takes the place of «Клиент написал», of a chat
                                                                                           # with an order too
     rows += missing_rows(conn, login)
+    rows += purchase_rows(conn, login)
     for row in rows:
         shown = stub_text(row.get("text"))
         if shown:
@@ -447,6 +449,17 @@ def missing_rows(conn, login: str) -> List[dict]:
         return []
     return [{"id": "inbox-%d" % item["id"], "order_id": None, "chat_row": None, "client": "", "at": item["at"], "author": "", "kind": "inbox",
              "level": "yellow", "more": 0, "title": "Входящие", "href": "/orders/inbox", "text": item["text"]} for item in order_manager.missing_orders(conn)]
+
+
+def purchase_rows(conn, login: str) -> List[dict]:
+    """«Закупка изменилась» (purchase_alert, the owner 2026-11-06): red, for who may see the purchase, until «Разобрался». Its trouble never
+    takes the bell down."""
+    from . import purchase_alert
+    try:
+        return purchase_alert.bell_rows(conn, login)
+    except Exception:                                                            # noqa: BLE001 - the bell must stay
+        logging.getLogger("tires_sync.orders").exception("the purchase alert row failed")
+        return []
 
 
 def order_levels(conn, login: str, now: Optional[str] = None) -> Dict[int, str]:

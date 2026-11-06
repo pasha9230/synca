@@ -228,6 +228,21 @@ def _market_cell(price, snapshot) -> dict:
 
 
 def register(app) -> None:
+    @app.route("/prices/purchase", methods=["GET"])
+    @app.route("/prices/purchase/<int:alert_id>", methods=["GET"])
+    @login_required
+    def purchase_changes_page(alert_id=None):
+        """«Закупка изменилась» (purchase_alert, the owner 2026-11-06): the whole list of one alert (the latest without a number); who may see
+        the purchase only (the right «money»). Read-only."""
+        from .. import purchase_alert
+        if not has_right("money"):
+            abort(403)
+        conn = get_conn()
+        alert = purchase_alert.get(conn, alert_id)
+        if alert_id is not None and alert is None:
+            abort(404)
+        return render_template("purchase_changes.html", alert=alert, recent=purchase_alert.recent(conn), pct=purchase_alert.pct_text)
+
     @app.route("/prices/changes", methods=["GET"])
     @login_required
     def price_changes_page():

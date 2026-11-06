@@ -580,6 +580,23 @@ def _alert_own_below_cost(conn, box, offers, settings=None) -> None:
         print("проверка «своя цена ниже закупки» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
 
 
+def _tell_important(conn, box, logins, text: str) -> bool:
+    """The one channel of the important news (the summaries of the prices; the owner 2026-11-06: it may change later, so only here): the owner's
+    chat of the alerts through _alert (journal, Telegram, its failure printed as always) and the same text in Telegram to each other person of
+    `logins` who has a chat, once the owner's is handled (as before). True when the owner's message is handled (_alert); False: Telegram
+    refused it (printed by _alert), nobody else was told."""
+    from . import order_notify
+    if not _alert(conn, box, text, notice=True):
+        return False
+    owner = order_notify.get_owner_login(conn)
+    others = [login for login in logins if login != owner]
+    if others:
+        how = order_notify.tell_people(conn, box, others, text, tg_http=_http())
+        if "не отправлен" in how:
+            print("сводка не отправлена в Telegram: %s" % how, file=sys.stderr)
+    return True
+
+
 def _alert_price_guard(conn, box) -> None:
     """The falls of the supplier's price held for the owner and the rises followed (price_guard, the owner 2026-10-30): one summary by brand
     with the link to «Цена поставщика изменилась», to the owner's chat and to every other owner's own; each change once (told only once it
@@ -589,14 +606,11 @@ def _alert_price_guard(conn, box) -> None:
         found = price_guard.news(conn)
         if not found["marks"]:
             return
-        base = (os.environ.get("TIRES_PUBLIC_BASE") or store.get_state(conn, "public_base") or "").rstrip("/")
-        text = price_guard.text(found, (base + "/prices/changes") if base else "панель → Товар и фид → Цены поставщика")
-        if not _alert(conn, box, text, notice=True):
-            return
+        text = price_guard.text(found, _panel_link(conn, "/prices/changes", "панель → Товар и фид → Цены поставщика"))
         owner = order_notify.get_owner_login(conn)
         others = [u["login"] for u in users.list_users(conn) if u["role"] == "owner" and u["active"] and u["login"] != owner]
-        if others:
-            order_notify.tell_people(conn, box, others, text)
+        if not _tell_important(conn, box, [owner] + others, text):
+            return
         price_guard.told(conn, found)
     except Exception as err:
         try:
@@ -606,37 +620,33 @@ def _alert_price_guard(conn, box) -> None:
         print("сводка «цена поставщика изменилась» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
 
 
-def _alert_own_price_falls(conn, box, offers, account_ids) -> None:
-    """Own prices in percent that went down after the purchase (the owner 2026-11-04): one summary per cycle to each person, the responsible of
-    the account, else the owner; the owner too for a responsible who may not see the purchase (the right «money») or whose Telegram did not take
-    it. After the publication: `account_ids`, the accounts whose feed went or needs none; each change once (kept once it went, one nobody took is
-    told by the next cycle). A side notice: whatever fails in it is printed and never stops the cycle."""
-    from . import order_notify, own_price, users
+def _panel_link(conn, path: str, otherwise: str) -> str:
+    """The address of a page of the panel for a message (TIRES_PUBLIC_BASE, else the saved public base), else how to find it."""
+    base = (os.environ.get("TIRES_PUBLIC_BASE") or store.get_state(conn, "public_base") or "").rstrip("/")
+    return base + path if base else otherwise
+
+
+def _alert_purchase(conn, box, offers=None, now: str = "") -> None:
+    """«Закупка изменилась» (purchase_alert, the owner 2026-11-06): after the cycle, one message on every change of the supplier's purchase
+    since the last one, to the people who may see the purchase, and a red row of their bell. Outside the alert hours nothing is made: the
+    changes wait for the first cycle of the working hours. Sent once: a refused Telegram is printed (as every alert) and the bell keeps it.
+    A side notice: whatever fails in it is printed and never stops the cycle."""
+    from . import order_oth, purchase_alert
     try:
-        events, keep = own_price.falls(conn, active_settings(conn), offers, account_ids)
-        own_price.remember_falls(conn, keep)
-        owner = order_notify.get_owner_login(conn)
-        people = {}
-        for event in events:
-            who = connections.account_responsible(conn, event["account_id"])
-            people.setdefault(who if who and users.has_right(users.get_role(conn, who)["role"], "money") else owner, []).append(event)
-        for who, group in sorted(people.items()):
-            text = own_price.falls_text(group)
-            if who != owner:
-                how = order_notify.tell_people(conn, box, [who], text, tg_http=_http())
-                if how.startswith("Telegram: отправлено"):
-                    store.write_audit(conn, _now(), "system", "notice", {"text": text, "to": who})
-                    own_price.told_falls(conn, group)
-                    continue
-                print("сводка «своя цена пошла за закупкой» (%s): %s, отправлено владельцу" % (who, how), file=sys.stderr)
-            if _alert(conn, box, text, notice=True):
-                own_price.told_falls(conn, group)
+        now = now or moscow_now().isoformat(timespec="seconds")
+        if not order_oth.in_alert_hours(conn, now):
+            return
+        alert = purchase_alert.collect(conn, now, offers)
+        if alert is None:
+            return
+        link = _panel_link(conn, "%s/%d" % (purchase_alert.PAGE, alert["id"]), "панель → Товар и фид → Закупка изменилась")
+        _tell_important(conn, box, purchase_alert.people(conn), purchase_alert.text(alert["rows"], link))
     except Exception as err:
         try:
             conn.rollback()
         except Exception:
             pass
-        print("сводка «своя цена пошла за закупкой» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
+        print("сводка «закупка изменилась» не удалась: %s: %s" % (type(err).__name__, err), file=sys.stderr)
 
 
 def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
@@ -924,8 +934,6 @@ def _run_cycle(args) -> int:
                     print("%s: error, %s" % (r.name, err))
                     r.ok, r.error = False, str(err)
                     failed.append(r)
-            if parsed is not None and any(r.ok for r in results):   # «наша цена» only of a feed that went: a refused one is told by a later cycle
-                _alert_own_price_falls(conn, box, parsed.offers, [r.account_id for r in results if r.ok])
             if promoted and not failed:
                 clear_expected(conn)
             if before_prices:
@@ -950,6 +958,7 @@ def _run_cycle(args) -> int:
         print("напоминания не отправлены (%s)" % err, file=sys.stderr)
     if args.fetch:
         _load_tochki(conn, box, args, started)
+    _alert_purchase(conn, box, getattr(parsed, "offers", None))       # «Закупка изменилась»: after the publication, with our prices of now
     if getattr(args, "publish", False):
         avito_stock.after_cycle(conn, box, args.feed_root, parsed, results, http=_http())    # the number in stock on Avito, last: only accounts switched on
         try:                                                    # the prices this cycle changed, and those a stopped sender left

@@ -207,6 +207,18 @@ def register(app):
             flash(str(err), "error")
         return redirect("/alerts")
 
+    @app.route("/alerts/purchase/<int:alert_id>/ack", methods=["POST"])
+    @login_required
+    def alerts_purchase_ack(alert_id):
+        """«Разобрался» on «Закупка изменилась» (purchase_alert): it and the older ones leave this person's bell."""
+        from .. import purchase_alert
+        conn = get_conn()
+        if not purchase_alert.may_see(conn, session["user"]) or purchase_alert.get(conn, alert_id) is None:
+            abort(404)
+        purchase_alert.ack(conn, alert_id, session["user"])
+        conn.commit()
+        return redirect("/alerts")
+
     @app.route("/alerts/accept-all", methods=["POST"])
     @login_required
     def alerts_accept_all():
