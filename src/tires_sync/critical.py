@@ -104,10 +104,18 @@ def tell(conn, box, logins: Iterable[str], text: str, now: str, vk_http: Transpo
         peers = vk_peers(conn)
         sender = vk_send.sender_for(conn, box, http=vk_http)
         window = _border(now, VK_REPEAT)
+    except Exception as err:                                      # noqa: BLE001 - whatever it is: printed, never a new alert
+        _rollback(conn)
+        print("критичное: ВК не отправлен (%s)" % type(err).__name__, file=sys.stderr)
+        return out
+    try:
         conn.execute("DELETE FROM app_state WHERE key LIKE ? AND value <= ?", (VK_MARK + "%", window))   # never pile up
         conn.commit()
-        done: Dict[str, bool] = {}
-        for login in people:
+    except Exception:                                             # noqa: BLE001 - only the cleanup: the sending goes on
+        _rollback(conn)
+    done: Dict[str, bool] = {}
+    for login in people:
+        try:
             peer = peers.get(login)
             if not peer:
                 out["no_vk"].append(login)
@@ -126,16 +134,19 @@ def tell(conn, box, logins: Iterable[str], text: str, now: str, vk_http: Transpo
                 continue
             try:
                 sender(peer, text, random_id=vk_send.stable_id("critical|%s|%s|%s" % (peer, text, now[:13])))
-                store.set_state(conn, key, now[:19])
-                done[peer] = True
-                out["vk"].append(login)
             except vk_send.VkError as err:
                 done[peer] = False
                 out["vk_failed"].append(login)
                 print("критичное: ВК «%s» не принял сообщение: %s" % (login, err), file=sys.stderr)
-    except Exception as err:                                      # noqa: BLE001 - whatever it is: printed, never a new alert
-        _rollback(conn)
-        print("критичное: ВК не отправлен (%s)" % type(err).__name__, file=sys.stderr)
+                continue
+            done[peer] = True                                          # sent: whatever the mark below does
+            out["vk"].append(login)
+            store.set_state(conn, key, now[:19])                       # a busy base here: VK drops the repeat within the hour (random_id)
+        except Exception as err:                                  # noqa: BLE001 - one person: printed, the others still get it
+            _rollback(conn)
+            if login not in out["vk"]:
+                out["vk_failed"].append(login)
+            print("критичное: ВК «%s» не отправлен (%s)" % (login, type(err).__name__), file=sys.stderr)
     return out
 
 
@@ -181,14 +192,15 @@ def bell_rows(conn, login: str, now: Optional[str] = None, action: str = BELL) -
     acked = set(_acked_notes(conn, login)) if action == NOTE else set()
     border = _border(now, timedelta(days=BELL_DAYS)) if now else ""
     found = []
-    for row_id, at, detail in conn.execute("SELECT id, at, detail FROM audit WHERE action = ? AND id > ? ORDER BY id DESC", (action, seen)):
+    for row_id, at, detail in conn.execute("SELECT id, at, detail FROM audit WHERE action = ? AND id > ? AND at >= ? ORDER BY id DESC",
+                                           (action, seen, border)):     # the index audit(action, id); older than BELL_DAYS: never read
         if row_id in acked:
             continue
         try:
             data = json.loads(detail or "{}")
         except ValueError:
             continue
-        if login in (data.get("to") or []) and (at or "") >= border:
+        if login in (data.get("to") or []):
             found.append((row_id, at, str(data.get("text") or "")))
     shown = found[:NOTE_SHOWN] if action == NOTE else found[:1]
     rows = [{"id": "%s-%d" % (prefix, row_id), "order_id": None, "chat_row": None, "client": "", "at": at, "author": "", "kind": prefix,

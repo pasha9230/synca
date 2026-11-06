@@ -155,7 +155,8 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
         key = "bell|%s|%s|%s" % (card["id"], who, text)
         if notify.sent_recently(conn, key, now):                  # a repeat of the same alert (its caller failed after it)
             return "в колокольчике (%s; повтор не записан)" % who
-        if not critical.note(conn, [who], "Заказ №%d: %s" % (card["id"], text), now):
+        label = "Заказ №%d: " % card["id"]
+        if not critical.note(conn, [who], text if text.startswith(label) else label + text, now):
             failure = "колокольчик → %s: не записано" % who
         else:
             notify.remember_sent(conn, key, now)                   # in the commit of the event: both, or neither

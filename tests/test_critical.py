@@ -46,7 +46,7 @@ def env(tmp_path, monkeypatch, **kw):
     connections.set_config(conn, "telegram", 0, {"chat_id": "1000"}, NOW, "owner")
     connections.set_secret(conn, box, "telegram", 0, "bot_token", BOT, NOW, "owner")
     connections.set_secret(conn, box, "vk", 0, "token", VK_KEY, NOW, "owner")
-    users.add_user(conn, "zaman", "пароль-второго-владельца", NOW, role="owner")
+    users.add_user(conn, "second1", "пароль-второго-владельца", NOW, role="owner")
     http = Http(**kw)
     monkeypatch.setattr(cli, "_http", lambda: http)
     monkeypatch.setattr(cli, "moscow_now", lambda: __import__("datetime").datetime.fromisoformat(NOW))
@@ -75,9 +75,9 @@ def test_a_critical_alert_goes_to_telegram_to_vk_of_who_has_it_and_to_the_bell(t
     text = "Tires Sync: цикл завершился с ошибками.\nОсновной: фид не принят"
     assert cli._alert(conn, box, text, critical=True) is True
     assert http.tg == ["1000"] and http.vk == [("501", text)]
-    rows = order_alerts.page_rows(conn, "zaman", NOW)
+    rows = order_alerts.page_rows(conn, "second1", NOW)
     assert [(r["kind"], r["level"], r["text"]) for r in rows] == [("critical", "red", text)]
-    assert critical.without_vk(conn, order_alerts.owner_people(conn)) == ["zaman"]
+    assert critical.without_vk(conn, order_alerts.owner_people(conn)) == ["second1"]
 
 
 def test_telegram_down_the_critical_still_reaches_vk_and_the_bell_once(tmp_path, monkeypatch, capsys):
@@ -99,9 +99,9 @@ def test_telegram_down_the_critical_still_reaches_vk_and_the_bell_once(tmp_path,
 def test_two_logins_of_one_vk_page_get_the_text_once(tmp_path, monkeypatch):
     conn, box, http = env(tmp_path, monkeypatch)
     critical.set_user_vk(conn, "owner", "501", NOW, "owner")
-    critical.set_user_vk(conn, "zaman", "501", NOW, "owner")
-    out = critical.tell(conn, box, ["owner", "zaman"], "Tires Sync: сбой", NOW, vk_http=http)
-    assert http.vk == [("501", "Tires Sync: сбой")] and out["vk"] == ["owner", "zaman"]
+    critical.set_user_vk(conn, "second1", "501", NOW, "owner")
+    out = critical.tell(conn, box, ["owner", "second1"], "Tires Sync: сбой", NOW, vk_http=http)
+    assert http.vk == [("501", "Tires Sync: сбой")] and out["vk"] == ["owner", "second1"]
     critical.tell(conn, box, ["owner"], "Tires Sync: сбой", NOW, vk_http=http)       # повтор вызова: тоже не дважды
     assert len(http.vk) == 1
 
@@ -128,10 +128,10 @@ def test_the_vk_page_is_checked_and_can_be_removed(tmp_path, monkeypatch):
             critical.set_user_vk(conn, "owner", bad, NOW, "owner")
     critical.set_user_vk(conn, "owner", "", NOW, "owner")
     assert critical.vk_peers(conn) == {}
-    order_notify.set_user_chat(conn, "zaman", "555", NOW, "owner")              # ВК и чаты в одной настройке: друг друга не стирают
-    critical.set_user_vk(conn, "zaman", "502", NOW, "owner")
-    order_notify.set_user_chat(conn, "zaman", "556", NOW, "owner")
-    assert order_notify.user_chats(conn) == {"zaman": "556"} and critical.vk_peers(conn) == {"zaman": "502"}
+    order_notify.set_user_chat(conn, "second1", "555", NOW, "owner")              # ВК и чаты в одной настройке: друг друга не стирают
+    critical.set_user_vk(conn, "second1", "502", NOW, "owner")
+    order_notify.set_user_chat(conn, "second1", "556", NOW, "owner")
+    assert order_notify.user_chats(conn) == {"second1": "556"} and critical.vk_peers(conn) == {"second1": "502"}
 
 
 # --- остальное в Telegram больше не идёт ---------------------------------------------------------------------------------------------
@@ -145,7 +145,7 @@ def test_an_order_alert_is_no_longer_sent_to_telegram_it_is_on_the_persons_own_b
     assert how == "в колокольчике (worker2)" and http.tg == []
     rows = [r for r in order_alerts.page_rows(conn, "worker2", NOW) if r["kind"] == "staffnote"]
     assert [(r["level"], r["text"]) for r in rows] == [("red", "Заказ №%d: Резерв на точке заканчивается" % card["id"])]
-    assert order_alerts.page_rows(conn, "zaman", NOW) == []                          # не его
+    assert order_alerts.page_rows(conn, "second1", NOW) == []                          # не его
     journal = [e["text"] for e in orders.list_events(conn, card["id"]) if e["kind"] == "notify"]
     assert journal == ["Оповещение в колокольчике: worker2 (в Telegram только критичное)"]   # без текста: журнал может читать точка
     assert order_notify.deliver(conn, box, card, "Резерв на точке заканчивается", NOW).endswith("повтор не записан)")
@@ -175,7 +175,7 @@ def test_a_person_without_a_telegram_chat_gets_the_order_alert_on_the_bell_too(t
     conn, box = setup(tmp_path)
     http = Http()
     pid = point(conn)
-    theirs = card(conn, "zamantyres", pid)                                        # у Замана нет чата Telegram
+    theirs = card(conn, "zamantyres", pid)                                        # у второго владельца нет чата Telegram
     chat(conn, POINT_ACCOUNT, theirs["id"])
     how = order_notify.deliver(conn, box, order_manager.staff_card(conn, theirs), "Клиент не пришёл", NOW, tg_http=http, vk_http=http)
     assert how == "в колокольчике (zamantyres)" and http.tg == []
@@ -288,7 +288,7 @@ def test_a_failed_send_to_a_client_and_a_red_rule_go_once_to_the_responsible(tmp
 
 def test_a_red_failure_of_an_order_nobody_answers_for_goes_to_both_owners(tmp_path, monkeypatch):
     conn, box, http = env(tmp_path, monkeypatch, tg_down=True)
-    critical.set_user_vk(conn, "zaman", "502", NOW, "owner")
+    critical.set_user_vk(conn, "second1", "502", NOW, "owner")
     critical.forward_red(conn, box, NOW, tg_http=http, vk_http=http)
     card_id = orders.create_card(conn, {"client_name": "Иван", "responsible": "robot"}, NOW, "robot")
     orders.add_event(conn, card_id, NOW, "система", "chat", "Сообщение клиенту не отправлено: нет связи", level="red")
@@ -307,7 +307,7 @@ def test_the_bell_row_of_the_critical_goes_on_разобрался(tmp_path):
     critical.tell(conn, None, ["owner"], "Tires Sync: второй сбой", NOW)
     rows = critical.bell_rows(conn, "owner")
     assert len(rows) == 1 and rows[0]["more"] == 1 and rows[0]["text"] == "Tires Sync: второй сбой"
-    assert critical.bell_rows(conn, "zaman") == []
+    assert critical.bell_rows(conn, "second1") == []
     client = app.test_client()
     tok = login(client)
     assert "Tires Sync: второй сбой" in client.get("/alerts").get_data(as_text=True)
@@ -319,11 +319,11 @@ def test_the_vk_page_is_saved_with_the_chat_on_the_telegram_page(tmp_path):
     from panel_helpers import login, make_app, post
     app = make_app(tmp_path)
     conn = store.connect(app.config["DB_PATH"])
-    users.add_user(conn, "zaman", "пароль-второго-владельца", NOW, role="owner")
+    users.add_user(conn, "second1", "пароль-второго-владельца", NOW, role="owner")
     client = app.test_client()
     tok = login(client)
-    post(client, "/connections/telegram/user-chat", tok, login="zaman", chat_id="555", vk_peer="502")
-    assert critical.vk_peers(conn) == {"zaman": "502"} and order_notify.user_chats(conn) == {"zaman": "555"}
+    post(client, "/connections/telegram/user-chat", tok, login="second1", chat_id="555", vk_peer="502")
+    assert critical.vk_peers(conn) == {"second1": "502"} and order_notify.user_chats(conn) == {"second1": "555"}
     assert 'value="502"' in client.get("/connections/telegram").get_data(as_text=True)
 
 
@@ -396,12 +396,12 @@ def test_a_failed_message_to_a_point_is_not_critical_even_naming_the_client_fiel
 def test_each_order_note_is_its_own_row_and_goes_on_its_own_разобрался(tmp_path, monkeypatch):
     conn, box, http = env(tmp_path, monkeypatch)
     for n in range(3):
-        critical.note(conn, ["zaman"], "Заказ №%d: резерв заканчивается" % n, NOW)
-    rows = critical.bell_rows(conn, "zaman", action=critical.NOTE)
+        critical.note(conn, ["second1"], "Заказ №%d: резерв заканчивается" % n, NOW)
+    rows = critical.bell_rows(conn, "second1", action=critical.NOTE)
     assert [r["text"] for r in rows] == ["Заказ №2: резерв заканчивается", "Заказ №1: резерв заканчивается", "Заказ №0: резерв заканчивается"]
-    critical.ack(conn, int(rows[0]["ack_href"].split("/")[3]), "zaman")
+    critical.ack(conn, int(rows[0]["ack_href"].split("/")[3]), "second1")
     conn.commit()
-    assert [r["text"] for r in critical.bell_rows(conn, "zaman", action=critical.NOTE)] == [
+    assert [r["text"] for r in critical.bell_rows(conn, "second1", action=critical.NOTE)] == [
         "Заказ №1: резерв заканчивается", "Заказ №0: резерв заканчивается"]
 
 
@@ -410,3 +410,41 @@ def test_a_login_named_on_a_bell_row_is_not_free_for_another_person(tmp_path, mo
     assert not users.login_taken(conn, "gone")
     critical.note(conn, ["gone"], "Заказ №5: клиент не пришёл", NOW)
     assert users.login_taken(conn, "gone")
+
+
+# --- по четвёртому ревью -------------------------------------------------------------------------------------------------------------
+
+def test_a_busy_base_after_one_vk_send_still_tells_the_next_person(tmp_path, monkeypatch, capsys):
+    conn, box, http = env(tmp_path, monkeypatch)
+    critical.set_user_vk(conn, "owner", "501", NOW, "owner")
+    critical.set_user_vk(conn, "second1", "502", NOW, "owner")
+    real, calls = store.set_state, []
+
+    def busy_once(conn, key, value):
+        calls.append(key)
+        if key.startswith(critical.VK_MARK) and len([k for k in calls if k.startswith(critical.VK_MARK)]) == 1:
+            raise __import__("sqlite3").OperationalError("database is locked")
+        return real(conn, key, value)
+    monkeypatch.setattr(store, "set_state", busy_once)
+    out = critical.tell(conn, box, ["owner", "second1"], "Tires Sync: сбой", NOW, vk_http=http, bell=False)
+    assert [p for p, _ in http.vk] == ["501", "502"] and out["vk"] == ["owner", "second1"] and out["vk_failed"] == []
+    assert "database is locked" not in capsys.readouterr().out
+
+
+def test_the_manual_ads_of_the_owners_own_cabinet_go_to_the_owners_bell(tmp_path, monkeypatch):
+    from test_manual_ads_alert import manual
+    from test_same_tire import setup
+    from tires_sync import connections
+    conn, account = setup(tmp_path)
+    manual(conn, account, 1)
+    cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, account), [], True)])
+    rows = [r for r in order_alerts.page_rows(conn, "owner", NOW) if r["kind"] == "staffnote"]
+    assert len(rows) == 1 and cli.MANUAL_HEAD[:40] in rows[0]["text"]
+
+
+def test_an_order_note_is_not_labelled_twice(tmp_path, monkeypatch):
+    conn, box, http = env(tmp_path, monkeypatch)
+    users.add_user(conn, "worker2", "пароль-для-партнёра-1", NOW)
+    card = orders.get_card(conn, orders.create_card(conn, {"client_name": "Иван", "responsible": "worker2"}, NOW, "owner"))
+    order_notify.deliver(conn, box, card, "Заказ №%d: Клиент не пришёл" % card["id"], NOW)
+    assert [r["text"] for r in critical.bell_rows(conn, "worker2", action=critical.NOTE)] == ["Заказ №%d: Клиент не пришёл" % card["id"]]
