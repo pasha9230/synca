@@ -505,6 +505,11 @@ def test_the_way_out_refuses_what_does_not_fit(tmp_path):
                           ({"webmim_id": "1001"}, "уже у заказа №%d" % other)):
         with pytest.raises(orders.OrderError, match=words):
             found(conn, mine, fake, **kwargs)
+    fake.add_order(None)                                                                # 1002 / №5002: typed by hand, without its id
+    by_hand = card(conn, webmim_number="5002")
+    for kwargs in ({"number": "5002"}, {"webmim_id": "1002"}):
+        with pytest.raises(orders.OrderError, match="№5002 уже у заказа №%d" % by_hand):
+            found(conn, mine, fake, **kwargs)
     orders.update_card(conn, mine, {"webmim_id": "3003"}, NOW, "owner")
     with pytest.raises(orders.OrderError, match="другой ID"):
         found(conn, mine, fake, webmim_id="1001")
@@ -556,7 +561,9 @@ def test_the_reading_shows_the_date_the_positions_and_what_dosozdat_adds(tmp_pat
     place(conn, mine, fake)
     fake.items["1001"] = [{"goodsId": "111", "territoryId": TERRITORY, "stockType": 0, "quantity": 3, "goodsName": "Шина 111"}]
     seen = webmim_create.check(conn, mine, client_of(fake), NOW, webmim_id="1001", sleep=lambda _s: None)
-    assert (seen["id"], seen["number"], seen["created"]) == ("1001", "5001", "2026-10-23 12:00")
+    assert (seen["id"], seen["number"], seen["created"], seen["early"]) == ("1001", "5001", "2026-10-23 12:00", "")
+    fake.add_order(None, created="20.10.26 09:00:00")                                   # an old order of the cabinet: a loud warning
+    assert "раньше нажатия" in webmim_create.check(conn, mine, client_of(fake), NOW, webmim_id="1002", sleep=lambda _s: None)["early"]
     assert seen["positions"] == ["«Шина 111» — 3 шт"] and seen["add"] == ["«Шина 111» — 1 шт", "«Шина 222» — 2 шт"]
     assert not fake.posts("/items")                                                    # a reading only
     text = webmim_create.resolve(conn, mine, True, NOW, "owner", webmim_id="1001", client=client_of(fake), confirm=seen["token"], sleep=lambda _s: None)

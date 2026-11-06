@@ -38,6 +38,7 @@
 <label class="field"><span class="label">или номер</span><input class="input" name="webmim_number" inputmode="numeric" maxlength="20" value="{{ b.held_number }}"></label>
 <button class="btn btn--secondary btn--sm">Заказ есть: проверить в WebMIM</button></form>
 {% set chk = session.get("webmim_check") %}{% if chk and chk.card == c.id %}<div class="stack" data-webmim-check><p class="small"><b>Это ваш заказ?</b> Заказ WebMIM {% if chk.number %}№{{ chk.number }} {% endif %}(id {{ chk.id }}, {{ chk.server }}), создан {{ chk.created or "(дата не указана)" }}{% if chk.status %}, {{ chk.status }}{% endif %}.</p>
+{% if chk.early %}<p class="small text-err"><b>{{ chk.early }}</b></p>{% endif %}
 <p class="small">В нём сейчас: {{ chk.positions|join("; ") if chk.positions else "позиций нет" }}.</p>
 <p class="small">«Досоздать» добавит: {{ chk.add|join("; ") if chk.add else "ничего, все позиции уже есть" }}.{% if chk.more %} В WebMIM больше, чем в заказе (не тронуто): {{ chk.more|join("; ") }}.{% endif %}</p>
 <form method="post" action="/orders/{{ c.id }}/webmim/resolve" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="found" value="1"><input type="hidden" name="webmim_id" value="{{ chk.id }}"><input type="hidden" name="confirm" value="{{ chk.token }}">

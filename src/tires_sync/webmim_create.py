@@ -45,6 +45,7 @@ ALL_OTH = "Все позиции взяты с ОТХ: заказ в WebMIM не
 TEST_TAG = "тест"            # the test server makes only the orders with this tag (the team lead's R2 2026-10-23: the owner's own test orders)
 STALE = 600                 # seconds: a «running» mark older than this is of a killed worker (order_engine.RUNNING_TIMEOUT)
 BUDGET = 45.0               # seconds a press may spend on positions (nginx gives the page 60)
+EARLY = 600                 # seconds: a WebMIM order created so long before the press is not its order (a warning for the person)
 RESOLVE_LEN = 20            # digits of an id or a number of WebMIM typed by resolve()
 STATE_NAMES = {"running": "оформляется", "unknown": "ответ WebMIM потерян", "refused": "не оформлен", "partial": "недосоздан", "done": "оформлен"}
 FIELDS = ("order_id", "server", "state", "first_at", "started_at", "author", "webmim_id", "result", "updated_at")
@@ -255,13 +256,16 @@ def _may_resolve(conn, card: dict, state: Optional[dict], now: str) -> None:
         raise orders.OrderError("Кнопка не заблокирована: снимать нечего.")
 
 
-def _may_take(conn, card: dict, webmim_id: str) -> None:
+def _may_take(conn, card: dict, webmim_id: str, number: str = "") -> None:
     typed = str(card["webmim_id"] or "")
     if typed and typed != webmim_id:
         raise orders.OrderError("В карточке уже вписан другой ID заказа WebMIM (%s): поправьте его в карточке." % typed)
     other = conn.execute("SELECT id FROM order_card WHERE webmim_id = ? AND id != ?", (webmim_id, card["id"])).fetchone()
     if other:
         raise orders.OrderError("Заказ WebMIM с ID %s уже у заказа №%d: проверьте ID." % (webmim_id, other[0]))
+    other = conn.execute("SELECT id FROM order_card WHERE webmim_number = ? AND id != ?", (number, card["id"])).fetchone() if number else None
+    if other:                                                     # a number typed by hand on another order, without its id
+        raise orders.OrderError("Заказ WebMIM №%s уже у заказа №%d: проверьте цифры." % (number, other[0]))
 
 
 def _cabinet_order(client, webmim_id: str, number: str, sleep: Callable[[float], None]) -> Optional[dict]:
@@ -300,24 +304,27 @@ def check(conn, card_id, client, now: str, webmim_id: str = "", number: str = ""
         held = _held(rows)
     except (OSError, webmim_orders.OrdersError) as err:
         raise orders.OrderError("Заказ WebMIM %s не прочитан (%s, %s): отметка не снята, ничего не изменено." % (typed, where, _why(err))) from None
-    _may_take(conn, card, order["id"])
+    _may_take(conn, card, order["id"], order["number"])
     wanted, names, _ = _wanted(conn, card)
     given = {str(r["goodsId"]).strip(): str(r.get("goodsName") or "").strip() for r in rows}
     positions = ["«%s» — %d шт" % (given.get(g) or names.get(g) or g, q) for g, q in held.items()]
     add = ["«%s» — %d шт" % (names[g], q - held.get(g, 0)) for g, q in wanted.items() if q > held.get(g, 0)]
     more = ["«%s»: в WebMIM %d шт, в заказе %d" % (names[g], held[g], q) for g, q in wanted.items() if held.get(g, 0) > q]
     created = order["create_date"][:16].replace("T", " ")
+    early = bool(order["create_date"]) and _age(state["first_at"], order["create_date"]) > EARLY
     token = hashlib.sha256(json.dumps([card_id, order["id"], order["number"], order["create_date"], sorted(held.items()), sorted(wanted.items())])
                            .encode("utf-8")).hexdigest()[:20]
     return {"id": order["id"], "number": order["number"], "created": created, "status": order["status_text"], "positions": positions,
-            "add": add, "more": more, "server": where, "token": token}
+            "add": add, "more": more, "server": where, "token": token,
+            "early": ("Внимание: заказ создан раньше нажатия кнопки (%s): похоже, это другой, старый заказ." % state["first_at"][:16].replace("T", " "))
+            if early else ""}
 
 
 def _found_text(seen: dict) -> str:
-    return "%s(id %s, %s), создан %s%s; в нём: %s. «Досоздать» добавит: %s.%s" % (
+    return "%s(id %s, %s), создан %s%s; в нём: %s. «Досоздать» добавит: %s.%s%s" % (
         "№%s " % seen["number"] if seen["number"] else "", seen["id"], seen["server"], seen["created"] or "(дата не указана)",
         ", %s" % seen["status"] if seen["status"] else "", "; ".join(seen["positions"]) or "позиций нет", "; ".join(seen["add"]) or "ничего",
-        (" В WebMIM больше, чем в заказе: %s." % "; ".join(seen["more"])) if seen["more"] else "")
+        (" В WebMIM больше, чем в заказе: %s." % "; ".join(seen["more"])) if seen["more"] else "", (" " + seen["early"]) if seen["early"] else "")
 
 
 def resolve(conn, card_id, found: bool, now: str, author: str, webmim_id: str = "", number: str = "", client=None, confirm: str = "",
@@ -341,7 +348,7 @@ def resolve(conn, card_id, found: bool, now: str, author: str, webmim_id: str = 
         _may_resolve(conn, card, state, now)
         where = webmim_orders.SERVER_NAMES.get(state["server"], state["server"])
         if seen is not None:
-            _may_take(conn, card, seen["id"])
+            _may_take(conn, card, seen["id"], seen["number"])
             change = {"webmim_id": seen["id"]}
             if seen["number"] and not card["webmim_number"]:
                 change["webmim_number"] = seen["number"]
