@@ -192,6 +192,7 @@ def test_the_manager_gets_the_order_in_telegram(tmp_path):
     assert any("Оповещение отправлено" in t for t in journal)
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_without_a_chat_the_order_is_made_and_the_journal_says_so(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path, staff_chat=False)
     add(client, keys(page(client))[0])

@@ -64,6 +64,15 @@ def _panel_logins(conn, owner_login: str) -> set:
     return {owner_login} | {u["login"] for u in users.list_users(conn) if u["role"] != "client"}      # a client is not staff
 
 
+NO_CHAT = "у %s нет чата Telegram"
+
+
+def _staff_login(way: dict, card: dict) -> str:
+    """The panel person the route goes to (with a Telegram chat or without one), else ''."""
+    who = card.get("responsible") or ""
+    return who if who and (way["channel"] == "telegram" or (way["channel"] == "owner" and way["why"] == NO_CHAT % who)) else ""
+
+
 def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     """{"channel": "telegram"|"vk"|"panel"|"owner", "to": chat, peer or point, "why": the person, the point, or the reason nobody can be
     written to}.
@@ -79,8 +88,8 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     if who in _panel_logins(conn, owner_login):
         chat = (connections.get_config(conn, "telegram", 0).get("chat_id") if who == owner_login else user_chats(conn).get(who)) or ""
         if chat:
-            return {"channel": "telegram", "to": str(chat), "why": who, "login": who}
-        return {"channel": "owner", "to": "", "why": "у %s нет чата Telegram" % who, "login": who}     # login: a person of the panel
+            return {"channel": "telegram", "to": str(chat), "why": who}
+        return {"channel": "owner", "to": "", "why": NO_CHAT % who}
     point = card.get("point")
     if not point:
         return {"channel": "owner", "to": "", "why": "ответственный «%s» не в панели, а у заказа нет точки" % who}
@@ -138,11 +147,11 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
     from . import critical
     way = way or route(conn, card, owner_login)
     failure = way["why"] if way["channel"] == "owner" else ""
-    if way.get("login") and not critical.telegram_allowed(False):
+    if _staff_login(way, card) and not critical.telegram_allowed(False):
         # the owner 2026-11-06: an order's alert is not critical, Telegram gets it no more. The person reads it on their own bell (critical.note:
         # an order of a point's account too, whose records the staff never see); the journal of the order keeps a grey line without the text,
         # as before (the point may read the journal of its order).
-        who = way["login"]                                         # with a Telegram chat or without: the same bell
+        who = _staff_login(way, card)                              # with a Telegram chat or without: the same bell
         key = "bell|%s|%s|%s" % (card["id"], who, text)
         if notify.sent_recently(conn, key, now):                  # a repeat of the same alert (its caller failed after it)
             return "в колокольчике (%s; повтор не записан)" % who
