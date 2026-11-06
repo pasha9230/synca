@@ -64,6 +64,15 @@ def _panel_logins(conn, owner_login: str) -> set:
     return {owner_login} | {u["login"] for u in users.list_users(conn) if u["role"] != "client"}      # a client is not staff
 
 
+NO_CHAT = "у %s нет чата Telegram"
+
+
+def _staff_login(way: dict, card: dict) -> str:
+    """The panel person the route goes to (with a Telegram chat or without one), else ''."""
+    who = card.get("responsible") or ""
+    return who if who and (way["channel"] == "telegram" or (way["channel"] == "owner" and way["why"] == NO_CHAT % who)) else ""
+
+
 def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
     """{"channel": "telegram"|"vk"|"panel"|"owner", "to": chat, peer or point, "why": the person, the point, or the reason nobody can be
     written to}.
@@ -80,7 +89,7 @@ def route(conn, card: dict, owner_login: Optional[str] = None) -> dict:
         chat = (connections.get_config(conn, "telegram", 0).get("chat_id") if who == owner_login else user_chats(conn).get(who)) or ""
         if chat:
             return {"channel": "telegram", "to": str(chat), "why": who}
-        return {"channel": "owner", "to": "", "why": "у %s нет чата Telegram" % who}
+        return {"channel": "owner", "to": "", "why": NO_CHAT % who}
     point = card.get("point")
     if not point:
         return {"channel": "owner", "to": "", "why": "ответственный «%s» не в панели, а у заказа нет точки" % who}
@@ -135,8 +144,25 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
             vk_http: Transport = urllib_transport, owner_login: Optional[str] = None, way: Optional[dict] = None) -> str:
     """Write the alert; never raises. Returns «отправлено …» or «не отправлено …» (the owner is told in the second case when possible).
     `way`: where it goes, when not to the responsible (tell_point)."""
+    from . import critical
     way = way or route(conn, card, owner_login)
     failure = way["why"] if way["channel"] == "owner" else ""
+    if _staff_login(way, card) and not critical.telegram_allowed(False):
+        # the owner 2026-11-06: an order's alert is not critical, Telegram gets it no more. The person reads it on their own bell (critical.note:
+        # an order of a point's account too, whose records the staff never see); the journal of the order keeps a grey line without the text,
+        # as before (the point may read the journal of its order).
+        who = _staff_login(way, card)                              # with a Telegram chat or without: the same bell
+        key = "bell|%s|%s|%s" % (card["id"], who, text)
+        if notify.sent_recently(conn, key, now):                  # a repeat of the same alert (its caller failed after it)
+            return "в колокольчике (%s; повтор не записан)" % who
+        label = "Заказ №%d: " % card["id"]
+        if not critical.note(conn, [who], text if text.startswith(label) else label + text, now):
+            failure = "колокольчик → %s: не записано" % who
+        else:
+            notify.remember_sent(conn, key, now)                   # in the commit of the event: both, or neither
+            _event(conn, card["id"], now, "Оповещение в колокольчике: %s (в Telegram только критичное)" % who)
+            return "в колокольчике (%s)" % who
+        way = {"channel": "owner", "to": "", "why": failure}
     if way["channel"] == "telegram":
         key = "order|%s|%s|%s" % (card["id"], way["to"], text)
         if notify.sent_recently(conn, key, now):                  # a repeat of the same alert (its caller failed after it): Telegram has no key
@@ -181,6 +207,14 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
         _event(conn, card["id"], now, "Оповещение не отправлено: %s; ответственному (%s) — в «Уведомлениях»" % (failure, who))
         return "не отправлено: %s; ответственному — в «Уведомлениях»" % failure
     told = ""
+    if not critical.telegram_allowed(False):                       # a failed alert is no critical news: the red record, the journal and
+        # the owners' own bell when nobody of the staff can see the order's records (a point's account order, order_alerts._quiet)
+        told = ""
+        if points.of_account(conn, card["id"]) is not None and critical.note(
+                conn, order_alerts.owner_people(conn), "Некому отправить оповещение по заказу №%d (%s).\n%s" % (card["id"], failure, text), now):
+            told = "; владельцам — в колокольчике"
+        _event(conn, card["id"], now, "Оповещение не отправлено: %s%s; в Telegram не пишется (туда только критичное)" % (failure, told))
+        return "не отправлено: %s%s" % (failure, told)
     key = "owner|%s|%s|%s" % (card["id"], failure, text)
     try:
         owner = notify.notifier_for(conn, box, http=tg_http)
@@ -224,9 +258,14 @@ def missing_order_people(conn) -> List[str]:
 
 
 def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg_http: Transport = urllib_transport, now: str = "",
-                skip_logins=()) -> str:
+                skip_logins=(), critical: bool = False) -> str:
     """The same text in Telegram to each of these panel users who has a chat (the owner's login: the chat of the failure alerts), once per chat.
-    With `now`, the same text to the same chat within the hour is a repeat and is not sent again. Never raises; returns how it went."""
+    With `now`, the same text to the same chat within the hour is a repeat and is not sent again. Never raises; returns how it went.
+    Not `critical` (critical.py): while only the critical news go to Telegram, the same text is a row of each person's own bell (critical.note;
+    never a client nor a point user); with `now`, the same text to the same people within the hour is not written again."""
+    from . import critical as crit
+    if not crit.telegram_allowed(critical):
+        return _to_bells(conn, logins, text, now, skip_logins)
     owner = get_owner_login(conn)
     owner_chat = str(connections.get_config(conn, "telegram", 0).get("chat_id") or "")
     mine = user_chats(conn)
@@ -264,6 +303,36 @@ def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg
     return "; ".join(parts)
 
 
+def _to_bells(conn, logins, text: str, now: str, skip_logins=()) -> str:
+    """tell_people while Telegram takes only the critical: the person's own bell instead. Never raises."""
+    from . import critical
+    try:
+        roles = {u["login"]: u["role"] for u in users.list_users(conn)}
+        owner = get_owner_login(conn)
+        people = sorted({x for x in logins if x and x not in skip_logins and (x == owner or roles.get(x) not in ("client", "point", None))})
+        if not people:
+            return "Telegram: не отправляется, туда только критичное; в колокольчик некому (%s)" % ", ".join(logins)
+        key = "bells|%s|%s" % (",".join(people), text)
+        if now and notify.sent_recently(conn, key, now):
+            return "Telegram: не отправляется, туда только критичное; в колокольчике (%s; повтор не записан)" % ", ".join(people)
+        if not critical.note(conn, people, text, now or store.moscow_iso()):
+            return "Telegram: не отправляется, туда только критичное; колокольчик не записан (%s)" % ", ".join(people)
+        if now:
+            notify.remember_sent(conn, key, now)
+            conn.commit()
+        return "Telegram: не отправляется, туда только критичное; в колокольчике (%s)" % ", ".join(people)
+    except Exception as err:                                       # noqa: BLE001 - never raises, as tell_people
+        try:
+            conn.rollback()
+        except Exception:                                          # noqa: BLE001
+            pass
+        return "Telegram: не отправляется, туда только критичное; колокольчик не записан (%s)" % type(err).__name__
+
+
+class _NotSent(Exception):
+    pass
+
+
 UNSEEN_MINUTES = 15
 UNSEEN_START_KEY = "point_unseen_start"           # app_state: the notes written before the safety net came are the past
 
@@ -297,6 +366,13 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
                 point["name"], " по заказу №%d" % note["order_id"] if note.get("order_id") else "", UNSEEN_MINUTES, note.get("text") or "")
             key = "unseen|%s" % note["id"]
             try:
+                from . import critical, order_alerts
+                if not critical.telegram_allowed(False):           # not critical: the owners' own bell, the record of the order below
+                    told = notify.sent_recently(conn, "bell-" + key, now) or critical.note(conn, order_alerts.owner_people(conn), text, now)
+                    if told:
+                        notify.remember_sent(conn, "bell-" + key, now)     # the mark below failed (a busy base): not written twice
+                        conn.commit()
+                    raise _NotSent("в колокольчике (в Telegram только критичное)" if told else "колокольчик не записан")
                 owner = notify.notifier_for(conn, box, http=tg_http)
                 if owner is None:
                     raise notify.NotifyError("Telegram не настроен")
@@ -305,6 +381,8 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
                     notify.remember_sent(conn, key, now)
                     conn.commit()                                  # kept even when the mark below fails
                 outcome = "владельцу написано в Telegram"
+            except _NotSent as err:
+                outcome = "владельцу: %s" % err
             except (notify.NotifyError, SecretKeyError) as err:
                 outcome = "владельцу написать не удалось: %s" % err
             if not points.mark_escalated(conn, note["id"], now, outcome):

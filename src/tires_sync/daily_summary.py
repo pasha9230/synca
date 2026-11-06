@@ -68,6 +68,9 @@ def maybe_send(conn, box, now: datetime, http: Transport = urllib_transport) -> 
     if store.get_state(conn, SENT_KEY) == today:
         return None
     store.set_state(conn, SENT_KEY, today)
+    from . import critical
+    if not critical.telegram_allowed(False):                    # not critical (the owner 2026-11-06): Telegram gets it no more
+        return "сводка: не отправлена, в Telegram только критичное"
     body = text(conn, now)
     sent, failed = 0, 0
     try:

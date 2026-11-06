@@ -2,6 +2,8 @@
 tells the client «можно забирать» on the arrival only; anything doubtful waits in «Входящие» for the owner and reaches no client."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import urllib.parse
 
@@ -502,6 +504,7 @@ def test_the_arrival_is_a_yellow_record_for_the_bell_once(tmp_path):
     assert any(r["text"].startswith("Поступили шины по заказу №5000100") for r in order_alerts.page_rows(conn, "owner", NOW))
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_unknown_number_tells_the_owner_in_the_bell_until_the_inbox_line_is_dealt_with(tmp_path):
     from tires_sync import order_alerts, users
     app, client, tok, conn, pid, card = ready(tmp_path)
@@ -522,6 +525,7 @@ def test_an_unknown_number_tells_the_owner_in_the_bell_until_the_inbox_line_is_d
     assert [r for r in order_alerts.page_rows(conn, "worker2", NOW) if r["kind"] == "inbox"] == []
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_unknown_number_reaches_the_partner_in_telegram_once(tmp_path):
     import datetime as dt
     from tires_sync import connections, order_notify, users

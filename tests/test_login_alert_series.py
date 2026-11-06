@@ -3,6 +3,8 @@ hour. One series is one alert: it goes on while the failed sign-ins of the windo
 the count fell to half or lower. The lock of an address and the journal without passwords stay as they are."""
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta
 
 from panel_helpers import make_app
@@ -32,6 +34,7 @@ def panel(tmp_path, clock):
     return app, guess
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_one_series_is_one_alert_however_long_it_goes(tmp_path, monkeypatch):
     said = told(monkeypatch)
     clock = [datetime(2026, 10, 7, 12, 0, 0)]
@@ -41,6 +44,7 @@ def test_one_series_is_one_alert_however_long_it_goes(tmp_path, monkeypatch):
     assert len(said) == 1
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_second_series_within_the_hour_is_reported_again(tmp_path, monkeypatch):
     said = told(monkeypatch)
     clock = [datetime(2026, 10, 7, 12, 0, 0)]
@@ -54,6 +58,7 @@ def test_a_second_series_within_the_hour_is_reported_again(tmp_path, monkeypatch
     assert len(said) == 2 and all("больше 30 неудачных входов" in s for s in said)
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_series_that_never_fell_to_half_stays_one_even_after_an_hour(tmp_path, monkeypatch):
     """Hovering around the threshold (about 31 failures in any 15 minutes for two hours) is one series, not an alert per failure."""
     said = told(monkeypatch)
@@ -65,6 +70,7 @@ def test_a_series_that_never_fell_to_half_stays_one_even_after_an_hour(tmp_path,
     assert len(said) == 1
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_count_that_fell_to_half_starts_a_new_series(tmp_path, monkeypatch):
     said = told(monkeypatch)
     clock = [datetime(2026, 10, 7, 12, 0, 0)]

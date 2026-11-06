@@ -253,6 +253,7 @@ def test_the_draft_review_counts_the_waiting_positions_as_staying(tmp_path):
     assert waiting["guard"]["gone"] == 0 and waiting["guard"]["over"] is False        # in fact they wait for the morning
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_burst_of_positions_leaving_at_once_raises_an_alarm_even_though_nothing_is_removed(tmp_path, monkeypatch):
     from http_fakes import ScriptedHttp
     from tires_sync.secretbox import load_box

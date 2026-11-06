@@ -1222,7 +1222,8 @@ AUTO_TOKENS = ("task-", "reserve-", "arrived-", "wait-", "autosend-")    # the o
 def _stopped(conn, chat: dict, token: str) -> str:
     """Why the sync must not send this one again now (the review of send-retry, L4), '' when it may: the task of a `task-…` mark was
     skipped, ticked off («отправлено вручную») or is gone; the order of one of the order's own messages is closed (a stage of kind «отказ»
-    or «завершающий»: «Отмена», «Отказ/невыкуп», «Возврат»; «Выполнено» is not) or deleted. A reply written in the chat is never stopped by
+    or «завершающий»: «Отмена», «Отказ/невыкуп», «Возврат»; «Выполнено» is not) or deleted; the reminder of the reservation (`reserve-…`)
+    once its order left that stay of «Товар на точке», «Выполнено» too (the owner 2026-11-06). A reply written in the chat is never stopped by
     the stage of the order: it may be about the cancellation itself; nor is a task made by the stage the order is in still (the same stay)."""
     token = str(token or "")
     if not token.startswith(AUTO_TOKENS):
@@ -1250,12 +1251,14 @@ def _stopped(conn, chat: dict, token: str) -> str:
                 return "задача пропущена" if task["status"] == "skipped" else "задача уже закрыта"
     if card_id is None:
         return ""
-    stage = conn.execute("SELECT s.kind, s.name, c.stage_id, c.entered_at FROM order_card c LEFT JOIN order_stage s ON s.id = c.stage_id WHERE c.id = ?",
-                         (card_id,)).fetchone()
+    stage = conn.execute("SELECT s.kind, s.name, c.stage_id, c.entered_at, s.code FROM order_card c LEFT JOIN order_stage s ON s.id = c.stage_id "
+                         "WHERE c.id = ?", (card_id,)).fetchone()
     if stage is None:
         return "заказ удалён"
     if stay is not None and (stage[2], stage[3]) == stay:
         return ""                                     # the task of that very stage («Клиенту: заказ отменён» on «Отмена»): it is what the person sent
+    if token.startswith("reserve-") and (stage[4] != "at_point" or not token.endswith("-" + re.sub(r"\D", "", stage[3] or ""))):
+        return "заказ в «%s»" % stage[1] if stage[4] != "at_point" else "резерв этого напоминания закончился"   # issued, closed, «На ОТХ» (2026-11-06)
     if token.startswith("wait-") and not token.endswith("-" + re.sub(r"\D", "", stage[3] or "")):
         return "заказ ушёл с этапа ожидания"           # «появилось в наличии» belongs to one stay in the stage (order_wait)
     if token.startswith("wait-"):                      # its task closed or skipped by a person: as for a `task-…` mark

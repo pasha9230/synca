@@ -2,6 +2,8 @@
 manager of the clients' orders, the message in Telegram, «Мои заказы» — and one client never reaching another's cart or orders."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import re
 
@@ -174,6 +176,7 @@ def test_above_the_stock_the_order_is_refused_whole(tmp_path):
 
 # ---- the message --------------------------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_manager_gets_the_order_in_telegram(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path)
     add(client, keys(page(client))[0], qty="2")
@@ -189,6 +192,7 @@ def test_the_manager_gets_the_order_in_telegram(tmp_path):
     assert any("Оповещение отправлено" in t for t in journal)
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_without_a_chat_the_order_is_made_and_the_journal_says_so(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path, staff_chat=False)
     add(client, keys(page(client))[0])
@@ -303,6 +307,7 @@ def test_a_failure_while_writing_the_order_keeps_the_cart(tmp_path, monkeypatch)
     assert shop_cart.cart(conn, "buyer") == {"77001": 3} and not conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_link_in_the_message_is_never_the_host_the_client_sent(tmp_path):
     app, client, conn, tg, pid = shop(tmp_path)
     add(client, keys(page(client))[0])

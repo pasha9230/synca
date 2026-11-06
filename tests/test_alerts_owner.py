@@ -4,6 +4,8 @@ of an order nobody answers for; «Срочно ответить» never of a clo
 orders without a stored responsible."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from test_inquiry import message
@@ -147,6 +149,7 @@ def test_telegram_of_an_order_goes_to_its_responsible_only(tmp_path):
     assert told == [["zamantyres"], ["owner", "zamantyres"]]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_failed_telegram_of_a_responsible_stays_on_their_bell(tmp_path):
     conn, box = setup(tmp_path)
     order_notify.set_user_chat(conn, "zamantyres", "555", NOW, "owner")
@@ -202,6 +205,7 @@ def test_the_fill_of_the_old_orders_follows_the_rules_of_a_new_one(tmp_path, cap
     assert chat_deals.fill_responsible(conn, NOW, "cli", apply=True)["set"] == {}                          # a second run: nothing new
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_failure_of_a_point_account_order_still_reaches_the_owner(tmp_path):
     """Review 1: the staff never see the records of a point's account order, so its failure is not left on a bell nobody sees."""
     conn, box = setup(tmp_path)
