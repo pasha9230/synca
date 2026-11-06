@@ -984,6 +984,26 @@ OLD_RETURN_NAME = "Возврат передан"             # the old default 
 MIGRATED = "Схема возврата 2026-11-03: "
 
 
+def migrated_since(conn) -> Dict[int, str]:
+    """The owner 2026-11-06: an order the migration moved to «На возврат» (and not moved since) shows the day its stay really began, not
+    the migration's: {order id: the moment of its stage record before the migration's}. Such an order: on return_given, its entered_at is
+    the migration's moment (FLOW_KEY), it has the migration's grey record (MIGRATED) of that moment, and its last stage record is the
+    migration's. Display only: entered_at stays, the timers of this module count from it."""
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (FLOW_KEY,)).fetchone()
+    if row is None:
+        return {}
+    moment, out = row[0], {}
+    for (card_id,) in conn.execute(
+            "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = ? AND c.entered_at = ? AND EXISTS ("
+            "SELECT 1 FROM order_event f WHERE f.order_id = c.id AND f.kind = 'field' AND f.at = ? AND f.author = 'система' AND f.text LIKE ?)",
+            (orders.RETURN_GIVEN, moment, moment, MIGRATED + "%")).fetchall():
+        stages = conn.execute("SELECT at, author FROM order_event WHERE order_id = ? AND kind = 'stage' ORDER BY id DESC LIMIT 2",
+                              (card_id,)).fetchall()
+        if len(stages) == 2 and tuple(stages[0]) == (moment, "система"):
+            out[card_id] = stages[1][0]
+    return out
+
+
 def migrate(conn, now: str) -> Dict[str, int]:
     """Once (FLOW_KEY), in one IMMEDIATE transaction: return_given still called «Возврат передан» is renamed «На возврат»; the orders on it
     (the old meaning: the act МХ-3 signed, the tyres given, the refund awaited) go to «Вернули поставщику» with the refund of the purchase

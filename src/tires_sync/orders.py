@@ -648,13 +648,14 @@ def get_card(conn, card_id) -> dict:
     return card
 
 
-def card_view(card: dict) -> dict:
-    """The head of the order's card in the one look of the cards (_entity.html), a dict ready to be JSON."""
+def card_view(card: dict, conn=None) -> dict:
+    """The head of the order's card in the one look of the cards (_entity.html), a dict ready to be JSON; with `conn` the day of the stage
+    is the real one (stage_since)."""
     stage = card["stage"]
     tone = {"won": "ok", "open": "neutral", "closed": "warn"}.get(stage["kind"], "err")
     name = card["client_name"] or "Клиент без имени"
     return {"type": "order", "kind": "Заказ", "ref": "№%d" % card["id"], "title": name, "hint": "Заказ №%d · %s" % (card["id"], name),
-            "status": {"text": stage["name"], "tone": tone, "since": stage_day(card["entered_at"])},
+            "status": {"text": stage["name"], "tone": tone, "since": stage_day(stage_since(conn, card) if conn is not None else card["entered_at"])},
             "crumbs": [{"label": "Заказы", "href": "/orders"}, {"label": "№%d" % card["id"]}]}
 
 
@@ -1104,6 +1105,13 @@ def _seconds_on_stage(entered_at: str, now: datetime) -> float:
         return 0.0
 
 
+def stage_since(conn, card: dict) -> str:
+    """The moment shown as the day of the card's stage: entered_at, or for an order the migration of 2026-11-03 moved, the moment it really
+    came (order_oth.migrated_since). Display only: the timers count from entered_at."""
+    from . import order_oth
+    return order_oth.migrated_since(conn).get(card["id"], card["entered_at"])
+
+
 def stage_day(entered_at) -> str:
     """The day the card came to its stage, "2026-11-04" (the stamps of the orders are Moscow time, as for _seconds_on_stage); "" with no such moment."""
     try:
@@ -1239,6 +1247,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     plans = order_oth.plans(conn)                                               # the labels of «На возврат» (2026-11-03)
     on_oth = order_oth.reserve_dates(conn)                                      # the dates of «На ОТХ» and «На возврат» (2026-11-04)
     intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
+    since = order_oth.migrated_since(conn)                                      # the day of the stage of a migrated order (2026-11-06)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
             continue
@@ -1258,7 +1267,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
         columns[sid]["cards"].append({"id": cid, "client": name or phone or "Без имени", "items_text": items_text, "point": names.get(pid, ""),
-                                      "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(entered), "overdue": overdue,
+                                      "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(since.get(cid, entered)), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
                                       "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid)})
         columns[sid]["count"] += 1

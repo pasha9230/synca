@@ -152,3 +152,46 @@ def test_a_points_phone_list_and_board_name_the_real_stage_with_its_date(tmp_pat
     desk = board_card(text[text.index('class="pt-desk"'):], own)
     assert "data-stage-date>%s 04.11" % stages["talk"]["name"] in desk
     assert 'data-order-sum' not in text
+
+
+# ---- the owner 2026-11-06: the orders the migration of 2026-11-03 moved to «На возврат» show the day they really came, not the migration's --
+
+MIGRATION = "2026-11-04T06:00:00"
+
+
+def migrated(tmp_path):
+    from test_order_reserve import db
+    from test_return_flow import old_flow
+    from tires_sync import order_oth
+    conn = db(tmp_path)
+    given, nopurchase, here, agreed_, asked, plain = old_flow(conn)
+    order_oth.migrate(conn, MIGRATION)
+    return conn, dict(given=given, nopurchase=nopurchase, here=here, agreed=agreed_, plain=plain)
+
+
+def board_days(conn):
+    cards = [c for col in orders.board(conn, datetime(2026, 11, 6, 12, 0))["columns"] for c in col["cards"]]
+    return {c["id"]: c["stage_day"] for c in cards}
+
+
+def test_a_migrated_order_shows_the_day_it_came_to_the_point_not_the_migrations(tmp_path):
+    conn, o = migrated(tmp_path)
+    days = board_days(conn)
+    for cid in (o["here"], o["agreed"]):
+        card = orders.get_card(conn, cid)
+        assert card["stage"]["code"] == orders.RETURN_GIVEN and card["entered_at"] == MIGRATION     # the timers keep the stored moment
+        assert days[cid] == "2026-10-20"                                                            # «На ОТХ» since 20.10: the stay the migration renamed
+        assert orders.card_view(card, conn)["status"]["since"] == "2026-10-20"
+    assert days[o["nopurchase"]] == "2026-10-21"          # never moved by the migration: its own moment, as before
+    assert days[o["plain"]] == "2026-10-20"               # not migrated
+    assert days[o["given"]] == MIGRATION[:10]             # closed by the migration in «Вернули поставщику»: not «На возврат», as it was
+
+
+def test_a_migrated_order_moved_again_shows_its_new_move(tmp_path):
+    conn, o = migrated(tmp_path)
+    orders.move_card(conn, o["here"], next(s["id"] for s in orders.list_stages(conn) if s["code"] == "at_point"), "2026-11-05T10:00:00", "o")
+    assert board_days(conn)[o["here"]] == "2026-11-05"
+
+
+def test_a_new_base_with_no_migrated_order_shows_the_stored_moment(w):
+    assert orders.card_view(orders.get_card(w["conn"], w["cid"]), w["conn"])["status"]["since"] == "2026-11-04"
