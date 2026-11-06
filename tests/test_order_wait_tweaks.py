@@ -37,6 +37,141 @@ def other_chat(conn, chat_row, order_id=None):
     return row
 
 
+# --- 1. «Клиент молчит» after the words sent by hand -----------------------------------------------------------------------------------------
+
+def test_the_words_sent_from_the_form_start_the_three_days_too(env):
+    conn, _row = env
+    card = manual(env)
+    assert order_wait.silent(conn, "2026-11-06T12:00:00") == 0
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+    [task] = silent_tasks(conn, card)
+    assert "вручную" in task["body"] and "04.11.2026" in task["body"]
+    assert "придержаны за ним" not in task["body"] and "не придержаны" in task["body"]           # nothing promises the tires are his
+    assert order_wait.silent(conn, "2026-11-08T12:00:00") == 0                                  # once per stay
+
+
+def test_the_words_by_hand_answered_in_the_chat_give_no_task(env):
+    conn, chat_row = env
+    card = manual(env)
+    said(conn, chat_row, "r1", "2026-11-05T09:00:00")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+def test_a_form_not_sent_starts_nothing(env):
+    conn, chat_row = env
+    card = waiting(env)
+    unread(conn, chat_row)
+    run(conn, Sender(), [tire()])
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+# --- 2. an answer elsewhere -------------------------------------------------------------------------------------------------------------------
+
+def test_an_answer_in_another_chat_of_the_order_is_an_answer(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    said(conn, other_chat(conn, chat_row, card), "r1", "2026-11-05T09:00:00")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+def test_an_answer_in_another_chat_of_the_client_is_an_answer(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    other = other_chat(conn, chat_row)
+    client = conn.execute("INSERT INTO client (name, note, created_at, created_by) VALUES ('Иван', '', ?, 'x')", (NOW,)).lastrowid
+    conn.execute("INSERT INTO client_order (order_id, client_id) VALUES (?, ?)", (card, client))
+    conn.execute("INSERT INTO client_chat (chat_row, client_id) VALUES (?, ?)", (other, client))
+    conn.commit()
+    said(conn, other, "r1", "2026-11-05T09:00:00")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+def test_an_answer_in_a_chat_of_somebody_else_is_not_an_answer(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    said(conn, other_chat(conn, chat_row), "r1", "2026-11-05T09:00:00")
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+
+
+def call(conn, chat_row, at, phone="+79990000001", order_id=None, call_id=1):
+    row = conn.execute("INSERT INTO avito_call (account_id, call_id, call_at, buyer_phone, order_id) VALUES (?, ?, ?, ?, ?)",
+                       (account_of(conn, chat_row), call_id, at, phone, order_id)).lastrowid
+    conn.commit()
+    return row
+
+
+@pytest.mark.parametrize("how", ("phone", "order", "client"))
+def test_a_call_of_the_client_after_the_message_is_an_answer(env, how):
+    conn, chat_row = env
+    card, _sender = told(env)
+    conn.execute("UPDATE order_card SET client_phone = '+7 999 000-00-01' WHERE id = ?", (card,))
+    conn.commit()
+    if how == "phone":
+        call(conn, chat_row, "2026-11-05T10:00:00", phone="89990000001")
+    elif how == "order":
+        call(conn, chat_row, "2026-11-05T10:00:00", phone="+79995550000", order_id=card)
+    else:
+        row = call(conn, chat_row, "2026-11-05T10:00:00", phone="+79995550000")
+        client = conn.execute("INSERT INTO client (name, note, created_at, created_by) VALUES ('Иван', '', ?, 'x')", (NOW,)).lastrowid
+        conn.execute("INSERT INTO client_order (order_id, client_id) VALUES (?, ?)", (card, client))
+        conn.execute("INSERT INTO client_call (call_row, client_id) VALUES (?, ?)", (row, client))
+        conn.commit()
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 0 and silent_tasks(conn, card) == []
+
+
+def test_a_call_before_the_message_or_of_another_number_is_not_an_answer(env):
+    conn, chat_row = env
+    card, _sender = told(env)
+    conn.execute("UPDATE order_card SET client_phone = '+79990000001' WHERE id = ?", (card,))
+    conn.commit()
+    call(conn, chat_row, "2026-11-04T11:00:00", call_id=1)                                      # before the message
+    call(conn, chat_row, "2026-11-05T10:00:00", phone="+79995550000", call_id=2)                 # somebody else
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+
+
+def test_the_button_client_answered_closes_the_task_writes_the_journal_and_no_task_comes_again(env):
+    conn, _row = env
+    card, _sender = told(env)
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+    [task] = silent_tasks(conn, card)
+    order_wait.client_answered(conn, task["id"], "2026-11-07T12:10:00", "worker2")
+    task = engine.get_task(conn, task["id"])
+    assert task["status"] == "done" and "клиент ответил" in task["result"].lower()
+    assert [e for e in orders.list_events(conn, card) if "Клиент ответил" in e["text"] and e["author"] == "worker2"]
+    assert order_wait.silent(conn, "2026-11-08T12:00:00") == 0 and len(silent_tasks(conn, card)) == 1
+    with pytest.raises(orders.OrderError):                                                      # a second press: nothing twice
+        order_wait.client_answered(conn, task["id"], "2026-11-07T12:11:00", "worker2")
+
+
+def test_the_button_is_only_for_the_task_of_the_silent_client(env):
+    conn, _row = env
+    card = waiting(env, with_chat=False)
+    run(conn, Sender(), [tire()])
+    [task] = tasks(conn, card)
+    with pytest.raises(orders.OrderError):
+        order_wait.client_answered(conn, task["id"], "2026-11-07T12:10:00", "worker2")
+    assert engine.get_task(conn, task["id"])["status"] == "pending"
+
+
+def test_the_card_shows_the_button_and_the_press_closes_the_task(tmp_path):
+    from panel_helpers import post
+    from test_order_wait_pages import WANT as PAGE_WANT, new_card, setup, text
+    _app, client, tok, conn = setup(tmp_path)
+    card = new_card(conn)
+    order_wait.add_want(conn, card, PAGE_WANT, "2026-10-15T12:00:00", "owner")
+    orders.move_card(conn, card, {s["code"]: s["id"] for s in orders.list_stages(conn)}["wait"], "2026-10-15T12:00:00", "owner")
+    c = orders.get_card(conn, card)
+    task_id = conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                           "VALUES (?, ?, ?, 'remind', '', ?, 'pending', ?, 'тело', '', ?)",
+                           (card, order_wait.TASK_SILENT, c["entered_at"], c["stage_id"], order_wait.TITLE_SILENT, "2026-10-15T12:00:00")).lastrowid
+    conn.commit()
+    page = text(client, "/orders/%d" % card)
+    assert 'name="answered"' in page and "Клиент ответил</button>" in page
+    assert post(client, "/orders/%d/task/%d/run" % (card, task_id), tok, answered="1").status_code == 302
+    assert engine.get_task(conn, task_id)["status"] == "done" and "ответил" in engine.get_task(conn, task_id)["result"]
+    assert [e for e in orders.list_events(conn, card) if "Клиент ответил" in e["text"]]
+
+
 # --- 3. the price is never below the ad -------------------------------------------------------------------------------------------------------
 
 def test_a_price_below_the_ad_names_the_price_of_the_ad(env):

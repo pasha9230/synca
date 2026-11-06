@@ -579,10 +579,50 @@ def replies(conn, now: str, notify=None) -> int:
     return made
 
 
+def _since(conn, log) -> Tuple[int, str]:
+    """The moment of a send (`log`: chat_row, message_id, at): the time of our message in the chat, at least that of the send; and the send's at."""
+    ours = conn.execute("SELECT ts FROM avito_message WHERE chat_row = ? AND message_id = ?", (log[0], log[1])).fetchone() if log[1] else None
+    return max(ours[0] if ours else 0, int(datetime.fromisoformat(log[2]).replace(tzinfo=timezone(timedelta(hours=3))).timestamp())), log[2]
+
+
+def _answered_anywhere(conn, card: dict, log) -> bool:
+    """The client answered after the send (the owner 2026-11-05): a message in the chat of the send, in another chat of the order or of the
+    order's client (client_chat), or a call the panel has (avito_call) of the order, of its client (client_call) or from the order's phone."""
+    from . import connections
+    ts, at = _since(conn, log)
+    rows = {log[0]} | {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ?", (card["id"],))}
+    rows |= {r[0] for r in conn.execute("SELECT l.chat_row FROM client_order o JOIN client_chat l ON l.client_id = o.client_id WHERE o.order_id = ?", (card["id"],))}
+    if conn.execute("SELECT 1 FROM avito_message WHERE chat_row IN (%s) AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND ts > ? LIMIT 1"
+                    % ",".join("?" * len(rows)), sorted(rows) + [ts]).fetchone():
+        return True
+    if conn.execute("SELECT 1 FROM avito_call k WHERE k.call_at > ? AND (k.order_id = ? OR k.id IN (SELECT l.call_row FROM client_order o JOIN client_call l "
+                    "ON l.client_id = o.client_id WHERE o.order_id = ?)) LIMIT 1", (at, card["id"], card["id"])).fetchone():
+        return True
+    phone = connections.normalize_phone(card.get("client_phone"))
+    return bool(phone) and any(connections.normalize_phone(b) == phone for (b,) in conn.execute(
+        "SELECT buyer_phone FROM avito_call WHERE call_at > ? AND buyer_phone LIKE ?", (at, "%" + phone[-10:])))
+
+
+def _silent_send(conn, card_id, stay) -> Tuple[Optional[tuple], bool]:
+    """The send «Клиент молчит» counts from in this stay: ((chat_row, message_id, at), True) for «появилось в наличии» that went by itself and
+    holds the tires; ((…), False) for the words a manager sent from the form of the task «Позиция появилась» (its mark «o<order>t<task>»: the
+    tires are not held for it); (None, False) when nothing went."""
+    token = _token(card_id, stay)
+    log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", (token,)).fetchone()
+    if log is not None:
+        return (log, True) if _state(conn, card_id) == "told" and store.get_state(conn, HELD % token) else (None, False)
+    task = conn.execute("SELECT id FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_EXACT, stay)).fetchone()
+    if task is None:
+        return None, False
+    log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", ("o%dt%d" % (card_id, task[0]),)).fetchone()
+    return log, False
+
+
 def silent(conn, now: str, notify=None) -> int:
-    """«Клиент молчит 3 дня» (the owner 2026-11-05): «появилось в наличии» went, the tires are held for the order, and the client has not
-    written in the chat since, SILENT_DAYS calendar days after the send: one task for the responsible per stay in the stage, made and told only
-    in the working hours. The tires are not let go and the client is sent nothing. Run by the minute's sync. Returns how many were made."""
+    """«Клиент молчит 3 дня» (the owner 2026-11-05): «появилось в наличии» went by itself and the tires are held for the order, or a manager sent
+    the words of the form of the task (the tires are not held then), and the client has not answered since (_answered_anywhere), SILENT_DAYS
+    calendar days after the send: one task for the responsible per stay in the stage, made and told only in the working hours. The tires are not
+    let go and the client is sent nothing. Run by the minute's sync. Returns how many were made."""
     from . import order_arrived, order_manager
     hours = order_manager.duty_settings(conn)["hours"]
     if not hours[0] <= int(now[11:13]) < hours[1]:
@@ -591,21 +631,25 @@ def silent(conn, now: str, notify=None) -> int:
     rows = conn.execute("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait'").fetchall()
     for card_id, stay in rows:
         try:
-            token = _token(card_id, stay)
-            log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", (token,)).fetchone()
-            if log is None or _state(conn, card_id) != "told" or not store.get_state(conn, HELD % token):
+            log, held = _silent_send(conn, card_id, stay)
+            if log is None:
                 continue
             if (datetime.fromisoformat(now[:10]) - datetime.fromisoformat(log[2][:10])).days < SILENT_DAYS:
                 continue
             if conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id IN (?, ?) AND entered_at = ?", (card_id, TASK_SILENT, TASK_REPLY, stay)).fetchone():
                 continue
-            if _answered(conn, log):
-                continue
             card = orders.get_card(conn, card_id)
-            body = ("Заказ №%d, клиент %s. Ответственный: %s. Сообщение о наличии ушло %s.%s.%s, клиент не ответил. Шины придержаны за ним и сами не "
-                    "снимаются: пока заказ на этапе «%s», они его. Чат заказа: %s") % (
-                card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], log[2][8:10], log[2][5:7], log[2][:4],
-                card["stage"]["name"], order_arrived._link(conn, card_id))
+            if _answered_anywhere(conn, card, log):
+                continue
+            day = "%s.%s.%s" % (log[2][8:10], log[2][5:7], log[2][:4])
+            if held:
+                said = ("Сообщение о наличии ушло %s, клиент не ответил. Шины придержаны за ним и сами не снимаются: пока заказ на этапе «%s», они его."
+                        % (day, card["stage"]["name"]))
+            else:
+                said = ("Сообщение о наличии отправлено вручную %s, клиент не ответил. Шины за ним не придержаны: их может взять другой заказ "
+                        "этапа «%s»." % (day, card["stage"]["name"]))
+            body = "Заказ №%d, клиент %s. Ответственный: %s. %s Если клиент ответил по телефону или в другом чате, нажмите «Клиент ответил». Чат заказа: %s" % (
+                card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], said, order_arrived._link(conn, card_id))
             if conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
                             "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card_id, TASK_SILENT, stay, "remind", "", card["stage_id"], "pending", TITLE_SILENT, body, "", now)).rowcount:
                 orders.add_event(conn, card_id, now, AUTHOR, "rule", "Задача создана: %s" % TITLE_SILENT)
@@ -618,6 +662,26 @@ def silent(conn, now: str, notify=None) -> int:
             conn.rollback()
             logging.getLogger("tires_sync.order_wait").warning("the silence of the client of card %s could not be looked at", card_id, exc_info=True)
     return made
+
+
+ANSWERED = "клиент ответил по телефону или в другом чате"
+
+
+def client_answered(conn, task_id, now: str, author: str) -> None:
+    """«Клиент ответил» of the task «Клиент молчит» (the owner 2026-11-05): the task is done, the order's journal has who pressed it; the task is
+    one per stay, so no other comes in this stay. Raises OrderError for another task or one already closed."""
+    from . import order_engine
+    task = order_engine.get_task(conn, task_id)
+    if task["rule_id"] != TASK_SILENT:
+        raise orders.OrderError("«Клиент ответил» есть только у задачи «%s»." % TITLE_SILENT)
+    if task["status"] != "pending":
+        raise orders.OrderError("Эта задача уже обработана.")
+    done = conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status = 'pending'", (ANSWERED, now, task_id))
+    if done.rowcount != 1:
+        conn.commit()
+        raise orders.OrderError("Эта задача уже обработана.")
+    orders.add_event(conn, task["order_id"], now, author, "rule", "%s: Клиент ответил (по телефону или в другом чате), задача закрыта." % TITLE_SILENT)
+    conn.commit()
 
 
 def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of: Optional[PriceOf] = None, max_sends: int = MAX_SENDS) -> Dict[str, List[int]]:

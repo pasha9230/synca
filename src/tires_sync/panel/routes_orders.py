@@ -1166,7 +1166,7 @@ def register(app) -> None:
             client_text=wait_form_text(conn, card, sendable) if card["wants"] and any(
                 t["title"] == order_wait.TITLE_EXACT for t in engine.list_tasks(conn, card_id, ("pending",))) else "",
             send_chats=sendable,
-            exact_title=order_wait.TITLE_EXACT, webmim=webmim_match.card_block(conn, card, with_hints=own_point() is None),
+            exact_title=order_wait.TITLE_EXACT, silent_title=order_wait.TITLE_SILENT, webmim=webmim_match.card_block(conn, card, with_hints=own_point() is None),
             webmim_cost=order_report.order_webmim(conn, card_id) if has_right("money") else None,                # the purchase is money
             webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn)) if can_post("order_webmim_create") else None,
             supplier=supplier_view(conn, card) if can_post("order_webmim_create") and own_point() is None else None,
@@ -1883,6 +1883,10 @@ def register(app) -> None:
         conn = get_conn()
         task = _task_or_404(conn, card_id, task_id)
         try:
+            if request.form.get("answered"):                       # «Клиент ответил» of «Клиент молчит»: by phone or in another chat
+                order_wait.client_answered(conn, task_id, local_iso(), author())
+                flash("Готово: клиент ответил, задача закрыта.", "ok")
+                return back(card_id)
             if task["kind"] == "message":                           # «Отправлено вручную»: also while it lacks a value
                 engine.sent_by_hand(conn, task_id, local_iso(), author())
                 flash("Готово.", "ok")
