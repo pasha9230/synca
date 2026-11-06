@@ -238,3 +238,13 @@
   body.pt-card-page .order-unsent :is(.row,form){flex-direction:column;align-items:stretch}
   body.pt-card-page .order-unsent .btn{width:100%;min-height:48px;font-size:16px;justify-content:center}
 }
+/* the positions of the card on a phone (the owner 2026-11-06: 537 px at 375): a row is the name on its own line, then the quantity × price
+   (wrapping) and the sum; the page never scrolls sideways. The window's positions and «Продажа точки» alike. */
+@media (max-width:560px){
+  body.pt-card-page .owin-items,body.pt-card-page .owin-items tbody{display:block;width:100%}
+  body.pt-card-page .owin-items tr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:8px 0;border-bottom:1px solid var(--gray-200)}
+  body.pt-card-page .owin-items td{display:block;padding:0;border-bottom:0;min-width:0}
+  body.pt-card-page .owin-items td.owin-iname{flex:1 1 100%;width:auto;overflow-wrap:anywhere}
+  body.pt-card-page .owin-items td.owin-iqty{flex:1 1 auto;white-space:normal}
+  body.pt-card-page .owin-items td.owin-isum{margin-left:auto;white-space:nowrap}
+}
