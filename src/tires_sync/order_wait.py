@@ -587,7 +587,9 @@ def _since(conn, log) -> Tuple[int, str]:
 
 def _answered_anywhere(conn, card: dict, log) -> bool:
     """The client answered after the send (the owner 2026-11-05): a message in the chat of the send, in another chat of the order or of the
-    order's client (client_chat), or a call the panel has (avito_call) of the order, of its client (client_call) or from the order's phone."""
+    order's client (client_chat), or a call the panel has (avito_call) of the order, of its client (client_call) or from the order's phone.
+    A call is an answer only when the talk took place (`answered`: calls._keep sets it from talkDuration > 0; the owner 2026-11-06): a missed
+    call, or one seen still ringing, is not."""
     from . import connections
     ts, at = _since(conn, log)
     rows = {log[0]} | {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ?", (card["id"],))}
@@ -595,12 +597,12 @@ def _answered_anywhere(conn, card: dict, log) -> bool:
     if conn.execute("SELECT 1 FROM avito_message WHERE chat_row IN (%s) AND direction = 'in' AND kind NOT IN ('system', 'deleted') AND ts > ? LIMIT 1"
                     % ",".join("?" * len(rows)), sorted(rows) + [ts]).fetchone():
         return True
-    if conn.execute("SELECT 1 FROM avito_call k WHERE k.call_at > ? AND (k.order_id = ? OR k.id IN (SELECT l.call_row FROM client_order o JOIN client_call l "
+    if conn.execute("SELECT 1 FROM avito_call k WHERE k.answered = 1 AND k.call_at > ? AND (k.order_id = ? OR k.id IN (SELECT l.call_row FROM client_order o JOIN client_call l "
                     "ON l.client_id = o.client_id WHERE o.order_id = ?)) LIMIT 1", (at, card["id"], card["id"])).fetchone():
         return True
     phone = connections.normalize_phone(card.get("client_phone"))
     return bool(phone) and any(connections.normalize_phone(b) == phone for (b,) in conn.execute(
-        "SELECT buyer_phone FROM avito_call WHERE call_at > ? AND buyer_phone LIKE ?", (at, "%" + phone[-10:])))
+        "SELECT buyer_phone FROM avito_call WHERE answered = 1 AND call_at > ? AND buyer_phone LIKE ?", (at, "%" + phone[-10:])))
 
 
 def _silent_send(conn, card_id, stay) -> Tuple[Optional[tuple], bool]:

@@ -93,9 +93,10 @@ def test_an_answer_in_a_chat_of_somebody_else_is_not_an_answer(env):
     assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
 
 
-def call(conn, chat_row, at, phone="+79990000001", order_id=None, call_id=1):
-    row = conn.execute("INSERT INTO avito_call (account_id, call_id, call_at, buyer_phone, order_id) VALUES (?, ?, ?, ?, ?)",
-                       (account_of(conn, chat_row), call_id, at, phone, order_id)).lastrowid
+def call(conn, chat_row, at, phone="+79990000001", order_id=None, call_id=1, talk=60):
+    """A call as calls._keep writes it: `answered` is a talk that took place (talkDuration > 0); a missed call has 0."""
+    row = conn.execute("INSERT INTO avito_call (account_id, call_id, call_at, buyer_phone, order_id, talk_seconds, answered) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       (account_of(conn, chat_row), call_id, at, phone, order_id, talk, 1 if talk > 0 else 0)).lastrowid
     conn.commit()
     return row
 
@@ -127,6 +128,26 @@ def test_a_call_before_the_message_or_of_another_number_is_not_an_answer(env):
     call(conn, chat_row, "2026-11-04T11:00:00", call_id=1)                                      # before the message
     call(conn, chat_row, "2026-11-05T10:00:00", phone="+79995550000", call_id=2)                 # somebody else
     assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1
+
+
+@pytest.mark.parametrize("how", ("phone", "order", "client"))
+def test_a_missed_call_of_the_client_is_not_an_answer(env, how):
+    """The owner 2026-11-06: only a talk that took place is an answer; a missed call is not."""
+    conn, chat_row = env
+    card, _sender = told(env)
+    conn.execute("UPDATE order_card SET client_phone = '+79990000001' WHERE id = ?", (card,))
+    conn.commit()
+    if how == "phone":
+        call(conn, chat_row, "2026-11-05T10:00:00", talk=0)
+    elif how == "order":
+        call(conn, chat_row, "2026-11-05T10:00:00", phone="+79995550000", order_id=card, talk=0)
+    else:
+        row = call(conn, chat_row, "2026-11-05T10:00:00", phone="+79995550000", talk=0)
+        client = conn.execute("INSERT INTO client (name, note, created_at, created_by) VALUES ('Иван', '', ?, 'x')", (NOW,)).lastrowid
+        conn.execute("INSERT INTO client_order (order_id, client_id) VALUES (?, ?)", (card, client))
+        conn.execute("INSERT INTO client_call (call_row, client_id) VALUES (?, ?)", (row, client))
+        conn.commit()
+    assert order_wait.silent(conn, "2026-11-07T12:00:00") == 1 and len(silent_tasks(conn, card)) == 1
 
 
 def test_the_button_client_answered_closes_the_task_writes_the_journal_and_no_task_comes_again(env):
