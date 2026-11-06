@@ -171,6 +171,20 @@ def test_the_new_login_keeps_the_users_things_and_the_journal_keeps_the_old_logi
     assert any(a["action"] == "login_reset_used" and a["detail"] == {"from": "zamantyres", "to": "zaman"} for a in journal)
 
 
+def test_the_rename_moves_every_login_of_a_task_who_did_it_too():
+    """«Выполнил» (done_by) after the rename shows the new login, like «Кому» (assignee) and «Поставил» (created_by)."""
+    conn = store.connect(":memory:")
+    users.add_user(conn, "zamantyres", PASSWORD, NOW, role="owner")
+    users.add_user(conn, "olya", PASSWORD, NOW, role="chats")
+    conn.execute("INSERT INTO callback_task (due_at, assignee, note, created_at, created_by, done_at, done_by, kind, title) "
+                 "VALUES ('2026-10-08T10:00', 'olya', '', ?, 'zamantyres', ?, 'zamantyres', 'other', 'Внести трек-номер')", (NOW, NOW))
+    conn.commit()
+    token = users.create_login_reset(conn, "zamantyres", NOW, "owner", "owner")
+    assert users.use_login_reset(conn, token, "zaman", NEW_PASSWORD, NOW, "owner") == "zaman"
+    assert conn.execute("SELECT assignee, created_by, done_by FROM callback_task").fetchone() == ("olya", "zaman", "zaman")
+    assert users.login_taken(conn, "zamantyres") is False                    # nothing of the old login is left behind
+
+
 def test_a_new_login_with_leftovers_of_a_removed_user_is_refused():
     """A removed user's things under a login (an order answered for, a read mark) never become another person's by a rename."""
     conn = store.connect(":memory:")
