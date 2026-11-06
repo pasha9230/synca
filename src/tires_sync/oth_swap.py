@@ -55,6 +55,8 @@ def _client_terms(conn, card: dict) -> Optional[str]:
         return "Заказ в другой город (данные доставки клиента)."
     if str(card.get("special_terms") or "").strip() or float(card.get("special_amount") or 0):
         return "В заказе особые условия клиента."
+    if card.get("receipt_needed"):
+        return "Клиенту нужен товарный чек."
     return None
 
 
@@ -76,6 +78,8 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     conn.execute("DELETE FROM client_order WHERE order_id = ?", (a,))
     chats = [r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ? ORDER BY id", (a,))]
     conn.execute("UPDATE avito_chat SET order_id = NULL, unlinked = 1 WHERE order_id = ?", (a,))
+    skipped = conn.execute("UPDATE order_task SET status = 'skipped', result = 'клиент сменён', done_at = ? WHERE order_id = ? "
+                           "AND status IN ('pending', 'error')", (now, a)).rowcount      # made for the old client: never sent to the new one
     for row in chats:
         orders.add_event(conn, a, now, author, "chat", "Отвязан чат Ч-%d: клиент сменён" % row)
     fee = handed_fee(conn, a)
@@ -87,7 +91,8 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     if fee:
         orders.add_event(conn, a, now, author, "field", FEE_OFF)
     detail = {"order": a, "old_client": old_client, "old_link": old_link, "old_order_link": list(linked) if linked else None,
-              "old_name": old_name, "old_phone": old_phone, "name": name, "phone": phone, "chats": chats, "fee_off": fee, "from_order": from_order}
+              "old_name": old_name, "old_phone": old_phone, "name": name, "phone": phone, "chats": chats, "fee_off": fee, "from_order": from_order,
+              "tasks_skipped": skipped}
     return detail
 
 
@@ -112,6 +117,9 @@ def to_client(conn, card_id, name: str, phone: str, now: str, author: str) -> No
         why = why_not(conn, card)
         if why:
             raise _error(why)
+        from .clients import normalize
+        if normalize(phone) and normalize(phone) == normalize(card["client_phone"]):
+            raise _error("Это телефон прежнего клиента: если шины берёт он же, выберите «Тот же клиент».")
         busy = orders.open_order_conflict(conn, phone, card["point_id"], besides=card["id"])
         if busy is not None:
             raise _error("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, busy["id"]))
@@ -138,6 +146,11 @@ def take_target(conn, card_id, line_id, from_item) -> Optional[int]:
         return None
     if [i["id"] for i in b["items"] if int(i["qty"]) >= 1] != [line["id"]] or _client_terms(conn, b):
         return None
+    if not str(b["client_name"] or "").strip() or not str(b["client_phone"] or "").strip() or str(b.get("reserve_until") or "").strip():
+        return None                                                   # A needs both on «Товар на точке»; a reserve B promised is B's
+    from .order_merge import is_target, into
+    if is_target(conn, b["id"]) or into(conn, b["id"]):
+        return None                                                   # a merge: its fees and «Разъединить» are B's
     source = next((r for r in oth_stock._rows(conn, manual=False) if r["item_id"] == int(from_item)), None)
     if source is None or source["order_id"] == b["id"] or str(source["goods_id"]) != str(line["goods_id"]):
         return None
@@ -182,6 +195,8 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
         _audit(conn, now, author, detail)
         orders.add_event(conn, a_id, now, author, "field", "Клиент заказа №%d взял все шины этого заказа: клиент, чаты (%d) и звонки (%d) перенесены сюда"
                          % (b["id"], len(chats), calls))
+        conn.execute("UPDATE order_task SET status = 'skipped', result = 'клиент перешёл в заказ №%d', done_at = ? WHERE order_id = ? "
+                     "AND status IN ('pending', 'error')" % a_id, (now, b["id"]))      # a cancelled order waits for nothing (as order_merge)
         orders.add_event(conn, b["id"], now, author, "field", "Клиент взял шины заказа №%d с ОТХ: клиент, чаты и звонки перенесены туда, заказ продолжается там"
                          % a_id)
         if not orders.move_card(conn, b["id"], cancel["id"], now, author, changes={"cancel_reason": CLIENT_TOOK % a_id}, fire_rules=False,

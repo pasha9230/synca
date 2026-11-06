@@ -286,6 +286,51 @@ def test_a_move_lost_to_another_tab_changes_nothing(tmp_path, monkeypatch):
     assert audits(conn, "oth_client_swap") == []
 
 
+def test_b_without_a_phone_or_with_its_own_reserve_or_receipt_takes_as_before(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    b, _ = _b(conn)
+    line = orders.get_card(conn, b)["items"][0]
+    source = orders.get_card(conn, a)["items"][0]["id"]
+    for change in ("client_phone = ''", "reserve_until = '2026-12-20'", "receipt_needed = 1"):
+        conn.execute("UPDATE order_card SET client_phone = ?, reserve_until = '', receipt_needed = 0 WHERE id = ?",
+                     (orders.get_card(conn, b)["client_phone"] or "+7 900 555 66 78", b))
+        conn.execute("UPDATE order_card SET %s WHERE id = ?" % change, (b,))
+        conn.commit()
+        assert oth_swap.take_target(conn, b, line["id"], source) is None, change
+    assert oth_sale.take(conn, b, line["id"], source, LATER, "o") == 4                  # the take as before
+
+
+def test_a_with_a_receipt_of_the_old_client_is_never_swapped(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    conn.execute("UPDATE order_card SET receipt_needed = 1 WHERE id = ?", (a,))
+    conn.commit()
+    assert "чек" in oth_swap.why_not(conn, orders.get_card(conn, a))
+
+
+def test_the_phone_of_the_old_client_is_not_a_new_client(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    with pytest.raises(orders.OrderError, match="Тот же клиент"):
+        oth_sale.to_new_client(conn, a, "Иван", orders.get_card(conn, a)["client_phone"], LATER, "o")
+    assert orders.get_card(conn, a)["stage"]["code"] == "oth" and put_aside(conn, a)
+
+
+def test_the_waiting_tasks_of_the_old_client_and_of_b_are_skipped(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    b, _ = _b(conn)
+    for order_id in (a, b):
+        conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, status, title, created_at) "
+                     "VALUES (?, 999, ?, 'send', 'pending', 'Старое сообщение', ?)", (order_id, T, T))
+    conn.commit()
+    line = orders.get_card(conn, b)["items"][0]
+    oth_swap.take_client(conn, b, line["id"], orders.get_card(conn, a)["items"][0]["id"], LATER, "o")
+    rows = conn.execute("SELECT order_id, status FROM order_task WHERE rule_id = 999 ORDER BY order_id").fetchall()
+    assert rows == [(a, "skipped"), (b, "skipped")]
+
+
 def test_b_with_another_position_takes_as_before(tmp_path):
     conn = db(tmp_path)
     a = card_at(conn, "oth", T)
