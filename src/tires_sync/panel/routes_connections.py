@@ -491,6 +491,9 @@ def register(app) -> None:
                 raise orders.OrderError("Такого пользователя панели нет." if login not in known else "Клиенту чат Telegram не привязывается.")
             if known[login] == "client" and request.form.get("vk_peer", "").strip():
                 raise orders.OrderError("Клиенту ВК для оповещений не привязывается.")
+            vk = request.form.get("vk_peer", "").strip()
+            if vk and not (vk.isascii() and vk.isdigit() and len(vk) <= 15 and vk != "0"):      # checked first: the chat is not saved alone
+                raise orders.OrderError("ВК: номер страницы, только цифры.")
             order_notify.set_user_chat(conn, login, request.form.get("chat_id", ""), now_iso(), author())
             if "vk_peer" in request.form:                         # the VK page of the critical news (critical.py)
                 from .. import critical

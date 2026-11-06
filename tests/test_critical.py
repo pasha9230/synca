@@ -230,7 +230,6 @@ def test_the_service_alert_is_not_lost_after_a_note_of_the_journal(tmp_path, mon
     cli._alert(conn, box, "Tires Sync: служба tires-cycle.service завершилась с ошибкой.", service=True, critical=True)
     assert http.tg == ["1000"] and len(audit(conn, "critical")) == 1
     cli._alert(conn, box, "Tires Sync: цикл завершился с ошибками.", critical=True)
-    store.set_state(conn, "last_critical_alert_at", store.get_state(conn, "last_alert_at"))
     cli._alert(conn, box, "Tires Sync: служба tires-stock.service завершилась с ошибкой.", service=True, critical=True)
     assert http.tg == ["1000", "1000"]                                             # сразу после критичного цикла служба молчит
 
@@ -344,3 +343,38 @@ def test_a_purchase_change_goes_to_vk_of_who_may_see_it_with_its_own_bell_row_on
     assert sorted(p for p, _ in http.vk) == ["501", "504"] and all("Закупка у поставщика изменилась" in t for _, t in http.vk)
     assert audit(conn, "critical") == []                                         # своя красная строка у закупки, второй не нужно
     assert [r["kind"] for r in order_alerts.page_rows(conn, "partner1", NOW) if r["level"] == "red"] == ["purchase"]
+
+
+# --- по второму ревью ----------------------------------------------------------------------------------------------------------------
+
+def test_the_manual_ads_list_of_a_cabinet_goes_to_its_responsibles_own_bell(tmp_path, monkeypatch):
+    from test_manual_ads_alert import manual
+    from test_same_tire import setup
+    from tires_sync import connections
+    conn, account = setup(tmp_path)
+    users.add_user(conn, "olga", "пароль-для-ольги-1", NOW, role="chats")
+    connections.set_responsible(conn, account, "olga", ["olga"], NOW, "owner")
+    manual(conn, account, 2)
+    monkeypatch.setattr(cli, "notifier_for", lambda *a, **k: (_ for _ in ()).throw(AssertionError("в Telegram не идёт")))
+    cli._prebind_report(conn, None, tmp_path / "feed", [(connections.get_account(conn, account), [], True)])
+    rows = [r for r in order_alerts.page_rows(conn, "olga", NOW) if r["kind"] == "staffnote"]
+    assert len(rows) == 1 and cli.MANUAL_HEAD[:40] in rows[0]["text"]
+
+
+def test_a_rename_carries_the_vk_page_and_the_bell(tmp_path, monkeypatch):
+    conn, box, http = env(tmp_path, monkeypatch)
+    users.add_user(conn, "ivan", "пароль-ивана-длинный", NOW, role="owner")
+    critical.set_user_vk(conn, "ivan", "505", NOW, "owner")
+    critical.tell(conn, box, ["ivan"], "Tires Sync: сбой", NOW, vk_http=http)
+    assert users.login_taken(conn, "ivan")
+    users.rename_login(conn, "ivan", "ivan.p")
+    conn.commit()
+    assert critical.vk_peers(conn) == {"ivan.p": "505"} and not users.login_taken(conn, "ivan")
+    assert len(critical.bell_rows(conn, "ivan.p")) == 1 and critical.bell_rows(conn, "ivan") == []
+
+
+def test_a_purchase_notice_does_not_silence_a_failed_service(tmp_path, monkeypatch):
+    conn, box, http = env(tmp_path, monkeypatch)
+    cli._alert(conn, box, "Tires Sync: Закупка у поставщика изменилась: 1 позиция", notice=True, critical=True)
+    cli._alert(conn, box, "Tires Sync: служба tires-pull.service завершилась с ошибкой.", service=True, critical=True)
+    assert http.tg == ["1000", "1000"]

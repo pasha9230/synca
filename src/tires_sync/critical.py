@@ -183,6 +183,22 @@ def bell_rows(conn, login: str, now: Optional[str] = None, action: str = BELL) -
              "ack_href": "/alerts/critical/%d/ack" % row_id}]
 
 
+def rename_login(conn, old: str, new: str) -> None:
+    """Inside the caller's transaction (users.rename_login): the person's rows of the bell and their «Разобрался» marks follow the new login."""
+    for _prefix, _title, mark in BELLS.values():
+        conn.execute("DELETE FROM app_state WHERE key = ?", (mark + new,))
+        conn.execute("UPDATE app_state SET key = ? WHERE key = ?", (mark + new, mark + old))
+    for row_id, detail in conn.execute("SELECT id, detail FROM audit WHERE action IN (%s) AND detail LIKE ?" % ",".join("?" * len(BELLS)),
+                                       list(BELLS) + ['%' + json.dumps(old, ensure_ascii=False) + '%']).fetchall():
+        try:
+            data = json.loads(detail or "{}")
+        except ValueError:
+            continue
+        if old in (data.get("to") or []):
+            data["to"] = sorted({new if x == old else x for x in data["to"]})
+            conn.execute("UPDATE audit SET detail = ? WHERE id = ?", (json.dumps(data, ensure_ascii=False), row_id))
+
+
 def action_of(conn, row_id: int) -> Optional[str]:
     """The kind of the bell (BELLS) of this record of the journal, or None when it is no row of a bell."""
     row = conn.execute("SELECT action FROM audit WHERE id = ?", (int(row_id),)).fetchone()

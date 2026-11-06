@@ -128,6 +128,7 @@ def test_the_list_of_a_cabinet_goes_to_its_responsible_and_the_owners_to_the_own
     assert [login for login, _t in to_person] == ["zaman"] and "Заманова 0" in to_person[0][1] and "Своя 0" not in to_person[0][1]
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_responsible_without_a_chat_leaves_the_list_with_the_owner(tmp_path, monkeypatch):
     from tires_sync import users
     conn, first = _fresh(tmp_path)

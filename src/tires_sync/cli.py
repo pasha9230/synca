@@ -470,8 +470,8 @@ def _alert(conn, box, text: str, service: bool = False, notice: bool = False, re
         return True                                                      # said within six hours, here or by another process
     store.set_state(conn, "last_alert_at", stamp)
     store.set_state(conn, "last_alert_text", digest)
-    if critical:
-        store.set_state(conn, LAST_SAID_KEY, stamp)               # the pause of the service's own alert counts from a news people got
+    if critical and not notice:
+        store.set_state(conn, LAST_SAID_KEY, stamp)               # the pause of the service's own alert: from a failure people got (not news)
     store.write_audit(conn, _now(), "system", "notice" if notice else "alert", {"text": text})   # the journal keeps it without Telegram
     if notify is None:
         if critical:
@@ -1928,6 +1928,11 @@ def _prebind_report(conn, box, feed_root, applied, offers=None, unavailable=froz
         parts = _manual_parts(groups)
         print("\n".join(parts))
         person = _person_telegram(conn, box, whom) if whom and whom != owner_login else None
+        from . import critical
+        if person is None and whom and whom != owner_login and not critical.telegram_allowed(False):
+            stamp = moscow_now().isoformat(timespec="seconds")       # not critical: the person's own bell (critical.note), as before their chat
+            if all(critical.note(conn, [whom], part, stamp) for part in parts):
+                continue
         for part in parts:                                            # each part on its own: Telegram cuts a longer message
             if person is not None:
                 try:

@@ -340,7 +340,10 @@ def escalate_unseen(conn, box: Optional[SecretBox], now: str, tg_http: Transport
             try:
                 from . import critical, order_alerts
                 if not critical.telegram_allowed(False):           # not critical: the owners' own bell, the record of the order below
-                    told = critical.note(conn, order_alerts.owner_people(conn), text, now)
+                    told = notify.sent_recently(conn, "bell-" + key, now) or critical.note(conn, order_alerts.owner_people(conn), text, now)
+                    if told:
+                        notify.remember_sent(conn, "bell-" + key, now)     # the mark below failed (a busy base): not written twice
+                        conn.commit()
                     raise _NotSent("в колокольчике (в Telegram только критичное)" if told else "колокольчик не записан")
                 owner = notify.notifier_for(conn, box, http=tg_http)
                 if owner is None:
