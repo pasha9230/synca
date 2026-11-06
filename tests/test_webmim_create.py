@@ -135,6 +135,12 @@ def client_of(fake):
     return webmim_orders.OrdersClient("https://mimtest.example", "api-bot", "pw-SECRET-1", http=fake)
 
 
+def found(conn, card_id, fake, now=NOW, author="owner", **typed):
+    """«Заказ есть» as the card does it: the order typed is read from WebMIM and shown, then the person confirms that reading."""
+    seen = webmim_create.check(conn, card_id, client_of(fake), now, sleep=lambda _s: None, **typed)
+    return webmim_create.resolve(conn, card_id, True, now, author, client=client_of(fake), confirm=seen["token"], sleep=lambda _s: None, **typed)
+
+
 def place(conn, card_id, fake, server="test", now=NOW, today=TODAY):
     return webmim_create.place(conn, card_id, client_of(fake), server, now, today, "owner", sleep=lambda _s: None)
 
@@ -459,7 +465,7 @@ def test_the_order_found_in_the_cabinet_is_finished_by_dosozdat(tmp_path):
     fake = FakeWebmim()
     fake.fail[("POST", "/api/v2/orders")] = ["made-then-timeout"]
     place(conn, mine, fake)
-    text = webmim_create.resolve(conn, mine, True, "2026-10-23T12:05:00", "owner", webmim_id="1001")
+    text = found(conn, mine, fake, "2026-10-23T12:05:00", webmim_id="1001")
     assert "id 1001" in text and "Досоздать" in text and orders._row(conn, mine)["webmim_id"] == "1001"
     state = webmim_create.get_state(conn, mine)
     assert (state["state"], state["webmim_id"]) == ("partial", "1001")
@@ -470,17 +476,17 @@ def test_the_order_found_in_the_cabinet_is_finished_by_dosozdat(tmp_path):
     assert fake.held(1001) == {"111": 4, "222": 2} and [c[2]["goodsId"] for c in fake.posts("/items")] == ["222"]
 
 
-def test_the_number_of_the_cabinet_is_found_in_the_snapshot(tmp_path):
+def test_the_number_of_the_cabinet_is_found_in_the_cabinet(tmp_path):
+    """The number typed is looked for in WebMIM's cabinet itself (the snapshot may be an hour old): not there — nothing changes."""
     conn = db(tmp_path)
     mine = card(conn)
     fake = FakeWebmim()
     fake.fail[("POST", "/api/v2/orders")] = ["made-then-timeout"]
     place(conn, mine, fake)
-    with pytest.raises(orders.OrderError, match="нет в снимке"):
-        webmim_create.resolve(conn, mine, True, NOW, "owner", number="5001")
-    conn.execute("INSERT INTO webmim_order (server, id, number, seen_at) VALUES ('test', '1001', '5001', ?)", (NOW,))
-    conn.commit()
-    webmim_create.resolve(conn, mine, True, NOW, "owner", number="5001")
+    with pytest.raises(orders.OrderError, match="нет в кабинете"):
+        found(conn, mine, fake, number="5009")
+    assert webmim_create.get_state(conn, mine)["state"] == "unknown" and orders._row(conn, mine)["webmim_id"] == ""
+    found(conn, mine, fake, number="5001")
     row = orders._row(conn, mine)
     assert (row["webmim_id"], row["webmim_number"]) == ("1001", "5001")
 
@@ -493,17 +499,72 @@ def test_the_way_out_refuses_what_does_not_fit(tmp_path):
     fake = FakeWebmim()
     fake.fail[("POST", "/api/v2/orders")] = ["timeout"]
     place(conn, mine, fake)
-    other = card(conn, webmim_id="2002")
+    fake.add_order(None)                                                                # 1001: somebody else's order of the cabinet
+    other = card(conn, webmim_id="1001")
     for kwargs, words in (({"webmim_id": "12a"}, "только цифры"), ({"number": "1" * 21}, "только цифры"), ({}, "Впишите ID"),
-                          ({"webmim_id": "2002"}, "уже у заказа №%d" % other)):
+                          ({"webmim_id": "1001"}, "уже у заказа №%d" % other)):
         with pytest.raises(orders.OrderError, match=words):
-            webmim_create.resolve(conn, mine, True, NOW, "owner", **kwargs)
+            found(conn, mine, fake, **kwargs)
     orders.update_card(conn, mine, {"webmim_id": "3003"}, NOW, "owner")
     with pytest.raises(orders.OrderError, match="другой ID"):
-        webmim_create.resolve(conn, mine, True, NOW, "owner", webmim_id="1001")
+        found(conn, mine, fake, webmim_id="1001")
     with pytest.raises(orders.OrderError, match="вписан номер WebMIM"):
         webmim_create.resolve(conn, mine, False, NOW, "owner")
     assert webmim_create.get_state(conn, mine)["state"] == "unknown" and fake.posts("/api/v2/orders") == fake.posts("/api/v2/orders")[:1]
+
+
+def test_a_wrong_digit_never_takes_the_mark_off(tmp_path):
+    """«Заказ есть» with an id of no order of the cabinet, an unread cabinet, a reading not confirmed or changed since: nothing changes,
+    and «Досоздать» never opens on somebody else's order."""
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = FakeWebmim()
+    fake.fail[("POST", "/api/v2/orders")] = ["made-then-timeout"]
+    place(conn, mine, fake)
+    before = (webmim_create.get_state(conn, mine), dict(orders._row(conn, mine)), events(conn, mine))
+
+    def unchanged():
+        assert (webmim_create.get_state(conn, mine), dict(orders._row(conn, mine)), events(conn, mine)) == before
+        assert "Досоздать" not in (webmim_create.button(conn, orders.get_card(conn, mine), "test")["label"])
+    with pytest.raises(orders.OrderError, match="нет в кабинете"):
+        found(conn, mine, fake, webmim_id="1011")                                      # one digit wrong
+    unchanged()
+    for where, action in ((("GET", "/api/v2/orders"), "500"), (("GET", "/api/v2/orders/{id}/items"), "not-a-list")):
+        fake.fail[where] = [action, action]                                            # a reading fails: refused, the mark stays
+        with pytest.raises(orders.OrderError, match="не прочитан"):
+            found(conn, mine, fake, webmim_id="1001")
+        fake.fail[where] = []
+        unchanged()
+    with pytest.raises(orders.OrderError, match="проверьте его снова"):
+        webmim_create.resolve(conn, mine, True, NOW, "owner", webmim_id="1001", client=client_of(fake), sleep=lambda _s: None)   # not shown
+    unchanged()
+    with pytest.raises(orders.OrderError, match="не настроен"):
+        webmim_create.check(conn, mine, None, NOW, webmim_id="1001")
+    seen = webmim_create.check(conn, mine, client_of(fake), NOW, webmim_id="1001", sleep=lambda _s: None)
+    fake.items["1001"] = [{"goodsId": "111", "territoryId": TERRITORY, "stockType": 0, "quantity": 4}]          # changed after it was shown
+    with pytest.raises(orders.OrderError, match="изменился"):
+        webmim_create.resolve(conn, mine, True, NOW, "owner", webmim_id="1001", client=client_of(fake), confirm=seen["token"], sleep=lambda _s: None)
+    unchanged()
+    assert not fake.posts("/items") and len(fake.posts("/api/v2/orders")) == 1
+
+
+def test_the_reading_shows_the_date_the_positions_and_what_dosozdat_adds(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = FakeWebmim()
+    fake.fail[("POST", "/api/v2/orders")] = ["made-then-timeout"]
+    place(conn, mine, fake)
+    fake.items["1001"] = [{"goodsId": "111", "territoryId": TERRITORY, "stockType": 0, "quantity": 3, "goodsName": "Шина 111"}]
+    seen = webmim_create.check(conn, mine, client_of(fake), NOW, webmim_id="1001", sleep=lambda _s: None)
+    assert (seen["id"], seen["number"], seen["created"]) == ("1001", "5001", "2026-10-23 12:00")
+    assert seen["positions"] == ["«Шина 111» — 3 шт"] and seen["add"] == ["«Шина 111» — 1 шт", "«Шина 222» — 2 шт"]
+    assert not fake.posts("/items")                                                    # a reading only
+    text = webmim_create.resolve(conn, mine, True, NOW, "owner", webmim_id="1001", client=client_of(fake), confirm=seen["token"], sleep=lambda _s: None)
+    assert "создан 2026-10-23 12:00" in text and "«Досоздать» добавит: «Шина 111» — 1 шт; «Шина 222» — 2 шт" in text
+    shown = webmim_create.button(conn, orders.get_card(conn, mine), "test")
+    assert "id 1001" in shown["confirm"] and "№5001" in shown["confirm"] and "«Шина 111» до 4 шт; «Шина 222» до 2 шт" in shown["confirm"]
+    assert "Новый заказ не создаётся" in shown["confirm"]
+    assert place(conn, mine, fake, now="2026-10-23T12:06:00")["state"] == "done" and fake.held(1001) == {"111": 4, "222": 2}
 
 
 def test_a_refusal_or_a_pause_of_webmim_does_not_shut_the_button(tmp_path, monkeypatch):
@@ -581,7 +642,7 @@ def test_cleared_webmim_fields_shut_the_button_until_a_person_says(tmp_path):
     with pytest.raises(orders.OrderError, match="второй заказ"):
         place(conn, mine, fake, now="2026-10-23T12:05:00")
     assert len(fake.calls) == calls and len(fake.orders) == 1
-    webmim_create.resolve(conn, mine, True, "2026-10-23T12:06:00", "owner", webmim_id="1001")       # it is there: back to the card
+    found(conn, mine, fake, "2026-10-23T12:06:00", webmim_id="1001")                                 # it is there: back to the card
     assert orders._row(conn, mine)["webmim_id"] == "1001"
     assert place(conn, mine, fake, now="2026-10-23T12:07:00")["state"] == "done" and len(fake.orders) == 1 and not fake.posts("/items")[2:]
     orders.update_card(conn, mine, {"webmim_id": "", "webmim_number": "", "webmim_status": ""}, NOW, "owner")
@@ -749,7 +810,7 @@ def test_an_order_found_after_its_date_is_finished(tmp_path):
     fake = FakeWebmim()
     fake.fail[("POST", "/api/v2/orders")] = ["made-then-timeout"]
     place(conn, mine, fake)
-    webmim_create.resolve(conn, mine, True, "2026-10-25T09:00:00", "owner", webmim_id="1001")
+    found(conn, mine, fake, "2026-10-25T09:00:00", webmim_id="1001")
     later = place(conn, mine, fake, now="2026-10-25T10:00:00", today=date(2026, 10, 25))          # the delivery date (24th) has passed
     assert later["state"] == "done" and len(fake.orders) == 1 and fake.held(1001) == {"111": 4, "222": 2}
 
@@ -1024,10 +1085,19 @@ def test_the_way_out_is_on_the_card_for_the_owner_and_the_partner_only(panel):
         assert other.post("/orders/%d/webmim/resolve" % mine, data={"csrf": "tok", "found": "0"}).status_code == 403
     assert webmim_create.get_state(conn, mine)["state"] == "unknown"
     partner = person(app, conn, "partner")
-    post(partner, "/orders/%d/webmim/resolve" % mine, "tok", found="1", webmim_id="1001")
+    post(partner, "/orders/%d/webmim/resolve" % mine, "tok", found="1", webmim_id="1001")       # a reading only: shown, nothing changed
+    assert orders._row(conn, mine)["webmim_id"] == "" and webmim_create.get_state(conn, mine)["state"] == "unknown"
+    html = partner.get("/orders/%d" % mine).get_data(as_text=True)
+    assert "data-webmim-check" in html and "Заказ WebMIM №5001 (id 1001" in html and "создан 2026-10-23 12:00" in html
+    assert "«Досоздать» добавит: «Шина 111» — 4 шт; «Шина 222» — 2 шт" in html
+    token = re.search(r'name="confirm" value="([0-9a-f]+)"', html).group(1)
+    post(partner, "/orders/%d/webmim/resolve" % mine, "tok", found="1", webmim_id="1001", confirm=token)
     assert orders._row(conn, mine)["webmim_id"] == "1001" and webmim_create.get_state(conn, mine)["state"] == "partial"
+    assert "data-webmim-check" not in partner.get("/orders/%d" % mine).get_data(as_text=True)
     assert any(t.startswith("Отметка снята вручную (partner1)") for t in events(conn, mine))
-    assert "Досоздать в тестовом WebMIM</button>" in client.get("/orders/%d" % mine).get_data(as_text=True)
+    html = client.get("/orders/%d" % mine).get_data(as_text=True)
+    assert "Досоздать в тестовом WebMIM</button>" in html and "Заказ будет создан в WebMIM" not in html
+    assert "позиции добавятся в заказ WebMIM №5001 (id 1001, Тестовый сервер (mimtest))" in html and "«Шина 111» до 4 шт; «Шина 222» до 2 шт" in html
 
 
 def test_a_press_at_work_is_shown_on_the_card(panel):

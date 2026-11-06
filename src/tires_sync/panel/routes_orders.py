@@ -1454,17 +1454,37 @@ def register(app) -> None:
     def order_webmim_resolve(card_id):
         """The way out of a shut button (webmim_create.held_back: a lost answer, a made order's id cleared): after a look at WebMIM's cabinet
         the owner or the partner says «заказ есть» (its id or number go to the card, «Досоздать» adds what lacks) or «заказа нет» (a new press
-        is open). A record of the journal; nothing is asked of WebMIM."""
+        is open). «Заказ есть» goes in two steps: the order typed is read from WebMIM (GETs only) and shown — its date, its positions, what
+        «Досоздать» adds (kept in the session for the card) — and only the person's confirmation of that reading takes the mark off. A record
+        of the journal; nothing is written to WebMIM."""
         conn = get_conn()
         card_or_404(conn, card_id)
+        found, confirm = request.form.get("found") == "1", request.form.get("confirm", "")
+        session.pop("webmim_check", None)
+        state = webmim_create.get_state(conn, card_id)
+        server = state["server"] if state else webmim_match.current_server(conn)    # the cabinet of the press, not of today's choice
+        client = None
         try:
-            text = webmim_create.resolve(conn, card_id, request.form.get("found") == "1", local_iso(), author(),
-                                         webmim_id=request.form.get("webmim_id", ""), number=request.form.get("webmim_number", ""))
-            flash(text, "ok")
+            if found and server in webmim_create.CREATE_SERVERS and app.config.get("SECRET_BOX") is not None:
+                client = webmim_match.client_for(conn, app.config["SECRET_BOX"], app.config.get("WEBMIM_HTTP") or urllib_transport, server)
+            if found and not confirm:
+                seen = webmim_create.check(conn, card_id, client, local_iso(), webmim_id=request.form.get("webmim_id", ""),
+                                           number=request.form.get("webmim_number", ""))
+                session["webmim_check"] = dict(seen, card=card_id)
+                flash("Заказ WebMIM прочитан: сверьте дату и позиции в блоке «WebMIM» и подтвердите.", "ok")
+            else:
+                text = webmim_create.resolve(conn, card_id, found, local_iso(), author(), webmim_id=request.form.get("webmim_id", ""),
+                                             number=request.form.get("webmim_number", ""), client=client, confirm=confirm)
+                flash(text, "ok")
         except orders.OrderError as err:
             flash(str(err), "error")
+        except SecretKeyError:
+            flash("Секреты не читаются: проверьте мастер-ключ.", "error")
         except sqlite3.OperationalError:
             flash("База занята, попробуйте ещё раз.", "error")
+        finally:
+            if client is not None:
+                client.close()
         return back(card_id, "webmim")
 
     @app.route("/orders/<int:card_id>/note", methods=["POST"])
