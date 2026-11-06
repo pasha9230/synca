@@ -1,15 +1,15 @@
-{# «Выполненные» of «Задачи» (routes_tasks, the owner 2026-11-04), the old view, a point and «Новый вид» alike: what was to do, who set it and when, who did it and when, how long it took; no «Результат» (the owner's decision). A missing author or time is a dash. #}
+{# «Выполненные» of «Задачи» (routes_tasks, the owner 2026-11-04), the old view, a point and «Новый вид» alike: what was to do, whom it was for (on «Все» of the office only, the owner 2026-11-05), who set it and when, who did it and when, how long it took; no «Результат» (the owner's decision). A missing author or time is a dash. #}
 {% macro what(t) %}<span class="badge badge--neutral">{{ t.kind_label }}</span>{% if t.brief %} <span title="{{ t.title or t.note }}">{{ t.brief }}</span>{% endif %}{% if t.order_id %}<div class="small"><a href="/orders/{{ t.order_id }}">Заказ №{{ t.order_id }}</a></div>{% elif t.chat_row and not point %}<div class="small"><a href="/chats/{{ t.chat_row }}">Чат</a></div>{% elif t.client_id and not point %}<div class="small"><a href="/clients/{{ t.client_id }}">Клиент</a></div>{% endif %}{% endmacro %}
 {% if point %}<div class="pt-tasks">{% for t in rows %}<article class="card pt-task" data-done-task="{{ t.id }}"><div class="pt-task-title">{{ what(t) }}</div>
 <div class="small">Поставил: {{ names[t.created_by] or "—" }}, {{ t.created_at|short_dt }}</div>
 <div class="small">Выполнил: {{ names[t.done_by] or "—" }}, {{ t.done_at|short_dt }}</div>
 <div class="small">Заняло: <b>{{ t.spent }}</b></div></article>{% else %}<p class="muted">Выполненных задач нет.</p>{% endfor %}</div>
 {% else %}<section class="card o2-tk-list"><div class="table-wrap">
-<table class="table"><thead><tr><th>Задача</th><th>Поставил</th><th>Выполнил</th><th>Заняло</th></tr></thead><tbody>
-{% for t in rows %}<tr data-done-task="{{ t.id }}"><td>{{ what(t) }}</td>
+<table class="table"><thead><tr><th>Задача</th>{% if tab == "all" %}<th>Кому</th>{% endif %}<th>Поставил</th><th>Выполнил</th><th>Заняло</th></tr></thead><tbody>
+{% for t in rows %}<tr data-done-task="{{ t.id }}"><td>{{ what(t) }}</td>{% if tab == "all" %}<td class="nowrap">{{ names[t.assignee] or "—" }}</td>{% endif %}
 <td class="nowrap">{{ names[t.created_by] or "—" }}<div class="small muted">{{ t.created_at|short_dt }}</div></td>
 <td class="nowrap">{{ names[t.done_by] or "—" }}<div class="small muted">{{ t.done_at|short_dt }}</div></td>
 <td class="nowrap">{{ t.spent }}</td></tr>
-{% else %}<tr><td colspan="4" class="muted">Выполненных задач нет.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="{{ 5 if tab == 'all' else 4 }}" class="muted">Выполненных задач нет.</td></tr>{% endfor %}
 </tbody></table></div></section>{% endif %}
 {% if done.pages > 1 %}<nav class="pager" aria-label="Страницы">{% if done.page > 1 %}<a href="/tasks?{{ {'tab': tab, 'view': 'done', 'to': to, 'kind': kind, 'page': done.page - 1}|urlencode }}">← Новее</a>{% endif %}<span class="small muted">Страница {{ done.page }} из {{ done.pages }}, всего {{ done.total }}</span>{% if done.page < done.pages %}<a href="/tasks?{{ {'tab': tab, 'view': 'done', 'to': to, 'kind': kind, 'page': done.page + 1}|urlencode }}">Старее →</a>{% endif %}</nav>{% endif %}

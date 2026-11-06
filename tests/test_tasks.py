@@ -474,3 +474,22 @@ def test_a_point_never_sees_an_office_login_who_set_or_did_its_task_in_both_view
     conn.commit()
     office = client.get("/tasks?tab=all&view=done").get_data(as_text=True)
     assert "olya.office" in office and "Офис<" not in office
+
+
+def test_whom_a_done_task_was_for_only_on_the_offices_all(tmp_path):
+    """The owner 2026-11-05: on «Все» of «Выполненные» the same «Внести трек-номер» of several people tells «Кому»; elsewhere no column."""
+    app, client, tok, conn, alpha, beta = setup(tmp_path)
+    gamma = manager(app, conn, alpha)
+    to_zaman = done_row(conn, title="Внести трек-номер", assignee="zaman")
+    to_gamma = done_row(conn, title="Внести трек-номер", assignee="gamma", done_at="2026-10-23T15:00:00")
+    for new_view in ("", "all"):
+        store.set_state(conn, "ui_new.office", new_view)
+        conn.commit()
+        html = client.get("/tasks?tab=all&view=done").get_data(as_text=True)
+        assert "<th>Кому</th>" in html, new_view
+        assert '<td class="nowrap">Заман</td>' in html[html.index('data-done-task="%d"' % to_zaman):], new_view
+        assert '<td class="nowrap">gamma</td>' in html[html.index('data-done-task="%d"' % to_gamma):html.index('data-done-task="%d"' % to_zaman)]
+        for other in ("/tasks?view=done", "/tasks?tab=by_me&view=done"):                    # «Мне», «Поставил я»: as before
+            assert "<th>Кому</th>" not in client.get(other).get_data(as_text=True), (new_view, other)
+    page = gamma.get("/tasks?tab=all&view=done").get_data(as_text=True)
+    assert "Кому" not in page.split("pt-tasks", 1)[-1]
