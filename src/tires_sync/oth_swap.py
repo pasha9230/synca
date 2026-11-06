@@ -80,6 +80,14 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     conn.execute("UPDATE avito_chat SET order_id = NULL, unlinked = 1 WHERE order_id = ?", (a,))
     skipped = conn.execute("UPDATE order_task SET status = 'skipped', result = 'клиент сменён', done_at = ? WHERE order_id = ? "
                            "AND status IN ('pending', 'error')", (now, a)).rowcount      # made for the old client: never sent to the new one
+    unsent = conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE order_id = ? AND closed_at IS NULL", (now, author, a)).rowcount
+    stopped = 0
+    if chats:                                                         # a retry of a message to the old client's chat is never sent again
+        stopped = conn.execute("UPDATE chat_send_log SET status = 'failed', next_at = '', text = '', error = 'клиент сменён' WHERE status = 'retry' "
+                               "AND chat_row IN (%s)" % ",".join("?" * len(chats)), chats).rowcount
+    callbacks = [r[0] for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (a,))]
+    if callbacks:                                                     # «перезвонить» the old client: not the new one's
+        conn.execute("UPDATE callback_task SET cancelled_at = ? WHERE id IN (%s)" % ",".join("?" * len(callbacks)), [now] + callbacks)
     for row in chats:
         orders.add_event(conn, a, now, author, "chat", "Отвязан чат Ч-%d: клиент сменён" % row)
     fee = handed_fee(conn, a)
@@ -92,7 +100,7 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
         orders.add_event(conn, a, now, author, "field", FEE_OFF)
     detail = {"order": a, "old_client": old_client, "old_link": old_link, "old_order_link": list(linked) if linked else None,
               "old_name": old_name, "old_phone": old_phone, "name": name, "phone": phone, "chats": chats, "fee_off": fee, "from_order": from_order,
-              "tasks_skipped": skipped}
+              "tasks_skipped": skipped, "unsent_closed": unsent, "retries_stopped": stopped, "callbacks_cancelled": callbacks}
     return detail
 
 
@@ -157,6 +165,11 @@ def take_target(conn, card_id, line_id, from_item) -> Optional[int]:
     if b["point_id"] and b["point_id"] != source["point_id"]:
         return None
     a = orders.get_card(conn, source["order_id"])
+    from .clients import normalize
+    aside = conn.execute("SELECT client_id FROM order_oth_client WHERE order_id = ?", (a["id"],)).fetchone()
+    mine = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (b["id"],)).fetchone()
+    if normalize(b["client_phone"]) == normalize(a["client_phone"]) or (aside and mine and aside[0] == mine[0]):
+        return None                                                   # the same client came back: no swap, the take as before
     if why_not(conn, a) or [i["id"] for i in a["items"] if int(i["qty"]) >= 1] != [source["item_id"]] or int(source["qty"]) != int(line["qty"]):
         return None
     item = next(i for i in a["items"] if i["id"] == source["item_id"])
@@ -186,10 +199,12 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
         chats = [r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ? ORDER BY id", (b["id"],))]
         conn.execute("UPDATE avito_chat SET order_id = ? WHERE order_id = ?", (a_id, b["id"]))
         calls = conn.execute("UPDATE avito_call SET order_id = ? WHERE order_id = ?", (a_id, b["id"])).rowcount
+        moved_callbacks = conn.execute("UPDATE callback_task SET order_id = ? WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL",
+                                       (a_id, b["id"])).rowcount
         if b["avito_chat"]:
             orders.update_card(conn, a_id, {"avito_chat": b["avito_chat"]}, now, author, commit=False, link_client=False)
             orders.update_card(conn, b["id"], {"avito_chat": ""}, now, author, commit=False, link_client=False)
-        detail.update(client=link[0] if link else None, moved_chats=chats, moved_calls=calls)
+        detail.update(client=link[0] if link else None, moved_chats=chats, moved_calls=calls, moved_callbacks=moved_callbacks)
         if conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (b["id"],)).fetchone():
             orders.add_event(conn, a_id, now, author, "field", FEE_FROM % b["id"])
         _audit(conn, now, author, detail)
@@ -229,7 +244,9 @@ def fee_handed(conn) -> Tuple[Set[int], Dict[int, int]]:
     to them: A → B, when B was handed by a point)."""
     found = swaps(conn)
     handed = {r[0] for r in conn.execute("SELECT order_id FROM order_handoff")}
-    return set(found), {a: int(d["from_order"]) for a, d in found.items() if d.get("from_order") and int(d["from_order"]) in handed}
+    moved = {a: int(d["from_order"]) for a, d in found.items() if d.get("from_order") and int(d["from_order"]) in handed}
+    gave = {int(d["from_order"]) for d in found.values() if d.get("from_order")}      # B: its client (and fee) went to A, never paid twice
+    return (set(found) | gave) - set(moved), moved
 
 
 def handed_fee(conn, order_id) -> bool:

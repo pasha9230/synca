@@ -331,6 +331,42 @@ def test_the_waiting_tasks_of_the_old_client_and_of_b_are_skipped(tmp_path):
     assert rows == [(a, "skipped"), (b, "skipped")]
 
 
+def test_b_of_the_same_client_takes_as_before(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    b, _ = _b(conn)
+    conn.execute("UPDATE order_card SET client_phone = ? WHERE id = ?", (orders.get_card(conn, a)["client_phone"], b))
+    conn.commit()
+    line = orders.get_card(conn, b)["items"][0]
+    assert oth_swap.take_target(conn, b, line["id"], orders.get_card(conn, a)["items"][0]["id"]) is None
+
+
+def test_what_was_left_for_the_old_client_is_closed(tmp_path):
+    from tires_sync import unsent
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    row = chat(conn, a)
+    unsent.record(conn, a, "tok-a", T, "нет связи", "Иван, шины на точке")
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES ('retry-a', ?, ?, 'o', 'retry')", (row, T))
+    conn.execute("INSERT INTO callback_task (order_id, due_at, created_at, created_by) VALUES (?, ?, ?, 'o')", (a, T, T))
+    conn.commit()
+    oth_sale.to_new_client(conn, a, "Пётр", NEW_PHONE, LATER, "o")
+    assert unsent.of_order(conn, a) == []
+    assert conn.execute("SELECT status FROM chat_send_log WHERE token = 'retry-a'").fetchone() == ("failed",)
+    assert conn.execute("SELECT cancelled_at FROM callback_task WHERE order_id = ?", (a,)).fetchone() == (LATER,)
+
+
+def test_the_callbacks_of_b_go_with_its_client(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    b, _ = _b(conn)
+    conn.execute("INSERT INTO callback_task (order_id, due_at, created_at, created_by) VALUES (?, ?, ?, 'o')", (b, T, T))
+    conn.commit()
+    line = orders.get_card(conn, b)["items"][0]
+    oth_swap.take_client(conn, b, line["id"], orders.get_card(conn, a)["items"][0]["id"], LATER, "o")
+    assert conn.execute("SELECT order_id, cancelled_at FROM callback_task").fetchall() == [(a, None)]
+
+
 def test_b_with_another_position_takes_as_before(tmp_path):
     conn = db(tmp_path)
     a = card_at(conn, "oth", T)
@@ -457,6 +493,7 @@ def test_the_fee_of_b_handed_by_a_point_goes_with_its_client_into_a(tmp_path):
     _sell(conn, a)
     assert order_report.build(conn, "2026-10-01", "2026-10-31")["handoff"]["clients"] == 1
     assert any(t == oth_swap.FEE_FROM % b for t in texts(conn, a))
+    assert oth_swap.handed_fee(conn, a) and not oth_swap.handed_fee(conn, b)        # once: never again for B brought back from «Отмена»
 
 
 def test_the_sale_of_a_is_counted_once_at_its_own_purchase(tmp_path):
