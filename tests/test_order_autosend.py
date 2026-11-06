@@ -283,7 +283,7 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     html = client.get("/orders/%d" % card).get_data(as_text=True)
     assert 'id="autosend"' in html and "Поставить: Спросить, решил ли брать" in html and tpl.AUTOSEND_DEAL_SAMPLE[2] in html
     due = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
-    r = post(client, "/orders/%d/autosend" % card, tok, kind="deal", due_at=due, text="Договорились на завтра")
+    r = post(client, "/orders/%d/autosend" % card, tok, kind="deal", due_at=due, body="Договорились на завтра")
     assert r.status_code == 302
     [item] = auto.of_order(conn, card)
     assert item["kind"] == "deal" and item["text"] == "Договорились на завтра" and item["created_by"] == app.config["AUTHOR"]
@@ -293,7 +293,7 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     assert seen.status_code == 200
     page = seen.get_data(as_text=True)
     assert 'id="autosend"' not in page and "Договорились на завтра" not in page and "Автосообщение" not in page
-    assert post(point, "/orders/%d/autosend" % card, "tok", kind="deal", due_at=due, text="x").status_code == 403
+    assert post(point, "/orders/%d/autosend" % card, "tok", kind="deal", due_at=due, body="x").status_code == 403
     assert post(point, "/orders/%d/autosend/%d/cancel" % (card, item["id"]), "tok").status_code == 403
     assert auto.get(conn, item["id"])["status"] == "pending"
     r = post(client, "/orders/%d/autosend/%d/cancel" % (card, item["id"]), tok)
@@ -305,7 +305,7 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     conn.commit()
     chat_page = client.get("/chats/%d" % row).get_data(as_text=True)
     assert 'id="autosend"' in chat_page and 'name="chat" value="%d"' % row in chat_page
-    r = post(client, "/orders/%d/autosend" % card, tok, kind="ask", due_at=due, text="Из чата", chat=str(row))
+    r = post(client, "/orders/%d/autosend" % card, tok, kind="ask", due_at=due, body="Из чата", chat=str(row))
     assert r.status_code == 302 and r.headers["Location"].endswith("/chats/%d#autosend" % row)
     assert [i["text"] for i in auto.of_order(conn, card) if i["status"] == "pending"] == ["Из чата"]
 

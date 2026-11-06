@@ -379,6 +379,9 @@ _MORE_TEXTS = {
     "callback_done": lambda d: "Задача №%s выполнена%s" % (_q(d.get("task")), (": " + str(d["result"])) if d.get("result") else ""),
     "sheet_keep_from": lambda d: "Google-таблица: вести заказы, оформленные с %s (было %s)" % (_q(d.get("to") or "всех"), _q(d.get("from") or "всех")),
     "unsent_by_hand": lambda d: "Заказ №%s: сообщение клиенту отправлено вручную (не дошло из панели)" % _q(d.get("order")),
+    "autosend_add": lambda d: "Заказ №%s: поставлено автосообщение клиенту на %s" % (_q(d.get("order")), _q(str(d.get("due") or "").replace("T", " "))),
+    "autosend_update": lambda d: "Заказ №%s: автосообщение клиенту изменено, на %s" % (_q(d.get("order")), _q(str(d.get("due") or "").replace("T", " "))),
+    "autosend_cancel": lambda d: "Заказ №%s: автосообщение клиенту отменено" % _q(d.get("order")),
     "callback_cancel": lambda d: "Задача №%s отменена" % _q(d.get("task")),
     "chat_handover": lambda d: "Точка передала клиента из чата Ч-%s владельцу и партнёру (%s), задачи «Взять клиента»: %s" % (     # chat_handover.py
         _q(d.get("chat")), ", ".join(map(str, d.get("to") or [])) if isinstance(d.get("to"), list) else _q(d.get("to")), _count(d.get("tasks"))),

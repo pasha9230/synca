@@ -46,14 +46,14 @@ def register(app) -> None:
     @login_required
     def order_autosend_add(card_id):
         form = request.form
-        return done(card_id, lambda: order_autosend.add(get_conn(), card_id, form.get("kind", ""), form.get("due_at", ""), form.get("text", ""),
+        return done(card_id, lambda: order_autosend.add(get_conn(), card_id, form.get("kind", ""), form.get("due_at", ""), form.get("body", ""),
                                                         local_iso(), author()), "Автосообщение поставлено.")
 
     @app.route("/orders/<int:card_id>/autosend/<int:autosend_id>/update", methods=["POST"])
     @login_required
     def order_autosend_update(card_id, autosend_id):
         form = request.form
-        return done(card_id, lambda: order_autosend.update(get_conn(), autosend_id, form.get("due_at", ""), form.get("text", ""), local_iso(),
+        return done(card_id, lambda: order_autosend.update(get_conn(), autosend_id, form.get("due_at", ""), form.get("body", ""), local_iso(),
                                                            author(), order_id=card_id), "Автосообщение изменено.")
 
     @app.route("/orders/<int:card_id>/autosend/<int:autosend_id>/cancel", methods=["POST"])
