@@ -16,7 +16,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import message_texts, onboarding_texts, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, point_log, user_prefs
+from .. import message_texts, onboarding_texts, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_swap, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -1154,6 +1154,7 @@ def register(app) -> None:
             to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             oth_invoice=order_sheet.oth_invoice(conn, card),
+            oth_title=order_sheet.mim_title(conn, card) if card["stage"]["code"] == "oth" else "",     # a purchase of WebMIM first (2026-11-06)
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
@@ -1578,6 +1579,13 @@ def register(app) -> None:
         try:
             raw = str(request.form.get("from_item") or "").strip()      # «-N»: the manual row N of «Свой остаток (ОТХ)» (oth_stock.manual_rows)
             source = -(_int(raw[1:]) or 0) if raw.startswith("-") else (_int(raw) or 0)
+            whole = oth_swap.take_target(conn, card_id, item_id, source) if source > 0 else None
+            if whole is not None:                                          # all the tyres of A, B holds nothing else: A takes the client
+                stamp = local_iso()
+                oth_swap.take_client(conn, card_id, item_id, source, stamp, author())
+                flash("Клиент взял все шины заказа №%d: заказ продолжается там, этот ушёл в «Отмену»." % whole, "ok")
+                tell_at_point(conn, whole, next(s for s in orders.list_stages(conn) if s["code"] == "at_point"), stamp)
+                return redirect("/orders/%d" % whole)
             pieces = oth_sale.take(conn, card_id, item_id, source, local_iso(), author())
             flash("Взято с ОТХ: %d шт. В WebMIM оформится только недостающее." % pieces)
         except orders.OrderError as err:
@@ -1626,12 +1634,17 @@ def register(app) -> None:
         except orders.OrderError as err:
             flash(str(err), "error")
             return False
+        tell_at_point(conn, card_id, stage, now)
+        return True
+
+    def tell_at_point(conn, card_id, stage: dict, now: str) -> None:
+        """The order has just gone to «Товар на точке» with tyres from «На ОТХ»: the client hears «можно забирать», the point its own text;
+        the result is flashed (oth_to_point, a swap of the client: oth_swap)."""
         card = orders.get_card(conn, card_id)
         sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author())     # without a WebMIM number, the text without it: order_manager
         told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, oth_sale.point_text(conn, card, now), now,
                                        vk_http=app.config.get("VK_HTTP") or urllib_transport)
         flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")
-        return True
 
     @app.route("/orders/<int:card_id>/oth-back", methods=["POST"])
     @login_required
@@ -1664,6 +1677,11 @@ def register(app) -> None:
             flash(str(err), "error")
             return redirect("/orders/%d#oth-back" % card_id)
         session.pop("oth_back", None)
+        if new == card_id:                                                 # every tyre went: the order itself has the new client (oth_swap)
+            stage = next(s for s in orders.list_stages(conn) if s["code"] == "at_point")
+            flash("Клиент сменён: заказ №%d продолжается с новым клиентом." % card_id, "ok")
+            tell_at_point(conn, card_id, stage, local_iso())
+            return redirect("/orders/%d" % card_id)
         left = orders.get_card(conn, card_id)
         if left["stage"]["code"] == "oth":                                 # a tyre of the point, pieces given back: the old order stays
             flash("Заказ №%d остался на «На ОТХ»: в нём остались шины, которые не переходят (шина точки или возвращённые поставщику)." % card_id, "error")

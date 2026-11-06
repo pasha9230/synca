@@ -264,7 +264,8 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     counted = {r["id"]: r for r in order_report._counted(conn, [rows[i] for i in ids])}
     rates, day = order_report.list_rates(conn), min(r["day"] for r in counted.values())
     fee = order_report.rate_on(rates, "point_fee", day)
-    if conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (card["id"],)).fetchone() or card["id"] in order_merge.handed(conn):
+    from . import oth_swap
+    if oth_swap.handed_fee(conn, card["id"]):                                     # never for a client who left (oth_swap)
         fee += order_report.rate_on(rates, "handoff_fee", day)
     total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
@@ -366,6 +367,25 @@ def _oth_values(conn, card: dict, item_id: int, number: str, typed: set) -> dict
     return {"№ заказа MIM": card["webmim_number"] if own_number else number,
             "Перемещение MIM": card["transfer_number"] if "transfer_number" in typed else (source["transfer_number"] if source else ""),
             "Дата счета": _invoice_day(conn, card) if own_number else (_invoice_day(conn, source) if source else "")}
+
+
+def mim_title(conn, card: dict) -> str:
+    """The name of an order on «На ОТХ» (the plan of 2026-11-06: a purchase of WebMIM, its client changes): «№ MIM <number> · пер. <transfer> ·
+    счёт <day>» as its first row of the table counts them (a position «с ОТХ»: the order of purchase, _oth_values), «без № MIM» without a number;
+    never the client's name."""
+    numbers = oth_sale.from_number(conn, card["id"])
+    held = [i for i in card["items"] if i["id"] in numbers and int(i["qty"]) >= 1]
+    if held:
+        values = _oth_values(conn, card, held[0]["id"], numbers[held[0]["id"]], oth_sale.typed_numbers(conn, card))
+    else:
+        values = {"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"], "Дата счета": _invoice_day(conn, card)}
+    parts = ["№ MIM %s" % values["№ заказа MIM"] if values["№ заказа MIM"] else "без № MIM"]
+    if values["Перемещение MIM"]:
+        parts.append("пер. %s" % values["Перемещение MIM"])
+    day = str(values["Дата счета"] or "")
+    if len(day) == 10:
+        parts.append("счёт %s.%s.%s" % (day[8:10], day[5:7], day[:4]))
+    return " · ".join(parts)
 
 
 def oth_invoice(conn, card: dict) -> List[dict]:

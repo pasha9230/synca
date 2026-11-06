@@ -66,7 +66,7 @@ def test_an_order_on_oth_is_named_by_its_purchase_of_webmim(tmp_path):
 def test_the_invoice_day_is_in_the_name_as_the_table_counts_it(tmp_path):
     conn = db(tmp_path)
     a = card_at(conn, "oth", T)
-    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, updated_at) VALUES (?, 'x', 'done', ?, ?, ?)",
+    conn.execute("INSERT INTO webmim_create (order_id, server, state, first_at, started_at, updated_at, author) VALUES (?, 'x', 'done', ?, ?, ?, 'o')",
                  (a, T, T, "2026-10-21T09:00:00"))
     conn.commit()
     card = orders.get_card(conn, a)
@@ -85,8 +85,20 @@ def test_the_board_names_an_order_on_oth_by_mim_first_and_never_by_the_client(tm
     assert cards[here]["oth_title"] == "" and cards[here]["client"] == "Иван"
 
 
-def test_the_panel_shows_the_mim_name_first_on_the_board_the_list_the_oth_page_and_the_card(tmp_path):
+def test_the_list_never_names_the_client_of_an_order_on_oth(tmp_path):
+    from tires_sync import orders_list
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    here = card_at(conn, "at_point", T)
+    assert [r["values"]["Имя"] for r in orders_list.rows(conn, [a, here], True)] == ["", "Иван"]
+    assert orders.get_card(conn, a)["client_name"] == "Иван"                        # the field of the order stays
+
+
+@pytest.mark.parametrize("new_view", [False, True])
+def test_the_panel_shows_the_mim_name_first_on_the_board_the_list_the_oth_page_and_the_card(tmp_path, new_view):
     app, owner, tok, conn = panel(tmp_path)
+    store.set_state(conn, "ui_new.office", "all" if new_view else "off")
+    conn.commit()
     a = card_at(conn, "oth", T)
     number = orders.get_card(conn, a)["webmim_number"]
     board = owner.get("/orders").get_data(as_text=True)
@@ -97,6 +109,9 @@ def test_the_panel_shows_the_mim_name_first_on_the_board_the_list_the_oth_page_a
     assert re.search(r"№ MIM %s · №%d" % (number, a), oth)
     page = owner.get("/orders/%d" % a).get_data(as_text=True)
     assert "№ MIM %s" % number in page and "data-oth-title" in page
+    assert ("office2" in board) == new_view
+    for text in (board, listed):
+        assert not re.search(r"№%d</a>\s*Иван|o2-cli\">Иван" % a, text)
 
 
 # ---- 2. a new client of all the tyres, from the card on «На ОТХ» -------------------------------------------------------------------------
@@ -157,8 +172,8 @@ def test_what_is_not_all_the_tyres_makes_a_new_order_as_before(tmp_path, why):
     if why == "returned":
         conn.execute("INSERT INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, 1, ?, 'o')", (item["id"], a, T))
     elif why == "point_tyre":
-        orders.add_item(conn, a, goods_id=orders.POINT_GOODS, name="Шина точки", brand_key="", season="winter", diameter=16, territory="1",
-                        qty=1, sale_unit=1000, supplier_price=0, terms=None, fee_pct=0, promo_pct=0, now=T, author="o")
+        conn.execute("INSERT INTO order_item (order_id, goods_id, name, qty, supplier_price, sale_unit) VALUES (?, ?, 'Шина точки', 1, 0, 1000)",
+                     (a, orders.POINT_GOODS))
     else:
         conn.execute("UPDATE order_card SET sale_ids = '[999]' WHERE id = ?", (a,))
     conn.commit()
@@ -198,6 +213,7 @@ def test_the_panel_swaps_the_client_and_tells_the_new_one(tmp_path, monkeypatch)
 def _b(conn, qty=4, extra=()):
     b = new_order(conn, qty=qty, extra=extra)
     row = chat(conn, b, "cb")
+    conn.execute("UPDATE order_card SET avito_chat = ? WHERE id = ?", ("Ч-%d" % row, b))
     call(conn, b, 7)
     return b, row
 
@@ -218,7 +234,7 @@ def test_taking_all_the_tyres_of_a_moves_the_client_of_b_into_a(tmp_path):
     assert client_of(conn, a) == b_client and client_of(conn, a) != old_client and put_aside(conn, a) is None
     assert conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (b_chat,)).fetchone() == (a,)
     assert conn.execute("SELECT order_id, unlinked FROM avito_chat WHERE id = ?", (old_chat,)).fetchone() == (None, 1)
-    assert sorted(conn.execute("SELECT call_id, order_id FROM avito_call").fetchall()) == [(1, a), (7, a)]
+    assert conn.execute("SELECT call_id, order_id FROM avito_call").fetchall() == [(7, a)]
     assert card["avito_chat"] == "Ч-%d" % b_chat
     assert gone["stage"]["code"] == "cancel" and gone["cancel_reason"] == oth_swap.CLIENT_TOOK % a
     assert [int(i["qty"]) for i in gone["items"]] == [4]                               # the data of B stays

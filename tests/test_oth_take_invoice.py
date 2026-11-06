@@ -80,8 +80,9 @@ def test_a_new_client_from_the_oth_stage_gets_all_three_too(tmp_path):
     old = source(conn)
     invoice(conn, old)
     cid = oth_sale.to_new_client(conn, old, "Пётр", "+7 900 555 66 77", LATER, "o")
-    assert numbers(conn, cid) == (NUMBER, TRANSFER)
-    assert row_of(conn, cid) == (NUMBER, TRANSFER, DAY)
+    assert cid == old and numbers(conn, cid) == (NUMBER, TRANSFER)                   # all the tyres: the order itself (oth_swap, 2026-11-06)
+    [found] = sheet.rows_of(conn, cid, LATER).values()
+    assert tuple(found[c] for c in COLUMNS) == (NUMBER, TRANSFER, DAY)
 
 
 def test_a_new_client_gets_the_day_of_the_source_even_when_its_number_finds_no_day(tmp_path):
@@ -89,7 +90,8 @@ def test_a_new_client_gets_the_day_of_the_source_even_when_its_number_finds_no_d
     old = source(conn)
     by_button(conn, old)
     cid = oth_sale.to_new_client(conn, old, "Пётр", "+7 900 555 66 77", LATER, "o")
-    assert row_of(conn, cid) == (NUMBER, TRANSFER, "2026-10-22")
+    [found] = sheet.rows_of(conn, cid, LATER).values()                             # the order itself (oth_swap, 2026-11-06)
+    assert cid == old and tuple(found[c] for c in COLUMNS) == (NUMBER, TRANSFER, "2026-10-22")
 
 
 def test_the_first_of_a_chain_gives_them(tmp_path):

@@ -547,7 +547,8 @@ def _take_manual(conn, card: dict, line: dict, source: dict, pieces: int, before
 
 
 def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
-    """Back from «На ОТХ» to «Товар на точке» with a new client (the owner 2026-10-30, the order 444): a new order of the same point, with the
+    """All the tyres given (oth_swap.why_not, the plan of 2026-11-06): the old order itself takes the new client and goes to «Товар на точке»
+    (oth_swap.to_client), it is returned. Otherwise, back from «На ОТХ» to «Товар на точке» with a new client (the owner 2026-10-30, the order 444): a new order of the same point, with the
     tyres still ours on OTH of the old one at their sale price, takes them as «Взять с ОТХ» does (take: the first order's purchase, «с ОТХ»,
     the old order emptied goes to «Отмена» «Шины переданы в заказ №…»). The caller puts the new order on «Товар на точке» (all from OTH).
     Returns the new order; OthSaleError says why nothing was made."""
@@ -561,6 +562,12 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
         raise OthSaleError("Укажите имя нового клиента.")
     if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (old_id,)).fetchone():
         raise OthSaleError("По заказу №%d согласован возврат поставщику (акт МХ-3): шины новому клиенту не передать." % old_id)
+    if old["sale_ids"]:                                                 # an order with a sale never changes its client (the plan of 2026-11-06)
+        raise OthSaleError("По заказу №%d записана продажа: клиента не сменить." % old_id)
+    from . import oth_swap
+    if oth_swap.why_not(conn, old) is None:                             # every tyre goes: the order itself takes the client (oth_swap)
+        oth_swap.to_client(conn, old_id, name, phone, now, author)
+        return int(old_id)
     rows = [r for r in oth_stock._rows(conn) if r["order_id"] == old_id]
     if not rows:
         raise OthSaleError("На ОТХ по заказу №%d нет шин, которые можно передать (возвращены поставщику, шина точки или тестовая точка)." % old_id)
