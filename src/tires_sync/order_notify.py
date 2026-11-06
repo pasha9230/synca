@@ -261,10 +261,11 @@ def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg
                 skip_logins=(), critical: bool = False) -> str:
     """The same text in Telegram to each of these panel users who has a chat (the owner's login: the chat of the failure alerts), once per chat.
     With `now`, the same text to the same chat within the hour is a repeat and is not sent again. Never raises; returns how it went.
-    Not `critical` (critical.py): nothing goes while only the critical news go to Telegram; the bell and the journal keep it."""
+    Not `critical` (critical.py): while only the critical news go to Telegram, the same text is a row of each person's own bell (critical.note;
+    never a client nor a point user); with `now`, the same text to the same people within the hour is not written again."""
     from . import critical as crit
     if not crit.telegram_allowed(critical):
-        return "Telegram: не отправляется, туда только критичное (%s)" % ", ".join(logins)
+        return _to_bells(conn, logins, text, now, skip_logins)
     owner = get_owner_login(conn)
     owner_chat = str(connections.get_config(conn, "telegram", 0).get("chat_id") or "")
     mine = user_chats(conn)
@@ -300,6 +301,32 @@ def tell_people(conn, box: Optional[SecretBox], logins: List[str], text: str, tg
     if failed:
         parts.append("Telegram не отправлен (%s)" % "; ".join(failed))
     return "; ".join(parts)
+
+
+def _to_bells(conn, logins, text: str, now: str, skip_logins=()) -> str:
+    """tell_people while Telegram takes only the critical: the person's own bell instead. Never raises."""
+    from . import critical
+    try:
+        roles = {u["login"]: u["role"] for u in users.list_users(conn)}
+        owner = get_owner_login(conn)
+        people = sorted({x for x in logins if x and x not in skip_logins and (x == owner or roles.get(x) not in ("client", "point", None))})
+        if not people:
+            return "Telegram: не отправляется, туда только критичное; в колокольчик некому (%s)" % ", ".join(logins)
+        key = "bells|%s|%s" % (",".join(people), text)
+        if now and notify.sent_recently(conn, key, now):
+            return "Telegram: не отправляется, туда только критичное; в колокольчике (%s; повтор не записан)" % ", ".join(people)
+        if not critical.note(conn, people, text, now or store.moscow_iso()):
+            return "Telegram: не отправляется, туда только критичное; колокольчик не записан (%s)" % ", ".join(people)
+        if now:
+            notify.remember_sent(conn, key, now)
+            conn.commit()
+        return "Telegram: не отправляется, туда только критичное; в колокольчике (%s)" % ", ".join(people)
+    except Exception as err:                                       # noqa: BLE001 - never raises, as tell_people
+        try:
+            conn.rollback()
+        except Exception:                                          # noqa: BLE001
+            pass
+        return "Telegram: не отправляется, туда только критичное; колокольчик не записан (%s)" % type(err).__name__
 
 
 class _NotSent(Exception):

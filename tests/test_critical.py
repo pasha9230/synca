@@ -448,3 +448,27 @@ def test_an_order_note_is_not_labelled_twice(tmp_path, monkeypatch):
     card = orders.get_card(conn, orders.create_card(conn, {"client_name": "Иван", "responsible": "worker2"}, NOW, "owner"))
     order_notify.deliver(conn, box, card, "Заказ №%d: Клиент не пришёл" % card["id"], NOW)
     assert [r["text"] for r in critical.bell_rows(conn, "worker2", action=critical.NOTE)] == ["Заказ №%d: Клиент не пришёл" % card["id"]]
+
+
+# --- по пятому ревью -----------------------------------------------------------------------------------------------------------------
+
+def test_what_went_to_peoples_telegram_through_tell_people_is_now_on_their_bell(tmp_path, monkeypatch):
+    conn, box, http = env(tmp_path, monkeypatch)
+    users.add_user(conn, "client1", "пароль-клиента-длинный", NOW, role="client")
+    how = order_notify.tell_people(conn, box, ["owner", "second1", "client1"], "Точка «Бета» сообщила о заказе №7", tg_http=http, now=NOW)
+    assert how.startswith("Telegram:") and "в колокольчике (owner, second1)" in how and http.tg == []
+    assert [r["text"] for r in critical.bell_rows(conn, "second1", action=critical.NOTE)] == ["Точка «Бета» сообщила о заказе №7"]
+    assert critical.bell_rows(conn, "client1", action=critical.NOTE) == []                        # клиенту никогда
+    order_notify.tell_people(conn, box, ["owner", "second1"], "Точка «Бета» сообщила о заказе №7", tg_http=http, now=NOW)
+    assert len(audit(conn, critical.NOTE)) == 1                                                    # повтор в течение часа не пишется
+
+
+def test_no_messenger_api_on_an_account_is_critical(tmp_path, monkeypatch):
+    from tires_sync import order_arrived
+    conn, box, http = env(tmp_path, monkeypatch)
+    critical.set_user_vk(conn, "owner", "501", NOW, "owner")
+    monkeypatch.setattr(cli, "load_box", lambda key_file: box)
+    monkeypatch.setattr(order_arrived, "check", lambda *a, **k: 0)
+    monkeypatch.setattr(order_arrived, "api_refusals", lambda conn, now: ["Авито не даёт отправлять сообщения: аккаунт «А» (нет подписки API мессенджера)"])
+    cli._arrived_alerts(conn, "key")
+    assert http.tg == ["1000"] and [p for p, _ in http.vk] == ["501"] and len(audit(conn, "critical")) == 1

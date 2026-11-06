@@ -1378,8 +1378,8 @@ def _arrived_alerts(conn, key_file) -> None:
         tell = lambda logins, text: order_notify.tell_people(conn, box, logins, text, tg_http=_http(), now=now)
         made = order_arrived.check(conn, now, tell, lambda card, text: order_notify.tell_point(conn, box, card, text, now, tg_http=_http(), vk_http=_http()))
         lines = order_arrived.api_refusals(conn, now)
-        if lines:
-            tell([order_notify.get_owner_login(conn)], "Tires Sync: " + "\n".join(lines))
+        if lines:                                               # no messenger API: every send to a client of the account fails (critical)
+            _alert(conn, box, "Tires Sync: " + "\n".join(lines), notice=True, critical=True)
         print("приехал, а клиенту не сообщили: %d; аккаунтов без API мессенджера: %d" % (made, len(lines)))
     except Exception as err:      # noqa: BLE001
         conn.rollback()
@@ -1932,7 +1932,8 @@ def _prebind_report(conn, box, feed_root, applied, offers=None, unavailable=froz
         if person is None and not critical.telegram_allowed(False):     # not critical: the own bell of the cabinet's responsible (critical.note),
             to = [whom] if whom and whom != owner_login else order_alerts.owner_people(conn)   # else both owners' (the note is the journal too)
             stamp = moscow_now().isoformat(timespec="seconds")
-            if all(critical.note(conn, to, part, stamp) for part in parts):
+            parts = [part for part in parts if not critical.note(conn, to, part, stamp)]     # a part not written: the journal below
+            if not parts:
                 continue
         for part in parts:                                            # each part on its own: Telegram cuts a longer message
             if person is not None:
