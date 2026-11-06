@@ -166,7 +166,8 @@ def test_the_dates_a_client_writes(text, expected):
     ("заберу 25.12", "far"), ("05.11", "far"), ("в 12.30 подъеду", "none"), ("8 900 123 45 67", "none"), ("31.02", "none"),
     ("Сегодня не успею", "refused"), ("завтра не смогу", "refused"), ("перезвоню завтра", "refused"), ("Отказываюсь, завтра не надо", "refused"),
     ("нет, 20.11", "refused"), ("Сегодня никак", "refused"), ("сегодня уже нельзя", "refused"), ("подъеду в 17.11", "none"),
-    ("к 12.11 буду", "none"), ("отмените заказ", "refused"), ("Передумал", "refused"),
+    ("к 12.11 буду", "none"), ("Завтра сообщу", "refused"), ("завтра напишу", "refused"), ("завтра позвоню", "refused"),
+    ("скажу завтра", "refused"), ("откажусь наверное, завтра скажу", "refused"), ("уточню и в пятницу отвечу", "refused"), ("отмените заказ", "refused"), ("Передумал", "refused"),
 ])
 def test_no_date_two_dates_and_a_far_one(text, status):
     assert reply_date.parse(text, date(2026, 11, 6))[0] == status
@@ -347,3 +348,14 @@ def test_a_call_in_the_chat_after_the_reminder_is_told_to_the_responsible(tmp_pa
     tick(conn, NEXT + "T10:07:00", deliver, notify)
     [alert] = [t for _c, t in notify.sent if "Клиент ответил" in t]
     assert "Звонок через Авито: пропущен" in alert and until(conn, cid) == DAY
+
+
+def test_answers_without_a_date_are_told_to_the_responsible_once(tmp_path):
+    conn, cid, chat, deliver, notify = told(tmp_path)
+    for at in ("T14:00:00", "T15:30:00", "T16:30:00"):
+        said(conn, chat, DAY + at, "здравствуйте")
+        tick(conn, DAY + at[:3] + ":07:00".replace(":07", ":%02d" % 50), deliver, notify)
+    assert len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1
+    said(conn, chat, DAY + "T17:00:00", "заберу 20.10")                 # a date still moves the reservation
+    tick(conn, DAY + "T17:50:00", deliver, notify)
+    assert until(conn, cid) == "2026-10-20"

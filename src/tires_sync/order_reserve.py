@@ -66,6 +66,7 @@ WROTE_MARK = "[резерв:клиент-писал:%s]"           # once per st
 WROTE_TASK = "Клиент писал, проверьте заказ №%s"   # the owner's words
 NOT_SENT_TASK = "Напоминание о сроке резерва по заказу №%s клиенту не ушло (%s). Свяжитесь с клиентом."
 REPLY_KEY = "reserve_reply:%d:%s"                 # app_state, per order and stay: the last avito_message.id of the client's answers read
+NO_DATE_MARK = "[резерв:ответ-без-даты:%s]"         # the responsible hears of answers without a date once per stay (the review 2026-11-06)
 REPLY_MARK = "[резерв:ответ:%d]"                  # a record of an answer read: the id of its message
 NO_DATE_TASK = ("Клиент ответил на напоминание о сроке резерва по заказу №%s: «%s». Дата не распознана или дальше 30 дней: проверьте заказ, "
                 "резерв не изменён.")
@@ -501,10 +502,14 @@ def _reply_step(conn, card: dict, now: str, notify: Optional[Notify]) -> None:
         conn.commit()
         logging.getLogger("tires_sync.orders").info("card %s: the client named %s in the answer to the reminder", card["id"], new)
         return
+    if _done(conn, card["id"], NO_DATE_MARK % stay):             # the responsible was told once this stay: the chat is theirs now
+        conn.commit()
+        return
     text = " / ".join((m[2] or "без текста")[:200] for m in found)
     task = NO_DATE_TASK % (order_manager.label(card), text)
     said = notify(card, task) if notify is not None else "оповещение не отправлено"
-    orders.add_event(conn, card["id"], now, "система", "reserve", "Ответственному: «%s»: %s %s" % (task, said, REPLY_MARK % found[-1][0]), level="yellow")
+    orders.add_event(conn, card["id"], now, "система", "reserve", "Ответственному: «%s»: %s %s %s" % (task, said, REPLY_MARK % found[-1][0], NO_DATE_MARK % stay),
+                     level="yellow")
     conn.commit()
 
 
