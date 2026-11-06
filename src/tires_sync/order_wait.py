@@ -237,7 +237,7 @@ def _mark(conn, card_id, kind: str, found: List, now: str, notify=None, note: st
     wanted = "; ".join(describe(w) for w in card["wants"])
     shown = "; ".join("%s (%d шт.)" % (o.name, o.stock) for o in found[:3]) or "см. чат заказа"
     body = "Заказ №%d, клиент %s. Ответственный: %s. Нужно: %s. В наличии: %s." % (
-        card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], wanted, shown)
+        card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], wanted.rstrip("."), shown)     # «4 шт.» ends the line
     if note:
         body += " " + note
     made = conn.execute(
