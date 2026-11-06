@@ -771,13 +771,26 @@ def item_money(item: dict) -> dict:
                           float(item["promo_pct"]), int(item["qty"]))
 
 
+def _item(row) -> dict:
+    item = dict(zip([c.strip() for c in ITEM_FIELDS.split(",")], row))
+    item["terms"] = json.loads(item["terms"] or "{}")
+    item["money"] = item_money(item)
+    return item
+
+
 def list_items(conn, card_id) -> List[dict]:
-    out = []
-    for row in conn.execute("SELECT %s FROM order_item WHERE order_id = ? ORDER BY id" % ITEM_FIELDS, (card_id,)):
-        item = dict(zip([c.strip() for c in ITEM_FIELDS.split(",")], row))
-        item["terms"] = json.loads(item["terms"] or "{}")
-        item["money"] = item_money(item)
-        out.append(item)
+    return [_item(row) for row in conn.execute("SELECT %s FROM order_item WHERE order_id = ? ORDER BY id" % ITEM_FIELDS, (card_id,))]
+
+
+def items_of(conn, card_ids) -> Dict[int, List[dict]]:
+    """The positions of many orders, as list_items gives them, in one query per 500 orders (a list of cards, not a query per card).
+    An order with no positions has no key."""
+    ids, out = sorted({int(i) for i in card_ids}), {}
+    for at in range(0, len(ids), 500):
+        part = ids[at:at + 500]
+        for row in conn.execute("SELECT %s FROM order_item WHERE order_id IN (%s) ORDER BY id" % (ITEM_FIELDS, ",".join("?" * len(part))), part):
+            item = _item(row)
+            out.setdefault(item["order_id"], []).append(item)
     return out
 
 
