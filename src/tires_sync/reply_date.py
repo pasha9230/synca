@@ -1,6 +1,7 @@
 """The date a client names in an answer to the reminder of the reservation (the owner 2026-11-06): «12.11», «12/11», «12.11.2026», «12 ноября»,
 «сегодня», «завтра», «послезавтра», «в пятницу». Only today and the next 30 days are a date (`ok`); one before or later is `far`; two
-different dates are `many`; nothing, `none`. A weekday is the next one after the day of the message (on a Friday «в пятницу» is a week later).
+different dates are `many`; nothing, `none`; a «не», «нет», «отказ…», «перезвон…», «передума…», «отмен…» is `refused` whatever date is in it
+(«сегодня не успею», «завтра не смогу»: the review 2026-11-06, the responsible's, never a date). A weekday is the next one after the day of the message (on a Friday «в пятницу» is a week later).
 A day without a year is this year's, or the next year's when it has passed. «12.30», a phone, a price are no date (no such month)."""
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ WEEKDAYS = ("понедельник", "вторник", "сред[ау]", "че�
 NUMERIC = re.compile(r"(?<![\d.,/:])(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?(?![\d/:]|[.,]\d)")
 WORDS = re.compile(r"(?<!\d)(\d{1,2})(?:-?го)?\s+(%s)[а-я]*" % "|".join("(%s)" % m for m in MONTHS))
 RELATIVE = re.compile(r"(?<![а-я])(послезавтра|завтра|сегодня)(?![а-я])")
+REFUSAL = re.compile(r"(?<![а-я])(не|нет|отказ[а-я]*|перезвон[а-я]*|передума[а-я]*|отмен[а-я]*)(?![а-я])")
 WEEKDAY = re.compile(r"(?<![а-я])(%s)(?![а-я])" % "|".join("(%s)" % w for w in WEEKDAYS))
 
 
@@ -53,7 +55,10 @@ def found_dates(text: str, day: date) -> Set[date]:
 
 
 def parse(text: str, day: date) -> Tuple[str, Optional[date]]:
-    """("ok", the date) for one date from `day` to `day` + 30 days; ("far", it) for one outside; ("many", None); ("none", None)."""
+    """("ok", the date) for one date from `day` to `day` + 30 days; ("far", it) for one outside; ("many", None); ("refused", None);
+    ("none", None)."""
+    if REFUSAL.search(str(text or "").lower().replace("ё", "е")):
+        return "refused", None
     dates = found_dates(text, day)
     if not dates:
         return "none", None

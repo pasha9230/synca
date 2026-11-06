@@ -162,8 +162,10 @@ def test_the_dates_a_client_writes(text, expected):
 
 
 @pytest.mark.parametrize("text, status", [
-    ("забрал и поставил", "none"), ("ок", "none"), ("", "none"), ("15.11 или 16.11", "many"), ("сегодня не смогу, в пятницу", "many"),
+    ("забрал и поставил", "none"), ("ок", "none"), ("", "none"), ("15.11 или 16.11", "many"), ("сегодня не смогу, в пятницу", "refused"),
     ("заберу 25.12", "far"), ("05.11", "far"), ("в 12.30 подъеду", "none"), ("8 900 123 45 67", "none"), ("31.02", "none"),
+    ("Сегодня не успею", "refused"), ("завтра не смогу", "refused"), ("перезвоню завтра", "refused"), ("Отказываюсь, завтра не надо", "refused"),
+    ("нет, 20.11", "refused"), ("отмените заказ", "refused"), ("Передумал", "refused"),
 ])
 def test_no_date_two_dates_and_a_far_one(text, status):
     assert reply_date.parse(text, date(2026, 11, 6))[0] == status
@@ -178,7 +180,7 @@ def test_the_date_of_the_answer_counts_from_the_day_it_was_written(tmp_path):
 
 # ---- 4. no date, or further than 30 days ---------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("text", ["ок, понял", "заберу 30.11"])
+@pytest.mark.parametrize("text", ["ок, понял", "заберу 30.11", "Сегодня не успею", "завтра не смогу"])
 def test_no_date_or_a_far_one_is_the_responsibles_and_moves_nothing(tmp_path, text):
     conn, cid, chat, deliver, notify = told(tmp_path)
     said(conn, chat, DAY + "T14:00:00", text)
@@ -307,3 +309,22 @@ def test_the_send_again_after_a_402_stops_for_an_order_that_left_the_point(tmp_p
     assert chats._stopped(conn, chat, token) == ""                      # still at the point: it may go
     orders.move_card(conn, cid, stage(conn, to), DAY + "T13:00:00", "точка", {"cancel_reason": "не выкупил"} if to != "done" else None)
     assert chats._stopped(conn, chat, token) != ""
+
+
+def test_a_later_refusal_or_far_date_in_the_same_batch_wins_over_an_earlier_date(tmp_path):
+    conn, cid, chat, deliver, notify = told(tmp_path)
+    said(conn, chat, DAY + "T14:00:00", "завтра")
+    said(conn, chat, DAY + "T14:01:00", "ой, лучше 20.12")
+    said(conn, chat, DAY + "T14:02:00", "спасибо")                     # says nothing: the far date before it decides
+    tick(conn, DAY + "T15:07:00", deliver, notify)
+    assert until(conn, cid) == DAY and len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1
+
+
+def test_after_the_date_moved_the_answers_are_the_managers(tmp_path):
+    conn, cid, chat, deliver, notify = told(tmp_path)
+    said(conn, chat, DAY + "T14:00:00", "заберу 20.10")
+    tick(conn, DAY + "T15:07:00", deliver, notify)
+    said(conn, chat, DAY + "T16:00:00", "спасибо")
+    said(conn, chat, DAY + "T16:01:00", "сегодня")
+    tick(conn, DAY + "T17:07:00", deliver, notify)
+    assert until(conn, cid) == "2026-10-20" and not [t for _c, t in notify.sent if "Клиент ответил" in t]

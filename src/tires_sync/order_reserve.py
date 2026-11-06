@@ -462,6 +462,8 @@ def _reply_step(conn, card: dict, now: str, notify: Optional[Notify]) -> None:
                         ("reserve-%d-%s" % (card["id"], re.sub(r"\D", "", stay)),)).fetchone()
     if sent is None or not _sent_by_itself(conn, card) or now > (datetime.fromisoformat(sent[0]) + NO_ANSWER_MAX).isoformat(timespec="seconds"):
         return
+    if card["reserve_until"] != sent[0][:10]:                   # moved since (by an answer or by hand): the managers' from now on
+        return
     key = REPLY_KEY % (card["id"], re.sub(r"\D", "", stay))
     conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, '0')", (key,))
     seen = store.get_state(conn, key) or "0"
@@ -471,7 +473,8 @@ def _reply_step(conn, card: dict, now: str, notify: Optional[Notify]) -> None:
     if not found:
         conn.commit()
         return
-    dated = [(m, d) for m, (status, d) in ((m, reply_date.parse(m[2], date.fromisoformat(m[1][:10]))) for m in found) if status == "ok"]
+    told = [(m, status, d) for m, (status, d) in ((m, reply_date.parse(m[2], date.fromisoformat(m[1][:10]))) for m in found) if status != "none"]
+    dated = [(m, d) for m, status, d in told[-1:] if status == "ok"]     # the newest that says something decides: a later refusal or far date wins
     if not dated and not order_oth.in_alert_hours(conn, now):
         conn.commit()                                           # the responsible is told in the alert hours: read then
         return
