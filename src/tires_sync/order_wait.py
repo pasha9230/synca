@@ -553,7 +553,7 @@ def delivered(conn, token: str, text: str, now: str, how: str) -> None:
     if row and re.sub(r"\D", "", row[0] or "") == found.group(2) and _state(conn, card_id) != "told":     # another stay: its own marks
         orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD + (text or store.get_state(conn, SENT_TEXT % token) or how), level="green")
         _notes(conn, card_id, token, row[0] or "", now)
-    conn.execute("DELETE FROM app_state WHERE key = ?", (SENT_TEXT % token,))
+    conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (SENT_TEXT % token, NOTES % token))     # another stay, or told already: not written
     conn.commit()
 
 

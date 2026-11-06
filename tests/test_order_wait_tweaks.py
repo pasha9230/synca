@@ -415,3 +415,12 @@ def test_the_card_shows_the_button_client_refused_and_the_press_closes_the_task(
     assert engine.get_task(conn, ids[0])["result"] == order_wait.REFUSED
     assert [e for e in orders.list_events(conn, card) if "Клиент отказался" in e["text"]]
 
+
+def test_delivered_forgets_the_notes_of_another_stay(env):
+    conn, _row = env
+    card = waiting(env)
+    token = order_wait._token(card, "2026-10-01T00:00:00")                                      # a send of an earlier stay
+    store.set_state(conn, order_wait.NOTES % token, '["заметка"]')
+    order_wait.delivered(conn, token, "слова", "2026-11-04T13:00:00", "отправлено")
+    assert store.get_state(conn, order_wait.NOTES % token) is None
+    assert [e for e in orders.list_events(conn, card) if e["text"] == "заметка"] == []
