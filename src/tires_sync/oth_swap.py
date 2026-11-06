@@ -18,6 +18,7 @@ from . import orders, oth_stock
 SWAP = "oth_client_swap"
 CLIENT_TOOK = "другое: Клиент взял шины заказа №%d, заказ продолжается там"     # a reason of «Отмена» as the window writes «другое»
 FEE_OFF = "Сбор за передачу клиента точкой снят: клиент сменён"
+FEE_FROM = "Сбор за передачу клиента точкой переходит из заказа №%d вместе с клиентом"
 
 
 def _error(text: str):
@@ -35,6 +36,9 @@ def why_not(conn, card: dict) -> Optional[str]:
         return "По заказу согласован возврат поставщику."
     if conn.execute("SELECT 1 FROM oth_return WHERE order_id = ? AND qty > 0", (card["id"],)).fetchone():
         return "Часть шин отмечена «возвращено поставщику»."
+    lacks = _client_terms(conn, card)
+    if lacks:                                                         # what the old client agreed stays his: not handed to a new one
+        return lacks
     held = {i["id"]: int(i["qty"]) for i in card["items"] if int(i["qty"]) >= 1}
     stock = {r["item_id"]: int(r["qty"]) for r in oth_stock._rows(conn, manual=False) if r["order_id"] == card["id"]}
     if not held:
@@ -42,6 +46,23 @@ def why_not(conn, card: dict) -> Optional[str]:
     if held != stock:
         return "В заказе есть шины, которые не переходят (шина точки или тестовая точка)."
     return None
+
+
+def _client_terms(conn, card: dict) -> Optional[str]:
+    """What the order holds of its client's own beyond the name and the phone (review 2026-11-06, not in the plan: the cautious way, no swap)."""
+    from . import order_intercity
+    if order_intercity.is_on(conn, card["id"]):
+        return "Заказ в другой город (данные доставки клиента)."
+    if str(card.get("special_terms") or "").strip() or float(card.get("special_amount") or 0):
+        return "В заказе особые условия клиента."
+    return None
+
+
+def _begin(conn) -> None:
+    """The checks and the writes in one transaction that holds the write lock from the first read: a move or a second press meanwhile waits."""
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
 
 
 def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_order: Optional[int] = None) -> dict:
@@ -84,22 +105,24 @@ def _at_point(conn) -> dict:
 def to_client(conn, card_id, name: str, phone: str, now: str, author: str) -> None:
     """«Новый клиент» of all the tyres of A: A takes the client and goes to «Товар на точке» by the ordinary move (its rules; the client of the
     phone is joined there, orders.move_card). One transaction; OthSaleError says why nothing changed. The messages are the caller's."""
-    card = orders.get_card(conn, card_id)
-    why = why_not(conn, card)
-    if why:
-        raise _error(why)
-    busy = orders.open_order_conflict(conn, phone, card["point_id"], besides=card["id"])
-    if busy is not None:
-        raise _error("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, busy["id"]))
     stage = _at_point(conn)
+    _begin(conn)
     try:
+        card = orders.get_card(conn, card_id)
+        why = why_not(conn, card)
+        if why:
+            raise _error(why)
+        busy = orders.open_order_conflict(conn, phone, card["point_id"], besides=card["id"])
+        if busy is not None:
+            raise _error("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, busy["id"]))
         _audit(conn, now, author, _swap(conn, card, name, phone, now, author))
-        moved = orders.move_card(conn, card["id"], stage["id"], now, author)
-    except orders.OrderError as err:
+        if not orders.move_card(conn, card["id"], stage["id"], now, author, commit=False):
+            raise _error("Клиент не сменён: заказ только что изменили. Обновите страницу.")
+    except orders.OrderError:
         conn.rollback()
-        raise _error("Клиент не сменён: %s" % err) from None
-    if not moved:
-        raise _error("Клиент не сменён: заказ только что изменили. Обновите страницу.")
+        raise
+    conn.commit()
+    orders._fire_rules(conn, card["id"], now, ())                     # the rules of «Товар на точке», as an ordinary move
 
 
 def take_target(conn, card_id, line_id, from_item) -> Optional[int]:
@@ -113,7 +136,7 @@ def take_target(conn, card_id, line_id, from_item) -> Optional[int]:
     line = next((i for i in b["items"] if i["id"] == int(line_id)), None)
     if line is None or line["id"] in oth_sale.taken_ids(conn, b["id"]) or line["id"] in placed_ids(conn, b["id"]):
         return None
-    if [i["id"] for i in b["items"] if int(i["qty"]) >= 1] != [line["id"]]:
+    if [i["id"] for i in b["items"] if int(i["qty"]) >= 1] != [line["id"]] or _client_terms(conn, b):
         return None
     source = next((r for r in oth_stock._rows(conn, manual=False) if r["item_id"] == int(from_item)), None)
     if source is None or source["order_id"] == b["id"] or str(source["goods_id"]) != str(line["goods_id"]):
@@ -123,21 +146,25 @@ def take_target(conn, card_id, line_id, from_item) -> Optional[int]:
     a = orders.get_card(conn, source["order_id"])
     if why_not(conn, a) or [i["id"] for i in a["items"] if int(i["qty"]) >= 1] != [source["item_id"]] or int(source["qty"]) != int(line["qty"]):
         return None
+    item = next(i for i in a["items"] if i["id"] == source["item_id"])
+    if any(round(float(item[k]), 2) != round(float(line[k]), 2) for k in ("sale_unit", "fee_pct", "promo_pct")):
+        return None                                                   # the price agreed with B is not A's: the take goes as before (review 2026-11-06)
     return a["id"]
 
 
 def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     """«Взять с ОТХ» of all the tyres of A into B holding nothing else: the client, the chats and the calls of B go to A, B goes to «Отмена»
     (CLIENT_TOOK: no message, no rule), A to «Товар на точке». One transaction. Returns A; the messages are the caller's."""
-    a_id = take_target(conn, card_id, line_id, from_item)
-    if a_id is None:
-        raise _error("Шины уже не те: обновите страницу.")
-    a, b = orders.get_card(conn, a_id), orders.get_card(conn, card_id)
     cancel = next((s for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
     if cancel is None:
         raise _error("В воронке нет этапа «Отмена».")
     stage = _at_point(conn)
+    _begin(conn)
     try:
+        a_id = take_target(conn, card_id, line_id, from_item)
+        if a_id is None:
+            raise _error("Шины уже не те: обновите страницу.")
+        a, b = orders.get_card(conn, a_id), orders.get_card(conn, card_id)
         detail = _swap(conn, a, b["client_name"], b["client_phone"], now, author, from_order=b["id"])
         link = conn.execute("SELECT client_id, how, at FROM client_order WHERE order_id = ?", (b["id"],)).fetchone()
         if link:
@@ -150,6 +177,8 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
             orders.update_card(conn, a_id, {"avito_chat": b["avito_chat"]}, now, author, commit=False, link_client=False)
             orders.update_card(conn, b["id"], {"avito_chat": ""}, now, author, commit=False, link_client=False)
         detail.update(client=link[0] if link else None, moved_chats=chats, moved_calls=calls)
+        if conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (b["id"],)).fetchone():
+            orders.add_event(conn, a_id, now, author, "field", FEE_FROM % b["id"])
         _audit(conn, now, author, detail)
         orders.add_event(conn, a_id, now, author, "field", "Клиент заказа №%d взял все шины этого заказа: клиент, чаты (%d) и звонки (%d) перенесены сюда"
                          % (b["id"], len(chats), calls))
@@ -157,13 +186,14 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
                          % a_id)
         if not orders.move_card(conn, b["id"], cancel["id"], now, author, changes={"cancel_reason": CLIENT_TOOK % a_id}, fire_rules=False,
                                 journal=False, commit=False):
-            raise _error("заказ №%d только что изменили" % b["id"])
-        moved = orders.move_card(conn, a_id, stage["id"], now, author)
-    except orders.OrderError as err:
+            raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % b["id"])
+        if not orders.move_card(conn, a_id, stage["id"], now, author, commit=False):
+            raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % a_id)
+    except orders.OrderError:
         conn.rollback()
-        raise _error("Шины не взяты: %s. Обновите страницу." % err) from None
-    if not moved:
-        raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % a_id)
+        raise
+    conn.commit()
+    orders._fire_rules(conn, a_id, now, ())                           # the rules of «Товар на точке» for A; none for B (closed quietly)
     return a_id
 
 

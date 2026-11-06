@@ -340,7 +340,7 @@ def test_a_rules_message_of_the_same_template_waits_and_nothing_goes_beside_it(t
 
 def test_from_oth_with_a_new_client_is_told_once_through_the_question(tmp_path, monkeypatch):
     """Was (arrived-alert): the window moved the order from «На ОТХ» with a new client typed and told it. Now (oth-newclient, the owner
-    2026-10-30, the order 444): the move from «На ОТХ» asks first; «Новый клиент» makes a new order at the point and it is told once."""
+    2026-10-30, the order 444): the move from «На ОТХ» asks first; «Новый клиент» of all the tyres keeps the order (oth_swap, 2026-11-06) and it is told once."""
     import re
     from panel_helpers import post
     from tires_sync import order_notify
@@ -352,7 +352,8 @@ def test_from_oth_with_a_new_client_is_told_once_through_the_question(tmp_path, 
     assert "#oth-back" in r.headers["Location"] and orders.get_card(conn, card)["stage"]["code"] == "oth" and told == []
     r = post(owner, "/orders/%d/oth-back" % card, tok, answer="new", client_name="Пётр", client_phone="+7 900 999-88-77")
     new = int(re.search(r"/orders/(\d+)", r.headers["Location"]).group(1))
-    assert new != card and orders.get_card(conn, new)["stage"]["code"] == "at_point" and told == [new]      # once, the new order
+    # all the tyres go: the order itself takes the new client (oth_swap, the plan of 2026-11-06), told once
+    assert new == card and orders.get_card(conn, new)["stage"]["code"] == "at_point" and told == [new]
 
 
 def test_the_systems_own_texts_in_the_chat_are_not_telling(env):

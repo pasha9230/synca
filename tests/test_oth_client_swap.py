@@ -103,7 +103,8 @@ def test_the_panel_shows_the_mim_name_first_on_the_board_the_list_the_oth_page_a
     number = orders.get_card(conn, a)["webmim_number"]
     board = owner.get("/orders").get_data(as_text=True)
     assert re.search(r"№ MIM %s · №%d" % (number, a), board)
-    listed = owner.get("/orders?view=list").get_data(as_text=True)
+    listed = owner.get("/orders?v=list").get_data(as_text=True)
+    assert "orders-sheet" in listed or "o2-chk" in listed                            # the list, not the board
     assert re.search(r"№ MIM %s · №%d" % (number, a), listed)
     oth = owner.get("/oth").get_data(as_text=True)
     assert re.search(r"№ MIM %s · №%d" % (number, a), oth)
@@ -211,7 +212,9 @@ def test_the_panel_swaps_the_client_and_tells_the_new_one(tmp_path, monkeypatch)
 # ---- 3. the manager takes all the tyres of A into the order B of the client -----------------------------------------------------------
 
 def _b(conn, qty=4, extra=()):
+    """B of the new client at the price of A (5000, card_at): a price agreed otherwise keeps the take as before."""
     b = new_order(conn, qty=qty, extra=extra)
+    conn.execute("UPDATE order_item SET sale_unit = 5000 WHERE order_id = ?", (b,))
     row = chat(conn, b, "cb")
     conn.execute("UPDATE order_card SET avito_chat = ? WHERE id = ?", ("Ч-%d" % row, b))
     call(conn, b, 7)
@@ -241,6 +244,46 @@ def test_taking_all_the_tyres_of_a_moves_the_client_of_b_into_a(tmp_path):
     assert [int(i["qty"]) for i in card["items"]] == [4] and oth_sale.taken(conn, b) == {}
     [swap] = audits(conn, "oth_client_swap")
     assert swap["from_order"] == b and swap["old_client"] == old_client
+
+
+def test_b_at_another_price_takes_as_before(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    b, _ = _b(conn)
+    conn.execute("UPDATE order_item SET sale_unit = 6000 WHERE order_id = ?", (b,))
+    conn.commit()
+    line = orders.get_card(conn, b)["items"][0]
+    source = orders.get_card(conn, a)["items"][0]["id"]
+    assert oth_swap.take_target(conn, b, line["id"], source) is None                # the price of B is never lost silently
+    assert oth_sale.take(conn, b, line["id"], source, LATER, "o") == 4
+    assert [float(i["sale_unit"]) for i in orders.get_card(conn, b)["items"] if int(i["qty"])] == [6000.0]
+
+
+def test_an_order_to_another_city_or_with_special_terms_is_never_swapped(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    conn.execute("INSERT INTO order_intercity (order_id, enabled, city, updated_at) VALUES (?, 1, 'Город', ?)", (a, T))
+    conn.commit()
+    assert "другой город" in oth_swap.why_not(conn, orders.get_card(conn, a))
+    conn.execute("UPDATE order_intercity SET enabled = 0 WHERE order_id = ?", (a,))
+    conn.execute("UPDATE order_card SET special_terms = 'скидка' WHERE id = ?", (a,))
+    conn.commit()
+    assert "особые условия" in oth_swap.why_not(conn, orders.get_card(conn, a))
+    new = oth_sale.to_new_client(conn, a, "Пётр", NEW_PHONE, LATER, "o")
+    assert new != a and audits(conn, "oth_client_swap") == []                        # as before: a new order
+
+
+def test_a_move_lost_to_another_tab_changes_nothing(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    old_client = put_aside(conn, a)
+    real = orders.move_card
+    monkeypatch.setattr(orders, "move_card", lambda c, cid, sid, now, who, **kw: False if not kw.get("commit", True) else real(c, cid, sid, now, who, **kw))
+    with pytest.raises(orders.OrderError, match="только что изменили"):
+        oth_sale.to_new_client(conn, a, "Пётр", NEW_PHONE, LATER, "o")
+    card = orders.get_card(conn, a)
+    assert (card["client_name"], card["stage"]["code"]) == ("Иван", "oth") and put_aside(conn, a) == old_client
+    assert audits(conn, "oth_client_swap") == []
 
 
 def test_b_with_another_position_takes_as_before(tmp_path):
@@ -368,6 +411,7 @@ def test_the_fee_of_b_handed_by_a_point_goes_with_its_client_into_a(tmp_path):
     oth_swap.take_client(conn, b, line["id"], orders.get_card(conn, a)["items"][0]["id"], LATER, "o")
     _sell(conn, a)
     assert order_report.build(conn, "2026-10-01", "2026-10-31")["handoff"]["clients"] == 1
+    assert any(t == oth_swap.FEE_FROM % b for t in texts(conn, a))
 
 
 def test_the_sale_of_a_is_counted_once_at_its_own_purchase(tmp_path):
