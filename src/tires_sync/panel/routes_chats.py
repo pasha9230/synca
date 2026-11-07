@@ -91,7 +91,7 @@ def wait_text(minutes) -> str:
     return "%d дн" % (minutes // (24 * 60))
 
 
-ANSWERING_ROLES = ("owner", "partner", "chats")                                  # who may answer a chat: the roles with «Чаты» to change
+ANSWERING_ROLES = chats.ANSWERING_ROLES                                          # who may answer a chat: the roles with «Чаты» to change
 
 
 def _answerers(conn) -> list:
