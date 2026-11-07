@@ -48,6 +48,7 @@ def test_a_new_chat_gets_the_account_s_responsible(env):
     details = [json.loads(r[0]) for r in conn.execute("SELECT detail FROM audit WHERE action = ? ORDER BY id", (chats.ASSIGN_DEFAULT,))]
     assert details == [{"chat": row(conn, c), "account": account, "to": "ivan"} for c in ("c1", "c2")]      # one per chat, with the write
     from tires_sync.panel import texts
+    assert conn.execute("SELECT author FROM audit WHERE action = ?", (chats.ASSIGN_DEFAULT,)).fetchone()[0] in store.SYSTEM_AUTHORS   # «Системные»
     assert texts.audit_text({"action": chats.ASSIGN_DEFAULT, "detail": details[0]}) == \
         "Чат Ч-%d: ответственный по умолчанию — ivan (ответственный аккаунта №%d)" % (row(conn, "c1"), account)
 
@@ -152,3 +153,20 @@ def test_the_webhook_never_overwrites_a_person_nor_gives_a_point_s_chat(env):
     chats.store_pushed(conn, account, "c2", msg("w-2", "Вопрос", created=TS + 700), LATER)
     conn.commit()
     assert who(conn, "c2") == ""
+
+
+def test_a_broken_record_never_hides_a_person_s_taking(env):
+    from tires_sync import order_points
+    conn, account = env
+    sync(conn, account, chat("c1"))
+    conn.execute("UPDATE avito_chat SET responsible = 'petr' WHERE id = ?", (row(conn),))      # set before the journal had such records
+    store.write_audit(conn, NOW, "system", chats.ASSIGN_DEFAULT, {"account": account})          # no «chat»: NULL in NOT IN would hide every taking
+    assert row(conn) in order_points.office_taken(conn)[1]
+
+
+def test_the_journal_shows_it_in_moscow_time(tmp_path):
+    from panel_helpers import make_app
+    app = make_app(tmp_path)
+    shown = app.jinja_env.globals.get("audit_dt") or app.jinja_env.filters.get("audit_dt")
+    assert shown({"action": chats.ASSIGN_DEFAULT, "at": "2026-10-13T12:00:00", "author": "system"}) == \
+        shown({"action": "chat_assign", "at": "2026-10-13T12:00:00", "author": "o"})

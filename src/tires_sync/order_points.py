@@ -142,7 +142,7 @@ def office_taken(conn) -> tuple:
         "AND e.kind = 'field' AND e.text = ? || c.responsible)" % marks, office + [orders.LABELS["responsible"] + ": "])}
     chats = {r[0] for r in conn.execute("SELECT chat_row FROM chat_handover WHERE taken_by IN (%s) UNION SELECT id FROM avito_chat "
                                         "WHERE responsible IN (%s) AND (id NOT IN (SELECT json_extract(detail, '$.chat') FROM audit WHERE action = "
-                                        "'chat_assign_default') OR id IN (SELECT json_extract(detail, '$.chat') FROM audit WHERE action = 'chat_assign'))"
+                                        "'chat_assign_default' AND json_extract(detail, '$.chat') IS NOT NULL) OR id IN (SELECT json_extract(detail, '$.chat') FROM audit WHERE action = 'chat_assign'))"
                                         % (marks, marks), office + office)}       # given by the system (chats.ASSIGN_DEFAULT), never chosen: no taking
     found |= {r[0] for r in conn.execute("SELECT order_id FROM avito_chat WHERE order_id > 0 AND id IN (%s)" % ",".join("?" * len(chats)),
                                          sorted(chats))} if chats else set()

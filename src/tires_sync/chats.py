@@ -153,7 +153,7 @@ def _give_default(conn, chat_row: int, account_id: int, login: str, now: str) ->
                     "WHERE action = 'chat_assign' AND json_extract(detail, '$.chat') = ?)", (login, chat_row, chat_row)).rowcount != 1:
         return False
     conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?, ?, ?, ?)",
-                 (now, "система", ASSIGN_DEFAULT, json.dumps({"chat": chat_row, "account": account_id, "to": login}, ensure_ascii=False)))
+                 (now, "system", ASSIGN_DEFAULT, json.dumps({"chat": chat_row, "account": account_id, "to": login}, ensure_ascii=False)))
     return True
 
 
