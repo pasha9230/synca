@@ -205,6 +205,8 @@ def _task(conn, item: dict, why: str, note: str, now: str) -> None:
     """The task of the responsible of the office (tasks.default_assignee: the order's responsible, else the owner), once per message. No raise."""
     if item.get("task_id"):
         return
+    if get(conn, item["id"])["status"] == "cancelled":               # cancelled meanwhile (the client changed): no task with its old text
+        return
     from . import order_notify, tasks
     try:
         owner = order_notify.get_owner_login(conn)
@@ -234,6 +236,8 @@ def _send(conn, item: dict, deliver: Optional[Deliver], now: str, started: bool)
         return ""                                                    # another run, a change or a cancel took it
     conn.commit()
     item = get(conn, item["id"])                                     # the words as they are now
+    if item["status"] != "sending":                                  # cancelled meanwhile (the client changed, oth_swap): nothing goes (night-build)
+        return ""
     card = orders.get_card(conn, item["order_id"])
     if not started and datetime.fromisoformat(now[:16]) - datetime.fromisoformat(item["due_at"]) > LATE:
         return _failed(conn, item, "не ушло вовремя: система не отправляла сообщения с %s" % _shown(item["due_at"]), BY_HAND, now)
