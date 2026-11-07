@@ -641,7 +641,7 @@ def register(app) -> None:
         columns = [dict(by_code[code], cards=[], count=0) for code in points.POINT_STAGES if code in by_code]
         target = {col["stage"]["code"]: col for col in columns}
         shown = [c["id"] for col in data["columns"] if col["stage"]["code"] not in order_oth.RETURNING for c in col["cards"] if c["id"] in mine]
-        no_mim = lambda c: dict(c, oth_title="", client="На ОТХ") if c.get("oth_title") else c      # «№ MIM …» of «На ОТХ»: not the point's (2026-10-30)
+        no_mim = lambda c: dict(c, oth_title="", oth_card=None, client="На ОТХ") if c.get("oth_title") else c      # «№ MIM …» of «На ОТХ»: not the point's (2026-10-30)
         sales = {cid: orders.totals(items)["sale"] for cid, items in orders.items_of(conn, shown).items()}    # «Итого» of the order window,
         for col in data["columns"]:                                       # one query for the page; «На ОТХ»: no client, no sum (2026-11-07)
             into = target.get(points.point_column(col["stage"]))

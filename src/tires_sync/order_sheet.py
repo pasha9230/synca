@@ -404,22 +404,29 @@ def _oth_values(conn, card: dict, item_id: int, number: str, typed=None) -> dict
             "Дата счета": own_day if own else (_invoice_day(conn, source) if source else "")}
 
 
-def mim_title(conn, card: dict) -> str:
-    """The name of an order on «На ОТХ» (the plan of 2026-11-06: a purchase of WebMIM, its client changes): «№ MIM <number> · пер. <transfer> ·
-    счёт <day>» as its first row of the table counts them (a position «с ОТХ»: the order of purchase, _oth_values), «без № MIM» without a number;
-    never the client's name."""
+def mim_parts(conn, card: dict) -> dict:
+    """The purchase of WebMIM of an order on «На ОТХ» (the plan of 2026-11-06), as its first row of the table counts them (a position «с ОТХ»: the
+    order of purchase, _oth_values): {"number": «№ заказа MIM», "transfer": «Перемещение MIM», "invoice": «Дата счета» as DD.MM.YYYY}, '' when unknown."""
     numbers = oth_sale.from_number(conn, card["id"])
     held = [i for i in card["items"] if i["id"] in numbers and int(i["qty"]) >= 1]
     if held:
         values = _oth_values(conn, card, held[0]["id"], numbers[held[0]["id"]])
     else:
         values = {"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"], "Дата счета": _invoice_day(conn, card)}
-    parts = ["№ MIM %s" % values["№ заказа MIM"] if values["№ заказа MIM"] else "без № MIM"]
-    if values["Перемещение MIM"]:
-        parts.append("пер. %s" % values["Перемещение MIM"])
     day = str(values["Дата счета"] or "")
-    if len(day) == 10:
-        parts.append("счёт %s.%s.%s" % (day[8:10], day[5:7], day[:4]))
+    return {"number": str(values["№ заказа MIM"] or ""), "transfer": str(values["Перемещение MIM"] or ""),
+            "invoice": "%s.%s.%s" % (day[8:10], day[5:7], day[:4]) if len(day) == 10 else ""}
+
+
+def mim_title(conn, card: dict) -> str:
+    """The name of an order on «На ОТХ» (the plan of 2026-11-06: a purchase of WebMIM, its client changes): «№ MIM <number> · пер. <transfer> ·
+    счёт <day>» (mim_parts), «без № MIM» without a number; never the client's name."""
+    m = mim_parts(conn, card)
+    parts = ["№ MIM %s" % m["number"] if m["number"] else "без № MIM"]
+    if m["transfer"]:
+        parts.append("пер. %s" % m["transfer"])
+    if m["invoice"]:
+        parts.append("счёт %s" % m["invoice"])
     return " · ".join(parts)
 
 
