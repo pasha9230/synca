@@ -1,0 +1,10 @@
+{# The pages of «Настройка» as tabs above the page (the owner 2026-11-07, ui-audit item 46): the menu has one item «Настройка» instead of six.
+   «Подключения» keeps its own item; a page shows the tabs the person may open. #}
+<nav class="tabs setup-tabs" aria-label="Настройка">
+{% if can("setup") %}<a href="/settings"{% if path.startswith(('/settings', '/brands', '/draft', '/publish')) %} class="is-active" aria-current="page"{% endif %}>Фид: правила и бренды</a>
+<a href="/orders/settings"{% if path.startswith('/orders/settings') %} class="is-active" aria-current="page"{% endif %}>Воронка заказов</a>
+<a href="/orders/templates"{% if path.startswith('/orders/templates') %} class="is-active" aria-current="page"{% endif %}>Шаблоны сообщений</a>{% endif %}
+{% if can("users") %}<a href="/users"{% if path.startswith('/users') %} class="is-active" aria-current="page"{% endif %}>Пользователи</a>{% endif %}
+{% if can("setup") %}<a href="/history"{% if path.startswith('/history') %} class="is-active" aria-current="page"{% endif %}>История</a>
+<a href="/ui-new"{% if path.startswith('/ui-new') %} class="is-active" aria-current="page"{% endif %}>Новый вид</a>{% endif %}
+</nav>

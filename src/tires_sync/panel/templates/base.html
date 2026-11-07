@@ -46,26 +46,30 @@
 {% endcall %}{% endif %}
 {% if can("catalog") %}{% call sb_section("goods", "Товар и фид") %}
 <a class="sb-link{% if path.startswith('/catalog') or path.startswith('/draft') or path.startswith('/publish') %} is-active{% endif %}" href="/catalog">{{ icon("tire") }}Каталог<span class="sb-count sb-count--pend" id="navpend" title="Неподтверждённые изменения" data-pend-count{% if not nav.staged %} hidden{% endif %}>{{ nav.staged }}</span></a>
+{% if current_user().role != "chats" or not ui_new() %}{# the manager of the chats: the catalog to pick a tyre and «На ОТХ» to sell from it; the feed is not theirs (the owner 2026-11-07, ui-audit 45; the right stays) #}
 <a class="sb-link{% if path.startswith('/new') %} is-active{% endif %}" href="/new">{{ icon("sparkle") }}Новые позиции{% if nav.new_count %}<span class="sb-count">{{ nav.new_count }}</span>{% endif %}</a>
 <a class="sb-link{% if path.startswith('/mappings') or path.startswith('/pairs') %} is-active{% endif %}" href="/mappings">{{ icon("link") }}Сопоставления{% if nav.pending_pairs %}<span class="sb-count">{{ nav.pending_pairs }}</span>{% endif %}</a>
 <a class="sb-link{% if path.startswith('/photos') %} is-active{% endif %}" href="/photos/review">{{ icon("image") }}Генерация</a>
 <a class="sb-link{% if path.startswith('/feeds') %} is-active{% endif %}" href="/feeds">{{ icon("upload") }}Фиды</a>
+{% endif %}
 <a class="sb-link{% if path.startswith('/oth') %} is-active{% endif %}" href="/oth">{{ icon("undo") }}На ОТХ</a>
 {% if current_user().role == "owner" %}<a class="sb-link{% if path.startswith('/prices') %} is-active{% endif %}" href="/prices/changes">{{ icon("arrow-up") }}Цены поставщика</a>{% endif %}
 {% endcall %}{% endif %}
-{% if can("home") %}{% call sb_section("analytics", "Аналитика") %}
+{% if can("home") and (current_user().role != "chats" or not ui_new()) %}{% call sb_section("analytics", "Аналитика") %}
 <a class="sb-link{% if path.startswith('/analytics') %} is-active{% endif %}" href="/analytics">{{ icon("arrow-up") }}Продажи и воронка</a>
 {% if can("analytics") and has_right("money") %}<a class="sb-link{% if path.startswith('/economics') %} is-active{% endif %}" href="/economics">{{ icon("chart") }}Юнит-экономика</a>
 <a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>{% endif %}
 {% endcall %}{% endif %}
 {% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
-<a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
+{% if not ui_new() %}<a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
 <a class="sb-link{% if path.startswith('/orders/settings') %} is-active{% endif %}" href="/orders/settings">{{ icon("layers") }}Настройки заказов</a>
 <a class="sb-link{% if path.startswith('/orders/templates') %} is-active{% endif %}" href="/orders/templates">{{ icon("edit") }}Шаблоны сообщений</a>
 <a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>
-<a class="sb-link{% if path.startswith('/ui-new') %} is-active{% endif %}" href="/ui-new">{{ icon("sparkle") }}Новый вид</a>{% endif %}
-{% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
+<a class="sb-link{% if path.startswith('/ui-new') %} is-active{% endif %}" href="/ui-new">{{ icon("sparkle") }}Новый вид</a>{% endif %}{% endif %}
+{% if not ui_new() %}{% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
+{% else %}{# «Новый вид»: one item «Настройка», its pages are the tabs above the page (_setup_tabs.html; the owner 2026-11-07, ui-audit 46) #}
+<a class="sb-link{% if setup_page(path) %} is-active{% endif %}" href="{{ '/settings' if can('setup') else '/users' }}">{{ icon("sliders") }}Настройка</a>{% endif %}
 {% endcall %}{% endif %}
 <nav class="sb-group"><a class="sb-link{% if path.startswith('/whats-new') %} is-active{% endif %}" href="/whats-new">{{ icon("sparkle") }}Что нового{% if whatsnew_dot() %}<span class="wn-dot" title="Есть новое"><span class="sr-only">есть новое</span></span>{% endif %}</a></nav>{# every role (routes_whatsnew) #}
 {% set me = current_user() %}
@@ -103,6 +107,7 @@
 <div class="page{% block page_class %}{% endblock %}">
 <div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' or kind.startswith('field:') else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' or kind.startswith('field:') %} role="alert"{% endif %}{% if kind.startswith('field:') %} data-field-error="{{ kind[6:] }}"{% endif %}>{{ icon("check" if kind == "ok" else "info") }}<div class="flash-text">{{ message }}</div><button type="button" class="close" aria-label="Закрыть">{{ icon("x") }}</button></div>{% endfor %}</div>
 {% set pf = page_filter() if page_filter is defined else {} %}{% if pf %}<div class="flash flash--info" data-filter-on><div class="flash-text">Фильтр включён: {{ pf.count }} · {% if pf.mine %}<a href="{{ pf.mine }}">Мои фильтры</a> <span class="muted xs">(открыто по ссылке; ваши сохранённые фильтры не тронуты)</span>{% else %}<a href="{{ pf.reset }}">Сбросить фильтры</a> <span class="muted xs">(фильтры запоминаются в вашем аккаунте)</span>{% endif %}</div></div>{% endif %}
+{% if ui_new() and setup_page(path) %}{% include "_setup_tabs.html" %}{% endif %}
 {% block content %}{% endblock %}
 </div>
 </main>

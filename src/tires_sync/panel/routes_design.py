@@ -77,8 +77,17 @@ def as_point_choices() -> list:
     return points.list_points(get_conn())
 
 
+SETUP_PAGES = ("/settings", "/brands", "/orders/settings", "/orders/templates", "/history", "/ui-new", "/users")
+
+
+def setup_page(path: str) -> bool:
+    """A page of «Настройка»: one item of the menu, the pages are the tabs above it (the owner 2026-11-07, ui-audit item 46)."""
+    return str(path or "").startswith(SETUP_PAGES)
+
+
 def register(app) -> None:
-    app.jinja_env.globals.update(ui_new=ui_new, point_new=point_new, office_new=office_new, as_point_choices=as_point_choices)
+    app.jinja_env.globals.update(ui_new=ui_new, point_new=point_new, office_new=office_new, as_point_choices=as_point_choices,
+                                 setup_page=setup_page)
 
     def stage_color_filter(color):                       # {{ stage.color|stage_color }}: ui_new() once per request (a list: a row each)
         if "ui_new_page" not in g:

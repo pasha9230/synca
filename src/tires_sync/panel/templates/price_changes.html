@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Цена поставщика изменилась · Tires Sync{% endblock %}
-{% block content %}
+{% block content %}{% include "_price_tabs.html" %}
 <header class="page-head"><div><h1>Цена поставщика изменилась</h1><p class="sub">Поставщик снизил цену на 5 % и больше: наша цена на Авито оставлена прежней до вашего решения. «Принять» — новая цена уйдёт на Авито {{ waits }}. «Оставить прежнюю» — спросим снова, если поставщик снизит ещё на 5 %.</p></div></header>
 <section class="card"><div class="card-body stack">
 {% if rows %}<form method="post" action="/prices/changes" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="rev" value="{{ rev }}">

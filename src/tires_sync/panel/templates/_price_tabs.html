@@ -1,0 +1,5 @@
+{# «Цены поставщика»: the two pages as tabs of one item of the menu (the owner 2026-11-07, ui-audit 47) #}
+<nav class="tabs setup-tabs" aria-label="Цены поставщика">
+<a href="/prices/changes"{% if request.path.startswith('/prices/changes') %} class="is-active" aria-current="page"{% endif %}>Снижение цены: ждёт решения</a>
+{% if has_right("money") %}<a href="/prices/purchase"{% if request.path.startswith('/prices/purchase') %} class="is-active" aria-current="page"{% endif %}>Изменения закупки</a>{% endif %}
+</nav>
