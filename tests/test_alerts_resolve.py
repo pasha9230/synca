@@ -97,6 +97,9 @@ def test_another_message_or_another_order_stays_red(tmp_path):
     orders.add_event(conn, mine, NOW, order_placed.AUTHOR, "chat", "Сообщение точке «Клиенту: заказ оформлен» не отправлено: нет ВК.", level="red")
     orders.add_event(conn, mine, NOW, "правило №7", "rule", "Задача не подготовлена: Клиенту: заказ оформлен", level="red")
     orders.add_event(conn, mine, NOW, "owner", "chat", "Сообщение клиенту «Клиенту: другое» не отправлено: нет чата.", level="red")
+    from test_webmim_create import card
+    another = card(conn, client_phone="+7 (911) 111-22-99")
+    orders.add_event(conn, another, NOW, order_placed.AUTHOR, "chat", "Сообщение клиенту «Клиенту: заказ оформлен» не отправлено: нет чата.", level="red")
     conn.commit()
     orders.update_card(conn, mine, {"transfer_number": "26R-1"}, LATER, "owner")
     [task] = tasks(conn, mine)
@@ -106,6 +109,17 @@ def test_another_message_or_another_order_stays_red(tmp_path):
     assert "Сообщение точке «Клиенту: заказ оформлен» не отправлено: нет ВК." in left           # another audience
     assert "Задача не подготовлена: Клиенту: заказ оформлен" in left                             # another rule's task (№7), not this one
     assert "Сообщение клиенту «Клиенту: другое» не отправлено: нет чата." in left                # another template
+    assert reds(conn, another) == ["Сообщение клиенту «Клиенту: заказ оформлен» не отправлено: нет чата."]     # another order
+
+
+def test_a_failure_of_the_alerts_never_undoes_a_send(tmp_path, monkeypatch):
+    conn, mine, task = unsent_after_placing(tmp_path)
+
+    def boom(*_args):
+        raise RuntimeError("x")
+    monkeypatch.setattr(alerts, "resolve_message_done", boom)
+    engine.sent_by_hand(conn, task["id"], LATER, "owner")
+    assert engine.get_task(conn, task["id"])["status"] == "done"
 
 
 def test_a_position_added_later_closes_position_not_added(tmp_path):
