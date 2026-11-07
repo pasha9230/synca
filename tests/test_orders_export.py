@@ -140,7 +140,8 @@ def test_the_file_of_a_point_has_no_money_at_all_and_the_staff_file_keeps_the_su
     point = manager(app, conn, pid)
     rows = list(sheet(point.get("/orders/export.xlsx").get_data()).iter_rows(values_only=True))
     head = list(rows[0])
-    assert head == [h for h in HEAD if h != "Сумма, ₽"] and [r[0] for r in rows[1:]] == [cid]
+    # no WebMIM in the file of a point either (the owner 2026-10-30, lane point-webmim-hide): its number and status columns are left out
+    assert head == [h for h in HEAD if h not in ("Сумма, ₽", "Номер заказа WebMIM", "Статус WebMIM")] and [r[0] for r in rows[1:]] == [cid]
     one = dict(zip(head, rows[1]))
     assert one["Клиент"] == "Иван" and one["Позиции"] == "Pirelli 225/55 R17 × 4" and one["Штук"] == 4
     cells = [v for row in rows for v in row]
