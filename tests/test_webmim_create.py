@@ -288,7 +288,7 @@ def test_the_test_server_journals_the_names_of_webmims_fields_never_their_values
     assert "26R-922352" not in line["text"] and "TRACK-SECRET" not in line["text"] and "Иван" not in line["text"] and "1001" not in line["text"]
 
 
-def test_the_live_server_journals_no_field_names(tmp_path, monkeypatch):
+def test_the_live_server_journals_no_field_names_of_the_creation_only_of_the_read_after(tmp_path, monkeypatch):
     conn = db(tmp_path, server="prod")
     mine = card(conn)
     monkeypatch.setattr(webmim_create, "CREATE_SERVERS", ("test", "prod"))
@@ -1460,11 +1460,16 @@ def test_after_a_full_success_one_get_of_the_order_takes_the_invoice_into_an_emp
             data = dict(data, invoiceNumber="26R-1554147")
         return status, data, extra
     fake._answer = answer
-    result = place(conn, mine, fake)
+    test_server = card(conn)
+    assert place(conn, test_server, fake)["ok"] and orders._row(conn, test_server)["transfer_number"] == ""   # a test invoice is never ours
+    connections.set_config(conn, "webmim_orders", 0, {"server": "prod", "login": "api-bot"}, NOW, "owner")
+    conn.commit()
+    fake.calls.clear()
+    result = place(conn, mine, fake, server="prod")
     assert result["ok"] and orders._row(conn, mine)["transfer_number"] == "26R-1554147"
     reads = [c for c in fake.calls if c[0] == "GET" and c[1].startswith("/api/v2/orders/") and not c[1].endswith("/items")]
     assert len(reads) == 1 and {c[0] for c in fake.calls if c[1].startswith("/api/v2/orders/")} <= {"GET", "POST"}
-    assert "Номер перемещения из WebMIM: 26R-1554147 (счёт заказа WebMIM №5001 (id 1001))." in events(conn, mine)
+    assert "Номер перемещения из WebMIM: 26R-1554147 (счёт заказа WebMIM №5002 (id 1002))." in events(conn, mine)
 
 
 @pytest.mark.parametrize("action", ["timeout", "500"])

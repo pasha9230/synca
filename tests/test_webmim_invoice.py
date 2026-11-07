@@ -267,6 +267,7 @@ def test_after_a_press_no_number_yet_is_a_grey_record_only_and_a_typed_one_is_ke
     conn = db(tmp_path)
     mine = card(conn, webmim_id="127616450414")
     api, _ = client((200, wm()), (200, wm(invoice=INVOICE)))
+    api.token()                                                         # the press holds its token
     assert webmim_invoice.after_place(conn, mine, api, NOW) == "none"
     assert [e["level"] for e in by_system(conn, mine)] == ["grey"] and transfer(conn, mine) == ""
     orders.update_card(conn, mine, {"transfer_number": "26R-0000001"}, NOW, "owner")
@@ -298,6 +299,7 @@ def test_the_quick_get_gives_the_transport_a_short_timeout_and_never_repeats_a_n
             return 200, {}, json.dumps({"accessToken": "T"}).encode()
         raise OSError("connection reset")
     api = webmim_orders.OrdersClient("https://webmim.example", "api-bot", "pw-SECRET-1", http=http)
+    api.token()
     assert webmim_invoice.after_place(conn, mine, api, NOW) == "failed"
     assert seen[-1] == ("https://webmim.example/api/v2/orders/127616450414", webmim_orders.QUICK) and len(seen) == 2
     assert webmim_orders.QUICK <= 3
@@ -308,3 +310,48 @@ def test_after_a_press_without_an_id_nothing_is_asked(tmp_path):
     mine = card(conn, webmim_number="5339404")
     api, http = client()
     assert webmim_invoice.after_place(conn, mine, api, NOW) == "no-id" and http.calls == []
+
+
+def test_the_quick_read_logs_in_never_and_is_outside_the_breaker(tmp_path, monkeypatch):
+    from tires_sync import reliability
+    conn = db(tmp_path)
+    mine = card(conn, webmim_id="127616450414")
+    api, http = client()
+    assert webmim_invoice.after_place(conn, mine, api, NOW) == "failed" and http.calls == []      # no token held: no login for it
+    services = []
+    real = reliability.call
+    monkeypatch.setattr(reliability, "call", lambda *a, **k: services.append(k.get("service")) or real(*a, **k))
+    api, _ = client((200, wm()))
+    api.token()
+    webmim_invoice.after_place(conn, mine, api, NOW)
+    assert services[-1] is None and services[0] is not None                                       # the token's call counts, the quick read not
+
+
+def test_after_a_press_on_the_test_server_only_the_field_names_are_written(tmp_path):
+    conn = db(tmp_path, server="test")
+    mine = card(conn, webmim_id="127616450414")
+    api, _ = client((200, wm(invoice=INVOICE)))
+    api.token()
+    assert webmim_invoice.after_place(conn, mine, api, NOW, server="test") == "test"
+    assert transfer(conn, mine) == "" and [e["text"][:40] for e in by_system(conn, mine)] == ["Поля ответа WebMIM (заказ по id, без зна"]
+
+
+def test_free_text_fields_and_lists_of_the_order_are_not_its_own_field():
+    assert webmim_invoice.look(wm(externalNumber=INVOICE))["number"] == ""
+    assert webmim_invoice.look(wm(noteForSupplier=INVOICE))["number"] == ""
+    assert webmim_invoice.look(wm(documents=[INVOICE]))["number"] == ""
+    assert webmim_invoice.look(wm(invoices=[INVOICE]))["number"] == INVOICE
+    assert webmim_invoice.look(wm(invoice="٢٦R-١٥٥٤١٤٧"))["number"] == ""                           # digits of another script
+
+
+def test_the_typed_number_of_a_second_order_is_never_looked_up_among_the_ids(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn, webmim_id="100", transfer_number="26R-0000100")
+    item = orders.add_item(conn, mine, goods_id="A", name="Шина A", brand_key="b", season="summer", diameter=16, territory="", qty=2,
+                           sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=NOW, author="owner")
+    item_id = item if isinstance(item, int) else conn.execute("SELECT MAX(id) FROM order_item").fetchone()[0]
+    conn.execute("INSERT INTO order_mim_extra (order_id, item_id, webmim_number, transfer_number, at, author) VALUES (?,?,?,?,?,?)",
+                 (mine, item_id, "1554147", "", NOW, "owner"))
+    conn.commit()
+    hourly(conn, [wm(100, 500, invoice="26R-0000100"), wm(1554147, 9999999, invoice="26R-1554199")])
+    assert conn.execute("SELECT transfer_number FROM order_mim_extra").fetchone() == ("",)

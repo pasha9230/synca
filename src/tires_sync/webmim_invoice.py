@@ -6,7 +6,8 @@ fields (never their values, but the number found) go once to the journal of the 
 Where it is read (GET only, nothing is sent to WebMIM):
 - hourly (webmim_match.run): the rows of GET /api/v2/orders of the live server; then GET /api/v2/orders/{id} for at most MAX_DETAILS open
   orders a run whose row had no number and whose «Номер перемещения» is empty (the ones asked longest ago first);
-- once right after «Оформить» / «Досоздать в WebMIM» (webmim_create.place): GET /api/v2/orders/{id}, one attempt of QUICK_TIMEOUT seconds;
+- once right after «Оформить» / «Досоздать в WebMIM» (webmim_create.place): GET /api/v2/orders/{id}, one attempt of webmim_orders.QUICK seconds
+  with the token of the press, outside the breaker; the number is written on the live server only;
   a failure is a grey line only, the press stays a success.
 A number found goes into an empty «Номер перемещения» (and into the empty transfer of a second order of WebMIM, order_mim_extra, of that
 number). A number typed by a person is never overwritten: when it differs, a yellow record asks the office to look (once)."""
@@ -22,10 +23,10 @@ from . import orders, webmim_orders
 AUTHOR = "система"
 # «26R-1554147»: two digits, one capital letter (Latin or Cyrillic), a hyphen, 4 to 10 digits: the whole value, never a part of it.
 # An order's number (digits only), a date, a phone or a code of goods never fits.
-PATTERN = re.compile(r"\d{2}[A-ZА-ЯЁ]-\d{4,10}")
+PATTERN = re.compile(r"[0-9]{2}[A-ZА-ЯЁ]-[0-9]{4,10}")
 STRONG = re.compile(r"invoice|bill|sch[eo]t|schyot|shchet|account|сч[её]т", re.I)   # a field named so is taken wherever it is in the answer
+TYPED = re.compile(r"external|note|comment|remark|descr", re.I)   # a field of the order a person types freely: taken only when named STRONG
 MAX_DETAILS = 10                 # GET /api/v2/orders/{id} at most so many a run (hourly)
-QUICK_TIMEOUT = 3.0              # seconds the read after a press may take (one attempt, no repeat)
 ASKED = "webmim_invoice_asked"   # app_state: {WebMIM id: when it was asked by id last}, the open orders only
 LIST = "список заказов"
 BY_ID = "заказ по id"
@@ -34,16 +35,18 @@ SKIPPED = (200, 400, 404, 410, 422)  # this order only is refused (gone, not par
 
 
 def _walk(data, path: str, depth: int, strong: bool, out: List[Tuple[str, str, bool, int]]) -> None:
-    if depth > 4:
+    """(path, value, under a STRONG name, depth) of every value of the invoice's form. Depth 1: a plain field of the order itself (not one a
+    person types freely, TYPED); a list is a level deeper (its values are not the order's own field)."""
+    if depth > 5:
         return
     if isinstance(data, dict):
         for key, value in data.items():
             name = str(key)[:60]
             here = path + ("." if path else "") + name
-            _walk(value, here, depth + 1, strong or bool(STRONG.search(name)), out)
+            _walk(value, here, depth + 1 + (1 if depth == 0 and TYPED.search(name) else 0), strong or bool(STRONG.search(name)), out)
     elif isinstance(data, list):
         for value in data[:50]:
-            _walk(value, path + "[]", depth, strong, out)
+            _walk(value, path + "[]", depth + 1, strong, out)
     elif isinstance(data, str) and PATTERN.fullmatch(data.strip()):
         out.append((path, data.strip(), strong, depth))
 
@@ -110,7 +113,9 @@ def apply(conn, card_id: int, number: str, label: str, now: str) -> str:
 
 
 def apply_extra(conn, card_id: int, item_id: int, number: str, label: str, now: str) -> str:
-    """The same for the second order of WebMIM of the pieces added to a position (order_mim_extra). No commit."""
+    """The same for the second order of WebMIM of the pieces added to a position (order_mim_extra), with the audit of the manual way
+    (order_webmim.set_extra_numbers). No commit."""
+    from . import store
     row = conn.execute("SELECT transfer_number FROM order_mim_extra WHERE order_id = ? AND item_id = ?", (card_id, item_id)).fetchone()
     if row is None:
         return ""
@@ -119,6 +124,7 @@ def apply_extra(conn, card_id: int, item_id: int, number: str, label: str, now: 
     if not row[0]:
         conn.execute("UPDATE order_mim_extra SET transfer_number = ?, at = ?, author = ? WHERE order_id = ? AND item_id = ?",
                      (number, now, AUTHOR, card_id, item_id))
+        store.write_audit(conn, now, AUTHOR, "order_mim_extra", {"order": card_id, "item": item_id, "transfer": number, "from": "webmim"})
         orders.add_event(conn, card_id, now, AUTHOR, "webmim", "Номер перемещения второго заказа WebMIM %s (добавленные шины «%s») из WebMIM: %s."
                          % (label, name, number), "grey")
         return "written"
@@ -137,9 +143,10 @@ def _label(order: dict) -> str:
 
 # ---- right after a press -------------------------------------------------------------------------------------------------------------
 
-def after_place(conn, card_id: int, client, now: str) -> str:
-    """One GET /api/v2/orders/{id} of the order the press made (QUICK_TIMEOUT, no repeat). Never raises for WebMIM's sake: a failure is a grey
-    line, the hourly reading takes the number later. Commits. Returns what became of it (for the tests)."""
+def after_place(conn, card_id: int, client, now: str, server: str = "prod") -> str:
+    """One GET /api/v2/orders/{id} of the order the press made (webmim_orders.QUICK, no repeat). Never raises for WebMIM's sake: a failure is
+    a grey line, the hourly reading takes the number later. The number goes into the order on the live server only (a test order's invoice is
+    never ours: it would stand in the way of the real one); on the test server only the names of the fields. Commits. Returns what became of it."""
     from . import webmim_match
     row = orders._row(conn, card_id)
     webmim_id = webmim_match.digits(row["webmim_id"])
@@ -156,7 +163,9 @@ def after_place(conn, card_id: int, client, now: str) -> str:
     seen = look(data)
     note_fields(conn, card_id, BY_ID, seen, now)
     result = "none"
-    if seen["number"]:
+    if seen["number"] and server != "prod":
+        result = "test"
+    elif seen["number"]:
         result = apply(conn, card_id, seen["number"], _label({"id": webmim_id, "number": webmim_match.digits(row["webmim_number"])}), now)
     conn.commit()
     return result
@@ -184,7 +193,7 @@ def _targets(conn, server: str, rows: Dict[str, dict]) -> Dict[str, dict]:
     for card_id, item_id, number, transfer, stage in conn.execute(
             "SELECT e.order_id, e.item_id, e.webmim_number, e.transfer_number, c.stage_id FROM order_mim_extra e JOIN order_card c ON c.id = e.order_id "
             "WHERE e.webmim_number != ''"):
-        order = by_id.get(webmim_match.digits(number)) or by_number.get(webmim_match.digits(number))
+        order = by_number.get(webmim_match.digits(number))         # a typed number: never looked up among the ids (webmim_match.paired)
         if order is not None:
             out.setdefault(order["id"], {"order": order, "cards": [], "extras": []})["extras"].append((card_id, item_id, transfer, kinds.get(stage) == "open"))
     return {k: v for k, v in out.items() if len(v["cards"]) <= 1}

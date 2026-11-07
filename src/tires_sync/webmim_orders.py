@@ -79,8 +79,9 @@ class OrdersClient:
         url = self._base + path + (("?" + urllib.parse.urlencode(params)) if params else "")
         sent = dict(headers, Accept="application/json")
         extra = {"timeout": timeout} if timeout is not None and _takes_timeout(self._http) else {}
+        # a quick read (`timeout`) is outside the breaker: its short timeout is no sign that WebMIM is down
         return reliability.call(lambda: self._http(method, url, sent, body, **extra), safe=safe,
-                                policy=reliability.WEBMIM, service=reliability.webmim_service(self._base),
+                                policy=reliability.WEBMIM, service=None if timeout is not None else reliability.webmim_service(self._base),
                                 read=method == "GET" or path == "/api/v3/auth/login")     # the pause holds the login (no session made), never a write or the logout
 
     def _authorized(self, path: str, params: Optional[dict] = None) -> Tuple[int, bytes]:
@@ -179,11 +180,14 @@ class OrdersClient:
 
     def get_with_headers(self, path: str, params: Optional[dict] = None, quick: Optional[float] = None) -> Tuple[object, Dict[str, str]]:
         """A GET with the token: (the decoded JSON, the answer's headers, lower-case; the lists give their pages there).
-        `quick`: one attempt of so many seconds, never repeated (a read that must not hold a press up)."""
+        `quick`: one attempt of so many seconds, never repeated, no other way in after a 401, and only with a token held already (a read that
+        must not hold a press up: OrdersError without one)."""
+        if quick is not None and self._token is None and self._key is None:
+            raise OrdersError("%s: быстрое чтение без входа не делается." % path)
         self.token()
         safe = quick is None
         status, headers, raw = self._authorized_full(path, params, safe=safe, timeout=quick)
-        if status == 401 and self._fallback():
+        if status == 401 and quick is None and self._fallback():
             status, headers, raw = self._authorized_full(path, params, safe=safe, timeout=quick)
         if status in (401, 403):
             raise OrdersError("%s: вход есть (%s), к заказам нет прав (код %s)." % (path, self.method, status), status)
