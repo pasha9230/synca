@@ -1,17 +1,19 @@
 """«Заказы WebMIM» in the order card (order_webmim, the owner 2026-11-07): the parts of the order by source, the numbers typed for one position
-«с ОТХ» and the second order of WebMIM of the pieces added. Section «Заказы», «менять». A manager of a point sees the block read-only (numbers
-only: nothing of money is in it); the forms are not theirs (not in POINT_PAGES: common.check_access answers 403). Nothing goes to WebMIM."""
+«с ОТХ» and the second order of WebMIM of the pieces added. Section «Заказы», «менять». A manager of a point never sees the block (the owner
+2026-10-30: no WebMIM for a point, as the block of the pairing) and may not post its forms (not in POINT_PAGES: 403). Nothing goes to WebMIM."""
 from __future__ import annotations
 
 from flask import abort, flash, redirect, request
 
 from .. import order_webmim, orders
-from .common import author, get_conn, login_required
+from .common import author, get_conn, login_required, own_point
 from .routes_orders import local_iso
 
 
 def register(app) -> None:
     def webmim_parts_for(card_id) -> list:
+        if own_point() is not None:                        # a point: no WebMIM (2026-10-30)
+            return []
         conn = get_conn()
         try:
             return order_webmim.parts(conn, orders.get_card(conn, int(card_id)), take_snapshot=True, now=local_iso())

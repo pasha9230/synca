@@ -232,7 +232,7 @@ def test_the_block_has_no_money(tmp_path):
 
 # ---- the panel -------------------------------------------------------------------------------------------------------------------------------
 
-def test_the_card_shows_the_block_its_forms_and_a_point_sees_it_read_only(tmp_path):
+def test_the_card_shows_the_block_its_forms_and_a_point_sees_none_of_it(tmp_path):
     from panel_helpers import post
     from test_mypoint import manager
     from test_vk_commands import _card, ready
@@ -253,9 +253,10 @@ def test_the_card_shows_the_block_its_forms_and_a_point_sees_it_read_only(tmp_pa
     assert post(client, "/orders/%d/items/%d/mim" % (cid, item), tok, webmim_number="5559999", transfer_number="26R-9").status_code == 302
     assert order_webmim.item_numbers(conn, cid)[item]["webmim_number"] == "5559999"
     point = manager(app, conn, pid)
-    seen = point.get("/orders/%d" % cid).get_data(as_text=True)
-    part = seen[seen.index('id="webmim-parts"'):].split("</section>")[0]
-    assert "5559999" in part and "/mim" not in part and "₽" not in part
+    seen = point.get("/orders/%d" % cid)
+    assert seen.status_code == 200
+    page = seen.get_data(as_text=True)
+    assert 'id="webmim-parts"' not in page and "/mim" not in page and "Заказы WebMIM" not in page   # the block is not a point's (2026-10-30)
     assert post(point, "/orders/%d/items/%d/mim" % (cid, item), "tok", webmim_number="1").status_code == 403
     assert order_webmim.item_numbers(conn, cid)[item]["webmim_number"] == "5559999"
 
