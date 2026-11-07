@@ -452,3 +452,30 @@ def test_3_an_undone_real_return_of_a_marked_position_leaves_the_seventh_day_as_
     order_oth.mark_returned(conn, first, "2026-10-21T11:00:00", "o", "1")       # by mistake
     order_oth.unmark_returned(conn, first, "2026-10-21T11:05:00", "o", "1")     # «Отменить»: only the mark is left
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
+
+
+def _seventh(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    started(conn)
+    conn.execute("UPDATE order_card SET entered_at = ? WHERE id = ?", (ENTERED, cid))
+    conn.commit()
+    return conn, cid, card["items"][1]["id"]                                    # the position of 2 pcs
+
+
+def test_3_a_part_of_the_mark_undone_then_a_real_return_keeps_the_order(tmp_path):
+    conn, cid, item = _seventh(tmp_path)
+    order_oth.item_to_return(conn, item, "2026-10-21T10:00:00", "o", "2")
+    order_oth.unmark_returned(conn, item, "2026-10-21T11:00:00", "o", "1")     # the mark holds 1 now
+    order_oth.mark_returned(conn, item, "2026-10-21T12:00:00", "o", "1")       # a real return of the other
+    assert order_oth.pieces_here(conn, orders.get_card(conn, cid))[item] == 1
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0
+
+
+def test_4_a_new_mark_after_a_closed_task_takes_the_old_one_in(tmp_path):
+    conn, cid, item = _seventh(tmp_path)
+    order_oth.item_to_return(conn, item, "2026-10-21T10:00:00", "o", "1")
+    [task] = conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (cid,)).fetchall()
+    tasks.close(conn, task[0], "done", "2026-10-21T11:00:00", "o", "согласовали")
+    order_oth.item_to_return(conn, item, "2026-10-21T12:00:00", "o", "1")
+    assert order_oth.pieces_here(conn, orders.get_card(conn, cid))[item] == 2  # both still at the point
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1          # nothing really given back: the 7th day asks

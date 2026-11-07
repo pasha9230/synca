@@ -601,7 +601,8 @@ def ask_due(card: dict, now: str) -> bool:
 
 _HELD_SQL = ("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth' "
              "AND c.entered_at >= ? AND NOT EXISTS (SELECT 1 FROM oth_return_plan r WHERE r.order_id = c.id) "
-             # a real «Вернуть поставщику» keeps the order; a position moved by hand (its key of this stay, ITEM_KEY) does not (the owner 2026-11-05)
+             # a real «Вернуть поставщику» keeps the order; the pieces of a mark «На возврат» of this stay (ITEM_KEY, its qty) do not (the owner
+             # 2026-11-05): kept while oth_return holds more than the mark
              "AND NOT EXISTS (SELECT 1 FROM oth_return r WHERE r.order_id = c.id AND r.qty > COALESCE((SELECT CAST(json_extract(a.value, '$.qty') AS INTEGER) "
              "FROM app_state a WHERE a.key = 'oth_item_return:' || r.item_id || ':' || replace(replace(replace(c.entered_at, '-', ''), ':', ''), 'T', '')), 0)) "
              "AND NOT EXISTS (SELECT 1 FROM order_intercity i WHERE i.order_id = c.id AND i.enabled = 1) ")
@@ -1152,8 +1153,10 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
         return False
     if item["returned_qty"] and not store_value(conn, key):                          # one row of oth_return: _HELD_SQL would take the real return for a mark
         raise OthError("У позиции уже есть отметка «возвращено поставщику»: снимите её или верните остаток той же кнопкой.")
-    conn.execute("DELETE FROM app_state WHERE key = ?", (key,))                       # a task closed earlier in this stay: the mark is over
-    mark = {"qty": pieces, "at": now, "by": who, "task": 0}
+    old = json.loads(store_value(conn, key) or "null") or {}                         # a task closed earlier in this stay: its pieces are still marked
+    kept = min(int(old.get("qty") or 0), int(item["returned_qty"]))                  # in oth_return — the new mark takes them in (review 2026-11-07)
+    conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+    mark = {"qty": pieces + kept, "at": now, "by": who, "task": 0}
     if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(mark, ensure_ascii=False))).rowcount != 1:
         conn.rollback()
         return False
@@ -1203,7 +1206,12 @@ def _item_undone(conn, item: dict, rest: int, now: str, who: str) -> None:
     key = _item_key(item["item_id"], item["since"])
     try:
         mark = json.loads(store_value(conn, key) or "null")
-        if not mark or rest > 0:
+        if not mark:
+            return
+        if rest > 0:                                                                 # a part undone: the mark holds what is left (review 2026-11-07)
+            if int(mark.get("qty") or 0) > rest:
+                conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(dict(mark, qty=rest), ensure_ascii=False), key))
+                conn.commit()
             return
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
