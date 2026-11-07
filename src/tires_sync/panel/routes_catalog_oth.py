@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from flask import abort, flash, redirect, render_template, request
 
-from .. import connections, oth_manual, oth_stock, order_oth, store
+from .. import connections, oth_manual, oth_stock, order_oth, order_sheet, orders, store
 from ..settings_store import active_settings
 from .common import author, can_post, get_conn, has_right, login_required, now_iso
 
@@ -150,7 +150,9 @@ def register(app) -> None:
         dates, marks = order_oth.reserve_dates(conn), order_oth.item_marks(conn)
         codes = {r[0]: r[1] for r in conn.execute("SELECT c.id, s.code FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_given')")}
         agreed = order_oth.plans(conn)
+        titles = {cid: order_sheet.mim_title(conn, orders.get_card(conn, cid)) for cid, code in codes.items() if code == "oth"}   # 2026-11-06
         for row in data["stock"]:
+            row["oth_title"] = titles.get(row["order_id"], "")
             when = dates.get(row["order_id"], {})
             on_oth = codes.get(row["order_id"]) == "oth"
             row.update(arrived=when.get("arrived", ""), reserve_last=when.get("until", ""), oth_since=when.get("oth_since") or row["since"],

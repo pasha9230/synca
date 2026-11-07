@@ -24,15 +24,20 @@ def _quiet(monkeypatch):
 # ---- the model -------------------------------------------------------------------------------------------------------------------------
 
 def test_a_new_client_takes_the_tyres_of_oth_into_a_new_order_and_the_old_one_is_cancelled(tmp_path):
+    """Not all the tyres go (one is marked «возвращено поставщику»): a new order takes the others, as before. All of them: test_oth_client_swap."""
     conn = db(tmp_path)
     old = card_at(conn, "oth", T)
+    item = orders.get_card(conn, old)["items"][0]["id"]
+    conn.execute("UPDATE order_item SET qty = 5 WHERE id = ?", (item,))
+    conn.execute("INSERT INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, 1, ?, 'o')", (item, old, T))
+    conn.commit()
     new = oth_sale.to_new_client(conn, old, "Пётр", "+7 900 555 66 77", LATER, "o")
     card = orders.get_card(conn, new)
     assert (card["client_name"], card["client_phone"], card["point_id"]) == ("Пётр", "+7 900 555 66 77", orders.get_card(conn, old)["point_id"])
     assert [(i["goods_id"], int(i["qty"]), float(i["supplier_price"])) for i in card["items"]] == [("1", 4, BUY_OLD)]   # the old purchase
     assert [t["from_order"] for t in oth_sale.taken(conn, new).values()] == [old]
     old_card = orders.get_card(conn, old)
-    assert old_card["stage"]["code"] == "cancel" and old_card["cancel_reason"] == oth_sale.TAKEN_REASON % new
+    assert old_card["stage"]["code"] == "oth" and [int(i["qty"]) for i in old_card["items"]] == [1]     # the returned one stays
     assert oth_stock.by_point(conn) == {}                                          # the stock of OTH (and the ad) is gone
     assert oth_sale.all_from_oth(conn, card)                                       # ready for «Товар на точке» without WebMIM
 
@@ -84,10 +89,9 @@ def test_a_new_client_makes_the_new_order_at_the_point_and_tells_the_client(tmp_
     post(owner, "/orders/%d/move" % old, tok, stage_id=str(stage(conn, "at_point")))
     r = post(owner, "/orders/%d/oth-back" % old, tok, answer="new", client_name="Пётр", client_phone="+7 900 555 66 77")
     new = int(re.search(r"/orders/(\d+)", r.headers["Location"]).group(1))
-    assert new != old
+    assert new == old                                                               # all the tyres: the order itself (oth_swap, 2026-11-06)
     card = orders.get_card(conn, new)
     assert card["stage"]["code"] == "at_point" and card["client_name"] == "Пётр"
-    assert orders.get_card(conn, old)["stage"]["code"] == "cancel"
     assert told == {"client": [new], "point": [new]}
 
 
@@ -135,6 +139,10 @@ def test_a_point_is_never_asked(tmp_path):
 def test_a_take_that_gets_fewer_tyres_undoes_the_new_order(tmp_path, monkeypatch):
     conn = db(tmp_path)
     old = card_at(conn, "oth", T)
+    item = orders.get_card(conn, old)["items"][0]["id"]
+    conn.execute("UPDATE order_item SET qty = 5 WHERE id = ?", (item,))              # one returned: a new order takes the others (not a swap)
+    conn.execute("INSERT INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, 1, ?, 'o')", (item, old, T))
+    conn.commit()
     real = oth_sale.take
     monkeypatch.setattr(oth_sale, "take", lambda *a, **kw: real(*a, **kw) - 1)    # the race: another tab took one a moment ago
     with pytest.raises(orders.OrderError, match="не переданы"):

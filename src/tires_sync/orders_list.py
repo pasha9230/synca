@@ -65,6 +65,8 @@ def rows(conn, card_ids: List[int], money: bool, point: bool = False) -> List[di
         card = dict(card, comment=order_notes.person_text(card["comment"]))       # «Примечание»: no ad nor call the order came with
         found = list(order_sheet.card_rows(conn, card, "").values()) or [dict(order_sheet.common_of(conn, card, ""), **{c: "" for c in POSITION})]
         for values in found:
+            if card["stage"]["code"] == "oth":                                    # a purchase of WebMIM, no client (2026-11-06); the table keeps it
+                values["Имя"] = ""
             if point:
                 values["Примечание"] = orders.without_account_names(conn, values["Примечание"])
             out.append({"order": card_id, "values": {c: values[c] for c in ok}})

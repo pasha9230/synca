@@ -114,6 +114,13 @@ def build(conn, start: str, end: str, point: str = "") -> dict:
     from .order_merge import handed as merged_handed
     for new, source in merged_handed(conn).items():                                     # a merged order: once, if a source was handed over
         handed.setdefault(new, handed.get(source))
+    from .oth_swap import fee_handed
+    off, moved = fee_handed(conn)                                                       # the client changed on «На ОТХ» (oth_swap)
+    for order_id, source in moved.items():
+        if source in handed:
+            handed[order_id] = handed[source]
+    for order_id in off - set(moved):
+        handed.pop(order_id, None)
     grouped: Dict[tuple, List[dict]] = {}
     for r in rows:
         if r["source"] == "order":

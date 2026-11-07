@@ -26,8 +26,9 @@ def press_take(client, tok, cid):
 
 
 def source_of_goods(conn, goods):
+    """A source of 6 pieces: an order of 4 takes a part, a new order (a take of all of them is a swap of the client: test_oth_client_swap)."""
     old = source(conn)
-    conn.execute("UPDATE order_item SET goods_id = ? WHERE order_id = ?", (goods, old))
+    conn.execute("UPDATE order_item SET goods_id = ?, qty = 6 WHERE order_id = ?", (goods, old))
     conn.commit()
     return old
 
@@ -41,7 +42,7 @@ def test_new_client_on_the_oth_page_gets_both_numbers_as_it_is_made(tmp_path, mo
     post(owner, "/orders/%d/move" % old, tok, stage_id=str(stage(conn, "at_point")))
     r = post(owner, "/orders/%d/oth-back" % old, tok, answer="new", client_name="Пётр", client_phone="+7 900 555 66 77")
     new = int(re.search(r"/orders/(\d+)", r.headers["Location"]).group(1))
-    assert new != old and numbers(conn, new) == OLD_NUMBERS and orders.get_card(conn, new)["webmim_id"] == ""
+    assert new == old and numbers(conn, new) == OLD_NUMBERS                          # all the tyres: the order itself (oth_swap, 2026-11-06)
     assert orders.get_card(conn, new)["stage"]["code"] == "at_point"
 
 
