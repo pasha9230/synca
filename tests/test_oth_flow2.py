@@ -295,8 +295,8 @@ def test_the_button_of_the_card_moves_the_order_with_the_task_and_the_label(tmp_
     [task] = open_tasks(conn, cid)
     assert task["title"] == order_oth.RETURN_TASK and task["kind"] == "return" and task["assignee"] == "ivan"
     assert tasks.KINDS[task["kind"]] == "Вернуть"
-    assert order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласуем"
-    assert "data-return-label>Согласуем<" in client.get("/orders?r=agree").get_data(as_text=True)
+    assert order_oth.label_of(order_oth.return_plan(conn, cid)) == "Ожидает согласование возврата"
+    assert "data-return-label>Ожидает согласование возврата<" in client.get("/orders?r=agree").get_data(as_text=True)
     assert "data-to-return" not in client.get("/orders/%d" % cid).get_data(as_text=True)     # already there
     assert [e for e in orders.list_events(conn, cid) if e["text"].startswith("Задача: Вернуть: " + order_oth.RETURN_TASK)]
     assert "/orders/%d" % cid in task["note"]
@@ -364,14 +364,15 @@ def test_a_task_of_before_counts_and_closes(tmp_path):
     assert open_tasks(conn, cid) == []
 
 
-def test_a_move_by_hand_has_no_question_and_a_stale_answer_marks_nothing(tmp_path):
+def test_a_move_by_hand_asks_the_question_too(tmp_path):
+    """Was: a move by hand had no question. The owner 2026-11-07: the point is asked as on the seventh day (test_return_tweaks, п. 4)."""
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
     orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T12:40:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T12:40:00", "o")
-    assert not order_oth.question_open(conn, orders.get_card(conn, cid))
-    assert order_oth.answer_here(conn, before, "точка", "2026-10-21T13:00:00")[2] is False
+    assert order_oth.question_open(conn, orders.get_card(conn, cid))
+    assert order_oth.answer_here(conn, before, "точка", "2026-10-21T13:00:00")[2] is True
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
 
 
@@ -441,7 +442,7 @@ def test_a_position_keeps_the_stage_leaves_the_sale_has_the_label_and_the_task(t
     now = orders.get_card(conn, cid)
     assert now["stage"]["code"] == "oth" and order_oth.return_plan(conn, cid) is None
     assert order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])["qty"] == 3
-    assert oth_stock.pieces(conn, manual=False) == {"1": 1, "2": 2}                        # off sale as «Согласуем» is (the owner 2026-11-04)
+    assert oth_stock.pieces(conn, manual=False) == {"1": 1, "2": 2}                        # off sale as «Ожидает согласование возврата» is (the owner 2026-11-04)
     assert [r["qty"] for r in order_oth.stock(conn)["returned"] if r["item_id"] == item] == [3]
     [task] = open_tasks(conn, cid)
     assert task["kind"] == "return" and task["assignee"] == "ivan" and "Nokian 205/55 R16, 3 шт." in task["note"]
@@ -507,7 +508,7 @@ def test_the_page_buttons_and_the_rights(tmp_path):
     assert 'formaction="/oth/to-return"' in page
     post(client, "/oth/to-return", tok, item=str(item), qty="1")
     page = client.get("/oth").get_data(as_text=True)
-    assert "data-item-return>Согласуем · 1 шт. на возврат" in page and 'formaction="/oth/to-return"' not in page
+    assert "data-item-return>Ожидает согласование возврата · 1 шт. на возврат" in page and 'formaction="/oth/to-return"' not in page
     assert "data-item-return" in client.get("/orders/%d" % cid).get_data(as_text=True)
     assert open_tasks(conn, cid)[0]["assignee"] == "ivan"
     post(client, "/oth/to-return", tok, item="999999")                                          # no such position: nothing, no error page
@@ -1189,7 +1190,7 @@ def test_a_manual_move_tells_a_vk_point_the_status_by_the_tick(tmp_path):
     told = []
     reserve.check(conn, "2026-10-21T11:07:00", calls(told))
     [text] = [t for who, t in told if who == ""]
-    assert "Ожидает согласование возврата" in text and "выдал" not in text                  # by hand: no question
+    assert "Ожидает согласование возврата" in text and "выдал" in text                      # by hand: the question too (the owner 2026-11-07)
     assert not [t for _w, t in told if t.startswith("Нужно согласовать")]
 
 
@@ -1303,15 +1304,20 @@ def _asked_vk(tmp_path, agreed=True):
 @pytest.mark.parametrize("text", ["отдал 700300", "отдали 700300", "700300 забрали", "забрал 700300"])
 @pytest.mark.parametrize("agreed", [True, False])
 def test_given_to_the_driver_never_closes_the_return_as_issued(tmp_path, text, agreed):
+    """Never «выдали»: the order stays, the client is not linked. The owner 2026-11-07: «отдал» of an agreed return is the hand-over to the driver
+    (it asks the confirmation as «возврат отдал», test_return_tweaks п. 1); otherwise the owner sees the message in «Входящие» as before."""
     from test_vk_commands import hook
     app, conn, cid = _asked_vk(tmp_path, agreed)
     plan = order_oth.return_plan(conn, cid)
     hook(app, conn, text)
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.return_plan(conn, cid) == plan
-    assert order_oth.question_open(conn, card)                                              # the question is still open, the owner sees the message
+    assert order_oth.question_open(conn, card)
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (cid,)).fetchone() is None
-    assert conn.execute("SELECT 1 FROM manager_message WHERE text LIKE ?", (text + "%",)).fetchone() is not None
+    to_driver = agreed and text.split()[0] in mgr.GIVE
+    assert (conn.execute("SELECT 1 FROM manager_message WHERE text LIKE ?", (text + "%",)).fetchone() is None) == to_driver
+    if to_driver:
+        assert conn.execute("SELECT outcome FROM order_command_log WHERE order_id = ? ORDER BY rowid DESC", (cid,)).fetchone()[0].startswith("ждёт подтверждения")
 
 
 @pytest.mark.parametrize("text", ["выдал 700300", "выдали 700300", "№700300 выдала", "отдал клиенту 700300"])
@@ -1400,7 +1406,7 @@ def test_an_agreement_of_an_earlier_stay_does_not_survive_a_return_to_work(tmp_p
     before = orders.get_card(conn, cid)
     orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-23T10:00:00", "o")  # refused again, straight back by hand
     order_oth.moved_by_hand(conn, before, "2026-10-23T10:00:00", "o")
-    assert order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласуем"
+    assert order_oth.label_of(order_oth.return_plan(conn, cid)) == "Ожидает согласование возврата"
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
     told = []
     assert order_oth.remind_handover(conn, "2026-10-26T09:00:00", calls(told)) == 0
