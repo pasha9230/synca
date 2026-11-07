@@ -151,7 +151,7 @@ def mark_returned(conn, item_id, now: str, author: str, qty=None) -> None:
         item["name"], pieces, "" if whole else " (всего возвращено %d из %d)" % (total, item["ordered"])))
     _audit(conn, now, author, "oth_return", {"order": item["order_id"], "item": item["item_id"], "qty": pieces, "returned": total})
     conn.commit()
-    if not any(r["order_id"] == item["order_id"] for r in stock(conn)["stock"]):     # all given back: nothing left to agree (the owner 2026-11-07)
+    if not pieces_here(conn, orders.get_card(conn, item["order_id"])):              # all given back (a mark «На возврат» is still here): nothing to agree (2026-11-07)
         close_return_tasks(conn, item["order_id"], now, author, "шины возвращены поставщику")
 
 

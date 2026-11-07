@@ -420,3 +420,12 @@ def test_8_the_remainder_the_supplier_refused_is_not_sent_back_on_its_seventh_da
     [rest] = order_oth.split_of(conn, cid)
     assert order_oth.ask_seventh_day(conn, "2026-11-05T12:30:00") == 0
     assert orders.get_card(conn, rest)["stage"]["code"] == "oth"
+
+
+def test_3_a_position_still_marked_keeps_the_task_when_another_is_given_back(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    first, second = card["items"][0]["id"], card["items"][1]["id"]
+    order_oth.item_to_return(conn, first, "2026-10-21T10:00:00", "o")           # A × 4 waits for the agreement
+    order_oth.mark_returned(conn, second, NOW, "o")                             # B × 2 given back
+    assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
+    assert order_oth.item_mark(order_oth.item_marks(conn), first, orders.get_card(conn, cid)["entered_at"])
