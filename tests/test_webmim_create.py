@@ -83,6 +83,9 @@ class FakeWebmim:
             self.orders[-1] = order
             return 201, order, {}
         order_id = path.split("/")[4]
+        if method == "GET" and not path.endswith("/items"):                         # the order itself (webmim_invoice.after_place)
+            order = next((o for o in self.orders if str(o["id"]) == order_id), None)
+            return (200, order, {}) if order is not None else (404, {"message": "not found"}, {})
         if method == "GET":
             return 200, self.items.get(order_id, []), {"X-Pagination-Page-Count": "1"}
         rows = self.items.setdefault(order_id, [])
@@ -198,8 +201,9 @@ def test_a_full_success_moves_an_earlier_order_to_placed_the_ordinary_way(tmp_pa
     result = place(conn, mine, FakeWebmim())
     assert result["ok"] and orders.get_card(conn, mine)["stage"]["code"] == "placed"
     line = "Этап: «%s» → «Заказ оформлен»" % stage(conn, code)["name"]
-    assert line in result["text"] and line in events(conn, mine)[0]                       # the move's own record, after the result's
-    assert "Оформлен в WebMIM" in events(conn, mine)[1]
+    texts = [t for t in events(conn, mine) if not t.startswith("Поля ответа WebMIM (заказ по id")]   # the grey record of the read after the press
+    assert line in result["text"] and line in texts[0]                                    # the move's own record, after the result's
+    assert "Оформлен в WebMIM" in texts[1]
 
 
 @pytest.mark.parametrize("code", ["placed", "moving", "at_point"])
@@ -277,7 +281,7 @@ def test_the_test_server_journals_the_names_of_webmims_fields_never_their_values
         return status, data, extra
     fake._answer = answer
     place(conn, mine, fake)
-    [line] = [e for e in orders.list_events(conn, mine) if e["text"].startswith("Поля ответа WebMIM")]
+    [line] = [e for e in orders.list_events(conn, mine) if e["text"].startswith("Поля ответа WebMIM на создание заказа")]
     assert line["level"] == "grey"
     for name in ("id", "number", "externalNumber", "transferDoc", "transferDoc.number", "deliveryRequests[].trackNumber"):
         assert name in line["text"].split(": ", 1)[1].rstrip(".").split(", ")
@@ -289,7 +293,10 @@ def test_the_live_server_journals_no_field_names(tmp_path, monkeypatch):
     mine = card(conn)
     monkeypatch.setattr(webmim_create, "CREATE_SERVERS", ("test", "prod"))
     place(conn, mine, FakeWebmim(), server="prod")
-    assert not [t for t in events(conn, mine) if t.startswith("Поля ответа WebMIM")]
+    assert not [t for t in events(conn, mine) if t.startswith("Поля ответа WebMIM на создание заказа")]
+    # the read of the order after the press (webmim_invoice, the owner 2026-11-07) names its fields on every server: names only, once
+    [line] = [t for t in events(conn, mine) if t.startswith("Поля ответа WebMIM (заказ по id")]
+    assert "номера счёта нет" in line and "1001" not in line
 
 
 def test_neither_the_order_time_nor_the_points_goes_to_webmim(tmp_path):
@@ -1437,3 +1444,59 @@ def test_on_the_live_server_tyres_from_oth_never_go(tmp_path):
     assert fake.calls == []
     assert place(conn, mixed, fake, server="prod")["ok"]
     assert [(c[2]["goodsId"], c[2]["quantity"]) for c in fake.posts("/items")] == [("222", 1)]
+
+
+# ---- the invoice's number right after the press (webmim_invoice.after_place, the owner 2026-11-07) ------------------------------------
+
+def test_after_a_full_success_one_get_of_the_order_takes_the_invoice_into_an_empty_transfer(tmp_path):
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = FakeWebmim()
+    original = fake._answer
+
+    def answer(method, path, query, payload):
+        status, data, extra = original(method, path, query, payload)
+        if method == "GET" and path.startswith("/api/v2/orders/") and not path.endswith("/items"):
+            data = dict(data, invoiceNumber="26R-1554147")
+        return status, data, extra
+    fake._answer = answer
+    result = place(conn, mine, fake)
+    assert result["ok"] and orders._row(conn, mine)["transfer_number"] == "26R-1554147"
+    reads = [c for c in fake.calls if c[0] == "GET" and c[1].startswith("/api/v2/orders/") and not c[1].endswith("/items")]
+    assert len(reads) == 1 and {c[0] for c in fake.calls if c[1].startswith("/api/v2/orders/")} <= {"GET", "POST"}
+    assert "Номер перемещения из WebMIM: 26R-1554147 (счёт заказа WebMIM №5001 (id 1001))." in events(conn, mine)
+
+
+@pytest.mark.parametrize("action", ["timeout", "500"])
+def test_a_failed_read_after_the_press_keeps_the_success_and_is_a_grey_line(tmp_path, action):
+    conn = db(tmp_path)
+    mine = card(conn)
+    fake = FakeWebmim()
+    original = fake.__call__
+
+    def http(method, url, headers, body):
+        if method == "GET" and "/api/v2/orders/" in url and not url.endswith("/items") and "/items?" not in url:
+            fake.calls.append((method, url, None))
+            if action == "timeout":
+                raise OSError("timed out")
+            return 500, {}, b"{}"
+        return original(method, url, headers, body)
+    from tires_sync import webmim_orders
+    result = webmim_create.place(conn, mine, webmim_orders.OrdersClient("https://mimtest.example", "api-bot", "pw-SECRET-1", http=http), "test",
+                                 NOW, TODAY, "owner", sleep=lambda _s: None)
+    assert result["ok"] and result["state"] == "done" and orders.get_card(conn, mine)["stage"]["code"] == "placed"
+    assert len([c for c in fake.calls if c[0] == "GET" and "/api/v2/orders/" in c[1] and "items" not in c[1]]) == 1    # not repeated
+    [line] = [e for e in orders.list_events(conn, mine) if e["text"].startswith("Номер счёта WebMIM сразу после оформления не прочитан")]
+    assert line["level"] == "grey" and orders._row(conn, mine)["transfer_number"] == ""
+
+
+def test_a_crash_of_the_read_after_the_press_never_fails_it(tmp_path, monkeypatch):
+    from tires_sync import webmim_invoice
+    conn = db(tmp_path)
+    mine = card(conn)
+
+    def boom(*_args):
+        raise RuntimeError("x")
+    monkeypatch.setattr(webmim_invoice, "after_place", boom)
+    result = place(conn, mine, FakeWebmim())
+    assert result["ok"] and orders.get_card(conn, mine)["stage"]["code"] == "placed"
