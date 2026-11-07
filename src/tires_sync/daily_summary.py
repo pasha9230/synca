@@ -1,7 +1,7 @@
 """The morning summary: a few lines with the figures of the day for the owners only (the owner 2026-11-07: the owner and Заман see it, never a
 partner) — the owner's login of the alerts and the active users of the role «owner» (order_alerts.owner_people). Off until the owner switches
-it on; once a day after 9:00 Moscow time from the hourly tick (`orders-tick`). Today it is a row of their bell for a day (lane/digest-bell,
-lane/digest-expire); while Telegram takes not only critical news (critical.telegram_allowed) it goes to their Telegram instead: the owner's chat
+it on; once a day after 9:00 Moscow time from the hourly tick (`orders-tick`). Today it is a row of their bell for a day (_to_bell,
+critical.note_once); while Telegram takes not only critical news (critical.telegram_allowed) it goes to their Telegram instead: the owner's chat
 of the failure alerts and the saved chats of the other owners. The day is marked before sending so it never goes twice. The figures are those of
 the day dashboard (`analytics.day_numbers`); nothing is sent to a client."""
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _recipients(conn, box, http) -> List[Callable[[str], None]]:
         found.append(owner)
         seen.add(str(connections.get_config(conn, "telegram", 0).get("chat_id") or ""))
     chats = order_notify.user_chats(conn)
-    owners = order_alerts.owner_people(conn)
+    owners = [x for x in order_alerts.owner_people(conn) if x != order_notify.get_owner_login(conn)]   # the owner: the alerts' chat above only
     token = connections.get_secret(conn, box, "telegram", 0, "bot_token") if box is not None and any(p in chats for p in owners) else ""
     for login in owners:
         if login in chats and token and chats[login] not in seen:         # a chat shared with the owner (a group) gets it once

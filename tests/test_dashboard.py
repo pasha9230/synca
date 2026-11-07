@@ -318,3 +318,16 @@ def test_the_summary_in_telegram_goes_to_the_owners_of_the_bell_only(tmp_path, a
     daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 9, 7), http=http)
     assert sorted(json.loads(c[3])["chat_id"] for c in http.calls) == (["1000", "888"] if active else ["1000"])
     assert ("zaman" in order_alerts.owner_people(conn)) is active and "worker2" not in order_alerts.owner_people(conn)
+
+
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
+def test_the_owners_own_user_chat_gives_no_second_summary(tmp_path):
+    conn = store.connect(str(tmp_path / "x.db"))
+    fill(conn)
+    box = _telegram(conn)
+    order_notify.set_user_chat(conn, order_notify.get_owner_login(conn), "2000", "2026-10-21T10:00:00", "owner")   # a chat of the owner's login too
+    conn.commit()
+    daily_summary.set_on(conn, True, "2026-10-21T10:00:00", "owner")
+    http = ScriptedHttp(*[(200, {"ok": True, "result": {}})] * 4)
+    assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 9, 7), http=http) == "сводка: отправлено 1, не ушло 0"
+    assert [json.loads(c[3])["chat_id"] for c in http.calls] == ["1000"]
