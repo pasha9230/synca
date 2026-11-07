@@ -1184,6 +1184,7 @@ def register(app) -> None:
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             oth_invoice=order_sheet.oth_invoice(conn, card) if own_point() is None else [],             # a point: no WebMIM (the owner 2026-10-30)
             oth_title=order_sheet.mim_title(conn, card) if card["stage"]["code"] == "oth" and own_point() is None else "",     # a purchase of WebMIM first (2026-11-06)
+            oth_parts=order_sheet.mim_parts(conn, card) if card["stage"]["code"] == "oth" and own_point() is None else None,   # its title and row (2026-11-07)
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),

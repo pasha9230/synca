@@ -1,7 +1,7 @@
 {# «Заказы WebMIM» (order_webmim, the owner 2026-11-07): every order of WebMIM and transfer of the order by source — с ОТХ (the order of purchase),
    the order's own order of the supplier, the point's own stock (no numbers), a merge (its sources), the pieces added after the number (a second
    order). No money. The forms: the numbers typed for one position «с ОТХ», the second numbers of the pieces added (the old ones lit). #}
-{% set wparts = webmim_parts_for(c.id) %}{% if wparts %}{% set may = can_post("order_item_mim") %}
+{% set wparts = webmim_parts_for(c.id) %}{% if c.stage.code == "oth" and oth_parts and wparts|length == 1 and not wparts[0].needs_numbers %}{% set wparts = [] %}{% endif %}{# «На ОТХ», one part: its numbers are in the row on top (2026-11-07) #}{% if wparts %}{% set may = can_post("order_item_mim") %}
 <section class="card order-webmim-parts" id="webmim-parts"><div class="card-body stack">
 <h3 style="margin:0">Заказы WebMIM</h3>
 {% if wparts|selectattr("needs_numbers")|list %}<p class="small text-warn" data-mimpart-warn>В заказ добавлены шины после оформления: впишите номер второго заказа WebMIM и перемещения. Старые номера подсвечены.</p>{% endif %}
