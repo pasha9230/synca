@@ -19,7 +19,7 @@ from test_vk_commands import _card, ready
 from tires_sync import orders, store
 
 NUMBER, WID, STATUS, TRANSFER = "5284060", "W-777", "Отгружен-статус", "ПМ-55"
-WORDS = re.compile(r"WebMIM|\bMIM\b|МИМ")          # as a person reads them; the lower-case codes of the forms (value="webmim") are not shown
+WORDS = re.compile(r"WebMIM|\bMIM\b|\bМИМ\b")          # as a person reads them; the lower-case codes of the forms (value="webmim") are not shown
 
 
 def visible(page):
@@ -44,7 +44,7 @@ def world(tmp_path, request):
     orders.add_event(conn, here, "2026-10-13T12:00:00", "o", "field", "Номер заказа WebMIM: %s" % NUMBER)
     store.set_state(conn, "ui_new.point", "all" if request.param == "new" else "off")
     conn.commit()
-    return dict(app=app, office=office, tok=tok, conn=conn, pid=pid, here=here, point=manager(app, conn, pid), view=request.param)
+    return dict(app=app, office=office, tok=tok, conn=conn, pid=pid, here=here, moving=moving, point=manager(app, conn, pid), view=request.param)
 
 
 def test_the_order_card_the_point_opens_has_no_webmim_but_keeps_the_delivery(world):
@@ -139,3 +139,36 @@ def test_an_alert_about_webmim_is_not_the_points_and_opening_the_order_still_rea
 def test_the_empty_search_hint_has_no_webmim_for_the_point(world):
     assert_no_webmim(world["point"].get("/search").get_data(as_text=True), "search", numbers=False)
     assert "WebMIM" in world["office"].get("/search").get_data(as_text=True)
+
+
+def test_a_client_s_words_with_mimo_stay_the_point_s(world):
+    """Review: only the whole words WebMIM / MIM / МИМ are hidden; «проеду мимо», «Мимоза» of a client stay in the journal and the alerts."""
+    from tires_sync.panel.routes_orders import point_no_webmim
+    conn, cid = world["conn"], world["here"]
+    orders.add_event(conn, cid, "2026-10-13T12:06:00", "o", "field", "Комментарий: проеду мимо в 5, Мимоза")
+    conn.commit()
+    assert "проеду мимо в 5" in world["point"].get("/orders/%d" % cid).get_data(as_text=True)
+    for text in ("Клиент написал: проеду мимо в 5", "Мимоза", "пантомима"):
+        assert not point_no_webmim({"kind": "chat", "text": text}), text
+    for text in ("Создан заказ WebMIM № 1", "№ MIM 1", "Заказать в МИМ"):
+        assert point_no_webmim({"kind": "field", "text": text}), text
+    assert point_no_webmim({"kind": "webmim", "text": "что угодно"})
+
+
+def test_a_merged_order_names_its_sources_by_the_point_s_order_number_without_webmim(world):
+    """A merged order names its sources by the number the point knows them by (order_label: «Рабочее место», VK, the journal's «[№…]»),
+    the same everywhere in the card; no word WebMIM, no ID, no status (review 2026-11-07: one number per order in one card)."""
+    from tires_sync import order_merge
+    conn, pid = world["conn"], world["pid"]
+    second = _card(conn, pid, webmim="5284061", code="at_point")
+    stage = next(s["id"] for s in orders.list_stages(conn) if s["code"] == "at_point")
+    merged = order_merge.merge(conn, [world["moving"], world["here"], second], stage, "2026-10-13T12:30:00", "o", client_from=world["here"])
+    conn.commit()
+    page = visible(world["point"].get("/orders/%d" % merged).get_data(as_text=True))
+    assert "Объединено из" in page
+    found = WORDS.search(page)
+    assert not found, page[max(0, found.start() - 120):found.end() + 120]
+    assert WID not in page and STATUS not in page
+    banner = page[page.index("Объединено из"):]
+    banner = banner[:banner.index("</div>")]
+    assert "№%s" % NUMBER in banner and "№5284061" in banner                     # the point's order numbers, as its journal names them

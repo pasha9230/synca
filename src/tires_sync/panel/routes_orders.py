@@ -95,7 +95,7 @@ MAX_NEW_ROWS = 20                                  # positions in the window of 
 POINT_SALE_FIELDS = ("client_name", "client_phone", "delivery_date", "comment")     # what the point edits in its own sale (the owner 2026-10-30)
 # A manager of a point never sees WebMIM (the owner 2026-10-30): the deal kinds without the word, the journal without its records.
 POINT_DEAL_KINDS = {"webmim": "Наш заказ (перемещение)", "stock": "Из наличия точки"}
-POINT_NO_WEBMIM = re.compile(r"WebMIM|\bMIM\b|МИМ", re.IGNORECASE)
+POINT_NO_WEBMIM = re.compile(r"WebMIM|\bMIM\b|\bМИМ\b")       # whole words: never «мимо», «Мимоза» of a client (review)
 
 
 def point_no_webmim(row: dict) -> bool:
