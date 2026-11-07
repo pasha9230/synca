@@ -98,7 +98,7 @@
 {% endif %}
 {% if choose %}{# the owner; the point has «Заказы» of its own sales on four stages (the owner 2026-10-30), our orders are here #}
 <details class="mp-handoff mp-stages"><summary><h2 id="mp-stages-h">Все этапы</h2></summary>
-<ul class="mp-stage-list">{% for s in stages %}<li><a class="mp-stage{% if not s.count %} mp-stage--empty{% endif %}" href="/orders?v=list&amp;s={{ s.stage.id }}{{ pq }}" data-stage-count="{{ s.stage.id }}"><span class="dot" style="background:{{ s.stage.color }}"></span><span class="mp-stage-name">{{ s.stage.name }}</span><b>{{ s.count }}</b></a></li>{% endfor %}</ul></details>{% endif %}
+<ul class="mp-stage-list">{% for s in stages %}<li><a class="mp-stage{% if not s.count %} mp-stage--empty{% endif %}" href="/orders?v=list&amp;s={{ s.stage.id }}{{ pq }}" data-stage-count="{{ s.stage.id }}"><span class="dot" style="background:{{ s.stage.color|stage_color }}"></span><span class="mp-stage-name">{{ s.stage.name }}</span><b>{{ s.count }}</b></a></li>{% endfor %}</ul></details>{% endif %}
 </div>
 {% endif %}
 {% with section="mypoint" %}{% include "_point_nav.html" %}{% endwith %}

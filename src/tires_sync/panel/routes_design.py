@@ -3,7 +3,7 @@ only / at everybody's, kept in app_state ui_new.<group>; body.ui-new switches th
 owner and the partner: the topbar's list of points, the session's as_point, «Выйти» (the rules of the mode are in common.current_user)."""
 from __future__ import annotations
 
-from flask import abort, flash, redirect, render_template, request, session
+from flask import abort, flash, g, redirect, render_template, request, session
 
 from .. import order_points as points, store
 from .common import AS_POINT_ROLES, acting_point, author, current_user, end_as_point, get_conn, now_iso
@@ -12,6 +12,12 @@ UI_GROUPS = {"client": "Клиент", "point": "Точка", "office": "Офи�
 UI_STATES = {"off": "Выкл", "owner_only": "Только у владельца", "all": "У всех"}
 UI_KEY = "ui_new.%s"
 VIEWERS = frozenset({"owner", "partner"})            # «только у владельца»: the owner and the partner see it
+# A stage's colour is kept as the code of the old palette (order_stage.color, «Настройка воронки»: orders.DEFAULT_STAGES, from_point, the
+# column's default). Under body.ui-new it is drawn from the tokens of «Строгий» (panel.css, --stage-*; lane design-colors); a code
+# of the owner's own: the neutral --stage-other. The base and the setting are never changed; the old view keeps the stored code.
+STAGE_TOKENS = {"#7F56D9": "violet", "#9E77ED": "violet-light", "#2E90FA": "blue", "#0BA5EC": "sky", "#F79009": "amber",
+                "#EF6820": "orange", "#17B26A": "green", "#0E9384": "teal", "#667085": "gray", "#DC6803": "amber-dark",
+                "#079455": "green-dark", "#D92D20": "red", "#B54708": "brown", "#98A2B3": "gray-light"}
 
 
 def ui_group(role: str) -> str:
@@ -56,6 +62,13 @@ def office_page(template: str) -> str:
     return "office2/" + template if office_new() else template
 
 
+def stage_color(color, new: bool) -> str:
+    """The colour to draw a stage with: the stored code in the old view, var(--stage-…) of «Строгий» in the new one (STAGE_TOKENS)."""
+    if not new:
+        return color
+    return "var(--stage-%s)" % STAGE_TOKENS.get(str(color or "").strip().upper(), "other")
+
+
 def as_point_choices() -> list:
     """The points of the topbar's «Работать как точка»: the owner and the partner only, never while working as a point."""
     user = current_user()
@@ -66,6 +79,12 @@ def as_point_choices() -> list:
 
 def register(app) -> None:
     app.jinja_env.globals.update(ui_new=ui_new, point_new=point_new, office_new=office_new, as_point_choices=as_point_choices)
+
+    def stage_color_filter(color):                       # {{ stage.color|stage_color }}: ui_new() once per request (a list: a row each)
+        if "ui_new_page" not in g:
+            g.ui_new_page = ui_new()
+        return stage_color(color, g.ui_new_page)
+    app.jinja_env.filters["stage_color"] = stage_color_filter
 
     @app.route("/ui-new", methods=["GET", "POST"])
     def ui_new_page():

@@ -22,6 +22,12 @@ body.ui-new{
   --sh-md:0 0 0 1px #D0D7DE,0 8px 24px rgba(66,74,83,.12); --sh-lg:var(--sh-md); --sh-xl:var(--sh-md);
   --s-2:7px; --s-3:10px; --s-4:14px; --s-6:20px; --s-8:28px;
   --ring:0 0 0 2px var(--gray-0),0 0 0 4px var(--primary-600);   /* :root computes it from its own values: again here */
+  /* этапы воронки: код старой палитры из базы → токен «Строгого» (routes_design.STAGE_TOKENS, фильтр stage_color) */
+  --stage-violet:#4F46E5; --stage-violet-light:#8250DF; --stage-blue:#0969DA; --stage-sky:#218BFF; --stage-amber:#BF8700;
+  --stage-orange:#BC4C00; --stage-green:#2DA44E; --stage-teal:#1B7C83; --stage-gray:#59636E; --stage-amber-dark:#9A6700;
+  --stage-green-dark:#1A7F37; --stage-red:#CF222E; --stage-brown:#953800; --stage-gray-light:#8C959F; --stage-other:#8C959F;
+  /* сезон «зима» и фон опоздания (office2-pages.css): значения пока прежние */
+  --winter-50:#EFF8FF; --winter-200:#B2DDFF; --winter-700:#175CD3; --err-25:#FFF5F5;
   background:var(--gray-0);color:var(--gray-900)
 }
 body.ui-new h1{font-size:22px;line-height:30px}
@@ -43,6 +49,11 @@ body.ui-new h1{font-size:22px;line-height:30px}
   /* знак поставщика 4Т */
   --sup4t-50:#EFF8FF; --sup4t-200:#B2DDFF; --sup4t-700:#175CD3;
   --summer:#F79009; --winter:#2E90FA; --spike:#D92D20;
+  --winter-50:#EFF8FF; --winter-200:#B2DDFF; --winter-700:#175CD3; --err-25:#FFF5F5;
+  /* этапы воронки: прежние коды (старый вид рисует код из базы как есть; под body.ui-new — свои значения) */
+  --stage-violet:#7F56D9; --stage-violet-light:#9E77ED; --stage-blue:#2E90FA; --stage-sky:#0BA5EC; --stage-amber:#F79009;
+  --stage-orange:#EF6820; --stage-green:#17B26A; --stage-teal:#0E9384; --stage-gray:#667085; --stage-amber-dark:#DC6803;
+  --stage-green-dark:#079455; --stage-red:#D92D20; --stage-brown:#B54708; --stage-gray-light:#98A2B3; --stage-other:#98A2B3;
 
   /* типографика */
   --font:"Inter",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;

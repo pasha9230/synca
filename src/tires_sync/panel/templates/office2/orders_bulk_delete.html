@@ -11,7 +11,7 @@
 <p class="sub">Заказы уйдут в «Удалённые» — оттуда их можно вернуть. В Авито и WebMIM ничего не меняется, клиентам ничего не отправится. Заказ с записанной продажей или с шинами с ОТХ не удалится: панель скажет, какой и почему.</p></div></header>
 <section class="card"><div class="table-wrap"><table class="table table--plain" data-bulk-delete-list>
 <thead><tr><th>№ WebMIM</th><th>внутр. №</th><th>Клиент</th><th>Этап</th></tr></thead>
-<tbody>{% for c in cards %}<tr><td><b>{{ c.webmim_number or "—" }}</b></td><td>№{{ c.id }}</td><td>{{ c.client_name or c.client_phone or "Без имени" }}</td><td><span class="o2-stage" style="--c:{{ c.stage.color }}">{{ c.stage.name }}</span></td></tr>
+<tbody>{% for c in cards %}<tr><td><b>{{ c.webmim_number or "—" }}</b></td><td>№{{ c.id }}</td><td>{{ c.client_name or c.client_phone or "Без имени" }}</td><td><span class="o2-stage" style="--c:{{ c.stage.color|stage_color }}">{{ c.stage.name }}</span></td></tr>
 {% else %}<tr><td colspan="4" class="muted">Выбранных заказов уже нет.</td></tr>{% endfor %}</tbody></table></div></section>
 <form method="post" action="/orders/bulk/delete" class="row" style="gap:var(--s-2)" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="confirmed" value="1"><input type="hidden" name="back" value="{{ back }}">
 {% for c in cards %}<input type="hidden" name="id" value="{{ c.id }}">{% endfor %}

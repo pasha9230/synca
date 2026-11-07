@@ -2,8 +2,8 @@
    renderCrm, renderTasks; index renderCatalog): only on the pages of templates/office2/ of this lane (body.o2; office2.css is the orders lane's, with body.ui-new and its tokens «Строгий»).
    Light theme only. No script of its own: app.js and own_price.js work on the same hooks as on the old pages. */
 body.o2{
-  --o2-primary:var(--primary-600,#4F46E5);--o2-primary-bg:var(--primary-100,#EEF2FF);--o2-bg:#FFFFFF;--o2-fill:#F6F8FA;--o2-hover:#F3F4F6;
-  --o2-border:#D0D7DE;--o2-border-2:#E4E7EB;--o2-text:#1F2328;--o2-text-2:#3D444D;--o2-text-3:#59636E;--o2-r:6px
+  --o2-primary:var(--primary-600);--o2-primary-bg:var(--primary-100);--o2-bg:var(--gray-0);--o2-fill:var(--gray-50);--o2-hover:var(--primary-50);
+  --o2-border:var(--gray-300);--o2-border-2:var(--gray-200);--o2-text:var(--gray-900);--o2-text-2:var(--gray-600);--o2-text-3:var(--gray-500);--o2-r:6px
 }
 body.o2{min-width:1024px}                         /* the office of the new view fits 1024 (the old pages keep 1280) */
 .o2 .o2-sp{flex:1 1 auto}
@@ -36,7 +36,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2 .o2-cl-row{display:block;padding:10px 14px;border-bottom:1px solid var(--o2-border-2);color:inherit;text-decoration:none;background:var(--o2-bg)}
 .o2 .o2-cl-row:hover{background:var(--o2-hover)}
 .o2 .o2-cl-row.is-active{background:var(--o2-primary-bg)}
-.o2 .o2-cl-row.is-handed{box-shadow:inset 3px 0 0 var(--warn-500,#F79009)}
+.o2 .o2-cl-row.is-handed{box-shadow:inset 3px 0 0 var(--warn-500)}
 .o2-r1{display:flex;align-items:center;gap:6px;min-width:0}
 .o2-r1 .chat-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--o2-text)}
 .o2-r1 .badge{flex:none;padding:0 6px;line-height:18px}
@@ -46,7 +46,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
   -webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .o2-you{color:var(--o2-text-3)}
 .o2 .o2-cl-row.is-unread .o2-ln{color:var(--o2-text);font-weight:600}
-.o2-cnt{flex:none;min-width:20px;height:20px;border-radius:10px;background:var(--o2-primary);color:#fff;font-size:12px;line-height:20px;text-align:center;
+.o2-cnt{flex:none;min-width:20px;height:20px;border-radius:10px;background:var(--o2-primary);color:var(--gray-0);font-size:12px;line-height:20px;text-align:center;
   padding:0 6px;margin-top:1px}
 .o2-r3{display:flex;gap:8px;margin-top:3px;font-size:12px;color:var(--o2-text-3)}
 .o2-r3 .chat-who{max-width:none}
@@ -117,9 +117,9 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 
 .o2 .o2-cl-msgs{flex:1 1 auto;min-height:120px;max-height:none;overflow-y:auto;padding:16px 24px;background:var(--o2-fill);gap:8px}
 .o2 .o2-cl-msgs .msg{max-width:70%;background:var(--o2-bg);border:1px solid var(--o2-border-2);border-radius:12px 12px 12px 4px;font-size:14px;line-height:20px}
-.o2 .o2-cl-msgs .msg--out{background:var(--o2-primary-bg);border-color:#C7D2FE;border-radius:12px 12px 4px 12px}
+.o2 .o2-cl-msgs .msg--out{background:var(--o2-primary-bg);border-color:var(--primary-300);border-radius:12px 12px 4px 12px}
 .o2 .o2-cl-msgs .msg--sys{background:var(--o2-bg);border:1px dashed var(--o2-border);border-radius:var(--o2-r);max-width:520px}
-.o2 .o2-cl-msgs .msg--call{background:var(--warn-50,#FFFAEB);border:1px solid var(--warn-200,#FEDF89)}
+.o2 .o2-cl-msgs .msg--call{background:var(--warn-50);border:1px solid var(--warn-200)}
 .o2 .o2-cl-msgs .chat-day{background:var(--o2-bg);border:1px solid var(--o2-border-2)}
 .o2-cl-none{text-align:center}
 .o2-cl-nohist{max-width:520px;align-self:center}
@@ -164,9 +164,9 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 .o2 .o2-filters .ig,.o2 .o2-filters .input,.o2 .o2-filters .select{height:34px}
 .o2 .o2-filters .brand-pick summary{height:34px;display:flex;align-items:center;min-width:180px}
 .o2-reset{height:34px}
-.o2 .ico-sun{color:var(--summer,#F79009)}
-.o2 .ico-snow{color:var(--winter,#2E90FA)}
-.o2 .o2-stud{color:var(--spike,#D92D20);width:15px;height:15px}
+.o2 .ico-sun{color:var(--summer)}
+.o2 .ico-snow{color:var(--winter)}
+.o2 .o2-stud{color:var(--spike);width:15px;height:15px}
 .o2 .o2-cat-bar{display:flex;flex-wrap:wrap;gap:8px 16px;padding:12px 16px;border-top:0;border-bottom:1px solid var(--o2-border-2)}
 .o2 .o2-seg a{height:30px;padding:0 12px;font-weight:500;text-decoration:none}
 .o2 .o2-seg a.is-active{background:var(--o2-primary-bg);color:var(--o2-primary);font-weight:600}
@@ -178,26 +178,26 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
   border:1px solid transparent;vertical-align:middle}
 .o2-season+.o2-season{margin-left:4px}
 .o2-season svg.i{width:13px;height:13px}
-.o2-season--summer{background:#FFFAEB;border-color:#FEDF89;color:#B54708}
-.o2-season--summer svg{color:var(--summer,#F79009)}
-.o2-season--winter{background:#EFF8FF;border-color:#B2DDFF;color:#175CD3}
-.o2-season--winter svg{color:var(--winter,#2E90FA)}
+.o2-season--summer{background:var(--warn-50);border-color:var(--warn-200);color:var(--warn-700)}
+.o2-season--summer svg{color:var(--summer)}
+.o2-season--winter{background:var(--winter-50);border-color:var(--winter-200);color:var(--winter-700)}
+.o2-season--winter svg{color:var(--winter)}
 .o2-season--all{background:var(--o2-fill);border-color:var(--o2-border-2);color:var(--o2-text-2)}
-.o2-season--all svg:first-child{color:var(--summer,#F79009)}.o2-season--all svg:nth-child(2){color:var(--winter,#2E90FA)}
-.o2-season--stud{padding:0 4px;background:#FEF3F2;border-color:#FECDCA}
+.o2-season--all svg:first-child{color:var(--summer)}.o2-season--all svg:nth-child(2){color:var(--winter)}
+.o2-season--stud{padding:0 4px;background:var(--err-50);border-color:var(--err-200)}
 .o2 .o2-cat-table .st-ico{width:auto;min-height:22px;height:auto;max-width:180px;padding:2px 8px 2px 6px;gap:4px;display:inline-flex;border-radius:4px;font-size:12px;font-weight:500;white-space:normal;line-height:16px;text-align:left;
   border:1px solid transparent}
 .o2 .o2-cat-table .st-ico svg{width:13px;height:13px}
 .o2 .o2-cat-table .st-ico::after{content:attr(data-tip-title)}
-.o2 .o2-cat-table .st-ico--ok{border-color:var(--ok-200,#ABEFC6);color:var(--ok-700,#067647)}
-.o2 .o2-cat-table .st-ico--err{border-color:var(--err-200,#FECDCA);color:var(--err-700,#B42318)}
-.o2 .o2-cat-table .st-ico--warn{border-color:var(--warn-200,#FEDF89);color:var(--warn-700,#B54708)}
-.o2 .o2-cat-table .st-ico--pend{border:1px dashed var(--pend-500,#EF6820);background:var(--pend-50,#FEF6EE)}
-.o2 .o2-cat-table .st-ico--brand{border-color:var(--primary-200,#E0E7FF);color:var(--primary-700,#4338CA)}
+.o2 .o2-cat-table .st-ico--ok{border-color:var(--ok-200);color:var(--ok-700)}
+.o2 .o2-cat-table .st-ico--err{border-color:var(--err-200);color:var(--err-700)}
+.o2 .o2-cat-table .st-ico--warn{border-color:var(--warn-200);color:var(--warn-700)}
+.o2 .o2-cat-table .st-ico--pend{border:1px dashed var(--pend-500);background:var(--pend-50)}
+.o2 .o2-cat-table .st-ico--brand{border-color:var(--primary-200);color:var(--primary-700)}
 .o2 .o2-cat-table .st-ico--neutral{border-color:var(--o2-border-2);color:var(--o2-text-2)}
 .o2 .o2-cat-table .t-status{width:auto!important}
-.o2 .o2-cat-table .is-pend td{background:var(--pend-50,#FEF6EE)}
-.o2 .o2-bulkbar{background:#24292F;color:#fff;border-radius:var(--o2-r)}
+.o2 .o2-cat-table .is-pend td{background:var(--pend-50)}
+.o2 .o2-bulkbar{background:var(--gray-800);color:var(--gray-0);border-radius:var(--o2-r)}
 .o2 .o2-cat-table .t-namecol{min-width:200px}
 
 /* ── Карточка позиции: what it is on the left, what is set by hand on the right ─────────────────────────────────────────── */
@@ -236,10 +236,10 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 /* ── Задачи ────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 .o2-tk-filters{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
 .o2-tk-filters .select{width:auto;min-width:160px}
-.o2-dot-red{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--err-600,#D92D20);margin-right:2px}
+.o2-dot-red{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--err-600);margin-right:2px}
 .o2 .o2-tk-list .table th{font-size:13px;color:var(--o2-text-2);background:var(--o2-fill)}
 .o2-tk-what{min-width:200px}
-.o2 .o2-tk-late td{background:#FFF5F5}
+.o2 .o2-tk-late td{background:var(--err-25)}
 .o2-tk-acts{min-width:170px;text-align:right}
 .o2-tk-acts form.row{flex-wrap:wrap;justify-content:flex-end}
 .o2-tk-acts .input{width:100%!important;min-width:0}

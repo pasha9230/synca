@@ -41,7 +41,7 @@
         top.querySelector("b").textContent = b.dataset.wm ? "№ " + b.dataset.wm : "№ WebMIM ещё нет";
         top.querySelector("span").textContent = "внутр. " + b.dataset.sel;
         cli.className = "o2-bl-cli"; cli.textContent = b.dataset.client || "";
-        stage.className = "o2-stage"; stage.style.setProperty("--c", b.dataset.stageColor || "#999"); stage.textContent = b.dataset.stageName || "";
+        stage.className = "o2-stage"; stage.style.setProperty("--c", b.dataset.stageColor || "var(--stage-other)"); stage.textContent = b.dataset.stageName || "";
         x.type = "button"; x.className = "icon-btn"; x.title = "Убрать из выбора"; x.setAttribute("aria-label", "Убрать из выбора"); x.textContent = "×";
         x.addEventListener("click", function () { mark(b.dataset.sel, false); draw(); });
         var second = document.createElement("div");
