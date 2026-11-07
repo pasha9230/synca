@@ -25,6 +25,16 @@ CHAT_FIELDS = ("id, account_id, chat_id, item_id, item_title, item_url, price_st
                "status_at, order_id, unlinked, history_ok, updated_ts, created_ts, synced_at, responsible")
 log = logging.getLogger("tires_sync.chats")
 MAX_REPLY = 2000
+# The send mark the system puts on its own messages to a client (lane token-guard): a word, the order's or task's number and digits —
+# «arrived-…», «reserve-…», «wait-…», «task-…» (order_engine.task_token), «autosend-…». A person's mark never has this shape: the chat
+# page's random one (routes_chats: 24 hex signs), the card's form «Позиция появилась» («o<order>t<task>», a person's send, order_wait).
+SYSTEM_MARK = re.compile(r"[a-z]+-\d+-\d*")
+
+
+def is_system_mark(value) -> bool:
+    """A send mark of the system (SYSTEM_MARK), read as send_reply reads a mark: stripped, 64 signs. A manager of a point never sends
+    under one, never presses «Отправить снова» or «Отправил вручную» on one: the message is not the point's (lane token-guard)."""
+    return bool(SYSTEM_MARK.fullmatch(str(value or "").strip()[:64]))
 PAYWALL = "подписку с API мессенджера"                    # the stub Avito puts instead of the history of a chat the subscription does not cover
 
 
