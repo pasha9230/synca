@@ -1049,7 +1049,8 @@ def agree_due(card: dict, now: str) -> bool:
 def tell_agree_due(conn, now: str, notify) -> int:
     """The tick: an order 6 days 12 hours on «На ОТХ» tells its responsible once per stay «Нужно согласовать на возврат» (the stage stays). The same orders as
     the seventh day (`_HELD_SQL`: since its first tick, no return agreed or marked, no other city, no point's own sale), and one without a point too:
-    no seventh day moves it, the responsible still has to decide. The seventh day usually comes first (an order enters «На ОТХ» after 00:30): it tells
+    no seventh day moves it, the responsible still has to decide. Not a stay whose task of the return was closed «не возвращаем» (_kept, the owner
+    2026-11-07): nothing is left to agree. The seventh day usually comes first (an order enters «На ОТХ» after 00:30): it tells
     with the move, and the stay is told once all the same (`_tell_agree`). Returns how many were told."""
     from . import order_points as points
     since = store_value(conn, SINCE_KEY)
@@ -1059,6 +1060,8 @@ def tell_agree_due(conn, now: str, notify) -> int:
             card = orders.get_card(conn, card_id)
             if card["stage"]["code"] != "oth" or card["entered_at"] != entered:
                 continue
+            if _kept(conn, card):
+                continue                                                     # the task of the return closed «не возвращаем»: nothing to agree
             if agree_due(card, now) and not (card["point_id"] and card_id in points.own_sales(conn, card["point_id"])):
                 told += _tell_agree(conn, card, now, notify)
         except Exception:                                                            # noqa: BLE001 - one order must not stop the others
