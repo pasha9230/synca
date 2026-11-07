@@ -830,6 +830,7 @@ def add_item(conn, card_id, *, goods_id, name, brand_key, season, diameter, terr
         (card_id, goods_id, str(code or "").strip()[:60], name, str(brand_key or ""), str(season or "all"), int(diameter or 0), str(territory or ""), qty, price, sale,
          json.dumps(terms or {}, ensure_ascii=False), fee, promo, 1 if point else 0))
     add_event(conn, card_id, now, author, "item", "Добавлено: %s × %d по %s ₽" % (name, qty, format(sale, ".0f")))
+    order_alerts.resolve_position_added(conn, card_id, now, author)          # «Позиция не добавлена» of before is fixed
     from . import oth_sale
     oth_sale.items_changed(conn, card_id, now, author)                  # a number of tyres «с ОТХ» gives way: the supplier is to be asked
     if commit:

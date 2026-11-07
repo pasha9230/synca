@@ -117,6 +117,42 @@ def resolve(conn, event_id: int, now: str, author: str) -> None:
     conn.execute("INSERT OR IGNORE INTO order_event_ack (event_id, login, at, author) VALUES (?,?,?,?)", (event_id, EVERYBODY, now, author))
 
 
+def _resolve_where(conn, order_id, now: str, author: str, fixed) -> int:
+    """Close for everybody (resolve) every red record of the order not closed yet for which fixed(event) holds; how many were closed."""
+    found = 0
+    for event_id, author_of, kind, text, level in conn.execute(
+            "SELECT e.id, e.author, e.kind, e.text, e.level FROM order_event e WHERE e.order_id = ? AND e.level IN ('', 'red') AND NOT EXISTS ("
+            "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (order_id, EVERYBODY)).fetchall():
+        event = {"id": event_id, "author": author_of, "kind": kind, "text": text or "", "level": level}
+        if level_of(event) == "red" and fixed(event):
+            resolve(conn, event_id, now, author)
+            found += 1
+    return found
+
+
+def resolve_message_done(conn, task: dict, whom: str, now: str, author: str) -> int:
+    """A task of the order is done (a message sent by the panel or by the sync, or ticked «Отправлено вручную»): its earlier red records are
+    fixed (the owner 2026-11-07: «зачем они мне там, если всё закрыто уже»): «Задача не подготовлена: <title>» of the same rule, and
+    «Сообщение <whom> «<title>» не отправлено …» of the same template and audience (order_placed._not_sent). `whom`: «клиенту», «точке» or ''
+    (not a message of either: only the rule's record). A skip is not a fix: nothing is closed then (the caller does not call)."""
+    title = str(task.get("title") or "")
+    if not title:
+        return 0
+    rule_record, rule_author = "Задача не подготовлена: " + title, "правило №%s" % task.get("rule_id")
+    chat_record = "Сообщение %s «%s» не отправлено" % (whom, title) if whom else None
+    return _resolve_where(conn, task["order_id"], now, author, lambda e: (
+        (e["kind"] == "rule" and e["author"] == rule_author and e["text"] == rule_record)
+        or (chat_record is not None and e["kind"] == "chat" and e["text"].startswith(chat_record))))
+
+
+POSITION_FAILED = ("Позиция не добавлена", "Позиция не определена")      # chat_deals._add_position: the order got no position from the ad
+
+
+def resolve_position_added(conn, order_id, now: str, author: str) -> int:
+    """A position is in the order now: «Позиция не добавлена / не определена» of before are fixed."""
+    return _resolve_where(conn, order_id, now, author, lambda e: e["kind"] == "chat" and e["text"].startswith(POSITION_FAILED))
+
+
 def open_alerts(conn, login: str, order_id: Optional[int] = None) -> List[dict]:
     """The records that are still alerts for this user, newest first: red not acked by them nor fixed, yellow and green not yet seen."""
     sql = ("SELECT e.id, e.order_id, e.at, e.author, e.kind, e.text, e.level, COALESCE(s.last_id, 0), "
