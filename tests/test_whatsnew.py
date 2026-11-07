@@ -130,6 +130,37 @@ def test_the_item_of_the_column_account_goes_to_the_owner_and_the_partner_only()
     assert "Подпись в таблице заказов" in str(item["body"])
 
 
+def test_the_fourth_update_is_shipped_and_tagged_as_decided():
+    """№4 (the lead 2026-11-07): what came after №3, by role; WebMIM, the purchase and the profit never to a point (the owner 2026-10-30)."""
+    [fourth] = [u for u in whatsnew.load() if u["number"] == 4]
+    assert fourth["title"] == "Обновление панели №4" and fourth["date"] == "07.11.2026"
+    roles = {i["title"]: i["roles"] for i in fourth["items"]}
+    assert roles["Рабочее место: «ОТКАЗ» с причиной вместо «Клиент не пришёл»"] == {"owner", "partner", "point"}
+    assert roles["Рабочее место: «Итого» на карточках заказов"] == {"owner", "partner", "point"}
+    assert roles["Заказы: блок «Заказы WebMIM» в карточке"] == {"owner", "partner", "chats", "viewer"}
+    assert roles["Заказы: «Заказать в МИМ» кнопкой"] == {"owner", "partner"}
+    assert roles["Заказы: автосообщение клиенту в указанный день"] == {"owner", "partner", "chats"}
+    assert roles["Уведомления: утренняя сводка и «Фото на проверке» в колокольчике"] == {"owner"}
+    assert not any("client" in r for r in roles.values())
+    assert not any(re.search(r"Письмо поставщику|Почта для возвратов", i["title"] + " " + str(i["body"])) for i in fourth["items"])   # removed (the owner 2026-11-07)
+    for item in fourth["items"]:
+        if "point" in item["roles"]:
+            assert not re.search(r"webmim|\bmim\b|мим\b|закуп|прибыл", item["title"] + " " + str(item["body"]), re.IGNORECASE), item["title"]
+
+
+def test_the_point_sees_only_its_items_of_the_fourth_update(tmp_path):
+    app = make_app(tmp_path)
+    pid = points.save_point(conn_of(app), {"name": "Янино", "manager_name": "А", "channel": "vk"})
+    client, _conn = person(app, "point", point_id=pid)
+    html = page(client)
+    [fourth] = [u for u in whatsnew.load() if u["number"] == 4]
+    shown = [i for i in fourth["items"] if str(escape(i["title"])) in html]
+    assert shown and all("point" in i["roles"] for i in shown)
+    assert len(shown) == sum("point" in i["roles"] for i in fourth["items"])
+    for hidden in ("Заказы WebMIM", "Закупка изменилась", "Автосообщение клиенту"):
+        assert hidden not in html, hidden
+
+
 @pytest.mark.parametrize("role", ["owner", "partner", "point", "client", "chats", "viewer"])
 def test_the_shipped_page_opens_for_a_role_with_its_own_items_only(tmp_path, role):
     app = make_app(tmp_path)
