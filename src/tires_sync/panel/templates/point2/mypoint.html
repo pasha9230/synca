@@ -14,6 +14,8 @@
 {% set pin %}{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}{% endset %}
 {% set pq = ("&p=%d"|format(point.id)) if choose and point else "" %}
 {% set short = {"moving": "Едут", "here": "На точке", "oth": "ОТХ", "return": "Возврат"} %}
+{% set ns = namespace(o=none, same=(cards or [])|length > 1) %}{% for r in cards or [] %}{% if not r.origin or (ns.o and r.origin.text != ns.o.text) %}{% set ns.same = false %}{% endif %}{% if not ns.o %}{% set ns.o = r.origin %}{% endif %}{% endfor %}
+{% set one_origin = ns.o if ns.same else none %}{# every card of the tab has the same note of its origin: once above them (ui-audit 76) #}
 {% macro press(c, row, action, label, cls, confirm_title="", confirm="", confirm_ok="") %}<form method="post" action="/my-point/{{ c.id }}/{{ action }}" data-once{% if confirm_title %} data-confirm-title="{{ confirm_title }}" data-confirm="{{ confirm }}" data-confirm-ok="{{ confirm_ok }}"{% endif %}><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens[action] }}">{{ pin }}<button class="btn {{ cls }} mp-btn">{{ label }}</button></form>{% endmacro %}
 {% macro refuse(c, row) %}<details class="mp-refuse" data-refuse="{{ c.id }}"><summary class="btn btn--secondary mp-btn">ОТКАЗ</summary><form method="post" action="/my-point/{{ c.id }}/refuse" data-once data-confirm-title="Отказ по заказу № {{ row.label }}?" data-confirm="Заказ перейдёт на «На ОТХ»: шины остаются у вас нашим товаром. Клиенту ничего не уходит." data-confirm-ok="Да, отказ" data-confirm-danger><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens['refuse'] }}">{{ pin }}<fieldset class="mp-refuse-why"><legend>Причина отказа</legend><label><input type="radio" name="reason" value="year" required> Старый год производства</label> <label><input type="radio" name="reason" value="size"> Ошиблись размером</label> <label><input type="radio" name="reason" value="other"> Другой</label> <input type="text" name="other" maxlength="200" placeholder="Другой: впишите причину" aria-label="Другая причина отказа"></fieldset><button class="btn btn--danger mp-btn">Отказ — на ОТХ</button></form></details>{% endmacro %}
 {% macro card(row) %}{% set c = row.card %}{% set who = ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' %}
@@ -21,7 +23,7 @@
 <article class="mp-card p2-card{% if row.here %} mp-card--here{% endif %}{% if row.asked %} mp-card--ask{% endif %}" id="order-{{ c.id }}" data-order="{{ c.id }}"{% if row.asked %} data-question="{{ c.id }}"{% endif %}>
 <div class="p2-main">
 <div class="p2-no"><span class="mp-no" data-no>№ {{ c.webmim_number or "панель %d"|format(c.id) }}</span>{% if row.order_date %}<span class="mp-date" data-order-date>от {{ row.order_date }}</span>{% endif %}</div>
-<div class="p2-tags"><span class="p2-tag {{ 'p2-tag--ok' if row.here else ('p2-tag--grey' if row.oth and not row.ret_label else 'p2-tag--warn') }}">{{ "на точке" if row.here else (("на возврат" if row.ret_label else "на ОТХ") if row.oth else "едет на точку") }}</span>{% if row.intercity %}<span class="p2-tag p2-tag--purple" data-intercity-tag>В другой город</span>{% endif %}</div>
+<div class="p2-tags">{% if query %}<span class="p2-tag {{ 'p2-tag--ok' if row.here else ('p2-tag--grey' if row.oth and not row.ret_label else 'p2-tag--warn') }}">{{ "на точке" if row.here else (("на возврат" if row.ret_label else "на ОТХ") if row.oth else "едет на точку") }}</span>{% endif %}{# the tab names it; the search shows it (ui-audit 74) #}{% if row.intercity %}<span class="p2-tag p2-tag--purple" data-intercity-tag>В другой город</span>{% endif %}</div>
 <div class="p2-info">
 {# the tyres first, then the client (the owner 2026-10-30); «На ОТХ»: the client is gone, the tyres only; the phone is in «Подробнее» #}
 <div class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}<div class="p2-g">{{ i.name }}<span class="p2-q">{{ i.qty }} шт.</span></div>{% else %}<div class="p2-g">шины не указаны</div>{% endfor %}</div>
@@ -48,9 +50,9 @@
 <div class="mp-transfer p2-sub" data-transfer>{% if c.transfer_number %}{{ c.transfer_number }} от {{ row.order_date }}{% else %}Перемещение: ещё нет · заказ от {{ row.order_date }}{% endif %}</div>
 {% if row.from_oth %}<div class="p2-sub" data-from-oth>Шины с ОТХ, заказ №{{ row.from_oth }}</div>{% endif %}
 {% if row.merged_from %}<div class="p2-sub" data-merged-from>Объединён из {{ row.merged_from }}</div>{% endif %}
-{% if row.origin %}<p class="p2-sub" data-origin>{{ row.origin.text }}: {{ row.origin.hint }}</p>{% endif %}
-{% if not row.oth %}<div class="mp-text">{{ row.text }}</div>{% endif %}{# «На ОТХ»: the client is gone (the owner 2026-10-30) #}
-{% if not row.here and not row.oth %}<dl class="mp-facts"><div><dt>Перемещение</dt><dd>{{ c.transfer_number or "номер ещё не вписан" }}</dd></div>{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}
+{% if row.origin and not one_origin %}<p class="p2-sub" data-origin>{{ row.origin.text }}: {{ row.origin.hint }}</p>{% endif %}{# the same for every card: once above them (ui-audit 76) #}
+{% if not row.oth %}<details class="mp-textd"><summary class="p2-sub">Текст сообщения</summary><div class="mp-text">{{ row.text }}</div></details>{% endif %}{# it repeats the card: folded (ui-audit 75) #}{# «На ОТХ»: the client is gone (the owner 2026-10-30) #}
+{% if not row.here and not row.oth %}<dl class="mp-facts">{# «Перемещение»: the line above (ui-audit 75) #}{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}
 {% if row.until %}<div class="mp-until{% if row.late %} mp-until--late{% endif %}">Хранение до {{ row.until }}{% if row.late %} — срок прошёл{% endif %}</div>{% endif %}
 </div></details>
 </article>
@@ -61,7 +63,7 @@
 <div class="p2-head-acts">
 {% if point %}<details class="p2-only-phone p2-find"{% if query %} open{% endif %}><summary class="p2-ico" aria-label="Найти заказ">{{ icon("search") }}</summary></details>{% endif %}
 {% if undo %}<a class="p2-ico p2-only-phone" href="#p2-undo" aria-label="Отменить отметку: {{ undo|length }}">{{ icon("undo") }}<b>{{ undo|length }}</b></a>{% endif %}
-<a class="p2-ico" href="/my-point?notes=1{% if choose and point %}&amp;p={{ point.id }}{% endif %}" aria-label="Оповещения{% if alerts_new %}: {{ alerts_new }} новых{% endif %}">{{ icon("alert") }}<span class="p2-ico-t">Оповещения</span>{% if alerts_new %}<b>{{ alerts_new }}</b>{% endif %}</a>
+{# «Оповещения»: the line «Оповещения: N» on the page and «Ещё» (the owner 2026-11-07, ui-audit 78) #}
 {% if point %}<a class="p2-ico p2-ico--primary" href="/my-point/handed{% if choose %}?p={{ point.id }}{% endif %}#handoff" data-handoff-open data-tour="handoff" aria-label="Передать клиента">{{ icon("plus") }}<span class="p2-ico-t">Передать клиента</span></a>{% endif %}
 </div>
 </header>
@@ -91,6 +93,7 @@
 {% if tab == "return" %}{% set waiting = cards|rejectattr("returning")|list %}{% if not returns and not waiting %}<p class="mp-empty">Возвратов поставщику сейчас нет.</p>{% endif %}{# the agreed returns are the plaque above #}
 {% if waiting %}<section class="mp-block" aria-labelledby="mp-agree-h"><h2 id="mp-agree-h">Ждут согласования возврата <span class="p2-count">{{ waiting|length }}</span></h2>{% for row in waiting %}{{ card(row) }}{% endfor %}</section>{% endif %}
 {% else %}
+{% if one_origin %}<p class="p2-sub" data-origin-once>{{ one_origin.text }}: {{ one_origin.hint }}</p>{% endif %}
 <section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">{{ tabs[tab] }}{% if cards %} <span class="p2-count">{{ cards|length }}</span>{% endif %}</h2>
 {% for row in cards %}{{ card(row) }}{% else %}<p class="mp-empty">Здесь сейчас нет заказов.</p>{% endfor %}</section>
 {% endif %}
