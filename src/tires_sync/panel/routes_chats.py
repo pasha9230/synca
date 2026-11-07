@@ -494,6 +494,8 @@ def register(app) -> None:
     @login_required
     def chat_send(chat_row):
         """The one «Отправить» of a chat: the text, the photo or both. The photo goes first; a text never follows a photo that did not surely go."""
+        if own_point() is not None and any(order_autosend.is_token(request.form.get(k)) for k in ("again", "reply_token", "image_token")):
+            abort(403)                                                    # «Автосообщение клиенту» is the office's (order_autosend)
         conn = get_conn()
         chat = _chat_or_404(conn, chat_row)
         if request.form.get("again"):
@@ -588,6 +590,8 @@ def register(app) -> None:
     @app.route("/chats/<int:chat_row>/send-image", methods=["POST"])
     @login_required
     def chat_send_image(chat_row):
+        if own_point() is not None and order_autosend.is_token(request.form.get("image_token")):
+            abort(403)                                                    # «Автосообщение клиенту» is the office's (order_autosend)
         conn = get_conn()
         chat = _chat_or_404(conn, chat_row)
         upload = request.files.get("photo")
