@@ -128,7 +128,8 @@
 
 /* the card (the owner 2026-10-30): the tyres first, the client under them; «Переданные клиенты»: «← Рабочее место» on a phone only */
 .pt .mp-tyres{font-weight:500;color:var(--pt-text)}
-.pt .mp-client .mp-name{font-weight:400;color:var(--pt-text-2)}
+.pt .mp-client .mp-name,.pt .mp-client .mp-sum{font-size:inherit;font-weight:500;color:var(--pt-text)}   /* the client and «Итого» as the tyres (the owner 2026-11-07) */
+.pt .mp-client .mp-sum b{font-weight:inherit}
 .pt-back{display:none}
 @media (max-width:760px){.pt-back{display:inline-flex}}
 
