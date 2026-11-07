@@ -102,7 +102,7 @@ def test_the_number_request_of_a_point_account_order_goes_only_to_the_point(tmp_
     from test_notify_by_point import sent_text
     texts = [sent_text(c) for c in vk_http.calls if "Укажите номер" in sent_text(c)]
     # the point still gets it, in its own words: no WebMIM to a point (the owner 2026-10-30, lane point-vk-webmim)
-    assert tg.calls == [] and texts == ["(бот) " + reserve.ASK_NUMBER_POINT.format(order_no=cid, client="Иван")], texts
+    assert tg.calls == [] and texts == ["(бот) Укажите номер заказа у поставщика по заказу %d (Иван)" % cid], texts
 
 
 

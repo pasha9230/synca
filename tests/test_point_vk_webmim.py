@@ -48,9 +48,12 @@ def test_the_point_s_card_journal_names_no_webmim_author(world):
     assert order_placed.AUTHOR in office                                           # the office: as before
 
 
-def test_the_number_request_of_the_last_reserve_day_reaches_the_point_without_webmim(tmp_path):
-    """Review: «Укажите номер заказа WebMIM …» (message_texts.ASK_NUMBER) went to the point of an order of its account. The point still
-    gets the request (the owner 2026-10-26: such an order's news are the point's), in words without WebMIM; the office keeps its template."""
-    from tires_sync import order_reserve
-    assert not WORDS.search(order_reserve.ASK_NUMBER_POINT)
-    assert "{order_no}" in order_reserve.ASK_NUMBER_POINT and "{client}" in order_reserve.ASK_NUMBER_POINT
+def test_an_alert_to_a_point_names_no_webmim_and_the_office_keeps_its_words():
+    """Review: «Укажите номер заказа WebMIM …» (message_texts.ASK_NUMBER, the owner's template) went to the point of an order of its account.
+    Every alert order_notify writes to a point (VK, «Рабочее место») reads «у поставщика» instead; the template, the journal and the office's
+    Telegram or bell keep their words (the VK case: test_reserve_no_number)."""
+    from tires_sync import order_notify
+    assert order_notify.for_point("Укажите номер заказа WebMIM по заказу 7 (Иван)") == "Укажите номер заказа у поставщика по заказу 7 (Иван)"
+    assert order_notify.for_point("Нет номера MIM: заказ 7") == "Нет номера у поставщика: заказ 7"
+    assert order_notify.for_point("Клиент проедет мимо в 5") == "Клиент проедет мимо в 5"
+    assert not WORDS.search(order_notify.for_point("Заказать в МИМ"))
