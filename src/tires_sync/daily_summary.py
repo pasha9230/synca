@@ -59,6 +59,24 @@ def _recipients(conn, box, http) -> List[Callable[[str], None]]:
     return found
 
 
+BELL_KEY = "daily_summary_bell"                 # app_state: the day whose summary is a row of the owners' bell (critical.note_once)
+
+
+def _to_bell(conn, now: datetime, today: str) -> Optional[str]:
+    """The summary as a row «Оповещение» of both owners' bell (order_alerts.owner_people), never Telegram nor VK; once a day: the day's mark
+    and the row are written together, so a busy base loses none and doubles none (the next tick of the morning writes it)."""
+    from . import critical, order_alerts
+    if store.get_state(conn, BELL_KEY) == today:
+        return None
+    people = order_alerts.owner_people(conn)
+    done = critical.note_once(conn, BELL_KEY, today, people, text(conn, now), now.isoformat(timespec="seconds"))
+    if done == "already":
+        return None
+    if done == "failed":
+        return "сводка: не записана в колокольчик (база занята), следующий тик утра повторит"
+    return "сводка: в колокольчик владельцев (%d)" % len(people)
+
+
 def maybe_send(conn, box, now: datetime, http: Transport = urllib_transport) -> Optional[str]:
     """Send the summary when it is on, it is between 9:00 and 12:00 in Moscow and it has not gone today. Returns what happened (None: not its time).
     The day is marked first: a second tick of the same day sends nothing, even when this one failed."""
@@ -67,10 +85,10 @@ def maybe_send(conn, box, now: datetime, http: Transport = urllib_transport) -> 
     today = now.date().isoformat()
     if store.get_state(conn, SENT_KEY) == today:
         return None
-    store.set_state(conn, SENT_KEY, today)
     from . import critical
-    if not critical.telegram_allowed(False):                    # not critical (the owner 2026-11-06): Telegram gets it no more
-        return "сводка: не отправлена, в Telegram только критичное"
+    if not critical.telegram_allowed(False):                    # not critical (the owner 2026-11-06): Telegram gets it no more, the owners' bell
+        return _to_bell(conn, now, today)                       # does (lane/digest-bell)
+    store.set_state(conn, SENT_KEY, today)
     body = text(conn, now)
     sent, failed = 0, 0
     try:

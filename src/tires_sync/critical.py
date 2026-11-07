@@ -172,6 +172,26 @@ def note(conn, logins: Iterable[str], text: str, now: str) -> bool:
         return False
 
 
+def note_once(conn, mark: str, issue: str, logins: Iterable[str], text: str, now: str) -> str:
+    """A not critical news of an issue (the morning summary of a day, a sheet of «Фото на проверке»): a row of these people's bell (note) once
+    per `issue` under the app_state key `mark`. The mark and the row are one transaction: a busy base leaves neither (the next try writes it),
+    a second try of the same issue writes nothing. Returns "written", "already" or "failed". Never raises."""
+    try:
+        claimed = conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value "
+                               "WHERE app_state.value != excluded.value", (mark, issue)).rowcount == 1
+    except Exception as err:                                      # noqa: BLE001 - a busy base: printed, never a new alert
+        _rollback(conn)
+        print("оповещение: колокольчик не записан (%s)" % type(err).__name__, file=sys.stderr)
+        return "failed"
+    if not claimed:
+        _rollback(conn)
+        return "already"
+    if note(conn, logins, text, now):                             # its write_audit commits the mark with the row
+        return "written"
+    _rollback(conn)
+    return "failed"
+
+
 NOTE_SHOWN = 20                    # the bell shows this many own notes one by one (the rest: «more» on the last one)
 NOTE_ACKED = "staff_note_acked:"   # app_state: "<NOTE_ACKED><login>" -> JSON list of the notes this person pressed «Разобрался» on
 

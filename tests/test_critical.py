@@ -253,8 +253,8 @@ def test_the_morning_summary_no_longer_goes_to_telegram(tmp_path, monkeypatch):
     from datetime import datetime
     conn, box, http = env(tmp_path, monkeypatch)
     monkeypatch.setattr(daily_summary, "is_on", lambda conn: True)
-    assert "не отправлена" in daily_summary.maybe_send(conn, box, datetime(2026, 11, 6, 10, 0), http=http)
-    assert http.tg == []
+    assert "колокольчик" in daily_summary.maybe_send(conn, box, datetime(2026, 11, 6, 10, 0), http=http)    # lane/digest-bell: the owners' bell
+    assert http.tg == [] and http.vk == []
 
 
 def test_the_one_setting_brings_back_everything_in_telegram(tmp_path, monkeypatch):
