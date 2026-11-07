@@ -28,17 +28,15 @@
 </div></details>
 {% if can_post("order_new") %}<a class="btn btn--primary" href="/orders/new">{{ icon("plus") }}Новый заказ</a>{% endif %}</div></header>
 <div class="o2-stats">
-<div class="o2-stat"><span class="t">В работе</span><b>{{ data.summary.open }}</b></div>
+{# the tiles: the two that filter the work; «В работе», «Новые сегодня» are the Главная's, «Сумма в работе» the columns' (the owner 2026-11-07, item 32) #}
 <div class="o2-stat{% if data.summary.overdue %} is-warn{% endif %}" title="дольше срока этапа"><span class="t">Просрочено</span><b>{{ data.summary.overdue }}</b></div>
 <div class="o2-stat{% if waiting %} is-warn{% endif %}" title="заказов с задачами правил"><span class="t">Ждут действия</span><b>{{ waiting|length }}</b></div>
-<div class="o2-stat"><span class="t">Новые сегодня</span><b>{{ data.summary.new_today }}</b></div>
-{% if data.summary.sum_open is not none %}<div class="o2-stat" title="по ценам продажи"><span class="t">Сумма в работе</span><b>{{ data.summary.sum_open|money }}</b></div>{% endif %}
 </div>
 <form method="get" action="/orders" class="card o2-filters">
 <input type="hidden" name="v" value="{{ view }}">
 <label class="field o2-f-wide"><span class="label">Поиск</span><span class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, номер"></span></label>
 <label class="field"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for p in points %}<option value="{{ p.id }}"{% if point == p.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
-{% if stages %}<label class="field"><span class="label">Этап</span><select class="select" name="s" data-stage-filter><option value="">Все</option>{% for s in stages %}<option value="{{ s.id }}"{% if only_stage == s.id %} selected{% endif %}>{{ s.name }}{% if not s.on_board %} (нет на доске){% endif %}</option>{% endfor %}</select></label>
+{% if stages and view != "board" %}{# the board's columns are the stages: «Этап» and «На возврат» in «Список» only (items 33, 34) #}<label class="field"><span class="label">Этап</span><select class="select" name="s" data-stage-filter><option value="">Все</option>{% for s in stages %}<option value="{{ s.id }}"{% if only_stage == s.id %} selected{% endif %}>{{ s.name }}{% if not s.on_board %} (нет на доске){% endif %}</option>{% endfor %}</select></label>
 <label class="field"><span class="label">{{ stage_name("return_given") }}</span><select class="select" name="r" data-return-filter><option value="">Все</option>{% for key, name in returning_filters.items() %}<option value="{{ key }}"{% if returning == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>{% endif %}
 <div class="field"><span class="label">Дата создания</span><span class="o2-dates"><input class="input" type="date" name="from" value="{{ date_from }}" aria-label="Дата создания: с"><span class="muted">—</span><input class="input" type="date" name="to" value="{{ date_to }}" aria-label="Дата создания: по"></span></div>
 <label class="field"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}" placeholder="Авито, предоплата…"></label>
@@ -116,9 +114,9 @@
 {% if c.oth_dates and c.oth_dates.until %}<div class="o2-meta" data-oth-dates>Резерв до {{ c.oth_dates.until|day }}</div>{% endif %}
 <div class="o2-meta">{{ c.point or "Точка не выбрана" }}</div>
 {% for i in m.tyres %}<div class="o2-items"><b class="o2-model">{{ i.name }}</b></div><div class="o2-meta" data-oth-qty>Кол-во: {{ i.qty }}</div>{% endfor %}
-{% else %}<div class="o2-t1">{{ odot(c.id) }}{{ wm(c) }}<span class="o2-inner">внутр. № {{ c.id }}</span></div>
+{% else %}<div class="o2-t1">{{ odot(c.id) }}{% if c.webmim or col.stage.code not in ("new", "talk", "wait") %}{{ wm(c) }}{% endif %}<span class="o2-inner">внутр. № {{ c.id }}</span></div>
 <div class="o2-cli">{{ c.client }}</div>
-{% if c.stage_day %}<div class="o2-meta" data-stage-date>{{ c.real or col.stage.name }} {{ c.stage_day|day }}</div>{% endif %}
+{% if c.stage_day %}<div class="o2-meta" data-stage-date>{% if c.real %}{{ c.real }} {{ c.stage_day|day }}{% else %}с {{ c.stage_day|day }}{% endif %}</div>{# the column names the stage (item 30) #}{% endif %}
 {{ items(c.items_text) }}
 <div class="o2-meta">{{ c.point or "Точка не выбрана" }}{% if c.delivery_date %} · {{ c.delivery_date|day }}{% elif c.in_stock %} · Товар в наличии на точке{% endif %}</div>
 {% if c.oth_dates %}<div class="o2-meta" data-oth-dates>На точке {{ c.oth_dates.arrived|day if c.oth_dates.arrived else "—" }} · резерв до {{ c.oth_dates.until|day if c.oth_dates.until else "—" }}</div>{% endif %}{% endif %}
