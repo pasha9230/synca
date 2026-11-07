@@ -63,54 +63,69 @@ def _number_of(card: dict) -> str:
     return str(card.get("webmim_number") or card.get("webmim_id") or "")
 
 
-def _moving(conn, card_id) -> set:
-    """The positions whose pieces follow other orders (they gave tyres «с ОТХ» or to a merge, and may get them back by «Вернуть на ОТХ» or
-    «Разъединить»): their pieces coming back are never «added» (review 2026-11-07)."""
-    from . import order_merge, oth_sale
-    return oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)
+def _away(conn, item_id) -> int:
+    """The pieces a position gave to other orders and may get back: taken «с ОТХ» (live) and given to an active merge (not through «На ОТХ»:
+    those are in order_item_oth already). Its pieces plus these stay the same whatever is taken, given back or merged (review 2026-11-07)."""
+    taken = conn.execute("SELECT COALESCE(SUM(qty), 0) FROM order_item_oth WHERE from_item = ? AND " + _LIVE, (int(item_id),)).fetchone()[0]
+    merged = conn.execute("SELECT COALESCE(SUM(i.qty), 0) FROM order_merge_item i JOIN order_merge m ON m.id = i.merge_id "
+                          "WHERE i.from_item = ? AND i.oth = 0 AND m.undone_at = ''", (int(item_id),)).fetchone()[0]
+    return int(taken or 0) + int(merged or 0)
+
+
+def _held(conn, item: dict) -> int:
+    return int(item["qty"]) + _away(conn, item["id"])
 
 
 def snapshot(conn, card_id, now: str, fresh: bool = False) -> bool:
-    """The pieces of the supplier's positions of an order with its own number (the mark: item 0, with that number). Taken again when the
-    number is another one now (corrected, or made by «Оформить в WebMIM»: everything in the order then is in that order of WebMIM), or with
-    `fresh`; the numbers of a second order typed for the old number go with it. No commit. True when taken now."""
+    """The pieces of the supplier's positions of an order with its own number (with those it gave to other orders: _away), once; the mark
+    (item 0) keeps the number it was taken for. A number corrected later only moves the mark: what was added and its second numbers stay.
+    `fresh` («Оформить в WebMIM»: everything in the order then is in that order of WebMIM): taken again; the rows of a second order already
+    known stay (their pieces may go to 0, never away). No commit. True when taken now."""
     from . import oth_sale
     card = orders.get_card(conn, int(card_id))
     if not own_number(conn, card):
         return False
     number = _number_of(card)
     mark = conn.execute("SELECT number FROM order_mim_base WHERE order_id = ? AND item_id = 0", (card["id"],)).fetchone()
-    if mark is not None and mark[0] == number and not fresh:
+    if mark is not None and not fresh:
+        if mark[0] != number:
+            conn.execute("UPDATE order_mim_base SET number = ? WHERE order_id = ?", (number, card["id"]))
         return False
     conn.execute("DELETE FROM order_mim_base WHERE order_id = ?", (card["id"],))
-    if mark is not None:
-        conn.execute("DELETE FROM order_mim_extra WHERE order_id = ?", (card["id"],))
     conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?, 0, 0, ?, ?)", (card["id"], now, number))
     for item in oth_sale.supplier_items(conn, card):
-        conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?,?,?,?,?)", (card["id"], item["id"], int(item["qty"]), now, number))
+        conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?,?,?,?,?)", (card["id"], item["id"], _held(conn, item), now, number))
     return True
 
 
 def extras(conn, card: dict) -> Dict[int, dict]:
-    """item → {qty added past the snapshot, webmim_number, transfer_number}; only while the order has its own number and a snapshot."""
+    """item → {qty added past the snapshot (0 or more), webmim_number, transfer_number}: a position with pieces added, and every position that
+    has a row of a second order already (order_mim_extra: it never goes away, its pieces follow the order; the table's row with them). {} with
+    no snapshot."""
     from . import oth_sale
-    rows = conn.execute("SELECT item_id, qty, number FROM order_mim_base WHERE order_id = ?", (card["id"],)).fetchall()
+    rows = conn.execute("SELECT item_id, qty FROM order_mim_base WHERE order_id = ?", (card["id"],)).fetchall()
     base = {r[0]: r[1] for r in rows}
-    mark = next((r[2] for r in rows if r[0] == 0), None)
-    if mark is None or not own_number(conn, card) or mark != _number_of(card):
-        return {}                                                    # no snapshot, or one of another number (it is taken again on the next look)
-    moving = _moving(conn, card["id"])
-    typed = {r[0]: (r[1], r[2]) for r in conn.execute(
+    if 0 not in base:
+        return {}
+    known = {r[0]: (r[1], r[2]) for r in conn.execute(
         "SELECT item_id, webmim_number, transfer_number FROM order_mim_extra WHERE order_id = ?", (card["id"],))}
     out = {}
     for item in oth_sale.supplier_items(conn, card):
-        if item["id"] in moving:
-            continue
-        added = int(item["qty"]) - int(base.get(item["id"], 0))
-        if added >= 1:
-            number, transfer = typed.get(item["id"], ("", ""))
+        added = min(int(item["qty"]), max(0, _held(conn, item) - int(base.get(item["id"], 0))))
+        if added >= 1 or item["id"] in known:
+            number, transfer = known.get(item["id"], ("", ""))
             out[item["id"]] = {"qty": added, "webmim_number": number, "transfer_number": transfer}
     return out
+
+
+def keep_extras(conn, card: dict, now: str) -> bool:
+    """The positions with pieces added get their row of a second order (empty numbers): from now on it is never lost. No commit."""
+    made = False
+    for item_id, extra in extras(conn, card).items():
+        if extra["qty"] >= 1:
+            made = conn.execute("INSERT OR IGNORE INTO order_mim_extra (order_id, item_id, at, author) VALUES (?,?,?, 'система')",
+                                (card["id"], item_id, now)).rowcount == 1 or made
+    return made
 
 
 def set_extra_numbers(conn, card_id, item_id, number, transfer, now: str, author: str) -> None:
@@ -165,8 +180,10 @@ def parts(conn, card: dict, take_snapshot: bool = False, now: str = "") -> List[
     """The orders of WebMIM of the order, in the order of the card: [{kind, label, source, number, transfer, day, items: [{id, name, qty}],
     typed, highlight, needs_numbers}]. `take_snapshot`: the card is looked at (the panel): an order with its own number gets its snapshot now."""
     from . import order_merge, order_sheet, oth_sale
-    if take_snapshot and snapshot(conn, card["id"], now or store.moscow_iso()):
-        conn.commit()
+    if take_snapshot:
+        when = now or store.moscow_iso()
+        if snapshot(conn, card["id"], when) | keep_extras(conn, card, when):
+            conn.commit()
     numbers = oth_sale.from_number(conn, card["id"])
     typed = item_numbers(conn, card["id"])
     merged = order_merge.items_of(conn, card["id"])
@@ -204,7 +221,7 @@ def parts(conn, card: dict, take_snapshot: bool = False, now: str = "") -> List[
             if own >= 1:
                 put("supplier", "Заказ поставщику", card["id"], card["webmim_number"] or card["webmim_id"], card["transfer_number"],
                     order_sheet._invoice_day(conn, card) if (card["webmim_number"] or card["webmim_id"]) else "", item, own)
-            if extra:
+            if extra and extra["qty"] >= 1:
                 put("extra", "Добавленные шины: второй заказ поставщику", card["id"], extra["webmim_number"], extra["transfer_number"],
                     order_sheet.day_of_number(conn, extra["webmim_number"]), item, extra["qty"])
     out = list(groups.values())
@@ -258,6 +275,9 @@ def _migrate(conn, now: str) -> int:
         for item_id, number in numbers.items():
             mine = card["webmim_number"] if "webmim_number" in typed and card["webmim_number"] != number else ""
             transfer = card["transfer_number"] if "transfer_number" in typed else ""
+            first = oth_sale.purchase_order(conn, item_id)
+            if first and conn.execute("SELECT 1 FROM order_card WHERE id = ?", (first,)).fetchone() is None:
+                mine, transfer = card["webmim_number"] or card["webmim_id"], card["transfer_number"]    # the source gone: the old rule read the order
             if mine or transfer:
                 conn.execute("INSERT OR IGNORE INTO order_item_mim (item_id, order_id, webmim_number, transfer_number, at, author) VALUES (?,?,?,?,?,?)",
                              (item_id, card_id, mine, transfer, now, "перенос"))

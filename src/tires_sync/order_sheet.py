@@ -453,7 +453,9 @@ def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
 def followed(conn, card_id: int) -> set:
     """The rows of the order whose quantity follows it: a position that gave tyres from «На ОТХ» or to a merge, or took them by a merge
     (order_merge; the old row stays at 0 pieces, «Примечание» is the owner's, the owner 2026-10-30)."""
-    return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)}
+    from . import order_webmim
+    seconds = {extra_key(card_id, r[0]) for r in conn.execute("SELECT item_id FROM order_mim_extra WHERE order_id = ?", (int(card_id),))}
+    return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)} | seconds    # a second order: follows too
 
 
 def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey: bool = False) -> List[dict]:

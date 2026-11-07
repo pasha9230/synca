@@ -274,15 +274,59 @@ def test_tyres_coming_back_from_oth_or_a_merge_are_never_added(tmp_path):
     assert set(rows(conn, old)) == set(before)                                # its row is there, no second one
 
 
-def test_a_new_number_takes_the_snapshot_again(tmp_path):
+def second_order(conn, cid):
+    """An order of 4 with its own number, looked at, then 2 more of the same tyre: its second part, its numbers typed."""
+    orders.update_card(conn, cid, {"webmim_number": OWN, "transfer_number": OWN_TRANSFER}, LATER, "o")
+    parts(conn, cid)
+    item = orders.get_card(conn, cid)["items"][0]["id"]
+    orders.update_item(conn, item, 6, 6000, LATER, "o")
+    parts(conn, cid)
+    order_webmim.set_extra_numbers(conn, cid, item, "6100300", "26R-2", LATER, "o")
+    return item
+
+
+def profit_of_rows(conn, cid):
+    return round(sum(float(r["Прибыль ₽"] or 0) for r in rows(conn, cid).values()), 2)
+
+
+def test_a_corrected_first_number_keeps_the_second_order(tmp_path):
     conn = db(tmp_path)
     cid = new_order(conn, qty=4)
-    orders.update_card(conn, cid, {"webmim_number": "X-1"}, LATER, "o")
-    parts(conn, cid)                                                          # the snapshot of «X-1»: 4
-    orders.update_card(conn, cid, {"webmim_number": ""}, LATER, "o")
-    orders.update_item(conn, orders.get_card(conn, cid)["items"][0]["id"], 6, 6000, LATER, "o")
-    orders.update_card(conn, cid, {"webmim_number": "Y-2"}, LATER, "o")      # another number: everything is in it
-    assert [(p["kind"], p["items"][0]["qty"]) for p in parts(conn, cid)] == [("supplier", 6)]
+    item = second_order(conn, cid)
+    orders.update_card(conn, cid, {"webmim_number": "6100299"}, LATER, "o")   # a typo of the first number fixed
+    parts(conn, cid)
+    extra = rows(conn, cid)[order_sheet.extra_key(cid, item)]
+    assert (extra["№ заказа MIM"], extra["Кол-во"]) == ("6100300", 2) and rows(conn, cid)[order_sheet.key(cid, item)]["№ заказа MIM"] == "6100299"
+
+
+def test_the_second_row_never_goes_away_and_the_profit_is_counted_once(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    item = second_order(conn, cid)
+    monkeypatch.setattr(order_sheet, "_profits", lambda conn_, card: {item: (1200.0, 20.0)})   # the position's profit, as the sale gives it
+    whole = 1200.0
+    assert profit_of_rows(conn, cid) == whole
+    assert order_sheet.extra_key(cid, item) in order_sheet.followed(conn, cid)         # its pieces and sums follow the order
+    orders.update_card(conn, cid, {"webmim_number": ""}, LATER, "o")                    # the number cleared
+    assert order_sheet.extra_key(cid, item) in rows(conn, cid) and abs(profit_of_rows(conn, cid) - whole) <= 0.02
+    orders.update_card(conn, cid, {"webmim_number": OWN}, LATER, "o")
+    orders.update_item(conn, item, 3, 6000, LATER, "o")                                 # fewer than were ordered first
+    now = rows(conn, cid)
+    assert now[order_sheet.extra_key(cid, item)]["Кол-во"] == 0 and now[order_sheet.key(cid, item)]["Кол-во"] == 3
+    assert now[order_sheet.extra_key(cid, item)]["Прибыль ₽"] in (0, 0.0) and profit_of_rows(conn, cid) == whole
+
+
+def test_a_take_after_the_second_order_moves_nothing_between_the_parts(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn, number=OWN, transfer=OWN_TRANSFER)                               # A: its own order of 4 on «На ОТХ»
+    parts(conn, old)
+    item = orders.get_card(conn, old)["items"][0]["id"]
+    before = rows(conn, old)
+    taker = new_order(conn, qty=2)
+    take(conn, taker)                                                                   # 2 of A's 4 leave
+    assert [p for p in parts(conn, old) if p["kind"] == "extra"] == [] and set(rows(conn, old)) == set(before)
+    oth_sale.untake(conn, taker, oth_item(conn, taker), LATER, "o")
+    assert [p for p in parts(conn, old) if p["kind"] == "extra"] == [] and order_sheet.extra_key(old, item) not in rows(conn, old)
 
 
 def test_the_button_of_webmim_takes_a_fresh_snapshot(tmp_path):
