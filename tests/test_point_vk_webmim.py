@@ -46,3 +46,11 @@ def test_the_point_s_card_journal_names_no_webmim_author(world):
     assert order_placed.AUTHOR not in page
     office = world["office"].get("/orders/%d" % cid).get_data(as_text=True)
     assert order_placed.AUTHOR in office                                           # the office: as before
+
+
+def test_the_number_request_of_the_last_reserve_day_reaches_the_point_without_webmim(tmp_path):
+    """Review: «Укажите номер заказа WebMIM …» (message_texts.ASK_NUMBER) went to the point of an order of its account. The point still
+    gets the request (the owner 2026-10-26: such an order's news are the point's), in words without WebMIM; the office keeps its template."""
+    from tires_sync import order_reserve
+    assert not WORDS.search(order_reserve.ASK_NUMBER_POINT)
+    assert "{order_no}" in order_reserve.ASK_NUMBER_POINT and "{client}" in order_reserve.ASK_NUMBER_POINT

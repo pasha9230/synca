@@ -100,7 +100,9 @@ def test_the_number_request_of_a_point_account_order_goes_only_to_the_point(tmp_
     tg, vk_http = ScriptedHttp((200, {"ok": True, "result": {}})), ScriptedHttp((200, {"response": 1}))
     reserve.check(conn, at(10), lambda card, text: order_notify.deliver(conn, box, card, text, at(10), tg_http=tg, vk_http=vk_http), deliver, vk)
     from test_notify_by_point import sent_text
-    assert tg.calls == [] and [sent_text(c) for c in vk_http.calls if "Укажите номер" in sent_text(c)] == ["(бот) " + ASK_NUMBER % cid]
+    texts = [sent_text(c) for c in vk_http.calls if "Укажите номер" in sent_text(c)]
+    # the point still gets it, in its own words: no WebMIM to a point (the owner 2026-10-30, lane point-vk-webmim)
+    assert tg.calls == [] and texts == ["(бот) " + reserve.ASK_NUMBER_POINT.format(order_no=cid, client="Иван")], texts
 
 
 
