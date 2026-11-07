@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import abort, flash, redirect, render_template, request
 
-from .. import avito_stock, connections, price_push, feed as feed_module, order_notify, orders, users as panel_users
+from .. import avito_stock, connections, daily_summary, price_push, feed as feed_module, order_notify, orders, users as panel_users
 from ..avito import AvitoAuthError, AvitoClient, AvitoError
 from ..secretbox import SecretKeyError
 from ..settings_store import StaleDraftError, active_settings, get_active
@@ -281,7 +281,7 @@ def register(app) -> None:
         from .. import critical
         chats = order_notify.user_chats(conn)
         return render_template(
-            "conn_telegram.html", tabs=tabs(conn, "telegram"), box_ok=box is not None,
+            "conn_telegram.html", tabs=tabs(conn, "telegram"), box_ok=box is not None, summary_on=daily_summary.is_on(conn),
             telegram=connections.get_config(conn, "telegram", 0),
             telegram_secrets=connections.secret_status(conn, box, "telegram", 0),
             telegram_check=connections.get_check(conn, "telegram", 0),
@@ -494,14 +494,15 @@ def register(app) -> None:
             vk = request.form.get("vk_peer", "").strip()
             if vk and not (vk.isascii() and vk.isdigit() and len(vk) <= 15 and vk != "0"):      # checked first: the chat is not saved alone
                 raise orders.OrderError("ВК: номер страницы, только цифры.")
-            order_notify.set_user_chat(conn, login, request.form.get("chat_id", ""), now_iso(), author())
+            if "chat_id" in request.form:                         # the Telegram chat (tab «Telegram»); the VK page alone comes from tab «ВК» (2026-11-07)
+                order_notify.set_user_chat(conn, login, request.form.get("chat_id", ""), now_iso(), author())
             if "vk_peer" in request.form:                         # the VK page of the critical news (critical.py)
                 from .. import critical
                 critical.set_user_vk(conn, login, request.form.get("vk_peer", ""), now_iso(), author())
-            flash("Чат Telegram и ВК сохранены.")
+            flash("Страница ВК сохранена." if "chat_id" not in request.form else "Чат Telegram сохранён." if "vk_peer" not in request.form else "Чат Telegram и ВК сохранены.")
         except orders.OrderError as err:
             flash(str(err))
-        return redirect("/connections/telegram")
+        return redirect("/connections/vk" if request.form.get("back") == "vk" else "/connections/telegram")
 
     @app.route("/connections/telegram", methods=["POST"])
     @login_required

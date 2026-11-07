@@ -6,7 +6,7 @@ import threading
 
 from flask import flash, redirect, render_template, request
 
-from .. import connections, store, vk_callback, vk_catchup
+from .. import connections, critical, store, users as panel_users, vk_callback, vk_catchup
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
 from .common import author, get_conn, login_required, now, now_iso
@@ -75,7 +75,8 @@ def register(app) -> None:
         return render_template(
             "conn_vk.html", tabs=tabs, box_ok=box is not None, vk=dict({"group_id": "", "confirmation": ""}, **connections.get_config(conn, "vk", 0)),
             vk_secrets=connections.secret_status(conn, box, "vk", 0), hook_url="%shook/vk/%s" % (request.url_root, vk_callback.path_token(conn)),
-            events=vk_callback.recent(conn))
+            events=vk_callback.recent(conn), user_vk=critical.vk_peers(conn),
+            panel_users=[u["login"] for u in panel_users.list_users(conn) if u["role"] != "client"])
 
     @app.route("/connections/vk", methods=["POST"])
     @login_required

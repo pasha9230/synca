@@ -76,7 +76,7 @@ def register(app) -> None:
         on = request.form.get("on") == "1"
         daily_summary.set_on(get_conn(), on, now_iso(), author())
         flash("Утренняя сводка включена: придёт после 9:00 МСК." if on else "Утренняя сводка выключена.")
-        return redirect("/")
+        return redirect("/connections/telegram" if request.form.get("back") == "telegram" else "/")      # the switch stands on «Подключения → Telegram» (2026-11-07)
 
     @app.route("/new")
     @login_required
