@@ -1,6 +1,0 @@
-{# «Письмо поставщику» (supplier_mail, the owner 2026-11-07): the «mailto:» link opens the letter in the operator's mail (app.js notes the press
-   in the order's journal: data-mail-log), «Скопировать текст» takes its text. `mail`: supplier_mail_for(order); `uid`: unique in the page. #}
-{% macro button(mail, order_id, uid) %}{% if mail %}<span class="row supplier-mail" style="gap:var(--s-1);align-items:center;flex-wrap:wrap">
-<a class="btn btn--secondary btn--xs" href="{{ mail.href }}" data-mail-log="/orders/{{ order_id }}/supplier-mail" data-csrf="{{ csrf_token() }}">Письмо поставщику</a>
-<textarea id="{{ uid }}" hidden readonly aria-label="Текст письма поставщику">{{ mail.body }}</textarea><button type="button" class="btn btn--link btn--xs" data-copy="#{{ uid }}">Скопировать текст</button>
-{% if mail.warning %}<span class="small text-warn">{{ mail.warning }}</span>{% endif %}</span>{% endif %}{% endmacro %}

@@ -320,7 +320,6 @@ SECTION_OF.update(catalog_oth_manual="orders")                   # «Свой о
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
 SECTION_OF.update(order_item_mim="orders", order_item_mim_extra="orders")    # «Заказы WebMIM» (routes_order_webmim, 2026-11-07)
 SECTION_OF.update(order_autosend_add="orders", order_autosend_update="orders", order_autosend_cancel="orders")   # «Автосообщение клиенту»
-SECTION_OF.update(order_supplier_mail="orders", connections_supplier_email="setup")   # «Письмо поставщику» (routes_supplier_mail, 2026-11-07)
 SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
                   order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
 SECTION_OF.update(ui_new_page="setup",                           # «Новый вид» (routes_design, 2026-11-02): the owner changes, the partner looks
