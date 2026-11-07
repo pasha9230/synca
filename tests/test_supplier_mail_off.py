@@ -37,7 +37,10 @@ def test_the_card_on_na_vozvrat_has_no_letter(tmp_path):
     stored_address(conn)
     client, _tok = owner_client(app)
     assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
-    page = client.get("/orders/%d" % cid).get_data(as_text=True)
+    response = client.get("/orders/%d" % cid)
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Ожидает согласование возврата" in page                            # the return-tweaks label stays (the owner 2026-11-07)
     assert_gone(page)
 
 
