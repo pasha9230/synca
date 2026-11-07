@@ -1,7 +1,7 @@
 """The point hears only of what it does (the owner 2026-11-07: «Убери у точек все лишние уведомления, они им не нужны»): its bell, the counter,
 «Уведомления», the sound (/my-point/feed) and the dots, for the manager of a point and for «Работать как точка», show a list of what is the
-point's — «Поступили шины по заказу …», its questions («Клиент забрал?», the 7th day of «На ОТХ»), the return (agreed with its date, cancelled;
-«возврат отмечен»), its orders on the way — and nothing of the office's records. The office, the owner and the journal of the order are
+point's — «Поступили шины по заказу …», «Клиент забрал?», «возврат отмечен» (the return agreed or cancelled is allowed too, but its record is
+grey: no alert) — and nothing of the office's records; the 7th day of «На ОТХ» and its orders on the way ring in /my-point/feed as before. The office, the owner and the journal of the order are
 not changed; what goes to the point's VK and «Рабочее место» (order_notify) is not changed here."""
 from __future__ import annotations
 

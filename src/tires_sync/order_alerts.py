@@ -75,8 +75,9 @@ POINT_RECORDS = {                                                # the point's o
 def point_row(row: dict) -> bool:
     """A row the manager of a point (or «Работать как точка») is shown: only what the point does (the owner 2026-11-07: «Убери у точек все
     лишние уведомления»), a list of what is allowed, not of what is not: its questions and its return row (routes_alerts.point_rows), «Поступили
-    шины по заказу …», the return agreed with its date (акт МХ-3) or cancelled. Every record of the office is no row of the point: its bell,
-    counter, «Уведомления», notify.js, the dots. Only the showing: the journal keeps them, the office sees them as before."""
+    шины по заказу …», the return agreed with its date (акт МХ-3) or cancelled (allowed, but written grey by order_oth: no alert today). Every
+    record of the office is no row of the point: its bell, counter, «Уведомления», notify.js, the dots. Only the showing: the journal keeps
+    them, the office sees them as before. The 7th day of «На ОТХ» and the orders on the way ring through /my-point/feed of their own."""
     kind, text = row.get("kind"), str(row.get("text") or "")
     if kind in POINT_ROWS:
         return True
