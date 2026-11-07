@@ -142,6 +142,7 @@ def test_the_fourth_update_is_shipped_and_tagged_as_decided():
     assert roles["Заказы: автосообщение клиенту в указанный день"] == {"owner", "partner", "chats"}
     assert roles["Уведомления: утренняя сводка и «Фото на проверке» в колокольчике"] == {"owner"}
     assert not any("client" in r for r in roles.values())
+    assert not any(re.search(r"Письмо поставщику|Почта для возвратов", i["title"] + " " + str(i["body"])) for i in fourth["items"])   # removed (the owner 2026-11-08)
     for item in fourth["items"]:
         if "point" in item["roles"]:
             assert not re.search(r"webmim|\bmim\b|мим\b|закуп|прибыл", item["title"] + " " + str(item["body"]), re.IGNORECASE), item["title"]
@@ -156,7 +157,7 @@ def test_the_point_sees_only_its_items_of_the_fourth_update(tmp_path):
     shown = [i for i in fourth["items"] if str(escape(i["title"])) in html]
     assert shown and all("point" in i["roles"] for i in shown)
     assert len(shown) == sum("point" in i["roles"] for i in fourth["items"])
-    for hidden in ("Заказы WebMIM", "Закупка изменилась", "Письмо поставщику", "Автосообщение клиенту"):
+    for hidden in ("Заказы WebMIM", "Закупка изменилась", "Автосообщение клиенту"):
         assert hidden not in html, hidden
 
 
