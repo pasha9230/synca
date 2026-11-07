@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import html
 import io
+import json
 import logging
 import re
 import sqlite3
@@ -121,6 +122,39 @@ def set_responsible(conn, chat_row, login: str, now: str, author: str) -> None:
     conn.execute("UPDATE avito_chat SET responsible = ? WHERE id = ?", (login, chat_row))
     store.write_audit(conn, now, author, "chat_assign", {"chat": chat_row, "from": row[0], "to": login})
     conn.commit()
+
+
+ANSWERING_ROLES = ("owner", "partner", "chats")    # who may answer a chat: the roles with «Чаты» to change (panel/routes_chats)
+ASSIGN_DEFAULT = "chat_assign_default"            # the journal of actions: the chats the sync gave the account's responsible
+
+
+def default_responsible(conn, account_id) -> str:
+    """Who answers a chat of the account by default (the owner 2026-11-07: «тот, чей аккаунт Авито»): «Ответственный за заказы этого
+    аккаунта» (connections.account_responsible) when that person may answer chats (ANSWERING_ROLES, or the shared owner saved as such); ''
+    when the account has nobody (as before) or is a point's (its chats and «Передать клиента» are the point's rules)."""
+    from . import order_points
+    if account_id is None or order_points.point_by_account(conn, account_id):
+        return ""
+    login = connections.account_responsible(conn, account_id)
+    if not login:
+        return ""
+    row = conn.execute("SELECT r.role, r.active FROM panel_user u LEFT JOIN panel_user_role r ON r.login = u.login WHERE u.login = ?", (login,)).fetchone()
+    if row is None:
+        return login                                    # the shared owner (account_responsible: saved as such)
+    role, active = row[0] or "owner", 1 if row[1] is None else row[1]
+    return login if active and role in ANSWERING_ROLES else ""
+
+
+def _give_default(conn, chat_row: int, account_id: int, login: str, now: str) -> bool:
+    """The chat gets `login` while nobody answers it and no person ever chose for it (set_responsible's «chat_assign», «никто» too), with its
+    record ASSIGN_DEFAULT in the same transaction: a responsible given by the system is never taken for a person's choice
+    (order_points.office_taken). No commit."""
+    if conn.execute("UPDATE avito_chat SET responsible = ? WHERE id = ? AND responsible = '' AND NOT EXISTS (SELECT 1 FROM audit "
+                    "WHERE action = 'chat_assign' AND json_extract(detail, '$.chat') = ?)", (login, chat_row, chat_row)).rowcount != 1:
+        return False
+    conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?, ?, ?, ?)",
+                 (now, "system", ASSIGN_DEFAULT, json.dumps({"chat": chat_row, "account": account_id, "to": login}, ensure_ascii=False)))
+    return True
 
 
 def wait_starts(conn, chat_rows) -> dict:
@@ -295,6 +329,7 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
     backfill_previews(conn, account_id)
     offset = 0
     rereads = 0
+    default = default_responsible(conn, account_id)                     # a new chat at once, one without anybody when it comes alive
     for _ in range(max_pages):
         try:
             data = client.chats(uid, limit=page, offset=offset, retry=False)
@@ -308,6 +343,8 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
             if upserted is None:
                 continue
             chat_row, existed, changed = upserted
+            if default and not existed:
+                _give_default(conn, chat_row, account_id, default, now)
             conn.commit()                                                          # no write stays open while we wait for Avito: the panel keeps working
             stats["chats"] += 1
             stats["new_chats"] += 0 if existed else 1
@@ -339,6 +376,8 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
                 added = [_store_message(conn, chat_row, m, "" if m is newest else oldest) for m in real]                       # the newest message is always kept
                 new_in = any(r for r, m in zip(added, [m for m in messages if m.get("id")]) if r and m.get("direction") == "in")
                 stats["messages"] += sum(added)
+                if default and existed and any(added):
+                    _give_default(conn, chat_row, account_id, default, now)     # rolled back with the rest if the chat was deleted meanwhile
                 waited = conn.execute("SELECT unread, status FROM avito_chat WHERE id = ?", (chat_row,)).fetchone()   # before this read (None: deleted meanwhile)
                 conn.execute("UPDATE avito_chat SET unread = ?, history_ok = ?, updated_ts = ? WHERE id = ?",
                              (_unread(conn, chat_row), ok, int(item.get("updated") or 0), chat_row))
@@ -420,6 +459,9 @@ def store_pushed(conn, account_id: int, chat_id: str, message: dict, now: str) -
         conn.execute("UPDATE avito_chat SET last_text = ?, last_at = ?, last_dir = ? WHERE id = ?",
                      (("Фото" if message.get("type") == "image" else message_text(message))[:500], at, str(message.get("direction") or ""), chat_row))
     conn.execute("UPDATE avito_chat SET unread = ? WHERE id = ?", (_unread(conn, chat_row), chat_row))
+    default = default_responsible(conn, account_id)                     # the chat came alive by the webhook: as by the reading (sync_account)
+    if default:
+        _give_default(conn, chat_row, account_id, default, now)
     if message.get("direction") == "in":
         conn.execute("UPDATE avito_chat SET status = 'open', status_at = ? WHERE id = ? AND status != 'open'", (now, chat_row))
         if not waited_unread or waited_status != "open":                     # nothing waited, or it was set aside: a new alert

@@ -1139,8 +1139,8 @@ def register(app) -> None:
         part = request.args.get("tab") if request.args.get("tab") in ORDER_PARTS else ""
         events = orders.list_events(conn, card_id)
         newest = events[0]["id"] if events else None                     # the journal is read up to its newest record, a hidden one too
-        if own_point() is not None:                                      # «Письмо поставщику» (supplier_mail): not the point's; nor WebMIM (2026-10-30)
-            events = [e for e in events if e["kind"] != "supplier_mail" and not point_no_webmim(e)]
+        if own_point() is not None:                                      # old records of «Письмо поставщику» (removed 2026-11-07): never the point's;
+            events = [e for e in events if e["kind"] != "supplier_mail" and not point_no_webmim(e)]     # nor WebMIM (the owner 2026-10-30)
         acting = from_panel()                                            # sent from another site: the page only
         if newest is not None and acting:                                # the user has seen the journal up to the newest record
             order_alerts.mark_seen(conn, session["user"], card_id, local_iso(), newest)

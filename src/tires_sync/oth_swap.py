@@ -241,25 +241,34 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
     return a_id
 
 
-def swaps(conn) -> Dict[int, dict]:
-    """Order → its last swap of the client (the journal of actions)."""
-    out: Dict[int, dict] = {}
+def _history(conn) -> list:
+    """Every swap of the client, oldest first (the journal of actions)."""
+    out = []
     for (text,) in conn.execute("SELECT detail FROM audit WHERE action = ? ORDER BY id", (SWAP,)):
         try:
             detail = json.loads(text)
-            out[int(detail["order"])] = detail
+            int(detail["order"])
         except (TypeError, ValueError, KeyError):
             continue
+        out.append(detail)
     return out
 
 
+def swaps(conn) -> Dict[int, dict]:
+    """Order → its last swap of the client (the journal of actions)."""
+    return {int(d["order"]): d for d in _history(conn)}
+
+
 def fee_handed(conn) -> Tuple[Set[int], Dict[int, int]]:
-    """(the orders whose own fee of a handed client is off: the client changed, the orders that pay the fee of the order B whose client came
-    to them: A → B, when B was handed by a point)."""
-    found = swaps(conn)
+    """(the orders whose own fee of a handed client is off: the client changed, and every order B whose client went to an order A — by any swap,
+    not only the last one of A (oth-return-fixes: a second swap of A never makes the first B pay for itself again); the orders that pay the fee of
+    the order B whose client is theirs now: A → B, by the last swap of A, when B was handed by a point). A merged order takes it from A
+    (order_merge.handed)."""
+    history = _history(conn)
+    found = {int(d["order"]): d for d in history}
     handed = {r[0] for r in conn.execute("SELECT order_id FROM order_handoff")}
     moved = {a: int(d["from_order"]) for a, d in found.items() if d.get("from_order") and int(d["from_order"]) in handed}
-    gave = {int(d["from_order"]) for d in found.values() if d.get("from_order")}      # B: its client (and fee) went to A, never paid twice
+    gave = {int(d["from_order"]) for d in history if d.get("from_order")}          # B: its client (and fee) went to A, never paid by B
     return (set(found) | gave) - set(moved), moved
 
 

@@ -166,7 +166,7 @@ def create_app(config: dict) -> Flask:
             return "—" if value is None or not str(value).strip() else str(value)
         return at.strftime("%d.%m" if at.year == _today().year else "%d.%m.%Y")
 
-    MOSCOW_AUDIT = frozenset({"order_rate", "order_delete", "order_restore", "chat_delete", "chat_restore", "chat_assign", "orders_bulk_move", "orders_bulk_delete",
+    MOSCOW_AUDIT = frozenset({"order_rate", "order_delete", "order_restore", "chat_delete", "chat_restore", "chat_assign", "chat_assign_default", "orders_bulk_move", "orders_bulk_delete",
                               "orders_bulk_undo", "orders_cleanup_new", "mirror_adopt", "mirror_reissue", "mirror_reissue_own",
                               "mirror_unreissue_own", "ids_rebound", "id_scheme", "clients_linked"})
 
@@ -377,8 +377,6 @@ def create_app(config: dict) -> Flask:
     routes_order_webmim.register(app)
     from . import routes_autosend
     routes_autosend.register(app)
-    from . import routes_supplier_mail
-    routes_supplier_mail.register(app)
     from . import routes_intercity
     routes_intercity.register(app)
     routes_shop.register(app)

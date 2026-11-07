@@ -192,14 +192,22 @@ def test_a_client_of_another_point_merged_away_or_missing_is_not_opened(w):
 
 # ---- 4. money -------------------------------------------------------------------------------------------------------------------
 
-def test_the_board_of_a_point_shows_no_sums_and_the_card_shows_the_clients_prices_without_the_purchase(w):
+def test_the_board_of_a_point_shows_only_itogo_and_the_card_shows_the_clients_prices_without_the_purchase(w):
     m = w["manager"]
     for view in ("board", "list"):
         page = _text(m.get("/orders?v=%s" % view))
         phone = page[page.index("data-point-orders"):page.index('class="pt-desk"')]      # the phone's list: «Итого» of the order only (2026-11-07)
         assert "Сумма в работе" not in phone and "₽" not in re.sub(r"<span class=\"mp-sub\" data-point-sum>Итого <b>[^<]+</b></span>", "", phone), view
         page = page.replace(phone, "")
+        # the owner 2026-11-07 (lane point-sum-board) replaced «на Заказах точки нет сумм» (2026-10-26): the desk board shows «Итого» of the
+        # point's own order too (4 × 5 000 = 20 000, the order window's «Итого»), nothing else — no «Сумма в работе», no column sums,
+        # no purchase (3 100 a piece, 12 400), no profit
+        if view == "board":
+            assert '<span class="small" data-point-sum>Итого <b>20%s000%s₽</b></span>' % (NBSP, NBSP) in page, view
+        assert "3%s100" % NBSP not in page and "12%s400" % NBSP not in page, view
+        page = re.sub(r'<span class="small" data-point-sum>Итого <b>[^<]+</b></span>', "", page)
         assert "Сумма в работе" not in page and "20%s000" % NBSP not in page and "₽" not in page, view
+        assert "Закупка" not in page and "прибыл" not in page.lower(), view
     card = _text(m.get("/orders/%d" % w["order_a"]))
     assert re.search(r'value="5000(\.0+)?"', card) and "20%s000" % NBSP in card            # the client's prices: the point takes the cash
     assert "Закупка" not in card and "3%s100" % NBSP not in card and "12%s400" % NBSP not in card and "прибыл" not in card.lower()

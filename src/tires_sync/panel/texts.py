@@ -87,6 +87,8 @@ def audit_text(entry: dict) -> str:
         return "Расходы Авито: комиссия %s %%, реклама %s %%" % (d.get("fee_pct", "?"), d.get("promo_pct", "?"))
     if action == "chat_assign":
         return "Чат Ч-%s: ответственный %s" % (d.get("chat", "?"), ("— " + d["to"]) if d.get("to") else "снят")
+    if action == "chat_assign_default":
+        return "Чат Ч-%s: ответственный по умолчанию — %s (ответственный аккаунта №%s)" % (d.get("chat", "?"), d.get("to", "?"), d.get("account", "?"))
     if action == "oth_detach":
         return "Заказ №%s на ОТХ: клиент №%s отвязан" % (d.get("order", "?"), d.get("client", "?"))
     if action == "oth_split":
@@ -326,6 +328,8 @@ _MORE_TEXTS = {
                                        % (d.get("closed", 0), d.get("waiting_amount", 0), d.get("to_return_given", 0), d.get("skipped", 0),
                                           ", этап переименован" if d.get("renamed") else "")),
     "oth_item_to_return": lambda d: "На возврат: позиция заказа №%s, %s шт." % (d.get("order", "?"), d.get("qty", "?")),
+    "oth_back_on_sale": lambda d: ("Шины снова в продаже: заказ №%s, %s шт. (не возвращаем)" % (d.get("order", "?"), d.get("qty", "?")) if d.get("qty")
+                                   else "Шины снова в продаже: заказ №%s снова на ОТХ (не возвращаем)" % d.get("order", "?")),
     "oth_return_amount": lambda d: "Возврат поставщику: заказ №%s, сумма возврата %s ₽ — закупка шин" % (d.get("order", "?"), d.get("amount", "?")),
     "stage_off_board": lambda d: "Этап «%s» убран с доски: его заказы — в «Списке», в поиске и в фильтре «Этап»" % (d.get("name") or d.get("stage", "?")),
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),
@@ -398,7 +402,7 @@ _MORE_TEXTS = {
     "autosend_add": lambda d: "Заказ №%s: поставлено автосообщение клиенту на %s" % (_q(d.get("order")), _q(str(d.get("due") or "").replace("T", " "))),
     "autosend_update": lambda d: "Заказ №%s: автосообщение клиенту изменено, на %s" % (_q(d.get("order")), _q(str(d.get("due") or "").replace("T", " "))),
     "autosend_cancel": lambda d: "Заказ №%s: автосообщение клиенту отменено" % _q(d.get("order")),
-    "supplier_mail": lambda d: "Заказ №%s: открыто письмо поставщику о возврате%s" % (_q(d.get("order")), (" (%s)" % d["to"]) if d.get("to") else " (без адреса)"),
+    "supplier_mail": lambda d: "Заказ №%s: открыто письмо поставщику о возврате%s" % (_q(d.get("order")), (" (%s)" % d["to"]) if d.get("to") else " (без адреса)"),   # old audit rows: «Письмо поставщику» removed 2026-11-07
     "callback_cancel": lambda d: "Задача №%s отменена" % _q(d.get("task")),
     "chat_handover": lambda d: "Точка передала клиента из чата Ч-%s владельцу и партнёру (%s), задачи «Взять клиента»: %s" % (     # chat_handover.py
         _q(d.get("chat")), ", ".join(map(str, d.get("to") or [])) if isinstance(d.get("to"), list) else _q(d.get("to")), _count(d.get("tasks"))),

@@ -42,6 +42,17 @@ class AutosendError(ValueError):
     """A refused set, change or cancel; the text is for the person."""
 
 
+def is_token(value) -> bool:
+    """The send mark of an auto message (TOKEN), as chats.send_reply reads a mark: stripped. A manager of a point never acts on one
+    (lane autosend-guard: «Отправить снова», a send under its mark, «Отправил вручную» are refused on the server, not only hidden)."""
+    return str(value or "").strip().startswith("autosend-")
+
+
+def is_task(task: dict) -> bool:
+    """The task «Автосообщение клиенту не ушло» (failed): the office's, never a point's to close."""
+    return str(task.get("title") or "").startswith(TASK_TITLE)
+
+
 def for_office(event: dict) -> bool:
     """A record of the order's journal that a manager of a point must not see: this module's own, and the «Задачи» line of its task."""
     return event.get("kind") == EVENT or (event.get("kind") == "task" and TASK_TITLE in str(event.get("text") or ""))

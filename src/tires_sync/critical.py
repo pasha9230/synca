@@ -157,14 +157,23 @@ def _rollback(conn) -> None:
         pass
 
 
-def note(conn, logins: Iterable[str], text: str, now: str) -> bool:
+NOTE_LIFE = timedelta(days=1)      # the morning summary, a sheet of «Фото на проверке»: leave the bell by themselves a day on (the owner 2026-11-07)
+
+
+def day_later(now: str) -> str:
+    """The moment a row given NOTE_LIFE leaves the bell (`now` and the result in the same clock, ISO)."""
+    return (datetime.fromisoformat(str(now)[:19]) + NOTE_LIFE).isoformat(timespec="seconds")
+
+
+def note(conn, logins: Iterable[str], text: str, now: str, until: Optional[str] = None) -> bool:
     """A news that is not critical but went to a person's Telegram before (an order's alert, «точка не открыла»): a red row of their own bell
-    until «Разобрался», never in the journal of the order (a point may read that). Never raises; False when it could not be written."""
+    until «Разобрался», never in the journal of the order (a point may read that); with `until` (the summary, a sheet of photos) it leaves the
+    bell by itself then, the journal keeps it. Never raises; False when it could not be written."""
     people = sorted({str(x) for x in logins if x})
     if not people or not str(text or "").strip():
         return False
     try:
-        store.write_audit(conn, now[:19], "system", NOTE, {"text": text[:4000], "to": people})
+        store.write_audit(conn, now[:19], "system", NOTE, dict({"text": text[:4000], "to": people}, **({"until": str(until)[:19]} if until else {})))
         return True
     except Exception as err:                                      # noqa: BLE001 - a busy base: printed, never a new alert
         _rollback(conn)
@@ -172,7 +181,7 @@ def note(conn, logins: Iterable[str], text: str, now: str) -> bool:
         return False
 
 
-def note_once(conn, mark: str, issue: str, logins: Iterable[str], text: str, now: str) -> str:
+def note_once(conn, mark: str, issue: str, logins: Iterable[str], text: str, now: str, until: Optional[str] = None) -> str:
     """A not critical news of an issue (the morning summary of a day, a sheet of «Фото на проверке»): a row of these people's bell (note) once
     per `issue` under the app_state key `mark`. The mark and the row are one transaction: a busy base leaves neither (the next try writes it),
     a second try of the same issue writes nothing. Returns "written", "already" or "failed". Never raises."""
@@ -186,7 +195,7 @@ def note_once(conn, mark: str, issue: str, logins: Iterable[str], text: str, now
     if not claimed:
         _rollback(conn)
         return "already"
-    if note(conn, logins, text, now):                             # its write_audit commits the mark with the row
+    if note(conn, logins, text, now, until):                      # its write_audit commits the mark with the row
         return "written"
     _rollback(conn)
     return "failed"
@@ -220,6 +229,8 @@ def bell_rows(conn, login: str, now: Optional[str] = None, action: str = BELL) -
             data = json.loads(detail or "{}")
         except ValueError:
             continue
+        if now and data.get("until") and str(now)[:19] >= str(data["until"])[:19]:
+            continue                                                     # its day is over (NOTE_LIFE): «История» keeps it
         if login in (data.get("to") or []):
             found.append((row_id, at, str(data.get("text") or "")))
     shown = found[:NOTE_SHOWN] if action == NOTE else found[:1]

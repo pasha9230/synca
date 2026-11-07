@@ -134,8 +134,9 @@ def _sheet_to_bell(conn, set_key: str, caption: str, data: bytes):
     set and the fingerprint of the picture: the agent's repeat of the same sheet writes nothing, a new sheet of the set does). 200 when it is
     in the bell (now or before), 204 when the base was busy (the agent's next sheet is written; the page «Фото на проверке» has the set)."""
     from .. import critical, order_alerts
+    at = store.moscow_iso()
     done = critical.note_once(conn, SHEET_BELL + set_key, hashlib.sha256(data).hexdigest()[:32], order_alerts.owner_people(conn), caption,
-                              store.moscow_iso())
+                              at, critical.day_later(at))                       # a day in the bell (the owner 2026-11-07)
     if done == "failed":
         current_app.logger.warning("review sheet for %s not written to the bell: the base is busy", set_key)
         return "", 204

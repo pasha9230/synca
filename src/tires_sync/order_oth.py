@@ -847,19 +847,92 @@ NO_RETURN_KEY = "oth_no_return:%d:%s"            # per order and stay on «На 
 NO_RETURN = re.compile(r"(?<![^\W\d_])не\s+(?:будем\s+)?возвра(?:щаем|щать|тим)(?![^\W\d_])", re.I)     # «не возвращаем»; never «ещё не возвращали»
 
 
+WAITING = re.compile(r"(?<![^\W\d_])(?:пока|ждем)(?![^\W\d_])", re.I)     # «пока», «ждём/ждем» (the owner 2026-11-08): never a refusal
+BACK = "Шины снова в продаже"
+
+
 def task_closed(conn, task: dict, how: str, result: str, who: str, now: str) -> None:
-    """tasks.close: the task of the return of an order on «На ОТХ» done with «не возвращаем» in its result: the seventh day leaves this stay of the order
-    alone (ask_seventh_day). Saved here (commits)."""
-    if how != "done" or task.get("title") not in RETURN_TITLES or not task.get("order_id") or not NO_RETURN.search(str(result or "").replace("ё", "е")):
+    """tasks.close: the task of the return of an order done with «не возвращаем» in its result (the owner 2026-11-07, 2026-11-08): the tyres taken off
+    sale for the return are on sale again by themselves — the marks «На возврат» of the positions of this stay on «На ОТХ» (_back_on_sale), the order on
+    «На возврат» not agreed yet («Согласуем») goes back to «На ОТХ» (_back_to_oth); the seventh day leaves that stay alone (ask_seventh_day). «пока»,
+    «ждём» in the result: not a refusal, the order still waits for the agreement (_still_waiting). Saved here (commits): the close itself first."""
+    if how != "done" or task.get("title") not in RETURN_TITLES or not task.get("order_id"):
         return
+    text = str(result or "").replace("ё", "е").replace("Ё", "Е")
+    waiting, refused = WAITING.search(text), NO_RETURN.search(text)
+    if not (waiting or refused):
+        return
+    conn.commit()                                                                    # the task is closed whatever follows
     card = orders.get_card(conn, task["order_id"])
-    if card["stage"]["code"] != "oth":
-        return
-    if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (NO_RETURN_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")),
-                                                                                  json.dumps({"at": now, "by": who, "task": task["id"]}))).rowcount == 1:
-        orders.add_event(conn, card["id"], now, who, "field", "Задача возврата закрыта «не возвращаем»: на 7-й день заказ не перейдёт на «%s»"
-                         % orders.stage_name(conn, orders.RETURN_GIVEN), level="grey")
+    if waiting:
+        _still_waiting(conn, card, task)
+    elif card["stage"]["code"] == "oth":
+        if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (NO_RETURN_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")),
+                                                                                      json.dumps({"at": now, "by": who, "task": task["id"]}))).rowcount == 1:
+            orders.add_event(conn, card["id"], now, who, "field", "Задача возврата закрыта «не возвращаем»: на 7-й день заказ не перейдёт на «%s»"
+                             % orders.stage_name(conn, orders.RETURN_GIVEN), level="grey")
+        _back_on_sale(conn, card, now, who)
+    elif card["stage"]["code"] == orders.RETURN_GIVEN:
+        _back_to_oth(conn, card, task, now, who)
     conn.commit()
+
+
+def _still_waiting(conn, card: dict, task: dict) -> None:
+    """«пока», «ждём»: the marks «На возврат» of the positions of this stay closed with the task keep «Ожидает согласование возврата» (item_marks)
+    until the agreement or the seventh day. No commit."""
+    if card["stage"]["code"] != "oth":
+        return                                                                       # «На возврат»: the label is the stage's, nothing to keep
+    for item in card["items"]:
+        key = _item_key(item["id"], card["entered_at"])
+        mark = json.loads(store_value(conn, key) or "null")
+        if mark and mark.get("task") == task["id"]:
+            conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(dict(mark, waiting=True), ensure_ascii=False), key))
+
+
+def _back_on_sale(conn, card: dict, now: str, who: str) -> None:
+    """The marks «На возврат» of the positions of this stay are gone and their pieces leave oth_return: on sale again. A real «Вернуть поставщику»
+    (the pieces beyond the mark) stays. No commit."""
+    for item in card["items"]:
+        key = _item_key(item["id"], card["entered_at"])
+        mark = json.loads(store_value(conn, key) or "null")
+        if not mark:
+            continue
+        row = conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item["id"],)).fetchone()
+        pieces = min(int(mark.get("qty") or 0), int(row[0]) if row else 0)
+        if pieces > 0:
+            conn.execute("UPDATE oth_return SET qty = qty - ? WHERE item_id = ?", (pieces, item["id"]))
+            conn.execute("DELETE FROM oth_return WHERE item_id = ? AND qty <= 0", (item["id"],))
+        conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+        if pieces > 0:
+            orders.add_event(conn, card["id"], now, who, "field", "%s: %s, %d шт. — задача возврата закрыта «не возвращаем»" % (BACK, item["name"], pieces))
+            _audit(conn, now, who, "oth_back_on_sale", {"order": card["id"], "item": item["id"], "qty": pieces})
+
+
+def _back_to_oth(conn, card: dict, task: dict, now: str, who: str) -> None:
+    """The order on «На возврат» with no agreement: back to «На ОТХ», on sale (orders.move_card: the marks of the stay go, the tasks of the return close;
+    no rule of the stage, nothing to the client), and the seventh day of the new stay leaves it alone. Not when tyres were really given back to the
+    supplier (the move would forget them) or the move is refused: one yellow record, a person decides. An agreed return is never undone."""
+    if return_plan(conn, card["id"]) is not None:
+        return
+    held, ordered = sum(pieces_here(conn, card).values()), sum(int(i["qty"]) for i in card["items"] if int(i["qty"]) >= 1)
+    oth = next((s for s in orders.list_stages(conn) if s["code"] == "oth"), None)
+    why = "часть шин уже отдана поставщику" if held < ordered else ("в воронке нет этапа «На ОТХ»" if oth is None else "")
+    if not why:
+        conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (NO_RETURN_KEY % (card["id"], re.sub(r"\D", "", now)),
+                                                                                   json.dumps({"at": now, "by": who, "task": task["id"]})))
+        try:
+            moved = orders.move_card(conn, card["id"], oth["id"], now, who, fire_rules=False)     # commits the key with the move
+        except orders.OrderError as err:                                             # rolled back with the key
+            moved, why = False, str(err)
+        if moved:
+            orders.add_event(conn, card["id"], now, who, "field", "%s: задача возврата закрыта «не возвращаем», заказ снова на «%s»; на 7-й день не перейдёт на «%s»"
+                             % (BACK, oth["name"], card["stage"]["name"]))
+            _audit(conn, now, who, "oth_back_on_sale", {"order": card["id"], "from": orders.RETURN_GIVEN})
+            return
+        if not why:
+            return                                                                   # moved meanwhile by somebody: theirs stands
+    orders.add_event(conn, card["id"], now, who, "field", "Задача возврата закрыта «не возвращаем», но заказ остался на «%s»: %s. Верните шины в продажу вручную."
+                     % (card["stage"]["name"], why), level="yellow")
 
 
 def _kept(conn, card: dict) -> bool:
@@ -1183,7 +1256,8 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
 
 
 def item_marks(conn) -> Dict[str, dict]:
-    """The positions moved by hand whose task is open, by their key (a key of an old stay is never read: `item_mark`)."""
+    """The positions moved by hand whose task is open, or closed with «пока», «ждём» (task_closed), by their key (a key of an old stay is never
+    read: `item_mark`)."""
     live = {r[0] for r in conn.execute("SELECT id FROM callback_task WHERE title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL", RETURN_TITLES)}
     found = {}
     for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'oth_item_return:%'"):
@@ -1191,7 +1265,7 @@ def item_marks(conn) -> Dict[str, dict]:
             mark = json.loads(value)
         except ValueError:
             continue
-        if mark.get("task") in live:
+        if mark.get("task") in live or mark.get("waiting"):                          # «пока», «ждём» (task_closed): still waits
             found[key] = mark
     return found
 
@@ -1215,7 +1289,7 @@ def _item_undone(conn, item: dict, rest: int, now: str, who: str) -> None:
             return
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
-        if mark.get("task") and not any(m.get("task") == mark["task"] for m in item_marks(conn).values()):     # another position's too: it stays
+        if mark.get("task") and not mark.get("waiting") and not any(m.get("task") == mark["task"] for m in item_marks(conn).values()):     # another position's too: it stays
             tasks.close(conn, mark["task"], "cancel", now, who)
     except Exception:                                                                # noqa: BLE001 - closed by a person meanwhile
         conn.rollback()
