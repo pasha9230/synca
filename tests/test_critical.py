@@ -286,6 +286,21 @@ def test_a_failed_send_to_a_client_and_a_red_rule_go_once_to_the_responsible(tmp
     assert len(http.tg) == 1 and len(http.vk) == 1
 
 
+def test_a_failed_auto_message_to_a_client_goes_once(tmp_path, monkeypatch):
+    from tires_sync import order_autosend
+    conn, box, http = env(tmp_path, monkeypatch)
+    users.add_user(conn, "worker2", "пароль-для-партнёра-1", NOW)
+    critical.set_user_vk(conn, "worker2", "503", NOW, "owner")
+    card_id = orders.create_card(conn, {"client_name": "Иван", "responsible": "worker2"}, NOW, "owner")
+    critical.forward_red(conn, box, NOW, tg_http=http, vk_http=http)
+    orders.add_event(conn, card_id, NOW, "система", order_autosend.EVENT, "Сообщение клиенту не отправлено: Авито отказал", level="red")
+    orders.add_event(conn, card_id, NOW, order_autosend.AUTHOR, order_autosend.EVENT, "Автосообщение клиенту не отправлено («Договорённость» на "
+                     "11.11.2026 15:00): Авито отказал", level="red")      # one failure, two records: one line
+    conn.commit()
+    assert critical.forward_red(conn, box, NOW, tg_http=http, vk_http=http) == 1
+    assert "Автосообщение клиенту не отправлено" in http.vk[0][1]
+
+
 def test_a_red_failure_of_an_order_nobody_answers_for_goes_to_both_owners(tmp_path, monkeypatch):
     conn, box, http = env(tmp_path, monkeypatch, tg_down=True)
     critical.set_user_vk(conn, "second1", "502", NOW, "owner")

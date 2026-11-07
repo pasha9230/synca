@@ -27,6 +27,7 @@
 <button type="button" class="btn btn--link-gray btn--sm ml-auto" data-cc-reset title="Ширина и свёрнутые колонки — как по умолчанию">Колонки по умолчанию</button>
 </header>
 {% include "_order_unsent.html" %}
+{% with autosend_order=c.id, autosend_chat=none %}{% include "_order_autosend.html" %}{% endwith %}
 <div class="o2c-body" data-ccs data-csrf="{{ csrf_token() }}" data-layout='{{ layout|tojson }}'>
 {% call col(0) %}
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}

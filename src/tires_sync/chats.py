@@ -556,7 +556,7 @@ def _not_delivered(conn, chat: dict, now: str, author: str, what: str, err: Chat
         try:
             from . import orders
             verdict = "не подтверждено" if isinstance(err, ChatSendUnknown) and not isinstance(err, ChatSendRetry) else "не отправлено"
-            orders.add_event(conn, chat["order_id"], now, author, "chat", "%s клиенту %s: %s" % (what, verdict, err))
+            orders.add_event(conn, chat["order_id"], now, author, _order_kind(chat), "%s клиенту %s: %s" % (what, verdict, err))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -665,7 +665,7 @@ def _resume_interrupted(conn, client, chat: dict, token: str, now: str, author: 
     if chat["order_id"] and chat["order_id"] > 0:
         try:
             from . import orders
-            orders.add_event(conn, chat["order_id"], now, author, "chat", "%s клиенту: прошлая отправка прервалась (панель перезапускалась), "
+            orders.add_event(conn, chat["order_id"], now, author, _order_kind(chat), "%s клиенту: прошлая отправка прервалась (панель перезапускалась), "
                              "в чате его нет — отправляем снова" % what)
             conn.commit()
         except Exception:
@@ -674,8 +674,15 @@ def _resume_interrupted(conn, client, chat: dict, token: str, now: str, author: 
     return "retaken"
 
 
-OWN_RECORD_TOKENS = ("reserve-", "wait-")         # the order's journal has the green record of these sends already (order_reserve.tell_client, order_wait):
-                                                   # no second «Отправлен ответ клиенту» (хвост З18)
+OWN_RECORD_TOKENS = ("reserve-", "wait-", "autosend-")    # the order's journal has the green record of these sends already (order_reserve.tell_client,
+                                                   # order_wait, order_autosend): no second «Отправлен ответ клиенту» (хвост З18)
+OFFICE_TOKENS = ("autosend-",)                     # «Автосообщение клиенту» (order_autosend): its records are not a point's (order_autosend.EVENT)
+
+
+def _order_kind(chat: dict) -> str:
+    """The kind of a record of the send's outcome in the order's journal: «chat», or order_autosend.EVENT for a send a point must not see
+    (the send's mark is put on the chat as `send_token` where the send starts: send_reply, settle_sends)."""
+    return "autosend" if str(chat.get("send_token") or "").startswith(OFFICE_TOKENS) else "chat"
 
 
 RETRY_AFTER = 60                  # seconds: a send Avito refused with a 402 is sent again by the minute's sync after this
@@ -827,8 +834,9 @@ def _deliver(conn, client, chat: dict, user_id, token: str, now: str, author: st
             again = note or (" (с повтора: Авито до этого отказал, код 402)" if tries else "")
             if photo:
                 orders.add_event(conn, chat["order_id"], now, author, "chat", "Отправлено фото клиенту" + again)
-            elif again or not str(token or "").startswith(OWN_RECORD_TOKENS):     # a send of the sync: its caller wrote «не отправлено» only
-                orders.add_event(conn, chat["order_id"], now, author, "chat", "Отправлен ответ клиенту%s: %s" % (again, text[:80] + ("…" if len(text) > 80 else "")))
+            elif not str(token or "").startswith(OFFICE_TOKENS) and (again or not str(token or "").startswith(OWN_RECORD_TOKENS)):
+                # a send of the sync: its caller wrote «не отправлено» only; «Автосообщение клиенту» writes its own green record even after a 402
+                orders.add_event(conn, chat["order_id"], now, author, _order_kind(chat), "Отправлен ответ клиенту%s: %s" % (again, text[:80] + ("…" if len(text) > 80 else "")))
             conn.commit()
     except Exception:
         conn.rollback()
@@ -924,6 +932,7 @@ def send_reply(conn, client, chat_row, text, token, now: str, author: str, force
     token = str(token or "").strip()[:64]
     if not token:
         raise ChatError("Нет метки отправки: обновите страницу.")
+    chat = dict(chat, send_token=token)
     claim = conn.execute("INSERT OR IGNORE INTO chat_send_log (token, chat_row, at, author, status, text, orig_at) VALUES (?,?,?,?, 'sending', ?, ?)",
                          (token, chat_row, now, author, text, now))
     conn.commit()
@@ -1169,7 +1178,7 @@ def _note_order(conn, chat: dict, now: str, text: str, level: str) -> None:
     if chat["order_id"] and chat["order_id"] > 0:
         try:
             from . import orders
-            orders.add_event(conn, chat["order_id"], now, SYSTEM, "chat", text, level=level)
+            orders.add_event(conn, chat["order_id"], now, SYSTEM, _order_kind(chat), text, level=level)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1206,7 +1215,8 @@ def _claim_by_sync(conn, token: str, status: str, at: str, now: str, **more) -> 
     return done.rowcount == 1
 
 
-AUTO_TOKENS = ("task-", "reserve-", "arrived-", "wait-")    # the order's own messages (a task, «срок резерва», «можно забирать», «появилось в наличии»)
+AUTO_TOKENS = ("task-", "reserve-", "arrived-", "wait-", "autosend-")    # the order's own messages (a task, «срок резерва», «можно забирать»,
+                                                                         # «появилось в наличии», «Автосообщение клиенту»)
 
 
 def _stopped(conn, chat: dict, token: str) -> str:
@@ -1228,6 +1238,9 @@ def _stopped(conn, chat: dict, token: str) -> str:
         if task["status"] in ("skipped", "done"):
             return "задача пропущена" if task["status"] == "skipped" else "задача уже закрыта"
         card_id, stay = task["order_id"], (task["stage_id"], task["entered_at"])
+    elif token.startswith("autosend-"):                              # cancelled, the order closed, «ask» answered (order_autosend)
+        from . import order_autosend
+        return order_autosend.stop_reason(conn, token)
     else:
         own = re.match(r"(?:reserve|arrived|wait)-(\d+)-", token)
         card_id = int(own.group(1)) if own else card_id
@@ -1552,6 +1565,7 @@ def settle_sends(conn, client, writer, account_id: int, now: str, clock=None) ->
         return kept[0]
     for row in rows:
         chat = get_chat(conn, row["chat_row"])
+        chat = dict(chat, send_token=row["token"]) if chat is not None else None
         try:
             if chat is None:                                                     # the chat was deleted in the panel: nothing to send it to
                 conn.execute("UPDATE chat_send_log SET status = CASE status WHEN 'retry' THEN 'failed' ELSE status END, verdict = ?, text = '', "

@@ -395,6 +395,9 @@ _MORE_TEXTS = {
         "№ %s, перемещение %s" % (d.get("number") or "—", d.get("transfer") or "—")) if d.get("number") or d.get("transfer") else "как у источника"),
     "order_mim_extra": lambda d: "Заказ №%s: второй заказ WebMIM для добавленных шин — № %s, перемещение %s" % (
         _q(d.get("order")), d.get("number") or "—", d.get("transfer") or "—"),
+    "autosend_add": lambda d: "Заказ №%s: поставлено автосообщение клиенту на %s" % (_q(d.get("order")), _q(str(d.get("due") or "").replace("T", " "))),
+    "autosend_update": lambda d: "Заказ №%s: автосообщение клиенту изменено, на %s" % (_q(d.get("order")), _q(str(d.get("due") or "").replace("T", " "))),
+    "autosend_cancel": lambda d: "Заказ №%s: автосообщение клиенту отменено" % _q(d.get("order")),
     "callback_cancel": lambda d: "Задача №%s отменена" % _q(d.get("task")),
     "chat_handover": lambda d: "Точка передала клиента из чата Ч-%s владельцу и партнёру (%s), задачи «Взять клиента»: %s" % (     # chat_handover.py
         _q(d.get("chat")), ", ".join(map(str, d.get("to") or [])) if isinstance(d.get("to"), list) else _q(d.get("to")), _count(d.get("tasks"))),

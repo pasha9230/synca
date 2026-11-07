@@ -229,14 +229,16 @@ def test_a_call_of_the_client_is_a_line_and_an_alert_in_the_open_order(tmp_path)
 
 # --- the guard: sending to the client is not changed by this lane ----------------------------------------------------------------------
 
-SEND_CODE = {"send_reply": "6420b6d5d3bef430", "send_image": "246067c5cbb76d35", "_not_delivered": "a8956eb6a6144a6f",
+# 2026-11-06, lane/autotask-date (RED, its own reviews): «Автосообщение клиенту» — the send's mark on the chat (send_token), the kind of its
+# records (_order_kind), its own green record (OWN_RECORD_TOKENS) and the stop of a 402 retry (_stopped); what is sent is unchanged.
+SEND_CODE = {"send_reply": "adbc013ba5413761", "send_image": "246067c5cbb76d35", "_not_delivered": "d97ecba58cd512a4",
              "_definitely_not_sent": "54fccf3440320712", "prepare_image": "49124b261ee79487", "_ours_at_avito": "b314973f9e146a88",
-             "_resume_interrupted": "6dafc631f5931af4", "_avito_said": "c548573094ccd636", "_refused_hint": "43286dbe7edeb825",
-             "_send_record": "31f9efceaa31c6ea", "_quotes": "fd5e8049fdeab435", "_deliver": "026189c9548d1b16",
+             "_resume_interrupted": "686bad404debd3c7", "_avito_said": "c548573094ccd636", "_refused_hint": "43286dbe7edeb825",
+             "_send_record": "31f9efceaa31c6ea", "_quotes": "fd5e8049fdeab435", "_deliver": "755af2491d7d226b",
              "_mark": "d70d75c8ce7b5088", "_alert_not_sent": "74efc5b821020db2", "_retry_refused": "b326049e6ea8d7a9",
-             "_check_unknown": "3aed91f55d552351", "settle_sends": "c527b46d7c743787", "_lost_is_there": "a5c7e7ea4c1266ec",
+             "_check_unknown": "3aed91f55d552351", "settle_sends": "a7a2ee0cc2913edf", "_lost_is_there": "a5c7e7ea4c1266ec",
              "_claim_by_sync": "12aa42afe40970a8", "_same_text": "3f655b3cb9d97bfe", "_since": "6194713c717a8ee2",
-             "_others": "2a2ad9a520585a3f", "_retry_late": "322e8e40b2498e09", "_stopped": "768f39faba49ecbd", "_halt": "bba4642d8e4cd798",
+             "_others": "2a2ad9a520585a3f", "_retry_late": "322e8e40b2498e09", "_stopped": "22ce28cb81e8039a", "_halt": "bba4642d8e4cd798",
              "_close_task": "216cf3e7ab5866cd",
              "_inbox_done": "0d5006e110a24a0b", "_again_said": "1f6b922254a554a8", "_failed_is_there": "f9de17b3a9f270aa",
              "_inbox_close": "480dcd9ae2041726"}       # run8, lane stuck-sending: a mark «sending» older than 5 minutes is resolved (tests/test_stuck_sending.py)

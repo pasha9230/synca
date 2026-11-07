@@ -2529,6 +2529,19 @@ def _wait_replies(conn, box, now: str) -> None:
         print("предупреждение: ответы на сообщение о наличии не проверены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
+def _autosend(conn, box, now: str) -> None:
+    """«Автосообщение клиенту» (order_autosend): after the chats are read, what is due goes to the order's Avito chat by the chat's account.
+    A failure is only a warning."""
+    try:
+        from . import order_autosend
+        made = order_autosend.run(conn, now, _chat_deliver(conn, box, now))
+        if any(made.values()):
+            print("автосообщений: отправлено %(sent)d, не ушло %(failed)d, неизвестно %(waiting)d, отменено %(cancelled)d" % made)
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: автосообщения клиентам не проверены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
+
+
 def _cmd_chats_sync(args) -> int:
     box = load_box(args.key_file)
     if box is None:
@@ -2718,6 +2731,7 @@ def _chats_sync_locked(conn, box, args, now) -> int:
         _settle_look(conn, client, account, client_id, client_secret, now)
     made = chat_deals.process_all(conn, now)
     _wait_replies(conn, box, now)
+    _autosend(conn, box, now)
     _handoff_look(conn, box, now)
     _inquiry_look(conn, box, now)
     _critical_look(conn, box, now)

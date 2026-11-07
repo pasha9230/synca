@@ -319,6 +319,7 @@ SECTION_OF.update(tasks_page="orders", task_new="orders", task_close="orders")  
 SECTION_OF.update(catalog_oth_manual="orders")                   # «Свой остаток (ОТХ)» of the catalog card (2026-11-03): stock of OTH, NEEDS below
 SECTION_OF.update(order_unsent_by_hand="orders")                 # «Не дошло клиенту» → «Отправил вручную» (routes_unsent, 2026-10-31)
 SECTION_OF.update(order_item_mim="orders", order_item_mim_extra="orders")    # «Заказы WebMIM» (routes_order_webmim, 2026-11-07)
+SECTION_OF.update(order_autosend_add="orders", order_autosend_update="orders", order_autosend_cancel="orders")   # «Автосообщение клиенту»
 SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
                   order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
 SECTION_OF.update(ui_new_page="setup",                           # «Новый вид» (routes_design, 2026-11-02): the owner changes, the partner looks
@@ -336,6 +337,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "share_create": "send"}
 SECTION_OF.update(connections_account_price_push="setup")       # «Цены сразу через API» (price_push, 2026-11-03): the owner, like «Остатки»
 NEEDS.update(connections_account_price_push="publish")
+NEEDS.update(order_autosend_add="send", order_autosend_update="send", order_autosend_cancel="send")   # a message to the client (routes_autosend)
 # «Собрать фид сейчас» (feed_now, 2026-11-03): the owner and the partner (the lead's task) — exactly those who have «orders» to change and
 # the right «supplier»; the partner has no «publish» and only looks at the catalog
 SECTION_OF.update(feed_update_now="orders")

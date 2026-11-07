@@ -12,6 +12,7 @@
 {{ entity_ui.crumbs(entity.crumbs) }}
 {% if oth_title %}<p class="strong" data-oth-title>{{ oth_title }} · №{{ c.id }}</p>{% endif %}{# «На ОТХ»: a purchase of WebMIM, its client changes (2026-11-06) #}
 {% include "_order_unsent.html" %}
+{% with autosend_order=c.id, autosend_chat=none %}{% include "_order_autosend.html" %}{% endwith %}
 <div class="ocard-layout">
 <div class="ocard-main">
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}

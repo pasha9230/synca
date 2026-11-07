@@ -40,6 +40,13 @@ OTH_POINT_SAMPLE = ("Точке: шины с ОТХ отложены под кл
 # the question to the point on the seventh day of «На ОТХ», a banner of its «Рабочее место» (order_oth.ask_seventh_day, the owner 2026-11-02)
 OTH_ASK_SAMPLE = ("Точке: ОТХ 7-й день", "manager", "Заказ выдали или он на точке?")
 SAMPLES = SAMPLES + (ARRIVED_SAMPLE, RESERVE_SAMPLE, OTH_POINT_SAMPLE, OTH_ASK_SAMPLE)
+# «Автосообщение клиенту» (order_autosend, the owner 2026-11-05/06): the default text of the form, the manager may change it before it goes;
+# no variables, so that nothing is lacking when it goes. The words wait for the owner's own (the report of lane/autotask-date).
+AUTOSEND_ASK_SAMPLE = ("Клиенту: автосообщение «решили ли брать»", "client",
+                       "Здравствуйте! Подскажите, пожалуйста, вы решили, будете брать шины? Если остались вопросы, напишите, мы ответим.")
+AUTOSEND_DEAL_SAMPLE = ("Клиенту: автосообщение по договорённости", "client",
+                        "Здравствуйте! Пишем, как договаривались. Подскажите, пожалуйста, всё в силе?")
+SAMPLES = SAMPLES + (AUTOSEND_ASK_SAMPLE, AUTOSEND_DEAL_SAMPLE)        # before those of another city: they stay the last (test_intercity)
 # an order to another city (order_intercity, the owner 2026-11-02): on placing, instead of «Клиенту: заказ оформлен» (order_placed), and when
 # the point handed it to the courier of the transport company; {track_line} is empty while there is no track number (never «не хватает»)
 VARIABLES.update(city="Город доставки", carrier="Транспортная компания", track="Трек-номер", track_line="Строка трек-номера")
