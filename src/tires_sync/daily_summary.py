@@ -1,12 +1,15 @@
-"""The morning summary in Telegram: a few lines with the figures of the day for the owner and the partner. Off until the owner switches it
-on; sent once a day after 9:00 Moscow time from the hourly tick (`orders-tick`), the day is marked before sending so it never goes twice.
-The figures are those of the day dashboard (`analytics.day_numbers`); nothing is sent to a client."""
+"""The morning summary: a few lines with the figures of the day for the owners only (the owner 2026-11-07: the owner and Заман see it, never a
+partner) — the owner's login of the alerts and the active users of the role «owner» (order_alerts.owner_people). Off until the owner switches
+it on; once a day after 9:00 Moscow time from the hourly tick (`orders-tick`). Today it is a row of their bell for a day (_to_bell,
+critical.note_once); while Telegram takes not only critical news (critical.telegram_allowed) it goes to their Telegram instead: the owner's chat
+of the failure alerts and the saved chats of the other owners. The day is marked before sending so it never goes twice. The figures are those of
+the day dashboard (`analytics.day_numbers`); nothing is sent to a client."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Callable, List, Optional
 
-from . import analytics, connections, notify, order_notify, store, users
+from . import analytics, connections, notify, order_notify, store
 from .secretbox import SecretKeyError
 from .transport import Transport, urllib_transport
 
@@ -42,7 +45,9 @@ def text(conn, now: datetime) -> str:
 
 
 def _recipients(conn, box, http) -> List[Callable[[str], None]]:
-    """The owner (the chat of the failure alerts) and every partner with a saved Telegram chat."""
+    """The owners of the bell (order_alerts.owner_people): the owner's chat of the failure alerts and every other owner with a saved Telegram chat;
+    never a partner or anybody else (the owner 2026-11-07)."""
+    from . import order_alerts
     found = []
     owner = notify.notifier_for(conn, box, http=http)
     seen = set()
@@ -50,9 +55,9 @@ def _recipients(conn, box, http) -> List[Callable[[str], None]]:
         found.append(owner)
         seen.add(str(connections.get_config(conn, "telegram", 0).get("chat_id") or ""))
     chats = order_notify.user_chats(conn)
-    partners = [u["login"] for u in users.list_users(conn) if u["role"] == "partner" and u["active"]]
-    token = connections.get_secret(conn, box, "telegram", 0, "bot_token") if box is not None and any(p in chats for p in partners) else ""
-    for login in partners:
+    owners = [x for x in order_alerts.owner_people(conn) if x != order_notify.get_owner_login(conn)]   # the owner: the alerts' chat above only
+    token = connections.get_secret(conn, box, "telegram", 0, "bot_token") if box is not None and any(p in chats for p in owners) else ""
+    for login in owners:
         if login in chats and token and chats[login] not in seen:         # a chat shared with the owner (a group) gets it once
             seen.add(chats[login])
             found.append(lambda body, chat=chats[login]: notify.send_message(token, chat, body, http=http))

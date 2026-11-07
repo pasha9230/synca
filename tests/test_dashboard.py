@@ -1,5 +1,6 @@
 """The day dashboard (the figures are those of analytics.py, the money only with the right), «Мои дела», «Фиды», and the morning summary
-in Telegram (off by default, once a day after 9:00, to the owner and the partner)."""
+in Telegram (off by default, once a day after 9:00, to the owners only: the owner's chat and the users of the role «owner»; never a partner,
+the owner 2026-11-07: the summary is seen by the owner and Заман only)."""
 from __future__ import annotations
 
 import json
@@ -153,14 +154,16 @@ def test_the_summary_is_off_by_default_and_goes_once_a_day_after_nine(tmp_path):
     box = _telegram(conn)
     users.add_user(conn, "worker2", PASSWORD, "2026-10-21T10:00:00", role="partner")
     users.add_user(conn, "olya", PASSWORD, "2026-10-21T10:00:00", role="chats")
+    users.add_user(conn, "zaman", PASSWORD, "2026-10-21T10:00:00", role="owner")
     order_notify.set_user_chat(conn, "worker2", "555", "2026-10-21T10:00:00", "owner")
     order_notify.set_user_chat(conn, "olya", "777", "2026-10-21T10:00:00", "owner")
+    order_notify.set_user_chat(conn, "zaman", "888", "2026-10-21T10:00:00", "owner")
     http = ScriptedHttp(*[(200, {"ok": True, "result": {}})] * 10)
     assert daily_summary.is_on(conn) is False and daily_summary.maybe_send(conn, box, NOW, http=http) is None and http.calls == []
     daily_summary.set_on(conn, True, "2026-10-21T10:00:00", "owner")
     assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 8, 59), http=http) is None and http.calls == []     # before 9:00
     assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 9, 7), http=http) == "сводка: отправлено 2, не ушло 0"
-    assert sorted(json.loads(c[3])["chat_id"] for c in http.calls) == ["1000", "555"]                    # the owner and the partner, not olya
+    assert sorted(json.loads(c[3])["chat_id"] for c in http.calls) == ["1000", "888"]                    # the owners only: not the partner, not olya
     assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 10, 7), http=http) is None and len(http.calls) == 2   # once a day
     assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 22, 12, 7), http=http) is None                            # after noon: not today
     assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 23, 9, 7), http=http) is not None                         # the next morning
@@ -189,12 +192,12 @@ def test_the_owner_switches_the_summary_on_the_main_page(tmp_path):
 
 
 @pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
-def test_a_partner_sharing_the_owners_chat_gets_one_summary(tmp_path):
+def test_a_second_owner_sharing_the_owners_chat_gets_one_summary(tmp_path):
     conn = store.connect(str(tmp_path / "x.db"))
     fill(conn)
     box = _telegram(conn)
-    users.add_user(conn, "worker2", PASSWORD, "2026-10-21T10:00:00", role="partner")
-    order_notify.set_user_chat(conn, "worker2", "1000", "2026-10-21T10:00:00", "owner")              # the same group as the owner's
+    users.add_user(conn, "zaman", PASSWORD, "2026-10-21T10:00:00", role="owner")
+    order_notify.set_user_chat(conn, "zaman", "1000", "2026-10-21T10:00:00", "owner")                 # the same group as the owner's
     daily_summary.set_on(conn, True, "2026-10-21T10:00:00", "owner")
     http = ScriptedHttp(*[(200, {"ok": True, "result": {}})] * 4)
     assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 9, 7), http=http) == "сводка: отправлено 1, не ушло 0"
@@ -292,3 +295,39 @@ def test_a_client_who_keeps_writing_still_waits_and_since_their_first_message(tm
     got = {w["peer_name"]: w["minutes"] for w in analytics.day_numbers(conn, NOW, without_points=True)["waiting"]}
     assert got["keeps-writing"] == analytics.working_minutes(datetime(2026, 10, 13, 19), NOW, (10, 20))
     assert got["old-thread"] == analytics.working_minutes(datetime(2026, 10, 12, 15), NOW, (10, 20))      # from the first read of the account
+
+
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
+@pytest.mark.parametrize("active", [True, False])
+def test_the_summary_in_telegram_goes_to_the_owners_of_the_bell_only(tmp_path, active):
+    """The same people as the bell (order_alerts.owner_people): a partner, a manager, a switched-off owner get nothing (the owner 2026-11-07)."""
+    from tires_sync import order_alerts
+    conn = store.connect(str(tmp_path / "x.db"))
+    fill(conn)
+    box = _telegram(conn)
+    for login, role in (("worker2", "partner"), ("manager1", "chats"), ("zaman", "owner")):
+        users.add_user(conn, login, PASSWORD, "2026-10-21T10:00:00", role=role)
+    order_notify.set_user_chat(conn, "worker2", "555", "2026-10-21T10:00:00", "owner")
+    order_notify.set_user_chat(conn, "manager1", "666", "2026-10-21T10:00:00", "owner")
+    order_notify.set_user_chat(conn, "zaman", "888", "2026-10-21T10:00:00", "owner")
+    if not active:
+        users.set_active(conn, "zaman", False, "2026-10-21T10:00:00", "owner")
+    conn.commit()
+    daily_summary.set_on(conn, True, "2026-10-21T10:00:00", "owner")
+    http = ScriptedHttp(*[(200, {"ok": True, "result": {}})] * 4)
+    daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 9, 7), http=http)
+    assert sorted(json.loads(c[3])["chat_id"] for c in http.calls) == (["1000", "888"] if active else ["1000"])
+    assert ("zaman" in order_alerts.owner_people(conn)) is active and "worker2" not in order_alerts.owner_people(conn)
+
+
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
+def test_the_owners_own_user_chat_gives_no_second_summary(tmp_path):
+    conn = store.connect(str(tmp_path / "x.db"))
+    fill(conn)
+    box = _telegram(conn)
+    order_notify.set_user_chat(conn, order_notify.get_owner_login(conn), "2000", "2026-10-21T10:00:00", "owner")   # a chat of the owner's login too
+    conn.commit()
+    daily_summary.set_on(conn, True, "2026-10-21T10:00:00", "owner")
+    http = ScriptedHttp(*[(200, {"ok": True, "result": {}})] * 4)
+    assert daily_summary.maybe_send(conn, box, datetime(2026, 10, 21, 9, 7), http=http) == "сводка: отправлено 1, не ушло 0"
+    assert [json.loads(c[3])["chat_id"] for c in http.calls] == ["1000"]
