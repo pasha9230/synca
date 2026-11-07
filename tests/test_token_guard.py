@@ -1,8 +1,8 @@
 """Метки системных сообщений клиенту — системные (ветка lane/token-guard, находка ревью autosend-guard): менеджер точки своим запросом
 не занимает метку «можно забирать» (arrived-…), «срок резерва» (reserve-…), «появилось в наличии» (wait-…), сообщения по правилу
-этапа (task-…), автосообщения (autosend-…) и формы офиса «Позиция появилась» (o<заказ>t<задача>), не жмёт по ним «Отправить снова» и
-«Отправил вручную»; 403, ничего не уходит и не меняется. Одна общая проверка: chats.is_system_mark (форма метки, которую ставит система:
-слово, номер и цифры). Свои сообщения точки (случайная метка страницы) и повторы по ним — как раньше; офис не меняется.
+этапа (task-…) и автосообщения (autosend-…), не жмёт по ним «Отправить снова» и «Отправил вручную»; 403, ничего не уходит и не меняется.
+Одна общая проверка: chats.is_system_mark (форма метки, которую ставит система: слово, номер и цифры). Свои сообщения точки (случайная
+метка страницы, форма карточки «Позиция появилась» o<заказ>t<задача>) и повторы по ним — как раньше; офис не меняется.
 Авито поддельное: ничего не уходит наружу."""
 from __future__ import annotations
 
@@ -13,7 +13,9 @@ import pytest
 
 from test_autosend_guard import AT, calls, env, status  # noqa: F401  (the fixture: the office, the point «gamma», its chat and order)
 from panel_helpers import post
-from tires_sync import chats, order_autosend as auto, order_engine, order_manager, unsent
+import re
+
+from tires_sync import chats, order_autosend as auto, order_engine, order_manager, order_wait, orders, unsent
 
 SYSTEM = {
     "arrived": "arrived-%d-20261013080000",
@@ -21,7 +23,6 @@ SYSTEM = {
     "wait": "wait-%d-20261013080000",
     "task": "task-%d-20261013080000",
     "autosend": "autosend-%d-7",
-    "office_form": "o%dt9",
 }
 
 
@@ -48,7 +49,7 @@ def test_the_marks_the_system_makes_are_system_marks_and_the_page_s_are_not():
     assert chats.is_system_mark(order_manager.arrived_token({"id": card, "entered_at": "2026-10-13T08:00:00"}, AT))
     assert chats.is_system_mark(order_engine.task_token({"id": 5, "created_at": "2026-10-13T08:00:00", "rule_id": 1}))
     assert chats.is_system_mark(auto.TOKEN % (card, 3))
-    for own in (secrets.token_hex(12), "lost-own", "point-own-reply-token", "t-own", "", None):     # the page's random mark; the tests' own
+    for own in (secrets.token_hex(12), "o%dt9" % card, "lost-own", "point-own-reply-token", "t-own", "", None):   # a person's marks
         assert not chats.is_system_mark(own), own
 
 
@@ -124,3 +125,18 @@ def test_the_point_still_marks_its_own_message_sent_by_hand(env):
     assert "/unsent/send/%d" % row in env["point"].get("/orders/%d" % card).get_data(as_text=True)
     assert post(env["point"], "/orders/%d/unsent/send/%d" % (card, row), "tok").status_code == 302
     assert conn.execute("SELECT closed_by FROM order_unsent WHERE id = ?", (row,)).fetchone()[0] == "gamma"
+
+
+def test_the_point_still_sends_the_card_form_position_appeared(env):
+    """Review: «Позиция появилась» of the order card is a person's send (its mark o<order>t<task>): the point is shown the form and sends it."""
+    conn, card = env["conn"], env["card"]
+    c = orders.get_card(conn, card)
+    task = conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card, order_wait.TASK_EXACT, c["entered_at"], "remind", "", c["stage_id"], "pending",
+                                                           order_wait.TITLE_EXACT, "Позиция появилась", "", AT)).lastrowid
+    conn.commit()
+    page = env["point"].get("/orders/%d" % card).get_data(as_text=True)
+    found = re.search(r'name="reply_token" value="(o\d+t\d+)"', page)
+    assert found and found.group(1) == "o%dt%d" % (card, task)
+    r = post(env["point"], "/chats/%d/send" % env["row"], "tok", text="Позиция появилась", reply_token=found.group(1))
+    assert r.status_code == 302 and status(env, found.group(1)) == "sent"

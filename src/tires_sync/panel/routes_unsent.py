@@ -47,7 +47,7 @@ def register(app) -> None:
                 row = get_conn().execute("SELECT token FROM order_unsent WHERE id = ?", (item_id,)).fetchone()
                 if row is not None and chats.is_system_mark(row[0]):
                     abort(403)
-            elif _task_mark(item_id) is not None and chats.is_system_mark(_task_mark(item_id)):
+            elif chats.is_system_mark(_task_mark(item_id)):
                 abort(403)
         try:
             unsent.sent_by_hand(get_conn(), card_id, kind, item_id, local_iso(), author())

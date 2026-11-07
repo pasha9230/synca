@@ -26,9 +26,9 @@ CHAT_FIELDS = ("id, account_id, chat_id, item_id, item_title, item_url, price_st
 log = logging.getLogger("tires_sync.chats")
 MAX_REPLY = 2000
 # The send mark the system puts on its own messages to a client (lane token-guard): a word, the order's or task's number and digits —
-# «arrived-…», «reserve-…», «wait-…», «task-…» (order_engine.task_token), «autosend-…» — and the office's form «Позиция появилась»
-# («o<order>t<task>», order_wait). A person's mark is the page's random one (routes_chats: 24 hex signs) and never has this shape.
-SYSTEM_MARK = re.compile(r"(?:[a-z]+-\d+-\d*|o\d+t\d+)")
+# «arrived-…», «reserve-…», «wait-…», «task-…» (order_engine.task_token), «autosend-…». A person's mark never has this shape: the chat
+# page's random one (routes_chats: 24 hex signs), the card's form «Позиция появилась» («o<order>t<task>», a person's send, order_wait).
+SYSTEM_MARK = re.compile(r"[a-z]+-\d+-\d*")
 
 
 def is_system_mark(value) -> bool:
