@@ -130,7 +130,7 @@ OFFICE_ROLES = ("owner", "partner")
 def office_taken(conn) -> tuple:
     """(orders, chats) the owner or the partner took from a point (the owner 2026-11-03: «если я или Заман берёт клиента от точки, то по
     таким нужны уведомления»): a chat handed over (chat_handover) that one of them took, a chat one of them answers for (a chat's
-    responsible is only ever set by a person), an order a person made one of them responsible for (its record «Ответственный: <login>»;
+    responsible set by a person — chats.ASSIGN_DEFAULT is the system's, lane chat-resp), an order a person made one of them responsible for (its record «Ответственный: <login>»;
     the responsible a new order gets by itself is no taking), and the chats of such an order and the order of such a chat. A client the
     point handed over with an order (order_handoff) is the staff's already (account_orders, work_orders)."""
     from . import orders, users                                           # both import this module
@@ -141,7 +141,9 @@ def office_taken(conn) -> tuple:
         "SELECT c.id FROM order_card c WHERE c.responsible IN (%s) AND EXISTS (SELECT 1 FROM order_event e WHERE e.order_id = c.id "
         "AND e.kind = 'field' AND e.text = ? || c.responsible)" % marks, office + [orders.LABELS["responsible"] + ": "])}
     chats = {r[0] for r in conn.execute("SELECT chat_row FROM chat_handover WHERE taken_by IN (%s) UNION SELECT id FROM avito_chat "
-                                        "WHERE responsible IN (%s)" % (marks, marks), office + office)}
+                                        "WHERE responsible IN (%s) AND (id NOT IN (SELECT json_extract(detail, '$.chat') FROM audit WHERE action = "
+                                        "'chat_assign_default') OR id IN (SELECT json_extract(detail, '$.chat') FROM audit WHERE action = 'chat_assign'))"
+                                        % (marks, marks), office + office)}       # given by the system (chats.ASSIGN_DEFAULT), never chosen: no taking
     found |= {r[0] for r in conn.execute("SELECT order_id FROM avito_chat WHERE order_id > 0 AND id IN (%s)" % ",".join("?" * len(chats)),
                                          sorted(chats))} if chats else set()
     chats |= {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id IN (%s)" % ",".join("?" * len(found)), sorted(found))} if found else set()

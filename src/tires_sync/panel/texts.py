@@ -88,7 +88,7 @@ def audit_text(entry: dict) -> str:
     if action == "chat_assign":
         return "Чат Ч-%s: ответственный %s" % (d.get("chat", "?"), ("— " + d["to"]) if d.get("to") else "снят")
     if action == "chat_assign_default":
-        return "Чаты аккаунта №%s: ответственный по умолчанию %s — %s" % (d.get("account", "?"), d.get("to", "?"), ", ".join("Ч-%s" % c for c in d.get("chats") or []) or "—")
+        return "Чат Ч-%s: ответственный по умолчанию — %s (ответственный аккаунта №%s)" % (d.get("chat", "?"), d.get("to", "?"), d.get("account", "?"))
     if action == "oth_detach":
         return "Заказ №%s на ОТХ: клиент №%s отвязан" % (d.get("order", "?"), d.get("client", "?"))
     if action == "oth_split":

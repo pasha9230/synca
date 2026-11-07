@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import html
 import io
+import json
 import logging
 import re
 import sqlite3
@@ -144,10 +145,16 @@ def default_responsible(conn, account_id) -> str:
     return login if active and role in ANSWERING_ROLES else ""
 
 
-def _give_default(conn, chat_row: int, login: str) -> bool:
-    """The chat gets `login` while nobody answers it and no person ever chose for it (set_responsible's «chat_assign», «никто» too). No commit."""
-    return conn.execute("UPDATE avito_chat SET responsible = ? WHERE id = ? AND responsible = '' AND NOT EXISTS (SELECT 1 FROM audit "
-                        "WHERE action = 'chat_assign' AND json_extract(detail, '$.chat') = ?)", (login, chat_row, chat_row)).rowcount == 1
+def _give_default(conn, chat_row: int, account_id: int, login: str, now: str) -> bool:
+    """The chat gets `login` while nobody answers it and no person ever chose for it (set_responsible's «chat_assign», «никто» too), with its
+    record ASSIGN_DEFAULT in the same transaction: a responsible given by the system is never taken for a person's choice
+    (order_points.office_taken). No commit."""
+    if conn.execute("UPDATE avito_chat SET responsible = ? WHERE id = ? AND responsible = '' AND NOT EXISTS (SELECT 1 FROM audit "
+                    "WHERE action = 'chat_assign' AND json_extract(detail, '$.chat') = ?)", (login, chat_row, chat_row)).rowcount != 1:
+        return False
+    conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?, ?, ?, ?)",
+                 (now, "система", ASSIGN_DEFAULT, json.dumps({"chat": chat_row, "account": account_id, "to": login}, ensure_ascii=False)))
+    return True
 
 
 def wait_starts(conn, chat_rows) -> dict:
@@ -322,7 +329,7 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
     backfill_previews(conn, account_id)
     offset = 0
     rereads = 0
-    default, given = default_responsible(conn, account_id), []           # a new chat at once, one without anybody when it comes alive
+    default = default_responsible(conn, account_id)                     # a new chat at once, one without anybody when it comes alive
     for _ in range(max_pages):
         try:
             data = client.chats(uid, limit=page, offset=offset, retry=False)
@@ -330,15 +337,14 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
             if err.status != 429:
                 raise
             stats["errors"] += 1                                                   # asked to slow down: the next run goes on
-            _note_given(conn, account_id, default, given, now)
             return stats
         for item in data.get("chats") or []:
             upserted = _upsert_chat(conn, account_id, item, uid, now)
             if upserted is None:
                 continue
             chat_row, existed, changed = upserted
-            if default and not existed and _give_default(conn, chat_row, default):
-                given.append(chat_row)
+            if default and not existed:
+                _give_default(conn, chat_row, account_id, default, now)
             conn.commit()                                                          # no write stays open while we wait for Avito: the panel keeps working
             stats["chats"] += 1
             stats["new_chats"] += 0 if existed else 1
@@ -357,7 +363,6 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
                         log.warning("messages of chat %s failed: %s", chat_row, err.status)
                         conn.commit()
                         if err.status == 429:                                             # Avito asks to slow down: the rest waits for the next run
-                            _note_given(conn, account_id, default, given, now)
                             return stats
                         continue
                     messages, ok = [dict(item.get("last_message") or {})], 0          # no subscription for this chat: only its last message
@@ -371,8 +376,8 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
                 added = [_store_message(conn, chat_row, m, "" if m is newest else oldest) for m in real]                       # the newest message is always kept
                 new_in = any(r for r, m in zip(added, [m for m in messages if m.get("id")]) if r and m.get("direction") == "in")
                 stats["messages"] += sum(added)
-                if default and existed and any(added) and _give_default(conn, chat_row, default):
-                    given.append(chat_row)                                  # rolled back with the rest if the chat was deleted meanwhile
+                if default and existed and any(added):
+                    _give_default(conn, chat_row, account_id, default, now)     # rolled back with the rest if the chat was deleted meanwhile
                 waited = conn.execute("SELECT unread, status FROM avito_chat WHERE id = ?", (chat_row,)).fetchone()   # before this read (None: deleted meanwhile)
                 conn.execute("UPDATE avito_chat SET unread = ?, history_ok = ?, updated_ts = ? WHERE id = ?",
                              (_unread(conn, chat_row), ok, int(item.get("updated") or 0), chat_row))
@@ -390,15 +395,7 @@ def sync_account(conn, client, account_id: int, now: str, page: int = 50, max_pa
         if not (data.get("meta") or {}).get("has_more"):
             break
         offset += page
-    _note_given(conn, account_id, default, given, now)
     return stats
-
-
-def _note_given(conn, account_id: int, login: str, given: list, now: str) -> None:
-    """One record of the journal of actions for the chats this pass gave the account's responsible (still theirs: a deleted one is left out)."""
-    kept = [r for r in given if conn.execute("SELECT 1 FROM avito_chat WHERE id = ? AND responsible = ?", (r, login)).fetchone()]
-    if kept:
-        store.write_audit(conn, now, "система", ASSIGN_DEFAULT, {"account": account_id, "to": login, "chats": kept})
 
 
 CLIENT_WROTE_AUTHOR = "чаты Авито"         # as chat_deals.SYSTEM_AUTHOR: not a panel login, so it is an alert for everybody
@@ -462,6 +459,9 @@ def store_pushed(conn, account_id: int, chat_id: str, message: dict, now: str) -
         conn.execute("UPDATE avito_chat SET last_text = ?, last_at = ?, last_dir = ? WHERE id = ?",
                      (("Фото" if message.get("type") == "image" else message_text(message))[:500], at, str(message.get("direction") or ""), chat_row))
     conn.execute("UPDATE avito_chat SET unread = ? WHERE id = ?", (_unread(conn, chat_row), chat_row))
+    default = default_responsible(conn, account_id)                     # the chat came alive by the webhook: as by the reading (sync_account)
+    if default:
+        _give_default(conn, chat_row, account_id, default, now)
     if message.get("direction") == "in":
         conn.execute("UPDATE avito_chat SET status = 'open', status_at = ? WHERE id = ? AND status != 'open'", (now, chat_row))
         if not waited_unread or waited_status != "open":                     # nothing waited, or it was set aside: a new alert

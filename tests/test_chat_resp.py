@@ -45,10 +45,11 @@ def test_a_new_chat_gets_the_account_s_responsible(env):
     responsible_of(conn, account, "ivan")
     sync(conn, account, chat("c1"), chat("c2"))
     assert who(conn, "c1") == "ivan" and who(conn, "c2") == "ivan"
-    [detail] = [json.loads(r[0]) for r in conn.execute("SELECT detail FROM audit WHERE action = ?", (chats.ASSIGN_DEFAULT,))]
-    assert detail == {"account": account, "to": "ivan", "chats": [row(conn, "c1"), row(conn, "c2")]}
+    details = [json.loads(r[0]) for r in conn.execute("SELECT detail FROM audit WHERE action = ? ORDER BY id", (chats.ASSIGN_DEFAULT,))]
+    assert details == [{"chat": row(conn, c), "account": account, "to": "ivan"} for c in ("c1", "c2")]      # one per chat, with the write
     from tires_sync.panel import texts
-    assert texts.audit_text({"action": chats.ASSIGN_DEFAULT, "detail": detail}).startswith("Чаты аккаунта")
+    assert texts.audit_text({"action": chats.ASSIGN_DEFAULT, "detail": details[0]}) == \
+        "Чат Ч-%d: ответственный по умолчанию — ivan (ответственный аккаунта №%d)" % (row(conn, "c1"), account)
 
 
 def test_no_responsible_of_the_account_as_before(env):
@@ -110,3 +111,44 @@ def test_a_chat_of_a_point_s_account_is_left_to_the_point(env):
     conn.commit()
     sync(conn, account, chat("c1"))
     assert who(conn) == ""
+
+
+def test_a_responsible_given_by_the_system_is_no_taking_from_a_point(env):
+    """order_points.office_taken: a chat the owner or the partner answers for is a client taken from a point — only when a person chose it;
+    the default is not (else «Клиент написал» of the orders the points work would come back to them, the owner 2026-11-03)."""
+    from tires_sync import order_points
+    conn, account = env
+    responsible_of(conn, account, "petr")                                         # a partner
+    sync(conn, account, chat("c1"))
+    assert who(conn) == "petr" and row(conn) not in order_points.office_taken(conn)[1]
+    chats.set_responsible(conn, row(conn), "ivan", NOW, "o")                       # a person's choices since: as before
+    chats.set_responsible(conn, row(conn), "petr", NOW, "o")
+    assert row(conn) in order_points.office_taken(conn)[1]
+
+
+def test_a_chat_come_alive_by_the_webhook_gets_it_too(env):
+    conn, account = env
+    sync(conn, account, chat("c1"))
+    responsible_of(conn, account, "ivan")
+    assert chats.store_pushed(conn, account, "c1", msg("w-1", "Ещё вопрос", created=TS + 600), LATER) == "stored"
+    conn.commit()
+    assert who(conn) == "ivan"
+    sync(conn, account, chat("c1", updated=TS + 600, text="Ещё вопрос"), now=LATER, messages={"c1": [msg("w-1", "Ещё вопрос", created=TS + 600)]})
+    assert who(conn) == "ivan" and conn.execute("SELECT COUNT(*) FROM audit WHERE action = ?", (chats.ASSIGN_DEFAULT,)).fetchone()[0] == 1
+
+
+def test_the_webhook_never_overwrites_a_person_nor_gives_a_point_s_chat(env):
+    conn, account = env
+    sync(conn, account, chat("c1"))
+    responsible_of(conn, account, "ivan")
+    chats.set_responsible(conn, row(conn), "petr", NOW, "o")
+    chats.set_responsible(conn, row(conn), "", NOW, "o")                           # «никто», chosen
+    chats.store_pushed(conn, account, "c1", msg("w-1", "Ещё вопрос", created=TS + 600), LATER)
+    conn.commit()
+    assert who(conn) == ""
+    conn.execute("INSERT INTO point (name, avito_account_id) VALUES ('Альфа', ?)", (account,))
+    conn.commit()
+    sync(conn, account, chat("c2"), now=LATER)
+    chats.store_pushed(conn, account, "c2", msg("w-2", "Вопрос", created=TS + 700), LATER)
+    conn.commit()
+    assert who(conn, "c2") == ""
