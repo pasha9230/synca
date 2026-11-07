@@ -20,7 +20,8 @@ OWN, OWN_TRANSFER = "6100200", "26R-5550001"
 
 
 def parts(conn, cid):
-    return order_webmim.parts(conn, orders.get_card(conn, cid))
+    """As the card shows them: looking at the card takes the snapshot of an order with its own number."""
+    return order_webmim.parts(conn, orders.get_card(conn, cid), take_snapshot=True, now=LATER)
 
 
 def rows(conn, cid):
@@ -135,6 +136,7 @@ def test_tyres_added_to_an_order_with_a_number_are_a_second_part_with_its_own_ro
     cid = new_order(conn, qty=4)
     orders.update_card(conn, cid, {"webmim_number": OWN, "transfer_number": OWN_TRANSFER}, LATER, "o")
     item = orders.get_card(conn, cid)["items"][0]["id"]
+    parts(conn, cid)                                                           # the card was looked at with its number
     first = rows(conn, cid)
     assert list(first) == [order_sheet.key(cid, item)] and first[order_sheet.key(cid, item)]["Кол-во"] == 4
     orders.update_item(conn, item, 6, 6000, LATER, "o")                        # two more of the same tyre
@@ -161,6 +163,15 @@ def test_a_new_position_in_an_order_with_a_number_is_a_second_part(tmp_path):
     [extra] = [p for p in parts(conn, cid) if p["kind"] == "extra"]
     assert [x["id"] for x in extra["items"]] == [new]
     assert order_sheet.key(cid, new) not in rows(conn, cid) and order_sheet.extra_key(cid, new) in rows(conn, cid)
+
+
+def test_without_a_look_at_the_card_nothing_becomes_added(tmp_path):
+    """No snapshot yet (the number came with the pieces in one save): nothing is a second part — never a false one."""
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    orders.update_card(conn, cid, {"webmim_number": OWN}, LATER, "o")
+    orders.update_item(conn, orders.get_card(conn, cid)["items"][0]["id"], 6, 6000, LATER, "o")
+    assert [(p["kind"], p["items"][0]["qty"]) for p in parts(conn, cid)] == [("supplier", 6)]
 
 
 def test_an_order_without_a_number_has_no_second_part(tmp_path):
@@ -217,3 +228,33 @@ def test_the_block_has_no_money(tmp_path):
         assert not {"price", "purchase", "profit", "sum"} & set(part)
         for x in part["items"]:
             assert set(x) <= {"id", "name", "qty"}
+
+
+# ---- the panel -------------------------------------------------------------------------------------------------------------------------------
+
+def test_the_card_shows_the_block_its_forms_and_a_point_sees_it_read_only(tmp_path):
+    from panel_helpers import post
+    from test_mypoint import manager
+    from test_vk_commands import _card, ready
+    app, client, tok, conn, pid, _tanya = ready(tmp_path)
+    old = _card(conn, pid, webmim=NUMBER, code="at_point")
+    conn.execute("UPDATE order_card SET transfer_number = ?, stage_id = ? WHERE id = ?", (TRANSFER, stage(conn, "oth"), old))
+    conn.commit()
+    cid = new_order(conn, qty=6, at="Бета") if conn.execute("SELECT 1 FROM point WHERE name = 'Бета'").fetchone() else None
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (pid, cid))
+    conn.commit()
+    assert take(conn, cid) == 4
+    page = client.get("/orders/%d" % cid).get_data(as_text=True)
+    block = page[page.index('id="webmim-parts"'):].split("</section>")[0]
+    assert NUMBER in block and TRANSFER in block and 'data-webmim-part="oth"' in block and 'data-webmim-part="supplier"' in block
+    assert "/items/%d/mim" % oth_item(conn, cid) in block
+    assert "4500" not in block and "4 500" not in block and "4000" not in block and "₽" not in block      # no money
+    item = oth_item(conn, cid)
+    assert post(client, "/orders/%d/items/%d/mim" % (cid, item), tok, webmim_number="5559999", transfer_number="26R-9").status_code == 302
+    assert order_webmim.item_numbers(conn, cid)[item]["webmim_number"] == "5559999"
+    point = manager(app, conn, pid)
+    seen = point.get("/orders/%d" % cid).get_data(as_text=True)
+    part = seen[seen.index('id="webmim-parts"'):].split("</section>")[0]
+    assert "5559999" in part and "/mim" not in part and "₽" not in part
+    assert post(point, "/orders/%d/items/%d/mim" % (cid, item), "tok", webmim_number="1").status_code == 403
+    assert order_webmim.item_numbers(conn, cid)[item]["webmim_number"] == "5559999"
