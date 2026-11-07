@@ -89,6 +89,10 @@ def audit_text(entry: dict) -> str:
         return "Чат Ч-%s: ответственный %s" % (d.get("chat", "?"), ("— " + d["to"]) if d.get("to") else "снят")
     if action == "oth_detach":
         return "Заказ №%s на ОТХ: клиент №%s отвязан" % (d.get("order", "?"), d.get("client", "?"))
+    if action == "oth_split":
+        return "Заказ №%s: часть шин выделена в заказ №%s (%s)" % (d.get("order", "?"), d.get("new", "?"), "на возврат" if d.get("stage") == "return_given" else "остаток на ОТХ")
+    if action == "callback_extend":
+        return "Задача №%s продлена до %s" % (d.get("task", "?"), str(d.get("to") or "?").replace("T", " "))
     if action == "oth_client_swap":
         return "Заказ №%s с ОТХ: клиент сменён (было: клиент №%s, %s)%s" % (
             d.get("order", "?"), d.get("old_client") or "—", d.get("old_name") or "без имени",

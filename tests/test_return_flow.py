@@ -1,6 +1,6 @@
 """The owner 2026-11-03: «На возврат» is a stage (code return_given). The point's «На точке» on the seventh day of «На ОТХ» moves the order
-there with «Согласуем» (the tyres still on sale: the feed and «Взять с ОТХ»); «Согласовано с поставщиком» keeps the stage, «Согласовано,
-отдать до ДД.ММ», the tyres leave the sale; «Отменить согласование» gives «Согласуем» back. «Подписал акт и отдал» (and the VK «возврат
+there with «Ожидает согласование возврата» (the tyres still on sale: the feed and «Взять с ОТХ»); «Согласовано с поставщиком» keeps the stage, «Согласовано,
+отдать до ДД.ММ», the tyres leave the sale; «Отменить согласование» gives «Ожидает согласование возврата» back. «Подписал акт и отдал» (and the VK «возврат
 отдал») closes it in «Вернули поставщику» with the refund = the purchase of the tyres given back. The board shows the label and filters by
 it; «Рабочее место» shows the stage on «На возврат»; the press is undone as the others. The orders of the old flow are moved once."""
 from __future__ import annotations
@@ -20,7 +20,7 @@ DAY7 = "2026-10-26T13:00:00"
 
 
 def returning(conn, cid=None):
-    """An order on «На возврат» («Согласуем»): the seventh day moved it (the owner 2026-11-04)."""
+    """An order on «На возврат» («Ожидает согласование возврата»): the seventh day moved it (the owner 2026-11-04)."""
     cid = cid or card_at(conn, "at_point", "2026-10-15T10:00:00")
     on_oth(conn, cid)
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
@@ -43,8 +43,8 @@ def test_the_seventh_day_moves_the_order_to_na_vozvrat_agreeing_and_the_tyres_le
     cid = returning(conn)
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and card["stage"]["name"] == "На возврат"
-    assert label(conn, cid) == "Согласуем" and order_oth.to_agree(conn, card)
-    assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: off sale from «Согласуем»
+    assert label(conn, cid) == "Ожидает согласование возврата" and order_oth.to_agree(conn, card)
+    assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: off sale from «Ожидает согласование возврата»
     assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND title = ?", (cid, order_oth.RETURN_TASK)).fetchone()[0] == 1
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (cid,)).fetchone() is None     # still not the client's
 
@@ -58,7 +58,7 @@ def test_agreed_keeps_the_stage_takes_the_tyres_off_sale_and_unagree_gives_agree
     assert [r["card"]["id"] for r in order_oth.to_return(conn, card["point_id"])] == [cid]
     assert order_oth.unagree(conn, card, "2026-10-27T11:00:00", "owner")
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласуем"
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Ожидает согласование возврата"
     assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: stays off sale
 
 
@@ -80,7 +80,7 @@ def test_take_from_oth_works_on_oth_and_not_on_na_vozvrat(tmp_path):
     [offer] = oth_sale.offers(conn, orders.get_card(conn, new))[line["id"]]
     assert offer["from_order"] == cid and offer["qty"] == 4
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
-    assert not oth_sale.offers(conn, orders.get_card(conn, new)).get(line["id"])         # the owner 2026-11-04: «Согласуем» is off sale
+    assert not oth_sale.offers(conn, orders.get_card(conn, new)).get(line["id"])         # the owner 2026-11-04: «Ожидает согласование возврата» is off sale
     with pytest.raises(oth_sale.OthSaleError):
         oth_sale.take(conn, new, line["id"], orders.list_items(conn, cid)[0]["id"], "2026-10-26T15:00:00", "owner")
 
@@ -211,8 +211,8 @@ def test_the_board_shows_the_label_and_filters_by_it(tmp_path):
         data = orders.board(conn, orders.datetime.fromisoformat("2026-10-27T12:00:00"), **kw)
         return {c["id"]: c["returning"] for col in data["columns"] for c in col["cards"]}
     shown = cards()
-    assert shown[wait] == "Согласуем" and shown[done] == "Согласовано, отдать до 28.10" and shown[plain] == ""
-    assert cards(returning=order_oth.AGREE) == {wait: "Согласуем"}
+    assert shown[wait] == "Ожидает согласование возврата" and shown[done] == "Согласовано, отдать до 28.10" and shown[plain] == ""
+    assert cards(returning=order_oth.AGREE) == {wait: "Ожидает согласование возврата"}
     assert cards(returning=order_oth.AGREED) == {done: "Согласовано, отдать до 28.10"}
 
 
@@ -224,7 +224,7 @@ def test_the_board_page_filter(tmp_path):
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
     order_oth.answer_here(conn, orders.get_card(conn, cid), "менеджер Бета", DAY7)
     page = client.get("/orders?r=agree").get_data(as_text=True)
-    assert 'data-return-filter' in page and 'data-return-label>Согласуем<' in page
+    assert 'data-return-filter' in page and 'data-return-label>Ожидает согласование возврата<' in page
     assert "№%d " % cid in page
     assert "№%d " % cid not in client.get("/orders?r=agreed").get_data(as_text=True)
 
@@ -305,7 +305,7 @@ def test_the_migration_moves_the_old_flow_once(tmp_path):
     assert orders.stage_name(conn, orders.RETURN_GIVEN) == "На возврат"
     assert code(given) == "return" and orders.get_card(conn, given)["return_amount"] == 16000.0
     assert code(nopurchase) == orders.RETURN_GIVEN and label(conn, nopurchase) == "Отдано, нужна сумма возврата"
-    assert code(here) == orders.RETURN_GIVEN and label(conn, here) == "Согласуем"
+    assert code(here) == orders.RETURN_GIVEN and label(conn, here) == "Ожидает согласование возврата"
     assert code(agreed_) == orders.RETURN_GIVEN and label(conn, agreed_) == "Согласовано, отдать до 21.10"
     assert code(asked) == "oth" and code(plain) == "oth"
     assert oth_stock.pieces(conn, manual=False) == {"1": 8}                              # asked, plain: on sale; «На возврат» never (2026-11-04)

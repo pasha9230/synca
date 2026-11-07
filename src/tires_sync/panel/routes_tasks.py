@@ -117,8 +117,10 @@ def register(app) -> None:
             rows = tasks.listing(conn, tab=tab, login=me, owner_login=_owner(conn), now=local_iso(), point=point, to=to, due=due, kind=kind,
                                  as_point=current_user()["as_point"])
             from .. import inquiry
+            from .. import order_oth
             for t in rows:                                # whom to call: the name and the phone, as the reminder had them
                 t["who"], t["phone"] = inquiry._who_called(conn, t)
+                t["extend"] = order_oth.can_extend(conn, t)     # «Продлить на 2 рабочих дня» of the task of the return
         names = {}
         own = set(tasks.point_managers(conn, own_point())) if point else set()
         for t in rows:
@@ -173,7 +175,7 @@ def register(app) -> None:
     @app.route("/tasks/<int:task_id>/<how>", methods=["POST"])
     @login_required
     def task_close(task_id, how):
-        if how not in ("done", "cancel"):
+        if how not in ("done", "cancel", "extend"):
             abort(404)
         if not may_set():
             abort(403)
@@ -187,8 +189,15 @@ def register(app) -> None:
         if not is_point() and not may_take():
             abort(403)
         try:
-            tasks.close(conn, task_id, how, local_iso(), me, request.form.get("result", ""), journal_author=author())
-            flash("Задача выполнена." if how == "done" else "Задача отменена.", "info")
+            if how == "extend":                                            # «Продлить на 2 рабочих дня»: the task of the return (2026-11-07)
+                from .. import order_oth
+                due = order_oth.extend_task(conn, task_id, local_iso(), author())
+                flash("Задача продлена до %s.%s %s." % (due[8:10], due[5:7], due[11:16]), "info")
+            else:
+                tasks.close(conn, task_id, how, local_iso(), me, request.form.get("result", ""), journal_author=author())
+                flash("Задача выполнена." if how == "done" else "Задача отменена.", "info")
         except tasks.TaskError as err:
+            flash(str(err), "error")
+        except ValueError as err:                                          # order_oth.OthError
             flash(str(err), "error")
         return redirect(_back())

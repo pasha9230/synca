@@ -67,6 +67,8 @@ def _check(conn, stage_id, trigger, hours, action, template_id, arg, mode, point
         target = get_stage(conn, int(arg))
         if target["id"] == stage_id:
             raise OrderError("Нельзя переносить заказ в тот же этап.")
+        if target.get("code") == "return_given":                    # the owner 2026-11-07: «На возврат» is the return's own (the 7th day, by hand)
+            raise OrderError("Этап «%s» нельзя выбрать в правилах: на него переводит 7-й день на ОТХ или человек." % target["name"])
         arg = str(target["id"])
     if action in ("record_sale",):
         arg = ""
