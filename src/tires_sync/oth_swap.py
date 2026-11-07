@@ -78,6 +78,9 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     conn.execute("DELETE FROM client_order WHERE order_id = ?", (a,))
     chats = [r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE order_id = ? ORDER BY id", (a,))]
     conn.execute("UPDATE avito_chat SET order_id = NULL, unlinked = 1 WHERE order_id = ?", (a,))
+    from . import order_autosend                                       # «Автосообщение клиенту» set for the old client: never to the new one (night-build)
+    autosends = [i["id"] for i in order_autosend.of_order(conn, a) if i["status"] in order_autosend.OPEN
+                 and order_autosend._cancel(conn, i, "клиент сменён", now, author)]
     skipped = conn.execute("UPDATE order_task SET status = 'skipped', result = 'клиент сменён', done_at = ? WHERE order_id = ? "
                            "AND status IN ('pending', 'error')", (now, a)).rowcount      # made for the old client: never sent to the new one
     unsent = conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE order_id = ? AND closed_at IS NULL", (now, author, a)).rowcount
@@ -102,7 +105,7 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
         orders.add_event(conn, a, now, author, "field", FEE_OFF)
     detail = {"order": a, "old_client": old_client, "old_link": old_link, "old_order_link": list(linked) if linked else None,
               "old_name": old_name, "old_phone": old_phone, "name": name, "phone": phone, "chats": chats, "fee_off": fee, "from_order": from_order,
-              "tasks_skipped": skipped, "unsent_closed": unsent, "retries_stopped": stopped, "callbacks_cancelled": callbacks}
+              "tasks_skipped": skipped, "autosends_cancelled": autosends, "unsent_closed": unsent, "retries_stopped": stopped, "callbacks_cancelled": callbacks}
     return detail
 
 
