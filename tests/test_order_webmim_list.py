@@ -246,7 +246,7 @@ def test_the_card_shows_the_block_its_forms_and_a_point_sees_it_read_only(tmp_pa
     assert take(conn, cid) == 4
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     block = page[page.index('id="webmim-parts"'):].split("</section>")[0]
-    assert NUMBER in block and TRANSFER in block and 'data-webmim-part="oth"' in block and 'data-webmim-part="supplier"' in block
+    assert NUMBER in block and TRANSFER in block and 'data-mimpart="oth"' in block and 'data-mimpart="supplier"' in block
     assert "/items/%d/mim" % oth_item(conn, cid) in block
     assert "4500" not in block and "4 500" not in block and "4000" not in block and "₽" not in block      # no money
     item = oth_item(conn, cid)

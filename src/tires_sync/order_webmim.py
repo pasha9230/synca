@@ -232,10 +232,10 @@ def parts(conn, card: dict, take_snapshot: bool = False, now: str = "") -> List[
             extra = added.get(item["id"])
             own = qty - (extra["qty"] if extra else 0)
             if own >= 1:
-                put("supplier", "Заказ поставщику", card["id"], card["webmim_number"] or card["webmim_id"], card["transfer_number"],
+                put("supplier", "Свой заказ WebMIM", card["id"], card["webmim_number"] or card["webmim_id"], card["transfer_number"],
                     order_sheet._invoice_day(conn, card) if (card["webmim_number"] or card["webmim_id"]) else "", item, own)
             if extra and extra["qty"] >= 1:
-                put("extra", "Добавленные шины: второй заказ поставщику", card["id"], extra["webmim_number"], extra["transfer_number"],
+                put("extra", "Добавленные шины: второй заказ WebMIM", card["id"], extra["webmim_number"], extra["transfer_number"],
                     order_sheet.day_of_number(conn, extra["webmim_number"]), item, extra["qty"])
     out = list(groups.values())
     waiting = [p for p in out if p["kind"] == "extra" and not p["number"]]

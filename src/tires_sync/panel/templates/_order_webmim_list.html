@@ -4,9 +4,9 @@
 {% set wparts = webmim_parts_for(c.id) %}{% if wparts %}{% set may = can_post("order_item_mim") %}
 <section class="card order-webmim-parts" id="webmim-parts"><div class="card-body stack">
 <h3 style="margin:0">Заказы WebMIM</h3>
-{% if wparts|selectattr("needs_numbers")|list %}<p class="small text-warn" data-webmim-extra-warn>В заказ добавлены шины после оформления: впишите номер второго заказа WebMIM и перемещения. Старые номера подсвечены.</p>{% endif %}
+{% if wparts|selectattr("needs_numbers")|list %}<p class="small text-warn" data-mimpart-warn>В заказ добавлены шины после оформления: впишите номер второго заказа WebMIM и перемещения. Старые номера подсвечены.</p>{% endif %}
 <div style="overflow-x:auto"><table class="table"><thead><tr><th>Откуда</th><th>№ заказа MIM</th><th>Перемещение</th><th>Дата счёта</th><th>Позиции</th></tr></thead><tbody>
-{% for p in wparts %}<tr data-webmim-part="{{ p.kind }}"{% if p.highlight %} class="is-old" style="background:var(--warn-50)"{% endif %}>
+{% for p in wparts %}<tr data-mimpart="{{ p.kind }}"{% if p.highlight %} class="is-old" style="background:var(--warn-50)"{% endif %}>
 <td>{{ p.label }}{% if p.typed %} <span class="badge badge--neutral">вписан для строки</span>{% endif %}</td>
 <td class="mono">{{ p.number or "—" }}</td><td class="mono">{{ p.transfer or "—" }}</td><td>{{ p.day|day if p.day else "—" }}</td>
 <td>{% for x in p['items'] %}<div>{{ x.name }} × {{ x.qty }}
