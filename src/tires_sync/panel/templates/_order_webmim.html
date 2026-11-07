@@ -3,7 +3,7 @@
    webmim_create (webmim_create.button): «Досоздать в WebMIM» and the last result, for the right «supplier» only; the first press is «Заказать
    в МИМ» of «Заказ поставщику» (_order_supplier.html, its window «Подтверждение»). #}
 {% set w = webmim %}{% set point_view = current_user().role == "point" %}
-{% if w and not point_view %}{# the manager of a point: no WebMIM at all (the owner 2026-10-30: the point orders nothing from the supplier) #}
+{% if w and not point_view and not (office_new() and c.stage.code == "cancel") %}{# a cancelled order: nothing to check against WebMIM (the owner 2026-11-07, item 18) #}{# the manager of a point: no WebMIM at all (the owner 2026-10-30: the point orders nothing from the supplier) #}
 {% call entity_ui.section("WebMIM", id="webmim", sub=w.server ~ (" · снимок " ~ (w.seen_at|short_dt_utc) if w.seen_at else " · снимка ещё нет"), fold=true, open=part == "webmim" or (webmim_create and webmim_create.held) or (webmim_create and webmim_create.state and webmim_create.state.result and webmim_create.state.state not in ("done", "running"))) %}{# folded (the owner 2026-11-05); open with the red result of «Досоздать» #}<div class="card-body stack" data-webmim>
 {% if w.test and w.order %}<p class="small text-err">Тестовый сервер WebMIM: номер совпал с тестовым заказом, это может быть не наш заказ.</p>{% endif %}
 {% if w.order %}{% set o = w.order %}
@@ -55,5 +55,10 @@
 {% else %}<p class="small muted">Этот сервер WebMIM закрыт для кнопки.</p>{% endif %}{% endif %}
 </div>{% endif %}
 {% if can("orders") and not point_view %}<p class="small"><a href="/orders/webmim">Сверка с WebMIM</a></p>{% endif %}
+{# «ID» and «Статус WebMIM» of the order (moved here from «Дополнительно» of the window, item 14): fields of the window's form (form="ow-main") #}
+{% if office_new() and can_post("order_save") and not (c.stage.code in ("done", "cancel") and not request.args.get("edit")) %}<details class="small" data-webmim-fields><summary>ID и статус заказа WebMIM{% if c.webmim_id %}: <span class="mono">{{ c.webmim_id }}</span>{% endif %}{% if c.webmim_status %} · {{ c.webmim_status }}{% endif %}</summary>
+<div class="grid-2" style="margin-top:var(--s-2)"><label class="field"><span class="label">ID заказа WebMIM</span><input class="input mono" name="webmim_id" form="ow-main" value="{{ c.webmim_id }}" maxlength="60"></label>
+<label class="field"><span class="label">Статус WebMIM</span><input class="input" name="webmim_status" form="ow-main" value="{{ c.webmim_status }}" maxlength="60"></label></div>
+<p class="small muted" style="margin:var(--s-1) 0 0">Сохраняются кнопкой «Сохранить» окна заказа.</p></details>{% endif %}
 </div>{% endcall %}
 {% endif %}

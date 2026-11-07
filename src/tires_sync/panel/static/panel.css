@@ -819,3 +819,13 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
 .wn-body{margin-top:var(--s-2);color:var(--gray-700)}
 .wn-body p,.wn-body ul{margin:var(--s-2) 0 0}
 .wn-body ul{padding-left:var(--s-5)}
+/* a field of the order window shown as its value; «Исправить» opens the input (the owner 2026-11-07, ui-audit) */
+.owin-fixd>summary{list-style:none;display:flex;align-items:baseline;gap:var(--s-2);min-height:40px;padding:8px 0;cursor:pointer}
+.owin-fixd>summary::-webkit-details-marker{display:none}
+.owin-fixv{color:var(--gray-900);overflow-wrap:anywhere}
+.owin-fixa{font-size:var(--fs-sm);color:var(--primary-600);white-space:nowrap}
+.owin-fixd[open]>summary .owin-fixa{display:none}
+.owin-fixd[open]>summary{min-height:0;padding:0 0 var(--s-1)}
+fieldset[disabled] .owin-fixd>summary{cursor:default}
+/* «Настройка»: its pages as tabs above the page (the owner 2026-11-07, ui-audit item 46) */
+.setup-tabs{margin-bottom:var(--s-4);overflow-x:auto;flex-wrap:nowrap;white-space:nowrap}

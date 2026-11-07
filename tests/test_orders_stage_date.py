@@ -74,12 +74,14 @@ def test_the_list_shows_the_date_next_to_the_status(w):
 
 def test_the_board_shows_the_date_on_the_order(w):
     card = board_card(page(w, "/orders"), w["cid"])
-    assert re.search(r"data-stage-date>%s 04\.11</div>" % re.escape(w["name"]), card)
+    shown = w["name"] if w["view"] == "old" else "с"                    # «Новый вид»: the column names the stage (the owner 2026-11-07, ui-audit 30)
+    assert re.search(r"data-stage-date>%s 04\.11</div>" % re.escape(shown), card)
 
 
 def test_the_card_shows_the_date_next_to_the_status(w):
     text = page(w, "/orders/%d" % w["cid"])
-    assert re.search(r'<span class="badge badge--\w+">%s 04\.11</span>' % re.escape(w["name"]), text)
+    # «Новый вид»: the stage with its date is the page's header, not a second badge in the window (the owner 2026-11-07, ui-audit 2)
+    assert bool(re.search(r'<span class="badge badge--\w+">%s 04\.11</span>' % re.escape(w["name"]), text)) == (w["view"] == "old")
     if w["view"] == "new":
         assert re.search(r'class="o2c-stage"[^>]*>%s 04\.11 · 0 дн\.</span>' % re.escape(w["name"]), text)
 
@@ -87,8 +89,8 @@ def test_the_card_shows_the_date_next_to_the_status(w):
 def test_a_date_of_another_year_names_the_year(w):
     entered(w, "2025-12-31T10:00:00")
     assert "%s 31.12.2025" % w["name"] in list_row(page(w, "/orders?v=list"), w["cid"])
-    assert "%s 31.12.2025" % w["name"] in board_card(page(w, "/orders"), w["cid"])
-    assert "%s 31.12.2025</span>" % w["name"] in page(w, "/orders/%d" % w["cid"])
+    assert "%s 31.12.2025" % (w["name"] if w["view"] == "old" else "с") in board_card(page(w, "/orders"), w["cid"])
+    assert ("%s 31.12.2025</span>" if w["view"] == "old" else "%s 31.12.2025 · ") % w["name"] in page(w, "/orders/%d" % w["cid"])
 
 
 @pytest.mark.parametrize("value", ["", "не дата"])
@@ -98,7 +100,7 @@ def test_an_order_with_no_moment_shows_the_status_without_a_date(w, value):
     assert re.search(r">%s</span>" % re.escape(w["name"]), row)
     assert "data-stage-date" not in board_card(page(w, "/orders"), w["cid"])
     text = page(w, "/orders/%d" % w["cid"])
-    assert re.search(r'<span class="badge badge--\w+">%s</span>' % re.escape(w["name"]), text)
+    assert bool(re.search(r'<span class="badge badge--\w+">%s</span>' % re.escape(w["name"]), text)) == (w["view"] == "old")    # ui-audit 2
     if w["view"] == "new":
         assert re.search(r'class="o2c-stage"[^>]*>%s · 0 дн\.</span>' % re.escape(w["name"]), text)
 
@@ -108,7 +110,8 @@ def test_the_card_shows_the_tyres_sum_under_the_clients_name_the_same_as_in_the_
     text = page(w, "/orders/%d" % w["cid"]).replace("\xa0", " ")
     head = re.search(r'id="ow-title"[^>]*>Анна</h1><div class="entity-under">Итого <b data-order-sum>([^<]+)</b></div>', text)
     assert head and head.group(1).startswith("20 000")
-    assert '<p class="ocard-sum">Итого <b>%s</b>' % head.group(1) in text
+    # «Новый вид»: not a third time in «Продажа и расчёты» (the owner 2026-11-07, ui-audit 3)
+    assert ('<p class="ocard-sum">Итого <b>%s</b>' % head.group(1) in text) == (w["view"] == "old")
     assert "Итого: <b>%s</b>" % head.group(1) in text                 # the line under the positions: the same number, the same word
     assert "Сумма шин" not in text and "Сумма заказа" not in text      # one word for the one sum (the owner 2026-11-06)
 
@@ -116,7 +119,7 @@ def test_the_card_shows_the_tyres_sum_under_the_clients_name_the_same_as_in_the_
 def test_an_order_with_no_positions_has_no_sum_under_the_name(w):
     text = page(w, "/orders/%d" % w["cid"])
     assert "data-order-sum" not in text and "entity-under" not in text
-    assert '<p class="ocard-sum">Итого <b>' in text                  # the money part is as it was, «Итого» (2026-11-06)
+    assert ('<p class="ocard-sum">Итого <b>' in text) == (w["view"] == "old")     # the old view as it was; «Новый вид»: no third sum (ui-audit 3)
 
 
 def test_the_new_order_window_has_no_sum_and_no_date(w):

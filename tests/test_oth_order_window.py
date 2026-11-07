@@ -45,7 +45,10 @@ def test_the_window_on_oth_has_no_autosend(w):
     cid = order(w)
     assert 'id="autosend"' not in window(w, cid)
     other = order(w, code="at_point", webmim="5316245")
-    assert 'id="autosend"' in window(w, other)                                   # other stages: the block stays
+    if w["view"] == "new":          # «Новый вид»: the block is in the column «Чат Авито», with a bound chat only (the owner 2026-11-07, ui-audit 6)
+        assert 'id="autosend"' not in window(w, other) and "data-autosend-nochat" in window(w, other)
+    else:
+        assert 'id="autosend"' in window(w, other)                               # other stages: the block stays
 
 
 def test_the_title_is_as_on_the_board_without_the_inner_number(w):

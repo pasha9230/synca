@@ -1,7 +1,7 @@
 {# «Доставка в другой город» (order_intercity, the owner 2026-11-02): the office writes the checkbox, the city, the transport company (ПЭК, КИТ),
    the track number and the labels (PDF); whoever else sees the order (the point, the observer) sees them and downloads the labels. #}
 {% set ic = c.intercity %}{% set ic_labels = intercity_labels(c.id) if ic.on else [] %}{% set ic_edit = can_post("order_intercity_save") %}
-{% if ic_edit or ic.on %}
+{% if ic.on or (ic_edit and (not office_new() or c.stage.code not in ("oth", "return_given", "done", "cancel", "return"))) %}{# not after the tyres stayed or the order closed, unless it is on (item 7) #}
 {# folded (the owner 2026-11-05): opens by a click, by ?tab=intercity or #intercity (app.js 13a) #}
 <details class="card ocard-part" id="intercity" data-intercity{% if part == "intercity" %} open{% endif %}><summary class="card-head"><h3 style="white-space:normal">Доставка в другой город{% if ic.on %} <span class="badge badge--warn" data-intercity-tag>В другой город</span>{% endif %}</h3>{{ icon("chev", "ml-auto") }}</summary><div class="card-body stack" style="gap:var(--s-3)">
 {% if ic_edit %}
