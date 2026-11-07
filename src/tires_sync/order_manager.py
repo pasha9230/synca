@@ -355,7 +355,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                        (number, point["id"])).fetchone() if written and not found else None
     if own:                                            # the panel's number of the point's own order, known by its WebMIM one (the owner 2026-10-23)
         state["order_id"] = own[0]
-        return finish("внутренний номер заказа: подсказан номер WebMIM", "У этого заказа номер WebMIM %s — напишите его: «%s %s»."
+        return finish("внутренний номер заказа: подсказан номер WebMIM", "У этого заказа номер %s — напишите его: «%s %s»."
                       % (own[1], word or "приехал", own[1]))
     if not found:
         return dispute(point, MISSING % number, MISSING_ANSWER % number)
@@ -469,7 +469,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
             command = {"to_stage_id": _stage_id(conn, target)}
         elif code == "new" and target == "at_point":                            # not placed yet: nothing can have come to the point
             return dispute(point, "«%s», а заказ ещё не оформлен" % word,
-                           "Заказ №%s ещё не оформлен в WebMIM; сообщение передано владельцу." % label(card))
+                           "Заказ №%s ещё не оформлен у поставщика; сообщение передано владельцу." % label(card))     # a point: no WebMIM (2026-10-30)
     if command is None or command["to_stage_id"] is None:
         return dispute(point, "слово «%s» не подходит к этапу «%s»" % (word, card["stage"]["name"]),
                        CANCELLED % label(card) if code == "cancel" else
