@@ -1129,6 +1129,8 @@ def register(app) -> None:
         engine.refresh_tasks(conn, card_id, local_iso())
         part = request.args.get("tab") if request.args.get("tab") in ORDER_PARTS else ""
         events = orders.list_events(conn, card_id)
+        if own_point() is not None:                                      # «Письмо поставщику» (supplier_mail): not the point's
+            events = [e for e in events if e["kind"] != "supplier_mail"]
         acting = from_panel()                                            # sent from another site: the page only
         if events and acting:                                            # the user has seen the journal up to the newest record shown
             order_alerts.mark_seen(conn, session["user"], card_id, local_iso(), events[0]["id"])

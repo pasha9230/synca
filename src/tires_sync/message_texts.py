@@ -14,7 +14,7 @@ from typing import Dict, List
 from . import order_templates as templates, store
 from .orders import OrderError
 
-TO = {"client": "клиент", "point": "точка", "manager": "менеджер"}
+TO = {"client": "клиент", "point": "точка", "manager": "менеджер", "supplier": "поставщик"}
 CHANGED = "message_template_changed"              # the audit action of a change (panel/texts.py has its words)
 
 
@@ -44,6 +44,7 @@ RETURN_ASK = "return_ask"
 RETURN_AGREED = "return_agreed"
 UNTOLD_POINT = "untold_point"
 WAIT_FOUND = "wait_found"
+SUPPLIER_RETURN = "supplier_return"
 _LABEL = {"order_label": "Номер заказа для точки (WebMIM, иначе панели)"}
 TEXTS = (
     _sample("placed_client", PLACED_CLIENT, "client", "Сам, после «Оформить в WebMIM» в панели, в чат Авито заказа (и по правилу этапа «Заказ оформлен»).",
@@ -67,6 +68,12 @@ TEXTS = (
           "в чат Авито заказа. Без {name} или {price} текст не уходит: менеджеру ставится задача.",
           "Здравствуйте. «{name}» появилось в наличии у нас на складе, стоимость: {price} за штуку. Желаете оформить заказ?",
           {"name": "Наименование шины", "price": "Цена за штуку"}, needs=("{name}", "{price}")),
+    _code(SUPPLIER_RETURN, "Поставщику: согласовать возврат (письмо)", "manager", "supplier",
+          "Не уходит само: кнопка «Письмо поставщику» у задачи возврата и в заказе на «На возврат» открывает это письмо в почте оператора "
+          "(или «Скопировать текст»). Закупка и прибыль в письмо не попадают.",
+          "Добрый день.\n\nПросим согласовать возврат по заказу № {mim} (дата счёта {invoice_date}):\n{items}\n\n"
+          "Подскажите, пожалуйста, дату забора груза.\n\nСпасибо.",
+          {"mim": "Номер заказа WebMIM", "invoice_date": "Дата счёта", "items": "Позиции и количество"}),
     _code(RESERVE_ASK, "Точке: заказ ещё на точке? (последний день резерва)", "manager", "point",
           "В последний день резерва, в начале рабочего дня, в ВК точки. Ответ точки читается: «выдал N» или «на точке N». "
           "Точке в панели вопрос показывается на «Рабочем месте» своими словами, этот текст туда не идёт.",

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_supplier_mail.html" import button as supplier_mail_button %}
 {# «Задачи» of the office in «Новый вид» (lane port-office-rest; the prototype's owner-daily renderTasks): routes draw it instead of
    tasks.html while routes_design.office_new() (a point keeps its own). «Новая задача» in the head opens the same form in a window; the
    terms as segments, «Кому» and «Тип» as selects; the columns of the prototype («Кому» always: the owner's «Мне» has the tasks of people no longer working too); «Выполнено» with what came of it and «Отменить» as before. #}
@@ -21,7 +22,7 @@
 <table class="table"><thead><tr><th>Тип</th><th>Что сделать</th><th>Кому</th><th>Поставил</th><th>Срок</th><th>Заказ / клиент</th><th></th></tr></thead><tbody>
 {% for t in rows %}<tr data-task="{{ t.id }}"{% if t.late %} class="is-late o2-tk-late"{% endif %}>
 <td class="nowrap"><span class="badge badge--neutral">{{ t.kind_label }}</span></td>
-<td class="o2-tk-what">{% if t.title %}<div>{{ t.title }}</div>{% endif %}{% if t.note %}<div class="small muted">{{ t.note }}</div>{% endif %}{% if not t.title and not t.note %}<span class="muted">—</span>{% endif %}</td>
+<td class="o2-tk-what">{% if t.title %}<div>{{ t.title }}</div>{% endif %}{% if t.note %}<div class="small muted">{{ t.note }}</div>{% endif %}{% if not t.title and not t.note %}<span class="muted">—</span>{% endif %}{% if t.kind == "return" and t.order_id %}{% set smail = supplier_mail_for(t.order_id) %}{% if smail %}<div>{{ supplier_mail_button(smail, t.order_id, "smail-task-%d"|format(t.id)) }}</div>{% endif %}{% endif %}</td>
 <td class="nowrap">{{ names[t.assignee] }}</td><td class="nowrap small muted">{{ names[t.created_by] }}</td>
 <td class="nowrap">{% if t.late %}<span class="badge badge--err">{{ (t.due_at ~ ':00')|short_dt }}</span>{% else %}{{ (t.due_at ~ ':00')|short_dt }}{% endif %}</td>
 <td class="nowrap">{% if t.order_id %}<a href="/orders/{{ t.order_id }}">Заказ №{{ t.order_id }}</a>{% elif t.chat_row %}<a href="/chats/{{ t.chat_row }}">Чат</a>{% elif t.client_id %}<a href="/clients/{{ t.client_id }}">Клиент</a>{% else %}<span class="muted">—</span>{% endif %}{% if t.who or t.phone %}<div class="small muted">{{ t.who }}{% if t.who and t.phone %}, {% endif %}{{ t.phone|phone if t.phone else "" }}</div>{% endif %}</td>
