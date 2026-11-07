@@ -32,3 +32,27 @@ def test_the_client_of_b_never_gets_the_message_of_the_old_one(tmp_path):
     line = orders.get_card(conn, b)["items"][0]
     oth_swap.take_client(conn, b, line["id"], orders.get_card(conn, a)["items"][0]["id"], LATER, "o")
     assert order_autosend.get(conn, autosend)["status"] == "cancelled"
+
+
+
+def test_a_send_that_failed_for_the_old_client_leaves_no_task_to_write_to_the_new_one(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    autosend = _set_for_the_old_client(conn, a)
+    task = conn.execute("INSERT INTO callback_task (order_id, due_at, created_at, created_by, kind, title) VALUES (?, ?, ?, 'o', 'other', 'Автосообщение не ушло')",
+                        (a, T, T)).lastrowid
+    conn.execute("UPDATE order_autosend SET status = 'waiting', task_id = ? WHERE id = ?", (task, autosend))
+    conn.commit()
+    oth_sale.to_new_client(conn, a, "Пётр", NEW_PHONE, LATER, "o")
+    assert order_autosend.get(conn, autosend)["status"] == "cancelled"
+    assert conn.execute("SELECT cancelled_at FROM callback_task WHERE id = ?", (task,)).fetchone()[0] == LATER
+
+
+def test_a_send_in_flight_is_left_to_its_own_run(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    autosend = _set_for_the_old_client(conn, a)
+    conn.execute("UPDATE order_autosend SET status = 'sending' WHERE id = ?", (autosend,))
+    conn.commit()
+    oth_sale.to_new_client(conn, a, "Пётр", NEW_PHONE, LATER, "o")
+    assert order_autosend.get(conn, autosend)["status"] == "sending"
