@@ -210,3 +210,27 @@ def test_the_vk_page_of_a_person_is_saved_on_the_vk_tab_and_keeps_the_telegram_c
     r = post(w["client"], "/connections/telegram/user-chat", w["tok"], login="chat1", vk_peer="777", back="vk")
     assert r.headers["Location"].endswith("/connections/vk")
     assert order_notify.user_chats(conn).get("chat1") == "12345" and critical.vk_peers(conn).get("chat1") == "777"
+
+
+def test_a_closed_order_can_be_deleted_without_fix(w):
+    cid = card(w, "done")
+    text = page(w, "/orders/%d" % cid)
+    fieldset = text[text.index('<fieldset disabled'):text.index("</fieldset>", text.index('<fieldset disabled'))]
+    assert 'form="ow-delete"' not in fieldset                                            # a disabled fieldset would disable it
+    assert 'data-closed-delete><button class="btn btn--danger-outline btn--sm" form="ow-delete">' in text
+
+
+def test_a_failed_save_does_not_show_the_numbers_twice(w):
+    cid = card(w, "new")
+    r = post(w["client"], "/orders/%d/save" % cid, w["tok"], transfer_number="26R-1", client_phone="12")     # a wrong phone: the window comes back
+    text = r.get_data(as_text=True)
+    assert text.count('name="transfer_number"') == 1 and text.count('name="webmim_number"') == 1
+
+
+def test_the_old_view_keeps_every_task_kind(w):
+    store.set_state(w["conn"], "ui_new.office", "off")
+    w["conn"].commit()
+    text = page(w, "/orders/%d" % card(w, "new"))
+    at = text.index('<select class="select select--sm" name="kind">')                   # the form «Поставить задачу»
+    box = text[at:text.index("</select>", at)]
+    assert re.findall(r'<option value="(\w+)"', box) == ["callback", "order", "oth", "return", "other"]

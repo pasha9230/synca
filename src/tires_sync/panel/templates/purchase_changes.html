@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Закупка изменилась · Tires Sync{% endblock %}
-{% block content %}{% include "_price_tabs.html" %}{# «Закупка изменилась» (purchase_alert, the owner 2026-11-06): the whole list of one alert; the right «money» only (routes_catalog). #}
+{% block content %}{% if ui_new() %}{% include "_price_tabs.html" %}{% endif %}{# «Закупка изменилась» (purchase_alert, the owner 2026-11-06): the whole list of one alert; the right «money» only (routes_catalog). #}
 <header class="page-head"><div><h1>Закупка изменилась</h1><p class="sub">Все изменения закупки у поставщиков, о которых было одно сообщение{% if alert %} ({{ alert.at|dt }}){% endif %}: сначала самые большие в процентах. Цены за одну шину; «наша цена» — цена объявления на Авито, если оно есть. Здесь ничего не меняется.</p></div></header>
 <section class="card"><div class="card-body stack" data-purchase-changes>
 {% if alert and alert.rows %}<table class="table"><thead><tr><th>Позиция</th><th class="num">Было</th><th class="num">Стало</th><th class="num">Изменение</th><th class="num">Наша цена</th></tr></thead><tbody>

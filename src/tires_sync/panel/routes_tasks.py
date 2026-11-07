@@ -11,7 +11,7 @@ from flask import abort, flash, redirect, render_template, request
 from .. import order_notify, orders, tasks, users
 from .common import author, can, current_user, get_conn, login_required, own_point, safe_path
 from .routes_alerts import may_take
-from .routes_design import office_page, point_page
+from .routes_design import office_page, point_page, ui_new
 from .routes_orders import local_iso
 
 TABS = {"mine": "Мне", "by_me": "Поставил я", "all": "Все"}
@@ -96,6 +96,8 @@ def register(app) -> None:
         kinds = dict(tasks.KINDS)
         if not (client_id or order_id or chat_row):
             kinds.pop("callback")
+        if not ui_new():                                   # the old view: every kind, as before
+            return kinds
         if is_point():
             return {k: v for k, v in kinds.items() if k in ("callback", "other")}
         if order_id is None:

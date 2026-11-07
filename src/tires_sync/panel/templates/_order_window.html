@@ -38,7 +38,7 @@
 {% if card and (not ro or can_delete or (c.stage.code not in ("cancel", "return") and can_post("order_move"))) %}<details class="menu owin-menu"><summary>Ещё ⋯</summary><div class="menu-list">
 {% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}<a class="menu-item menu-item--danger" href="#finish" data-open-modal="finish-window">Отменить заказ или оформить возврат…</a>{% endif %}
 {% for s in stages if not ro and s.kind not in ("open", "won") and s.code not in ("cancel", "return") and s.id != c.stage_id %}<button class="menu-item" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ s.id }}">Перенести на этап «{{ s.name }}»</button>{% endfor %}
-{% if can_delete %}<hr><button class="menu-item menu-item--danger" form="ow-delete">Удалить заказ…</button>
+{% if can_delete and not closed %}<hr><button class="menu-item menu-item--danger" form="ow-delete">Удалить заказ…</button>
 <span class="small muted menu-note">Удаляется только из нашей базы: в Авито и WebMIM ничего не меняется. <a href="/deleted">Удалённые</a></span>{% endif %}
 </div></details>{% endif %}{% endcall %}
 {% if card %}{% set flow = stages|selectattr("kind", "in", ["open", "won"])|rejectattr("code", "equalto", "-" if c.intercity.on else "shipped")|list %}{# «Отправлен»: an order to another city only #}
@@ -143,6 +143,7 @@
 {% elif ro %}<p class="hint owin-foot">Только просмотр: менять заказ может тот, у кого есть право «Заказы: менять».</p>{% else %}<div class="owin-foot"><a class="btn btn--secondary" href="{{ '/orders/%d' % c.id if card else '/orders' }}">Отмена</a><button class="btn btn--primary">Сохранить</button></div>{% endif %}
 </div>
 {% if ro %}</fieldset></div>{% else %}</form>{% endif %}
+{% if closed and can_delete %}<div class="owin-foot" data-closed-delete><button class="btn btn--danger-outline btn--sm" form="ow-delete">Удалить заказ…</button><span class="small muted">Удаляется только из нашей базы: в Авито и WebMIM ничего не меняется.</span></div>{% endif %}{# a closed order's window is a disabled fieldset: the deletion stands outside it #}
 {% if can_delete %}
 <form id="ow-delete" method="post" action="/orders/{{ c.id }}/delete" data-once data-confirm-title="Удалить заказ №{{ c.id }}?" data-confirm="Заказ{% if c.client_name %} ({{ c.client_name }}){% endif %} уйдёт в «Удалённые», вернуть его можно там. В Авито и WebMIM ничего не меняется." data-confirm-ok="Удалить заказ" data-confirm-danger><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form>{% endif %}
 {% if card and not ro %}

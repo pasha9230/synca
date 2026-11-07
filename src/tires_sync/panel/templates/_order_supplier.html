@@ -26,7 +26,7 @@
 <a class="small ml-auto" href="/orders/{{ c.id }}?check=1#supplier">Проверить снова</a>
 </div>
 {% endif %}
-{% if office_new() and c.stage.code in ("new", "talk", "wait") and not c.webmim_number and not c.transfer_number and can_post("order_save") %}{# the numbers of a manual order: here, not in the window (the owner 2026-11-07, item 13); fields of the window's form #}
+{% if office_new() and c.stage.code in ("new", "talk", "wait") and not v.webmim_number and not v.transfer_number and can_post("order_save") %}{# the numbers of a manual order: here, not in the window (the owner 2026-11-07, item 13); fields of the window's form #}
 <div class="stack" style="gap:var(--s-2)" data-supplier-manual><p class="small muted" style="margin:0">Оформили вручную в кабинете поставщика? Впишите номера и переведите заказ.</p>
 <div class="grid-2"><label class="field"><span class="label">Номер заказа WebMIM</span><input class="input mono" name="webmim_number" form="ow-main" maxlength="60" placeholder="1234567"></label>
 <label class="field"><span class="label">Номер перемещения</span><input class="input mono" name="transfer_number" form="ow-main" maxlength="40" placeholder="26R-…"></label></div>
