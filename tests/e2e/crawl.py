@@ -52,6 +52,7 @@ PROBE = r"""
   const name = el => { let s = el.tagName.toLowerCase(); if (el.id) s += '#' + el.id; if (el.classList.length) s += '.' + [...el.classList].slice(0, 3).join('.');
     return s; };
   const path = el => { const p = []; for (let e = el; e && e !== document.body && p.length < 4; e = e.parentElement) p.unshift(name(e)); return p.join(' > '); };
+  const noise = el => !!el.closest('.sr-only, .p2-sr, .menu-list, .tour, details:not([open]) > :not(summary), .modal-backdrop:not(.is-open)');
   const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity !== 0; };
   const main = document.querySelector('.main');      // the panel scrolls .main, not the page: .main is the page here
@@ -73,11 +74,11 @@ PROBE = r"""
   }
   out.clipped = [];
   for (const el of all) { const s = getComputedStyle(el);
-    if (!el.children.length && (el.innerText || '').trim() && (s.overflowX === 'hidden' || s.overflow === 'hidden') && s.textOverflow !== 'ellipsis'
+    if (!noise(el) && !el.children.length && (el.innerText || '').trim() && (s.overflowX === 'hidden' || s.overflow === 'hidden') && s.textOverflow !== 'ellipsis'
         && el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0)
       out.clipped.push({el: path(el), text: el.innerText.trim().slice(0, 60)}); }
   out.clipped = out.clipped.slice(0, 12);
-  const hits = [...document.querySelectorAll('a, button, .btn, input, select, .badge, label')].filter(visible).map(e => [e, e.getBoundingClientRect()]);
+  const hits = [...document.querySelectorAll('a, button, .btn, input, select, .badge, label')].filter(e => visible(e) && !noise(e)).map(e => [e, e.getBoundingClientRect()]);
   out.overlap = [];
   for (let i = 0; i < hits.length && out.overlap.length < 10; i++) for (let j = i + 1; j < hits.length; j++) {
     const [a, ra] = hits[i], [b, rb] = hits[j]; if (a.contains(b) || b.contains(a)) continue;
@@ -100,7 +101,8 @@ PROBE = r"""
     if (!visible(el)) continue; const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
     if (t.length < 14) continue; if (seen[t]) { if (seen[t] === 1) out.repeated.push(t.slice(0, 120)); seen[t]++; } else seen[t] = 1; }
   out.links = [...document.querySelectorAll('a[href]')].map(a => a.href);
-  out.modals = [...new Set([...document.querySelectorAll('[data-open-modal]')].filter(visible).map(b => b.getAttribute('data-open-modal')))];
+  out.modals = [...new Set([...document.querySelectorAll('[data-open-modal]')].filter(b => visible(b) || b.closest('details'))
+                .map(b => b.getAttribute('data-open-modal')))];
   out.empty = [...document.querySelectorAll('.empty, .empty-state, .muted, td[colspan]')].filter(visible).map(e => e.innerText.trim()).filter(t => t && t.length < 120).slice(0, 8);
   out.text = document.body.innerText.slice(0, 6000);
   return out;
@@ -186,6 +188,8 @@ class Crawl:
         if click_modals:
             for modal in probe.get("modals", [])[:6]:
                 try:
+                    page.evaluate("m => { const b = document.querySelector('[data-open-modal=\"' + m + '\"]'); const d = b && b.closest('details');"
+                                  " if (d) d.open = true; }", modal)          # an opener in the «Ещё» menu: open the menu first, as a person does
                     page.click('[data-open-modal="%s"] >> visible=true' % modal, timeout=3000)
                     page.wait_for_timeout(300)
                     self.shot(page, role, vp, "%s#%s" % (key or path, modal), path, status, {"modal": modal})
