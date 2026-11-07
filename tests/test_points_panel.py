@@ -228,6 +228,7 @@ def test_a_waiting_message_of_the_rule_to_a_point_in_the_panel_is_skipped_by_the
     assert [t["title"] for t in engine.list_tasks(conn, mine, ("pending",)) if t["kind"] == "message"] == []      # the client's went
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_alert_that_cannot_be_kept_for_the_point_never_raises(tmp_path, monkeypatch):
     conn, box = env(tmp_path)
     pid = notify_point(conn, channel="panel")

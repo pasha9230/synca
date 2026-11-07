@@ -2,6 +2,8 @@
 the bell or on «Уведомления». The accounts of no point, and their orders delivered to a point, are as before."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import urllib.parse
 
@@ -179,6 +181,7 @@ def _no_show(conn, box, mine, tg, vk):
                                  lambda c, text: order_notify.deliver(conn, box, c, text, NOW, tg_http=tg, vk_http=vk))
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_no_show_the_point_reports_on_its_own_account_order_goes_to_the_owner_not_back_to_the_point(tmp_path):
     conn, box = env(tmp_path)                                                 # the owner 2026-10-26: «С клиентом свяжутся» stays true
     pid = point(conn)
@@ -192,6 +195,7 @@ def test_a_no_show_the_point_reports_on_its_own_account_order_goes_to_the_owner_
     assert order_notify.route(conn, mine)["channel"] == "vk"                  # the other alerts of the order still go to the point
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_no_show_of_a_point_account_order_goes_to_the_partner_who_answers_for_it(tmp_path):
     conn, box = env(tmp_path)
     order_notify.set_user_chat(conn, "partner1", "555", NOW, "owner")
@@ -204,6 +208,7 @@ def test_a_no_show_of_a_point_account_order_goes_to_the_partner_who_answers_for_
     assert points.unseen_alerts(conn, pid, "") == []
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_no_show_of_a_point_account_order_nobody_in_the_panel_answers_for_goes_to_the_owner(tmp_path):
     conn, box = env(tmp_path)
     for responsible, channel in (("chats-robot", "vk"), ("chats-robot", "panel")):
@@ -217,6 +222,7 @@ def test_a_no_show_of_a_point_account_order_nobody_in_the_panel_answers_for_goes
         assert points.unseen_alerts(conn, pid, "") == []
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_no_show_of_an_order_a_point_user_answers_for_goes_to_the_owner_not_to_that_user(tmp_path):
     conn, box = env(tmp_path)                                                 # review 1: a deal the point made answers to its user
     pid = point(conn)
@@ -230,6 +236,7 @@ def test_a_no_show_of_an_order_a_point_user_answers_for_goes_to_the_owner_not_to
     assert "777000" not in tg.calls[0][3].decode("utf-8")
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_no_show_with_nobody_to_tell_goes_to_the_owner_not_to_the_point_page(tmp_path):
     conn, box = env(tmp_path)
     users.add_user(conn, "owner2", "пароль-для-владельца-2", NOW, role="owner")
@@ -242,6 +249,7 @@ def test_a_no_show_with_nobody_to_tell_goes_to_the_owner_not_to_the_point_page(t
     assert points.unseen_alerts(conn, pid, "") == []
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_safety_net_of_unseen_alerts_skips_the_point_account_orders(tmp_path):
     conn, box = env(tmp_path)
     pid = point(conn, channel="panel")
@@ -347,6 +355,7 @@ def test_the_safety_net_tells_the_owner_nothing_of_an_order_the_point_opened(tmp
     assert tg.calls == [] and points.unseen_alerts(conn, pid, "") == []                    # marked: not looked at again
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_the_safety_net_still_tells_the_owner_when_only_the_staff_or_an_older_look_opened_it(tmp_path):
     conn, box, pid, ours = unseen_order_alert(tmp_path)
     order_alerts.mark_seen(conn, "gamma1", ours["id"], "2026-10-15T11:00:00")          # before the alert: not a look at it

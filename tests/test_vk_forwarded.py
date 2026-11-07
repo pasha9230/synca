@@ -4,6 +4,8 @@ one command, the client hears «можно забирать» once per order, th
 unknown or of another point waits in «Входящие» and the others go on."""
 from __future__ import annotations
 
+import pytest
+
 import json
 
 from test_vk_commands import GROUP, PEER, SECRET, SENT, _card, _stage, ready, to_client, to_points
@@ -140,6 +142,7 @@ def test_the_backstop_of_vk_reads_the_forwards_too(tmp_path):
 
 # ---- review, round 1 ------------------------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_an_unknown_forwarded_number_reaches_the_partner_in_telegram_once(tmp_path):
     import datetime as dt
     from http_fakes import ScriptedHttp

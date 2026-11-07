@@ -59,3 +59,11 @@ def no_own_address(secondary_accounts_have_their_cabinet_phone):
     secondary_accounts_have_their_cabinet_phone.no_address = True
     yield
     secondary_accounts_have_their_cabinet_phone.no_address = False
+
+
+@pytest.fixture
+def telegram_for_everything(monkeypatch):
+    """The setting of critical.py off: everything goes to Telegram, as before 2026-11-06. For the tests of the mechanics of the sending
+    (repeats, routes, failures), which stay in that mode; the rule «only the critical» is tested in test_critical.py."""
+    from tires_sync import critical
+    monkeypatch.setattr(critical, "TELEGRAM_ONLY_CRITICAL", False)

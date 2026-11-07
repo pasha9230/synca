@@ -4,6 +4,8 @@ templates/shop2/ only when «Новый вид» of the group «Клиент» i
 delivery (the city, the street, the house, the recipient, a word for the driver) is kept in the client's own profile only."""
 from __future__ import annotations
 
+import pytest
+
 import re
 
 from panel_helpers import login, post
@@ -236,6 +238,7 @@ def test_on_the_staff_still_has_no_page_of_the_client(tmp_path):
 
 # ---- the review of 2026-11-02 ---------------------------------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_on_a_failed_save_of_the_delivery_never_silences_the_order(tmp_path, monkeypatch):
     app, client, conn, tg, pid = shop(tmp_path)
     new_view(conn)

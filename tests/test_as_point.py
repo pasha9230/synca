@@ -370,6 +370,7 @@ def _chats(w):
     order_notify.set_user_chat(conn, "zaman", "2000", NOW, "owner")
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_telegram_about_ones_own_press_as_a_point_is_not_sent_to_oneself(w):
     from flask import session
     from http_fakes import ScriptedHttp
@@ -478,6 +479,7 @@ def test_an_order_made_for_a_point_never_has_the_text_as_its_responsible(w):
     assert orders.get_card(conn, made)["responsible"] == "zaman"           # a login: as before
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_chat_shared_with_another_person_still_hears_of_the_press(w):
     """The skip is by the person, not by the chat: the partner who shares the owner's chat of the alerts still gets it."""
     from flask import session

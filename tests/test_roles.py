@@ -550,6 +550,7 @@ def test_the_open_pages_draw_no_staff_frame_for_a_signed_in_client(tmp_path):
             assert mark not in html, (page.status_code, mark)
 
 
+@pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)
 def test_a_staff_member_made_a_client_gets_nothing_of_an_order_in_telegram(tmp_path):
     """Review 2 of build 1: the chat of a person turned into a client stays, the order's alerts never go there; the owner can clear it."""
     from tires_sync import order_notify
