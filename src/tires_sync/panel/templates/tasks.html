@@ -1,7 +1,6 @@
 {# «Задачи» (routes_tasks, the owner 2026-10-31): «Мне», «Поставил я», «Все» (the office only); the filters «Кому», «Срок», «Тип»; a late task
    is red; «Новая задача» without an order; «Выполнено» with what came of it, «Отменить». A point sees only its own. #}
 {% extends "base.html" %}
-{% from "_supplier_mail.html" import button as supplier_mail_button %}
 {% import "_inquiry.html" as inq_ui %}
 {% block viewport %}{% if point %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
 {% block body_class %}{% if point %}pt-ui pt-tasks-page{% endif %}{% endblock %}
@@ -31,7 +30,7 @@
 <table class="table"><thead><tr><th>Срок</th><th>Что сделать</th><th>По чему</th><th>Кому</th><th>Поставил</th><th>Комментарий</th><th></th></tr></thead><tbody>
 {% for t in rows %}<tr data-task="{{ t.id }}"{% if t.late %} class="is-late"{% endif %}>
 <td class="nowrap{% if t.late %} text-err strong{% endif %}">{{ (t.due_at ~ ':00')|short_dt }}</td>
-<td><span class="badge badge--neutral">{{ t.kind_label }}</span>{% if t.title %} {{ t.title }}{% endif %}{% if t.kind == "return" and t.order_id %}{% set smail = supplier_mail_for(t.order_id) %}{% if smail %}<div>{{ supplier_mail_button(smail, t.order_id, "smail-task-%d"|format(t.id)) }}</div>{% endif %}{% endif %}</td>
+<td><span class="badge badge--neutral">{{ t.kind_label }}</span>{% if t.title %} {{ t.title }}{% endif %}</td>
 <td class="nowrap">{% if t.order_id %}<a href="/orders/{{ t.order_id }}">Заказ №{{ t.order_id }}</a>{% elif t.chat_row and not point %}<a href="/chats/{{ t.chat_row }}">Чат</a>{% elif t.client_id and not point %}<a href="/clients/{{ t.client_id }}">Клиент</a>{% else %}<span class="muted">—</span>{% endif %}{% if t.who or t.phone %}<div class="small muted">{{ t.who }}{% if t.who and t.phone %}, {% endif %}{{ t.phone|phone if t.phone else "" }}</div>{% endif %}</td>
 <td>{{ names[t.assignee] }}</td><td class="small muted">{{ names[t.created_by] }}</td><td class="small">{{ t.note }}</td>
 <td style="white-space:nowrap">{% if may_task() %}<form method="post" action="/tasks/{{ t.id }}/done" class="inline row" style="gap:var(--s-1)"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="{{ request.full_path }}"><input class="input input--xs" name="result" maxlength="300" placeholder="Результат" aria-label="Результат" style="width:140px"><button class="btn btn--secondary btn--xs">Выполнено</button></form> <form method="post" action="/tasks/{{ t.id }}/cancel" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="{{ request.full_path }}"><button class="btn btn--link btn--xs">Отменить</button></form>{% if t.extend %} <form method="post" action="/tasks/{{ t.id }}/extend" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="{{ request.full_path }}"><button class="btn btn--link btn--xs" title="Точка ещё не отдала шины водителю: срок задачи +2 рабочих дня (пн–пт)">Продлить на 2 рабочих дня</button></form>{% endif %}{% endif %}</td></tr>

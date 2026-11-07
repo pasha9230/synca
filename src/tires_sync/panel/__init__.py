@@ -377,8 +377,6 @@ def create_app(config: dict) -> Flask:
     routes_order_webmim.register(app)
     from . import routes_autosend
     routes_autosend.register(app)
-    from . import routes_supplier_mail
-    routes_supplier_mail.register(app)
     from . import routes_intercity
     routes_intercity.register(app)
     routes_shop.register(app)
