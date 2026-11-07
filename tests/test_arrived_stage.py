@@ -43,7 +43,7 @@ def test_arrived_on_a_new_order_is_doubtful_and_says_it_is_not_placed(tmp_path):
     hook(app, conn, "приехали 5000100")
     assert orders.get_card(conn, card)["stage"]["code"] == "new" and to_client(app) == []
     assert outcome(conn)[-1].startswith("спорно: ")
-    assert any("Заказ №5000100 ещё не оформлен в WebMIM" in text for _peer, text in to_points(app))
+    assert any("Заказ №5000100 ещё не оформлен у поставщика" in text for _peer, text in to_points(app))     # no WebMIM to a point (2026-10-30)
 
 
 def test_the_button_of_my_point_shows_and_marks_a_placed_order(tmp_path):

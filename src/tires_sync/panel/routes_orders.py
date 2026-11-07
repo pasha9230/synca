@@ -98,6 +98,9 @@ POINT_DEAL_KINDS = {"webmim": "Наш заказ (перемещение)", "sto
 POINT_NO_WEBMIM = re.compile(r"WebMIM|\bMIM\b|\bМИМ\b")       # whole words: never «мимо», «Мимоза» of a client (review)
 
 
+POINT_SYSTEM = "система"                                          # the author a point reads instead of «после оформления в WebMIM» (order_placed)
+
+
 def point_no_webmim(row: dict) -> bool:
     """A record of the journal or a row of the alerts about WebMIM: never the point's (the owner 2026-10-30)."""
     return row.get("kind") == "webmim" or bool(POINT_NO_WEBMIM.search(str(row.get("text") or "")))
@@ -1141,6 +1144,7 @@ def register(app) -> None:
         newest = events[0]["id"] if events else None                     # the journal is read up to its newest record, a hidden one too
         if own_point() is not None:                                      # old records of «Письмо поставщику» (removed 2026-11-07): never the point's;
             events = [e for e in events if e["kind"] != "supplier_mail" and not point_no_webmim(e)]     # nor WebMIM (the owner 2026-10-30)
+            events = [dict(e, author=POINT_SYSTEM) if POINT_NO_WEBMIM.search(str(e.get("author") or "")) else e for e in events]   # its author too
         acting = from_panel()                                            # sent from another site: the page only
         if newest is not None and acting:                                # the user has seen the journal up to the newest record
             order_alerts.mark_seen(conn, session["user"], card_id, local_iso(), newest)
