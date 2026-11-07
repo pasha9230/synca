@@ -180,15 +180,20 @@ def ever(conn, card_id) -> Set[int]:
 
 
 def handed(conn) -> Dict[int, int]:
-    """New order → the source a point handed over (order_handoff), for the fee of a handed client (the owner 2026-10-30: once, if any source
-    was handed). A source with its own sale has had its fee; a new order handed by itself needs none of a source."""
-    from .oth_swap import swaps
-    out, off = {}, set(swaps(conn))
+    """New order → the order a point handed over (order_handoff) whose fee it pays (the owner 2026-10-30: once, if any source was handed): a source
+    handed itself, or a source A whose client came from a handed order B on «На ОТХ» (oth_swap.fee_handed: A → B; oth-return-fixes: the fee of B
+    is never lost in the merge). A source with its own sale has had its fee; a new order handed by itself needs none of a source."""
+    from .oth_swap import fee_handed, swaps
+    off, (_, moved) = set(swaps(conn)), fee_handed(conn)
+    own = {r[0] for r in conn.execute("SELECT order_id FROM order_handoff")}
+    out = {}
     for new, source in conn.execute(
-            "SELECT m.into_order, s.order_id FROM order_merge m JOIN order_merge_source s ON s.merge_id = m.id JOIN order_handoff h ON h.order_id = s.order_id "
+            "SELECT m.into_order, s.order_id FROM order_merge m JOIN order_merge_source s ON s.merge_id = m.id "
             "JOIN order_card c ON c.id = s.order_id WHERE " + _ACTIVE + " AND c.sale_ids = '[]' "
             "AND m.into_order NOT IN (SELECT order_id FROM order_handoff) ORDER BY s.position").fetchall():
-        if source not in off:                                         # a source whose client changed on «На ОТХ»: its fee is off (oth_swap)
+        if source in moved:                                           # the client of B came to this source: B's fee goes on
+            out.setdefault(new, moved[source])
+        elif source in own and source not in off:                     # a source whose client changed on «На ОТХ»: its fee is off (oth_swap)
             out.setdefault(new, source)
     return out
 
