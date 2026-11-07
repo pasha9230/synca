@@ -3,6 +3,7 @@ a click, at 1280×800 and 375×812 with «Новый вид» on, and saves a fu
 is sent but the login one (the temporary base only). The checks of each screen go to <out>/report.json; the report itself is written by a person.
 
     python tests/e2e/crawl.py [out]            # default out: tests/e2e/shots
+    E2E_ROLES=point1,client1 python tests/e2e/crawl.py [out]     # some roles only: <out>/report-<roles>.json (summarize.py merges them)
 
 Chromium: the one of the Playwright package, or E2E_CHROMIUM=<path> (the cloud session has /opt/pw-browsers/chromium)."""
 from __future__ import annotations
@@ -58,6 +59,8 @@ PROBE = r"""
     const o = getComputedStyle(e).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden' || o === 'clip') return true; } return false; };
   out.bodyClass = document.body.className;
   out.title = document.title;
+  out.viewportMeta = (document.querySelector('meta[name=viewport]') || {}).content || '';
+  out.innerW = W;
   out.h1 = [...document.querySelectorAll('h1')].map(h => h.innerText.trim()).filter(Boolean);
   out.scrollW = Math.max(document.documentElement.scrollWidth, main ? main.scrollWidth + (W - main.clientWidth) : 0);
   const all = [...document.body.querySelectorAll('*')].filter(visible);
@@ -218,7 +221,8 @@ class Crawl:
 
     def role(self, login: str, orders_of: list):
         for vp, size in VIEWPORTS.items():
-            ctx = self.browser.new_context(viewport=size, device_scale_factor=1, locale="ru-RU")
+            phone = dict(is_mobile=True, has_touch=True) if vp == "375" else {}     # a phone reads <meta viewport>, as a real one does
+            ctx = self.browser.new_context(viewport=size, device_scale_factor=1, locale="ru-RU", **phone)
             page = self.login(ctx, login)
             self.watch(page)
             start = page.url.replace(self.base, "") or "/"
@@ -255,6 +259,7 @@ class Crawl:
 
 def main(out: Path) -> int:
     started = time.time()
+    roles = [r for r in os.environ.get("E2E_ROLES", ",".join(ROLES)).split(",") if r]
     base, server, seeded = serve.start()
     chromium = os.environ.get("E2E_CHROMIUM") or ("/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else "")
     out.mkdir(parents=True, exist_ok=True)
@@ -265,7 +270,7 @@ def main(out: Path) -> int:
             "client1": []}
     broken = []
     try:
-        for login in ROLES:
+        for login in roles:
             print("role %s ..." % login, flush=True)
             crawl.role(login, plan[login])
             broken += crawl.check_links(login)
@@ -274,7 +279,8 @@ def main(out: Path) -> int:
         server.shutdown()
     report = dict(base=base, seconds=round(time.time() - started), orders=seeded["orders"], screens=crawl.rows, broken_links=broken,
                   outside_calls=serve.OUTSIDE)
-    (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    name = "report.json" if roles == list(ROLES) else "report-%s.json" % "-".join(roles)
+    (out / name).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     bad = [r for r in crawl.rows if isinstance(r.get("status"), int) and r["status"] >= 500]
     print("screens %d, 5xx %d, broken links %d, outside calls %d, %ds" % (len(crawl.rows), len(bad), len(broken), len(serve.OUTSIDE),
                                                                           report["seconds"]))

@@ -13,7 +13,12 @@ HERE = Path(__file__).resolve().parent
 
 
 def main(shots: Path) -> None:
-    report = json.loads((shots / "report.json").read_text(encoding="utf-8"))
+    report = {"screens": [], "broken_links": [], "outside_calls": [], "seconds": 0}
+    for part in sorted(shots.glob("report*.json")):                 # one run, or one per role (E2E_ROLES)
+        one = json.loads(part.read_text(encoding="utf-8"))
+        for key in ("screens", "broken_links", "outside_calls"):
+            report[key] += one[key]
+        report["seconds"] = max(report["seconds"], one["seconds"])
     rows = report["screens"]
     print("screens: %d, %ds, outside calls: %d" % (len(rows), report["seconds"], len(report["outside_calls"])))
     for call in Counter(c[0] for c in report["outside_calls"]).most_common():
@@ -40,9 +45,16 @@ def main(shots: Path) -> None:
     for r in rows:
         if r.get("landed") and r["landed"].split("#")[0] != r["url"] and not r.get("modal"):
             print("- %s %s %s → %s" % (r["role"], r["vp"], r["url"], r["landed"]))
+    print("\n## 375: the desktop page scaled down on a phone (meta viewport width=1280)")
+    scaled = defaultdict(set)
+    for r in rows:
+        if r["vp"] == "375" and "width=1280" in (r.get("viewportMeta") or "") and not r.get("modal"):
+            scaled[r["role"]].add(r["url"].split("?")[0])
+    for role, urls in scaled.items():
+        print("- %s: %d pages: %s" % (role, len(urls), ", ".join(sorted(urls))))
     print("\n## horizontal overflow at 375")
     for r in rows:
-        if r["vp"] == "375" and r.get("scrollW", 0) > 376:
+        if r["vp"] == "375" and r.get("scrollW", 0) > r.get("innerW", 375) + 1:
             print("- %s %s (scrollWidth %s) %s: %s" % (r["role"], r["key"], r["scrollW"], r["shot"],
                                                       "; ".join("%s [%s]" % (o["el"], o["text"][:30]) for o in r.get("overflow", [])[:3])))
     print("\n## clipped text")
