@@ -179,7 +179,7 @@ def register(app) -> None:
         conn = get_conn()
         try:
             if order_oth.item_to_return(conn, int(request.form.get("item") or 0), local_iso(), author(), request.form.get("qty")):
-                flash("Позиция на возврат: метка «Согласуем», шины сняты с продажи, ответственному поставлена задача.")
+                flash("Позиция на возврат: метка «Ожидает согласование возврата», шины сняты с продажи, ответственному поставлена задача.")
             else:
                 flash("Эта позиция уже на возврат.")
         except (order_oth.OthError, ValueError) as err:

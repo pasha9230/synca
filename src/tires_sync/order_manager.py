@@ -46,7 +46,7 @@ NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её
 # supplier. No typo is guessed («лтправлен» stays a question). The client is never written to.
 RETURN, RETURNED = "возврат отдал", "шины отданы на возврат"   # the command is a phrase only: a bare «возврат» is not it
 RETURN_SURE = "подтверждаю"                                    # the second step of «возврат отдал» of the tyres of «На ОТХ» / «На возврат» (the owner 2026-11-04)
-OTH_ISSUED = ("выдал", "выдали", "выдала", ISSUE_PHRASE)        # the words of that question: «отдал», «забрали» here may mean the supplier's driver, the owner decides
+OTH_ISSUED = ("выдал", "выдали", "выдала", ISSUE_PHRASE)        # the words of that question: «отдал» of an agreed return is the driver (the owner 2026-11-07)
 RETURN_FROM = ("at_point", "oth", orders.RETURN_GIVEN)   # the stages where the tyres are at the point (the lead 2026-10-26; «На возврат» 2026-11-03),
                                                   # and «Отмена / невыкуп»
                                                   # with the reason «не выкупил» (it was «Отказ/невыкуп» before the merge, the owner 2026-10-29)
@@ -174,6 +174,8 @@ WORD_PART = re.compile(r"[^\W\d_]+")
 COUNT = r"(?:\d+(?!\d)|(?:одн[аиоу]|дв[аеу]|тр[её]?[иеху]|четыр[её])[а-я]*(?![^\W\d_]))"   # 2, «одна», «две», «три», «четырёх»; whole words
 PART = re.compile(r"(?<!\w)" + COUNT + r"(?:\s*[^\W\d_]+(?![^\W\d_])\.?){0,2}\s*из(?![^\W\d_])"   # «3 шины из 4», «три из четырёх», «3из4»
                   r"|(?<!\d)\d+\s*/\s*\d|(?<!\w)(?:только|пока|лишь)\s+" + COUNT + r"|(?<!\w)частичн", re.I)   # «3/4», «только 2»
+TOOK = re.compile(r"(?<![^\W\d_])(?:взял|взяла|взяли|забрал|забрала|забрали)\s+" + COUNT, re.I)     # «взял 2» (the owner 2026-11-07): a part, the owner reads it
+NOT_THE = ("тот", "та", "те", "то", "того", "той", "ту", "тех")           # «не тот размер», «не та модель»: a plain reason, no negation (the owner 2026-11-07)
 DOUBT = ("кроме", "без", "вроде", "наверное", "ли", "другой", "другая", "другое", "другие", "другую", "другого", "других")   # the lead 2026-10-25
 ORDER_WORD = re.compile(r"^(?:заказ(?:а|у|е|ом)?|номер)$")
 DAMAGE = ("нехватк", "недостач", "брак", "бит", "поврежд", "царап", "порез", "грыж", "слома", "порва", "дефект", "вмятин", "перепута", "ошиб")   # anywhere in a word: «побиты», «разбиты», «перепутали»
@@ -430,6 +432,10 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                            CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
         return finish(*no_show(conn, card, "менеджер %s" % point["name"], now, notify))
+    if word in GIVE and code in ("oth", orders.RETURN_GIVEN):         # the owner 2026-11-07: «отдал» of an agreed return is the hand-over to the driver
+        from . import order_oth
+        if (order_oth.return_plan(conn, card["id"]) or {}).get("agreed_at") and not order_oth.return_plan(conn, card["id"])["signed_at"]:
+            word = RETURN
     if word == RETURN:
         if code == "return":
             return finish("уже отмечено", "Заказ №%s уже отмечен: %s." % (label(card), RETURNED))
@@ -778,9 +784,9 @@ def refuse_doubt(text, reason, conn=None) -> str:
     if number and len(number) == 4 and 1990 <= int(number) <= 2099 and not MARKED_NUMBER.search(raw[:found.start(2)]):
         return "похоже на год, а не на номер заказа"           # «отказ 2019 выпуск»; the order 2019 is written «отказ №2019 …»
     tokens = WORD_PART.findall(rules.normalise_word(reason))
-    if tokens and tokens[0] in NEGATION:
+    if tokens and tokens[0] in NEGATION and not (tokens[0] == "не" and len(tokens) > 1 and tokens[1] in NOT_THE):
         return "отрицание"
-    if PART.search(str(reason or "")):
+    if PART.search(str(reason or "")) or TOOK.search(str(reason or "")):
         return "отказ от части заказа"                         # «забрали 2 из 4», «только 2», «частично»: the order is not all refused
     plain = " ".join(tokens)
     words = [rules.normalise_word(c["word"]) for c in rules.list_commands(conn)] if conn is not None else []
@@ -855,7 +861,8 @@ def no_show(conn, card: dict, who: str, now: str, notify: Optional[Notify]) -> T
     if notify is not None and points.of_account(conn, card["id"]) is not None:    # the point itself reports it: the staff call the client,
         card = staff_card(conn, card)                                              # not the point again (the owner 2026-10-26)
     told = notify(card, "Заказ №%d: %s" % (card["id"], text)) if notify is not None else "оповещение не отправлено: канал не настроен"
-    return "клиент не пришёл: красная запись, %s" % told, "Заказ №%s — отмечено: %s. С клиентом свяжутся." % (label(card), NO_SHOW)
+    return "клиент не пришёл: красная запись, %s" % told, ("Заказ №%s — отмечено: %s. С клиентом свяжутся. Если клиент отказался от заказа, напишите: "
+                                                          "«отказ %s причина»." % (label(card), NO_SHOW, label(card)))     # the old phrase (the owner 2026-11-07)
 
 
 ARRIVED_TEMPLATE = templates.ARRIVED_SAMPLE[0]

@@ -246,7 +246,12 @@ def test_8_the_card_offers_the_pieces_and_refuses_more_than_there_are(tmp_path):
         order_oth.agree(conn, orders.get_card(conn, cid), TODAY, NOW, "o", qty={item: 99})
     found = __import__("re").search(r'name="return_date" value="([0-9-]+)"', page)
     post(client, "/orders/%d/oth-agreed" % cid, tok, return_date=found.group(1), **{"return_qty_%d" % item: "3"})
-    assert [int(i["qty"]) for i in orders.get_card(conn, cid)["items"]] == [3] and len(order_oth.split_of(conn, cid)) == 1
+    old = orders.get_card(conn, cid)                                           # on «На ОТХ»: the 3 going back leave, the rest stays on sale
+    assert old["stage"]["code"] == "oth" and [int(i["qty"]) for i in old["items"]] == [1]
+    [new] = order_oth.split_of(conn, cid)
+    got = orders.get_card(conn, new)
+    assert got["stage"]["code"] == orders.RETURN_GIVEN and [int(i["qty"]) for i in got["items"]] == [3]
+    assert any("едет меньше шин, чем в закупке: 3 из 4" in t for _l, t in events(conn, new))
 
 
 # ---- 9. «не возвращаем» ----------------------------------------------------------------------------------------------------------------
@@ -306,7 +311,7 @@ def test_10_the_tasks_page_has_the_button(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
     post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
     [task] = conn.execute("SELECT id, due_at FROM callback_task WHERE order_id = ?", (cid,)).fetchall()
-    assert 'action="/tasks/%d/extend"' % task[0] in client.get("/tasks").get_data(as_text=True)
+    assert 'action="/tasks/%d/extend"' % task[0] in client.get("/tasks?tab=all").get_data(as_text=True)
     post(client, "/tasks/%d/extend" % task[0], tok)
     assert conn.execute("SELECT due_at FROM callback_task WHERE id = ?", (task[0],)).fetchone()[0] > task[1]
 

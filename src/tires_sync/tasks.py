@@ -158,6 +158,12 @@ def close(conn, task_id, how: str, now: str, who: str, result: str = "", journal
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.tasks").exception("the chat handover of task %s was not marked taken", task_id)
+    from . import order_oth                                                # «не возвращаем»: no move on the seventh day (2026-11-07)
+    try:
+        order_oth.task_closed(conn, task, how, result, journal_author or who, now)
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.tasks").exception("the return decision of task %s was not kept", task_id)
     return task
 
 

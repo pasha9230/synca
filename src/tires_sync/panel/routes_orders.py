@@ -992,8 +992,12 @@ def register(app) -> None:
         entered (Monday, Wednesday, Friday; order_oth.check_return_day), the point sees it."""
         conn = get_conn()
         card = card_or_404(conn, card_id)
+        typed = {k[len("return_qty_"):]: v for k, v in request.form.items() if k.startswith("return_qty_") and k[len("return_qty_"):].isdigit()}
         try:
-            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author(), request.form.get("return_date", ""))
+            qty = None
+            if typed and {int(k): v for k, v in typed.items()} != {k: str(v) for k, v in order_oth.return_parts(conn, card).items()}:
+                qty = typed                                                # the operator changed what goes back (the owner 2026-11-07)
+            day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author(), request.form.get("return_date", ""), qty=qty)
             flash("Возврат согласован: точка передаст шины поставщику %s.%s и подпишет акт МХ-3." % (day[8:10], day[5:7]), "ok")
         except (order_oth.OthError, orders.OrderError) as err:
             flash(str(err), "error")
@@ -1152,6 +1156,7 @@ def register(app) -> None:
             c=card, entity=orders.card_view(card, conn), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card),
             to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
+            oth_return_parts=order_oth.return_parts(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},     # «сколько примет поставщик»
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             oth_invoice=order_sheet.oth_invoice(conn, card),
             oth_title=order_sheet.mim_title(conn, card) if card["stage"]["code"] == "oth" else "",     # a purchase of WebMIM first (2026-11-06)
