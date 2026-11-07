@@ -198,7 +198,7 @@ def test_the_panels_number_of_an_order_with_a_webmim_number_gets_a_hint_only_at_
     orders.update_card(conn, card, {"webmim_number": "5000200"}, NOW, "o")
     moving = stage(conn, "moving")
     answer = mgr.handle_command(conn, "h1", "111", "приехал %d" % card, None, "2026-10-12T15:00:00")
-    assert answer == "У этого заказа номер WebMIM 5000200 — напишите его: «приехал 5000200»."
+    assert answer == "У этого заказа номер 5000200 — напишите его: «приехал 5000200»."          # no word WebMIM to a point (2026-10-30)
     assert orders.get_card(conn, card)["stage_id"] == moving and mgr.list_inbox(conn) == []
     assert conn.execute("SELECT outcome, order_id FROM order_command_log WHERE message_id = 'h1'").fetchone() == (
         "внутренний номер заказа: подсказан номер WebMIM", card)
