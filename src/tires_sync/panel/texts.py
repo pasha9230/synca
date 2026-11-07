@@ -87,6 +87,8 @@ def audit_text(entry: dict) -> str:
         return "Расходы Авито: комиссия %s %%, реклама %s %%" % (d.get("fee_pct", "?"), d.get("promo_pct", "?"))
     if action == "chat_assign":
         return "Чат Ч-%s: ответственный %s" % (d.get("chat", "?"), ("— " + d["to"]) if d.get("to") else "снят")
+    if action == "chat_assign_default":
+        return "Чаты аккаунта №%s: ответственный по умолчанию %s — %s" % (d.get("account", "?"), d.get("to", "?"), ", ".join("Ч-%s" % c for c in d.get("chats") or []) or "—")
     if action == "oth_detach":
         return "Заказ №%s на ОТХ: клиент №%s отвязан" % (d.get("order", "?"), d.get("client", "?"))
     if action == "oth_split":
