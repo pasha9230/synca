@@ -455,6 +455,14 @@ def link(conn, card_id: int, order_id: str, now: str, author: str) -> dict:
     return order
 
 
+MOSCOW = timedelta(hours=3)
+
+
+def moscow(now: str) -> str:
+    """The run's UTC clock (cli._now) as the order journal's: Moscow time, as every other record of it (panel local_iso, cli.moscow_now)."""
+    return (datetime.fromisoformat(now) + MOSCOW).isoformat(timespec="seconds")
+
+
 def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callable[[float], None] = time.sleep) -> Tuple[str, str]:
     """One reading of the snapshot for the command and the hourly tick: (read / off / failed, a line for the journal). A failure of the login or the
     network ends the reading (what was read stays); only the client repeats a reading once after a blip (reliability.WEBMIM), the login
@@ -477,7 +485,7 @@ def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callabl
         with client:
             counts = sync(conn, client, server, now, today, days, sleep, raws)
             from . import webmim_invoice                       # the number of the invoice: never fails the snapshot (safe_hourly)
-            invoice = webmim_invoice.safe_hourly(conn, client, server, raws, now, sleep)
+            invoice = webmim_invoice.safe_hourly(conn, client, server, raws, moscow(now), sleep)    # its records are the order journal's
     except webmim_orders.OrdersError as err:
         if str(err).startswith(REFUSED):                       # shown in «Подключения»; the hourly tick does not knock again with the same password
             connections.record_check(conn, "webmim_orders", connections.supplier_owner(1), False, "снимок заказов: %s" % err, now)

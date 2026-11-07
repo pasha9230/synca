@@ -239,6 +239,8 @@ def test_the_hourly_run_writes_it_says_so_and_asks_webmim_with_gets_only(tmp_pat
     assert status == "read" and "номер счёта: вписано 1, запросов по id 1, чтение по id прервано (код 503)" in line, line
     assert transfer(conn, mine) == INVOICE and transfer(conn, other) == ""
     assert {c[0] for c in http.calls} == {"GET"} and "pw-SECRET-1" not in line
+    ours = [e for e in orders.list_events(conn, mine) if e["author"] == webmim_invoice.AUTHOR]
+    assert ours and {e["at"] for e in ours} == {"2026-11-07T16:00:00"}     # the run's clock is UTC, the order's journal Moscow time (+3)
 
 
 def test_a_crash_of_the_invoice_part_never_fails_the_snapshot(tmp_path, monkeypatch):
