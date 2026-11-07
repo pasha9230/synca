@@ -15,14 +15,16 @@
 <style>.crm-pragmatic{background:var(--err-600);border-color:var(--err-600);color:#fff;font-weight:700;font-size:var(--fs-sm,14px)}
 .crm-tags{display:flex;gap:var(--s-2);flex-wrap:wrap;align-items:center}.crm-tags form{display:inline}.crm-items{margin:0;padding-left:1.1em}</style>
 <div class="entity-page o2-client">
-<header>{{ entity_ui.crumbs(entity.crumbs) }}{% call entity_ui.head(entity) %}<span class="crm-tags">
+{# «CRM › №1» above «Клиент №1»: one back link to the list (the owner 2026-11-07, ui-audit 54) #}
+<header>{% set back = entity.crumbs|first %}{% if back and back.href %}<div class="crumbs"><a href="{{ back.href }}">{{ icon("arrow-left", "i-sm") }}{{ back.label }}</a></div>{% endif %}{% call entity_ui.head(entity) %}<span class="crm-tags">
 {# the status of the inquiry and «перезвонить» (the lane crm-inquiry, its own template and data): here in the head #}
 {% if not narrow %}{% with inquiry_client_id = c.id, inquiry_place = "card" %}{% include "_client_inquiry.html" ignore missing %}{% endwith %}{% endif %}
 {% for t in entity.tags %}{% if t == PRAGMATIC %}<span class="badge badge--err crm-pragmatic">{{ t }}</span>{% elif t == HANDED %}<span class="badge badge--warn" title="Точка передала клиента под заказ">{{ t }}</span>{% else %}<span class="badge badge--neutral">{{ t }}</span>{% endif %}{% endfor %}
 </span>{% endcall %}</header>
 <nav class="tabs o2-tabs o2-anchors" aria-label="Разделы карточки"><a class="is-active" href="#o2-main">Обзор</a><a href="#o2-orders">Заказы <span class="badge badge--neutral">{{ entity.purchases|length }}</span></a><a href="#o2-chats">Чаты <span class="badge badge--neutral">{{ entity.chats|length }}</span></a><a href="#o2-calls">Звонки <span class="badge badge--neutral">{{ entity.calls|length }}</span></a>{% if not narrow %}<a href="#o2-touch">Обращения</a><a href="#o2-log">События</a>{% endif %}{% if dups or joined or edit %}<a href="#o2-merge">Склейка{% if dups %} <span class="badge badge--warn">{{ dups|length }}</span>{% endif %}</a>{% endif %}</nav>
 <div class="o2-client-cols"><div class="o2-client-side" id="o2-main">
-<section class="card card-body">{{ entity_ui.fields(entity.fields) }}</section>
+{# the counts are on the tabs; «Клиент с» repeats «Первое обращение» (ui-audit 55, 56) #}
+<section class="card card-body">{{ entity_ui.fields(entity.fields|rejectattr("label", "in", ["Обращений", "Заказов", "Чатов Авито", "Звонков", "Клиент с"])|list) }}</section>
 {% if not narrow %}<section class="card card-body">
 {% if edit %}<form method="post" action="/clients/{{ c.id }}/save" class="stack">{{ csrf }}
 <label class="field"><span class="label">Имя</span><input class="input" name="name" value="{{ c.name }}" maxlength="120"></label>

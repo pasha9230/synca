@@ -72,7 +72,7 @@
 <button type="button" class="icon-btn o2-op-close" data-order-panel-close aria-label="Закрыть панель заказа" title="Закрыть (Esc)">{{ icon("x") }}</button>{# outside .chats-deal: a focus on it is no «hand in the block» for the live refill #}
 <section class="chats-deal o2-cl-panel" id="chats-deal">
 {% if deal %}<div class="o2-panel-head"><h3 id="order-panel-h">Заказ №{{ deal.id }}</h3><span class="small muted">{{ deal.days }} дн.</span><a class="small" href="/orders/{{ deal.id }}">Открыть полностью</a></div>
-{% if can_post("chat_stage") %}<form method="post" action="/chats/{{ current.id }}/stage" class="o2-dd-sec chat-stage" data-autosubmit>{{ keep }}<label class="small muted" for="o2-stage">Этап</label><select class="select select--sm" id="o2-stage" name="stage_id">{% for s in stages %}<option value="{{ s.id }}"{% if s.id == deal.stage_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select><noscript><button class="btn btn--secondary btn--sm">Перенести</button></noscript></form>{% else %}<div class="o2-panel-stage"><span class="badge badge--brand">{{ deal.stage.name }}</span></div>{% endif %}
+{% if can_post("chat_stage") %}<form method="post" action="/chats/{{ current.id }}/stage" class="o2-dd-sec chat-stage" data-autosubmit>{{ keep }}<label class="small muted" for="o2-stage">Этап</label><select class="select select--sm" id="o2-stage" name="stage_id">{% for s in stages if s.code not in ("oth", "shipped") or s.id == deal.stage_id %}{# «На ОТХ», «Отправлен в ТК»: not a step of the chat (ui-audit 52) #}<option value="{{ s.id }}"{% if s.id == deal.stage_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select><noscript><button class="btn btn--secondary btn--sm">Перенести</button></noscript></form>{% else %}<div class="o2-panel-stage"><span class="badge badge--brand">{{ deal.stage.name }}</span></div>{% endif %}
 <div class="o2-panel-body">
 <dl class="kv o2-kv">
 {% set cl = chat_client(current.id, deal.id) %}<dt>Клиент</dt><dd class="strong">{{ deal.client_name or "имя не указано" }}{% if cl and can("clients") %} <a class="small chat-client-link" href="/clients/{{ cl.id }}">Карточка клиента</a>{% endif %}</dd>
@@ -100,7 +100,7 @@
 {% endif %}
 {% if can_post("chat_wait") or may_callback() %}<div class="o2-panel-foot">
 {% if can_post("chat_wait") %}{% set w = current.wait.line %}
-<details class="chat-wait"><summary class="btn btn--secondary btn--sm">{{ icon("clock", "i-sm") }}Клиент ждёт эту шину</summary>
+<details class="chat-wait"><summary class="btn btn--secondary btn--sm">{{ icon("clock", "i-sm") }}Что нужно клиенту</summary>{# the same list as «Что нужно клиенту» of the order (the owner 2026-11-07, ui-audit 51) #}
 <form method="post" action="/chats/{{ current.id }}/wait" class="stack" data-once style="margin-top:var(--s-3)">{{ keep }}
 <p class="small muted">{% if current.wait.source %}Заполнено из {{ current.wait.source }}: проверьте и поправьте.{% else %}Введите, какую шину ждёт клиент (бренд, размер, сезон, количество).{% endif %} Заказ по чату создастся сам, если его нет, и перейдёт в этап «Ожидает наличие».</p>
 <div class="grid-2"><label class="field"><span class="label">Бренд</span><input class="input" name="brand" value="{{ w.brand or '' }}" maxlength="60"></label>

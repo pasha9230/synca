@@ -64,7 +64,7 @@ def test_one_line_above_the_messages_and_the_order_in_the_panel(w):
     panel = html.split('id="order-panel"', 1)[1].split("</aside>", 1)[0]
     assert html.index('class="chat-composer') < html.index('id="order-panel"')  # the panel is no part of the column of messages
     for part in ("<dt>Клиент</dt>", "<dt>Телефон</dt>", "<dt>Точка</dt>", "<dt>Доставка</dt>", "<dt>Позиции</dt>", "<dt>Сумма</dt>", "data-item-find",
-                 'action="/chats/%d/items/add"' % w["chat"], 'action="/chats/%d/wait"' % w["chat"], "Клиент ждёт эту шину", "Задачи",
+                 'action="/chats/%d/items/add"' % w["chat"], 'action="/chats/%d/wait"' % w["chat"], "Что нужно клиенту", "Задачи",    # the waiting list under the name of the order's (ui-audit 51)
                  'action="/chats/%d/stage"' % w["chat"], 'id="o2-stage"', 'href="/orders/%d">Открыть полностью' % oid, "data-order-panel-close"):
         assert part in panel, part
     assert "data-deal-fold" not in html and "data-deal-unfold" not in html
@@ -110,7 +110,7 @@ def test_a_chat_without_an_order_creates_it_and_the_panel_opens(w):
     assert "Без заказа" in line and "Панель заказа" in line and "data-order-panel-open" in line
     assert 'action="/chats/%d/create-deal" data-order-panel-after' % w["chat"] in line and ">Создать заказ<" in line
     panel = between(html, 'id="order-panel"', "</aside>")
-    assert "Чат не привязан к заказу" in panel and 'action="/chats/%d/link"' % w["chat"] in panel and "Клиент ждёт эту шину" in panel
+    assert "Чат не привязан к заказу" in panel and 'action="/chats/%d/link"' % w["chat"] in panel and "Что нужно клиенту" in panel
     assert post(w["owner"], "/chats/%d/create-deal" % w["chat"], w["tok"], f="", acc="", q="").status_code == 302
     assert "Заказ №%d" % order_of(w) in between(chat_page(w), '<div class="o2-order-line">', "</div>")
 
