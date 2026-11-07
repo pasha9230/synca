@@ -355,7 +355,7 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
         extra = added.get(item["id"])
         if extra:
             whole, qty = qty, qty - extra["qty"]                     # the first part keeps its pieces; the profit is shared by the pieces
-            share = (lambda value, n: round(value * n / whole, 2)) if whole else (lambda value, n: value)
+            share = (lambda value, n: round(value * n / whole, 2)) if whole else (lambda value, n: 0.0)    # no pieces: no profit in either
             out[extra_key(card_id, item["id"])] = dict(common, **{
                 "№ заказа MIM": extra["webmim_number"], "Перемещение MIM": extra["transfer_number"], "Дата счета": day_of_number(conn, extra["webmim_number"]),
                 "Артикул": item["code"] or item["goods_id"], "Наименование": item["name"], "Кол-во": extra["qty"], "Цена MIM": buy,
@@ -364,7 +364,7 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
                 "Примечание": " ".join(("добавлено к заказу. %s" % (common["Примечание"] or "")).split())})
             if profit:
                 profit = (share(profit[0], qty), profit[1])
-            if qty < 1:
+            if qty < 1 and not extra["in_base"]:                    # a new position: it never had a row of the first order
                 continue
         if item["id"] in from_oth:
             row = dict(common, **_oth_values(conn, card, item["id"], from_oth[item["id"]]), **{"Примечание": " ".join(

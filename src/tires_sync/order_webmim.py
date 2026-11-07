@@ -114,7 +114,7 @@ def extras(conn, card: dict) -> Dict[int, dict]:
         added = min(int(item["qty"]), max(0, _held(conn, item) - int(base.get(item["id"], 0))))
         if added >= 1 or item["id"] in known:
             number, transfer = known.get(item["id"], ("", ""))
-            out[item["id"]] = {"qty": added, "webmim_number": number, "transfer_number": transfer}
+            out[item["id"]] = {"qty": added, "webmim_number": number, "transfer_number": transfer, "in_base": item["id"] in base}
     return out
 
 

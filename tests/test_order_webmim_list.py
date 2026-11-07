@@ -352,3 +352,17 @@ def test_a_chain_from_the_points_own_stock_is_own_stock_not_order_zero(tmp_path)
     note = rows(conn, last)[order_sheet.key(last, oth_item(conn, last))]["Примечание"]
     assert note.startswith("с ОТХ, свой остаток, через №%d" % middle) and "№0" not in note
     assert [p["kind"] for p in parts(conn, last)] == ["stock"]
+
+
+def test_a_take_from_an_order_with_a_second_part_counts_every_piece_once(tmp_path):
+    """Review 3: A of 4 with its own number, +2 added (its second part), then on «На ОТХ» B takes 5: A's rows hold the 1 it has."""
+    conn = db(tmp_path)
+    old = source(conn, number=OWN, transfer=OWN_TRANSFER)
+    item = second_order(conn, old)
+    taker = new_order(conn, qty=5)
+    take(conn, taker)
+    held = int(orders.get_card(conn, old)["items"][0]["qty"])
+    mine = {k: r for k, r in rows(conn, old).items() if k in (order_sheet.key(old, item), order_sheet.extra_key(old, item))}
+    assert set(mine) == {order_sheet.key(old, item), order_sheet.extra_key(old, item)}           # both rows still follow
+    assert sum(r["Кол-во"] for r in mine.values()) == held
+    assert {order_sheet.key(old, item), order_sheet.extra_key(old, item)} <= order_sheet.followed(conn, old)
