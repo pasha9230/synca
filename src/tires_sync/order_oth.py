@@ -291,14 +291,22 @@ def _returning_stage(conn) -> dict:
     return next(s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN)
 
 
-def _marked(conn, item_id, returned: int) -> int:
+def _oth_since(conn, order_id) -> str:
+    """The moment the order last entered «На ОТХ» (its record orders.OTH_ENTERED): oth_return and the marks of an earlier stay are not this one's."""
+    row = conn.execute("SELECT MAX(at) FROM order_event WHERE order_id = ? AND kind = 'field' AND text = ?", (order_id, orders.OTH_ENTERED)).fetchone()
+    return str(row[0] or "") if row else ""
+
+
+def _marked(conn, item_id, returned: int, since: str = "") -> int:
     """The pieces of oth_return of a position that are a mark of «На возврат» (item_to_return), not a real «Вернуть поставщику»: the newest mark
-    of the position (its stay on «На ОТХ»; on «На возврат» the order has moved on since), never more than oth_return holds."""
+    of the position made since the order last entered «На ОТХ» (`since`; on «На возврат» the order has moved on since), never more than oth_return holds."""
     best, qty = "", 0
     for (value,) in conn.execute("SELECT value FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item_id),)):
         try:
             mark = json.loads(value)
         except ValueError:
+            continue
+        if str(mark.get("at") or "") < since:                                       # a mark of an earlier stay (detach dropped its oth_return)
             continue
         if str(mark.get("at") or "") >= best:
             best, qty = str(mark.get("at") or ""), int(mark.get("qty") or 0)
@@ -309,9 +317,10 @@ def pieces_here(conn, card: dict) -> Dict[int, int]:
     """Position → the pieces still at the point: the order's minus those really given back to the supplier («Вернуть поставщику»); the pieces
     marked «На возврат» are here (review 2026-11-07)."""
     returned = {r[0]: int(r[1]) for r in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ?", (card["id"],))}
+    since = _oth_since(conn, card["id"])
     out = {}
     for i in card["items"]:
-        real = returned.get(i["id"], 0) - _marked(conn, i["id"], returned.get(i["id"], 0))
+        real = returned.get(i["id"], 0) - _marked(conn, i["id"], returned.get(i["id"], 0), since)
         if int(i["qty"]) - real >= 1:
             out[i["id"]] = int(i["qty"]) - real
     return out
@@ -334,9 +343,11 @@ def _checked_parts(conn, card: dict, qty: Dict) -> Dict[int, int]:
     parts = {}
     for key, value in qty.items():
         item = int(key)
+        if str(value).strip().lstrip("0") == "":                                     # 0 (or empty): this position does not go back
+            continue
         if item not in held:
-            raise OthError("Такой позиции в заказе нет: обновите страницу.")
-        pieces = 0 if str(value).strip() in ("", "0") else _pieces(value)
+            raise OthError("Такой позиции на точке нет: обновите страницу.")
+        pieces = _pieces(value)
         if pieces > held[item]:
             raise OthError("На возврат не больше %d шт. позиции: столько на точке." % held[item])
         if pieces:
@@ -383,7 +394,7 @@ def _split_off(conn, card: dict, parts: Dict[int, int], stage: dict, now: str, w
         conn.execute("INSERT INTO order_item_oth (item_id, order_id, from_item, from_order, qty, at, author) VALUES (?,?,?,?,?,?,?)",
                      (cur.lastrowid, new, item_id, card["id"], pieces, now, who))
         off = conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item_id,)).fetchone()
-        marked = _marked(conn, item_id, int(off[0])) if off else 0
+        marked = _marked(conn, item_id, int(off[0]), _oth_since(conn, card["id"])) if off else 0
         if marked:                                                                    # the mark «На возврат» is decided now: its pieces go with the
             conn.execute("UPDATE oth_return SET qty = qty - ? WHERE item_id = ?", (marked, item_id))     # split or are on sale again; a real
             conn.execute("DELETE FROM oth_return WHERE item_id = ? AND qty <= 0", (item_id,))           # «Вернуть поставщику» stays as it is
@@ -445,6 +456,8 @@ def _agree_part(conn, card: dict, held: Dict[int, int], parts: Dict[int, int], d
             rest = {i: held[i] - parts.get(i, 0) for i in held if held[i] - parts.get(i, 0) > 0}
             oth = next(s for s in orders.list_stages(conn) if s["code"] == "oth")
             new = _split_off(conn, card, rest, oth, now, author, "поставщик примет не все шины, остаток на ОТХ")
+            conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (NO_RETURN_KEY % (new, re.sub(r"\D", "", now)), json.dumps(
+                {"at": now, "by": author, "why": "поставщик не принял"})))      # the supplier refused these: the 7th day never sends them back again
             if note:
                 orders.add_event(conn, card["id"], now, author, "field", "На возврат: %s; остаток выделен в заказ №%d на «%s»." % (note, new, oth["name"]))
             back = _agree_whole(conn, orders.get_card(conn, card["id"]), day, now, author, commit=False)

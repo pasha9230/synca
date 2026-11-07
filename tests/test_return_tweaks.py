@@ -388,3 +388,35 @@ def test_7_a_second_press_with_the_old_form_splits_nothing(tmp_path):
 def test_9_only_a_decision_not_to_return_counts():
     assert order_oth.NO_RETURN.search("Не возвращаем, продаём") and order_oth.NO_RETURN.search("решили не возвращать")
     assert not order_oth.NO_RETURN.search("ещё не возвращали, ждём")
+
+
+def test_7_a_mark_of_an_earlier_stay_never_hides_a_real_return(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    card = on_oth(conn, cid)
+    item = card["items"][0]["id"]
+    order_oth.item_to_return(conn, item, "2026-10-16T10:00:00", "o", "2")       # stay 1: a mark of 2
+    orders.move_card(conn, cid, stage(conn, "at_point"), "2026-10-17T10:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, "oth"), "2026-10-18T10:00:00", "o")   # stay 2: the old oth_return is dropped
+    order_oth.mark_returned(conn, item, "2026-10-19T10:00:00", "o", "1")        # a real return of 1
+    assert order_oth.pieces_here(conn, orders.get_card(conn, cid)) == {item: 3}
+
+
+def test_8_a_position_given_back_whole_does_not_block_a_part(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    first, second = card["items"][0]["id"], card["items"][1]["id"]
+    order_oth.mark_returned(conn, second, NOW, "o")                             # the second all given back
+    order_oth.agree(conn, orders.get_card(conn, cid), TODAY, NOW, "o", qty={str(first): "3", str(second): "0"})
+    assert [int(i["qty"]) for i in orders.get_card(conn, cid)["items"] if i["id"] == first] == [1]
+
+
+def test_8_the_remainder_the_supplier_refused_is_not_sent_back_on_its_seventh_day(tmp_path):
+    conn = db(tmp_path)
+    started(conn)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    on_oth(conn, cid)
+    card = returning(conn, cid)
+    order_oth.agree(conn, card, TODAY, NOW, "o", qty={card["items"][0]["id"]: 3})
+    [rest] = order_oth.split_of(conn, cid)
+    assert order_oth.ask_seventh_day(conn, "2026-11-05T12:30:00") == 0
+    assert orders.get_card(conn, rest)["stage"]["code"] == "oth"

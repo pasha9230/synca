@@ -1164,6 +1164,7 @@ def register(app) -> None:
             oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card),
             to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
             oth_return_parts=order_oth.return_parts(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},     # «сколько примет поставщик»
+            oth_here=order_oth.pieces_here(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},
             oth_return_seen=",".join("%d:%d" % kv for kv in sorted(order_oth.pieces_here(conn, card).items())) if card["stage"]["code"] in order_oth.RETURNING else "",
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             oth_invoice=order_sheet.oth_invoice(conn, card),
