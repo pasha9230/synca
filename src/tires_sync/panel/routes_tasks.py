@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from flask import abort, flash, redirect, render_template, request
 
-from .. import order_notify, tasks, users
+from .. import order_notify, orders, tasks, users
 from .common import author, can, current_user, get_conn, login_required, own_point, safe_path
 from .routes_alerts import may_take
 from .routes_design import office_page, point_page
@@ -89,8 +89,32 @@ def register(app) -> None:
             return next(iter(_mine_as_point(conn, to_set=True)), "")
         return tasks.default_assignee(conn, _owner(conn), me, order_id, chat_row)
 
+    def task_kinds_for(client_id=None, order_id=None, chat_row=None) -> dict:
+        """The kinds the form offers (the owner 2026-11-07, ui-audit 12, 29, 49): a task of an order — by its stage («Оформить заказ» before the
+        order is placed, «Переместить на ОТХ» while the tyres wait at the point, «Вернуть» once they are there or later); a point — «Перезвонить»
+        and «Другое»; no place — «Другое» (and «Перезвонить» with a client or a chat). Display only: /tasks/new takes every kind as before."""
+        kinds = dict(tasks.KINDS)
+        if not (client_id or order_id or chat_row):
+            kinds.pop("callback")
+        if is_point():
+            return {k: v for k, v in kinds.items() if k in ("callback", "other")}
+        if order_id is None:
+            return {k: v for k, v in kinds.items() if k in ("callback", "order", "other") and (k != "order" or chat_row or client_id)}
+        try:
+            code = orders.get_card(get_conn(), order_id)["stage"].get("code") or ""
+        except Exception:                                  # an order of no stage known: everything, as before
+            return kinds
+        allowed = {"callback", "other"}
+        if code in ("new", "talk", "wait", "placed"):
+            allowed.add("order")
+        if code in ("at_point",):
+            allowed.add("oth")
+        if code in ("at_point", "oth", "return_given", "shipped", "done"):
+            allowed.add("return")
+        return {k: v for k, v in kinds.items() if k in allowed}
+
     app.jinja_env.globals.update(tasks_for=tasks_for, may_task=may_set, task_people=task_people, task_default=task_default,
-                                 task_kinds=tasks.KINDS)
+                                 task_kinds=tasks.KINDS, task_kinds_for=task_kinds_for)
 
     @app.route("/tasks")
     @login_required
