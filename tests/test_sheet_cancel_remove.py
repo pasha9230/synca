@@ -125,7 +125,7 @@ def test_a_row_the_owner_rewrote_is_not_removed(table):
     sheet.flush(conn, box, fake, LATER)
     assert list(k for k in fake.rows if k.startswith("tires:%d:" % mine)) == [mark]
     assert any("строки удалены из Google-таблицы: 1 стр." in e for e in events(conn, mine))
-    assert any("изменена или удалена вручную" in e for e in events(conn, mine))
+    assert any(e.startswith("Строка Google-таблицы не удалена: её нет или она изменена вручную") and e.endswith("1 стр.") for e in events(conn, mine))
 
 
 def test_a_script_without_remove_keeps_the_rows_with_the_stage_and_says_it_once(tmp_path):
@@ -190,3 +190,78 @@ def test_the_dry_run_of_the_command_lists_and_changes_nothing(table, capsys):
     out = capsys.readouterr().out
     assert "№%d" % old in out and "заказов: 1" in out and "ничего не изменено" in out
     assert conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (old,)).fetchone()[0] == before and len(fake.posts) == 1
+
+
+def test_a_cancel_with_the_reason_not_bought_keeps_the_rows(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    orders.move_card(conn, mine, stage(conn, "moving")["id"], NOW, "owner")
+    sheet.flush(conn, box, fake, NOW)
+    orders.move_card(conn, mine, stage(conn, "cancel")["id"], LATER, "owner", {"cancel_reason": orders.cancel_reason_of("не выкупил", "")})
+    sheet.flush(conn, box, fake, LATER)
+    assert len([k for k in fake.rows if k.startswith("tires:%d:" % mine)]) == 2 and sheet.cancelled_before_point(conn) == []
+
+
+def test_an_own_finished_stage_of_the_owner_in_the_history_keeps_the_rows(table):
+    conn, box, fake = table
+    given = orders.get_stage(conn, orders.add_stage(conn, "Выдан сам", "#123456", "won", "", 0))
+    mine = placed(conn)
+    orders.move_card(conn, mine, given["id"], NOW, "owner")
+    orders.move_card(conn, mine, stage(conn, "placed")["id"], NOW, "owner")
+    sheet.flush(conn, box, fake, NOW)
+    cancel(conn, mine)
+    sheet.flush(conn, box, fake, LATER)
+    assert len([k for k in fake.rows if k.startswith("tires:%d:" % mine)]) == 2
+
+
+def test_the_command_skips_the_orders_before_keep_from_and_holds_no_write_while_google_answers(table):
+    from tires_sync import store
+    conn, box, fake = table
+    old, newer = placed(conn), placed(conn, client_name="Пётр")
+    sheet.flush(conn, box, fake, NOW)
+    cancel(conn, old)
+    cancel(conn, newer)
+    conn.execute("UPDATE sheet_order SET placed_at = '2026-10-01T10:00:00' WHERE order_id = ?", (old,))
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (sheet.SINCE, LATEST))
+    conn.commit()
+    sheet.save_settings(conn, sheet.settings(conn)["url"], True, NOW, "owner", keep_from="2026-10-15")
+    conn.commit()
+    assert [c["id"] for c in sheet.cancelled_before_point(conn)] == [newer]
+    other = store.connect(conn.execute("PRAGMA database_list").fetchone()[2])
+    real = fake.__call__
+    wrote = []
+
+    def watching(method, url, headers, body):
+        if method == "POST":
+            other.execute("UPDATE order_card SET comment = 'x' WHERE id = ?", (old,))      # a person saves meanwhile: never locked out
+            other.commit()
+            wrote.append(True)
+        return real(method, url, headers, body)
+    done = sheet.remove_cancelled(conn, box, watching, LATEST, apply=True)
+    assert list(done) == [newer] and wrote and len([k for k in fake.rows if k.startswith("tires:%d:" % old)]) == 2
+
+
+def test_a_crash_of_one_order_in_the_command_frees_it_and_goes_on(table, monkeypatch):
+    conn, box, fake = table
+    first, second = placed(conn), placed(conn, client_name="Пётр")
+    sheet.flush(conn, box, fake, NOW)
+    cancel(conn, first)
+    cancel(conn, second)
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (sheet.SINCE, LATEST))
+    conn.commit()
+    real = sheet.send_order
+
+    def flaky(conn_, card_id, *args, **kwargs):
+        if card_id == first:
+            raise RuntimeError("x")
+        return real(conn_, card_id, *args, **kwargs)
+    monkeypatch.setattr(sheet, "send_order", flaky)
+    done = sheet.remove_cancelled(conn, box, fake, LATEST, apply=True)
+    assert done[first].startswith("сбой панели") and "строки удалены" in done[second]
+    assert conn.execute("SELECT claim_until FROM sheet_order WHERE order_id = ?", (first,)).fetchone()[0] == ""
+
+
+def test_the_command_without_a_key_says_so(table):
+    conn, box, fake = table
+    with pytest.raises(sheet.SheetError, match="ключа"):
+        sheet.remove_cancelled(conn, None, fake, LATEST, apply=True)
