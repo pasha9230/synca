@@ -362,8 +362,9 @@ def card_rows(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
                 "Сумма MIM": round(buy * extra["qty"], 2), "Цена продажи": sell, "Сумма продажи": round(sell * extra["qty"], 2),
                 "Прибыль ₽": share(profit[0], extra["qty"]) if profit else "", "Прибыль %": profit[1] if profit else "",
                 "Примечание": " ".join(("добавлено к заказу. %s" % (common["Примечание"] or "")).split())})
-            if profit:
-                profit = (share(profit[0], qty), profit[1])
+            if profit:                                               # the first row: what the second does not have (the sum is exact)
+                second = out[extra_key(card_id, item["id"])]["Прибыль ₽"]
+                profit = (round(profit[0] - second, 2) if whole else 0.0, profit[1])
             if qty < 1 and not extra["in_base"]:                    # a new position: it never had a row of the first order
                 continue
         if item["id"] in from_oth:
@@ -394,7 +395,10 @@ def _oth_values(conn, card: dict, item_id: int, number: str, typed=None) -> dict
     if first and row is None and not (own or own_transfer):
         return {"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"], "Дата счета": _invoice_day(conn, card)}
     source = dict(zip(("id", "webmim_id", "webmim_number", "transfer_number"), row)) if row else None
-    own_day = (_invoice_day(conn, card) if own == (card["webmim_number"] or card["webmim_id"]) else day_of_number(conn, own)) if own else ""
+    own_day = ""
+    if own:                                                          # typed equal to the source's: the source's day; the order's own: its day
+        own_day = ((_invoice_day(conn, source) if source else "") if own == number else
+                   _invoice_day(conn, card) if own == (card["webmim_number"] or card["webmim_id"]) else day_of_number(conn, own))
     return {"№ заказа MIM": own or number,
             "Перемещение MIM": own_transfer or (source["transfer_number"] if source else ""),
             "Дата счета": own_day if own else (_invoice_day(conn, source) if source else "")}
@@ -454,8 +458,13 @@ def followed(conn, card_id: int) -> set:
     """The rows of the order whose quantity follows it: a position that gave tyres from «На ОТХ» or to a merge, or took them by a merge
     (order_merge; the old row stays at 0 pieces, «Примечание» is the owner's, the owner 2026-10-30)."""
     from . import order_webmim
-    seconds = {extra_key(card_id, r[0]) for r in conn.execute("SELECT item_id FROM order_mim_extra WHERE order_id = ?", (int(card_id),))}
-    return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)} | seconds    # a second order: follows too
+    split = {r[0] for r in conn.execute("SELECT item_id FROM order_mim_extra WHERE order_id = ?", (int(card_id),))}
+    try:
+        split |= set(order_webmim.extras(conn, orders.get_card(conn, int(card_id))))
+    except orders.OrderError:
+        pass
+    seconds = {extra_key(card_id, i) for i in split} | {key(card_id, i) for i in split}    # a position split in two orders: both rows follow it
+    return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)} | seconds
 
 
 def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey: bool = False) -> List[dict]:

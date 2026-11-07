@@ -366,3 +366,59 @@ def test_a_take_from_an_order_with_a_second_part_counts_every_piece_once(tmp_pat
     assert set(mine) == {order_sheet.key(old, item), order_sheet.extra_key(old, item)}           # both rows still follow
     assert sum(r["Кол-во"] for r in mine.values()) == held
     assert {order_sheet.key(old, item), order_sheet.extra_key(old, item)} <= order_sheet.followed(conn, old)
+
+
+# ---- review 4: what the table would hold ----------------------------------------------------------------------------------------------
+
+def table_after(conn, cid, written):
+    """The rows as the table holds them after one flush: the written rows with the changes applied (follow = order_sheet.followed)."""
+    now = order_sheet.rows_of(conn, cid, LATER)
+    held = {k: dict(v) for k, v in written.items()}
+    for op in order_sheet.changes(now, written, order_sheet.followed(conn, cid)):
+        held[op["key"]] = dict(held.get(op["key"], {}), **op["fields"])
+    return held
+
+
+def test_lowered_pieces_follow_in_the_table_too(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    item = second_order(conn, cid)
+    written = order_sheet.rows_of(conn, cid, LATER)
+    orders.update_item(conn, item, 3, 6000, LATER, "o")
+    held = table_after(conn, cid, written)
+    assert sum(r["Кол-во"] for r in held.values()) == 3
+
+
+def test_the_button_after_a_cleared_number_puts_everything_in_one_order_in_the_table(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    item = second_order(conn, cid)
+    written = order_sheet.rows_of(conn, cid, LATER)
+    orders.update_card(conn, cid, {"webmim_number": "", "transfer_number": ""}, LATER, "o")
+    webmim_create._write_order(conn, cid, {"id": "W9", "number": "W9", "status_text": "Новый"}, LATER, "o", "Заказ WebMIM оформлен")
+    held = table_after(conn, cid, written)
+    assert sum(r["Кол-во"] for r in held.values()) == 6 and held[order_sheet.key(cid, item)]["Кол-во"] == 6
+
+
+def test_dosozdat_done_takes_the_pieces_added_meanwhile_into_the_first_order(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    orders.update_card(conn, cid, {"webmim_id": "W5", "webmim_number": "W5"}, LATER, "o")
+    parts(conn, cid)
+    orders.update_item(conn, orders.get_card(conn, cid)["items"][0]["id"], 6, 6000, LATER, "o")
+    conn.execute("INSERT OR REPLACE INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, updated_at) "
+                 "VALUES (?, 'prod', 'partial', ?, ?, 'o', 'W5', ?)", (cid, LATER, LATER, LATER))
+    conn.commit()
+    webmim_create._finish(conn, cid, "done", "Оформлен в WebMIM: заказ №W5", LATER, "o", "green")   # «Досоздать» added the 2
+    assert [(p["kind"], p["items"][0]["qty"]) for p in parts(conn, cid)] == [("supplier", 6)]
+
+
+def test_the_profit_of_the_two_rows_is_exact(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=1)
+    orders.update_card(conn, cid, {"webmim_number": OWN}, LATER, "o")
+    parts(conn, cid)
+    item = orders.get_card(conn, cid)["items"][0]["id"]
+    orders.update_item(conn, item, 2, 6000, LATER, "o")                     # 1 + 1: each half of 1.15 rounds to 0.57
+    monkeypatch.setattr(order_sheet, "_profits", lambda conn_, card: {item: (1.15, 10.0)})
+    assert round(sum(float(r["Прибыль ₽"] or 0) for r in rows(conn, cid).values()), 2) == 1.15

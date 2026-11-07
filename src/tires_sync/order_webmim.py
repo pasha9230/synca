@@ -98,6 +98,19 @@ def snapshot(conn, card_id, now: str, fresh: bool = False) -> bool:
     return True
 
 
+def fresh_snapshot(conn, card_id, now: str) -> None:
+    """«Оформить» / «Досоздать в WebMIM» done: the snapshot taken again, inside a savepoint: a failure here never costs the number of the order
+    made nor its record. No commit."""
+    try:
+        conn.execute("SAVEPOINT mim_snapshot")
+        snapshot(conn, card_id, now, fresh=True)
+        conn.execute("RELEASE SAVEPOINT mim_snapshot")
+    except Exception:                                                 # noqa: BLE001
+        conn.execute("ROLLBACK TO SAVEPOINT mim_snapshot")
+        conn.execute("RELEASE SAVEPOINT mim_snapshot")
+        logging.getLogger("tires_sync.orders").exception("the snapshot of order %s was not taken", card_id)
+
+
 def extras(conn, card: dict) -> Dict[int, dict]:
     """item → {qty added past the snapshot (0 or more), webmim_number, transfer_number}: a position with pieces added, and every position that
     has a row of a second order already (order_mim_extra: it never goes away, its pieces follow the order; the table's row with them). {} with
