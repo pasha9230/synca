@@ -12,6 +12,7 @@ COLUMNS = ("Дата счета", "№ заказа MIM", "Перемещени�
            "Сумма продажи", "Имя", "Телефон", "ПВЗ", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽", "Примечание")
 MONEY = frozenset({"Цена MIM", "Сумма MIM", "Прибыль %", "Прибыль ₽"})          # the purchase and the profit: the right «money» only
 SALE = frozenset({"Цена продажи", "Сумма продажи"})                            # a point: no sums in the list (the owner 2026-10-26), the card has them
+WEBMIM = frozenset({"Дата счета", "№ заказа MIM", "Перемещение MIM"})            # a point: no WebMIM (the owner 2026-10-30)
 NUMBERS = frozenset({"Кол-во", "Цена MIM", "Сумма MIM", "Цена продажи", "Сумма продажи", "Прибыль %", "Прибыль ₽"})
 POSITION = ("Артикул", "Наименование", "Кол-во", "Цена MIM", "Сумма MIM", "Цена продажи", "Сумма продажи", "Прибыль %", "Прибыль ₽")
 PREF_KEY = "orders.list.columns"
@@ -19,7 +20,7 @@ PAGE = 50                                                                      #
 
 
 def allowed(money: bool, point: bool = False) -> tuple:
-    banned = (frozenset() if money else MONEY) | (SALE if point else frozenset())
+    banned = (frozenset() if money else MONEY) | (SALE | WEBMIM if point else frozenset())
     return tuple(c for c in COLUMNS if c not in banned)
 
 

@@ -12,6 +12,7 @@ from . import orders, oth_sale
 HEAD = ["№ заказа", "Создан", "Этап", "Клиент", "Телефон", "Точка", "Ответственный", "Источник", "Теги", "Позиции", "Штук", "Сумма, ₽",
         "Дата доставки", "Номер заказа WebMIM", "Статус WebMIM", "Комментарий", "Чат Авито"]
 WIDTHS = [10, 17, 22, 28, 18, 16, 16, 18, 24, 60, 8, 14, 14, 18, 18, 40, 16]
+WEBMIM = {"Номер заказа WebMIM", "Статус WebMIM"}                    # nor WebMIM (the owner 2026-10-30)
 MONEY = {"Сумма, ₽"}                                                # the columns of money: never in the file of a point (the owner 2026-10-27)
 FORBIDDEN = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")        # signs a sheet cannot hold (XML 1.0 forbids these too)
 
@@ -50,7 +51,7 @@ def build(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     sheet.title = "Заказы"
     hidden = frozenset() if money else frozenset(orders.account_tags(conn))
     # the file of a point: no tag with an account's name (the owner 2026-10-29)
-    keep = [i for i, name in enumerate(HEAD) if money or name not in MONEY]
+    keep = [i for i, name in enumerate(HEAD) if money or name not in MONEY | WEBMIM]      # a point: no WebMIM either (the owner 2026-10-30)
     sheet.append([HEAD[i] for i in keep])
     for cell in sheet[1]:
         cell.font = Font(bold=True)

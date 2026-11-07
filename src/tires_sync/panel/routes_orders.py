@@ -93,6 +93,9 @@ MAX_NEW_ROWS = 20                                  # positions in the window of 
 
 
 POINT_SALE_FIELDS = ("client_name", "client_phone", "delivery_date", "comment")     # what the point edits in its own sale (the owner 2026-10-30)
+# A manager of a point never sees WebMIM (the owner 2026-10-30): the deal kinds without the word, the journal without its records.
+POINT_DEAL_KINDS = {"webmim": "Наш заказ (перемещение)", "stock": "Из наличия точки"}
+POINT_NO_WEBMIM = re.compile(r"WebMIM|\bMIM\b|МИМ", re.IGNORECASE)
 
 
 def placed_kind(line: str) -> str:
@@ -633,6 +636,7 @@ def register(app) -> None:
         columns = [dict(by_code[code], cards=[], count=0) for code in points.POINT_STAGES if code in by_code]
         target = {col["stage"]["code"]: col for col in columns}
         shown = [c["id"] for col in data["columns"] if col["stage"]["code"] not in order_oth.RETURNING for c in col["cards"] if c["id"] in mine]
+        no_mim = lambda c: dict(c, oth_title="", client="На ОТХ") if c.get("oth_title") else c      # «№ MIM …» of «На ОТХ»: not the point's (2026-10-30)
         sales = {cid: orders.totals(items)["sale"] for cid, items in orders.items_of(conn, shown).items()}    # «Итого» of the order window,
         for col in data["columns"]:                                       # one query for the page; «На ОТХ»: no client, no sum (2026-11-07)
             into = target.get(points.point_column(col["stage"]))
@@ -640,7 +644,7 @@ def register(app) -> None:
                 continue
             for c in col["cards"]:
                 if c["id"] in mine:
-                    into["cards"].append(dict(c, real="" if col["stage"]["code"] in target else col["stage"]["name"], point_sale=sales.get(c["id"])))
+                    into["cards"].append(dict(no_mim(c), real="" if col["stage"]["code"] in target else col["stage"]["name"], point_sale=sales.get(c["id"])))
         for col in columns:
             col["cards"].sort(key=lambda c: -c["id"])
             col["count"] = len(col["cards"])
@@ -1129,8 +1133,8 @@ def register(app) -> None:
         engine.refresh_tasks(conn, card_id, local_iso())
         part = request.args.get("tab") if request.args.get("tab") in ORDER_PARTS else ""
         events = orders.list_events(conn, card_id)
-        if own_point() is not None:                                      # «Письмо поставщику» (supplier_mail): not the point's
-            events = [e for e in events if e["kind"] != "supplier_mail"]
+        if own_point() is not None:                                      # «Письмо поставщику» (supplier_mail): not the point's; nor WebMIM
+            events = [e for e in events if e["kind"] != "supplier_mail" and not POINT_NO_WEBMIM.search(str(e.get("text") or ""))]   # (2026-10-30)
         acting = from_panel()                                            # sent from another site: the page only
         if events and acting:                                            # the user has seen the journal up to the newest record shown
             order_alerts.mark_seen(conn, session["user"], card_id, local_iso(), events[0]["id"])
@@ -1172,8 +1176,8 @@ def register(app) -> None:
             oth_here=order_oth.pieces_here(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},
             oth_return_seen=",".join("%d:%d" % kv for kv in sorted(order_oth.pieces_here(conn, card).items())) if card["stage"]["code"] in order_oth.RETURNING else "",
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
-            oth_invoice=order_sheet.oth_invoice(conn, card),
-            oth_title=order_sheet.mim_title(conn, card) if card["stage"]["code"] == "oth" else "",     # a purchase of WebMIM first (2026-11-06)
+            oth_invoice=order_sheet.oth_invoice(conn, card) if own_point() is None else [],             # a point: no WebMIM (the owner 2026-10-30)
+            oth_title=order_sheet.mim_title(conn, card) if card["stage"]["code"] == "oth" and own_point() is None else "",     # a purchase of WebMIM first (2026-11-06)
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
@@ -1182,7 +1186,7 @@ def register(app) -> None:
             oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
             oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stage_day=orders.stage_day(orders.stage_since(conn, card)), stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
-            events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS, marks=orders.MARKS,
+            events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS if own_point() is None else POINT_DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=order_autosend.office_sends(chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()), own_point() is not None),
             chat_ref=chat_ref, responsible_options=_responsible_options(app, conn, card["responsible"]),
             want_seasons=order_wait.SEASON_NAMES, want_studs=order_wait.STUD_NAMES, want_text=order_wait.describe,
