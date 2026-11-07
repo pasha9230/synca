@@ -486,6 +486,9 @@ class _OutOfTime(Exception):
 
 def _finish(conn, card_id, state: str, text: str, now: str, author: str, level: str) -> dict:
     conn.execute("UPDATE webmim_create SET state = ?, result = ?, updated_at = ? WHERE order_id = ?", (state, text[:1000], now, card_id))
+    if state == "done":                                               # «Досоздать» too: everything in the order is in its order of WebMIM now
+        from . import order_webmim
+        order_webmim.fresh_snapshot(conn, card_id, now)
     orders.add_event(conn, card_id, now, author, "webmim", text, level)
     conn.commit()
     return {"state": state, "text": text, "ok": state == "done"}
@@ -559,6 +562,8 @@ def _write_order(conn, card_id, order: dict, now: str, author: str, line: str) -
         return False
     orders.update_card(conn, card_id, {"webmim_id": order["id"], "webmim_number": order["number"], "webmim_status": order["status_text"][:60]},
                        now, author, commit=False)
+    from . import order_webmim                                        # the pieces this order of WebMIM was made with (2026-11-07)
+    order_webmim.fresh_snapshot(conn, card_id, now)
     orders.add_event(conn, card_id, now, author, "webmim", line, "green")
     conn.commit()
     return True

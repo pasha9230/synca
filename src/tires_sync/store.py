@@ -518,6 +518,23 @@ CREATE TABLE IF NOT EXISTS callback_task (
     done_at TEXT, done_by TEXT NOT NULL DEFAULT '', cancelled_at TEXT
 );
 CREATE INDEX IF NOT EXISTS callback_task_open ON callback_task (done_at, cancelled_at, due_at);
+-- «Заказы WebMIM» of an order (order_webmim.py, the owner 2026-11-07). order_item_mim: the numbers a person typed for one position «с ОТХ»
+-- (the order's own number no longer stands for it). order_mim_base: the pieces of the supplier's positions when the order had its own number
+-- (item_id 0: the mark of the snapshot, `number`: the own number it was taken for); order_mim_extra: the numbers of the pieces added past it
+-- (the second order of WebMIM). New tables only: nothing of before is changed.
+CREATE TABLE IF NOT EXISTS order_item_mim (
+    item_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, webmim_number TEXT NOT NULL DEFAULT '', transfer_number TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL, author TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS order_item_mim_order ON order_item_mim (order_id);
+CREATE TABLE IF NOT EXISTS order_mim_base (
+    order_id INTEGER NOT NULL, item_id INTEGER NOT NULL, qty INTEGER NOT NULL, at TEXT NOT NULL, number TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (order_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS order_mim_extra (
+    order_id INTEGER NOT NULL, item_id INTEGER NOT NULL, webmim_number TEXT NOT NULL DEFAULT '', transfer_number TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL, author TEXT NOT NULL, PRIMARY KEY (order_id, item_id)
+);
 -- «Не дошло клиенту» (unsent.py, the owner 2026-10-31): a message to the client that did not go, with its text (chat_send_log drops it on
 -- «failed») and why, one per send token; closed by «Отправил вручную». Goes and comes back with the order (trash), moves with a merge
 CREATE TABLE IF NOT EXISTS order_unsent (
@@ -697,6 +714,9 @@ def _migrate(conn) -> None:
     orders.hide_default_off_board(conn, moscow_iso())
     from . import order_oth                                           # the owner 2026-11-03: «На возврат», the orders of the old flow, once
     order_oth.migrate(conn, moscow_iso())
+    _add_column(conn, "order_mim_base", "number", "TEXT NOT NULL DEFAULT ''")      # a base of the first draft of the table
+    from . import order_webmim                                        # the owner 2026-11-07: «Заказы WebMIM», the old orders kept as they read, once
+    order_webmim.migrate(conn, moscow_iso())
 
 
 BUSY_SECONDS = 15.0          # how long a connection waits for another one's write before «database is locked»

@@ -172,6 +172,15 @@ def test_own_stock_next_to_an_order_of_webmim_shows_none_of_that_order(tmp_path)
 
 
 # ---- a person's value ---------------------------------------------------------------------------------------------------------------
+# The owner 2026-11-07 (lane/order-webmim-list): a number typed on the order no longer stands for a row «с ОТХ»; a person types it for the row
+# itself (order_webmim.set_item_numbers). Each test below: the order's typed value leaves the row the source's, the row's typed value stays.
+
+def typed_for_row(conn, cid, number="", transfer="", goods="1"):
+    from tires_sync import order_webmim
+    card = orders.get_card(conn, cid)
+    item = next(i for i in card["items"] if i["goods_id"] == goods and i["id"] in oth_sale.taken_ids(conn, cid))
+    order_webmim.set_item_numbers(conn, cid, item["id"], number, transfer, LATER, "o")
+
 
 def test_a_typed_transfer_stays_in_the_card_and_the_row(tmp_path):
     conn = db(tmp_path)
@@ -180,7 +189,9 @@ def test_a_typed_transfer_stays_in_the_card_and_the_row(tmp_path):
     cid = new_order(conn)
     orders.update_card(conn, cid, {"transfer_number": "26R-МОЙ"}, LATER, "o")
     take(conn, cid)
-    assert numbers(conn, cid) == (NUMBER, "26R-МОЙ")
+    assert numbers(conn, cid) == (NUMBER, "26R-МОЙ")                               # the card keeps it
+    assert row_of(conn, cid) == (NUMBER, TRANSFER, DAY)                             # the row: the source's (2026-11-07)
+    typed_for_row(conn, cid, transfer="26R-МОЙ")
     assert row_of(conn, cid) == (NUMBER, "26R-МОЙ", DAY)
 
 
@@ -193,6 +204,8 @@ def test_a_typed_number_stays_and_its_own_day_goes_with_it(tmp_path):
     take(conn, cid)
     orders.update_card(conn, cid, {"webmim_number": "5999999"}, LATER, "o")         # over the copy: a person's from now on
     assert numbers(conn, cid)[0] == "5999999"
+    assert row_of(conn, cid) == (NUMBER, TRANSFER, DAY)                             # the row: the source's (2026-11-07)
+    typed_for_row(conn, cid, number="5999999")
     assert row_of(conn, cid) == ("5999999", TRANSFER, "2026-09-09")
     assert sheet.oth_invoice(conn, orders.get_card(conn, cid)) == [{"order": 0, "day": "2026-09-09"}]
 
@@ -200,6 +213,8 @@ def test_a_typed_number_stays_and_its_own_day_goes_with_it(tmp_path):
 def test_a_typed_transfer_on_own_stock_stays_in_the_row(tmp_path):
     conn = db(tmp_path)
     cid = own_stock_order(conn, typed={"transfer_number": "26R-МОЙ"})
+    assert row_of(conn, cid) == ("", "", "")                                        # the order's: not the row's (2026-11-07)
+    typed_for_row(conn, cid, transfer="26R-МОЙ")
     assert row_of(conn, cid) == ("", "26R-МОЙ", "")
 
 
@@ -209,6 +224,7 @@ def test_a_typed_transfer_survives_a_change_of_the_source(tmp_path):
     cid = new_order(conn)
     orders.update_card(conn, cid, {"transfer_number": "26R-МОЙ"}, LATER, "o")
     take(conn, cid)
+    typed_for_row(conn, cid, transfer="26R-МОЙ")
     orders.update_card(conn, old, {"transfer_number": "26R-НОВЫЙ"}, LATER, "o")
     assert numbers(conn, cid)[1] == "26R-МОЙ" and row_of(conn, cid)[1] == "26R-МОЙ"
 
@@ -488,6 +504,8 @@ def test_a_typed_number_on_own_stock_shows_its_day_in_the_card_too(tmp_path):
     conn.commit()
     cid = own_stock_order(conn)
     orders.update_card(conn, cid, {"webmim_number": "5999999"}, LATER, "o")
+    assert row_of(conn, cid) == ("", "", "")                                        # the order's: not the row's (2026-11-07)
+    typed_for_row(conn, cid, number="5999999")
     assert row_of(conn, cid) == ("5999999", "", "2026-09-09")
     assert sheet.oth_invoice(conn, orders.get_card(conn, cid)) == [{"order": 0, "day": "2026-09-09"}]
 

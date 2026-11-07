@@ -38,7 +38,10 @@ def base(tmp_path):
                  "'o', 'order', 'Оформить')", (card, NOW))                       # «Задачи» of the order (2026-10-31): go and come back with it
     conn.execute("INSERT INTO order_unsent (order_id, token, at, why, text) VALUES (?, 'tok-unsent', ?, 'Авито отказал', 'Добрый день')",
                  (card, NOW))                                                    # «Не дошло клиенту» (2026-10-31): goes and comes back with it
-    conn.commit()
+    conn.execute("INSERT INTO order_item_mim (item_id, order_id, webmim_number, at, author) VALUES (?, ?, '5550001', ?, 'o')", (item, card, NOW))
+    conn.execute("INSERT OR IGNORE INTO order_mim_base (order_id, item_id, qty, at) VALUES (?, 0, 0, ?)", (card, NOW))
+    conn.execute("INSERT INTO order_mim_extra (order_id, item_id, webmim_number, at, author) VALUES (?, ?, '5550002', ?, 'o')", (card, item, NOW))
+    conn.commit()                                                                # «Заказы WebMIM» (2026-11-07): the same
     return conn, fake, account, chats.get_chat(conn, chat["id"]), card
 
 

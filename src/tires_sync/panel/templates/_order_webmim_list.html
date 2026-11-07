@@ -1,0 +1,16 @@
+{# «Заказы WebMIM» (order_webmim, the owner 2026-11-07): every order of WebMIM and transfer of the order by source — с ОТХ (the order of purchase),
+   the order's own order of the supplier, the point's own stock (no numbers), a merge (its sources), the pieces added after the number (a second
+   order). No money. The forms: the numbers typed for one position «с ОТХ», the second numbers of the pieces added (the old ones lit). #}
+{% set wparts = webmim_parts_for(c.id) %}{% if wparts %}{% set may = can_post("order_item_mim") %}
+<section class="card order-webmim-parts" id="webmim-parts"><div class="card-body stack">
+<h3 style="margin:0">Заказы WebMIM</h3>
+{% if wparts|selectattr("needs_numbers")|list %}<p class="small text-warn" data-mimpart-warn>В заказ добавлены шины после оформления: впишите номер второго заказа WebMIM и перемещения. Старые номера подсвечены.</p>{% endif %}
+<div style="overflow-x:auto"><table class="table"><thead><tr><th>Откуда</th><th>№ заказа MIM</th><th>Перемещение</th><th>Дата счёта</th><th>Позиции</th></tr></thead><tbody>
+{% for p in wparts %}<tr data-mimpart="{{ p.kind }}"{% if p.highlight %} class="is-old" style="background:var(--warn-50)"{% endif %}>
+<td>{{ p.label }}{% if p.typed %} <span class="badge badge--neutral">вписан для строки</span>{% endif %}</td>
+<td class="mono">{{ p.number or "—" }}</td><td class="mono">{{ p.transfer or "—" }}</td><td>{{ p.day|day if p.day else "—" }}</td>
+<td>{% for x in p['items'] %}<div>{{ x.name }} × {{ x.qty }}
+{% if may and p.kind in ("oth", "stock") %}<form method="post" action="/orders/{{ c.id }}/items/{{ x.id }}/mim" class="row" style="gap:var(--s-1);flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input class="input input--xs mono" name="webmim_number" maxlength="60" placeholder="№ MIM для строки" aria-label="Номер WebMIM для строки"><input class="input input--xs mono" name="transfer_number" maxlength="40" placeholder="Перемещение" aria-label="Перемещение для строки"><button class="btn btn--secondary btn--xs">Вписать для строки</button></form>{% endif %}
+{% if may and p.kind == "extra" %}<form method="post" action="/orders/{{ c.id }}/items/{{ x.id }}/mim-extra" class="row" style="gap:var(--s-1);flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input class="input input--xs mono" name="webmim_number" maxlength="60" value="{{ p.number }}" placeholder="№ второго заказа MIM" aria-label="Номер второго заказа WebMIM"><input class="input input--xs mono" name="transfer_number" maxlength="40" value="{{ p.transfer }}" placeholder="Перемещение" aria-label="Перемещение второго заказа"><button class="btn btn--secondary btn--xs">Сохранить</button></form>{% endif %}
+</div>{% endfor %}</td></tr>{% endfor %}
+</tbody></table></div></div></section>{% endif %}
