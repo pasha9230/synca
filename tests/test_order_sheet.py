@@ -515,7 +515,8 @@ def test_the_script_knows_the_columns_of_the_panel():
         assert name in sheet.COLUMNS, name
     assert "body.secret !== secret" in code and "LockService" in code and "row.create" in code and "typeof value === 'string'" in code
     assert "row.shade" in code and "setBackground" in code and "row.extra" in code and "body.optional" in code   # 2026-11-02
-    assert "deleteRow" not in code and "row.delete" not in code                                                     # rows are never taken out
+    assert "row.delete" not in code                                                                               # rows are taken out
+    assert "deleteRow" not in code or "row.remove" in code      # only by the op «remove» (an order cancelled before the point, 2026-11-07)
     doc = doc_text()
     for name in sheet.COLUMNS:
         assert name in doc, name
