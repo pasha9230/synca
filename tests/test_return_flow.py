@@ -354,7 +354,8 @@ def test_the_new_view_of_the_point_shows_na_vozvrat_with_its_label(tmp_path, clo
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     assert is_new(page) and 'id="order-%d"' % cid in page
     block = page[page.index('id="order-%d"' % cid):].split("</article>")[0]
-    assert "data-return-label>Ожидает согласование возврата<" in block and "на возврат" in block and 'data-point-hint="returning"' in block
+    # the tab names the state; the tag «на возврат» only in a search (the owner 2026-11-07, ui-audit 74)
+    assert "data-return-label>Ожидает согласование возврата<" in block and 'data-point-hint="returning"' in block
     agreed(conn, cid)
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     assert 'data-return="%d"' % cid in page and "сумма возврата — закупка шин" in page

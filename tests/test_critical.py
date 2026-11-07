@@ -339,7 +339,8 @@ def test_the_vk_page_is_saved_with_the_chat_on_the_telegram_page(tmp_path):
     tok = login(client)
     post(client, "/connections/telegram/user-chat", tok, login="second1", chat_id="555", vk_peer="502")
     assert critical.vk_peers(conn) == {"second1": "502"} and order_notify.user_chats(conn) == {"second1": "555"}
-    assert 'value="502"' in client.get("/connections/telegram").get_data(as_text=True)
+    assert 'value="555"' in client.get("/connections/telegram").get_data(as_text=True)
+    assert 'value="502"' in client.get("/connections/vk").get_data(as_text=True)          # the VK page of a person: tab «ВК» (ui-audit 68)
 
 
 def test_a_purchase_change_goes_to_vk_of_who_may_see_it_with_its_own_bell_row_only(tmp_path, monkeypatch):

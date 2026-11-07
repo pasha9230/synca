@@ -67,6 +67,9 @@ def is_open(text, part):
 
 def owner(w, new_view=False):
     store.set_state(w["conn"], "ui_new.office", "all" if new_view else "off")
+    if new_view:                         # «Новый вид»: «Продажа и расчёты» from the point on (the owner 2026-11-07, ui-audit 9)
+        st = {s["code"]: s["id"] for s in orders.list_stages(w["conn"])}
+        w["conn"].execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (st["at_point"], w["card"]))
     w["conn"].commit()
     client = w["app"].test_client()
     tok = login(client)

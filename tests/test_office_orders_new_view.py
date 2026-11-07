@@ -142,10 +142,10 @@ def test_the_board_shows_the_webmim_number_first_and_the_model_bold(w):
     assert '<span class="o2-wm">№ 7712345</span>' in a and "внутр. № %d" % w["ids"]["a"] in a
     assert '<b class="o2-model">Nokian Hakkapeliitta 10 205/55 R16</b> × 4' in a
     b = re.search(r'data-card="%d".*?</a>' % w["ids"]["b"], text, re.S).group(0)
-    assert "№ WebMIM ещё нет" in b
+    assert "№ WebMIM ещё нет" not in b                                  # the first stages: no empty number (the owner 2026-11-07, ui-audit 31)
     assert 'id="board"' in text and 'data-stage="' in text and 'draggable="true"' in text          # app.js drag and drop: the same hooks
-    assert 'class="o2-stats"' in text and "Сумма в работе" in text
-    assert 'name="from"' in text and 'name="to"' in text and 'name="s"' in text                    # «Дата создания» and «Этап»
+    assert 'class="o2-stats"' in text and "Сумма в работе" not in text          # two tiles that filter (ui-audit 32)
+    assert 'name="from"' in text and 'name="to"' in text and 'name="s"' not in text                # «Этап»: in «Список» only (ui-audit 33)
 
 
 def test_the_date_of_creation_filters_the_board_the_list_and_the_file(w):
@@ -257,7 +257,7 @@ def test_the_card_has_three_columns_and_the_live_window(w):
     assert [int(x) for x in re.findall(r'data-cc="(\d)"', text)] == [0, 1, 2]
     assert "WebMIM № 7712345" in text and "внутр. № %d" % w["ids"]["a"] in text
     for hook in ("form[data-owin]".replace("form[data-owin]", "data-owin"), 'class="owin-stages"', "data-autosave", 'action="/orders/%d/note"' % w["ids"]["a"],
-                 "data-feed-tabs", 'id="wants"', 'id="money"'):
+                 "data-feed-tabs", 'id="wants"'):                               # «Продажа и расчёты»: from the point on (ui-audit 9)
         assert hook in text, hook
     assert json.loads(re.search(r"data-layout='([^']*)'", text).group(1)) == {"w": [1.15, 1.0, 0.85], "off": [False, False, False]}
 
