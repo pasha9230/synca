@@ -182,7 +182,7 @@ def test_the_dry_run_of_the_command_lists_and_changes_nothing(table, capsys):
     old = placed(conn)
     sheet.flush(conn, box, fake, NOW)
     cancel(conn, old)
-    conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (sheet.SINCE, LATEST))
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (sheet.SINCE, LATEST))
     conn.commit()
     before = conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (old,)).fetchone()[0]
     db_path = conn.execute("PRAGMA database_list").fetchone()[2]
