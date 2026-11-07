@@ -25,6 +25,7 @@ def register(app) -> None:
     def done(card_id, action, said):
         try:
             action()
+            get_conn().commit()
             flash(said)
         except orders.OrderError as err:
             get_conn().rollback()

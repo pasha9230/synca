@@ -59,29 +59,53 @@ def set_item_numbers(conn, card_id, item_id, number, transfer, now: str, author:
 
 # ---- (3) the pieces added after the order had its own number ------------------------------------------------------------------------------
 
-def snapshot(conn, card_id, now: str) -> bool:
-    """The pieces of the supplier's positions of an order with its own number, once (the mark: item 0). No commit. True when taken now."""
+def _number_of(card: dict) -> str:
+    return str(card.get("webmim_number") or card.get("webmim_id") or "")
+
+
+def _moving(conn, card_id) -> set:
+    """The positions whose pieces follow other orders (they gave tyres «с ОТХ» or to a merge, and may get them back by «Вернуть на ОТХ» or
+    «Разъединить»): their pieces coming back are never «added» (review 2026-11-07)."""
+    from . import order_merge, oth_sale
+    return oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)
+
+
+def snapshot(conn, card_id, now: str, fresh: bool = False) -> bool:
+    """The pieces of the supplier's positions of an order with its own number (the mark: item 0, with that number). Taken again when the
+    number is another one now (corrected, or made by «Оформить в WebMIM»: everything in the order then is in that order of WebMIM), or with
+    `fresh`; the numbers of a second order typed for the old number go with it. No commit. True when taken now."""
     from . import oth_sale
     card = orders.get_card(conn, int(card_id))
     if not own_number(conn, card):
         return False
-    if conn.execute("INSERT OR IGNORE INTO order_mim_base (order_id, item_id, qty, at) VALUES (?, 0, 0, ?)", (card["id"], now)).rowcount != 1:
+    number = _number_of(card)
+    mark = conn.execute("SELECT number FROM order_mim_base WHERE order_id = ? AND item_id = 0", (card["id"],)).fetchone()
+    if mark is not None and mark[0] == number and not fresh:
         return False
+    conn.execute("DELETE FROM order_mim_base WHERE order_id = ?", (card["id"],))
+    if mark is not None:
+        conn.execute("DELETE FROM order_mim_extra WHERE order_id = ?", (card["id"],))
+    conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?, 0, 0, ?, ?)", (card["id"], now, number))
     for item in oth_sale.supplier_items(conn, card):
-        conn.execute("INSERT OR IGNORE INTO order_mim_base (order_id, item_id, qty, at) VALUES (?,?,?,?)", (card["id"], item["id"], int(item["qty"]), now))
+        conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?,?,?,?,?)", (card["id"], item["id"], int(item["qty"]), now, number))
     return True
 
 
 def extras(conn, card: dict) -> Dict[int, dict]:
     """item → {qty added past the snapshot, webmim_number, transfer_number}; only while the order has its own number and a snapshot."""
     from . import oth_sale
-    base = {r[0]: r[1] for r in conn.execute("SELECT item_id, qty FROM order_mim_base WHERE order_id = ?", (card["id"],))}
-    if 0 not in base or not own_number(conn, card):
-        return {}
+    rows = conn.execute("SELECT item_id, qty, number FROM order_mim_base WHERE order_id = ?", (card["id"],)).fetchall()
+    base = {r[0]: r[1] for r in rows}
+    mark = next((r[2] for r in rows if r[0] == 0), None)
+    if mark is None or not own_number(conn, card) or mark != _number_of(card):
+        return {}                                                    # no snapshot, or one of another number (it is taken again on the next look)
+    moving = _moving(conn, card["id"])
     typed = {r[0]: (r[1], r[2]) for r in conn.execute(
         "SELECT item_id, webmim_number, transfer_number FROM order_mim_extra WHERE order_id = ?", (card["id"],))}
     out = {}
     for item in oth_sale.supplier_items(conn, card):
+        if item["id"] in moving:
+            continue
         added = int(item["qty"]) - int(base.get(item["id"], 0))
         if added >= 1:
             number, transfer = typed.get(item["id"], ("", ""))
@@ -124,6 +148,8 @@ def oth_note(conn, item_id) -> str:
     links = chain(conn, item_id)
     if not links or links[0] == 0:
         return "с ОТХ, свой остаток"
+    if links[-1] == 0:                                                 # a chain that began at the point's own stock: no order of purchase
+        return "с ОТХ, свой остаток, через %s" % ", ".join("№%d" % o for o in reversed(links) if o)
     first = oth_sale.purchase_order(conn, item_id) or links[-1]
     between = [o for o in reversed(links) if o and o != first]
     return "с ОТХ, заказ №%d" % first + (", через %s" % ", ".join("№%d" % o for o in between) if between else "")
@@ -160,9 +186,9 @@ def parts(conn, card: dict, take_snapshot: bool = False, now: str = "") -> List[
             continue
         if item["id"] in numbers:
             links = chain(conn, item["id"])
-            if not links or links[0] == 0:
+            if not links or links[0] == 0 or links[-1] == 0:                 # the point's own stock, also along a chain that began there
                 mine = typed.get(item["id"], {})
-                put("stock", "Свой остаток точки", None, mine.get("webmim_number", ""), mine.get("transfer_number", ""), "", item, qty, bool(mine))
+                put("stock", "Свой остаток точки" if links and links[0] == 0 else oth_note(conn, item["id"]), None, mine.get("webmim_number", ""), mine.get("transfer_number", ""), "", item, qty, bool(mine))
                 continue
             values = order_sheet._oth_values(conn, card, item["id"], numbers[item["id"]], set())
             first = oth_sale.purchase_order(conn, item["id"])
@@ -204,6 +230,7 @@ def migrate(conn, now: str) -> int:
     except Exception:                                                         # noqa: BLE001 - a base without the orders' tables
         return 0
     try:
+        conn.commit()                                                         # nothing of an earlier step left open in the migration's lock
         conn.execute("BEGIN IMMEDIATE")
         if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (MIGRATED,)).fetchone():
             conn.rollback()

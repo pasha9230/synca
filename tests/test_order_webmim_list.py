@@ -258,3 +258,53 @@ def test_the_card_shows_the_block_its_forms_and_a_point_sees_it_read_only(tmp_pa
     assert "5559999" in part and "/mim" not in part and "₽" not in part
     assert post(point, "/orders/%d/items/%d/mim" % (cid, item), "tok", webmim_number="1").status_code == 403
     assert order_webmim.item_numbers(conn, cid)[item]["webmim_number"] == "5559999"
+
+
+# ---- the review of 2026-11-07 ------------------------------------------------------------------------------------------------------------------
+
+def test_tyres_coming_back_from_oth_or_a_merge_are_never_added(tmp_path):
+    conn = db(tmp_path)
+    old = source(conn, number=OWN, transfer=OWN_TRANSFER)                      # A: its own order, its tyres on «На ОТХ»
+    cid = new_order(conn)
+    take(conn, cid)                                                           # B takes them all: A's position at 0
+    parts(conn, old)                                                          # A looked at: its snapshot at 0
+    before = rows(conn, old)
+    oth_sale.untake(conn, cid, oth_item(conn, cid), LATER, "o")              # back to A
+    assert [p for p in parts(conn, old) if p["kind"] == "extra"] == []
+    assert set(rows(conn, old)) == set(before)                                # its row is there, no second one
+
+
+def test_a_new_number_takes_the_snapshot_again(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    orders.update_card(conn, cid, {"webmim_number": "X-1"}, LATER, "o")
+    parts(conn, cid)                                                          # the snapshot of «X-1»: 4
+    orders.update_card(conn, cid, {"webmim_number": ""}, LATER, "o")
+    orders.update_item(conn, orders.get_card(conn, cid)["items"][0]["id"], 6, 6000, LATER, "o")
+    orders.update_card(conn, cid, {"webmim_number": "Y-2"}, LATER, "o")      # another number: everything is in it
+    assert [(p["kind"], p["items"][0]["qty"]) for p in parts(conn, cid)] == [("supplier", 6)]
+
+
+def test_the_button_of_webmim_takes_a_fresh_snapshot(tmp_path):
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?, 0, 0, ?, 'W1')", (cid, LATER))
+    conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?, ?, 2, ?, 'W1')", (cid, orders.get_card(conn, cid)["items"][0]["id"], LATER))
+    conn.commit()
+    webmim_create._write_order(conn, cid, {"id": "W1", "number": "W1", "status_text": "Новый"}, LATER, "o", "Заказ WebMIM оформлен")
+    assert [(p["kind"], p["items"][0]["qty"]) for p in parts(conn, cid)] == [("supplier", 4)]
+
+
+def test_a_chain_from_the_points_own_stock_is_own_stock_not_order_zero(tmp_path):
+    conn = db(tmp_path)
+    middle = new_order(conn, qty=2)
+    oth_manual.set_qty(conn, "1", orders.get_card(conn, middle)["point_id"], 2, T, "o")
+    [offer] = oth_sale.offers(conn, orders.get_card(conn, middle))[line(conn, middle)["id"]]
+    oth_sale.take(conn, middle, line(conn, middle)["id"], offer["from_item"], LATER, "o")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, "oth"), middle))
+    conn.commit()
+    last = new_order(conn, qty=2)
+    oth_sale.take(conn, last, line(conn, last)["id"], oth_item(conn, middle), LATER, "o")
+    note = rows(conn, last)[order_sheet.key(last, oth_item(conn, last))]["Примечание"]
+    assert note.startswith("с ОТХ, свой остаток, через №%d" % middle) and "№0" not in note
+    assert [p["kind"] for p in parts(conn, last)] == ["stock"]
