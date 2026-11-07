@@ -579,11 +579,23 @@ def place(conn, card_id, client, server: str, now: str, today: date, author: str
     result = _press(conn, card_id, client, server, now, today, author, sleep, clock, seen)
     result["stage_error"] = ""
     if result["ok"]:                                    # «done» once: a done order refuses a press (_claim)
+        _invoice(conn, card_id, client, now, server)
         line, refused = _to_placed(conn, card_id, now, author)
         if line:
             result["text"] += " " + line
         result["stage_error"] = refused
     return result
+
+
+def _invoice(conn, card_id, client, now: str, server: str) -> None:
+    """The invoice's number at once (the owner 2026-11-07: «сразу забирать № счёта после оформления»): one quick GET of the order made
+    (webmim_invoice.after_place). Never fails the press: the order is made already."""
+    try:
+        from . import webmim_invoice
+        webmim_invoice.after_place(conn, card_id, client, now, server)
+    except Exception:                                                 # noqa: BLE001
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the invoice number of order %s after WebMIM", card_id)
 
 
 def _to_placed(conn, card_id, now: str, author: str) -> Tuple[str, str]:
