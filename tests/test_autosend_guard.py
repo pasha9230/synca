@@ -92,8 +92,8 @@ def test_the_point_cannot_take_the_mark_of_a_pending_auto_message(env):
 
 
 def test_the_point_s_own_message_goes_as_before(env):
-    r = post(env["point"], "/chats/%d/send" % env["row"], "tok", text="Шины на точке, ждём вас", reply_token="a1b2c3d4e5f6a1b2c3d4e5f6")
-    assert r.status_code == 302 and status(env, "a1b2c3d4e5f6a1b2c3d4e5f6") == "sent"
+    r = post(env["point"], "/chats/%d/send" % env["row"], "tok", text="Шины на точке, ждём вас", reply_token="point-own-reply-token")
+    assert r.status_code == 302 and status(env, "point-own-reply-token") == "sent"
 
 
 # ---- «Отправил вручную» of «Не дошло клиенту» ----------------------------------------------------------------------------------------------
