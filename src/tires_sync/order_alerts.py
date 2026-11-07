@@ -65,6 +65,24 @@ def bell_row(row: dict) -> bool:
     return True
 
 
+POINT_ROWS = ("question", "return")                             # routes_alerts.point_rows: «Клиент забрал?», «возврат отмечен, ждёт суммы»
+POINT_RECORDS = {                                                # the point's own records of the journal (the owner 2026-11-07)
+    "point": ("Поступили шины по заказу",),                      # order_manager.ARRIVAL, ARRIVAL_INTERCITY
+    "field": ("Возврат с ОТХ согласован с поставщиком", "Согласование возврата с поставщиком отменено"),     # order_oth.agree, unagree
+}
+
+
+def point_row(row: dict) -> bool:
+    """A row the manager of a point (or «Работать как точка») is shown: only what the point does (the owner 2026-11-07: «Убери у точек все
+    лишние уведомления»), a list of what is allowed, not of what is not: its questions and its return row (routes_alerts.point_rows), «Поступили
+    шины по заказу …», the return agreed with its date (акт МХ-3) or cancelled. Every record of the office is no row of the point: its bell,
+    counter, «Уведомления», notify.js, the dots. Only the showing: the journal keeps them, the office sees them as before."""
+    kind, text = row.get("kind"), str(row.get("text") or "")
+    if kind in POINT_ROWS:
+        return True
+    return isinstance(row.get("id"), int) and text.startswith(POINT_RECORDS.get(kind, ()))
+
+
 def check_level(level: str) -> str:
     if level not in LEVELS:
         raise AlertError("Неизвестный цвет записи: %s." % level)
@@ -286,7 +304,7 @@ def counts(conn, login: str) -> Dict[str, int]:
     mine = _mine(conn, login, staff, quiet)
     result = {level: 0 for level in ALERT_LEVELS}
     for event in open_alerts(conn, login):
-        if not _hidden(event, quiet) and not _not_mine(event, mine):
+        if not _hidden(event, quiet) and not _not_mine(event, mine) and (staff or point_row(event)):     # a point: its own only (2026-11-07)
             result[event["level"]] += 1
     return result
 

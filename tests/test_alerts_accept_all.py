@@ -120,15 +120,16 @@ def test_rows_of_a_point_stay_for_a_point_manager_and_a_point_user_accepts_only_
     a, b = card(conn, "Свой"), card(conn, "Чужой")
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (mine, a))
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (foreign, b))
-    ra = event(conn, a, "notify", "Оповещение не отправлено: свой")
-    rb = event(conn, b, "notify", "Оповещение не отправлено: чужой")
+    from tires_sync import order_manager as mgr                               # a row a point is shown (order_alerts.point_row, the owner 2026-11-07)
+    ra = event(conn, a, "point", mgr.ARRIVAL % (a, "Юнона", "отправлено"), level="yellow")
+    rb = event(conn, b, "point", mgr.ARRIVAL % (b, "Руставели", "отправлено"), level="yellow")
     conn.commit()
     pt = other_user(app, conn, "yun", role="point", point_id=mine)
     # the staff's page also holds the orders of both: a point's ids posted by a point manager are checked against that manager's own page
     r = pt.post("/alerts/accept-all", data={"csrf": "tok2", "ids": [ra, rb]})
     assert r.status_code == 302
     assert ra not in open_ids(conn, "yun") and rb in open_ids(conn, "owner") and ra in open_ids(conn, "owner")
-    assert conn.execute("SELECT COUNT(*) FROM order_event_ack WHERE event_id = ? AND login = 'yun'", (rb,)).fetchone()[0] == 0
+    assert rb in open_ids(conn, "yun")                                             # another point's row: not accepted by this one
 
 
 def test_chat_based_rows_and_handoffs_are_left_out(tmp_path):
@@ -203,9 +204,13 @@ def test_a_point_manager_accepts_a_yellow_row_of_its_order_and_a_handoff_blocks_
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (mine, a))
     hand = event(conn, a, "handoff", mgr.ASK + " Иван", level="yellow")
     yellow = event(conn, a, "reserve", "Оповещение о конце резерва")
+    arrived = event(conn, a, "point", mgr.ARRIVAL % (a, "Юнона", "отправлено"), level="yellow")    # the point's row (2026-11-07)
     pt = other_user(app, conn, "yun", role="point", point_id=mine)
-    pt.post("/alerts/accept-all", data={"csrf": "tok2", "ids": [yellow]})
-    assert yellow not in open_ids(conn, "yun")                                    # no block for a point: it never sees the handoff row
+    pt.post("/alerts/accept-all", data={"csrf": "tok2", "ids": [arrived]})
+    assert arrived not in open_ids(conn, "yun")                                   # no block for a point: it never sees the handoff row
+    conn.execute("DELETE FROM order_event_seen")                                   # the staff's part below: as it was
+    conn.execute("DELETE FROM order_event WHERE id = ?", (arrived,))
+    conn.commit()
     # the staff: the yellow above the handoff stays; the green «Заказ создан» below it is no row since 2026-11-05 and stays as it was
     ids, _ = shown(client)
     assert ids == [yellow]
