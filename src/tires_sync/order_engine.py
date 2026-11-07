@@ -211,7 +211,19 @@ def _finish(conn, task: dict, status: str, result: str, now: str, author: str, t
     orders.add_event(conn, task["order_id"], now, author, "rule", "%s: %s%s%s" % (task["title"], STATUS_NAMES[status], " (%s)" % result if result else "",
                                                                        ":\n" + text if text else ""),   # a sent message: its text is in the journal
                      level="red" if status == "error" else "grey")            # by the status: the client's words never colour the record
+    if status == "done":
+        resolve_done(conn, task, now, author)
     conn.commit()
+
+
+def resolve_done(conn, task: dict, now: str, author: str) -> None:
+    """The task is done: its earlier red records «не подготовлена / не отправлено …» close by themselves (order_alerts.resolve_message_done).
+    Never raises: a send that went is never undone by its alerts."""
+    from . import order_alerts
+    try:
+        order_alerts.resolve_message_done(conn, task, {"client": "клиенту", "manager": "точке"}.get(audience(conn, task), ""), now, author)
+    except Exception:                                              # noqa: BLE001
+        logging.getLogger("tires_sync.orders").exception("the alerts of done task %s", task.get("id"))
 
 
 def run_task(conn, task_id, now: str, author: str, chain: Tuple[int, ...] = ()) -> str:
@@ -520,6 +532,7 @@ def sent_by_hand(conn, task_id, now: str, author: str) -> None:
     token = task_token(task)
     conn.execute("UPDATE order_unsent SET closed_at = ?, closed_by = ? WHERE token = ? AND closed_at IS NULL", (now, author, token))
     orders.add_event(conn, task["order_id"], now, author, "rule", "%s: %s (отправлено вручную)" % (task["title"], STATUS_NAMES["done"]), level="grey")
+    resolve_done(conn, task, now, author)
     conn.commit()
     chats._inbox_close(conn, token, now, "Итог: отправлено вручную из «Сообщений по заказу» (%s)." % author, alerts=True)
 

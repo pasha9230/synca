@@ -99,8 +99,9 @@ def sent_by_hand(conn, order_id, kind: str, item_id, now: str, who: str) -> None
         token = conn.execute("SELECT token FROM order_unsent WHERE id = ?", (int(item_id),)).fetchone()[0]
         task = order_engine.task_of_token(conn, token)       # the rule's message of that send (the review): ticked off too — never a second
         if task is not None and task["status"] in ("pending", "error"):    # «Отправить клиенту в Авито» of the same text afterwards
-            conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status IN ('pending', 'error')",
-                         ("отправлено вручную", now, task["id"]))
+            if conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ? AND status IN ('pending', 'error')",
+                            ("отправлено вручную", now, task["id"])).rowcount == 1:
+                order_engine.resolve_done(conn, task, now, who)       # its red «не отправлено» are fixed (order_alerts)
     elif kind == "task":
         try:
             task = order_engine.get_task(conn, int(item_id))
@@ -114,6 +115,7 @@ def sent_by_hand(conn, order_id, kind: str, item_id, now: str, who: str) -> None
         if cur.rowcount != 1:
             conn.rollback()
             raise UnsentError("Это сообщение уже отмечено.")
+        order_engine.resolve_done(conn, task, now, who)
     else:
         raise UnsentError("Неизвестное сообщение.")
     orders.add_event(conn, order_id, now, who, "chat", "Сообщение клиенту отправлено вручную (не дошло из панели)", level="grey")
