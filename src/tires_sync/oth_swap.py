@@ -80,9 +80,9 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     conn.execute("UPDATE avito_chat SET order_id = NULL, unlinked = 1 WHERE order_id = ?", (a,))
     from . import order_autosend                                       # «Автосообщение клиенту» set for the old client: never to the new one (night-build)
     sends = order_autosend.of_order(conn, a)
-    def unsent(i):                                                    # «sending» with no send mark yet: nothing went, it is cancelled as well
+    def not_started(i):                                               # «sending» with no send mark yet: nothing went, it is cancelled as well
         return i["status"] == "sending" and not conn.execute("SELECT 1 FROM chat_send_log WHERE token = ?", (i["token"],)).fetchone()
-    autosends = [i["id"] for i in sends if (i["status"] in ("pending", "waiting") or unsent(i))
+    autosends = [i["id"] for i in sends if (i["status"] in ("pending", "waiting") or not_started(i))
                  and order_autosend._cancel(conn, i, "клиент сменён", now, author, (i["status"],))]
     send_tasks = [i["task_id"] for i in sends if i.get("task_id")]     # «напишите клиенту вручную» with the old client's text: never for the new one
     if send_tasks and conn.execute("UPDATE callback_task SET cancelled_at = ?, done_by = ? WHERE id IN (%s) AND done_at IS NULL AND cancelled_at IS NULL"

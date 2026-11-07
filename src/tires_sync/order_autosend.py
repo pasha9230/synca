@@ -207,6 +207,9 @@ def _task(conn, item: dict, why: str, note: str, now: str) -> None:
         return
     if get(conn, item["id"])["status"] == "cancelled":               # cancelled meanwhile (the client changed): no task with its old text
         return
+    mark = conn.execute("SELECT c.order_id FROM chat_send_log l LEFT JOIN avito_chat c ON c.id = l.chat_row WHERE l.token = ?", (item["token"],)).fetchone()
+    if mark is not None and mark[0] != item["order_id"]:             # its chat is no longer the order's (oth_swap: another client now): never
+        return                                                       # «напишите клиенту вручную» with the old client's text (night-build)
     from . import order_notify, tasks
     try:
         owner = order_notify.get_owner_login(conn)

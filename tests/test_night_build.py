@@ -86,3 +86,19 @@ def test_a_run_that_lost_its_message_to_the_swap_sends_nothing_and_makes_no_task
         mp.undo()
     assert order_autosend.get(conn, autosend)["status"] == "cancelled"
     assert not conn.execute("SELECT 1 FROM callback_task WHERE order_id = ? AND kind = 'other' AND cancelled_at IS NULL", (a,)).fetchone()
+
+
+
+def test_a_send_with_its_mark_that_fails_after_the_swap_makes_no_task_for_the_new_client(tmp_path):
+    conn = db(tmp_path)
+    a = card_at(conn, "oth", T)
+    autosend = _set_for_the_old_client(conn, a)
+    row = chat(conn, a)
+    conn.execute("UPDATE order_autosend SET status = 'sending' WHERE id = ?", (autosend,))
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES (?, ?, ?, 'o', 'sending')",
+                 (order_autosend.get(conn, autosend)["token"], row, T))
+    conn.commit()
+    oth_sale.to_new_client(conn, a, "Пётр", NEW_PHONE, LATER, "o")                # the old chat leaves A
+    order_autosend._failed(conn, order_autosend.get(conn, autosend), "Авито не принял", order_autosend.BY_HAND, "2026-10-30T10:05:00")
+    assert not conn.execute("SELECT 1 FROM callback_task WHERE order_id = ? AND kind = 'other' AND cancelled_at IS NULL AND done_at IS NULL",
+                            (a,)).fetchone()
