@@ -69,7 +69,8 @@ def _to_bell(conn, now: datetime, today: str) -> Optional[str]:
     if store.get_state(conn, BELL_KEY) == today:
         return None
     people = order_alerts.owner_people(conn)
-    done = critical.note_once(conn, BELL_KEY, today, people, text(conn, now), now.isoformat(timespec="seconds"))
+    at = now.isoformat(timespec="seconds")
+    done = critical.note_once(conn, BELL_KEY, today, people, text(conn, now), at, critical.day_later(at))     # a day in the bell (2026-11-07)
     if done == "already":
         return None
     if done == "failed":
