@@ -123,10 +123,19 @@ def _point_route(point: dict) -> dict:
     return {"channel": "vk", "to": str(point["vk_peer_id"]), "why": point["name"]}
 
 
+POINT_WORDS = re.compile(r"\b(?:WebMIM|MIM|МИМ)\b")
+
+
+def for_point(text: str) -> str:
+    """An alert as a point reads it (VK, «Рабочее место»): WebMIM is never named to a point (the owner 2026-10-30, lane point-vk-webmim) —
+    «номер заказа WebMIM» reads «номер заказа у поставщика». The office's words (the journal, Telegram, the bell) are not changed."""
+    return POINT_WORDS.sub("у поставщика", str(text or ""))
+
+
 def _leave_on_point(conn, way: dict, card: dict, text: str, now: str, failure: str) -> str:
     """An alert of a point's account order that could not go: kept on the point's «Рабочее место» and in the journal; the owner is not told."""
     try:
-        points.add_note(conn, way["own_point"], "alert", text, now, card["id"])
+        points.add_note(conn, way["own_point"], "alert", for_point(text), now, card["id"])
         kept = "оставлено точке на «Рабочем месте»"
     except Exception as err:                                       # a busy base: the red record of the journal is what is left
         conn.rollback()
@@ -182,7 +191,7 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
             if sender is None:
                 raise vk_send.VkError("ВК не настроен: нет ключа сообщества.")
             from .order_manager import signed
-            body = signed(text)                                    # the bot writes it: «(бот) » (the owner 2026-10-24)
+            body = signed(for_point(text))                         # the bot writes it: «(бот) » (the owner 2026-10-24); no WebMIM to a point
             sender(way["to"], body, random_id=vk_send.stable_id("notify|%s|%s|%s|%s" % (card["id"], way["to"], body, now[:13])))
             _event(conn, card["id"], now, "Оповещение отправлено: ВК → точка «%s»" % way["why"])
             return "отправлено в ВК (%s)" % way["why"]
@@ -190,7 +199,7 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
             failure = "ВК → точка «%s»: %s" % (way["why"], err)
     elif way["channel"] == "panel":                                # the point's own «Рабочее место»; the staff get no alert of it (grey)
         try:
-            points.add_note(conn, int(way["to"]), "alert", text, now, card["id"])
+            points.add_note(conn, int(way["to"]), "alert", for_point(text), now, card["id"])
             _event(conn, card["id"], now, "Оповещение показано точке «%s» в панели" % way["why"])
             return "показано точке в панели (%s)" % way["why"]
         except Exception as err:                                   # a busy base: the owner is told, as when nobody can be written to
