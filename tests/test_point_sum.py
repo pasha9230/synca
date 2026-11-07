@@ -95,3 +95,55 @@ def test_the_point_phone_orders_show_the_sum_of_the_order_window(orders_world):
     assert seen[m["stock_new"]] == window_sum(w["point"], m["stock_new"])     # the one number of the order window
     assert seen[m["stock_talk"]] is None                                   # no positions: no line
     assert m["stock_oth"] in seen and seen[m["stock_oth"]] is None         # «На ОТХ», folded into a column: the client is gone, no sum
+
+
+# --- the computer (the owner 2026-11-07, lane point-sum-board): the point's board of «Заказы» and the order card it opens -------------------
+# Replaces the decision of 2026-10-26 «на Заказах точки нет сумм»: the point sees «Итого» of each own order; never the purchase, the profit,
+# WebMIM, «Сумма в работе» nor the sums of the columns.
+
+def desk(page):
+    return page[page.index('class="pt-desk"'):]
+
+
+def desk_cards(page):
+    board = desk(page)
+    out = {}
+    for cid in re.findall(r'data-card="(\d+)"', board):
+        card = board[board.index('data-card="%s"' % cid):]
+        out[int(cid)] = card[:card.index("</a>")]
+    return out
+
+
+@pytest.mark.parametrize("view", ["old", "new"])
+def test_the_point_desk_board_shows_the_sum_of_the_order_window_on_every_column(orders_world, view):
+    from test_point_orders import _order
+    w, m = orders_world, orders_world["made"]
+    cancelled = _order(w["conn"], w["stages"], w["alfa"], "cancel", "Свой отказ", deal_kind="stock")
+    for cid in (m["stock_new"], m["stock_at"], m["stock_done"], m["stock_oth"], cancelled):
+        item(w["conn"], cid, goods=orders.POINT_GOODS)
+    store.set_state(w["conn"], "ui_new.point", "all" if view == "new" else "off")
+    w["conn"].commit()
+    page = w["point"].get("/orders?v=board").get_data(as_text=True)
+    no_office_money(page)
+    assert "Сумма в работе" not in page and "WebMIM" not in desk(page)
+    cards = desk_cards(page)
+    for cid in (m["stock_new"], m["stock_at"], m["stock_done"], cancelled):        # «Отмена» keeps its sum too (the owner 2026-11-07)
+        shown = re.search(r"data-point-sum>Итого <b>([^<]+)</b>", cards[cid])
+        assert shown and shown.group(1) == SALE, (cid, cards[cid])
+    assert window_sum(w["point"], m["stock_new"]) == SALE                          # the one number of the order window
+    assert "data-point-sum" not in cards[m["stock_talk"]]                         # no positions: no line
+    assert "data-point-sum" not in cards[m["stock_oth"]]                          # «На ОТХ»: the client is gone, no sum
+    plain = re.sub(r'<span class="small" data-point-sum>Итого <b>[^<]+</b></span>', "", desk(page))
+    assert "₽" not in plain                                                       # no other sum: not the columns', not «Сумма в работе»
+
+
+@pytest.mark.parametrize("view", ["old", "new"])
+def test_the_order_card_the_point_opens_shows_itogo_and_no_office_money(orders_world, view):
+    w, m = orders_world, orders_world["made"]
+    item(w["conn"], m["stock_new"], goods=orders.POINT_GOODS)
+    store.set_state(w["conn"], "ui_new.point", "all" if view == "new" else "off")
+    w["conn"].commit()
+    page = w["point"].get("/orders/%d" % m["stock_new"]).get_data(as_text=True)
+    assert window_sum(w["point"], m["stock_new"]) == SALE
+    assert "Итого: <b>%s</b>" % SALE in page or "Итого <b>%s</b>" % SALE in page
+    no_office_money(page)                       # (the window's «Доставка и WebMIM» was there before this change: a task of its own)
