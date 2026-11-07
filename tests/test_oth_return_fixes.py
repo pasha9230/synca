@@ -14,7 +14,7 @@ from test_oth_client_swap import LATER, LATEST, T, _b, _sell, new_order, point_i
 from test_oth_flow2 import _two_positions
 from test_oth_seventh_day import ENTERED, on_oth, started
 from test_order_reserve import card_at, db, stage
-from tires_sync import order_merge, order_oth, order_report, orders, oth_sale, oth_stock, oth_swap, tasks
+from tires_sync import order_merge, order_oth, order_rules as rules, order_report, orders, oth_sale, oth_stock, oth_swap, tasks
 
 TODAY = date(2026, 10, 21)
 NOW = "2026-10-21T11:00:00"
@@ -78,6 +78,15 @@ def test_1_a_real_return_to_the_supplier_stays_returned(tmp_path):
     assert conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ?", (cid,)).fetchall() == [(other, 1)]
 
 
+def test_1_a_mark_and_a_real_return_of_one_position_only_the_mark_is_on_sale(tmp_path):
+    conn, cid, item = marked_position(tmp_path, qty="1")
+    order_oth.mark_returned(conn, item, "2026-10-21T12:00:00", "o", "1")            # the same position, one row of oth_return: 2
+    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone()[0] == 2
+    close(conn, cid, "не возвращаем")
+    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone()[0] == 1     # the real return stays
+    assert oth_stock.pieces(conn, manual=False) == {"1": 3, "2": 2}
+
+
 def test_1_the_whole_order_on_return_is_on_sale_again_on_oth(tmp_path):
     conn, cid = whole_returning(tmp_path)
     assert "1" not in order_oth.goods_on_oth(conn)                                  # «Согласуем»: not on sale
@@ -89,6 +98,13 @@ def test_1_the_whole_order_on_return_is_on_sale_again_on_oth(tmp_path):
     assert not conn.execute("SELECT 1 FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (cid,)).fetchone()
     assert order_oth.ask_seventh_day(conn, "2026-10-28T12:30:00") == 0             # the new stay: the 7th day never sends it back again
     assert orders.get_card(conn, cid)["stage"]["code"] == "oth"
+
+
+def test_1_back_on_oth_fires_no_rule_of_the_stage(tmp_path):
+    conn, cid = whole_returning(tmp_path)
+    rules.add_rule(conn, stage(conn, "oth"), "enter", "0", "move", None, str(stage(conn, "cancel")), "auto", None)
+    close(conn, cid, "не возвращаем")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "oth"                     # a rule (a message to the client too) would fire here
 
 
 def test_1_an_order_with_tyres_given_to_the_supplier_stays_and_says_so(tmp_path):
