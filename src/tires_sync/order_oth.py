@@ -144,9 +144,8 @@ def mark_returned(conn, item_id, now: str, author: str, qty=None) -> None:
     if pieces > item["left"]:
         raise OthError("Можно вернуть не больше %d шт.: в заказе %d шт., уже возвращено %d шт." % (item["left"], item["ordered"], item["returned_qty"]))
     _add_returned(conn, item, pieces, now, author)
-    if store_value(conn, _item_key(item["item_id"], item["since"])):              # a real return now: the seventh day leaves it (_HELD_SQL); the mark
-        conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)",     # «На возврат» stays: its pieces are still at the point (review 2026-11-07)
-                     (REAL_KEY % (int(item["item_id"]), re.sub(r"\D", "", item["since"] or "")), now))
+    # a real return now: the seventh day leaves the order (_HELD_SQL: more pieces in oth_return than the mark); the mark «На возврат» stays,
+    # its pieces are still at the point (review 2026-11-07)
     total = int(item["returned_qty"]) + pieces
     whole = not item["returned_qty"] and total == int(item["ordered"])
     orders.add_event(conn, item["order_id"], now, author, "field", "ОТХ: возвращено поставщику — %s, %d шт.%s" % (
@@ -603,9 +602,8 @@ def ask_due(card: dict, now: str) -> bool:
 _HELD_SQL = ("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth' "
              "AND c.entered_at >= ? AND NOT EXISTS (SELECT 1 FROM oth_return_plan r WHERE r.order_id = c.id) "
              # a real «Вернуть поставщику» keeps the order; a position moved by hand (its key of this stay, ITEM_KEY) does not (the owner 2026-11-05)
-             "AND NOT EXISTS (SELECT 1 FROM oth_return r WHERE r.order_id = c.id AND (NOT EXISTS (SELECT 1 FROM app_state a WHERE a.key = "
-             "'oth_item_return:' || r.item_id || ':' || replace(replace(replace(c.entered_at, '-', ''), ':', ''), 'T', '')) OR EXISTS (SELECT 1 FROM "
-             "app_state a WHERE a.key = 'oth_real_return:' || r.item_id || ':' || replace(replace(replace(c.entered_at, '-', ''), ':', ''), 'T', '')))) "
+             "AND NOT EXISTS (SELECT 1 FROM oth_return r WHERE r.order_id = c.id AND r.qty > COALESCE((SELECT CAST(json_extract(a.value, '$.qty') AS INTEGER) "
+             "FROM app_state a WHERE a.key = 'oth_item_return:' || r.item_id || ':' || replace(replace(replace(c.entered_at, '-', ''), ':', ''), 'T', '')), 0)) "
              "AND NOT EXISTS (SELECT 1 FROM order_intercity i WHERE i.order_id = c.id AND i.enabled = 1) ")
 
 
@@ -919,7 +917,6 @@ AGREE_AFTER = timedelta(days=6, hours=12)
 AGREE_KEY = "oth_agree_due:%d:%s"                # per order and stay on «На ОТХ»: told|<at>
 TASK_DAYS_KEY = "orders.return_task_days"        # «Срок задачи на возврат», working days; the owner sets it (orders_settings)
 TASK_DAYS_DEFAULT, TASK_DAYS_MAX = 2, 30      # the owner 2026-11-04: 2 working days from the move
-REAL_KEY = "oth_real_return:%d:%s"               # per position and stay: a real «Вернуть поставщику» of a position that also has a mark «На возврат»
 ITEM_KEY = "oth_item_return:%d:%s"               # per position and stay on «На ОТХ»: {"qty", "at", "by", "task"} — a position moved by hand, «Согласуем» while its task is open
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 

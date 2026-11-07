@@ -439,3 +439,16 @@ def test_3_a_marked_position_is_not_given_back_past_its_mark(tmp_path):
     assert order_oth.pieces_here(conn, orders.get_card(conn, cid))[first] == 2  # the 2 marked are still at the point, waiting
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
     assert order_oth.item_mark(order_oth.item_marks(conn), first, orders.get_card(conn, cid)["entered_at"])
+
+
+
+def test_3_an_undone_real_return_of_a_marked_position_leaves_the_seventh_day_as_it_was(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    started(conn)
+    conn.execute("UPDATE order_card SET entered_at = ? WHERE id = ?", (ENTERED, cid))
+    conn.commit()
+    first = card["items"][0]["id"]
+    order_oth.item_to_return(conn, first, "2026-10-21T10:00:00", "o", "1")
+    order_oth.mark_returned(conn, first, "2026-10-21T11:00:00", "o", "1")       # by mistake
+    order_oth.unmark_returned(conn, first, "2026-10-21T11:05:00", "o", "1")     # «Отменить»: only the mark is left
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
