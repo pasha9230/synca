@@ -427,7 +427,9 @@ def register(app) -> None:
                           "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
                           "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"])),     # «Шины с ОТХ, заказ №…»
                           "intercity": order_intercity.on(card) and code not in order_oth.RETURNING,     # «В другой город» (2026-11-02)
-                          "labels": order_intercity.labels(conn, card["id"]) if order_intercity.on(card) else []})
+                          "labels": order_intercity.labels(conn, card["id"]) if order_intercity.on(card) else [],
+                          # «Итого» (the owner 2026-11-07): the order window's own sum of the positions already read; «На ОТХ»: no client, no sum
+                          "sale": orders.totals(card["items"])["sale"] if card["items"] and code not in order_oth.RETURNING else None})
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over

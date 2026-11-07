@@ -196,6 +196,9 @@ def test_the_board_of_a_point_shows_no_sums_and_the_card_shows_the_clients_price
     m = w["manager"]
     for view in ("board", "list"):
         page = _text(m.get("/orders?v=%s" % view))
+        phone = page[page.index("data-point-orders"):page.index('class="pt-desk"')]      # the phone's list: «Итого» of the order only (2026-11-07)
+        assert "Сумма в работе" not in phone and "₽" not in re.sub(r"<span class=\"mp-sub\" data-point-sum>Итого <b>[^<]+</b></span>", "", phone), view
+        page = page.replace(phone, "")
         assert "Сумма в работе" not in page and "20%s000" % NBSP not in page and "₽" not in page, view
     card = _text(m.get("/orders/%d" % w["order_a"]))
     assert re.search(r'value="5000(\.0+)?"', card) and "20%s000" % NBSP in card            # the client's prices: the point takes the cash
