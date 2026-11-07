@@ -2,6 +2,8 @@
 of the whole filter, the person's own columns (user_pref), and no purchase nor profit for a person without the right «money» (a point)."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from panel_helpers import make_app, shared_mark_of
@@ -127,15 +129,23 @@ def test_a_column_the_saved_order_does_not_name_comes_at_its_place(panel):
 def test_a_point_never_gets_the_purchase_nor_the_profit(panel):
     app, conn, client = panel
     pid, other = point(conn), point(conn, name="Дельта")
-    mine = card(conn, client_name="Свой", point_id=pid)
-    card(conn, client_name="Чужой", point_id=other)
-    sold(conn, mine)
+    mine = card(conn, client_name="Свой", point_id=pid, deal_kind="stock")       # the point's own sale: in its list on any stage
+    card(conn, client_name="Чужой", point_id=other, deal_kind="stock")
     manager, _ = person(app, "point", point_id=pid)
-    html = manager.get("/orders?v=list").get_data(as_text=True)
-    assert "Свой" in html and "Чужой" not in html
-    assert not any(h in html for h in MONEY_HEADS) and "Итого" not in html and "orders-total-line" not in html
-    assert rub(16000) not in html and "Цена MIM" not in html and "Прибыль" not in html
-    assert "Цена продажи" not in html and "Сумма продажи" not in html and "₽" not in html     # no sums for a point (the owner 2026-10-26)
+    row = 'data-href="/orders/%d"' % mine
+
+    def no_money(html):     # the only sum a point sees: «Итого» of its own sale on the phone's card (data-point-sum, the owner 2026-10-30)
+        rest = re.sub(r"<span class=\"mp-sub\" data-point-sum>Итого <b>[^<]*</b></span>", "", html)
+        assert not any(h in rest for h in MONEY_HEADS) and "Итого" not in rest and "orders-total-line" not in rest
+        assert rub(16000) not in rest and "Цена MIM" not in rest and "Прибыль" not in rest
+        assert "Цена продажи" not in rest and "Сумма продажи" not in rest and "₽" not in rest     # no sums for a point (the owner 2026-10-26)
+
+    for stage in ("new", "done"):                                         # an open stage and the sold order: the same check
+        if stage == "done":
+            sold(conn, mine)
+        html = manager.get("/orders?v=list").get_data(as_text=True)
+        assert row in html and "Чужой" not in html, stage                  # the order is really in the list
+        no_money(html)
     every = list(orders_list.COLUMNS)                                     # a saved choice with the money: not taken, not shown
     assert manager.post("/orders/list/columns", data={"csrf": "tok", "order": every, "shown": every}).status_code == 302
     saved = user_prefs.get(conn, "point1", orders_list.PREF_KEY)
