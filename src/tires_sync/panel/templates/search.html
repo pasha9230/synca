@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Поиск · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Поиск</h1><p class="sub">{% if result.q %}По запросу «{{ result.q }}»{% else %}Номер заказа (№123), чата (Ч-123), WebMIM, телефон, имя клиента, текст переписки за 3 месяца, размер, модель или код шины.{% endif %}</p></div></header>
+<header class="page-head"><div><h1>Поиск</h1><p class="sub">{% if result.q %}По запросу «{{ result.q }}»{% else %}Номер заказа (№123), чата (Ч-123){% if current_user().role != "point" %}, WebMIM{% endif %}, телефон, имя клиента, текст переписки за 3 месяца, размер, модель или код шины.{% endif %}</p></div></header>
 {% for g in result.groups %}
 <section class="card search-group"><div class="card-body">
 <div class="search-group-head"><h2>{{ g.title }}</h2><a href="{{ g.all_url }}">Все в разделе «{{ g.title }}» &rsaquo;</a></div>

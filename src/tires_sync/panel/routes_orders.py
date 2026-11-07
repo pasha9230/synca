@@ -98,6 +98,11 @@ POINT_DEAL_KINDS = {"webmim": "Наш заказ (перемещение)", "sto
 POINT_NO_WEBMIM = re.compile(r"WebMIM|\bMIM\b|МИМ", re.IGNORECASE)
 
 
+def point_no_webmim(row: dict) -> bool:
+    """A record of the journal or a row of the alerts about WebMIM: never the point's (the owner 2026-10-30)."""
+    return row.get("kind") == "webmim" or bool(POINT_NO_WEBMIM.search(str(row.get("text") or "")))
+
+
 def placed_kind(line: str) -> str:
     """How a line of order_placed.on_placed is shown after «Заказать в МИМ»: sent — green; a point in the panel or a merged order already told
     — grey information; anything else (not sent, data lacking) — red."""
@@ -1133,11 +1138,12 @@ def register(app) -> None:
         engine.refresh_tasks(conn, card_id, local_iso())
         part = request.args.get("tab") if request.args.get("tab") in ORDER_PARTS else ""
         events = orders.list_events(conn, card_id)
-        if own_point() is not None:                                      # «Письмо поставщику» (supplier_mail): not the point's; nor WebMIM
-            events = [e for e in events if e["kind"] != "supplier_mail" and not POINT_NO_WEBMIM.search(str(e.get("text") or ""))]   # (2026-10-30)
+        newest = events[0]["id"] if events else None                     # the journal is read up to its newest record, a hidden one too
+        if own_point() is not None:                                      # «Письмо поставщику» (supplier_mail): not the point's; nor WebMIM (2026-10-30)
+            events = [e for e in events if e["kind"] != "supplier_mail" and not point_no_webmim(e)]
         acting = from_panel()                                            # sent from another site: the page only
-        if events and acting:                                            # the user has seen the journal up to the newest record shown
-            order_alerts.mark_seen(conn, session["user"], card_id, local_iso(), events[0]["id"])
+        if newest is not None and acting:                                # the user has seen the journal up to the newest record
+            order_alerts.mark_seen(conn, session["user"], card_id, local_iso(), newest)
             conn.commit()
         if acting and own_point() is None and can("orders", "edit") and manager.take(conn, card_id, "открыл заказ", session["user"], local_iso()):     # «взяли в работу»
             events = orders.list_events(conn, card_id)

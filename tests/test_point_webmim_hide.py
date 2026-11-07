@@ -117,3 +117,25 @@ def test_the_point_s_own_sale_form_never_writes_webmim(orders_world):
     post(w["point"], "/orders/%d/point-sale" % cid, "tok", client_name="Свой новый", webmim_number="999", webmim_id="888", webmim_status="x")
     card = orders.get_card(w["conn"], cid)
     assert not card["webmim_number"] and not card["webmim_id"] and not card["webmim_status"]
+
+
+def test_an_alert_about_webmim_is_not_the_points_and_opening_the_order_still_reads_the_journal(world):
+    """Review: the journal hides the records of WebMIM from the point; the alerts must not show them either, and opening the order marks the
+    journal read up to its newest record, a hidden one too (before: a WebMIM record left the alert lit)."""
+    conn, m, cid = world["conn"], world["point"], world["here"]
+    orders.add_event(conn, cid, "2026-10-13T12:05:00", "система", "webmim", "Создан заказ WebMIM № %s" % NUMBER, level="green")
+    conn.commit()
+    assert_no_webmim(m.get("/alerts").get_data(as_text=True), "alerts")
+    feed = m.get("/alerts/feed").get_json()
+    assert not any(WORDS.search(str(i.get("text") or "")) for i in feed["items"]), feed
+    m.get("/orders/%d" % cid)
+    newest = conn.execute("SELECT MAX(id) FROM order_event WHERE order_id = ?", (cid,)).fetchone()[0]
+    marks = [r[0] for r in conn.execute("SELECT last_id FROM order_event_seen WHERE order_id = ?", (cid,))]
+    assert newest in marks, (newest, marks)                                       # the point's mark covers the hidden newest record
+    office = world["office"]
+    assert "Создан заказ WebMIM" in office.get("/orders/%d" % cid).get_data(as_text=True)     # the office still has it
+
+
+def test_the_empty_search_hint_has_no_webmim_for_the_point(world):
+    assert_no_webmim(world["point"].get("/search").get_data(as_text=True), "search", numbers=False)
+    assert "WebMIM" in world["office"].get("/search").get_data(as_text=True)

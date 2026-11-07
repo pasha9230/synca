@@ -8,7 +8,7 @@ from flask import abort, current_app, flash, jsonify, redirect, render_template,
 
 from .. import order_alerts, order_engine, order_manager as mgr, order_oth, order_reserve as reserve, orders, store
 from .common import AS_POINT_ROLES, as_point_author, author, can, current_user, get_conn, login_required, own_point, point_account
-from .routes_orders import from_panel, local_iso
+from .routes_orders import from_panel, local_iso, point_no_webmim
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,8 @@ def _grouped(conn, login: str) -> list:
         sorted(ids) + [account, account])} if ids else set()
     chats_of = {r[0] for r in conn.execute("SELECT id FROM avito_chat WHERE account_id = ?", (account,))} if account is not None else set()
     foreign = quiet | set(orders.origin_labels(conn, point, ours))     # not the point's own order: the client's texts named only (as in the card)
-    rows = [r for r in rows if not is_handoff(r) and not is_return_ask(r) and not is_handoff_cancel(r)]   # «Клиент хочет заказать шины…» is for the staff: the point sees it on
+    rows = [r for r in rows if not is_handoff(r) and not is_return_ask(r) and not is_handoff_cancel(r)
+            and not point_no_webmim(r)]                           # nor WebMIM: never the point's (the owner 2026-10-30)   # «Клиент хочет заказать шины…» is for the staff: the point sees it on
                                                                   # «Рабочее место»; «заполните сумму возврата» too: the point has its green row
     rows = [order_engine.for_point(r) if r["order_id"] in foreign else r
             for r in rows if (r["order_id"] in ours and not (r["order_id"] in quiet and orders.client_words(r))
