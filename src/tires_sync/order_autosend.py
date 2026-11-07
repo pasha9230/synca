@@ -59,8 +59,10 @@ def for_office(event: dict) -> bool:
 
 
 def office_sends(sends: List[dict], point: bool) -> List[dict]:
-    """The unsettled sends shown above a chat and in the card (chats.pending_sends): without this module's for a manager of a point."""
-    return [s for s in sends if not str(s.get("token") or "").startswith("autosend-")] if point else sends
+    """The unsettled sends shown above a chat and in the card (chats.pending_sends): without the system's (this module's among them,
+    chats.is_system_mark, lane token-guard) for a manager of a point."""
+    from . import chats
+    return [s for s in sends if not chats.is_system_mark(s.get("token"))] if point else sends
 
 
 def _row(row) -> dict:

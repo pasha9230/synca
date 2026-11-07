@@ -284,7 +284,8 @@ def test_a_point_never_ticks_off_a_message_the_block_does_not_show(tmp_path):
     task_id = conn.execute("INSERT INTO order_task (order_id, rule_id, entered_at, kind, arg, status, title, body, result, created_at) "
                            "VALUES (?, 0, ?, 'message', '', 'pending', 'Менеджеру', 'Текст менеджеру', '', ?)", (card, NOW, NOW)).lastrowid
     conn.commit()
-    assert post(gamma, "/orders/%d/unsent/task/%d" % (card, task_id), "tok").status_code == 302
+    # lane token-guard: a rule's message task is the system's (its mark «task-…», chats.is_system_mark): the point is refused outright
+    assert post(gamma, "/orders/%d/unsent/task/%d" % (card, task_id), "tok").status_code == 403
     assert engine.get_task(conn, task_id)["status"] == "pending"                                     # not shown in the block: not touched
 
 
