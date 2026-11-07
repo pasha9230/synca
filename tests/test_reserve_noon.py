@@ -54,7 +54,7 @@ def test_the_reminder_goes_at_12_30_not_at_12_29_and_once(tmp_path):
     tick(conn, DAY + "T12:29:00", deliver, vk)
     assert deliver.sent == []
     tick(conn, DAY + "T12:30:00", deliver, vk)
-    assert [(c, t.split(".")[0]) for c, t, _ in deliver.sent] == [(chat, "Добрый день")]  # nobody answered: it goes all the same
+    assert [(c, t.split("!")[0]) for c, t, _ in deliver.sent] == [(chat, "Здравствуйте")]  # nobody answered: it goes all the same
     for when in (DAY + "T13:07:00", DAY + "T19:07:00"):
         tick(conn, when, deliver, vk)
     assert len(deliver.sent) == 1 and len(vk.sent) == 1
@@ -138,7 +138,8 @@ def test_a_message_of_the_client_after_the_reminder_keeps_the_order_at_the_point
     tick(conn, NEXT + "T09:07:00", deliver, vk)
     tick(conn, NEXT + "T10:07:00", deliver, vk)
     assert code(conn, cid) == "at_point"
-    assert sum("Клиент ответил на напоминание" in e["text"] for e in orders.list_events(conn, cid)) == 1
+    assert sum("Клиент ответил на напоминание о сроке резерва: на «На ОТХ» не переводим" in e["text"] for e in orders.list_events(conn, cid)) == 1
+    assert sum(e["text"].startswith("Ответственному: «Клиент ответил") for e in orders.list_events(conn, cid)) == 1    # no date: 2026-11-06
 
 
 def test_our_own_messages_and_the_clients_before_the_reminder_do_not_count(tmp_path):

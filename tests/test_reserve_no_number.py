@@ -12,8 +12,7 @@ from tires_sync import connections, order_notify, order_reserve as reserve, orde
 from tires_sync.secretbox import SecretBox
 
 ASK_NUMBER = "Укажите номер заказа WebMIM по заказу %d (Иван)"
-NO_NUMBER_TEXT = ("Добрый день. Срок хранения вашего заказа истекает 18.10.2026. Если вы уже забрали заказ — спасибо, не обращайте внимания. "
-                  "Если нужно продлить ожидание, напишите нам.")
+NO_NUMBER_TEXT = owner_text()                          # the owner's text of 2026-11-06 has no «№…» at all
 
 
 class Notify:

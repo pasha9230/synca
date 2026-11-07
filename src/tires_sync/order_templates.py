@@ -28,10 +28,10 @@ ARRIVED_SAMPLE = ("Клиенту: товар на точке, можно заб
                   "Заказ {webmim_number} приехал в пункт выдачи, можно забирать.\nТерритория {point_address}\nГрафик работы {point_hours}\n"
                   "Локация на Яндекс Картах {point_map}\n\n{items}\n\nХранение резерва до {hold_until}\n\nПокупатель {client_name} {client_phone}\n\n"
                   "! Обратите внимание. К оплате принимаем наличные.")
-# goes by itself on the last day of the reservation from 12:30 (order_reserve, the owner 2026-11-02); the owner's text 2026-10-26, without the prepayment
+# goes by itself on the last day of the reservation from 12:30 (order_reserve, the owner 2026-11-02); the owner's text 2026-11-06: the client
+# answers with a date (order_reserve._reply_step)
 RESERVE_SAMPLE = ("Клиенту: срок резерва истекает", "client",
-                  "Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — спасибо, "
-                  "не обращайте внимания. Если нужно продлить ожидание, напишите нам.")
+                  "Здравствуйте! Планируете забрать заказ? резерв истекает сегодня. Если планируете забрать, сообщите дату")
 # goes to the point when an order whose tyres all come from «На ОТХ» is moved straight to «Товар на точке» (oth_sale, the owner 2026-10-30);
 # the owner's text 2026-11-04, without the panel's number of the new order; {oth_source}: «Шины с ОТХ (заказ №…)», «Шины со своего остатка» or both
 OTH_POINT_SAMPLE = ("Точке: шины с ОТХ отложены под клиента", "manager",
@@ -51,7 +51,9 @@ INTERCITY_SHIPPED_SAMPLE = ("Клиенту: заказ отправлен", "cl
                             "Заказ {webmim_number} отправлен в город {city} транспортной компанией {carrier}.{track_line}\n\nСпасибо за покупку!")
 SAMPLES = SAMPLES + (INTERCITY_PLACED_SAMPLE, INTERCITY_SHIPPED_SAMPLE)
 RETIRED = {RESERVE_SAMPLE[0]: ("Добрый день. Срок резерва истекает. Вы отказываетесь от выкупа шин или нужно продлить ожидание? "   # the owner
-                               "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",),                                       # 2026-10-23
+                               "Готовы перевести предоплату в 10%, чтобы они вас ещё ждали?",                                         # 2026-10-23
+                               "Добрый день. Срок хранения вашего заказа №{webmim_number} истекает {hold_until}. Если вы уже забрали заказ — "
+                               "спасибо, не обращайте внимания. Если нужно продлить ожидание, напишите нам."),                         # 2026-10-26
            OTH_POINT_SAMPLE[0]: ("Шины с ОТХ (заказ №{oth_orders}) отложены под нового клиента: заказ №{order_no}, {client_name}, {client_phone}, "
                                  "{items}. Не продавать другим, резерв до {hold_until}.",)}                                           # 2026-11-04
 FIELDS = "id, name, audience, body"

@@ -635,13 +635,16 @@ def test_a_retelling_by_hand_refused_too_stops_the_automatic_retry_and_goes_itse
     """Н1: «Срок резерва» gets a 402, the inbox says «напишите вручную», the person writes it again — refused as well. When Avito takes
     messages again only the person's goes, never both."""
     conn, chat_row, card = env
+    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE code = 'at_point'), entered_at = ? WHERE id = ?", (NOW, card))
+    conn.commit()                                       # the reminder's mark is of a stay at the point (2026-11-06: another stay stops it)
+    token = "reserve-%d-%s" % (card, "".join(ch for ch in NOW if ch.isdigit()))
     sender = Refusing(refused402(), refused402())
     with pytest.raises(chats.ChatSendRetry):
-        chats.send_reply(conn, sender, chat_row, "Срок резерва истекает", "reserve-1", NOW, "система")
+        chats.send_reply(conn, sender, chat_row, "Срок резерва истекает", token, NOW, "система")
     with pytest.raises(chats.ChatSendRetry):
         chats.send_reply(conn, sender, chat_row, "Татьяна, резерв до завтра", "hand-1", at(20), "owner")
     assert settle(conn, sender, at(81)) == {"failed": 1, "sent": 1}
-    assert sender.sent == ["Татьяна, резерв до завтра"] and row(conn, "reserve-1")["status"] == "failed"
+    assert sender.sent == ["Татьяна, резерв до завтра"] and row(conn, token)["status"] == "failed"
 
 
 def test_a_retelling_by_hand_after_an_unknown_send_stops_the_send_again(env):

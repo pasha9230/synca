@@ -278,13 +278,14 @@ def register(app) -> None:
     def connections_telegram_page():
         conn = get_conn()
         box = app.config.get("SECRET_BOX")
+        from .. import critical
         chats = order_notify.user_chats(conn)
         return render_template(
             "conn_telegram.html", tabs=tabs(conn, "telegram"), box_ok=box is not None,
             telegram=connections.get_config(conn, "telegram", 0),
             telegram_secrets=connections.secret_status(conn, box, "telegram", 0),
             telegram_check=connections.get_check(conn, "telegram", 0),
-            user_chats=chats, panel_users=[u["login"] for u in panel_users.list_users(conn)
+            user_vk=critical.vk_peers(conn), user_chats=chats, panel_users=[u["login"] for u in panel_users.list_users(conn)
                                            if u["role"] != "client" or u["login"] in chats])     # a client: only its stale chat, to be cleared
 
     @app.route("/connections/avito")
@@ -488,8 +489,16 @@ def register(app) -> None:
             known = {u["login"]: u["role"] for u in panel_users.list_users(conn)}
             if login not in known or (known[login] == "client" and request.form.get("chat_id", "").strip()):   # a client: only cleared
                 raise orders.OrderError("Такого пользователя панели нет." if login not in known else "Клиенту чат Telegram не привязывается.")
+            if known[login] == "client" and request.form.get("vk_peer", "").strip():
+                raise orders.OrderError("Клиенту ВК для оповещений не привязывается.")
+            vk = request.form.get("vk_peer", "").strip()
+            if vk and not (vk.isascii() and vk.isdigit() and len(vk) <= 15 and vk != "0"):      # checked first: the chat is not saved alone
+                raise orders.OrderError("ВК: номер страницы, только цифры.")
             order_notify.set_user_chat(conn, login, request.form.get("chat_id", ""), now_iso(), author())
-            flash("Чат Telegram сохранён.")
+            if "vk_peer" in request.form:                         # the VK page of the critical news (critical.py)
+                from .. import critical
+                critical.set_user_vk(conn, login, request.form.get("vk_peer", ""), now_iso(), author())
+            flash("Чат Telegram и ВК сохранены.")
         except orders.OrderError as err:
             flash(str(err))
         return redirect("/connections/telegram")
