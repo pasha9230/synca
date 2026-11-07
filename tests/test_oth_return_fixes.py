@@ -6,6 +6,7 @@
 а вторая смена клиента у A не забывает первую B (сбор не платится дважды и не платится за ушедшего клиента)."""
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -67,6 +68,9 @@ def test_1_a_position_marked_for_the_return_is_on_sale_again(tmp_path):
     assert card["stage"]["code"] == "oth" and order_oth.item_mark(order_oth.item_marks(conn), item, card["entered_at"]) is None
     assert any(t.startswith("Шины снова в продаже") and "2 шт." in t for _l, t in events(conn, cid))
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0            # «не возвращаем»: no move on the 7th day, as before
+    from tires_sync.panel import texts
+    detail = json.loads(conn.execute("SELECT detail FROM audit WHERE action = 'oth_back_on_sale'").fetchone()[0])
+    assert texts.audit_text({"action": "oth_back_on_sale", "detail": detail}) == "Шины снова в продаже: заказ №%d, 2 шт. (не возвращаем)" % cid
 
 
 def test_1_a_real_return_to_the_supplier_stays_returned(tmp_path):
