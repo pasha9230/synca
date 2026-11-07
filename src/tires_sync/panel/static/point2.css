@@ -97,9 +97,9 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .p2-acts .mp-btn{width:100%;height:40px;justify-content:center}
 .p2-acts .mp-btn--big{font-weight:600}
 .p2-acts .mp-btn--quiet,.p2-quiet{background:none;border:0;padding:2px 0;color:var(--p2-text-3);text-decoration:underline;font-size:13px;height:auto;min-height:0;cursor:pointer;font-family:inherit}
-.p2-g{font-weight:600;color:var(--p2-text)}
-.p2-g .p2-q{font-weight:400;color:var(--p2-text-3);margin-left:6px}
-.p2-who{color:var(--p2-text-2)}
+.p2-g,.p2-g .p2-q,.p2-who,.p2-sum{font-weight:600;color:var(--p2-text)}     /* the quantity, the client and «Итого» as the tyre (the owner 2026-11-07) */
+.p2-g .p2-q{margin-left:6px}
+.p2-sum b{font-weight:inherit}
 .p2-note{display:flex;gap:6px;align-items:flex-start;font-size:13px;color:var(--p2-text-2);margin:2px 0 0}
 .p2-note .i{width:14px;height:14px;flex:none;margin-top:3px;color:var(--p2-text-3)}
 .p2-tag{display:inline-block;height:22px;line-height:20px;padding:0 7px;border-radius:4px;font-size:12px;white-space:nowrap;border:1px solid transparent}
