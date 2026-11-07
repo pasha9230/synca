@@ -460,6 +460,8 @@ def resolve(conn, card_id, found: bool, now: str, author: str, webmim_id: str = 
             if seen["number"] and not card["webmim_number"]:
                 change["webmim_number"] = seen["number"]
             orders.update_card(conn, card_id, change, now, author, commit=False)
+            from . import order_webmim
+            order_webmim.fresh_snapshot(conn, card_id, now, fresh=False)       # the number came from WebMIM: added later is a second part (07.11)
             text = ("Отметка снята вручную (%s): заказ WebMIM %s проверен в кабинете. Если в нём не все позиции, нажмите «Досоздать в WebMIM»: "
                     "панель прочитает его снова и добавит только недостающее." % (author, _found_text(seen)))
             conn.execute("UPDATE webmim_create SET state = 'partial', webmim_id = ?, result = ?, updated_at = ? WHERE order_id = ?",

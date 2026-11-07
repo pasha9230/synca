@@ -98,12 +98,13 @@ def snapshot(conn, card_id, now: str, fresh: bool = False) -> bool:
     return True
 
 
-def fresh_snapshot(conn, card_id, now: str) -> None:
+def fresh_snapshot(conn, card_id, now: str, fresh: bool = True) -> None:
     """«Оформить» / «Досоздать в WebMIM» done: the snapshot taken again, inside a savepoint: a failure here never costs the number of the order
-    made nor its record. No commit."""
+    made nor its record. `fresh=False` (the number written by itself from WebMIM: «Это он», «Заказ есть», the owner's «А» 07.11): taken
+    once, a snapshot taken before is kept. No commit."""
     try:
         conn.execute("SAVEPOINT mim_snapshot")
-        snapshot(conn, card_id, now, fresh=True)
+        snapshot(conn, card_id, now, fresh=fresh)
         conn.execute("RELEASE SAVEPOINT mim_snapshot")
     except Exception:                                                 # noqa: BLE001
         conn.execute("ROLLBACK TO SAVEPOINT mim_snapshot")
