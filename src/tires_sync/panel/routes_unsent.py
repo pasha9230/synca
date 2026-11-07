@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from flask import abort, flash, redirect
 
-from .. import unsent
+from .. import order_autosend, unsent
 from .common import author, get_conn, login_required, own_point
 from .routes_orders import local_iso
 
@@ -15,7 +15,7 @@ def register(app) -> None:
         try:
             rows = unsent.of_order(get_conn(), order_id)
             if own_point() is not None:                    # «Автосообщение клиенту» is not the point's (order_autosend)
-                rows = [r for r in rows if not str(r.get("token") or "").startswith("autosend-")]
+                rows = [r for r in rows if not order_autosend.is_token(r.get("token"))]
             return rows
         except Exception:                                  # the block never takes the card down
             get_conn().rollback()
@@ -29,6 +29,10 @@ def register(app) -> None:
     def order_unsent_by_hand(card_id, kind, item_id):
         if kind not in ("send", "task"):
             abort(404)
+        if own_point() is not None and kind == "send":                     # «Автосообщение клиенту» is the office's (order_autosend): refused,
+            row = get_conn().execute("SELECT token FROM order_unsent WHERE id = ?", (item_id,)).fetchone()     # not only hidden
+            if row is not None and order_autosend.is_token(row[0]):
+                abort(403)
         try:
             unsent.sent_by_hand(get_conn(), card_id, kind, item_id, local_iso(), author())
             flash("Отмечено: сообщение клиенту отправлено вручную.", "info")

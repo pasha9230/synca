@@ -186,6 +186,9 @@ def register(app) -> None:
             abort(404)
         if is_point() and task["assignee"] not in _mine_as_point(conn):     # a point closes only its own (as a point: its managers'):
             abort(403)                                                  # another's is refused, never even looked at
+        from .. import order_autosend
+        if is_point() and order_autosend.is_task(task):                  # «Автосообщение клиенту не ушло»: the office's, even if given to a point
+            abort(403)
         if not is_point() and not may_take():
             abort(403)
         try:
