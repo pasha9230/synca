@@ -1,0 +1,2 @@
+{# The purchase of WebMIM of an order on «На ОТХ» (order_sheet.mim_parts; the owner 2026-11-07): «№<MIM> · <transfer> от <invoice>», what is known only. #}
+{% macro mim_head(m) %}{% if m.number %}№{{ m.number }}{% else %}без № MIM{% endif %}{% if m.transfer %} · {{ m.transfer }}{% if m.invoice %} от {{ m.invoice }}{% endif %}{% elif m.invoice %} · счёт от {{ m.invoice }}{% endif %}{% endmacro %}

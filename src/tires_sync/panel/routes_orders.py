@@ -644,7 +644,7 @@ def register(app) -> None:
         columns = [dict(by_code[code], cards=[], count=0) for code in points.POINT_STAGES if code in by_code]
         target = {col["stage"]["code"]: col for col in columns}
         shown = [c["id"] for col in data["columns"] if col["stage"]["code"] not in order_oth.RETURNING for c in col["cards"] if c["id"] in mine]
-        no_mim = lambda c: dict(c, oth_title="", client="На ОТХ") if c.get("oth_title") else c      # «№ MIM …» of «На ОТХ»: not the point's (2026-10-30)
+        no_mim = lambda c: dict(c, oth_title="", oth_card=None, client="На ОТХ") if c.get("oth_title") else c      # «№ MIM …» of «На ОТХ»: not the point's (2026-10-30)
         sales = {cid: orders.totals(items)["sale"] for cid, items in orders.items_of(conn, shown).items()}    # «Итого» of the order window,
         for col in data["columns"]:                                       # one query for the page; «На ОТХ»: no client, no sum (2026-11-07)
             into = target.get(points.point_column(col["stage"]))
@@ -1188,6 +1188,7 @@ def register(app) -> None:
             oth_taken={i: dict(t, back=oth_sale.can_untake(conn, card_id, i)) for i, t in oth_sale.taken(conn, card_id).items()},
             oth_invoice=order_sheet.oth_invoice(conn, card) if own_point() is None else [],             # a point: no WebMIM (the owner 2026-10-30)
             oth_title=order_sheet.mim_title(conn, card) if card["stage"]["code"] == "oth" and own_point() is None else "",     # a purchase of WebMIM first (2026-11-06)
+            oth_parts=order_sheet.mim_parts(conn, card) if card["stage"]["code"] == "oth" and own_point() is None else None,   # its title and row (2026-11-07)
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),

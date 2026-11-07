@@ -1279,11 +1279,15 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         overdue = bool(stage["limit_hours"]) and stage["kind"] == "open" and seconds > stage["limit_hours"] * 3600
         total = round(sums.get(cid, 0.0), 2)
         items_text = first.get(cid, "") + (" +%d" % (count[cid] - 1) if count.get(cid, 0) > 1 else "")
-        oth_title = order_sheet.mim_title(conn, get_card(conn, cid)) if stage["code"] == "oth" else ""     # a purchase of WebMIM, no client (2026-11-06)
+        oth_title, oth_card = "", None
+        if stage["code"] == "oth":                                              # a purchase of WebMIM, no client (2026-11-06)
+            full = get_card(conn, cid)
+            oth_title = order_sheet.mim_title(conn, full)
+            oth_card = dict(order_sheet.mim_parts(conn, full), tyres=[{"name": i["name"], "qty": int(i["qty"])} for i in full["items"]])   # its lines (2026-11-07)
         columns[sid]["cards"].append({"id": cid, "client": oth_title or name or phone or "Без имени", "oth_title": oth_title, "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(since.get(cid, entered)), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
-                                      "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid)})
+                                      "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid), "oth_card": oth_card})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":

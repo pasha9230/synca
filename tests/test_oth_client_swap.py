@@ -102,14 +102,14 @@ def test_the_panel_shows_the_mim_name_first_on_the_board_the_list_the_oth_page_a
     a = card_at(conn, "oth", T)
     number = orders.get_card(conn, a)["webmim_number"]
     board = owner.get("/orders").get_data(as_text=True)
-    assert re.search(r"№ MIM %s · №%d" % (number, a), board)
+    assert re.search(r"data-oth-title>№%s<" % number, board) and not re.search(r"№ MIM %s · №%d" % (number, a), board)   # the board: «№<MIM>», no inner number (2026-11-07)
     listed = owner.get("/orders?v=list").get_data(as_text=True)
     assert "orders-sheet" in listed or "o2-chk" in listed                            # the list, not the board
     assert re.search(r"№ MIM %s · №%d" % (number, a), listed)
     oth = owner.get("/oth").get_data(as_text=True)
     assert re.search(r"№ MIM %s · №%d" % (number, a), oth)
     page = owner.get("/orders/%d" % a).get_data(as_text=True)
-    assert "№ MIM %s" % number in page and "data-oth-title" in page
+    assert re.search(r"data-oth-title>№%s<" % number, page)                          # the window: as on the board (2026-11-07)
     assert ("office2" in board) == new_view
     for text in (board, listed):
         assert not re.search(r"№%d</a>\s*Иван|o2-cli\">Иван" % a, text)
