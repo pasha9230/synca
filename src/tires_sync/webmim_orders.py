@@ -5,6 +5,7 @@ Other ways in (the test pair from WebMIM, the unload's key): see OrdersClient.""
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import urllib.parse
 from typing import Dict, Optional, Tuple
@@ -18,6 +19,7 @@ SERVERS = {"test": "https://mimtest.svrauto.ru", "prod": "https://webmim.svrauto
 SERVER_NAMES = {"test": "Тестовый сервер (mimtest)", "prod": "Боевой сервер (webmim)"}
 DEFAULT_SERVER = "test"
 WRONG_PASSWORD = "неверный логин или пароль"
+QUICK = 3.0                  # seconds of a quick read (OrdersClient.order after a press): one attempt
 OPENAPI_PATH = "/api/v3/api/open-api/file/api.v2.openapi.yaml"
 DICTIONARIES = (
     ("payment_types", "/api/v2/account/payment-types"),
@@ -71,10 +73,13 @@ class OrdersClient:
         self.close()
 
     def _call(self, path: str, headers: Dict[str, str], params: Optional[dict] = None, method: str = "GET",
-              body: Optional[bytes] = None, safe: bool = False) -> Tuple[int, Dict[str, str], bytes]:
-        """`safe`: a read of the data, repeated after a failure (reliability.WEBMIM); the token, the login, the logout and the writes go once."""
+              body: Optional[bytes] = None, safe: bool = False, timeout: Optional[float] = None) -> Tuple[int, Dict[str, str], bytes]:
+        """`safe`: a read of the data, repeated after a failure (reliability.WEBMIM); the token, the login, the logout and the writes go once.
+        `timeout`: the seconds of this request, for a transport that takes it (urllib_transport); another one is called as it is."""
         url = self._base + path + (("?" + urllib.parse.urlencode(params)) if params else "")
-        return reliability.call(lambda: self._http(method, url, dict(headers, Accept="application/json"), body), safe=safe,
+        sent = dict(headers, Accept="application/json")
+        extra = {"timeout": timeout} if timeout is not None and _takes_timeout(self._http) else {}
+        return reliability.call(lambda: self._http(method, url, sent, body, **extra), safe=safe,
                                 policy=reliability.WEBMIM, service=reliability.webmim_service(self._base),
                                 read=method == "GET" or path == "/api/v3/auth/login")     # the pause holds the login (no session made), never a write or the logout
 
@@ -83,11 +88,11 @@ class OrdersClient:
         return status, raw
 
     def _authorized_full(self, path: str, params: Optional[dict] = None, method: str = "GET",
-                         body: Optional[bytes] = None, safe: bool = False) -> Tuple[int, Dict[str, str], bytes]:
+                         body: Optional[bytes] = None, safe: bool = False, timeout: Optional[float] = None) -> Tuple[int, Dict[str, str], bytes]:
         headers = {"Content-Type": "application/json"} if body is not None else {}
         if self._key is not None:
-            return self._call(path, headers, dict(params or {}, **{"access-token": self._key}), method, body, safe)
-        return self._call(path, dict(headers, Authorization="Bearer " + str(self._token)), params, method, body, safe)
+            return self._call(path, headers, dict(params or {}, **{"access-token": self._key}), method, body, safe, timeout)
+        return self._call(path, dict(headers, Authorization="Bearer " + str(self._token)), params, method, body, safe, timeout)
 
     def token(self) -> str:
         if self._token is not None or self._key is not None:
@@ -172,12 +177,14 @@ class OrdersClient:
         """A GET with the token; returns the decoded JSON."""
         return self.get_with_headers(path, params)[0]
 
-    def get_with_headers(self, path: str, params: Optional[dict] = None) -> Tuple[object, Dict[str, str]]:
-        """A GET with the token: (the decoded JSON, the answer's headers, lower-case; the lists give their pages there)."""
+    def get_with_headers(self, path: str, params: Optional[dict] = None, quick: Optional[float] = None) -> Tuple[object, Dict[str, str]]:
+        """A GET with the token: (the decoded JSON, the answer's headers, lower-case; the lists give their pages there).
+        `quick`: one attempt of so many seconds, never repeated (a read that must not hold a press up)."""
         self.token()
-        status, headers, raw = self._authorized_full(path, params, safe=True)
+        safe = quick is None
+        status, headers, raw = self._authorized_full(path, params, safe=safe, timeout=quick)
         if status == 401 and self._fallback():
-            status, headers, raw = self._authorized_full(path, params, safe=True)
+            status, headers, raw = self._authorized_full(path, params, safe=safe, timeout=quick)
         if status in (401, 403):
             raise OrdersError("%s: вход есть (%s), к заказам нет прав (код %s)." % (path, self.method, status), status)
         if status != 200:
@@ -191,6 +198,15 @@ class OrdersClient:
         """One page of GET /api/v2/orders (ordered by the creation date, the direction is not described): (orders, pages in all; 0: not said)."""
         data, headers = self.get_with_headers("/api/v2/orders", {"page": int(page), "per-page": int(per_page)})
         return (data if isinstance(data, list) else []), _int_header(headers, "x-pagination-page-count")
+
+    def order(self, order_id, quick: bool = False) -> dict:
+        """GET /api/v2/orders/{id}: the order as WebMIM gives it, every field (webmim_invoice looks for the invoice's number there).
+        `quick`: one attempt of QUICK seconds. An answer 200 that is not an object: OrdersError (status 200)."""
+        path = "/api/v2/orders/%s" % _order_id(order_id)
+        data, _ = self.get_with_headers(path, quick=QUICK if quick else None)
+        if not isinstance(data, dict):
+            raise OrdersError("%s: ответ WebMIM не заказ." % path, 200)
+        return data
 
     def items(self, order_id, per_page: int = 100, max_pages: int = 5) -> list:
         """The positions of a WebMIM order as WebMIM gives them (goodsId, quantity, price, sum, goodsName), every page up to `max_pages`.
@@ -273,6 +289,13 @@ class OrdersClient:
         self.token()
         status, raw = self._authorized(OPENAPI_PATH)
         return raw if status == 200 and b"openapi" in raw[:300].lower() else None
+
+
+def _takes_timeout(http) -> bool:
+    try:
+        return "timeout" in inspect.signature(http).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _order_id(order_id) -> str:

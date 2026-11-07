@@ -143,8 +143,10 @@ def _every_page(client, sleep: Callable[[float], None], counts: dict):
             return
 
 
-def sync(conn, client, server: str, now: str, today: date, days: int = DAYS, sleep: Callable[[float], None] = time.sleep) -> dict:
+def sync(conn, client, server: str, now: str, today: date, days: int = DAYS, sleep: Callable[[float], None] = time.sleep,
+         raws: Optional[Dict[str, dict]] = None) -> dict:
     """Read the WebMIM orders of the last `days` days into webmim_order (GET only). New and changed orders get their positions read again.
+    `raws`: filled with the rows of the window as WebMIM gave them, every field (webmim_invoice looks for the invoice's number there).
     What was read before a failure is kept; the failure (OrdersError, OSError) goes on to the caller. A reading is repeated once after a
     blip by the client itself (reliability.WEBMIM); nothing more is retried here."""
     if server not in webmim_orders.SERVERS:
@@ -161,6 +163,8 @@ def sync(conn, client, server: str, now: str, today: date, days: int = DAYS, sle
                 if order is None or (order["create_date"] and order["create_date"] < cutoff):
                     continue
                 counts["orders"] += 1
+                if raws is not None:
+                    raws[order["id"]] = raw
                 counts["undated"] += 0 if order["create_date"] else 1
                 before = known.get(order["id"])
                 if before is None:
@@ -469,8 +473,11 @@ def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callabl
     if _refused_before(conn):
         return "failed", "снимок WebMIM не читается: логин или пароль API-пользователя не приняты, вход не повторяется до нового пароля или проверки в «Подключениях»"
     try:
+        raws: Dict[str, dict] = {}
         with client:
-            counts = sync(conn, client, server, now, today, days, sleep)
+            counts = sync(conn, client, server, now, today, days, sleep, raws)
+            from . import webmim_invoice                       # the number of the invoice: never fails the snapshot (safe_hourly)
+            invoice = webmim_invoice.safe_hourly(conn, client, server, raws, now, sleep)
     except webmim_orders.OrdersError as err:
         if str(err).startswith(REFUSED):                       # shown in «Подключения»; the hourly tick does not knock again with the same password
             connections.record_check(conn, "webmim_orders", connections.supplier_owner(1), False, "снимок заказов: %s" % err, now)
@@ -480,6 +487,7 @@ def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callabl
     pages = "%d из %d" % (counts["pages"], counts["pages_total"]) if counts["pages_total"] else "%d (сколько всего, WebMIM не сказал)" % counts["pages"]
     line = "снимок WebMIM (%s, %d дн.): страниц %s, заказов %d, новых %d, изменилось %d, позиции прочитаны у %d" % (
         server, days, pages, counts["orders"], counts["new"], counts["changed"], counts["items"])
+    line += invoice
     if counts["pages_total"] > MAX_PAGES:
         line += "; прочитаны не все страницы (предел %d), самые новые" % MAX_PAGES
     elif counts["pages"] < counts["pages_total"]:
