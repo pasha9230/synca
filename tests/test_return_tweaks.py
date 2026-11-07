@@ -429,3 +429,13 @@ def test_3_a_position_still_marked_keeps_the_task_when_another_is_given_back(tmp
     order_oth.mark_returned(conn, second, NOW, "o")                             # B × 2 given back
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
     assert order_oth.item_mark(order_oth.item_marks(conn), first, orders.get_card(conn, cid)["entered_at"])
+
+
+def test_3_a_marked_position_is_not_given_back_past_its_mark(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    first = card["items"][0]["id"]
+    order_oth.item_to_return(conn, first, "2026-10-21T10:00:00", "o", "2")
+    order_oth.mark_returned(conn, first, NOW, "o")                             # the 2 not marked are really given back
+    assert order_oth.pieces_here(conn, orders.get_card(conn, cid))[first] == 2  # the 2 marked are still at the point, waiting
+    assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
+    assert order_oth.item_mark(order_oth.item_marks(conn), first, orders.get_card(conn, cid)["entered_at"])
