@@ -347,3 +347,44 @@ def test_12_a_number_before_the_word_goes_to_the_inbox(tmp_path):
     conn, card, answer = _say(tmp_path, "5000100 отказ старый год производства")
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point" and linked(conn, card)
     assert [m["text"] for m in mgr.list_inbox(conn)] == ["5000100 отказ старый год производства"]
+
+
+# ---- review of 2026-11-07: a real «Вернуть поставщику» is not a mark; a second press splits nothing more ----------------------------------
+
+def test_7_a_real_return_stays_and_only_the_pieces_at_the_point_can_go(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    card = on_oth(conn, cid)
+    item = card["items"][0]["id"]
+    order_oth.mark_returned(conn, item, NOW, "o", "2")                         # 2 of 4 really given back
+    card = orders.get_card(conn, cid)
+    assert order_oth.pieces_here(conn, card) == {item: 2}
+    with pytest.raises(order_oth.OthError):
+        order_oth.agree(conn, card, TODAY, NOW, "o", qty={item: 3})
+    order_oth.agree(conn, card, TODAY, NOW, "o", qty={item: 1})
+    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (2,)     # the real return is kept
+    assert oth_stock.pieces(conn, manual=False) == {"1": 1}                    # 4 − 2 returned − 1 going back
+
+
+def test_7_fewer_than_marked_puts_the_rest_of_the_mark_on_sale_again(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    first = card["items"][0]["id"]
+    order_oth.item_to_return(conn, first, "2026-10-21T10:00:00", "o", "3")
+    order_oth.agree(conn, orders.get_card(conn, cid), TODAY, NOW, "o", qty={first: 2})
+    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (first,)).fetchone() is None
+    assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}             # 4 − 2 going back, nothing falsely «returned»
+
+
+def test_7_a_second_press_with_the_old_form_splits_nothing(tmp_path):
+    conn, cid, card = _two_positions(tmp_path)
+    first = card["items"][0]["id"]
+    seen = order_oth.pieces_here(conn, orders.get_card(conn, cid))
+    order_oth.agree(conn, orders.get_card(conn, cid), TODAY, NOW, "o", qty={first: 2}, seen=seen)
+    with pytest.raises(order_oth.OthError, match="только что изменили"):
+        order_oth.agree(conn, orders.get_card(conn, cid), TODAY, NOW, "o", qty={first: 2}, seen=seen)
+    assert len(order_oth.split_of(conn, cid)) == 1
+
+
+def test_9_only_a_decision_not_to_return_counts():
+    assert order_oth.NO_RETURN.search("Не возвращаем, продаём") and order_oth.NO_RETURN.search("решили не возвращать")
+    assert not order_oth.NO_RETURN.search("ещё не возвращали, ждём")
