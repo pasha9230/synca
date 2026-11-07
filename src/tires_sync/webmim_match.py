@@ -448,6 +448,8 @@ def link(conn, card_id: int, order_id: str, now: str, author: str) -> dict:
             raise orders.OrderError("Заказ WebMIM №%s уже сопоставлен с заказом №%d." % (order["number"] or order["id"], other))
         orders.update_card(conn, card_id, {"webmim_number": order["number"], "webmim_id": order["id"]}, now, author, commit=False)
         orders.add_event(conn, card_id, now, author, "field", "Сопоставлен с заказом WebMIM №%s (подтверждено вручную)" % (order["number"] or order["id"]))
+        from . import order_webmim                                     # the pieces now are this order's: added later is a second part (07.11)
+        order_webmim.fresh_snapshot(conn, card_id, now, fresh=False)
     except Exception:
         conn.rollback()
         raise
