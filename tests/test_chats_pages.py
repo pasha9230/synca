@@ -814,4 +814,4 @@ def test_waits_for_an_answer_reads_the_start_of_each_wait_once(tmp_path, monkeyp
     page = client.get("/chats/%d?f=wait" % ivan["id"]).get_data(as_text=True)          # Иван is answered: kept, out of the filter
     assert _names(page) == ["Иван", "Татьяна"] or _names(page) == ["Татьяна", "Иван"]
     assert "ждёт ответа" in page and "Всего: 1 · открытый чат вне фильтра" in page
-    assert sorted(asked) == sorted([tanya["id"], ivan["id"]] * 2)                      # each chat once for the list and once for the menu «Чаты»
+    assert sorted(asked) == sorted([tanya["id"], ivan["id"]])                          # each chat once: the list and the menu «Чаты» share it

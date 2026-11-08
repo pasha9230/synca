@@ -16,14 +16,16 @@ REQUIRED = ("SECRET_KEY", "PASSWORD_HASH", "DB_PATH", "UNLOAD_PATH", "REFERENCE_
 def _chat_wait(conn) -> int:
     """The menu counter of «Чаты»: «Ждут ответа» (chats.waiting, the same as the filter of the chats; п. 7 of the audit, 2026-11-08) — the
     whole panel's but the points' accounts (the owner 2026-10-26); for the manager of a point, the chats of its account only (none without one)."""
+    from flask import g
     from .. import chats as chats_store
     from .common import own_point, point_account
+    cache = g.setdefault("chat_wait_starts", {})                      # «Чаты» read them already on this request: once (review 08.11)
     if own_point() is None:
-        return chats_store.waiting_total(conn, without_points=True)
+        return chats_store.waiting_total(conn, without_points=True, cache=cache)
     account = point_account()
     if account is None:
         return 0
-    return chats_store.waiting_total(conn, account_id=account)
+    return chats_store.waiting_total(conn, account_id=account, cache=cache)
 
 
 class SafeInt(IntegerConverter):

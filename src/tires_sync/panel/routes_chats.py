@@ -5,7 +5,7 @@ import re
 import secrets
 from pathlib import Path
 
-from flask import abort, flash, jsonify, redirect, render_template, request, session
+from flask import abort, flash, g, jsonify, redirect, render_template, request, session
 
 from .. import ad_stats, catalog_archive, chat_deals as deals, chat_handover, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
 from .. import order_autosend, order_notes, oth_sale
@@ -271,7 +271,7 @@ def register(app) -> None:
             if flt in ("", "nodeal") and chat["status"] == "closed" and found is None:     # a search finds closed chats too
                 continue
             rows.append(chat)
-        waiting = chats.waiting(conn, scope)                              # «Ждут ответа»: one definition with the menu (п. 7, 2026-11-08)
+        waiting = chats.waiting(conn, scope, g.setdefault("chat_wait_starts", {}))                              # «Ждут ответа»: one definition with the menu (п. 7, 2026-11-08)
         if flt == "wait":
             rows = [c for c in rows if c["id"] in waiting]
         total = len(rows)
@@ -304,7 +304,7 @@ def register(app) -> None:
             current["catalog_url"] = current["product"]["catalog_url"] if current["product"] else (
                 "/catalog?" + urlencode({"q": _title_search(current.get("item_title"))}) if current.get("item_title") else "")
             current["wait"] = _wait_prefill(conn, current)
-            current["waiting"] = current["id"] in (waiting if current["id"] in place else chats.waiting(conn, [current]))
+            current["waiting"] = current["id"] in (waiting if current["id"] in place else chats.waiting(conn, [current], g.setdefault("chat_wait_starts", {})))
             messages = chats.list_messages(conn, chat_row)
             for m in messages:                                            # Avito's stub «Сообщение не поддерживается»: a plain label and its link
                 m["avito_link"] = chats.unsupported_link(m["text"], current["chat_id"]) if m["kind"] not in ("image", "call") else None
