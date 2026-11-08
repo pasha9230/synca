@@ -23,8 +23,18 @@ def register(app) -> None:
         chips = [{"label": label, "on": key == kind, "url": "/history" + ("?f=" + key if key else "")}
                  for key, label in (("", "Все"), ("mine", "Мои действия"), ("system", "Система"), ("errors", "Ошибки"))]
         return render_template("history.html", versions=list_versions(conn), chips=chips, kind=kind,
-                               audit=store.list_audit(conn, 50, kind=kind, author=author()),
-                               last_publish=service.last_publish(conn))
+                               audit=store.list_audit(conn, 50, kind=kind, author=author()), last_publish=_last_publish(conn))
+
+    def _last_publish(conn):
+        """«Последняя публикация»: the feeds as the main page and «Фиды» show them (service.feed_status, feed_tiles: the files Avito reads,
+        updated by the hourly cycle too), not the state of the last publish by hand (the owner 2026-11-08: «07.11 16:36» after the cycle
+        of 23:40). None without feeds."""
+        feeds = service.feed_status(conn, app.config.get("FEED_ROOT", ""), now().replace(tzinfo=None))
+        tiles = service.feed_tiles(conn, feeds) if feeds else []
+        if not tiles:
+            return None
+        times = [f["public_at"] for f in feeds if f["public_at"]]
+        return {"at": max(times).strftime("%d.%m %H:%M") if times else None, "feeds": tiles}
 
     @app.route("/history/rollback/<int:version>", methods=["POST"])
     @login_required

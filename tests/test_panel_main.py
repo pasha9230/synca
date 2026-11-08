@@ -147,13 +147,18 @@ def test_one_unmatched_model_is_one_item_not_three(tmp_path):
 
 def test_a_publication_switched_off_on_our_side_is_not_called_a_failure(tmp_path):
     import json
-    app = make_app(tmp_path)
-    conn = store.connect(app.config["DB_PATH"])
+    from datetime import datetime
+    from test_home_simple import _feed
+    app = make_app(tmp_path, FEED_ROOT=str(tmp_path / "feed"))
+    conn = _feed(app, public_at=datetime(2026, 10, 8, 7, 0, 0), live=False)
     store.set_state(conn, "last_publish", json.dumps({"at": "2026-10-08T10:00:00", "lines": ["Не публикуется: A, публикация выключена"]}))
+    conn.commit()
     client = app.test_client()
     login(client)
     assert "Последняя публикация прошла не полностью" not in client.get("/").get_data(as_text=True)
-    assert "Пропущено" in client.get("/history").get_data(as_text=True)                              # the last publication is on «История» (2026-10-21)
+    page = client.get("/history").get_data(as_text=True)                         # the last publication is on «История» (2026-10-21), by the feeds
+    block = page[page.index("Последняя публикация</h3>"):page.index("</section>", page.index("Последняя публикация</h3>"))]   # (2026-11-08)
+    assert "Пропущено" in block and "публикация выключена" in block and "Проверьте" not in block
 
 
 def test_new_positions_show_the_latin_name_of_the_goods_not_the_suppliers_russian_spelling(tmp_path):
