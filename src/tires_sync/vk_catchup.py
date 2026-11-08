@@ -109,7 +109,7 @@ def _came_by_callback(conn, message_id: str, raw_id: int, group: str, since: dat
                         (since.isoformat(timespec="seconds"), SOURCE + "-%")).fetchall()
     for (payload,) in rows:
         try:
-            msg = vk_callback._message(json.loads(payload), group)
+            msg = vk_callback._message(json.loads(payload), group)   # its id only
         except ValueError:                                          # cut at MAX_PAYLOAD: the id is looked for in the text
             if ('"id": %d,' % raw_id) in payload:
                 return True
@@ -218,7 +218,7 @@ def _would(conn, msg: dict, raw_id: int, peer: str, group: str, floor: datetime)
     """The message as the bot would get it (vk_callback._message) when it is the point's own and the bot does not have it yet, else None."""
     if not raw_id or not _is_points(msg, peer):
         return None
-    parsed = vk_callback._message({"type": "message_new", "group_id": group, "object": {"message": msg}}, group)
+    parsed = vk_callback._message({"type": "message_new", "group_id": group, "object": {"message": msg}}, group, conn)
     if parsed is None or not (parsed["text"].strip() or parsed["voice"]):                # a photo, a sticker: nothing for the bot
         return None
     if _came_by_callback(conn, "vk-%d" % raw_id, raw_id, group, floor - timedelta(days=1)):

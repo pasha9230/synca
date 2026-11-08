@@ -43,7 +43,7 @@ MAX_FORWARDED, FORWARD_DEPTH = 50, 3                # the numbers read from one 
                                                     # how deep a forward inside a forward is read
 
 
-def _forwarded(items, group: str, depth: int = 1) -> list:
+def _forwarded(items, group: str, depth: int = 1, conn=None) -> list:
     """The orders the community's forwarded lines name (30.10: a point forwards the bot's «Заказ … оформлен» with its word), in their
     order, a forward inside a forward too; a line of anybody else names nothing."""
     found = []
@@ -51,25 +51,26 @@ def _forwarded(items, group: str, depth: int = 1) -> list:
         if not isinstance(item, dict):
             continue
         if str(item.get("from_id", "")) == "-" + group:
-            number = order_manager.line_number(item.get("text"))
+            number = order_manager.line_order(conn, item.get("text"))
             if number is not None:
                 found.append(number)
         if depth < FORWARD_DEPTH:
-            found += _forwarded(item.get("fwd_messages"), group, depth + 1)
+            found += _forwarded(item.get("fwd_messages"), group, depth + 1, conn)
     return found
 
 
-def _message(data: dict, group: str) -> Optional[dict]:
-    """The private message of a person to the community in a `message_new` event, or None (a chat, the community itself, garbage)."""
+def _message(data: dict, group: str, conn=None) -> Optional[dict]:
+    """The private message of a person to the community in a `message_new` event, or None (a chat, the community itself, garbage).
+    `conn`: the base, for the order of the bot's line «Шины с ОТХ (заказ №…)» (order_manager.line_order); without it that line names none."""
     obj = data.get("object") if isinstance(data.get("object"), dict) else {}
     msg = obj.get("message") if isinstance(obj.get("message"), dict) else obj           # API 5.103+ wraps it; older versions do not
     sender, peer = str(msg.get("from_id", "")), str(msg.get("peer_id", msg.get("from_id", "")))
     if not (sender.isascii() and sender.isdigit() and sender != "0" and peer == sender):       # negative: a community; another peer: a chat
         return None
     reply = msg.get("reply_message") if isinstance(msg.get("reply_message"), dict) else {}
-    reply_no = order_manager.line_number(reply.get("text")) if str(reply.get("from_id", "")) == "-" + group else None    # a line of the community «Заказ …»
+    reply_no = order_manager.line_order(conn, reply.get("text")) if str(reply.get("from_id", "")) == "-" + group else None    # a line of the community «Заказ …»
     numbers = []
-    for number in ([reply_no] if reply_no is not None else []) + _forwarded(msg.get("fwd_messages"), group):
+    for number in ([reply_no] if reply_no is not None else []) + _forwarded(msg.get("fwd_messages"), group, conn=conn):
         if number not in numbers and len(numbers) < MAX_FORWARDED:
             numbers.append(number)
     text, voice, transcript, link = str(msg.get("text") or ""), "", "", ""
@@ -101,7 +102,7 @@ def _act(conn, data: dict, group: str, event_id: str, now: datetime, channel: Ca
     """A message of a manager goes to the bot; its answer goes back (signed «(бот) »). A number the panel does not know is told to the
     partner in Telegram (`box`: the keys). Never raises: the event is recorded whatever happens here. True: the message was the bot's to act
     on (taken now, not before by another way); `source`: which way it came."""
-    msg = _message(data, group)
+    msg = _message(data, group, conn)
     if msg is None:
         return False
     local = (now + timedelta(hours=3)).isoformat(timespec="seconds")                   # the journal of the orders keeps panel time (Moscow)
@@ -267,7 +268,7 @@ def sweep(conn, now: datetime) -> int:
                         ((now - LOST_AFTER).isoformat(timespec="seconds"), (now - timedelta(days=1)).isoformat(timespec="seconds"), since)).fetchall()
     for event_id, at, group, payload in rows:
         try:
-            msg = _message(json.loads(payload), group)
+            msg = _message(json.loads(payload), group, conn)
         except ValueError:
             continue
         if msg is None or not (msg["text"].strip() or msg["voice"]) or order_manager._point_of(conn, msg["from"]) is None:    # a photo; a stranger
