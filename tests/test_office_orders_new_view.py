@@ -150,7 +150,7 @@ def test_the_board_shows_the_webmim_number_first_and_the_model_bold(w):
     assert 'class="o2-stats"' not in text and "Сумма в работе" not in text                          # audit 15: no strip of numbers
     assert 'name="from"' in text and 'name="to"' in text and 'name="s"' in text                    # «Дата создания» and «Этап»
     assert "data-filters-toggle" in text and 'class="o2-f-more"' in text                            # the rest under «Фильтры» (the owner 08.11)
-    assert 'class="quick"' not in text and 'href="/orders/inbox"' not in text                       # no quick add, no «Входящие» (the owner 08.11)
+    assert 'class="quick"' not in text and 'class="btn btn--secondary" href="/orders/inbox"' not in text    # no quick add, no button «Входящие» (the owner 08.11)
 
 
 def test_the_date_of_creation_filters_the_board_the_list_and_the_file(w):
@@ -482,3 +482,29 @@ def test_the_new_order_page_says_create(w):
     flag(w, "off")
     old = html(client_of(w, "owner"), "/orders/new")
     assert "Создать заказ</button>" not in old and '<button class="btn btn--primary">Сохранить</button>' in old
+
+
+def test_the_sale_keeps_its_one_line_with_its_buttons(w):
+    """No «Продажа и расчёты» (the owner 08.11), but «Записать продажу» and «Сторнировать» are made nowhere else: one line on the window."""
+    flag(w, "all")
+    conn, a = w["conn"], w["ids"]["a"]
+    done = next(s["id"] for s in orders.list_stages(conn) if s["code"] == "done")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (done, a))
+    conn.commit()
+    text = html(client_of(w, "owner"), "/orders/%d" % a)
+    assert "data-sale-line" in text and 'action="/orders/%d/sale"' % a in text and "Записать продажу" in text
+    conn.execute("UPDATE order_card SET sale_ids = '[7]' WHERE id = ?", (a,))
+    conn.commit()
+    text = html(client_of(w, "owner"), "/orders/%d" % a)
+    assert 'action="/orders/%d/sale/reverse"' % a in text and "Сторнировать продажу" in text and "Продажа и расчёты" not in text
+    open_ = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["b"])
+    assert "data-sale-line" not in open_                                     # an open stage, no sale: nothing
+
+
+def test_the_inbox_stays_in_more(w, monkeypatch):
+    monkeypatch.setattr("tires_sync.order_manager.new_count", lambda conn: 3)
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders")
+    menu = text[text.index('<details class="menu orders-more">'):text.index("</details>", text.index('<details class="menu orders-more">'))]
+    assert '<a class="menu-item" href="/orders/inbox">Входящие (3)</a>' in menu
+    assert text.count('href="/orders/inbox"') == 1                         # no button on the head (the owner 08.11)

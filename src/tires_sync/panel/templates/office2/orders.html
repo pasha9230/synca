@@ -19,6 +19,7 @@
 {% if has_right("money") %}<a class="menu-item" href="/orders/report">Отчёт</a>{% endif %}
 <a class="menu-item" href="/orders/webmim">Сверка с WebMIM</a>
 <a class="menu-item" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Файл Excel с заказами по текущим фильтрам (поиск, точка, тег, дата создания)">Выгрузить в Excel</a>
+<a class="menu-item" href="/orders/inbox">Входящие{% if inbox_new %} ({{ inbox_new }}){% endif %}</a>{# no button on the head (the owner 08.11); the page stays reachable #}
 {% if can_post("orders_bulk_run") %}<a class="menu-item" href="/orders/bulk">Закрыть разом</a>{% endif %}
 {% if can("setup") %}<a class="menu-item" href="/orders/templates">Шаблоны</a>
 <a class="menu-item" href="/orders/settings">Настроить воронку</a>{% endif %}

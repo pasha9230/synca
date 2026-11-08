@@ -18,7 +18,7 @@
 {% if s.late and can_post("order_delivery_tomorrow") %}<form method="post" action="/orders/{{ c.id }}/delivery/tomorrow" data-once class="row" style="gap:var(--s-3);flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <span class="small text-warn">Сейчас после 16:00: заказ на сегодня WebMIM может не успеть передать в работу.</span><button class="btn btn--secondary btn--xs">Перенести на завтра</button></form>{% endif %}
 <div class="row" style="gap:var(--s-3);flex-wrap:wrap" data-supplier-actions>
-{% if s.supplier == "webmim" and o2s %}{% if s.blocked %}<span class="small muted">Исправьте строки с ✗: «Оформить в WebMIM» откроется.</span>{% endif %}
+{% if s.supplier == "webmim" and o2s %}{% if s.blocked %}<span class="small muted">Исправьте строки с ✗: «Оформить в WebMIM» откроется.</span>{% elif not mim_ready %}<span class="small muted" data-wm-why>«Оформить в WebMIM» закрыта: {% if not b %}на тестовом сервере WebMIM оформляются только заказы с тегом «тест».{% elif b.held %}итог прошлого нажатия неизвестен, проверьте кабинет WebMIM (блок «WebMIM» ниже).{% elif not b.live %}этот сервер WebMIM закрыт для кнопки.{% elif b.state and b.state.state == "running" %}заказ уже оформляется в WebMIM, обновите страницу через минуту.{% else %}заказ уже оформлен.{% endif %}</span>{% endif %}
 {% elif s.supplier == "webmim" %}
 {% if mim_ready and not s.blocked %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="supplier-window">Заказать в МИМ</button>
 {% else %}<button type="button" class="btn btn--primary btn--sm" disabled>Заказать в МИМ</button>{% endif %}

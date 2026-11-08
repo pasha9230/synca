@@ -92,6 +92,10 @@
 {% if (b and (b.held or (b.state and b.state.state == "running") or (b.state and b.state.result and b.state.state != "done") or (b.label and b.label.startswith("Досоздать"))))
    or (w and ((w.order and w.differences) or (not w.order and w.hints))) %}{% include "_order_webmim.html" %}{% endif %}
 {# no «Продажа и расчёты» (the owner 08.11: «убери»); a sale that failed half way still shows, with its button #}
+{% if -1 not in c.sale_ids and (c.sale_ids or c.stage.kind == "won") %}{# the sale's one line on a won stage: «Записать» / «Сторнировать» are made nowhere else (an order with a sale moves nowhere before its reversal) #}
+{% if c.sale_ids %}<div class="row small" style="gap:var(--s-3);align-items:center" data-sale-line><span>Продажа записана ({{ c.sale_ids|length }} поз.).</span>{% if can_post("order_sale_reverse") %}<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once>{{ csrf }}<button class="btn btn--danger-outline btn--xs">Сторнировать продажу</button></form>{% endif %}</div>
+{% elif can_post("order_sale") %}<div class="row small" style="gap:var(--s-3);align-items:center" data-sale-line><span class="muted">Продажа не записана.</span><form method="post" action="/orders/{{ c.id }}/sale" data-once>{{ csrf }}<button class="btn btn--primary btn--xs">Записать продажу</button></form></div>{% endif %}
+{% endif %}
 {% if -1 in c.sale_ids %}<div class="flash flash--err" data-sale-broken role="alert"><div class="flash-text row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center"><span>Запись продажи не завершена (сбой при записи).</span>
 {% if can_post("order_sale_reverse") %}<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once>{{ csrf }}<button class="btn btn--danger-outline btn--sm">Освободить заказ</button></form>{% endif %}</div></div>{% endif %}
 {% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}{% include "_order_finish.html" %}{% endif %}
