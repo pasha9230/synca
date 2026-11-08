@@ -27,8 +27,13 @@ def visible(page):
     return re.sub(r"<script.*?</script>|<!--.*?-->", "", page, flags=re.S)
 
 
-def assert_no_webmim(page, where, numbers=True):
+def assert_no_webmim(page, where, numbers=True, named=False):
+    """`named`: the order's window of a point names the order «№ <WebMIM number>» (the owner 08.11: «Точка: заказ виден по № MIM, без
+    внутреннего номера») — that name only; no word «WebMIM», no id, no status, no number anywhere else."""
     text = visible(page)
+    if named:
+        assert "№ %s" % NUMBER in text, where
+        text = text.replace("№ %s" % NUMBER, "№ —")
     found = WORDS.search(text)
     assert not found, (where, text[max(0, found.start() - 120):found.end() + 120])
     if numbers:
@@ -52,7 +57,7 @@ def test_the_order_card_the_point_opens_has_no_webmim_but_keeps_the_delivery(wor
         response = world["point"].get(url)
         assert response.status_code == 200, url
         page = response.get_data(as_text=True)
-        assert_no_webmim(page, url)
+        assert_no_webmim(page, url, named=True)
         assert 'name="delivery_date"' in page and "2026-10-15" in page            # the delivery stays
         assert TRANSFER in page                                                    # the transfer: the point receives the tyres by it
         assert "Доставка" in page
@@ -70,7 +75,7 @@ def test_working_as_a_point_hides_webmim_too(world):
     login(owner)
     assert post(owner, "/as-point", "tok", point_id=str(world["pid"])).status_code == 302
     page = owner.get("/orders/%d" % world["here"]).get_data(as_text=True)
-    assert_no_webmim(page, "as point")
+    assert_no_webmim(page, "as point", named=True)
 
 
 def test_the_workplace_has_the_order_number_but_no_word_webmim(world):

@@ -400,6 +400,19 @@ OTH_OFFER = ("cancel",)                           # «Отмена / невык�
 OTH_QUESTION = "Шины остаются на точке — перевести на «На ОТХ»?"
 
 
+def point_number(card: dict) -> str:
+    """The number of the order a point sees (the owner 08.11, the prototype of the audit): the WebMIM number, never the panel's inner one;
+    the point's own sale has no WebMIM number: «панель N», as on «Рабочее место» (point2/mypoint.html)."""
+    return "№ %s" % (card.get("webmim_number") or "панель %d" % card["id"])
+
+
+def point_entity(entity: dict, card: dict) -> dict:
+    """The head of the order's window for a point: the order by its WebMIM number (point_number), no inner number anywhere in it."""
+    number = point_number(card)
+    return dict(entity, ref=number, hint="Заказ %s · %s" % (number, entity["title"]),
+                crumbs=[dict(entity["crumbs"][0]), {"label": number}])
+
+
 def no_account_tags(conn, tags):
     """The tags a manager of a point sees: never the name of an Avito account (chat_deals._account_tag puts it on the orders of the chats and
     the calls; the owner 2026-10-29: a point never sees an account's name). Everybody else: the tags as they are."""
@@ -623,16 +636,31 @@ def register(app) -> None:
         notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
                                    clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
         total = sum(col["count"] for col in data["columns"])
+        to_list = [{"stage": col["stage"], "count": col["count"]} for col in data["columns"]    # «Выполнено» and «Отмена» — links into «Список» (audit 32)
+                   if col["stage"]["code"] in ("done", "cancel")] if view == "board" and not own_point() and only is None else []
         if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03),
             found = bool(query or tag or returning)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only
                                        or (found and col["count"])])
         extra = dict(date_from=start, date_to=end, bulk_targets=order_bulk.targets(conn), bulk_reason=order_bulk.DEFAULT_REASON, responsible_options=_responsible_options(app, conn)) if office_new() else {}
+        if office_new() and view == "board":                  # the card of the board (the owner 08.11): the tyres, the count, the account as a label
+            known = set() if own_point() else orders.account_tags(conn)
+            extra.update(positions=board_positions(conn), to_list=to_list, account_names=sorted(
+                {t for col in data["columns"] for c in col["cards"] for t in c["tags"] if t.lower() in known}))
         return render_template(office_page("orders.html"), data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes, **extra,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                stages=[] if own_point() else orders.list_stages(conn),
                                dots=_dots(conn), rows=rows, total_cards=total, only_stage=only, returning=returning, returning_filters=order_oth.FILTERS,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
+
+    def board_positions(conn) -> dict:
+        """The positions of every order for the card of the board (view only): {order: {"n": positions, "qty": pieces, "name": the first one}}."""
+        found: dict = {}
+        for order_id, name, qty in conn.execute("SELECT order_id, name, qty FROM order_item ORDER BY id"):
+            row = found.setdefault(order_id, {"n": 0, "qty": 0, "name": name})
+            row["n"] += 1
+            row["qty"] += int(qty or 0)
+        return found
 
     def point_board(conn, data: dict, point_id: int) -> dict:
         """«Заказы» of the manager of a point (the owner 2026-10-30): the point sells its own tyres through its Avito account and orders
@@ -1179,7 +1207,7 @@ def register(app) -> None:
             office_page("order_card.html"), messages=messages, open_messages=open_messages,
             **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
-            c=card, entity=orders.card_view(card, conn), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
+            c=card, entity=point_entity(orders.card_view(card, conn), card) if own_point() else orders.card_view(card, conn), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card),
             to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
             oth_return_parts=order_oth.return_parts(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},     # «сколько примет поставщик»
@@ -1195,7 +1223,7 @@ def register(app) -> None:
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id), merge_unordered=order_merge_store.unordered(conn, card),
             oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
-            oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stage_day=orders.stage_day(orders.stage_since(conn, card)), stages=orders.list_stages(conn), points=points.list_points(conn),
+            oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stage_day=orders.stage_day(orders.stage_since(conn, card)), stage_at=card["entered_at"] if orders.stage_day(card["entered_at"]) == orders.stage_day(orders.stage_since(conn, card)) else "", stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS if own_point() is None else POINT_DEAL_KINDS, marks=orders.MARKS,
             tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=order_autosend.office_sends(chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()), own_point() is not None),

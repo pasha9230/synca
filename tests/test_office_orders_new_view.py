@@ -136,16 +136,21 @@ def test_off_written_is_the_same_markup_as_nothing_written(w):
 # --- the board and the list -------------------------------------------------------------------------------------------------------
 
 def test_the_board_shows_the_webmim_number_first_and_the_model_bold(w):
+    """The card of the prototype of the audit (the owner 08.11): left-aligned, a field per line — № WebMIM, the tyres, «4 шт.», the sum,
+    the point, the account as a label, the days; no inner number, no «№ WebMIM ещё нет», no strip of numbers above the board."""
     flag(w, "all")
     text = html(client_of(w, "chat1"), "/orders")
     a = re.search(r'<a class="ocard o2-card[^"]*"[^>]*data-card="%d".*?</a>' % w["ids"]["a"], text, re.S).group(0)
-    assert '<span class="o2-wm">№ 7712345</span>' in a and "внутр. № %d" % w["ids"]["a"] in a
-    assert '<b class="o2-model">Nokian Hakkapeliitta 10 205/55 R16</b> × 4' in a
+    assert '<span class="o2-wm">№ 7712345</span>' in a and "внутр." not in a and "№ %d" % w["ids"]["a"] not in a
+    assert '<b class="o2-model">Nokian Hakkapeliitta 10 205/55 R16</b>' in a and "4 шт." in a and "× 4" not in a
+    assert a.index("o2-wm") < a.index("o2-model") < a.index("4 шт.") < a.index("дн.")
     b = re.search(r'data-card="%d".*?</a>' % w["ids"]["b"], text, re.S).group(0)
-    assert "№ WebMIM ещё нет" in b
+    assert "WebMIM ещё нет" not in b and "o2-wm" not in b
     assert 'id="board"' in text and 'data-stage="' in text and 'draggable="true"' in text          # app.js drag and drop: the same hooks
-    assert 'class="o2-stats"' in text and "Сумма в работе" in text
+    assert 'class="o2-stats"' not in text and "Сумма в работе" not in text                          # audit 15: no strip of numbers
     assert 'name="from"' in text and 'name="to"' in text and 'name="s"' in text                    # «Дата создания» and «Этап»
+    assert "data-filters-toggle" in text and 'class="o2-f-more"' in text                            # the rest under «Фильтры» (the owner 08.11)
+    assert 'class="quick"' not in text and 'class="btn btn--secondary" href="/orders/inbox"' not in text    # no quick add, no button «Входящие» (the owner 08.11)
 
 
 def test_the_date_of_creation_filters_the_board_the_list_and_the_file(w):
@@ -255,10 +260,11 @@ def test_the_card_has_three_columns_and_the_live_window(w):
     flag(w, "all")
     text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
     assert [int(x) for x in re.findall(r'data-cc="(\d)"', text)] == [0, 1, 2]
-    assert "WebMIM № 7712345" in text and "внутр. № %d" % w["ids"]["a"] in text
+    assert 'value="7712345"' in text and "внутр." not in text and "Колонки по умолчанию" not in text    # the head: «← Заказы» only (the owner 08.11)
     for hook in ("form[data-owin]".replace("form[data-owin]", "data-owin"), 'class="owin-stages"', "data-autosave", 'action="/orders/%d/note"' % w["ids"]["a"],
-                 "data-feed-tabs", 'id="wants"', 'id="money"'):
+                 "data-feed-tabs", 'id="wants"'):
         assert hook in text, hook
+    assert 'id="money"' not in text and "Продажа и расчёты" not in text and "Что делать сейчас" not in text
     assert json.loads(re.search(r"data-layout='([^']*)'", text).group(1)) == {"w": [1.15, 1.0, 0.85], "off": [False, False, False]}
 
 
@@ -420,3 +426,85 @@ def test_a_click_beside_the_checkbox_is_skipped_by_the_row_handler_itself():
     root = Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static"
     assert 't.closest("a,button,input,label,select,.o2-chk")' in (root / "app.js").read_text(encoding="utf-8")
     assert "stopPropagation" not in (root / "office2.js").read_text(encoding="utf-8")    # the menus close on a click outside
+
+
+# --- the window by the prototype of the audit (the owner 08.11) ----------------------------------------------------------------------
+
+def test_the_button_to_webmim_is_right_of_the_responsible_and_the_check_lists_the_problems_only(w):
+    flag(w, "all")
+    owner = client_of(w, "owner")
+    empty = html(owner, "/orders/%d" % w["ids"]["b"])
+    grid = empty[empty.index('name="responsible"'):empty.index('id="items"')]
+    assert "data-owin-wm" in grid and re.search(r'<button type="button" class="btn btn--primary" disabled title="В заказе нет позиций">Оформить в WebMIM</button>', grid)
+    sup = empty[empty.index('id="supplier"'):]
+    assert "✗" in sup and "Можно и вручную" not in sup and "Заказать в МИМ" not in sup        # the problems listed; the button moved up
+    assert "в порядке</span>" not in sup.split("Проверить снова")[0].replace("не в порядке", "")    # no line «в порядке»
+
+
+def test_the_check_of_the_supplier_is_one_line_when_all_is_well(w, monkeypatch):
+    from tires_sync import order_supplier
+    real = order_supplier.view
+
+    def all_well(*args, **kwargs):
+        v = real(*args, **kwargs)
+        return dict(v, lines=[dict(l, state="ok") for l in v["lines"]], blocked=False)
+    monkeypatch.setattr(order_supplier, "view", all_well)
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["c"])
+    assert "data-supplier-ok" in text and "всё сходится" in text and "Сверка с WebMIM: 1 позиция, цены и остатки в порядке" in text
+    assert not re.findall(r'<li class="supplier-line', text)              # no line «в порядке» (audit 24)
+    flag(w, "off")
+    old = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["c"])
+    assert "data-supplier-ok" not in old and re.findall(r'<li class="supplier-line is-ok"', old)    # the old view: line by line, as before
+
+
+def test_the_auto_message_is_in_the_chat_column_only_with_a_chat(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+    assert 'id="autosend"' not in text                                     # no chat: no auto message (audit 20)
+    head = text[text.index('<header class="o2c-head">'):text.index("</header>")]
+    assert re.sub(r"<[^>]+>|\s+", "", head) == "Заказы"                    # «← Заказы» only (the owner 08.11)
+
+
+def test_the_hint_of_the_positions_is_one_line(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+    assert "появятся позиции с остатком и ценой объявления.</p>" in text and "Код позиции из «Каталога»" not in text
+    flag(w, "off")
+    assert "Код позиции из «Каталога»" in html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+
+
+def test_the_new_order_page_says_create(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/new")
+    assert "data-create-head" in text and text.count(">Создать заказ</button>") == 2
+    assert text.index('<button class="sr-only"') < text.index("data-create-head")       # Enter still presses the first, hidden button
+    flag(w, "off")
+    old = html(client_of(w, "owner"), "/orders/new")
+    assert "Создать заказ</button>" not in old and '<button class="btn btn--primary">Сохранить</button>' in old
+
+
+def test_the_sale_keeps_its_one_line_with_its_buttons(w):
+    """No «Продажа и расчёты» (the owner 08.11), but «Записать продажу» and «Сторнировать» are made nowhere else: one line on the window."""
+    flag(w, "all")
+    conn, a = w["conn"], w["ids"]["a"]
+    done = next(s["id"] for s in orders.list_stages(conn) if s["code"] == "done")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (done, a))
+    conn.commit()
+    text = html(client_of(w, "owner"), "/orders/%d" % a)
+    assert "data-sale-line" in text and 'action="/orders/%d/sale"' % a in text and "Записать продажу" in text
+    conn.execute("UPDATE order_card SET sale_ids = '[7]' WHERE id = ?", (a,))
+    conn.commit()
+    text = html(client_of(w, "owner"), "/orders/%d" % a)
+    assert 'action="/orders/%d/sale/reverse"' % a in text and "Сторнировать продажу" in text and "Продажа и расчёты" not in text
+    open_ = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["b"])
+    assert "data-sale-line" not in open_                                     # an open stage, no sale: nothing
+
+
+def test_the_inbox_stays_in_more(w, monkeypatch):
+    monkeypatch.setattr("tires_sync.order_manager.new_count", lambda conn: 3)
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders")
+    menu = text[text.index('<details class="menu orders-more">'):text.index("</details>", text.index('<details class="menu orders-more">'))]
+    assert '<a class="menu-item" href="/orders/inbox">Входящие (3)</a>' in menu
+    assert text.count('href="/orders/inbox"') == 1                         # no button on the head (the owner 08.11)

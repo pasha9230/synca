@@ -14,6 +14,7 @@ from tires_sync import connections, order_intercity as intercity, order_points a
 
 NOW = "2026-10-07T12:00:00"
 FOLDED = ("intercity", "webmim", "money")
+NEW_GONE = ("webmim", "money")      # «Новый вид» (the owner 08.11, the prototype of the audit): no «Продажа и расчёты»; «WebMIM» only to act on
 APP_JS = Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static" / "app.js"
 
 
@@ -78,6 +79,11 @@ def test_the_three_parts_are_folded_when_the_card_opens(w, new_view):
     client, _ = owner(w, new_view)
     text = page(client, "/orders/%d" % w["card"])
     assert ("office2.js" in text) == new_view
+    if new_view:
+        assert is_folded(text, "intercity") and "Доставка в другой город" in block(text, "intercity").split("</summary>")[0]
+        assert 'name="city" value="Псков"' in block(text, "intercity")
+        assert all('id="%s"' % part not in text for part in NEW_GONE) and "Продажа и расчёты" not in text
+        return
     for part in FOLDED:
         assert is_folded(text, part), part
     assert "Доставка в другой город" in block(text, "intercity").split("</summary>")[0]
@@ -92,8 +98,13 @@ def test_the_three_parts_are_folded_when_the_card_opens(w, new_view):
 def test_a_link_to_a_part_opens_it_and_only_it(w, new_view, part):
     client, _ = owner(w, new_view)
     text = page(client, "/orders/%d?tab=%s" % (w["card"], part))
+    if new_view and part in NEW_GONE:
+        assert 'id="%s"' % part not in text and is_folded(text, "intercity")
+        return
     assert is_open(text, part)
     for other in FOLDED:
+        if new_view and other in NEW_GONE:
+            continue
         if other != part:
             assert is_folded(text, other), other
 
@@ -131,7 +142,12 @@ def test_a_stored_red_result_keeps_its_part_open(w, new_view):
     conn.commit()
     client, _ = owner(w, new_view)
     text = page(client, "/orders/%d" % card)
-    assert "WebMIM отказал: нет позиций" in block(text, "webmim") and is_open(text, "webmim")
+    assert "WebMIM отказал: нет позиций" in block(text, "webmim") and is_open(text, "webmim")      # an action: the block shows in «Новый вид» too
+    if new_view:                                     # no «Продажа и расчёты» (08.11): the broken sale is a red line of its own, with its button
+        assert 'id="money"' not in text and "data-sale-broken" in text and "Запись продажи не завершена" in text
+        assert 'action="/orders/%d/sale/reverse"' % card in text
+        assert is_folded(text, "intercity")
+        return
     assert "Запись продажи не завершена" in block(text, "money") and is_open(text, "money")
     assert is_folded(text, "intercity")
 
