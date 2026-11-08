@@ -2,14 +2,14 @@
 {% from "_ui.html" import icon, season %}
 {% block title %}Сопоставления · Tires Sync{% endblock %}
 {% block content %}
-<nav class="tabs2"><a{% if request.path.startswith('/mappings') %} class="is-active" aria-current="page"{% endif %} href="/mappings">Модели</a><a{% if request.path.startswith('/pairs') %} class="is-active" aria-current="page"{% endif %} href="/pairs">Пары поставщиков</a></nav>
 <header class="page-head"><div><h1>Сопоставления<span class="help-q" tabindex="0" data-tip="Модели поставщика нужно связать с моделями из справочника Авито — иначе объявление не соберётся. Сохраняется сразу, без черновика.">?</span></h1></div>
 <div class="actions">
 <a class="btn btn--secondary" href="/mappings/export.csv">{{ icon("download") }}Выгрузить CSV</a>
 {% if can_post("import_mappings") %}<form method="post" action="/mappings/import" enctype="multipart/form-data" class="inline" data-autosubmit><input type="hidden" name="csrf" value="{{ csrf_token() }}"><label class="btn btn--secondary">{{ icon("upload") }}Загрузить CSV<input type="file" name="file" accept=".csv,text/csv" class="sr-only"></label><noscript><button class="btn btn--secondary btn--sm">Отправить</button></noscript></form>{% endif %}
-{% if can_post("accept_confident") %}<form method="post" action="/mappings/accept-confident" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="b" value="{{ only_brand }}"><input type="hidden" name="next" value="{{ next_url }}"><button class="btn btn--primary"{% if not confident %} disabled{% endif %}>{{ icon("check") }}Принять все уверенные{% if filtered %} (по фильтру){% endif %} ({{ confident }})</button></form>{% endif %}
+{% if can_post("accept_confident") and confident %}<form method="post" action="/mappings/accept-confident" class="inline">{# hidden at zero (notes-by-page 08.11) #}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="b" value="{{ only_brand }}"><input type="hidden" name="next" value="{{ next_url }}"><button class="btn btn--primary">{{ icon("check") }}Принять все уверенные{% if filtered %} (по фильтру){% endif %} ({{ confident }})</button></form>{% endif %}
 </div></header>
-<div class="flash flash--info">{{ icon("info") }}<div class="grow"><div class="flash-title">Загрузка CSV</div><div class="flash-text">В выгруженной таблице заполните столбец <code>avito_model</code> и загрузите её обратно: заменятся только строки с заполненным столбцом, пустые пропускаются, ошибки покажем списком.</div></div><button class="close" type="button" aria-label="Закрыть">{{ icon("x") }}</button></div>
+<nav class="tabs2"><a{% if request.path.startswith('/mappings') %} class="is-active" aria-current="page"{% endif %} href="/mappings">Модели</a><a{% if request.path.startswith('/pairs') %} class="is-active" aria-current="page"{% endif %} href="/pairs">Пары поставщиков</a></nav>{# the tabs under the title (notes-by-page 08.11) #}
+<details class="card" style="margin-bottom:var(--s-4)"><summary class="card-body small">Как загрузить CSV</summary><div class="card-body small muted">В выгруженной таблице заполните столбец <code>avito_model</code> и загрузите её обратно: заменятся только строки с заполненным столбцом, пустые пропускаются, ошибки покажем списком.</div></details>
 
 {% if mirror_rows %}<section class="card" id="mirror">
 <div class="card-head"><h3>Зеркальные фиды: модели вне справочника Авито</h3><span class="sub">{{ mirror_rows|length }} {{ plural(mirror_rows|length, "модель", "модели", "моделей") }}</span></div>
@@ -74,8 +74,7 @@
 </section>
 
 <section class="card" id="old-names">
-<div class="card-head"><h3>Прежние названия моделей</h3><span class="sub">{{ old_names|length }} {{ plural(old_names|length, "запись", "записи", "записей") }}</span></div>
-<div class="flash flash--info">{{ icon("info") }}<div class="grow"><div class="flash-text">Для подстановки <code>{old_model}</code> в шаблоне описания: она сама печатает слова «Прежнее название шин» перед названием, например «Ikon Tyres · Autograph Ice 9 → Nokian Hakkapeliitta 9». В каталоге не показывается. Строка шаблона с <code>{old_model}</code> выводится только у моделей с записью. Фид обновится со следующим циклом.</div></div></div>
+<div class="card-head"><h3>Прежние названия моделей</h3><span class="sub">{{ old_names|length }} {{ plural(old_names|length, "запись", "записи", "записей") }}</span><span class="help-q" tabindex="0" data-tip="Строка «Прежнее название шин» в описании объявления: печатается только у моделей с записью. В каталоге не показывается.">?</span></div>
 <table class="table table--plain">
 <thead><tr><th>Бренд в Авито</th><th>Модель в Авито</th><th>Прежнее название</th><th></th></tr></thead>
 <tbody>{% for r in old_names %}{% set fid = "on-%d" % loop.index %}
