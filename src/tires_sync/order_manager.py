@@ -230,12 +230,30 @@ def find_orders(conn, number) -> List[int]:
 
 
 COMMUNITY_LINE = re.compile(r"^\W*(?:\(бот\)\s*)?заказ\s*№?\s*(\d{1,9})(?!\d)", re.I)     # the bot signs its lines «(бот) » (signed)
+_N = r"\s*№\s*(\d{1,9})(?!\d)"
+# the bot's lines to a point about one order that do not start with «Заказ №…» (signed «(бот) », as every line of the bot in VK): each by its
+# fixed start, so that only the bot's own words name an order, never digits of any text. A line naming several orders is none of these.
+BOT_LINES = tuple(re.compile(r"^\W*\(бот\)\s*" + p, re.I) for p in (
+    r"шины\s+с\s+ОТХ\s+\(заказ" + _N + r"\)",                             # order_templates.OTH_POINT_SAMPLE: «Шины с ОТХ (заказ №N) [и со своего остатка] отложены…»
+    r"возврат\s+по\s+заказу" + _N + r"\s+поставщику\s+отмен",              # message_texts.UNAGREED
+    r"готово:\s*заказ" + _N + r"\s+на\s+этапе",                             # the bot's answer of a move (_move)
+    r"(?:завтра|сегодня)\s*\(\d{2}\.\d{2}\.\d{4}\)\s*заканчивается\s+резерв\s+по\s+заказу" + _N,    # order_reserve._text (the point of its account)
+    r"резерв\s+по\s+заказу" + _N + r"\s+закончился",                        # order_reserve._text
+    r"клиент\s+писал,\s*проверьте\s+заказ" + _N,                           # order_reserve.WROTE_TASK
+    r"напоминание\s+о\s+сроке\s+резерва\s+по\s+заказу" + _N + r"\s+клиенту\s+не\s+ушло",   # order_reserve.NOT_SENT_TASK
+    r"клиент\s+ответил\s+на\s+напоминание\s+о\s+сроке\s+резерва\s+по\s+заказу" + _N + r":",  # order_reserve.NO_DATE_TASK
+))
 
 
 def line_number(text):
-    """The order a line of the community starts with: the bot's «(бот) Заказ №…», the owner's «Заказ 5000100 оформлен…», an alert «Заказ №17: …»."""
-    found = COMMUNITY_LINE.match(str(text or ""))
-    return int(found.group(1)) if found else None
+    """The order a line of the community starts with: the bot's «(бот) Заказ №…», the owner's «Заказ 5000100 оформлен…», an alert «Заказ №17: …»,
+    or one of the bot's own lines of BOT_LINES («(бот) Шины с ОТХ (заказ №…) отложены…», 08.11 the order 509)."""
+    text = str(text or "")
+    for line in (COMMUNITY_LINE,) + BOT_LINES:
+        found = line.match(text)
+        if found:
+            return int(found.group(1))
+    return None
 
 
 def find_named(conn, number) -> List[int]:
@@ -246,6 +264,14 @@ def find_named(conn, number) -> List[int]:
         from .order_merge import moved_into
         found = [moved_into(conn, number) or number]                # a source of a merge: its merged order (этап 2)
     return found
+
+
+def _given_only(conn, number) -> bool:
+    """A number of a line of the community names only orders closed by a take (oth_sale.given_away): their tyres are in another order, so the
+    line names none the point could mean. A number they share with that order names it already (find_orders)."""
+    found = find_named(conn, number)
+    from .oth_sale import given_away
+    return bool(found) and set(found) <= given_away(conn, found)
 
 
 def label(card: dict) -> str:
@@ -332,7 +358,9 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     point = _point_of(conn, sender)
     if point is None:
         return finish("отправитель не привязан ни к одной точке", "")
-    refused = parse_refuse(text)                       # «отказ <номер> <причина>»: the reason is text, so not the parser of the other words
+    if reply_order_no and _given_only(conn, reply_order_no):
+        reply_order_no = None                          # «Шины с ОТХ (заказ №A)» of A's own number: A gave its tyres away, it is not the order meant
+    refused = parse_refuse(text)                      # «отказ <номер> <причина>»: the reason is text, so not the parser of the other words
     word = REFUSE if refused else _word(text)
     written = refused[0] if refused else order_number(text)
     doubt = refuse_doubt(text, refused[1], conn) if refused else ""
