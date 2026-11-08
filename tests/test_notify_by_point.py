@@ -298,7 +298,7 @@ def test_the_staff_do_not_see_the_point_account_alerts_and_the_point_does(tmp_pa
     orders.add_event(conn, theirs["id"], NOW, "система", "rule", "Задача не подготовлена", level="red")
     conn.commit()
     assert order_alerts.counts(conn, "owner")["red"] == 0                     # «Красные уведомления» of the dashboard
-    assert order_alerts.counts(conn, "gamma1")["red"] == 1
+    assert order_alerts.counts(conn, "gamma1")["red"] == 0                    # «Задача не подготовлена» is the office's, not the point's (2026-11-07)
     point_rows = order_alerts.page_rows(conn, "gamma1", NOW)
     assert theirs["id"] in {r["order_id"] for r in point_rows}
     assert any(r.get("chat_row") and r["order_id"] is None and "Есть шины" in r["text"] for r in point_rows)

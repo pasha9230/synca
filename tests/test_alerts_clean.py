@@ -218,12 +218,12 @@ def test_the_point_bell_and_notify_keep_the_question_and_lose_the_noise(tmp_path
     data = bell(mine)
     texts = [i["text"] for i in data["items"]]
     assert "Ответьте на «Рабочем месте»: «Выдан» или «На точке»." in texts       # «Клиент забрал?» stays
-    assert "Позиция не добавлена: нет кода" in texts and "Резерв кончается завтра" in texts
+    assert "Позиция не добавлена: нет кода" not in texts and "Резерв кончается завтра" not in texts     # the office's (the owner 2026-11-07)
     assert not [t for t in texts if t in noise or t.startswith("Этап")]
-    assert data["count"] == 3 and data["red"] is True
+    assert data["count"] == 1 and data["red"] is False
     feed = mine.get("/my-point/feed").get_json()["items"]
     rung = [i["text"] for i in feed if i["key"].startswith("alert-")]           # what notify.js rings for of the bell
-    assert "Позиция не добавлена: нет кода" in rung and "Резерв кончается завтра" in rung
+    assert "Позиция не добавлена: нет кода" not in rung and "Резерв кончается завтра" not in rung
     assert not [t for t in rung if t in noise or t.startswith(("Этап", "Заказ создан"))]
     assert any(i["key"].startswith("question-") for i in feed)
     page_html = mine.get("/alerts").get_data(as_text=True)
