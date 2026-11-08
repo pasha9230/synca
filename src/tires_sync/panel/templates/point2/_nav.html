@@ -5,7 +5,7 @@
 {% set more_on = section in ("handed", "tasks", "whatsnew") %}
 <nav class="p2-nav" aria-label="Разделы точки" data-point-nav>
 <a href="/my-point" class="{{ 'is-active' if section == 'mypoint' else '' }}"{% if section == 'mypoint' %} aria-current="page"{% endif %} data-sec="mypoint">{{ icon("layers") }}<span>Рабочее место</span>{% if n.mypoint %}<b>{{ n.mypoint }}</b>{% endif %}</a>
-{% if can("chats") %}<a href="/chats" class="{{ 'is-active' if section == 'chats' else '' }}"{% if section == 'chats' %} aria-current="page"{% endif %} data-sec="chats">{{ icon("chat") }}<span>Чаты</span>{% if nav.chat_unread %}<b class="is-hot">{{ nav.chat_unread }}</b>{% endif %}</a>{% endif %}
+{% if can("chats") %}<a href="/chats" class="{{ 'is-active' if section == 'chats' else '' }}"{% if section == 'chats' %} aria-current="page"{% endif %} data-sec="chats">{{ icon("chat") }}<span>Чаты</span>{% if nav.chat_wait %}<b class="is-hot">{{ nav.chat_wait }}</b>{% endif %}</a>{% endif %}
 {% if can("calls") %}<a href="/calls" class="{{ 'is-active' if section == 'calls' else '' }}"{% if section == 'calls' %} aria-current="page"{% endif %} data-sec="calls">{{ icon("clock") }}<span>Звонки</span></a>{% endif %}
 <details class="p2-more" data-sec="more"><summary class="{{ 'is-active' if more_on else '' }}" aria-label="Ещё разделы">{{ icon("sliders") }}<span>Ещё</span>{% if n.handed or nav.tasks %}<b{% if nav.tasks_late %} class="is-hot"{% endif %}>{{ (n.handed or 0) + (nav.tasks or 0) }}</b>{% endif %}</summary>
 <div class="p2-more-list">

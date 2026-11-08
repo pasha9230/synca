@@ -24,7 +24,18 @@ from .routes_orders import local_iso, local_now, offer_send, send_offer
 
 LIST_LIMIT = 200
 AD_LOOKUP_TIMEOUT = 5         # seconds the press of «Создать заказ» waits for Avito's word on one ad it does not know yet
-FILTERS = {"": "Открытые", "wait": "Ждут ответа", "unread": "Не прочитанные", "nodeal": "Без заказа", "noreply": "Не требуют ответа", "closed": "Закрытые"}
+FILTERS = {"": "Открытые", "wait": "Ждут ответа", "nodeal": "Без заказа", "noreply": "Не требуют ответа", "closed": "Закрытые"}
+
+
+def before_placed(conn, stage: dict) -> bool:
+    """The order is not placed yet: «Подобрать позицию» and «Клиент ждёт эту шину» in the order panel of a chat are shown up to the stage
+    «Заказ оформлен» only (the owner 2026-11-08). The stages before it (new, wait, from a point) and a user's open stage standing before it."""
+    if stage["code"] in ("new", "talk", "wait", orders.FROM_POINT[0]):
+        return True
+    if stage["code"] in orders.PLACED_CODES or stage["kind"] != "open" or stage["code"] in ("return", orders.RETURN_GIVEN):
+        return False
+    placed = orders._placed_stage(conn)
+    return placed is not None and stage["position"] < placed["position"]
 
 
 def _int(value):
@@ -78,17 +89,6 @@ def _search(conn, q: str) -> set:
     """The chats a search finds (chats.find: the name, the messages, a phone, the number of the order); for the manager of a point an order
     finds its chat only when it is of the own point, as in the one search. Returns the chat rows."""
     return chats.find(conn, q, point=own_point())
-
-
-def wait_text(minutes) -> str:
-    """«12 мин», «1 ч 05 мин», «2 дн»."""
-    if minutes is None:
-        return ""
-    if minutes < 60:
-        return "%d мин" % minutes
-    if minutes < 24 * 60:
-        return "%d ч %02d мин" % (minutes // 60, minutes % 60)
-    return "%d дн" % (minutes // (24 * 60))
 
 
 ANSWERING_ROLES = chats.ANSWERING_ROLES                                          # who may answer a chat: the roles with «Чаты» to change
@@ -246,29 +246,20 @@ def register(app) -> None:
                 every = "all" if request.args.get("acc") == "all" else None
                 acc = default if every is None else None
         q = " ".join(request.args.get("q", "").split())[:SEARCH_MAX]
-        moment = local_now().replace(tzinfo=None)
         answerers = _answerers(conn)
-        baselines = {}
-
-        def waits(chat):
-            """The clock of the waiting client; none for the chats that were there before their account was first read (the past)."""
-            if chat["account_id"] not in baselines:
-                baselines[chat["account_id"]] = store.get_state(conn, "chats_baseline_%d" % chat["account_id"]) or ""
-            return chats.waiting_minutes(chat, moment) if (chat.get("last_at") or "") >= baselines[chat["account_id"]] else None
         found = _search(conn, q) if q else None
         accounts = [a for a in connections.list_accounts(conn) if (a["chats_enabled"] or a["id"] == acc) and (not mine or a["id"] == acc)]
         enabled = {a["id"] for a in connections.list_accounts(conn) if a["chats_enabled"]}
-        rows, place, opened = [], {}, None
+        rows, place, opened, scope = [], {}, None, []
         for chat in (chats.list_chats(conn, acc) if not mine or acc is not None else []):
             if chat["account_id"] not in enabled and acc is None:
                 continue
             if found is not None and chat["id"] not in found:
                 continue
             place[chat["id"]] = len(place)
+            scope.append(chat)
             if chat["id"] == chat_row:                                    # the open chat (owner's word 2026-10-24 (6)): see below
                 opened = chat
-            if flt == "unread" and not chat["unread"]:
-                continue
             if flt == "noreply" and chat["status"] != "no_reply":
                 continue
             if flt == "nodeal" and chat["order_id"]:
@@ -277,17 +268,12 @@ def register(app) -> None:
                 continue
             if flt == "wait" and chat["status"] != "open":
                 continue
-            if flt in ("", "unread", "nodeal") and chat["status"] == "closed" and found is None:     # a search finds closed chats too
+            if flt in ("", "nodeal") and chat["status"] == "closed" and found is None:     # a search finds closed chats too
                 continue
             rows.append(chat)
-        pending, asked = {}, set()
-        if flt == "wait":                                                 # «Ждут ответа»: the same clock as the badge «ждёт N мин»
-            asked = {c["id"] for c in rows}
-            pending = chats.wait_starts(conn, sorted(asked))
-            for chat in rows:
-                if chat["id"] in pending:
-                    chat["wait_since"] = pending[chat["id"]]
-            rows = [c for c in rows if waits(c) is not None]
+        waiting = chats.waiting(conn, scope)                              # «Ждут ответа»: one definition with the menu (п. 7, 2026-11-08)
+        if flt == "wait":
+            rows = [c for c in rows if c["id"] in waiting]
         total = len(rows)
         fits = chat_row is not None and any(c["id"] == chat_row for c in rows)   # in the state, maybe beyond the first LIST_LIMIT
         rows = rows[:LIST_LIMIT]
@@ -296,9 +282,6 @@ def register(app) -> None:
             rows = sorted(rows + [opened], key=lambda c: place[c["id"]])
             kept = opened["kept"] = not fits                              # «вне фильтра» on its row only when it is out of the state
         names = {} if mine else {a["id"]: a["name"] for a in connections.list_accounts(conn)}   # a point never sees an account's name (2026-10-29)
-        wanted = [c["id"] for c in rows] + ([chat_row] if chat_row is not None else [])
-        starts = dict(pending)                                            # «Ждут ответа» read them already: only the others are read
-        starts.update(chats.wait_starts(conn, [r for r in wanted if r not in asked]))        # the auto-answer is no answer
         for chat in rows:
             chat["deal"] = None
             chat["last_avito"] = chats.unsupported_link(chat["last_text"], chat["chat_id"])     # Avito's stub instead of the text: a short label
@@ -311,10 +294,7 @@ def register(app) -> None:
                     pass
             chat["account_name"] = names.get(chat["account_id"], "")
             chat["ref"] = deals.ref(chat["id"])
-            if chat["id"] in starts:
-                chat["wait_since"] = starts[chat["id"]]
-            chat["waits"] = waits(chat)
-            chat["wait_text"] = wait_text(chat["waits"])
+            chat["waiting"] = chat["id"] in waiting                         # a label «ждёт ответа», no time (the owner 2026-11-08, п. 8)
         current, messages, deal = None, [], None
         if chat_row is not None:
             current = _chat_or_404(conn, chat_row)
@@ -324,10 +304,7 @@ def register(app) -> None:
             current["catalog_url"] = current["product"]["catalog_url"] if current["product"] else (
                 "/catalog?" + urlencode({"q": _title_search(current.get("item_title"))}) if current.get("item_title") else "")
             current["wait"] = _wait_prefill(conn, current)
-            if current["id"] in starts:
-                current["wait_since"] = starts[current["id"]]
-            current["waits"] = waits(current)
-            current["wait_text"] = wait_text(current["waits"])
+            current["waiting"] = current["id"] in (waiting if current["id"] in place else chats.waiting(conn, [current]))
             messages = chats.list_messages(conn, chat_row)
             for m in messages:                                            # Avito's stub «Сообщение не поддерживается»: a plain label and its link
                 m["avito_link"] = chats.unsupported_link(m["text"], current["chat_id"]) if m["kind"] not in ("image", "call") else None
@@ -343,6 +320,7 @@ def register(app) -> None:
                         ours = {r[0] for r in conn.execute("SELECT id FROM order_card WHERE point_id = ?", (own_point(),))}
                         deal["earlier"] = [i for i in deal["earlier"] if i in ours]
                     deal["gaps"] = orders.gaps_to_place(conn, deal)
+                    deal["before_placed"] = before_placed(conn, deal["stage"])
                     if mine:                                                     # never an account's name (the owner 2026-10-29)
                         deal["comment"] = orders.without_account_names(conn, deal["comment"])
                         deal["tags"] = [t for t in deal["tags"] if t.lower() not in orders.account_tags(conn)]
@@ -367,7 +345,7 @@ def register(app) -> None:
         stages = orders.list_stages(conn)
         if deal and own_point() is not None and deal["id"] in points.own_sales(conn, own_point()):     # its own sale: the four (and where it is)
             stages = [s for s in stages if s["code"] in points.POINT_STAGES or s["id"] == deal["stage_id"]]
-        return render_template(office_page(point_page("chats.html")), deal_note=order_notes.person_text(deal["comment"]) if deal else "", offer=offer, handoff=handoff, handed=handed, take=take, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=order_autosend.office_sends(chats.pending_sends(conn, [current["id"]], local_iso()), own_point() is not None) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
+        return render_template(office_page(point_page("chats.html")), deal_note=order_notes.person_text(deal["comment"]) if deal else "", offer=offer, handoff=handoff, handed=handed, take=take, can_send=can_send, live_sig=chats.signature(conn, chat_row), reply_token=secrets.token_hex(12), image_token=secrets.token_hex(12), sends=order_autosend.office_sends(chats.pending_sends(conn, [current["id"]], local_iso()), own_point() is not None) if current else [], draft=session.get("draft_%d" % chat_row, "") if chat_row else "", rows=rows, total=total, wait_n=len(waiting), kept=kept, current=current, messages=messages, deal=deal, flt=flt, filters=FILTERS, acc=acc, filter_menus=filter_menus,
                                accounts=accounts, stages=stages, statuses=chats.STATUSES, q=q, answerers=answerers, answer_names=dict(answerers),
                                unsearch="/chats" + ("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every)) if kv[1]]) if (flt or acc or every) else ""), every=every,
                                query=("?" + urlencode([kv for kv in (("f", flt), ("acc", acc or every), ("q", q)) if kv[1]])) if (flt or acc or every or q) else "")

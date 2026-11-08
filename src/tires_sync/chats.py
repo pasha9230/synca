@@ -184,6 +184,40 @@ def wait_starts(conn, chat_rows) -> dict:
     return found
 
 
+def waiting(conn, chat_list) -> set:
+    """The one «Ждут ответа» (п. 7 of the audit, the owner 2026-11-08): the ids of the chats of `chat_list` whose client waits for our answer —
+    the chat is open, its last message is after its account was first read (`chats_baseline_<account>`: the past is no waiting), and a
+    message of the client came after the last answer of a person (wait_starts; Avito's auto-answer is no answer), or, without the messages
+    here, the last message is the client's. The menu «Чаты» and the filter «Ждут ответа» of the chats count the same."""
+    opened = [c for c in chat_list if c.get("status") == "open"]
+    starts = wait_starts(conn, [c["id"] for c in opened])
+    baselines, found = {}, set()
+    for chat in opened:
+        account = chat["account_id"]
+        if account not in baselines:
+            baselines[account] = store.get_state(conn, "chats_baseline_%d" % account) or ""
+        if (chat.get("last_at") or "") < baselines[account]:
+            continue
+        since = starts[chat["id"]] if chat["id"] in starts else (chat.get("last_at") if chat.get("last_dir") == "in" else None)
+        if since:
+            found.add(chat["id"])
+    return found
+
+
+def waiting_total(conn, account_id: Optional[int] = None, without_points: bool = False) -> int:
+    """«Ждут ответа» (waiting) over the chats of the enabled accounts, or of `account_id` only; `without_points`: not the chats of the
+    points' accounts (the staff's counter, the owner 2026-10-26)."""
+    from .order_points import POINT_ACCOUNTS
+    sql = ("SELECT %s FROM avito_chat c JOIN account a ON a.id = c.account_id WHERE a.chats_enabled = 1 AND c.status = 'open'"
+           % ", ".join("c." + f.strip() for f in CHAT_FIELDS.split(",")))
+    args = ()
+    if account_id is not None:
+        sql, args = sql + " AND c.account_id = ?", (account_id,)
+    if without_points:
+        sql += " AND c.account_id NOT IN (" + POINT_ACCOUNTS + ")"
+    return len(waiting(conn, [_chat_row(r) for r in conn.execute(sql, args)]))
+
+
 def waiting_minutes(chat: dict, now) -> Optional[int]:
     """How long the client waits for an answer, the chat being open: since `wait_since` when the caller read it (wait_starts: the first
     message of the client after a person's answer), else since the last message when it is theirs; None when nobody waits.

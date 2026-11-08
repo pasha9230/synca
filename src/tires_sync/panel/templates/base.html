@@ -38,7 +38,7 @@
 {% if can("orders") or can("chats") or can("calls") or can("alerts") %}{% call sb_section("sales", "Продажи") %}
 {% if can("orders") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}{# the point: hidden (the owner 2026-11-02) #}
 {% if current_user().role != "point" %}{% include "_nav_tasks.html" %}{% endif %}
-{% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_unread %}<span class="sb-count">{{ nav.chat_unread }}</span>{% endif %}</a>{% endif %}
+{% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_wait %}<span class="sb-count">{{ nav.chat_wait }}</span>{% endif %}</a>{% endif %}
 {% if can("calls") %}<a class="sb-link{% if path.startswith('/calls') %} is-active{% endif %}" href="/calls">{{ icon("clock") }}Звонки</a>{% endif %}
 {% if can("clients") %}<a class="sb-link{% if path.startswith('/clients') %} is-active{% endif %}" href="/clients">{{ icon("users") }}CRM</a>{% endif %}
 {% if can("alerts") %}<a class="sb-link{% if path.startswith('/alerts') %} is-active{% endif %}" href="/alerts">{{ icon("alert") }}Уведомления{% if nav.alerts %}<span class="sb-count{% if nav.alerts_red %} sb-count--red{% endif %}">{{ nav.alerts }}</span>{% endif %}</a>{% endif %}

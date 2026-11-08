@@ -13,18 +13,17 @@ from .common import can, can_post, check_access, check_csrf, close_conn, csrf_to
 REQUIRED = ("SECRET_KEY", "PASSWORD_HASH", "DB_PATH", "UNLOAD_PATH", "REFERENCE_PATH")
 
 
-def _chat_unread(conn) -> int:
-    """The menu counter of «Чаты»: the whole panel's but the points' accounts (the owner 2026-10-26); for the manager of a point, the chats
-    of its account only (none without one)."""
+def _chat_wait(conn) -> int:
+    """The menu counter of «Чаты»: «Ждут ответа» (chats.waiting, the same as the filter of the chats; п. 7 of the audit, 2026-11-08) — the
+    whole panel's but the points' accounts (the owner 2026-10-26); for the manager of a point, the chats of its account only (none without one)."""
     from .. import chats as chats_store
     from .common import own_point, point_account
     if own_point() is None:
-        return chats_store.unread_total(conn, without_points=True)
+        return chats_store.waiting_total(conn, without_points=True)
     account = point_account()
     if account is None:
         return 0
-    return conn.execute("SELECT COUNT(*) FROM avito_chat c JOIN account a ON a.id = c.account_id WHERE a.chats_enabled = 1 AND c.unread > 0 "
-                        "AND c.status = 'open' AND c.account_id = ?", (account,)).fetchone()[0]
+    return chats_store.waiting_total(conn, account_id=account)
 
 
 class SafeInt(IntegerConverter):
@@ -263,7 +262,7 @@ def create_app(config: dict) -> Flask:
                     "draft_id": staged["draft_id"], "rev": draft_rev(staged["changes"]),
                     "new_count": _visible_new_count(conn),
                     "pending_pairs": int(pairs) if pairs.isdigit() else 0,
-                    "chat_unread": _chat_unread(conn)}
+                    "chat_wait": _chat_wait(conn)}
                 from flask import session
                 from .routes_alerts import nav_counts
                 self._data.update(nav_counts(conn, session["user"]))
