@@ -30,3 +30,9 @@ body.o2 .o2-crm-grid th.t-c,body.o2 .o2-crm-grid td.t-c{text-align:center;width:
 .tpl-var code{font-size:12px;color:var(--primary-700);white-space:nowrap}
 .tpl-var span{color:var(--gray-500)}
 @media (max-width:720px){.tpl2-grid{grid-template-columns:minmax(0,1fr)}}
+
+/* Каталог (п. 41): the status short in one line, the name not cut off */
+body.o2 .o2-cat-table .st-ico{white-space:nowrap;max-width:none}
+body.o2 .o2-cat-table .table--items .gname{white-space:normal;overflow:visible;text-overflow:clip}
+body.o2 .o2-cat-table .table--items .t-name{flex-wrap:wrap}
+body.o2 .o2-cat-table td.t-actions{white-space:normal!important;min-width:150px}body.o2 .o2-cat-table td.t-actions .btn{margin:2px 0}
