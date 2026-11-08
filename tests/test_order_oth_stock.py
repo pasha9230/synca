@@ -523,6 +523,21 @@ def test_the_page_returns_and_undoes_a_number_of_tyres(tmp_path):
     assert order_oth.goods_on_oth(conn) == {"1": 4}
 
 
+def test_the_return_and_its_undo_are_written_in_moscow_time_as_the_rest_of_the_order(tmp_path):
+    """Review 2026-11-08: «Вернуть поставщику» / «Отменить» of /oth wrote UTC into the order's records, its tasks and the journal, which
+    are all read in Moscow time (panel.MOSCOW_AUDIT): their lines came 3 hours early."""
+    from datetime import datetime
+    app, owner, tok, conn = panel(tmp_path)
+    app.config["NOW"] = lambda: datetime(2026, 11, 8, 9, 15, 0)                    # the panel's clock is UTC
+    cid = card_at(conn, "oth", T)
+    item = re.search(r'name="item" value="(\d+)"', owner.get("/oth").get_data(as_text=True)).group(1)
+    post(owner, "/oth/return", tok, item=item, qty="1")
+    post(owner, "/oth/return", tok, item=item, qty="1", undo="1")
+    moscow = "2026-11-08T12:15:00"
+    assert [a for (a,) in conn.execute("SELECT at FROM audit WHERE action IN ('oth_return', 'oth_return_undo') ORDER BY id")] == [moscow, moscow]
+    assert {a for (a,) in conn.execute("SELECT at FROM order_event WHERE order_id = ? AND text LIKE 'ОТХ: %возвращено поставщику%'", (cid,))} == {moscow}
+
+
 def test_the_journal_of_actions_names_the_number_of_an_undo(tmp_path):
     import json
     from tires_sync.panel import texts

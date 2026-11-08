@@ -69,6 +69,8 @@ def test_the_journal_shows_both_clocks_in_moscow_time(env):
         audit_dt = env[1].globals["audit_dt"]
         assert audit_dt({"action": "settings_confirm", "author": "owner", "at": "2026-10-20T21:30:00"}) == "21.10.2026 00:30:00"     # UTC
         assert audit_dt({"action": "chat_assign", "author": "owner", "at": "2026-10-20T21:30:00"}) == "20.10.2026 21:30:00"         # Moscow
+        for action in ("inquiry", "staff_note", "point_action"):          # written in Moscow time (the owner 2026-11-08: shown 3 hours late)
+            assert audit_dt({"action": action, "author": "owner", "at": "2026-10-20T21:30:00"}) == "20.10.2026 21:30:00", action
         assert audit_dt({"action": "ids_bound", "author": "ids-heal", "at": "2026-10-20T10:00:00"}) == "20.10.2026 10:00:00"
         assert audit_dt({"action": "ids_bound", "author": "same_tire", "at": "2026-10-20T10:00:00"}) == "20.10.2026 13:00:00"
         assert audit_dt({"action": "account_live", "author": "mirror-go-live", "at": "2026-10-20T10:00:00"}) == "20.10.2026 10:00:00"

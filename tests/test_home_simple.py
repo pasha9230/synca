@@ -207,19 +207,28 @@ def test_the_feed_tile_keeps_its_warnings(tmp_path):
 
 
 def test_last_publication_and_the_journal_of_changes_open_the_history_page_and_left_the_home_page(tmp_path):
-    app = make_app(tmp_path)
-    conn = store.connect(app.config["DB_PATH"])
-    store.set_state(conn, "last_publish", json.dumps({"at": "2026-10-08T10:00:00", "lines": ["Опубликовано: Основной, 5 объявлений"]}))
+    """«Последняя публикация» shows the feeds as the home page and «Фиды» do (service.feed_status / feed_tiles), with their names: the hourly
+    cycle updates them, the state of the last publish by hand is never read (the owner 2026-11-08: it said «07.11 16:36, 254/253» after the
+    cycle of 23:40, and named the account by its Avito cabinet, not «Основной»)."""
+    app = make_app(tmp_path, FEED_ROOT=str(tmp_path / "feed"))
+    conn = _feed(app, public_at=datetime(2026, 10, 7, 20, 40, 0), live=True, avito_id=777)          # 23:40 Moscow time
+    store.set_state(conn, "last_publish", json.dumps({"at": "2026-10-07T13:36:00", "lines": ["Опубликовано: Шины, 254 объявления"]}))
     conn.commit()
     client = app.test_client()
     login(client)
     html = home(client)
     assert "Последняя публикация</h3>" not in html and "Последние изменения" not in html
+    tile = _tiles(html).split('<a class="tile tile--warn" href="/mappings">')[0]
+    assert "Фид Авито · ID 777 · Основной" in tile and "обновлён 07.10 23:40 МСК" in tile
     page = client.get("/history").get_data(as_text=True)
     assert page.index("Последняя публикация</h3>") < page.index("Журнал действий</h3>") < page.index("Версии настроек</h3>")      # the latest changes = the journal
-    assert "Опубликовано: Основной, 5 объявлений" in page and 'href="/publish/result">Подробнее<' in page
+    block = page[page.index("Последняя публикация</h3>"):page.index("</section>", page.index("Последняя публикация</h3>"))]
+    assert "07.10 23:40 МСК" in block
+    assert "Фид Авито · ID 777 · Основной: 2 объявления в фиде, обновлён 07.10 23:40 МСК" in block
+    assert "254" not in block and "16:36" not in block and "Шины" not in block           # the publish by hand of before is not shown
+    assert 'href="/feeds">Фиды<' in block
     assert 'class="tabs"' in page and page.index('class="tabs"') < page.index("Последняя публикация</h3>")
-    assert "Опубликовано: Основной, 5 объявлений" in client.get("/history?f=system").get_data(as_text=True)
+    assert "Фид Авито · ID 777 · Основной" in client.get("/history?f=system").get_data(as_text=True)
 
 
 def test_history_without_a_publication_has_no_publication_block(tmp_path):

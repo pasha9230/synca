@@ -185,3 +185,21 @@ def test_a_filter_unfolds_the_closed_stages_so_what_was_found_shows(tmp_path, mo
         assert "is-folded" not in page and "data-fold-toggle" not in page, url
     css = (STATIC / "panel.css").read_text(encoding="utf-8")
     assert ".col.is-folded.is-over{" in css                                                        # a folded column still shows where a card drops
+
+
+def test_the_task_form_of_the_order_window_keeps_its_text_fields_wide_enough(tmp_path, monkeypatch):
+    """The owner 2026-11-08: in the order window «Текст» ran onto «Кому» and «Комментарий» shrank to nothing (.grow is flex:1 from a zero
+    basis, min-width 0): the fields of the task form have a basis and a minimum width and wrap to the next line instead."""
+    client, tok, _conn = setup(tmp_path, monkeypatch)
+    page = client.get("/orders/%d" % new_card(client, tok)).get_data(as_text=True)
+    form = page[page.index('action="/tasks/new"') - 200:]
+    form = form[form.index("<form"):form.index("</form>")]
+    assert 'class="row task-form"' in form and "flex-wrap:wrap" in form
+    for name in ("Текст", "Комментарий"):
+        assert '<label class="field grow"><span class="label">%s</span>' % name in form, name
+    css = (STATIC / "panel.css").read_text(encoding="utf-8")
+    rule = re.search(r"\.task-form>\.field\.grow\{([^}]*)\}", css)
+    assert rule, "no rule for the text fields of the task form"
+    basis = re.search(r"flex:1 1 (\d+)px", rule.group(1))
+    least = re.search(r"min-width:(\d+)px", rule.group(1))
+    assert basis and least and int(basis.group(1)) >= 160 and int(least.group(1)) >= 160

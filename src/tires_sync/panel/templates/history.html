@@ -5,12 +5,12 @@
 <header class="page-head"><div><h1>История</h1><p class="sub">Последняя публикация, журнал действий и версии настроек. Каждое применение черновика — новая версия. Откат создаёт новую версию и не стирает текущую.</p></div></header>
 {% set tab = "log" %}{% include "_history_tabs.html" %}
 {% if last_publish %}
-<section class="card">
-<div class="card-head"><h3>Последняя публикация</h3><span class="sub">{{ last_publish.at|dt_utc }}</span></div>
+<section class="card" id="last-publish">
+<div class="card-head"><h3>Последняя публикация</h3><span class="sub">{% if last_publish.at %}{{ last_publish.at }} МСК{% else %}ещё не публиковался{% endif %}</span></div>
 <ul class="checklist">
-{% for line in last_publish.lines %}<li style="grid-template-columns:auto minmax(0,1fr)"><span class="badge badge--{{ 'ok' if line.ok else ('neutral' if line.neutral else 'warn') }} badge--dot">{{ "Готово" if line.ok else ("Пропущено" if line.neutral else "Проверьте") }}</span><div class="cl-text" style="color:var(--gray-700)">{{ line.text }}</div></li>{% endfor %}
+{% for f in last_publish.feeds %}<li style="grid-template-columns:auto minmax(0,1fr)">{% set state = "neutral" if not f.live else ("warn" if f.warn or not f.public_short else "ok") %}<span class="badge badge--{{ state }} badge--dot">{{ {"neutral": "Пропущено", "warn": "Проверьте", "ok": "Готово"}[state] }}</span><div class="cl-text" style="color:var(--gray-700)">{{ f.title }}: {{ f.ads }} {{ plural(f.ads, "объявление", "объявления", "объявлений") }} в фиде{% if f.known %}{% if f.public_short %}, обновлён {{ f.public_short }} МСК{% else %}, ещё не публиковался{% endif %}{% endif %}{% if not f.live %}; публикация выключена, Авито читает старый фид{% endif %}{% if f.draft_short %}; свежий собран {{ f.draft_short }}{% endif %}</div></li>{% endfor %}
 </ul>
-<div class="card-foot"><a class="btn btn--link small" href="/publish/result">Подробнее</a></div>
+{% if can("catalog") %}<div class="card-foot"><a class="btn btn--link small" href="/feeds">Фиды</a></div>{% endif %}
 </section>
 {% endif %}
 <section class="card">

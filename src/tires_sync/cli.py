@@ -155,6 +155,9 @@ def _build_parser() -> argparse.ArgumentParser:
     fr = sub.add_parser("orders-fill-responsible", help="один раз: заказам без ответственного поставить его по правилам нового заказа (аккаунт Авито, каталог клиента, кто создал); без --apply только показывает")
     fr.add_argument("--db", required=True)
     fr.add_argument("--apply", action="store_true", help="записать (сделайте копию базы до этого); без него ничего не пишется")
+    ar = sub.add_parser("alerts-resolve-done", help="закрыть красные записи «Задача не подготовлена» и «Сообщение … не отправлено» заказов, у которых та же задача уже выполнена (задачи, выполненные до автозакрытия); без --apply только показывает")
+    ar.add_argument("--db", required=True)
+    ar.add_argument("--apply", action="store_true", help="закрыть (сделайте копию базы до этого); без него ничего не пишется")
     se = sub.add_parser("sheet-enroll", help="поставить в очередь Google-таблицы открытые заказы, оформленные до её включения (строки только добавляются; запуск вручную)")
     se.add_argument("--db", required=True)
     se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «На возврат»")
@@ -1254,6 +1257,20 @@ def _cmd_orders_fill_responsible(args) -> int:
     print("%s: %d; без ответственного осталось: %d%s" % ("записано" if args.apply else "будет записано (ничего не записано, нужен --apply)",
                                                         len(made["set"]), len(made["left"]),
                                                         " (№ %s)" % ", ".join(map(str, made["left"][:30])) if made["left"] else ""))
+    return 0
+
+
+def _cmd_alerts_resolve_done(args) -> int:
+    """alerts-resolve-done: the red records of tasks done before order_engine.resolve_done was there (order_engine.resolve_done_backlog);
+    without --apply it only shows them. Run by hand after a copy of the base (the owner 2026-11-08)."""
+    conn = store.connect(args.db)
+    try:
+        found = order_engine.resolve_done_backlog(conn, moscow_now().isoformat(timespec="seconds"), apply=args.apply)
+    finally:
+        conn.close()
+    for event in found:
+        print("№%d: %s" % (event["order_id"], event["text"].splitlines()[0][:160]))
+    print("%s: %d" % ("закрыто" if args.apply else "будет закрыто (ничего не записано, нужен --apply)", len(found)))
     return 0
 
 
@@ -3141,6 +3158,8 @@ def main(argv=None) -> int:
             return _cmd_clients_link(args)
         if args.command == "orders-tick":
             return _cmd_orders_tick(args)
+        if args.command == "alerts-resolve-done":
+            return _cmd_alerts_resolve_done(args)
         if args.command == "orders-fill-responsible":
             return _cmd_orders_fill_responsible(args)
         if args.command == "sheet-enroll":
