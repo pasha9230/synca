@@ -480,10 +480,10 @@ def create_deal(conn, chat_row, now: str, author: str = SYSTEM_AUTHOR, position_
     try:
         own = own_phones(conn)
         phone = next((p for p in (extract_phone(t, own) for t in _incoming_texts(conn, chat_row)) if p), "")
-        comment = "Объявление: %s %s" % (chat["item_title"], chat["item_url"]) if chat["item_title"] else ""
+        comment = ""                     # empty by default, no link to the ad (the owner 08.11, the prototype of the audit): the ad is in the chat
         earlier = earlier_deals(conn, chat)
         stated = name_in_chat(conn, chat_row)
-        name = (stated or chat["peer_name"] or "")[:120]                                               # the name the client wrote, else the profile name; the ad stays in the comment
+        name = (stated or chat["peer_name"] or "")[:120]                                               # the name the client wrote, else the profile name
         tags = ",".join(t for t in (_account_tag(conn, chat["account_id"]), "повторный" if earlier else "") if t)
         of_account = points_store.point_by_account(conn, chat["account_id"])
         named = None if of_account else named_point(_incoming_texts(conn, chat_row), points_store.list_points(conn))   # a point's account keeps its point, bound by _attach

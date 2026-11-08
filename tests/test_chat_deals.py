@@ -61,7 +61,7 @@ def test_a_first_message_makes_a_deal_with_the_chat_the_ad_and_the_name(tmp_path
     [chat] = chats.list_chats(conn)
     card = orders.get_card(conn, chat["order_id"])
     assert card["client_name"] == "Татьяна" and card["source"] == "avito" and card["stage"]["code"] == "new"
-    assert "Объявление: Ikon 185/65 R15" in card["comment"] and card["avito_chat"] == "Ч-%d" % chat["id"]
+    assert card["comment"] == "" and card["avito_chat"] == "Ч-%d" % chat["id"]
     assert any("Привязан чат" in e["text"] for e in orders.list_events(conn, card["id"]))
     assert sync(conn, account, fake)["created"] == 0 and conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 1       # no second deal
 

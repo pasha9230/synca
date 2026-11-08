@@ -212,7 +212,7 @@ def test_the_existing_card_of_a_chat_is_kept_as_before(tmp_path):
     card_id = deals.create_deal(conn, row, NOW, "pavel")
     card = orders.get_card(conn, card_id)
     assert card["client_name"] == "Татьяна" and card["client_phone"] == "+79000000017" and card["avito_chat"] == "Ч-%d" % row
-    assert card["source"] == "avito" and "Объявление: Ikon 185/65 R15" in card["comment"] and "Павел" in card["tags"]
+    assert card["source"] == "avito" and card["comment"] == "" and "Павел" in card["tags"]     # no ad in the comment (the owner 08.11)
     assert deals.create_deal(conn, row, NOW, "pavel") == card_id                          # a second press gives the same order
 
 

@@ -1,4 +1,4 @@
-"""The client's name on a deal made from a chat is the Avito name only, the ad stays in the comment."""
+"""The client's name on a deal made from a chat is the Avito name only; the comment is empty (the owner 08.11: no link to the ad)."""
 from __future__ import annotations
 
 import pytest
@@ -14,7 +14,7 @@ def test_a_deal_from_a_chat_is_named_with_the_client_only(tmp_path):
     [chat] = chats.list_chats(conn)
     card = orders.get_card(conn, chat["order_id"])
     assert card["client_name"] == "Татьяна" and "·" not in card["client_name"]
-    assert card["comment"].startswith("Объявление: Ikon 185/65 R15 https://www.avito.ru/x_111")
+    assert card["comment"] == ""                                     # no ad in the comment (the owner 08.11)
 
 
 def test_a_chat_without_a_name_makes_a_nameless_deal_and_the_ad_is_not_used_as_the_name(tmp_path):
@@ -25,7 +25,7 @@ def test_a_chat_without_a_name_makes_a_nameless_deal_and_the_ad_is_not_used_as_t
     conn.execute("UPDATE avito_chat SET order_id = NULL, peer_name = '' WHERE id = ?", (chat["id"],))
     conn.commit()
     card = orders.get_card(conn, deals.create_deal(conn, chat["id"], NOW))
-    assert card["client_name"] == "" and "Ikon" in card["comment"]
+    assert card["client_name"] == "" and "Ikon" not in card["client_name"] and card["comment"] == ""
 
 
 def test_an_order_from_a_chat_with_only_an_ad_title_still_asks_for_a_name(tmp_path):
