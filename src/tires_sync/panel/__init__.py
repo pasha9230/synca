@@ -20,7 +20,7 @@ REQUIRED = ("SECRET_KEY", "PASSWORD_HASH", "DB_PATH", "UNLOAD_PATH", "REFERENCE_
 # are UTC only from «Отметить возвращённым» of /oth); «ids_bound» and «account_live» are told by their author (audit_dt); a sale
 # («sale_added», «sale_reversed») from an order is Moscow, typed by hand UTC: both are shown as UTC.
 MOSCOW_AUDIT = frozenset({
-    "autosend_add", "autosend_cancel", "autosend_update", "avito_price_push", "avito_stock_push", "avito_stock_restore", "avito_webhook_subscribe",
+    "alerts_resolve_done", "autosend_add", "autosend_cancel", "autosend_update", "avito_price_push", "avito_stock_push", "avito_stock_restore", "avito_webhook_subscribe",
     "avito_webhook_unsubscribe", "callback", "callback_cancel", "callback_done", "callback_extend", "chat_assign", "chat_assign_default",
     "chat_delete", "chat_handover", "chat_handover_taken", "chat_restore", "client_own_name", "clients_linked", "critical", "id_scheme",
     "ids_rebound", "inquiry", "inquiry_failed", "inquiry_merged", "mirror_adopt", "mirror_reissue", "mirror_reissue_own", "mirror_unreissue_own",

@@ -139,10 +139,10 @@ def resolve(conn, event_id: int, now: str, author: str) -> None:
 def _open_red_where(conn, order_id, fixed) -> List[dict]:
     """The red records of the order not closed yet for which fixed(event) holds (nothing is written)."""
     found = []
-    for event_id, author_of, kind, text, level in conn.execute(
-            "SELECT e.id, e.author, e.kind, e.text, e.level FROM order_event e WHERE e.order_id = ? AND e.level IN ('', 'red') AND NOT EXISTS ("
+    for event_id, at, author_of, kind, text, level in conn.execute(
+            "SELECT e.id, e.at, e.author, e.kind, e.text, e.level FROM order_event e WHERE e.order_id = ? AND e.level IN ('', 'red') AND NOT EXISTS ("
             "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (order_id, EVERYBODY)).fetchall():
-        event = {"id": event_id, "order_id": order_id, "author": author_of, "kind": kind, "text": text or "", "level": level}
+        event = {"id": event_id, "order_id": order_id, "at": at, "author": author_of, "kind": kind, "text": text or "", "level": level}
         if level_of(event) == "red" and fixed(event):
             found.append(event)
     return found

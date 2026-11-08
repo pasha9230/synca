@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from . import chats, order_points as points, order_rules as rules, order_templates as templates, orders, vk_send
+from . import chats, order_points as points, order_rules as rules, order_templates as templates, orders, store, vk_send
 from .orders import OrderError
 
 MAX_CHAIN = 3
@@ -232,11 +232,23 @@ def _whom(conn, task: dict) -> str:
 
 
 RESOLVE_DONE_AUTHOR = "сверка выполненных задач"
+RESOLVE_DONE_AUDIT = "alerts_resolve_done"
+
+
+def _not_later(at, done_at) -> bool:
+    """The record was made not later than the task was done. Both are written by the order's own clock (Moscow time: the panel's local_iso,
+    the commands' moscow_now); a stamp that does not read is never taken for an old one."""
+    try:
+        return datetime.fromisoformat(str(at)) <= datetime.fromisoformat(str(done_at))
+    except (TypeError, ValueError):
+        return False
 
 
 def resolve_done_backlog(conn, now: str, author: str = RESOLVE_DONE_AUTHOR, apply: bool = False) -> List[dict]:
     """Tasks done before resolve_done was there (the owner 2026-11-08, orders 539/540/542) left their red records open: the same check of
-    order_alerts.resolve_message_done for every done task. The records it would close (each once), newest order last; closed only with apply.
+    order_alerts.resolve_message_done for every done task, but only for the records made not later than the task was done (review
+    2026-11-08: the order went back to the stage, the task of the same rule for the new stay failed: its record is alive). The records it
+    would close (each once), newest order last; closed only with apply, and the run is put in the journal (RESOLVE_DONE_AUDIT).
     A skipped or cancelled task is no fix: only status 'done' counts."""
     from . import order_alerts
     found: Dict[int, dict] = {}
@@ -244,11 +256,12 @@ def resolve_done_backlog(conn, now: str, author: str = RESOLVE_DONE_AUTHOR, appl
         task = _task(row)
         whom = _whom(conn, task)
         for event in order_alerts.message_done_open(conn, task, whom):
-            found.setdefault(event["id"], event)
+            if _not_later(event["at"], task["done_at"]):
+                found.setdefault(event["id"], event)
     if apply:
         for event_id in found:
             order_alerts.resolve(conn, event_id, now, author)
-        conn.commit()
+        store.write_audit(conn, now, author, RESOLVE_DONE_AUDIT, {"closed": len(found), "orders": sorted({e["order_id"] for e in found.values()})})
     return list(found.values())
 
 
