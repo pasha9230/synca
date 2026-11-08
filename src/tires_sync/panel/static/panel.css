@@ -247,6 +247,8 @@ a.tile:hover{border-color:var(--primary-300);text-decoration:none;box-shadow:var
 
 /* ============ ФОРМЫ ============ */
 .field{display:flex;flex-direction:column;gap:6px;min-width:0}
+/* the task form (_inquiry.task_form): «Текст» and «Комментарий» never shrink to nothing in the narrow middle of the order window, they wrap */
+.task-form>.field.grow{flex:1 1 180px;min-width:160px}
 .label{font-size:var(--fs-sm);font-weight:500;color:var(--gray-700)}
 .hint{font-size:var(--fs-xs);color:var(--gray-500)}
 .hint--err{color:var(--err-600)}
