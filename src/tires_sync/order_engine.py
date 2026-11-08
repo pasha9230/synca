@@ -221,9 +221,35 @@ def resolve_done(conn, task: dict, now: str, author: str) -> None:
     Never raises: a send that went is never undone by its alerts."""
     from . import order_alerts
     try:
-        order_alerts.resolve_message_done(conn, task, {"client": "клиенту", "manager": "точке"}.get(audience(conn, task), ""), now, author)
+        order_alerts.resolve_message_done(conn, task, _whom(conn, task), now, author)
     except Exception:                                              # noqa: BLE001
         logging.getLogger("tires_sync.orders").exception("the alerts of done task %s", task.get("id"))
+
+
+def _whom(conn, task: dict) -> str:
+    """To whom the message task speaks in its records «Сообщение <whom> … не отправлено»: «клиенту», «точке» or ''."""
+    return {"client": "клиенту", "manager": "точке"}.get(audience(conn, task), "")
+
+
+RESOLVE_DONE_AUTHOR = "сверка выполненных задач"
+
+
+def resolve_done_backlog(conn, now: str, author: str = RESOLVE_DONE_AUTHOR, apply: bool = False) -> List[dict]:
+    """Tasks done before resolve_done was there (the owner 2026-11-08, orders 539/540/542) left their red records open: the same check of
+    order_alerts.resolve_message_done for every done task. The records it would close (each once), newest order last; closed only with apply.
+    A skipped or cancelled task is no fix: only status 'done' counts."""
+    from . import order_alerts
+    found: Dict[int, dict] = {}
+    for row in conn.execute("SELECT %s FROM order_task WHERE status = 'done' ORDER BY order_id, id" % TASK_FIELDS).fetchall():
+        task = _task(row)
+        whom = _whom(conn, task)
+        for event in order_alerts.message_done_open(conn, task, whom):
+            found.setdefault(event["id"], event)
+    if apply:
+        for event_id in found:
+            order_alerts.resolve(conn, event_id, now, author)
+        conn.commit()
+    return list(found.values())
 
 
 def run_task(conn, task_id, now: str, author: str, chain: Tuple[int, ...] = ()) -> str:
