@@ -472,3 +472,13 @@ def test_the_hint_of_the_positions_is_one_line(w):
     assert "появятся позиции с остатком и ценой объявления.</p>" in text and "Код позиции из «Каталога»" not in text
     flag(w, "off")
     assert "Код позиции из «Каталога»" in html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+
+
+def test_the_new_order_page_says_create(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/new")
+    assert "data-create-head" in text and text.count(">Создать заказ</button>") == 2
+    assert text.index('<button class="sr-only"') < text.index("data-create-head")       # Enter still presses the first, hidden button
+    flag(w, "off")
+    old = html(client_of(w, "owner"), "/orders/new")
+    assert "Создать заказ</button>" not in old and '<button class="btn btn--primary">Сохранить</button>' in old

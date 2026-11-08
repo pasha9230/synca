@@ -23,6 +23,7 @@
 {% if card and c.stage.code == "return_given" %}{% if oth_plan and oth_plan.signed_at %}{% set next_stage = stages|selectattr("code", "equalto", "return")|first %}{% endif %}{# «На возврат»: only once the act is signed (the tyres went back) the amount closes it in «Вернули поставщику»; before, the act does it #}
 {% elif card and c.stage.kind == "open" %}{% set next_stage = stages|selectattr("kind", "in", ["open", "won"])|rejectattr("code", "equalto", "return_given")|rejectattr("code", "equalto", "-" if c.intercity.on else "shipped")|selectattr("position", "gt", c.stage.position)|first %}{% endif %}{# «Возврат передан» is the point's act МХ-3, never a click of the window #}
 {# one button to the next stage of the flow (review 2026-10-21, 2.5): like a chip of the strip, it saves the window, then moves #}
+{% if o2 and not card and not ro %}<button class="btn btn--primary btn--sm owin-next" data-create-head>Создать заказ</button>{% endif %}{# the prototype of the audit: «Создать заказ» in the head too #}
 {% if next_stage and not ro %}<button class="btn btn--primary btn--sm owin-next" formaction="/orders/{{ c.id }}/save" name="stage_id" value="{{ next_stage.id }}" title="Сохранить окно и перенести заказ на этап «{{ next_stage.name }}»">Перевести в «{{ next_stage.name }}» {{ icon("arrow-right", "i-sm") }}</button>{% endif %}
 {% if card and (not ro or can_delete or (c.stage.code not in ("cancel", "return") and can_post("order_move"))) %}<details class="menu owin-menu"><summary>Ещё ⋯</summary><div class="menu-list">
 {% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}<a class="menu-item menu-item--danger" href="#finish" data-open-modal="finish-window">Отменить заказ или оформить возврат…</a>{% endif %}
@@ -106,7 +107,7 @@
 {% if not (card and c.stage.code == "oth") %}<label class="field is-wide"><span class="label">Крайняя дата резерва (по умолчанию 3 дня с приезда на точку; поставьте позже, если клиент просит продлить)</span><input class="input" type="date" name="reserve_until" value="{{ v.reserve_until }}"></label>{% endif %}
 {% endif %}
 </div></details>
-{% if ro %}<p class="hint owin-foot">Только просмотр: менять заказ может тот, у кого есть право «Заказы: менять».</p>{% else %}<div class="owin-foot"><a class="btn btn--secondary" href="{{ '/orders/%d' % c.id if card else '/orders' }}">Отмена</a><button class="btn btn--primary">Сохранить</button></div>{% endif %}
+{% if ro %}<p class="hint owin-foot">Только просмотр: менять заказ может тот, у кого есть право «Заказы: менять».</p>{% else %}<div class="owin-foot"><a class="btn btn--secondary" href="{{ '/orders/%d' % c.id if card else '/orders' }}">Отмена</a><button class="btn btn--primary">{{ "Создать заказ" if o2 and not card else "Сохранить" }}</button></div>{% endif %}
 </div>
 {% if ro %}</fieldset></div>{% else %}</form>{% endif %}
 {% if can_delete %}
