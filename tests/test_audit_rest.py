@@ -103,3 +103,13 @@ def test_the_main_page_of_a_chats_manager_has_no_feed_and_no_line_to_a_closed_pa
     assert "Главная" in page and "<h3>Фид</h3>" not in page and "Последний запуск" not in page
     for href in re.findall(r'<a class="btn btn--secondary btn--sm" href="([^"]+)"', page):
         assert client.get(href).status_code == 200, href                           # every «Открыть» / «Сопоставить» opens (Б1)
+
+
+def test_the_templates_are_a_tab_of_the_order_settings_text_left_variables_right(tmp_path):
+    app, client, tok, conn, account = setup(tmp_path)
+    page = client.get("/orders/templates").get_data(as_text=True)
+    assert "<h1>Настройки заказов" in page and 'href="/orders/settings">Воронка</a>' in page and "Шаблоны сообщений</a>" in page
+    assert page.count('class="tpl2-grid"') >= 5 and 'class="tpl-var" data-insert="{client_name}"' in page
+    assert "<strong>Клиенту:" not in page and "<strong>Менеджеру:" not in page
+    settings = client.get("/orders/settings").get_data(as_text=True)
+    assert "<h1>Настройки заказов" in settings and 'href="/orders/templates">Шаблоны сообщений</a>' in settings
