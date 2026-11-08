@@ -15,3 +15,8 @@ body.o2 .o2-cl-panel .o2-panel-row,body.o2 .o2-cl-panel .o2-panel-foot,body.o2 .
 body.o2 .o2-cl-panel .o2-panel-row{display:flex;flex-direction:column;gap:var(--s-2)}
 body.o2 .o2-cl-panel .o2-panel-head{justify-content:flex-start}
 body.o2 .o2-cl-panel .chat-pick-row{align-items:flex-end}
+
+/* CRM (the owner 2026-11-08): the status right of the name, the values in the columns of a grid */
+body.o2 .o2-crm-nm{display:flex;align-items:center;gap:var(--s-2);flex-wrap:wrap}
+body.o2 .o2-crm-grid th,body.o2 .o2-crm-grid td{vertical-align:middle;text-align:left}
+body.o2 .o2-crm-grid th.t-c,body.o2 .o2-crm-grid td.t-c{text-align:center;width:90px}

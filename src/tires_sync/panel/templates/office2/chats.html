@@ -66,7 +66,7 @@
 <div class="o2-cl-line"><label class="icon-btn chat-photo-pick" title="Фото клиенту">{{ icon("paperclip") }}<input type="file" name="photo" accept="image/*" aria-label="Фото клиенту"></label><button type="button" class="icon-btn" data-photo-clear hidden aria-label="Убрать фото" title="Убрать фото">{{ icon("x", "i-sm") }}</button>
 <textarea class="textarea" name="text" rows="2" maxlength="2000" placeholder="Ответ для {{ current.peer_name or 'клиента' }}" aria-label="Ответ клиенту">{{ draft }}</textarea>
 <button class="btn btn--primary" title="Отправить">{{ icon("send", "i-sm") }}Отправить</button></div>
-<div class="small muted chat-send-note">Уйдёт сразу{% if current.account_name %}, от имени «{{ current.account_name }}»{% endif %}. <span data-photo-note>Фото уменьшится до 1600 px.</span></div></form>
+<div class="small muted chat-send-note"><span data-photo-note></span></div>{# no «Уйдёт сразу… 1600 px» (п. 35): the note shows the photo and an error only #}</form>
 {% else %}<div class="flash flash--warn chat-send-off" role="status">{{ icon("alert") }}<div class="flash-text">Отправка ответов выключена{% if has_right("connections") %} · <a href="/connections/avito/{{ current.account_id }}">Включить</a>{% else %}: включить её может владелец в «Подключениях»{% endif %}</div></div>{% endif %}</div>
 <aside class="o2-order-panel" id="order-panel" data-order-panel data-chat="{{ current.id }}" role="dialog" aria-labelledby="order-panel-h">
 <button type="button" class="icon-btn o2-op-close" data-order-panel-close aria-label="Закрыть панель заказа" title="Закрыть (Esc)">{{ icon("x") }}</button>{# outside .chats-deal: a focus on it is no «hand in the block» for the live refill #}

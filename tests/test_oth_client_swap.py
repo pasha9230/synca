@@ -107,7 +107,7 @@ def test_the_panel_shows_the_mim_name_first_on_the_board_the_list_the_oth_page_a
     assert "orders-sheet" in listed or "o2-chk" in listed                            # the list, not the board
     assert re.search(r"№ MIM %s · №%d" % (number, a), listed)
     oth = owner.get("/oth").get_data(as_text=True)
-    assert re.search(r"№ MIM %s · №%d" % (number, a), oth)
+    assert re.search(r"№%d · № MIM %s" % (a, number), oth)                          # «На ОТХ»: «№<order> · № MIM …» on every row (П20, 2026-11-08)
     page = owner.get("/orders/%d" % a).get_data(as_text=True)
     assert re.search(r"data-oth-title>№%s<" % number, page)                          # the window: as on the board (2026-11-07)
     assert ("office2" in board) == new_view

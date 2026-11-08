@@ -155,7 +155,7 @@ def register(app) -> None:
             row["oth_title"] = titles.get(row["order_id"], "")
             when = dates.get(row["order_id"], {})
             on_oth = codes.get(row["order_id"]) == "oth"
-            row.update(arrived=when.get("arrived", ""), reserve_last=when.get("until", ""), oth_since=when.get("oth_since") or row["since"],
+            row.update(oth_since=when.get("oth_since") or row["since"],                      # no reserve columns (П19, 2026-11-08)
                        return_label="" if on_oth else order_oth.label_of(agreed.get(row["order_id"])),
                        can_to_return=on_oth and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
         for row in data["returned"]:
@@ -169,7 +169,8 @@ def register(app) -> None:
         if point:
             data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
             own = [r for r in own if r["point_id"] == point]
-        return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, **data)
+        tab = "returned" if request.args.get("tab") == "returned" else "stock"     # two tabs (the owner 2026-11-08)
+        return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, tab=tab, **data)
 
     @app.route("/oth/to-return", methods=["POST"])
     @login_required
