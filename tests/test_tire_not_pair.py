@@ -275,7 +275,7 @@ def test_only_the_owner_says_not_a_pair_the_others_see(tmp_path, monkeypatch):
     assert r.status_code == 302 and r.headers["Location"].endswith("/pairs")
     html = owner.get("/pairs").get_data(as_text=True)
     assert "Не пары (запрет владельца)" in html and "Это пара" in html and "25.10.2026 12:00:00" in html     # 09:00 UTC of the panel's clock
-    assert re.search(r"Пары сейчас <span class=\"badge badge--neutral\">0</span>", html)
+    assert "Пары сейчас" not in html                                                   # an empty block is not shown (П29, 2026-11-08)
     journal = owner.get("/history").get_data(as_text=True)
     assert "Пары поставщиков: «это не пара» 100 | s2-TCH1 (не склеиваются)" in journal
     r = post(owner, "/pairs/not-pair", "tok", a="100", b="s2-TCH1", undo="1")

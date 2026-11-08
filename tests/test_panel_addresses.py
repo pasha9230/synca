@@ -51,10 +51,10 @@ def test_invalid_input_is_explained_and_nothing_is_saved(tmp_path):
 def test_readiness_and_connections_page_mention_missing_addresses(tmp_path):
     app, client, tok = setup(tmp_path)
     assert "Авито адреса Основной" in client.get("/").get_data(as_text=True)
-    assert "адреса не добавлены" in client.get("/").get_data(as_text=True)
+    assert "адреса не добавлены" in client.get("/feeds").get_data(as_text=True)            # the readiness: «Фиды» (2026-11-08)
     assert client.get("/accounts/1/addresses").headers["Location"].endswith("/connections/avito/1")
     post(client, "/accounts/1/addresses", tok, **FORM)
-    assert "адреса не добавлены" not in client.get("/").get_data(as_text=True)
+    assert "адреса не добавлены" not in client.get("/feeds").get_data(as_text=True)
 
 
 def test_requires_login_and_known_account(tmp_path):

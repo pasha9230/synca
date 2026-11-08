@@ -12,7 +12,7 @@ def test_dashboard_shows_pending_pairs_and_no_run_yet(tmp_path):
     login(client)
     page = client.get("/").get_data(as_text=True)
     assert "1 модель (1 позиция)" in page
-    assert "Запусков ещё не было" in page
+    assert "Запусков ещё не было" in client.get("/feeds").get_data(as_text=True)          # the run is on «Фиды» only (п. 12, 2026-11-08)
 
 
 def test_dashboard_shows_last_run_counts(tmp_path):
@@ -22,7 +22,7 @@ def test_dashboard_shows_last_run_counts(tmp_path):
     conn.close()
     client = app.test_client()
     login(client)
-    assert '<b class="text-ok">1</b><span>к публикации</span>' in client.get("/").get_data(as_text=True)
+    assert '<b class="text-ok">1</b><span>к публикации</span>' in client.get("/feeds").get_data(as_text=True)   # «Фиды» (2026-11-08)
 
 
 def test_missing_data_files_render_a_no_data_message_not_an_error(tmp_path):
@@ -106,7 +106,7 @@ def test_dashboard_leads_with_what_needs_attention_and_links_to_where_it_is_solv
     client = app.test_client()
     login(client)
     html = client.get("/").get_data(as_text=True)
-    assert html.index("Требует внимания") < html.index("Ждут сопоставления")
+    assert html.index("Требует внимания") < html.index("Мои дела на сегодня")             # the tile «Ждут сопоставления» is on «Фиды» (2026-11-08)
     assert "Модели ждут сопоставления" in html and 'href="/mappings">Сопоставить<' in html
     assert "Есть неподтверждённые изменения" not in html
     staging.set_override(store.connect(app.config["DB_PATH"]), "100", "off", "2026-10-07T10:00:00")
@@ -140,9 +140,9 @@ def test_one_unmatched_model_is_one_item_not_three(tmp_path):
     client = app.test_client()
     login(client)
     html = client.get("/").get_data(as_text=True)
-    attention = html.split("Требует внимания")[1].split('<div class="tiles">')[0]
+    attention = html.split("Требует внимания")[1].split("Мои дела на сегодня")[0]
     assert attention.count("Модели ждут сопоставления") == 1 and "Позиции с проблемами" not in attention
-    assert attention.count("Подготовка к публикации") <= 1 and 'href="#readiness"' in attention
+    assert attention.count("Подготовка к публикации") <= 1 and 'href="/feeds#readiness"' in attention     # the block is on «Фиды»
 
 
 def test_a_publication_switched_off_on_our_side_is_not_called_a_failure(tmp_path):

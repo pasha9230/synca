@@ -9,7 +9,8 @@ NOW = "2026-10-10T12:00:00"
 
 
 def home(client):
-    return client.get("/").get_data(as_text=True)
+    """«Готовность к публикации» is on «Фиды» (the main page has none since 2026-11-08, П1)."""
+    return client.get("/feeds").get_data(as_text=True)
 
 
 def steps(app):

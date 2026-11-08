@@ -18,7 +18,7 @@ def test_one_run_shows_one_moscow_time_on_every_page(tmp_path):
     conn.commit()
     client = app.test_client()
     login(client)
-    for url in ("/", "/feeds", "/new"):
+    for url in ("/feeds", "/new"):                                                     # the main page shows no run since 2026-11-08 (п. 12)
         page = client.get(url).get_data(as_text=True)
         assert re.search(r"21\.10(\.2026)? 01:30", page), url
         assert not re.search(r"20\.10(\.2026)? 22:30", page), url
