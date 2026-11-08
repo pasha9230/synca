@@ -7,7 +7,7 @@ from flask import flash, redirect, render_template, request
 
 from .. import analytics, daily_summary, new_filter, order_alerts, staging, store, tochki_feed
 from ..settings_store import active_settings, get_active
-from .common import author, can, current_user, get_conn, has_right, login_required, now, now_iso
+from .common import SECTION_OF, author, can, current_user, get_conn, has_right, login_required, now, now_iso
 from .data import load_merged, load_reference
 from . import service
 
@@ -56,11 +56,31 @@ def register(app) -> None:
         if day["orders_overdue"] and can("orders"):
             extra.append({"level": "warn", "title": "Просроченные заказы: %d" % day["orders_overdue"], "detail": "Заказы дольше срока своего этапа.",
                           "href": "/orders", "action": "Открыть"})
-        if day["waiting_long"] and can("chats"):
-            extra.append({"level": "bad", "title": "Клиенты ждут ответа дольше %d минут: %d" % (analytics.WAIT_ALERT_MINUTES, len(day["waiting_long"])),
-                          "detail": "Дольше всех — %d мин." % day["waiting_long"][0]["minutes"], "href": "/chats", "action": "Ответить"})
-        return render_template("dashboard.html", d=_feed_data(conn, settings, parsed, ref), day=day, mine=analytics.my_day(conn, login, local),
-                               extra=extra, summary_on=daily_summary.is_on(conn))
+        # no line of the waiting chats: the waiting time is shown nowhere (the owner 2026-11-08, п. 8), «Чаты» in the menu counts them
+        d = _feed_data(conn, settings, parsed, ref)
+        for a in d["attention"]:                                         # «#readiness» of «Фиды»: the block is on «Фиды» only (п. 13)
+            if a["href"].startswith("#"):
+                a["href"] = "/feeds" + a["href"]
+        d["attention"] = [a for a in d["attention"] if _opens(a["href"])]      # no «Включить» to a closed page (Б1, П4 of the audit 08.11)
+        return render_template("dashboard.html", d=d, day=day, mine=analytics.my_day(conn, login, local),
+                               extra=extra)
+
+    @app.route("/settings/notify")
+    @login_required
+    def settings_notify_page():
+        """«Настройки › Уведомления»: the morning summary in Telegram (was a line of the main page; п. 27 of the audit, 2026-11-08)."""
+        return render_template("settings_notify.html", tab="notify", summary_on=daily_summary.is_on(get_conn()))
+
+    def _opens(href: str) -> bool:
+        """The person may open the page of a line of «Требует внимания» (an outside link: yes)."""
+        if not href.startswith("/"):
+            return True
+        try:
+            endpoint, _args = app.url_map.bind("localhost").match(href.split("#")[0].split("?")[0], method="GET")
+        except Exception:                                                # no such page here: the line is not the person's to act on
+            return False
+        section = SECTION_OF.get(endpoint)
+        return section is not None and can(section) and (section != "analytics" or has_right("money"))
 
     @app.route("/feeds")
     @login_required
@@ -76,7 +96,7 @@ def register(app) -> None:
         on = request.form.get("on") == "1"
         daily_summary.set_on(get_conn(), on, now_iso(), author())
         flash("Утренняя сводка включена: придёт после 9:00 МСК." if on else "Утренняя сводка выключена.")
-        return redirect("/")
+        return redirect("/settings/notify")
 
     @app.route("/new")
     @login_required

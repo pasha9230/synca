@@ -274,7 +274,7 @@ for _section, _endpoints in {
                   "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report",
                   "orders_report_export"),
     "setup": ("draft", "draft_cancel", "draft_confirm", "catalog_review", "publish_result", "summary_toggle",      # a draft shows the markups: the owner's
-              "settings_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_pending", "settings_exclusions_page", "settings_pricing",
+              "settings_page", "settings_notify_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_pending", "settings_exclusions_page", "settings_pricing",
               "history", "history_rollback", "connections_page", "connections_add_account", "connections_account_brand_pricing",
               "connections_account_check", "account_contact_name", "account_sheet_label", "account_problems_to", "account_responsible", "account_exclude_types", "connections_account_keys",
               "connections_account_live", "account_modes", "account_phone", "account_phone_source", "connections_account_photo_base",

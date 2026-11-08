@@ -88,3 +88,18 @@ def test_no_search_on_top_and_no_number_on_the_bell_and_no_templates_in_the_menu
         assert 'href="/orders/templates">' not in page.split("</aside>")[0], url   # «Шаблоны сообщений» is a tab of «Настройки заказов» (п. 19)
     menu = client.get("/orders/templates").get_data(as_text=True).split("</aside>")[0]
     assert re.search(r'class="sb-link is-active" href="/orders/settings"', menu)
+
+
+def test_the_main_page_of_a_chats_manager_has_no_feed_and_no_line_to_a_closed_page(tmp_path):
+    from panel_helpers import make_app
+    from tires_sync import users
+    app = make_app(tmp_path)
+    conn = store.connect(app.config["DB_PATH"])
+    users.add_user(conn, "olya", "пароль-для-теста-1", "2026-10-21T10:00:00", role="chats")
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user"], s["epoch"], s["csrf"] = "olya", store.get_session_epoch(conn, "olya"), "tok"
+    page = client.get("/").get_data(as_text=True)
+    assert "Главная" in page and "<h3>Фид</h3>" not in page and "Последний запуск" not in page
+    for href in re.findall(r'<a class="btn btn--secondary btn--sm" href="([^"]+)"', page):
+        assert client.get(href).status_code == 200, href                           # every «Открыть» / «Сопоставить» opens (Б1)
