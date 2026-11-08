@@ -310,7 +310,6 @@ def register(app) -> None:
         groups = service.catalog_groups(
             conn, effective, filtered, ref, args.get("q", ""), "all" if status in ("nopair", "problem") else status, sort, descending, base_raw=raw,
             gone=gone, view_only=view_only, capped_supplier=capped, twins_from=parsed)
-        held_shown = {o.goods_id for o, _ in _held_view(conn, raw, {}, None, None, held_all, ref)}   # after the exclusions: the tab counts
         held = []
         if status in ("all", "feed", "no"):
             published = {re.sub(r"-x\d+$", "", g) for acc in connections.list_feed_accounts(conn) for g in store.load_published(conn, acc["id"])}
@@ -367,7 +366,7 @@ def register(app) -> None:
         shown = [dict(i, oth=on_oth.get(i["goods_id"])) for i in shown]
         if market_on:
             shown = [dict(i, market=_market_cell(i["price"], snaps.get(i["goods_id"]))) for i in shown]
-        return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids, held_shown=held_shown,
+        return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids,
                     all_ids=[i["goods_id"] for i in items],                # every position of the filter, every page («все по фильтру»)
                     market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
                     page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
@@ -429,8 +428,11 @@ def register(app) -> None:
         supplier_tabs = []
         if len(suppliers) > 1:
             plain = _pairs(args, ("sup", "p", "wait"))
+            # the tabs count what the filters find (п. 9 of the audit, 2026-11-08): «Все» = «Найдено» on the tab «Все», each supplier's tab =
+            # «Найдено» on it; on a supplier's tab the filters are counted once more without the supplier
+            every = b["all_ids"] if sup is None else build(MultiDict(_pairs(args, ("sup", "p", "wait"))))["all_ids"]
             counts = {}
-            for gid in set(b["parsed"].offers) | b["held_shown"]:
+            for gid in every:
                 sid = service.supplier_of_id(gid)
                 counts[sid] = counts.get(sid, 0) + 1
             supplier_tabs = [{"label": "Все", "on": sup is None, "url": "/catalog?" + urlencode(plain), "count": sum(counts.values())}] + [

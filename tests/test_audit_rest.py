@@ -113,3 +113,21 @@ def test_the_templates_are_a_tab_of_the_order_settings_text_left_variables_right
     assert "<strong>Клиенту:" not in page and "<strong>Менеджеру:" not in page
     settings = client.get("/orders/settings").get_data(as_text=True)
     assert "<h1>Настройки заказов" in settings and 'href="/orders/templates">Шаблоны сообщений</a>' in settings
+
+
+def test_the_catalog_tab_all_counts_what_is_found(tmp_path):
+    """п. 9: «Все N» = «Найдено N позиций»; a supplier's tab counts what the filters find there too."""
+    from test_panel_suppliers import setup as suppliers
+    app, client, tok, conn = suppliers(tmp_path)
+
+    def tabs(html):
+        return {name: int(n) for name, n in re.findall(r'>(Все|WebMIM|Второй) <span class="badge badge--neutral">(\d+)</span>', html)}
+
+    def found(html):
+        return int(re.search(r"Найдено (\d+) позиц", html).group(1))
+    html = client.get("/catalog").get_data(as_text=True)
+    assert tabs(html)["Все"] == found(html) == tabs(html)["WebMIM"] + tabs(html)["Второй"]
+    second = client.get("/catalog?sup=2").get_data(as_text=True)
+    assert tabs(second) == tabs(html) and tabs(second)["Второй"] == found(second)
+    none = client.get("/catalog?q=нет-такой-шины").get_data(as_text=True)
+    assert tabs(none)["Все"] == found(none) == 0
