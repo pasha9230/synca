@@ -19,7 +19,7 @@ UTC_AUDIT = frozenset({
     "description_template_set", "economics_params", "feed_now_refused", "feed_now_started", "feed_update_failed", "feed_updated_manually",
     "invite_created", "invite_revoked", "login", "login_failed", "login_reset_created", "login_reset_revoked", "login_reset_used",
     "main_display_name", "mapping_confirm", "market_switch", "market_token", "match_not_pair", "match_not_pair_undo", "match_pair_forget",
-    "match_pair_unforget", "message_template_changed", "notice", "old_model_name", "oth_manual", "oth_return", "oth_return_undo",
+    "match_pair_unforget", "message_template_changed", "notice", "old_model_name", "oth_manual",
     "own_price_confirmed", "owner_login", "point_rule", "secret_cleared", "secret_set", "secrets_cleared", "service_pause", "settings_cancel",
     "settings_confirm", "settings_init", "settings_rollback", "share_created", "share_labels", "share_price_toggled", "share_revoked",
     "sheet_keep_from", "shop_responsible", "shop_tochki_stale", "supplier_created", "term_deleted", "term_saved", "term_updated",

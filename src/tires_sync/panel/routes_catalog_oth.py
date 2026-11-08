@@ -189,16 +189,17 @@ def register(app) -> None:
     @app.route("/oth/return", methods=["POST"])
     @login_required
     def oth_return():
+        from .routes_orders import local_iso                              # Moscow time, as every record of the order, its tasks and the journal
         conn = get_conn()
         try:
             item_id = int(request.form.get("item") or 0)
             qty = request.form.get("qty")                                 # no field (the older form): every piece left, or every piece returned;
                                                                           # an empty field is a wrong number, never «all»
             if request.form.get("undo"):
-                order_oth.unmark_returned(conn, item_id, now_iso(), author(), qty)
+                order_oth.unmark_returned(conn, item_id, local_iso(), author(), qty)
                 flash("Отметка «возвращено поставщику» снята: шины снова на ОТХ.")
             else:
-                order_oth.mark_returned(conn, item_id, now_iso(), author(), qty)
+                order_oth.mark_returned(conn, item_id, local_iso(), author(), qty)
                 flash("Отмечено как возвращённое поставщику. В WebMIM ничего не отправлено.")
         except (order_oth.OthError, ValueError) as err:
             flash(str(err) if isinstance(err, order_oth.OthError) else "Неизвестная позиция.")

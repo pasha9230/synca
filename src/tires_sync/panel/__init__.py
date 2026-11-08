@@ -15,17 +15,18 @@ REQUIRED = ("SECRET_KEY", "PASSWORD_HASH", "DB_PATH", "UNLOAD_PATH", "REFERENCE_
 
 # The journal of actions (audit) is written by both clocks: the panel's own actions in UTC (now_iso), the orders, the chats, the points,
 # the identifier commands and the cycle's Avito pushes in Moscow time (local_iso, moscow_iso, moscow_now). The actions written in Moscow
-# time, found by reading every write (tests/test_audit_clock.py keeps the list whole: a new action must be put on one side). Some are
-# written by both clocks: the most of their writes decide («callback_done», «callback_cancel», «chat_handover_taken», «oth_back_on_sale»
-# are UTC only from «Отметить возвращённым» of /oth); «ids_bound» and «account_live» are told by their author (audit_dt); a sale
-# («sale_added», «sale_reversed») from an order is Moscow, typed by hand UTC: both are shown as UTC.
+# time, found by reading every write (tests/test_audit_clock.py keeps the list whole: a new action must be put on one side). «Вернуть
+# поставщику» / «Отменить» of /oth write in Moscow time as the rest of the order (review 2026-11-08: «callback_done», «callback_cancel»,
+# «chat_handover_taken», «oth_back_on_sale» were UTC from there; «oth_return» / «oth_return_undo» before that day are UTC, shown 3 hours
+# early). Some are told by their author: «ids_bound» and «account_live» (audit_dt); a sale («sale_added», «sale_reversed») from an order is
+# Moscow, typed by hand UTC: both are shown as UTC.
 MOSCOW_AUDIT = frozenset({
     "alerts_resolve_done", "autosend_add", "autosend_cancel", "autosend_update", "avito_price_push", "avito_stock_push", "avito_stock_restore", "avito_webhook_subscribe",
     "avito_webhook_unsubscribe", "callback", "callback_cancel", "callback_done", "callback_extend", "chat_assign", "chat_assign_default",
     "chat_delete", "chat_handover", "chat_handover_taken", "chat_restore", "client_own_name", "clients_linked", "critical", "id_scheme",
     "ids_rebound", "inquiry", "inquiry_failed", "inquiry_merged", "mirror_adopt", "mirror_reissue", "mirror_reissue_own", "mirror_unreissue_own",
     "order_chat_link", "order_chat_unlink", "order_delete", "order_item_mim", "order_item_purchase", "order_merge", "order_mim_extra", "order_rate",
-    "order_restore", "order_unmerge", "orders_bulk_delete", "orders_bulk_move", "orders_bulk_undo", "orders_cleanup_new", "orders_fill_responsible",
+    "order_restore", "order_unmerge", "oth_return", "oth_return_undo", "orders_bulk_delete", "orders_bulk_move", "orders_bulk_undo", "orders_cleanup_new", "orders_fill_responsible",
     "oth_act_signed", "oth_back_on_sale", "oth_client_swap", "oth_detach", "oth_item_to_return", "oth_manual_no_id", "oth_manual_no_price",
     "oth_new_client", "oth_numbers", "oth_reattach", "oth_return_agreed", "oth_return_amount", "oth_return_unagreed", "oth_split", "oth_take",
     "oth_untake", "point_action", "price_guard_accept", "price_guard_keep", "return_flow_migrated", "shop_order_cancel", "staff_note",
