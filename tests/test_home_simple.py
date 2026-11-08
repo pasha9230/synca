@@ -218,7 +218,7 @@ def test_last_publication_and_the_journal_of_changes_open_the_history_page_and_l
     login(client)
     html = home(client)
     assert "Последняя публикация</h3>" not in html and "Последние изменения" not in html
-    tile = _tiles(html).split('<a class="tile tile--warn" href="/mappings">')[0]
+    tile = _tiles(client.get("/feeds").get_data(as_text=True)).split('<a class="tile tile--warn" href="/mappings">')[0]   # the feed tiles moved to «Фиды» (prototype 08.11)
     assert "Фид Авито · ID 777 · Основной" in tile and "обновлён 07.10 23:40 МСК" in tile
     page = client.get("/history").get_data(as_text=True)
     assert page.index("Последняя публикация</h3>") < page.index("Журнал действий</h3>") < page.index("Версии настроек</h3>")      # the latest changes = the journal

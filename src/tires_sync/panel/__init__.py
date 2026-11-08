@@ -39,9 +39,13 @@ def _chat_wait(conn) -> int:
     whole panel's but the points' accounts (the owner 2026-10-26); for the manager of a point, the chats of its account only (none without one)."""
     from flask import g
     from .. import chats as chats_store
-    from .common import own_point, point_account
+    from .. import connections
+    from .common import author, own_point, point_account
     cache = g.setdefault("chat_wait_starts", {})                      # «Чаты» read them already on this request: once (review 08.11)
     if own_point() is None:
+        default = connections.chats_default_account(conn, author())    # the menu counts what its link opens: the account the person answers for
+        if default is not None:                                        # (routes_chats, the owner 2026-10-29); the review 08.11: 59 against 14
+            return chats_store.waiting_total(conn, account_id=default, cache=cache)
         return chats_store.waiting_total(conn, without_points=True, cache=cache)
     account = point_account()
     if account is None:

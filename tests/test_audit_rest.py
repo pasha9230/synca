@@ -131,3 +131,23 @@ def test_the_catalog_tab_all_counts_what_is_found(tmp_path):
     assert tabs(second) == tabs(html) and tabs(second)["Второй"] == found(second)
     none = client.get("/catalog?q=нет-такой-шины").get_data(as_text=True)
     assert tabs(none)["Все"] == found(none) == 0
+
+
+def test_the_menu_counts_the_account_the_chats_open_with(tmp_path):
+    """Review 08.11 (59 in the menu, 14 in the filter): the menu counts what its link opens — the one account the person answers for."""
+    from tires_sync import connections
+    app, client, tok, conn, account, tanya, ivan = _waiting_world(tmp_path)
+    _new_view(conn)
+    other = connections.create_account(conn, "Второй", "2026-10-13T09:00:00", "o")
+    connections.set_modes(conn, other, True, True, "2026-10-13T09:00:00", "o")
+    conn.execute("UPDATE account SET chats_enabled = 1")
+    conn.execute("UPDATE avito_chat SET account_id = ? WHERE id = ?", (other, ivan["id"]))
+    conn.execute("DELETE FROM avito_message WHERE chat_row = ? AND direction = 'out'", (ivan["id"],))   # Иван waits too, on the other account
+    store.set_state(conn, "chats_baseline_%d" % other, "2026-10-13T09:00:00")
+    conn.commit()
+    assert chats.waiting_total(conn) == 2
+    page = client.get("/chats").get_data(as_text=True)
+    assert _menu_chats(page) == 2 and "Ждут ответа <b>2</b>" in page              # nobody answers for an account: all of them, both
+    connections.set_responsible(conn, account, app.config["AUTHOR"], [app.config["AUTHOR"]], "2026-10-13T09:00:00", "o")
+    page = client.get("/chats").get_data(as_text=True)
+    assert _menu_chats(page) == 1 and "Ждут ответа <b>1</b>" in page              # the person's account: the same one in both
