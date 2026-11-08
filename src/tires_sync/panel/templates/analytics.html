@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Аналитика · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Аналитика</h1><p class="sub">Продажи и прибыль, воронка «чат → заказ → выдан», время на этапах. Период: с {{ start }} по {{ end }} включительно (Москва).</p></div></header>
+<header class="page-head"><div><h1>Аналитика<span class="help-q" tabindex="0" data-tip="Продажи и прибыль, воронка «чат → заказ → выдан», время на этапах. Период: с {{ start }} по {{ end }} включительно (Москва).">?</span></h1></div></header>
 <form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--s-4)">
 <label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
 <label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>

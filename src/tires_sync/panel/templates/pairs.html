@@ -6,7 +6,7 @@
 <nav class="tabs2"><a{% if request.path.startswith('/mappings') %} class="is-active" aria-current="page"{% endif %} href="/mappings">Модели</a><a{% if request.path.startswith('/pairs') %} class="is-active" aria-current="page"{% endif %} href="/pairs">Пары поставщиков</a></nav>
 {% if error %}<header class="page-head"><div><h1>Пары поставщиков</h1><p class="sub">Выгрузка поставщика не читается, пары сейчас не показать: {{ error }}</p></div></header>
 {% else %}
-<header class="page-head"><div><h1>Пары поставщиков</h1><p class="sub">Одна и та же шина у разных поставщиков. Склейка в фиде {% if switch_on %}<b>включена</b>{% else %}<b>выключена</b>: страница показывает, что система нашла, в фидах это пока не используется{% endif %}. Позиций по поставщикам: {% for sid, n in by_supplier %}№{{ sid }}: {{ n }}{% if not loop.last %}, {% endif %}{% else %}нет{% endfor %}. Страница ничего не меняет, кроме «Забыть пару» и «Это не пара» у владельца.</p></div></header>
+<header class="page-head"><div><h1>Пары поставщиков<span class="help-q" tabindex="0" data-tip="Одна и та же шина у разных поставщиков. Склейка в фиде {% if switch_on %}включена{% else %}выключена: страница показывает, что система нашла, в фидах это пока не используется{% endif %}. Позиций по поставщикам: {% for sid, n in by_supplier %}№{{ sid }}: {{ n }}{% if not loop.last %}, {% endif %}{% else %}нет{% endfor %}. Страница ничего не меняет, кроме «Забыть пару» и «Это не пара» у владельца.">?</span></h1></div></header>
 {% for n in notes %}<p class="xs muted">{{ n }}</p>{% endfor %}
 
 <section class="card"><div class="card-head"><h3>Пары сейчас <span class="badge badge--neutral">{{ groups|length }}</span></h3></div>

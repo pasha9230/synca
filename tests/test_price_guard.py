@@ -221,7 +221,7 @@ def test_the_page_is_the_owners_only(tmp_path):
                  "3850, ?, 'Ikon Tyres')", (NOW, NOW))
     conn.commit()
     page = owner.get("/prices/changes").get_data(as_text=True)
-    assert "Цена поставщика изменилась" in page and 'value="101"' in page and "в ближайший цикл" in page
+    assert "<h1>Цены поставщика" in page and 'value="101"' in page and "в ближайший цикл" in page
     rev = __import__("re").search(r'name="rev" value="([0-9a-f]+)"', page).group(1)
     assert post(owner, "/prices/changes", tok, goods=["101"], action="keep", rev="0" * 16).status_code == 302
     assert price_guard.load(conn)["anchors"]["101"]["pending"] == 3850.0           # a stale page changes nothing

@@ -3,7 +3,7 @@
 {% from "_handoff_dialog.html" import handoff_window with context %}
 {% block title %}Звонки · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Звонки</h1><p class="sub">Звонки через подменные номера Авито{% if mine %} аккаунта вашей точки{% endif %}. Запись разговора появляется до 30 минут после звонка и хранится 7 дней.</p></div></header>
+<header class="page-head"><div><h1>Звонки<span class="help-q" tabindex="0" data-tip="Звонки через подменные номера Авито{% if mine %} аккаунта вашей точки{% endif %}. Запись разговора появляется до 30 минут после звонка и хранится 7 дней.">?</span></h1></div></header>
 <form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;margin-bottom:var(--s-4);flex-wrap:wrap">
 {% if not mine %}<label class="field"><span class="label">Аккаунт</span><select class="input" name="account"><option value="">Все</option>{% for a in accounts %}<option value="{{ a.id }}"{% if a.id == account %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>{% endif %}
 <label class="field"><span class="label">Период</span><select class="input" name="days">{% for k, v in periods.items() %}<option value="{{ k }}"{% if k == days %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>

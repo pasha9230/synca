@@ -6,7 +6,7 @@
 {% set label = {"pending": "Ждёт решения", "approved": "Одобрен", "rejected": "Отклонён", "withdrawn": "Снят"} %}
 {% set kinds = {"three_quarter": "Вполоборота", "set4": "Комплект 4 шт."} %}
 {% set dkinds = {"crop": "вырезка", "card": "карточка", "copy": "копия"} %}
-<header class="page-head"><div><h1>Генерация</h1><p class="sub">Кадры, нарисованные агентом. Одобренные уходят в фид, если включён выключатель ниже.</p></div></header>
+<header class="page-head"><div><h1>Генерация<span class="help-q" tabindex="0" data-tip="Кадры, нарисованные агентом. Одобренные уходят в фид, если включён выключатель ниже.">?</span></h1></div></header>
 {% if new_token %}<section class="card"><p><b>Новый токен агента</b> (показан один раз, прежний больше не работает; обновление страницы выпустит ещё один):</p><p><code>{{ new_token }}</code></p></section>{% endif %}
 <section class="card">
 {% if can_post("photos_switch") %}<form method="post" action="/photos/switch" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="tab" value="{{ tab }}">

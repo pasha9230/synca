@@ -7,7 +7,7 @@
 {% block head %}{% if point %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block title %}Задачи · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Задачи</h1><p class="sub">{% if view %}Выполненные задачи: кто поставил, кто сделал и сколько это заняло.{% else %}Задача никому ничего не отправляет: это напоминание, кому что сделать и к какому сроку. Просроченные — красным.{% endif %}</p></div></header>
+<header class="page-head"><div><h1>Задачи<span class="help-q" tabindex="0" data-tip="{% if view %}Выполненные задачи: кто поставил, кто сделал и сколько это заняло.{% else %}Задача никому ничего не отправляет: это напоминание, кому что сделать и к какому сроку. Просроченные — красным.{% endif %}">?</span></h1></div></header>
 {% include "_tasks_views.html" %}
 <nav class="tabs" aria-label="Задачи">{% for key, name in tabs.items() %}<a class="tab{% if key == tab %} is-active{% endif %}" href="/tasks?tab={{ key }}{% if view %}&amp;view=done{% endif %}"{% if key == tab %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}</nav>
 <form method="get" action="/tasks" class="row filters" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end;margin:var(--s-3) 0"><input type="hidden" name="tab" value="{{ tab }}">{% if view %}<input type="hidden" name="view" value="done">{% endif %}

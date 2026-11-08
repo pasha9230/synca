@@ -3,7 +3,7 @@
 {% block title %}Сопоставления · Tires Sync{% endblock %}
 {% block content %}
 <nav class="tabs2"><a{% if request.path.startswith('/mappings') %} class="is-active" aria-current="page"{% endif %} href="/mappings">Модели</a><a{% if request.path.startswith('/pairs') %} class="is-active" aria-current="page"{% endif %} href="/pairs">Пары поставщиков</a></nav>
-<header class="page-head"><div><h1>Сопоставления</h1><p class="sub">Модели поставщика нужно связать с моделями из справочника Авито — иначе объявление не соберётся. Сохраняется сразу, без черновика.</p></div>
+<header class="page-head"><div><h1>Сопоставления<span class="help-q" tabindex="0" data-tip="Модели поставщика нужно связать с моделями из справочника Авито — иначе объявление не соберётся. Сохраняется сразу, без черновика.">?</span></h1></div>
 <div class="actions">
 <a class="btn btn--secondary" href="/mappings/export.csv">{{ icon("download") }}Выгрузить CSV</a>
 {% if can_post("import_mappings") %}<form method="post" action="/mappings/import" enctype="multipart/form-data" class="inline" data-autosubmit><input type="hidden" name="csrf" value="{{ csrf_token() }}"><label class="btn btn--secondary">{{ icon("upload") }}Загрузить CSV<input type="file" name="file" accept=".csv,text/csv" class="sr-only"></label><noscript><button class="btn btn--secondary btn--sm">Отправить</button></noscript></form>{% endif %}
