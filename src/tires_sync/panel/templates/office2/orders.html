@@ -92,10 +92,10 @@
 </div></aside>
 </div>
 {% else %}
-{% set to_list = [] if only_stage else data.columns|selectattr("stage.code", "in", ["done", "cancel"])|list %}{# «Выполнено» and «Отмена» — in «Список» (audit 32) #}
+{# «Выполнено» and «Отмена» — in «Список» (audit 32): to_list of the route, counted before the stages off the board left #}
 {% if to_list %}<div class="row small muted o2-to-list" data-to-list><span class="ml-auto">В «Списке»: {% for col in to_list %}<a href="/orders?v=list&amp;s={{ col.stage.id }}{{ keep_q }}">{{ col.stage.name }} {{ col.count }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</span></div>{% endif %}
 <div class="board o2-board" id="board" data-csrf="{{ csrf_token() }}">
-{% for col in data.columns if col not in to_list %}{% set folded = not only_stage and (col.count == 0 or (col.stage.kind != "open" and not (query or tag or point))) %}<section class="col{% if folded %} is-folded{% endif %}" data-stage="{{ col.stage.id }}"{% if folded %} data-fold{% endif %}>
+{% set listed = to_list|map(attribute="stage.id")|list %}{% for col in data.columns if col.stage.id not in listed %}{% set folded = not only_stage and (col.count == 0 or (col.stage.kind != "open" and not (query or tag or point))) %}<section class="col{% if folded %} is-folded{% endif %}" data-stage="{{ col.stage.id }}"{% if folded %} data-fold{% endif %}>
 {% set words = col.stage.name.rsplit(" ", 1) %}{# the last word and the number never part: the number right of the stage's name, the sum below (the owner 08.11) #}
 {% if folded %}<button type="button" class="col-head" data-fold-toggle aria-expanded="false" aria-controls="col-body-{{ col.stage.id }}" title="{% if col.stage.hint %}{{ col.stage.hint }} · {% endif %}Нажмите, чтобы показать или скрыть заказы этапа"><span class="dot" style="background:{{ col.stage.color|stage_color }}"></span><span class="col-name">{{ col.stage.name }}</span> <span class="o2-count">{{ col.count }}</span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</button>
 {% else %}<div class="col-head" title="{{ col.stage.hint }}"><span class="dot" style="background:{{ col.stage.color|stage_color }}"></span><span class="col-name">{% if words|length > 1 %}{{ words[0] }} {% endif %}<span class="nowrap">{{ words[-1] }} <span class="o2-count">{{ col.count }}</span></span></span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</div>{% endif %}

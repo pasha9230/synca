@@ -20,14 +20,10 @@
 <button type="button" class="o2c-strip" data-cc-toggle="{{ i }}" title="Развернуть колонку «{{ names[i] }}»" aria-expanded="false">{{ icon("chev", "i-sm") }}<span>{{ names[i] }}</span>{% if i == 2 and chat_links|map(attribute="unread")|select|sum %}<span class="sb-count">{{ chat_links|map(attribute="unread")|select|sum }}</span>{% endif %}</button>
 <div class="o2c-colin"><div class="o2c-colhead">{{ names[i] }}<button type="button" class="icon-btn ml-auto" data-cc-toggle="{{ i }}" title="Свернуть колонку «{{ names[i] }}»" aria-expanded="true">{{ icon("chev", "i-sm") }}</button></div>
 <div class="o2c-scroll">{{ body }}</div></div></section>{% endmacro %}
-{% from "_oth_mim.html" import mim_head %}<header class="o2c-head">
+<header class="o2c-head">{# the owner 08.11: no «Заказ № · клиент · телефон», no stage, no «Колонки по умолчанию» — all of it is in the window below #}
 <a class="o2c-back" href="/orders">{{ icon("arrow-left", "i-sm") }}Заказы</a>
-<div class="o2c-title">{% if oth_parts %}<span class="o2c-wm" data-oth-title>{{ mim_head(oth_parts) }}</span>{# «На ОТХ»: as on the board, no inner number (2026-11-07) #}{% elif oth_title %}<span class="o2c-wm" data-oth-title>{{ oth_title }}</span><span class="o2c-inner">внутр. № {{ c.id }}</span>{% else %}<span class="o2c-wm">{% if c.webmim_number %}WebMIM № {{ c.webmim_number }}{% else %}<span class="o2c-wm-none">№ WebMIM ещё нет</span>{% endif %}</span><span class="o2c-inner">внутр. № {{ c.id }}</span>{% if c.client_name %}<span class="o2c-client">· {{ c.client_name }}</span>{% endif %}{% if c.client_phone %}<a class="o2c-phone" href="tel:{{ c.client_phone }}">{{ c.client_phone|phone }}</a>{% endif %}{% endif %}</div>
-<span class="o2c-stage" style="--c:{{ c.stage.color|stage_color }}">{{ c.stage.name }}{% if stage_day %} {{ stage_day|day }}{% endif %} · {{ days }} дн.</span>
-<button type="button" class="btn btn--link-gray btn--sm ml-auto" data-cc-reset title="Ширина и свёрнутые колонки — как по умолчанию">Колонки по умолчанию</button>
 </header>
 {% include "_order_unsent.html" %}
-{% if c.stage.code != "oth" %}{% with autosend_order=c.id, autosend_chat=none %}{% include "_order_autosend.html" %}{% endwith %}{% endif %}{# «На ОТХ»: no client, no auto message (2026-11-07) #}
 <div class="o2c-body" data-ccs data-csrf="{{ csrf_token() }}" data-layout='{{ layout|tojson }}'>
 {% call col(0) %}
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}
@@ -47,14 +43,15 @@
 {% set oth_head = c.stage.code == "oth" and oth_parts %}{% if oth_head %}{% include "_oth_card.html" %}{% endif %}{# «На ОТХ»: the row and «На возврат» first (2026-11-07) #}
 {% if oth_plan and (c.stage.code in ("oth", "return_given") or oth_plan.signed_at) %}<div class="flash {{ 'flash--ok' if oth_plan.signed_at else 'flash--err' }}" data-oth-return role="status"><div class="flash-text">{% if oth_plan.signed_at %}<b>Акт МХ-3 подписан, шины отданы поставщику {{ oth_plan.signed_at|day }}</b> ({{ oth_plan.signed_by }}).{% else %}<b>Передать на возврат {{ oth_plan.return_date|day }}</b> — согласовано с поставщиком ({{ oth_plan.agreed_by }}); точка подписывает акт МХ-3 и отдаёт шины.{% endif %}</div>{% if not oth_plan.signed_at and can_post("order_oth_unagree") %}<form method="post" action="/orders/{{ c.id }}/oth-unagree" data-once data-confirm-title="Отменить согласование возврата?" data-confirm="Метка снова «Ожидает согласование возврата»: точка перестанет видеть дату, шины останутся снятыми с продажи."><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Отменить согласование</button></form>{% endif %}</div>
 {% elif c.stage.code in ("oth", "return_given") and c.point_id and can_post("order_oth_agreed") %}<form method="post" action="/orders/{{ c.id }}/oth-agreed" class="row" style="gap:var(--s-2);align-items:center" data-once data-confirm-title="Возврат согласован с поставщиком?" data-confirm="Точка увидит дату возврата и подпишет акт МХ-3." data-confirm-ok="Согласовано"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><label class="field"><span class="label">Дата возврата (пн, ср, пт)</span><input class="input input--sm" type="date" name="return_date" value="{{ oth_next_day }}" min="{{ oth_next_day }}" required data-return-date></label>{% if oth_return_parts %}<input type="hidden" name="return_seen" value="{{ oth_return_seen }}"><span class="row" style="gap:var(--s-2);flex-wrap:wrap" data-return-parts>{% for i in c['items'] if oth_here.get(i.id) %}<label class="field"><span class="label">{{ i.name }}: примет поставщик, шт.</span><input class="input input--sm input--num" type="number" name="return_qty_{{ i.id }}" value="{{ oth_return_parts.get(i.id, 0) }}" min="0" max="{{ oth_here[i.id] }}" step="1" style="width:72px" title="Сколько шин этой позиции примет поставщик: остаток останется нашим товаром на ОТХ"></label>{% endfor %}</span>{% endif %}<button class="btn btn--secondary btn--sm">Согласовано с поставщиком</button><span class="small muted">возврат шин с ОТХ: точка получит дату и акт МХ-3</span></form>{% endif %}
-{% if not oth_head %}{% include "_oth_card.html" %}{% endif %}{% include "_order_webmim_list.html" %}
+{% if not oth_head %}{% include "_oth_card.html" %}{% endif %}{% with hide_single=true %}{% include "_order_webmim_list.html" %}{% endwith %}
 {% include "_order_merge.html" %}
 {% if arrived_untold %}<div class="flash flash--err" data-arrived-untold role="status"><div class="flash-text row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center"><span><b>Клиенту не сообщили, что шины на точке</b> — {{ arrived_untold.why }}. {{ arrived_untold.advice }}.</span>
 {% if arrived_untold.send and can_post("order_arrived_message") %}<form method="post" action="/orders/{{ c.id }}/arrived-message"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--sm">Открыть сообщение клиенту</button></form>{% endif %}
 {% if can_post("order_arrived_told") %}<form method="post" action="/orders/{{ c.id }}/arrived-told" data-once data-confirm-title="Клиенту уже сообщили?" data-confirm="Сообщение «можно забирать» не будет отправлено, напоминания прекратятся." data-confirm-ok="Да, сообщили"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Клиенту сообщили</button></form>{% endif %}</div></div>{% endif %}
-{% include "_order_hint.html" %}
+{# no «Что делать сейчас» (audit 14, П14; the owner 08.11) #}
 {% if own_sale %}{% include "_point_sale.html" %}{% endif %}{# the point edits its own sale here; the window stays read-only for it #}
 {% include "_order_window.html" %}
+{% include "_order_supplier.html" %}{# right under the window, as in the prototype of the audit #}
 {% include "_order_intercity.html" %}
 {% if messages %}{% call entity_ui.section("Сообщения по заказу", id="messages") %}<div class="card-body row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center">
 <span>Ждут отправки: {{ messages|length }} ({% for m in messages %}{{ m.task.title }}{% if not loop.last %}; {% endif %}{% endfor %}).</span>{% if messages|selectattr("lacking")|list %}<span class="small text-err">Не хватает данных: см. в окне.</span>{% endif %}
@@ -90,20 +87,13 @@
 {% include "_order_want_fields.html" %}
 <div><button class="btn btn--primary btn--sm">{{ icon("plus") }}Добавить строку</button></div></form>{% endif %}
 </div></details>
-{% include "_order_supplier.html" %}
-{% include "_order_webmim.html" %}
-{% call entity_ui.section("Продажа и расчёты", id="money", fold=true, open=part == "money" or -1 in c.sale_ids) %}{# folded (the owner 2026-11-05); open with «Запись продажи не завершена» #}<div class="card-body stack">
-<p class="ocard-sum">Итого <b>{{ totals.sale|money }}</b>{% if c['items'] %} · {{ c['items']|length }} поз.{% endif %}</p>
-{% if webmim_cost and has_right("money") %}<p class="small" data-webmim-analytics>В аналитике закупка по WebMIM: <b>{{ webmim_cost.cost|money }}</b> ({{ webmim_cost.count }} из {{ webmim_cost.positions }} поз.; по цене из заказа WebMIM с учётом скидки поставщика). В заказ и продажи не записывается.</p>{% endif %}
-{% if c.stage.kind == "won" and not c.sale_ids and can_post("order_sale") %}<div class="row" style="gap:var(--s-3)"><span class="small muted">Продажа не записана</span><form method="post" action="/orders/{{ c.id }}/sale" data-once>{{ csrf }}<button class="btn btn--primary btn--sm">Записать продажу</button></form></div>{% endif %}
-{% if c.sale_ids %}<div class="row" style="gap:var(--s-3)">{% if -1 in c.sale_ids %}<span class="small text-err">Запись продажи не завершена (сбой при записи).</span>{% else %}<span class="small">Продажа записана ({{ c.sale_ids|length }} поз.).</span>{% endif %}
-{% if can_post("order_sale_reverse") %}<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once>{{ csrf }}<button class="btn btn--danger-outline btn--sm">{% if -1 in c.sale_ids %}Освободить заказ{% else %}Сторнировать продажу{% endif %}</button></form>{% endif %}</div>{% endif %}
-{% if can_post("order_save") %}<form method="post" action="/orders/{{ c.id }}/save" class="stack">{{ csrf }}<input type="hidden" name="tab" value="money">
-<p class="small muted">Дата, когда сделано; пусто, если ещё нет.</p><div class="grid-2">
-{% for key, label in marks.items() %}<label class="field"><span class="label">{{ label }}</span><input class="input" type="date" name="{{ key }}" value="{{ c[key] }}"></label>{% endfor %}</div>
-<div><button class="btn btn--secondary btn--sm">Сохранить даты</button></div></form>
-{% else %}<dl class="small">{% for key, label in marks.items() %}<dt>{{ label }}</dt><dd>{{ c[key] or "—" }}</dd>{% endfor %}</dl>{% endif %}
-</div>{% endcall %}
+{% set w = webmim %}{% set b = webmim_create %}{# the block «WebMIM» only when it asks for an action (П11, the owner 08.11: no block «WebMIM»): the button is held,
+   «Досоздать», a result that failed, the positions differ, or no number and orders of WebMIM to pick #}
+{% if (b and (b.held or (b.state and b.state.state == "running") or (b.state and b.state.result and b.state.state != "done") or (b.label and b.label.startswith("Досоздать"))))
+   or (w and ((w.order and w.differences) or (not w.order and w.hints))) %}{% include "_order_webmim.html" %}{% endif %}
+{# no «Продажа и расчёты» (the owner 08.11: «убери»); a sale that failed half way still shows, with its button #}
+{% if -1 in c.sale_ids %}<div class="flash flash--err" data-sale-broken role="alert"><div class="flash-text row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center"><span>Запись продажи не завершена (сбой при записи).</span>
+{% if can_post("order_sale_reverse") %}<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once>{{ csrf }}<button class="btn btn--danger-outline btn--sm">Освободить заказ</button></form>{% endif %}</div></div>{% endif %}
 {% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}{% include "_order_finish.html" %}{% endif %}
 {% endcall %}<div class="o2c-split" data-split="0" role="separator" aria-orientation="vertical" tabindex="0" title="Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию"></div>
 {% call col(1) %}
@@ -120,6 +110,7 @@
 {% with sends=chat_sends, back="/orders/%d"|format(c.id) %}{% include "_chat_sends.html" %}{% endwith %}
 {% for ch in chat_links %}<div class="stack" style="gap:2px"><div class="row" style="gap:var(--s-2)"><a href="/chats/{{ ch.id }}"><b>Ч-{{ ch.id }}</b> · {{ ch.peer_name or "без имени" }}</a>{% if ch.unread %}<span class="badge badge--warn">новых: {{ ch.unread }}</span>{% endif %}<a class="btn btn--secondary btn--xs ml-auto" href="/chats/{{ ch.id }}">Открыть</a></div>{% if ch.item_title %}<div class="small">{{ ch.item_title }}</div>{% endif %}<div class="small muted chat-last">{{ ch.last_text }}</div></div>{% endfor %}
 </div></section>{% else %}<p class="muted small o2c-empty">К заказу не привязан чат Авито. Привязать можно в окне заказа: «Дополнительно» → «Чат Авито».</p>{% endif %}
+{% if chat_links and c.stage.kind == "open" and c.stage.code != "oth" %}{% with autosend_order=c.id, autosend_chat=none %}{% include "_order_autosend.html" %}{% endwith %}{% endif %}{# the auto message lives in the chat's column, only with a chat on an open stage (audit 20) #}
 {% endcall %}
 </div>
 {% endblock %}

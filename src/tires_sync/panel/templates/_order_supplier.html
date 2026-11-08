@@ -7,15 +7,19 @@
 {% call entity_ui.section("Заказ поставщику", id="supplier", sub="сверка перед заказом") %}<div class="card-body stack" data-supplier>
 {% if s.all_oth %}<p class="small" data-supplier-all-oth>Заказ поставщику не нужен: {{ "все позиции уже заказаны в исходных заказах или взяты с ОТХ." if merge_items else "все позиции взяты с ОТХ, шины уже на точке." }}</p>{% endif %}
 {% if s.oth %}<div class="small" data-supplier-oth><b>Уже на точке (с ОТХ), поставщику не уходит:</b> {% for o in s.oth %}{{ o.name }} — {{ o.qty }} шт{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}
-{% if not s.all_oth %}<ul class="supplier-check" data-supplier-check aria-live="polite">
-{% for l in s.lines %}<li class="supplier-line is-{{ l.state }}" data-state="{{ l.state }}"><span class="supplier-mark" aria-hidden="true">{% if l.state == "ok" %}✓{% elif l.state == "warn" %}!{% else %}✗{% endif %}</span>
+{% set o2s = office_new() and current_user().role != "point" %}{# «Новый вид» (audit 24, the owner 08.11): the check in one line, only the problems listed; «Оформить в WebMIM» is right of «Ответственный» #}
+{% set bad = s.lines|rejectattr("state", "equalto", "ok")|list %}
+{% if not s.all_oth and o2s and not bad and s.lines %}<div class="row" style="gap:var(--s-2);align-items:center" data-supplier-ok><span class="badge badge--ok">всё сходится</span><span class="small">Сверка с WebMIM: {{ s['items']|length }} {{ plural(s['items']|length, "позиция", "позиции", "позиций") }}, цены и остатки в порядке</span></div>{% endif %}
+{% if not s.all_oth %}<ul class="supplier-check"{% if not o2s %} data-supplier-check{% endif %} aria-live="polite"{% if o2s and not bad %} hidden{% endif %}>
+{% for l in (bad if o2s else s.lines) %}<li class="supplier-line is-{{ l.state }}" data-state="{{ l.state }}"><span class="supplier-mark" aria-hidden="true">{% if l.state == "ok" %}✓{% elif l.state == "warn" %}!{% else %}✗{% endif %}</span>
 <span class="supplier-label">{{ l.label }}</span><span class="supplier-text">{% for t in l.texts %}{{ t }}{% if not loop.last %}; {% endif %}{% endfor %}</span>
 <span class="sr-only">{% if l.state == "ok" %}в порядке{% elif l.state == "warn" %}предупреждение{% else %}не в порядке{% endif %}</span></li>{% endfor %}
 </ul>
 {% if s.late and can_post("order_delivery_tomorrow") %}<form method="post" action="/orders/{{ c.id }}/delivery/tomorrow" data-once class="row" style="gap:var(--s-3);flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <span class="small text-warn">Сейчас после 16:00: заказ на сегодня WebMIM может не успеть передать в работу.</span><button class="btn btn--secondary btn--xs">Перенести на завтра</button></form>{% endif %}
 <div class="row" style="gap:var(--s-3);flex-wrap:wrap" data-supplier-actions>
-{% if s.supplier == "webmim" %}
+{% if s.supplier == "webmim" and o2s %}{% if s.blocked %}<span class="small muted">Исправьте строки с ✗: «Оформить в WebMIM» откроется.</span>{% endif %}
+{% elif s.supplier == "webmim" %}
 {% if mim_ready and not s.blocked %}<button type="button" class="btn btn--primary btn--sm" data-open-modal="supplier-window">Заказать в МИМ</button>
 {% else %}<button type="button" class="btn btn--primary btn--sm" disabled>Заказать в МИМ</button>{% endif %}
 <span class="small muted">{% if s.blocked %}Исправьте строки с ✗: кнопка откроется.{% elif not b %}На тестовом сервере WebMIM оформляются только заказы с тегом «тест».{% elif b.held %}Кнопка закрыта: итог прошлого нажатия неизвестен, проверьте кабинет WebMIM (блок «WebMIM» ниже).{% elif not b.live %}Этот сервер WebMIM закрыт для кнопки.{% elif b.state and b.state.state == "running" %}Заказ уже оформляется в WebMIM: обновите страницу через минуту.{% elif b.test %}{{ b.server }}{% endif %}</span>
@@ -26,7 +30,7 @@
 <a class="small ml-auto" href="/orders/{{ c.id }}?check=1#supplier">Проверить снова</a>
 </div>
 {% endif %}
-<p class="small muted">Можно и вручную: оформите заказ в кабинете поставщика и переведите заказ на «Заказ оформлен» с номером.</p>
+{% if not o2s %}<p class="small muted">Можно и вручную: оформите заказ в кабинете поставщика и переведите заказ на «Заказ оформлен» с номером.</p>{% endif %}
 </div>{% endcall %}
 {% if not s.blocked and (mim_ready or s.supplier == "tochki") %}{% set f = s.fields %}
 <div class="modal-backdrop send-window" id="supplier-window" role="dialog" aria-modal="true" aria-labelledby="supplier-window-h"><div class="modal">

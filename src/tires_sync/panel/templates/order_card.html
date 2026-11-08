@@ -2,7 +2,7 @@
 {% from "_ui.html" import icon %}
 {% import "_entity.html" as entity_ui %}
 {% import "_inquiry.html" as inq_ui %}
-{% block title %}Заказ №{{ c.id }} · Tires Sync{% endblock %}
+{% block title %}Заказ {{ entity.ref }} · Tires Sync{% endblock %}{# a point: the WebMIM number (routes_orders.point_entity, the owner 08.11) #}
 {# a point's phone (2026-10-31, point-mobile): its own width and the frame of «Рабочее место»; the office keeps 1280 #}
 {% block viewport %}{% if current_user().role == "point" %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
 {% block body_class %}{% if current_user().role == "point" %}pt-ui pt-card-page{% endif %}{% endblock %}
@@ -10,7 +10,7 @@
 {% block content %}
 {% set csrf %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endset %}
 {{ entity_ui.crumbs(entity.crumbs) }}
-{% from "_oth_mim.html" import mim_head %}{% if oth_parts %}<p class="strong" data-oth-title>{{ mim_head(oth_parts) }}</p>{# «На ОТХ»: as on the board, no inner number (2026-11-07) #}{% elif oth_title %}<p class="strong" data-oth-title>{{ oth_title }} · №{{ c.id }}</p>{% endif %}{# «На ОТХ»: a purchase of WebMIM, its client changes (2026-11-06) #}
+{% from "_oth_mim.html" import mim_head %}{% if oth_parts %}<p class="strong" data-oth-title>{{ mim_head(oth_parts) }}</p>{# «На ОТХ»: as on the board, no inner number (2026-11-07) #}{% elif oth_title %}<p class="strong" data-oth-title>{{ oth_title }}{% if entity.ref == "№%d"|format(c.id) %} · №{{ c.id }}{% endif %}</p>{% endif %}{# «На ОТХ»: a purchase of WebMIM, its client changes (2026-11-06) #}
 {% include "_order_unsent.html" %}
 {% if c.stage.code != "oth" %}{% with autosend_order=c.id, autosend_chat=none %}{% include "_order_autosend.html" %}{% endwith %}{% endif %}{# «На ОТХ»: no client, no auto message (2026-11-07) #}
 <div class="ocard-layout">

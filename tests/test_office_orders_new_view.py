@@ -260,10 +260,11 @@ def test_the_card_has_three_columns_and_the_live_window(w):
     flag(w, "all")
     text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
     assert [int(x) for x in re.findall(r'data-cc="(\d)"', text)] == [0, 1, 2]
-    assert "WebMIM № 7712345" in text and "внутр. № %d" % w["ids"]["a"] in text
+    assert 'value="7712345"' in text and "внутр." not in text and "Колонки по умолчанию" not in text    # the head: «← Заказы» only (the owner 08.11)
     for hook in ("form[data-owin]".replace("form[data-owin]", "data-owin"), 'class="owin-stages"', "data-autosave", 'action="/orders/%d/note"' % w["ids"]["a"],
-                 "data-feed-tabs", 'id="wants"', 'id="money"'):
+                 "data-feed-tabs", 'id="wants"'):
         assert hook in text, hook
+    assert 'id="money"' not in text and "Продажа и расчёты" not in text and "Что делать сейчас" not in text
     assert json.loads(re.search(r"data-layout='([^']*)'", text).group(1)) == {"w": [1.15, 1.0, 0.85], "off": [False, False, False]}
 
 
@@ -425,3 +426,49 @@ def test_a_click_beside_the_checkbox_is_skipped_by_the_row_handler_itself():
     root = Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static"
     assert 't.closest("a,button,input,label,select,.o2-chk")' in (root / "app.js").read_text(encoding="utf-8")
     assert "stopPropagation" not in (root / "office2.js").read_text(encoding="utf-8")    # the menus close on a click outside
+
+
+# --- the window by the prototype of the audit (the owner 08.11) ----------------------------------------------------------------------
+
+def test_the_button_to_webmim_is_right_of_the_responsible_and_the_check_lists_the_problems_only(w):
+    flag(w, "all")
+    owner = client_of(w, "owner")
+    empty = html(owner, "/orders/%d" % w["ids"]["b"])
+    grid = empty[empty.index('name="responsible"'):empty.index('id="items"')]
+    assert "data-owin-wm" in grid and re.search(r'<button type="button" class="btn btn--primary" disabled title="В заказе нет позиций">Оформить в WebMIM</button>', grid)
+    sup = empty[empty.index('id="supplier"'):]
+    assert "✗" in sup and "Можно и вручную" not in sup and "Заказать в МИМ" not in sup        # the problems listed; the button moved up
+    assert "в порядке</span>" not in sup.split("Проверить снова")[0].replace("не в порядке", "")    # no line «в порядке»
+
+
+def test_the_check_of_the_supplier_is_one_line_when_all_is_well(w, monkeypatch):
+    from tires_sync import order_supplier
+    real = order_supplier.view
+
+    def all_well(*args, **kwargs):
+        v = real(*args, **kwargs)
+        return dict(v, lines=[dict(l, state="ok") for l in v["lines"]], blocked=False)
+    monkeypatch.setattr(order_supplier, "view", all_well)
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["c"])
+    assert "data-supplier-ok" in text and "всё сходится" in text and "Сверка с WebMIM: 1 позиция, цены и остатки в порядке" in text
+    assert not re.findall(r'<li class="supplier-line', text)              # no line «в порядке» (audit 24)
+    flag(w, "off")
+    old = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["c"])
+    assert "data-supplier-ok" not in old and re.findall(r'<li class="supplier-line is-ok"', old)    # the old view: line by line, as before
+
+
+def test_the_auto_message_is_in_the_chat_column_only_with_a_chat(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+    assert 'id="autosend"' not in text                                     # no chat: no auto message (audit 20)
+    head = text[text.index('<header class="o2c-head">'):text.index("</header>")]
+    assert re.sub(r"<[^>]+>|\s+", "", head) == "Заказы"                    # «← Заказы» only (the owner 08.11)
+
+
+def test_the_hint_of_the_positions_is_one_line(w):
+    flag(w, "all")
+    text = html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])
+    assert "появятся позиции с остатком и ценой объявления.</p>" in text and "Код позиции из «Каталога»" not in text
+    flag(w, "off")
+    assert "Код позиции из «Каталога»" in html(client_of(w, "owner"), "/orders/%d" % w["ids"]["a"])

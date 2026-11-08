@@ -45,11 +45,17 @@ def test_the_window_on_oth_has_no_autosend(w):
     cid = order(w)
     assert 'id="autosend"' not in window(w, cid)
     other = order(w, code="at_point", webmim="5316245")
-    assert 'id="autosend"' in window(w, other)                                   # other stages: the block stays
+    # other stages: the block stays; «Новый вид» (audit 20, the owner 08.11): in the column «Чат Авито», only with a chat
+    assert ('id="autosend"' in window(w, other)) == (w["view"] == "old")
 
 
 def test_the_title_is_as_on_the_board_without_the_inner_number(w):
     cid = order(w)
+    if w["view"] == "new":                      # no title in the head at all (the owner 08.11): the row of «На ОТХ» is in the window
+        text = window(w, cid)
+        head = text[text.index('<header class="o2c-head">'):text.index("</header>", text.index('<header class="o2c-head">'))]
+        assert plain(head) == "Заказы" and "внутр." not in text and plain(text).count(LINE) == 1
+        return
     head = title(w, window(w, cid))
     assert plain(head) == HEAD
     assert "внутр." not in head and "№%d" % cid not in head and "Иван" not in head
@@ -86,15 +92,18 @@ def test_the_table_of_webmim_shows_only_for_several_parts(w):
     assert "Заказы WebMIM" in text and "5316300" in text
     other = order(w, code="at_point", webmim="5316245")
     w["app"].jinja_env.globals["webmim_parts_for"] = lambda card_id: [part("own", "5316245")]
-    assert "Заказы WebMIM" in window(w, other)                                   # other stages: as before
+    # other stages: as before; «Новый вид» (audit 25): one order of WebMIM — no table, the number is in «Доставка и WebMIM»
+    assert ("Заказы WebMIM" in window(w, other)) == (w["view"] == "old")
+    w["app"].jinja_env.globals["webmim_parts_for"] = lambda card_id: [part("own", "5316245"), part("extra", "5316301")]
+    assert "Заказы WebMIM" in window(w, other)
 
 
 def test_other_stages_keep_their_title(w):
     cid = order(w, code="at_point")
     text = window(w, cid)
     assert "data-oth-head" not in text
-    if w["view"] == "new":
-        assert "внутр. № %d" % cid in title(w, text)
+    if w["view"] == "new":                      # no «Заказ № · клиент · телефон» in the head (the owner 08.11)
+        assert "внутр." not in text and 'class="o2c-title"' not in text
 
 
 def test_the_point_sees_no_webmim_nor_transfer_in_the_window(w):
