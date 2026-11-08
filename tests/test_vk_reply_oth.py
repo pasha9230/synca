@@ -103,6 +103,31 @@ def test_tyres_of_one_order_in_two_new_orders_name_neither(tmp_path):
     assert code(conn, b) == code(conn, c) == "at_point"
 
 
+def test_an_order_of_the_tyres_closed_before_is_not_meant(tmp_path):
+    """The review 08.11: B took 2 of A's tyres and was issued; C took the other 2 and is at the point. «Выдал» to the line about C closes C."""
+    conn = db(tmp_path)
+    old = source(conn)
+    b = new_order(conn, qty=2)
+    take(conn, b)
+    at_point(conn, b)
+    orders.move_card(conn, b, stage(conn, "done"), WHEN, "o")
+    c = new_order(conn, qty=2)
+    take(conn, c)
+    at_point(conn, c)
+    line = mgr.signed(oth_sale.point_text(conn, orders.get_card(conn, c), LATER))
+    assert reply_no(line, conn=conn) == c
+    mgr.handle_command(conn, "vk-1", POINT_VK, "Выдал", reply_no(line, conn=conn), WHEN)
+    assert code(conn, c) == "done" and code(conn, b) == "done" and code(conn, old) == "cancel"
+
+
+def test_the_one_order_of_the_tyres_issued_already_is_still_named(tmp_path):
+    conn = db(tmp_path)
+    old, cid, line = oth_order(conn)
+    orders.move_card(conn, cid, stage(conn, "done"), WHEN, "o")
+    assert reply_no(line, conn=conn) == cid                                             # «уже отмечено», not «какой заказ?»
+    assert "уже отмечен" in mgr.handle_command(conn, "vk-1", POINT_VK, "Выдал", reply_no(line, conn=conn), WHEN)
+
+
 def test_a_take_undone_names_nothing(tmp_path):
     conn = db(tmp_path)
     source(conn)

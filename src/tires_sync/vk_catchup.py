@@ -109,7 +109,7 @@ def _came_by_callback(conn, message_id: str, raw_id: int, group: str, since: dat
                         (since.isoformat(timespec="seconds"), SOURCE + "-%")).fetchall()
     for (payload,) in rows:
         try:
-            msg = vk_callback._message(json.loads(payload), group, conn)
+            msg = vk_callback._message(json.loads(payload), group)   # its id only
         except ValueError:                                          # cut at MAX_PAYLOAD: the id is looked for in the text
             if ('"id": %d,' % raw_id) in payload:
                 return True

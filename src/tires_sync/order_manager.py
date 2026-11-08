@@ -268,11 +268,16 @@ def line_order(conn, text):
     if found is None:
         return number
     from .oth_sale import first_order
-    sources = {r[0] for r in conn.execute("SELECT id, webmim_number FROM order_card") if str(r[1] or r[0]) == found.group(1)}   # as _oth_taken names them
-    held = sorted({o for o, item_id in conn.execute("SELECT t.order_id, t.item_id FROM order_item_oth t JOIN order_item i ON i.id = t.item_id "
-                                                    "WHERE t.undone_at = '' AND i.qty >= 1")      # as _oth_taken: a position given on is not here
-                   if first_order(conn, item_id) in sources})
-    return held[0] if len(held) == 1 else None
+    number = found.group(1)
+    sources = {r[0] for r in conn.execute("SELECT id, webmim_number FROM order_card WHERE webmim_number = ? OR id = ?", (number, int(number)))
+               if str(r[1] or r[0]) == number}                                     # as _oth_taken names them
+    held = {o: kind for o, item_id, kind in conn.execute(
+        "SELECT t.order_id, t.item_id, s.kind FROM order_item_oth t JOIN order_item i ON i.id = t.item_id JOIN order_card c ON c.id = t.order_id "
+        "JOIN order_stage s ON s.id = c.stage_id WHERE t.undone_at = '' AND i.qty >= 1")     # as _oth_taken: a position given on is not here
+        if first_order(conn, item_id) in sources}
+    live = sorted(o for o, kind in held.items() if kind == "open")              # an order of the tyres closed before (issued, cancelled) is not meant
+    found = live if live else sorted(held)
+    return found[0] if len(found) == 1 else None
 
 
 def find_named(conn, number) -> List[int]:
