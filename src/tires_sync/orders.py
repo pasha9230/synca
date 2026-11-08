@@ -1147,13 +1147,24 @@ def board_query(query: str) -> tuple:
     return needle, digits, int(found.group(1)) if found else None, phone
 
 
+SIZE_NOISE = re.compile(r"[\s/\-.,·№r+()×*xх]")
+
+
+def size_key(text: str) -> str:
+    """A text for the search by size (the owner 08.11, the prototype of the audit): lower case, «ё» as «е», no spaces, slashes, dots, «R»,
+    «×» — «185/65 R15», «185/65R15» and «185 65 15» are all «1856515»."""
+    return SIZE_NOISE.sub("", str(text or "").lower().replace("ё", "е"))
+
+
 def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item: str, webmim_number: str = "", transfer_number: str = "",
-                  articles: tuple = ()) -> bool:
+                  articles: tuple = (), items: tuple = ()) -> bool:
     """The order fits the search of the board (board_query): a number finds that order, the order with that number of WebMIM (or a phone with
     those digits, or a transfer number ending in them, four and more), not every order with the digit; words find the client's name or the
     first position, six characters and more the transfer number as typed («26R-004417», the owner 2026-10-29: never every «26R» of the year); three digits and more find the phone; a whole phone
     (the last ten digits) finds it written in any way. `articles`: the supplier's codes of every position of the order (board_articles; the owner
-    2026-11-02) — the whole code in any case, or four characters and more of it, a number too."""
+    2026-11-02) — the whole code in any case, or four characters and more of it, a number too. `items`: the names of every position of the order
+    (the owner 08.11: the search finds an order by any of its positions and by a size written in any way — size_key; a query of digits only
+    stays a number: «1856515» finds the order with that WebMIM number, never a size)."""
     needle, digits, number, phone10 = wanted
     if not needle:
         return True
@@ -1167,8 +1178,11 @@ def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item
         return (card_id == number or (len(digits) >= 4 and digits in phone_digits)
                 or bool(webmim_number and re.sub(r"\D", "", webmim_number) == digits)
                 or bool(transfer and len(digits) >= 4 and re.sub(r"\D", "", transfer).endswith(digits)))
-    hay = " ".join([name.lower(), first_item.lower()])
-    return needle in hay or (len(digits) >= 3 and digits in phone_digits) or (len(needle) >= 6 and needle in transfer)
+    hay = " ".join([name.lower(), first_item.lower()] + [str(i).lower() for i in items])
+    if needle in hay or (len(digits) >= 3 and digits in phone_digits) or (len(needle) >= 6 and needle in transfer):
+        return True
+    key = size_key(needle)                                         # a size or a model with its size, written in another way
+    return len(digits) >= 2 and len(key) >= 4 and any(key in size_key(i) for i in (first_item,) + tuple(items))
 
 
 def board_articles(conn) -> Dict[int, tuple]:
@@ -1246,9 +1260,11 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     sums: Dict[int, float] = {}
     first: Dict[int, str] = {}
     count: Dict[int, int] = {}
+    item_names: Dict[int, tuple] = {}
     for order_id, name, qty, sale_unit in conn.execute("SELECT order_id, name, qty, sale_unit FROM order_item ORDER BY id"):
         sums[order_id] = sums.get(order_id, 0.0) + qty * sale_unit
         count[order_id] = count.get(order_id, 0) + 1
+        item_names[order_id] = item_names.get(order_id, ()) + (name,)
         first.setdefault(order_id, "%s × %d" % (name, qty))
     wanted = board_query(query)
     articles = board_articles(conn) if wanted[0] else {}
@@ -1270,7 +1286,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
             continue
         if tag and tag not in tag_names:
             continue
-        if not board_matches(wanted, cid, name, phone, first.get(cid, ""), webmim or "", articles=articles.get(cid, ())):
+        if not board_matches(wanted, cid, name, phone, first.get(cid, ""), webmim or "", articles=articles.get(cid, ()), items=item_names.get(cid, ())):
             continue
         stage = columns[sid]["stage"]
         state = order_oth.state_of(plans.get(cid)) if stage["code"] == RETURN_GIVEN else ""
