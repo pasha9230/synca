@@ -15,48 +15,39 @@
 {% set keep_q %}{% for k, v in keep.items() if v %}&amp;{{ k }}={{ v|urlencode }}{% endfor %}{% endset %}
 <header class="page-head"><div><h1>Заказы</h1><p class="sub">Заказы клиентов по этапам воронки: от переговоров до выдачи на точке.</p></div>
 <div class="actions"><div class="seg" role="group" aria-label="Вид"><a href="/orders?v=board{{ keep_q }}"{% if view == "board" %} class="is-active" aria-current="true"{% endif %}>{{ icon("layers", "i-sm") }}Доска</a><a href="/orders?v=list{{ keep_q }}"{% if view == "list" %} class="is-active" aria-current="true"{% endif %}>{{ icon("report", "i-sm") }}Список</a></div>
-{% if inbox_new %}<a class="btn btn--secondary" href="/orders/inbox" title="Новые входящие заказы">Входящие <span class="sb-count sb-count--red">{{ inbox_new }}</span></a>{% endif %}
 <details class="menu orders-more"><summary class="btn btn--secondary">Ещё ⋯</summary><div class="menu-list">
 {% if has_right("money") %}<a class="menu-item" href="/orders/report">Отчёт</a>{% endif %}
 <a class="menu-item" href="/orders/webmim">Сверка с WebMIM</a>
 <a class="menu-item" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Файл Excel с заказами по текущим фильтрам (поиск, точка, тег, дата создания)">Выгрузить в Excel</a>
-<a class="menu-item" href="/orders/inbox">Входящие{% if inbox_new %} ({{ inbox_new }}){% endif %}</a>
 {% if can_post("orders_bulk_run") %}<a class="menu-item" href="/orders/bulk">Закрыть разом</a>{% endif %}
 {% if can("setup") %}<a class="menu-item" href="/orders/templates">Шаблоны</a>
 <a class="menu-item" href="/orders/settings">Настроить воронку</a>{% endif %}
 <hr><a class="menu-item" href="/deleted">Удалённые</a>
 </div></details>
 {% if can_post("order_new") %}<a class="btn btn--primary" href="/orders/new">{{ icon("plus") }}Новый заказ</a>{% endif %}</div></header>
-<div class="o2-stats">
-<div class="o2-stat"><span class="t">В работе</span><b>{{ data.summary.open }}</b></div>
-<div class="o2-stat{% if data.summary.overdue %} is-warn{% endif %}" title="дольше срока этапа"><span class="t">Просрочено</span><b>{{ data.summary.overdue }}</b></div>
-<div class="o2-stat{% if waiting %} is-warn{% endif %}" title="заказов с задачами правил"><span class="t">Ждут действия</span><b>{{ waiting|length }}</b></div>
-<div class="o2-stat"><span class="t">Новые сегодня</span><b>{{ data.summary.new_today }}</b></div>
-{% if data.summary.sum_open is not none %}<div class="o2-stat" title="по ценам продажи"><span class="t">Сумма в работе</span><b>{{ data.summary.sum_open|money }}</b></div>{% endif %}
-</div>
-<form method="get" action="/orders" class="card o2-filters">
+{% set more_on = [point, tag, only_stage, returning, date_from or date_to]|select|list|length %}
+<form method="get" action="/orders" class="card o2-filters o2-filters--fold{% if more_on %} is-open{% endif %}" data-o2-filters>{# the owner 08.11: the search and «Сбросить» in sight, the rest under «Фильтры» #}
 <input type="hidden" name="v" value="{{ view }}">
-<label class="field o2-f-wide"><span class="label">Поиск</span><span class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, номер"></span></label>
+<label class="field o2-f-wide"><span class="label">Поиск</span><span class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, № заказа, позиция, размер"></span></label>
+<button type="button" class="btn btn--secondary" data-filters-toggle aria-expanded="{{ 'true' if more_on else 'false' }}">{{ icon("sliders") }}Фильтры</button><a class="btn btn--secondary o2-reset-btn" href="/orders?v={{ view }}">Сбросить</a>
+<div class="o2-f-more">
 <label class="field"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for p in points %}<option value="{{ p.id }}"{% if point == p.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
 {% if stages %}<label class="field"><span class="label">Этап</span><select class="select" name="s" data-stage-filter><option value="">Все</option>{% for s in stages %}<option value="{{ s.id }}"{% if only_stage == s.id %} selected{% endif %}>{{ s.name }}{% if not s.on_board %} (нет на доске){% endif %}</option>{% endfor %}</select></label>
 <label class="field"><span class="label">{{ stage_name("return_given") }}</span><select class="select" name="r" data-return-filter><option value="">Все</option>{% for key, name in returning_filters.items() %}<option value="{{ key }}"{% if returning == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>{% endif %}
 <div class="field"><span class="label">Дата создания</span><span class="o2-dates"><input class="input" type="date" name="from" value="{{ date_from }}" aria-label="Дата создания: с"><span class="muted">—</span><input class="input" type="date" name="to" value="{{ date_to }}" aria-label="Дата создания: по"></span></div>
 <label class="field"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}" placeholder="Авито, предоплата…"></label>
-<button class="btn btn--secondary">Показать</button><a class="btn btn--link-gray" href="/orders?v={{ view }}">Сбросить</a>
-<a class="btn btn--secondary o2-icon-btn" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Скачать в Excel по текущим фильтрам" aria-label="Скачать в Excel">{{ icon("download") }}</a>
+<button class="btn btn--secondary">Показать</button>
+<a class="btn btn--secondary o2-icon-btn" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Скачать в Excel по текущим фильтрам" aria-label="Скачать в Excel">{{ icon("download") }}</a></div>
 </form>
 {% set on = [query, point, tag, only_stage, returning, date_from or date_to]|select|list|length %}
 {% if on %}<div class="o2-filter-on" data-o2-filter-on>Фильтр включён: {{ on }} · <a href="/orders?v={{ view }}">Сбросить фильтры</a></div>{% endif %}
 {% if only_stage %}<p class="small" data-only-stage="{{ only_stage }}">Только этап «{{ data.columns[0].stage.name }}» · <a href="/orders?v={{ view }}{{ keep_q }}">все этапы</a></p>{% endif %}
 <div class="flash flash--err" id="board-msg" hidden>{{ icon("alert") }}<div class="flash-text"></div></div>
 {% if total_cards == 0 and not query and not tag and not point and not (date_from or date_to) %}
-<div class="flash flash--info" style="margin-bottom:var(--s-4)">{{ icon("info") }}<div class="flash-text"><b>Заказов пока нет.</b> Создайте первый, когда клиент написал вам на Авито: поле «Быстрое добавление» в первой колонке или кнопка «Новый заказ».</div></div>
+<div class="flash flash--info" style="margin-bottom:var(--s-4)">{{ icon("info") }}<div class="flash-text"><b>Заказов пока нет.</b> Создайте первый, когда клиент написал вам на Авито: кнопка «Новый заказ».</div></div>
 {% endif %}
 {% set dot_label = {"red": "Нужно действие", "yellow": "Внимание", "green": "Движется"} %}
 {% macro odot(id) %}{% if dots.get(id) %}<span class="odot odot--{{ dots[id] }}" title="{{ dot_label[dots[id]] }}"></span>{% endif %}{% endmacro %}
-{% macro wm(c) %}{% if c.webmim %}<span class="o2-wm">№ {{ c.webmim }}</span>{% else %}<span class="o2-wm o2-wm--none">№ WebMIM ещё нет</span>{% endif %}{% endmacro %}
-{% macro oth_transfer(m) %}{% if m.transfer %}{{ m.transfer }}{% if m.invoice %} от {{ m.invoice }}{% endif %}{% else %}Счёт от {{ m.invoice }}{% endif %}{% endmacro %}
-{% macro items(text) %}{% if text %}{% set parts = text.split(" × ", 1) %}<div class="o2-items"><b class="o2-model">{{ parts[0] }}</b>{% if parts|length > 1 %} × {{ parts[1] }}{% endif %}</div>{% endif %}{% endmacro %}
 {% set ic_ids = intercity_ids() %}
 {% if view == "list" %}{# the Google table of orders (orders_list): a row per position; the selection is of orders (every row of the order) #}
 {% set by_id = {} %}{% for r in rows %}{% set _ = by_id.update({r.card.id: r.card}) %}{% endfor %}
@@ -101,29 +92,27 @@
 </div></aside>
 </div>
 {% else %}
+{% set to_list = [] if only_stage else data.columns|selectattr("stage.code", "in", ["done", "cancel"])|list %}{# «Выполнено» and «Отмена» — in «Список» (audit 32) #}
+{% if to_list %}<div class="row small muted o2-to-list" data-to-list><span class="ml-auto">В «Списке»: {% for col in to_list %}<a href="/orders?v=list&amp;s={{ col.stage.id }}{{ keep_q }}">{{ col.stage.name }} {{ col.count }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</span></div>{% endif %}
 <div class="board o2-board" id="board" data-csrf="{{ csrf_token() }}">
-{% set quick_stage = ((data.columns|selectattr("stage.code", "equalto", "new")|first) or (data.columns|first) or {"stage": {}}).stage.id %}
-{% for col in data.columns %}{% set folded = col.stage.kind != "open" and not (query or tag or point) %}<section class="col{% if folded %} is-folded{% endif %}" data-stage="{{ col.stage.id }}"{% if folded %} data-fold{% endif %}>
+{% for col in data.columns if col not in to_list %}{% set folded = not only_stage and (col.count == 0 or (col.stage.kind != "open" and not (query or tag or point))) %}<section class="col{% if folded %} is-folded{% endif %}" data-stage="{{ col.stage.id }}"{% if folded %} data-fold{% endif %}>
+{% set words = col.stage.name.rsplit(" ", 1) %}{# the last word and the number never part: the number right of the stage's name, the sum below (the owner 08.11) #}
 {% if folded %}<button type="button" class="col-head" data-fold-toggle aria-expanded="false" aria-controls="col-body-{{ col.stage.id }}" title="{% if col.stage.hint %}{{ col.stage.hint }} · {% endif %}Нажмите, чтобы показать или скрыть заказы этапа"><span class="dot" style="background:{{ col.stage.color|stage_color }}"></span><span class="col-name">{{ col.stage.name }}</span> <span class="o2-count">{{ col.count }}</span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</button>
-{% else %}<div class="col-head" title="{{ col.stage.hint }}"><span class="dot" style="background:{{ col.stage.color|stage_color }}"></span>{{ col.stage.name }} <span class="o2-count">{{ col.count }}</span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</div>{% endif %}
+{% else %}<div class="col-head" title="{{ col.stage.hint }}"><span class="dot" style="background:{{ col.stage.color|stage_color }}"></span><span class="col-name">{% if words|length > 1 %}{{ words[0] }} {% endif %}<span class="nowrap">{{ words[-1] }} <span class="o2-count">{{ col.count }}</span></span></span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</div>{% endif %}
 <div class="col-body" id="col-body-{{ col.stage.id }}">
-{% if col.stage.id == quick_stage and can_post("order_new") %}<form method="post" action="/orders/new" class="quick"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input class="input input--sm" name="client_name" placeholder="Имя или телефон клиента" maxlength="120" aria-label="Быстрое добавление"><button class="btn btn--secondary btn--sm">Добавить</button></form>{% endif %}
-{% for c in col.cards %}<a class="ocard o2-card{% if waiting.get(c.id) %} waiting{% endif %}" draggable="{{ 'true' if can_post('order_move') else 'false' }}" data-card="{{ c.id }}" href="/orders/{{ c.id }}">
-{% if c.oth_card %}{% set m = c.oth_card %}{# «На ОТХ» (the owner 2026-11-07): the purchase of WebMIM, its dates, the point, each tyre and its count; no inner number #}
-<div class="o2-t1">{{ odot(c.id) }}<span class="o2-wm" data-oth-title>{% if m.number %}№{{ m.number }}{% else %}без № MIM{% endif %}</span></div>
-{% if m.transfer or m.invoice %}<div class="o2-meta" data-oth-transfer>{{ oth_transfer(m) }}</div>{% endif %}
-{% if c.stage_day %}<div class="o2-meta" data-stage-date>{{ col.stage.name }} с {{ c.stage_day|day }}</div>{% endif %}
-{% if c.oth_dates and c.oth_dates.until %}<div class="o2-meta" data-oth-dates>Резерв до {{ c.oth_dates.until|day }}</div>{% endif %}
-<div class="o2-meta">{{ c.point or "Точка не выбрана" }}</div>
-{% for i in m.tyres %}<div class="o2-items"><b class="o2-model">{{ i.name }}</b></div><div class="o2-meta" data-oth-qty>Кол-во: {{ i.qty }}</div>{% endfor %}
-{% else %}<div class="o2-t1">{{ odot(c.id) }}{{ wm(c) }}<span class="o2-inner">внутр. № {{ c.id }}</span></div>
-<div class="o2-cli">{{ c.client }}</div>
-{% if c.stage_day %}<div class="o2-meta" data-stage-date>{{ c.real or col.stage.name }} {{ c.stage_day|day }}</div>{% endif %}
-{{ items(c.items_text) }}
-<div class="o2-meta">{{ c.point or "Точка не выбрана" }}{% if c.delivery_date %} · {{ c.delivery_date|day }}{% elif c.in_stock %} · Товар в наличии на точке{% endif %}</div>
-{% if c.oth_dates %}<div class="o2-meta" data-oth-dates>На точке {{ c.oth_dates.arrived|day if c.oth_dates.arrived else "—" }} · резерв до {{ c.oth_dates.until|day if c.oth_dates.until else "—" }}</div>{% endif %}{% endif %}
-{% if c.intercity or c.returning or c.real or labels.get(c.id) or waiting.get(c.id) or notes.get(c.id) %}<div class="o2-tags">{% if c.intercity %}<span class="badge badge--warn" data-intercity-tag>В другой город</span>{% endif %}{% if c.returning %}<span class="badge badge--warn" data-return-label>{{ c.returning }}</span>{% endif %}{% if c.real %}<span class="badge badge--neutral" data-real-stage title="Настоящий этап заказа">{{ c.real }}</span>{% endif %}{% if labels.get(c.id) %}<span class="badge badge--warn" data-origin title="{{ labels[c.id].hint }}">{{ labels[c.id].text }}</span>{% endif %}{% if waiting.get(c.id) %}<span class="badge badge--err" title="Есть задачи правил: откройте заказ">Ждёт действия: {{ waiting[c.id] }}</span>{% endif %}{% if notes.get(c.id) %}<span class="badge badge--neutral" data-note title="{{ notes[c.id] }}">Есть примечание</span>{% endif %}</div>{% endif %}
-<div class="o2-foot">{% if c.sum is not none %}<b>{{ c.sum|money }}</b>{% endif %}{% for t in c.tags %}<span class="badge badge--neutral">{{ t }}</span>{% endfor %}<span class="daymark{% if c.overdue %} is-over{% endif %} ml-auto">{{ c.days }} дн.</span></div></a>{% endfor %}
+{% for c in col.cards %}{% set acc = c.tags|select("in", account_names)|list if account_names else [] %}{% set wm_no = c.oth_card.number if c.oth_card else c.webmim %}{% set pos = positions.get(c.id, {"n": 0, "qty": 0, "name": ""}) %}<a class="ocard o2-card o2-card--col{% if waiting.get(c.id) %} waiting{% endif %}" draggable="{{ 'true' if can_post('order_move') else 'false' }}" data-card="{{ c.id }}" href="/orders/{{ c.id }}">
+{# the owner 08.11: left-aligned, a field per line — the WebMIM number, the tyres, the count, the sum, the point, the Avito account as a label, the days on the stage, the statuses at the bottom; no inner number, no line of the stage #}
+{% if wm_no or dots.get(c.id) %}<div class="o2-t1">{{ odot(c.id) }}{% if wm_no %}<span class="o2-wm"{% if c.oth_card %} data-oth-title{% endif %}>№ {{ wm_no }}</span>{% endif %}</div>{% endif %}
+{% if pos.n > 1 %}<div class="o2-items"><b class="o2-model">{{ pos.n }} {{ plural(pos.n, "позиция", "позиции", "позиций") }} · {{ pos.qty }} шт.</b></div>
+{% elif pos.n == 1 %}<div class="o2-items"><b class="o2-model">{{ pos.name }}</b></div><div class="o2-meta" data-qty>{{ pos.qty }} шт.</div>
+{% else %}<div class="o2-items"><b class="o2-model">без позиций</b></div>{% endif %}
+{% if c.sum is not none %}<div class="o2-sum"><b>{{ c.sum|money }}</b></div>{% endif %}
+{% if c.point %}<div class="o2-meta">{{ c.point }}</div>{% endif %}
+{% if acc %}<div class="o2-tags o2-acc" data-account>{% for t in acc %}<span class="badge badge--brand">{{ t }}</span>{% endfor %}</div>{% endif %}
+<div class="o2-meta daymark{% if c.overdue %} is-over{% endif %}">{{ c.days }} дн.</div>
+{% set rest = c.tags|reject("in", acc)|list %}
+{% if c.intercity or c.returning or c.real or labels.get(c.id) or waiting.get(c.id) or notes.get(c.id) or rest %}<div class="o2-tags">{% if c.intercity %}<span class="badge badge--warn" data-intercity-tag>В другой город</span>{% endif %}{% if c.returning %}<span class="badge badge--warn" data-return-label>{{ c.returning }}</span>{% endif %}{% if c.real %}<span class="badge badge--neutral" data-real-stage title="Настоящий этап заказа">{{ c.real }}</span>{% endif %}{% if labels.get(c.id) %}<span class="badge badge--warn" data-origin title="{{ labels[c.id].hint }}">{{ labels[c.id].text }}</span>{% endif %}{% if waiting.get(c.id) %}<span class="badge badge--err" title="Есть задачи правил: откройте заказ">Ждёт действия: {{ waiting[c.id] }}</span>{% endif %}{% if notes.get(c.id) %}<span class="badge badge--neutral" data-note title="{{ notes[c.id] }}">Есть примечание</span>{% endif %}{% for t in rest %}<span class="badge badge--neutral">{{ t }}</span>{% endfor %}</div>{% endif %}
+</a>{% endfor %}
 </div></section>{% endfor %}
 </div>
 {% endif %}

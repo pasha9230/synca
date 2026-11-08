@@ -120,3 +120,36 @@ body.o2-card .o2c-scroll .owin-stages{flex-wrap:wrap;overflow-x:visible}       /
 @container (min-width:900px){body.o2-card .o2c-scroll .owin-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:1100px){body.o2-card .o2c-body{height:calc(100vh - 170px)}}
 @container (max-width:360px){body.o2-card .o2c-feed form.row{flex-direction:column;align-items:stretch}}
+/* ---- Заказы по прототипу аудита 08.11 (lane proto-orders) ---- */
+/* доска (п. 32): колонки влезают в 1280, шапки прилипают; пустые этапы — узкие свёрнутые колонки (владелец 08.11) */
+@media (min-width:1200px){
+  body.o2 .o2-board .col{min-width:0;flex:1 1 0}
+  body.o2 .o2-board{overflow:visible}
+  body.o2 .o2-board .col-head{position:sticky;top:0;z-index:4;background:var(--gray-50);border-radius:var(--r-lg) var(--r-lg) 0 0;flex-wrap:wrap}
+  body.o2 .o2-board .col-head .col-name{flex:1;min-width:0}
+  body.o2 .o2-board .col.is-folded{flex:0 0 48px;min-width:48px}
+  body.o2 .o2-board .col.is-folded .col-head{flex-wrap:nowrap;border-radius:var(--r-lg);cursor:pointer;width:100%;border:0;font:inherit;color:inherit}
+  body.o2 .o2-board .col.is-folded .col-name{flex:none}
+  body.o2 .o2-board .o2-tags{flex-wrap:wrap;min-width:0}
+  body.o2 .o2-board .o2-tags .badge{white-space:normal;max-width:100%}
+  /* шапка колонки: этап и число заказов в одной строке, сумма — строкой ниже (владелец 08.11) */
+  body.o2 .o2-board .col:not(.is-folded) .col-head{padding-left:8px;padding-right:6px;gap:6px}
+  body.o2 .o2-board .col:not(.is-folded) .col-head .col-name{flex:1 1 0;min-width:0}
+  body.o2 .o2-board .col:not(.is-folded) .col-head .col-name .o2-count{display:inline-block;margin-left:4px;vertical-align:1px}
+  body.o2 .o2-board .col-head .sum{margin-left:0;flex-basis:100%;padding-left:18px}
+}
+@media (max-width:1400px) and (min-width:761px){body.o2 .o2-board .col:not(.is-folded) .col-head .col-name{font-size:13px}}
+/* карточка доски по левому краю, поле на строку; статусы внизу с переносом (владелец 08.11) */
+body.o2 .o2-card--col{text-align:left}
+body.o2 .o2-card--col>div{display:block;margin:0}
+body.o2 .o2-card--col .o2-t1{display:flex;gap:6px;align-items:center}
+body.o2 .o2-card--col .o2-sum{margin-top:2px}
+body.o2 .o2-card--col .daymark{margin:2px 0 0;padding:0;text-align:left}
+body.o2 .o2-card--col .daymark.is-over{color:var(--error-600)}
+body.o2 .o2-card--col .o2-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;min-width:0}
+body.o2 .o2-card--col .o2-tags .badge{white-space:normal;overflow-wrap:break-word;word-break:normal;hyphens:manual;max-width:100%;height:auto;line-height:1.3;text-align:left;border-radius:8px;padding:2px 6px;font-size:12px}
+/* фильтры заказов: видны поиск, «Фильтры» и «Сбросить»; остальное раскрывается кнопкой (владелец 08.11) */
+body.o2 .o2-filters--fold .o2-f-more{display:none;flex-basis:100%;flex-wrap:wrap;gap:var(--s-3);align-items:flex-end}
+body.o2 .o2-filters--fold.is-open .o2-f-more{display:flex}
+body.o2 .o2-filters--fold .o2-f-wide{max-width:420px}
+body.o2 .o2-to-list{margin:0 0 var(--s-2)}

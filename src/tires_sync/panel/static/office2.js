@@ -144,3 +144,12 @@
     });
   }
 })();
+// «Заказы»: «Фильтры» opens and hides the rest of the filters (the owner 08.11; the prototype of the audit).
+(function () {
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest ? ev.target.closest("[data-filters-toggle]") : null;
+    if (!b) return;
+    var open = b.closest("form").classList.toggle("is-open");
+    b.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+})();

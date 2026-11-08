@@ -1,6 +1,8 @@
 """The card of an order on «На ОТХ» on the board «Заказы» (the owner 2026-11-07), in the old view and «Новый вид»: «№<WebMIM>», «<transfer> от
 <invoice>», «На ОТХ с <day>», «Резерв до <day>», the point, every tyre and «Кол-во: N» — no inner number of the panel, no «На точке», no «× N».
-Display only; the bottom row (sum, tags, days) stays; other stages and the point's board are not changed."""
+Display only; the bottom row (sum, tags, days) stays; other stages and the point's board are not changed.
+«Новый вид» since the prototype of the audit 08.11 (audit 40, the owner 08.11): the card of «На ОТХ» is as every other card — № WebMIM, the
+tyres, «4 шт.», the sum, the point, the days; no inner number."""
 from __future__ import annotations
 
 import re
@@ -75,9 +77,17 @@ def lines(text, cid):
     return [re.sub(r"\s*\n\s*", " ", x).strip() for x in rows if x.strip()]
 
 
+NEW = ["№ 5316244", TYRE, "4 шт.", "61 200 ₽", "Юнона", "0 дн."]
+
+
 def test_the_card_on_oth_has_exactly_the_owners_rows(w):
     cid = order(w)
     text = board(w)
+    if w["view"] == "new":                                       # as every other card (audit 40)
+        assert lines(text, cid) == NEW
+        card = card_html(text, cid)
+        assert "внутр." not in card and "№ %d" % cid not in card and "Иван" not in card and "Кол-во" not in card
+        return
     assert lines(text, cid) == ["№5316244", "26R-1506015 от 03.11.2026", "На ОТХ с 07.11", "Резерв до 07.11", "Юнона", TYRE, "Кол-во: 4"]
     card = card_html(text, cid)
     assert "№%d" % cid not in card and "№ %d" % cid not in card and "внутр." not in card       # no inner number of the panel
@@ -87,6 +97,9 @@ def test_the_card_on_oth_has_exactly_the_owners_rows(w):
 
 def test_every_position_has_its_name_and_its_count(w):
     cid = order(w, items=((TYRE, 4), ("Ikon Nordman 7 205/55 R16", 2)))
+    if w["view"] == "new":                                       # two positions: «2 позиции · 6 шт.» (the prototype of the audit)
+        assert lines(board(w), cid)[:2] == ["№ 5316244", "2 позиции · 6 шт."]
+        return
     assert lines(board(w), cid)[-4:] == [TYRE, "Кол-во: 4", "Ikon Nordman 7 205/55 R16", "Кол-во: 2"]
 
 
@@ -98,6 +111,9 @@ def test_every_position_has_its_name_and_its_count(w):
 def test_what_is_missing_leaves_no_empty_row(w, transfer, invoice, reserve, want):
     cid = order(w, transfer=transfer, invoice=invoice, reserve=reserve)
     got = lines(board(w), cid)
+    if w["view"] == "new":                                       # no rows of the transfer and the reserve at all (audit 40)
+        assert got == NEW
+        return
     assert got == want + [TYRE, "Кол-во: 4"]
     assert not any(x.startswith("от") or x.endswith("от") or x == "Резерв до" for x in got)
 
@@ -105,6 +121,9 @@ def test_what_is_missing_leaves_no_empty_row(w, transfer, invoice, reserve, want
 def test_other_stages_keep_their_card(w):
     cid = order(w, code="at_point")
     card = card_html(board(w), cid)
+    if w["view"] == "new":                                       # the card of the prototype: no client, no inner number (the owner 08.11)
+        assert lines(board(w), cid) == NEW and "внутр." not in card
+        return
     assert "Иван Клиентов" in card and "× 4" in card and "Кол-во" not in card and "data-oth-transfer" not in card
     assert ("внутр. № %d" % cid in card) if w["view"] == "new" else ("№%d Иван Клиентов" % cid in card)
 

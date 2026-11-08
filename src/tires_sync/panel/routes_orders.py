@@ -628,11 +628,24 @@ def register(app) -> None:
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only
                                        or (found and col["count"])])
         extra = dict(date_from=start, date_to=end, bulk_targets=order_bulk.targets(conn), bulk_reason=order_bulk.DEFAULT_REASON, responsible_options=_responsible_options(app, conn)) if office_new() else {}
+        if office_new() and view == "board":                  # the card of the board (the owner 08.11): the tyres, the count, the account as a label
+            known = set() if own_point() else orders.account_tags(conn)
+            extra.update(positions=board_positions(conn), account_names=sorted(
+                {t for col in data["columns"] for c in col["cards"] for t in c["tags"] if t.lower() in known}))
         return render_template(office_page("orders.html"), data=data, view=view, point=point, tag=tag, query=query, labels=labels, table=table, notes=notes, **extra,
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                stages=[] if own_point() else orders.list_stages(conn),
                                dots=_dots(conn), rows=rows, total_cards=total, only_stage=only, returning=returning, returning_filters=order_oth.FILTERS,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
+
+    def board_positions(conn) -> dict:
+        """The positions of every order for the card of the board (view only): {order: {"n": positions, "qty": pieces, "name": the first one}}."""
+        found: dict = {}
+        for order_id, name, qty in conn.execute("SELECT order_id, name, qty FROM order_item ORDER BY id"):
+            row = found.setdefault(order_id, {"n": 0, "qty": 0, "name": name})
+            row["n"] += 1
+            row["qty"] += int(qty or 0)
+        return found
 
     def point_board(conn, data: dict, point_id: int) -> dict:
         """«Заказы» of the manager of a point (the owner 2026-10-30): the point sells its own tyres through its Avito account and orders

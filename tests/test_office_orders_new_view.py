@@ -136,16 +136,21 @@ def test_off_written_is_the_same_markup_as_nothing_written(w):
 # --- the board and the list -------------------------------------------------------------------------------------------------------
 
 def test_the_board_shows_the_webmim_number_first_and_the_model_bold(w):
+    """The card of the prototype of the audit (the owner 08.11): left-aligned, a field per line — № WebMIM, the tyres, «4 шт.», the sum,
+    the point, the account as a label, the days; no inner number, no «№ WebMIM ещё нет», no strip of numbers above the board."""
     flag(w, "all")
     text = html(client_of(w, "chat1"), "/orders")
     a = re.search(r'<a class="ocard o2-card[^"]*"[^>]*data-card="%d".*?</a>' % w["ids"]["a"], text, re.S).group(0)
-    assert '<span class="o2-wm">№ 7712345</span>' in a and "внутр. № %d" % w["ids"]["a"] in a
-    assert '<b class="o2-model">Nokian Hakkapeliitta 10 205/55 R16</b> × 4' in a
+    assert '<span class="o2-wm">№ 7712345</span>' in a and "внутр." not in a and "№ %d" % w["ids"]["a"] not in a
+    assert '<b class="o2-model">Nokian Hakkapeliitta 10 205/55 R16</b>' in a and "4 шт." in a and "× 4" not in a
+    assert a.index("o2-wm") < a.index("o2-model") < a.index("4 шт.") < a.index("дн.")
     b = re.search(r'data-card="%d".*?</a>' % w["ids"]["b"], text, re.S).group(0)
-    assert "№ WebMIM ещё нет" in b
+    assert "WebMIM ещё нет" not in b and "o2-wm" not in b
     assert 'id="board"' in text and 'data-stage="' in text and 'draggable="true"' in text          # app.js drag and drop: the same hooks
-    assert 'class="o2-stats"' in text and "Сумма в работе" in text
+    assert 'class="o2-stats"' not in text and "Сумма в работе" not in text                          # audit 15: no strip of numbers
     assert 'name="from"' in text and 'name="to"' in text and 'name="s"' in text                    # «Дата создания» and «Этап»
+    assert "data-filters-toggle" in text and 'class="o2-f-more"' in text                            # the rest under «Фильтры» (the owner 08.11)
+    assert 'class="quick"' not in text and 'href="/orders/inbox"' not in text                       # no quick add, no «Входящие» (the owner 08.11)
 
 
 def test_the_date_of_creation_filters_the_board_the_list_and_the_file(w):
