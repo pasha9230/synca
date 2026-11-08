@@ -56,8 +56,8 @@ def test_filters_unread_without_a_deal_and_account(tmp_path):
     assert ivan["order_id"] is None                                                                   # only our own words: no deal
     page = client.get("/chats?f=nodeal").get_data(as_text=True)
     assert "Иван" in page and "Татьяна" not in page
-    page = client.get("/chats?f=unread").get_data(as_text=True)
-    assert "Татьяна" in page and "Иван" not in page
+    page = client.get("/chats?f=unread").get_data(as_text=True)                                    # «Не прочитанные» is gone (п. 7, 2026-11-08)
+    assert "Не прочитанные" not in page and "Татьяна" in page and "Иван" in page                     # an unknown state: «Открытые»
     assert "Татьяна" in client.get("/chats?acc=%d" % account).get_data(as_text=True)
     assert "Татьяна" not in client.get("/chats?acc=999").get_data(as_text=True)
 
@@ -78,19 +78,19 @@ def test_the_state_and_the_account_are_two_buttons_that_combine_and_keep_their_p
     menus = _menus(page)
     assert list(menus) == ["Состояние: Открытые"]                                                               # one account: no «Аккаунт» button
     assert menus["Состояние: Открытые"] == [(v, "/chats" + ("?f=" + k if k else ""), k == "") for k, v in FILTERS.items()]
-    assert list(FILTERS.values()) == ["Открытые", "Ждут ответа", "Не прочитанные", "Без заказа", "Не требуют ответа", "Закрытые"]
+    assert list(FILTERS.values()) == ["Открытые", "Ждут ответа", "Без заказа", "Не требуют ответа", "Закрытые"]      # no «Не прочитанные» (п. 7)
     assert "Всего: 2" in page and 'href="/deleted?k=chat"' in page
     second = connections.create_account(conn, "Партнёр-2", NOW, "o")
     connections.set_modes(conn, second, True, True, NOW, "o")
-    menus = _menus(client.get("/chats?f=unread&acc=%d&q=Тат" % account).get_data(as_text=True))
-    assert list(menus) == ["Состояние: Не прочитанные", "Аккаунт: Основной"]
-    states = {item: (href, on) for item, href, on in menus["Состояние: Не прочитанные"]}
+    menus = _menus(client.get("/chats?f=nodeal&acc=%d&q=Тат" % account).get_data(as_text=True))
+    assert list(menus) == ["Состояние: Без заказа", "Аккаунт: Основной"]
+    states = {item: (href, on) for item, href, on in menus["Состояние: Без заказа"]}
     assert states["Закрытые"] == ("/chats?f=closed&amp;acc=%d&amp;q=%%D0%%A2%%D0%%B0%%D1%%82" % account, False)       # a state keeps the account and the search
-    assert states["Не прочитанные"][1] and [on for _, on in states.values()].count(True) == 1
+    assert states["Без заказа"][1] and [on for _, on in states.values()].count(True) == 1
     accounts = {item: (href, on) for item, href, on in menus["Аккаунт: Основной"]}
-    assert accounts == {"Все аккаунты": ("/chats?f=unread&amp;q=%D0%A2%D0%B0%D1%82", False),                  # an account keeps the state and the search
-                        "Основной": ("/chats?f=unread&amp;acc=%d&amp;q=%%D0%%A2%%D0%%B0%%D1%%82" % account, True),
-                        "Партнёр-2": ("/chats?f=unread&amp;acc=%d&amp;q=%%D0%%A2%%D0%%B0%%D1%%82" % second, False)}
+    assert accounts == {"Все аккаунты": ("/chats?f=nodeal&amp;q=%D0%A2%D0%B0%D1%82", False),                  # an account keeps the state and the search
+                        "Основной": ("/chats?f=nodeal&amp;acc=%d&amp;q=%%D0%%A2%%D0%%B0%%D1%%82" % account, True),
+                        "Партнёр-2": ("/chats?f=nodeal&amp;acc=%d&amp;q=%%D0%%A2%%D0%%B0%%D1%%82" % second, False)}
     assert list(_menus(client.get("/chats").get_data(as_text=True))) == ["Состояние: Открытые", "Аккаунт: Все аккаунты"]
 
 
@@ -114,7 +114,7 @@ def _names(page):
 
 
 def test_the_state_waits_for_an_answer_shows_the_open_chats_whose_client_waits(tmp_path):
-    """«Ждут ответа»: the same clock as the badge «ждёт N мин» (an open chat, a message of the client after the last answer of a person,
+    """«Ждут ответа»: one definition with the menu (chats.waiting; an open chat, a message of the client after the last answer of a person,
     the chat newer than the first read of its account)."""
     app, client, tok, conn, account = setup(tmp_path)
     tanya = next(c for c in chats.list_chats(conn) if c["peer_name"] == "Татьяна")
@@ -127,7 +127,7 @@ def test_the_state_waits_for_an_answer_shows_the_open_chats_whose_client_waits(t
     store.set_state(conn, "chats_baseline_%d" % account, "2026-10-13T09:00:00")
     conn.commit()
     page = client.get("/chats?f=wait").get_data(as_text=True)
-    assert _names(page) == ["Татьяна"] and "Всего: 1" in page and "ждёт 25 мин" in page
+    assert _names(page) == ["Татьяна"] and "Всего: 1" in page and "ждёт ответа" in page and "мин" not in page.split("chats-list")[1].split("</section>")[0]   # no time (п. 8)
     assert _names(client.get("/chats?f=wait&acc=%d" % account).get_data(as_text=True)) == ["Татьяна"]          # it combines with the account
     assert _names(client.get("/chats?f=wait&acc=999").get_data(as_text=True)) == []
     for status in ("closed", "no_reply"):                                                         # a closed chat or «не требует ответа» does not wait
@@ -277,8 +277,8 @@ def test_the_deal_block_lists_the_earlier_deals_of_the_client_and_the_filter_is_
     other = chats.get_chat(conn, ivan["id"])["order_id"]
     page = client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)
     assert "писал раньше" in page and "/orders/%d" % other in page
-    resp = post(client, "/chats/%d/status" % tanya["id"], tok, status="closed", f="unread", acc=str(account))
-    assert "f=unread" in resp.headers["Location"] and "acc=%d" % account in resp.headers["Location"]
+    resp = post(client, "/chats/%d/status" % tanya["id"], tok, status="closed", f="nodeal", acc=str(account))
+    assert "f=nodeal" in resp.headers["Location"] and "acc=%d" % account in resp.headers["Location"]
     post(client, "/chats/merge", tok, from_order=str(other), into_order=str(tanya["order_id"]))               # the manual move of chats stays
     assert chats.get_chat(conn, ivan["id"])["order_id"] == tanya["order_id"]
 
@@ -813,5 +813,5 @@ def test_waits_for_an_answer_reads_the_start_of_each_wait_once(tmp_path, monkeyp
     monkeypatch.setattr(chats, "wait_starts", lambda c, rows: (asked.extend(list(rows)), real(c, rows))[1])
     page = client.get("/chats/%d?f=wait" % ivan["id"]).get_data(as_text=True)          # Иван is answered: kept, out of the filter
     assert _names(page) == ["Иван", "Татьяна"] or _names(page) == ["Татьяна", "Иван"]
-    assert "ждёт 25 мин" in page and "Всего: 1 · открытый чат вне фильтра" in page
-    assert sorted(asked) == sorted([tanya["id"], ivan["id"]])                          # each chat once (was: twice)
+    assert "ждёт ответа" in page and "Всего: 1 · открытый чат вне фильтра" in page
+    assert sorted(asked) == sorted([tanya["id"], ivan["id"]])                          # each chat once: the list and the menu «Чаты» share it

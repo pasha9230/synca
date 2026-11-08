@@ -1,10 +1,9 @@
 {% extends "base.html" %}
 {% from "_ui.html" import icon %}
-{% block title %}Отчёт · Заказы · Tires Sync{% endblock %}
+{% block title %}Отчёт по заказам · Tires Sync{% endblock %}
 {% block content %}
 {% set names = {"point_fee": "Выплата точке за заказ", "owner_share": "Доля собственника", "handoff_fee": "За переданного клиента"} %}
-<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Отчёт</span></div><h1>Отчёт по проданным позициям</h1>
-<p class="sub">Продажи, записанные по заказам. Выплата точке за заказ вычитается из прибыли; чистая прибыль делится на две доли: «{{ labels.owner }}» и «{{ labels.partner }}». Ставки берутся на дату заказа (сейчас {{ fee|pct(2)|replace(",00", "") }} ₽ за заказ и {{ (owner_share * 100)|pct(2)|replace(",00", "") }} % собственнику){% if report.rates_used|length > 1 %}; в этом периоде ставки менялись{% endif %}. Продажи вручную показаны отдельной строкой и в итог не входят; продажи из Авито сюда не входят.</p></div></header>
+<header class="page-head"><div><div class="crumbs"><a href="/orders">Заказы</a>{{ icon("chev", "i-sm") }}<span>Отчёт по заказам</span></div><h1>Отчёт по заказам<span class="help-q" tabindex="0" data-tip="Продажи, записанные по заказам. Выплата точке за заказ вычитается из прибыли; чистая прибыль делится на две доли: «{{ labels.owner }}» и «{{ labels.partner }}». Ставки берутся на дату заказа (сейчас {{ fee|pct(2)|replace(",00", "") }} ₽ за заказ и {{ (owner_share * 100)|pct(2)|replace(",00", "") }} % собственнику){% if report.rates_used|length > 1 %}; в этом периоде ставки менялись{% endif %}. Продажи вручную показаны отдельной строкой и в итог не входят; продажи из Авито сюда не входят.">?</span></h1></div></header>
 <form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--s-4)">
 <label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
 <label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>

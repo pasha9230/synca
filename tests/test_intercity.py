@@ -478,7 +478,9 @@ def test_the_two_texts_are_on_the_page_of_the_texts_that_go_by_themselves(tmp_pa
     app, client, tok, conn, pid, card = ready(tmp_path, SENT)
     page = client.get("/orders/templates").get_data(as_text=True)
     auto = page[page.index("Сообщения, которые уходят сами"):]
-    assert intercity.PLACED_TEMPLATE in auto and intercity.SHIPPED_TEMPLATE in auto
+    shown = [name.split(": ", 1)[1] for name in (intercity.PLACED_TEMPLATE, intercity.SHIPPED_TEMPLATE)]   # without «Клиенту:» (2026-11-08)
+    assert all("<strong>" + name[:1].upper() + name[1:] + "</strong>" in auto for name in shown)
+    assert "<strong>Клиенту:" not in auto and "<strong>Менеджеру:" not in auto
 
 
 def test_the_checkbox_skips_the_waiting_pickup_messages(tmp_path):

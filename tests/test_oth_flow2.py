@@ -123,8 +123,7 @@ def test_an_order_never_at_the_point_has_no_dates_and_the_page_shows_dashes(tmp_
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
     assert order_oth.reserve_dates(conn)[cid] == {"arrived": "", "until": "", "oth_since": "2026-10-20"}
     page = client.get("/oth").get_data(as_text=True)
-    assert "<th>Товар на точке</th><th>Крайняя дата резерва</th>" in page
-    assert "data-oth-arrived>—<" in page and "data-oth-until>—<" in page
+    assert "Товар на точке" not in page and "Крайняя дата резерва" not in page              # no reserve columns on «На ОТХ» (п. 22, П19, 2026-11-08)
 
 
 def test_the_page_the_board_and_the_card_show_the_dates(tmp_path):
@@ -134,8 +133,7 @@ def test_the_page_the_board_and_the_card_show_the_dates(tmp_path):
     conn.execute("UPDATE order_card SET reserve_until = '2026-10-18' WHERE id = ?", (cid,))
     conn.commit()
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
-    page = client.get("/oth").get_data(as_text=True)
-    assert re.search(r"data-oth-arrived>15\.10(\.2026)?<", page) and re.search(r"data-oth-until>18\.10(\.2026)?<", page)      # the year when not this one
+    assert order_oth.reserve_dates(conn)[cid]["arrived"] == "2026-10-15"                    # the page has no reserve columns since 2026-11-08 (П19)
     assert "data-oth-dates" in client.get("/orders").get_data(as_text=True)
     assert "data-oth-dates" in client.get("/orders/%d" % cid).get_data(as_text=True)
 
@@ -508,7 +506,8 @@ def test_the_page_buttons_and_the_rights(tmp_path):
     assert 'formaction="/oth/to-return"' in page
     post(client, "/oth/to-return", tok, item=str(item), qty="1")
     page = client.get("/oth").get_data(as_text=True)
-    assert "data-item-return>Ожидает согласование возврата · 1 шт. на возврат" in page and 'formaction="/oth/to-return"' not in page
+    assert 'formaction="/oth/to-return"' not in page
+    assert "data-item-return>Ожидает согласование возврата · 1 шт. на возврат" in client.get("/oth?tab=returned").get_data(as_text=True)
     assert "data-item-return" in client.get("/orders/%d" % cid).get_data(as_text=True)
     assert open_tasks(conn, cid)[0]["assignee"] == "ivan"
     post(client, "/oth/to-return", tok, item="999999")                                          # no such position: nothing, no error page

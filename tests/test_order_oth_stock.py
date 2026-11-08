@@ -514,8 +514,9 @@ def test_the_page_returns_and_undoes_a_number_of_tyres(tmp_path):
     post(owner, "/oth/return", tok, item=item, qty="1")
     html = owner.get("/oth").get_data(as_text=True)
     assert "Отмечено как возвращённое поставщику" in html
-    assert "из 4, возвращено 1" in html and "Возвращено поставщику" in html                   # the part is in both tables
-    assert re.search(r'name="qty" value="3" min="1" max="3"', html) and re.search(r'name="qty" value="1" min="1" max="1"', html)
+    returned = owner.get("/oth?tab=returned").get_data(as_text=True)                       # two tabs (the owner 2026-11-08)
+    assert "из 4, возвращено 1" in html and "Возвращено поставщику" in returned               # the part is in both tabs
+    assert re.search(r'name="qty" value="3" min="1" max="3"', html) and re.search(r'name="qty" value="1" min="1" max="1"', returned)
     post(owner, "/oth/return", tok, item=item, qty="9")
     assert "Можно вернуть не больше 3 шт." in owner.get("/oth").get_data(as_text=True)
     post(owner, "/oth/return", tok, item=item, qty="1", undo="1")

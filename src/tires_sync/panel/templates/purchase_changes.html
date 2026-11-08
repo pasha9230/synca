@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Закупка изменилась · Tires Sync{% endblock %}
 {% block content %}{# «Закупка изменилась» (purchase_alert, the owner 2026-11-06): the whole list of one alert; the right «money» only (routes_catalog). #}
-<header class="page-head"><div><h1>Закупка изменилась</h1><p class="sub">Все изменения закупки у поставщиков, о которых было одно сообщение{% if alert %} ({{ alert.at|dt }}){% endif %}: сначала самые большие в процентах. Цены за одну шину; «наша цена» — цена объявления на Авито, если оно есть. Здесь ничего не меняется.</p></div></header>
+<header class="page-head"><div><h1>Закупка изменилась<span class="help-q" tabindex="0" data-tip="Все изменения закупки у поставщиков, о которых было одно сообщение{% if alert %} ({{ alert.at|dt }}){% endif %}: сначала самые большие в процентах. Цены за одну шину; «наша цена» — цена объявления на Авито, если оно есть. Здесь ничего не меняется.">?</span></h1></div></header>
 <section class="card"><div class="card-body stack" data-purchase-changes>
 {% if alert and alert.rows %}<table class="table"><thead><tr><th>Позиция</th><th class="num">Было</th><th class="num">Стало</th><th class="num">Изменение</th><th class="num">Наша цена</th></tr></thead><tbody>
 {% for r in alert.rows %}<tr><td>{{ r.name }}<div class="small muted mono">{{ r.goods_id }}</div></td><td class="num">{{ r.was|money }}</td><td class="num">{{ r.price|money }}</td>

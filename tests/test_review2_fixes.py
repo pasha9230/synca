@@ -127,7 +127,7 @@ def test_readiness_has_a_line_per_secondary_supplier(tmp_path, monkeypatch):
     login(client)
     conn = store.connect(app.config["DB_PATH"])
     two = connections.create_supplier(conn, "Второй", NOW, "owner")
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/feeds").get_data(as_text=True)                                  # the readiness: «Фиды» (2026-11-08)
     assert "Поставщик «Второй»" in html and "нет файла выгрузки" in html
     connections.set_config(conn, "webmim", two, {"base_url": "https://b.example", "mode": "apikey", "territory_rn": "T9"}, NOW, "owner")
     (tmp_path / "unload-2.xml").write_bytes(TWO.replace(b"2002", b"T9"))
@@ -140,7 +140,7 @@ def test_readiness_has_a_line_per_secondary_supplier(tmp_path, monkeypatch):
                               load_reference(app.config["REFERENCE_PATH"]), settings, now=Clock.utcnow())
     step = next(s for s in found if s["title"] == "Поставщик «Второй»")
     assert step["level"] == "ok" and "скачана 14.10.2026 12:00:00" in step["detail"]              # UTC shown in Moscow time (run6c)
-    assert "Поставщик «Второй»" not in client.get("/").get_data(as_text=True)          # a ready step is not listed on the home page (2026-10-21)
+    assert "Поставщик «Второй»" not in client.get("/feeds").get_data(as_text=True)          # a ready step is not listed on «Фиды» (2026-10-21)
 
 
 def test_two_alerts_within_ten_minutes_send_one_message(tmp_path, monkeypatch):

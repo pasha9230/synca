@@ -70,9 +70,11 @@ def test_the_dashboard_shows_the_figures_and_the_money_only_with_the_right(tmp_p
     owner = app.test_client()
     login(owner)
     page = owner.get("/").get_data(as_text=True)
-    for text in ("Заказы в работе", "Просрочено", "Новые сегодня", "Выручка", "20 000 ₽", "30 000 ₽", "Клиент ждёт ответа",
-                 "дольше всех 40 мин", "Клиенты ждут ответа дольше 15 минут", "Объявления в фидах", "Мои дела на сегодня", "Утренняя сводка"):
+    for text in ("Заказы в работе", "Просрочено", "Новые сегодня", "Выручка", "20 000 ₽", "30 000 ₽", "Мои дела на сегодня"):
         assert text in page, text
+    for text in ("Клиент ждёт ответа", "дольше всех", "Клиенты ждут ответа дольше", "Непрочитанные чаты", "Объявления в фидах",   # the audit 08.11:
+                 "Утренняя сводка", "Последний запуск", "Готовность к публикации", " мин", 'id="topsearch"'):                    # п. 7, 8, 12, 27
+        assert text not in page, text
     users.add_user(conn, "olya", PASSWORD, "2026-10-21T10:00:00", role="chats")
     users.add_user(conn, "viewer1", PASSWORD, "2026-10-21T10:00:00", role="viewer")
     for name in ("olya", "viewer1"):
@@ -82,7 +84,7 @@ def test_the_dashboard_shows_the_figures_and_the_money_only_with_the_right(tmp_p
         page = client.get("/").get_data(as_text=True)
         assert "Заказы в работе" in page and "Выручка" not in page and "20 000" not in page and "Утренняя сводка" not in page
         if name == "olya":
-            assert "Заказ №1 · Иван" in page and "Ответить" in page                              # her own work
+            assert "Заказ №1 · Иван" in page and "Ответить" not in page                          # her own work: the orders only (2026-11-08)
         assert client.post("/summary/toggle", data={"csrf": "tok", "on": "1"}).status_code == 403
 
 
@@ -114,7 +116,7 @@ def test_the_staff_counters_leave_out_the_chats_of_the_point_accounts(tmp_path):
     owner = app.test_client()
     login(owner)
     page = owner.get("/").get_data(as_text=True)
-    assert "Клиенты ждут ответа дольше 15 минут: 1" in page and "Дольше всех — 40 мин" in page and "Клиент точки" not in page
+    assert "Клиенты ждут ответа" not in page and "Клиент точки" not in page                    # no waiting time on the page (п. 8, 2026-11-08)
     assert re.findall(r'<span class="sb-count">(\d+)</span>', _chats_link(page)) == ["1"]
     assert chats.unread_total(conn) == 3 and chats.unread_total(conn, without_points=True) == 1
 
@@ -179,14 +181,16 @@ def test_the_summary_text_has_the_figures_of_the_day(tmp_path):
     assert "Сводка на 22.10" in text and "Вчера: выручка 20 000 ₽" in text and "За 7 дней по вчера: выручка 30 000 ₽" in text
 
 
-def test_the_owner_switches_the_summary_on_the_main_page(tmp_path):
+def test_the_owner_switches_the_summary_in_the_settings_tab_notify(tmp_path):
+    """The switch moved from the main page to «Настройки › Уведомления» (п. 27 of the audit, 2026-11-08)."""
     app = make_app(tmp_path, NOW=lambda: UTC_NOW)
     client = app.test_client()
     tok = login(client)
-    assert "выключена" in client.get("/").get_data(as_text=True)
-    post(client, "/summary/toggle", tok, on="1")
+    assert "Утренняя сводка" not in client.get("/").get_data(as_text=True)
+    assert "выключена" in client.get("/settings/notify").get_data(as_text=True)
+    assert post(client, "/summary/toggle", tok, on="1").headers["Location"].endswith("/settings/notify")
     conn = store.connect(app.config["DB_PATH"])
-    assert daily_summary.is_on(conn) and "включена" in client.get("/").get_data(as_text=True)
+    assert daily_summary.is_on(conn) and "включена" in client.get("/settings/notify").get_data(as_text=True)
     assert any(a["action"] == "daily_summary" for a in store.list_audit(conn))
 
 

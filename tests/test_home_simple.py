@@ -137,7 +137,8 @@ def test_readiness_shows_only_steps_that_are_not_ready_and_names_them_in_attenti
     client = app.test_client()
     login(client)
     html = home(client)
-    block = html.split('id="readiness"')[1].split("</section>")[0]
+    feeds = client.get("/feeds").get_data(as_text=True)                       # the block is on «Фиды» only since 2026-11-08 (П1, п. 13)
+    block = feeds.split('id="readiness"')[1].split("</section>")[0]
     assert "Включённые сочетания" not in block and "Готово" not in block and "готово" not in block      # the one ready step is not listed
     assert "Подключение к WebMIM" in block and "Справочник Авито" in block
     attention = attention_of(html)
@@ -184,7 +185,7 @@ def test_one_tile_per_feed_with_the_cabinet_id_the_account_name_the_time_and_the
     _feed(app, public_at=datetime(2026, 10, 7, 11, 0, 0), draft_at=datetime(2026, 10, 7, 11, 0, 0), live=True, avito_id=80000001)
     client = app.test_client()
     login(client)
-    tiles = _tiles(home(client))
+    tiles = _tiles(client.get("/feeds").get_data(as_text=True))              # the tiles: «Фиды» (the main page has one card «Фид», 2026-11-08)
     assert "Фид Авито · ID 80000001 · Основной" in tiles
     assert "Фид для Авито" not in tiles and "В фиде ·" not in tiles
     assert tiles.count("Фид Авито ·") == 1 and "07.10 14:00" in tiles and ">2<" in tiles and "Ждут сопоставления" in tiles
@@ -196,12 +197,12 @@ def test_the_feed_tile_keeps_its_warnings(tmp_path):
     conn = _feed(app, public_at=datetime(2026, 10, 6, 12, 0, 0), draft_at=datetime(2026, 10, 7, 11, 18, 0))
     client = app.test_client()
     login(client)
-    tile = _tiles(home(client)).split('<a class="tile tile--warn" href="/mappings">')[0]
+    tile = _tiles(client.get("/feeds").get_data(as_text=True)).split('<a class="tile tile--warn" href="/mappings">')[0]
     assert "Фид Авито · Основной" in tile and "tile--warn" in tile
     assert "публикация выключена" in tile and "свежий собран 07.10 14:18" in tile
     connections.set_live(conn, connections.list_accounts(conn)[0]["id"], True, NOW, "owner")
     conn.commit()
-    tile = _tiles(home(client)).split('<a class="tile tile--warn" href="/mappings">')[0]
+    tile = _tiles(client.get("/feeds").get_data(as_text=True)).split('<a class="tile tile--warn" href="/mappings">')[0]
     assert "публикация выключена" not in tile and "tile--warn" in tile                         # the public feed is a day old (over 13 hours)
 
 

@@ -1,0 +1,38 @@
+/* The look of the audit of 2026-11-08 (the prototype lane/proto-faithful, the lane proto-rest): what the owner changed on the pages but the
+   orders. Kept apart from panel.css / office2*.css, which the lane of the orders changes at the same time. */
+
+/* п. 34: the explanation of a page is a «?» with a hint beside its title, not a paragraph under it */
+.help-q{position:relative;display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--gray-300);color:var(--gray-500);font:600 12px/1 var(--font);margin-left:8px;vertical-align:middle;cursor:help}
+.help-q:hover::after,.help-q:focus::after{content:attr(data-tip);position:absolute;left:0;top:24px;z-index:60;width:max-content;max-width:min(320px,calc(100vw - 32px));padding:8px 10px;background:var(--gray-900);color:var(--gray-0);border-radius:var(--r-md);font-weight:400;font-size:13px;line-height:1.4;white-space:normal;text-align:left}
+
+/* a line «name — number» inside a card (the card «Фид» of the main page: П1, п. 13) */
+.list-row{display:flex;align-items:center;gap:var(--s-3);padding:var(--s-3) var(--s-5);border-bottom:1px solid var(--gray-100);min-height:var(--row-h)}
+.list-row:last-child{border-bottom:0}
+
+/* Чаты: the order panel — all on the left (the owner 2026-11-08) */
+body.o2 .o2-cl-panel,body.o2 .o2-cl-panel *{text-align:left}
+body.o2 .o2-cl-panel .o2-panel-row,body.o2 .o2-cl-panel .o2-panel-foot,body.o2 .o2-cl-panel .row{justify-content:flex-start;align-items:flex-start}
+body.o2 .o2-cl-panel .o2-panel-row{display:flex;flex-direction:column;gap:var(--s-2)}
+body.o2 .o2-cl-panel .o2-panel-head{justify-content:flex-start}
+body.o2 .o2-cl-panel .chat-pick-row{align-items:flex-end}
+
+/* CRM (the owner 2026-11-08): the status right of the name, the values in the columns of a grid */
+body.o2 .o2-crm-nm{display:flex;align-items:center;gap:var(--s-2);flex-wrap:wrap}
+body.o2 .o2-crm-grid th,body.o2 .o2-crm-grid td{vertical-align:middle;text-align:left}
+body.o2 .o2-crm-grid th.t-c,body.o2 .o2-crm-grid td.t-c{text-align:center;width:90px}
+
+/* «Шаблоны сообщений» (a tab of «Настройки заказов»): the message on the left, the variables on the right (the owner 2026-11-08) */
+.tpl2-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--s-4);align-items:start}
+.tpl2-vars{border:1px solid var(--gray-200);border-radius:var(--r-md);padding:var(--s-3);background:var(--gray-50)}
+.tpl2-list{display:flex;flex-direction:column;gap:2px;margin-top:var(--s-2);max-height:420px;overflow-y:auto}
+.tpl-var{display:flex;gap:var(--s-2);align-items:baseline;text-align:left;border:0;background:none;padding:4px 6px;border-radius:6px;cursor:pointer;font:inherit;font-size:13px;color:var(--gray-900)}
+.tpl-var:hover{background:var(--gray-100)}
+.tpl-var code{font-size:12px;color:var(--primary-700);white-space:nowrap}
+.tpl-var span{color:var(--gray-500)}
+@media (max-width:720px){.tpl2-grid{grid-template-columns:minmax(0,1fr)}}
+
+/* Каталог (п. 41): the status short in one line, the name not cut off */
+body.o2 .o2-cat-table .st-ico{white-space:nowrap;max-width:none}
+body.o2 .o2-cat-table .table--items .gname{white-space:normal;overflow:visible;text-overflow:clip}
+body.o2 .o2-cat-table .table--items .t-name{flex-wrap:wrap}
+body.o2 .o2-cat-table td.t-actions{white-space:normal!important;min-width:150px}body.o2 .o2-cat-table td.t-actions .btn{margin:2px 0}

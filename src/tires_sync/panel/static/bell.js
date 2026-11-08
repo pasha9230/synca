@@ -1,8 +1,8 @@
 (function () {
   "use strict";
   var btn = document.getElementById("bell-btn"), pop = document.getElementById("bell-pop"),
-      list = document.getElementById("bell-list"), count = document.getElementById("bell-count");
-  if (!btn || !pop || !list || !count) return;
+      list = document.getElementById("bell-list");
+  if (!btn || !pop || !list) return;
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -19,11 +19,6 @@
   function offline(on) {
     btn.classList.toggle("is-offline", on);
     btn.title = on ? "Нет связи с панелью: уведомления не обновляются" : "";
-  }
-  function setCount(n) {
-    count.textContent = n > 99 ? "99+" : String(n);
-    count.hidden = !n;
-    btn.setAttribute("aria-label", "Уведомления" + (n ? ": " + n : ""));
   }
   function fill(data) {
     list.textContent = "";
@@ -43,7 +38,6 @@
   function refresh(withList) {
     return load().then(function (data) {
       offline(false);
-      setCount(data.count);
       if (withList) fill(data);
     }).catch(function () {
       offline(true);

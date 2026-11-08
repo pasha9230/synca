@@ -129,9 +129,9 @@ def test_the_clock_of_the_client_who_waits_for_an_answer(tmp_path):
     store.set_state(conn, "chats_baseline_%d" % account, "2026-10-13T09:00:00")              # the account was first read at 09:00
     conn.commit()
     listing = client.get("/chats").get_data(as_text=True)
-    assert "badge--warn badge--dot\" title=\"Клиент ждёт ответа\">ждёт 25 мин" in listing
-    assert "badge--err badge--dot\" title=\"Клиент ждёт ответа\">ждёт 2 ч 10 мин" in listing           # an hour and more: red
-    assert "Клиент ждёт ответа 25 мин" in client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)
+    mark = "badge--err badge--dot\" title=\"Клиент ждёт ответа\">ждёт ответа<"              # a label, no time (the owner 2026-11-08, п. 8)
+    assert listing.count(mark) == 2 and not re.search(r"ждёт \d", listing)                   # both wait: the auto-answer is no answer
+    assert "Клиент ждёт ответа</span>" in client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)
     say(tanya["id"], "2026-10-13T11:50:00", "out")                                            # we answered: nobody waits
     conn.execute("UPDATE avito_chat SET status = 'no_reply' WHERE id = ?", (ivan["id"],))         # «не требует ответа»: no clock
     conn.commit()
@@ -365,5 +365,5 @@ def test_a_chat_with_only_the_stand_in_of_its_preview_waits_by_its_preview(tmp_p
     store.set_state(conn, "chats_baseline_%d" % account, "2026-10-13T09:00:00")
     conn.commit()
     assert chats.wait_starts(conn, [tanya["id"]]) == {}
-    assert "Клиент ждёт ответа 25 мин" in client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)
+    assert "Клиент ждёт ответа</span>" in client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)
     assert chats.waiting_minutes(chats.get_chat(conn, tanya["id"]), datetime(2026, 10, 13, 12, 0)) == 25

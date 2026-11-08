@@ -184,6 +184,53 @@ def wait_starts(conn, chat_rows) -> dict:
     return found
 
 
+def waiting(conn, chat_list, cache: Optional[dict] = None) -> set:
+    """The one «Ждут ответа» (п. 7 of the audit, the owner 2026-11-08): the ids of the chats of `chat_list` whose client waits for our answer —
+    the chat is open, its last message is after its account was first read (`chats_baseline_<account>`: the past is no waiting), and a
+    message of the client came after the last answer of a person (wait_starts; Avito's auto-answer is no answer), or, without the messages
+    here, the last message is the client's. The menu «Чаты» and the filter «Ждут ответа» of the chats count the same.
+    `cache`: {chat id: its wait_starts answer} of this request — the page and the menu read each chat once."""
+    baselines = {}
+
+    def recent(chat):
+        account = chat["account_id"]
+        if account not in baselines:
+            baselines[account] = store.get_state(conn, "chats_baseline_%d" % account) or ""
+        return (chat.get("last_at") or "") >= baselines[account]
+    opened = [c for c in chat_list if c.get("status") == "open" and recent(c)]          # the cheap checks before the messages are read
+    cache = {} if cache is None else cache
+    asked = [c["id"] for c in opened if c["id"] not in cache]
+    if asked:
+        starts = wait_starts(conn, asked)
+        for chat_row in asked:
+            cache[chat_row] = starts.get(chat_row, NO_MESSAGES)
+    found = set()
+    for chat in opened:
+        start = cache[chat["id"]]
+        since = (chat.get("last_at") if chat.get("last_dir") == "in" else None) if start is NO_MESSAGES else start
+        if since:
+            found.add(chat["id"])
+    return found
+
+
+NO_MESSAGES = object()                                   # waiting(): a chat without its messages here (its preview is all there is)
+
+
+def waiting_total(conn, account_id: Optional[int] = None, without_points: bool = False, cache: Optional[dict] = None) -> int:
+    """«Ждут ответа» (waiting) over the chats of the enabled accounts, or of `account_id` only; `without_points`: not the chats of the
+    points' accounts (the staff's counter, the owner 2026-10-26). Reads only the open chats and the fields waiting() needs."""
+    from .order_points import POINT_ACCOUNTS
+    sql = ("SELECT c.id, c.account_id, c.status, c.last_at, c.last_dir FROM avito_chat c JOIN account a ON a.id = c.account_id "
+           "WHERE a.chats_enabled = 1 AND c.status = 'open'")
+    args = ()
+    if account_id is not None:
+        sql, args = sql + " AND c.account_id = ?", (account_id,)
+    if without_points:
+        sql += " AND c.account_id NOT IN (" + POINT_ACCOUNTS + ")"
+    rows = [dict(zip(("id", "account_id", "status", "last_at", "last_dir"), r)) for r in conn.execute(sql, args)]
+    return len(waiting(conn, rows, cache))
+
+
 def waiting_minutes(chat: dict, now) -> Optional[int]:
     """How long the client waits for an answer, the chat being open: since `wait_since` when the caller read it (wait_starts: the first
     message of the client after a person's answer), else since the last message when it is theirs; None when nobody waits.

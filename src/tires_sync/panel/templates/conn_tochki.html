@@ -31,6 +31,6 @@
 {% if tochki_load.error %}<p class="small text-err">{{ icon("x-circle", "i-sm") }} Ошибка {{ tochki_load.error_at|dt_utc }}: {{ tochki_load.error }} Позиции остаются от последней удачной загрузки.</p>{% endif %}
 <p class="muted small">Последняя попытка: {{ tochki_load.attempt_at|dt_utc }}.</p>{% endif %}
 </div>
-<div class="card-body"><p class="muted small">После успешной проверки сохраняется образец ответов поставщика (склады, одна страница поиска, карточки): <a href="/connections/tochki/sample">открыть образец</a>. В нём нет логина и пароля. По нему сверяется формат ответов поставщика.</p></div>
+<div class="card-body"><p class="muted small">После успешной проверки сохраняется образец ответов поставщика (склады, одна страница поиска, карточки): {% if tochki_sample %}<a href="/connections/tochki/sample">открыть образец</a>{% else %}образца ещё нет{% endif %}. В нём нет логина и пароля. По нему сверяется формат ответов поставщика.</p></div>
 </section>
 {% endblock %}

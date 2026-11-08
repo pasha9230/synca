@@ -111,7 +111,8 @@ def test_accept_confident_respects_the_brand_filter_and_the_supplier_key(tmp_pat
     post(client, "/mappings/accept-confident", tok, b="LAUFENN", q="", next="/mappings")
     assert len(store.load_confirmed_mappings(store.connect(app.config["DB_PATH"]))) == 1
     html = client.get("/mappings?b=LAUFENN").get_data(as_text=True)
-    assert 'name="b" value="LAUFENN"' in html or "Нет моделей" in html
+    assert 'value="LAUFENN" selected' in html or "Нет моделей" in html                       # the filter is kept
+    assert "Принять все уверенные" not in html                                                # none left: the button is hidden (2026-11-08)
 
 
 def test_brand_typed_in_any_case_is_accepted_and_errors_are_in_russian(tmp_path):

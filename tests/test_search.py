@@ -90,7 +90,7 @@ def test_the_point_never_searches_the_positions_even_with_the_catalog_and_its_cl
     assert search.scope_for("point", 3, 9).groups == frozenset({"orders", "chats", "clients"})
 
 
-def test_every_role_opens_the_search_and_sees_the_field(w):
+def test_every_role_opens_the_search_page_and_no_page_has_the_field_on_top(w):
     bind(w)
     people = {"owner": w["owner"]}
     for role in ("partner", "chats", "viewer"):
@@ -99,7 +99,7 @@ def test_every_role_opens_the_search_and_sees_the_field(w):
     for role, client in people.items():
         assert client.get("/search?q=Свой").status_code == 200, role
         page = client.get("/orders").get_data(as_text=True)
-        assert 'id="topsearch"' in page and "/static/topbar.js" in page, role
+        assert 'id="topsearch"' not in page and 'action="/search"' not in page, role       # no search field on top of any page (the owner 2026-11-08)
     keys = {role: set(find(client, "клиент")) for role, client in people.items()}
     assert keys["owner"] == keys["partner"] == keys["chats"] == keys["viewer"] == {"orders", "clients"}
     assert keys["point"] == {"orders"}                                              # no «CRM» (the owner 2026-10-29)

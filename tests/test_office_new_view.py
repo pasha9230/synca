@@ -211,7 +211,7 @@ def test_crm_the_list_and_the_card_with_the_deleted_order(w):
     flag(w, "all")
     html = w["owner"].get("/clients").get_data(as_text=True)
     assert 'class="card o2-crm-list"' in html and 'href="/clients/duplicates"' in html and 'data-href="/clients/%d"' % w["client"] in html
-    assert "Заказы · чаты · звонки" in html and 'name="q"' in html and 'name="tag"' in html
+    assert "<th class=\"t-c\">Заказы</th><th class=\"t-c\">Чаты</th><th class=\"t-c\">Звонки</th>" in html and 'name="q"' in html   # columns (2026-11-08) and 'name="tag"' in html
     card = w["owner"].get("/clients/%d" % w["client"]).get_data(as_text=True)
     assert 'class="o2-client-cols"' in card and 'href="#o2-orders"' in card and 'id="o2-orders"' in card and 'id="o2-merge"' in card
     assert 'badge badge--err">удалён</span>' in card                                                     # the purchases keep the deleted

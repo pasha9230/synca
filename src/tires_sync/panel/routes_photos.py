@@ -143,7 +143,7 @@ def register(app) -> None:
     def photos_review():
         return _page(request.args.get("tab", "pending"))
 
-    def _page(tab, new_token=None):
+    def _page(tab):
         conn = get_conn()
         if tab not in TABS:
             tab = "pending"
@@ -160,7 +160,7 @@ def register(app) -> None:
                                agent=photo_agent.status_view(conn, now_iso()) if tab in ("queue", "models") else None,
                                sold_text=sold_text, sold_missing=sorted(missing.items(), key=lambda x: (-x[1], x[0])), sold_count=len(sold),
                                models=model_groups(conn, show) if tab == "models" else [], show=show,
-                               on=store.get_state(conn, SWITCH_KEY) == "1", new_token=new_token)
+                               on=store.get_state(conn, SWITCH_KEY) == "1")
 
     def _back(tab):
         return redirect("/photos/review?tab=%s" % (tab if tab in TABS else "pending"))
@@ -294,9 +294,11 @@ def register(app) -> None:
     @login_required
     def connections_openai_page():
         """«Подключения → OpenAI (фото)»: the key and the proxy the agent on the server uses; the values are never shown."""
-        conn = get_conn()
+        return _openai_page(get_conn())
+
+    def _openai_page(conn, new_token=None):
         box = app.config.get("SECRET_BOX")
-        return render_template("conn_openai.html", tabs={"active": "openai"}, box_ok=box is not None,
+        return render_template("conn_openai.html", tabs={"active": "openai"}, box_ok=box is not None, new_token=new_token,
                                secrets=connections.secret_status(conn, box, photo_agent.SECRET_KIND, 0))
 
     @app.route("/connections/openai", methods=["POST"])
@@ -343,6 +345,6 @@ def register(app) -> None:
         conn = get_conn()
         token = issue_agent_token(conn)
         conn.commit()
-        resp = make_response(_page("pending", new_token=token))
+        resp = make_response(_openai_page(conn, new_token=token))            # the button is in «Подключения › OpenAI (фото)» (п. 30, 2026-11-08)
         resp.headers["Cache-Control"] = "no-store"
         return resp
