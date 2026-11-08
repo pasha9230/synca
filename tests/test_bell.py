@@ -8,19 +8,20 @@ from tires_sync import order_alerts as alerts
 
 
 def bell_count(html):
-    found = re.search(r'<span class="bell-count" id="bell-count"( hidden)?>(\d*)</span>', html)
-    assert found, "no bell"
-    return 0 if found.group(1) else int(found.group(2))
+    """The bell carries no number: the red count is in the menu «Уведомления» only (П5 of the audit, the owner 2026-11-08)."""
+    assert 'id="bell-btn"' in html, "no bell"
+    assert "bell-count" not in html
+    return 0
 
 
-def test_the_bell_is_on_every_page_with_the_menu_number(tmp_path):
+def test_the_bell_is_on_every_page_and_the_number_is_in_the_menu_only(tmp_path):
     app, client, tok, conn = setup(tmp_path)
     cid = card(conn, "Ольга")
     event(conn, cid, "notify", "Оповещение не отправлено: нет ВК")
     for url in ("/", "/alerts", "/orders", "/chats"):
         html = client.get(url).get_data(as_text=True)
         assert 'id="bell-btn"' in html and "bell.js" in html and "bell.css" in html, url
-        assert bell_count(html) == counter(html)[0] == 1, url                # «Заказ создан» is no row (2026-11-05)
+        assert bell_count(html) == 0 and counter(html)[0] == 1, url                # «Заказ создан» is no row (2026-11-05)
 
 
 def test_no_alerts_no_number_and_no_bell_when_logged_out(tmp_path):

@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='bell.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='topbar.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='tour.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='audit.css') }}">
 {% if session.get("user") %}<script src="{{ url_for('static', filename='navfold.js') }}"></script>{% endif %}{# before the body: folded sections are hidden before paint #}
 {% block head %}{% endblock %}
 </head>
@@ -61,8 +62,7 @@
 {% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
 <a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
-<a class="sb-link{% if path.startswith('/orders/settings') %} is-active{% endif %}" href="/orders/settings">{{ icon("layers") }}Настройки заказов</a>
-<a class="sb-link{% if path.startswith('/orders/templates') %} is-active{% endif %}" href="/orders/templates">{{ icon("edit") }}Шаблоны сообщений</a>
+<a class="sb-link{% if path.startswith(('/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders/settings">{# «Шаблоны сообщений» is its tab (п. 19, 2026-11-08) #}{{ icon("layers") }}Настройки заказов</a>
 <a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>
 <a class="sb-link{% if path.startswith('/ui-new') %} is-active{% endif %}" href="/ui-new">{{ icon("sparkle") }}Новый вид</a>{% endif %}
 {% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
@@ -75,8 +75,8 @@
 </div>
 </aside>
 <main class="main">
-<div class="topbar"><form class="topsearch" id="topsearch" method="get" action="/search" role="search"><button type="button" class="topsearch-open" id="topsearch-open" aria-label="Поиск" aria-controls="topsearch-input">{{ icon("search") }}</button><label class="topsearch-box">{{ icon("search") }}<input class="topsearch-input" id="topsearch-input" type="search" name="q" maxlength="80" value="{{ request.args.get('q', '') if request.endpoint == 'search' else '' }}" placeholder="Заказ, клиент, телефон, чат, шина" autocomplete="off" aria-label="Поиск: заказ, клиент, телефон, чат, шина" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="topsearch-list"></label><div class="topsearch-pop" id="topsearch-list" role="listbox" aria-label="Найдено" hidden></div></form>{% if can("alerts") %}<div class="bell" id="bell">
-<button type="button" class="bell-btn" id="bell-btn" aria-label="Уведомления{% if nav.alerts %}: {{ nav.alerts }}{% endif %}" aria-haspopup="dialog" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="bell-count" id="bell-count"{% if not nav.alerts %} hidden{% endif %}>{{ ("99+" if nav.alerts > 99 else nav.alerts) if nav.alerts else "" }}</span></button>
+<div class="topbar">{# no search field on any page (the owner 2026-11-08) #}{% if can("alerts") %}<div class="bell" id="bell">
+<button type="button" class="bell-btn" id="bell-btn" aria-label="Уведомления" aria-haspopup="dialog" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>{# no number on the bell: the red count is in the menu only (П5, the owner 2026-11-08) #}
 <div class="bell-pop" id="bell-pop" role="dialog" aria-label="Уведомления" hidden>
 <div class="bell-head"><strong>Уведомления</strong><button type="button" class="bell-close" id="bell-close" aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="bell-list" id="bell-list"></div>
