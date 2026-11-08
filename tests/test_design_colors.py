@@ -83,7 +83,7 @@ def test_the_new_view_of_the_card_draws_no_old_code(board):
     owner = client_of(board, "owner")
     for cid, stage in zip(board["ids"], board["stages"]):
         html = owner.get("/orders/%d" % cid).get_data(as_text=True)
-        assert 'class="o2c-stage" style="--c:var(--stage-' in html, stage["code"]
+        assert 'class="owin-stage is-' in html, stage["code"]          # the stage once, in the strip (the owner 08.11: no chip in the head)
         assert not old_codes(html), (stage["code"], old_codes(html))
 
 
