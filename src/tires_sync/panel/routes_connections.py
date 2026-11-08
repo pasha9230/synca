@@ -197,7 +197,8 @@ def register(app) -> None:
             tochki_cfg=tochki_feed.config(conn), tochki_choices=connections.tochki_supplier_choices(conn),
             tochki_load=tochki_feed.read_state(app.config["UNLOAD_PATH"]),
             tochki_secrets=connections.secret_status(conn, box, "tochki", 0),
-            tochki_check=connections.get_check(conn, "tochki", 0))
+            tochki_check=connections.get_check(conn, "tochki", 0),
+            tochki_sample=(Path(app.config["DB_PATH"]).parent / "tochki.sample.xml").exists())   # no link to a 404 (Б2 of the audit 08.11)
 
     def save_tochki() -> None:
         conn = get_conn()

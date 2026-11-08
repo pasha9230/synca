@@ -63,7 +63,9 @@ def test_agent_token_shown_once(tmp_path):
     tok = login(c)
     body = post(c, "/photos/agent-token", tok).get_data(as_text=True)
     assert "Новый токен агента" in body
-    assert "Новый токен агента" not in c.get("/photos/review").get_data(as_text=True)
+    assert "Новый токен агента" not in c.get("/connections/openai").get_data(as_text=True)
+    assert "Выпустить токен агента" in c.get("/connections/openai").get_data(as_text=True)          # in «Подключения», not «Генерация» (п. 30)
+    assert "Выпустить токен агента" not in c.get("/photos/review").get_data(as_text=True)
 
 
 def test_tabs_list_sets(tmp_path):

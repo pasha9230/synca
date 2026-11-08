@@ -7,12 +7,10 @@
 {% set kinds = {"three_quarter": "Вполоборота", "set4": "Комплект 4 шт."} %}
 {% set dkinds = {"crop": "вырезка", "card": "карточка", "copy": "копия"} %}
 <header class="page-head"><div><h1>Генерация<span class="help-q" tabindex="0" data-tip="Кадры, нарисованные агентом. Одобренные уходят в фид, если включён выключатель ниже.">?</span></h1></div></header>
-{% if new_token %}<section class="card"><p><b>Новый токен агента</b> (показан один раз, прежний больше не работает; обновление страницы выпустит ещё один):</p><p><code>{{ new_token }}</code></p></section>{% endif %}
 <section class="card">
 {% if can_post("photos_switch") %}<form method="post" action="/photos/switch" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="tab" value="{{ tab }}">
 <span class="badge badge--dot {{ 'badge--ok' if on else 'badge--neutral' }}">Свои фото в фиде: {{ "включены" if on else "выключены" }}</span>
 <input type="hidden" name="on" value="{{ 0 if on else 1 }}"><button class="btn btn--secondary btn--xs">{{ "Выключить" if on else "Включить" }}</button></form>{% endif %}
-{% if can_post("photos_agent_token") %}<form method="post" action="/photos/agent-token" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Выпустить токен агента</button></form>{% endif %}
 </section>
 <nav class="tabs2">
 <a{% if tab == 'pending' %} class="is-active" aria-current="page"{% endif %} href="/photos/review?tab=pending">На проверке ({{ counts.pending }})</a>
@@ -36,7 +34,7 @@
 {% if can_post("photos_generate") %}<form method="post" action="/photos/generate" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary btn--xs"{% if agent.state in ("running", "waiting") %} disabled{% endif %}>Сгенерировать очередь</button></form>{% endif %}
 {{ agent_line(agent) }}
 </section>
-<section class="card">
+{% if can_post("photos_priority") %}<section class="card">{# the list of sales: who may change it (Б3 of the audit 08.11) #}
 <details{% if not sold_text %} open{% endif %}><summary>{% if sold_text %}<b>Список продаж:</b> моделей вперёд — {{ sold_count }}, строк без пары — {{ sold_missing|sum(attribute=1) }}. <span class="btn--link">Изменить</span>{% else %}<b>Проданные модели идут первыми</b>{% endif %}</summary>
 <p class="muted small">Вставьте названия проданных шин, по одной в строке, как в отчёте: «Ikon Tyres 205/55/16 T 94 Ikon Character Ice 8 XL Ш.». Чем больше продаж модели, тем раньше её генерируем. R14 и меньше не учитываются.</p>
 <form method="post" action="/photos/priority"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
@@ -45,7 +43,7 @@
 {% if sold_missing %}<p class="muted small">Без пары в наличии (летние, нет у поставщика или другое написание):</p>
 <ul class="small">{% for line, n in sold_missing %}<li>{{ line }}{% if n > 1 %} — {{ n }} шт.{% endif %}</li>{% endfor %}</ul>{% endif %}
 </details>
-</section>
+</section>{% endif %}
 {% macro qtable(rows) %}
 <div class="table-wrap" style="max-height:none;border-top:0"><table class="table table--plain">
 <thead><tr><th></th><th>Набор</th><th>Класс</th><th>Вполоборота</th><th>Комплект</th></tr></thead>
