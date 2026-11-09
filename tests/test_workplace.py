@@ -437,7 +437,7 @@ def test_the_tabs_count_and_list_the_points_orders(tmp_path):
     conn.commit()
     mine = manager(app, conn, pid)
     page = _text(mine.get("/my-point"))
-    assert _tab_counts(page) == {"moving": 2, "here": 2, "oth": 1, "return": 0}             # «Едут»: placed and moving (the owner 2026-10-30)
+    assert _tab_counts(page) == {"moving": 2, "here": 2, "oth": 1, "return": 0, "issued": 0}   # «Едут»: placed and moving (the owner 2026-10-30)
     assert _listed(page) == {ending, later}                                                  # «На точке» opens first
     for tab, wanted in (("moving", {card, placed}), ("here", {ending, later}), ("oth", {oth})):
         shown = _text(mine.get("/my-point?tab=%s" % tab))

@@ -344,11 +344,14 @@
     cancel.onclick = function () { askWin.classList.remove("is-open"); if (back) back.focus(); };   // this window only, the focus back where it was
     askWin.querySelector("h2").textContent = form.getAttribute("data-confirm-title") || "Подтвердите действие";
     askWin.querySelector(".confirm-text").textContent = form.getAttribute("data-confirm");
+    askWin.querySelector(".confirm-text").style.whiteSpace = form.hasAttribute("data-confirm-lines") ? "pre-line" : "";   // a line each (a hand-out)
     go.textContent = form.getAttribute("data-confirm-ok") || "Да, выполнить";
     go.className = "btn " + (danger ? "btn--danger" : "btn--primary");
     go.onclick = function () {
       askWin.classList.remove("is-open");
       form.dataset.confirmed = "1";
+      var field = form.querySelector("input[data-confirm-field]");          // the server takes the press as confirmed (else it asks on a page)
+      if (field) field.value = "yes";
       if (form.requestSubmit) form.requestSubmit(submitter && submitter.form === form ? submitter : undefined); else form.submit();
       setTimeout(function () { delete form.dataset.confirmed; }, 0);       // a send stopped on the way (a check of the browser) asks again next time
     };

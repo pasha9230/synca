@@ -268,8 +268,11 @@ def _hand_over(conn, point: dict, back: str):
 # «Рабочее место» (the owner 2026-10-29): the tabs of the point's orders, each with its count; an order may be in two of them.
 # the tabs of «Рабочее место» (the owner 2026-10-30, the new design: a list of the point's work, no «Все», «Резерв истекает» nor «Ждут ответа»;
 # the question «Клиент забрал?» is a line of its card on «На точке», first); an old address (all, ending, asked, …) opens DEFAULT_TAB
-TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "return": "На возврат"}     # «Переданные клиенты»: a section of its own
+TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "return": "На возврат",      # «Переданные клиенты»: a section of its own
+        "issued": "Выдано"}                        # the owner 2026-11-09: what the point gave out in the last ISSUED_DAYS (_issued)
 DEFAULT_TAB = "here"
+ISSUED_DAYS = 30
+CONFIRM = ("issued", "reserve_issued", "oth_issued")   # the owner 2026-11-09: a hand-out is confirmed with the order's number, tyres and client
 ALERTS_READ = 500                                  # the notes read to find the point's newest alerts among the bot's answers (two weeks kept)
 
 
@@ -279,7 +282,44 @@ def _in_tab(row: dict, tab: str) -> bool:
     agreed and the act МХ-3 not signed yet), and one of «На ОТХ» agreed before the stage came."""
     code = row["card"]["stage"]["code"]
     returning = code == orders.RETURN_GIVEN or bool(row.get("returning"))
-    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": code == "oth" and not returning, "return": returning}[tab]
+    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": code == "oth" and not returning, "return": returning,
+            "issued": False}[tab]                                       # «Выдано» is not of these cards: _issued
+
+
+def issue_lines(card: dict) -> list:
+    """What the point checks before a hand-out (the owner 2026-11-09): the WebMIM number, the tyres line by line with the quantity, the
+    client. Nothing of money."""
+    lines = ["Номер заказа MIM: %s" % (card["webmim_number"] or "нет (заказ в панели №%d)" % card["id"])]
+    lines += ["%s × %s" % (i["name"], i["qty"]) for i in card["items"] if i["qty"] >= 1] or ["Шины не указаны"]
+    return lines + ["Клиент: %s" % (card["client_name"] or "без имени")]
+
+
+def _issued(conn, point_id, today: str) -> list:
+    """«Выдано» (the owner 2026-11-09): the orders of the point closed by a hand-out in the last ISSUED_DAYS, newest first — on
+    «Выполнено», come there from «На точке» (or from the way: «Выдал» skips «Товар на точке», order_manager.ISSUE_FROM) by the point's
+    press, its VK command or the office; not an order to another city (the courier took it), not its own sale («Заказы»). With the moment,
+    who marked it and the press still to undo (point_log.undoable). Nothing of money."""
+    since = (date.fromisoformat(today) - timedelta(days=ISSUED_DAYS)).isoformat()
+    done = orders.stage_name(conn, "done")
+    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM}
+    rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'done' "
+                        "AND c.entered_at >= ? ORDER BY c.entered_at DESC, c.id DESC", (point_id, since)).fetchall()
+    mine = points.own_sales(conn, point_id) if rows else set()
+    found = []
+    for (card_id,) in rows:
+        if card_id in mine:
+            continue
+        card = orders.get_card(conn, card_id)
+        if order_intercity.on(card):
+            continue
+        move = conn.execute("SELECT author, text FROM order_event WHERE order_id = ? AND kind = 'stage' AND text LIKE ? ORDER BY id DESC LIMIT 1",
+                            (card_id, "%→ «" + done + "»")).fetchone()
+        came = re.match(r"Этап: «(.*)» → «", move[1]) if move else None
+        if came is None or came.group(1) not in sources:
+            continue
+        found.append({"card": card, "label": mgr.label(card), "at": card["entered_at"], "who": users.person_name(conn, move[0], current_app.config["AUTHOR"]),
+                      "undo": point_log.undoable(conn, card, point_id)})
+    return found
 
 
 def _tab_of(row: dict) -> str:
@@ -303,6 +343,7 @@ def _back(point_id) -> str:
     from urllib.parse import parse_qs, urlsplit
     came = urlsplit(request.referrer or "")
     tab = (parse_qs(came.query).get("tab") or [""])[0] if came.path == "/my-point" and (not came.netloc or came.netloc == request.host) else ""
+    tab = str(request.form.get("tab") or "") or tab                     # the page «Подтвердите выдачу» keeps the tab it came from
     args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab in TABS and tab != DEFAULT_TAB else [])
     return "/my-point" + ("?" + "&".join(args) if args else "")
 
@@ -429,7 +470,8 @@ def register(app) -> None:
                           "intercity": order_intercity.on(card) and code not in order_oth.RETURNING,     # «В другой город» (2026-11-02)
                           "labels": order_intercity.labels(conn, card["id"]) if order_intercity.on(card) else [],
                           # «Итого» (the owner 2026-11-07): the order window's own sum of the positions already read; «На ОТХ»: no client, no sum
-                          "sale": orders.totals(card["items"])["sale"] if card["items"] and code not in order_oth.RETURNING else None})
+                          "sale": orders.totals(card["items"])["sale"] if card["items"] and code not in order_oth.RETURNING else None,
+                          "issue_lines": issue_lines(card), "undo": point_log.undoable(conn, card, point_id)})     # «Отменить» in the card (2026-11-09)
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
             row["origin"] = labels.get(row["card"]["id"])                # not from the point's own Avito account: only receive and hand over
@@ -455,18 +497,21 @@ def register(app) -> None:
         tab = tab if tab in TABS else DEFAULT_TAB
         shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not (r["asked"] or r["oth_asked"]))     # the questions first
         counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
+        issued = _issued(conn, point_id, today) if point_id is not None else []
+        counts["issued"] = len(issued)
         hot = {"here": any(r["asked"] for r in cards), "oth": any(r["oth_asked"] and r["card"]["stage"]["code"] == "oth" for r in cards),
                "return": any(r.get("returning") or (r["oth_asked"] and r["card"]["stage"]["code"] == orders.RETURN_GIVEN) for r in cards)}                                   # the tabs that wait for the point
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
         found = _found(conn, query, point_id) if query and point_id is not None else None
         if found:                                                                # the search looks at every order of the point: say its tab
-            tab_of = {r["card"]["id"]: _tab_of(r) for r in cards}
+            tab_of = {r["card"]["id"]: "issued" for r in issued}
+            tab_of.update({r["card"]["id"]: _tab_of(r) for r in cards})
             for f in found:
                 oid = int(f["url"].rsplit("/", 1)[-1]) if f.get("url", "").rsplit("/", 1)[-1].isdigit() else None
                 f["tab"] = tab_of.get(oid, "")
                 if f["tab"] in ("oth", "return"):                               # our tyres at the point: the client is gone (the owner 2026-10-30)
                     f["title"] = "Заказ №%d · шины на ОТХ" % oid
-        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot,
+        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot, issued=issued,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
@@ -495,6 +540,14 @@ def register(app) -> None:
         flash(answer, "info")
         return redirect(back)
 
+    def _confirm_issue(card, action, token, point_id, back):
+        """«Подтвердите выдачу» without the script (the owner 2026-11-09; with it, the same lines in the panel's window, app.js): the
+        order's number, the tyres, the client; «Да, выдал» sends the same press (its token) once more with confirm=yes, «Отмена» goes back."""
+        from urllib.parse import parse_qs, urlsplit
+        return render_template("mypoint_confirm.html", card=card, action=action, token=token, lines=issue_lines(card), label=mgr.label(card),
+                               p=point_id if own_point() is None else None, back=back,
+                               tab=(parse_qs(urlsplit(back).query).get("tab") or [""])[0])
+
     @app.route("/my-point/<int:card_id>/<action>", methods=["POST"])
     @login_required
     def mypoint_action(card_id, action):
@@ -520,6 +573,8 @@ def register(app) -> None:
         if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
             flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
+        if action in CONFIRM and request.form.get("confirm") != "yes" and not order_intercity.on(card):
+            return _confirm_issue(card, action, token, point_id, back)        # nothing is taken nor changed until «Да, выдал»
         now = local_iso()
         claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,'обрабатывается')",
                                ("page-" + token, now, "панель: %s" % author(), ACTIONS[action], card["id"]))

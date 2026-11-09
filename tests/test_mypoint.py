@@ -43,6 +43,8 @@ def press(client, card, action, tok="tok", p=None, again=None):
         data["handover"] = "yes"                                                 # the second step of the button (the owner 2026-11-04)
     if action == "refuse":
         data["reason"] = "year"                                                  # «ОТКАЗ» needs its reason (the owner 2026-11-05)
+    if action in ("issued", "reserve_issued", "oth_issued"):
+        data["confirm"] = "yes"                                                  # «Да, выдал» of the window (the owner 2026-11-09)
     if p:
         data["p"] = str(p)
     r = post(client, "/my-point/%d/%s" % (card, action), tok, **data)
@@ -241,7 +243,7 @@ def test_each_button_of_a_card_is_its_own_press(tmp_path):
     assert conn.execute("SELECT 1 FROM order_command_log WHERE message_id = ?", ("page-" + token(page, card, "refuse"),)).fetchone()
     conn.execute("UPDATE order_card SET client_phone = '+7 900 111 22 33' WHERE id = ?", (card,))
     conn.commit()
-    r = post(mine, "/my-point/%d/issued" % card, "tok", token=token(page, card, "issued"))
+    r = post(mine, "/my-point/%d/issued" % card, "tok", token=token(page, card, "issued"), confirm="yes")     # «Да, выдал» (2026-11-09)
     assert "отмечено: выдан" in mine.get(r.headers["Location"]).get_data(as_text=True)
     assert orders.get_card(conn, card)["stage"]["code"] == "done"
 
