@@ -51,12 +51,12 @@ body.o2 .o2-wm-link{font-weight:600}
 body.o2 .o2-sheet tr.is-sel td{background:var(--primary-25)}
 body.o2 .o2-listwrap{display:flex;gap:var(--s-3);align-items:flex-start}
 body.o2 .o2-listwrap > .o2-list{flex:1 1 auto;min-width:0}
-body.o2 .o2-bulk{flex:0 0 340px;position:sticky;top:var(--s-3);max-height:calc(100vh - 2 * var(--s-3));display:flex;flex-direction:column}
+body.o2 .o2-bulk{flex:0 0 340px;display:flex;flex-direction:column}   /* no height of its own: the page scrolls, not the panel (owner's word 2026-11-09) */
 body.o2 .o2-bulk[hidden]{display:none}
 body.o2 .o2-bulk-head{display:flex;align-items:center;gap:var(--s-2);padding:var(--s-3) var(--s-4);border-bottom:1px solid var(--gray-200)}
-body.o2 .o2-bulk-body{overflow:auto;padding:var(--s-3) var(--s-4);display:flex;flex-direction:column;gap:var(--s-4)}
+body.o2 .o2-bulk-body{padding:var(--s-3) var(--s-4);display:flex;flex-direction:column;gap:var(--s-4)}
 body.o2 .o2-bulk-body > *{flex-shrink:0}
-body.o2 .o2-bulk-list{list-style:none;margin:0;padding:0;max-height:220px;overflow:auto;border:1px solid var(--gray-200);border-radius:var(--r-md)}
+body.o2 .o2-bulk-list{list-style:none;margin:0;padding:0;border:1px solid var(--gray-200);border-radius:var(--r-md)}
 body.o2 .o2-bulk-list li{display:flex;gap:var(--s-2);align-items:center;padding:6px var(--s-2);border-bottom:1px solid var(--gray-100);font-size:13px}
 body.o2 .o2-bulk-list li:last-child{border-bottom:0}
 body.o2 .o2-bulk-list .o2-bl-main{flex:1 1 auto;min-width:0}
@@ -80,7 +80,7 @@ body.o2-card .o2c-client{font-size:15px;color:var(--gray-700)}
 body.o2-card .o2c-phone{font-size:13px}
 body.o2-card .o2c-stage{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:12px;font-size:12px;background:color-mix(in srgb,var(--c) 14%,#fff);border:1px solid color-mix(in srgb,var(--c) 45%,transparent)}
 body.o2-card .o2c-stage::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--c)}
-body.o2-card .o2c-body{display:flex;align-items:stretch;height:calc(100vh - 150px);min-height:520px;border:1px solid var(--gray-200);border-radius:var(--r-md);background:var(--gray-0);overflow:hidden}
+body.o2-card .o2c-body{display:flex;align-items:stretch;min-height:520px;border:1px solid var(--gray-200);border-radius:var(--r-md);background:var(--gray-0)}   /* the columns grow with what is in them: only the page scrolls (owner's word 2026-11-09) */
 body.o2-card .o2c-col{flex:var(--w,1) 1 0;min-width:min(300px,28%);display:flex;flex-direction:column;min-height:0}
 body.o2-card .o2c-col[data-cc="0"]{min-width:min(380px,36%)}
 body.o2-card .o2c-col[data-cc="2"]{min-width:min(280px,26%)}
@@ -93,7 +93,7 @@ body.o2-card .o2c-strip:hover{background:var(--gray-100)}
 body.o2-card .o2c-colin{display:flex;flex-direction:column;min-height:0;height:100%}
 body.o2-card .o2c-colhead{display:flex;align-items:center;gap:var(--s-2);padding:6px var(--s-3);border-bottom:1px solid var(--gray-200);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--gray-500)}
 body.o2-card .o2c-colhead .icon-btn .i{transform:rotate(180deg)}
-body.o2-card .o2c-scroll{flex:1 1 auto;overflow:auto;padding:var(--s-3);display:flex;flex-direction:column;gap:var(--s-3);container-type:inline-size}
+body.o2-card .o2c-scroll{flex:1 1 auto;padding:var(--s-3);display:flex;flex-direction:column;gap:var(--s-3);container-type:inline-size}
 body.o2-card .o2c-split{flex:0 0 6px;cursor:col-resize;background:var(--gray-100);border-left:1px solid var(--gray-200);border-right:1px solid var(--gray-200)}
 body.o2-card .o2c-split:hover,body.o2-card .o2c-split.is-drag,body.o2-card .o2c-split:focus-visible{background:var(--primary-200)}
 body.o2-card .o2c-split.is-idle{cursor:default;background:var(--gray-50)}
@@ -118,7 +118,6 @@ body.o2-card .o2c-scroll .owin-stages{flex-wrap:wrap;overflow-x:visible}       /
   body.o2-card .entity-sec .card-head .sub{display:none}
 }
 @container (min-width:900px){body.o2-card .o2c-scroll .owin-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media (max-width:1100px){body.o2-card .o2c-body{height:calc(100vh - 170px)}}
 @container (max-width:360px){body.o2-card .o2c-feed form.row{flex-direction:column;align-items:stretch}}
 /* ---- Заказы по прототипу аудита 08.11 (lane proto-orders) ---- */
 /* доска (п. 32): колонки влезают в 1280, шапки прилипают; пустые этапы — узкие свёрнутые колонки (владелец 08.11) */

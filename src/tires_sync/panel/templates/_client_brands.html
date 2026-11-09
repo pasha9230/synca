@@ -13,7 +13,7 @@
 <div class="row" style="gap:var(--s-3);align-items:center;flex-wrap:wrap">
 <input class="input" type="search" data-brand-filter="{{ table_id }}" placeholder="Найти бренд" aria-label="Найти бренд" style="max-width:260px">
 </div>
-<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px;max-height:560px;overflow:auto"><table class="table" id="{{ table_id }}">
+<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px"><table class="table" id="{{ table_id }}">
 <thead><tr><th>Бренд</th><th>У нас сейчас, до R17 / от R18</th><th>Клиенту до R17</th><th>Клиенту от R18</th></tr></thead>
 <tbody>{% for r in rows %}{% set i = loop.index0 %}<tr data-name="{{ (r.label ~ ' ' ~ r.key)|lower }}">
 <td class="strong"><input type="hidden" name="{{ prefix }}bk" value="{{ r.key }}">{{ r.label }}</td>

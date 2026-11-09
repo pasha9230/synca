@@ -18,9 +18,9 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 /* ── Чаты: two columns like a messenger ─────────────────────────────────────────────────────────────────────────────── */
 .o2-chats-page .page{gap:var(--s-3);padding-top:var(--s-4);padding-bottom:var(--s-4)}
 .o2 .chats-layout.o2-cl,.o2 .chats-layout.o2-cl.is-deal-folded{display:grid;grid-template-columns:380px minmax(0,1fr);grid-template-areas:"list main";gap:0;
-  align-items:stretch;height:calc(100vh - 40px - 2 * var(--s-4));min-height:520px;background:var(--o2-bg);border:1px solid var(--o2-border-2);
-  border-radius:var(--o2-r);overflow:hidden}
-.o2 .o2-cl-list{grid-area:list;display:block;max-height:none;min-height:0;overflow-y:auto;border-right:1px solid var(--o2-border-2);background:var(--o2-bg)}
+  align-items:start;min-height:520px;background:var(--o2-bg);border:1px solid var(--o2-border-2);
+  border-radius:var(--o2-r)}   /* no height of its own: the page scrolls, not the list or the messages (owner's word 2026-11-09); each column as tall as itself (a long list never stretches the chat) */
+.o2 .o2-cl-list{grid-area:list;display:block;max-height:none;min-height:0;border-right:1px solid var(--o2-border-2);background:var(--o2-bg)}
 .o2 .o2-cl-top{position:sticky;top:0;z-index:2;display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:12px 12px 8px;background:var(--o2-bg);
   border-bottom:1px solid var(--o2-border-2)}
 .o2-cl-title{display:flex;align-items:center;gap:8px}
@@ -52,7 +52,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-r3 .chat-who{max-width:none}
 .o2 .o2-cl-list .empty{padding:24px 16px}
 
-.o2 .o2-cl-pane{grid-area:main;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--o2-bg);position:relative;overflow-y:auto}
+.o2 .o2-cl-pane{grid-area:main;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--o2-bg);position:relative}
 .o2 .o2-cl-head{display:flex;align-items:center;flex-wrap:nowrap;gap:8px;padding:8px 12px 8px 16px;border-bottom:1px solid var(--o2-border-2);background:var(--o2-bg)}
 .o2-cl-back{display:none}
 .o2-cl-who{flex:1;min-width:0}
@@ -115,7 +115,7 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 .o2-panel-foot .chat-wait>summary{list-style:none;display:inline-flex}
 .o2-panel-foot .chat-wait>summary::-webkit-details-marker{display:none}
 
-.o2 .o2-cl-msgs{flex:1 1 auto;min-height:120px;max-height:none;overflow-y:auto;padding:16px 24px;background:var(--o2-fill);gap:8px}
+.o2 .o2-cl-msgs{flex:1 1 auto;min-height:120px;max-height:none;padding:16px 24px;background:var(--o2-fill);gap:8px}
 .o2 .o2-cl-msgs .msg{max-width:70%;background:var(--o2-bg);border:1px solid var(--o2-border-2);border-radius:12px 12px 12px 4px;font-size:14px;line-height:20px}
 .o2 .o2-cl-msgs .msg--out{background:var(--o2-primary-bg);border-color:var(--primary-300);border-radius:12px 12px 4px 12px}
 .o2 .o2-cl-msgs .msg--sys{background:var(--o2-bg);border:1px dashed var(--o2-border);border-radius:var(--o2-r);max-width:520px}
@@ -123,7 +123,7 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 .o2 .o2-cl-msgs .chat-day{background:var(--o2-bg);border:1px solid var(--o2-border-2)}
 .o2-cl-none{text-align:center}
 .o2-cl-nohist{max-width:520px;align-self:center}
-.o2 .o2-cl-comp{flex:none;padding:8px 12px 6px;border-top:1px solid var(--o2-border-2);background:var(--o2-bg);gap:6px}
+.o2 .o2-cl-comp{flex:none;position:sticky;bottom:0;z-index:2;padding:8px 12px 6px;border-top:1px solid var(--o2-border-2);background:var(--o2-bg);gap:6px}
 .o2-cl-send{display:flex;flex-direction:column;gap:4px}
 .o2-cl-line{display:flex;align-items:flex-end;gap:6px}
 .o2-cl-line .textarea{flex:1;min-width:0;min-height:40px;max-height:160px;resize:vertical}
