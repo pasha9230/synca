@@ -412,3 +412,13 @@ def test_the_window_save_of_a_corrected_number_says_the_transfer_number_is_of_th
     text = webmim_cabinet.MOVED % ("5001", "5002", INVOICE)
     assert (text, "yellow") in events(conn, mine) and logins(cabinet) == 1
     assert text in client.get("/orders/%d" % mine).get_data(as_text=True)
+
+
+def test_a_number_typed_when_the_order_is_made_counts_as_after_the_release(tmp_path):
+    """The window of a new order has the WebMIM number too (re-review 2026-11-09): typed there, it is new, the messages may go."""
+    conn = store.connect(str(tmp_path / "made.db"))
+    orders.ensure_pipeline(conn, NOW)
+    made = orders.create_card(conn, {"client_name": "Тест", "webmim_number": "7007"}, NOW, "owner")
+    assert webmim_cabinet.typed_since_release(conn, made)
+    plain = orders.create_card(conn, {"client_name": "Тест 2", "client_phone": "+79000000002"}, NOW, "owner")
+    assert not webmim_cabinet.typed_since_release(conn, plain)

@@ -594,6 +594,8 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
         if commit:
             conn.rollback()                                   # the caller saves nothing of it; with commit=False the caller rolls back
         raise OpenOrderExists(busy["id"])
+    if base["webmim_number"]:                                 # typed in the window of a new order: after the release too (re-review 2026-11-09)
+        _mark_number(conn, cur.lastrowid, base["webmim_number"], now)
     add_event(conn, cur.lastrowid, now, author, "created", "Заказ создан на этапе «%s»" % stage["name"])
     _attach_client(conn, cur.lastrowid, now, author)
     if commit:
@@ -686,6 +688,11 @@ def _guard_stage(conn, card_id, before: List[str]) -> None:
 NUMBER_AT = "webmim_number_at:%d"     # app_state: {"number", "at"} of the WebMIM number's last save (none: typed before 2026-11-09's release)
 
 
+def _mark_number(conn, card_id, number, now: str) -> None:
+    conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (NUMBER_AT % int(card_id), json.dumps({"number": number, "at": now}, ensure_ascii=False)))
+
+
 def update_card(conn, card_id, changes: dict, now: str, author: str, commit: bool = True, link_client: Optional[bool] = None) -> List[str]:
     """Save the fields. A new phone joins the order to its client (`link_client`), except on «На ОТХ»: the client refused, the order is
     not theirs (хвост З15: no empty client is made, no phone is added to the client put aside)."""
@@ -698,8 +705,7 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     conn.execute("UPDATE order_card SET %s, updated_at = ? WHERE id = ?" % ", ".join("%s = ?" % k for k in changed),
                  list(changed.values()) + [now, card_id])
     if "webmim_number" in changed:                                      # when it was typed (webmim_cabinet.typed_since_release)
-        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                     (NUMBER_AT % int(card_id), json.dumps({"number": changed["webmim_number"], "at": now}, ensure_ascii=False)))
+        _mark_number(conn, card_id, changed["webmim_number"], now)
     for key, value in changed.items():
         if key == "receipt_needed":
             shown = "да" if value else "нет"
