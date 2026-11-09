@@ -317,7 +317,8 @@ def register(app) -> None:
                     if mine:                                                     # the numbers of other points' orders are not the point's
                         ours = {r[0] for r in conn.execute("SELECT id FROM order_card WHERE point_id = ?", (own_point(),))}
                         deal["earlier"] = [i for i in deal["earlier"] if i in ours]
-                    deal["gaps"] = orders.gaps_to_place(conn, deal)
+                    # a client who waits for a tire is not to be placed yet: no «не хватает» there (the owner 2026-11-09)
+                    deal["gaps"] = [] if deal["stage"]["code"] == "wait" else orders.gaps_to_place(conn, deal)
                     deal["before_placed"] = before_placed(conn, deal["stage"])
                     if mine:                                                     # never an account's name (the owner 2026-10-29)
                         deal["comment"] = orders.without_account_names(conn, deal["comment"])
@@ -702,13 +703,13 @@ def register(app) -> None:
         _chat_or_404(conn, chat_row)
         fields = {k: request.form.get(k, "") for k in ("brand", "model", "width", "profile", "radius", "season", "studded", "qty", "any_brand", "any_size")}
         try:
-            card_id, added, moved = deals.wait_from_chat(conn, chat_row, fields, _catalog_offers(conn), local_iso(), author(), own_point=own_point())
+            card_id, added, _moved = deals.wait_from_chat(conn, chat_row, fields, _catalog_offers(conn), local_iso(), author(), own_point=own_point())
             _to_own_point(conn, card_id)
-            flash("%s Заказ №%d%s." % ("Шина добавлена в лист ожидания." if added else "Такая строка уже есть в заказе, второй не добавлено.", card_id,
-                                       ", этап «Ожидает наличие»" if moved else " уже в этапе «Ожидает наличие»"))
         except orders.OrderError as err:
             flash(str(err))
-        return back(chat_row)
+            return back(chat_row)
+        flash("Шина добавлена в лист ожидания, заказ №%d." % card_id if added else "Такая строка уже есть в заказе №%d, второй не добавлено." % card_id)
+        return redirect("/orders/%d" % card_id)            # the window of the order, as from the list (the owner 2026-11-09)
 
     @app.route("/chats/<int:chat_row>/stage", methods=["POST"])
     @login_required

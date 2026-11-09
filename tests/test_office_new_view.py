@@ -267,3 +267,40 @@ def test_the_task_and_the_client_presses_work_from_the_new_view(w):
     assert "Позвонить поставщику" not in o.get("/tasks").get_data(as_text=True)
     assert post(o, "/clients/%d/tag" % w["client"], tok, tag="опт", on="1").status_code == 302
     assert ">опт</span>" in o.get("/clients").get_data(as_text=True)
+
+
+# --- «В лист ожидания» in the head of a chat (the owner 2026-11-09) ------------------------------------------------------------------
+
+@pytest.mark.parametrize("state", ["off", "all"])
+def test_the_head_of_a_chat_has_the_wait_button_and_the_wait_stage_has_no_hint_of_what_is_missing(w, state):
+    flag(w, state)
+    conn, cid = w["conn"], next(c for c in chats.list_chats(w["conn"]) if c["id"] == w["chat"])["order_id"]
+    html = w["owner"].get("/chats/%d" % w["chat"]).get_data(as_text=True)
+    assert is_new(html) == (state == "all")
+    head = html.split('class="chat-thread', 1)[0]                                  # the head, before the messages
+    assert 'href="#chat-wait" data-chat-wait-open' in head and ">В лист ожидания</a>" in head
+    assert '<details class="%s" id="chat-wait">' % ("chat-wait" if state == "all" else "card-body chat-wait") in html
+    assert orders.get_card(conn, cid)["stage"]["code"] == "new" and "chat-deal-gaps" in html and "Заказ оформлен» и дальше, не хватает" in html
+    stage = {s["code"]: s["id"] for s in orders.list_stages(conn)}
+    orders.move_card(conn, cid, stage["wait"], NOW, "o", fire_rules=False)
+    conn.commit()
+    html = w["owner"].get("/chats/%d" % w["chat"]).get_data(as_text=True)
+    assert "chat-deal-gaps" not in html and "не хватает" not in html
+    assert ">В лист ожидания</a>" in html                                          # «Ожидает наличие» is before «Заказ оформлен»: the button stays
+    order = w["owner"].get("/orders/%d" % cid).get_data(as_text=True)
+    assert "Заказ оформлен» и дальше, не хватает" not in order
+
+
+def test_the_wait_form_of_a_chat_opens_the_order_window_and_a_bad_form_stays_in_the_chat(w):
+    conn, owner, tok = w["conn"], w["owner"], w["tok"]
+    cid = chats.get_chat(conn, w["chat"])["order_id"]
+    form = dict(brand="Nokian", width="225", profile="45", radius="17", qty="4", f="", acc="", q="")
+    bad = post(owner, "/chats/%d/wait" % w["chat"], tok, **form)                   # no season of an unknown tire
+    assert bad.status_code == 302 and bad.headers["Location"].endswith("/chats/%d" % w["chat"])
+    good = post(owner, "/chats/%d/wait" % w["chat"], tok, season="summer", **form)
+    assert good.status_code == 302 and good.headers["Location"].endswith("/orders/%d" % cid)      # the line goes into the chat's order, as before
+    page = owner.get(good.headers["Location"]).get_data(as_text=True)
+    assert "Шина добавлена в лист ожидания, заказ №%d." % cid in page and orders.get_card(conn, cid)["stage"]["code"] == "wait"
+    again = post(owner, "/chats/%d/wait" % w["chat"], tok, season="summer", **form)
+    assert again.headers["Location"].endswith("/orders/%d" % cid)
+    assert "Такая строка уже есть в заказе №%d" % cid in owner.get(again.headers["Location"]).get_data(as_text=True)
