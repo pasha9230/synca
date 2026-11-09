@@ -58,7 +58,7 @@ def test_the_point_sees_no_term_for_an_order_on_oth_even_with_an_old_date(tmp_pa
     conn.execute("UPDATE order_card SET reserve_until = '2026-01-01' WHERE id = ?", (oth,))            # a date of the seven days, long past
     conn.commit()
     page = manager(app, conn, pid).get("/my-point", query_string={"tab": "oth"}).get_data(as_text=True)
-    assert "700501" in page and "Хранение до 01.01" not in page and "срок прошёл" not in page
+    assert "700501" in page and "Хранение шин до 01.01" not in page and "Резерв:" not in page and "срок прошёл" not in page
 
 
 def test_the_templates_give_no_reservation_date_for_an_order_on_oth(tmp_path):

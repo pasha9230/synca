@@ -22,11 +22,30 @@
 {# «Отменить» of the order's last press in its card (the owner 2026-11-09): the same route and window as the list «Отменить отметку» #}
 {% macro undo_btn(c, u, label) %}{% if u %}<form method="post" action="/my-point/{{ c.id }}/undo" data-once data-undo-card="{{ c.id }}" data-confirm-title="Отменить {{ u.name }} по заказу № {{ label }}?" data-confirm="Заказ вернётся туда, где был до отметки. {{ undo_hint }}" data-confirm-ok="Отменить"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--secondary btn--sm">Отменить {{ u.name }}</button></form>{% endif %}{% endmacro %}
 {% macro refuse(c, row) %}<details class="mp-refuse" data-refuse="{{ c.id }}"><summary class="btn btn--secondary mp-btn">ОТКАЗ</summary><form method="post" action="/my-point/{{ c.id }}/refuse" data-once data-confirm-title="Отказ по заказу № {{ row.label }}?" data-confirm="Заказ перейдёт на «На ОТХ»: шины остаются у вас нашим товаром. Клиенту ничего не уходит." data-confirm-ok="Да, отказ" data-confirm-danger><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens['refuse'] }}">{{ pin }}<fieldset class="mp-refuse-why"><legend>Причина отказа</legend><label><input type="radio" name="reason" value="year" required> Старый год производства</label> <label><input type="radio" name="reason" value="size"> Ошиблись размером</label> <label><input type="radio" name="reason" value="other"> Другой</label> <input type="text" name="other" maxlength="200" placeholder="Другой: впишите причину" aria-label="Другая причина отказа"></fieldset><button class="btn btn--danger mp-btn">Отказ — на ОТХ</button></form></details>{% endmacro %}
+{# the stage's badge with its day (the owner 2026-11-09): «на точке с 07.11», «на ОТХ с 31.10» — the day the order came to the stage #}
+{% macro stage_tag(row) %}{% set at = (" с " ~ (row.since|day)) if row.since else "" %}{{ ("на точке" ~ at) if row.here else ((("на возврат" if row.ret_label else ("на ОТХ" ~ (at if row.card.stage.code == "oth" else ""))) if row.oth else "едет на точку")) }}{% endmacro %}
+{# «Подробнее» (the owner 2026-11-09): the client's phone, the transfer with its day (routes_mypoint._order_day), every position
+   (routes_mypoint.point_lines), the reserve; no line of what is not there #}
+{% macro more(c, row) %}<details class="mp-more"><summary>Подробнее</summary>
+<div class="mp-more-body" data-more>
+{% if row.tel and not row.oth %}<div class="mp-item" data-more-tel><div>Телефон клиента</div><a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a></div>{% endif %}
+{% if c.transfer_number %}<div class="mp-transfer" data-transfer>Номер перемещения: {{ c.transfer_number }}{% if row.order_date %} от {{ row.order_date }}{% endif %}</div>{% endif %}
+{% for i in row.lines %}<div class="mp-item" data-item><div>Товар {{ i.name }}</div>{% if i.code %}<div>Код {{ i.code }}</div>{% endif %}<div>Кол-во {{ i.qty }} шт</div>{% if i.unit is not none %}<div>Цена ед. {{ i.unit|money }}</div><div>Сумма {{ i.sum|money }}</div>{% endif %}</div>{% endfor %}
+{% if row.hold %}<div class="mp-until{% if row.late %} mp-until--late{% endif %}" data-hold>Резерв: Хранение шин до {{ row.hold }}{% if row.late %} — срок прошёл{% endif %}</div>{% endif %}
+{# kept from the owner's earlier answers (what a point sees is not changed): the day of the delivery on the way (2026-10-26), the order the
+   tyres «с ОТХ» come from (2026-10-30), the orders merged into this one, the order not from the point's own Avito account (2026-10-22) #}
+{% if not row.here and not row.oth and (row.delivery or c.delivery_time) %}<div class="mp-sub" data-delivery>Доставка: {{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</div>{% endif %}
+{% if row.from_oth %}<div class="mp-sub" data-from-oth>Шины с ОТХ, заказ №{{ row.from_oth }}</div>{% endif %}
+{% if row.merged_from %}<div class="mp-sub" data-merged-from>Объединён из {{ row.merged_from }}</div>{% endif %}
+{% if row.origin %}<p class="mp-sub" data-origin>{{ row.origin.text }}: {{ row.origin.hint }}</p>{% endif %}
+</div></details>{% endmacro %}
 {% macro card(row) %}{% set c = row.card %}{% set who = ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' %}
 <article class="mp-card{% if row.here %} mp-card--here{% endif %}{% if row.asked %} mp-card--ask{% endif %}" id="order-{{ c.id }}" data-order="{{ c.id }}"{% if row.asked %} data-question="{{ c.id }}"{% endif %}>
-<div class="mp-card-head"><span class="mp-no" data-no>№ {{ c.webmim_number or "панель %d"|format(c.id) }}</span>{% if row.order_date %}<span class="mp-date" data-order-date>от {{ row.order_date }}</span>{% endif %}<span class="mp-badges">{% if row.intercity %}<span class="badge badge--warn" data-intercity-tag>В другой город</span> {% endif %}<span class="badge {{ 'badge--ok' if row.here else 'badge--warn' }}">{{ "на точке" if row.here else (("на возврат" if row.ret_label else "на ОТХ") if row.oth else "едет на точку") }}</span></span></div>
-{# the tyres first, then the client (the owner 2026-10-30); «На ОТХ»: the client is gone, the tyres only; the phone is in «Подробнее» #}
-<div class="mp-client"><span class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}шины не указаны{% endfor %}</span>{% if not row.oth %}<span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% endif %}{% if row.sale is not none %}<span class="mp-sub mp-sum" data-point-sum>Итого <b>{{ row.sale|money }}</b></span>{% endif %}</div>
+<div class="mp-card-head"><span class="mp-no" data-no>№ {{ c.webmim_number or "панель %d"|format(c.id) }}</span>{% if row.order_date %}<span class="mp-date" data-order-date>от {{ row.order_date }}</span>{% endif %}<span class="mp-badges">{% if row.intercity %}<span class="badge badge--warn" data-intercity-tag>В другой город</span> {% endif %}<span class="badge {{ 'badge--ok' if row.here else 'badge--warn' }}" data-stage-tag>{{ stage_tag(row) }}</span></span></div>
+{# the tyres first, then the client (the owner 2026-10-30); «На ОТХ»: the client is gone, the tyres only; the phone is in «Подробнее».
+   «На ОТХ» (the owner 2026-11-09): a block of each position — the supplier's name, «Кол-во: N шт.», «Цена:» the order's price × the pieces #}
+<div class="mp-client">{% if row.oth %}<span class="mp-tyres" data-tyres>{% for i in row.lines %}<span class="mp-oth-item" data-oth-item><span class="mp-oth-name">{{ i.name }}</span><span class="mp-sub">Кол-во: {{ i.qty }} шт.</span>{% if i.sum is not none %}<span class="mp-sub" data-oth-price>Цена: {{ i.sum|money }}</span>{% endif %}</span>{% else %}шины не указаны{% endfor %}</span>
+{% else %}<span class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}шины не указаны{% endfor %}</span>{% endif %}{% if not row.oth %}<span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% endif %}{% if row.sale is not none %}<span class="mp-sub mp-sum" data-point-sum>Итого <b>{{ row.sale|money }}</b></span>{% endif %}</div>
 {% if hints and not row.intercity %}{% set hint = 'ask' if row.asked else ('returning' if row.ret_state == 'agree' else ('return' if row.ret_state == 'agreed' else ('signed' if row.ret_state == 'signed' else ('oth' if row.oth else ('here' if row.here else 'going'))))) %}<p class="mp-now mp-hint" data-point-hint="{{ hint }}">{{ point_hint(hint) }}</p>{% endif %}
 {% if row.intercity %}<div class="mp-ask" role="note" data-intercity="{{ c.id }}"><b>{{ intercity_hint }}</b><span class="mp-sub">{% if c.intercity.city %}{{ c.intercity.city }}{% endif %}{% if c.intercity.carrier %} · ТК {{ c.intercity.carrier }}{% endif %}{% if c.intercity.track %} · трек {{ c.intercity.track }}{% endif %}</span>
 {% for f in row.labels %}<a class="btn btn--secondary mp-btn" href="/orders/{{ c.id }}/labels/{{ f.id }}" data-label-file>Скачать этикетки{% if row.labels|length > 1 %} ({{ loop.index }}){% endif %}</a>{% else %}<span class="mp-sub">Этикеток пока нет: их загрузит офис.</span>{% endfor %}</div>{% endif %}
@@ -34,24 +53,14 @@
 <div class="mp-actions">{{ press(c, row, "reserve_issued", "Выдан", "btn--primary", "Выдать заказ № %s?"|format(row.label), who ~ " забрал заказ; он закроется.", "Выдан") }}{{ press(c, row, "reserve_here", "На точке", "btn--secondary") }}</div></div>{% endif %}
 {% if row.oth_asked %}<div class="mp-ask" role="note" data-oth-question="{{ c.id }}"><b>{{ row.oth_question }}</b><span class="mp-sub">Заказ идёт на возврат поставщику. «Выдали» — клиент забрал заказ, возврат отменится; «На точке» — шины у вас, возврат идёт дальше.</span>
 <div class="mp-actions">{{ press(c, row, "oth_issued", "Выдали", "btn--primary", "Заказ № %s выдали?"|format(row.label), "Клиент забрал заказ; он закроется.", "Выдали") }}{{ press(c, row, "oth_here", "На точке", "btn--secondary") }}</div></div>{% endif %}
-{% if row.oth %}<div class="mp-oth" data-oth-card="{{ c.id }}"><span class="mp-sub">{% if row.ret_label %}<b data-return-label>{{ row.ret_label }}</b> · {% endif %}{% if row.ret_state == "agree" %}Шины на точке, возврат согласуют с поставщиком{% elif row.ret_state == "agreed" %}Шины на точке: отдайте поставщику по акту МХ-3{% elif row.ret_state == "signed" %}Шины отданы поставщику, менеджер заполнит сумму возврата{% else %}На ОТХ с {{ c.entered_at|day }} · срока продажи нет{% endif %}</span></div>
+{% if row.oth %}{# no line «На ОТХ с … · срока продажи нет» (the owner 2026-11-09: the day is on the badge) #}{% if row.ret_label or row.ret_state in ("agree", "agreed", "signed") %}<div class="mp-oth" data-oth-card="{{ c.id }}"><span class="mp-sub">{% if row.ret_label %}<b data-return-label>{{ row.ret_label }}</b>{% if row.ret_state in ("agree", "agreed", "signed") %} · {% endif %}{% endif %}{% if row.ret_state == "agree" %}Шины на точке, возврат согласуют с поставщиком{% elif row.ret_state == "agreed" %}Шины на точке: отдайте поставщику по акту МХ-3{% elif row.ret_state == "signed" %}Шины отданы поставщику, менеджер заполнит сумму возврата{% endif %}</span></div>{% endif %}
 {% else %}<div class="mp-actions">
 {% if not row.here %}{{ press(c, row, "arrived", "Приехал", "btn--primary") }}{# «Едут»: one button (the owner 2026-10-30) #}
 {% elif row.intercity %}{{ press(c, row, "shipped", "Передал курьеру ТК", "btn--primary mp-btn--big", "Передать заказ № %s курьеру ТК?"|format(row.label), "Шины и этикетки отданы курьеру; клиенту уйдёт сообщение, заказ закроется («Выполнено»).", "Передал") }}{# no «ОТКАЗ»: no client comes #}
 {% else %}{{ press(c, row, "issued", "Выдал", "btn--primary mp-btn--big", "Выдать заказ № %s?"|format(row.label), who ~ " забирает заказ; он закроется.", "Выдал") }}{{ refuse(c, row) }}{% endif %}
 </div>{% endif %}
 {% if row.undo %}<div class="mp-actions" data-card-undo>{{ undo_btn(c, row.undo, row.label) }}</div>{% endif %}
-<details class="mp-more"><summary>Подробнее</summary>
-<div class="mp-more-body">
-{% if row.tel and not row.oth %}<div class="mp-facts"><span class="mp-sub">Телефон клиента</span> <a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a></div>{% endif %}
-<div class="mp-transfer" data-transfer>{% if c.transfer_number %}{{ c.transfer_number }} от {{ row.order_date }}{% else %}Перемещение: ещё нет · заказ от {{ row.order_date }}{% endif %}</div>
-{% if row.from_oth %}<div class="mp-sub" data-from-oth>Шины с ОТХ, заказ №{{ row.from_oth }}</div>{% endif %}
-{% if row.merged_from %}<div class="mp-sub" data-merged-from>Объединён из {{ row.merged_from }}</div>{% endif %}
-{% if row.origin %}<p class="mp-sub" data-origin>{{ row.origin.text }}: {{ row.origin.hint }}</p>{% endif %}
-{% if not row.oth %}<div class="mp-text">{{ row.text }}</div>{% endif %}{# «На ОТХ»: the client is gone (the owner 2026-10-30) #}
-{% if not row.here and not row.oth %}<dl class="mp-facts"><div><dt>Перемещение</dt><dd>{{ c.transfer_number or "номер ещё не вписан" }}</dd></div>{% if row.delivery or c.delivery_time %}<div><dt>Доставка</dt><dd>{{ row.delivery }}{% if row.delivery and c.delivery_time %}, {% endif %}{{ c.delivery_time }}</dd></div>{% endif %}</dl>{% endif %}
-{% if row.until %}<div class="mp-until{% if row.late %} mp-until--late{% endif %}">Хранение до {{ row.until }}{% if row.late %} — срок прошёл{% endif %}</div>{% endif %}
-</div></details>
+{{ more(c, row) }}
 </article>
 {% endmacro %}
 {# «Выдано» (the owner 2026-11-09): the order closed by a hand-out, its moment and who marked it; no money, nothing of WebMIM but its number #}
@@ -102,11 +111,11 @@
 <nav class="mp-tabs" aria-label="Заказы точки">{% for key, name in tabs.items() %}<a class="mp-tab{% if key == tab %} is-active{% endif %}{% if hot.get(key) %} mp-tab--hot{% endif %}" href="/my-point?tab={{ key }}{{ pq }}" data-tab="{{ key }}"{% if key == tab %} aria-current="page"{% endif %}><span>{{ name }}</span><b data-tab-count="{{ key }}">{{ counts[key] }}</b></a>{% endfor %}</nav>
 <div class="mp-list">
 {% if tab == "return" %}{% set waiting = cards|rejectattr("returning")|list %}{% if not returns and not waiting %}<p class="mp-empty">Возвратов поставщику сейчас нет.</p>{% endif %}{# the agreed returns are the plaque above #}
-{% if waiting %}<section class="mp-block" aria-labelledby="mp-agree-h"><h2 id="mp-agree-h">Ждут согласования возврата <span class="mp-count">{{ waiting|length }}</span></h2>{% for row in waiting %}{{ card(row) }}{% endfor %}</section>{% endif %}
-{% elif tab == "issued" %}<section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">Выдано за 30 дней{% if issued %} <span class="mp-count">{{ issued|length }}</span>{% endif %}</h2>
+{% if waiting %}<section class="mp-block" aria-labelledby="mp-agree-h"><h2 id="mp-agree-h">Ждут согласования возврата</h2>{% for row in waiting %}{{ card(row) }}{% endfor %}</section>{% endif %}
+{% elif tab == "issued" %}<section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h" class="sr-only">Выдано за 30 дней</h2>
 {% for row in issued %}{{ issued_card(row) }}{% else %}<p class="mp-empty">За 30 дней выданных заказов нет.</p>{% endfor %}</section>
 {% else %}
-<section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">{{ tabs[tab] }}{% if cards %} <span class="mp-count">{{ cards|length }}</span>{% endif %}</h2>
+<section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h" class="sr-only">{{ tabs[tab] }}</h2>{# the owner 2026-11-09: the stage and its number on the tab only #}
 {% for row in cards %}{{ card(row) }}{% else %}<p class="mp-empty">Здесь сейчас нет заказов.</p>{% endfor %}</section>
 {% endif %}
 {% if choose %}{# the owner; the point has «Заказы» of its own sales on four stages (the owner 2026-10-30), our orders are here #}

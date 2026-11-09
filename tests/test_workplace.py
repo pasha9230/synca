@@ -460,8 +460,9 @@ def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tm
         assert "/my-point/%d/%s" % (order_id, "arrived" if order_id == card else "issued") in top   # the buttons: never folded («Вернули поставщику» is)
         assert "<summary>Подробнее</summary>" in more and "Кол-во 4 шт" in more
     first = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0)            # the transfer is under «Подробнее» (the prototype, 2026-10-30)
-    assert re.search(r"26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[1])
-    assert "Перемещение: ещё нет · заказ от" in re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split('<details class="mp-more"')[1]   # «ОТКАЗ» is a <details> of its own (2026-11-05)
+    assert re.search(r"Номер перемещения: 26R-1447431 от \d\d\.\d\d\.\d{4}", first.split("<details")[1])
+    bare_more = re.search(r'id="order-%d".*?</article>' % bare, page, re.S).group(0).split('<details class="mp-more"')[1]   # «ОТКАЗ» is a <details> of its own (2026-11-05)
+    assert "еремещени" not in bare_more                                                     # no number: no line (the owner 2026-11-09)
 
 
 def test_a_press_brings_back_to_the_tab_it_came_from(tmp_path):

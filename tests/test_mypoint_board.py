@@ -115,21 +115,17 @@ def test_a_question_to_a_point_in_the_panel_raises_the_order_too(tmp_path, clock
 
 
 def test_the_card_says_what_the_vk_message_says_with_the_clients_prices(tmp_path, clock):
+    """The owner 2026-11-09: «Подробнее» is no longer the VK text itself but its positions line by line (test_point_ui2), with the same
+    client's prices as the message «Менеджеру: заказ оформлен»; never the purchase."""
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
     page = mine.get("/my-point?tab=moving").get_data(as_text=True)
     text = tpl.render(conn, orders.get_card(conn, card), tpl.SAMPLES[1][2], MORNING)[0]
     assert "Цена ед. 5 000 ₽" in text and "Сумма 20 000 ₽" in text
-    shown = re.search(r'<div class="mp-text"[^>]*>(.*?)</div>', page, re.S).group(1)
-    assert shown.strip() == text.replace("+", "&#43;").strip() or shown.strip() == text.strip()
+    more = re.search(r'id="order-%d".*?</article>' % card, page, re.S).group(0).split('<details class="mp-more">')[1].replace("\u00a0", " ")
+    for line in ("Товар Nokian Hakkapeliitta 10", "Кол-во 4 шт", "Цена ед. 5 000 ₽", "Сумма 20 000 ₽"):
+        assert line in text and line in more, line                                         # the message's positions, the same prices
     assert "4 000" not in page and "закуп" not in page.lower()                                 # the purchase price is never on the page
-    template = conn.execute("SELECT id FROM order_template WHERE name = 'Менеджеру: заказ оформлен' AND audience = 'manager'").fetchone()
-    if template is None:
-        tpl.add_template(conn, "Менеджеру: заказ оформлен", "manager", "Особый текст {webmim_number} для {client_name}")
-    else:
-        tpl.update_template(conn, template[0], "Менеджеру: заказ оформлен", "manager", "Особый текст {webmim_number} для {client_name}")
-    page = mine.get("/my-point?tab=moving").get_data(as_text=True)
-    assert "Особый текст 5000100 для Татьяна" in page                                      # the owner's edit of the template is on the page
     assert 'href="tel:+79001112233"' in page and "едет на точку" in page
 
 
