@@ -84,3 +84,17 @@ def test_the_check_takes_the_tag_off_in_the_journal_as_the_wait_list(tmp_path):
     order_wait.check(conn, gone(), T2)
     authors = [r[0] for r in conn.execute("SELECT author FROM order_event WHERE order_id = ? AND at = ?", (card_id, T2))]
     assert authors and set(authors) == {order_wait.AUTHOR}
+
+
+def test_a_tag_that_could_not_come_back_is_tried_again_at_the_next_check(tmp_path):
+    conn = db(tmp_path)
+    card_id = waiting(conn, WANT)
+    order_wait.check(conn, [tire()], T1)
+    order_wait.check(conn, gone(), T2)
+    full = ["т%d" % i for i in range(10)]
+    orders.update_card(conn, card_id, {"tags": ",".join(full)}, T2, "worker2")                 # ten tags: no room
+    order_wait.check(conn, [tire()], T3)
+    assert tags(conn, card_id) == full
+    orders.update_card(conn, card_id, {"tags": ""}, T3, "worker2")
+    order_wait.check(conn, [tire()], T4)
+    assert tags(conn, card_id) == ["Появилось"]

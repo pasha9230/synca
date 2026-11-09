@@ -244,12 +244,12 @@ def _tag_now(conn, card_id, stay: str, kind: Optional[str], now: str) -> None:
         tags = [t for t in card["tags"] if t not in (TAG_EXACT, TAG_ANALOG)]
         if tags != card["tags"]:
             orders.update_card(conn, card_id, {"tags": ",".join(tags)}, now, AUTHOR, commit=False)
-            store.set_state(conn, key, "1")
-            conn.commit()
+            store.set_state(conn, key, "1")                        # commits the tags with it
     elif store.get_state(conn, key):
-        conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
-        conn.commit()
         _tag(conn, card_id, card, kind, now)
+        if any(t in (TAG_EXACT, TAG_ANALOG) for t in orders.get_card(conn, card_id)["tags"]):     # not given (ten tags): the next check tries again
+            conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+            conn.commit()
 
 
 def _mark(conn, card_id, kind: str, found: List, now: str, notify=None, note: str = "", title: str = "") -> None:
@@ -779,7 +779,7 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
         results = [_line_result(line, stock) for line in lines]
         covered = bool(lines) and all(r is not None for r in results)
         kind = ("exact" if all(r[0] == "exact" for r in results) else "analogs") if covered else ""
-        if stock or covered:                                       # no stock at all is a failed unload, not «шин нет»: the tags stay
+        if stock:                                                  # no stock at all is a failed unload, not «шин нет»: the tags stay
             try:
                 _tag_now(conn, card_id, stay, {"exact": "exact", "analogs": "analog"}.get(kind), now)
             except Exception:                                      # a tag that cannot change never stops the check

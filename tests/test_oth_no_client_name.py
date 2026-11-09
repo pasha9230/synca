@@ -65,7 +65,9 @@ def test_the_notifications_and_the_tasks_show_no_client(tmp_path):
     oth, talk = card(conn, "oth"), card(conn, "talk")
     rows = with_orders(conn, [{"order_id": oth}, {"order_id": talk}])
     assert [r["order"]["client"] for r in rows] == ["", NAME]
-    assert inquiry._who_called(conn, {"client_id": None, "order_id": oth, "chat_row": None}) == ("", "")
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, peer_name) VALUES (1, 'c1', ?)", (NAME,))
+    chat = conn.execute("SELECT id FROM avito_chat").fetchone()[0]
+    assert inquiry._who_called(conn, {"client_id": None, "order_id": oth, "chat_row": chat}) == ("", PHONE[:-1] + "1")     # the phone stays: the task
     assert inquiry._who_called(conn, {"client_id": None, "order_id": talk, "chat_row": None}) == (NAME, PHONE[:-1] + "2")
 
 
@@ -81,3 +83,11 @@ def test_the_main_page_writes_the_number_without_the_name(tmp_path):
     login(client)
     page = client.get("/").get_data(as_text=True)
     assert "Заказ №%d</div>" % oth in page and NAME not in page
+
+
+def test_the_list_of_orders_has_no_name_on_the_return_either(tmp_path):
+    from tires_sync import orders_list
+    conn = db(tmp_path)
+    ids = [card(conn, "oth"), card(conn, "return_given"), card(conn, "return", True), card(conn, "talk")]
+    names = [r["values"]["Имя"] for r in orders_list.rows(conn, ids, money=True)]
+    assert names == ["", "", "", NAME]
