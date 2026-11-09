@@ -3,7 +3,7 @@ partner) — the owner's login of the alerts and the active users of the role «
 it on; once a day after 9:00 Moscow time from the hourly tick (`orders-tick`). Today it is a row of their bell for a day (_to_bell,
 critical.note_once); while Telegram takes not only critical news (critical.telegram_allowed) it goes to their Telegram instead: the owner's chat
 of the failure alerts and the saved chats of the other owners. The day is marked before sending so it never goes twice. The figures are those of
-the day dashboard (`analytics.day_numbers`); nothing is sent to a client."""
+the day dashboard (`analytics.day_numbers`; «ждут ответа» is the panel's one, chats.waiting_total); nothing is sent to a client."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -40,7 +40,7 @@ def text(conn, now: datetime) -> str:
              "Заказы: в работе %d, просрочено %d, новых сегодня %d." % (day["orders_open"], day["orders_overdue"], day["orders_new_today"]),
              "Вчера: выручка %s, прибыль %s." % (_rub(money_y["revenue"]), _rub(money_y["profit"])),
              "За 7 дней по вчера: выручка %s, прибыль %s." % (_rub(week["revenue"]), _rub(week["profit"])),
-             "Чаты: непрочитанных %d, ждут ответа %d." % (day["chats_unread"], len(day["waiting"]))]
+             "Чаты: непрочитанных %d, ждут ответа %d." % (day["chats_unread"], day["chats_waiting"])]    # «Ждут ответа» as the menu (п. 7)
     return "\n".join(lines)
 
 

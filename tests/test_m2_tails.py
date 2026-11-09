@@ -238,9 +238,12 @@ def test_a_green_alert_older_than_seven_days_is_not_shown_but_stays_in_the_journ
     orders.add_event(conn, cid, "2026-10-13T12:01:00", "система", "sale", "Продажа проведена (неделя без минуты)", level="green")
     orders.add_event(conn, cid, "2026-10-01T10:00:00", "система", "reserve", "Оповещение о конце резерва (старое)", level="yellow")
     conn.commit()
-    texts = [i["text"] for i in client.get("/alerts/feed").get_json()["items"]]
+    from tires_sync import order_alerts
+    texts = [r["text"] for r in order_alerts.page_rows(conn, "owner", "2026-10-20T12:00:00")]   # the source of the bell and of the dots
     assert "Продажа проведена (старое)" not in texts and "Продажа проведена (неделя без минуты)" in texts
     assert "Оповещение о конце резерва (старое)" in texts                                    # only green ones expire
+    feed = [i["text"] for i in client.get("/alerts/feed").get_json()["items"]]              # the office's bell: no green at all (п. 31)
+    assert feed == ["Оповещение о конце резерва (старое)"]
     assert "Продажа проведена (старое)" not in client.get("/alerts").get_data(as_text=True)
     assert "Продажа проведена (старое)" in [e["text"] for e in orders.list_events(conn, cid)]  # the journal keeps it
 

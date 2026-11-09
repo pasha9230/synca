@@ -85,8 +85,10 @@ def test_the_office_sees_what_it_saw_and_the_journal_keeps_everything(tmp_path, 
     app, owner, conn, pid, cid = world(tmp_path)
     owner.get("/alerts")                                                            # the flash messages of the setup are shown once
     before = owner.get("/alerts").get_data(as_text=True)
-    assert "Резерв кончается завтра" in before and "Задача не подготовлена: нет шаблона" in before
-    assert "Позиция не определена: нет кода" in before
+    texts = [r["text"] for r in alerts.page_rows(conn, "owner")]                     # the source of the office's rows: all its records
+    assert "Резерв кончается завтра" in texts and "Задача не подготовлена: нет шаблона" in texts
+    assert "Позиция не определена: нет кода" in texts
+    assert before.count('href="/orders/%d"' % cid) == 1 and "ещё " in before        # one row of the order, its first texts (п. 31)
     count = bell(owner)["count"]
     manager(app, conn, pid).get("/alerts/feed")                                     # the point looked: nothing of the office's changes
     assert owner.get("/alerts").get_data(as_text=True) == before and bell(owner)["count"] == count

@@ -64,16 +64,18 @@ def test_the_page_lists_coloured_alerts_and_the_menu_counts_them(tmp_path):
     cid = card(conn, "Ольга")                                  # «Заказ создан» is green, but no row (a stage: order_alerts.bell_row)
     event(conn, cid, "notify", "Оповещение не отправлено: у точки нет ВК")
     event(conn, cid, "reserve", "Оповещение о конце резерва")
-    event(conn, cid, "sale", "Продажа проведена: 5 000 ₽")                     # green
+    event(conn, cid, "sale", "Продажа проведена: 5 000 ₽")                     # green: no action needed, no row (п. 31, 2026-11-08)
     event(conn, cid, "notify", "Оповещение отправлено: Telegram")        # grey: never an alert
+    other = card(conn, "Пётр")
+    event(conn, other, "reserve", "Резерв кончается")
     html = client.get("/alerts").get_data(as_text=True)
-    assert "Оповещение не отправлено" in html and "Оповещение о конце резерва" in html and "Продажа проведена" in html
+    assert "Оповещение не отправлено: у точки нет ВК · Оповещение о конце резерва" in html and "Продажа проведена" not in html
     assert "Заказ создан" not in html
     assert "Оповещение отправлено: Telegram" not in html
     assert 'href="/orders/%d"' % cid in html and "Ольга" in html
-    assert "badge--err" in html and "badge--warn" in html and "badge--ok" in html
+    assert "badge--err" in html and "badge--warn" in html and "badge--ok" not in html
     assert html.count("Разобрался</button>") == 1
-    assert counter(client.get("/").get_data(as_text=True)) == (3, True)
+    assert counter(client.get("/").get_data(as_text=True)) == (2, True)             # one row per order
 
 
 def test_an_empty_page_and_no_counter(tmp_path):
@@ -91,8 +93,9 @@ def test_opening_the_order_puts_out_all_but_red(tmp_path):
     left = alerts.open_alerts(conn, "owner")
     assert [e["level"] for e in left] == ["red"]
     assert counter(client.get("/").get_data(as_text=True)) == (1, True)
-    event(conn, cid, "reserve", "Резерв снова кончается")                # a record after the visit is a new alert
-    assert counter(client.get("/").get_data(as_text=True)) == (2, True)
+    event(conn, cid, "reserve", "Резерв снова кончается")                # a record after the visit is a new alert: in the order's row
+    assert counter(client.get("/").get_data(as_text=True)) == (1, True)
+    assert "Оповещение не отправлено: нет ВК · Резерв снова кончается" in client.get("/alerts").get_data(as_text=True)
 
 
 def test_ack_closes_a_red_alert_for_this_user_only(tmp_path):
@@ -161,7 +164,7 @@ def test_the_users_own_records_are_not_alerts_for_them_except_red(tmp_path):
     html = worker2.get("/alerts").get_data(as_text=True)                        # somebody else's records are alerts
     assert "Резерв кончается" in html and "сбой" in html                       # a chat and a stage are no rows (2026-11-05)
     assert "Отправлен ответ клиенту" not in html and "Заказ создан" not in html
-    assert counter(worker2.get("/").get_data(as_text=True)) == (2, True)
+    assert counter(worker2.get("/").get_data(as_text=True)) == (1, True)             # one row per order (п. 31)
 
 
 def test_a_broken_counter_does_not_break_the_pages(tmp_path, monkeypatch):

@@ -47,7 +47,8 @@ def register(app) -> None:
         login = current_user()["login"]
         extra = []
         try:
-            reds = order_alerts.counts(conn, login).get("red", 0)
+            from .routes_alerts import grouped                            # the red ROWS of «Уведомления» (one per order, п. 31): as the page
+            reds = sum(1 for r in grouped(conn, login) if r["level"] == "red")
         except Exception:                                                 # a broken counter never breaks the page (as the menu's nav_counts)
             reds = 0
         if reds and can("alerts"):

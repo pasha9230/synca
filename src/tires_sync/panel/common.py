@@ -260,7 +260,7 @@ for _section, _endpoints in {
     "chats": ("chats_page", "chat_assign", "chat_items_add", "chat_create_deal", "chat_delete", "chat_link", "chat_send", "chat_send_image", "chat_stage", "chat_status",
               "chat_unlink", "chat_wait", "chat_handoff", "chat_take", "chats_merge", "chats_refresh", "share_create", "share_list", "share_price", "share_revoke",
               "share_created", "share_new"),
-    "alerts": ("alerts_page", "alerts_ack", "alerts_purchase_ack", "alerts_critical_ack", "alerts_feed", "alerts_go", "alerts_take", "alerts_accept_all"),
+    "alerts": ("alerts_page", "alerts_ack", "alerts_order_ack", "alerts_purchase_ack", "alerts_critical_ack", "alerts_feed", "alerts_go", "alerts_take", "alerts_accept_all"),
     "calls": ("calls_page", "call_record", "call_create_order", "call_handoff"),
     "clients": ("clients_page", "client_page", "client_save", "client_merge", "client_split_order", "client_split_chat",
                 "clients_duplicates", "client_tag", "client_unmerge", "client_skip"),
@@ -271,7 +271,7 @@ for _section, _endpoints in {
                 "history_ads", "history_catalog", "photos_feed", "photos_frame_action", "photos_generate", "photos_priority", "photos_queue_switch", "photos_ref", "photos_review", "photos_switch"),
     "analytics": ("economics_page", "economics_brand", "economics_params", "economics_sales", "economics_sale_add", "economics_sales_export",
                   "economics_sale_new", "economics_sale_reverse", "economics_terms", "economics_apply_pricing", "economics_terms_delete",
-                  "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report",
+                  "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report", "orders_settings_money",
                   "orders_report_export"),
     "setup": ("draft", "draft_cancel", "draft_confirm", "catalog_review", "publish_result", "summary_toggle",      # a draft shows the markups: the owner's
               "settings_page", "settings_notify_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_pending", "settings_exclusions_page", "settings_pricing",

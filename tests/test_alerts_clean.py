@@ -28,6 +28,7 @@ HIDDEN = [
     ("created", "Заказ создан вручную", ""),
     ("restored", "Заказ восстановлен из удалённых", ""),
     ("field", "Резерв: товар на точке до 20.10", ""),                               # green
+    ("sale", "Продажа проведена: 20 000 ₽", ""),                                    # green: no action needed (п. 31 of the audit, 2026-11-08)
 ]
 
 KEPT = [
@@ -40,7 +41,6 @@ KEPT = [
     ("notify", "Оповещение не отправлено: у точки нет ВК", "", "red"),
     ("refused", "Перевод не выполнен: нет телефона клиента", "", "red"),
     ("rule", "Задача не подготовлена: нет шаблона", "", "red"),
-    ("sale", "Продажа проведена: 20 000 ₽", "", "green"),
     ("sale", "Продажа сторнирована: 20 000 ₽", "", "yellow"),
     ("field", "Шины с ОТХ взяты не полностью (нет остатка): проверьте заказ", "red", "red"),
 ]
@@ -105,11 +105,12 @@ def test_the_counter_counts_what_is_left_and_old_records_are_as_they_were(tmp_pa
     assert len(opened) == len(HIDDEN) + 2 + 3                                     # the data: every record is still an open alert
     before = state(conn)
     data = bell(client)
-    assert data["count"] == 3 and data["red"] is True and sorted(i["id"] for i in data["items"]) == sorted([red, yellow, failed])
-    assert counter(client.get("/").get_data(as_text=True)) == (3, True)
-    assert page(client).count("<tr>") == 1 + 3
+    assert data["count"] == 2 and data["red"] is True and sorted(i["id"] for i in data["items"]) == sorted([yellow, failed])  # a row per order (п. 31)
+    assert counter(client.get("/").get_data(as_text=True)) == (2, True)
+    assert page(client).count("<tr>") == 1 + 2
     assert state(conn) == before and alerts.open_alerts(conn, "owner") == opened
-    assert alerts.counts(conn, "owner")["red"] == 2                              # the red of the day dashboard: as before
+    assert alerts.counts(conn, "owner")["red"] == 2                              # the records: as before
+    assert "Красные уведомления: 2" in client.get("/").get_data(as_text=True)      # the day dashboard: the red rows of the page
     client.get("/orders/%d" % other)                                             # the yellow of the order is seen as before
     assert bell(client)["count"] == 2
 
