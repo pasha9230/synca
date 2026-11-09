@@ -10,7 +10,7 @@ from panel_helpers import login, make_app
 from tires_sync import order_report, store, users
 
 NOW = "2026-10-20T09:00:00"
-PASSWORD = "Long-test-pass-2026"
+PASSWORD = "длинный-пароль-1"
 
 
 def _as(app, conn, role):
