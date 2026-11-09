@@ -7,7 +7,7 @@
 <div class="row" style="gap:12px;flex-wrap:wrap"><div class="input-icon" style="width:280px">{{ icon("search") }}<input class="input" type="search" placeholder="Найти бренд" data-brand-filter="brands-{{ supplier.id }}" aria-label="Найти бренд" autocomplete="off"></div>
 <span class="small muted">Отмечено для исключения: <b data-brand-count="brands-{{ supplier.id }}">{{ ex.brand_rows|selectattr("excluded")|list|length }}</b> из {{ ex.brand_rows|length }}</span>
 <button class="btn btn--primary ml-auto">В черновик</button></div>
-<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px;max-height:460px"><table class="table table--plain" id="brands-{{ supplier.id }}">
+<div class="table-wrap" style="border:1px solid var(--gray-200);border-radius:8px"><table class="table table--plain" id="brands-{{ supplier.id }}">
 <thead><tr><th style="width:48px"><span class="sr-only">Исключить</span></th><th>Бренд</th><th class="num">Позиций</th><th class="num">Остаток, шт.</th><th></th></tr></thead>
 <tbody>{% for b in ex.brand_rows %}<tr data-name="{{ b.label|lower }}"><td><input type="checkbox" name="excluded" value="{{ b.label }}"{% if b.excluded %} checked{% endif %} aria-label="Исключить {{ b.label }}"><input type="hidden" name="listed" value="{{ b.label }}"></td>
 <td class="strong">{{ b.label }}</td><td class="num">{{ b.count }}</td><td class="num">{{ b.stock }}</td>

@@ -177,10 +177,8 @@
   body:is(.pt-chats-page,.pt-card-page) .msgs:not(:has(*)){display:none}
   body.pt-chats-page .chats-layout,body.pt-chats-page .chats-layout.is-deal-folded{grid-template-columns:minmax(0,1fr);grid-template-areas:"list" "main" "deal";gap:12px}
   body.pt-chats-page:not(.is-chat-open) .chats-main,body.pt-chats-page:not(.is-chat-open) .chats-layout .chats-deal{display:none}
-  /* the list scrolls in itself (app.js keeps its place per filter); with a chat open it is hidden but keeps its size, so its place survives */
-  body.pt-chats-page .chats-layout{position:relative}
-  body.pt-chats-page .chats-list{max-height:calc(100dvh - 190px)}
-  body.pt-chats-page.is-chat-open .chats-list{visibility:hidden;position:absolute;left:0;right:0;top:0;pointer-events:none}
+  /* the list has no height of its own (the page scrolls); with a chat open it is out of the way */
+  body.pt-chats-page.is-chat-open .chats-list{display:none}
   body.pt-chats-page .chat-row{padding:12px}
   body.pt-chats-page .chats-search .input{height:40px;font-size:16px}
   body.pt-chats-page.is-chat-open .chats-layout.is-deal-folded .chats-deal{display:block}
@@ -194,7 +192,7 @@
   body.pt-chats-page :is(.chat-assign,.chat-stage) .select{flex:1 1 auto;max-width:none;height:44px;font-size:16px}
   body.pt-chats-page .chat-head .btn{min-height:40px}
   body.pt-chats-page .chat-product{padding:8px 12px}
-  body.pt-chats-page .chat-thread{padding:12px;max-height:max(260px,calc(100dvh - 330px))}
+  body.pt-chats-page .chat-thread{padding:12px}
   body.pt-chats-page .msg{max-width:88%}
   body.pt-chats-page .chat-composer{padding:10px 12px 12px}
   body.pt-chats-page .chat-send .textarea{font-size:16px}

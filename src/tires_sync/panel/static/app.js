@@ -612,6 +612,32 @@
     }
     trigger.addEventListener("change", sync); action.addEventListener("change", sync); sync();
   });
+  // «Чаты»: the thread has no scroll of its own (owner's word 2026-11-09: only the page scrolls), so the page opens at the last message
+  function chatScroller(el) {                         // the box that scrolls the page: .main of the panel, else the document
+    for (var n = el.parentElement; n; n = n.parentElement) {
+      var y = getComputedStyle(n).overflowY;
+      if ((y === "auto" || y === "scroll") && n.scrollHeight > n.clientHeight) return n;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+  function chatBottom(box) {                          // where the screen ends for the thread: above a reply field stuck to the bottom
+    var comp = document.querySelector(".chat-composer"), view = box === document.scrollingElement || box === document.documentElement ? window.innerHeight : box.getBoundingClientRect().bottom;
+    if (comp && getComputedStyle(comp).position === "sticky") view -= comp.getBoundingClientRect().height;
+    return view;
+  }
+  function chatAtEnd(thread) {
+    var last = thread.lastElementChild;
+    return !last || last.getBoundingClientRect().bottom <= chatBottom(chatScroller(thread)) + 40;
+  }
+  function chatToEnd() {
+    var thread = document.querySelector(".chat-thread"), last = thread && thread.lastElementChild;
+    if (!last) return;
+    var box = chatScroller(thread), comp = document.querySelector(".chat-composer");
+    var end = comp && getComputedStyle(comp).position !== "sticky" ? comp : last;   // the old view: the reply field under the thread in sight too
+    var over = end.getBoundingClientRect().bottom - chatBottom(box);
+    if (over > 0) box.scrollTop += over + 8;
+  }
+  if (document.querySelector(".chat-thread") && !window.location.hash) chatToEnd();
   (function () {                                    // «Чаты»: the list keeps its place (owner's word 2026-10-24: a chat picked low in the list, a reload, and the list was at the top again)
     var list = document.querySelector(".chats-list"), live = document.getElementById("chats-live");
     if (!list || !live) return;
@@ -718,9 +744,9 @@
       if (note) note.hidden = hrefs(document).join("|") === hrefs(doc).join("|");
       var thread = document.querySelector(".chat-thread"), fresh = doc.querySelector(".chat-thread");
       if (thread && fresh && thread.innerHTML !== fresh.innerHTML) {
-        var atEnd = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40, top = thread.scrollTop;
+        var atEnd = chatAtEnd(thread);              // the page scrolls, not the thread: a person at the last message sees the new one too
         thread.innerHTML = fresh.innerHTML;
-        thread.scrollTop = atEnd ? thread.scrollHeight : top;
+        if (atEnd) chatToEnd();
       }
       var held = false;
       [".chats-main .card-head", ".o2-order-line", ".chats-deal"].forEach(function (sel) {      // the head and the deal block follow too, unless a hand is in them
