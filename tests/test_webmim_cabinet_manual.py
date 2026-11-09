@@ -134,9 +134,36 @@ def test_a_transfer_number_typed_by_a_person_is_never_overwritten(tmp_path):
 def test_the_sums_differ_the_number_is_written_and_nothing_is_sent_but_a_yellow_record(tmp_path):
     conn, mine = manual(tmp_path)
     (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5001, total=30000)]))
-    assert result == "written" and lines == [] and orders.get_card(conn, mine)["transfer_number"] == INVOICE
+    differs = webmim_cabinet.SUM_DIFFERS % ("30000", "24000", INVOICE)
+    assert result == "written" and lines == [differs] and orders.get_card(conn, mine)["transfer_number"] == INVOICE
     assert not deliver.sent and not vk.sent
-    assert (webmim_cabinet.SUM_DIFFERS % ("30000", "24000", INVOICE), "yellow") in events(conn, mine)
+    assert (differs, "yellow") in events(conn, mine)
+
+
+def test_no_sum_in_the_cabinet_the_number_is_written_and_nothing_is_sent(tmp_path):
+    conn, mine = manual(tmp_path)
+    (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5001, total=None)]))
+    assert result == "written" and lines == [webmim_cabinet.NO_SUM % INVOICE] and not deliver.sent and not vk.sent
+    assert (webmim_cabinet.NO_SUM % INVOICE, "yellow") in events(conn, mine)
+
+
+def test_an_order_that_left_its_stay_of_the_stage_never_hears_placed_late(tmp_path):
+    conn, mine = manual(tmp_path)
+    back = next(s["id"] for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] not in ("placed",)
+                and s["id"] != orders.get_card(conn, mine)["stage_id"])
+    assert orders.move_card(conn, mine, back, NOW, "owner")
+    (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5001)]))
+    assert result == "written" and orders.get_card(conn, mine)["transfer_number"] == INVOICE
+    assert lines == [] and not deliver.sent and not vk.sent
+
+
+def test_a_number_typed_with_more_than_digits_is_never_read(tmp_path):
+    conn, mine = manual(tmp_path, number="5001/2")
+    cabinet = Cabinet([row(50012)])
+    assert save(conn, mine, cabinet)[0] == ("no-number", []) and not cabinet.calls
+    orders.update_card(conn, mine, {"webmim_number": "№ 5001"}, NOW, "owner")
+    cabinet.rows = [row(5001)]
+    assert save(conn, mine, cabinet, now="2026-10-23T12:10:00")[0][0] == "written"
 
 
 @pytest.mark.parametrize("cabinet, words", [
@@ -152,7 +179,7 @@ def test_mim_down_is_a_grey_record_once_and_nothing_changes(tmp_path, cabinet, w
     grey = [text for text, level in events(conn, mine) if level == "grey" and words in text]
     assert len(grey) == 1 and "почасового чтения" in grey[0]
     assert not deliver.sent and not vk.sent and {t["status"] for t in message_tasks(conn, mine)} == {"error"}
-    assert cabinet.logouts == logins(cabinet) - (0 if cabinet.login is None else logins(cabinet))     # every session made is closed
+    assert cabinet.logouts == (logins(cabinet) if cabinet.login is None else 0)          # every session made is closed, none else
     assert "pw-SECRET-1" not in str(events(conn, mine)) and "AUTH-SECRET" not in str(events(conn, mine))
 
 
@@ -179,7 +206,8 @@ def test_two_saves_within_the_gap_ask_the_cabinet_once(tmp_path):
     cabinet = Cabinet([])
     assert save(conn, mine, cabinet, now="2026-10-23T12:05:00")[0] == ("wait", [])
     assert save(conn, other, cabinet, now="2026-10-23T12:05:02")[0] == ("busy", [])       # sessions are limited: the hourly reading
-    assert logins(cabinet) == 1 and (webmim_cabinet.LATER % "5002", "grey") in events(conn, other)
+    assert logins(cabinet) == 1 and (webmim_cabinet.BUSY, "grey") in events(conn, other)
+    assert (webmim_cabinet.LATER % "5002", "grey") not in events(conn, other)
 
 
 def test_the_test_server_does_nothing(tmp_path):

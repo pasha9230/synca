@@ -126,6 +126,8 @@ def write(conn, card_id: int, seen: dict, now: str) -> str:
     return result
 
 
+NO_SUM = ("Сумма заказа в кабинете MIM не указана: номер перемещения %s вписан, сообщения «заказ оформлен» сами не отправлены — сверьте "
+          "заказ и отправьте их в окне «Сообщения по заказу».")
 SUM_DIFFERS = ("Сумма заказа в кабинете MIM (%s ₽) не сходится с закупкой заказа (%s ₽): номер перемещения %s вписан, сообщения «заказ "
                "оформлен» сами не отправлены — сверьте и отправьте их в окне «Сообщения по заказу».")
 
@@ -142,10 +144,12 @@ def take(conn, card_id: int, seen: dict, now: str, send: Optional[Send]) -> Tupl
     result = write(conn, card_id, seen, now)
     lines: List[str] = []
     if result == "written" and send is not None:
-        if sum_differs(conn, card_id, seen):
-            orders.add_event(conn, card_id, now, AUTHOR, "webmim", SUM_DIFFERS % (_money(seen["sum"]), _money(purchase(conn, card_id)),
-                                                                                  seen["invoice"]), "yellow")
+        if seen.get("sum") is None or sum_differs(conn, card_id, seen):    # no sum to check the row by: never a reason to tell the client
+            text = (NO_SUM % seen["invoice"] if seen.get("sum") is None else
+                    SUM_DIFFERS % (_money(seen["sum"]), _money(purchase(conn, card_id)), seen["invoice"]))
+            orders.add_event(conn, card_id, now, AUTHOR, "webmim", text, "yellow")
             conn.commit()
+            lines = [text]                                                   # shown to the person who saved it (never counted as sent)
         else:
             lines = send(card_id)
     return result, lines
@@ -200,27 +204,39 @@ def later(conn, card_id: int, number: str, now: str) -> None:
     conn.commit()
 
 
+BUSY = "Кабинет MIM только что спрашивали по другому заказу: номер перемещения возьмём при почасовой проверке (или впишите сами)."
+
+
+def busy(conn, card_id: int, now: str) -> None:
+    """A grey record, once: the cabinet was not asked (the GAP of the window). Commits."""
+    if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND author = ? AND text = ?", (card_id, AUTHOR, BUSY)).fetchone() is None:
+        orders.add_event(conn, card_id, now, AUTHOR, "webmim", BUSY, "grey")
+    conn.commit()
+
+
 def after_save(conn, card_id: int, client_of: Callable[[], object], now: str, send: Optional[Send]) -> Tuple[str, List[str]]:
     """A WebMIM number has just been typed into the order window by a person (the partner places the order by hand in the cabinet): when
     the order is one the hourly reading would ask for (_targets: open, no transfer number, not of the test server, its number its own), one
     quick read of the cabinet's list right in that save (a new client of `client_of()`, its quick login, its logout), and take() of what is
-    found: the number written, the messages that waited for it sent once. Not there yet, no invoice yet: a grey record once, the hourly
-    reading takes it; a failure: a grey record once (note). The window's GAP holds here too (sessions are limited): within it, the hourly
-    reading. (what became of it, the lines of the send)."""
+    found: the number written, the messages that waited for it sent once. Only a number typed as WebMIM's digits (a «№» and spaces
+    around them at most: «5001/2» is never read as 50012). Not there yet, no invoice yet: a grey record once, the hourly reading takes it;
+    a failure: a grey record once (note). The window's GAP holds here too (sessions are limited): within it, a grey record of its own
+    and the hourly reading. (what became of it, the lines of the send)."""
     from . import webmim_match
     if not enabled(conn):
         return "off", []
-    number = webmim_match.digits(orders._row(conn, card_id)["webmim_number"])
+    typed = str(orders._row(conn, card_id)["webmim_number"] or "").strip().lstrip("№").strip()
+    number = _number(typed)
     if not number:
         return "no-number", []
-    if _targets(conn, SERVER).get(number) != card_id:
+    if _targets(conn, SERVER).get(webmim_match.digits(typed)) != card_id:
         return "off", []
-    if _turn(conn, card_id, now) is not None:
-        later(conn, card_id, number, now)
-        return "busy", []
     client = client_of()
     if client is None:
         return "off", []
+    if _turn(conn, card_id, now) is not None:                           # no login made yet: nothing to close
+        busy(conn, card_id, now)
+        return "busy", []
     try:
         with client:
             row = _find(client, number, quick=True)

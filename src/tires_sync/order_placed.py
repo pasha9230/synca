@@ -208,7 +208,8 @@ def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver
     """The transfer number has just come by itself (webmim_cabinet.take, its one write): the messages «заказ оформлен» to the client and the
     point that waited for it (a task in «error» lacking the transfer number) go now, the very way on_placed sends them (_use_earlier: the
     text as the card is now, the task's claim, the send mark). A message sent, being sent, skipped by a person, waiting for a chat, or not
-    made at all is left as it is: nothing new is made here, so nothing goes twice. Never raises."""
+    made at all is left as it is: nothing new is made here, so nothing goes twice. A task of a rule of a stage goes only while the order is
+    still in that very stay of its stage (the review 2026-11-09: an order moved on or back since never hears «оформлен» late). Never raises."""
     from . import order_intercity, order_merge
     try:
         if order_merge.told_placed(conn, card_id):
@@ -221,10 +222,14 @@ def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver
     lacking = templates.VARIABLES["transfer_number"]
     waiting = []                                   # both found first: the first send brings every task of the card up to date
     try:
+        card = orders._row(conn, card_id)
         for who, send in whom:
             row = conn.execute("SELECT id FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1",
                                (who["template"], who["audience"])).fetchone()
             task = _earlier(conn, card_id, row[0], who.get("undone", "")) if row else None
+            if task is not None and task["rule_id"] != who.get("rule", RULE) and (
+                    task["stage_id"] != card["stage_id"] or task["entered_at"] != card["entered_at"]):
+                continue                                                  # made by a stage the order has left since: a person decides
             if task is not None and task["status"] == "error" and lacking in str(task["result"]):
                 waiting.append((who, send, task))
     except Exception:                                                     # noqa: BLE001
