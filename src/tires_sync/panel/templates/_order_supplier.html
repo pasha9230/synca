@@ -2,6 +2,22 @@
    one, «проверяется…» → ✓ / ✗), then «Заказать в МИМ» (the window «Подтверждение»: what goes to WebMIM, webmim_create.fields; «Подтвердить»
    posts the fingerprint of what it showed) or «Заказать в 4 Точки» (the text for the cabinet of 4 Точки and «Оформил вручную»).
    For the right «supplier» only, never for a point. #}
+{% if mim_window %}{# «Сверка с кабинетом MIM» right after «Оформить в WebMIM» (the owner 2026-11-09): the window stays; app.js asks
+   /orders/<id>/webmim/cabinet (webmim_cabinet.poll) every few seconds for about a minute #}
+<div class="modal-backdrop send-window is-open" id="mim-cabinet-window" role="dialog" aria-modal="true" aria-labelledby="mim-cabinet-h"><div class="modal">
+<div class="modal-head"><h3 id="mim-cabinet-h">Подтверждение заказа в МИМ · №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
+<div class="modal-body stack" data-mim-cabinet="/orders/{{ c.id }}/webmim/cabinet" data-csrf="{{ csrf_token() }}">
+<p class="small">Заказ оформлен в WebMIM. Номер перемещения берём из кабинета MIM («№ Счета»): как только он есть, сообщения «заказ оформлен», которые его ждут, уйдут сами.</p>
+<b>Сверка с кабинетом MIM</b>
+<p class="small" data-mim-state role="status" aria-live="polite">проверяю…</p>
+<dl class="supplier-fields" data-mim-fields hidden>
+<dt>№ заказа</dt><dd data-mim="order_number"></dd><dt>№ Счета</dt><dd data-mim="invoice"></dd><dt>Статус</dt><dd data-mim="status"></dd>
+{% if has_right("money") %}<dt>Сумма MIM</dt><dd data-mim="sum"></dd><dt>Сумма заказа</dt><dd data-mim="purchase"></dd>{% endif %}
+<dt>Дата счёта</dt><dd data-mim="invoice_date"></dd><dt>Номер перемещения</dt><dd data-mim="transfer"></dd></dl>
+<ul class="small" data-mim-lines></ul>
+<div class="row" style="gap:var(--s-3)"><a class="small" href="/orders/{{ c.id }}?messages=1#messages">Сообщения по заказу</a><button type="button" class="btn btn--secondary btn--sm ml-auto" data-close-modal>Закрыть</button></div>
+</div></div></div>
+{% endif %}
 {% set s = supplier %}{% if s %}
 {% set b = webmim_create %}{% set mim_ready = s.supplier == "webmim" and b and b.live and b.label and b.label.startswith("Оформить") and not (b.state and b.state.state == "running") %}
 {% call entity_ui.section("Заказ поставщику", id="supplier", sub="сверка перед заказом") %}<div class="card-body stack" data-supplier>
