@@ -330,16 +330,22 @@ def test_a_gone_position_is_ticked_only_under_the_own_filter_and_never_gets_a_ma
     assert r.get_json()["ok"] is False and "ничего не записано" in r.get_json()["message"]
 
 
-def test_a_position_shown_for_viewing_only_gets_no_own_price_even_if_the_archive_knows_it(tmp_path, monkeypatch):
+def test_a_position_shown_for_viewing_only_gets_an_own_price_in_rubles_and_a_percent_of_a_known_purchase(tmp_path, monkeypatch):
+    """Владелец 09.11: «пусть работает во всех» — старая вторая выгрузка держит позицию только для просмотра, своя цена ей ставится."""
     from tires_sync.panel import routes_catalog
     app, conn, (first, _) = _gone_app(tmp_path)
     client, tok = _owner(app)
-    held = catalog_archive.gone_offer(conn, GONE)
-    monkeypatch.setattr(routes_catalog, "_held_offers", lambda *a: [(held, datetime(2026, 10, 1, 10))])     # an old second unload holds it
+    held, blind = catalog_archive.gone_offer(conn, GONE), catalog_archive.gone_offer(conn, BLIND)
+    monkeypatch.setattr(routes_catalog, "_held_offers", lambda *a: [(held, datetime(2026, 10, 1, 10)), (blind, datetime(2026, 10, 1, 10))])
+    page = client.get("/catalog/item/%s" % GONE).get_data(as_text=True).replace("\xa0", " ")
+    assert "data-own-view" in page and "data-own-gone" not in page and "от закупки 4 000 ₽" in page
     r = post(client, "/catalog/item/%s/own-price" % GONE, tok, kind="price", value="4500", a=[str(first)], action="save")
-    assert "Такой позиции нет в выгрузке" in _flash(client, r)
-    r = _draft(client, tok, [GONE], [first], base="purchase", unit="rub", side="up", value="100")
-    assert staging.summary(conn)["draft_id"] is None and "Среди выбранных нет позиций фида" in _flash(client, r)
+    assert "показана только для просмотра: цена начнёт действовать" in _flash(client, r)
+    assert _changes(conn) == {"%d:%s" % (first, GONE): {"price": 4500}}
+    r = post(client, "/catalog/item/%s/own-price" % BLIND, tok, kind="pct", value="5", a=[str(first)], action="save")
+    assert "процент не от чего считать" in _flash(client, r) and "%d:%s" % (first, BLIND) not in _changes(conn)
+    _draft(client, tok, [GONE, BLIND], [first], base="purchase", unit="rub", side="up", value="100", redo="1")
+    assert _changes(conn) == {"%d:%s" % (first, GONE): {"price": 4100}}       # закупка неизвестна — «от закупки» пропущено
 
 
 def test_from_the_purchase_counts_from_the_anchor_and_below_is_said_as_apply_asks_it(tmp_path, monkeypatch):

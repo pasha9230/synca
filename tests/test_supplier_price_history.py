@@ -8,7 +8,7 @@ import sqlite3
 
 from helpers import make_offer
 from panel_helpers import login, post
-from test_manual_prices import GONE, _flash, _gone_app, _owner
+from test_manual_prices import BLIND, GONE, _flash, _gone_app, _owner
 from test_oth_feed import ads_of, public, run
 from test_panel_stale_ux import app_of, stale_setup
 from test_roles import person
@@ -106,7 +106,8 @@ def test_a_card_without_changes_says_since_when_it_is_kept(tmp_path):
 
 # --- позиция, которой никогда не было у поставщика ------------------------------------------------------------------------------------
 
-def test_a_position_never_at_the_supplier_has_the_own_price_closed_with_a_clear_reason(tmp_path):
+def test_a_position_never_in_the_unload_prices_are_counted_from_gets_an_own_price_too(tmp_path):
+    """Владелец 09.11: «я хочу ставить свою цену даже если нет у поставщика», «пусть работает во всех» (было 05.11: нельзя)."""
     stale_setup(tmp_path)                                                    # s2-5: старый файл второго поставщика, только для просмотра
     conn = store.connect(tmp_path / "t.db")
     assert catalog_archive.item_info(conn, "s2-5") is None
@@ -115,35 +116,38 @@ def test_a_position_never_at_the_supplier_has_the_own_price_closed_with_a_clear_
     client = app_of(tmp_path).test_client()
     tok = login(client)
     page = client.get("/catalog/item/s2-5").get_data(as_text=True)
-    assert "data-own-closed" in page and "только для просмотра" in page and "её нет и не было" in page
-    assert "никогда не было у поставщика" not in page                     # она у поставщика есть, только не в нашей выгрузке
+    assert "data-own-view" in page and 'action="/catalog/item/s2-5/own-price"' in page and "data-own-closed" not in page
     assert "data-price-history" not in page                               # её закупку цикл не пишет: истории нет
-    assert 'action="/catalog/item/s2-5/own-price"' not in page
     r = post(client, "/catalog/item/s2-5/own-price", tok, kind="price", value="4500", a=[str(first)], action="save")
-    said = _flash(client, r)
-    assert "по которой считаются цены: она показана только для просмотра" in said and "никогда не было у поставщика" not in said
+    assert "цена начнёт действовать, когда позиция войдёт в фид" in _flash(client, r)
     r = post(client, "/catalog/item/s2-77/own-price", tok, kind="price", value="4500", a=[str(first)], action="save")
-    assert "нет в выгрузке и не было в ней раньше" in _flash(client, r)       # Id, которого не было нигде
+    assert "нет в выгрузке и не было в ней раньше" in _flash(client, r)       # Id, которого не было нигде: цену некуда применить
     conn = store.connect(tmp_path / "t.db")
     from tires_sync import staging
-    assert not (staging.summary(conn)["changes"] or {}).get("price_overrides")
+    assert staging.summary(conn)["changes"]["price_overrides"] == {"%d:s2-5" % first: {"price": 4500}}
 
 
-def test_the_closed_note_is_not_shown_to_a_role_without_the_purchase(tmp_path):
+def test_the_own_price_block_is_not_shown_to_a_role_without_the_purchase(tmp_path):
     stale_setup(tmp_path)
     client = person(app_of(tmp_path), "chats")[0]
     page = client.get("/catalog/item/s2-5").get_data(as_text=True)
-    assert "data-own-closed" not in page and "data-price-history" not in page
+    assert "data-own-view" not in page and "own-price" not in page and "data-price-history" not in page
 
 
-def test_a_position_known_but_not_marked_gone_yet_is_told_so_not_never(tmp_path):
+def test_a_position_known_but_not_marked_gone_yet_gets_an_own_price_at_once(tmp_path):
     app, conn, (first, _) = _gone_app(tmp_path)
-    conn.execute("UPDATE catalog_item SET gone_since = '' WHERE goods_id = ?", (GONE,))    # пропажа ещё не принята (обвал, битый файл)
+    conn.execute("UPDATE catalog_item SET gone_since = '' WHERE goods_id IN (?, ?)", (GONE, BLIND))   # пропажа ещё не принята (обвал, битый файл)
     conn.commit()
     client, tok = _owner(app)
+    page = client.get("/catalog/item/%s" % GONE).get_data(as_text=True).replace("\xa0", " ")
+    assert "data-own-gone" in page and "от последней известной закупки 4 000 ₽" in page
     r = post(client, "/catalog/item/%s/own-price" % GONE, tok, kind="price", value="4500", a=[str(first)], action="save")
-    said = _flash(client, r)
-    assert "Позиции сейчас нет в выгрузке" in said and "не было" not in said
+    assert "Позиции нет у поставщика: на Авито она уйдёт" in _flash(client, r)
+    post(client, "/catalog/item/%s/own-price" % GONE, tok, kind="pct", value="5", a=[str(first)], action="save")
+    r = post(client, "/catalog/item/%s/own-price" % BLIND, tok, kind="pct", value="5", a=[str(first)], action="save")
+    assert "Поставьте цену продажи в рублях" in _flash(client, r)
+    from tires_sync import staging
+    assert staging.summary(conn)["changes"]["price_overrides"] == {"%d:%s" % (first, GONE): {"pct": 5.0}}
 
 
 # --- все поставщики: 4tochki до включения «в фид» (владелец 05.11: «Храни историю по всем поставщикам») -----------------------------------
@@ -184,6 +188,6 @@ def test_the_card_of_a_position_shown_for_viewing_only_shows_its_history_to_who_
     client = app_of(tmp_path).test_client()
     login(client)
     page = client.get("/catalog/item/s2-5").get_data(as_text=True).replace("\xa0", " ")
-    assert "data-price-history" in page and "3 300 ₽" in page and "data-own-closed" in page
+    assert "data-price-history" in page and "3 300 ₽" in page and "data-own-view" in page
     page = person(app_of(tmp_path), "chats")[0].get("/catalog/item/s2-5").get_data(as_text=True)
     assert "data-price-history" not in page and "3 300" not in page

@@ -150,6 +150,9 @@ def _locate(conn, settings, parsed, goods_id: str, base):
     offer = catalog_archive.gone_offer(conn, goods_id)
     if offer is not None:
         return ParseResult(offers={goods_id: offer}), (catalog_archive.item_info(conn, goods_id) or {}).get("gone_since") or ""
+    offer = catalog_archive.last_offer(conn, goods_id)               # left the unload, not marked gone yet (a drop not believed): its own price
+    if offer is not None:                                            # can be set (the owner 2026-11-09), so it has a card: stock 0, «нет в наличии»
+        return ParseResult(offers={goods_id: offer}), ""
     return None
 
 
@@ -536,9 +539,9 @@ def register(app) -> None:
                     raise ValueError("Неизвестное действие.")
                 ids = form.getlist("g")
                 skipped = []
-                if mode != "clear":                                       # a position the supplier took away (ticked for its own price) gets no
-                    offers = context(app)[2].offers                       # manual rule: it would outlive its return (the owner 2026-11-03)
-                    skipped = [g for g in dict.fromkeys(ids) if g not in offers and catalog_archive.gone_offer(conn, g) is not None]
+                if mode != "clear":                                       # a position not in the panel's set (ticked for its own price: gone from
+                    offers = context(app)[2].offers                       # the supplier, or shown for viewing only) gets no manual rule: it would
+                    skipped = [g for g in dict.fromkeys(ids) if g not in offers]          # outlive its return (the owner 2026-11-03)
                     ids = [g for g in ids if g not in skipped]
                 if skipped and not ids:
                     raise ValueError("Выбраны только позиции, которых нет у поставщика: ручное правило им не ставится, ничего не записано.")
@@ -591,16 +594,14 @@ def register(app) -> None:
                                          found[1]) if found else None
         if data is None:
             abort(404)
-        gone = None if goods_id in parsed.offers else catalog_archive.gone_offer(conn, goods_id) if found[1] else None
-        if has_right("money") and (goods_id in parsed.offers or gone is not None):   # the own prices: the owner and the partner see them, the owner
-            general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)   # sets them: the panel's
-            offer = parsed.offers.get(goods_id) or gone                                 # set and a position the supplier took away (its last purchase)
+        own = _bulk_positions(conn, [goods_id]) if has_right("money") else ({}, {}, {}, [])
+        if goods_id in own[0]:                                        # the own prices: the owner and the partner see them, the owner sets them;
+            general = settings_from_dict({**raw, **({} if staged["stale"] else staged["changes"])}, enforce_pct_limit=False)   # every position the
+            offer = own[0][goods_id]                                                    # card is of (the owner 2026-11-09 «пусть работает во всех»)
             data["own_prices"] = service.own_price_rows(conn, general, settings_from_dict(raw, enforce_pct_limit=False), offer, ref, parsed.offers)
             data["purchase"] = offer.base_price
-            data["own_gone"] = gone is not None
-        elif has_right("money"):                                      # shown for viewing only (4tochki before its switch, an old second unload):
-            data["own_closed"] = True                                 # not in the unload prices are counted from — no own price, said why
-            data["own_never"] = catalog_archive.item_info(conn, goods_id) is None
+            data["own_gone"] = own[2].get(goods_id) == "gone"
+            data["own_view"] = own[2].get(goods_id) == "view"
         if has_right("money") and catalog_archive.price_tracked(conn, goods_id):  # the history of the supplier's purchase: who may
             data["price_history"], data["price_history_since"] = catalog_archive.price_history(conn, goods_id)   # see the purchase; of every
                                                                       # supplier the cycle saw (4tochki shown for viewing only too)
@@ -632,25 +633,22 @@ def register(app) -> None:
                 if kind not in ("pct", "price") or not re.fullmatch(r"[+\-]?\d+(\.\d+)?", text):
                     raise ValueError("Введите процент к закупке или цену продажи числом.")
                 value = {"pct": float(text)} if kind == "pct" else {"price": float(text)}
-            if value is not None:                                                     # the reset also for a position gone
-                offers, _purchases, gone, _other = _bulk_positions(conn, [goods_id])     # the supplier took it away: a sale price always, a percent
-                if goods_id not in offers:                                               # of its last purchase only (the owner 2026-11-03); never
-                    _c, settings, parsed, _r = context(app)                              # a position shown for viewing only, nor one never in
-                    if _locate(conn, settings, parsed, goods_id, app.config["UNLOAD_PATH"]) is not None:     # the unload (the owner 2026-11-05)
-                        raise ValueError("Такой позиции нет в выгрузке, по которой считаются цены: она показана только для просмотра. "
-                                         "Свою цену ей поставить нельзя.")
-                    if catalog_archive.item_info(conn, goods_id) is not None:            # known, not marked gone yet (a collapse not believed,
-                        raise ValueError("Позиции сейчас нет в выгрузке: свою цену можно будет поставить, когда она вернётся "   # the file
-                                         "или каталог отметит её пропавшей у поставщика.")                                       # unusable)
+            outside = None
+            if value is not None:                                                     # the reset also for a position not in the panel's set
+                offers, _purchases, away, _other = _bulk_positions(conn, [goods_id])     # every position the catalog knows (the owner 2026-11-09):
+                if goods_id not in offers:                                               # a sale price always, a percent of a known purchase only
                     raise ValueError("Такой позиции нет в выгрузке и не было в ней раньше: свою цену поставить нельзя.")
-                if goods_id in gone and "pct" in value and not offers[goods_id].base_price > 0:
-                    raise ValueError("Позиции нет у поставщика, и последняя закупка неизвестна: процент не от чего считать. "
-                                     "Поставьте цену продажи в рублях.")
+                outside = away.get(goods_id)
+                if outside and "pct" in value and not offers[goods_id].base_price > 0:
+                    raise ValueError("Закупка этой позиции неизвестна: процент не от чего считать. Поставьте цену продажи в рублях.")
             staging.set_own_price(conn, goods_id, accounts, value, now_iso())
         except (StaleDraftError, ValueError) as err:
             flash(str(err))
             return redirect(_item_path(goods_id))
-        flash(("Своя цена" if value else "Своя цена снята — цена по настройкам фида —") + " в черновике: подтвердите изменения, чтобы они попали в фид.")
+        flash(("Своя цена" if value else "Своя цена снята — цена по настройкам фида —") + " в черновике: подтвердите изменения, чтобы они попали в фид."
+              + {"gone": " Позиции нет у поставщика: на Авито она уйдёт по этой цене, только когда вернётся к поставщику или будет в своём остатке.",
+                 "view": " Позиция показана только для просмотра: цена начнёт действовать, когда позиция войдёт в фид аккаунта "
+                         "(4 точки — после включения «в фид», вторая выгрузка — когда она обновится)."}.get(outside, ""))
         return redirect(_item_path(goods_id))
 
     @app.route("/catalog/own-price/inline", methods=["POST"])
@@ -703,23 +701,30 @@ def register(app) -> None:
         return redirect(back)
 
     def _bulk_positions(conn, found):
-        """The positions a press of «Своя цена выбранным» works on: the panel's set and those the supplier took away (the archive: the last
-        purchase seen), never one shown for viewing only (4tochki before its switch, an old second unload). (offers, purchases — the anchor of
-        price_guard the feed counts from —, the ids gone from the supplier, the ids skipped)."""
+        """The positions an own price is set on (the card, «Своя цена выбранным»): every one the catalog knows (the owner 2026-11-09 «пусть
+        работает во всех»): the panel's set; one shown for viewing only (4tochki before its switch, an old second unload: its price is kept
+        and counts once the position is in the account's feed); one the supplier took away, marked gone or not yet (the archive's last offer:
+        the last purchase seen; on Avito only with «Свой остаток», sync._manual_gone). (offers, purchases — the anchor of price_guard the feed
+        counts from —, {id not in the panel's set: "view" | "gone"}, the ids unknown)."""
         from .. import price_guard
         _conn, settings, parsed, _ref = context(app)
         missing = [g for g in found if g not in parsed.offers]
-        archive = {}
+        elsewhere, away = {}, {}
         if missing:
             base = app.config["UNLOAD_PATH"]
-            shown_only = set(tochki_feed.catalog_view(conn, parsed, base)[1]) | {o.goods_id for o, _ in _held_offers(conn, settings, base)}
-            archive = {g: catalog_archive.gone_offer(conn, g) for g in missing if g not in shown_only}
-        offers = {g: parsed.offers.get(g) or archive.get(g) for g in found}
+            view, only = tochki_feed.catalog_view(conn, parsed, base)
+            held = {o.goods_id: o for o, _ in _held_offers(conn, settings, base)}
+            for g in missing:                                         # the order of _locate: what the card shows is what is priced
+                shown = (view.offers.get(g) if g in only else None) or held.get(g)
+                elsewhere[g] = shown or catalog_archive.last_offer(conn, g)
+                if elsewhere[g] is not None:
+                    away[g] = "view" if shown is not None else "gone"
+        offers = {g: parsed.offers.get(g) or elsewhere.get(g) for g in found}
         other = [g for g, o in offers.items() if o is None]
         offers = {g: o for g, o in offers.items() if o is not None}
         guard = price_guard.load(conn)
         purchases = {g: price_guard.base_for(guard, g, float(o.base_price))[0] for g, o in offers.items()}
-        return offers, purchases, {g for g in offers if g not in parsed.offers}, other
+        return offers, purchases, away, other
 
     def _bulk_op(form):
         """What «Своя цена выбранным» does: None takes the own prices off («Сбросить к настройкам фида»), else {"base", "unit", "delta"}
@@ -770,9 +775,10 @@ def register(app) -> None:
                     raise ValueError("По фильтру сейчас другие позиции (%d), чем были на странице: обновите страницу и повторите." % len(found))
             else:
                 found = form.getlist("g")
-            offers, purchases, gone, other = _bulk_positions(conn, sorted({str(g) for g in found if str(g or "").strip()}))
+            offers, purchases, away, other = _bulk_positions(conn, sorted({str(g) for g in found if str(g or "").strip()}))
+            gone = {g for g, where in away.items() if where == "gone"}    # the archive's: «нет у поставщика»; shown for viewing only: «только просмотр»
             if not offers:
-                raise ValueError("Среди выбранных нет позиций фида." if other else "Отметьте позиции.")
+                raise ValueError("Среди выбранных нет известных позиций." if other else "Отметьте позиции.")
             if len(offers) > BULK_PRICE_LIMIT:
                 raise ValueError("Не больше %d позиций за раз: сузьте фильтр." % BULK_PRICE_LIMIT)
             op = _bulk_op(form)
@@ -787,7 +793,7 @@ def register(app) -> None:
                     rows = own_bulk.rows(conn, general, offers, purchases, result["set"], gone, float(get_active(conn)[1]["pct_limit"]))
                     return render_template("catalog_own_bulk.html", rows=rows, shown=BULK_ROWS_SHOWN, result=result, op_text=_op_text(op),
                                            plan=own_bulk.fingerprint(result["set"]), positions=len({r["goods_id"] for r in rows}),
-                                           gone=len(gone), other=len(other), skips=own_bulk.SKIPS, back=back, own_price_text=service.own_price_text,
+                                           gone=len(gone), view=len(away) - len(gone), other=len(other), skips=own_bulk.SKIPS, back=back, own_price_text=service.own_price_text,
                                            fields=[(k, v) for k, v in form.items(multi=True) if k not in ("csrf", "step", "plan")])
                 done = result
             else:
@@ -811,7 +817,7 @@ def register(app) -> None:
         for why, keys in sorted((done.get("skipped") or {}).items()):
             parts.append("Пропущено, %s: %d (позиция × аккаунт)." % (own_bulk.SKIPS[why], len(keys)))
         if other:
-            parts.append("Пропущено, не позиции фида (нет в выгрузке или только для просмотра): %d." % len(other))
+            parts.append("Пропущено, нет в выгрузке и не было в ней раньше: %d." % len(other))
         flash(" ".join(parts) + (" Подтвердите изменения, чтобы они попали в фид." if done["set"] else ""))
         return redirect(back)
 
