@@ -130,13 +130,32 @@ def placed(conn, card_id: int) -> bool:
     return bool(state and state["state"] == "done")
 
 
+SUM_DIFFERS = ("Сумма заказа в кабинете MIM (%s ₽) не сходится с закупкой заказа (%s ₽): номер перемещения %s вписан, сообщения «заказ "
+               "оформлен» сами не отправлены — сверьте и отправьте их в окне «Сообщения по заказу».")
+
+
+def sum_differs(conn, card_id: int, seen: dict) -> bool:
+    """The cabinet's sum of the order against its purchase (the window's own check): a strange row is never a reason to tell the client."""
+    return seen.get("sum") is not None and abs(float(seen["sum"]) - purchase(conn, card_id)) >= 0.5
+
+
 def take(conn, card_id: int, seen: dict, now: str, send: Optional[Send]) -> Tuple[str, List[str]]:
-    """Write the number found and, when this was the write of it, send what waited for it. (apply's result, the lines of the send)."""
+    """Write the number found and, when this was the write of it, send what waited for it — unless the cabinet's sum differs from the
+    order's purchase (the review 2026-11-09: a yellow record, the messages wait for a person). (apply's result, the lines of the send)."""
     result = write(conn, card_id, seen, now)
     lines: List[str] = []
     if result == "written" and send is not None and placed(conn, card_id):
-        lines = send(card_id)
+        if sum_differs(conn, card_id, seen):
+            orders.add_event(conn, card_id, now, AUTHOR, "webmim", SUM_DIFFERS % (_money(seen["sum"]), _money(purchase(conn, card_id)),
+                                                                                  seen["invoice"]), "yellow")
+            conn.commit()
+        else:
+            lines = send(card_id)
     return result, lines
+
+
+def _money(value) -> str:
+    return ("%.2f" % float(value)).rstrip("0").rstrip(".").replace(".", ",")
 
 
 def note(conn, card_id: int, text: str, now: str) -> None:
@@ -166,6 +185,8 @@ def after_place(conn, card_id: int, client, now: str, server: str) -> str:
     seen = info(row) if row is not None else None
     if seen is None or not seen["invoice"]:
         return "wait"
+    if sum_differs(conn, card_id, seen):                                  # not before on_placed: the window's poll writes it, nothing is sent
+        return "sum-differs"
     return write(conn, card_id, seen, now)
 
 

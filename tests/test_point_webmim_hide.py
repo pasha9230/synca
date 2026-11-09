@@ -90,7 +90,7 @@ def test_the_webmim_routes_are_closed_to_the_point(world):
     assert m.get("/orders/webmim").status_code == 403
     item = world["conn"].execute("SELECT id FROM order_item WHERE order_id = ?", (cid,)).fetchone()[0]
     for url, fields in (("/orders/%d/webmim/link" % cid, {"order": "1"}), ("/orders/%d/webmim/create" % cid, {}),
-                        ("/orders/%d/webmim/resolve" % cid, {"found": "1", "webmim_id": "1"}),
+                        ("/orders/%d/webmim/resolve" % cid, {"found": "1", "webmim_id": "1"}), ("/orders/%d/webmim/cabinet" % cid, {}),
                         ("/orders/%d/items/%d/mim" % (cid, item), {"webmim_number": "1"}),
                         ("/orders/%d/items/%d/mim-extra" % (cid, item), {"webmim_number": "1"})):
         assert post(m, url, "tok", **fields).status_code in (403, 404, 405), url

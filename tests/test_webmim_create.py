@@ -1283,6 +1283,7 @@ def test_the_others_have_no_button_and_are_refused(panel):
         html = client.get("/orders/%d" % mine).get_data(as_text=True)
         assert "WebMIM</button>" not in html and "webmim/create" not in html
         assert client.post("/orders/%d/webmim/create" % mine, data={"csrf": "tok"}).status_code == 403
+        assert client.post("/orders/%d/webmim/cabinet" % mine, data={"csrf": "tok"}).status_code == 403     # the cabinet's poll too (09.11)
     assert fake.calls == [] and orders._row(conn, mine)["webmim_id"] == ""
     assert users.has_right("owner", "supplier") and users.has_right("partner", "supplier")
     assert not any(users.has_right(r, "supplier") for r in ("chats", "point", "viewer"))
