@@ -164,3 +164,10 @@ def test_the_catalog_actions_of_2026_11_09(tmp_path):
     o2 = (root / "office2" / "_o2.html").read_text()
     tag = o2[o2.index("{% macro season_tag"):o2.index("{%- endmacro %}", o2.index("{% macro season_tag"))]
     assert "}}Зима</span>" not in tag and "}}Лето</span>" not in tag
+
+def test_the_help_question_mark_has_one_tooltip():
+    """The owner 2026-11-09: «?» showed two tooltips (the CSS ::after of audit.css and app.js's [data-tip]); only app.js's is left."""
+    import pathlib
+    static = pathlib.Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static"
+    for css in static.glob("*.css"):
+        assert "content:attr(data-tip)" not in css.read_text().replace(" ", ""), css.name

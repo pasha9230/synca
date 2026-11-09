@@ -3,7 +3,7 @@
 
 /* п. 34: the explanation of a page is a «?» with a hint beside its title, not a paragraph under it */
 .help-q{position:relative;display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--gray-300);color:var(--gray-500);font:600 12px/1 var(--font);margin-left:8px;vertical-align:middle;cursor:help}
-.help-q:hover::after,.help-q:focus::after{content:attr(data-tip);position:absolute;left:0;top:24px;z-index:60;width:max-content;max-width:min(320px,calc(100vw - 32px));padding:8px 10px;background:var(--gray-900);color:var(--gray-0);border-radius:var(--r-md);font-weight:400;font-size:13px;line-height:1.4;white-space:normal;text-align:left}
+/* подсказка «?» — только всплывающая app.js ([data-tip]); своя ::after давала второе окно (владелец 2026-11-09) */
 
 /* a line «name — number» inside a card (the card «Фид» of the main page: П1, п. 13) */
 .list-row{display:flex;align-items:center;gap:var(--s-3);padding:var(--s-3) var(--s-5);border-bottom:1px solid var(--gray-100);min-height:var(--row-h)}
