@@ -12,7 +12,7 @@
 {{ entity_ui.crumbs(entity.crumbs) }}
 {% from "_oth_mim.html" import mim_head %}{% if oth_parts %}<p class="strong" data-oth-title>{{ mim_head(oth_parts) }}</p>{# «На ОТХ»: as on the board, no inner number (2026-11-07) #}{% elif oth_title %}<p class="strong" data-oth-title>{{ oth_title }}{% if entity.ref == "№%d"|format(c.id) %} · №{{ c.id }}{% endif %}</p>{% endif %}{# «На ОТХ»: a purchase of WebMIM, its client changes (2026-11-06) #}
 {% include "_order_unsent.html" %}
-{% if c.stage.code != "oth" %}{% with autosend_order=c.id, autosend_chat=none %}{% include "_order_autosend.html" %}{% endwith %}{% endif %}{# «На ОТХ»: no client, no auto message (2026-11-07) #}
+{% with autosend_order=c.id %}{% include "_order_autosend.html" %}{% endwith %}{# no block «Автосообщение клиенту» (the owner 2026-11-09): the waiting ones only, with «Отменить» #}
 <div class="ocard-layout">
 <div class="ocard-main">
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}

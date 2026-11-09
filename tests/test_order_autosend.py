@@ -281,13 +281,17 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     card = orders.create_card(conn, {"client_name": "Иван", "client_phone": "+79001112233", "point_id": str(alpha)}, SET, "owner")
     conn.commit()
     html = client.get("/orders/%d" % card).get_data(as_text=True)
-    assert 'id="autosend"' in html and "Поставить: Спросить, решил ли брать" in html and tpl.AUTOSEND_DEAL_SAMPLE[2] in html
+    # the owner 2026-11-09 («Автосообщения убери»): no block to set one in the order window any more (it was here: «Поставить: …» and its text)
+    assert 'id="autosend"' not in html and "Поставить: Спросить, решил ли брать" not in html and tpl.AUTOSEND_DEAL_SAMPLE[2] not in html
     due = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
     r = post(client, "/orders/%d/autosend" % card, tok, kind="deal", due_at=due, body="Договорились на завтра")
     assert r.status_code == 302
     [item] = auto.of_order(conn, card)
     assert item["kind"] == "deal" and item["text"] == "Договорились на завтра" and item["created_by"] == app.config["AUTHOR"]
-    assert "Договорились на завтра" in client.get("/orders/%d" % card).get_data(as_text=True)
+    html = client.get("/orders/%d" % card).get_data(as_text=True)                          # the waiting one: a line with «Отменить»
+    assert 'id="autosend"' in html and "Автосообщение запланировано на " in html and "«Договорились на завтра»" in html
+    assert 'action="/orders/%d/autosend/%d/cancel"' % (card, item["id"]) in html and 'action="/orders/%d/autosend"' % card not in html
+    assert 'autosend/%d/update' % item["id"] not in html                                   # nothing to change it with
     point = manager(app, conn, alpha)
     seen = point.get("/orders/%d" % card)
     assert seen.status_code == 200
@@ -297,7 +301,8 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     assert post(point, "/orders/%d/autosend/%d/cancel" % (card, item["id"]), "tok").status_code == 403
     assert auto.get(conn, item["id"])["status"] == "pending"
     r = post(client, "/orders/%d/autosend/%d/cancel" % (card, item["id"]), tok)
-    assert r.status_code == 302 and auto.get(conn, item["id"])["status"] == "cancelled"
+    assert r.status_code == 302 and auto.get(conn, item["id"])["status"] == "cancelled" and r.headers["Location"].endswith("/orders/%d#autosend" % card)
+    assert 'id="autosend"' not in client.get("/orders/%d" % card).get_data(as_text=True)     # cancelled: no line
     from tires_sync import connections
     account = connections.create_account(conn, "Основной", SET, "o")
     conn.execute("UPDATE account SET chats_enabled = 1, chats_send = 1 WHERE id = ?", (account,))
@@ -305,10 +310,11 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     conn.commit()
     chat_page = client.get("/chats/%d" % row).get_data(as_text=True)
     assert 'id="autosend"' not in chat_page and "Автосообщение клиенту" not in chat_page   # not in the chat's order panel (the owner 2026-11-09)
-    assert 'id="autosend"' in client.get("/orders/%d" % card).get_data(as_text=True)       # the order window keeps it
-    r = post(client, "/orders/%d/autosend" % card, tok, kind="ask", due_at=due, body="Из чата", chat=str(row))
+    assert 'id="autosend"' not in client.get("/orders/%d" % card).get_data(as_text=True)   # nor in the order window (the owner 2026-11-09)
+    r = post(client, "/orders/%d/autosend" % card, tok, kind="ask", due_at=due, body="Из чата", chat=str(row))     # the route itself stays
     assert r.status_code == 302 and r.headers["Location"].endswith("/chats/%d#autosend" % row)
     assert [i["text"] for i in auto.of_order(conn, card) if i["status"] == "pending"] == ["Из чата"]
+    assert "«Из чата»" in client.get("/orders/%d" % card).get_data(as_text=True)              # set by its address: the waiting line shows it
 
 
 # --- the review of 2026-11-06 ----------------------------------------------------------------------------------------------------------
