@@ -392,6 +392,39 @@ def save_photo(conn, root: Path, data: bytes, source: str, now: str) -> int:
     return cur.lastrowid
 
 
+FEED_KIND = "feed"            # account_photo.kind: the JPEG of an approved frame, what the primary account sends to Avito
+FEED_JPEG_QUALITY = 88        # a generated PNG is 2.5-3 MB, its JPEG about 250 KB (the owner 2026-11-09)
+
+
+def make_feed_copy(conn, root: Path, photo_id: int, now: str) -> Optional[int]:
+    """The JPEG of a library PNG for the feed of the primary account (quality 88, no metadata): its `photo.id`, or None when the
+    picture is not a PNG or cannot be read. The PNG stays in the library as it is; the link is the `account_photo` row of the
+    primary account, kind `feed`. Commits."""
+    from . import connections
+    row = conn.execute("SELECT sha256, ext FROM photo WHERE id=?", (photo_id,)).fetchone()
+    if row is None or row[1] != "png":
+        return None
+    from PIL import Image
+    try:
+        with Image.open(Path(root) / ("%s.png" % row[0])) as image:
+            image.load()
+            if image.mode in ("RGBA", "LA", "P"):                  # no transparency in a JPEG: on white
+                rgba = image.convert("RGBA")
+                flat = Image.new("RGB", rgba.size, (255, 255, 255))
+                flat.paste(rgba, mask=rgba.split()[3])
+            else:
+                flat = image.convert("RGB")
+        out = io.BytesIO()
+        flat.save(out, "JPEG", quality=FEED_JPEG_QUALITY, optimize=True)     # a new picture: no EXIF, no ICC, no text chunks
+    except Exception:
+        return None
+    copy_id = save_photo(conn, root, out.getvalue(), FEED_KIND, now)
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO account_photo (account_id, source_photo_id, kind, variant, photo_id) VALUES (?,?,?,'',?)",
+                     (connections.PRIMARY_ACCOUNT, photo_id, FEED_KIND, copy_id))
+    return copy_id
+
+
 def photo_url(base: str, sha256: str, ext: str) -> str:
     return "%s/photos/%s.%s" % (base, sha256, ext)
 
@@ -442,7 +475,7 @@ def own_photos_for(conn, account_id: int, base: str) -> Optional[OwnPhotos]:
     """The account's own library links, or None when the switch `own_photos` is off, the account is not chosen for own photos
     or has no photo address.
     A set counts only when the owner sent it to the feed, with both frames approved and this account's files ready:
-    originals for the primary account, `copy` for the rest."""
+    originals for the primary account (the JPEG `feed` of an original when it is made, `make_feed_copy`), `copy` for the rest."""
     from . import connections, store
     if store.get_state(conn, "own_photos") != "1" or not base or not connections.account_own_photos(conn, account_id):
         return None
@@ -457,7 +490,7 @@ def own_photos_for(conn, account_id: int, base: str) -> Optional[OwnPhotos]:
         if key not in chosen or any(kind not in got for kind in FRAME_KINDS):
             continue
         if account_id == connections.PRIMARY_ACCOUNT:
-            links = [_link(conn, base, got[kind]) for kind in FRAME_KINDS]
+            links = [_account_link(conn, base, account_id, got[kind], FEED_KIND) or _link(conn, base, got[kind]) for kind in FRAME_KINDS]
         else:
             links = [_account_link(conn, base, account_id, got[kind], "copy") for kind in FRAME_KINDS]
         if not all(links):

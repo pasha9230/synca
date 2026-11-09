@@ -219,6 +219,8 @@ def register(app) -> None:
             photo_library.enqueue(conn, now)
         if action == "approve":
             photo_agent.after_approve(conn, frame["set_key"], now)
+            conn.commit()
+            photo_library.make_feed_copy(conn, app.config["PHOTOS_ROOT"], frame["photo_id"], now)   # the feed gets a JPEG, not the 3 MB PNG
         elif action == "regenerate":
             photo_agent.after_regenerate(conn, frame["set_key"], now)
         conn.commit()

@@ -254,3 +254,37 @@ def test_a_library_link_with_nothing_to_fall_back_to_is_dropped():
     ad = ET.fromstring('<Ad><Id>100</Id><Images><Image url="%s/photos/%s.jpg"/></Images></Ad>' % (BASE, "a" * 64))
     sync._set_images(ad, [])
     assert ad.find("Images") is None
+
+
+def test_primary_account_sends_the_jpeg_of_a_frame_when_it_is_made(tmp_path):
+    """The owner 2026-11-09: a generated PNG (2.5-3 MB) goes to Avito as its JPEG; the order of the frames is the same."""
+    conn, first, second = env(tmp_path)
+    links = library(conn, first, second)
+    tq = conn.execute("SELECT photo_id FROM set_frame WHERE kind = 'three_quarter'").fetchone()[0]
+    s4 = conn.execute("SELECT photo_id FROM set_frame WHERE kind = 'set4'").fetchone()[0]
+    jpeg_tq = account_photo(conn, first, tq, photo_library.FEED_KIND, 50)
+    jpeg_s4 = account_photo(conn, first, s4, photo_library.FEED_KIND, 51)
+    conn.commit()
+    run(tmp_path, conn)
+    mine = links[first]
+    assert images(tmp_path, conn, first)["100"] == [jpeg_tq, jpeg_s4, mine["x1"], mine["crop"], supplier(conn, first)]
+    theirs = links[second]                                    # the other account: its own copies, as before
+    assert images(tmp_path, conn, second)["100_a%d" % second][:4] == [theirs["tq"], theirs["set4"], theirs["x1"], theirs["crop"]]
+    assert foreign_findings(tmp_path, conn, first) == []      # the JPEG is the account's own link for the feed check
+
+
+def test_a_set_approved_before_keeps_its_links_and_mixes_with_a_new_frame(tmp_path):
+    """A vertical set approved before has no JPEG: its links stay. One new square frame beside an old one builds the ad as usual."""
+    conn, first, second = env(tmp_path)
+    links = library(conn, first, second)[first]
+    own = photo_library.own_photos_for(conn, first, BASE)
+    assert own.by_set[KEY] == [links["tq"], links["set4"], links["crop"]]
+    old = conn.execute("SELECT id, photo_id FROM set_frame WHERE kind = 'three_quarter'").fetchone()
+    conn.execute("UPDATE set_frame SET status = 'withdrawn' WHERE id = ?", (old[0],))
+    cur = conn.execute("INSERT INTO photo(sha256, ext, width, height, bytes, source, created) VALUES (?,?,?,?,?,?,?)",
+                       ("%064x" % 60, "png", 1024, 1024, 1, "test", NOW))
+    conn.execute("INSERT INTO set_frame(set_key, kind, photo_id, status, created) VALUES (?,?,?,?,?)", (KEY, "three_quarter", cur.lastrowid, "approved", NOW))
+    jpeg = account_photo(conn, first, cur.lastrowid, photo_library.FEED_KIND, 61)
+    conn.commit()
+    run(tmp_path, conn)
+    assert images(tmp_path, conn, first)["100"] == [jpeg, links["set4"], supplier(conn, first)]   # the card and the crop of the new frame are not made yet
