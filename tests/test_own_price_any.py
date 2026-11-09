@@ -213,3 +213,13 @@ def test_all_by_the_filter_takes_a_gone_position_but_never_one_shown_for_viewing
     assert "%d:s3-1" % first not in _changes(conn) and "%d:%s" % (first, GONE) in _changes(conn)
     r = _draft(client, tok, ["s3-1"], [first], base="purchase", unit="rub", side="up", value="100")
     assert _changes(conn)["%d:s3-1" % first] == {"price": 2100}
+def test_the_new_view_card_explains_a_position_shown_for_viewing_only(tmp_path, monkeypatch):
+    """Ревью 09.11: в «Новом виде» карточка тоже объясняет, что цена начнёт действовать, когда позиция войдёт в фид."""
+    from tires_sync import store
+    from tires_sync.panel.routes_design import UI_KEY
+    app, conn, _ids = _tochki_app(tmp_path, monkeypatch)
+    store.set_state(conn, UI_KEY % "office", "all")
+    conn.commit()
+    client, _tok = _owner(app)
+    page = client.get("/catalog/item/s3-1").get_data(as_text=True)
+    assert "data-own-view" in page and 'action="/catalog/item/s3-1/own-price"' in page
