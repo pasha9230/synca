@@ -105,6 +105,7 @@ def test_popups_modals_and_the_frame_keep_their_scroll():
 def test_the_chat_opens_at_the_last_message():
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "function chatToEnd()" in js
-    assert 'if (document.querySelector(".chat-thread") && !window.location.hash) {\n    chatToEnd();' in js
+    # «Чаты» with no anchor; the order window (the owner 2026-11-09) too, and back from a send there (#order-chat), except a point's phone page
+    assert 'if (document.querySelector(".chat-thread") && ((!window.location.hash && (!orderChat || orderChat.hasAttribute("data-open-end"))) || window.location.hash === "#order-chat")) {\n    chatToEnd();' in js
     assert 'img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });' in js   # фото грузятся позже
     assert "thread.scrollTop" not in js          # лента без своей прокрутки: новое сообщение показывает страница
