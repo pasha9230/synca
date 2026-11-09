@@ -3,6 +3,8 @@ answered (the point is still asked as before); when the client writes nothing in
 by itself — not when the point marked «выдан», the order left «Товар на точке», the date was moved, or the reminder did not go."""
 from __future__ import annotations
 
+import pytest
+
 from test_order_reserve import PointVk, card_at, chat_of, db, ok, stage
 from tires_sync import chats, order_reserve as reserve, orders
 
@@ -22,6 +24,12 @@ class Deliver:
         self.sent.append((chat_row, text, token))
         self.conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status) VALUES (?, ?, ?, 'система', 'sent')", (token, chat_row, self.at))
 
+
+
+@pytest.fixture(autouse=True)
+def _vk_question_on(monkeypatch):
+    """The VK question of the last day is off since 2026-11-09 (order_reserve.VK_ASK_OFF); here its timing rules are kept tested as when on."""
+    monkeypatch.setattr(reserve, "VK_ASK_OFF", False)
 
 def ready(tmp_path, error=None):
     conn = db(tmp_path)
