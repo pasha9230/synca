@@ -223,3 +223,13 @@ def test_the_new_view_card_explains_a_position_shown_for_viewing_only(tmp_path, 
     client, _tok = _owner(app)
     page = client.get("/catalog/item/s3-1").get_data(as_text=True)
     assert "data-own-view" in page and 'action="/catalog/item/s3-1/own-price"' in page
+
+
+def test_the_new_view_catalog_ticks_a_view_only_position_under_the_own_filter_only(tmp_path, monkeypatch):
+    from tires_sync.panel.routes_design import UI_KEY
+    app, conn, (first, _) = _tochki_app(tmp_path, monkeypatch)
+    store.set_state(conn, UI_KEY % "office", "all")
+    staging.set_own_price(conn, "s3-1", [first], {"price": 2500}, NOW)
+    client, _tok = _owner(app)
+    assert 'name="g" value="s3-1"' in client.get("/catalog?own=1").get_data(as_text=True)
+    assert 'name="g" value="s3-1"' not in client.get("/catalog").get_data(as_text=True)
