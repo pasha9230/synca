@@ -120,7 +120,9 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, 
     out = dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
                seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart, view=view, view_links=view_links,
                size={k: " ".join(map(str, v)) for k, v in (("w", f.widths), ("h", f.heights), ("d", f.diameters))},
-               size_options=cc.size_values(items), filters_reset=_reset_link(base, here))
+               size_options=cc.size_values(items), filters_reset=_reset_link(base, here),
+               pick=cc.size_pick(base, here, {"w": f.widths, "h": f.heights, "d": f.diameters}, cc.size_values(items)),
+               recent=[])
     if new:
         out.update(_new_catalog(base, f, here, items))
     return out
@@ -249,7 +251,13 @@ def register(app) -> None:
     @app.route("/shop")
     def shop_page():
         conn, login = get_conn(), current_user()["login"]
-        return _page("shop.html", conn, login, **catalog(app, conn, login, "/shop", photos=True, cart=True, new=ui_new()))
+        values = catalog(app, conn, login, "/shop", photos=True, cart=True, new=ui_new())
+        f = values["f"]                             # «Недавние» of the client's own page only (never the owner's preview)
+        recent = cc.remember_sizes(conn, login, cc.searched_sizes(f.widths, f.heights, f.diameters, f.sizes), now().isoformat(timespec="seconds"))
+        here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS]
+        values.update(recent=cc.recent_links("/shop", here, recent))
+        return _page("shop.html", conn, login, **values)
+
 
     @app.route("/shop/cart/add", methods=["POST"])
     def shop_cart_add():

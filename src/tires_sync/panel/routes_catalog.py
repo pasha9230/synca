@@ -13,7 +13,7 @@ from .. import catalog_archive, connections, market, own_bulk, order_oth, order_
 from ..config import own_price_value, settings_from_dict
 from ..pricing import position_price
 from ..settings_store import StaleDraftError, get_active
-from .common import author, can, can_post, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
+from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
 from .routes_design import office_page
 from .data import load_merged, stale_unload
 from ..webmim import ParseResult
@@ -32,12 +32,9 @@ MAX_SIZE_VALUES = 20
 
 
 def _nums(args, name):
-    """«205, 215» or «205 215» -> [205, 215]; anything that is not a number is ignored; None when nothing is left."""
-    found = []
-    for token in re.split(r"[\s,;]+", args.get(name, "")):
-        if token.isascii() and token.isdigit() and int(token) not in found:
-            found.append(int(token))
-    return found[:MAX_SIZE_VALUES] or None
+    """`?w=205&w=215`, «205, 215» or «205 215» -> [205, 215]: the client's reading (client_catalog.size_numbers, one for both, the
+    owner 2026-11-09); None when nothing is left."""
+    return client_catalog.size_numbers(args, name, MAX_SIZE_VALUES) or None
 
 
 def _back(default="/catalog"):
@@ -458,7 +455,10 @@ def register(app) -> None:
             office_page("catalog.html"), size={k: " ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
             size_text=(args.get("size") or "")[:client_catalog.MAX_TEXT], size_unknown=view["unknown"], brand_choices=brand_choices, chosen_brands=view["brands"],
             without_brands=view["without"], feed_brands=_feed_brands(conn, counts, suppliers) if can_post("connections_excluded_brand") else None,
-            size_options=service.size_options(b["parsed"]), supplier_tabs=supplier_tabs, wait=wait, **b)
+            size_options=service.size_options(b["parsed"]), supplier_tabs=supplier_tabs, wait=wait,
+            pick=client_catalog.size_pick("/catalog", _pairs(args, ("wait",)), {k: _nums(args, k) or () for k in ("w", "h", "d")},
+                                          service.size_options(b["parsed"])),
+            recent=client_catalog.recent_links("/catalog", _pairs(args, ("wait",)), client_catalog.recent_sizes(conn, current_user()["login"])), **b)
 
     def _feed_brands(conn, counts, suppliers):
         """«Бренды в фиде» of the owner: every brand on view and every brand taken off, with what one button does to it. The change is the
@@ -481,7 +481,10 @@ def register(app) -> None:
     @app.route("/catalog")
     @login_required
     def catalog():
-        return catalog_page(request.args)
+        args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
+        client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
+            _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())
+        return catalog_page(args)
 
     @app.route("/catalog/wait", methods=["POST"])
     @login_required

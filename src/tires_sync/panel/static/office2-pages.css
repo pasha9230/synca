@@ -164,6 +164,39 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 .o2 .o2-filters .ig,.o2 .o2-filters .input,.o2 .o2-filters .select{height:34px}
 .o2 .o2-filters .brand-pick summary{height:34px;display:flex;align-items:center;min-width:180px}
 .o2-reset{height:34px}
+/* «Ширина», «Профиль», «Диаметр»: several values from the list of the catalog, the chips with crosses, the badge of how many, «Недавние»
+   (_catalog_filters.html size_list, the office's catalog and the client's /shop, the owner 2026-11-09). No script needed. */
+.o2-frow--1{align-items:flex-start}
+.msel{position:relative;min-width:0}
+.msel-box{position:relative}
+.o2 .o2-filters .msel-sum{display:flex;align-items:center;gap:6px;width:150px;cursor:pointer;list-style:none;overflow:hidden}
+.msel-sum::-webkit-details-marker{display:none}
+.msel-sum:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.msel-val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msel-n{flex:none;padding:0 6px}
+.msel-list{position:absolute;z-index:30;top:calc(100% + 4px);left:0;width:240px;max-width:calc(100vw - 32px);max-height:300px;overflow:auto;
+  background:var(--gray-0);border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.12);padding:8px;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:2px 4px}
+.msel-opt{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;font-size:13px;white-space:nowrap;cursor:pointer}
+.msel-opt:hover{background:var(--gray-50)}
+.msel-opt:focus-within{outline:2px solid var(--primary);outline-offset:-2px}
+.msel-go{grid-column:1/-1;margin-top:6px}
+.msel-chips{display:flex;flex-wrap:wrap;gap:4px;max-width:200px;margin-top:4px}
+.msel-chip,.msel-clear{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:var(--r-full);font-size:12px;
+  white-space:nowrap;text-decoration:none;color:var(--gray-700);background:var(--gray-50);border:1px solid var(--gray-200)}
+.msel-chip:hover,.msel-clear:hover{background:var(--gray-100)}
+.msel-chip svg,.msel-chip .i,.msel-clear svg,.msel-clear .i{width:12px;height:12px}
+.msel-clear{padding:0 6px;color:var(--gray-500)}
+.o2-recent{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;min-width:0}
+.o2-recent .label{font-size:13px;color:var(--o2-text-2);margin-right:4px}
+.o2-recent-chip{color:var(--primary-700);background:var(--primary-25);border-color:var(--primary-200)}
+@media (max-width:720px){
+  .o2-frow--1 .msel{flex:1 1 28%}
+  .o2-frow--1 .msel:has(.msel-box[open]){flex-basis:100%}
+  .o2 .o2-filters .msel-sum{width:100%}
+  .msel-list{position:static;width:auto;max-width:none;margin-top:4px;box-shadow:none}
+  .msel-chips{max-width:none}
+}
 .o2 .ico-sun{color:var(--summer)}
 .o2 .ico-snow{color:var(--winter)}
 .o2 .o2-stud{color:var(--spike);width:15px;height:15px}

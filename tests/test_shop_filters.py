@@ -57,7 +57,7 @@ def test_each_filter_narrows_the_rows(tmp_path, state):
     assert found(page(client, "/shop?s=summer")) == 1 and found(page(client, "/shop?s=winter")) == 3
     assert found(page(client, "/shop?t=studded")) == 1 and found(page(client, "/shop?t=friction")) == 3
     html = page(client, "/shop?w=205+245&s=winter&t=friction")
-    assert found(html) == 2 and 'value="205 245"' in filters(html)            # the filters keep what was typed
+    assert found(html) == 2 and 'name="w" value="205" checked' in filters(html) and 'name="w" value="245" checked' in filters(html)   # kept ticked
     assert 'name="s" value="winter" checked' in filters(html) and 'name="t" value="friction" checked' in filters(html)
     for junk in ("/shop?w=abc", "/shop?d=R", "/shop?w=" + "9" * 500, "/shop?h=%00"):
         assert found(page(client, junk)) in (0, 4)
