@@ -544,11 +544,11 @@ def register(app) -> None:
                     skipped = [g for g in dict.fromkeys(ids) if g not in offers]          # outlive its return (the owner 2026-11-03)
                     ids = [g for g in ids if g not in skipped]
                 if skipped and not ids:
-                    raise ValueError("Выбраны только позиции, которых нет у поставщика: ручное правило им не ставится, ничего не записано.")
+                    raise ValueError("Выбраны только позиции, которых нет в выгрузке, по которой считаются цены: ручное правило им не ставится, ничего не записано.")
                 staging.set_overrides(conn, ids, None if mode == "clear" else mode, now_iso())
                 message = "%s позиций: %d." % ({"on": "Добавлено вручную", "off": "Снято", "clear": "Возвращено"}[mode], len(set(ids)))
                 if skipped:
-                    message += " Пропущено, нет у поставщика: %d." % len(skipped)
+                    message += " Пропущено, нет в выгрузке, по которой считаются цены: %d." % len(skipped)
             elif form.get("op"):
                 mode, _, goods_id = form["op"].partition(":")
                 if mode not in ("on", "off", "clear") or not goods_id:
@@ -760,7 +760,7 @@ def register(app) -> None:
         from the purchase or from their own price, in % or in ₽, up or down (own_bulk.plan), or «Сбросить к настройкам фида». The first press
         shows «было → стало» of every position and account; «В черновик» there writes just that (its mark `plan`: changed since — nothing
         written) into the working draft («Применить» with its confirmations). Whom: as the own price of a position (common.NEEDS). A position
-        the supplier took away goes too (its last purchase); one shown for viewing only is skipped."""
+        the supplier took away goes too (its last purchase); one shown for viewing only too when ticked, never by «все по фильтру»."""
         conn = get_conn()
         form = request.form
         back = _back()
@@ -776,6 +776,12 @@ def register(app) -> None:
             else:
                 found = form.getlist("g")
             offers, purchases, away, other = _bulk_positions(conn, sorted({str(g) for g in found if str(g or "").strip()}))
+            swept = []                                                   # «все по фильтру» never sweeps a position shown for viewing only: it is
+            if form.get("all") == "1":                                   # ticked by hand (under «Ручные цены») or set from its card
+                swept = [g for g, where in away.items() if where == "view"]
+                offers = {g: o for g, o in offers.items() if g not in swept}
+                purchases = {g: p for g, p in purchases.items() if g not in swept}
+                away = {g: w for g, w in away.items() if g not in swept}
             gone = {g for g, where in away.items() if where == "gone"}    # the archive's: «нет у поставщика»; shown for viewing only: «только просмотр»
             if not offers:
                 raise ValueError("Среди выбранных нет известных позиций." if other else "Отметьте позиции.")
@@ -791,6 +797,8 @@ def register(app) -> None:
                     raw = staging.effective_raw(conn)
                     general = settings_from_dict(raw, enforce_pct_limit=False)
                     rows = own_bulk.rows(conn, general, offers, purchases, result["set"], gone, float(get_active(conn)[1]["pct_limit"]))
+                    for r in rows:
+                        r["view"] = away.get(r["goods_id"]) == "view"
                     return render_template("catalog_own_bulk.html", rows=rows, shown=BULK_ROWS_SHOWN, result=result, op_text=_op_text(op),
                                            plan=own_bulk.fingerprint(result["set"]), positions=len({r["goods_id"] for r in rows}),
                                            gone=len(gone), view=len(away) - len(gone), other=len(other), skips=own_bulk.SKIPS, back=back, own_price_text=service.own_price_text,
@@ -818,6 +826,8 @@ def register(app) -> None:
             parts.append("Пропущено, %s: %d (позиция × аккаунт)." % (own_bulk.SKIPS[why], len(keys)))
         if other:
             parts.append("Пропущено, нет в выгрузке и не было в ней раньше: %d." % len(other))
+        if swept:
+            parts.append("Пропущено, только для просмотра (по фильтру не берутся — отметьте их или поставьте в карточке): %d." % len(swept))
         flash(" ".join(parts) + (" Подтвердите изменения, чтобы они попали в фид." if done["set"] else ""))
         return redirect(back)
 

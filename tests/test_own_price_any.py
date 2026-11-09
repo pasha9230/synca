@@ -195,3 +195,21 @@ def test_the_card_of_a_position_unknown_everywhere_is_still_refused(tmp_path):
     assert client.get("/catalog/item/nope").status_code == 404
     r = post(client, "/catalog/item/nope/own-price", tok, kind="price", value="4500", a=[str(first)], action="save")
     assert "нет в выгрузке и не было в ней раньше" in _flash(client, r) and _changes(conn) == {}
+
+
+def test_all_by_the_filter_takes_a_gone_position_but_never_one_shown_for_viewing_only(tmp_path, monkeypatch):
+    """Ревью: «все по фильтру» по бренду или размеру не должны молча ставить цену позициям только для просмотра — их отмечают руками."""
+    import re
+    app, conn, (first, _) = _tochki_app(tmp_path, monkeypatch)
+    client, tok = _owner(app)
+    page = client.get("/catalog").get_data(as_text=True)
+    fp = re.search(r'name="fp" value="([^"]*)"', page).group(1)
+    form = dict(all="1", filter="", fp=fp, base="purchase", unit="rub", side="up", value="100")
+    r = post(client, "/catalog/own-price/bulk", tok, a=[str(first)], **form)
+    assert r.status_code == 200 and "только просмотр" not in r.get_data(as_text=True)
+    plan = re.search(r'name="plan" value="([0-9a-f]+)"', r.get_data(as_text=True)).group(1)
+    r = post(client, "/catalog/own-price/bulk", tok, a=[str(first)], step="draft", plan=plan, **form)
+    assert "только для просмотра (по фильтру не берутся" in _flash(client, r)
+    assert "%d:s3-1" % first not in _changes(conn) and "%d:%s" % (first, GONE) in _changes(conn)
+    r = _draft(client, tok, ["s3-1"], [first], base="purchase", unit="rub", side="up", value="100")
+    assert _changes(conn)["%d:s3-1" % first] == {"price": 2100}
