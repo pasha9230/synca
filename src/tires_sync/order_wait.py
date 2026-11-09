@@ -35,6 +35,7 @@ BEFORE_MODEL = re.compile(r"\d{2,3}|[A-Z]")                 # in WebMIM's own na
 HELD = "wait_held:%s"                                # app_state, per send mark: the positions the client was told of, [[position, pieces]]: they are held
 SENT_TEXT = "wait_text:%s"                           # app_state, per send mark: the words of a send until it is known to have gone
 NOTES = "wait_notes:%s"                              # app_state, per send mark: the journal lines that wait for the send to go (_note)
+TAG_OFF = "wait_tag_off:%s"                          # app_state, per send mark: the check took the tag of the find off (_tag_now): it comes back
 TITLE_EXACT, TITLE_ANALOG = "Позиция появилась: предложите клиенту", "Есть аналоги: можно предложить клиенту"
 TITLE_CHECK = "Позиция появилась: проверьте чат клиента"    # the message may have gone: the same task, without the card's form «отправить клиенту»
 AUTHOR = "лист ожидания"
@@ -219,7 +220,8 @@ def _line_result(line: dict, offers: List) -> Optional[tuple]:
 
 
 def _tag(conn, card_id, card: dict, kind: str, now: str) -> None:
-    """The tag of the find, once per stay: a manager who takes it off is not given it again; the exact find replaces the analog tag."""
+    """The tag of the find, with its task or its message (once per stay): a manager who takes it off is not given it again; the exact find
+    replaces the analog tag. The check keeps it current (_tag_now)."""
     tag = TAG_EXACT if kind == "exact" else TAG_ANALOG
     tags = [t for t in card["tags"] if t != TAG_ANALOG or kind != "exact"]
     if tag not in tags:
@@ -230,6 +232,24 @@ def _tag(conn, card_id, card: dict, kind: str, now: str) -> None:
         except orders.OrderError:                                  # ten tags already: the task or the message is there, the person is still told
             conn.rollback()
             logging.getLogger("tires_sync.order_wait").warning("card %s could not take the tag", card_id)
+
+
+def _tag_now(conn, card_id, stay: str, kind: Optional[str], now: str) -> None:
+    """The tag of the find says what is in stock now (the owner 2026-11-09): `kind` None (the list is not covered now) takes «Появилось» and
+    «Есть аналоги» off and remembers it (TAG_OFF); covered again ("exact" or "analog"), the tag the check took off comes back. A tag the manager
+    took off by hand is not remembered: it does not come back in this stay. The task and the message stay once per stay."""
+    key = TAG_OFF % _token(card_id, stay)
+    card = orders.get_card(conn, card_id)
+    if kind is None:
+        tags = [t for t in card["tags"] if t not in (TAG_EXACT, TAG_ANALOG)]
+        if tags != card["tags"]:
+            orders.update_card(conn, card_id, {"tags": ",".join(tags)}, now, AUTHOR, commit=False)
+            store.set_state(conn, key, "1")
+            conn.commit()
+    elif store.get_state(conn, key):
+        conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+        conn.commit()
+        _tag(conn, card_id, card, kind, now)
 
 
 def _mark(conn, card_id, kind: str, found: List, now: str, notify=None, note: str = "", title: str = "") -> None:
@@ -733,7 +753,7 @@ def client_refused(conn, task_id, now: str, author: str) -> None:
 def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of: Optional[PriceOf] = None, max_sends: int = MAX_SENDS) -> Dict[str, List[int]]:
     """Look at every card in «Ожидает наличие» against the offers in stock. Returns {"exact": [card ids], "analogs": [card ids]}.
     Found exactly: the client is written to by `deliver` (chats.send_reply of the chat's account) with the price from `price_of` (_tell_client);
-    the task only when that cannot go. Marking is once per stay in the stage (the task), the tag only once. `notify(card_id, title, body)` is
+    the task only when that cannot go. Marking is once per stay in the stage (the task); the tag follows the stock each check (_tag_now). `notify(card_id, title, body)` is
     called once for each new task.
     Stock enough for fewer orders than wait for it (the owner 2026-11-05): the order that waits longest goes first and holds the tires, counted
     across the orders of this cycle: while it stays in this stay in the stage after its message or its task, unless the task was skipped.
@@ -757,9 +777,16 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
             logging.getLogger("tires_sync.order_wait").warning("the send of card %s could not be settled", card_id, exc_info=True)
         lines = list_wants(conn, card_id)
         results = [_line_result(line, stock) for line in lines]
-        if not lines or any(r is None for r in results):
+        covered = bool(lines) and all(r is not None for r in results)
+        kind = ("exact" if all(r[0] == "exact" for r in results) else "analogs") if covered else ""
+        if stock or covered:                                       # no stock at all is a failed unload, not «шин нет»: the tags stay
+            try:
+                _tag_now(conn, card_id, stay, {"exact": "exact", "analogs": "analog"}.get(kind), now)
+            except Exception:                                      # a tag that cannot change never stops the check
+                conn.rollback()
+                logging.getLogger("tires_sync.order_wait").warning("the tag of card %s could not change", card_id, exc_info=True)
+        if not covered:
             continue                                               # a part of the set is no sale: nothing is marked
-        kind = "exact" if all(r[0] == "exact" for r in results) else "analogs"
         out[kind].append(card_id)
         cards.append((card_id, kind, lines, [r[1] for r in results]))
         stays[card_id] = stay
