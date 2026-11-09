@@ -325,7 +325,7 @@ def hourly(conn, client, server: str, now: str, send: Optional[Send]) -> dict:
     for number, seen in found.items():
         result, lines = take(conn, targets[number], seen, now, send)
         counts[result] = counts.get(result, 0) + 1
-        counts["sent"] += sum(1 for line in lines if line.startswith("Клиенту отправлено") or line.startswith("Точке «"))
+        counts["sent"] += sum(1 for line in lines if line.startswith("Клиенту отправлено") or (line.startswith("Точке «") and "» отправлено «" in line))
     return counts
 
 
