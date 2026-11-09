@@ -95,13 +95,14 @@ def note_fields(conn, card_id: int, source: str, seen: dict, now: str) -> bool:
     return True
 
 
-def apply(conn, card_id: int, number: str, label: str, now: str) -> str:
+def apply(conn, card_id: int, number: str, label: str, now: str, written_text: str = "") -> str:
     """The invoice `number` of the WebMIM order `label` for the order of the panel: written into an empty «Номер перемещения» ('written'),
-    the same as typed ('same'), another typed by a person (a yellow record once, nothing changed: 'differs'). No commit."""
+    the same as typed ('same'), another typed by a person (a yellow record once, nothing changed: 'differs'). `written_text`: the grey
+    record of the write when the number came from elsewhere (webmim_cabinet). No commit."""
     current = orders._row(conn, card_id)["transfer_number"]
     if not current:
         orders.update_card(conn, card_id, {"transfer_number": number}, now, AUTHOR, commit=False)
-        orders.add_event(conn, card_id, now, AUTHOR, "webmim", "Номер перемещения из WebMIM: %s (счёт заказа WebMIM %s)." % (number, label), "grey")
+        orders.add_event(conn, card_id, now, AUTHOR, "webmim", written_text or "Номер перемещения из WebMIM: %s (счёт заказа WebMIM %s)." % (number, label), "grey")
         return "written"
     if _same(current, number):
         return "same"

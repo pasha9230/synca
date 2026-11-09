@@ -33,6 +33,8 @@ class FakeWebmim:
         self.shipments = {"1": "Доставка", "2": "Самовывоз"} if shipments is None else shipments
         self.addresses = [{"id": "77", "address": "СПб, Гамма"}, {"id": "78", "address": "СПб, Парнас"}] if addresses is None else addresses
         self.orders, self.items, self.fail, self.calls = [], {}, {}, []
+        self.cabinet = None              # the rows of GET /api/v3/orders (webmim_cabinet); None: the login does not see the list (404)
+        self.sessions = 0                # the v3 sessions open now (the login +1, the logout −1)
 
     def add_order(self, external, created="23.10.26 11:00:00"):
         order = {"id": 1000 + len(self.orders) + 1, "number": 5000 + len(self.orders) + 1, "externalNumber": external, "createDate": created,
@@ -65,6 +67,14 @@ class FakeWebmim:
     def _answer(self, method, path, query, payload):
         if path == "/api/v2/token":
             return 200, {"accessToken": "TOKEN-1", "tokenType": "bearer"}, {}
+        if path == "/api/v3/auth/login":
+            self.sessions += 1
+            return 200, {"result": True, "authKey": "AUTH-%d" % self.sessions}, {}
+        if path == "/api/v3/auth/logout":
+            self.sessions -= 1
+            return 200, {"result": True}, {}
+        if path == "/api/v3/orders":
+            return (404, {"message": "not found"}, {}) if self.cabinet is None else (200, {"data": list(self.cabinet)}, {})
         if path == "/api/v2/account/payment-types":
             return 200, self.payment_types, {}
         if path == "/api/v2/account/payment-terms":
