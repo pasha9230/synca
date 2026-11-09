@@ -67,7 +67,7 @@ def test_the_notifications_and_the_tasks_show_no_client(tmp_path):
     assert [r["order"]["client"] for r in rows] == ["", NAME]
     conn.execute("INSERT INTO avito_chat (account_id, chat_id, peer_name) VALUES (1, 'c1', ?)", (NAME,))
     chat = conn.execute("SELECT id FROM avito_chat").fetchone()[0]
-    assert inquiry._who_called(conn, {"client_id": None, "order_id": oth, "chat_row": chat}) == ("", PHONE[:-1] + "1")     # the phone stays: the task
+    assert inquiry._who_called(conn, {"client_id": None, "order_id": oth, "chat_row": chat}) == ("", "")     # no name, no phone (the owner 2026-11-09)
     assert inquiry._who_called(conn, {"client_id": None, "order_id": talk, "chat_row": None}) == (NAME, PHONE[:-1] + "2")
 
 

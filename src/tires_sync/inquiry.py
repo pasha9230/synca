@@ -490,6 +490,8 @@ def _who_called(conn, task: dict) -> tuple:
     if task["chat_row"] and not name and not gone:
         row = conn.execute("SELECT peer_name FROM avito_chat WHERE id = ?", (task["chat_row"],)).fetchone()
         name = row[0] if row else ""
+    if gone:                                                       # the owner 2026-11-09: the phone of an unlinked client is hidden too
+        phone = ""
     return name or "", phone or ""
 
 
