@@ -351,6 +351,13 @@ def register(app) -> None:
     def back(chat_row):
         return redirect("/chats/%d%s" % (chat_row, _keep_query()))
 
+    def sent_back(chat):
+        """Where «Отправить» comes back: the order window it was pressed in (`to=order`, the column «Чат Авито», the owner 2026-11-09) — only
+        the window of the chat's own order, never an address from the form; else the chat, as before."""
+        if request.form.get("to") == "order" and chat.get("order_id"):
+            return redirect("/orders/%d#order-chat" % chat["order_id"])
+        return back(chat["id"])
+
     @app.route("/chats/<int:chat_row>/status", methods=["POST"])
     @login_required
     def chat_status(chat_row):
@@ -487,14 +494,14 @@ def register(app) -> None:
             flash("Файл фото пустой: ничего не отправлено. Выберите фото ещё раз.")
             if plain:
                 keep_text()
-            return back(chat_row)
+            return sent_back(chat)
         if not data and not plain:
             flash("Ничего не отправлено: напишите ответ или выберите фото.")
-            return back(chat_row)
+            return sent_back(chat)
         if len(plain) > chats.MAX_REPLY:
             flash("Ничего не отправлено: текст ответа длиннее %d знаков." % chats.MAX_REPLY)
             keep_text()
-            return back(chat_row)
+            return sent_back(chat)
         try:
             writer = _writer(conn, chat)
             if data:
@@ -508,12 +515,12 @@ def register(app) -> None:
                 keep_text()
             else:
                 flash(str(err))
-            return back(chat_row)
+            return sent_back(chat)
         if not plain:
             flash("Фото отправлено клиенту.")
             session.pop("draft_%d" % chat_row, None)                       # the field was sent empty: an old draft must not come back
             _took(conn, chat_row)
-            return back(chat_row)
+            return sent_back(chat)
         try:
             chats.send_reply(conn, writer, chat_row, text, request.form.get("reply_token"), local_iso(), author())
             flash("Фото и ответ отправлены клиенту." if data else "Ответ отправлен клиенту.")
@@ -525,7 +532,7 @@ def register(app) -> None:
         except chats.ChatError as err:
             flash(("Фото отправлено клиенту, а текст не ушёл: %s Текст остался в поле." % err) if data else str(err))
             keep_text()
-        return back(chat_row)
+        return sent_back(chat)
 
     @app.route("/orders/<int:card_id>/task/<int:task_id>/send", methods=["POST"])
     @login_required
@@ -579,7 +586,7 @@ def register(app) -> None:
             flash("Фото отправлено клиенту.")
         except chats.ChatError as err:                                     # ChatSendUnknown too: its text says not to send it again
             flash(str(err))
-        return back(chat_row)
+        return sent_back(chat)
 
     @app.route("/chats/<int:chat_row>/delete", methods=["POST"])
     @login_required

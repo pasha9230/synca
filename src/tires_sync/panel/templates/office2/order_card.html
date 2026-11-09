@@ -111,8 +111,7 @@
 {% endcall %}<div class="o2c-split" data-split="1" role="separator" aria-orientation="vertical" tabindex="0" title="Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию"></div>
 {% call col(2) %}
 {% if chat_links %}<section class="card entity-sec o2c-chats"><div class="card-body stack">
-{% with sends=chat_sends, back="/orders/%d"|format(c.id) %}{% include "_chat_sends.html" %}{% endwith %}
-{% for ch in chat_links %}<div class="stack" style="gap:2px"><div class="row" style="gap:var(--s-2)"><a href="/chats/{{ ch.id }}"><b>Ч-{{ ch.id }}</b> · {{ ch.peer_name or "без имени" }}</a>{% if ch.unread %}<span class="badge badge--warn">новых: {{ ch.unread }}</span>{% endif %}<a class="btn btn--secondary btn--xs ml-auto" href="/chats/{{ ch.id }}">Открыть</a></div>{% if ch.item_title %}<div class="small">{{ ch.item_title }}</div>{% endif %}<div class="small muted chat-last">{{ ch.last_text }}</div></div>{% endfor %}
+{% with o2=true %}{% include "_order_chat.html" %}{% endwith %}
 </div></section>{% else %}<p class="muted small o2c-empty">К заказу не привязан чат Авито. Привязать можно в окне заказа: «Дополнительно» → «Чат Авито».</p>{% endif %}
 {% with autosend_order=c.id %}{% include "_order_autosend.html" %}{% endwith %}{# no block «Автосообщение клиенту» (the owner 2026-11-09): the waiting ones only, with «Отменить» #}
 {% endcall %}

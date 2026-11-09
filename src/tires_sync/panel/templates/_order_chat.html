@@ -1,0 +1,15 @@
+{#- The column «Чат Авито» of the order window, in both views (order_card.html, office2/order_card.html). The owner 2026-11-09: «видеть диалог и
+    писать клиенту прямо из этого окна». The order's chat (routes_orders.order_chat_view: the newest of its chats, for who may see «Чаты») with
+    its whole thread and the reply field of the page «Чаты» (the same files _chat_thread.html and _chat_composer.html, the same form to
+    /chats/<id>/send: the account, the rights, the journal, «отвечено», the marks against a double press); the send comes back here
+    (#order-chat). Its other chats: a line each, as before. The thread has no scroll of its own: the page scrolls and opens at the last message
+    (app.js; not on a point's phone page, where the chat is at the very end of a long page: there only after a send, #order-chat); the live
+    update of the page «Чаты» reads /chats/<id> and swaps the thread. `o2`: the look of «Новый вид». -#}
+{% with sends=chat_sends, back="/orders/%d"|format(c.id) %}{% include "_chat_sends.html" %}{% endwith %}
+{% for ch in chat_links %}<div class="stack" style="gap:2px"><div class="row" style="gap:var(--s-2)"><a href="/chats/{{ ch.id }}"><b>Ч-{{ ch.id }}</b> · {{ ch.peer_name or "без имени" }}</a>{% if ch.unread %}<span class="badge badge--warn">новых: {{ ch.unread }}</span>{% endif %}<a class="btn btn--secondary btn--xs ml-auto" href="/chats/{{ ch.id }}">Открыть</a></div>{% if ch.item_title %}<div class="small">{{ ch.item_title }}</div>{% endif %}
+{% if order_chat and ch.id == order_chat.chat.id %}<div class="order-chat" data-order-chat="{{ ch.id }}"{% if current_user().role != "point" %} data-open-end{% endif %}>
+<div id="chats-live" data-sig="{{ order_chat.sig }}" data-chat="{{ ch.id }}" data-page="/chats/{{ ch.id }}" data-csrf="{{ csrf_token() }}" hidden></div>
+<div class="chat-thread order-chat-thread">{% with current=order_chat.chat, messages=order_chat.messages %}{% include "_chat_thread.html" %}{% endwith %}</div>
+{% set keep %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="to" value="order">{% endset %}
+{% with current=order_chat.chat, sends=[], can_send=order_chat.can_send, reply_token=order_chat.reply_token, image_token=order_chat.image_token, draft=order_chat.draft, composer_id="order-chat", composer_back="/orders/%d#order-chat"|format(c.id) %}{% include "_chat_composer.html" %}{% endwith %}
+</div>{% else %}<div class="small muted chat-last">{{ ch.last_text }}</div>{% endif %}</div>{% endfor %}

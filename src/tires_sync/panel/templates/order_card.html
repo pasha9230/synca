@@ -94,8 +94,7 @@
 <div class="ocard-side">
 {% if can("orders") %}{{ inq_ui.callbacks(tasks_for(order_id=c.id), order_id=c.id, back="/orders/%d"|format(c.id), title="Задачи по заказу") }}{% endif %}
 {% if chat_links %}{% call entity_ui.section("Чаты Авито") %}<div class="card-body stack">
-{% with sends=chat_sends, back="/orders/%d"|format(c.id) %}{% include "_chat_sends.html" %}{% endwith %}
-{% for ch in chat_links %}<div class="stack" style="gap:2px"><div class="row" style="gap:var(--s-2)"><a href="/chats/{{ ch.id }}"><b>Ч-{{ ch.id }}</b> · {{ ch.peer_name or "без имени" }}</a>{% if ch.unread %}<span class="badge badge--warn">новых: {{ ch.unread }}</span>{% endif %}<a class="btn btn--secondary btn--xs ml-auto" href="/chats/{{ ch.id }}">Открыть</a></div>{% if ch.item_title %}<div class="small">{{ ch.item_title }}</div>{% endif %}<div class="small muted chat-last">{{ ch.last_text }}</div></div>{% endfor %}
+{% include "_order_chat.html" %}
 </div>{% endcall %}{% endif %}
 {% call entity_ui.section("Лента событий") %}
 {% if can_post("order_note") %}<form method="post" action="/orders/{{ c.id }}/note" class="card-body row" style="gap:var(--s-2)">{{ csrf }}

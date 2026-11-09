@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 import sqlite3
 import time
 from datetime import date, timedelta
@@ -1203,6 +1204,7 @@ def register(app) -> None:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
         sendable = [ch for ch in links if ch["account_id"] in {                                      # (a point: its own account's only)
             a["id"] for a in connections.list_accounts(conn) if a["chats_enabled"] and a["chats_send"]}]
+        order_chat = order_chat_view(conn, links, sendable)
         return render_template(
             office_page("order_card.html"), messages=messages, open_messages=open_messages,
             **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
@@ -1226,7 +1228,7 @@ def register(app) -> None:
             oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stage_day=orders.stage_day(orders.stage_since(conn, card)), stage_at=card["entered_at"] if orders.stage_day(card["entered_at"]) == orders.stage_day(orders.stage_since(conn, card)) else "", stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS if own_point() is None else POINT_DEAL_KINDS, marks=orders.MARKS,
-            tasks=tasks, chat_links=links, chat_bind=bind, origin=origin, chat_sends=order_autosend.office_sends(chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()), own_point() is not None),
+            tasks=tasks, chat_links=links, order_chat=order_chat, chat_bind=bind, origin=origin, chat_sends=order_autosend.office_sends(chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()), own_point() is not None),
             chat_ref=chat_ref, responsible_options=_responsible_options(app, conn, card["responsible"]),
             want_seasons=order_wait.SEASON_NAMES, want_studs=order_wait.STUD_NAMES, want_text=order_wait.describe,
             client_text=wait_form_text(conn, card, sendable) if card["wants"] and any(
@@ -1239,6 +1241,20 @@ def register(app) -> None:
             supplier_number=order_supplier.number_of(conn, card_id),
             ad_position=deals.ad_position_chat(conn, card) if own_point() is None and can_post("order_ad_position") else None), status, {
             "Cache-Control": "no-store"}            # «Назад» reads the order again: the positions a press added are shown (хвост З6)
+
+    def order_chat_view(conn, links, sendable):
+        """The column «Чат Авито» of the order window (the owner 2026-11-09: see the dialog and write to the client from the order): the whole
+        thread of the order's chat (the newest of its chats) and the reply field of the page «Чаты», with its values (routes_chats.chats_page).
+        `links`: the chats the person may see here (a point: its own account's only, card_page); nothing without the right to see «Чаты»."""
+        if not links or not can("chats"):
+            return None
+        chat = dict(links[0])
+        chat["ref"] = deals.ref(chat["id"])
+        chat["account_name"] = "" if own_point() is not None else next(                             # a point never sees an account's name
+            (a["name"] for a in connections.list_accounts(conn) if a["id"] == chat["account_id"]), "")
+        return {"chat": chat, "messages": chats_store.thread(conn, chat), "can_send": any(ch["id"] == chat["id"] for ch in sendable),
+                "sig": chats_store.signature(conn, chat["id"]), "reply_token": secrets.token_hex(12), "image_token": secrets.token_hex(12),
+                "draft": session.get("draft_%d" % chat["id"], "")}
 
     def wait_form_text(conn, card, sendable):
         """The words of the form «Позиция появилась»: those the message by itself has, priced as order_wait.check prices them (by the order

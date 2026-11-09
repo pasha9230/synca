@@ -104,6 +104,23 @@ body.o2-card .o2c-tab{border:1px solid var(--gray-200);background:var(--gray-0);
 body.o2-card .o2c-tab.is-on{background:var(--primary-50);border-color:var(--primary-300);color:var(--primary-700)}
 body.o2-card .o2c-feed li[hidden]{display:none}
 body.o2-card .o2c-empty{padding:var(--s-3)}
+/* the column «Чат Авито»: the order's thread and the reply field of «Чаты» (_order_chat.html, the owner 2026-11-09); no height of its own, the page scrolls */
+body.o2-card .order-chat{display:flex;flex-direction:column;gap:var(--s-2);margin-top:var(--s-2)}
+body.o2-card .order-chat-thread{padding:var(--s-2);gap:8px;background:var(--gray-50);border-radius:8px}
+body.o2-card .order-chat-thread .msg{max-width:85%;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:12px 12px 12px 4px;font-size:14px;line-height:20px}
+body.o2-card .order-chat-thread .msg--out{background:var(--primary-50);border-color:var(--primary-300);border-radius:12px 12px 4px 12px}
+body.o2-card .order-chat-thread .msg--sys{border-style:dashed;max-width:100%}
+body.o2-card .order-chat-thread .msg--call{background:var(--warn-50);border:1px solid var(--warn-200)}
+body.o2-card .order-chat-thread .chat-day{background:var(--gray-0);border:1px solid var(--gray-200)}
+body.o2-card .order-chat .chat-composer{padding:0;border-top:0}
+body.o2-card .order-chat .o2-cl-send{display:flex;flex-direction:column;gap:4px}
+body.o2-card .order-chat .o2-cl-line{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px}     /* a narrow column: the field on its own line */
+body.o2-card .order-chat .o2-cl-line .textarea{flex:1 1 100%;order:-1;min-width:0;min-height:64px;max-height:240px;resize:vertical}
+body.o2-card .order-chat .o2-cl-line .btn{margin-left:auto}
+body.o2-card .order-chat .o2-cl-line .btn{height:40px}
+body.o2-card .order-chat .o2-cl-line .chat-photo-pick{height:40px;width:36px}
+body.o2-card .order-chat .chat-send-note{white-space:normal}
+body.o2-card .order-chat .o2-cl-none{text-align:center}
 /* the window in a column: its own grid follows the column (container queries) */
 body.o2-card .o2c-scroll .owin-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 body.o2-card .o2c-scroll .owin-stages{flex-wrap:wrap;overflow-x:visible}       /* every stage seen in a column: the strip wraps */
