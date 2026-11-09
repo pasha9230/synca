@@ -150,7 +150,7 @@ def test_the_sums_differ_the_number_is_written_and_nothing_is_sent_but_a_yellow_
     """Review 09.11: a row of another sum may be another order — the number goes in, the messages wait for a person."""
     conn, mine, *_ = placed_order(tmp_path, cabinet=[])
     result, deliver, vk = poll(conn, mine, Cabinet([row(5001, total=25000)]))
-    assert result["result"] == "written" and result["lines"] == [] and not deliver.sent and not vk.sent
+    assert result["result"] == "written" and result["lines"] == [webmim_cabinet.SUM_DIFFERS % ("25000", "24000", INVOICE)] and not deliver.sent and not vk.sent
     assert orders.get_card(conn, mine)["transfer_number"] == INVOICE
     assert any(level == "yellow" and "не сходится" in text and INVOICE in text for text, level in events(conn, mine))
     assert {t["status"] for t in message_tasks(conn, mine)} != {"done"}
@@ -265,7 +265,7 @@ def test_a_number_in_already_costs_no_login_and_an_old_answer_is_not_shown(tmp_p
 def test_hourly_one_login_for_every_open_order_writes_and_sends_once(tmp_path):
     conn, mine, *_ = placed_order(tmp_path, cabinet=[])
     other = card(conn, point_id=point(conn, name="Парнас", webmim_address_id="78"))
-    orders.update_card(conn, other, {"webmim_number": "7007"}, NOW, "owner")         # typed by hand, not placed by the button: no send
+    orders.update_card(conn, other, {"webmim_number": "7007"}, NOW, "owner")         # typed by hand: written; it has no message waiting
     deliver, vk = Deliver(), FakeVk()
     cabinet = Cabinet([row(7007, invoice="26R-7000007"), row(5001)])
     client = cabinet_of(cabinet)()

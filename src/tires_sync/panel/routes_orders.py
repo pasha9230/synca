@@ -1386,6 +1386,7 @@ def register(app) -> None:
         else:
             flash("Сохранено.", "ok")
         row = orders._row(conn, card_id)
+        typed_number = bool(row["webmim_number"]) and "webmim_number" in changed     # the transfer number from MIM's cabinet, at the end
         if row["webmim_number"] and (("webmim_number" in changed and not number_before) or "webmim_id" in changed):
             # placed in WebMIM (the number appeared, or the id for the API came): the purchase from there; a corrected number keeps the purchase
             _conn, _settings, parsed, _ref = context(app)
@@ -1396,15 +1397,21 @@ def register(app) -> None:
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
                 offer_waiting(conn, card_id)                              # a move of this press below offers its own messages instead
         if refused is not None:                                           # the press meant the position and the move: no move without it
+            if typed_number:
+                cabinet_after_save(conn, card_id, number_before)
             if "stage_id" in request.form:
                 flash("Заказ не перенесён: позиция не добавлена.", "error")
             return card_page(conn, card_or_404(conn, card_id), typed_row)
         if "stage_id" in request.form:                                    # a stage of the window: the fields are saved first, then the move
             asked = oth_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
             if asked is not None:                                         # the fields are saved (the reason too); the move asks first
+                if typed_number:
+                    cabinet_after_save(conn, card_id, number_before)
                 return ask_oth(card_id, asked)
             going_back = back_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
             if going_back is not None:                                    # the fields are saved; a new client or the same asks first
+                if typed_number:
+                    cabinet_after_save(conn, card_id, number_before)
                 return ask_back(card_id, going_back)
             try:
                 stage_id = _int(request.form.get("stage_id"))
@@ -1419,8 +1426,35 @@ def register(app) -> None:
                     offer_send(conn, card_id, stamp)
             except orders.OrderError as err:
                 flash(str(err), "error")                                  # the fields stay saved; the refusal is a red record of the journal
+        if typed_number:                                                  # after the move: the messages its rules made can go with the number
+            cabinet_after_save(conn, card_id, number_before)
         part = part or request.form.get("tab", "")
         return back(card_id, part if part in ORDER_PARTS else "")
+
+    def cabinet_after_save(conn, card_id, number_before) -> None:
+        """A WebMIM number typed in the order window (the partner places orders by hand in MIM's cabinet, the owner 2026-11-09): its
+        «Номер перемещения» from the cabinet right away (webmim_cabinet.after_save: one quick read), the messages «заказ оформлен» that
+        waited for it go (order_placed.send_waiting, as the window «Подтверждение»). Never fails the save: the hourly reading is there."""
+        if own_point() is not None or not webmim_cabinet.enabled(conn):
+            return
+        stamp = local_iso()
+
+        def send(order_id):
+            return order_placed.send_waiting(conn, order_id, stamp, author(), avito_deliver(conn, stamp), vk_sender(conn))
+
+        def client_of():
+            box = app.config.get("SECRET_BOX")
+            return None if box is None else webmim_match.client_for(conn, box, app.config.get("WEBMIM_HTTP") or urllib_transport, "prod")
+        try:
+            result, lines = webmim_cabinet.after_save(conn, card_id, client_of, stamp, send, number_before)
+        except Exception:                                                 # noqa: BLE001  the fields are saved; the hourly reading takes it
+            conn.rollback()
+            log.exception("the transfer number of MIM's cabinet after the save of order %s", card_id)
+            return
+        if result == "written":
+            flash("Номер перемещения взят из кабинета MIM: %s." % orders._row(conn, card_id)["transfer_number"], "ok")
+        for line in lines:
+            flash(line, placed_kind(line))
 
     @app.route("/orders/<int:card_id>/autosave", methods=["POST"])
     @login_required
