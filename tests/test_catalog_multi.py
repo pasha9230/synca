@@ -8,8 +8,10 @@ import re
 
 import pytest
 
+from panel_helpers import post
 from test_catalog_filters import codes, setup as office
-from test_shop import make_shop, page, prices
+from test_shop import ROWS, make_shop, page, prices, wm
+from test_shop_cart import add, keys
 from tires_sync import store, user_prefs
 from tires_sync.panel import client_catalog as cc
 
@@ -132,3 +134,70 @@ def test_recent_sizes_are_each_persons_own_and_the_preview_keeps_none(tmp_path):
     assert cc.remember_sizes(conn, "", [(1, 2, 3)], "x") == [] and cc.recent_sizes(conn, "nobody") == []
     user_prefs.put(conn, "buyer", cc.RECENT_KEY, [[205, 55], "junk", [0, 1, 2], [205, 55, 16]], "x")       # a value that no longer reads
     assert cc.recent_sizes(conn, "buyer") == [(205, 55, 16)]
+
+
+# ---- the client's «Колонки» and «Количество» ---------------------------------------------------------------------------------------
+
+def head(html) -> list:
+    return re.findall(r"<th[^>]*>([^<]*)</th>", html.split('class="table shop-table')[1].split("</thead>")[0])
+
+
+@pytest.mark.parametrize("state", ["off", "all"])
+def test_country_and_year_are_two_columns_and_the_client_hides_and_keeps_them(tmp_path, state):
+    app, client, conn, _ = make_shop(tmp_path)
+    view(conn, "client", state)
+    html = page(client)
+    names = head(html)
+    assert "Страна" in names and "Год" in names and "Страна, год" not in names
+    assert "Колонки" in html and html.count('name="show"') == 6
+    assert post(client, "/shop/columns", "tok", show="season").status_code == 302      # only «Сезон» stays shown
+    client.post("/shop/columns", data={"csrf": "tok", "show": ["season", "price"]}, headers={"Referer": "http://localhost/shop?w=205"})
+    assert user_prefs.get(conn, "buyer", cc.COLUMNS_KEY) == ["country", "year", "wh", "stock"]
+    html = page(client)
+    names = head(html)
+    assert "Сезон" in names and "Цена за шт." in names and "Шина" in names and "Количество" in names
+    assert not {"Страна", "Год", "Склад", "Остаток"} & set(names)
+    assert 'class="c-country"' not in html and 'class="c-stock num"' not in html and 'class="c-tire"' in html
+    assert 'name="show" value="year">' in html and 'name="show" value="season" checked' in html
+    response = client.post("/shop/columns", data={"csrf": "tok"}, headers={"Referer": "http://localhost/shop?w=205"})
+    assert response.headers["Location"].endswith("/shop?w=205")                           # back to the page it came from
+    names = head(page(client))
+    assert "Шина" in names and "Количество" in names and "Сезон" not in names and "Цена за шт." not in names
+
+
+def test_the_columns_are_the_clients_only(tmp_path):
+    app, owner, tok, conn = office(tmp_path)
+    assert owner.post("/shop/columns", data={"csrf": tok, "show": ["season"]}).status_code in (302, 403)
+    assert user_prefs.get(conn, "owner", cc.COLUMNS_KEY) is None
+
+
+@pytest.mark.parametrize("state", ["off", "all"])
+def test_the_quantity_is_at_most_the_stock(tmp_path, state):
+    few = wm(NNOMMODIF="77009", SMODIFNAME="IKON 215/60/16 T 95 Test Model", SWIDTH="215", SHEIGHT="60", NPRICE_DELAYED="9000", NREST="3")
+    app, client, conn, _ = make_shop(tmp_path, rows=ROWS + (few,))
+    view(conn, "client", state)
+    html = page(client, "/shop?o=price")                   # 195/65 R15 (9 in stock), 215/60 R16 (3), 205/55 R16 (12), 245/45 R18 (41)
+    found = re.findall(r'name="qty" value="(\d+)" min="1" max="(\d+)"', html.split('class="shop2-sheet"')[0])
+    assert found == [("4", "9"), ("3", "3"), ("4", "12"), ("4", "41")]
+    assert 'max="100"' not in html
+
+
+def test_more_than_the_stock_puts_the_stock_and_says_so(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    key = keys(page(client, "/shop?w=205"))[0]                                             # 205/55 R16, 12 in stock
+    add(client, key, qty="50")
+    html = page(client, "/shop")
+    assert "В наличии 12 шт.: столько и положили." in html
+    from tires_sync import shop_cart
+    assert list(shop_cart.cart(conn, "buyer").values()) == [12]
+    add(client, key, qty="1")                                                              # the cart holds all of them already
+    assert "В наличии 12 шт.: столько и положили." in page(client)
+    assert list(shop_cart.cart(conn, "buyer").values()) == [12]
+
+
+def test_within_the_stock_the_usual_word(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    key = keys(page(client, "/shop?w=205"))[0]
+    add(client, key, qty="4")
+    html = page(client)
+    assert "В корзине: 4 шт." in html and "В наличии" not in html

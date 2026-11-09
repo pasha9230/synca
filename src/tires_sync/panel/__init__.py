@@ -344,7 +344,7 @@ def create_app(config: dict) -> Flask:
             "frame-ancestors 'none'")
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if request.endpoint in ("shop_page", "shop_photo", "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
-                                "shop_profile_page", "shop_profile_save", "shop_order_cancel") \
+                                "shop_profile_page", "shop_profile_save", "shop_order_cancel", "shop_columns") \
                 or (request.endpoint == "whatsnew_page" and _client_signed_in()):    # «Что нового» in the client's frame
             # the client's catalog: no scripts, no picture from outside (a supplier's host is never asked by the client's browser), not kept
             response.headers["Content-Security-Policy"] = (

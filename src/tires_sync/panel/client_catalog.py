@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
-from .. import user_prefs
+from .. import shop_cart, user_prefs
 from ..catalog import resolve_brand
 from ..models import PricingRule
 from ..pricing import TENS, final_price
@@ -24,7 +24,11 @@ from ..suppliers import supplier_of_id
 from . import service
 
 FIELDS = ("brand", "model", "name", "size", "season", "studs", "load", "speed", "runflat", "country", "year", "stock", "warehouse", "price",
-          "photo")
+          "photo", "qty", "qty_max")
+QTY_DEFAULT = 4                       # «Количество» of «В корзину»: 4, never more than the stock (the owner 2026-11-09)
+# the columns of the client's table a client may hide («Колонки», the owner 2026-11-09); «Шина» and «Количество» always stay
+COLUMNS = (("season", "Сезон"), ("country", "Страна"), ("year", "Год"), ("wh", "Склад"), ("stock", "Остаток"), ("price", "Цена за шт."))
+COLUMNS_KEY = "shop.cols"             # user_pref of the client: the keys of COLUMNS hidden
 WAREHOUSE_MAIN, WAREHOUSE_TOCHKI = "Склад 1", "Склад 2"
 STOCK_MANY = "40+"                    # 4tochki sends 41 for «more than 40» (the owner 2026-10-29, В3)
 SEASONS = {"summer": "Лето", "winter": "Зима", "all": "Всесезонные"}
@@ -316,7 +320,22 @@ def row(item: Visible, photo: Optional[str]) -> dict:
            "size": "%d/%d R%d" % (o.width, o.height, o.diameter), "season": SEASONS.get(o.season.value, ""), "studs": bool(o.studded),
            "load": o.load or "", "speed": o.speed or "", "runflat": bool(o.runflat), "country": o.country or "", "year": o.mnf_year or "",
            "stock": stock, "warehouse": WAREHOUSE_TOCHKI if item.warehouse == 2 else WAREHOUSE_MAIN, "price": item.price, "photo": photo}
+    most = max(1, min(int(o.stock), shop_cart.MAX_QTY))                 # the cart takes no more (shop_cart.put cuts it there too)
+    out.update(qty=min(QTY_DEFAULT, most), qty_max=most)
     return out
+
+
+def hidden_columns(conn, login: str) -> List[str]:
+    saved = user_prefs.get(conn, login, COLUMNS_KEY, []) if login else []
+    keys = [k for k, _ in COLUMNS]
+    return [k for k in keys if isinstance(saved, list) and k in saved]
+
+
+def save_columns(conn, login: str, shown, now: str) -> List[str]:
+    """«Колонки» of the client: every column of COLUMNS not in `shown` is hidden; kept for the login."""
+    hidden = [k for k, _ in COLUMNS if k not in set(shown)]
+    user_prefs.put(conn, login, COLUMNS_KEY, hidden, now)
+    return hidden
 
 
 def brand_list(items: List[Visible]) -> List[Tuple[str, str]]:

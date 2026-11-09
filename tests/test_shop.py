@@ -168,7 +168,8 @@ def test_the_row_has_exactly_the_white_list_of_fields(tmp_path):
     rows = {r["warehouse"] + r["size"]: r for r in (cc.row(i, None) for i in items)}
     assert all(tuple(r) == cc.FIELDS for r in rows.values())
     assert cc.FIELDS == ("brand", "model", "name", "size", "season", "studs", "load", "speed", "runflat", "country", "year", "stock",
-                         "warehouse", "price", "photo")
+                         "warehouse", "price", "photo", "qty", "qty_max")
+    assert rows["Склад 1205/55 R16"]["qty"] == 4 and rows["Склад 1205/55 R16"]["qty_max"] == 12           # «Количество»: 4, never over the stock
     assert rows["Склад 2205/55 R16"]["stock"] == "40+" and rows["Склад 2205/55 R16"]["studs"] is True     # 4tochki 41 = «more than 40»
     assert rows["Склад 1245/45 R18"]["stock"] == "41"                          # WebMIM's 41 is a number
     assert rows["Склад 1205/55 R16"]["stock"] == "12" and rows["Склад 1205/55 R16"]["price"] == 13580
