@@ -598,6 +598,12 @@ def _invoice(conn, card_id, client, now: str, server: str) -> None:
     except Exception:                                                 # noqa: BLE001
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the invoice number of order %s after WebMIM", card_id)
+    try:                                              # «№ Счета» of MIM's cabinet with the press's own session, before its logout (2026-11-09):
+        from . import webmim_cabinet                  # in the card before on_placed renders the messages
+        webmim_cabinet.after_place(conn, card_id, client, now, server)
+    except Exception:                                                 # noqa: BLE001
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the cabinet's invoice number of order %s after WebMIM", card_id)
 
 
 def _to_placed(conn, card_id, now: str, author: str) -> Tuple[str, str]:

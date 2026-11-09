@@ -465,10 +465,12 @@ def moscow(now: str) -> str:
     return (datetime.fromisoformat(now) + MOSCOW).isoformat(timespec="seconds")
 
 
-def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callable[[float], None] = time.sleep) -> Tuple[str, str]:
+def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callable[[float], None] = time.sleep,
+        send: Optional[Callable[[int], list]] = None) -> Tuple[str, str]:
     """One reading of the snapshot for the command and the hourly tick: (read / off / failed, a line for the journal). A failure of the login or the
     network ends the reading (what was read stays); only the client repeats a reading once after a blip (reliability.WEBMIM), the login
-    goes once; the line never carries a login, a password or a key."""
+    goes once; the line never carries a login, a password or a key. Then, the same session, «№ Счета» of MIM's cabinet for the open
+    orders without one (webmim_cabinet.safe_hourly); `send(order)`: the messages that waited for it (order_placed.send_waiting)."""
     if box is None:
         return "failed", "снимок WebMIM не прочитан: нет ключа шифрования"
     server = current_server(conn)
@@ -488,6 +490,8 @@ def run(conn, box, http, now: str, today: date, days: int = DAYS, sleep: Callabl
             counts = sync(conn, client, server, now, today, days, sleep, raws)
             from . import webmim_invoice                       # the number of the invoice: never fails the snapshot (safe_hourly)
             invoice = webmim_invoice.safe_hourly(conn, client, server, raws, moscow(now), sleep)    # its records are the order journal's
+            from . import webmim_cabinet                       # «№ Счета» of the cabinet: the same session, never fails the snapshot
+            invoice += webmim_cabinet.safe_hourly(conn, client, server, moscow(now), send)
     except webmim_orders.OrdersError as err:
         if str(err).startswith(REFUSED):                       # shown in «Подключения»; the hourly tick does not knock again with the same password
             connections.record_check(conn, "webmim_orders", connections.supplier_owner(1), False, "снимок заказов: %s" % err, now)

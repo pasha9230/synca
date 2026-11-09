@@ -19,6 +19,7 @@ SERVERS = {"test": "https://mimtest.svrauto.ru", "prod": "https://webmim.svrauto
 SERVER_NAMES = {"test": "Тестовый сервер (mimtest)", "prod": "Боевой сервер (webmim)"}
 DEFAULT_SERVER = "test"
 WRONG_PASSWORD = "неверный логин или пароль"
+CABINET_QUICK = 5.0          # seconds of the cabinet's list right after a press (webmim_cabinet.after_place): one attempt
 QUICK = 3.0                  # seconds of a quick read (OrdersClient.order after a press): one attempt
 OPENAPI_PATH = "/api/v3/api/open-api/file/api.v2.openapi.yaml"
 DICTIONARIES = (
@@ -61,6 +62,7 @@ class OrdersClient:
         self._tried = False
         self._failed = ""
         self._fallback_used = False
+        self._cabinet_failed = ""
         self.method = ""
 
     def __repr__(self) -> str:
@@ -173,6 +175,43 @@ class OrdersClient:
             self._call("/api/v3/auth/logout", {"Authorization": "Bearer " + auth}, method="POST")
         except OSError:
             pass
+
+    def _cabinet_auth(self) -> str:
+        """The session of the v3 login (its authKey): the one the press logged in with when there is one; else one login now, closed by
+        close() like any. Never more than one attempt a client."""
+        if self._session:
+            return self._session
+        if self._cabinet_failed:
+            raise OrdersError(self._cabinet_failed)
+        if not self._login or not self._password:
+            raise OrdersError("Логин или пароль API-пользователя не заданы.")
+        auth, reason = self._login_v3()
+        if not auth:
+            self._cabinet_failed = "вход в кабинет не удался: %s" % reason
+            raise OrdersError(self._cabinet_failed)
+        self._session = auth
+        return auth
+
+    def cabinet_orders(self, page: int = 1, per_page: int = 100, quick: bool = False) -> list:
+        """GET /api/v3/orders of MIM's cabinet (the newest first) with the session of the v3 login: the rows carry «№ Счета»
+        (paymentAccount.number), which API v2 never gives (webmim_cabinet). `quick`: one attempt of CABINET_QUICK seconds outside the
+        breaker (right after a press). A list the login does not see (401, 403, 404): OrdersError with its code."""
+        auth = self._cabinet_auth()
+        params = {"author": "all", "sort": "-createdDate", "page": int(page), "per-page": int(per_page)}
+        status, _, raw = self._call("/api/v3/orders", {"Authorization": "Bearer " + auth}, params, safe=not quick,
+                                    timeout=CABINET_QUICK if quick else None)
+        if status in (401, 403, 404):
+            raise OrdersError("вход API-бота не видит заказов кабинета (/api/v3/orders, код %s)" % status, status)
+        if status != 200:
+            raise OrdersError("список заказов кабинета не прочитан (код %s)" % status, status)
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeError):
+            data = None
+        rows = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            raise OrdersError("ответ кабинета не того вида (нет списка data)", 200)
+        return [row for row in rows if isinstance(row, dict)]
 
     def get(self, path: str, params: Optional[dict] = None):
         """A GET with the token; returns the decoded JSON."""

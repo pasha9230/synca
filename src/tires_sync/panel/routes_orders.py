@@ -17,7 +17,7 @@ from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
 from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_swap, point_log, user_prefs
-from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_create, webmim_match
+from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
 from .routes_design import office_new, office_page
@@ -1184,6 +1184,9 @@ def register(app) -> None:
         messages = messages_view(conn, card_id, vk_sender(conn, quiet=True) is not None) if own_point() is None else []      # points: none
         open_messages = (bool(messages) and bool(offer or request.args.get("messages")) and any(m["task"]["status"] == "pending" for m in messages)
                          and (can_post("order_messages_send") or bool(request.args.get("messages"))))     # by itself: only for who may send
+        mim_window = (bool(request.args.get("mim")) and own_point() is None and can_post("order_webmim_cabinet")    # «Сверка с кабинетом MIM»
+                      and webmim_cabinet.enabled(conn))                  # right after the press: the window stays (the owner 2026-11-09)
+        open_messages = open_messages and not mim_window                 # one window at a time: its own link opens the messages
         linked = chats_store.chats_of_order(conn, card_id)
         links, bind, chat_ref, origin = linked, chat_bind_view(conn, card, linked), orders.chat_link(card["avito_chat"]), None
         money = orders.totals(card["items"])
@@ -1204,7 +1207,7 @@ def register(app) -> None:
         sendable = [ch for ch in links if ch["account_id"] in {                                      # (a point: its own account's only)
             a["id"] for a in connections.list_accounts(conn) if a["chats_enabled"] and a["chats_send"]}]
         return render_template(
-            office_page("order_card.html"), messages=messages, open_messages=open_messages,
+            office_page("order_card.html"), messages=messages, open_messages=open_messages, mim_window=mim_window,
             **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=point_entity(orders.card_view(card, conn), card) if own_point() else orders.card_view(card, conn), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
@@ -1506,6 +1509,8 @@ def register(app) -> None:
                 for line in order_placed.on_placed(conn, card_id, state["webmim_id"], stamp, author(), avito_deliver(conn, stamp), vk_sender(conn)):
                     flash(line, placed_kind(line))
                 offer_waiting(conn, card_id)                              # what is left to send opens «Сообщения по заказу»
+                if webmim_cabinet.enabled(conn) and can_post("order_webmim_cabinet"):    # the window «Подтверждение» stays: «Сверка с кабинетом MIM»
+                    return redirect("/orders/%d?mim=1#supplier" % card_id)
         except orders.OrderError as err:
             flash(str(err), "error")
         except SecretKeyError:
@@ -1514,6 +1519,39 @@ def register(app) -> None:
             flash("База занята: итог нажатия мог не сохраниться. Обновите страницу через минуту: если итог неизвестен, кнопка закрыта, "
                   "пока вы не проверите кабинет WebMIM (блок «WebMIM» заказа).", "error")
         return back(card_id, "webmim")
+
+    @app.route("/orders/<int:card_id>/webmim/cabinet", methods=["POST"])
+    @login_required
+    def order_webmim_cabinet(card_id):
+        """«Сверка с кабинетом MIM» of the window «Подтверждение» (webmim_cabinet.poll): asked every few seconds by the page, JSON. Reads the
+        cabinet (the login, the list, the logout); the number found goes into an empty «Номер перемещения», and its one write sends the
+        messages «заказ оформлен» that waited for it (order_placed.send_waiting, as on_placed). The sums: with the right «money» only."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if own_point() is not None:
+            abort(403)
+        stamp = local_iso()
+
+        def send(order_id):
+            return order_placed.send_waiting(conn, order_id, stamp, author(), avito_deliver(conn, stamp), vk_sender(conn))
+
+        def client_of():                                                  # a new client a poll: its logout in poll (with)
+            box = app.config.get("SECRET_BOX")
+            return None if box is None else webmim_match.client_for(conn, box, app.config.get("WEBMIM_HTTP") or urllib_transport, "prod")
+        try:
+            result = webmim_cabinet.poll(conn, card_id, client_of, stamp, send)
+        except SecretKeyError:
+            result = {"state": "error", "final": True, "text": "секреты не читаются: проверьте мастер-ключ"}
+        except sqlite3.OperationalError:
+            conn.rollback()
+            result = {"state": "wait", "final": False, "text": "база занята, проверю ещё раз"}
+        except Exception:                                                 # noqa: BLE001  the window never breaks
+            conn.rollback()
+            log.exception("«Сверка с кабинетом MIM» of order %s", card_id)
+            result = {"state": "error", "final": True, "text": "сбой панели, номер возьмёт почасовое чтение"}
+        if not has_right("money"):
+            result = {k: v for k, v in result.items() if k not in ("sum", "purchase", "sum_differs")}
+        return jsonify(result)
 
     @app.route("/orders/<int:card_id>/webmim/resolve", methods=["POST"])
     @login_required

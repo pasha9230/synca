@@ -65,9 +65,14 @@ def _template(conn, who: dict, card_id=None, now: str = "") -> Optional[dict]:
     return {"id": row[0], "body": row[1]} if row else None
 
 
-def _fill_in(who: dict, missing: List[str]) -> str:
-    """What to do about lacking values. The transfer number comes later, by hand (the owner 2026-10-23: «Ждать номер»)."""
+def _fill_in(who: dict, missing: List[str], conn=None) -> str:
+    """What to do about lacking values. The transfer number comes later, by hand (the owner 2026-10-23: «Ждать номер»), or from MIM's
+    cabinet when it is connected (webmim_cabinet, the owner 2026-11-09): then the message goes by itself (send_waiting)."""
     if templates.VARIABLES["transfer_number"] in missing:
+        from . import webmim_cabinet
+        if conn is not None and webmim_cabinet.enabled(conn) and len(missing) == 1:
+            return ("Сообщение %s уйдёт само, если номер перемещения придёт из кабинета MIM; не придёт — впишите его и отправьте сообщение "
+                    "в окне «Сообщения по заказу»." % who["whom"])
         return "Сообщение %s подготовится, когда впишете номер перемещения: потом отправьте его в окне «Сообщения по заказу»." % who["whom"]
     return "Заполните поля заказа: сообщение ждёт в окне «Сообщения по заказу»."
 
@@ -103,7 +108,7 @@ def _use_earlier(conn, card_id, who: dict, task: dict, now: str, author: str, se
     task = engine.get_task(conn, task["id"])
     if task["status"] == "error":
         lacking = task["result"].split(":", 1)[-1].rstrip(".").strip()
-        return _not_sent(conn, card_id, who, now, "не хватает: %s." % lacking, _fill_in(who, [n.strip() for n in lacking.split(",")]))
+        return _not_sent(conn, card_id, who, now, "не хватает: %s." % lacking, _fill_in(who, [n.strip() for n in lacking.split(",")], conn))
     return _send(conn, card_id, who, task, now, author, send)
 
 
@@ -175,7 +180,7 @@ def _tell(conn, card_id, who: dict, webmim_id: str, now: str, author: str, send)
                                                                   # its text: in the record of the send (order_engine._finish), never twice
         conn.commit()
         if missing:
-            return _not_sent(conn, card_id, who, now, "не хватает: %s." % ", ".join(missing), _fill_in(who, missing))
+            return _not_sent(conn, card_id, who, now, "не хватает: %s." % ", ".join(missing), _fill_in(who, missing, conn))
         return _send(conn, card_id, who, engine.get_task(conn, task_id), now, author, send)
     except Exception as err:                                      # the order is placed; only the message did not go
         conn.rollback()
@@ -197,3 +202,44 @@ def tell_client(conn, card_id, webmim_id: str, now: str, author: str, deliver: O
 def tell_point(conn, card_id, webmim_id: str, now: str, author: str, send_vk: Optional[SendVk]) -> str:
     """«Менеджеру: заказ оформлен» to the manager of the order's point in VK, once per WebMIM order."""
     return _tell(conn, card_id, POINT, webmim_id, now, author, send_vk)
+
+
+def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver], send_vk: Optional[SendVk] = None) -> List[str]:
+    """The transfer number has just come by itself (webmim_cabinet.take, its one write): the messages «заказ оформлен» to the client and the
+    point that waited for it (a task in «error» lacking the transfer number) go now, the very way on_placed sends them (_use_earlier: the
+    text as the card is now, the task's claim, the send mark). A message sent, being sent, skipped by a person, waiting for a chat, or not
+    made at all is left as it is: nothing new is made here, so nothing goes twice. Never raises."""
+    from . import order_intercity, order_merge
+    try:
+        if order_merge.told_placed(conn, card_id):
+            return []
+        whom = [(order_intercity.PLACED_CLIENT if order_intercity.is_on(conn, card_id) else CLIENT, deliver), (POINT, send_vk)]
+    except Exception:                                                     # noqa: BLE001
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the waiting messages of order %s", card_id)
+        return []
+    lacking = templates.VARIABLES["transfer_number"]
+    waiting = []                                   # both found first: the first send brings every task of the card up to date
+    try:
+        for who, send in whom:
+            row = conn.execute("SELECT id FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1",
+                               (who["template"], who["audience"])).fetchone()
+            task = _earlier(conn, card_id, row[0], who.get("undone", "")) if row else None
+            if task is not None and task["status"] == "error" and lacking in str(task["result"]):
+                waiting.append((who, send, task))
+    except Exception:                                                     # noqa: BLE001
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the waiting messages of order %s", card_id)
+        return []
+    lines = []
+    for who, send, task in waiting:
+        try:
+            lines.append(_use_earlier(conn, card_id, who, engine.get_task(conn, task["id"]), now, author, send))
+        except Exception as err:                                          # noqa: BLE001  the number is written; only the message did not go
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the message %s of order %s after the transfer number", who["whom"], card_id)
+            try:
+                lines.append(_not_sent(conn, card_id, who, now, "сбой отправки (%s)." % err.__class__.__name__, "Проверьте сообщения и журнал заказа."))
+            except Exception:                                             # noqa: BLE001
+                conn.rollback()
+    return lines

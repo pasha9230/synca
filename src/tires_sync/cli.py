@@ -1351,11 +1351,29 @@ def _google_sheet(conn, key_file) -> None:
         print("предупреждение: Google-таблица не отправлена (%s)" % type(err).__name__, file=sys.stderr)
 
 
+def _placed_sender(conn, box):
+    """send(order) for webmim_cabinet: the messages «заказ оформлен» that waited for the transfer number (order_placed.send_waiting) through
+    the bot's channels; None without the key (they keep waiting)."""
+    if box is None:
+        return None
+    from . import order_placed, vk_send
+
+    def send(card_id):
+        now = moscow_now().isoformat(timespec="seconds")
+        try:
+            vk = vk_send.sender_for(conn, box, http=_http())
+        except Exception:      # noqa: BLE001  the point's message waits
+            vk = None
+        return order_placed.send_waiting(conn, card_id, now, "почасовое чтение WebMIM", _chat_deliver(conn, box, now), vk)
+    return send
+
+
 def _webmim_snapshot(conn, key_file, days: int = 60) -> bool:
     """The hourly reading of the WebMIM orders for «Сверка с WebMIM» (webmim_match.run). Not set up or failed: only a line in the journal."""
     try:
         from . import webmim_match
-        status, line = webmim_match.run(conn, load_box(key_file) if key_file else None, _http(), _now(), moscow_now().date(), days)
+        box = load_box(key_file) if key_file else None
+        status, line = webmim_match.run(conn, box, _http(), _now(), moscow_now().date(), days, send=_placed_sender(conn, box))
         print(line, file=sys.stderr if status == "failed" else sys.stdout)       # not set up: not a failure of the tick
         return status == "read"
     except Exception as err:      # noqa: BLE001

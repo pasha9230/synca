@@ -1421,4 +1421,47 @@
     window.tiresPending = refreshPending;
     if (!bar.hidden) refreshPending();
   }
+  // «Сверка с кабинетом MIM» (окно «Подтверждение» после оформления в WebMIM, владелец 09.11): раз в 5 с, не дольше минуты; номер и
+  // сообщения пишет сервер (webmim_cabinet.poll). Закрыли окно: страница обновляется (номер в карточке, журнал).
+  (function () {
+    var box = document.querySelector("[data-mim-cabinet]");
+    if (!box) return;
+    var url = box.getAttribute("data-mim-cabinet"), started = Date.now(), LIMIT = 60000, EVERY = 5000;
+    var state = box.querySelector("[data-mim-state]"), fields = box.querySelector("[data-mim-fields]"), lines = box.querySelector("[data-mim-lines]");
+    var rub = function (v) { return v === null || v === undefined ? "—" : Number(v).toLocaleString("ru-RU", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " ₽"; };
+    var put = function (key, text, bad) {
+      var dd = box.querySelector('[data-mim="' + key + '"]');
+      if (!dd) return;
+      dd.textContent = text || "—";
+      dd.classList.toggle("text-err", !!bad);
+    };
+    var show = function (r) {
+      if (r.order_number) {
+        fields.hidden = false;
+        put("order_number", r.order_number); put("invoice", r.invoice || "ещё не выдан"); put("status", r.status);
+        put("invoice_date", r.invoice_date); put("transfer", r.transfer);
+        if ("sum" in r) { put("sum", rub(r.sum), r.sum_differs); put("purchase", rub(r.purchase), r.sum_differs); }
+      }
+      (r.lines || []).forEach(function (t) { var li = document.createElement("li"); li.textContent = t; lines.appendChild(li); });
+    };
+    var late = function () { state.textContent = "№ счёта ещё не выдан: возьмём позже (почасовое чтение). Окно можно закрыть."; };
+    var ask = function () {
+      var data = new FormData();
+      data.append("csrf", box.getAttribute("data-csrf"));
+      fetch(url, {method: "POST", body: data, credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
+        .then(function (r) { if (!r.ok || r.redirected) throw new Error("answer"); return r.json(); })
+        .then(function (r) {
+          show(r);
+          if (r.final) { state.textContent = r.text; return; }
+          if (Date.now() - started > LIMIT) { late(); return; }
+          state.textContent = "проверяю… " + (r.text || "");
+          setTimeout(ask, EVERY);
+        })
+        .catch(function () { if (Date.now() - started > LIMIT) late(); else setTimeout(ask, EVERY); });
+    };
+    ask();
+    var win = box.closest(".modal-backdrop");
+    if (win) new MutationObserver(function () { if (!win.classList.contains("is-open")) window.location.replace(window.location.pathname + "#webmim"); })
+      .observe(win, {attributes: true, attributeFilter: ["class"]});
+  })();
 })();
