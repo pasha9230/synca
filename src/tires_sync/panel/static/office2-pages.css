@@ -18,8 +18,8 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 /* ── Чаты: two columns like a messenger ─────────────────────────────────────────────────────────────────────────────── */
 .o2-chats-page .page{gap:var(--s-3);padding-top:var(--s-4);padding-bottom:var(--s-4)}
 .o2 .chats-layout.o2-cl,.o2 .chats-layout.o2-cl.is-deal-folded{display:grid;grid-template-columns:380px minmax(0,1fr);grid-template-areas:"list main";gap:0;
-  align-items:stretch;min-height:520px;background:var(--o2-bg);border:1px solid var(--o2-border-2);
-  border-radius:var(--o2-r)}   /* no height of its own: the page scrolls, not the list or the messages (owner's word 2026-11-09) */
+  align-items:start;min-height:520px;background:var(--o2-bg);border:1px solid var(--o2-border-2);
+  border-radius:var(--o2-r)}   /* no height of its own: the page scrolls, not the list or the messages (owner's word 2026-11-09); each column as tall as itself (a long list never stretches the chat) */
 .o2 .o2-cl-list{grid-area:list;display:block;max-height:none;min-height:0;border-right:1px solid var(--o2-border-2);background:var(--o2-bg)}
 .o2 .o2-cl-top{position:sticky;top:0;z-index:2;display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:12px 12px 8px;background:var(--o2-bg);
   border-bottom:1px solid var(--o2-border-2)}

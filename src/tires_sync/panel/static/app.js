@@ -637,7 +637,14 @@
     var over = end.getBoundingClientRect().bottom - chatBottom(box);
     if (over > 0) box.scrollTop += over + 8;
   }
-  if (document.querySelector(".chat-thread") && !window.location.hash) chatToEnd();
+  if (document.querySelector(".chat-thread") && !window.location.hash) {
+    chatToEnd();
+    var chatMoved = false;                          // photos load after the first scroll and push the end down: follow them until the person scrolls
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { chatMoved = true; }, {once: true, passive: true}); });
+    document.querySelectorAll(".chat-thread img").forEach(function (img) {
+      if (!img.complete) img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });
+    });
+  }
   (function () {                                    // «Чаты»: the list keeps its place (owner's word 2026-10-24: a chat picked low in the list, a reload, and the list was at the top again)
     var list = document.querySelector(".chats-list"), live = document.getElementById("chats-live");
     if (!list || !live) return;

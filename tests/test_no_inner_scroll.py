@@ -41,11 +41,10 @@ PAGE_BLOCKS = [
     ("office2-pages.css", ".o2 .o2-cl-msgs"),
     ("panel.css", ".chats-list"),                       # чаты старого вида
     ("panel.css", ".chat-thread"),
-    ("point.css", "body.pt-chats-page .chats-list"),    # чаты точки на телефоне
+    ("point.css", "body.pt-chats-page.is-chat-open .chats-list"),    # чаты точки на телефоне
     ("point.css", "body.pt-chats-page .chat-thread"),
     ("audit.css", ".tpl2-list"),                        # шаблоны сообщений
     ("shop.css", ".shop-blist"),                        # фильтры магазина
-    ("shop.css", ".shop2-filters .shop-blist"),
 ]
 
 
@@ -56,7 +55,9 @@ def test_shop_filters_scroll_with_the_page():
 
 def test_page_blocks_have_no_scroll_of_their_own():
     for name, selector in PAGE_BLOCKS:
-        for body in rules(css(name), selector):
+        found = rules(css(name), selector)
+        assert found, (name, selector)               # the rule is still there: a renamed selector must not pass unchecked
+        for body in found:
             assert not scrolls(body), (name, selector, body)
 
 
@@ -71,6 +72,12 @@ def test_side_blocks_do_not_stick_taller_than_the_screen():
     assert not any("position:sticky" in b for b in rules(css("shop.css"), ".shop-side"))
 
 
+def test_a_long_chat_list_does_not_stretch_the_chat():
+    # без своей высоты строка сетки была бы высотой со весь список чатов: лента и поле ответа уехали бы вниз
+    body = rules(css("office2-pages.css"), ".o2 .chats-layout.o2-cl")[0]
+    assert "align-items:start" in body
+
+
 def test_the_reply_field_of_the_new_view_stays_at_the_bottom():
     body = rules(css("office2-pages.css"), ".o2 .o2-cl-comp")[0]
     assert "position:sticky" in body and "bottom:0" in body
@@ -79,7 +86,7 @@ def test_the_reply_field_of_the_new_view_stays_at_the_bottom():
 def test_brand_tables_in_templates_have_no_height_of_their_own():
     for name in ("_client_brands.html", "_exclusions.html"):
         text = (PANEL / "templates" / name).read_text(encoding="utf-8")
-        assert "max-height:5" not in text and "max-height:4" not in text, name
+        assert "max-height" not in text and "overflow:auto" not in text, name
 
 
 def test_popups_modals_and_the_frame_keep_their_scroll():
@@ -98,5 +105,6 @@ def test_popups_modals_and_the_frame_keep_their_scroll():
 def test_the_chat_opens_at_the_last_message():
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "function chatToEnd()" in js
-    assert 'if (document.querySelector(".chat-thread") && !window.location.hash) chatToEnd();' in js
+    assert 'if (document.querySelector(".chat-thread") && !window.location.hash) {\n    chatToEnd();' in js
+    assert 'img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });' in js   # фото грузятся позже
     assert "thread.scrollTop" not in js          # лента без своей прокрутки: новое сообщение показывает страница
