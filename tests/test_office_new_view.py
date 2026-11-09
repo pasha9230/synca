@@ -281,9 +281,8 @@ def test_the_head_of_a_chat_has_the_wait_button_and_the_wait_stage_has_no_hint_o
     assert 'href="#chat-wait" data-chat-wait-open' in head and ">В лист ожидания</a>" in head
     assert '<details class="%s" id="chat-wait">' % ("chat-wait" if state == "all" else "card-body chat-wait") in html
     assert orders.get_card(conn, cid)["stage"]["code"] == "new" and "chat-deal-gaps" in html and "Заказ оформлен» и дальше, не хватает" in html
-    stage = {s["code"]: s["id"] for s in orders.list_stages(conn)}
-    orders.move_card(conn, cid, stage["wait"], NOW, "o", fire_rules=False)
-    conn.commit()
+    post(w["owner"], "/chats/%d/wait" % w["chat"], w["tok"], brand="Nokian", width="225", profile="45", radius="17", season="summer", qty="4")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "wait"
     html = w["owner"].get("/chats/%d" % w["chat"]).get_data(as_text=True)
     assert "chat-deal-gaps" not in html and "не хватает" not in html
     assert ">В лист ожидания</a>" in html                                          # «Ожидает наличие» is before «Заказ оформлен»: the button stays
