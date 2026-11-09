@@ -304,7 +304,8 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     row = conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at) VALUES (?, 'c-9', ?, ?)", (account, card, SET)).lastrowid
     conn.commit()
     chat_page = client.get("/chats/%d" % row).get_data(as_text=True)
-    assert 'id="autosend"' in chat_page and 'name="chat" value="%d"' % row in chat_page
+    assert 'id="autosend"' not in chat_page and "Автосообщение клиенту" not in chat_page   # not in the chat's order panel (the owner 2026-11-09)
+    assert 'id="autosend"' in client.get("/orders/%d" % card).get_data(as_text=True)       # the order window keeps it
     r = post(client, "/orders/%d/autosend" % card, tok, kind="ask", due_at=due, body="Из чата", chat=str(row))
     assert r.status_code == 302 and r.headers["Location"].endswith("/chats/%d#autosend" % row)
     assert [i["text"] for i in auto.of_order(conn, card) if i["status"] == "pending"] == ["Из чата"]
