@@ -127,6 +127,13 @@ impl OpenAi {
     }
 }
 
+/// The generated frame: a square, as Avito shows previews (the owner 2026-11-09; 1024x1536 before).
+pub const IMAGE_SIZE: &str = "1024x1024";
+
+fn edit_fields<'a>(model: &'a str, prompt: &'a str) -> [(&'a str, &'a str); 5] {
+    [("model", model), ("prompt", prompt), ("size", IMAGE_SIZE), ("quality", "high"), ("n", "1")]
+}
+
 /// Call `/v1/images/edits` with the reference images; returns the generated PNG and usage.
 fn edit(http: &ureq::Agent, key: &str, model: &str, prompt: &str, images: &[Vec<u8>]) -> Result<Generated> {
     let files: Vec<(&str, String, &str, &[u8])> = images
@@ -138,11 +145,7 @@ fn edit(http: &ureq::Agent, key: &str, model: &str, prompt: &str, images: &[Vec<
         })
         .collect();
     let b = boundary();
-    let body = multipart(
-        &b,
-        &[("model", model), ("prompt", prompt), ("size", "1024x1536"), ("quality", "high"), ("n", "1")],
-        &files,
-    );
+    let body = multipart(&b, &edit_fields(model, prompt), &files);
     let res = http.post("https://api.openai.com/v1/images/edits")
         .set("Authorization", &format!("Bearer {key}"))
         .set("Content-Type", &format!("multipart/form-data; boundary={b}"))
@@ -194,6 +197,14 @@ mod tests {
         assert_eq!(g.png, b"hi");
         assert_eq!((g.usage.input_tokens, g.usage.output_tokens), (5, 7));
         assert!(parse_response(r#"{"data":[]}"#).is_err());
+    }
+
+    #[test]
+    fn request_asks_for_a_square_frame() {
+        assert_eq!(IMAGE_SIZE, "1024x1024");
+        let body = String::from_utf8(multipart("B", &edit_fields("m", "p"), &[])).unwrap();
+        assert!(body.contains("name=\"size\"\r\n\r\n1024x1024\r\n"), "{body}");
+        assert!(!body.contains("1536"));
     }
 
     #[test]

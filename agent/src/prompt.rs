@@ -25,7 +25,9 @@ are plain smooth rubber with no readable characters (one photo serves every size
 The tires are brand-new and NOT mounted on rims (no wheel, empty center hole). \
 Make it look like a casual real photo taken on a smartphone by a tire shop employee: natural daylight from a \
 warehouse gate, slight perspective, mild sensor noise, realistic rubber texture with fine mold flash hairs on the \
-sidewall, true black rubber, no CGI look, no studio backdrop, no text overlays, no watermarks. Vertical 2:3 frame. ";
+sidewall, true black rubber, no CGI look, no studio backdrop, no text overlays, no watermarks. \
+Square 1:1 frame: the whole subject (the tire, or the whole stack of tires) is fully inside the frame and centered, \
+with free space of about 8-10% of the frame on every side; nothing is cut off by the frame edges. ";
 
 fn tire_desc(job: &Job) -> String {
     let season = match job.season.as_str() {
@@ -153,11 +155,21 @@ mod tests {
     }
 
     #[test]
-    fn prompt_keeps_markings_generic_and_frame_2_3() {
+    fn prompt_keeps_markings_generic_and_frame_square() {
         let p = build_prompt(&job(), false);
         assert!(!p.contains("orange"));
         assert!(p.contains("keep any coloured marking lines, the brand logo and the model name lettering"));
-        assert!(p.contains("Vertical 2:3 frame") && !p.contains("3:4"));
+        // the owner 2026-11-09: a square frame (Avito previews are square), the tire whole and centered; "Vertical 2:3" before
+        for kind in ["three_quarter", "set4"] {
+            for location in [false, true] {
+                let mut j = job();
+                j.kind = kind.into();
+                let p = build_prompt(&j, location);
+                assert!(p.contains("Square 1:1 frame") && p.contains("fully inside the frame and centered"), "{kind} {location}");
+                assert!(p.contains("8-10%") && p.contains("nothing is cut off"));
+                assert!(!p.contains("Vertical") && !p.contains("2:3") && !p.contains("3:4"));
+            }
+        }
     }
 
     #[test]
