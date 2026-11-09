@@ -208,7 +208,7 @@ def test_the_sales_page_filters_by_period_brand_and_exports_csv(tmp_path):
 
 def test_sold_buttons_and_facts_are_wired_into_the_catalog_the_overview_and_the_brand_page(tmp_path):
     app, client, tok, conn = setup(tmp_path)
-    assert 'href="/economics/sales/new?goods_id=1"' in client.get("/catalog").get_data(as_text=True)
+    assert 'href="/economics/sales/new?goods_id=1"' not in client.get("/catalog").get_data(as_text=True)   # «Продано» убрана из каталога (владелец 2026-11-09)
     post(client, "/economics/sales/add", tok, goods_id="1", ad_kind="single", pieces="4", sale_total="19240", day="2026-10-05")
     overview = client.get("/economics").get_data(as_text=True)
     assert "Факт за 30 дней" in overview and "2 640" in overview
