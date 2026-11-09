@@ -91,3 +91,4 @@ def test_the_list_of_orders_has_no_name_on_the_return_either(tmp_path):
     ids = [card(conn, "oth"), card(conn, "return_given"), card(conn, "return", True), card(conn, "talk")]
     names = [r["values"]["Имя"] for r in orders_list.rows(conn, ids, money=True)]
     assert names == ["", "", "", NAME]
+
