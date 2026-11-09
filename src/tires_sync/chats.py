@@ -114,6 +114,15 @@ def list_messages(conn, chat_row) -> List[dict]:
         "SELECT id, message_id, at, direction, kind, text, is_read, media FROM avito_message WHERE chat_row = ? ORDER BY ts, id", (chat_row,))]
 
 
+def thread(conn, chat: dict) -> List[dict]:
+    """The messages of a chat as the panel shows them (the page «Чаты» and the column «Чат Авито» of the order window, the owner 2026-11-09):
+    Avito's stub «Сообщение не поддерживается» gets `avito_link`, a plain label and its link; None for every other message."""
+    messages = list_messages(conn, chat["id"])
+    for m in messages:
+        m["avito_link"] = unsupported_link(m["text"], chat["chat_id"]) if m["kind"] not in ("image", "call") else None
+    return messages
+
+
 def set_status(conn, chat_row, status: str, now: str) -> None:
     if status not in STATUSES:
         raise ValueError("Неизвестный статус беседы.")

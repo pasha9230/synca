@@ -592,6 +592,7 @@ a.menu-item{text-decoration:none}
 .chat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .chat-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-thread { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-4); }   /* no height of its own: the page scrolls and opens at the last message (app.js) */
+#order-chat { scroll-margin-top: max(0px, calc(100vh - 220px)); }   /* back from a send in the order window: the reply field at the bottom of the screen, the last messages above it */
 .msg { max-width: 78%; padding: var(--s-2) var(--s-3); border-radius: 10px; background: var(--gray-100); white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg--out { align-self: flex-end; background: var(--primary-100); }
 .msg-meta { margin-top: 2px; font-size: var(--fs-xs); color: var(--gray-500); text-align: right; }

@@ -45,8 +45,9 @@ def test_the_window_on_oth_has_no_autosend(w):
     cid = order(w)
     assert 'id="autosend"' not in window(w, cid)
     other = order(w, code="at_point", webmim="5316245")
-    # other stages: the block stays; «Новый вид» (audit 20, the owner 08.11): in the column «Чат Авито», only with a chat
-    assert ('id="autosend"' in window(w, other)) == (w["view"] == "old")
+    # other stages: no block either since the owner 2026-11-09 («Автосообщения убери»; before: the old view had it on every other stage);
+    # only an auto message that waits is shown, a line with «Отменить» (tests/test_order_autosend.py)
+    assert 'id="autosend"' not in window(w, other)
 
 
 def test_the_title_is_as_on_the_board_without_the_inner_number(w):

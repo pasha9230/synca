@@ -75,7 +75,7 @@ def test_the_crosses_are_icons_of_the_set():
     assert 'textContent = "✕"' not in js and 'textContent = "×"' not in js and '"icon-btn ml-auto", "×"' not in js
     assert js.count("x.innerHTML = X_ICON") == 4
     assert '<path d="M6 6l12 12M18 6L6 18"/>' in js and '"x": \'<path d="M6 6l12 12M18 6L6 18"/>\'' in (TEMPLATES / "_ui.html").read_text(encoding="utf-8")
-    chats = (TEMPLATES / "chats.html").read_text(encoding="utf-8")
+    chats = (TEMPLATES / "_chat_composer.html").read_text(encoding="utf-8")     # the reply field of «Чаты» moved here (shared with the order window, 2026-11-09)
     assert re.search(r'data-photo-clear[^>]*>\{\{ icon\("x", "i-sm"\) \}\}</button>', chats)
     assert 'chat-photo-pick">{{ icon("paperclip", "i-sm") }} Фото<input' in chats and "📎" not in chats
     base = (TEMPLATES / "base.html").read_text(encoding="utf-8")

@@ -1,21 +1,8 @@
-{# «Автосообщение клиенту» (order_autosend, the owner 2026-11-05/06): set, change and cancel a message that goes by itself at its time into the
-   order's Avito chat. `autosend_order`: the order; `autosend_chat`: the chat's row when the block is in the chat (the forms come back there).
-   Empty for a manager of a point (routes_autosend.autosend_for). #}
-{% set au = autosend_for(autosend_order) %}{% if au %}{% set csrf %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% if autosend_chat %}<input type="hidden" name="chat" value="{{ autosend_chat }}">{% endif %}{% endset %}
-<section class="card order-autosend" id="autosend"><div class="card-body stack">
-<h3 style="margin:0">Автосообщение клиенту</h3>
-<p class="small muted" style="margin:0">Система сама напишет клиенту в чат Авито заказа в указанное время. «Спросить, решил ли брать» отменится, если клиент ответит или заказ закроют; «Договорённость» отменится только при закрытии заказа.</p>
-{% for r in au.rows %}<div class="stack small" data-autosend="{{ r.id }}" style="gap:var(--s-1)">
-<div><b>{{ r.kind_name }}</b> · на {{ r.due_at|short_dt }} · {{ r.status_name }}{% if r.reason %}: {{ r.reason }}{% endif %} · поставил(а) {{ r.created_by }} {{ r.created_at|short_dt }}</div>
-{% if r.status == "pending" %}<form method="post" action="/orders/{{ autosend_order }}/autosend/{{ r.id }}/update" class="stack" style="gap:var(--s-1)">{{ csrf }}
-<input class="input input--sm" type="datetime-local" name="due_at" value="{{ r.due_at }}" aria-label="Дата и время">
-<textarea class="textarea" name="body" rows="3" maxlength="2000" aria-label="Текст автосообщения">{{ r.text }}</textarea>
-<div class="row" style="gap:var(--s-2)"><button class="btn btn--secondary btn--sm">Изменить</button>
-<button class="btn btn--secondary btn--sm" formaction="/orders/{{ autosend_order }}/autosend/{{ r.id }}/cancel">Отменить</button></div></form>
-{% else %}<div class="muted">{{ r.text }}</div>{% endif %}</div>{% endfor %}
-{% for k, name in au.kinds.items() %}<details><summary class="btn btn--secondary btn--sm">Поставить: {{ name }}</summary>
-<form method="post" action="/orders/{{ autosend_order }}/autosend" class="stack" style="margin-top:var(--s-3);gap:var(--s-2)">{{ csrf }}<input type="hidden" name="kind" value="{{ k }}">
-<label class="field"><span class="label">Дата и время</span><input class="input input--sm" type="datetime-local" name="due_at" required></label>
-<label class="field"><span class="label">Текст</span><textarea class="textarea" name="body" rows="3" maxlength="2000" required>{{ au.texts[k] }}</textarea></label>
-<button class="btn btn--primary btn--sm">Поставить</button></form></details>{% endfor %}
-</div></section>{% endif %}
+{#- «Автосообщение клиенту» of the order (order_autosend). The owner 2026-11-09: «Автосообщения убери» — no block to set or change one in the
+    order window any more (nor in the chat, 7312d93); the ones already set and waiting are shown, a line each, with «Отменить» (the route
+    /orders/<id>/autosend/<id>/cancel, it comes back to #autosend). Their sending by the minute's sync is not changed. `autosend_order`: the
+    order. Empty for a manager of a point and for who may not set them (routes_autosend.autosend_for). -#}
+{% set au = autosend_for(autosend_order) %}{% set waiting = au.rows|selectattr("status", "equalto", "pending")|list if au else [] %}
+{% if waiting %}<div class="stack small order-autosend" id="autosend" style="gap:var(--s-1)">{% for r in waiting %}<div class="row" data-autosend="{{ r.id }}" style="gap:var(--s-2);align-items:center;flex-wrap:wrap">
+<span>Автосообщение запланировано на {{ r.due_at|short_dt }}: «{{ r.text|truncate(80, true, "…") }}»</span>
+<form method="post" action="/orders/{{ autosend_order }}/autosend/{{ r.id }}/cancel" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--xs">Отменить</button></form></div>{% endfor %}</div>{% endif %}

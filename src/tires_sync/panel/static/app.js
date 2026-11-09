@@ -450,6 +450,7 @@
         var query = new URLSearchParams();
         ["f", "acc"].forEach(function (k) { var v = form.elements[k] && form.elements[k].value; if (v) query.set(k, v); });
         var qs = query.toString();
+        if (form.dataset.back) { window.location.href = form.dataset.back; return; }   // the order window it was sent from (its column «Чат Авито»)
         window.location.href = form.action.replace(/\/send(-image)?$/, "") + (qs ? "?" + qs : "");       // the chat page shows the result (or asks to log in)
       });
     };
@@ -637,8 +638,9 @@
     var over = end.getBoundingClientRect().bottom - chatBottom(box);
     if (over > 0) box.scrollTop += over + 8;
   }
-  if (document.querySelector(".chat-thread") && !window.location.hash) {
-    chatToEnd();
+  var orderChat = document.querySelector(".order-chat");   // the order window: at the end unless it is a point's long phone page (data-open-end)
+  if (document.querySelector(".chat-thread") && ((!window.location.hash && (!orderChat || orderChat.hasAttribute("data-open-end"))) || window.location.hash === "#order-chat")) {
+    chatToEnd();                                    // #order-chat: back from a send in the order window (its scroll-margin, panel.css, sets the place)
     var chatMoved = false;                          // photos load after the first scroll and push the end down: follow them until the person scrolls
     ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { chatMoved = true; }, {once: true, passive: true}); });
     document.querySelectorAll(".chat-thread img").forEach(function (img) {
@@ -782,7 +784,7 @@
         .then(function (r) { if (!r.ok || r.redirected) throw new Error("refresh"); return r.json(); })
         .then(function (res) {                      // the bar hides only when the page is as fresh as the server: nothing new, or read and refilled
           if (!(res.sig && res.sig !== sig) && !stale()) { misses = 0; offline(false); return null; }
-          return fetch(window.location.href, {credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
+          return fetch(box.dataset.page || window.location.href, {credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})   // the order window reads its chat's page
             .then(function (r) { if (!r.ok || r.redirected) throw new Error("page"); return r.text(); })
             .then(function (html) {
               misses = 0;                            // the connection is there: a page it cannot read is no «Нет связи»
