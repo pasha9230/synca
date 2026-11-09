@@ -269,6 +269,7 @@ def my_day(conn, login: str, now: datetime, limit: int = 10) -> dict:
     from . import chats
     stages = {s["id"]: s for s in orders.list_stages(conn)}
     mine = []
+    gone = orders.unlinked_orders(conn)                             # «На ОТХ», «На возврат»: the client is unlinked, no name (the owner 2026-11-09)
     for card_id, name, phone, stage_id, entered in conn.execute(
             "SELECT id, client_name, client_phone, stage_id, entered_at FROM order_card WHERE responsible = ? ORDER BY id", (login,)):
         stage = stages.get(stage_id)
@@ -278,7 +279,7 @@ def my_day(conn, login: str, now: datetime, limit: int = 10) -> dict:
             hours = _hours(entered, now.isoformat(timespec="seconds"))
         except ValueError:                                          # a broken time never breaks the page (as orders._seconds_on_stage)
             hours = 0.0
-        mine.append({"id": card_id, "client": name or phone or "Без имени", "stage": stage["name"], "hours": round(hours, 1),
+        mine.append({"id": card_id, "client": "" if card_id in gone else name or phone or "Без имени", "stage": stage["name"], "hours": round(hours, 1),
                      "overdue": bool(stage["limit_hours"]) and hours > stage["limit_hours"]})
     mine.sort(key=lambda o: (not o["overdue"], -o["hours"]))
     chats_mine = []

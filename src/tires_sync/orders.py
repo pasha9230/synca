@@ -6,7 +6,7 @@ import logging
 import re
 import sqlite3
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from .amounts import parse_amount
 from . import economics, order_alerts, sales as sales_store
@@ -248,6 +248,23 @@ def cancel_reason_of(kind, text) -> str:
     return (kind + (": " + text if text else ""))[:300]
 
 RETURN_GIVEN = "return_given"
+NO_CLIENT = "клиента нет"
+
+
+def unlinked_orders(conn, ids: Optional[Iterable[int]] = None) -> set:
+    """The orders the lists show without their client (the owner 2026-11-09): on «На ОТХ» and «На возврат», and in «Вернули поставщику»
+    after them (order_oth.detach: the client is unlinked, the journal keeps who it was). The look only: client_name stays in the order.
+    `ids`: only these are looked at."""
+    sql = ("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE (s.code IN ('oth', ?) "
+           "OR (s.code = 'return' AND c.id IN (SELECT order_id FROM order_oth_client)))")
+    args: list = [RETURN_GIVEN]
+    if ids is not None:
+        ids = [int(i) for i in ids]
+        if not ids:
+            return set()
+        sql += " AND c.id IN (%s)" % ",".join("?" * len(ids))
+        args += ids
+    return {r[0] for r in conn.execute(sql, args)}
 
 
 def _ensure_return_given_stage(conn) -> None:
@@ -1278,6 +1295,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     on_oth = order_oth.reserve_dates(conn)                                      # the dates of «На ОТХ» and «На возврат» (2026-11-04)
     intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
     since = order_oth.migrated_since(conn)                                      # the day of the stage of a migrated order (2026-11-06)
+    gone = unlinked_orders(conn)                                                # «На возврат» and after: «клиента нет» (the owner 2026-11-09)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
         if sid not in columns:
             continue
@@ -1301,7 +1319,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
             full = get_card(conn, cid)
             oth_title = order_sheet.mim_title(conn, full)
             oth_card = dict(order_sheet.mim_parts(conn, full), tyres=[{"name": i["name"], "qty": int(i["qty"])} for i in full["items"]])   # its lines (2026-11-07)
-        columns[sid]["cards"].append({"id": cid, "client": oth_title or name or phone or "Без имени", "oth_title": oth_title, "items_text": items_text, "point": names.get(pid, ""),
+        columns[sid]["cards"].append({"id": cid, "client": oth_title or (NO_CLIENT if cid in gone else name or phone or "Без имени"), "oth_title": oth_title, "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(since.get(cid, entered)), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
                                       "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid), "oth_card": oth_card})

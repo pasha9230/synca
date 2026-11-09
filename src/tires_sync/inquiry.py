@@ -482,7 +482,7 @@ def _who_called(conn, task: dict) -> tuple:
         name = row[0] if row else ""
         row = conn.execute("SELECT phone FROM client_phone WHERE client_id = ? ORDER BY phone LIMIT 1", (task["client_id"],)).fetchone()
         phone = row[0] if row else ""
-    if task["order_id"] and not (name and phone):
+    if task["order_id"] and not (name and phone) and not orders.unlinked_orders(conn, [task["order_id"]]):     # «На ОТХ», «На возврат»: no client
         row = conn.execute("SELECT client_name, client_phone FROM order_card WHERE id = ?", (task["order_id"],)).fetchone()
         if row:
             name, phone = name or row[0], phone or row[1]

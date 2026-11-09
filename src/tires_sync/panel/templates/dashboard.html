@@ -26,7 +26,7 @@
 <section class="card"><div class="card-head"><h3>Мои дела на сегодня</h3>{% if mine.orders_total %}<span class="sub">{{ mine.orders_total }} {{ plural(mine.orders_total, "заказ", "заказа", "заказов") }}</span>{% endif %}</div>
 {% if mine.orders %}<ul class="checklist">
 {% for o in mine.orders %}<li data-href="/orders/{{ o.id }}" class="is-link"><span>{% if o.overdue %}<span class="badge badge--err badge--dot">Просрочен</span>{% else %}<span class="badge badge--neutral">{{ o.stage }}</span>{% endif %}</span>
-<div><div class="cl-title">Заказ №{{ o.id }} · {{ o.client }}</div><div class="cl-text">{{ o.stage }} · {{ o.hours|round|int }} ч на этапе</div></div><a class="btn btn--secondary btn--sm" href="/orders/{{ o.id }}">Открыть</a></li>{% endfor %}
+<div><div class="cl-title">Заказ №{{ o.id }}{% if o.client %} · {{ o.client }}{% endif %}</div><div class="cl-text">{{ o.stage }} · {{ o.hours|round|int }} ч на этапе</div></div><a class="btn btn--secondary btn--sm" href="/orders/{{ o.id }}">Открыть</a></li>{% endfor %}
 </ul>{% else %}<div class="card-body muted">На вас сейчас ничего не висит.</div>{% endif %}</section>
 {# the feeds: one card «Фид» — the ads of each account and when the feed was updated (П1, п. 12, 13); the last run, the readiness and the
    tiles are on «Фиды»; the morning summary is in «Настройки › Уведомления» (п. 27) #}

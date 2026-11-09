@@ -102,6 +102,8 @@ def with_orders(conn, rows: list) -> list:
     if ids:
         names = {r[0]: {"client": r[1], "number": r[2]} for r in conn.execute(
             "SELECT id, client_name, webmim_number FROM order_card WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)}
+        for order_id in orders.unlinked_orders(conn, ids):        # «На ОТХ», «На возврат»: the client is unlinked, no name (the owner 2026-11-09)
+            names[order_id]["client"] = ""
     return [dict(r, order=names[r["order_id"]] if r["order_id"] is not None else {"client": r.get("client", ""), "number": ""})
             for r in rows if r["order_id"] is None or r["order_id"] in names]
 
