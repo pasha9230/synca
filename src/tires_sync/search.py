@@ -88,11 +88,12 @@ def _orders(conn, p: dict, scope: Scope, limit: int) -> list:
         sql, args = sql + " WHERE o.point_id = ?", (scope.point,)
     found = []
     articles = orders.board_articles(conn)
+    gone = orders.unlinked_orders(conn)                            # «На ОТХ», «На возврат»: found, shown without the client (the owner 2026-11-09)
     for cid, name, phone, number, stage, transfer in conn.execute(sql + " ORDER BY o.id DESC", args):
         if not orders.board_matches(wanted, cid, " ".join(x for x in (name or "", peers.get(cid, "")) if x), phone, first.get(cid, ""), number or "",
                                     transfer or "", articles.get(cid, ())):          # the words in lower case by Python: «алексей» finds «Алексей» (sqlite's LOWER would not)
             continue
-        found.append({"type": "order", "title": "Заказ №%d · %s" % (cid, name or phone or "Без имени"),
+        found.append({"type": "order", "title": "Заказ №%d · %s" % (cid, orders.NO_CLIENT if cid in gone else name or phone or "Без имени"),
                       "subtitle": " · ".join(x for x in (stage, "перемещение %s" % transfer if transfer else "", first.get(cid, "")) if x),
                       "url": "/orders/%d" % cid})
         if len(found) > limit:

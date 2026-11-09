@@ -61,12 +61,13 @@ def rows(conn, card_ids: List[int], money: bool, point: bool = False) -> List[di
     "values": {column: value}} with the allowed columns only. `point`: no SALE, the note without an Avito account's name. The note is a person's: no automatic part (order_notes.person_text)."""
     ok = allowed(money, point)
     out = []
+    gone = orders.unlinked_orders(conn)                                           # «На возврат» and after too (the owner 2026-11-09); every order of the filter: no IN (…)
     for card_id in card_ids:
         card = orders.get_card(conn, card_id)
         card = dict(card, comment=order_notes.person_text(card["comment"]))       # «Примечание»: no ad nor call the order came with
         found = list(order_sheet.card_rows(conn, card, "").values()) or [dict(order_sheet.common_of(conn, card, ""), **{c: "" for c in POSITION})]
         for values in found:
-            if card["stage"]["code"] == "oth":                                    # a purchase of WebMIM, no client (2026-11-06); the table keeps it
+            if card_id in gone:                                                   # a purchase of WebMIM, no client (2026-11-06); the table keeps it
                 values["Имя"] = ""
             if point:
                 values["Примечание"] = orders.without_account_names(conn, values["Примечание"])

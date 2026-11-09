@@ -482,13 +482,16 @@ def _who_called(conn, task: dict) -> tuple:
         name = row[0] if row else ""
         row = conn.execute("SELECT phone FROM client_phone WHERE client_id = ? ORDER BY phone LIMIT 1", (task["client_id"],)).fetchone()
         phone = row[0] if row else ""
+    gone = bool(task["order_id"]) and bool(orders.unlinked_orders(conn, [task["order_id"]]))     # «На ОТХ», «На возврат»: no name (2026-11-09)
     if task["order_id"] and not (name and phone):
         row = conn.execute("SELECT client_name, client_phone FROM order_card WHERE id = ?", (task["order_id"],)).fetchone()
         if row:
-            name, phone = name or row[0], phone or row[1]
-    if task["chat_row"] and not name:
+            name, phone = name or ("" if gone else row[0]), phone or row[1]
+    if task["chat_row"] and not name and not gone:
         row = conn.execute("SELECT peer_name FROM avito_chat WHERE id = ?", (task["chat_row"],)).fetchone()
         name = row[0] if row else ""
+    if gone:                                                       # the owner 2026-11-09: the phone of an unlinked client is hidden too
+        phone = ""
     return name or "", phone or ""
 
 

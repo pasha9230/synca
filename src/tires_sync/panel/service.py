@@ -732,8 +732,10 @@ def catalog_item_view(conn, settings, parsed, ref, goods_id, today, money: bool,
                     "price": {"text": price, "fmt": "money"}, "point": point})
     rows = conn.execute(
         "SELECT c.id, c.client_name, s.name, i.qty, i.sale_unit, c.created_at FROM order_item i JOIN order_card c ON c.id = i.order_id "
-        "JOIN order_stage s ON s.id = c.stage_id WHERE i.goods_id = ? ORDER BY c.id DESC LIMIT 50", (goods_id,)) if orders else []
-    found = [{"ref": {"text": "№%d" % r[0], "href": "/orders/%d" % r[0]}, "client": r[1], "stage": r[2], "qty": r[3],
+        "JOIN order_stage s ON s.id = c.stage_id WHERE i.goods_id = ? ORDER BY c.id DESC LIMIT 50", (goods_id,)).fetchall() if orders else []
+    from .. import orders as orders_mod
+    gone = orders_mod.unlinked_orders(conn, [r[0] for r in rows]) if rows else set()     # «На ОТХ», «На возврат»: no client (2026-11-09)
+    found = [{"ref": {"text": "№%d" % r[0], "href": "/orders/%d" % r[0]}, "client": orders_mod.NO_CLIENT if r[0] in gone else r[1], "stage": r[2], "qty": r[3],
               "unit": {"text": r[4], "fmt": "money"}, "created": {"text": r[5], "fmt": "dt"}} for r in rows]
     return {"type": "item", "kind": "Позиция", "ref": p["code"] or goods_id, "title": p["name"],
             "status": {"text": OUT_OF_STOCK_TEXT if out else p["reason"], "tone": "ok" if p["state"] == "feed" else "warn"}, "out_of_stock": out,

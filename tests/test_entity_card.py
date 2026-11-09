@@ -131,6 +131,11 @@ def test_the_page_of_a_position(tmp_path):
     assert "Закупка (за 1 шт.)" in page                                            # the owner has «money»
     assert "Объявления по аккаунтам" in page and ">C1<" in page and "Бета" in page
     assert "Заказы с этой позицией" in page and 'href="/orders/%d"' % cid in page and "Иван" in page
+    oth = next(st for st in orders.list_stages(conn) if st["code"] == "oth")       # «На ОТХ»: the client is unlinked, no name (the owner 2026-11-09)
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (oth["id"], cid))
+    conn.commit()
+    page = owner.get("/catalog/item/1").get_data(as_text=True)
+    assert 'href="/orders/%d"' % cid in page and "клиента нет" in page and "Иван" not in page
     unbuilt = owner.get("/catalog/item/3").get_data(as_text=True)
     assert "Объявление не собирается" in unbuilt and "Ни в одном опубликованном фиде" in unbuilt
     assert owner.get("/catalog/item/999").status_code == 404
