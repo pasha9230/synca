@@ -69,7 +69,9 @@ def test_a_noise_record_is_no_row_of_the_page_nor_of_the_bell_and_stays_in_the_j
     stored = conn.execute("SELECT level FROM order_event WHERE id = ?", (eid,)).fetchone()[0]
     assert stored in alerts.ALERT_LEVELS                                         # it is an alert by its colour ...
     assert eid in [e["id"] for e in alerts.open_alerts(conn, "owner")]
-    assert any(r["id"] == eid or r["text"] == text for r in alerts.page_rows(conn, "owner", NOW))     # ... and a row of the source
+    assert any(r["id"] == eid or r["text"] == text for r in alerts.all_rows(conn, "owner", NOW))      # ... and a row of the source,
+    assert kind == "sale" or not any(r["id"] == eid for r in alerts.page_rows(conn, "owner", NOW))     # left out by bell_row (2026-11-09);
+                                                                                                       # a green sale by by_order
     before = state(conn)
     assert text not in page(client)                                              # ... but not of the page
     assert bell(client) == {"count": 0, "red": False, "items": []}               # nor of the bell
@@ -138,8 +140,9 @@ def test_chats_without_an_order_and_urgent_are_no_rows_and_the_chats_counter_sta
     message(conn, later, at(-5, NOW), text="А шипы?")                            # «Клиент написал» of a chat without an order
     conn.execute("UPDATE avito_chat SET unread = 1, status = 'open'")
     conn.commit()
-    rows = alerts.page_rows(conn, "owner", NOW)
+    rows = alerts.all_rows(conn, "owner", NOW)
     assert {r["chat_row"] for r in rows if r.get("urgent")} == {waits} and later in {r["chat_row"] for r in rows}   # the source has them
+    assert not any(r.get("chat_row") for r in alerts.page_rows(conn, "owner", NOW))                   # page_rows never (2026-11-09)
     data = bell(client)
     assert data == {"count": 0, "red": False, "items": []}
     html = client.get("/").get_data(as_text=True)

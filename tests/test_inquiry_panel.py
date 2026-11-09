@@ -28,7 +28,7 @@ def setup(tmp_path, utc=datetime(2026, 10, 23, 9, 0, 0)):
 
 
 def urgent(conn, now=NOW):
-    return [r for r in alerts.page_rows(conn, "owner", now) if r.get("urgent")]
+    return [r for r in alerts.all_rows(conn, "owner", now) if r.get("urgent")]
 
 
 # ---- «Срочно ответить» -----------------------------------------------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def test_a_client_waiting_an_hour_is_urgent_and_one_row_per_chat(tmp_path):
     conn.commit()
     [row] = urgent(conn)
     assert row["level"] == "red" and row["text"] == "Срочно ответить: ждёт с 10:50: Есть 205/55 R16?" and row["chat_row"] == h
-    assert [r["id"] for r in alerts.page_rows(conn, "owner", NOW) if r.get("chat_row") == h] == [row["id"]]   # not «Клиент написал» as well
+    assert [r["id"] for r in alerts.all_rows(conn, "owner", NOW) if r.get("chat_row") == h] == [row["id"]]   # not «Клиент написал» as well
     assert urgent(conn, at(-11)) == []                                           # 59 minutes: not yet
 
 
@@ -69,7 +69,7 @@ def test_an_answer_or_no_reply_or_closing_puts_it_out(tmp_path):
     r = post(client, "/chats/%d/status" % other, tok, status="no_reply", back="alerts")
     assert r.status_code == 302 and r.headers["Location"].endswith("/alerts")
     assert urgent(conn) == []
-    chats_of = lambda: [r for r in alerts.page_rows(conn, "owner", NOW) if r.get("chat_row") == other]     # noqa: E731
+    chats_of = lambda: [r for r in alerts.all_rows(conn, "owner", NOW) if r.get("chat_row") == other]     # noqa: E731
     assert chats_of() == []
 
 
@@ -90,7 +90,7 @@ def test_point_accounts_closed_chats_and_waits_from_before_the_release_are_not_u
 
 def test_the_bell_shows_neither_urgent_nor_a_task(tmp_path):
     """The owner 2026-10-31: a due task is not in «Уведомления» nor in the bell — only the counter and the light of «Задачи».
-    The owner 2026-11-05 «чаты не нужны там»: «Срочно ответить» is no row of the bell either (page_rows still has it)."""
+    The owner 2026-11-05 «чаты не нужны там»: «Срочно ответить» is no row of the bell either (all_rows still has it; page_rows not since 2026-11-09)."""
     app, client, tok, conn = setup(tmp_path)
     message(conn, chat(conn), at(-90))
     inquiry.add_callback(conn, at(-5)[:16], "", at(-30), "owner", chat_row=chat(conn, peer="p9", name="Олег"))
@@ -229,14 +229,14 @@ def test_for_a_chat_with_an_order_urgent_takes_the_place_of_the_yellow_record(tm
     assert cid not in dots(client.get("/orders?v=list").get_data(as_text=True))                     # the dot by the number: no chat (2026-11-06)
     orders.add_event(conn, cid, at(-60), "owner", "note", "Позвонить завтра", level="red")
     conn.commit()
-    rows = alerts.page_rows(conn, "worker", NOW)
+    rows = alerts.all_rows(conn, "worker", NOW)
     [row] = [r for r in rows if r.get("urgent")]
     assert row["chat_row"] == h and row["of_order"] == cid and row["title"] == "Чат · заказ №%d" % cid
     assert not [r for r in rows if r["order_id"] == cid and r["kind"] == "chat"]                  # not «Клиент написал» as well
     assert "Позвонить завтра" in [r["text"] for r in rows if r["order_id"] == cid]
     assert alerts.order_levels(conn, "worker", NOW) == {cid: "red"}
     message(conn, h, at(-1), direction="out", text="Есть")                                         # answered: the yellow record is as before
-    assert [r["text"] for r in alerts.page_rows(conn, "worker", NOW) if r["order_id"] == cid and r["kind"] == "chat"] == ["Клиент написал: Есть 205/55 R16?"]
+    assert [r["text"] for r in alerts.all_rows(conn, "worker", NOW) if r["order_id"] == cid and r["kind"] == "chat"] == ["Клиент написал: Есть 205/55 R16?"]
 
 
 def test_avitos_stub_is_a_label_with_the_chat_in_avito_on_the_card_and_in_the_alerts(tmp_path):
@@ -248,7 +248,7 @@ def test_avitos_stub_is_a_label_with_the_chat_in_avito_on_the_card_and_in_the_al
     stub = "Клиент написал: Сообщение не поддерживается. Чтобы посмотреть сообщение, перейдите в Авито мессенджер"
     orders.add_event(conn, cid, at(-5), "клиент", "chat", stub, level="yellow")
     conn.commit()
-    [row] = [r for r in alerts.page_rows(conn, "worker", NOW) if r["order_id"] == cid and r["kind"] == "chat"]
+    [row] = [r for r in alerts.all_rows(conn, "worker", NOW) if r["order_id"] == cid and r["kind"] == "chat"]
     assert row["text"] == alerts.NO_TEXT and "не поддерживается" not in row["text"]
     feed = client.get("/alerts/feed").get_data(as_text=True)
     assert "не поддерживается" not in feed

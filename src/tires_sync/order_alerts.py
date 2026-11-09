@@ -47,19 +47,28 @@ def level_for(kind: str, text: str) -> str:
 
 
 QUIET_KINDS = ("stage", "created", "restored")                  # the stages: the owner 2026-11-05 «этапы тоже там не нужны»
-QUIET_FIELD = "Резерв: товар на точке"                           # the green «field» record (level_for)
+QUIET_ROWS = ("critical", "purchase")                            # the owner 2026-11-09: «Критичное», «Закупка изменилась» are no rows
+                                                                 # (Telegram and VK still get them: critical.tell, cli._tell_important)
+QUIET_TEXTS = {                                                  # the owner 2026-11-05, 2026-11-09:
+    "staffnote": ("Заказ №",),                                   # the notes of an order (order_notify.deliver: «Заказ №N: …»); the other
+                                                                 # notes stay: «Некому отправить оповещение», the day summary, …
+    "field": ("Резерв: товар на точке",),                        # the green «на точке»: level_for
+    "point": ("Поступили шины по заказу",),                      # order_manager.ARRIVAL, ARRIVAL_INTERCITY
+    "autosend": ("Отправлен ответ клиенту", "Отправлено фото клиенту"),
+}
 
 
 def bell_row(row: dict) -> bool:
-    """A row of «Уведомления», of the bell, of its counter and of notify.js (the owner 2026-11-05: «из уведомлений убери весь мусор, чаты не
-    нужны там», «этапы тоже»). Not: a chat's record or row (the client's words, «Клиент написал» of a chat without an order, «Срочно
-    ответить»), except a red record of the order journal (a failed send to the client); a stage (QUIET_KINDS); «Резерв: товар на точке».
-    Only the showing: the records stay in the journal with their colour; the dots by the order numbers count the same rows (2026-11-06)."""
+    """A row of «Уведомления», of the bell, of its counter, of notify.js and of the dots by the order numbers, for every role: page_rows and
+    counts keep only these (one source). The owner 2026-11-09: only the failures and what needs an action. Not: a stage (QUIET_KINDS);
+    «Критичное», «Закупка изменилась» (QUIET_ROWS); a note of an order, the green «на точке» (QUIET_TEXTS); a chat's record or row (the
+    client's words, «Клиент написал», «Срочно ответить», «Отправлен ответ клиенту»), except a red record of the order journal (a failed
+    send to the client). Only the showing: the records stay in the journal with their colour; «Чаты» and «Задачи» keep theirs."""
     kind, text = row.get("kind"), str(row.get("text") or "")
-    if kind in QUIET_KINDS:
+    if kind in QUIET_KINDS or kind in QUIET_ROWS:
         return False
-    if kind == "field":
-        return not text.startswith(QUIET_FIELD)
+    if text.startswith(QUIET_TEXTS.get(kind, ())):
+        return False
     if kind == "chat" or (kind == "autosend" and row.get("author") == "система"):    # the send mechanism's own records of an auto message
         return isinstance(row.get("id"), int) and row.get("level") == "red"            # (chats.SYSTEM): as those of any send
     return True
@@ -116,16 +125,15 @@ def by_order(rows: List[dict]) -> List[dict]:
 
 POINT_ROWS = ("question", "return")                             # routes_alerts.point_rows: «Клиент забрал?», «возврат отмечен, ждёт суммы»
 POINT_RECORDS = {                                                # the point's own records of the journal (the owner 2026-11-07)
-    "point": ("Поступили шины по заказу",),                      # order_manager.ARRIVAL, ARRIVAL_INTERCITY
     "field": ("Возврат с ОТХ согласован с поставщиком", "Согласование возврата с поставщиком отменено"),     # order_oth.agree, unagree
 }
 
 
 def point_row(row: dict) -> bool:
     """A row the manager of a point (or «Работать как точка») is shown: only what the point does (the owner 2026-11-07: «Убери у точек все
-    лишние уведомления»), a list of what is allowed, not of what is not: its questions and its return row (routes_alerts.point_rows), «Поступили
-    шины по заказу …», the return agreed with its date (акт МХ-3) or cancelled (allowed, but written grey by order_oth: no alert today). Every
-    record of the office is no row of the point: its bell, counter, «Уведомления», notify.js, the dots. Only the showing: the journal keeps
+    лишние уведомления»), a list of what is allowed, not of what is not: its questions and its return row (routes_alerts.point_rows), the
+    return agreed with its date (акт МХ-3) or cancelled (allowed, but written grey by order_oth: no alert today); «Поступили шины по заказу …»
+    no more (bell_row, the owner 2026-11-09). Every record of the office is no row of the point: its bell, counter, «Уведомления», notify.js, the dots. Only the showing: the journal keeps
     them, the office sees them as before. The 7th day of «На ОТХ» and the orders on the way ring through /my-point/feed of their own."""
     kind, text = row.get("kind"), str(row.get("text") or "")
     if kind in POINT_ROWS:
@@ -408,13 +416,19 @@ def counts(conn, login: str) -> Dict[str, int]:
     mine = _mine(conn, login, staff, quiet)
     result = {level: 0 for level in ALERT_LEVELS}
     for event in open_alerts(conn, login):
-        if not _hidden(event, quiet) and not _not_mine(event, mine) and (staff or point_row(event)):     # a point: its own only (2026-11-07)
+        if not _hidden(event, quiet) and not _not_mine(event, mine) and (staff or point_row(event)) and bell_row(event):   # a point: its own only
             result[event["level"]] += 1
     return result
 
 
 def page_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool] = None, own_prefix: str = "") -> List[dict]:
-    """The rows of «Уведомления», of the bell and of its counter, and the dots by the order numbers: one source for all of them. Newest first:
+    """The rows of «Уведомления», of the bell and of its counter, and the dots by the order numbers: one source for all of them, for every role.
+    all_rows without what bell_row leaves out (the owner 2026-11-09: only the failures and what needs an action)."""
+    return [row for row in all_rows(conn, login, now, staff, own_prefix) if bell_row(row)]
+
+
+def all_rows(conn, login: str, now: Optional[str] = None, staff: Optional[bool] = None, own_prefix: str = "") -> List[dict]:
+    """Every row this user could be told of, before bell_row (page_rows shows them). Newest first:
     every alert on its own, except that the non-red chat records of one order (client messages) are one row until the order is opened; such a row
     has the most important colour of its records. The user's own records are not alerts for them, except red ones.
     `now` (the panel's local time): a green alert older than GREEN_DAYS days is not shown either; nothing is deleted.

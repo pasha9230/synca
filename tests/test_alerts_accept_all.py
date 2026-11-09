@@ -10,6 +10,8 @@ from tires_sync import order_alerts as alerts, order_points as points, orders, s
 
 NOW = "2026-10-20T12:00:00"
 
+POINT_TEXT = "Возврат с ОТХ согласован с поставщиком: передать на возврат %d.11 (акт МХ-3)."   # order_oth.agree, a row of a point
+
 
 def setup(tmp_path):
     app = make_app(tmp_path, NOW=lambda: datetime(2026, 10, 20, 9, 0, 0))
@@ -120,9 +122,9 @@ def test_rows_of_a_point_stay_for_a_point_manager_and_a_point_user_accepts_only_
     a, b = card(conn, "Свой"), card(conn, "Чужой")
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (mine, a))
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (foreign, b))
-    from tires_sync import order_manager as mgr                               # a row a point is shown (order_alerts.point_row, the owner 2026-11-07)
-    ra = event(conn, a, "point", mgr.ARRIVAL % (a, "Юнона", "отправлено"), level="yellow")
-    rb = event(conn, b, "point", mgr.ARRIVAL % (b, "Руставели", "отправлено"), level="yellow")
+    # a row a point is shown (order_alerts.point_row, the owner 2026-11-07); «Поступили шины» is none since 2026-11-09 (bell_row)
+    ra = event(conn, a, "field", POINT_TEXT % a, level="yellow")
+    rb = event(conn, b, "field", POINT_TEXT % b, level="yellow")
     conn.commit()
     pt = other_user(app, conn, "yun", role="point", point_id=mine)
     # the staff's page also holds the orders of both: a point's ids posted by a point manager are checked against that manager's own page
@@ -204,7 +206,7 @@ def test_a_point_manager_accepts_a_yellow_row_of_its_order_and_a_handoff_blocks_
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (mine, a))
     hand = event(conn, a, "handoff", mgr.ASK + " Иван", level="yellow")
     yellow = event(conn, a, "reserve", "Оповещение о конце резерва")
-    arrived = event(conn, a, "point", mgr.ARRIVAL % (a, "Юнона", "отправлено"), level="yellow")    # the point's row (2026-11-07)
+    arrived = event(conn, a, "field", POINT_TEXT % a, level="yellow")              # the point's row (2026-11-07)
     pt = other_user(app, conn, "yun", role="point", point_id=mine)
     pt.post("/alerts/accept-all", data={"csrf": "tok2", "ids": [arrived]})
     assert arrived not in open_ids(conn, "yun")                                   # no block for a point: it never sees the handoff row

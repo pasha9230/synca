@@ -157,7 +157,7 @@ def test_a_new_message_of_the_client_in_a_chat_of_an_order_is_one_alert_until_it
     [(text, level, author)] = _client_wrote(conn, card)
     assert text == "Клиент написал: Есть в наличии?" and level == "yellow" and author == "чаты Авито"
     assert text in [a["text"] for a in order_alerts.open_alerts(conn, "owner")]
-    assert [r["text"] for r in order_alerts.page_rows(conn, "owner") if r["kind"] == "chat"] == [text]   # one row in «Уведомления» and the bell
+    assert [r["text"] for r in order_alerts.all_rows(conn, "owner") if r["kind"] == "chat"] == [text]   # one row of all_rows (none of «Уведомления»: bell_row)
     client.chat_pages = [[chat("c1", updated=TS + 20, text="Алло?")]]                    # more messages while the first waits: no new alert
     client.messages["c1"] = client.messages["c1"] + [msg("m3", "Алло?", created=TS + 20), msg("m4", "Ответьте", created=TS + 21)]
     chats.sync_account(conn, client, account, "2026-10-13T12:10:00")
@@ -266,13 +266,13 @@ def _unlinked_chat(app, conn):
 
 
 def test_a_chat_without_an_order_is_one_row_of_page_rows_until_it_is_answered_and_no_row_of_the_bell(tmp_path):
-    """order_alerts.page_rows keeps the row; the page, the bell and the counter show no chat since 2026-11-05 (order_alerts.bell_row)."""
+    """order_alerts.all_rows keeps the row (page_rows not since 2026-11-09); the page, the bell and the counter show no chat since 2026-11-05 (order_alerts.bell_row)."""
     from test_alerts_page import counter, setup
     from test_chats_sync import TS, msg
     from tires_sync import chats, order_alerts
     app, client, tok, conn = setup(tmp_path)
     account, avito, chat_row = _unlinked_chat(app, conn)
-    waiting = lambda: [r for r in order_alerts.page_rows(conn, "owner") if r.get("chat_row") == chat_row]     # noqa: E731
+    waiting = lambda: [r for r in order_alerts.all_rows(conn, "owner") if r.get("chat_row") == chat_row]     # noqa: E731
     assert waiting() == []                                                               # what was there before the first read is the past
     chats.sync_account(conn, avito, account, "2026-10-20T11:00:00")
     conn.execute("UPDATE avito_message SET at = '2026-10-20T11:00:00' WHERE message_id = 'm2'")

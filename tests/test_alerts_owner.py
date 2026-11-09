@@ -35,15 +35,15 @@ def staff_list(conn):
 
 
 def of_orders(conn, login, **kw):
-    return {r["order_id"] for r in order_alerts.page_rows(conn, login, NOW, **kw) if r["order_id"] is not None}
+    return {r["order_id"] for r in order_alerts.all_rows(conn, login, NOW, **kw) if r["order_id"] is not None}
 
 
 def urgent(conn, login):
-    return {r["chat_row"] for r in order_alerts.page_rows(conn, login, NOW) if r.get("urgent")}
+    return {r["chat_row"] for r in order_alerts.all_rows(conn, login, NOW) if r.get("urgent")}
 
 
 def chats_seen(conn, login):
-    return {r["chat_row"] for r in order_alerts.page_rows(conn, login, NOW) if r.get("chat_row")}
+    return {r["chat_row"] for r in order_alerts.all_rows(conn, login, NOW) if r.get("chat_row")}
 
 
 def test_the_owner_and_zaman_each_hear_only_of_their_own_orders(tmp_path):
@@ -54,8 +54,8 @@ def test_the_owner_and_zaman_each_hear_only_of_their_own_orders(tmp_path):
         orders.add_event(conn, cid, NOW, "система", "notify", "Оповещение не отправлено: Telegram недоступен", level="red")
     conn.commit()
     assert of_orders(conn, "owner") == {pavel["id"]} and of_orders(conn, "zamantyres") == {zaman["id"]}
-    assert order_alerts.counts(conn, "owner") == {"red": 1, "yellow": 1, "green": 1}
-    assert order_alerts.counts(conn, "zamantyres") == {"red": 1, "yellow": 1, "green": 1}
+    assert order_alerts.counts(conn, "owner") == {"red": 1, "yellow": 1, "green": 0}            # «Заказ создан»: no row (2026-11-09)
+    assert order_alerts.counts(conn, "zamantyres") == {"red": 1, "yellow": 1, "green": 0}
     assert of_orders(conn, "partner1") == set() and order_alerts.counts(conn, "olga")["red"] == 0
     assert set(order_alerts.order_levels(conn, "zamantyres", NOW)) == {zaman["id"]}            # the dots by the numbers too
     orders.update_card(conn, pavel["id"], {"responsible": "zamantyres"}, NOW, "owner")          # given to Заман: his from now on
