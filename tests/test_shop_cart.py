@@ -343,7 +343,8 @@ def test_a_line_holds_at_most_what_an_order_line_does(tmp_path):
     assert shop_cart.cart(conn, "buyer") == {}
     add(client, k, qty="0")
     assert shop_cart.cart(conn, "buyer") == {}
-    assert shop_cart.MAX_QTY == 100 and 'max="100"' in page(client)
+    maxes = [int(m) for m in re.findall(r'name="qty" value="\d+" min="1" max="(\d+)"', page(client))]
+    assert shop_cart.MAX_QTY == 100 and maxes and all(m <= 100 for m in maxes) and 41 in maxes      # «max» is the stock (2026-11-09)
 
 
 def test_without_any_choice_the_order_is_the_owners_never_the_clients(tmp_path):

@@ -120,7 +120,9 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, 
     out = dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
                seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart, view=view, view_links=view_links,
                size={k: " ".join(map(str, v)) for k, v in (("w", f.widths), ("h", f.heights), ("d", f.diameters))},
-               size_options=cc.size_values(items), filters_reset=_reset_link(base, here))
+               size_options=cc.size_values(items), filters_reset=_reset_link(base, here),
+               pick=cc.size_pick(base, here, {"w": f.widths, "h": f.heights, "d": f.diameters}, cc.size_values(items)),
+               recent=[], hidden=[], columns=cc.COLUMNS)
     if new:
         out.update(_new_catalog(base, f, here, items))
     return out
@@ -249,7 +251,19 @@ def register(app) -> None:
     @app.route("/shop")
     def shop_page():
         conn, login = get_conn(), current_user()["login"]
-        return _page("shop.html", conn, login, **catalog(app, conn, login, "/shop", photos=True, cart=True, new=ui_new()))
+        values = catalog(app, conn, login, "/shop", photos=True, cart=True, new=ui_new())
+        f = values["f"]                             # «Недавние» and «Колонки» of the client's own page only (never the owner's preview)
+        recent = cc.remember_sizes(conn, login, cc.searched_sizes(f.widths, f.heights, f.diameters, f.sizes), now().isoformat(timespec="seconds"))
+        here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS]
+        values.update(recent=cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login))
+        return _page("shop.html", conn, login, **values)
+
+    @app.route("/shop/columns", methods=["POST"])
+    def shop_columns():
+        """«Колонки» of the client's table: the columns shown, kept for the client (user_pref); back to the catalog page it came from."""
+        conn, login = get_conn(), current_user()["login"]
+        cc.save_columns(conn, login, request.form.getlist("show"), now().isoformat(timespec="seconds"))
+        return redirect(_back_to_catalog() or "/shop")
 
     @app.route("/shop/cart/add", methods=["POST"])
     def shop_cart_add():
@@ -262,8 +276,13 @@ def register(app) -> None:
             flash("Этой шины уже нет в наличии.", "error")
             return redirect(back or "/shop")
         try:
+            before = shop_cart.cart(conn, login).get(found[0].offer.goods_id, 0)
             qty = shop_cart.put(conn, login, found[0], request.form.get("qty", "1"), now().isoformat(timespec="seconds"), add=True)
-            flash("В корзине: %d шт. %s." % (qty, shop_cart._client_name(found[0])), "ok")
+            asked = before + shop_cart._qty(request.form.get("qty", "1"))
+            if qty < asked and qty >= int(found[0].offer.stock):                  # more asked than the stock: the cart holds the stock
+                flash("В наличии %d шт.: столько и положили." % qty, "info")
+            else:
+                flash("В корзине: %d шт. %s." % (qty, shop_cart._client_name(found[0])), "ok")
         except shop_cart.CartError as err:
             flash(str(err), "error")
         return redirect(back or "/shop")

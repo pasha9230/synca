@@ -176,7 +176,7 @@ body.shop.ui-new,.shop-cat:where(.ui-new *){--cl-primary:#4F46E5;--cl-primary-bg
   .shop-table .c-tire{grid-area:tire}
   .shop-table .c-size{grid-area:size;color:var(--cl-text)}
   .shop-table .c-season{grid-area:season;color:var(--cl-text-3);font-size:13px}
-  .shop-table .c-origin{display:none}
+  .shop-table .c-country,.shop-table .c-year{display:none}
   .shop-table .c-wh{grid-area:wh;text-align:right;color:var(--cl-text-3);font-size:13px}
   .shop-table .c-stock{grid-area:stock;text-align:right;font-size:13px}
   .shop-table .c-price{grid-area:price;text-align:right}
@@ -414,6 +414,13 @@ body.shop span.shop2-tile-img{display:flex;align-items:center;justify-content:ce
    (office2-pages.css .o2-frow, .o2 .o2-filters); the rows take the whole width; a phone: the fields wrap, nothing scrolls sideways */
 .shop-o2f{--o2-text-2:var(--gray-600);margin-bottom:16px;min-width:0}
 .shop-o2f .o2-cat-filters{margin:0}
+.shop-cols{position:relative}
+.shop-cols>summary{list-style:none;cursor:pointer}
+.shop-cols>summary::-webkit-details-marker{display:none}
+.shop-cols-list{position:absolute;z-index:30;right:0;top:calc(100% + 4px);width:220px;max-width:calc(100vw - 32px);background:#fff;border:1px solid var(--cl-border);
+  border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.12);padding:10px;display:flex;flex-direction:column;gap:6px}
+.shop-cols-list p{margin:2px 0}
+@media (max-width:720px){.shop-cols-list{position:fixed;left:16px;right:16px;top:auto;bottom:80px;width:auto;max-width:none}}
 .shop-cat--top{display:block}
 @media (max-width:720px){
   .shop-o2f .o2-filters{padding:12px}

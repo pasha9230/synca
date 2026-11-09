@@ -311,6 +311,7 @@ for _section, _endpoints in {
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
              "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",   # its cart, its orders,
              "shop_profile_page", "shop_profile_save",                                                               # its profile,
+             "shop_columns",                                                                                         # «Колонки» of its table,
              "shop_order_cancel"),                                                                                   # its early order cancelled
 }.items():
     for _endpoint in _endpoints:
@@ -368,7 +369,7 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)
 CLIENT_PAGES = frozenset({"shop_page", "shop_photo", "account_password_page", "account_password", "tour_done", "tour_again",
                           "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
-                          "shop_profile_page", "shop_profile_save", "shop_order_cancel", "whatsnew_page"})
+                          "shop_profile_page", "shop_profile_save", "shop_order_cancel", "shop_columns", "whatsnew_page"})
 # «CRM» is not the point's (the owner 2026-10-29: hidden; before, its own part of a client, 2026-10-26)
 # a POST that only reads (an open «Чаты» page asks for fresh messages): «смотреть» is enough for the manager of a point
 VIEW_POSTS = frozenset({"chats_refresh"})

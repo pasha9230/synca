@@ -14,7 +14,9 @@ import math
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlencode
 
+from .. import shop_cart, user_prefs
 from ..catalog import resolve_brand
 from ..models import PricingRule
 from ..pricing import TENS, final_price
@@ -22,7 +24,11 @@ from ..suppliers import supplier_of_id
 from . import service
 
 FIELDS = ("brand", "model", "name", "size", "season", "studs", "load", "speed", "runflat", "country", "year", "stock", "warehouse", "price",
-          "photo")
+          "photo", "qty", "qty_max")
+QTY_DEFAULT = 4                       # «Количество» of «В корзину»: 4, never more than the stock (the owner 2026-11-09)
+# the columns of the client's table a client may hide («Колонки», the owner 2026-11-09); «Шина» and «Количество» always stay
+COLUMNS = (("season", "Сезон"), ("country", "Страна"), ("year", "Год"), ("wh", "Склад"), ("stock", "Остаток"), ("price", "Цена за шт."))
+COLUMNS_KEY = "shop.cols"             # user_pref of the client: the keys of COLUMNS hidden
 WAREHOUSE_MAIN, WAREHOUSE_TOCHKI = "Склад 1", "Склад 2"
 STOCK_MANY = "40+"                    # 4tochki sends 41 for «more than 40» (the owner 2026-10-29, В3)
 SEASONS = {"summer": "Лето", "winter": "Зима", "all": "Всесезонные"}
@@ -177,15 +183,78 @@ class Filters:
     wide: bool = False                 # «Новый вид»: the search looks in more fields (_search_fields)
 
 
-def _numbers(args, name: str) -> List[int]:
-    """The values of the width, the height or the radius: ticked one by one (the chips) or typed in one box by spaces or commas, as in
-    the office's catalog («225 205 195», the owner 2026-11-09)."""
+def size_numbers(args, name: str, limit: int = MAX_VALUES) -> List[int]:
+    """The values of the width, the height or the radius, one reading for the office's catalog and the client's /shop (the owner
+    2026-11-09): repeated (`?w=245&w=255`, the ticks of the list) or typed in one value by spaces or commas («225 205 195», the old
+    links), «R16» read as 16. Sorted, each once, `limit` at most."""
+    given = args.getlist(name) if hasattr(args, "getlist") else [args.get(name) or ""]
     out = []
-    for value in [t for v in args.getlist(name)[:MAX_VALUES] for t in re.split(r"[\s,;]+", str(v)[:MAX_TEXT]) if t][:MAX_VALUES]:
+    for value in [t for v in given[:limit] for t in re.split(r"[\s,;]+", str(v)[:MAX_TEXT]) if t][:limit]:
         value = value.upper().lstrip("RР")
         if value.isascii() and value.isdigit() and len(value) <= 3 and int(value) not in out:
             out.append(int(value))
     return sorted(out)
+
+
+SIZE_FIELDS = (("w", "Ширина"), ("h", "Профиль"), ("d", "Диаметр"))
+RECENT_KEY = "recent.sizes"           # user_pref of the login: the last sizes searched, the latest first (the owner 2026-11-09)
+RECENT_MAX = 5
+
+
+def _url(base: str, pairs) -> str:
+    return base + ("?" + urlencode(pairs) if pairs else "")
+
+
+def size_pick(base: str, pairs, chosen: dict, options: dict) -> list:
+    """The three lists «Ширина», «Профиль», «Диаметр» of the filters (_catalog_filters.html, the office's and the client's): the values
+    of the catalog to tick (any chosen one kept even when nothing has it now), the chosen ones as chips each with the link without it,
+    the link without any of the field. `pairs`: the parameters of the page; a link never keeps the page number."""
+    out = []
+    for key, label in SIZE_FIELDS:
+        on = list(chosen.get(key) or ())
+        rest = [(k, v) for k, v in pairs if k not in (key, "p")]
+        out.append({"key": key, "label": label, "options": sorted(set(options.get(key) or ()) | set(on)), "on": on,
+                    "chips": [(v, _url(base, rest + [(key, str(x)) for x in on if x != v])) for v in on],
+                    "none_url": _url(base, rest) if on else ""})
+    return out
+
+
+def searched_sizes(widths, heights, diameters, sizes) -> List[Tuple[int, int, int]]:
+    """The whole sizes a search asked for: those of «Размеры» and the one of the three lists when each holds one value."""
+    out = list(sizes or ())
+    if len(widths or ()) == 1 and len(heights or ()) == 1 and len(diameters or ()) == 1:
+        out.append((widths[0], heights[0], diameters[0]))
+    return list(dict.fromkeys(out))
+
+
+def recent_sizes(conn, login: str) -> List[Tuple[int, int, int]]:
+    saved = user_prefs.get(conn, login, RECENT_KEY, []) if login else []
+    out = []
+    for item in saved if isinstance(saved, list) else []:
+        if isinstance(item, list) and len(item) == 3 and all(isinstance(n, int) and 0 < n < 1000 for n in item) and tuple(item) not in out:
+            out.append(tuple(item))
+    return out[:RECENT_MAX]
+
+
+def remember_sizes(conn, login: str, searched, now: str) -> List[Tuple[int, int, int]]:
+    """«Недавние» of `login`: the sizes just searched go first, the older ones after, RECENT_MAX in all; saved only when it changed."""
+    old = recent_sizes(conn, login)
+    if not login or not searched:
+        return old
+    new = list(dict.fromkeys(list(reversed(searched)) + old))[:RECENT_MAX]
+    if new != old:
+        try:
+            user_prefs.put(conn, login, RECENT_KEY, [list(s) for s in new], now)
+        except user_prefs.PrefError:
+            return old
+    return new
+
+
+def recent_links(base: str, pairs, recent) -> List[Tuple[str, str]]:
+    """The chips of «Недавние»: «205/55 R16» and the page with that size in the three lists (the other filters, the view and the sort
+    kept; the size fields and the page number replaced)."""
+    rest = [(k, v) for k, v in pairs if k not in ("w", "h", "d", "size", "p")]
+    return [("%d/%d R%d" % s, _url(base, rest + [("w", s[0]), ("h", s[1]), ("d", s[2])])) for s in recent]
 
 
 def filters_of(args, known_brands, wide: bool = False) -> Filters:
@@ -203,7 +272,7 @@ def filters_of(args, known_brands, wide: bool = False) -> Filters:
                    args.get("s") if args.get("s") in SEASONS else "", args.get("t") if args.get("t") in ("studded", "friction") else "",
                    {"1": 1, "2": 2}.get(args.get("wh") or "", 0), (args.get("q") or "")[:MAX_TEXT].strip(),
                    args.get("o") if args.get("o") in SORTS else "brand", args.get("r") == "1", page,
-                   _numbers(args, "w"), _numbers(args, "h"), _numbers(args, "d"), wide)
+                   size_numbers(args, "w"), size_numbers(args, "h"), size_numbers(args, "d"), wide)
 
 
 def apply(items: List[Visible], f: Filters) -> List[Visible]:
@@ -251,7 +320,22 @@ def row(item: Visible, photo: Optional[str]) -> dict:
            "size": "%d/%d R%d" % (o.width, o.height, o.diameter), "season": SEASONS.get(o.season.value, ""), "studs": bool(o.studded),
            "load": o.load or "", "speed": o.speed or "", "runflat": bool(o.runflat), "country": o.country or "", "year": o.mnf_year or "",
            "stock": stock, "warehouse": WAREHOUSE_TOCHKI if item.warehouse == 2 else WAREHOUSE_MAIN, "price": item.price, "photo": photo}
+    most = max(1, min(int(o.stock), shop_cart.MAX_QTY))                 # the cart takes no more (shop_cart.put cuts it there too)
+    out.update(qty=min(QTY_DEFAULT, most), qty_max=most)
     return out
+
+
+def hidden_columns(conn, login: str) -> List[str]:
+    saved = user_prefs.get(conn, login, COLUMNS_KEY, []) if login else []
+    keys = [k for k, _ in COLUMNS]
+    return [k for k in keys if isinstance(saved, list) and k in saved]
+
+
+def save_columns(conn, login: str, shown, now: str) -> List[str]:
+    """«Колонки» of the client: every column of COLUMNS not in `shown` is hidden; kept for the login."""
+    hidden = [k for k, _ in COLUMNS if k not in set(shown)]
+    user_prefs.put(conn, login, COLUMNS_KEY, hidden, now)
+    return hidden
 
 
 def brand_list(items: List[Visible]) -> List[Tuple[str, str]]:

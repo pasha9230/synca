@@ -6,7 +6,7 @@
 <div class="o2 shop-o2f"><section class="card o2-cat-filters">
 <form method="get" action="{{ base }}" class="filters o2-filters">
 <input type="hidden" name="o" value="{{ f.sort }}">{% if f.descending %}<input type="hidden" name="r" value="1">{% endif %}{% if view == "tiles" %}<input type="hidden" name="v" value="tiles">{% endif %}
-{% call filter_rows(size, f.size_text, f.unknown, size_options, f.query, f.season, f.studs, filters_reset, "Размер, бренд, модель") %}
+{% call filter_rows(pick, f.size_text, f.unknown, f.query, f.season, f.studs, filters_reset, "Размер, бренд, модель", recent=recent or ()) %}
 <div class="field" id="f-wh"><span class="label">Склад</span><div class="seg">
 {% for key, label in ((0, "Все"), (1, "Склад 1"), (2, "Склад 2")) %}<label><input type="radio" name="wh" value="{{ key or '' }}"{% if f.warehouse == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div></div>
 <button class="btn btn--primary o2-reset">Показать</button>

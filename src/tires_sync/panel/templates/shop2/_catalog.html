@@ -12,13 +12,13 @@
 <div class="shop2-title"><h1>Каталог</h1><span class="muted">найдено {{ total }}{% if pages > 1 %} · стр. {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
 <div class="shop2-sortrow">
 <div class="shop2-sort" role="group" aria-label="Сортировка">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div>
-<div class="shop-seg shop2-view" role="group" aria-label="Вид"><a href="{{ view_links.table }}"{% if view != "tiles" %} class="is-active" aria-current="true"{% endif %}>Таблица</a><a href="{{ view_links.tiles }}"{% if view == "tiles" %} class="is-active" aria-current="true"{% endif %}>Плитка</a></div>
+{% include "_shop_columns.html" %}<div class="shop-seg shop2-view" role="group" aria-label="Вид"><a href="{{ view_links.table }}"{% if view != "tiles" %} class="is-active" aria-current="true"{% endif %}>Таблица</a><a href="{{ view_links.tiles }}"{% if view == "tiles" %} class="is-active" aria-current="true"{% endif %}>Плитка</a></div>
 </div>
 {% if chips %}<div class="shop2-on" aria-label="Включённые фильтры">{% for label, url in chips %}<a class="shop2-on-chip" href="{{ url }}" title="Убрать">{{ label }}{{ icon("x") }}</a>{% endfor %}<a class="shop2-on-reset" href="{{ reset_link }}">Сбросить</a></div>{% endif %}
 {% if f.unknown %}<span class="shop-unknown">Не понял: {{ f.unknown|join(" ") }}</span>{% endif %}
 </div>
 {% macro buy(r) %}<form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
-<input class="input input--num" type="number" name="qty" value="4" min="1" max="100" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--primary btn--sm">{{ "Ещё" if r.in_cart else "В корзину" }}</button></form>{% if r.in_cart %}<span class="shop-in-cart shop2-in-cart">{{ icon("check") }}в корзине: {{ r.in_cart }} шт.</span>{% endif %}{% endmacro %}
+<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty_max }}" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--primary btn--sm">{{ "Ещё" if r.in_cart else "В корзину" }}</button></form>{% if r.in_cart %}<span class="shop-in-cart shop2-in-cart">{{ icon("check") }}в корзине: {{ r.in_cart }} шт.</span>{% endif %}{% endmacro %}
 {% macro season(r) %}<span class="shop2-tag {{ 'shop2-tag--winter' if r.season == 'Зима' else ('shop2-tag--summer' if r.season == 'Лето' else '') }}">{% if r.season == "Зима" %}{{ icon("snow") }}{% elif r.season == "Лето" %}{{ icon("sun") }}{% endif %}{{ r.season or "—" }}</span>{% if r.studs %}<span class="shop2-tag" title="Шипованные">шипы</span>{% endif %}{% endmacro %}
 {% macro photo(r, cls) %}{% if r.photo %}<img class="{{ cls }}" src="{{ r.photo }}" alt="" loading="lazy">{% else %}<span class="{{ cls }} shop2-nophoto" title="Фото нет">{{ icon("tire") }}</span>{% endif %}{% endmacro %}
 {% if rows and view == "tiles" %}<div class="shop-tiles shop2-tiles">{% for r in rows %}<article class="shop-tile shop2-tile">
@@ -29,16 +29,16 @@
 <div class="shop-tile-price"><b class="strong">{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
 {% if cart %}{{ buy(r) }}{% endif %}</article>{% endfor %}</div>
 {% elif rows %}<div class="table-wrap card shop2-table-wrap"><table class="table shop-table shop2-table">
-<thead><tr><th class="shop2-th-photo"><span class="sr-only">Фото</span></th><th>Шина</th><th>Сезон</th><th>Страна, год</th><th>Склад</th><th class="num">Остаток</th><th class="num">Цена за шт.</th>{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
+<thead><tr><th class="shop2-th-photo"><span class="sr-only">Фото</span></th><th>Шина</th>{% if "season" not in hidden %}<th>Сезон</th>{% endif %}{% if "country" not in hidden %}<th>Страна</th>{% endif %}{% if "year" not in hidden %}<th>Год</th>{% endif %}{% if "wh" not in hidden %}<th>Склад</th>{% endif %}{% if "stock" not in hidden %}<th class="num">Остаток</th>{% endif %}{% if "price" not in hidden %}<th class="num">Цена за шт.</th>{% endif %}{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
 <tbody>{% for r in rows %}
 <tr id="row-{{ loop.index }}"{% if cart %} class="has-buy"{% endif %}>
 <td class="c-photo"><a class="shop2-open" href="#tire-{{ loop.index }}" title="Карточка шины">{{ photo(r, "shop2-ph") }}</a></td>
 <td class="c-tire"><div class="shop2-name"><a class="shop2-open" href="#tire-{{ loop.index }}"><b>{{ r.brand }}</b> {{ r.model or r.name }}</a></div><div class="shop2-sub">{{ r.size }} {{ r.load }}{{ r.speed }}{% if r.runflat %} · RunFlat{% endif %}<span class="shop2-origin-m">{% if r.country or r.year %} · {{ r.country }}{% if r.country and r.year %}, {% endif %}{{ r.year }}{% endif %}</span></div></td>
-<td class="c-season">{{ season(r) }}</td>
-<td class="c-origin">{{ r.country }}{% if r.country and r.year %}, {% endif %}{{ r.year }}</td>
-<td class="c-wh">{{ r.warehouse }}</td>
-<td class="c-stock num">{{ r.stock }} шт.</td>
-<td class="c-price num"><b class="strong">{{ r.price|money }}</b></td>
+{% if "season" not in hidden %}<td class="c-season">{{ season(r) }}</td>{% endif %}
+{% if "country" not in hidden %}<td class="c-country">{{ r.country or "—" }}</td>{% endif %}{% if "year" not in hidden %}<td class="c-year">{{ r.year or "—" }}</td>{% endif %}
+{% if "wh" not in hidden %}<td class="c-wh">{{ r.warehouse }}</td>{% endif %}
+{% if "stock" not in hidden %}<td class="c-stock num">{{ r.stock }} шт.</td>{% endif %}
+{% if "price" not in hidden %}<td class="c-price num"><b class="strong">{{ r.price|money }}</b></td>{% endif %}
 {% if cart %}<td class="c-buy">{{ buy(r) }}</td>{% endif %}
 </tr>{% endfor %}</tbody></table></div>
 {% else %}<div class="card"><div class="empty"><h3>Ничего не найдено</h3><p>Измените или <a href="{{ reset_link }}">сбросьте фильтры</a>.</p></div></div>{% endif %}

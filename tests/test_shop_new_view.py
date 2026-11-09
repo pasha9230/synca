@@ -67,9 +67,9 @@ def test_on_the_catalog_has_the_size_chips_one_search_no_except_and_the_photo_ce
     new_view(conn)
     html = page(client)
     assert "shop2-cat" in html and 'name="xb"' not in html and 'id="f-size"' not in html
-    for key, values in (("w", "195 205 245"), ("h", "45 55 65"), ("d", "15 16 18")):        # the hints of the boxes (2026-11-09: as the office's)
-        hints = re.search(r'<datalist id="dl-%s">(.*?)</datalist>' % key, html).group(1)
-        assert re.findall(r'value="(\d+)"', hints) == values.split(), key
+    for key, values in (("w", "195 205 245"), ("h", "45 55 65"), ("d", "15 16 18")):        # the lists of the fields (2026-11-09: as the office's)
+        box = re.search(r'data-msel="%s">(.*?)</details>' % key, html, re.S).group(1)
+        assert re.findall(r'name="%s" value="(\d+)"' % key, box) == values.split(), key
     assert 'name="w"' in html and 'name="q"' in html and html.count('name="q"') == 1
     assert html.count('class="c-photo"') == len(prices(html)) and "<script" not in html
     assert len(set(keys(html))) == len(prices(html))                       # «В корзину» in each row (and in its card)

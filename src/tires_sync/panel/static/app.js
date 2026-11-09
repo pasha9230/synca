@@ -10,6 +10,25 @@
     if (form && !e.target.closest("[data-no-autosubmit]")) form.submit();
   });
 
+  // 1а) «Ширина», «Профиль», «Диаметр» (_catalog_filters.html): несколько значений из списка; выдача обновляется, когда список закрыт
+  // после изменения, по Enter на значении или кнопкой «Показать», но не на каждую отметку и не по Tab. Esc закрывает список.
+  function mselChanged(box) {
+    return Array.prototype.some.call(box.querySelectorAll("input[type=checkbox]"), function (i) { return i.checked !== i.defaultChecked; });
+  }
+  document.querySelectorAll("details.msel-box").forEach(function (box) {
+    box.addEventListener("toggle", function () {
+      var form = box.closest("form");
+      if (!box.open && form && mselChanged(box)) form.submit();
+    });
+    box.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && box.open) { e.preventDefault(); e.stopPropagation(); box.open = false; box.querySelector("summary").focus(); }
+      else if (e.key === "Enter" && e.target.type === "checkbox" && box.closest("form")) { e.preventDefault(); box.closest("form").submit(); }
+    });
+  });
+  document.addEventListener("click", function (e) {                  // a click outside closes an open list (and asks the page if it changed)
+    document.querySelectorAll("details.msel-box[open]").forEach(function (box) { if (!box.contains(e.target)) box.open = false; });
+  });
+
   // 2) Выбор позиций: «выбрать все» в таблице бренда и нижняя панель массовых действий
   function syncSelection() {
     var rows = document.querySelectorAll("[data-select-row]");
@@ -874,7 +893,7 @@
     });
     document.addEventListener("keydown", function (e) {                    // first of all the Esc listeners: an open window, menu or list of suggestions closes first
       if (e.key !== "Escape" || !isOpen()) return;
-      if (document.querySelector(".modal-backdrop.is-open, details.menu[open], #bell-pop:not([hidden])") || panel.querySelector(".suggest:not([hidden]) li:not(.s-empty)")) return;
+      if (document.querySelector(".modal-backdrop.is-open, details.menu[open], details.msel-box[open], #bell-pop:not([hidden])") || panel.querySelector(".suggest:not([hidden]) li:not(.s-empty)")) return;
       if (e.target.closest && e.target.closest(".topbar")) return;         // the search of the top bar has its own Esc
       close();
     }, true);

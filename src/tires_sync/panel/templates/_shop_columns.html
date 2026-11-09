@@ -1,0 +1,7 @@
+{# «Колонки» of the client's table (/shop, both views, the owner 2026-11-09): the client hides or shows «Сезон», «Страна», «Год», «Склад»,
+   «Остаток», «Цена за шт.» (client_catalog.COLUMNS); «Шина» and «Количество» always stay. A form of the server (no script, the CSP of
+   /shop), kept for the client (user_pref shop.cols). The client's own page only (`cart`), the table only. #}
+{% if cart and view != "tiles" %}<details class="shop-cols"><summary class="btn btn--secondary btn--sm">Колонки</summary>
+<form method="post" action="/shop/columns" class="shop-cols-list"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% for key, label in columns %}<label class="check"><input type="checkbox" name="show" value="{{ key }}"{% if key not in hidden %} checked{% endif %}>{{ label }}</label>{% endfor %}
+<p class="muted xs">«Шина» и «Количество» видны всегда.</p><button class="btn btn--primary btn--sm">Сохранить</button></form></details>{% endif %}
