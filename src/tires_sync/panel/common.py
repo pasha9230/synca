@@ -271,7 +271,7 @@ for _section, _endpoints in {
                 "history_ads", "history_catalog", "photos_feed", "photos_frame_action", "photos_generate", "photos_priority", "photos_queue_switch", "photos_ref", "photos_review", "photos_switch"),
     "analytics": ("economics_page", "economics_brand", "economics_params", "economics_sales", "economics_sale_add", "economics_sales_export",
                   "economics_sale_new", "economics_sale_reverse", "economics_terms", "economics_apply_pricing", "economics_terms_delete",
-                  "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report",
+                  "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report", "orders_settings_money",
                   "orders_report_export"),
     "setup": ("draft", "draft_cancel", "draft_confirm", "catalog_review", "publish_result", "summary_toggle",      # a draft shows the markups: the owner's
               "settings_page", "settings_notify_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_pending", "settings_exclusions_page", "settings_pricing",

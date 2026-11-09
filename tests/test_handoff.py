@@ -300,11 +300,12 @@ def test_the_report_page_shows_the_handed_over_clients_and_saves_their_rate(tmp_
     mgr.dispatch(conn, "vk-1", PEER, "клиент 89001112233 шины", None, NOW)
     _sell(conn, conn.execute("SELECT order_id FROM order_handoff").fetchone()[0], "Бета", "2026-10-10")
     page = client.get("/orders/report?from=2026-10-01&to=2026-10-31").get_data(as_text=True)
-    assert "Переданные клиенты" in page and 'name="handoff_fee" inputmode="decimal" required value="0"' in page
+    assert "Переданные клиенты" in page
+    assert 'name="handoff_fee" inputmode="decimal" required value="0"' in client.get("/orders/settings/money").get_data(as_text=True)
     post(client, "/orders/report/rates", tok, point_fee="75", point_fee_was="75", owner_pct="50", owner_pct_was="50", handoff_fee="300",
          handoff_fee_was="0", valid_from="2026-10-22")
     assert [(r["name"], r["value"]) for r in order_report.list_rates(conn)] == [("handoff_fee", 300.0)]
-    page = client.get("/orders/report").get_data(as_text=True)
+    page = client.get("/orders/settings/money").get_data(as_text=True)
     assert "За переданного клиента" in page and "300 ₽" in page
 
 

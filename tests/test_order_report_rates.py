@@ -111,12 +111,15 @@ def test_the_page_shows_money_the_manual_line_and_saves_the_rates(tmp_path):
     html = client.get("/orders/report?from=2026-08-01&to=2026-10-31").get_data(as_text=True)
     assert "12 576 ₽" in html and "12 575,86" not in html                      # the money filter: whole rubles, no-break spaces
     assert "Продажи вручную" in html and "9 778 ₽" in html
+    assert 'name="point_fee"' not in html and "/orders/settings/money" in html          # the forms: «Настройки заказов › Расчёты» (п. 28)
+    assert client.get("/orders/report/rates").headers["Location"].endswith("/orders/settings/money")    # the old address leads there
+    html = client.get("/orders/settings/money").get_data(as_text=True)
     assert "Ставки не менялись" in html and 'value="75"' in html and 'value="50"' in html
     assert client.post("/orders/report/rates", data={"csrf": tok, "point_fee": "100", "owner_pct": "60", "valid_from": "2026-10-19"}).status_code == 302
     assert order_report.list_rates(conn) == []                                            # yesterday: refused
     client.post("/orders/report/rates", data={"csrf": tok, "point_fee": "1 000", "owner_pct": "60", "valid_from": "2026-10-21"})
     assert [(r["name"], r["value"], r["author"]) for r in order_report.list_rates(conn)] == [("owner_share", 0.6, "owner"), ("point_fee", 1000.0, "owner")]
-    html = client.get("/orders/report?from=2026-08-01&to=2026-10-31").get_data(as_text=True)
+    html = client.get("/orders/settings/money").get_data(as_text=True)
     assert "2026-10-21" in html and "1000\u00a0₽" in html and "60 %" in html
     assert GOLDEN_CSV in client.get("/orders/report/export.csv?from=2026-08-01&to=2026-10-31").get_data(as_text=True)   # tomorrow's rate: today's report is the same
     client.post("/orders/report/rates", data={"csrf": tok, "point_fee": "сто", "owner_pct": "60", "valid_from": "2026-10-21"})
@@ -130,7 +133,7 @@ def test_changing_one_rate_in_the_form_keeps_a_future_rate_of_the_other(tmp_path
     tok = login(client)
     conn = store.connect(app.config["DB_PATH"])
     order_report.set_rates(conn, "2026-11-01", "2026-10-20", NOW, "owner", point_fee=100)
-    html = client.get("/orders/report").get_data(as_text=True)
+    html = client.get("/orders/settings/money").get_data(as_text=True)
     assert 'name="point_fee_was" value="75"' in html                                     # the form is filled with today's rates
     client.post("/orders/report/rates", data={"csrf": tok, "point_fee": "75", "point_fee_was": "75", "owner_pct": "60", "owner_pct_was": "50",
                                               "valid_from": "2026-12-01"})

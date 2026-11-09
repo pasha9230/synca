@@ -24,6 +24,7 @@ from .routes_design import office_new, office_page
 from .routes_main import context
 
 log = logging.getLogger(__name__)
+MONEY_PAGE = "/orders/settings/money"                # «Настройки заказов › Расчёты»: «Ставки» and «Подписи долей» (п. 28 of the audit, 2026-11-08)
 
 
 AUTOSAVED = ("client_name", "client_phone", "point_id", "deal_kind", "responsible")     # saved by themselves on change (order_autosave)
@@ -810,25 +811,38 @@ def register(app) -> None:
         every = order_report.build(conn, start, end) if point else report               # a point paid only for the clients it handed over
         names = sorted(set(names) | {r["point"] for r in every["handoff"]["lines"] if r["point"] != order_report.NO_POINT})   # is chosen too (З8)
         rates, today = order_report.list_rates(conn), local_now().date().isoformat()
-        return render_template("orders_report.html", report=report, start=start, end=end, point=point,
-                               point_names=names, rates=rates, today=today, fee=order_report.rate_on(rates, "point_fee", today),
+        return render_template("orders_report.html", report=report, start=start, end=end, point=point, point_names=names,
+                               fee=order_report.rate_on(rates, "point_fee", today), owner_share=order_report.rate_on(rates, "owner_share", today),
+                               labels=order_report.share_labels(conn))
+
+    @app.route("/orders/settings/money")
+    @login_required
+    def orders_settings_money():
+        """«Настройки заказов › Расчёты»: the forms «Ставки» and «Подписи долей» of the report (п. 28 of the audit, 2026-11-08), as they were
+        there: the same values, the same POST (/orders/report/rates). Who sees the money sees it (the section of the report, common.SECTION_OF)."""
+        conn = get_conn()
+        rates, today = order_report.list_rates(conn), local_now().date().isoformat()
+        return render_template("orders_money.html", rates=rates, today=today, fee=order_report.rate_on(rates, "point_fee", today),
                                owner_share=order_report.rate_on(rates, "owner_share", today), defaults=order_report.DEFAULTS,
                                handoff_fee=order_report.rate_on(rates, "handoff_fee", today), labels=order_report.share_labels(conn),
                                saved_labels=order_report.saved_share_labels(conn), label_defaults=order_report.SHARE_LABELS,
                                label_max=order_report.SHARE_LABEL_MAX)
 
-    @app.route("/orders/report/rates", methods=["POST"])
+    @app.route("/orders/report/rates", methods=["GET", "POST"])
     @login_required
     def orders_report_rates():
         """The point fee and the owner's share from a date (today or later); an order is counted with the rates of its day.
-        The form «Подписи долей» comes here too (`what=labels`): who the two shares are shown to, with no date (a label, not money)."""
+        The form «Подписи долей» comes here too (`what=labels`): who the two shares are shown to, with no date (a label, not money).
+        The forms are in «Настройки заказов › Расчёты» (п. 28, 2026-11-08): the answer and the old address (GET) lead there."""
+        if request.method == "GET":
+            return redirect(MONEY_PAGE)
         conn = get_conn()
         if request.form.get("what") == "labels":
             if not has_right("money"):
                 abort(403)
             changed = order_report.set_share_labels(conn, request.form.get("owner_label", ""), request.form.get("partner_label", ""), now_iso(), author())   # UTC: the journal reads it so
             flash("Подписи долей сохранены." if changed else "Подписи не менялись.")
-            return redirect("/orders/report")
+            return redirect(MONEY_PAGE)
         def typed(name):                     # a field left as the form filled it is not sent: it would undo a rate already saved for a later date
             text = request.form.get(name, "").strip()
             return None if text == request.form.get(name + "_was", "").strip() else parse_amount(text)
@@ -839,10 +853,10 @@ def register(app) -> None:
                                              point_fee=fee, owner_share=share, handoff_fee=handoff)
         except ValueError as err:
             flash(str(err) if str(err) != "not a number" else "Ставка: нужно число.")
-            return redirect("/orders/report")
+            return redirect(MONEY_PAGE)
         flash("Ставки сохранены." if changed else "Ничего не записано: поля не менялись или такие ставки уже действуют с этой даты. "
               "Чтобы записать прежнее значение поверх будущей ставки, впишите его заново (например, 75,00).")
-        return redirect("/orders/report")
+        return redirect(MONEY_PAGE)
 
     @app.route("/orders/report/export.csv")
     @login_required

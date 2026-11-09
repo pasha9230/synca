@@ -143,19 +143,19 @@ def test_a_page_without_a_saved_choice_opens_with_its_default(tmp_path, monkeypa
 
 def test_a_page_coming_back_after_its_own_form_post_keeps_the_saved_filters(tmp_path):
     """POST → redirect to the bare address of the list (a saved rate, an import, a rollback): the browser sends the list page as the Referer,
-    which must not read as «Сбросить» of the page (the review 2026-10-30)."""
+    which must not read as «Сбросить» of the page (the review 2026-10-30). (The forms of the rates left the report for «Настройки заказов ›
+    Расчёты», п. 28 of the audit: the import of «Сопоставления» is the list page's own form here.)"""
     app, owner, conn = setup(tmp_path)
-    owner.get("/orders/report?from=2026-10-01&to=2026-10-07", headers=on("/orders/report"))
-    saved = {"from": ["2026-10-01"], "to": ["2026-10-07"]}
-    assert user_prefs.get(conn, "owner", "f.orders_report") == saved
-    r = owner.post("/orders/report/rates", data={"csrf": "tok", "what": "labels", "owner_label": "А", "partner_label": "Б"},
-                   headers=on("/orders/report?from=2026-10-01&to=2026-10-07"))
-    assert r.status_code == 302 and r.headers["Location"].endswith("/orders/report")
-    back = owner.get("/orders/report", headers=on("/orders/report?from=2026-10-01&to=2026-10-07"))
-    assert back.status_code == 302 and "from=2026-10-01" in back.headers["Location"]
-    assert user_prefs.get(conn, "owner", "f.orders_report") == saved
-    assert owner.get("/orders/report", headers=on("/orders/report?from=2026-10-01")).status_code == 200      # «Сбросить» of the page still clears
-    assert user_prefs.get(conn, "owner", "f.orders_report") is None
+    owner.get("/mappings?b=ikon", headers=on("/mappings"))
+    saved = {"b": ["ikon"]}
+    assert user_prefs.get(conn, "owner", "f.mappings") == saved
+    r = owner.post("/mappings/import", data={"csrf": "tok"}, headers=on("/mappings?b=ikon"))
+    assert r.status_code == 302 and r.headers["Location"].endswith("/mappings")
+    back = owner.get("/mappings", headers=on("/mappings?b=ikon"))
+    assert back.status_code == 302 and "b=ikon" in back.headers["Location"]
+    assert user_prefs.get(conn, "owner", "f.mappings") == saved
+    assert owner.get("/mappings", headers=on("/mappings?b=ikon")).status_code == 200      # «Сбросить» of the page still clears
+    assert user_prefs.get(conn, "owner", "f.mappings") is None
 
 
 def test_the_tab_general_of_a_brand_card_opens_general(tmp_path):
@@ -177,12 +177,11 @@ def test_a_one_off_view_offers_the_saved_filters_and_its_reset_keeps_them(tmp_pa
 
 def test_the_mark_of_a_form_post_is_not_taken_by_a_request_of_another_page(tmp_path):
     app, owner, conn = setup(tmp_path)
-    owner.get("/orders/report?from=2026-10-01", headers=on("/orders/report"))
-    owner.post("/orders/report/rates", data={"csrf": "tok", "what": "labels", "owner_label": "А", "partner_label": "Б"},
-               headers=on("/orders/report?from=2026-10-01"))
+    owner.get("/mappings?b=ikon", headers=on("/mappings"))
+    owner.post("/mappings/import", data={"csrf": "tok"}, headers=on("/mappings?b=ikon"))
     owner.get("/catalog", headers=on("/"))                                      # another tab meanwhile
-    back = owner.get("/orders/report", headers=on("/orders/report?from=2026-10-01"))
-    assert back.status_code == 302 and "from=2026-10-01" in back.headers["Location"]
+    back = owner.get("/mappings", headers=on("/mappings?b=ikon"))
+    assert back.status_code == 302 and "b=ikon" in back.headers["Location"]
 
 
 def test_the_text_of_a_search_is_never_kept_the_rest_is(tmp_path):
