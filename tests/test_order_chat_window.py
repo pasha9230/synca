@@ -94,6 +94,7 @@ def test_the_window_shows_the_whole_thread_with_the_photo_and_the_link_as_the_ch
     live = re.search(r'<div id="chats-live" data-sig="([0-9a-f]+)" data-chat="%d" data-page="/chats/%d"' % (tanya["id"], tanya["id"]), block)
     assert live and live.group(1) == chats.signature(conn, tanya["id"])                            # the live update of «Чаты» reads the chat's page
     assert html.count('id="chats-live"') == 1
+    assert html.count('id="chats-offline"') == 1 and re.search(r'id="chats-offline" role="status" hidden', block)   # a cut connection is said, as in «Чаты»
 
 
 def test_the_reply_field_is_the_one_of_the_chats_page_and_comes_back_to_the_window(tmp_path, view):
