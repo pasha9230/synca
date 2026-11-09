@@ -359,13 +359,14 @@ def cc_tochki_gid(app, conn):
 
 
 def test_the_photo_comes_through_our_server_under_an_opaque_name(tmp_path):
+    """The owner 2026-11-09: the supplier's photo (its marks in the metadata are dropped), fetched in the background, never by the page."""
     app, client, conn, sid = make_shop(tmp_path, tochki=[tochki_row("T1")])
-    own_photo(app, conn, "77001", JPEG)                                       # our photo, with marks in its metadata
     assert tokens(page(client)) == []                                          # not drawn yet: no link
     shop_photos.drain()
     found = tokens(page(client))
-    ours = {cc.photo_token(app.secret_key, g) for g in ("77001", "77002")}     # one set of ours: both sizes of the model
-    assert set(found) == ours and cc.photo_token(app.secret_key, cc_tochki_gid(app, conn)) not in found   # 4tochki's: a placeholder
+    every = {cc.photo_token(app.secret_key, g) for g in ("77001", "77002", "77003", cc_tochki_gid(app, conn))}
+    assert set(found) == every                                                 # every visible position has the supplier's photo
+    assert sorted(FETCHED) == sorted(["https://cdn.supplier-one.test/p/7700%d.jpg" % n for n in (1, 2, 3)] + ["https://img.4tochki.test/T1.jpg"])
     for token in found:
         response = client.get("/shop/photo/" + token)
         data = response.get_data()
@@ -377,13 +378,20 @@ def test_the_photo_comes_through_our_server_under_an_opaque_name(tmp_path):
         text = " ".join("%s: %s" % kv for kv in response.headers.items()).lower()
         for leak in ("supplier-one", "4tochki", "77001", "77002", "t1.jpg", "s%d-" % sid):
             assert leak not in text, leak
-    assert FETCHED == []                                                       # no supplier is ever asked
+    shop_photos.drain()
+    page(client)
+    shop_photos.drain()
+    assert len(FETCHED) == 4                                                   # made once: the supplier is not asked again
+    made = sorted(p.name for p in (tmp_path.glob("**/shop/*.jpg")))
+    assert len(made) == 4 and all(re.match(r"^sup-[0-9a-f]{64}\.jpg$", n) for n in made)    # no code, no address in a name
+
 
 def test_the_photo_of_a_position_out_of_the_set_or_any_address_is_never_served(tmp_path):
     app, client, conn, sid = make_shop(tmp_path)
+    set_ours(conn, {"IKON TYRES|winter": (10, 20)})                            # no % of Laufenn: not of the client's set
     page(client)
     shop_photos.drain()
-    outside = cc.photo_token(app.secret_key, "77003")                         # Laufenn: not of the client's brands
+    outside = cc.photo_token(app.secret_key, "77003")                         # Laufenn: not of the client's set (its photo exists)
     hidden = cc.photo_token(app.secret_key, "77005")                          # no stock
     for token in (outside, hidden, "0" * 32, "77001", "..%2f..%2fetc%2fpasswd", "https:%2f%2fexample.com%2fa.jpg",
                   cc.photo_token("other-secret", "77001")):
@@ -391,14 +399,15 @@ def test_the_photo_of_a_position_out_of_the_set_or_any_address_is_never_served(t
     assert client.get("/shop/photo/https://example.com/a.jpg").status_code == 404
     assert client.get("/shop/photo?url=https://example.com/a.jpg").status_code in (403, 404)
     assert not any("77003" in u or "example.com" in u for u in FETCHED)
-    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL WHERE subject = '*'")   # no general %: the old link closes
+    assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, "77001")).status_code == 200   # the link works while it is the client's
+    conn.execute("UPDATE client_terms SET pct_small = NULL, pct_large = NULL WHERE subject = '*'")
     conn.commit()
+    set_ours(conn, {})                                    # no % of the brand at all (since 2026-10-31 ours counts): the old link closes
     assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, "77001")).status_code == 404
 
 
 def test_the_photo_is_the_clients_only(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
-    own_photo(app, conn, "77001")
     page(client)
     shop_photos.drain()
     token = cc.photo_token(app.secret_key, "77001")
@@ -409,33 +418,50 @@ def test_the_photo_is_the_clients_only(tmp_path):
     assert app.test_client().get("/shop/photo/" + token).status_code == 302   # signed out: to the login page
 
 
-def test_our_own_photo_comes_first(tmp_path):
+def test_the_supplier_s_photo_and_not_ours(tmp_path):
+    """The owner 2026-11-09 (replacing 2026-10-29 В6): with our approved frame and the supplier's photo the client gets the supplier's."""
     app, client, conn, _ = make_shop(tmp_path)
-    sha = own_photo(app, conn, "77001")
+    sha = own_photo(app, conn, "77001")                                        # ours: red; the supplier's: blue
     html = page(client)
     token = cc.photo_token(app.secret_key, "77001")
     assert token not in tokens(html)                                           # being made
     shop_photos.drain()
     html = page(client)
-    assert token in tokens(html)                                               # made from our own photo
-    own = client.get("/shop/photo/" + token).get_data()
-    assert color_of(own)[0] > 200 and b"4tochki" not in own
-    shop_photos.drain()
-    assert "https://cdn.supplier-one.test/p/77001.jpg" not in FETCHED
-    assert sha not in html                                                     # our library's name is not shown either
+    assert token in tokens(html)
+    made = client.get("/shop/photo/" + token).get_data()
+    assert color_of(made)[2] > 200 and color_of(made)[0] < 50 and b"4tochki" not in made
+    assert "https://cdn.supplier-one.test/p/77001.jpg" in FETCHED
+    lowered = html.lower()
+    for leak in (sha, "supplier-one", "cdn.", "77001", "secretcode1", "/img/"):  # nor our library's name, nor the supplier, nor the code
+        assert leak not in lowered, leak
 
 
-def test_a_position_without_our_photo_is_a_stub_and_the_supplier_is_never_asked(tmp_path):
-    """The owner 2026-10-29: the supplier's photos carry its watermarks, the client must not know the supplier: only our own photos."""
-    app, client, conn, _ = make_shop(tmp_path, tochki=[tochki_row("T1")])
+def test_our_photo_without_the_supplier_s_is_a_stub(tmp_path):
+    """The owner 2026-11-09: our own frames never reach /shop; no supplier's photo: a placeholder."""
+    rows = (wm(NNOMMODIF="77001", SMODIFNAME="IKON 205/55/16 T 94 Test Model", NPRICE_DELAYED="12345", NREST="12", SPICTURE=""),) + ROWS[1:]
+    app, client, conn, _ = make_shop(tmp_path, rows=rows)
+    own_photo(app, conn, "77001")
     page(client)
     shop_photos.drain()
     html = page(client)
+    token = cc.photo_token(app.secret_key, "77001")
+    assert token not in tokens(html) and cc.photo_token(app.secret_key, "77002") in tokens(html) and "нет фото" in html
+    assert client.get("/shop/photo/" + token).status_code == 404
     shop_photos.drain()
-    assert tokens(html) == [] and html.count("нет фото") == 4 and FETCHED == []     # Laufenn too: every brand (2026-10-30)
-    for gid in ("77001", "77002"):
-        assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, gid)).status_code == 404
-    assert FETCHED == []
+    assert not any("77001" in u for u in FETCHED)
+
+
+def test_a_broken_supplier_s_photo_is_a_stub_and_not_asked_again_within_the_hour(tmp_path):
+    rows = (wm(NNOMMODIF="77001", SMODIFNAME="IKON 205/55/16 T 94 Test Model", NPRICE_DELAYED="12345", NREST="12",
+               SPICTURE="https://cdn.supplier-one.test/broken/77001.jpg"),) + ROWS[1:]
+    app, client, conn, _ = make_shop(tmp_path, rows=rows)
+    token = cc.photo_token(app.secret_key, "77001")
+    for _ in range(3):
+        html = page(client)
+        assert client.get("/shop/photo/" + token).status_code == 404
+        shop_photos.drain()
+    assert token not in tokens(html) and FETCHED.count("https://cdn.supplier-one.test/broken/77001.jpg") == 1
+
 
 def test_no_season_label_of_unknown_and_the_search_fields_have_no_code():
     item = cc.Visible(make_offer(code="ART123", name="IKON ART123 205/55/16", name_orig="", season=Season.UNKNOWN), 100, 1, "ikon tyres", "Ikon")
@@ -444,19 +470,25 @@ def test_no_season_label_of_unknown_and_the_search_fields_have_no_code():
     assert not any("art123" in f or "100" == f for f in cc._search_fields(item)[0])
 
 
-def test_a_supplier_s_copy_kept_for_img_or_made_before_is_never_served(tmp_path):
+def test_the_copy_kept_for_img_is_taken_and_the_supplier_not_asked(tmp_path):
+    """photo_cache keeps the supplier's original (the feed's /img): it is drawn anew, nobody is asked; an old picture named by the goods id
+    (a build before) is never served."""
     app, client, conn, _ = make_shop(tmp_path)
     from tires_sync import photo_cache
     kept = photo_cache.root(app.config["DB_PATH"], app.config.get("IMG_ROOT"))
     (kept / "shop").mkdir(parents=True, exist_ok=True)
-    (kept / "77001.png").write_bytes(picture((0, 0, 255), kind="PNG"))         # the copy /img keeps
-    (kept / "shop" / "77002.jpg").write_bytes(JPEG)                            # a supplier's picture drawn by the build before
-    html = page(client)
+    (kept / "77001.png").write_bytes(picture((0, 255, 0), kind="PNG"))         # the copy /img keeps: green
+    (kept / "shop" / "77002.jpg").write_bytes(OWN_JPEG)                        # red, named by the goods id: never served
+    page(client)
     shop_photos.drain()
-    assert tokens(page(client)) == [] and tokens(html) == []
-    for gid in ("77001", "77002"):
-        assert client.get("/shop/photo/" + cc.photo_token(app.secret_key, gid)).status_code == 404
-    assert FETCHED == []
+    html = page(client)
+    assert {cc.photo_token(app.secret_key, g) for g in ("77001", "77002")} <= set(tokens(html))
+    green = client.get("/shop/photo/" + cc.photo_token(app.secret_key, "77001")).get_data()
+    assert color_of(green)[1] > 200 and color_of(green)[2] < 50 and b"Exif" not in green
+    blue = client.get("/shop/photo/" + cc.photo_token(app.secret_key, "77002")).get_data()
+    assert color_of(blue)[2] > 200
+    assert "https://cdn.supplier-one.test/p/77001.jpg" not in FETCHED and "https://cdn.supplier-one.test/p/77002.jpg" in FETCHED
+
 
 def test_a_huge_or_false_picture_is_refused():
     with pytest.raises(share_photos.PhotoError):

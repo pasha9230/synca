@@ -1,15 +1,18 @@
-"""The photos of the client's catalog through our server (the owner 2026-10-29, В6): the client sees /shop/photo/<our opaque name>, never
-the supplier's address, its host, a goods id or a code. Only our own photo (an approved three-quarter frame of a set sent to the feed);
-a position without one shows a placeholder (the owner 2026-10-29: the supplier's photos carry its watermarks, so they never reach the
-client and the supplier is never asked). Every picture is drawn anew as a small JPEG (MAX_SIDE) without any metadata
-(EXIF/XMP/IPTC of the supplier or of a phone never reach the client) into its own folder `<img>/shop`: one file per position at most, so
-the folder is bounded by the catalog (about 50-150 KB a file). The pictures are made in the background, so that a page of 50 positions
-never holds the panel's few workers; the row gets its photo link once its picture is made."""
+"""The photos of the client's catalog through our server: the client sees /shop/photo/<our opaque name>, never the supplier's address,
+its host, a goods id or a code. Only the supplier's photo of the position (the owner 2026-11-09, replacing 2026-10-29 В6: our own
+generated frames of the sets are not shown in /shop; the supplier's watermarks on its photo are acceptable): the copy the feed keeps in
+photo_cache (`<img>/<code>.<kind>`) if there is one, else the picture of the position in the unload (`offer.image`), fetched in the
+background only (share_photos.fetch: a public host, its own timeouts) and only once per position and picture (a made picture is kept; a
+failure is not tried again for FAIL_SECONDS). A position without a supplier's photo, or whose photo could not be made, shows a
+placeholder. Every picture is drawn anew as a small JPEG (MAX_SIDE) without any metadata (EXIF/XMP/IPTC of the supplier never reach the
+client) into its own folder `<img>/shop` under a name of a hash (no code, no address): one file per position and picture, so the folder
+is bounded by the catalog (about 50-150 KB a file). The pictures are made in the background, so that a page of 50 positions never holds
+the panel's few workers; the row gets its photo link once its picture is made."""
 from __future__ import annotations
 
+import hashlib
 import io
 import os
-import re
 import tempfile
 import threading
 import time
@@ -17,10 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from .. import photo_cache, photo_library, share_photos
+from .. import photo_cache, share_photos
 
 KINDS = photo_cache.KINDS
-SHA = re.compile(r"^[0-9a-f]{64}$")
 MAX_SIDE = 800                 # the client sees a small picture: the longer side, px
 MAX_PIXELS = 40_000_000        # a bigger JPEG is not decoded at all (a JPEG is decoded already reduced, `draft`)
 MAX_PIXELS_FULL = 20_000_000   # PNG and WebP are decoded whole: a lower bound keeps the memory of a worker small
@@ -59,27 +61,24 @@ def clean(data: bytes) -> bytes:
 
 
 class Photos:
-    """The photos of one request: our own sets (read once) and the folders."""
+    """The photos of one request: the supplier's photos of the positions (a kept copy, or its address fetched in the background)."""
 
     def __init__(self, conn, photos_root, cache_folder, fetch=None):
         self.cache = Path(cache_folder)
         self.made = self.cache / "shop"
         self.fetch = fetch or share_photos.fetch
-        self.aliases = photo_library.aliases(conn)
-        root = Path(photos_root)
-        self.own = {key: (sha, root / ("%s.%s" % (sha, ext))) for key, sha, ext in conn.execute(
-            "SELECT s.key, p.sha256, p.ext FROM photo_set s JOIN set_frame f ON f.set_key = s.key AND f.kind = 'three_quarter'"
-            " AND f.status = 'approved' JOIN photo p ON p.id = f.photo_id WHERE s.in_feed = 1") if SHA.match(sha or "") and ext in KINDS}
 
     def _source(self, offer) -> Optional[Tuple[str, str, object]]:
-        """(the name of the made picture, "file", our photo), or None: only our own photos reach the client (the owner 2026-10-29: the
-        supplier's carry its watermarks, the client must not know the supplier). A copy of a supplier's photo made before is never served."""
-        key = photo_library.set_key_for(offer)
-        if key is not None:
-            own = self.own.get(self.aliases.get(key.text(), key.text()))
-            if own is not None and own[1].is_file():
-                return "own-" + own[0], "file", own[1]
-        return None
+        """(the name of the made picture, "file" | "url", where), or None: only the supplier's photo of the position reaches the client
+        (the owner 2026-11-09). The copy photo_cache keeps comes first (nobody is asked); else the address of the unload. The name is a
+        hash of the position and its picture: a new picture of the supplier is a new name, and the name tells nothing of either."""
+        code = str(getattr(offer, "goods_id", "") or "")
+        url = str(getattr(offer, "image", "") or "").strip()
+        kept = photo_cache.cached(self.cache, code) if code else None
+        if kept is None and not url.lower().startswith("https://"):
+            return None
+        name = "sup-" + hashlib.sha256(("shop-supplier\0%s\0%s" % (code, url)).encode("utf-8")).hexdigest()
+        return (name, "file", kept) if kept is not None else (name, "url", url)
 
     def path(self, offer) -> Optional[Path]:
         """The made picture of the position, or None."""
@@ -112,9 +111,10 @@ def _ask(folder: Path, source, fetch) -> None:
 def _make(folder: Path, source, fetch) -> None:
     name, kind, where = source
     try:
-        if kind != "file":                                    # only our own files: nothing is ever fetched from a supplier
-            return
-        data = Path(where).read_bytes()
+        if kind == "file":                                    # the copy photo_cache keeps: nobody is asked
+            data = Path(where).read_bytes()
+        else:                                                 # the supplier's address: here, in the background, with fetch's timeouts
+            data = fetch(where)[0]
         picture = clean(data)
         folder.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(folder), prefix=name + ".", suffix=".part")
