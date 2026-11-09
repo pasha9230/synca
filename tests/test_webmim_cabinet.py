@@ -265,7 +265,7 @@ def test_a_number_in_already_costs_no_login_and_an_old_answer_is_not_shown(tmp_p
 def test_hourly_one_login_for_every_open_order_writes_and_sends_once(tmp_path):
     conn, mine, *_ = placed_order(tmp_path, cabinet=[])
     other = card(conn, point_id=point(conn, name="Парнас", webmim_address_id="78"))
-    orders.update_card(conn, other, {"webmim_number": "7007"}, NOW, "owner")         # typed by hand, not placed by the button: no send
+    orders.update_card(conn, other, {"webmim_number": "7007"}, NOW, "owner")         # typed by hand: written; it has no message waiting
     deliver, vk = Deliver(), FakeVk()
     cabinet = Cabinet([row(7007, invoice="26R-7000007"), row(5001)])
     client = cabinet_of(cabinet)()

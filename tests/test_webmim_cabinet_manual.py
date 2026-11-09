@@ -174,7 +174,8 @@ def test_not_in_the_cabinet_yet_is_a_grey_record_once_the_hourly_reading_takes_i
 
 def test_two_saves_within_the_gap_ask_the_cabinet_once(tmp_path):
     conn, mine = manual(tmp_path)
-    other = by_hand(conn, number="5002")
+    other = card(conn, point_id=orders.get_card(conn, mine)["point_id"])
+    orders.update_card(conn, other, {"webmim_number": "5002"}, NOW, "owner")
     cabinet = Cabinet([])
     assert save(conn, mine, cabinet, now="2026-10-23T12:05:00")[0] == ("wait", [])
     assert save(conn, other, cabinet, now="2026-10-23T12:05:02")[0] == ("busy", [])       # sessions are limited: the hourly reading
