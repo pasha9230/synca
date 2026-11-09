@@ -312,9 +312,11 @@ def _issued(conn, point_id, today: str) -> list:
         card = orders.get_card(conn, card_id)
         if order_intercity.on(card):
             continue
-        move = conn.execute("SELECT author, text FROM order_event WHERE order_id = ? AND kind = 'stage' AND text LIKE ? ORDER BY id DESC LIMIT 1",
-                            (card_id, "%→ «" + done + "»")).fetchone()
-        came = re.match(r"Этап: «(.*)» → «", move[1]) if move else None
+        move = conn.execute("SELECT author, text FROM order_event WHERE order_id = ? AND kind = 'stage' ORDER BY id DESC LIMIT 1",
+                            (card_id,)).fetchone()                     # the last move of an order on «Выполнено» is the one there
+        came = re.fullmatch(r"Этап: «(.*)» → «(.*)»", move[1]) if move else None
+        if came is not None and came.group(2) != done:
+            came = None
         if came is None or came.group(1) not in sources:
             continue
         found.append({"card": card, "label": mgr.label(card), "at": card["entered_at"], "who": users.person_name(conn, move[0], current_app.config["AUTHOR"]),
@@ -573,7 +575,7 @@ def register(app) -> None:
         if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
             flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
-        if action in CONFIRM and request.form.get("confirm") != "yes" and not order_intercity.on(card):
+        if action in CONFIRM and request.form.get("confirm") != "yes" and not (order_intercity.on(card) and action != "oth_issued"):
             return _confirm_issue(card, action, token, point_id, back)        # nothing is taken nor changed until «Да, выдал»
         now = local_iso()
         claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,'обрабатывается')",

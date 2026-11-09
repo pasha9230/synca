@@ -157,7 +157,7 @@ def test_the_confirm_page_keeps_the_point_and_the_tab_of_the_owner(tmp_path, clo
     assert orders.get_card(conn, card)["stage"]["code"] == "done"
 
 
-def test_a_crafted_confirm_of_an_own_sale_or_a_bad_token_still_changes_nothing(tmp_path, clock):
+def test_a_bad_token_changes_nothing_and_asks_nothing(tmp_path, clock):
     app, owner, conn, pid, card = setup(tmp_path, "old")
     mine = manager(app, conn, pid)
     r = post(mine, "/my-point/%d/issued" % card, "tok", token="not-a-token")
