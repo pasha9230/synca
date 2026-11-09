@@ -1,0 +1,22 @@
+{# The rows of the catalog's filters (the office's «Новый вид», office2/catalog.html, and the client's /shop, the owner 2026-11-09: one
+   look): row 1 the width, the profile, the diameter (several values by spaces), «Размеры», «Поиск»; row 2 the season and the studs as
+   segments, then what the caller puts in (the office: «Статус», «Цены», «Рынок», «Бренды»; the client: «Склад», «Показать»), then
+   «Сбросить». No supplier is named here. Styles: office2-pages.css (.o2-frow, .o2 .o2-filters). #}
+{% from "_ui.html" import icon %}
+{% from "office2/_o2.html" import stud %}
+{% macro filter_rows(size, size_text, size_unknown, size_options, q, season, studs, reset, search_hint="Размер, название, артикул") -%}
+<div class="o2-frow o2-frow--1">{# п. 41: three fields, each with its label above (no «Шир. / Проф. R Диам.» cut off) #}<div class="field"><label class="label" for="f-w">Ширина</label><input class="input" style="width:90px" id="f-w" name="w" value="{{ size.w }}" title="Можно несколько значений через пробел, например 225 205 195: покажутся все сочетания" placeholder="205" list="dl-w" inputmode="numeric"></div><div class="field"><label class="label" for="f-h">Профиль</label><input class="input" style="width:90px" id="f-h" name="h" value="{{ size.h }}" title="Можно несколько значений через пробел, например 55 60" placeholder="55" list="dl-h" inputmode="numeric"></div><div class="field"><label class="label" for="f-d">Диаметр</label><input class="input" style="width:90px" id="f-d" name="d" value="{{ size.d }}" title="Можно несколько значений через пробел, например 16 17" placeholder="16" list="dl-d" inputmode="numeric"></div>
+<div class="field o2-fwide"><span class="label">Размеры</span><input class="input" name="size" value="{{ size_text }}" placeholder="205/55R16 225/45R18" title="Несколько размеров целиком через пробел, как в каталоге клиента">{% if size_unknown %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}</div>
+<datalist id="dl-w">{% for v in size_options.w %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-h">{% for v in size_options.h %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-d">{% for v in size_options.d %}<option value="{{ v }}">{% endfor %}</datalist>
+<div class="field o2-fwide"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ q }}" placeholder="{{ search_hint }}" title="Например: 205/55 R16, Ikon, часть названия или артикул"></div></div></div>
+<div class="o2-frow o2-frow--2"><div class="field"><span class="label">Сезон</span><div class="seg">
+<label><input type="radio" name="s" value=""{% if not season %} checked{% endif %}>Все</label>
+<label title="Лето"><input type="radio" name="s" value="summer"{% if season == "summer" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span>Лето</label>
+<label title="Зима"><input type="radio" name="s" value="winter"{% if season == "winter" %} checked{% endif %}><span class="ico-snow">{{ icon("snow") }}</span>Зима</label></div></div>
+<div class="field"><span class="label">Шипы</span><div class="seg">
+<label><input type="radio" name="t" value=""{% if not studs %} checked{% endif %}>Все</label>
+<label><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}>{{ stud() }}Шипы</label>
+<label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div></div>
+{{ caller() }}
+<a class="btn btn--secondary o2-reset" href="{{ reset }}">Сбросить</a></div>
+{%- endmacro %}

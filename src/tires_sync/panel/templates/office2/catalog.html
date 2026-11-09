@@ -4,6 +4,7 @@
    office2/_catalog_table.html; the same fields, forms, ids and scripts as catalog.html (app.js: #items, #stage, #bulk, #bulk-price, #pv). #}
 {% from "_ui.html" import icon, season %}
 {% from "office2/_o2.html" import stud %}
+{% from "_catalog_filters.html" import filter_rows %}
 {% block title %}Каталог · Tires Sync{% endblock %}
 {% block page_class %} page--wide{% endblock %}
 {% block body_class %}o2 o2-catalog-page{% endblock %}
@@ -15,18 +16,7 @@
 <section class="card o2-cat-filters">
 <form method="get" action="/catalog" class="filters o2-filters" data-autosubmit>
 <input type="hidden" name="o" value="{{ sort }}">{% if descending %}<input type="hidden" name="r" value="1">{% endif %}{% if sup %}<input type="hidden" name="sup" value="{{ sup }}">{% endif %}{% if page_size != 100 %}<input type="hidden" name="n" value="{{ page_size }}">{% endif %}
-<div class="o2-frow o2-frow--1">{# п. 41: three fields, each with its label above (no «Шир. / Проф. R Диам.» cut off) #}<div class="field"><label class="label" for="f-w">Ширина</label><input class="input" style="width:90px" id="f-w" name="w" value="{{ size.w }}" title="Можно несколько значений через пробел, например 225 205 195: покажутся все сочетания" placeholder="205" list="dl-w" inputmode="numeric"></div><div class="field"><label class="label" for="f-h">Профиль</label><input class="input" style="width:90px" id="f-h" name="h" value="{{ size.h }}" title="Можно несколько значений через пробел, например 55 60" placeholder="55" list="dl-h" inputmode="numeric"></div><div class="field"><label class="label" for="f-d">Диаметр</label><input class="input" style="width:90px" id="f-d" name="d" value="{{ size.d }}" title="Можно несколько значений через пробел, например 16 17" placeholder="16" list="dl-d" inputmode="numeric"></div>
-<div class="field o2-fwide"><span class="label">Размеры</span><input class="input" name="size" value="{{ size_text }}" placeholder="205/55R16 225/45R18" title="Несколько размеров целиком через пробел, как в каталоге клиента">{% if size_unknown %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}</div>
-<datalist id="dl-w">{% for v in size_options.w %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-h">{% for v in size_options.h %}<option value="{{ v }}">{% endfor %}</datalist><datalist id="dl-d">{% for v in size_options.d %}<option value="{{ v }}">{% endfor %}</datalist>
-<div class="field o2-fwide"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ q }}" placeholder="Размер, название, артикул" title="Например: 205/55 R16, Ikon, часть названия или артикул"></div></div></div>
-<div class="o2-frow o2-frow--2"><div class="field"><span class="label">Сезон</span><div class="seg">
-<label><input type="radio" name="s" value=""{% if not season %} checked{% endif %}>Все</label>
-<label title="Лето"><input type="radio" name="s" value="summer"{% if season == "summer" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span>Лето</label>
-<label title="Зима"><input type="radio" name="s" value="winter"{% if season == "winter" %} checked{% endif %}><span class="ico-snow">{{ icon("snow") }}</span>Зима</label></div></div>
-<div class="field"><span class="label">Шипы</span><div class="seg">
-<label><input type="radio" name="t" value=""{% if not studs %} checked{% endif %}>Все</label>
-<label><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}>{{ stud() }}Шипы</label>
-<label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div></div>
+{% call filter_rows(size, size_text, size_unknown, size_options, q, season, studs, "/catalog" ~ ("?sup=" ~ sup if sup else "")) %}
 <div class="field o2-fsel"><span class="label">Статус</span><select class="select" name="st"><option value=""{% if status == "all" %} selected{% endif %}>Все</option><option value="feed"{% if status == "feed" %} selected{% endif %}>В фиде</option><option value="no"{% if status == "no" %} selected{% endif %}>Не в фиде</option><option value="nopair"{% if status == "nopair" %} selected{% endif %}>Нет пары</option><option value="problem"{% if status == "problem" %} selected{% endif %}>Проблемы</option><option value="gone"{% if status == "gone" %} selected{% endif %}>Нет у поставщика</option></select></div>
 {% if has_right("money") %}<div class="field"><span class="label">Цены</span><label class="check" title="Только позиции, у которых стоит своя цена хотя бы на одном аккаунте (применённая или в черновике), любой бренд и поставщик, в том числе ушедшие от поставщика"><input type="checkbox" name="own" value="1"{% if own_only %} checked{% endif %}> Ручные цены</label></div>{% endif %}
 {% if market_on %}<div class="field o2-fsel"><span class="label">Рынок</span><select class="select" name="mk"><option value="">Все</option><option value="over"{% if market_over %} selected{% endif %}>Дороже рынка</option></select></div>{% endif %}
@@ -35,7 +25,7 @@
 {% for c in brand_choices %}<div class="row"><span class="grow">{{ c.label }} <span class="muted xs">{{ c.count }}</span></span><label class="check" title="Показать только отмеченные бренды"><input type="checkbox" name="b" value="{{ c.key }}"{% if c.key in chosen_brands %} checked{% endif %} aria-label="Показать {{ c.label }}"></label><label class="check" title="Не показывать этот бренд"><input type="checkbox" name="xb" value="{{ c.key }}"{% if c.key in without_brands %} checked{% endif %} aria-label="Кроме {{ c.label }}"></label></div>{% endfor %}
 <button class="btn btn--secondary btn--sm">Показать</button> <span class="muted xs">Только вид каталога: фид не меняется.</span></div></details></div>
 <noscript><button class="btn btn--secondary">Показать</button></noscript>
-<a class="btn btn--secondary o2-reset" href="/catalog{% if sup %}?sup={{ sup }}{% endif %}">Сбросить</a></div>
+{% endcall %}
 </form>
 </section>
 {% if market_on and can_post("catalog_market_token") %}<details class="card" data-market-parser style="margin-top:12px"><summary class="card-head"><h3>Парсер цен конкурентов</h3><span class="muted small">{{ "приём снимков остановлен" if market_stopped else "приём снимков включён" }}</span></summary><div class="card-body stack"><p class="muted small">Парсер работает на Маке и присылает сюда цены конкурентов по нашим позициям. Сервер сам к Авито не ходит, фид и цены от этого не меняются.</p><div class="row"><form method="post" action="/catalog/market-token" class="inline" data-once data-confirm-title="Выпустить новый токен?" data-confirm="Прежний токен парсера перестанет работать." data-confirm-ok="Выпустить"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Выпустить токен парсера</button></form> <form method="post" action="/catalog/market-switch" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stop" value="{{ '0' if market_stopped else '1' }}"><button class="btn btn--secondary btn--sm">{{ "Включить приём" if market_stopped else "Остановить приём" }}</button></form></div></div></details>{% endif %}
