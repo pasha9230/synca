@@ -36,3 +36,8 @@ body.o2 .o2-cat-table .st-ico{white-space:nowrap;max-width:none}
 body.o2 .o2-cat-table .table--items .gname{white-space:normal;overflow:visible;text-overflow:clip}
 body.o2 .o2-cat-table .table--items .t-name{flex-wrap:wrap}
 body.o2 .o2-cat-table td.t-actions{white-space:normal!important;min-width:150px}body.o2 .o2-cat-table td.t-actions .btn{margin:2px 0}
+/* каталог: кнопки «Действия» одной ширины, столбиком (владелец 2026-11-09) */
+.t-actions--stack{white-space:nowrap}
+.t-actions--stack>.btn{display:flex;justify-content:center;width:172px;margin:0 0 6px auto}
+.t-actions--stack>.btn:last-child{margin-bottom:0}
+.t-actions--stack>.xs{display:block;text-align:right}

@@ -151,3 +151,16 @@ def test_the_menu_counts_the_account_the_chats_open_with(tmp_path):
     connections.set_responsible(conn, account, app.config["AUTHOR"], [app.config["AUTHOR"]], "2026-10-13T09:00:00", "o")
     page = client.get("/chats").get_data(as_text=True)
     assert _menu_chats(page) == 1 and "Ждут ответа <b>1</b>" in page              # the person's account: the same one in both
+
+
+def test_the_catalog_actions_of_2026_11_09(tmp_path):
+    """The owner 2026-11-09: «+ в фид» / «− снять с фида», no «Продано», no «В лист ожидания» at 4 and more, the season as an icon only."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "templates"
+    for name in ("_catalog_table.html", "office2/_catalog_table.html"):
+        t = (root / name).read_text()
+        assert "+ в фид</button>" in t and "− снять с фида</button>" in t and ">Продано</a>" not in t
+        assert '(i.stock or 0) < 4' in t
+    o2 = (root / "office2" / "_o2.html").read_text()
+    tag = o2[o2.index("{% macro season_tag"):o2.index("{%- endmacro %}", o2.index("{% macro season_tag"))]
+    assert "}}Зима</span>" not in tag and "}}Лето</span>" not in tag
