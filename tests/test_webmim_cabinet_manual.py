@@ -389,3 +389,26 @@ def test_no_sum_at_the_press_nothing_is_sent_by_the_button_either_a_yellow_recor
     assert not deliver.sent and not vk.sent and result["lines"] == [webmim_cabinet.NO_SUM % INVOICE]
     assert (webmim_cabinet.NO_SUM % INVOICE, "yellow") in events(conn, mine)
 
+
+def test_a_number_corrected_after_the_transfer_number_came_is_a_yellow_record(tmp_path):
+    conn, mine = manual(tmp_path)
+    assert save(conn, mine, Cabinet([row(5001)]))[0][0] == "written"
+    orders.update_card(conn, mine, {"webmim_number": "5002"}, NOW, "owner")
+    cabinet = Cabinet([row(5002, invoice="26R-2222222")])
+    result = webmim_cabinet.after_save(conn, mine, cabinet_of(cabinet), "2026-10-23T12:10:00", None, "5001")
+    text = webmim_cabinet.MOVED % ("5001", "5002", INVOICE)
+    assert result == ("moved", [text]) and not cabinet.calls and orders.get_card(conn, mine)["transfer_number"] == INVOICE
+    assert (text, "yellow") in events(conn, mine)
+    webmim_cabinet.after_save(conn, mine, cabinet_of(cabinet), "2026-10-23T12:11:00", None, "5001")
+    assert [e for e in events(conn, mine)].count((text, "yellow")) == 1                         # once
+
+
+def test_the_window_save_of_a_corrected_number_says_the_transfer_number_is_of_the_former(tmp_path, monkeypatch):
+    cabinet = Cabinet([row(5001)])
+    app, conn, mine, client = panel(tmp_path, monkeypatch, cabinet)
+    post(client, "/orders/%d/save" % mine, "tok", webmim_number="5001")
+    assert orders.get_card(conn, mine)["transfer_number"] == INVOICE and logins(cabinet) == 1
+    post(client, "/orders/%d/save" % mine, "tok", webmim_number="5002")
+    text = webmim_cabinet.MOVED % ("5001", "5002", INVOICE)
+    assert (text, "yellow") in events(conn, mine) and logins(cabinet) == 1
+    assert text in client.get("/orders/%d" % mine).get_data(as_text=True)

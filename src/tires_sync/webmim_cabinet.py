@@ -233,17 +233,30 @@ def busy(conn, card_id: int, now: str) -> None:
     conn.commit()
 
 
-def after_save(conn, card_id: int, client_of: Callable[[], object], now: str, send: Optional[Send]) -> Tuple[str, List[str]]:
+MOVED = ("Номер заказа WebMIM исправлен (%s → %s), а номер перемещения %s вписан по прежнему номеру MIM: проверьте его.")
+
+
+def after_save(conn, card_id: int, client_of: Callable[[], object], now: str, send: Optional[Send],
+               before: str = "") -> Tuple[str, List[str]]:
     """A WebMIM number has just been typed into the order window by a person (the partner places the order by hand in the cabinet): when
     the order is one the hourly reading would ask for (_targets: open, no transfer number, not of the test server, its number its own), one
     quick read of the cabinet's list right in that save (a new client of `client_of()`, its quick login, its logout), and take() of what is
     found: the number written, the messages that waited for it sent once. Only a number typed as WebMIM's digits (a «№» and spaces
     around them at most: «5001/2» is never read as 50012). Not there yet, no invoice yet: a grey record once, the hourly reading takes it;
     a failure: a grey record once (note). The window's GAP holds here too (sessions are limited): within it, a grey record of its own
-    and the hourly reading. (what became of it, the lines of the send)."""
+    and the hourly reading. `before`: the WebMIM number before this save; corrected while a transfer number is in already: a yellow
+    record once, the cabinet is not asked (the review 2026-11-09). (what became of it, the lines of the send)."""
     if not enabled(conn):
         return "off", []
-    number = _typed(orders._row(conn, card_id)["webmim_number"])
+    card = orders._row(conn, card_id)
+    was, typed = str(before or "").strip(), str(card["webmim_number"] or "").strip()
+    if was and was != typed and card["transfer_number"]:
+        text = MOVED % (was[:40], typed[:40] or "(пусто)", card["transfer_number"])
+        if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND text = ?", (card_id, text)).fetchone() is None:
+            orders.add_event(conn, card_id, now, AUTHOR, "webmim", text, "yellow")
+        conn.commit()
+        return "moved", [text]
+    number = _typed(card["webmim_number"])
     if not number:
         return "no-number", []
     if _targets(conn, SERVER).get(number) != card_id:

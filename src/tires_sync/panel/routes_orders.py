@@ -1398,7 +1398,7 @@ def register(app) -> None:
                 offer_waiting(conn, card_id)                              # a move of this press below offers its own messages instead
         if refused is not None:                                           # the press meant the position and the move: no move without it
             if typed_number:
-                cabinet_after_save(conn, card_id)
+                cabinet_after_save(conn, card_id, number_before)
             if "stage_id" in request.form:
                 flash("Заказ не перенесён: позиция не добавлена.", "error")
             return card_page(conn, card_or_404(conn, card_id), typed_row)
@@ -1406,12 +1406,12 @@ def register(app) -> None:
             asked = oth_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
             if asked is not None:                                         # the fields are saved (the reason too); the move asks first
                 if typed_number:
-                    cabinet_after_save(conn, card_id)
+                    cabinet_after_save(conn, card_id, number_before)
                 return ask_oth(card_id, asked)
             going_back = back_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
             if going_back is not None:                                    # the fields are saved; a new client or the same asks first
                 if typed_number:
-                    cabinet_after_save(conn, card_id)
+                    cabinet_after_save(conn, card_id, number_before)
                 return ask_back(card_id, going_back)
             try:
                 stage_id = _int(request.form.get("stage_id"))
@@ -1427,11 +1427,11 @@ def register(app) -> None:
             except orders.OrderError as err:
                 flash(str(err), "error")                                  # the fields stay saved; the refusal is a red record of the journal
         if typed_number:                                                  # after the move: the messages its rules made can go with the number
-            cabinet_after_save(conn, card_id)
+            cabinet_after_save(conn, card_id, number_before)
         part = part or request.form.get("tab", "")
         return back(card_id, part if part in ORDER_PARTS else "")
 
-    def cabinet_after_save(conn, card_id) -> None:
+    def cabinet_after_save(conn, card_id, number_before) -> None:
         """A WebMIM number typed in the order window (the partner places orders by hand in MIM's cabinet, the owner 2026-11-09): its
         «Номер перемещения» from the cabinet right away (webmim_cabinet.after_save: one quick read), the messages «заказ оформлен» that
         waited for it go (order_placed.send_waiting, as the window «Подтверждение»). Never fails the save: the hourly reading is there."""
@@ -1446,7 +1446,7 @@ def register(app) -> None:
             box = app.config.get("SECRET_BOX")
             return None if box is None else webmim_match.client_for(conn, box, app.config.get("WEBMIM_HTTP") or urllib_transport, "prod")
         try:
-            result, lines = webmim_cabinet.after_save(conn, card_id, client_of, stamp, send)
+            result, lines = webmim_cabinet.after_save(conn, card_id, client_of, stamp, send, number_before)
         except Exception:                                                 # noqa: BLE001  the fields are saved; the hourly reading takes it
             conn.rollback()
             log.exception("the transfer number of MIM's cabinet after the save of order %s", card_id)
