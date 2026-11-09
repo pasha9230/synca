@@ -91,6 +91,7 @@
 .pt .mp-more-body .mp-text{font-size:13px;color:var(--pt-text-2)}
 /* «На ОТХ» and «Подробнее» (the owner 2026-11-09): a block of each position */
 .pt .mp-oth-item{display:flex;flex-direction:column;gap:1px}
+.pt .mp-oth-name{font-size:14px;font-weight:500;color:var(--pt-text)}
 .pt .mp-oth-item + .mp-oth-item{margin-top:6px}
 .pt [data-oth-price]{font-weight:600;color:var(--pt-text)}
 .pt .mp-item{display:flex;flex-direction:column;gap:1px;overflow-wrap:anywhere}
