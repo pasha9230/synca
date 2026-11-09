@@ -125,7 +125,7 @@ def test_the_press_form_carries_the_lines_and_an_empty_confirm(tmp_path, clock, 
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
     form = re.search(r'<form method="post" action="/my-point/%d/issued"[^>]*>.*?</form>' % card, page, re.S).group(0)
     assert 'data-confirm-ok="Да, выдал"' in form and "data-confirm-lines" in form
-    assert "Номер заказа MIM: 5000100\nNokian Hakkapeliitta 10 × 4\nКлиент: Татьяна" in form
+    assert "Номер заказа: 5000100\nNokian Hakkapeliitta 10 × 4\nКлиент: Татьяна" in form
     assert '<input type="hidden" name="confirm" value="" data-confirm-field>' in form
 
 
@@ -136,7 +136,8 @@ def test_without_yes_nothing_changes_and_the_server_asks(tmp_path, clock, view):
     r = post(mine, "/my-point/%d/issued" % card, "tok", token=tok)
     page = r.get_data(as_text=True)
     assert r.status_code == 200 and "data-issue-confirm" in page
-    assert "Номер заказа MIM: 5000100" in page and "Nokian Hakkapeliitta 10 × 4" in page and "Клиент: Татьяна" in page
+    assert "Номер заказа: 5000100" in page and "Nokian Hakkapeliitta 10 × 4" in page and "Клиент: Татьяна" in page
+    assert not re.search(r"WebMIM|\bMIM\b|\bМИМ\b", page)                             # the number only (the owner 30.10, 08.11)
     assert "Да, выдал" in page and 'name="confirm" value="yes"' in page and ('value="%s"' % tok) in page and "Отмена" in page
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
     assert conn.execute("SELECT 1 FROM order_command_log WHERE message_id = ?", ("page-" + tok,)).fetchone() is None
@@ -208,3 +209,17 @@ def test_the_answers_vydan_and_vydali_ask_too(tmp_path, clock):
         assert orders.get_card(conn, card)["stage"]["code"] == before, action
         r = post(mine, "/my-point/%d/%s" % (card, action), "tok", token=token(page, card, action), confirm="yes")
         assert r.status_code == 302 and orders.get_card(conn, card)["stage"]["code"] == "done", action
+
+
+def test_a_stage_name_with_wildcards_and_a_round_trip(tmp_path, clock):
+    app, owner, conn, pid, card = setup(tmp_path, "old")
+    conn.execute("UPDATE order_stage SET name = 'Выполнено_%' WHERE code = 'done'")
+    conn.commit()
+    done = _stage(conn, "done")
+    orders.move_card(conn, card, done, "2026-10-14T09:00:00", "owner")
+    orders.move_card(conn, card, _stage(conn, "oth"), "2026-10-14T10:00:00", "owner")
+    orders.move_card(conn, card, done, "2026-10-14T11:00:00", "owner")        # back from «На ОТХ»: not a hand-out of the point
+    second = _card(conn, pid, webmim="700301", code="at_point")
+    orders.move_card(conn, second, done, "2026-10-15T09:00:00", "owner")
+    conn.commit()
+    assert cards(issued_tab(manager(app, conn, pid))) == [second]

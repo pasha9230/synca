@@ -344,7 +344,7 @@
     cancel.onclick = function () { askWin.classList.remove("is-open"); if (back) back.focus(); };   // this window only, the focus back where it was
     askWin.querySelector("h2").textContent = form.getAttribute("data-confirm-title") || "Подтвердите действие";
     askWin.querySelector(".confirm-text").textContent = form.getAttribute("data-confirm");
-    askWin.querySelector(".confirm-text").style.whiteSpace = form.hasAttribute("data-confirm-lines") ? "pre-line" : "";   // a line each (a hand-out)
+    askWin.querySelector(".confirm-text").classList.toggle("confirm-text--lines", form.hasAttribute("data-confirm-lines"));   // a line each (a hand-out)
     go.textContent = form.getAttribute("data-confirm-ok") || "Да, выполнить";
     go.className = "btn " + (danger ? "btn--danger" : "btn--primary");
     go.onclick = function () {

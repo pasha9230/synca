@@ -287,9 +287,9 @@ def _in_tab(row: dict, tab: str) -> bool:
 
 
 def issue_lines(card: dict) -> list:
-    """What the point checks before a hand-out (the owner 2026-11-09): the WebMIM number, the tyres line by line with the quantity, the
+    """What the point checks before a hand-out (the owner 2026-11-09): the order's number (WebMIM's, «№ MIM» of 08.11), the tyres line by line with the quantity, the
     client. Nothing of money."""
-    lines = ["Номер заказа MIM: %s" % (card["webmim_number"] or "нет (заказ в панели №%d)" % card["id"])]
+    lines = ["Номер заказа: %s" % (card["webmim_number"] or "нет (заказ в панели №%d)" % card["id"])]     # no word «MIM» at a point (30.10)
     lines += ["%s × %s" % (i["name"], i["qty"]) for i in card["items"] if i["qty"] >= 1] or ["Шины не указаны"]
     return lines + ["Клиент: %s" % (card["client_name"] or "без имени")]
 
