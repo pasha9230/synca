@@ -305,9 +305,7 @@ def register(app) -> None:
                 "/catalog?" + urlencode({"q": _title_search(current.get("item_title"))}) if current.get("item_title") else "")
             current["wait"] = _wait_prefill(conn, current)
             current["waiting"] = current["id"] in (waiting if current["id"] in place else chats.waiting(conn, [current], g.setdefault("chat_wait_starts", {})))
-            messages = chats.list_messages(conn, chat_row)
-            for m in messages:                                            # Avito's stub «Сообщение не поддерживается»: a plain label and its link
-                m["avito_link"] = chats.unsupported_link(m["text"], current["chat_id"]) if m["kind"] not in ("image", "call") else None
+            messages = chats.thread(conn, current)                        # the order window draws the same (routes_orders.order_chat_view)
             if current["order_id"]:
                 try:
                     deal = orders.get_card(conn, current["order_id"])
