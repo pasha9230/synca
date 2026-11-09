@@ -4,7 +4,17 @@ use image::{DynamicImage, GenericImageView, RgbaImage};
 use std::sync::{Arc, OnceLock};
 
 pub const CARD_W: u32 = 1024;
-pub const CARD_H: u32 = 1536;
+/// A card is a square, as the frames are (the owner 2026-11-09).
+pub const CARD_H: u32 = 1024;
+/// The card of a vertical frame made before the square ones: its set keeps one shape in the ad.
+pub const CARD_H_VERTICAL: u32 = 1536;
+/// The text block was laid out for the 1536 card (baselines 700 / 860 / 990); on another height it moves as a whole.
+const LAYOUT_H: f32 = 1536.0;
+
+/// The height of the card of a background: 1536 for a vertical frame, else the square.
+pub fn card_height(bg_w: u32, bg_h: u32) -> u32 {
+    if bg_h > bg_w { CARD_H_VERTICAL } else { CARD_H }
+}
 
 pub fn fontdb() -> Arc<usvg::fontdb::Database> {
     static DB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
@@ -82,12 +92,14 @@ fn fit_size(text: &str, max_px: f32, max_w: f32) -> f32 {
     max_px.min(max_w / (text.chars().count().max(1) as f32 * 0.6))
 }
 
-pub fn card_svg(size: &str, season_line: &str, set_line: Option<&str>, fill: &str, stroke: &str) -> String {
-    let mut lines = vec![(size, fit_size(size, 190.0, 940.0), 700.0_f32, true), (season_line, fit_size(season_line, 96.0, 900.0), 860.0, false)];
+/// The text of a card `height` px high: the three lines keep their sizes and gaps, the block stays in the middle of the card.
+pub fn card_svg(size: &str, season_line: &str, set_line: Option<&str>, fill: &str, stroke: &str, height: u32) -> String {
+    let dy = (height as f32 - LAYOUT_H) / 2.0;
+    let mut lines = vec![(size, fit_size(size, 190.0, 940.0), 700.0 + dy, true), (season_line, fit_size(season_line, 96.0, 900.0), 860.0 + dy, false)];
     if let Some(s) = set_line {
-        lines.push((s, fit_size(s, 80.0, 900.0), 990.0, false));
+        lines.push((s, fit_size(s, 80.0, 900.0), 990.0 + dy, false));
     }
-    let mut svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{CARD_W}\" height=\"{CARD_H}\" viewBox=\"0 0 {CARD_W} {CARD_H}\">");
+    let mut svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{CARD_W}\" height=\"{height}\" viewBox=\"0 0 {CARD_W} {height}\">");
     for (text, fs, y, bold) in lines {
         let weight = if bold { "bold" } else { "normal" };
         svg.push_str(&format!(
@@ -100,13 +112,14 @@ pub fn card_svg(size: &str, season_line: &str, set_line: Option<&str>, fill: &st
     svg
 }
 
-/// 1024x1536 card: background covered to size, blurred and darkened, text centered.
+/// 1024x1024 card (1024x1536 from a vertical frame): background covered to size, blurred and darkened, text centered.
 pub fn render_card(bg: &DynamicImage, size: &str, season_line: &str, set_line: Option<&str>) -> DynamicImage {
     let (w, h) = bg.dimensions();
-    let scale = (CARD_W as f32 / w as f32).max(CARD_H as f32 / h as f32);
-    let (sw, sh) = (((w as f32 * scale).ceil() as u32).max(CARD_W), ((h as f32 * scale).ceil() as u32).max(CARD_H));
+    let card_h = card_height(w, h);
+    let scale = (CARD_W as f32 / w as f32).max(card_h as f32 / h as f32);
+    let (sw, sh) = (((w as f32 * scale).ceil() as u32).max(CARD_W), ((h as f32 * scale).ceil() as u32).max(card_h));
     let big = imageops::resize(&bg.to_rgba8(), sw, sh, FilterType::Triangle);
-    let cropped = imageops::crop_imm(&big, (sw - CARD_W) / 2, (sh - CARD_H) / 2, CARD_W, CARD_H).to_image();
+    let cropped = imageops::crop_imm(&big, (sw - CARD_W) / 2, (sh - card_h) / 2, CARD_W, card_h).to_image();
     let mut base = imageops::blur(&cropped, 14.0);
     for p in base.pixels_mut() {
         for c in 0..3 {
@@ -115,7 +128,7 @@ pub fn render_card(bg: &DynamicImage, size: &str, season_line: &str, set_line: O
         p[3] = 255;
     }
     let (fill, stroke) = pick_text_palette(&DynamicImage::ImageRgba8(base.clone()));
-    if let Some(over) = render_svg(&card_svg(size, season_line, set_line, fill, stroke), CARD_W, CARD_H) {
+    if let Some(over) = render_svg(&card_svg(size, season_line, set_line, fill, stroke, card_h), CARD_W, card_h) {
         blend(&mut base, &over, 0, 0);
     }
     DynamicImage::ImageRgba8(base)
@@ -137,7 +150,7 @@ mod tests {
     #[test]
     fn card_has_size_text() {
         let card = render_card(&bg(), "205/55 R16", "Зима · шипы", Some("Комплект 4 шт."));
-        assert_eq!(card.dimensions(), (CARD_W, CARD_H));
+        assert_eq!(card.dimensions(), (CARD_W, CARD_H_VERTICAL));   // the fixture is a vertical frame: its card is as before
         assert!(bright(&card, 540, 720) > 2000, "size text missing");
         assert!(bright(&card, 790, 880) > 500, "season line missing (Cyrillic font?)");
     }
@@ -146,15 +159,48 @@ mod tests {
     fn no_font_no_card() {
         assert!(require_fonts(0).is_err());
         assert!(require_fonts(2).is_ok());
-        assert!(card_svg("205/55 R16", "Зима", None, "#fff", "#000").contains("Liberation Sans"));
+        assert!(card_svg("205/55 R16", "Зима", None, "#fff", "#000", CARD_H).contains("Liberation Sans"));
     }
 
     #[test]
     fn card_without_set_line() {
-        assert!(card_svg("205/55 R16", "Зима", None, "#fff", "#000").matches("<text").count() == 2);
+        assert!(card_svg("205/55 R16", "Зима", None, "#fff", "#000", CARD_H).matches("<text").count() == 2);
         let with = render_card(&bg(), "205/55 R16", "Зима · шипы", Some("Комплект 4 шт."));
         let without = render_card(&bg(), "205/55 R16", "Зима · шипы", None);
         assert!(bright(&with, 920, 1010) > 300);
         assert!(bright(&without, 920, 1010) < 50);
+    }
+
+    fn square_bg() -> DynamicImage {
+        DynamicImage::ImageRgba8(imageops::resize(&bg().to_rgba8(), 1024, 1024, FilterType::Triangle))
+    }
+
+    /// Rows of the card that hold text (near-white pixels).
+    fn text_rows(img: &DynamicImage) -> (u32, u32) {
+        let rows: Vec<u32> = img.to_luma8().enumerate_pixels().filter(|(_, _, p)| p[0] > 200).map(|(_, y, _)| y).collect();
+        (*rows.iter().min().unwrap(), *rows.iter().max().unwrap())
+    }
+
+    #[test]
+    fn square_frame_gives_a_square_card_with_all_lines_inside() {
+        assert_eq!((CARD_W, CARD_H), (1024, 1024));
+        assert_eq!((card_height(1024, 1024), card_height(1536, 1024), card_height(1024, 1536)), (1024, 1024, 1536));
+        let card = render_card(&square_bg(), "285/45 R22 114T XL", "Зима · шипы", Some("Комплект 4 шт."));
+        assert_eq!(card.dimensions(), (1024, 1024));
+        assert!(bright(&card, 284, 464) > 2000, "size text missing");
+        assert!(bright(&card, 534, 624) > 500, "season line missing");
+        assert!(bright(&card, 664, 754) > 300, "set line missing");
+        let (top, bottom) = text_rows(&card);
+        assert!(top > 150 && bottom < 874, "text {top}..{bottom} is too close to the edge");
+        assert!(((top + bottom) as i32 / 2 - 512).abs() < 60, "text {top}..{bottom} is not in the middle");
+        let px = card.to_luma8();
+        assert!((0..1024).all(|y| px.get_pixel(20, y)[0] <= 200 && px.get_pixel(1003, y)[0] <= 200), "text reaches the side edge");
+    }
+
+    #[test]
+    fn square_card_without_set_line_is_centered_too() {
+        let card = render_card(&square_bg(), "205/55 R16 94T", "Лето", None);
+        let (top, bottom) = text_rows(&card);
+        assert!(top > 150 && bottom < 874 && ((top + bottom) as i32 / 2 - 512).abs() < 110, "text {top}..{bottom}");
     }
 }
