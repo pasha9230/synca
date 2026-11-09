@@ -3,6 +3,8 @@
 it); the client still gets the reminder, without «№…». An order with a number is as before."""
 from __future__ import annotations
 
+import pytest
+
 from cryptography.fernet import Fernet
 
 from http_fakes import ScriptedHttp
@@ -14,6 +16,14 @@ from tires_sync.secretbox import SecretBox
 ASK_NUMBER = "Укажите номер заказа WebMIM по заказу %d (Иван)"
 NO_NUMBER_TEXT = owner_text()                          # the owner's text of 2026-11-06 has no «№…» at all
 
+
+
+@pytest.fixture(autouse=True)
+def _vk_question_on(monkeypatch):
+    """The owner 2026-11-09 turned the VK question of the last day off (order_reserve.VK_ASK_OFF); these tests keep the question's own
+    rules (answers, silence, the panel's points) tested, as when it is on — test_reserve_vk_off.py holds the owner's default."""
+    from tires_sync import order_reserve
+    monkeypatch.setattr(order_reserve, "VK_ASK_OFF", False)
 
 class Notify:
     def __init__(self):

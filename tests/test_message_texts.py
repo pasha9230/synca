@@ -18,6 +18,14 @@ NOW = "2026-10-12T12:00:00"
 ASK = "Заказ №{order_label}: клиент забрал? Ответьте «выдал {order_label}» или «на точке {order_label}». {order_summary}"
 
 
+
+@pytest.fixture(autouse=True)
+def _vk_question_on(monkeypatch):
+    """The owner 2026-11-09 turned the VK question of the last day off (order_reserve.VK_ASK_OFF); these tests keep the question's own
+    rules (answers, silence, the panel's points) tested, as when it is on — test_reserve_vk_off.py holds the owner's default."""
+    from tires_sync import order_reserve
+    monkeypatch.setattr(order_reserve, "VK_ASK_OFF", False)
+
 @pytest.fixture(autouse=True)
 def cheap_hashes(monkeypatch):
     monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
