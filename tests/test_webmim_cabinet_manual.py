@@ -149,12 +149,40 @@ def test_no_sum_in_the_cabinet_the_number_is_written_and_nothing_is_sent(tmp_pat
 
 def test_an_order_that_left_its_stay_of_the_stage_never_hears_placed_late(tmp_path):
     conn, mine = manual(tmp_path)
-    back = next(s["id"] for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] not in ("placed",)
-                and s["id"] != orders.get_card(conn, mine)["stage_id"])
-    assert orders.move_card(conn, mine, back, NOW, "owner")
+    assert orders.move_card(conn, mine, other_open_stage(conn, mine), NOW, "owner")
     (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5001)]))
-    assert result == "written" and orders.get_card(conn, mine)["transfer_number"] == INVOICE
-    assert lines == [] and not deliver.sent and not vk.sent
+    assert result == "written" and orders.get_card(conn, mine)["transfer_number"] == INVOICE and not deliver.sent and not vk.sent
+    said = [order_placed.LEFT % ("клиенту", order_placed.CLIENT_TEMPLATE), order_placed.LEFT % ("точке", order_placed.POINT_TEMPLATE)]
+    assert lines == said and sorted((t, "yellow") for t in said) == sorted(e for e in events(conn, mine) if e[0] in said)
+
+
+def other_open_stage(conn, mine):
+    return next(s["id"] for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] != "placed"
+                and s["id"] != orders.get_card(conn, mine)["stage_id"])
+
+
+def test_an_order_moved_back_and_into_the_stage_again_hears_it_once_by_the_tasks_of_this_stay(tmp_path):
+    conn, mine = manual(tmp_path)
+    placed = orders.get_card(conn, mine)["stage_id"]
+    assert orders.move_card(conn, mine, other_open_stage(conn, mine), NOW, "owner")
+    assert orders.move_card(conn, mine, placed, "2026-10-23T12:01:00", "owner")
+    assert len([t for t in message_tasks(conn, mine) if t["status"] == "error"]) == 4         # two of the stay left, two of this one
+    (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5001)]))
+    assert result == "written" and len(deliver.sent) == 1 and len(vk.sent) == 1 and len(lines) == 2
+    entered = orders._row(conn, mine)["entered_at"]
+    assert {t["entered_at"] for t in message_tasks(conn, mine) if t["status"] == "done"} == {entered}
+
+
+def test_a_message_sent_in_a_stay_before_never_goes_again_by_itself(tmp_path):
+    conn, mine = manual(tmp_path)
+    placed = orders.get_card(conn, mine)["stage_id"]
+    first = next(t for t in message_tasks(conn, mine) if t["title"] == order_placed.POINT_TEMPLATE)
+    conn.execute("UPDATE order_task SET status = 'done', result = '' WHERE id = ?", (first["id"],))     # the point was told by a person
+    conn.commit()
+    assert orders.move_card(conn, mine, other_open_stage(conn, mine), NOW, "owner")
+    assert orders.move_card(conn, mine, placed, "2026-10-23T12:01:00", "owner")
+    (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5001)]))
+    assert result == "written" and len(deliver.sent) == 1 and not vk.sent
 
 
 def test_a_number_typed_with_more_than_digits_is_never_read(tmp_path):

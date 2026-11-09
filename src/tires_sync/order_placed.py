@@ -208,8 +208,10 @@ def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver
     """The transfer number has just come by itself (webmim_cabinet.take, its one write): the messages «заказ оформлен» to the client and the
     point that waited for it (a task in «error» lacking the transfer number) go now, the very way on_placed sends them (_use_earlier: the
     text as the card is now, the task's claim, the send mark). A message sent, being sent, skipped by a person, waiting for a chat, or not
-    made at all is left as it is: nothing new is made here, so nothing goes twice. A task of a rule of a stage goes only while the order is
-    still in that very stay of its stage (the review 2026-11-09: an order moved on or back since never hears «оформлен» late). Never raises."""
+    made at all is left as it is: nothing new is made here, so nothing goes twice. Only a task of this stay of the order's stage (a rule's,
+    the stage and the entering as the card's now) or this hook's own (RULE) goes, and none once a message of the template went in any stay
+    (the review 2026-11-09): an order moved on or back since never hears «оформлен» by itself; a task of a stay left that waited is said
+    (a yellow record once, a line) for a person to decide. Never raises."""
     from . import order_intercity, order_merge
     try:
         if order_merge.told_placed(conn, card_id):
@@ -220,23 +222,37 @@ def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver
         logging.getLogger("tires_sync.orders").exception("the waiting messages of order %s", card_id)
         return []
     lacking = templates.VARIABLES["transfer_number"]
-    waiting = []                                   # both found first: the first send brings every task of the card up to date
+    rank = {"done": 0, "running": 1, "pending": 2, "error": 3, "skipped": 4}
+    waiting, left = [], []                         # both found first: the first send brings every task of the card up to date
     try:
         card = orders._row(conn, card_id)
         for who, send in whom:
             row = conn.execute("SELECT id FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1",
                                (who["template"], who["audience"])).fetchone()
-            task = _earlier(conn, card_id, row[0], who.get("undone", "")) if row else None
-            if task is not None and task["rule_id"] != who.get("rule", RULE) and (
-                    task["stage_id"] != card["stage_id"] or task["entered_at"] != card["entered_at"]):
-                continue                                                  # made by a stage the order has left since: a person decides
+            if row is None:
+                continue
+            found = [t for t in engine.list_tasks(conn, card_id) if t["kind"] == "message" and str(t["arg"]) == str(row[0])
+                     and not (who.get("undone") and t["status"] == "skipped" and t["result"] == who["undone"])]
+            if any(t["status"] in ("done", "running") for t in found):
+                continue                                                  # it went (or goes) once already: never again by itself
+            here = [t for t in found if t["rule_id"] == who.get("rule", RULE)
+                    or (t["stage_id"] == card["stage_id"] and t["entered_at"] == card["entered_at"])]
+            task = min(here, key=lambda t: (rank.get(t["status"], 5), t["id"])) if here else None
             if task is not None and task["status"] == "error" and lacking in str(task["result"]):
                 waiting.append((who, send, task))
+            elif task is None and any(t["status"] == "error" and lacking in str(t["result"]) for t in found):
+                left.append(who)                                          # made by a stay of a stage the order has left since
     except Exception:                                                     # noqa: BLE001
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the waiting messages of order %s", card_id)
         return []
     lines = []
+    for who in left:
+        try:
+            lines.append(_left(conn, card_id, who, now))
+        except Exception:                                                 # noqa: BLE001
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the message %s of order %s of a stage left", who["whom"], card_id)
     for who, send, task in waiting:
         try:
             lines.append(_use_earlier(conn, card_id, who, engine.get_task(conn, task["id"]), now, author, send))
@@ -248,3 +264,16 @@ def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver
             except Exception:                                             # noqa: BLE001
                 conn.rollback()
     return lines
+
+
+LEFT = ("Сообщение %s «%s» ждало номер перемещения, но заказ с тех пор ушёл с этапа, где оно подготовлено: само не отправлено — "
+        "отправьте его в окне «Сообщения по заказу», если оно ещё нужно.")
+
+
+def _left(conn, card_id, who: dict, now: str) -> str:
+    """A message of a stay the order has left: a yellow record once, the line for the person. Commits."""
+    text = LEFT % (who["whom"], who["template"])
+    if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND text = ?", (card_id, text)).fetchone() is None:
+        orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", text, level="yellow")
+    conn.commit()
+    return text
