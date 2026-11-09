@@ -72,7 +72,7 @@ def test_issued_lists_the_points_hand_outs_newest_first_with_time_tyres_client_a
     orders.move_card(conn, office, done, "2026-10-15T09:00:00", "owner")                 # the office marked it from «Товар на точке»
     orders.move_card(conn, old, done, "2026-09-10T09:00:00", "owner")                   # more than 30 days ago
     orders.move_card(conn, oth, _stage(conn, "oth"), "2026-10-14T09:00:00", "o")
-    orders.move_card(conn, oth, done, "2026-10-15T10:00:00", "owner")                   # not from «На точке»: not a hand-out of the point
+    orders.move_card(conn, oth, done, "2026-10-15T10:00:00", "owner")                   # «Выдали» from «На ОТХ»: in «Выдано» too (the owner 2026-11-09)
     orders.move_card(conn, foreign, done, "2026-10-15T11:00:00", "owner")               # another point's
     conn.commit()
     mine = manager(app, conn, pid)
@@ -80,8 +80,8 @@ def test_issued_lists_the_points_hand_outs_newest_first_with_time_tyres_client_a
     clock["now"] = T2
     press(mine, second, "issued")
     page = issued_tab(mine)
-    assert cards(page) == [second, card, office]                                       # newest first
-    assert count(page, "issued") == 3
+    assert cards(page) == [second, card, oth, office]                                  # newest first
+    assert count(page, "issued") == 4
     listed = block(page)
     assert "№ 700301" in listed and "№ 5000100" in listed and "№ 700302" in listed
     assert "выдан 16.10 12:30" in listed and "выдан 16.10 11:00" in listed and "выдан 15.10 09:00" in listed
@@ -125,7 +125,7 @@ def test_the_press_form_carries_the_lines_and_an_empty_confirm(tmp_path, clock, 
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
     form = re.search(r'<form method="post" action="/my-point/%d/issued"[^>]*>.*?</form>' % card, page, re.S).group(0)
     assert 'data-confirm-ok="Да, выдал"' in form and "data-confirm-lines" in form
-    assert "Номер заказа: 5000100\nNokian Hakkapeliitta 10 × 4\nКлиент: Татьяна" in form
+    assert "№ заказа: 5000100\nNokian Hakkapeliitta 10 × 4\nКлиент: Татьяна" in form
     assert '<input type="hidden" name="confirm" value="" data-confirm-field>' in form
 
 
@@ -136,7 +136,7 @@ def test_without_yes_nothing_changes_and_the_server_asks(tmp_path, clock, view):
     r = post(mine, "/my-point/%d/issued" % card, "tok", token=tok)
     page = r.get_data(as_text=True)
     assert r.status_code == 200 and "data-issue-confirm" in page
-    assert "Номер заказа: 5000100" in page and "Nokian Hakkapeliitta 10 × 4" in page and "Клиент: Татьяна" in page
+    assert "№ заказа: 5000100" in page and "Nokian Hakkapeliitta 10 × 4" in page and "Клиент: Татьяна" in page
     assert not re.search(r"WebMIM|\bMIM\b|\bМИМ\b", page)                             # the number only (the owner 30.10, 08.11)
     assert "Да, выдал" in page and 'name="confirm" value="yes"' in page and ('value="%s"' % tok) in page and "Отмена" in page
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
@@ -218,8 +218,8 @@ def test_a_stage_name_with_wildcards_and_a_round_trip(tmp_path, clock):
     done = _stage(conn, "done")
     orders.move_card(conn, card, done, "2026-10-14T09:00:00", "owner")
     orders.move_card(conn, card, _stage(conn, "oth"), "2026-10-14T10:00:00", "owner")
-    orders.move_card(conn, card, done, "2026-10-14T11:00:00", "owner")        # back from «На ОТХ»: not a hand-out of the point
+    orders.move_card(conn, card, done, "2026-10-14T11:00:00", "owner")        # «Выдали» from «На ОТХ»: in «Выдано» too (the owner 2026-11-09)
     second = _card(conn, pid, webmim="700301", code="at_point")
     orders.move_card(conn, second, done, "2026-10-15T09:00:00", "owner")
     conn.commit()
-    assert cards(issued_tab(manager(app, conn, pid))) == [second]
+    assert cards(issued_tab(manager(app, conn, pid))) == [second, card]

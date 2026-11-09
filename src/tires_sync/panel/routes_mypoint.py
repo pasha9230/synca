@@ -280,7 +280,7 @@ def _in_tab(row: dict, tab: str) -> bool:
 def issue_lines(card: dict) -> list:
     """What the point checks before a hand-out (the owner 2026-11-09): the order's number (WebMIM's, «№ MIM» of 08.11), the tyres line by line with the quantity, the
     client. Nothing of money."""
-    lines = ["Номер заказа: %s" % (card["webmim_number"] or "нет (заказ в панели №%d)" % card["id"])]     # no word «MIM» at a point (30.10)
+    lines = ["№ заказа: %s" % (card["webmim_number"] or "нет (заказ в панели №%d)" % card["id"])]     # no word «MIM» at a point (30.10)
     lines += ["%s × %s" % (i["name"], i["qty"]) for i in card["items"] if i["qty"] >= 1] or ["Шины не указаны"]
     return lines + ["Клиент: %s" % (card["client_name"] or "без имени")]
 
@@ -306,7 +306,7 @@ def _issued(conn, point_id, today: str) -> list:
     who marked it and the press still to undo (point_log.undoable). Nothing of money."""
     since = (date.fromisoformat(today) - timedelta(days=ISSUED_DAYS)).isoformat()
     done = orders.stage_name(conn, "done")
-    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM}
+    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM + ("oth",)}     # and «Выдали» from «На ОТХ» (the owner 2026-11-09)
     rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'done' "
                         "AND c.entered_at >= ? ORDER BY c.entered_at DESC, c.id DESC", (point_id, since)).fetchall()
     mine = points.own_sales(conn, point_id) if rows else set()
