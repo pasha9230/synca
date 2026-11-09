@@ -204,14 +204,16 @@ def tell_point(conn, card_id, webmim_id: str, now: str, author: str, send_vk: Op
     return _tell(conn, card_id, POINT, webmim_id, now, author, send_vk)
 
 
-def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver], send_vk: Optional[SendVk] = None) -> List[str]:
+def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver], send_vk: Optional[SendVk] = None,
+                 hold: bool = False) -> List[str]:
     """The transfer number has just come by itself (webmim_cabinet.take, its one write): the messages «заказ оформлен» to the client and the
     point that waited for it (a task in «error» lacking the transfer number) go now, the very way on_placed sends them (_use_earlier: the
     text as the card is now, the task's claim, the send mark). A message sent, being sent, skipped by a person, waiting for a chat, or not
     made at all is left as it is: nothing new is made here, so nothing goes twice. Only a task of this stay of the order's stage (a rule's,
     the stage and the entering as the card's now) or this hook's own (RULE) goes, and none once a message of the template went in any stay
     (the review 2026-11-09): an order moved on or back since never hears «оформлен» by itself; a task of a stay left that waited is said
-    (a yellow record once, a line) for a person to decide. Never raises."""
+    (a yellow record once, a line) for a person to decide. `hold`: nothing goes, each message that would is said instead (OLD, the owner
+    2026-11-09: the WebMIM number was typed before the release, only new orders hear it by themselves). Never raises."""
     from . import order_intercity, order_merge
     try:
         if order_merge.told_placed(conn, card_id):
@@ -254,6 +256,13 @@ def send_waiting(conn, card_id, now: str, author: str, deliver: Optional[Deliver
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the message %s of order %s of a stage left", who["whom"], card_id)
     for who, send, task in waiting:
+        if hold:
+            try:
+                lines.append(_left(conn, card_id, who, now, OLD))
+            except Exception:                                             # noqa: BLE001
+                conn.rollback()
+                logging.getLogger("tires_sync.orders").exception("the message %s of order %s typed before", who["whom"], card_id)
+            continue
         try:
             lines.append(_use_earlier(conn, card_id, who, engine.get_task(conn, task["id"]), now, author, send))
         except Exception as err:                                          # noqa: BLE001  the number is written; only the message did not go
@@ -270,9 +279,14 @@ LEFT = ("Сообщение %s «%s» ждало номер перемещени
         "отправьте его в окне «Сообщения по заказу», если оно ещё нужно.")
 
 
-def _left(conn, card_id, who: dict, now: str) -> str:
-    """A message of a stay the order has left: a yellow record once, the line for the person. Commits."""
-    text = LEFT % (who["whom"], who["template"])
+OLD = ("Сообщение %s «%s» ждало номер перемещения, но номер заказа WebMIM вписан до включения автоотправки: само не отправлено — "
+       "отправьте его в окне «Сообщения по заказу», если оно ещё нужно.")
+
+
+def _left(conn, card_id, who: dict, now: str, form: str = LEFT) -> str:
+    """A message that does not go by itself (a stay the order has left, LEFT; a number typed before, OLD): a yellow record once, the line
+    for the person. Commits."""
+    text = form % (who["whom"], who["template"])
     if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND text = ?", (card_id, text)).fetchone() is None:
         orders.add_event(conn, card_id, now, who.get("author", AUTHOR), "chat", text, level="yellow")
     conn.commit()

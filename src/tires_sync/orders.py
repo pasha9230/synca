@@ -683,6 +683,9 @@ def _guard_stage(conn, card_id, before: List[str]) -> None:
         raise OrderError("Заказ на этапе «%s»: нельзя убрать — %s. Верните его на более ранний этап, чтобы править." % (stage, ", ".join(new)))
 
 
+NUMBER_AT = "webmim_number_at:%d"     # app_state: {"number", "at"} of the WebMIM number's last save (none: typed before 2026-11-09's release)
+
+
 def update_card(conn, card_id, changes: dict, now: str, author: str, commit: bool = True, link_client: Optional[bool] = None) -> List[str]:
     """Save the fields. A new phone joins the order to its client (`link_client`), except on «На ОТХ»: the client refused, the order is
     not theirs (хвост З15: no empty client is made, no phone is added to the client put aside)."""
@@ -694,6 +697,9 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     before = _stage_gaps(conn, card_id)
     conn.execute("UPDATE order_card SET %s, updated_at = ? WHERE id = ?" % ", ".join("%s = ?" % k for k in changed),
                  list(changed.values()) + [now, card_id])
+    if "webmim_number" in changed:                                      # when it was typed (webmim_cabinet.typed_since_release)
+        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                     (NUMBER_AT % int(card_id), json.dumps({"number": changed["webmim_number"], "at": now}, ensure_ascii=False)))
     for key, value in changed.items():
         if key == "receipt_needed":
             shown = "да" if value else "нет"

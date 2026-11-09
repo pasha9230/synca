@@ -150,7 +150,10 @@ def take(conn, card_id: int, seen: dict, now: str, send: Optional[Send]) -> Tupl
     result = write(conn, card_id, seen, now)
     lines: List[str] = []
     if result == "written" and send is not None:
-        if seen.get("sum") is None or sum_differs(conn, card_id, seen):    # no sum to check the row by: never a reason to tell the client
+        if not typed_since_release(conn, card_id):                        # the owner 2026-11-09: only new orders, the old ones are said
+            from . import order_placed
+            lines = order_placed.send_waiting(conn, card_id, now, AUTHOR, None, None, hold=True)
+        elif seen.get("sum") is None or sum_differs(conn, card_id, seen):    # no sum to check the row by: never a reason to tell the client
             text = (NO_SUM % seen["invoice"] if seen.get("sum") is None else
                     SUM_DIFFERS % (_money(seen["sum"]), _money(purchase(conn, card_id)), seen["invoice"]))
             orders.add_event(conn, card_id, now, AUTHOR, "webmim", text, "yellow")
@@ -159,6 +162,14 @@ def take(conn, card_id: int, seen: dict, now: str, send: Optional[Send]) -> Tupl
         else:
             lines = send(card_id)
     return result, lines
+
+
+def typed_since_release(conn, card_id: int) -> bool:
+    """The order's WebMIM number was saved after the release of 2026-11-09 (orders.NUMBER_AT, any save: the button, a person, the hourly
+    match) and is still that one: only then the messages «заказ оформлен» go by themselves when the transfer number comes (the owner
+    2026-11-09: only new orders; a number typed before has no mark)."""
+    mark = _state(conn, orders.NUMBER_AT % card_id)
+    return bool(mark) and str(mark.get("number", "")) == str(orders._row(conn, card_id)["webmim_number"] or "")
 
 
 def _money(value) -> str:

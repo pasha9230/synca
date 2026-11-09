@@ -347,3 +347,35 @@ def test_the_hourly_reading_never_reads_a_number_with_more_than_digits(tmp_path)
     assert tail == "" and orders.get_card(conn, mine)["transfer_number"] == ""
     assert not deliver.sent and not vk.sent and ("GET", "/api/v3/orders") not in cabinet.calls
 
+
+def before_the_release(conn, mine):
+    """The WebMIM number of an order typed before this release: no mark of when it was typed."""
+    conn.execute("DELETE FROM app_state WHERE key = ?", (orders.NUMBER_AT % mine,))
+    conn.commit()
+
+
+def test_only_a_number_typed_after_the_release_lets_the_messages_go_by_themselves(tmp_path):
+    conn, old = manual(tmp_path)
+    before_the_release(conn, old)
+    new = card(conn, point_id=orders.get_card(conn, old)["point_id"])
+    orders.update_card(conn, new, {"webmim_number": "7007"}, NOW, "owner")       # typed after the release: no message waits for it
+    tail, deliver, vk = hourly(conn, Cabinet([row(5001), row(7007, invoice="26R-7000007")]))
+    assert orders.get_card(conn, old)["transfer_number"] == INVOICE and not deliver.sent and not vk.sent
+    said = [order_placed.OLD % ("клиенту", order_placed.CLIENT_TEMPLATE), order_placed.OLD % ("точке", order_placed.POINT_TEMPLATE)]
+    assert sorted((t, "yellow") for t in said) == sorted(e for e in events(conn, old) if e[0] in said)
+    assert {t["status"] for t in message_tasks(conn, old)} == {"error"}                  # they wait for a person
+    assert not [e for e in events(conn, new) if e[1] == "yellow"]                         # nothing waited: nothing said
+    # a new one: its number typed (again) after the release, the messages go
+    (tmp_path / "new").mkdir()
+    conn2, mine = manual(tmp_path / "new")
+    tail, deliver, vk = hourly(conn2, Cabinet([row(5001)]))
+    assert len(deliver.sent) == 1 and len(vk.sent) == 1
+
+
+def test_a_number_typed_again_after_the_release_is_new(tmp_path):
+    conn, mine = manual(tmp_path)
+    before_the_release(conn, mine)
+    orders.update_card(conn, mine, {"webmim_number": "5002"}, NOW, "owner")
+    (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5002)]))
+    assert result == "written" and len(deliver.sent) == 1 and len(vk.sent) == 1
+
