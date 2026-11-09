@@ -16,8 +16,20 @@ log = logging.getLogger(__name__)
 def grouped(conn, login: str) -> list:
     """The rows of the page, newest first: `order_alerts.page_rows` (one source with the bell, its counter and the dots by the order numbers),
     at the panel's local time, so that old green alerts are left out. Without the chats, the stages and «Резерв: товар на точке»
-    (order_alerts.bell_row, the owner 2026-11-05; the dots too, 2026-11-06)."""
-    return [r for r in _grouped(conn, login) if order_alerts.bell_row(r)]
+    (order_alerts.bell_row, the owner 2026-11-05; the dots too, 2026-11-06). The office: only red and yellow, one row per order
+    (order_alerts.by_order, п. 31 of the audit, 2026-11-08); the point keeps its own list (order_alerts.point_row, the owner 2026-11-07)."""
+    rows = [r for r in _grouped(conn, login) if order_alerts.bell_row(r)]
+    return order_alerts.by_order(rows) if _office() else rows
+
+
+def _office() -> bool:
+    """The office's view of «Уведомления» (not a manager of a point, not «Работать как точка»)."""
+    return own_point() is None and current_user()["as_point"] is None
+
+
+def members(row: dict) -> list:
+    """The records of a row: those of a group row of one order (order_alerts.by_order), else the row itself."""
+    return row.get("rows") or [row]
 
 
 def _grouped(conn, login: str) -> list:
@@ -102,6 +114,11 @@ def is_handoff(row: dict) -> bool:
     return row.get("kind") == "handoff" and str(row.get("text") or "").startswith(mgr.ASK)
 
 
+def handoff_of(row: dict):
+    """The record of a handed-over client among the records of a row (a group of one order), or None."""
+    return next((m for m in members(row) if is_handoff(m)), None)
+
+
 def is_return_ask(row: dict) -> bool:
     """The yellow «заполните сумму возврата» (or «не заполнено — …») of a return the point pressed (order_manager.returned): it asks the
     manager; the point has its green «возврат отмечен, ждёт суммы» (point_rows) instead (the owner 2026-10-27)."""
@@ -124,7 +141,8 @@ def acceptable(rows: list) -> list:
     """The rows «Принять все» takes (the owner 2026-10-27): the records of the order journal only (a numeric id), red, yellow and green.
     Left out, each by its own button: the chat rows («Клиент написал» of a chat without an order, «Срочно ответить»),
     «Входящие», the point's questions (string ids), and the handed-over clients (a press there «берёт в работу»)."""
-    return [r for r in rows if isinstance(r["id"], int) and r["order_id"] is not None and not is_handoff(r) and r["level"] in order_alerts.ALERT_LEVELS]
+    return [m for r in rows for m in members(r)
+            if isinstance(m["id"], int) and m["order_id"] is not None and not is_handoff(m) and m["level"] in order_alerts.ALERT_LEVELS]
 
 
 def href(row: dict) -> str:
@@ -132,7 +150,8 @@ def href(row: dict) -> str:
         return row["href"]
     if row.get("chat_row"):
         return "/chats/%d" % row["chat_row"]
-    return "/alerts/%d/go" % row["id"] if is_handoff(row) else "/orders/%d" % row["order_id"]
+    handoff = handoff_of(row)
+    return "/alerts/%d/go" % handoff["id"] if handoff else "/orders/%d" % row["order_id"]
 
 
 def register(app):
@@ -140,9 +159,11 @@ def register(app):
     @login_required
     def alerts_page():
         conn = get_conn()
-        rows = [dict(r, href=href(r), handoff=is_handoff(r)) for r in with_orders(conn, grouped(conn, session["user"]))]
+        rows = [dict(r, href=href(r), handoff=handoff_of(r)) for r in with_orders(conn, grouped(conn, session["user"]))]
         take = acceptable(rows)
-        return render_template("alerts.html", rows=rows, staff=may_take(), acceptable=take, confirm=bool(take) and request.args.get("accept") == "1")
+        shown = sum(1 for r in rows if any(m in take for m in members(r)))             # «Принять N»: the rows of the page, not the records
+        return render_template("alerts.html", rows=rows, staff=may_take(), acceptable=take, accept_rows=shown, office=_office(),
+                               confirm=bool(take) and request.args.get("accept") == "1")
 
     @app.route("/alerts/feed")
     @login_required
@@ -206,6 +227,29 @@ def register(app):
             conn.commit()
         except order_alerts.AlertError as err:
             flash(str(err), "error")
+        return redirect("/alerts")
+
+    @app.route("/alerts/order/<int:order_id>/ack", methods=["POST"])
+    @login_required
+    def alerts_order_ack(order_id):
+        """«Разобрался» on the row of an order (order_alerts.by_order, п. 31): each red record of THIS person's row now, as a press on it
+        alone (order_alerts.ack); a record that came after loading, another person's or a point's never. Yellow ones stay until the order
+        is opened, as before."""
+        conn = get_conn()
+        now, login, taken = local_iso(), session["user"], 0
+        for row in grouped(conn, login):
+            if row.get("order_id") != order_id:
+                continue
+            for member in members(row):
+                if member["level"] == "red" and isinstance(member["id"], int):
+                    try:
+                        order_alerts.ack(conn, member["id"], login, now, author())
+                        taken += 1
+                    except order_alerts.AlertError as err:
+                        flash(str(err), "error")
+        conn.commit()
+        if not taken:
+            flash("Красных уведомлений по заказу №%d у вас уже нет." % order_id)
         return redirect("/alerts")
 
     @app.route("/alerts/purchase/<int:alert_id>/ack", methods=["POST"])

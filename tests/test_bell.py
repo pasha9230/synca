@@ -49,7 +49,7 @@ def test_the_feed_is_the_page_rows_folded_and_limited(tmp_path):
     assert {"id", "order_id", "level", "client", "text", "more", "at"} <= set(data["items"][0])
     assert all(i["order_id"] == cid and i["client"] == "Ольга" for i in data["items"])
     assert any(i["id"] == red and i["level"] == "red" for i in data["items"])
-    assert len(data["items"]) == data["count"] == 4
+    assert len(data["items"]) == data["count"] == 1                          # the greens: no rows; one row for the order (п. 31)
     for i in range(15):
         event(conn, card(conn, "К%d" % i), "reserve", "Оповещение о конце резерва")
     data = client.get("/alerts/feed").get_json()

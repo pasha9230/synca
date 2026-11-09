@@ -260,7 +260,7 @@ for _section, _endpoints in {
     "chats": ("chats_page", "chat_assign", "chat_items_add", "chat_create_deal", "chat_delete", "chat_link", "chat_send", "chat_send_image", "chat_stage", "chat_status",
               "chat_unlink", "chat_wait", "chat_handoff", "chat_take", "chats_merge", "chats_refresh", "share_create", "share_list", "share_price", "share_revoke",
               "share_created", "share_new"),
-    "alerts": ("alerts_page", "alerts_ack", "alerts_purchase_ack", "alerts_critical_ack", "alerts_feed", "alerts_go", "alerts_take", "alerts_accept_all"),
+    "alerts": ("alerts_page", "alerts_ack", "alerts_order_ack", "alerts_purchase_ack", "alerts_critical_ack", "alerts_feed", "alerts_go", "alerts_take", "alerts_accept_all"),
     "calls": ("calls_page", "call_record", "call_create_order", "call_handoff"),
     "clients": ("clients_page", "client_page", "client_save", "client_merge", "client_split_order", "client_split_chat",
                 "clients_duplicates", "client_tag", "client_unmerge", "client_skip"),

@@ -65,6 +65,54 @@ def bell_row(row: dict) -> bool:
     return True
 
 
+ACTION_LEVELS = ("red", "yellow")                                 # «Уведомления» of the office: only what needs an action (п. 31 of the audit)
+
+
+def by_order(rows: List[dict]) -> List[dict]:
+    """The rows of the office's «Уведомления», of the bell, of its counter (п. 31 of the audit, 2026-11-08): only what needs an action (red,
+    yellow; a green «движется» — «Клиенту отправлено», a sale — lives in the journal of the order) and ONE row per order with all its troubles
+    in it; the most important colour wins, the newest time, red before yellow in the text. A row without an order («Закупка изменилась»,
+    «Критичное», «Входящие») stays a row of its own. Only the showing: nothing is acked, seen or deleted; the records keep their colours.
+    A group row keeps its records in `rows` («Разобрался» and «Принять все» act on them), its id is the newest record's (notify.js rings
+    for a new one), `handoff_id` the record of a handed-over client among them (its buttons)."""
+    groups, found = {}, []
+    for row in rows:
+        if row.get("level") not in ACTION_LEVELS:
+            continue
+        if row.get("order_id") is None:
+            found.append(row)
+            continue
+        group = groups.get(row["order_id"])
+        if group is None:
+            group = groups[row["order_id"]] = {"order_id": row["order_id"], "rows": []}
+            found.append(group)
+        group["rows"].append(row)
+    result = []
+    for item in found:
+        if "rows" not in item:
+            result.append(item)
+            continue
+        members = sorted(item["rows"], key=lambda r: r.get("at") or "", reverse=True)       # newest first, then red before yellow (stable)
+        members.sort(key=lambda r: ACTION_LEVELS.index(r["level"]))
+        newest = max(item["rows"], key=lambda r: r.get("at") or "")
+        texts = []
+        for member in members:
+            text = str(member.get("text") or "")
+            if text and text not in texts:
+                texts.append(text)
+        group = dict(newest, level=members[0]["level"], at=newest.get("at"), text=" · ".join(texts),
+                     more=sum(int(m.get("more") or 0) for m in item["rows"]), rows=members,
+                     title=next((m["title"] for m in members if m.get("title")), None))
+        reds = [m for m in members if m["level"] == "red"]
+        if len(reds) == 1 and reds[0].get("ack_href"):
+            group["ack_href"] = reds[0]["ack_href"]
+        elif reds:
+            group["ack_href"] = "/alerts/order/%d/ack" % item["order_id"]
+        result.append(group)
+    result.sort(key=lambda r: r.get("at") or "", reverse=True)
+    return result
+
+
 POINT_ROWS = ("question", "return")                             # routes_alerts.point_rows: «Клиент забрал?», «возврат отмечен, ждёт суммы»
 POINT_RECORDS = {                                                # the point's own records of the journal (the owner 2026-11-07)
     "point": ("Поступили шины по заказу",),                      # order_manager.ARRIVAL, ARRIVAL_INTERCITY
