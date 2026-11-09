@@ -178,17 +178,20 @@ class Filters:
 
 
 def _numbers(args, name: str) -> List[int]:
+    """The values of the width, the height or the radius: ticked one by one (the chips) or typed in one box by spaces or commas, as in
+    the office's catalog («225 205 195», the owner 2026-11-09)."""
     out = []
-    for value in args.getlist(name)[:MAX_VALUES]:
-        value = str(value).strip().upper().lstrip("R")
-        if value.isdigit() and len(value) <= 3 and int(value) not in out:
+    for value in [t for v in args.getlist(name)[:MAX_VALUES] for t in re.split(r"[\s,;]+", str(v)[:MAX_TEXT]) if t][:MAX_VALUES]:
+        value = value.upper().lstrip("RР")
+        if value.isascii() and value.isdigit() and len(value) <= 3 and int(value) not in out:
             out.append(int(value))
     return sorted(out)
 
 
 def filters_of(args, known_brands, wide: bool = False) -> Filters:
     """The GET parameters, parsed on the server with limits; a brand the client sees no position of is dropped (never searched for).
-    `wide` («Новый вид»): the width, the height and the radius by several values each, the search in more fields."""
+    The width, the height and the radius by several values each (both views since 2026-11-09: the filters of the office's catalog);
+    `wide` («Новый вид»): the search in more fields."""
     size_text = (args.get("size") or "")[:MAX_TEXT]
     sizes, unknown = parse_sizes(size_text)
     pick = lambda name: [b for b in dict.fromkeys(bare_brand(v) for v in args.getlist(name)[:MAX_BRANDS]) if b in known_brands]
@@ -200,7 +203,7 @@ def filters_of(args, known_brands, wide: bool = False) -> Filters:
                    args.get("s") if args.get("s") in SEASONS else "", args.get("t") if args.get("t") in ("studded", "friction") else "",
                    {"1": 1, "2": 2}.get(args.get("wh") or "", 0), (args.get("q") or "")[:MAX_TEXT].strip(),
                    args.get("o") if args.get("o") in SORTS else "brand", args.get("r") == "1", page,
-                   *((_numbers(args, "w"), _numbers(args, "h"), _numbers(args, "d"), True) if wide else ()))
+                   _numbers(args, "w"), _numbers(args, "h"), _numbers(args, "d"), wide)
 
 
 def apply(items: List[Visible], f: Filters) -> List[Visible]:

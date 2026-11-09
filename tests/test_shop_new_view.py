@@ -34,7 +34,7 @@ def test_off_every_page_of_the_client_is_the_old_one(tmp_path):
     for state in ("off", "owner_only"):                                    # «только у владельца»: the client still has the old pages
         new_view(conn, state)
         cat = page(client)
-        assert 'name="xb"' in cat and 'id="f-size"' in cat and "shop2" not in cat and "ui-new" not in cat
+        assert 'class="o2 shop-o2f"' in cat and "shop2" not in cat and "ui-new" not in cat
         add(client, keys(cat)[0])
         cart = page(client, "/shop/cart")
         assert 'name="address"' in cart and "shop2" not in cart and 'name="city"' not in cart
@@ -51,7 +51,7 @@ def test_off_the_owners_preview_is_the_old_one_and_owner_only_shows_it_the_new_o
     owner = app.test_client()
     login(owner)
     old = page(owner, "/client-terms/c/buyer/preview")
-    assert 'name="xb"' in old and "shop2" not in old
+    assert 'class="o2 shop-o2f"' in old and "shop2" not in old
     new_view(conn, "owner_only")
     html = page(owner, "/client-terms/c/buyer/preview")
     assert "shop2-cat" in html and 'name="xb"' not in html and " ui-new" in html
@@ -67,9 +67,10 @@ def test_on_the_catalog_has_the_size_chips_one_search_no_except_and_the_photo_ce
     new_view(conn)
     html = page(client)
     assert "shop2-cat" in html and 'name="xb"' not in html and 'id="f-size"' not in html
-    for key, value in (("w", "195"), ("w", "205"), ("w", "245"), ("h", "45"), ("h", "55"), ("h", "65"), ("d", "15"), ("d", "16"), ("d", "18")):
-        assert 'name="%s" value="%s"' % (key, value) in html, (key, value)
-    assert 'form="shop-f"' in html and 'id="shop-f"' in html and 'name="q"' in html
+    for key, values in (("w", "195 205 245"), ("h", "45 55 65"), ("d", "15 16 18")):        # the hints of the boxes (2026-11-09: as the office's)
+        hints = re.search(r'<datalist id="dl-%s">(.*?)</datalist>' % key, html).group(1)
+        assert re.findall(r'value="(\d+)"', hints) == values.split(), key
+    assert 'name="w"' in html and 'name="q"' in html and html.count('name="q"') == 1
     assert html.count('class="c-photo"') == len(prices(html)) and "<script" not in html
     assert len(set(keys(html))) == len(prices(html))                       # «В корзину» in each row (and in its card)
 
@@ -103,13 +104,14 @@ def test_on_the_search_looks_in_the_season_too_off_it_does_not(tmp_path):
     assert sorted(prices(page(client, "/shop?q=ikon+205/55"))) == [13580]
 
 
-def test_on_the_filters_fold_and_the_links_keep_it(tmp_path):
+def test_on_the_filters_are_a_card_above_the_rows_and_an_old_folding_link_still_opens(tmp_path):
+    # 2026-11-09 (the owner): the filters are one card above the rows as in the office's catalog, no side panel to fold any more
     app, client, conn, _ = make_shop(tmp_path)
     new_view(conn)
     html = page(client, "/shop?sf=0&w=205")
-    assert "shop2-cat is-folded" in html and 'name="sf" value="0"' in html and "shop2-unfold" in html
-    assert all("sf=0" in s for s in re.findall(r'href="(/shop\?[^"]*o=price[^"]*)"', html))
-    assert "is-folded" not in page(client, "/shop?w=205")
+    assert sorted(prices(html)) == [13580] and 'class="o2 shop-o2f"' in html
+    assert "is-folded" not in html and "shop2-unfold" not in html and "shop-side" not in html
+    assert html.index('class="o2 shop-o2f"') < html.index('data-tour="catalog"')
 
 
 def test_on_every_step_of_the_tour_still_lights_an_element(tmp_path):

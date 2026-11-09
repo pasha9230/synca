@@ -134,7 +134,7 @@ def test_the_owners_preview_has_the_new_design_and_no_cart(tmp_path):
     owner = app.test_client()
     login(owner)
     html = page(owner, "/client-terms/c/buyer/preview")
-    assert "/static/shop.css" in html and 'class="shop-cat"' in html and "/shop/cart/add" not in html and 3670 in prices(html)
+    assert "/static/shop.css" in html and 'class="shop-cat shop-cat--top"' in html and "/shop/cart/add" not in html and 3670 in prices(html)
 
 
 def test_nothing_priced_is_a_catalog_not_set_up(tmp_path):

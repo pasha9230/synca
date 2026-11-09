@@ -181,7 +181,7 @@ def test_every_brand_of_the_suppliers_is_shown_and_a_brand_without_its_own_pct_h
     for url in ("/shop", "/shop?q=Laufenn", "/shop?q=G+Fit", "/shop?b=laufenn", "/shop?b=LAUFENN", "/shop?size=195/65R15"):
         html = page(client, url)
         assert "laufenn" in listing(html).lower() and 3670 in prices(html), url
-    assert 'value="laufenn"' in page(client)                                  # in the brand ticks
+    assert 'name="b"' not in page(client)                                     # no brand ticks since 2026-11-09 (the owner); a link with b= still works
     assert 3670 not in prices(page(client, "/shop?xb=laufenn"))               # «кроме брендов» works for it
     assert "Найдено 0" in page(client, "/shop?q=SECRETCODE1")                 # the supplier's article is not searched
     assert "Найдено 0" in page(client, "/shop?q=77001")                       # nor the goods id
@@ -503,7 +503,7 @@ def test_the_frame_of_the_client_is_for_a_phone_too_and_the_staff_css_is_untouch
     assert client.get("/static/shop.css").status_code == 200
     assert "Зима · шип" in html                                               # 4tochki T1: winter, studded
     assert "Ikon Tyres Test Model 205/55 R16" not in html                     # the supplier's name is not repeated
-    assert all('id="f-%s"' % n in html and 'for="f-%s"' % n in html for n in ("size", "q", "s", "t", "wh"))
+    assert all('id="f-%s"' % n in html and 'for="f-%s"' % n in html for n in ("w", "h", "d"))       # the filters of the office's catalog
 
 
 @pytest.mark.parametrize("fetched, shown", [("2026-10-07T07:00:00", True), ("2026-10-07T06:00:00", True), ("2026-10-07T05:59:00", False),
