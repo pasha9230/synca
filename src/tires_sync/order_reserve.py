@@ -44,6 +44,7 @@ FIRST_HOUR = 9                                   # no alert before 09:00 (Moscow
 STAGE_CODES = ("at_point",)
 Notify = Callable[[dict, str], str]               # (card, text) -> how it went; never raises
 CLIENT_TEMPLATE = order_templates.RESERVE_SAMPLE[0]
+VK_ASK_OFF = True                                 # the owner 2026-11-09 «Когда срок заканчивается, бот шлёт сообщение точке, это надо отключить»
 PointSend = Callable[..., object]                 # vk_send.sender_for: (peer_id, text, random_id=None, keyboard=None); raises when it did not go
 ASK_KEY = "reserve_ask:%d:%s"                     # app_state, per order and stay at the point: «asking|<at>» → asked → answered / silent; failed, unasked
 HERE = "на точке"
@@ -350,6 +351,8 @@ def _point_step(conn, card: dict, today: date, now: str, hours, working: bool, d
         return
     if _arrived_today(conn, card, now):                         # «можно забирать» went today: nobody is asked (the reminder's grey record
         return                                                  # comes at 12:30, _client_step)
+    if VK_ASK_OFF and (card.get("point") or {}).get("channel") != PANEL:      # the owner 2026-11-09: the bot no longer asks the point in VK
+        return                                                  # («ещё на точке? выдал / на точке»); a point in the panel is asked as before
     ask_point(conn, card, point_send, now)
 
 

@@ -4,11 +4,21 @@ the reminder goes from the tick of 12:30 (its own tests: test_reserve_noon.py), 
 point which order, and nothing moves without its «да» or a number. The text to the client has no prepayment."""
 from __future__ import annotations
 
+import pytest
+
 from test_order_reserve import OLD_TEXT, POINT_VK, PointVk, _deliver, card_at, chat_of, db, ok, owner_text, stage
 from tires_sync import order_manager as mgr, order_reserve as reserve, order_templates as tpl, orders, store, vk_send
 
 DAY = "2026-10-18"                                     # the last day of a card that came to the point on 2026-10-15
 
+
+
+@pytest.fixture(autouse=True)
+def _vk_question_on(monkeypatch):
+    """The owner 2026-11-09 turned the VK question of the last day off (order_reserve.VK_ASK_OFF); these tests keep the question's own
+    rules (answers, silence, the panel's points) tested, as when it is on — test_reserve_vk_off.py holds the owner's default."""
+    from tires_sync import order_reserve
+    monkeypatch.setattr(order_reserve, "VK_ASK_OFF", False)
 
 def at(hour, minute=5, day=DAY):
     return "%sT%02d:%02d:00" % (day, hour, minute)

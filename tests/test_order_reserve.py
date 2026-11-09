@@ -11,6 +11,14 @@ PLACED = "2026-10-12T12:00:00"
 POINT_VK = "100500"
 
 
+
+@pytest.fixture(autouse=True)
+def _vk_question_on(monkeypatch):
+    """The owner 2026-11-09 turned the VK question of the last day off (order_reserve.VK_ASK_OFF); these tests keep the question's own
+    rules (answers, silence, the panel's points) tested, as when it is on — test_reserve_vk_off.py holds the owner's default."""
+    from tires_sync import order_reserve
+    monkeypatch.setattr(order_reserve, "VK_ASK_OFF", False)
+
 def stage(conn, code):
     return next(s["id"] for s in orders.list_stages(conn) if s["code"] == code)
 
