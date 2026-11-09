@@ -63,6 +63,7 @@ class OrdersClient:
         self._failed = ""
         self._fallback_used = False
         self._cabinet_failed = ""
+        self._quick = False                        # the session was made by a quick login: its logout is quick too
         self.method = ""
 
     def __repr__(self) -> str:
@@ -131,10 +132,10 @@ class OrdersClient:
         self.method = "вход логином"
         return auth
 
-    def _login_v3(self) -> Tuple[str, str]:
-        """(authKey, "") or ("", why not) from /api/v3/auth/login."""
+    def _login_v3(self, timeout: Optional[float] = None) -> Tuple[str, str]:
+        """(authKey, "") or ("", why not) from /api/v3/auth/login. `timeout`: one attempt of so many seconds, outside the breaker."""
         status, _, raw = self._call("/api/v3/auth/login", {"Content-Type": "application/json"}, method="POST",
-                                    body=json.dumps({"login": self._login, "password": self._password}).encode("utf-8"))
+                                    body=json.dumps({"login": self._login, "password": self._password}).encode("utf-8"), timeout=timeout)
         if status != 200:
             return "", "код %s" % status
         try:
@@ -172,31 +173,33 @@ class OrdersClient:
             self._token = None
             self._failed = self._failed or "Сессия закрыта."
         try:
-            self._call("/api/v3/auth/logout", {"Authorization": "Bearer " + auth}, method="POST")
+            self._call("/api/v3/auth/logout", {"Authorization": "Bearer " + auth}, method="POST",
+                       timeout=CABINET_QUICK if self._quick else None)
         except OSError:
             pass
 
-    def _cabinet_auth(self) -> str:
+    def _cabinet_auth(self, quick: bool = False) -> str:
         """The session of the v3 login (its authKey): the one the press logged in with when there is one; else one login now, closed by
-        close() like any. Never more than one attempt a client."""
+        close() like any (`quick`: of CABINET_QUICK seconds, within a person's save). Never more than one attempt a client."""
         if self._session:
             return self._session
         if self._cabinet_failed:
             raise OrdersError(self._cabinet_failed)
         if not self._login or not self._password:
             raise OrdersError("Логин или пароль API-пользователя не заданы.")
-        auth, reason = self._login_v3()
+        auth, reason = self._login_v3(CABINET_QUICK if quick else None)
         if not auth:
             self._cabinet_failed = "вход в кабинет не удался: %s" % reason
             raise OrdersError(self._cabinet_failed)
-        self._session = auth
+        self._session, self._quick = auth, quick
         return auth
 
     def cabinet_orders(self, page: int = 1, per_page: int = 100, quick: bool = False) -> list:
         """GET /api/v3/orders of MIM's cabinet (the newest first) with the session of the v3 login: the rows carry «№ Счета»
         (paymentAccount.number), which API v2 never gives (webmim_cabinet). `quick`: one attempt of CABINET_QUICK seconds outside the
-        breaker (right after a press). A list the login does not see (401, 403, 404): OrdersError with its code."""
-        auth = self._cabinet_auth()
+        breaker, the login too when there is no session yet (right after a press, a number typed in the order window). A list the login
+        does not see (401, 403, 404): OrdersError with its code."""
+        auth = self._cabinet_auth(quick)
         params = {"author": "all", "sort": "-createdDate", "page": int(page), "per-page": int(per_page)}
         status, _, raw = self._call("/api/v3/orders", {"Authorization": "Bearer " + auth}, params, safe=not quick,
                                     timeout=CABINET_QUICK if quick else None)

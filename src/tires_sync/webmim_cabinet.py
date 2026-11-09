@@ -9,14 +9,17 @@ Where it is read (GETs only; the session is closed by the client's close(): sess
   in the card before order_placed.on_placed renders the messages, so they go with it at once;
 - the window «Подтверждение» (poll): every few seconds for about a minute while the number is not there, one client a poll, GAP between
   any two asks of the panel;
-- hourly (webmim_match.run → safe_hourly): the open orders without a number, the session of the snapshot, one login a run.
+- hourly (webmim_match.run → safe_hourly): the open orders without a number, the session of the snapshot, one login a run;
+- a WebMIM number typed by a person in the order window (after_save, the owner 2026-11-09: the partner places orders by hand in the
+  cabinet): within that save, one quick login and read, its logout; the save never fails for it.
 The live server only: an invoice of the test server is never ours (as webmim_invoice.after_place). No API user (an empty login): off,
 everything as before. A list the login does not see: a grey record of the order, everything as before.
 
 A number found is written by webmim_invoice.apply (an empty «Номер перемещения» only; a different one typed by a person is a yellow record,
 nothing changed) in one IMMEDIATE transaction: two tabs, a second poll and the hourly reading write it once. Only that one write ('written')
-of an order placed in full lets the messages «заказ оформлен» that waited for it go (order_placed.send_waiting: the same send as on_placed,
-the task's claim, the send mark: once). The login, the password and the session's key never go to a journal, a line or the page."""
+lets the messages «заказ оформлен» that waited for it go, of any order, placed by the button or by hand (the owner 2026-11-09: «слать
+всем»; order_placed.send_waiting: the same send as on_placed, the task's claim, the send mark: once). The login, the password and the
+session's key never go to a journal, a line or the page."""
 from __future__ import annotations
 
 import json
@@ -123,13 +126,6 @@ def write(conn, card_id: int, seen: dict, now: str) -> str:
     return result
 
 
-def placed(conn, card_id: int) -> bool:
-    """Placed in full by the button (webmim_create «done»): only then the messages «заказ оформлен» are due (order_placed.on_placed)."""
-    from . import webmim_create
-    state = webmim_create.get_state(conn, card_id)
-    return bool(state and state["state"] == "done")
-
-
 SUM_DIFFERS = ("Сумма заказа в кабинете MIM (%s ₽) не сходится с закупкой заказа (%s ₽): номер перемещения %s вписан, сообщения «заказ "
                "оформлен» сами не отправлены — сверьте и отправьте их в окне «Сообщения по заказу».")
 
@@ -140,11 +136,12 @@ def sum_differs(conn, card_id: int, seen: dict) -> bool:
 
 
 def take(conn, card_id: int, seen: dict, now: str, send: Optional[Send]) -> Tuple[str, List[str]]:
-    """Write the number found and, when this was the write of it, send what waited for it — unless the cabinet's sum differs from the
-    order's purchase (the review 2026-11-09: a yellow record, the messages wait for a person). (apply's result, the lines of the send)."""
+    """Write the number found and, when this was the write of it, send what waited for it (of any order: the owner 2026-11-09 «слать
+    всем»; nothing new is made, order_placed.send_waiting) — unless the cabinet's sum differs from the order's purchase (the review
+    2026-11-09: a yellow record, the messages wait for a person). (apply's result, the lines of the send)."""
     result = write(conn, card_id, seen, now)
     lines: List[str] = []
-    if result == "written" and send is not None and placed(conn, card_id):
+    if result == "written" and send is not None:
         if sum_differs(conn, card_id, seen):
             orders.add_event(conn, card_id, now, AUTHOR, "webmim", SUM_DIFFERS % (_money(seen["sum"]), _money(purchase(conn, card_id)),
                                                                                   seen["invoice"]), "yellow")
@@ -188,6 +185,53 @@ def after_place(conn, card_id: int, client, now: str, server: str) -> str:
     if sum_differs(conn, card_id, seen):                                  # not before on_placed: the window's poll writes it, nothing is sent
         return "sum-differs"
     return write(conn, card_id, seen, now)
+
+
+# ---- a number typed by a person ----------------------------------------------------------------------------------------------------------
+
+LATER = ("Номер перемещения заказа WebMIM №%s в кабинете MIM пока не найден: возьмём его при почасовой проверке (или впишите сами).")
+
+
+def later(conn, card_id: int, number: str, now: str) -> None:
+    """A grey record, once per number: not in the cabinet yet (or no invoice yet), the hourly reading takes it. Commits."""
+    line = LATER % number
+    if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND author = ? AND text = ?", (card_id, AUTHOR, line)).fetchone() is None:
+        orders.add_event(conn, card_id, now, AUTHOR, "webmim", line, "grey")
+    conn.commit()
+
+
+def after_save(conn, card_id: int, client_of: Callable[[], object], now: str, send: Optional[Send]) -> Tuple[str, List[str]]:
+    """A WebMIM number has just been typed into the order window by a person (the partner places the order by hand in the cabinet): when
+    the order is one the hourly reading would ask for (_targets: open, no transfer number, not of the test server, its number its own), one
+    quick read of the cabinet's list right in that save (a new client of `client_of()`, its quick login, its logout), and take() of what is
+    found: the number written, the messages that waited for it sent once. Not there yet, no invoice yet: a grey record once, the hourly
+    reading takes it; a failure: a grey record once (note). The window's GAP holds here too (sessions are limited): within it, the hourly
+    reading. (what became of it, the lines of the send)."""
+    from . import webmim_match
+    if not enabled(conn):
+        return "off", []
+    number = webmim_match.digits(orders._row(conn, card_id)["webmim_number"])
+    if not number:
+        return "no-number", []
+    if _targets(conn, SERVER).get(number) != card_id:
+        return "off", []
+    if _turn(conn, card_id, now) is not None:
+        later(conn, card_id, number, now)
+        return "busy", []
+    client = client_of()
+    if client is None:
+        return "off", []
+    try:
+        with client:
+            row = _find(client, number, quick=True)
+    except (OSError, webmim_orders.OrdersError) as err:
+        note(conn, card_id, _why(err), now)
+        return "failed", []
+    seen = info(row) if row is not None else None
+    if seen is None or not seen["invoice"]:
+        later(conn, card_id, number, now)
+        return "wait", []
+    return take(conn, card_id, seen, now, send)
 
 
 # ---- the window «Подтверждение» -------------------------------------------------------------------------------------------------------
