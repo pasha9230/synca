@@ -142,7 +142,7 @@ def test_the_script_and_the_style_keep_their_contract():
     js = (PANEL / "static" / "app.js").read_text(encoding="utf-8")
     block = js.split("«Чаты» of the new view: the order in a panel", 1)[1].split("// 11) Заказ: поиск позиции", 1)[0]
     assert 'MARK = "#order"' in block and "history.pushState" in block and "history.back()" in block and 'addEventListener("popstate", sync)' in block
-    assert '".modal-backdrop.is-open, details.menu[open], #bell-pop:not([hidden])"' in block and 'closest(".topbar")' in block and '.suggest:not([hidden])' in block            # Esc: what is on top closes first
+    assert '".modal-backdrop.is-open, details.menu[open], details.msel-box[open], #bell-pop:not([hidden])"' in block and 'closest(".topbar")' in block and '.suggest:not([hidden])' in block            # Esc: what is on top closes first (a size list of the catalog too, 2026-11-09)
     assert "form && (isOpen() ||" in block                                                                            # a reply to the client keeps the panel open
     assert "if (live && !held)" in js                                                                                 # held back: the next poll asks again
     assert "sessionStorage" in block and "localStorage" not in block                                                  # no state is kept beyond the tab
