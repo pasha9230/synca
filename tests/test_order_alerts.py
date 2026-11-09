@@ -103,10 +103,12 @@ def test_opening_an_order_closes_green_and_yellow_for_that_user_only(tmp_path):
     one, two = both_owners_card(conn), both_owners_card(conn)
     orders.add_event(conn, one, NOW, "система", "reserve", "Оповещение о конце резерва")
     orders.add_event(conn, one, NOW, "owner", "field", "Телефон: +7")                                         # grey: never an alert
-    assert alerts.counts(conn, "owner") == {"red": 0, "yellow": 1, "green": 2}
+    assert len(alerts.open_alerts(conn, "owner")) == 3                                                       # the two «Заказ создан» too,
+    assert alerts.counts(conn, "owner") == {"red": 0, "yellow": 1, "green": 0}                                # no rows since 2026-11-09
     alerts.mark_seen(conn, "owner", one, LATER)
-    assert alerts.counts(conn, "owner") == {"red": 0, "yellow": 0, "green": 1}
-    assert alerts.counts(conn, "worker2") == {"red": 0, "yellow": 1, "green": 2}                                # every user has their own
+    assert alerts.counts(conn, "owner") == {"red": 0, "yellow": 0, "green": 0}
+    assert len(alerts.open_alerts(conn, "owner")) == 1                                                       # the other order's «создан»
+    assert alerts.counts(conn, "worker2") == {"red": 0, "yellow": 1, "green": 0}                                # every user has their own
     orders.add_event(conn, one, LATER, "owner", "stage", "Этап: «A» → «B»")
     assert [e["text"] for e in alerts.open_alerts(conn, "owner", one)] == ["Этап: «A» → «B»"]                 # newer records are new again
     alerts.mark_seen(conn, "owner", two, LATER)
@@ -129,7 +131,7 @@ def test_a_red_record_waits_for_razobralsya_or_for_the_fix(tmp_path):
     assert alerts.order_levels(conn, "worker2") == {cid: "red"}                                                 # Партнёр has not looked yet
     alerts.resolve(conn, red["id"], LATER, "система")
     assert conn.execute("SELECT author FROM order_event_ack WHERE login = '*'").fetchone() == ("система",)
-    assert alerts.order_levels(conn, "worker2") == {cid: "green"}                                               # fixed: closed for everybody
+    assert alerts.order_levels(conn, "worker2") == {}                    # fixed: closed for everybody («Заказ создан»: no row, 2026-11-09)
 
 
 def test_razobralsya_only_on_a_red_record_by_a_named_user(tmp_path):

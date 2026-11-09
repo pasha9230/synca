@@ -90,13 +90,13 @@ def test_a_handed_over_client_in_the_row_of_its_order_keeps_its_buttons(tmp_path
 
 def test_a_point_keeps_its_own_rows(tmp_path):
     """The manager of a point: its own list (order_alerts.point_row, the owner 2026-11-07), not grouped nor cut here (п. 31 is the office's)."""
-    from tires_sync import order_manager as mgr, order_points as points
+    from tires_sync import order_points as points
     app, client, tok, conn = setup(tmp_path)
     pid = points.save_point(conn, {"name": "Юнона", "manager_name": "А", "channel": "panel"})
     a = card(conn, "Анна")
     conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (pid, a))
-    one = event(conn, a, "point", mgr.ARRIVAL % (a, "Юнона", "отправлено"), level="yellow")
-    two = event(conn, a, "point", mgr.ARRIVAL % (a, "Юнона", "ещё раз"), level="yellow")
+    one = event(conn, a, "field", "Возврат с ОТХ согласован с поставщиком: передать на возврат 10.11.", level="yellow")   # order_oth.agree
+    two = event(conn, a, "field", "Согласование возврата с поставщиком отменено: ещё раз.", level="yellow")             # order_oth.unagree
     users.add_user(conn, "yun", "password-123", "2026-10-20T12:00:00", role="point", point_id=pid)
     pt = app.test_client()
     with pt.session_transaction() as s:

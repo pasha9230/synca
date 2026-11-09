@@ -112,12 +112,12 @@ def test_a_point_sees_the_alerts_of_its_orders_and_chats_only(tmp_path):
     w = world(tmp_path)
     bind(w)
     manager, conn = person(w["app"], "point", w["rust"])
-    from tires_sync import order_manager as mgr                                            # a row a point is shown (2026-11-07)
+    agreed = "Возврат с ОТХ согласован с поставщиком: передать на возврат %d.10 (акт МХ-3)."   # a row a point is shown (2026-11-07; order_oth.agree)
     for cid in (w["mine"], w["other"]):
-        orders.add_event(conn, cid, "2026-10-13T12:00:00", "система", "point", mgr.ARRIVAL % (cid, "Точка", "отправлено"), level="yellow")
+        orders.add_event(conn, cid, "2026-10-13T12:00:00", "система", "field", agreed % cid, level="yellow")
     conn.commit()
     page = manager.get("/alerts").get_data(as_text=True)
-    assert mgr.ARRIVAL % (w["mine"], "Точка", "отправлено") in page and mgr.ARRIVAL % (w["other"], "Точка", "отправлено") not in page
+    assert agreed % w["mine"] in page and agreed % w["other"] not in page
     assert "Красная запись заказа №" not in page                                            # the office's records: not the point's (2026-11-07)
     assert "Татьяна" not in page and "Иван" not in page                                    # the waiting chats of the other account
     feed = manager.get("/alerts/feed").get_json()

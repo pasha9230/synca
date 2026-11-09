@@ -1,7 +1,7 @@
 """The point hears only of what it does (the owner 2026-11-07: «Убери у точек все лишние уведомления, они им не нужны»): its bell, the counter,
 «Уведомления», the sound (/my-point/feed) and the dots, for the manager of a point and for «Работать как точка», show a list of what is the
-point's — «Поступили шины по заказу …», «Клиент забрал?», «возврат отмечен» (the return agreed or cancelled is allowed too, but its record is
-grey: no alert) — and nothing of the office's records; the 7th day of «На ОТХ» and its orders on the way ring in /my-point/feed as before. The office, the owner and the journal of the order are
+point's — «Клиент забрал?», «возврат отмечен» (the return agreed or cancelled is allowed too, but its record is grey: no alert); «Поступили
+шины по заказу …» no more (the owner 2026-11-09: order_alerts.bell_row, the journal keeps it) — and nothing of the office's records; the 7th day of «На ОТХ» and its orders on the way ring in /my-point/feed as before. The office, the owner and the journal of the order are
 not changed; what goes to the point's VK and «Рабочее место» (order_notify) is not changed here."""
 from __future__ import annotations
 
@@ -65,10 +65,10 @@ def test_the_point_sees_only_its_own_rows_everywhere(tmp_path, clock, who):
     app, owner, conn, pid, cid = world(tmp_path)
     person = manager(app, conn, pid) if who == "manager" else as_point(owner, pid)
     data = bell(person)
-    assert sorted(i["text"] for i in data["items"]) == sorted([ARRIVED, "Ответьте на «Рабочем месте»: «Выдан» или «На точке»."])
-    assert data["count"] == 2 and data["red"] is False
+    assert [i["text"] for i in data["items"]] == ["Ответьте на «Рабочем месте»: «Выдан» или «На точке»."]     # not ARRIVED (2026-11-09)
+    assert data["count"] == 1 and data["red"] is False
     page = person.get("/alerts").get_data(as_text=True)
-    assert ARRIVED in page and not [t for _, t, _ in OFFICE if t in page]
+    assert ARRIVED not in page and not [t for _, t, _ in OFFICE if t in page]
     feed = person.get("/my-point/feed").get_json()["items"]
     rung = [i["text"] for i in feed if i["key"].startswith("alert-")]
     assert not [t for _, t, _ in OFFICE if t in rung]
@@ -78,7 +78,7 @@ def test_the_point_sees_only_its_own_rows_everywhere(tmp_path, clock, who):
 def test_the_point_counts_no_office_red(tmp_path, clock):
     app, owner, conn, pid, cid = world(tmp_path)
     manager(app, conn, pid)
-    assert alerts.counts(conn, "gamma") == {"red": 0, "yellow": 1, "green": 0}            # the arrival only
+    assert alerts.counts(conn, "gamma") == {"red": 0, "yellow": 0, "green": 0}            # not even the arrival (2026-11-09)
 
 
 def test_the_office_sees_what_it_saw_and_the_journal_keeps_everything(tmp_path, clock):
@@ -98,8 +98,9 @@ def test_the_office_sees_what_it_saw_and_the_journal_keeps_everything(tmp_path, 
 
 def test_the_row_rule():
     ok = alerts.point_row
-    assert ok({"id": 1, "kind": "point", "level": "yellow", "text": ARRIVED})
-    assert ok({"id": 1, "kind": "point", "level": "yellow", "text": order_manager.ARRIVAL_INTERCITY % ("1", "Бета")})
+    for text in (ARRIVED, order_manager.ARRIVAL_INTERCITY % ("1", "Бета")):     # no row of anybody since 2026-11-09 (bell_row)
+        assert not ok({"id": 1, "kind": "point", "level": "yellow", "text": text})
+        assert not alerts.bell_row({"id": 1, "kind": "point", "level": "yellow", "text": text})
     assert ok({"id": "question-1-2", "kind": "question", "level": "yellow", "text": "Ответьте"})
     assert ok({"id": "return-1", "kind": "return", "level": "green", "text": "Сумму возврата вносит менеджер"})
     assert ok({"id": 1, "kind": "field", "level": "yellow", "text": "Возврат с ОТХ согласован с поставщиком: передать на возврат 15.10 (акт МХ-3)."})

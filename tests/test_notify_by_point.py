@@ -265,7 +265,7 @@ def test_the_safety_net_of_unseen_alerts_skips_the_point_account_orders(tmp_path
     assert len(tg.calls) == 1 and "Наш заказ" in sent_text(tg.calls[0])
 
 
-# ---- the bell, its counter and «Уведомления» (order_alerts.page_rows) -------------------------------------------------------------------
+# ---- the bell, its counter and «Уведомления» (order_alerts.all_rows, page_rows) ----------------------------------------------------------
 
 def test_the_staff_do_not_see_the_point_account_alerts_and_the_point_does(tmp_path):
     conn, box = env(tmp_path)
@@ -288,7 +288,7 @@ def test_the_staff_do_not_see_the_point_account_alerts_and_the_point_does(tmp_pa
     for login in ("owner", "partner1"):
         for cid in (theirs["id"], ours["id"], handed["id"]):                 # since 2026-11-03 only the responsible hears of an order
             conn.execute("UPDATE order_card SET responsible = ? WHERE id = ?", (login, cid))
-        rows = order_alerts.page_rows(conn, login, NOW)
+        rows = order_alerts.all_rows(conn, login, NOW)
         orders_seen = {r["order_id"] for r in rows if r["order_id"] is not None}
         assert theirs["id"] not in orders_seen and {ours["id"], handed["id"]} <= orders_seen
         chats_seen = {r["chat_row"] for r in rows if r.get("chat_row")}
@@ -299,7 +299,7 @@ def test_the_staff_do_not_see_the_point_account_alerts_and_the_point_does(tmp_pa
     conn.commit()
     assert order_alerts.counts(conn, "owner")["red"] == 0                     # «Красные уведомления» of the dashboard
     assert order_alerts.counts(conn, "gamma1")["red"] == 0                    # «Задача не подготовлена» is the office's, not the point's (2026-11-07)
-    point_rows = order_alerts.page_rows(conn, "gamma1", NOW)
+    point_rows = order_alerts.all_rows(conn, "gamma1", NOW)
     assert theirs["id"] in {r["order_id"] for r in point_rows}
     assert any(r.get("chat_row") and r["order_id"] is None and "Есть шины" in r["text"] for r in point_rows)
 

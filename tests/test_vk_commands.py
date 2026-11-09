@@ -501,7 +501,8 @@ def test_the_arrival_is_a_yellow_record_for_the_bell_once(tmp_path):
     notes = [e for e in orders.list_events(conn, card) if e["text"].startswith("Поступили шины")]
     assert [(e["text"], e["level"]) for e in notes] == [
         ("Поступили шины по заказу №5000100 (точка «Бета»). Клиенту «можно забирать»: отправлено.", "yellow")]   # the owner 2026-10-23, п. 18
-    assert any(r["text"].startswith("Поступили шины по заказу №5000100") for r in order_alerts.page_rows(conn, "owner", NOW))
+    assert any(r["text"].startswith("Поступили шины по заказу №5000100") for r in order_alerts.all_rows(conn, "owner", NOW))
+    assert not any(r["text"].startswith("Поступили шины") for r in order_alerts.page_rows(conn, "owner", NOW))   # no row (2026-11-09)
 
 
 @pytest.mark.usefixtures("telegram_for_everything")       # the mechanics of Telegram: the setting of critical.py off (test_critical.py: the rule)

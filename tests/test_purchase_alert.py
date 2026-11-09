@@ -176,6 +176,8 @@ def test_the_cycle_tells_the_change_after_the_publication_and_no_longer_the_old_
 # --- колокольчик и страница ----------------------------------------------------------------------------------------------------------
 
 def test_the_bell_has_one_red_row_until_handled_and_only_for_who_may_see_the_purchase(tmp_path):
+    """The owner 2026-11-09: «Закупка изменилась» is no row of «Уведомления» nor of the bell (it goes to Telegram and VK: cli._alert_purchase);
+    its row is still computed for who may see the purchase (purchase_alert.bell_rows) and «Разобрался» still answers."""
     app, conn, _ids = _gone_app(tmp_path)
     assert purchase_alert.collect(conn, DAY) is None                             # первый запуск
     _cycle(conn, "2026-11-06T09:00:00", **{"100": 5200.0})
@@ -185,16 +187,14 @@ def test_the_bell_has_one_red_row_until_handled_and_only_for_who_may_see_the_pur
     zaman, _c = person(app, "partner")
     olya, _c = person(app, "chats")
     owner, tok = _owner(app)
-    feed = owner.get("/alerts/feed").get_json()
-    mine = [i for i in feed["items"] if i["title"] == "Закупка изменилась"]
-    assert feed["red"] and len(mine) == 1 and mine[0]["href"] == "/prices/purchase/%d" % second["id"]
-    page = owner.get("/alerts").get_data(as_text=True)
-    assert 'action="/alerts/purchase/%d/ack"' % second["id"] in page and "ещё 1" in page
-    assert not [i for i in olya.get("/alerts/feed").get_json()["items"] if i["title"] == "Закупка изменилась"]
-    assert [i for i in zaman.get("/alerts/feed").get_json()["items"] if i["title"] == "Закупка изменилась"]
+    mine = purchase_alert.bell_rows(conn, "owner")
+    assert len(mine) == 1 and mine[0]["href"] == "/prices/purchase/%d" % second["id"] and mine[0]["more"] == 1
+    assert purchase_alert.bell_rows(conn, "chats1") == [] and purchase_alert.bell_rows(conn, "partner1")
+    for client in (owner, zaman, olya):                                         # no row of the bell, nor of the page (2026-11-09)
+        assert not [i for i in client.get("/alerts/feed").get_json()["items"] if i["title"] == "Закупка изменилась"]
+        assert "/alerts/purchase/" not in client.get("/alerts").get_data(as_text=True)
     assert post(owner, "/alerts/purchase/%d/ack" % second["id"], tok).status_code == 302
-    assert not [i for i in owner.get("/alerts/feed").get_json()["items"] if i["title"] == "Закупка изменилась"]
-    assert [i for i in zaman.get("/alerts/feed").get_json()["items"] if i["title"] == "Закупка изменилась"]      # у каждого своё
+    assert purchase_alert.bell_rows(conn, "owner") == [] and purchase_alert.bell_rows(conn, "partner1")      # у каждого своё
     assert first["id"] < second["id"]
 
 

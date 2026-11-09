@@ -222,7 +222,7 @@ def test_a_call_of_the_client_is_a_line_and_an_alert_in_the_open_order(tmp_path)
     chats.sync_account(conn, client, account, "2026-10-13T12:05:00")
     events = [(e["text"], e["level"]) for e in orders.list_events(conn, card) if e["text"].startswith("Клиент звонил")]
     assert events == [("Клиент звонил: Звонок через Авито: пропущен", "yellow")]
-    assert "Клиент звонил: Звонок через Авито: пропущен" in [a["text"] for a in order_alerts.page_rows(conn, "owner")]
+    assert "Клиент звонил: Звонок через Авито: пропущен" in [a["text"] for a in order_alerts.all_rows(conn, "owner")]
     chats.sync_account(conn, client, account, "2026-10-13T12:06:00")                            # read again: no second record of the same call
     assert len([e for e in orders.list_events(conn, card) if e["text"].startswith("Клиент звонил")]) == 1
 

@@ -124,7 +124,7 @@ def test_ack_on_a_record_that_is_not_red_is_refused(tmp_path):
 
 
 def test_client_messages_are_one_alert_per_order(tmp_path):
-    """The folding is of page_rows (the dots by the order numbers still see the chat records); the page keeps of them the red only."""
+    """The folding is of all_rows; page_rows (the page, the bell, the dots) keeps of the chat records the red only (2026-11-05, 2026-11-09)."""
     app, client, tok, conn = setup(tmp_path)
     cid = card(conn)
     other = card(conn, "Пётр")
@@ -135,7 +135,8 @@ def test_client_messages_are_one_alert_per_order(tmp_path):
     event(conn, cid, "chat", "Отправлен ответ клиенту: да", level="green")
     event(conn, other, "chat", "Клиент написал после закрытия сделки (3)")
     red = event(conn, cid, "chat", "Позиция не добавлена: нет кода")             # red stays on its own
-    rows = alerts.page_rows(conn, "owner", NOW)
+    assert [r["id"] for r in alerts.page_rows(conn, "owner", NOW)] == [red]
+    rows = alerts.all_rows(conn, "owner", NOW)
     folded = [r for r in rows if r["text"].startswith("Отправлен ответ клиенту")]
     assert [(r["more"], r["level"]) for r in folded] == [(2, "yellow")]         # the most important colour of the folded records
     assert [r["text"] for r in rows if r["order_id"] == other] == ["Клиент написал после закрытия сделки (3)"]

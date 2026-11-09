@@ -75,8 +75,9 @@ def test_a_critical_alert_goes_to_telegram_to_vk_of_who_has_it_and_to_the_bell(t
     text = "Tires Sync: цикл завершился с ошибками.\nОсновной: фид не принят"
     assert cli._alert(conn, box, text, critical=True) is True
     assert http.tg == ["1000"] and http.vk == [("501", text)]
-    rows = order_alerts.page_rows(conn, "second1", NOW)
+    rows = order_alerts.all_rows(conn, "second1", NOW)
     assert [(r["kind"], r["level"], r["text"]) for r in rows] == [("critical", "red", text)]
+    assert order_alerts.page_rows(conn, "second1", NOW) == []                     # no row of the bell since 2026-11-09: Telegram, VK
     assert critical.without_vk(conn, order_alerts.owner_people(conn)) == ["second1"]
 
 
@@ -143,8 +144,9 @@ def test_an_order_alert_is_no_longer_sent_to_telegram_it_is_on_the_persons_own_b
     card = orders.get_card(conn, orders.create_card(conn, {"client_name": "Иван", "responsible": "worker2"}, NOW, "owner"))
     how = order_notify.deliver(conn, box, card, "Резерв на точке заканчивается", NOW, tg_http=http, vk_http=http)
     assert how == "в колокольчике (worker2)" and http.tg == []
-    rows = [r for r in order_alerts.page_rows(conn, "worker2", NOW) if r["kind"] == "staffnote"]
+    rows = [r for r in order_alerts.all_rows(conn, "worker2", NOW) if r["kind"] == "staffnote"]
     assert [(r["level"], r["text"]) for r in rows] == [("red", "Заказ №%d: Резерв на точке заканчивается" % card["id"])]
+    assert order_alerts.page_rows(conn, "worker2", NOW) == []                      # a note of an order: no row since 2026-11-09
     assert order_alerts.page_rows(conn, "second1", NOW) == []                          # не его
     journal = [e["text"] for e in orders.list_events(conn, card["id"]) if e["kind"] == "notify"]
     assert journal == ["Оповещение в колокольчике: worker2 (в Telegram только критичное)"]   # без текста: журнал может читать точка
@@ -164,8 +166,9 @@ def test_an_alert_of_a_point_account_order_for_the_staff_reaches_them_and_not_th
     order_notify.set_user_chat(conn, "zamantyres", "555", NOW, "owner")
     how = order_notify.deliver(conn, box, order_manager.staff_card(conn, theirs), "Клиент не пришёл", NOW, tg_http=http, vk_http=http)
     assert how == "в колокольчике (zamantyres)" and http.tg == [] and http.vk == []          # ни Telegram, ни ВК точки
-    assert [r["text"] for r in order_alerts.page_rows(conn, "zamantyres", NOW) if r["kind"] == "staffnote"] == [
+    assert [r["text"] for r in order_alerts.all_rows(conn, "zamantyres", NOW) if r["kind"] == "staffnote"] == [
         "Заказ №%d: Клиент не пришёл" % theirs["id"]]
+    assert not [r for r in order_alerts.page_rows(conn, "zamantyres", NOW) if r["kind"] == "staffnote"]     # no row (2026-11-09)
     assert all("Клиент не пришёл" not in e["text"] for e in orders.list_events(conn, theirs["id"]))
 
 
@@ -179,7 +182,8 @@ def test_a_person_without_a_telegram_chat_gets_the_order_alert_on_the_bell_too(t
     chat(conn, POINT_ACCOUNT, theirs["id"])
     how = order_notify.deliver(conn, box, order_manager.staff_card(conn, theirs), "Клиент не пришёл", NOW, tg_http=http, vk_http=http)
     assert how == "в колокольчике (zamantyres)" and http.tg == []
-    assert any(r["kind"] == "staffnote" and "Клиент не пришёл" in r["text"] for r in order_alerts.page_rows(conn, "zamantyres", NOW))
+    assert any(r["kind"] == "staffnote" and "Клиент не пришёл" in r["text"] for r in order_alerts.all_rows(conn, "zamantyres", NOW))
+    assert not any("Клиент не пришёл" in r["text"] for r in order_alerts.page_rows(conn, "zamantyres", NOW))   # no row (2026-11-09)
 
 
 def test_a_failed_alert_of_a_point_account_order_reaches_both_owners_bell(tmp_path, monkeypatch):
@@ -325,7 +329,7 @@ def test_the_bell_row_of_the_critical_goes_on_разобрался(tmp_path):
     assert critical.bell_rows(conn, "second1") == []
     client = app.test_client()
     tok = login(client)
-    assert "Tires Sync: второй сбой" in client.get("/alerts").get_data(as_text=True)
+    assert "Tires Sync: второй сбой" not in client.get("/alerts").get_data(as_text=True)   # no row of the page since 2026-11-09
     assert post(client, rows[0]["ack_href"], tok).status_code == 302
     assert critical.bell_rows(conn, "owner") == []
 
@@ -357,7 +361,8 @@ def test_a_purchase_change_goes_to_vk_of_who_may_see_it_with_its_own_bell_row_on
     cli._alert_purchase(conn, box, now=NOW)
     assert sorted(p for p, _ in http.vk) == ["501", "504"] and all("Закупка у поставщика изменилась" in t for _, t in http.vk)
     assert audit(conn, "critical") == []                                         # своя красная строка у закупки, второй не нужно
-    assert [r["kind"] for r in order_alerts.page_rows(conn, "partner1", NOW) if r["level"] == "red"] == ["purchase"]
+    assert [r["kind"] for r in order_alerts.all_rows(conn, "partner1", NOW) if r["level"] == "red"] == ["purchase"]
+    assert order_alerts.page_rows(conn, "partner1", NOW) == []                    # no row of the bell since 2026-11-09: VK, Telegram
 
 
 # --- по второму ревью ----------------------------------------------------------------------------------------------------------------
