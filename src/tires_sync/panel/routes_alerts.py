@@ -312,9 +312,9 @@ def register(app):
                 taken += 1
                 done_rows.add(row_of[id(row)])
             else:
-                accepted.setdefault(row["order_id"], []).append(row["id"])
-                done_rows.add(row_of[id(row)])
-        for order_id, ids in accepted.items():
+                accepted.setdefault(row["order_id"], []).append(row)
+        for order_id, taken_rows in accepted.items():
+            ids = [r["id"] for r in taken_rows]
             # «seen» is a mark up to a record: an open handed-over client of the order (its button «Взять в работу» is its own) must not fall
             # under it, so the mark stops below the first one (what is above it stays). The point never sees these rows: no block for it.
             blocks = [] if own_point() is not None else [e["id"] for e in order_alerts.open_alerts(conn, login, order_id)
@@ -323,6 +323,7 @@ def register(app):
             if top:
                 order_alerts.mark_seen(conn, login, order_id, now, max(top))
                 taken += len(top)
+                done_rows.update(row_of[id(r)] for r in taken_rows if r["id"] in top)    # a row counts when a record of it is taken
         conn.commit()
         flash("Принято уведомлений: %d." % len(done_rows), "ok")         # the rows of the page, as its button counts (п. 31)
         return redirect("/alerts")
