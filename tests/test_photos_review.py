@@ -417,3 +417,49 @@ def test_models_tab_splits_generated_and_not_by_brand(tmp_path):
     assert "Ready One" in done and "Fresh One" not in done
     every = models_page(c, "all")
     assert "Ready One" in every and "Fresh One" in every and "готово 1 из 2" in every
+
+
+# --- frames 3 and 4 of the ad: the card and the close-up made from the approved three-quarter frame ---
+
+def add_derived(conn, account_id, kind, photo_id, variant=""):
+    conn.execute("INSERT INTO account_photo (account_id, source_photo_id, kind, variant, photo_id) VALUES (?,1,?,?,?)",
+                 (account_id, kind, variant, photo_id))
+
+
+def extra_block(page):
+    return page[page.index('data-extra-frames'):] if 'data-extra-frames' in page else ""
+
+
+def test_review_shows_the_cards_and_the_close_up_of_a_set(tmp_path):
+    app, conn = make(tmp_path)
+    add_derived(conn, 1, "crop", 3)
+    add_derived(conn, 1, "card", 2, "205/55 R16 94T|x1")
+    add_derived(conn, 1, "card", 3, "205/55 R16 94T|x4")
+    add_derived(conn, 2, "card", 1, "205/55 R16 94T|x1")            # another account's copy: not shown twice
+    conn.commit()
+    c = app.test_client()
+    login(c)
+    block = extra_block(c.get("/photos/review?tab=pending").get_data(as_text=True))
+    assert "Карточка" in block and "Крупный план" in block
+    assert block.count('src="http://localhost/photos/%064x.jpg"' % 3) == 2           # the close-up and the x4 card
+    assert 'src="http://localhost/photos/%064x.jpg"' % 2 in block and 'src="http://localhost/photos/%064x.jpg"' % 1 not in block
+    assert "205/55 R16 94T · 1 шт." in block and "205/55 R16 94T · комплект 4 шт." in block
+    assert "/photos/frame/" not in block                                             # view only: no approve buttons
+
+
+def test_review_has_no_extra_block_without_the_frames(tmp_path):
+    app, conn = make(tmp_path)
+    c = app.test_client()
+    login(c)
+    page = c.get("/photos/review?tab=pending").get_data(as_text=True)
+    assert "data-extra-frames" not in page and "Крупный план" not in page
+
+
+def test_review_close_up_alone_has_no_card_caption(tmp_path):
+    app, conn = make(tmp_path)
+    add_derived(conn, 2, "crop", 3)                                  # only a non-primary account has files
+    conn.commit()
+    c = app.test_client()
+    login(c)
+    block = extra_block(c.get("/photos/review?tab=pending").get_data(as_text=True))
+    assert "Крупный план" in block and "Карточка" not in block

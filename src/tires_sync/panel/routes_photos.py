@@ -38,16 +38,39 @@ def review_rows(conn, tab: str, base: str) -> list:
     for f in _dicts(conn, "SELECT * FROM set_frame ORDER BY id"):
         if f["set_key"] not in sets:
             continue
-        derived = [{"account_id": a["account_id"], "kind": a["kind"], "url": _thumb(conn, base, a["photo_id"])}
+        derived = [{"account_id": a["account_id"], "kind": a["kind"], "variant": a["variant"], "url": _thumb(conn, base, a["photo_id"])}
                    for a in _dicts(conn, "SELECT * FROM account_photo WHERE source_photo_id=? ORDER BY kind, account_id", (f["photo_id"],))]
         sets[f["set_key"]]["frames"].append(dict(f, url=_thumb(conn, base, f["photo_id"]), derived=derived))
     rows = []
     for s in sets.values():
+        s["extra"] = extra_frames(s["frames"])
         st = {(f["kind"]): f["status"] for f in s["frames"] if f["status"] == "approved"}
         pending = any(f["status"] == "pending" for f in s["frames"])
         if (tab == "pending" and pending) or (tab == "approved" and len(st) == 2) or (tab == "decision" and s["state"] == "needs_decision"):
             rows.append(s)
     return rows
+
+
+def card_variant_text(variant: str) -> str:
+    """`205/55 R16 94T|x4` -> `205/55 R16 94T · комплект 4 шт.` (`photo_library.card_variant`)."""
+    size, _, pack = variant.rpartition("|")
+    return "%s · %s" % (size, "комплект 4 шт." if pack == "x4" else "1 шт.") if size else variant
+
+
+def extra_frames(frames: list) -> dict:
+    """Frames 3 and 4 of the ad, made automatically from the approved three-quarter frame: {"cards": [{variant, text, url}], "crop": url}.
+    One account's files: the primary account's when it has them, else the smallest account id. Empty when nothing is made yet."""
+    source = next((f for f in frames if f["kind"] == "three_quarter" and f["status"] == "approved"), None)
+    made = [d for d in (source["derived"] if source else []) if d["kind"] in ("card", "crop") and d["url"]]
+    if not made:
+        return {}
+    ids = {d["account_id"] for d in made}
+    account = connections.PRIMARY_ACCOUNT if connections.PRIMARY_ACCOUNT in ids else min(ids)
+    mine = [d for d in made if d["account_id"] == account]
+    cards = sorted(({"variant": d["variant"], "text": card_variant_text(d["variant"]), "url": d["url"]} for d in mine if d["kind"] == "card"),
+                   key=lambda c: c["variant"])
+    crop = next((d["url"] for d in mine if d["kind"] == "crop"), None)
+    return {"cards": cards, "crop": crop}
 
 
 CLASS_TEXT = {"r15_18": "R15–R18", "r19p": "R19+"}
