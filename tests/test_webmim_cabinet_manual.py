@@ -327,3 +327,23 @@ def test_a_point_cannot_save_the_order_window(tmp_path, monkeypatch):
     sign_in(client, conn, "gamma")
     assert client.post("/orders/%d/save" % mine, data={"csrf": "tok", "webmim_number": "5001"}).status_code == 403
     assert orders.get_card(conn, mine)["webmim_number"] == "" and not cabinet.calls
+
+
+# ---- the review 2026-11-09 and the owner's decisions -------------------------------------------------------------------------------------
+
+def hourly(conn, cabinet, now=LATER, deliver=None, vk=None):
+    deliver, vk = deliver if deliver is not None else Deliver(), vk if vk is not None else FakeVk()
+    client = cabinet_of(cabinet)()
+    with client:
+        tail = webmim_cabinet.safe_hourly(conn, client, "prod", now,
+                                          lambda card_id: order_placed.send_waiting(conn, card_id, now, "почасовое чтение WebMIM", deliver, vk))
+    return tail, deliver, vk
+
+
+def test_the_hourly_reading_never_reads_a_number_with_more_than_digits(tmp_path):
+    conn, mine = manual(tmp_path, number="5001/2")                    # «5001/2» is not WebMIM's 50012
+    cabinet = Cabinet([row(50012)])
+    tail, deliver, vk = hourly(conn, cabinet)
+    assert tail == "" and orders.get_card(conn, mine)["transfer_number"] == ""
+    assert not deliver.sent and not vk.sent and ("GET", "/api/v3/orders") not in cabinet.calls
+

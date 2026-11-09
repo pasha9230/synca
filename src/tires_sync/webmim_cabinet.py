@@ -56,6 +56,12 @@ def _number(value) -> str:
     return text if text.isascii() and text.isdigit() else ""
 
 
+def _typed(value) -> str:
+    """A WebMIM number as typed into the order (a «№» and spaces around the digits at most): its digits, else '' («5001/2» is never
+    read as 50012)."""
+    return _number(str(value or "").strip().lstrip("№").strip())
+
+
 def _text(value) -> str:
     if isinstance(value, dict):
         for key in ("name", "title", "description", "text", "value", "code"):
@@ -222,14 +228,12 @@ def after_save(conn, card_id: int, client_of: Callable[[], object], now: str, se
     around them at most: «5001/2» is never read as 50012). Not there yet, no invoice yet: a grey record once, the hourly reading takes it;
     a failure: a grey record once (note). The window's GAP holds here too (sessions are limited): within it, a grey record of its own
     and the hourly reading. (what became of it, the lines of the send)."""
-    from . import webmim_match
     if not enabled(conn):
         return "off", []
-    typed = str(orders._row(conn, card_id)["webmim_number"] or "").strip().lstrip("№").strip()
-    number = _number(typed)
+    number = _typed(orders._row(conn, card_id)["webmim_number"])
     if not number:
         return "no-number", []
-    if _targets(conn, SERVER).get(webmim_match.digits(typed)) != card_id:
+    if _targets(conn, SERVER).get(number) != card_id:
         return "off", []
     client = client_of()
     if client is None:
@@ -369,14 +373,14 @@ def _own_number(conn, card_id: int, number: str) -> bool:
 
 def _targets(conn, server: str) -> Dict[str, int]:
     """WebMIM number → the open order of the panel without a transfer number (not one of another server, nor a borrowed number; a number
-    of two orders is left alone: a person sorts it)."""
+    of two orders is left alone: a person sorts it). The key as after_save reads it (_typed): «5001/2» is no number of WebMIM's."""
     from . import oth_sale, webmim_match
     kinds = {s["id"]: s["kind"] for s in orders.list_stages(conn)}
     elsewhere = webmim_match.made_elsewhere(conn, server) | oth_sale.borrowed_ids(conn)
     seen: Dict[str, List[int]] = {}
     for card_id, number, transfer, stage in conn.execute(
             "SELECT id, webmim_number, transfer_number, stage_id FROM order_card WHERE webmim_number != ''"):
-        key = webmim_match.digits(number)
+        key = _typed(number)
         if key:
             seen.setdefault(key, []).append(card_id if (not transfer and kinds.get(stage) == "open" and card_id not in elsewhere) else 0)
     return {k: v[0] for k, v in seen.items() if len(v) == 1 and v[0]}
