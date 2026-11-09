@@ -118,20 +118,29 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, 
     shown = sorted({1, pages} | set(range(max(1, page - 4), min(pages, page + 4) + 1)))       # a window of pages, not hundreds
     pager = {n: base + "?" + urlencode(here + [("p", n)]) for n in shown} if pages > 1 else {}
     out = dict(rows=rows, brands=cc.brand_list(items), f=f, total=total, page=page, pages=pages, sort_links=sort_links, pager=pager,
-               seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart, view=view, view_links=view_links)
+               seasons=cc.SEASONS, empty=not items, base=base, tochki_hidden=tochki_stale(app, conn), cart=cart, view=view, view_links=view_links,
+               size={k: " ".join(map(str, v)) for k, v in (("w", f.widths), ("h", f.heights), ("d", f.diameters))},
+               size_options=cc.size_values(items), filters_reset=_reset_link(base, here))
     if new:
         out.update(_new_catalog(base, f, here, items))
     return out
 
 
+def _reset_link(base: str, here: list) -> str:
+    """«Сбросить» of the filters: the view, the sort and the folding stay, every filter goes."""
+    reset = [kv for kv in here if kv[0] in ("v", "sf", "o", "r")]
+    return base + ("?" + urlencode(reset) if reset else "")
+
+
 def _new_catalog(base: str, f, here: list, items) -> dict:
-    """The parts of the catalog only «Новый вид» draws: the values of the size chips, the chips of the filters on (each a link without
-    it), the links folding and opening the filters (the owner 2026-10-31 п. 25: the catalog takes the whole width)."""
+    """The parts of the catalog only «Новый вид» draws: the chips of the filters on (each a link without
+    it), «Сбросить»."""
     labels = dict(cc.brand_list(items))
     num = lambda v: str(v).strip().upper().lstrip("R")
-    acts = {"w": lambda v: num(v).isdigit() and int(num(v)) in f.widths and "ширина %s" % num(v),
-            "h": lambda v: num(v).isdigit() and int(num(v)) in f.heights and "высота %s" % num(v),
-            "d": lambda v: num(v).isdigit() and int(num(v)) in f.diameters and "R%s" % num(v),
+    of = lambda v, chosen: [t for t in (num(x) for x in re.split(r"[\s,;]+", str(v))) if t.isdigit() and int(t) in chosen]   # «205 215» typed
+    acts = {"w": lambda v: of(v, f.widths) and "ширина %s" % " ".join(of(v, f.widths)),
+            "h": lambda v: of(v, f.heights) and "профиль %s" % " ".join(of(v, f.heights)),
+            "d": lambda v: of(v, f.diameters) and " ".join("R" + t for t in of(v, f.diameters)),
             "s": lambda v: v == f.season and cc.SEASONS[v], "t": lambda v: v == f.studs and {"studded": "Шипы", "friction": "Без шипов"}[v],
             "wh": lambda v: f.warehouse and v == str(f.warehouse) and "Склад %s" % v,
             "b": lambda v: cc.bare_brand(v) in f.brands and labels[cc.bare_brand(v)],
@@ -143,12 +152,7 @@ def _new_catalog(base: str, f, here: list, items) -> dict:
         if label:
             rest = [kv for kv in here if kv != (k, v)]
             chips.append((label, base + ("?" + urlencode(rest) if rest else "")))
-    folded = request.args.get("sf") == "0"
-    keep = [kv for kv in here if kv[0] != "sf"]
-    side_links = {"fold": base + "?" + urlencode(keep + [("sf", "0")]), "open": base + ("?" + urlencode(keep) if keep else "")}
-    reset = [kv for kv in here if kv[0] in ("v", "sf", "o", "r")]
-    return dict(new=True, sizes=cc.size_values(items), chips=chips, folded=folded, side_links=side_links,
-                reset_link=base + ("?" + urlencode(reset) if reset else ""))
+    return dict(new=True, chips=chips, reset_link=_reset_link(base, here))
 
 
 def _page(template: str, conn, login: str, **values):

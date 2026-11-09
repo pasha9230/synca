@@ -409,3 +409,15 @@ body.shop span.shop2-tile-img{display:flex;align-items:center;justify-content:ce
   .shop2-sheet-ph{height:220px}
   .shop2-sheet-ph img{max-height:220px}
 }
+
+/* the catalog's filters in one card above the rows (_shop_filters.html, the owner 2026-11-09): the look of the office's catalog
+   (office2-pages.css .o2-frow, .o2 .o2-filters); the rows take the whole width; a phone: the fields wrap, nothing scrolls sideways */
+.shop-o2f{--o2-text-2:var(--gray-600);margin-bottom:16px;min-width:0}
+.shop-o2f .o2-cat-filters{margin:0}
+.shop-cat--top{display:block}
+@media (max-width:720px){
+  .shop-o2f .o2-filters{padding:12px}
+  .shop-o2f .o2-frow{gap:10px 12px}
+  .shop-o2f .o2-fwide{flex:1 1 100%;min-width:0}
+  .shop-o2f .seg{max-width:100%;flex-wrap:wrap}
+}
