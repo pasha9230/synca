@@ -128,6 +128,13 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .p2w .mp-text{white-space:pre-line;font-size:13px;color:var(--p2-text-2)}
 .p2w .mp-note-text{white-space:pre-line;overflow-wrap:anywhere}
 .p2w .mp-until--late{color:var(--p2-err);font-weight:500}
+/* «На ОТХ» (the owner 2026-11-09): a block of each position, «Кол-во» and «Цена» under the name; «Подробнее»: a block of each position */
+.p2-oth-item{display:flex;flex-direction:column;gap:1px}
+.p2-oth-item + .p2-oth-item{margin-top:8px}
+.p2-q2{font-size:13px;color:var(--p2-text-2)}
+.p2-q2[data-oth-price]{font-weight:600;color:var(--p2-text)}
+.p2w .mp-item{display:flex;flex-direction:column;gap:1px;overflow-wrap:anywhere}
+.p2w .mp-item[data-item]{padding-top:6px;border-top:1px dashed var(--p2-border-2)}
 .p2-hints{margin-top:12px}
 
 /* «Передать клиента», «Переданные клиенты», «Звонки» */

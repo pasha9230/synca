@@ -10,8 +10,8 @@ one), never in the template. «Передать клиента» (a POST to the 
 it. «Оповещения» (a line under the search, the list on ?notes=1) shows the alerts the bot did not write to a point in the panel
 (order_points.notes); the bot's answers to the clients are not shown to the point (the owner 2026-10-30). /my-point/feed is what notify.js asks every
 half a minute for the sound and the browser's notification: the orders of the point, its notes and the rows of its bell (one source with it).
-The owner 2026-10-26: counters at the top; one list, newest first by the order's last event that matters to the point (_cards); the card's text is
-the VK message «Менеджеру: заказ оформлен» (its template, with the client's prices: the point takes the cash; never the purchase); «Возврат» of an order at the
+The owner 2026-10-26: counters at the top; one list, newest first by the order's last event that matters to the point (_cards); «Подробнее» of a card
+was the VK message «Менеджеру: заказ оформлен», since 2026-11-09 its positions line by line (point_lines: the client's prices, never the purchase); «Возврат» of an order at the
 point has no button since 2026-11-02 (the VK «возврат отдал» stays); the question of the last day of the reservation (order_reserve, asked in VK) is answered
 here too: «Выдан» is «выдал», «На точке» is «на точке» (order_reserve.here), one answer whichever comes first. The owner 2026-11-02: the
 question of the seventh day on «На ОТХ» («Выдали» / «На точке», order_oth), and «Отменить» of a press that moved an order (point_log.undo)."""
@@ -23,7 +23,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_sale, order_placed, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
@@ -89,15 +89,6 @@ def tel(phone) -> str:
     """The phone as a tel: address (digits and a leading plus only)."""
     digits = re.sub(r"\D", "", str(phone or ""))
     return ("+" if str(phone or "").strip().startswith("+") else "") + digits if digits else ""
-
-
-def vk_text(conn, card: dict, now: str) -> str:
-    """What the VK message «Менеджеру: заказ оформлен» says of the order: the owner's template of that name (as order_placed sends it), else
-    the sample; a value the order lacks is left out, as in the message."""
-    row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = 'manager' ORDER BY id LIMIT 1",
-                       (order_placed.POINT_TEMPLATE,)).fetchone()
-    body = row[0] if row else next(b for name, _a, b in templates.SAMPLES if name == order_placed.POINT_TEMPLATE)
-    return templates.render(conn, card, body, now)[0].strip()
 
 
 def _not_here(card: dict, what: str):
@@ -294,6 +285,20 @@ def issue_lines(card: dict) -> list:
     return lines + ["Клиент: %s" % (card["client_name"] or "без имени")]
 
 
+def point_lines(card: dict) -> list:
+    """The positions of «Подробнее» and of a card «На ОТХ» (the owner 2026-11-09): the supplier's name, its code (a tyre of the point has
+    none), the pieces, the price of one and the sum — the price written in the order (sale_unit; «бери цену, которую мы указывали в заказе
+    изначально»), never Avito's nor the purchase. A position given on to another order (0 pieces) is not here; no price given: no price."""
+    lines = []
+    for i in card["items"]:
+        if int(i["qty"] or 0) < 1:
+            continue
+        unit = float(i["sale_unit"] or 0)
+        lines.append({"name": i["name"], "code": "" if i["goods_id"] == orders.POINT_GOODS else str(i.get("code") or i["goods_id"] or ""),
+                      "qty": int(i["qty"]), "unit": unit if unit > 0 else None, "sum": unit * int(i["qty"]) if unit > 0 else None})
+    return lines
+
+
 def _issued(conn, point_id, today: str) -> list:
     """«Выдано» (the owner 2026-11-09): the orders of the point closed by a hand-out in the last ISSUED_DAYS, newest first — on
     «Выполнено», come there from «На точке» (or from the way: «Выдал» skips «Товар на точке», order_manager.ISSUE_FROM) by the point's
@@ -461,8 +466,10 @@ def register(app) -> None:
             cards.append({"card": card, "label": mgr.label(card), "tel": tel(card["client_phone"]), "here": code == "at_point", "oth": code in order_oth.RETURNING,
                           "tokens": {action: secrets.token_hex(12) for action in ACTIONS},          # every button is its own press
                           "until": date.fromisoformat(until).strftime("%d.%m") if until else "", "late": bool(until) and until < today,
+                          "hold": date.fromisoformat(until).strftime("%d.%m.%Y") if until else "",     # «Резерв: Хранение шин до …» (2026-11-09)
+                          "since": card["entered_at"], "lines": point_lines(card),     # «на точке с 07.11», «на ОТХ с 31.10»: the stage came then
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
-                          "text": orders.without_account_names(conn, vk_text(conn, card, now)), "asked": reserve.question_open(conn, card, now),
+                          "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
                           "ret_label": order_oth.point_label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "ret_state": order_oth.state_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",

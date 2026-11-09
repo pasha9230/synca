@@ -89,6 +89,12 @@
 .pt .mp-more summary{color:var(--pt-text-2);font-size:13px}
 .pt .mp-more .mp-btn{color:var(--pt-error-text)}
 .pt .mp-more-body .mp-text{font-size:13px;color:var(--pt-text-2)}
+/* «На ОТХ» and «Подробнее» (the owner 2026-11-09): a block of each position */
+.pt .mp-oth-item{display:flex;flex-direction:column;gap:1px}
+.pt .mp-oth-item + .mp-oth-item{margin-top:6px}
+.pt [data-oth-price]{font-weight:600;color:var(--pt-text)}
+.pt .mp-item{display:flex;flex-direction:column;gap:1px;overflow-wrap:anywhere}
+.pt .mp-item[data-item]{padding-top:6px;border-top:1px dashed var(--pt-border-2)}
 
 /* «Переданные клиенты» */
 .pt .mp-handoff{background:var(--pt-bg);border:1px solid var(--pt-border-2);border-radius:var(--pt-radius-card);box-shadow:none}

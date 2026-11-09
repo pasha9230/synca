@@ -63,7 +63,7 @@ def test_the_five_tabs_and_the_default_one(w):
 def test_each_tab_holds_its_own_orders(w):
     assert _cards(_page(w["point"], "/my-point?tab=moving")) == [w["made"]["moving"]]
     oth = _page(w["point"], "/my-point?tab=oth")
-    assert _cards(oth) == [w["made"]["oth"]] and "На ОТХ с" in oth and "срока продажи нет" in oth
+    assert _cards(oth) == [w["made"]["oth"]] and "на ОТХ с" in oth and "срока продажи нет" not in oth   # the day on the plaque (2026-11-09)
     assert "/my-point/%d/" % w["made"]["oth"] not in oth                                          # no press on our tyres at the point
     assert _cards(_page(w["point"], "/my-point?tab=return")) == [] and "Возвратов поставщику сейчас нет" in _page(w["point"], "/my-point?tab=return")
     r = w["point"].get("/my-point?tab=handed")                                                # the old tab: its section
