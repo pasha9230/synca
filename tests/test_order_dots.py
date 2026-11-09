@@ -77,7 +77,7 @@ def test_a_failing_count_does_not_break_the_page(tmp_path, monkeypatch):
         assert "\u2116%d" % cid in response.get_data(as_text=True)
 
 
-def test_an_older_red_beats_a_newer_yellow_and_green_has_its_colour(tmp_path):
+def test_an_older_red_beats_a_newer_yellow_and_green_lights_no_dot(tmp_path):
     app, client, conn = setup(tmp_path)
     mixed, calm = card(conn, "Смесь"), card(conn, "Спокойный")
     for cid in (mixed, calm):
@@ -85,8 +85,8 @@ def test_an_older_red_beats_a_newer_yellow_and_green_has_its_colour(tmp_path):
     conn.commit()
     event(conn, mixed, "notify", "Оповещение не отправлено: у точки нет ВК", level="red")    # older
     event(conn, mixed, "reserve", "Оповещение о конце резерва")                              # newer, yellow
-    event(conn, calm, "sale", "Продажа проведена: 20 000 ₽")                                 # green (a stage is no dot: 2026-11-06)
+    event(conn, calm, "sale", "Продажа проведена: 20 000 ₽")                                 # green: no action needed (п. 31, 2026-11-08)
     for url in ("/orders?v=list", "/orders"):
         found = dots(client.get(url).get_data(as_text=True))
         assert found[mixed] == ("red", "Нужно действие")
-        assert found[calm] == ("green", "Движется")
+        assert calm not in found                                     # the dots count what the bell counts (2026-11-06): no green row

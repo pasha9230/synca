@@ -232,16 +232,22 @@ def register(app):
     @app.route("/alerts/order/<int:order_id>/ack", methods=["POST"])
     @login_required
     def alerts_order_ack(order_id):
-        """«Разобрался» on the row of an order (order_alerts.by_order, п. 31): each red record of THIS person's row now, as a press on it
-        alone (order_alerts.ack); a record that came after loading, another person's or a point's never. Yellow ones stay until the order
-        is opened, as before."""
+        """«Разобрался» on the row of an order (order_alerts.by_order, п. 31): the red records the page showed (`seen` of its form) that are
+        still red records of THIS person's row of the order now, each as a press on it alone (order_alerts.ack); a record that came after
+        loading (the review 09.11), another person's or a point's never. Yellow ones stay until the order is opened, as before."""
         conn = get_conn()
+        wanted = set()
+        for i in request.form.getlist("seen"):
+            try:
+                wanted.add(int(i))
+            except ValueError:
+                pass
         now, login, taken = local_iso(), session["user"], 0
         for row in grouped(conn, login):
             if row.get("order_id") != order_id:
                 continue
             for member in members(row):
-                if member["level"] == "red" and isinstance(member["id"], int):
+                if member["level"] == "red" and isinstance(member["id"], int) and member["id"] in wanted:
                     try:
                         order_alerts.ack(conn, member["id"], login, now, author())
                         taken += 1
@@ -249,7 +255,7 @@ def register(app):
                         flash(str(err), "error")
         conn.commit()
         if not taken:
-            flash("Красных уведомлений по заказу №%d у вас уже нет." % order_id)
+            flash("Красных уведомлений по заказу №%d, которые были на странице, у вас уже нет." % order_id)
         return redirect("/alerts")
 
     @app.route("/alerts/purchase/<int:alert_id>/ack", methods=["POST"])
@@ -292,8 +298,10 @@ def register(app):
             except ValueError:
                 pass
         now, login = local_iso(), session["user"]
-        taken, accepted = 0, {}
-        for row in acceptable(grouped(conn, login)):
+        taken, accepted, done_rows = 0, {}, set()
+        rows_now = grouped(conn, login)
+        row_of = {id(m): (r.get("order_id"), r["id"]) for r in rows_now for m in members(r)}
+        for row in acceptable(rows_now):
             if row["id"] not in wanted:
                 continue
             if row["level"] == "red":
@@ -302,8 +310,10 @@ def register(app):
                 except order_alerts.AlertError:
                     continue
                 taken += 1
+                done_rows.add(row_of[id(row)])
             else:
                 accepted.setdefault(row["order_id"], []).append(row["id"])
+                done_rows.add(row_of[id(row)])
         for order_id, ids in accepted.items():
             # «seen» is a mark up to a record: an open handed-over client of the order (its button «Взять в работу» is its own) must not fall
             # under it, so the mark stops below the first one (what is above it stays). The point never sees these rows: no block for it.
@@ -314,5 +324,5 @@ def register(app):
                 order_alerts.mark_seen(conn, login, order_id, now, max(top))
                 taken += len(top)
         conn.commit()
-        flash("Принято уведомлений: %d." % taken, "ok")
+        flash("Принято уведомлений: %d." % len(done_rows), "ok")         # the rows of the page, as its button counts (п. 31)
         return redirect("/alerts")

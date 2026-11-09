@@ -65,6 +65,7 @@ def bell_row(row: dict) -> bool:
     return True
 
 
+GROUP_TEXTS = 3                                                  # by_order: the texts shown in an order's row, the rest is «ещё N»
 ACTION_LEVELS = ("red", "yellow")                                 # «Уведомления» of the office: only what needs an action (п. 31 of the audit)
 
 
@@ -100,8 +101,8 @@ def by_order(rows: List[dict]) -> List[dict]:
             text = str(member.get("text") or "")
             if text and text not in texts:
                 texts.append(text)
-        group = dict(newest, level=members[0]["level"], at=newest.get("at"), text=" · ".join(texts),
-                     more=sum(int(m.get("more") or 0) for m in item["rows"]), rows=members,
+        group = dict(newest, level=members[0]["level"], at=newest.get("at"), text=" · ".join(texts[:GROUP_TEXTS]),    # the first ones (red
+                     more=sum(int(m.get("more") or 0) for m in item["rows"]) + max(0, len(texts) - GROUP_TEXTS), rows=members,   # first), «ещё N»
                      title=next((m["title"] for m in members if m.get("title")), None))
         reds = [m for m in members if m["level"] == "red"]
         if len(reds) == 1 and reds[0].get("ack_href"):
