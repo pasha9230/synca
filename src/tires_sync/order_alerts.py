@@ -561,3 +561,38 @@ def order_levels(conn, login: str, now: Optional[str] = None) -> Dict[int, str]:
         if have is None or ALERT_LEVELS.index(row["level"]) < ALERT_LEVELS.index(have):
             result[order_id] = row["level"]
     return result
+
+
+CLEAR_ALL_AUTHOR = "очистка уведомлений"
+CLEAR_ALL_AUDIT = "alerts_clear_all"
+
+
+def clear_all(conn, now: str, logins: List[str], apply: bool = False, author: str = CLEAR_ALL_AUTHOR) -> Dict[str, int]:
+    """The owner 2026-11-09 «Почисти у всех уведомления»: every red record still open closes for everybody (resolve, as «Разобрался» for all),
+    every other record of the journal is seen by each of `logins` (mark_seen up to the last record of each order). Nothing is deleted; the
+    rows the bell computes from the state of now (a chat that waits, a lacking number) are not records and come back while their cause is
+    there. Counts only without `apply`; with it one line goes to the journal of actions (CLEAR_ALL_AUDIT). No commit."""
+    from . import store
+    start = _start(conn)
+    reds = []
+    for event_id, order_id, kind, text, level in conn.execute(
+            "SELECT e.id, e.order_id, e.kind, e.text, e.level FROM order_event e WHERE e.id > ? AND e.level IN ('', 'red') AND NOT EXISTS ("
+            "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (start, EVERYBODY)).fetchall():
+        if level_of({"id": event_id, "order_id": order_id, "kind": kind, "text": text or "", "level": level}) == "red":
+            reds.append(event_id)
+    orders_with = [r[0] for r in conn.execute("SELECT DISTINCT order_id FROM order_event WHERE id > ? AND order_id IS NOT NULL", (start,))]
+    people = [p for p in dict.fromkeys(logins) if p and p != EVERYBODY]
+    unseen = 0
+    for login in people:
+        for order_id in orders_with:
+            last = conn.execute("SELECT MAX(id) FROM order_event WHERE order_id = ?", (order_id,)).fetchone()[0]
+            seen = conn.execute("SELECT last_id FROM order_event_seen WHERE login = ? AND order_id = ?", (login, order_id)).fetchone()
+            if last is not None and (seen is None or seen[0] < last):
+                unseen += 1
+                if apply:
+                    mark_seen(conn, login, order_id, now)
+    if apply:
+        for event_id in reds:
+            resolve(conn, event_id, now, author)
+        store.write_audit(conn, now, author, CLEAR_ALL_AUDIT, {"red": len(reds), "seen": unseen, "people": len(people)})
+    return {"red": len(reds), "seen": unseen, "people": len(people)}

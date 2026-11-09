@@ -158,6 +158,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ar = sub.add_parser("alerts-resolve-done", help="закрыть красные записи «Задача не подготовлена» и «Сообщение … не отправлено» заказов, у которых та же задача уже выполнена (задачи, выполненные до автозакрытия); без --apply только показывает")
     ar.add_argument("--db", required=True)
     ar.add_argument("--apply", action="store_true", help="закрыть (сделайте копию базы до этого); без него ничего не пишется")
+    ac = sub.add_parser("alerts-clear-all", help="почистить уведомления у всех: красные записи закрыть для всех, остальные отметить прочитанными у каждого пользователя (ничего не удаляется); без --apply только считает")
+    ac.add_argument("--db", required=True)
+    ac.add_argument("--apply", action="store_true", help="записать (сделайте копию базы до этого); без него ничего не пишется")
     se = sub.add_parser("sheet-enroll", help="поставить в очередь Google-таблицы открытые заказы, оформленные до её включения (строки только добавляются; запуск вручную)")
     se.add_argument("--db", required=True)
     se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «На возврат»")
@@ -1271,6 +1274,21 @@ def _cmd_alerts_resolve_done(args) -> int:
     for event in found:
         print("№%d: %s" % (event["order_id"], event["text"].splitlines()[0][:160]))
     print("%s: %d" % ("закрыто" if args.apply else "будет закрыто (ничего не записано, нужен --apply)", len(found)))
+    return 0
+
+
+def _cmd_alerts_clear_all(args) -> int:
+    """alerts-clear-all (the owner 2026-11-09): order_alerts.clear_all for every person of the panel and the owners; without --apply it only counts."""
+    from . import order_alerts
+    conn = store.connect(args.db)
+    try:
+        logins = [r[0] for r in conn.execute("SELECT login FROM panel_user")] + order_alerts.owner_people(conn)
+        found = order_alerts.clear_all(conn, moscow_now().isoformat(timespec="seconds"), logins, apply=args.apply)
+        conn.commit()
+    finally:
+        conn.close()
+    print("людей: %d; красных записей закрыть для всех: %d; заказов отметить прочитанными (по людям): %d%s"
+          % (found["people"], found["red"], found["seen"], "" if args.apply else " — ничего не записано, нужен --apply"))
     return 0
 
 
@@ -3178,6 +3196,8 @@ def main(argv=None) -> int:
             return _cmd_orders_tick(args)
         if args.command == "alerts-resolve-done":
             return _cmd_alerts_resolve_done(args)
+        if args.command == "alerts-clear-all":
+            return _cmd_alerts_clear_all(args)
         if args.command == "orders-fill-responsible":
             return _cmd_orders_fill_responsible(args)
         if args.command == "sheet-enroll":
