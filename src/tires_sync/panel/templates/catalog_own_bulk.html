@@ -10,10 +10,11 @@
 {% if result.kept %}<li>Уже есть своя цена, не тронуто: {{ result.kept|length }} («изменить и их» — чтобы поменять).</li>{% endif %}
 {% for why, keys in result.skipped|dictsort %}<li data-own-bulk-skip="{{ why }}">Пропущено, {{ skips[why] }}: {{ keys|length }}.</li>{% endfor %}
 {% if result.same %}<li>Цена не меняется: {{ result.same|length }}.</li>{% endif %}
-{% if other %}<li>Пропущено, не позиции фида (нет в выгрузке или только для просмотра): {{ other }}.</li>{% endif %}</ul>{% endif %}
+{% if other %}<li>Пропущено, нет в выгрузке и не было в ней раньше: {{ other }}.</li>{% endif %}</ul>{% endif %}
 {% if gone %}<p class="small">Нет у поставщика: {{ gone }} {{ plural(gone, "позиция", "позиции", "позиций") }} — от последней известной закупки; на Авито такая позиция не уходит, пока её нет в выгрузке или в своём остатке.</p>{% endif %}
+{% if view %}<p class="small" data-own-bulk-view>Только для просмотра: {{ view }} {{ plural(view, "позиция", "позиции", "позиций") }} (4 точки до включения «в фид» или устаревшая вторая выгрузка) — цена начнёт действовать, когда позиция войдёт в фид аккаунта.</p>{% endif %}
 <div class="table-wrap"><table class="table"><thead><tr><th>Позиция</th><th>Аккаунт</th><th class="num">Закупка</th><th class="num">Было</th><th class="num">Станет</th><th>Своя цена</th><th></th></tr></thead><tbody>
-{% for r in rows[:shown] %}<tr data-own-bulk-row="{{ r.key }}"><td>{{ r.name }} <span class="muted xs mono">{{ r.code }}</span>{% if r.gone %} <span class="badge badge--neutral">нет у поставщика</span>{% endif %}</td><td>{{ r.account }}</td>
+{% for r in rows[:shown] %}<tr data-own-bulk-row="{{ r.key }}"><td>{{ r.name }} <span class="muted xs mono">{{ r.code }}</span>{% if r.gone %} <span class="badge badge--neutral">нет у поставщика</span>{% elif r.view %} <span class="badge badge--neutral">только просмотр</span>{% endif %}</td><td>{{ r.account }}</td>
 <td class="num">{% if r.purchase %}{{ r.purchase|money }}{% else %}—{% endif %}</td><td class="num">{% if r.was is not none %}{{ r.was|money }}{% else %}—{% endif %}</td>
 <td class="num"><b>{% if r.now is not none %}{{ r.now|money }}{% else %}—{% endif %}</b></td><td class="small">{{ own_price_text(r.value) }}</td>
 <td>{% for w in r.why %}<span class="badge badge--err">{{ w }}</span> {% endfor %}</td></tr>{% endfor %}

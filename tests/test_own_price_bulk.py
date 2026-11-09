@@ -85,7 +85,7 @@ def test_a_position_gone_from_the_unload_is_skipped_and_said(tmp_path):
     r = _bulk(client, tok, ["100", "nope"], [first])
     assert _changes(conn) == {"%d:100" % first: {"pct": 5.0}}
     page = client.get(r.headers["Location"]).get_data(as_text=True)
-    assert "только для просмотра): 1" in page
+    assert "нет в выгрузке и не было в ней раньше: 1" in page       # Id, которого нет нигде; только для просмотра — ставится (09.11)
 
 
 @pytest.mark.parametrize("form", [
