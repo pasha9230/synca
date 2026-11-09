@@ -801,6 +801,19 @@
     }
     window.setInterval(ask, 15000);
   })();
+  document.addEventListener("click", function (e) {   // «В лист ожидания» in the head of a chat: the form «Клиент ждёт эту шину» opens where it stands (the owner 2026-11-09)
+    var b = e.target.closest && e.target.closest("[data-chat-wait-open]"), box = document.getElementById("chat-wait");
+    if (!b || !box || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+    e.preventDefault();
+    var unfold = document.querySelector("[data-deal-unfold]");
+    if (unfold && !unfold.hidden) unfold.click();                // the old view: a folded order column comes back
+    box.open = true;
+    window.setTimeout(function () {                               // after the panel of the new view has opened and taken the focus
+      box.scrollIntoView({block: "nearest"});
+      var first = box.querySelector("input[name=brand]");
+      if (first) first.focus();
+    }, 0);
+  });
   (function () {                                    // «Чаты» of the new view: the order in a panel on the right (the owner 2026-11-04); #order in the address, so «Назад» closes it
     var panel = document.querySelector("[data-order-panel]");
     if (!panel) return;

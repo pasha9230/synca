@@ -36,6 +36,7 @@
 {% if can_post("chat_assign") %}<form method="post" action="/chats/{{ current.id }}/assign" class="row chat-assign" data-autosubmit>{{ keep }}<select class="select select--sm" name="responsible" aria-label="Ответственный за чат"><option value="">Ответственный: никто</option>{% for login, name in answerers %}<option value="{{ login }}"{% if current.responsible == login %} selected{% endif %}>Отвечает: {{ name }}</option>{% endfor %}</select><noscript><button class="btn btn--secondary btn--sm">Назначить</button></noscript></form>{% elif current.responsible %}<span class="small muted">Отвечает: {{ dict(answerers).get(current.responsible, current.responsible) }}</span>{% endif %}
 <div class="ml-auto row" style="gap:var(--s-2);align-items:center">
 <button type="button" class="btn btn--secondary btn--sm" data-deal-unfold aria-controls="chats-deal" hidden>‹ Заказ</button>
+{% if can_post("chat_wait") and (not deal or deal.before_placed) %}<a class="btn btn--secondary btn--sm" href="#chat-wait" data-chat-wait-open title="Какую шину ждёт клиент: форма заполнена шиной объявления">В лист ожидания</a>{% endif %}
 {{ handoff_button(handoff) }}
 {% if take %}<span class="badge badge--warn">передан с точки {{ take.point }}</span><form method="post" action="/chats/{{ current.id }}/take" class="inline" data-once>{{ keep }}<button class="btn btn--primary btn--sm">Взять клиента</button></form>{% endif %}
 {% if deal and can_post("chat_stage") %}<form method="post" action="/chats/{{ current.id }}/stage" class="row chat-stage" style="gap:var(--s-2);align-items:center" data-autosubmit>{{ keep }}
@@ -81,7 +82,7 @@
 {% if can_post("chat_link") %}<form method="post" action="/chats/{{ current.id }}/link" class="row" style="gap:var(--s-2)">{{ keep }}<input class="input input--num" name="order_id" placeholder="№ заказа" style="width:110px" inputmode="numeric" aria-label="Номер заказа"><button class="btn btn--secondary btn--sm">Привязать</button></form>{% endif %}</div>
 {% else %}<div class="card-head"><h3>Заказ</h3></div><div class="card-body"><p class="muted">Откройте чат, чтобы увидеть заказ.</p></div>{% endif %}
 {% if current and can_post("chat_wait") and (not deal or deal.before_placed) %}{% set w = current.wait.line %}
-<details class="card-body chat-wait"><summary class="btn btn--secondary btn--sm">Клиент ждёт эту шину</summary>
+<details class="card-body chat-wait" id="chat-wait"><summary class="btn btn--secondary btn--sm">Клиент ждёт эту шину</summary>
 <form method="post" action="/chats/{{ current.id }}/wait" class="stack" data-once style="margin-top:var(--s-3)">{{ keep }}
 <p class="small muted">{% if current.wait.source %}Заполнено из {{ current.wait.source }}: проверьте и поправьте.{% else %}Введите, какую шину ждёт клиент (бренд, размер, сезон, количество).{% endif %} Заказ по чату создастся сам, если его нет, и перейдёт в этап «Ожидает наличие».</p>
 <div class="grid-2"><label class="field"><span class="label">Бренд</span><input class="input" name="brand" value="{{ w.brand or '' }}" maxlength="60"></label>

@@ -48,8 +48,9 @@
 {% if deal %}<form method="post" action="/chats/{{ current.id }}/unlink">{{ keep }}<button class="menu-item">Отвязать от заказа №{{ deal.id }}</button></form>{% endif %}
 {% if can_post("chat_delete") %}<hr><form method="post" action="/chats/{{ current.id }}/delete" data-once data-confirm-title="Удалить чат {{ current.ref }}?" data-confirm="Чат с клиентом «{{ current.peer_name or 'Без имени' }}» уйдёт в «Удалённые» и больше не загрузится из Авито; вернуть его можно там. В самом Авито чат останется." data-confirm-ok="Удалить чат" data-confirm-danger>{{ keep }}<button class="menu-item menu-item--danger">Удалить чат…</button></form>{% endif %}{% endif %}
 </div></details>{% endif %}</div></div>
+{% set wait_ok = can_post("chat_wait") and (not deal or deal.before_placed) %}{# up to «Заказ оформлен» only (the owner 2026-11-08) #}
 <div class="o2-order-line">{% if deal %}<span class="o2-ol-text"><b>Заказ №{{ deal.id }}</b> · {{ deal.stage.name }}{% if deal['items'] %} · <b>{{ deal.totals.sale|money }}</b>{% endif %}</span><a class="btn btn--secondary btn--xs" href="/orders/{{ deal.id }}" data-order-panel-open aria-controls="order-panel">Открыть заказ</a>
-{% else %}<span class="o2-ol-text muted">Без заказа</span>{% if can_post("chat_create_deal") %}<form method="post" action="/chats/{{ current.id }}/create-deal" data-order-panel-after>{{ keep }}<button class="btn btn--primary btn--xs">Создать заказ</button></form>{% endif %}<button type="button" class="btn btn--secondary btn--xs" data-order-panel-open aria-controls="order-panel">Панель заказа</button>{% endif %}</div>
+{% else %}<span class="o2-ol-text muted">Без заказа</span>{% if can_post("chat_create_deal") %}<form method="post" action="/chats/{{ current.id }}/create-deal" data-order-panel-after>{{ keep }}<button class="btn btn--primary btn--xs">Создать заказ</button></form>{% endif %}<button type="button" class="btn btn--secondary btn--xs" data-order-panel-open aria-controls="order-panel">Панель заказа</button>{% endif %}{% if wait_ok %}<a class="btn btn--secondary btn--xs" href="#chat-wait" data-chat-wait-open data-order-panel-open aria-controls="order-panel" title="Какую шину ждёт клиент: форма заполнена шиной объявления">В лист ожидания</a>{% endif %}</div>
 {% if current.item_title %}<div class="chat-product o2-cl-product">
 <span class="muted">Объявление:</span><a class="strong o2-ad-name" href="{{ current.catalog_url }}" target="_blank" rel="noopener" title="{{ current.item_title }}">{{ current.item_title }}</a>
 <span class="o2-ad-links"><a class="btn btn--secondary btn--xs" href="{{ current.catalog_url }}" target="_blank" rel="noopener">В каталоге</a>
@@ -90,10 +91,9 @@
 {% if can_post("chat_create_deal") %}<form method="post" action="/chats/{{ current.id }}/create-deal">{{ keep }}<button class="btn btn--primary btn--sm">Создать заказ</button></form>{% endif %}
 {% if can_post("chat_link") %}<form method="post" action="/chats/{{ current.id }}/link" class="row" style="gap:var(--s-2)">{{ keep }}<input class="input input--sm input--num" name="order_id" placeholder="№ заказа" style="width:110px" inputmode="numeric" aria-label="Номер заказа"><button class="btn btn--secondary btn--sm">Привязать</button></form>{% endif %}</div>
 {% endif %}
-{% set wait_ok = can_post("chat_wait") and (not deal or deal.before_placed) %}{# up to «Заказ оформлен» only (the owner 2026-11-08) #}
 {% if wait_ok or may_callback() %}<div class="o2-panel-foot">
 {% if wait_ok %}{% set w = current.wait.line %}
-<details class="chat-wait"><summary class="btn btn--secondary btn--sm">{{ icon("clock", "i-sm") }}Клиент ждёт эту шину</summary>
+<details class="chat-wait" id="chat-wait"><summary class="btn btn--secondary btn--sm">{{ icon("clock", "i-sm") }}Клиент ждёт эту шину</summary>
 <form method="post" action="/chats/{{ current.id }}/wait" class="stack" data-once style="margin-top:var(--s-3)">{{ keep }}
 <p class="small muted">{% if current.wait.source %}Заполнено из {{ current.wait.source }}: проверьте и поправьте.{% else %}Введите, какую шину ждёт клиент (бренд, размер, сезон, количество).{% endif %} Заказ по чату создастся сам, если его нет, и перейдёт в этап «Ожидает наличие».</p>
 <div class="grid-2"><label class="field"><span class="label">Бренд</span><input class="input" name="brand" value="{{ w.brand or '' }}" maxlength="60"></label>
