@@ -379,3 +379,13 @@ def test_a_number_typed_again_after_the_release_is_new(tmp_path):
     (result, lines), deliver, vk = save(conn, mine, Cabinet([row(5002)]))
     assert result == "written" and len(deliver.sent) == 1 and len(vk.sent) == 1
 
+
+def test_no_sum_at_the_press_nothing_is_sent_by_the_button_either_a_yellow_record(tmp_path):
+    from test_webmim_cabinet import placed_order, poll
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001, total=None)])
+    assert orders.get_card(conn, mine)["transfer_number"] == "" and not deliver.sent and not vk.sent
+    result, deliver, vk = poll(conn, mine, Cabinet([row(5001, total=None)]))                   # the window writes it, tells nobody
+    assert result["result"] == "written" and orders.get_card(conn, mine)["transfer_number"] == INVOICE
+    assert not deliver.sent and not vk.sent and result["lines"] == [webmim_cabinet.NO_SUM % INVOICE]
+    assert (webmim_cabinet.NO_SUM % INVOICE, "yellow") in events(conn, mine)
+

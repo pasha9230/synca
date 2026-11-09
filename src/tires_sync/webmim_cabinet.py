@@ -203,6 +203,8 @@ def after_place(conn, card_id: int, client, now: str, server: str) -> str:
     seen = info(row) if row is not None else None
     if seen is None or not seen["invoice"]:
         return "wait"
+    if seen.get("sum") is None:                                           # the owner 2026-11-09: no sum, no message anywhere; as below
+        return "no-sum"
     if sum_differs(conn, card_id, seen):                                  # not before on_placed: the window's poll writes it, nothing is sent
         return "sum-differs"
     return write(conn, card_id, seen, now)
