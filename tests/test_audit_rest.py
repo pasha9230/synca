@@ -151,3 +151,11 @@ def test_the_menu_counts_the_account_the_chats_open_with(tmp_path):
     connections.set_responsible(conn, account, app.config["AUTHOR"], [app.config["AUTHOR"]], "2026-10-13T09:00:00", "o")
     page = client.get("/chats").get_data(as_text=True)
     assert _menu_chats(page) == 1 and "Ждут ответа <b>1</b>" in page              # the person's account: the same one in both
+
+
+def test_the_help_question_mark_has_one_tooltip():
+    """The owner 2026-11-09: «?» showed two tooltips (the CSS ::after of audit.css and app.js's [data-tip]); only app.js's is left."""
+    import pathlib
+    static = pathlib.Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static"
+    for css in static.glob("*.css"):
+        assert "content:attr(data-tip)" not in css.read_text().replace(" ", ""), css.name
