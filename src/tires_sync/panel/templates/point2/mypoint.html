@@ -13,8 +13,12 @@
 {% set hints = not hint_folded("point") %}
 {% set pin %}{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}{% endset %}
 {% set pq = ("&p=%d"|format(point.id)) if choose and point else "" %}
-{% set short = {"moving": "Едут", "here": "На точке", "oth": "ОТХ", "return": "Возврат"} %}
-{% macro press(c, row, action, label, cls, confirm_title="", confirm="", confirm_ok="") %}<form method="post" action="/my-point/{{ c.id }}/{{ action }}" data-once{% if confirm_title %} data-confirm-title="{{ confirm_title }}" data-confirm="{{ confirm }}" data-confirm-ok="{{ confirm_ok }}"{% endif %}><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens[action] }}">{{ pin }}<button class="btn {{ cls }} mp-btn">{{ label }}</button></form>{% endmacro %}
+{% set short = {"moving": "Едут", "here": "На точке", "oth": "ОТХ", "return": "Возврат", "issued": "Выдано"} %}
+{# a hand-out (the owner 2026-11-09) is confirmed with the order's number, the tyres and the client (routes_mypoint.issue_lines): the panel's
+   window sets confirm=yes (app.js); without the script the server asks on a page of its own (mypoint_confirm.html) #}
+{% macro press(c, row, action, label, cls, confirm_title="", confirm="", confirm_ok="") %}{% set sure = action in ("issued", "reserve_issued", "oth_issued") %}<form method="post" action="/my-point/{{ c.id }}/{{ action }}" data-once{% if confirm_title %} data-confirm-title="{{ confirm_title }}" data-confirm="{{ row.issue_lines|join('\n') if sure else confirm }}" data-confirm-ok="{{ 'Да, выдал' if sure else confirm_ok }}"{% if sure %} data-confirm-lines{% endif %}{% endif %}><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens[action] }}">{% if sure %}<input type="hidden" name="confirm" value="" data-confirm-field>{% endif %}{{ pin }}<button class="btn {{ cls }} mp-btn">{{ label }}</button></form>{% endmacro %}
+{# «Отменить» of the order's last press in its card (the owner 2026-11-09): the same route and window as the list «Отменить отметку» #}
+{% macro undo_btn(c, u, label) %}{% if u %}<form method="post" action="/my-point/{{ c.id }}/undo" data-once data-undo-card="{{ c.id }}" data-confirm-title="Отменить {{ u.name }} по заказу № {{ label }}?" data-confirm="Заказ вернётся туда, где был до отметки. {{ undo_hint }}" data-confirm-ok="Отменить"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--secondary btn--sm">Отменить {{ u.name }}</button></form>{% endif %}{% endmacro %}
 {% macro refuse(c, row) %}<details class="mp-refuse" data-refuse="{{ c.id }}"><summary class="btn btn--secondary mp-btn">ОТКАЗ</summary><form method="post" action="/my-point/{{ c.id }}/refuse" data-once data-confirm-title="Отказ по заказу № {{ row.label }}?" data-confirm="Заказ перейдёт на «На ОТХ»: шины остаются у вас нашим товаром. Клиенту ничего не уходит." data-confirm-ok="Да, отказ" data-confirm-danger><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ row.tokens['refuse'] }}">{{ pin }}<fieldset class="mp-refuse-why"><legend>Причина отказа</legend><label><input type="radio" name="reason" value="year" required> Старый год производства</label> <label><input type="radio" name="reason" value="size"> Ошиблись размером</label> <label><input type="radio" name="reason" value="other"> Другой</label> <input type="text" name="other" maxlength="200" placeholder="Другой: впишите причину" aria-label="Другая причина отказа"></fieldset><button class="btn btn--danger mp-btn">Отказ — на ОТХ</button></form></details>{% endmacro %}
 {% macro card(row) %}{% set c = row.card %}{% set who = ('Клиент ' ~ c.client_name) if c.client_name else 'Клиент' %}
 {% set hold = row.asked or row.oth_asked %}
@@ -42,6 +46,7 @@
 <div class="p2-ask-acts">{{ press(c, row, "reserve_issued", "Выдан", "btn--primary", "Выдать заказ № %s?"|format(row.label), who ~ " забрал заказ; он закроется.", "Выдан") }}{{ press(c, row, "reserve_here", "На точке", "btn--secondary") }}</div></div></div>{% endif %}
 {% if row.oth_asked %}<div class="mp-ask" role="note" data-oth-question="{{ c.id }}">{{ icon("warn") }}<div class="p2-ask-body"><b>{{ row.oth_question }}</b><span class="p2-sub">Заказ идёт на возврат поставщику. «Выдали» — клиент забрал заказ, возврат отменится; «На точке» — шины у вас, возврат идёт дальше.</span>
 <div class="p2-ask-acts">{{ press(c, row, "oth_issued", "Выдали", "btn--primary", "Заказ № %s выдали?"|format(row.label), "Клиент забрал заказ; он закроется.", "Выдали") }}{{ press(c, row, "oth_here", "На точке", "btn--secondary") }}</div></div></div>{% endif %}
+{% if row.undo %}<div class="mp-actions" data-card-undo>{{ undo_btn(c, row.undo, row.label) }}</div>{% endif %}
 <details class="mp-more"><summary>Подробнее</summary>
 <div class="mp-more-body">
 {% if row.tel and not row.oth %}<dl class="mp-facts"><div><dt>Телефон клиента</dt><dd><a class="mp-tel" href="tel:{{ row.tel }}">{{ c.client_phone|phone }}</a></dd></div></dl>{% endif %}
@@ -55,6 +60,15 @@
 </div></details>
 </article>
 {% endmacro %}
+{# «Выдано» (the owner 2026-11-09): the order closed by a hand-out, its moment and who marked it; no money, nothing of WebMIM but its number #}
+{% macro issued_card(row) %}{% set c = row.card %}<article class="mp-card p2-card" id="order-{{ c.id }}" data-order="{{ c.id }}" data-issued="{{ c.id }}">
+<div class="p2-main">
+<div class="p2-no"><span class="mp-no" data-no>№ {{ c.webmim_number or "панель %d"|format(c.id) }}</span><span class="mp-date" data-issued-at>выдан {{ row.at|short_dt }}</span></div>
+<div class="p2-tags"><span class="p2-tag p2-tag--ok">выдан</span></div>
+<div class="p2-info"><div class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}<div class="p2-g">{{ i.name }}<span class="p2-q">{{ i.qty }} шт.</span></div>{% else %}<div class="p2-g">шины не указаны</div>{% endfor %}</div>
+<div class="p2-who mp-name">{{ c.client_name or "Без имени" }}</div><div class="p2-sub" data-issued-by>Отметил: {{ row.who or "—" }}</div></div>
+<div class="p2-acts mp-actions">{{ undo_btn(c, row.undo, row.label) }}</div>
+</div></article>{% endmacro %}
 <div class="p2w" data-p2>
 <header class="p2-head">
 <div class="p2-title"><h1>{% if point %}<span class="p2-only-desk">Рабочее место · </span>{{ point.name }}{% else %}Рабочее место{% endif %}</h1><span class="p2-sub">Заказы на точке и те, что едут к вам{% if point %} · <span data-tab-title>{{ tabs[tab] }}</span>{% endif %}</span></div>
@@ -78,10 +92,9 @@
 {% if found is not none %}<section class="p2-box mp-found" aria-labelledby="mp-found-h"><div class="p2-section"><h2 id="mp-found-h">Найдено{% if found %} <span class="p2-count">{{ found|length }}</span>{% endif %}</h2>
 {% if found %}<ul class="p2-list">{% for f in found %}<li><div class="p2-grow"><a class="mp-name" href="{{ f.url }}">{{ f.title }}</a><span class="p2-sub">{{ f.subtitle }}</span></div>{% if f.tab %}<a class="p2-tag p2-tag--grey" href="/my-point?tab={{ f.tab }}{{ pq }}" data-found-tab="{{ f.tab }}">{{ tabs[f.tab] }}</a>{% endif %}</li>{% endfor %}</ul>
 {% else %}<p class="p2-sub">Среди заказов точки ничего не нашлось.</p>{% endif %}<a class="p2-sub" href="/my-point{% if choose %}?p={{ point.id }}{% endif %}">Очистить поиск</a></div></section>{% endif %}
-{% if undo %}<details class="p2-box mp-undo" id="p2-undo" data-undo-list><summary>{{ icon("undo") }}<span id="mp-undo-h">Отменить отметку</span> <span class="p2-count">{{ undo|length }}</span></summary>
-<div class="p2-box-body"><p class="p2-sub" style="margin:0">Заказ вернётся туда, где был до отметки; владельцу и партнёру придёт оповещение. {{ undo_hint }}</p>
+{% if undo %}<section class="p2-box mp-undo" id="p2-undo" data-undo-list aria-labelledby="mp-undo-h"><div class="p2-box-body"><h2 class="p2-undo-h" style="display:flex;align-items:center;gap:6px;margin:0;font-size:16px">{{ icon("undo") }}<span id="mp-undo-h">Отменить отметку</span> <span class="p2-count">{{ undo|length }}</span></h2><p class="p2-sub" style="margin:0">Заказ вернётся туда, где был до отметки; владельцу и партнёру придёт оповещение. {{ undo_hint }}</p>
 <ul class="p2-list">{% for u in undo %}<li><div class="p2-grow"><span><b>№ {{ u.label }}</b> · {{ u.rec.name }}</span><span class="p2-sub">{{ u.rec.at|short_dt }}</span></div>
-<form method="post" action="/my-point/{{ u.card.id }}/undo" data-once data-confirm-title="Отменить {{ u.rec.name }} по заказу № {{ u.label }}?" data-confirm="Заказ вернётся туда, где был до отметки. {{ undo_hint }}" data-confirm-ok="Отменить"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--secondary btn--sm" data-undo="{{ u.card.id }}">Отменить</button></form></li>{% endfor %}</ul></div></details>{% endif %}
+<form method="post" action="/my-point/{{ u.card.id }}/undo" data-once data-confirm-title="Отменить {{ u.rec.name }} по заказу № {{ u.label }}?" data-confirm="Заказ вернётся туда, где был до отметки. {{ undo_hint }}" data-confirm-ok="Отменить"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--secondary btn--sm" data-undo="{{ u.card.id }}">Отменить</button></form></li>{% endfor %}</ul></div></section>{% endif %}
 {% if returns %}<section class="mp-returns" aria-labelledby="mp-returns-h"><h2 id="mp-returns-h" class="p2-sr">Возврат поставщику {{ returns|length }}</h2>
 {% for r in returns %}{% set c = r.card %}<article class="p2-mx3" data-return="{{ c.id }}">{{ icon("clipboard") }}<div><b>Подпишите акт МХ-3</b> при передаче шин поставщику (бумажный акт). <span class="p2-tag {{ 'p2-tag--err' if r.late else 'p2-tag--warn' }}">№ {{ r.label }} · <span data-return-label>Согласовано на возврат, {{ r.date }}</span></span>
 <span class="p2-sub">{{ c.items_text or "шины с ОТХ" }}{% if r.act_order %} · Шины с ОТХ: акт, скорее всего, по исходному заказу №{{ r.act_order }}.{% endif %}</span>{% if hints %}<span class="p2-sub mp-hint" data-point-hint="return">{{ point_hint("return") }}</span>{% endif %}</div>
@@ -90,6 +103,8 @@
 <div class="mp-list">
 {% if tab == "return" %}{% set waiting = cards|rejectattr("returning")|list %}{% if not returns and not waiting %}<p class="mp-empty">Возвратов поставщику сейчас нет.</p>{% endif %}{# the agreed returns are the plaque above #}
 {% if waiting %}<section class="mp-block" aria-labelledby="mp-agree-h"><h2 id="mp-agree-h">Ждут согласования возврата <span class="p2-count">{{ waiting|length }}</span></h2>{% for row in waiting %}{{ card(row) }}{% endfor %}</section>{% endif %}
+{% elif tab == "issued" %}<section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">Выдано за 30 дней{% if issued %} <span class="p2-count">{{ issued|length }}</span>{% endif %}</h2>
+{% for row in issued %}{{ issued_card(row) }}{% else %}<p class="mp-empty">За 30 дней выданных заказов нет.</p>{% endfor %}</section>
 {% else %}
 <section class="mp-block" aria-labelledby="mp-orders-h"><h2 id="mp-orders-h">{{ tabs[tab] }}{% if cards %} <span class="p2-count">{{ cards|length }}</span>{% endif %}</h2>
 {% for row in cards %}{{ card(row) }}{% else %}<p class="mp-empty">Здесь сейчас нет заказов.</p>{% endfor %}</section>
