@@ -163,7 +163,9 @@ def test_issued_closes_the_order_and_tells_the_client_nothing(tmp_path):
     assert "отмечено: выдан" in page
     page = mine.get("/my-point").get_data(as_text=True)
     assert 'id="order-%d"' % card not in page                                             # a closed order leaves the list
-    assert 'action="/my-point/%d/undo"' % card in page                                    # its «Выдал» can be undone (the owner 2026-11-02)
+    assert 'action="/my-point/%d/undo"' % card not in page                                # no list of presses over the orders (the owner 2026-11-10)
+    page = mine.get("/my-point?tab=issued").get_data(as_text=True)
+    assert 'action="/my-point/%d/undo"' % card in page                                    # its «Выдал» is undone in «Выдано» (the owner 2026-11-02)
 
 
 def test_refuse_writes_the_red_record_as_the_vk_command_and_the_client_hears_nothing(tmp_path):

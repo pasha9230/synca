@@ -175,12 +175,30 @@ def test_undo_in_the_card_only_while_undoable_and_it_works(tmp_path, clock, view
     press(mine, card, "issued")
     page = issued_tab(mine)
     assert 'data-undo-card="%d"' % card in block(page) and "Отменить «Выдал»" in block(page)
-    assert 'data-undo-list' in page and "<details class=\"p2-box mp-undo\"" not in page and "<details class=\"mp-handoff mp-undo\"" not in page
+    assert 'data-undo-list' not in page and "Отменить отметку" not in page                # no list above the orders (the owner 2026-11-10)
     clock["now"] = T2
     r = post(mine, "/my-point/%d/undo" % card, "tok")
     assert r.status_code == 302 and orders.get_card(conn, card)["stage"]["code"] == "at_point"
     assert cards(issued_tab(mine)) == []
     assert 'data-undo-card="%d"' % card not in mine.get("/my-point").get_data(as_text=True)    # undone: nothing more to undo
+
+
+def test_no_list_of_presses_above_the_orders_the_card_keeps_its_undo(tmp_path, clock, view):
+    """The owner 2026-11-10 («Убери конечно этот блок»): no open list «Отменить отметку» over the orders; «Отменить» stays in the card of
+    the last press and in «Выдано», and it still undoes."""
+    app, owner, conn, pid, card = setup(tmp_path, view)
+    second = _card(conn, pid, webmim="700302", code="moving")
+    mine = manager(app, conn, pid)
+    press(mine, second, "arrived")
+    press(mine, card, "issued")
+    for page in (mine.get("/my-point").get_data(as_text=True), issued_tab(mine)):
+        assert "data-undo-list" not in page and "Отменить отметку" not in page and "Заказ вернётся туда, где был до отметки;" not in page
+    here = mine.get("/my-point").get_data(as_text=True)
+    assert 'data-undo-card="%d"' % second in here and "Отменить «Приехал»" in here                  # in the order's card
+    assert 'data-undo-card="%d"' % card in block(issued_tab(mine))                                  # in «Выдано»
+    clock["now"] = T2
+    assert post(mine, "/my-point/%d/undo" % second, "tok").status_code == 302
+    assert orders.get_card(conn, second)["stage"]["code"] == "moving"
 
 
 def test_no_undo_in_the_card_after_a_later_move(tmp_path, clock, view):

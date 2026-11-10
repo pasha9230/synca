@@ -549,8 +549,7 @@ def register(app) -> None:
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns,
-                               undo=[dict(u, label=mgr.label(u["card"])) for u in point_log.undo_list(conn, point_id)]
-                               if point_id is not None else [], undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
+                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the

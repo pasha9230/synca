@@ -11,8 +11,7 @@
 {# the owner 2026-11-02: the number, the order's date and the badge centred one under another; «Выдал» big; «ОТКАЗ» with its reason (2026-11-05) #}
 <style>.pt .mp-card-head{flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:2px}
 .pt .mp-card-head .mp-date{font-size:13px;color:var(--gray-600)}.pt .mp-btn--big{flex:1 1 auto;min-height:48px;font-size:17px;font-weight:600}
-.pt .mp-btn--quiet{background:none;border:0;padding:4px 0;color:var(--gray-600);text-decoration:underline;font-size:13px;min-height:0}
-.pt .mp-undo-item{display:flex;align-items:center;justify-content:space-between;gap:8px}</style>{% endblock %}
+.pt .mp-btn--quiet{background:none;border:0;padding:4px 0;color:var(--gray-600);text-decoration:underline;font-size:13px;min-height:0}</style>{% endblock %}
 {% block content %}
 {% set hints = not hint_folded("point") %}
 {% set pin %}{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}{% endset %}
@@ -106,10 +105,6 @@
 {% if r.asked %}<div class="mp-ask" role="note" data-oth-question="{{ c.id }}"><b>{{ r.asked.oth_question }}</b><div class="mp-actions">{{ press(c, r.asked, "oth_issued", "Выдали", "btn--secondary", "Заказ № %s выдали?"|format(r.label), "Клиент забрал заказ; он закроется, согласование возврата снимется.", "Выдали") }}{{ press(c, r.asked, "oth_here", "На точке", "btn--secondary") }}</div></div>{% endif %}
 {% if r.sell %}<div class="mp-actions" data-oth-sell="{{ c.id }}">{{ press(c, r.sell, "oth_sold", "Продать", "btn--secondary", "Продать шины заказа № %s?"|format(r.label)) }}</div>{% endif %}
 <div class="mp-actions"><details class="mp-handover" data-handover="{{ c.id }}"><summary class="btn btn--primary mp-btn">Подписал акт и отдал</summary><p><b>Подтверждаете передачу поставщику (водителю)?</b> Заказ № {{ r.label }} перейдёт в «{{ stage_name("return") }}», сумма возврата — закупка шин.</p><form method="post" action="/my-point/{{ c.id }}/act_signed" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ r.token }}"><input type="hidden" name="handover" value="yes">{{ pin }}<button class="btn btn--primary mp-btn">Да, передал</button></form></details></div></article>{% endfor %}</section>{% endif %}
-{% if undo %}<section class="mp-handoff mp-undo" data-undo-list aria-labelledby="mp-undo-h"><h2 id="mp-undo-h">Отменить отметку <span class="mp-count">{{ undo|length }}</span></h2>
-<p class="mp-sub">Заказ вернётся туда, где был до отметки; владельцу и партнёру придёт оповещение. {{ undo_hint }}</p>
-<ul class="mp-handed-list">{% for u in undo %}<li class="mp-handed-item mp-undo-item"><div class="mp-handed-who"><span class="mp-name">№ {{ u.label }} · {{ u.rec.name }}</span><span class="mp-sub">{{ u.rec.at|short_dt }}</span></div>
-<form method="post" action="/my-point/{{ u.card.id }}/undo" data-once data-confirm-title="Отменить {{ u.rec.name }} по заказу № {{ u.label }}?" data-confirm="Заказ вернётся туда, где был до отметки. {{ undo_hint }}" data-confirm-ok="Отменить"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--secondary btn--sm" data-undo="{{ u.card.id }}">Отменить</button></form></li>{% endfor %}</ul></section>{% endif %}
 <nav class="mp-tabs" aria-label="Заказы точки">{% for key, name in tabs.items() %}<a class="mp-tab{% if key == tab %} is-active{% endif %}{% if hot.get(key) %} mp-tab--hot{% endif %}" href="/my-point?tab={{ key }}{{ pq }}" data-tab="{{ key }}"{% if key == tab %} aria-current="page"{% endif %}><span>{{ name }}</span><b data-tab-count="{{ key }}">{{ counts[key] }}</b></a>{% endfor %}</nav>
 <div class="mp-list">
 {% if tab == "return" %}{% set waiting = cards|rejectattr("returning")|list %}{% if not returns and not waiting %}<p class="mp-empty">Возвратов поставщику сейчас нет.</p>{% endif %}{# the agreed returns are the plaque above #}
