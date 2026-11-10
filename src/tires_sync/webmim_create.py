@@ -1,8 +1,8 @@
 """«Оформить в WebMIM»: an order of the panel made in WebMIM by a person's button (the owner and the partner), on the test and the live server
 (the owner 2026-11-06: «Сделай так, чтобы можно было Заказ МИМ кнопкой»). A real purchase on the live server: the money goes.
 Delivery to the address of the order's point, the fields as the owner fills WebMIM's form by hand (2026-10-29: «безнал», «Отсрочка», contact
-«Админ», the point's phone; 2026-11-06: the working hours 10:00-17:00 for every point, both notes «грузим на ОТХ», «Собственный номер» empty —
-no `externalNumber`; fields()). No approve, no rule of a stage, no timer presses it. The first full success moves an order standing before «Заказ оформлен» there the ordinary way
+«Админ», the point's phone; 2026-11-06: the working hours 10:00-17:00 for every point, «Собственный номер» empty — no `externalNumber`;
+2026-11-10: «Примечание для поставщика» is «Грузим на ОТХ», «Примечание к заказу» is empty (before, 2026-11-06: both «грузим на ОТХ»); fields()). No approve, no rule of a stage, no timer presses it. The first full success moves an order standing before «Заказ оформлен» there the ordinary way
 (the owner 2026-10-23: its checks, journal and rules of the stage); then the route calls order_placed.on_placed (the client's message
 «Клиенту: заказ оформлен», the owner 2026-10-23): the move first, so the hook sends the message the rule of the stage has just prepared, never a
 second one (order_placed._earlier).
@@ -36,7 +36,8 @@ PAYMENT_TERMS = "отсрочка"
 PAYMENT_TYPES = ("безнал",)
 CONTACT = "Админ"                    # the contact person of the delivery (the owner 2026-10-29); the phone is the point's
 NOTE_FOR_SUPPLIER = "Грузим на ОТХ"  # the note of the text for 4 Точки (order_supplier.tochki_text; the owner 2026-10-29)
-MIM_NOTE = "грузим на ОТХ"           # WebMIM: «Примечание для поставщика» and «Примечание к заказу», as written (the owner 2026-11-06)
+MIM_NOTE = "Грузим на ОТХ"           # WebMIM: «Примечание для поставщика», as written (the owner 2026-11-10)
+MIM_SELF_NOTE = ""                   # WebMIM: «Примечание к заказу» is empty (the owner 2026-11-10; before, 2026-11-06: the same note)
 MIM_TIME = "10:00-17:00"             # WebMIM: «Время работы клиента» of every point; the point's and the order's own time never go there (2026-11-06)
 LATE_HOUR = 16                       # WebMIM: an order for today goes to work before 16:00 (its own warning in the form)
 
@@ -127,10 +128,10 @@ def late(card: dict, now: str) -> bool:
 def fields(conn, card: dict) -> dict:
     """What the order of WebMIM gets from the panel, the dictionaries aside: the same for the window «Подтверждение» and for POST /orders
     (what the person saw is what goes). The card passed problems() (a point, its address and phone, a date). No number of the panel goes
-    («Собственный номер» empty, the owner 2026-11-06); the time and both notes are the same for every order."""
+    («Собственный номер» empty, the owner 2026-11-06); the time and the notes are the same for every order."""
     point = get_point(conn, card["point_id"])
     return {"date": card["delivery_date"], "address_id": point["webmim_address_id"], "point": point["name"], "address": point["address"] or "",
-            "time": MIM_TIME, "person": CONTACT, "phone": webmim_phone(point["manager_phone"]), "note": MIM_NOTE, "self_note": MIM_NOTE,
+            "time": MIM_TIME, "person": CONTACT, "phone": webmim_phone(point["manager_phone"]), "note": MIM_NOTE, "self_note": MIM_SELF_NOTE,
             "kind": PAYMENT_TYPES[0], "terms": PAYMENT_TERMS.capitalize(), "shipment": SHIPMENT.capitalize()}
 
 
