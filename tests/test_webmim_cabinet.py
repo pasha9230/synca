@@ -100,8 +100,11 @@ def test_the_number_of_the_press_session_is_in_the_card_before_the_messages_and_
     assert len(deliver.sent) == 1 and len(vk.sent) == 1 and "перемещение " + INVOICE in deliver.sent[0][1]
     assert [c[:2] for c in fake.calls].count(("GET", "/api/v3/orders")) == 1 and fake.sessions == 0       # one read, logged out
     assert [c[:2] for c in fake.calls].count(("POST", "/api/v3/auth/login")) == 1
-    again, _, _ = poll(conn, mine, Cabinet([row(5001)]), deliver=deliver, vk=vk)                           # the window, then a second tab
-    assert again["state"] == "found" and again["result"] == "same" and len(deliver.sent) == 1 and len(vk.sent) == 1
+    window = Cabinet([row(5001)])
+    again, _, _ = poll(conn, mine, window, deliver=deliver, vk=vk)                                         # the window, then a second tab
+    assert again["state"] == "found" and again["final"] and len(deliver.sent) == 1 and len(vk.sent) == 1
+    assert again["text"] == "Номер перемещения %s вписан" % INVOICE and again["transfer"] == INVOICE       # the owner 2026-11-10: the number
+    assert again["lines"] == ["Сообщения «заказ оформлен» отправлены: 2."] and window.calls == []         # is in: never a login for it
     assert {t["status"] for t in message_tasks(conn, mine)} == {"done"}
 
 
@@ -128,9 +131,10 @@ def test_the_window_finds_the_number_writes_it_and_both_messages_go_exactly_once
     # a second tab within the gap gets the last answer without a login; a later poll and the hourly reading write nothing, send nothing
     calls = len(cabinet.calls)
     tab, _, _ = poll(conn, mine, cabinet, "2026-10-23T12:01:12", deliver, vk)
-    assert tab["state"] == "found" and tab["lines"] == [] and len(cabinet.calls) == calls
+    said = ["Сообщения «заказ оформлен» отправлены: 2."]               # 2026-11-10: what became of the messages (read only), not the send's lines
+    assert tab["state"] == "found" and tab["lines"] == said and len(cabinet.calls) == calls
     later, _, _ = poll(conn, mine, cabinet, "2026-10-23T12:02:00", deliver, vk)     # the number is in: the answer found, no login
-    assert later["state"] == "found" and later["lines"] == [] and len(cabinet.calls) == calls
+    assert later["state"] == "found" and later["lines"] == said and len(cabinet.calls) == calls
     again = webmim_cabinet.take(conn, mine, webmim_cabinet.info(row(5001)), "2026-10-23T12:02:30",            # the hourly reading
                                 lambda card_id: order_placed.send_waiting(conn, card_id, "2026-10-23T12:02:30", "owner", deliver, vk))
     assert again == ("same", []) and len(deliver.sent) == 1 and len(vk.sent) == 1
@@ -164,10 +168,12 @@ def test_the_sums_differ_at_the_press_the_number_is_not_written_before_the_messa
 def test_a_number_typed_by_a_person_is_kept_and_nothing_is_sent(tmp_path):
     conn, mine, *_ = placed_order(tmp_path, cabinet=[])
     orders.update_card(conn, mine, {"transfer_number": "26R-1000001"}, NOW, "owner")
-    result, deliver, vk = poll(conn, mine, Cabinet([row(5001)]))
-    assert result["result"] == "differs" and result["transfer"] == "26R-1000001" and not deliver.sent and not vk.sent
+    cabinet = Cabinet([row(5001)])                   # the owner 2026-11-10: a number in the card — the window never asks the cabinet (before:
+    result, deliver, vk = poll(conn, mine, cabinet)  # one login, «differs» and a yellow record; a typed number is checked by after_save)
+    assert result["state"] == "found" and result["final"] and result["transfer"] == "26R-1000001" and not deliver.sent and not vk.sent
+    assert result["text"] == "Номер перемещения 26R-1000001 вписан" and cabinet.calls == []
+    assert result["lines"] == ["Сообщения «заказ оформлен» ждут в окне «Сообщения по заказу»: 2."]
     assert orders.get_card(conn, mine)["transfer_number"] == "26R-1000001"
-    assert any(level == "yellow" and INVOICE in text for text, level in events(conn, mine))
 
 
 def test_no_number_in_the_cabinet_leaves_everything_as_now(tmp_path):
@@ -191,7 +197,11 @@ def test_a_failure_is_a_grey_record_once_the_window_says_why_and_the_logout_alwa
     conn, mine, *_ = placed_order(tmp_path, cabinet=[])
     cabinet = Cabinet([row(5001)], login=login, listing=listing)
     result, deliver, _ = poll(conn, mine, cabinet)
-    assert result["state"] == "error" and result["final"] is final and words in result["text"] and not deliver.sent
+    assert result["state"] == "error" and result["final"] is final and not deliver.sent
+    if final:                                                            # the login never sees the list: said as it is, nothing to press
+        assert words in result["text"] and not result.get("retry")
+    else:                                                                # the owner 2026-11-10: a plain line and «Проверить ещё раз»; why — in the journal
+        assert result["retry"] is True and result["text"] == webmim_cabinet.UNREACHABLE and words in result["why"]
     assert cabinet.logouts == logouts
     poll(conn, mine, cabinet, "2026-10-23T12:06:00")
     grey = [t for t, level in events(conn, mine) if t.startswith("Номер перемещения из кабинета MIM не прочитан") and level == "grey"]
@@ -258,6 +268,50 @@ def test_a_number_in_already_costs_no_login_and_an_old_answer_is_not_shown(tmp_p
     conn2.commit()
     fresh = poll(conn2, other, Cabinet([row(5001)]), "2026-10-23T12:20:02")[0]   # within the gap, but the stored answer is old
     assert fresh["state"] == "wait" and not fresh["final"]
+
+
+# ---- «Проверить ещё раз» (the owner 2026-11-10) -------------------------------------------------------------------------------------------
+
+BUSY_LOGIN = (429, {}, b"{}")                                            # the cabinet lets one session in
+
+
+def logins(cabinet):
+    return cabinet.calls.count(("POST", "/api/v3/auth/login"))
+
+
+def test_a_failed_ask_can_be_asked_again_but_not_within_the_gap_and_the_number_is_written_once(tmp_path, monkeypatch):
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, *_ = placed_order(tmp_path, cabinet=[])
+    deliver, vk = Deliver(), FakeVk()
+    cabinet = Cabinet([row(5001)], login=BUSY_LOGIN)
+    failed, _, _ = poll(conn, mine, cabinet, "2026-10-23T12:01:00", deliver, vk)
+    assert failed["state"] == "error" and not failed["final"] and failed["retry"] is True and "retry_in" not in failed
+    assert failed["text"] == "Кабинет MIM занят или не отвечает. Номер подтянется сам при ежечасной проверке." and "429" in failed["why"]
+    asked = logins(cabinet)
+    cabinet.login = None                                                 # free again, but the button is pressed too early
+    early, _, _ = poll(conn, mine, cabinet, "2026-10-23T12:01:01", deliver, vk)
+    assert early["retry_in"] == 3 and not early["final"] and logins(cabinet) == asked and not deliver.sent
+    assert orders.get_card(conn, mine)["transfer_number"] == ""
+    done, _, _ = poll(conn, mine, cabinet, "2026-10-23T12:01:04", deliver, vk)
+    assert done["state"] == "found" and done["result"] == "written" and done["final"] and "retry_in" not in done and not done.get("retry")
+    assert logins(cabinet) == asked + 1 and len(deliver.sent) == 1 and len(vk.sent) == 1
+    more, _, _ = poll(conn, mine, cabinet, "2026-10-23T12:01:30", deliver, vk)     # pressed again in another tab: no login, nothing sent
+    assert more["text"] == "Номер перемещения %s вписан" % INVOICE and logins(cabinet) == asked + 1 and len(deliver.sent) == 1
+    assert [t for t, _ in events(conn, mine)].count("Номер перемещения из кабинета MIM: %s (счёт от 23.10.2026)." % INVOICE) == 1
+
+
+def test_the_page_stops_asking_after_a_failure_and_has_the_button():
+    from pathlib import Path
+    panel = Path(webmim_cabinet.__file__).parent / "panel"
+    html = (panel / "templates" / "_order_supplier.html").read_text(encoding="utf-8")
+    assert "data-mim-retry hidden>Проверить ещё раз</button>" in html
+    js = (panel / "static" / "app.js").read_text(encoding="utf-8")
+    block = js[js.index('document.querySelector("[data-mim-cabinet]")'):]
+    block = block[:block.index("new MutationObserver")]
+    assert webmim_cabinet.UNREACHABLE in block and "[data-mim-retry]" in block and "r.retry_in" in block
+    assert block.count("setTimeout(ask") == 1                            # only while the cabinet answers and has no number yet
+    assert block.index("if (r.retry || manual) { stop(") < block.index("setTimeout(ask")     # a failure: stop until the button
+    assert ".catch(function () { stop(BUSY); })" in block                # no answer of the panel: the same, never a silent loop
 
 
 # ---- hourly -----------------------------------------------------------------------------------------------------------------------------
@@ -330,4 +384,7 @@ def test_the_window_stays_after_the_press_and_asks_the_cabinet(tmp_path, monkeyp
     answer = client.post("/orders/%d/webmim/cabinet" % mine, data={"csrf": "tok"}).get_json()
     assert answer["state"] == "found" and answer["invoice"] == INVOICE and answer["result"] == "written"
     assert "pw-SECRET-1" not in json.dumps(answer) and fake.sessions == 0
+    calls = len(fake.calls)                                              # the window opened again (2026-11-10): the number is in, no request
+    again = client.post("/orders/%d/webmim/cabinet" % mine, data={"csrf": "tok"}).get_json()
+    assert again["final"] and again["text"] == "Номер перемещения %s вписан" % INVOICE and len(fake.calls) == calls
     assert "Сверка с кабинетом MIM" not in client.get("/orders/%d" % mine).get_data(as_text=True)       # once: only right after the press

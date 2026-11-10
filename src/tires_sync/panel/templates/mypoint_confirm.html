@@ -4,18 +4,18 @@
    same press once more with confirm=yes, «Отмена» changes nothing. Both views of the point: the new one's frame while point_new(). #}
 {% block viewport %}width=device-width, initial-scale=1{% endblock %}
 {% block body_class %}pt-ui{% if point_new() %} p2 p2-own{% endif %}{% endblock %}
-{% block title %}Подтвердите выдачу · Tires Sync{% endblock %}
+{% block title %}{{ 'Подтвердите продажу' if sell else 'Подтвердите выдачу' }} · Tires Sync{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='point2.css' if point_new() else 'point.css') }}">
 <style>.mp-confirm{max-width:560px;margin:16px auto;padding:16px;border:1px solid var(--gray-200);border-radius:12px;background:var(--gray-0)}
 .mp-confirm h1{font-size:20px;margin:0 0 12px}.mp-confirm ul{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:6px;font-size:16px}
 .mp-confirm .mp-confirm-acts{display:flex;flex-wrap:wrap;gap:8px}.mp-confirm .mp-confirm-acts .btn{flex:1 1 140px;min-height:48px;font-size:17px}</style>{% endblock %}
 {% block content %}
 <section class="mp-confirm" aria-labelledby="mp-confirm-h" data-issue-confirm="{{ card.id }}">
-<h1 id="mp-confirm-h">Выдать заказ № {{ label }}?</h1>
-<p class="mp-sub" style="margin:0 0 8px">Сверьте с заказом клиента перед выдачей.</p>
+<h1 id="mp-confirm-h">{{ 'Продать шины заказа' if sell else 'Выдать заказ' }} № {{ label }}?</h1>
+<p class="mp-sub" style="margin:0 0 8px">{{ 'Сверьте шины, количество и цену перед продажей.' if sell else 'Сверьте с заказом клиента перед выдачей.' }}</p>
 <ul data-issue-lines>{% for line in lines %}<li>{% if loop.first %}<b>{{ line }}</b>{% else %}{{ line }}{% endif %}</li>{% endfor %}</ul>
 <div class="mp-confirm-acts">
-<form method="post" action="/my-point/{{ card.id }}/{{ action }}" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ token }}"><input type="hidden" name="confirm" value="yes">{% if p %}<input type="hidden" name="p" value="{{ p }}">{% endif %}{% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}<button class="btn btn--primary" data-issue-yes>Да, выдал</button></form>
+<form method="post" action="/my-point/{{ card.id }}/{{ action }}" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ token }}"><input type="hidden" name="confirm" value="yes">{% if p %}<input type="hidden" name="p" value="{{ p }}">{% endif %}{% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}<button class="btn btn--primary" data-issue-yes>{{ 'Да, продал' if sell else 'Да, выдал' }}</button></form>
 <a class="btn btn--secondary" href="{{ back }}" data-issue-cancel>Отмена</a>
 </div>
 </section>

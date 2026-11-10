@@ -17,7 +17,7 @@
 <div class="shop-tile-ph">{% if r.photo %}<img src="{{ r.photo }}" alt="" loading="lazy">{% else %}<span class="thumb">нет фото</span>{% endif %}</div>
 <div class="shop-tile-name"><b>{{ r.brand }}</b> {{ r.model or r.name }}</div>
 <div class="shop-tile-meta">{{ r.size }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} · RunFlat{% endif %}</div>
-<div class="shop-tile-meta"><span class="shop-tag">{{ r.season or "—" }}{% if r.studs %} · шип{% endif %}</span> <span class="muted">{{ r.warehouse }} · {{ r.stock }} шт.</span></div>
+<div class="shop-tile-meta"><span class="shop-tag">{{ r.season or "—" }}{% if r.studs %} · шип{% endif %}</span> <span class="muted">{% if wh_both %}{{ r.warehouse }} · {% endif %}{{ r.stock }} шт.</span></div>
 <div class="shop-tile-price"><b class="strong">{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
 {% if cart %}{{ buy(r) }}{% endif %}</article>{% endfor %}</div>
 {% elif rows %}<div class="table-wrap"><table class="table shop-table">

@@ -3,13 +3,15 @@
    posts the fingerprint of what it showed) or «Заказать в 4 Точки» (the text for the cabinet of 4 Точки and «Оформил вручную»).
    For the right «supplier» only, never for a point. #}
 {% if mim_window %}{# «Сверка с кабинетом MIM» right after «Оформить в WebMIM» (the owner 2026-11-09): the window stays; app.js asks
-   /orders/<id>/webmim/cabinet (webmim_cabinet.poll) every few seconds for about a minute #}
+   /orders/<id>/webmim/cabinet (webmim_cabinet.poll) every few seconds for about a minute; a number in the card already: no ask of the cabinet; a failed ask stops
+   the asking, «Проверить ещё раз» asks once more (the owner 2026-11-10) #}
 <div class="modal-backdrop send-window is-open" id="mim-cabinet-window" role="dialog" aria-modal="true" aria-labelledby="mim-cabinet-h"><div class="modal">
 <div class="modal-head"><h3 id="mim-cabinet-h">Подтверждение заказа в МИМ · №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack" data-mim-cabinet="/orders/{{ c.id }}/webmim/cabinet" data-csrf="{{ csrf_token() }}">
 <p class="small">Заказ оформлен в WebMIM. Номер перемещения берём из кабинета MIM («№ Счета»): как только он есть, сообщения «заказ оформлен», которые его ждут, уйдут сами.</p>
 <b>Сверка с кабинетом MIM</b>
 <p class="small" data-mim-state role="status" aria-live="polite">проверяю…</p>
+<div><button type="button" class="btn btn--secondary btn--sm" data-mim-retry hidden>Проверить ещё раз</button></div>
 <dl class="supplier-fields" data-mim-fields hidden>
 <dt>№ заказа</dt><dd data-mim="order_number"></dd><dt>№ Счета</dt><dd data-mim="invoice"></dd><dt>Статус</dt><dd data-mim="status"></dd>
 {% if has_right("money") %}<dt>Сумма MIM</dt><dd data-mim="sum"></dd><dt>Сумма заказа</dt><dd data-mim="purchase"></dd>{% endif %}
@@ -63,7 +65,7 @@
 <dt>Вид оплаты</dt><dd>{{ f.kind }}</dd><dt>Признак оплаты</dt><dd>{{ f.terms }}</dd><dt>Способ</dt><dd>{{ f.shipment }}</dd>
 <dt>Адрес</dt><dd>{% if f.address %}{{ f.address }}, {% endif %}адрес WebMIM {{ f.address_id }} (точка «{{ f.point }}»)</dd><dt>Дата доставки</dt><dd>{{ f.date[8:10] }}.{{ f.date[5:7] }}.{{ f.date[:4] }}</dd>
 <dt>Время работы клиента</dt><dd>{{ f.time }}</dd><dt>Контактное лицо</dt><dd>{{ f.person }}</dd><dt>Контактный телефон</dt><dd>{{ f.phone }}</dd>
-<dt>Примечание для поставщика</dt><dd>{{ f.note }}</dd><dt>Примечание к заказу</dt><dd>{{ f.self_note }}</dd><dt>Собственный номер</dt><dd>пусто</dd></dl>
+<dt>Примечание для поставщика</dt><dd>{{ f.note }}</dd><dt>Примечание к заказу</dt><dd>{{ f.self_note or "пусто" }}</dd><dt>Собственный номер</dt><dd>пусто</dd></dl>
 <p class="small muted">Заказ на более раннем этапе перейдёт в «Заказ оформлен». Когда заказ будет создан полностью, сообщения об оформлении уйдут сами: клиенту в чат Авито и менеджеру точки в ВК, если хватает данных. Сообщение подождёт в задачах заказа, если не хватает данных (например, номера перемещения) или нет чата Авито (у точки — ВК); не уйдёт второй раз, если уже отправлено, и не уйдёт, если его пропустили вручную.{% if b.test %} Это тестовый сервер: у поставщика ничего не заказывается, но номер тестового заказа впишется в карточку и может уйти в сообщениях. Ушедшее сообщение не удалить; поля WebMIM в карточке после проверки можно очистить.{% endif %}</p>
 <form method="post" action="/orders/{{ c.id }}/webmim/create" data-once data-supplier-go class="row" style="gap:var(--s-3)"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="seen" value="{{ s.fingerprint }}">
 <button type="button" class="btn btn--secondary btn--sm" data-close-modal>Отмена</button><button class="btn btn--primary btn--sm ml-auto">Подтвердить</button></form>

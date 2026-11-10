@@ -25,7 +25,7 @@
 <a class="shop-tile-ph shop2-open" href="#tire-{{ loop.index }}" id="row-{{ loop.index }}" title="Карточка шины">{{ photo(r, "shop2-tile-img") }}</a>
 <div class="shop-tile-name"><a class="shop2-open" href="#tire-{{ loop.index }}"><b>{{ r.brand }}</b> {{ r.model or r.name }}</a></div>
 <div class="shop-tile-meta">{{ r.size }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} · RunFlat{% endif %}{% if r.country or r.year %} · {{ r.country }}{% if r.country and r.year %}, {% endif %}{{ r.year }}{% endif %}</div>
-<div class="shop-tile-meta">{{ season(r) }} <span class="muted">{{ r.warehouse }} · {{ r.stock }} шт.</span></div>
+<div class="shop-tile-meta">{{ season(r) }} <span class="muted">{% if wh_both %}{{ r.warehouse }} · {% endif %}{{ r.stock }} шт.</span></div>
 <div class="shop-tile-price"><b class="strong">{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
 {% if cart %}{{ buy(r) }}{% endif %}</article>{% endfor %}</div>
 {% elif rows %}<div class="table-wrap card shop2-table-wrap"><table class="table shop-table shop2-table">
@@ -51,7 +51,7 @@
 <dl class="shop2-sheet-dl"><dt>Размер</dt><dd>{{ r.size }}</dd>{% if r.load or r.speed %}<dt>Нагрузка и скорость</dt><dd>{{ r.load }}{{ r.speed }}</dd>{% endif %}
 <dt>Сезон</dt><dd>{{ season(r) }}{% if r.runflat %}<span class="shop2-tag">RunFlat</span>{% endif %}</dd>
 {% if r.country or r.year %}<dt>Страна, год</dt><dd>{{ r.country }}{% if r.country and r.year %}, {% endif %}{{ r.year }}</dd>{% endif %}
-<dt>Наличие</dt><dd>{{ r.warehouse }} · {{ r.stock }} шт.</dd></dl>
+<dt>Наличие</dt><dd>{% if wh_both %}{{ r.warehouse }} · {% endif %}{{ r.stock }} шт.</dd></dl>
 <div class="shop2-sheet-price"><b>{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
 {% if cart %}{{ buy(r) }}{% endif %}</div></div>{% endfor %}
 {% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}

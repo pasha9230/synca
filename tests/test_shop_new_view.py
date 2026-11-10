@@ -87,7 +87,7 @@ def test_on_several_widths_and_radii_at_once(tmp_path):
 
 
 def test_on_the_form_as_a_browser_sends_it_with_every_filter_empty(tmp_path):
-    app, client, conn, _ = make_shop(tmp_path)
+    app, client, conn, _ = make_shop(tmp_path, warehouses=(1, 2))        # both warehouses on (the owner 2026-11-10: else no «Склад»)
     new_view(conn)
     html = page(client, "/shop?o=brand&w=205&s=&t=&wh=&q=&wh=0")
     assert sorted(prices(html)) == [13580] and "ширина 205" in html and "Склад 0" not in html
@@ -115,7 +115,7 @@ def test_on_the_filters_are_a_card_above_the_rows_and_an_old_folding_link_still_
 
 
 def test_on_every_step_of_the_tour_still_lights_an_element(tmp_path):
-    app, client, conn, _ = make_shop(tmp_path)
+    app, client, conn, _ = make_shop(tmp_path, warehouses=(1, 2))        # both warehouses on (the owner 2026-11-10: else no «Склад»)
     new_view(conn)
     html = page(client)
     for s in tour.steps_for("client"):

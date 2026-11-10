@@ -8,7 +8,7 @@ from flask import abort, flash, redirect, render_template, request
 
 from .. import connections, oth_manual, oth_stock, order_oth, order_sheet, orders, store
 from ..settings_store import active_settings
-from .common import author, can_post, get_conn, has_right, login_required, now_iso
+from .common import author, can_post, current_user, get_conn, has_right, login_required, now_iso
 
 
 def manual_block(goods_id: str) -> dict:
@@ -117,6 +117,13 @@ def _known(conn, goods_id: str) -> bool:
                                or conn.execute("SELECT 1 FROM oth_manual WHERE goods_id = ?", (goods_id,)).fetchone() is not None)
 
 
+def _back() -> str:
+    """Where a form of «На ОТХ» returns: the page with the point it was sent from (the owner 2026-11-10: the filter of the point stays until
+    the person takes it off; the hidden field `point` of oth.html). A point (the role) has no filter of points: the bare page, as before."""
+    point = request.form.get("point", type=int)
+    return "/oth?point=%d" % point if point and point > 0 and current_user()["role"] != "point" else "/oth"
+
+
 def register(app) -> None:
     app.jinja_env.globals["oth_manual_block"] = manual_block
 
@@ -144,7 +151,7 @@ def register(app) -> None:
     @login_required
     def oth_page():
         """The orders' tyres on «На ОТХ» and «Свой остаток» (the owner 2026-11-03: its own rows, each opening the card to change it);
-        `?point=<id>` shows one point (both lists)."""
+        `?point=<id>` shows one point (both lists); the point chosen is kept in the person's account (page_prefs, the owner 2026-11-10)."""
         conn = get_conn()
         data = order_oth.stock(conn)
         dates, marks = order_oth.reserve_dates(conn), order_oth.item_marks(conn)
@@ -185,7 +192,7 @@ def register(app) -> None:
                 flash("Эта позиция уже на возврат.")
         except (order_oth.OthError, ValueError) as err:
             flash(str(err) if isinstance(err, order_oth.OthError) else "Неизвестная позиция.")
-        return redirect("/oth")
+        return redirect(_back())
 
     @app.route("/oth/return", methods=["POST"])
     @login_required
@@ -204,4 +211,4 @@ def register(app) -> None:
                 flash("Отмечено как возвращённое поставщику. В WebMIM ничего не отправлено.")
         except (order_oth.OthError, ValueError) as err:
             flash(str(err) if isinstance(err, order_oth.OthError) else "Неизвестная позиция.")
-        return redirect("/oth")
+        return redirect(_back())

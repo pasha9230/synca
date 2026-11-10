@@ -283,6 +283,10 @@ def _client_pct_text(d: dict) -> str:
     return "Свой %% клиента %s: %s" % (_q(d.get("subject")), shown or "без изменений")
 
 
+def _wh_text(value) -> str:
+    return ", ".join("Склад %d" % n for n in (1, 2) if isinstance(value, (list, tuple)) and n in value) or "—"
+
+
 def _client_followed_text(d: dict) -> str:
     """«Наш % изменён — % клиентов следом (клиентов 3): buyer, GISLAVED (лето) до R17: 12 % → 15 %; …»."""
     lines = [str(x) for x in d.get("lines") or [] if isinstance(x, str)]
@@ -354,6 +358,7 @@ _MORE_TEXTS = {
     "message_template_changed": lambda d: _template_text(d),             # «Шаблоны сообщений» (message_texts, 2026-11-02)
     "client_pct_changed": lambda d: _client_pct_text(d),
     "client_pct_followed": lambda d: _client_followed_text(d),
+    "client_warehouses_changed": lambda d: "Склады клиента %s: %s → %s" % (_q(d.get("subject")), _wh_text(d.get("was")), _wh_text(d.get("now"))),
     "shop_tochki_stale": lambda d: "Каталог клиента: «Склад 2» скрыт, снимок 4 Точек старше 6 часов (загружен %s)" % _q(d.get("fetched_at")),
     "supplier_created": lambda d: "Добавлен поставщик «%s»" % _q(d.get("name")),
     "account_chats_send": lambda d: "Отправка сообщений из панели, %s: %s" % (_acc(d), _on(d.get("enabled"), "включена", "выключена")),

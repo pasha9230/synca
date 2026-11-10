@@ -12,6 +12,10 @@ Per diameter of a brand (client_brand_pct: small/large, `*_abs`):
   the brand is not shown to the client. It stays absolute until the owner saves the client's conditions again.
 The client's % must be within −50…300 (below the purchase is allowed: the owner's word) for every one of ours; else nothing is saved. A
 change of our % that would take a client's % out of it stops «Применить» (follow_check, called by settings_store) with the list.
+A client's warehouses (the owner 2026-11-10): which of «Склад 1» / «Склад 2» the client is shown, set beside the % (the invitation, the
+client's page). Kept in user_pref «client.wh» of the client (no table of its own); nothing kept = «Склад 1» only; never both off. How it
+acts is client_catalog.visible's. The journal: client_warehouses_changed.
+
 The journal: client_pct_changed («было → стало» of a client's brands), client_pct_followed (our % changed: whose % followed)."""
 from __future__ import annotations
 
@@ -29,6 +33,10 @@ PCT_TEXT = "Процент: число от −50 до 300, не больше д
 SHIFT_TEXT = "Сдвиг: число пунктов от −350 до +350, не больше двух знаков после запятой."
 DIAMETERS = (("small", "до R17"), ("large", "от R18"))
 SEASON_RU = {"winter": "зима", "summer": "лето", "all": "всесезонные"}
+WAREHOUSES = ((1, "Склад 1"), (2, "Склад 2"))      # the warehouses a client may be shown (client_catalog: 1 the main supplier, 2 4 Точки)
+WAREHOUSES_DEFAULT = (1,)                          # the owner 2026-11-10: «Склад 2» is off for every client until it is switched on
+WAREHOUSES_PREF = "client.wh"                      # user_pref of the client, written by the owner only: [1], [2] or [1, 2]
+WAREHOUSES_TEXT = "Оставьте хотя бы один склад."
 MODES = ("pct", "shift", "abs")          # the field is: the client's % over our one %; the shift from several of ours; the client's own %
 
 # a client's row: (small, small_abs, large, large_abs); a value None = as ours (shift 0) or, absolute, not set (the brand hidden)
@@ -250,6 +258,58 @@ def save_rows(conn, login: str, data: Dict[str, Row], now: str, author: str, com
     return detail
 
 
+# ---- a client's warehouses (the owner 2026-11-10) --------------------------------------------------------------------------------------
+
+def _warehouses(value) -> Optional[Tuple[int, ...]]:
+    """[1, 2] of a kept value -> (1, 2); None: not one a client may have (nothing, none, another number)."""
+    known = [n for n, _label in WAREHOUSES]
+    if not isinstance(value, (list, tuple)) or not value or any(isinstance(v, bool) or v not in known for v in value):
+        return None
+    return tuple(n for n in known if n in value)
+
+
+def warehouses(conn, login: str) -> Tuple[int, ...]:
+    """The warehouses the client `login` is shown. Nothing kept (every client before 2026-11-10 and a new one) or a value that does not
+    read: WAREHOUSES_DEFAULT («Склад 1» only)."""
+    from . import user_prefs
+    return _warehouses(user_prefs.get(conn, login, WAREHOUSES_PREF)) or WAREHOUSES_DEFAULT
+
+
+def warehouses_text(shown) -> str:
+    return ", ".join(label for n, label in WAREHOUSES if n in shown) or "—"
+
+
+def parse_warehouses(form, prefix: str = "") -> Optional[Tuple[int, ...]]:
+    """The switches of a sent form (the ticks `<prefix>wh`, the mark `<prefix>wh_sent` that the form drew them). None: the form had no
+    switches (nothing to change). Both off: refused."""
+    if not form.get(prefix + "wh_sent"):
+        return None
+    shown = tuple(n for n, _label in WAREHOUSES if str(n) in form.getlist(prefix + "wh"))
+    if not shown:
+        raise TermsError(WAREHOUSES_TEXT, prefix + "wh")
+    return shown
+
+
+def set_warehouses(conn, login: str, shown, now: str, author: str, commit: bool = True) -> bool:
+    """Write the warehouses a client is shown; the journal gets «было → стало». False: nothing changed (nothing written). `commit=False`:
+    the caller's transaction."""
+    from . import users
+    login = users.normalize(login)
+    if not users.exists(conn, login) or users.get_role(conn, login)["role"] != "client":
+        raise TermsError("Условия ставятся только клиенту.")
+    new = _warehouses(list(shown or ()))
+    if new is None:
+        raise TermsError(WAREHOUSES_TEXT, "wh")
+    old = warehouses(conn, login)
+    if new == old:
+        return False
+    conn.execute("INSERT INTO user_pref (login, key, value, updated_at) VALUES (?, ?, ?, ?) "
+                 "ON CONFLICT (login, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                 (login, WAREHOUSES_PREF, json.dumps(list(new)), now))
+    audit(conn, now, author, "client_warehouses_changed", {"subject": login, "was": list(old), "now": list(new)}, commit)
+    return True
+
+
 def audit(conn, now: str, author: str, action: str, detail: dict, commit: bool) -> None:
     """store.write_audit commits; inside a caller's transaction the row is written without it."""
     if commit:
@@ -314,14 +374,19 @@ def follow_check(conn, old_pricing: dict, new_pricing: dict, now: str, author: s
 
 # ---- an invitation of a client -------------------------------------------------------------------------------------------------------
 
-def invite_terms(data: Dict[str, Row]) -> str:
-    """The client's rows an invitation puts in the profile (checked by parse_rows), as JSON {"rows": {bare: [4 values]}}."""
-    return json.dumps({"rows": {bare(k): [v[0], bool(v[1]), v[2], bool(v[3])] for k, v in data.items() if bare(k)}},
+def invite_terms(data: Dict[str, Row], shown=None) -> str:
+    """The client's rows and warehouses an invitation puts in the profile (checked by parse_rows, parse_warehouses), as JSON
+    {"rows": {bare: [4 values]}, "warehouses": [1]}. No `shown`: WAREHOUSES_DEFAULT."""
+    wh = _warehouses(list(shown)) if shown is not None else WAREHOUSES_DEFAULT
+    if wh is None:
+        raise TermsError(WAREHOUSES_TEXT, "c_wh")
+    return json.dumps({"rows": {bare(k): [v[0], bool(v[1]), v[2], bool(v[3])] for k, v in data.items() if bare(k)}, "warehouses": list(wh)},
                       ensure_ascii=False, sort_keys=True)
 
 
 def from_invite(text: str) -> Optional[dict]:
-    """The rows of an invitation ({"rows": {key: Row}}; None: not a client's). An invitation made before 2026-10-31 (the role's or the
+    """The rows and the warehouses of an invitation ({"rows": {key: Row}, "warehouses": (1,)}; None: not a client's). One made before
+    2026-11-10 names no warehouses: WAREHOUSES_DEFAULT. An invitation made before 2026-10-31 (the role's or the
     profile's general % and a set of brands: no such conditions any more) brings none. A broken one is refused."""
     if not text:
         return None
@@ -329,8 +394,13 @@ def from_invite(text: str) -> Optional[dict]:
         data = json.loads(text)
         if not isinstance(data, dict):
             raise ValueError
+        shown = WAREHOUSES_DEFAULT
+        if "warehouses" in data:
+            shown = _warehouses(data["warehouses"])
+            if shown is None:
+                raise ValueError
         if "rows" not in data:
-            return {"rows": {}}
+            return {"rows": {}, "warehouses": shown}
         if not isinstance(data["rows"], dict) or len(data["rows"]) > MAX_BRANDS:
             raise ValueError
         out = {}
@@ -341,7 +411,7 @@ def from_invite(text: str) -> Optional[dict]:
                 raise ValueError
             if bare(str(key)) and row != EMPTY:
                 out[bare(str(key))] = row
-        return {"rows": out}
+        return {"rows": out, "warehouses": shown}
     except (ValueError, KeyError, TypeError) as err:
         raise TermsError("Условия приглашения испорчены: попросите новую ссылку.") from err
 

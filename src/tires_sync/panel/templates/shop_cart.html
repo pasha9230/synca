@@ -9,10 +9,10 @@
 <div class="shop-two">
 <section class="card shop-cart-box">
 <div class="table-wrap"><table class="table shop-cart-table">
-<thead><tr><th>Шина</th><th>Склад</th><th class="num">Цена за шт.</th><th>Количество</th><th class="num">Сумма</th></tr></thead>
+<thead><tr><th>Шина</th>{% if wh_both %}<th>Склад</th>{% endif %}<th class="num">Цена за шт.</th><th>Количество</th><th class="num">Сумма</th></tr></thead>
 <tbody>{% for r in rows %}<tr>
 <td class="c-name">{{ r.name }}{% if not r.ok %} <span class="badge badge--err">нет в наличии</span>{% endif %}</td>
-<td class="c-wh">{{ r.row.warehouse if r.ok else "—" }}</td>
+{% if wh_both %}<td class="c-wh">{{ r.row.warehouse if r.ok else "—" }}</td>{% endif %}
 <td class="num c-price">{{ r.row.price|money if r.ok else "—" }}</td>
 <td class="c-qty"><form method="post" action="/shop/cart/set" class="shop-cart-qty"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
 {% if r.ok %}<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="0" max="100" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--secondary btn--sm">Изменить</button>{% endif %}

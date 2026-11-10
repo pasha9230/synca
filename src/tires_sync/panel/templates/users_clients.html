@@ -5,7 +5,7 @@
 <p class="small muted">Цена клиента = закупка (цена в выгрузке) × (1 + % клиента / 100), вверх до 10 ₽. % клиента по бренду — наш % бренда («Настройки → Бренды и наценки», без поправки аккаунта) или свой % клиента, заданный в его условиях; он хранится как сдвиг от нашего и следует за ним. Бренд без нашего % клиент видит только со своим %. Клиент видит только итоговую цену. <a href="/users">← Пользователи</a></p>
 <section class="card"><div class="card-body" style="overflow-x:auto"><h2>Клиенты</h2>
 <table class="table"><thead><tr><th>Логин</th><th>Имя, компания</th><th>Свой % брендов</th><th>Состояние</th><th></th></tr></thead><tbody>
-{% for c in clients %}<tr{% if not c.active %} class="muted"{% endif %}><td>{{ c.login }}</td><td>{{ c.display_name }}</td><td class="small">{{ describe(c.terms)|join(" · ") }}</td>
+{% for c in clients %}<tr{% if not c.active %} class="muted"{% endif %}><td>{{ c.login }}</td><td>{{ c.display_name }}</td><td class="small">{{ c.wh }} · {{ describe(c.terms)|join(" · ") }}</td>
 <td>{% if c.active %}<span class="badge badge--ok">включён</span>{% else %}<span class="badge badge--neutral">выключен</span>{% endif %}</td>
 <td style="white-space:nowrap"><a class="btn btn--secondary btn--sm" href="/client-terms/c/{{ c.login }}">Условия</a> <a class="btn btn--link-gray btn--sm" href="/client-terms/c/{{ c.login }}/preview">Каталог глазами клиента</a></td></tr>
 {% else %}<tr><td colspan="5" class="muted">Клиентов пока нет: пригласите на странице «Пользователи», роль «Клиент».</td></tr>{% endfor %}

@@ -3,7 +3,8 @@
    drawn by the <style> below (the selectors are ours, checked by tour.SELECTOR) #}
 {# what of the page the steps need (tour.WHEN): the values the page was drawn with #}
 {% set steps = tour({"point": point is defined and point, "cards": cards is defined and cards, "returns": returns is defined and returns,
-                     "catalog": empty is defined and not empty}) if tour is defined else [] %}
+                     "catalog": empty is defined and not empty,
+                     "warehouses": empty is defined and not empty and wh_both is defined and wh_both}) if tour is defined else [] %}
 {% if steps %}
 <style>{% for s in steps %}
 body:has(#tour-s{{ loop.index }}:checked) {{ s.sel|safe }}{outline:3px solid var(--primary-600);outline-offset:4px;box-shadow:0 0 0 9px rgba(127,86,217,.22);border-radius:var(--r-md);scroll-margin:120px}

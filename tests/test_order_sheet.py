@@ -843,6 +843,32 @@ def test_the_row_follows_the_responsible_and_the_label_of_a_person(table):
     assert mine() == {"Подпись-В"}
 
 
+def test_every_written_row_of_the_order_takes_the_new_responsible(table):
+    """The owner 2026-11-10: an order of the partner's account handed to the owner is the owner's in the table — every written row of
+    it, by the record «Ответственный: …» of the journal (no hourly look needed); nothing changed: nothing sent."""
+    conn, box, fake = table
+    person_with_label(conn, "person1", "Павел")
+    users.add_user(conn, "person2", "пароль-для-теста-1", NOW, role="partner")      # no label of their own
+    order = placed(conn)
+    chat_of(conn, account(conn, "Шина-Колесо", "Заман"), order)
+    sheet.flush(conn, box, fake, NOW)
+    mine = lambda: [r["Аккаунт"] for k, r in fake.rows.items() if k.startswith("tires:%d:" % order)]
+    assert len(mine()) > 1 and set(mine()) == {"Заман"}
+    sent = len(fake.data_posts())
+    orders.update_card(conn, order, {"responsible": "person1"}, LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    ops = fake.data_posts()[-1]["rows"]
+    assert len(fake.data_posts()) == sent + 1 and len(ops) == len(mine())
+    assert all(op["extra"] == {"Аккаунт": "Павел"} and not op["create"] and not op["fields"] for op in ops)
+    assert set(mine()) == {"Павел"}
+    sheet.flush(conn, box, fake, LATER)
+    sheet.flush(conn, box, fake, LATER, full=True)
+    assert len(fake.data_posts()) == sent + 1                                       # sent again: nothing to say
+    orders.update_card(conn, order, {"responsible": "person2"}, LATER, "owner")     # no label: the account's one comes back
+    sheet.flush(conn, box, fake, LATER)
+    assert set(mine()) == {"Заман"} and len(fake.data_posts()) == sent + 2
+
+
 def test_the_label_of_a_person_is_checked_like_the_account_s(table):
     conn, box, fake = table
     users.add_user(conn, "person1", "пароль-для-теста-1", NOW, role="partner")

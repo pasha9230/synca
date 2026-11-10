@@ -8,7 +8,8 @@ Where it is read (GETs only; the session is closed by the client's close(): sess
 - right after the press (webmim_create.place → after_place): the session of the press, before its logout, one quick attempt; the number is
   in the card before order_placed.on_placed renders the messages, so they go with it at once;
 - the window «Подтверждение» (poll): every few seconds for about a minute while the number is not there, one client a poll, GAP between
-  any two asks of the panel;
+  any two asks of the panel; a number in the card already: no login at all; a failed ask (the cabinet lets one session in: «код 429»)
+  stops the asking until the person presses «Проверить ещё раз» (the owner 2026-11-10);
 - hourly (webmim_match.run → safe_hourly): the open orders without a number, the session of the snapshot, one login a run;
 - a WebMIM number typed by a person in the order window (after_save, the owner 2026-11-09: the partner places orders by hand in the
   cabinet): within that save, one quick login and read, its logout; the save never fails for it.
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -313,7 +315,8 @@ def _turn(conn, card_id: int, now: str) -> Optional[dict]:
             conn.commit()
             seen = _state(conn, SEEN % card_id)
             fresh = seen and 0 <= _seconds(now, str(seen.get("at", ""))) < FRESH
-            return {k: v for k, v in seen.items() if k != "at"} if fresh else {"state": "wait", "final": False, "text": "проверяю…"}
+            wait = max(1, math.ceil(GAP - _seconds(now, str(last.get("at", "")))))     # «Проверить ещё раз» pressed too early says so
+            return dict({k: v for k, v in seen.items() if k != "at"} if fresh else {"state": "wait", "final": False, "text": "проверяю…"}, retry_in=wait)
         _put(conn, LAST, {"at": now})
     except Exception:
         conn.rollback()
@@ -328,6 +331,19 @@ def _remember(conn, card_id: int, result: dict, now: str) -> dict:
     return result
 
 
+WRITTEN = "Номер перемещения %s вписан"
+UNREACHABLE = "Кабинет MIM занят или не отвечает. Номер подтянется сам при ежечасной проверке."
+
+
+def messages(conn, card_id: int) -> List[str]:
+    """What became of the messages «заказ оформлен» of the order (order_placed's tasks), for the window: read only."""
+    from . import order_engine
+    tasks = [t for t in order_engine.list_tasks(conn, card_id) if t["kind"] == "message" and t["rule_id"] == order_engine.PLACED_RULE]
+    sent, waits = sum(t["status"] == "done" for t in tasks), sum(t["status"] in ("pending", "error", "running") for t in tasks)
+    return ((["Сообщения «заказ оформлен» отправлены: %d." % sent] if sent else [])
+            + (["Сообщения «заказ оформлен» ждут в окне «Сообщения по заказу»: %d." % waits] if waits else []))
+
+
 def purchase(conn, card_id: int) -> float:
     """The order's purchase as the window «Подтверждение» shows it (order_supplier.view: the supplier's positions, the panel's price)."""
     from . import oth_sale
@@ -337,7 +353,8 @@ def purchase(conn, card_id: int) -> float:
 
 def poll(conn, card_id: int, client_of: Callable[[], object], now: str, send: Optional[Send]) -> dict:
     """One poll of the window: {state, text, final, order_number, invoice, invoice_date, status, sum, purchase, sum_differs, transfer, result,
-    lines}. state: off (no API user / not the live server), none (no WebMIM number), wait (not in the list yet, no invoice yet), found,
+    lines; retry: the ask failed, the page stops asking and shows «Проверить ещё раз»; retry_in: asked within GAP — seconds to wait}. A
+    number in the card already (the owner 2026-11-10): the answer found with what became of the messages, never a login. state: off (no API user / not the live server), none (no WebMIM number), wait (not in the list yet, no invoice yet), found,
     error (the login, the list, the network; `final` when the login does not see the list). `client_of()`: a new OrdersClient or None;
     closed here (its logout). Never raises for the cabinet's sake."""
     from . import webmim_create, webmim_match
@@ -352,10 +369,14 @@ def poll(conn, card_id: int, client_of: Callable[[], object], now: str, send: Op
         return dict(out, state="none", final=True, text="у заказа нет номера WebMIM")
     if not _own_number(conn, card_id, number):
         return dict(out, state="off", final=True, text="номер WebMIM заказа не только его (взят с ОТХ или вписан в другой заказ): номер перемещения впишите сами")
-    if card["transfer_number"]:                               # in already (by the press, a poll, a person): no login for it
+    if card["transfer_number"]:                               # in already (by the press, a poll, a person): never a login for it
         seen = _state(conn, SEEN % card_id)
-        if seen.get("state") == "found":
-            return dict(out, **dict({k: v for k, v in seen.items() if k != "at"}, transfer=card["transfer_number"], lines=[]))
+        known = {k: v for k, v in seen.items() if k not in ("at", "retry", "retry_in")} if seen.get("state") == "found" else {}
+        text = WRITTEN % card["transfer_number"]
+        if known.get("invoice") and known["invoice"] != card["transfer_number"]:
+            text += ": в кабинете MIM «№ Счета» другой (%s), сверьте" % known["invoice"]
+        return dict(out, **dict(known, state="found", final=True, result=known.get("result") or "in", transfer=card["transfer_number"],
+                                text=text, lines=messages(conn, card_id)))
     cached = _turn(conn, card_id, now)
     if cached is not None:
         return dict(out, **dict(cached, transfer=orders._row(conn, card_id)["transfer_number"], lines=[]))
@@ -369,7 +390,9 @@ def poll(conn, card_id: int, client_of: Callable[[], object], now: str, send: Op
         note(conn, card_id, _why(err), now)
         seen_not = isinstance(err, webmim_orders.OrdersError) and err.status in (401, 403, 404)
         refused = isinstance(err, webmim_orders.OrdersError) and webmim_orders.WRONG_PASSWORD in str(err)
-        return _remember(conn, card_id, dict(out, state="error", final=seen_not or refused, text=_why(err)), now)
+        if seen_not or refused:                                   # the login never sees the list: a new ask changes nothing
+            return _remember(conn, card_id, dict(out, state="error", final=True, text=_why(err)), now)
+        return _remember(conn, card_id, dict(out, state="error", retry=True, text=UNREACHABLE, why=_why(err)), now)
     if row is None:
         return _remember(conn, card_id, dict(out, text="заказа №%s ещё нет в кабинете MIM" % number), now)
     seen = info(row)

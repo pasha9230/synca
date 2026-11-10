@@ -1493,6 +1493,8 @@
   }
   // «Сверка с кабинетом MIM» (окно «Подтверждение» после оформления в WebMIM, владелец 09.11): раз в 5 с, не дольше минуты; номер и
   // сообщения пишет сервер (webmim_cabinet.poll). Закрыли окно: страница обновляется (номер в карточке, журнал).
+  // Владелец 10.11: номер уже вписан — сервер отвечает итогом без входа в кабинет; спросить не вышло (r.retry, сеть) — опрос стоит,
+  // «Проверить ещё раз» спрашивает один раз (рано: r.retry_in секунд).
   (function () {
     var box = document.querySelector("[data-mim-cabinet]");
     if (!box) return;
@@ -1514,21 +1516,27 @@
       }
       (r.lines || []).forEach(function (t) { var li = document.createElement("li"); li.textContent = t; lines.appendChild(li); });
     };
-    var late = function () { state.textContent = "№ счёта ещё не выдан: возьмём позже (почасовое чтение). Окно можно закрыть."; };
+    var retry = box.querySelector("[data-mim-retry]"), manual = false;
+    var BUSY = "Кабинет MIM занят или не отвечает. Номер подтянется сам при ежечасной проверке.";
+    var stop = function (text) { manual = true; state.textContent = text; if (retry) { retry.hidden = false; retry.disabled = false; } };
+    var late = function () { stop("№ счёта ещё не выдан: возьмём позже (почасовое чтение). Окно можно закрыть."); };
     var ask = function () {
       var data = new FormData();
       data.append("csrf", box.getAttribute("data-csrf"));
       fetch(url, {method: "POST", body: data, credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
         .then(function (r) { if (!r.ok || r.redirected) throw new Error("answer"); return r.json(); })
         .then(function (r) {
+          if (manual && !r.final && r.retry_in) { stop("Кабинет MIM только что спрашивали: повторить можно через " + r.retry_in + " с."); return; }
           show(r);
-          if (r.final) { state.textContent = r.text; return; }
+          if (r.final) { state.textContent = r.text; if (retry) retry.hidden = true; return; }
+          if (r.retry || manual) { stop(r.text || BUSY); return; }
           if (Date.now() - started > LIMIT) { late(); return; }
           state.textContent = "проверяю… " + (r.text || "");
           setTimeout(ask, EVERY);
         })
-        .catch(function () { if (Date.now() - started > LIMIT) late(); else setTimeout(ask, EVERY); });
+        .catch(function () { stop(BUSY); });
     };
+    if (retry) retry.addEventListener("click", function () { manual = true; retry.disabled = true; state.textContent = "проверяю…"; ask(); });
     ask();
     var win = box.closest(".modal-backdrop");
     if (win) new MutationObserver(function () { if (!win.classList.contains("is-open")) window.location.replace(window.location.pathname + "#webmim"); })

@@ -151,7 +151,7 @@ def test_every_step_of_the_point_lights_an_element_of_its_workplace(tmp_path):
 
 
 def test_every_step_of_the_client_lights_an_element_of_the_catalog(tmp_path):
-    app, client, conn, _ = make_shop(tmp_path)
+    app, client, conn, _ = make_shop(tmp_path, warehouses=(1, 2))        # both warehouses on (the owner 2026-11-10: else no «Склад»)
     response = client.get("/shop")
     html = text(response)
     steps = tour.steps_for("client")
@@ -265,7 +265,7 @@ def test_an_empty_catalog_shows_no_tour_and_keeps_it_for_later(tmp_path):
 
 
 def test_a_catalog_found_empty_keeps_its_steps_and_the_cart(tmp_path):
-    app, client, conn, _ = make_shop(tmp_path)
+    app, client, conn, _ = make_shop(tmp_path, warehouses=(1, 2))        # both warehouses on (the owner 2026-11-10: else no «Склад»)
     html = text(client.get("/shop?q=nothing-like-this"))                    # nothing found: the filters and the table head are still there
     assert shown(html) == ["Каталог", "Фильтры", "Склад 1 и Склад 2", "Корзина и заказ", tour.AGAIN["title"]]
     for s in tour.steps_for("client"):

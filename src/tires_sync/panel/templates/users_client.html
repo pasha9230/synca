@@ -2,10 +2,11 @@
 {% block title %}Условия клиента {{ login }} · Tires Sync{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Условия клиента {{ login }}{% if info.display_name %} · {{ info.display_name }}{% endif %}</h1>
-<p class="sub">Свой % клиента по брендам; рядом — наш % сейчас. <a href="/client-terms">← Условия клиентов</a> · <a href="/client-terms/c/{{ login }}/preview">Каталог глазами клиента</a></p></div></header>
+<p class="sub">Склады клиента и свой % по брендам; рядом — наш % сейчас. <a href="/client-terms">← Условия клиентов</a> · <a href="/client-terms/c/{{ login }}/preview">Каталог глазами клиента</a></p></div></header>
 <section class="card card-body stack">
 {% set ro = not can_post("users_client_save") %}
 {% if not ro %}<form method="post" action="/client-terms/c/{{ login }}" class="stack">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% with prefix = "" %}{% include "_client_warehouses.html" %}{% endwith %}
 {% with rows = rows, table_id = "client-brands", prefix = "" %}{% include "_client_brands.html" %}{% endwith %}
 <div class="row"><button class="btn btn--primary">Сохранить</button></div>
 {% if not ro %}</form>{% else %}</fieldset>{% endif %}
