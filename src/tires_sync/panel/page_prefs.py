@@ -37,6 +37,7 @@ PAGES = {
     "mypoint_page": ("tab q p", "tab", "p"),
     "shop_page": ("size q s t wh b xb o r p", "o r p", ""),
     "new_positions": ("days", "", ""),
+    "oth_page": ("point", "", "point"),          # «На ОТХ»: the point stays until the person takes it off (the owner 2026-11-10)
 }
 # a group of pages that are one place: «Настройки» opens the tab last looked at, its tabs move between themselves freely
 # (the tabs, the other pages under the same head of tabs: their links to a tab are moves inside the place too)
