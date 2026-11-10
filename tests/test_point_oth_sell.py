@@ -242,3 +242,28 @@ def test_tyres_partly_given_back_to_the_supplier_are_not_sold_by_the_point(tmp_p
     assert not done and "возвращ" in answer and "офис" in answer
     assert "Точка продала шины с ОТХ" not in texts(conn, card)
 
+
+
+def test_tyres_marked_for_the_return_not_agreed_yet_are_sold_by_the_point(tmp_path, clock):
+    """10.11 (c13acc4): the mark «На возврат» of the positions («Ожидает согласование возврата», item_to_return) is kept in oth_return too, and
+    «Продать» took it for tyres given back: the button was gone. The tyres lie at the point: the button is there and sells the order."""
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (card,)).fetchone()[0]
+    assert order_oth.item_to_return(conn, item, "2026-10-14T10:00:00", "owner")                 # all 4 of 4
+    assert not order_oth.given_back(conn, card)
+    mine = manager(app, conn, pid)
+    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=oth").get_data(as_text=True)
+    sell(mine, card)
+    assert orders.get_card(conn, card)["stage"]["code"] == "done" and "Точка продала шины с ОТХ" in texts(conn, card)
+
+
+def test_a_real_return_of_a_part_after_the_mark_still_keeps_the_button_off(tmp_path, clock):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (card,)).fetchone()[0]
+    order_oth.item_to_return(conn, item, "2026-10-14T10:00:00", "owner", qty=2)
+    assert not order_oth.given_back(conn, card)
+    order_oth.mark_returned(conn, item, "2026-10-14T11:00:00", "owner", qty=1)                # one really went back
+    assert order_oth.given_back(conn, card)
+    assert "oth_sold" not in manager(app, conn, pid).get("/my-point?tab=oth").get_data(as_text=True)
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
+    assert not done and orders.get_card(conn, card)["stage"]["code"] == "oth"

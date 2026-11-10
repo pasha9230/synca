@@ -807,8 +807,11 @@ SOLD_SKIP = "шины проданы с ОТХ другому покупател
 
 
 def given_back(conn, order_id) -> bool:
-    """Some tyres of the order are marked «Вернуть поставщику» (oth_return): the point does not sell such an order by one press (review 2026-11-10)."""
-    return conn.execute("SELECT 1 FROM oth_return WHERE order_id = ? AND qty > 0 LIMIT 1", (order_id,)).fetchone() is not None
+    """Some tyres of the order really went back to the supplier («Вернуть поставщику»): the point does not sell such an order by one press (review
+    2026-11-10). The pieces of oth_return that are a mark «На возврат» (_marked, «Ожидает согласование возврата») lie at the point: not given back."""
+    since = _oth_since(conn, order_id)
+    return any(int(qty) - _marked(conn, item_id, int(qty), since) > 0
+               for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (order_id,)).fetchall())
 
 
 def sell(conn, card: dict, who: str, now: str) -> tuple:
