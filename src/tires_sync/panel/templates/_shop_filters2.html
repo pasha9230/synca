@@ -39,7 +39,8 @@
 <div class="seg shop-v2-seg" role="group" aria-label="Сезон">
 <label><input type="radio" name="s" value=""{% if not f.season %} checked{% endif %}>Все</label>
 <label title="Лето"><input type="radio" name="s" value="summer"{% if f.season == "summer" %} checked{% endif %}><span class="shop-ico shop-ico--sun">{{ icon("sun") }}</span>Лето</label>
-<label title="Зима"><input type="radio" name="s" value="winter"{% if f.season == "winter" %} checked{% endif %}><span class="shop-ico shop-ico--snow">{{ icon("snow") }}</span>Зима</label></div>
+<label title="Зима"><input type="radio" name="s" value="winter"{% if f.season == "winter" %} checked{% endif %}><span class="shop-ico shop-ico--snow">{{ icon("snow") }}</span>Зима</label>
+<label title="Всесезонные"><input type="radio" name="s" value="all"{% if f.season == "all" %} checked{% endif %}><span class="shop-ico shop-ico--sun">{{ icon("sun") }}</span><span class="shop-ico shop-ico--snow">{{ icon("snow") }}</span>Всесезонные</label></div>
 <div class="seg shop-v2-seg" role="group" aria-label="Шипы">
 <label><input type="radio" name="t" value=""{% if not f.studs %} checked{% endif %}>Все</label>
 <label title="Шипы"><input type="radio" name="t" value="studded"{% if f.studs == "studded" %} checked{% endif %}><span class="shop-ico shop-ico--stud">{{ stud_icon() }}</span>Шипы</label>
