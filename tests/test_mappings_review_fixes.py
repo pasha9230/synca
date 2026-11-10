@@ -88,12 +88,12 @@ def test_models_show_season_studs_and_commercial_marks_on_mappings_and_catalog(t
         commodity_xml(NNOMMODIF="3", SMODEL="Plain 1", SSEASON="Летняя", SMNFCODE="C3")))
     page = client.get("/mappings").get_data(as_text=True)
     row = page.split('class="t-name">Weird 9000')[1].split("</td>")[0]
-    assert 'title="Зима' in row and 'title="Лето"' not in row                            # only the winter studded position of this model is here: the commercial one is not taken
-    assert ">C</span>" not in row                                                         # commercial tires (C, LT) are not taken from the unload at all (2026-10-14)
+    assert 'title="Зима' in row and 'title="Лето"' in row                                # both positions of this model are here: «C» is taken since 2026-11-10
+    assert ">C</span>" in row and "коммерческая шина: без пары не публикуется" in row     # the mark of a commercial tire and what it waits for
     plain = page.split('class="t-name">Plain 1')[1].split("</td>")[0]
     assert 'title="Лето"' in plain and "badge--neutral" not in plain
     catalog = client.get("/catalog?q=ikon").get_data(as_text=True)
-    assert ">C2<" not in catalog and ">C1<" in catalog
+    assert ">C2<" in catalog and ">C1<" in catalog
 
 
 def test_account_page_has_a_copy_button_for_the_feed_address(tmp_path):

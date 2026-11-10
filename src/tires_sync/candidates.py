@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from .catalog import resolve_brand, resolve_model
-from .filters import exclusion_reason
+from .filters import exclusion_reason, is_commercial_c
 from .models import Offer, Settings
 from .overrides import FORCEABLE, override_key
 from .pricing import position_price
@@ -85,7 +85,7 @@ def evaluate(
         if avito_brand is None:
             problems.append("brand_not_in_reference:%s" % offer.brand_key)
         else:
-            avito_model = resolve_model(avito_brand, offer.model_raw, confirmed, ref)
+            avito_model = resolve_model(avito_brand, offer.model_raw, confirmed, ref, commercial=is_commercial_c(offer))
             if avito_model is None:
                 problems.append("model_needs_mapping:%s" % offer.model_raw)
                 ev.unmatched[gid] = (avito_brand, offer.model_raw)

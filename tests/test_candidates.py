@@ -41,7 +41,7 @@ def test_zero_price_is_a_problem_never_a_candidate():
 
 
 def test_filtered_offers_are_excluded_with_reason():
-    ev = run([make_offer(goods_id="1", car_type="C"), make_offer(goods_id="2", brand_key="KUMHO")])
+    ev = run([make_offer(goods_id="1", car_type="LT"), make_offer(goods_id="2", brand_key="KUMHO")])
     assert ev.excluded == {"1": "commercial", "2": "not_enabled"}
 
 

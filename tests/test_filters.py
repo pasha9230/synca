@@ -9,8 +9,8 @@ def test_enabled_offer_passes():
     assert exclusion_reason(make_offer(), S) is None
 
 
-def test_commercial_tires_are_excluded():
-    assert exclusion_reason(make_offer(car_type="C"), S) == "commercial"
+def test_lt_tires_are_excluded_and_c_tires_are_not():
+    assert exclusion_reason(make_offer(car_type="C"), S) is None                          # owner's decision 2026-11-10: «C» is published
     assert exclusion_reason(make_offer(car_type="lt"), S) == "commercial"
 
 

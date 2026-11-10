@@ -357,7 +357,7 @@ def dashboard_data(conn, settings, parsed, ref, unload_path="", feed_root="", no
 
 from collections import defaultdict
 
-from ..catalog import classify_model, normalize_model, resolve_brand, resolve_model, suggest_brand
+from ..catalog import classify_model, commercial_marks, keeps_commercial_mark, normalize_model, resolve_brand, resolve_model, suggest_brand
 
 SEASONS = ("winter", "summer", "all")
 
@@ -1010,7 +1010,7 @@ def _unbuilt_candidate(conn, settings, ref, offer):
     else:
         price = position_price(offer, settings)
     brand = resolve_brand(offer.brand_key, ref, store.load_brand_map(conn))
-    model = resolve_model(brand, offer.model_raw, store.load_confirmed_mappings(conn), ref) if brand else None
+    model = resolve_model(brand, offer.model_raw, store.load_confirmed_mappings(conn), ref, commercial=offer.car_type.strip().upper() == "C") if brand else None
     return Candidate(offer.goods_id, offer, price, brand or offer.brand_raw, model or offer.model_raw), note
 
 
@@ -1078,12 +1078,17 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
         for item in sorted(models.get(key, {}).values(), key=lambda m: (-m["goods"], m["name"])):
             found, proposal, tier, options = None, None, "none", []
             if avito:
-                found = resolve_model(avito, item["name"], confirmed, ref)
+                commercial = "C" in item["cartypes"]                       # a «C» tire: only under its own commercial model (catalog.resolve_model)
+                found = resolve_model(avito, item["name"], confirmed, ref, commercial=commercial)
                 if not found and proposals:
                     tier, options = classify_model(avito, item["name"], ref)
+                    if commercial:                                          # never hint at the nearest other model (C4 → C3)
+                        options = [o for o in options if keeps_commercial_mark(item["name"], o)]
                     proposal = options[0] if options and tier in ("prefix", "code") else None
             model_rows.append(dict(item, seasons=[k for k in KIND_ORDER if k in item["seasons"]], cartypes=sorted(item["cartypes"]),
                                    avito_model=found, proposal=proposal, tier=tier, options=list(options),
+                                   commercial_wait="C" in item["cartypes"] and not found,
+                                   commercial_marks=sorted(commercial_marks(item["name"])) if "C" in item["cartypes"] else [],
                                    sizes=["%d/%d R%d (%d)" % (w, h, d, stock) for (d, w, h), (_, stock) in sorted(item["sizes"].items())]))
         rows.append({
             "models": model_rows,
@@ -1182,7 +1187,7 @@ REASON_TEXT = {
     "unknown_season": "неизвестный сезон",
     "brand_excluded": "бренд исключён из выгрузки",
     "size_excluded": "размер исключён из выгрузки",
-    "commercial": "коммерческая шина (C/LT)",
+    "commercial": "коммерческая шина (LT)",
     "old_production": "старая продукция",
     "diameter": "диаметр меньше минимального",
     "low_stock": "остаток ниже порога",
