@@ -64,7 +64,7 @@ STEPS = {
         {"sel": ".o2-filters", "need": "shop", "when": "catalog", "title": "Фильтры",
          "text": "Ширина, профиль, диаметр или несколько размеров через пробел, поиск, сезон, шипы. «Показать» применяет фильтры, "
                  "«Сбросить» убирает. Они запоминаются в вашем аккаунте."},
-        {"sel": "#f-wh", "need": "shop", "when": "catalog", "title": "Склад 1 и Склад 2",
+        {"sel": "#f-wh", "need": "shop", "when": "warehouses", "title": "Склад 1 и Склад 2",
          "text": "Шины лежат на двух складах. Выберите склад, чтобы видеть только его; в таблице склад указан у каждой шины."},
         {"sel": "[data-tour=cart]", "need": "shop", "when": "catalog", "title": "Корзина и заказ",
          "text": "«В корзину» в строке шины добавляет её с количеством. В корзине поправьте количество, выберите точку или доставку и "
@@ -76,7 +76,7 @@ assert all(SELECTOR.match(s[k]) for steps in STEPS.values() for s in steps for k
 # `phone`: the element a step lights on a phone (PHONE wide at most) where its own `sel` is hidden (the client's filters: in a closed sheet)
 PHONE = 720
 # `when`: what of the page (_tour.html reads it from the page's own values) a step needs
-WHEN = ("point", "cards", "returns", "catalog")
+WHEN = ("point", "cards", "returns", "catalog", "warehouses")     # «warehouses»: the catalog with both warehouses on for the client
 # where the tour of a kind is shown (the endpoint of its start page)
 START = {"staff": "index", "point": "mypoint_page", "client": "shop_page"}
 

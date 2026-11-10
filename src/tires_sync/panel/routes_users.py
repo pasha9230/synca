@@ -16,6 +16,13 @@ def _user_field(message: str) -> str:
     return ""
 
 
+def _typed_wh(typed, prefix: str, saved) -> tuple:
+    """The switches of the warehouses a form shows: what a refused form had ticked, else `saved`."""
+    if typed is not None and typed.get(prefix + "wh_sent"):
+        return tuple(n for n, _label in client_terms.WAREHOUSES if str(n) in typed.getlist(prefix + "wh"))
+    return tuple(saved)
+
+
 def register(app) -> None:
     def _point(value):
         try:
@@ -30,7 +37,7 @@ def register(app) -> None:
                                points={p["id"]: p["name"] for p in points.list_points(conn)}, roles=users.ROLES, sections=users.SECTIONS,
                                rights=users.RIGHTS, matrix=users.MATRIX, link=session.pop("invite_link", None) if not typed else None,
                                invite_rows=rows_of(brand_choices(app, conn), client_terms.active_ours(conn), {}, typed, "c_"),
-                               invite_typed=bool(typed), invite_form=typed, describe=client_terms.describe, shop_resp=_shop_resp(conn),
+                               invite_typed=bool(typed), invite_form=typed, invite_wh=_typed_wh(typed, "c_", client_terms.WAREHOUSES_DEFAULT), describe=client_terms.describe, wh_text=client_terms.warehouses_text, shop_resp=_shop_resp(conn),
                                main_name=users.main_name(conn), main_login=app.config["AUTHOR"], sheet_labels=_sheet_labels(conn), unsigned=users.UNSIGNED,
                                resets=users.list_login_resets(conn, now_iso()), reset_link=session.pop("reset_link", None) if not typed else None), status
 
@@ -84,7 +91,7 @@ def register(app) -> None:
         conn = get_conn()
         role, f = request.form.get("role", ""), request.form
         try:
-            terms = client_terms.invite_terms(parse_form(f, "c_")) if role == "client" else ""
+            terms = client_terms.invite_terms(parse_form(f, "c_"), client_terms.parse_warehouses(f, "c_")) if role == "client" else ""
             token = users.create_invite(conn, role, _point(f.get("point_id")), f.get("display_name", ""), now_iso(), author(), terms)
         except client_terms.TermsError as err:                   # the form comes back with what was typed, the message under its field
             flash(str(err), "field:" + err.field if err.field else "error")

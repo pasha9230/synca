@@ -1,0 +1,5 @@
+{# The warehouses a client is shown (client_terms.warehouses, the owner 2026-11-10): `wh` (the numbers on), `prefix` of the fields. The
+   hidden <prefix>wh_sent says the form drew the switches (client_terms.parse_warehouses); both off is refused by the server #}
+<div class="field" data-client-warehouses><span class="label">Склады клиента</span><input type="hidden" name="{{ prefix }}wh_sent" value="1">
+<div class="row" style="gap:var(--s-4);flex-wrap:wrap">{% for n, label in ((1, "Склад 1"), (2, "Склад 2")) %}<label class="row" style="gap:6px;align-items:center"><input type="checkbox" name="{{ prefix }}wh" value="{{ n }}"{% if n in wh %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+<span class="small muted">Шины выключенного склада клиент не видит нигде: ни в каталоге, ни в поиске, ни в корзине. Хотя бы один склад должен быть включён. Пока включён один склад, фильтр и колонка «Склад» у клиента не показываются.</span></div>

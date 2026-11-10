@@ -116,7 +116,11 @@ class Visible:
 
 def visible(conn, login: str, offers, tochki_sid, ref=None, brand_map=None) -> List[Visible]:
     """Every position the client may see, before the filters: of any brand of the suppliers (WebMIM and 4 Точки; the owner 2026-10-30),
-    with stock and a price."""
+    with stock and a price, of the warehouses switched on for the client (client_terms.warehouses, the owner 2026-11-10). The one place
+    that decides it: the catalog, the search, the lists of the filters, the cart, the checkout, the owner's preview and the photos all
+    ask here."""
+    from ..client_terms import warehouses
+    shown = warehouses(conn, login)
     terms = terms_of(conn, login)
     if not priced(terms):
         return []
@@ -126,12 +130,14 @@ def visible(conn, login: str, offers, tochki_sid, ref=None, brand_map=None) -> L
         brand = bare_brand(offer.brand_key)
         if offer.stock <= 0 or not brand:                               # a tyre with no brand: never a tick without a name
             continue
+        warehouse = 2 if tochki_sid and supplier_of_id(offer.goods_id) == tochki_sid else 1
+        if warehouse not in shown:
+            continue
         price = client_price(terms, offer)
         if price is None:
             continue
         if brand not in labels:
             labels[brand] = resolve_brand(offer.brand_key, ref or {}, brand_map) or (offer.brand_raw or "").strip() or brand.upper()
-        warehouse = 2 if tochki_sid and supplier_of_id(offer.goods_id) == tochki_sid else 1
         out.append(Visible(offer, price, warehouse, brand, labels[brand]))
     return out
 
@@ -325,6 +331,16 @@ def row(item: Visible, photo: Optional[str]) -> dict:
     return out
 
 
+def both_warehouses(conn, login: str) -> bool:
+    """Both warehouses are on for the client: only then the filter «Склад», the column «Склад» and its tick in «Колонки» are drawn."""
+    from ..client_terms import warehouses
+    return len(warehouses(conn, login)) > 1
+
+
+def columns_of(both: bool) -> tuple:
+    return COLUMNS if both else tuple(c for c in COLUMNS if c[0] != "wh")
+
+
 def hidden_columns(conn, login: str) -> List[str]:
     saved = user_prefs.get(conn, login, COLUMNS_KEY, []) if login else []
     keys = [k for k, _ in COLUMNS]
@@ -332,8 +348,12 @@ def hidden_columns(conn, login: str) -> List[str]:
 
 
 def save_columns(conn, login: str, shown, now: str) -> List[str]:
-    """«Колонки» of the client: every column of COLUMNS not in `shown` is hidden; kept for the login."""
-    hidden = [k for k, _ in COLUMNS if k not in set(shown)]
+    """«Колонки» of the client: every column of COLUMNS not in `shown` is hidden; kept for the login. One warehouse on: the form has
+    no tick of «Склад», what was chosen for it stays."""
+    shown = set(shown)
+    if not both_warehouses(conn, login) and "wh" not in hidden_columns(conn, login):
+        shown.add("wh")
+    hidden = [k for k, _ in COLUMNS if k not in shown]
     user_prefs.put(conn, login, COLUMNS_KEY, hidden, now)
     return hidden
 

@@ -336,6 +336,8 @@ def test_an_invitation_with_the_clients_own_percent_puts_it_in_the_profile(tmp_p
     assert accept(app, path, "shina2").status_code == 404                               # one time
     plain = invite(app, owner, tok)
     assert accept(app, plain, "shina3").status_code == 302 and ct.rows(conn, "shina3") == {}
+    assert ct.warehouses(conn, "shina3") == (1,)                # the owner 2026-11-10: a new client has «Склад 1» only, the buyer of
+    ct.set_warehouses(conn, "shina3", (1, 2), NOW, "o")         # this shop has both; with both on the prices are the same
     assert sorted(prices(page(as_user(app, conn, "shina3")))) == sorted(prices(page(buyer)))
     journal = [json.loads(r[0]) for r in conn.execute("SELECT detail FROM audit WHERE action = 'client_pct_changed'")]
     assert [j["subject"] for j in journal] == ["shina"]

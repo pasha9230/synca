@@ -1,14 +1,14 @@
 {# The client's filters (/shop, both views; the owner 2026-11-09 by the office's catalog): the rows of _catalog_filters.html in one card
    above the rows, the same look as the office's; nothing of the office («Статус», «Цены», «Бренды») and no supplier (no tabs of the
-   sources). «Склад 1 / 2» stays (the client's own filter, the tour lights it). No script (the CSP of /shop): «Показать» sends the form.
+   sources). «Склад 1 / 2» stays (the client's own filter, the tour lights it) while both warehouses are on for the client (`wh_both`). No script (the CSP of /shop): «Показать» sends the form.
    On a phone the fields wrap (shop.css .shop-o2f). #}
 {% from "_catalog_filters.html" import filter_rows %}
 <div class="o2 shop-o2f"><section class="card o2-cat-filters">
 <form method="get" action="{{ base }}" class="filters o2-filters">
 <input type="hidden" name="o" value="{{ f.sort }}">{% if f.descending %}<input type="hidden" name="r" value="1">{% endif %}{% if view == "tiles" %}<input type="hidden" name="v" value="tiles">{% endif %}
 {% call filter_rows(pick, f.size_text, f.unknown, f.query, f.season, f.studs, filters_reset, "Размер, бренд, модель", recent=recent or ()) %}
-<div class="field" id="f-wh"><span class="label">Склад</span><div class="seg">
-{% for key, label in ((0, "Все"), (1, "Склад 1"), (2, "Склад 2")) %}<label><input type="radio" name="wh" value="{{ key or '' }}"{% if f.warehouse == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div></div>
+{% if wh_both %}<div class="field" id="f-wh"><span class="label">Склад</span><div class="seg">
+{% for key, label in ((0, "Все"), (1, "Склад 1"), (2, "Склад 2")) %}<label><input type="radio" name="wh" value="{{ key or '' }}"{% if f.warehouse == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div></div>{% endif %}
 <button class="btn btn--primary o2-reset">Показать</button>
 {% endcall %}
 </form>

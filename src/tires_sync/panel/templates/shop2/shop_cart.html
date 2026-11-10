@@ -17,7 +17,7 @@
 <ol><li>Проверьте количество: «−» и «+», больше остатка не даст; убрать шину — «Удалить».</li><li>Выберите, как получить: забрать на точке или доставка.</li><li>Укажите телефон — спросим один раз, дальше подставится сам.</li><li>«Оформить заказ» — менеджер проверит наличие и свяжется с вами. Статус — в «Мои заказы».</li></ol></div>{% endif %}
 {% for r in rows %}<article class="card shop2-line{% if not r.ok %} is-gone{% endif %}">
 <div class="shop2-line-top"><div class="shop2-line-name"><b>{{ r.name }}</b>
-{% if r.ok %}<div class="shop2-line-meta">{% if r.row.season %}<span class="shop2-tag">{{ r.row.season }}{% if r.row.studs %} · шипы{% endif %}</span>{% endif %}<span class="shop2-tag">{{ r.row.warehouse }}</span><span class="muted">есть {{ r.row.stock }} шт.</span></div>
+{% if r.ok %}<div class="shop2-line-meta">{% if r.row.season %}<span class="shop2-tag">{{ r.row.season }}{% if r.row.studs %} · шипы{% endif %}</span>{% endif %}{% if wh_both %}<span class="shop2-tag">{{ r.row.warehouse }}</span>{% endif %}<span class="muted">есть {{ r.row.stock }} шт.</span></div>
 {% else %}<div class="shop2-line-meta"><span class="badge badge--err">нет в наличии</span></div>{% endif %}</div>
 <form method="post" action="/shop/cart/set" class="shop2-drop"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}"><button class="btn btn--link-gray btn--sm" name="drop" value="1" aria-label="Удалить из корзины">{{ icon("x") }}Удалить</button></form></div>
 {% if r.ok %}<div class="shop2-line-bottom"><form method="post" action="/shop/cart/set" class="shop2-stepper"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
