@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-27",
+  "version": "2026-11-10",
   "about": "Rules of the check of a feed before it is published (docs/feed-check-rules.md). level: critical stops the publication of that account's feed (the published one stays), warning is only reported, off does not apply. Modes: generated = our own feed, mirror = a file of another owner carried over.",
   "params": {"title_limit": 70, "shrink_warning_fraction": 0.3},
   "rules": {
@@ -18,7 +18,7 @@
     "owner_phone":       {"generated": "critical", "mirror": "critical", "text": "В объявлении общий номер владельца, а это не основной аккаунт"},
     "address":           {"generated": "critical", "mirror": "off",      "text": "В объявлении адрес другого аккаунта (или общий адрес настроек), а не свой адрес этого аккаунта"},
     "pack4":             {"generated": "critical", "mirror": "warning",  "text": "Комплект -x4 в фиде, а комплекты не публикуются"},
-    "commercial":        {"generated": "critical", "mirror": "warning",  "text": "Коммерческая шина (индекс C) в фиде, а коммерческие не публикуются"},
+    "commercial":        {"generated": "critical", "mirror": "warning",  "text": "Коммерческая шина (индекс C) в легковом разделе: «C» публикуются только в разделе «Шины для грузовиков и спецтехники»"},
     "model_in_reference":{"generated": "critical", "mirror": "warning",  "text": "Бренд или модель не найдены в справочнике Авито"},
     "title":             {"generated": "critical", "mirror": "warning",  "text": "Название длиннее лимита или с двойным пробелом"},
     "photo":             {"generated": "critical", "mirror": "warning",  "text": "Нет фото, или ссылка на фото не своя у аккаунта"},

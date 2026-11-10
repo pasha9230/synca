@@ -37,7 +37,7 @@ def test_off_hides_a_position_that_would_otherwise_be_published():
 
 
 def test_on_bypasses_the_filters_that_only_hide_goods():
-    for kw in ({"diameter": 13}, {"car_type": "C"}, {"name": "IKON 205/55/16 старше 3-х лет"},
+    for kw in ({"diameter": 13}, {"car_type": "C", "model_raw": "Character Ice C2"}, {"name": "IKON 205/55/16 старше 3-х лет"},
                {"brand_key": "IKON TYRES", "season": make_offer().season}):
         ev = run([make_offer(**kw)], **{"100": "on"})
         assert "100" in ev.ok, kw

@@ -16,6 +16,11 @@ def owner_exclusion(brand_key: str, diameter: int, excluded_brands, excluded_siz
     return None
 
 
+def is_commercial_c(offer: Offer) -> bool:
+    """A commercial tire of type «C»: published since 2026-11-10, but only under its own Avito model (catalog.keeps_commercial_mark)."""
+    return offer.car_type.strip().upper() == "C"
+
+
 def is_aged(offer: Offer) -> bool:
     """«старше 3-х/5-ти лет» in the supplier's name or year: the one test behind the old_production exclusion."""
     return "старше" in offer.name.lower() or "старше" in offer.mnf_year.lower()
@@ -27,7 +32,7 @@ def exclusion_reason(offer: Offer, settings: Settings, on_oth: bool = False) -> 
     owner = owner_exclusion(offer.brand_key, offer.diameter, () if on_oth else settings.excluded_brands, settings.excluded_sizes)
     if owner:
         return owner
-    if offer.car_type.upper() in ("C", "LT"):
+    if offer.car_type.strip().upper() == "LT":       # «C» is published like a passenger tire (owner, 2026-11-10); «LT» is not
         return "commercial"
     if is_aged(offer):
         return "old_production"

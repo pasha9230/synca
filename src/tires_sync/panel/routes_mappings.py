@@ -15,7 +15,7 @@ from .common import author, get_conn, login_required, now_iso, safe_path
 from .data import load_reference
 from .routes_drafts import publish_now, publish_summary
 from .routes_main import context as _context
-from .. import store, tochki_feed
+from .. import store, tochki_feed, truck
 from . import service
 
 
@@ -36,7 +36,7 @@ def suggestion_kind(m) -> str:
     """How sure the proposal for an unmatched model is: conf (apply after a look), check (several candidates), none."""
     if m["avito_model"]:
         return "done"
-    if m["tier"] in CONFIDENT and m["proposal"]:
+    if m["tier"] in CONFIDENT and m["proposal"] and not m.get("section"):     # a «C» model of the truck section: always the owner's look
         return "conf"
     return "check" if m["options"] else "none"
 
@@ -91,7 +91,8 @@ def register(app) -> None:
             shown.sort(key=lambda m: (bool(m["avito_model"]), -m["goods"], m["name"]))
             shown_models += len(shown)
             shown_goods += sum(m["goods"] for m in shown)
-            groups.append({"brand": row["brand_key"], "avito_brand": row["avito_brand"], "models": shown,
+            truck_rows = any(m.get("section") for m in shown)
+            groups.append({"brand": row["brand_key"], "avito_brand": row["avito_brand"], "models": shown, "truck": truck_rows,
                            "avito_models": sorted(ref.get(row["avito_brand"], ())),
                            "confident": sum(1 for m in shown if m["kind"] == "conf"),
                            "dom_id": hashlib.md5(row["brand_key"].encode("utf-8")).hexdigest()[:8]})
@@ -108,8 +109,9 @@ def register(app) -> None:
         chips = [{"label": label + (" (%d)" % n if n is not None else ""), "on": key == kind,
                   "url": "/mappings" + ("?" + urlencode(dict(base, **({"c": key} if key else {}))) if (base or key) else "")}
                  for key, label, n in chips]
+        truck_models = sorted(truck.values().get("Model", ())) if any(g["truck"] for g in groups) else []
         return render_template(
-            "mappings.html", groups=groups, total=unmatched_total, model_total=model_total,
+            "mappings.html", groups=groups, truck_models=truck_models, truck_label=truck.SECTION_LABEL, total=unmatched_total, model_total=model_total,
             confident=sum(g["confident"] for g in groups), brands=brands, mirror_rows=mirror_rows, mirror_lists=mirror_lists, filtered=bool(query or only_brand or kind),
             brand_options=[(r["brand_key"], r["avito_brand"]) for r in overview if r["avito_brand"] and r["models"]],
             q=request.args.get("q", ""), only_brand=only_brand, show_all=show_all, kind=kind, chips=chips,
@@ -133,7 +135,7 @@ def register(app) -> None:
                 continue
             label = (row["brand_key"] + " " + row["avito_brand"]).casefold()
             for m in row["models"]:
-                if m["avito_model"] or m["tier"] not in CONFIDENT or not m["proposal"]:
+                if m["avito_model"] or m["tier"] not in CONFIDENT or not m["proposal"] or m.get("section"):
                     continue
                 if query and query not in m["name"].casefold() and query not in label:
                     continue
@@ -154,7 +156,7 @@ def register(app) -> None:
             if row["avito_brand"] is None:
                 continue
             for m in row["models"]:
-                if not m["avito_model"]:
+                if not m["avito_model"] and not m.get("section"):        # a «C» model is confirmed on the page, from the truck section's list
                     writer.writerow([csv_safe(row["avito_brand"]), csv_safe(m["name"]), m["goods"],
                                      csv_safe(m["proposal"] or ""), m["tier"]])
         return Response(
@@ -208,7 +210,8 @@ def register(app) -> None:
     @app.route("/mappings/model", methods=["POST"])
     @login_required
     def confirm_model():
-        ref = load_reference(app.config["REFERENCE_PATH"])
+        section = truck.SECTION if request.form.get("section") == truck.SECTION else ""
+        ref = truck.reference() if section else load_reference(app.config["REFERENCE_PATH"])
         brand = request.form.get("brand", "")
         act = request.form.get("act", "") or "manual"
         typed = request.form.get("proposal", "") if act == "accept" else request.form.get("avito_model", "")
@@ -217,7 +220,7 @@ def register(app) -> None:
             if target is None and act:
                 raise MappingError("Модели «%s» нет у бренда «%s» в справочнике Авито." % (typed.strip(), brand))
             confirm_mapping(get_conn(), brand, request.form.get("model_raw", ""),
-                            target or typed, ref, now_iso(), author())
+                            target or typed, ref, now_iso(), author(), section=section)
             message = "Сопоставлено: %s → %s." % (request.form.get("model_raw", ""), target or typed)
             ok = True
         except MappingError as err:
