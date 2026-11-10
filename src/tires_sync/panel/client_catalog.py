@@ -421,26 +421,52 @@ def _fits(item: Visible, axis) -> bool:
     return all(v is None or v == got for v, got in zip(axis, (o.width, o.height, o.diameter)))
 
 
-def _model_key(item: Visible) -> tuple:
+def _model_key(item: Visible) -> Optional[tuple]:
+    """What the two tyres of a set share: the brand, the model, the season, the studs and RunFlat (the review 2026-11-10). A position
+    with no model has no key: never in a set (two «no model» are not one model), only in «Только передняя / задняя ось»."""
     o = item.offer
-    return item.brand, " ".join((o.model_raw or "").split()).casefold(), o.season.value, bool(o.studded)
+    model = " ".join((o.model_raw or "").split()).casefold()
+    if not model:
+        return None
+    return item.brand, model, o.season.value, bool(o.studded), bool(getattr(o, "runflat", False))
 
 
 def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
-    """The mixed-width sets (the owner 2026-11-10): a tyre of the front axis and one of the rear of one model of one brand, season
-    and studs, of another size; one front may be in several sets. Then the tyres of each axis that are in no set. The other filters
-    (the brands, the season, the studs, the warehouse, the search) act on both axes; the sort is the page's."""
+    """The mixed-width sets (the owner 2026-11-10): a tyre of the front axis and one of the rear of one model (_model_key), of another
+    size; one front may be in several sets. A set is ordered: its front of the front axis, its rear of the rear; when both tyres fit
+    both axes, the narrower is in front, the mirror is never shown. A rear with no radius takes the front's (a mixed set is of one
+    radius); an empty rear builds no set (`rear_empty`: «Укажите ширину задней оси»), never the whole catalog. At most KITS_MAX + 1
+    sets are built (the one past the limit tells «more»). Then the tyres in no set, each once (one fitting both axes: «Только
+    передняя»). The other filters (the brands, the season, the studs, the warehouse, the search) act on both axes; the sort is the
+    page's."""
     base = apply(items, Filters([], [], "", f.brands, f.without, f.season, f.studs, f.warehouse, f.query, f.sort, f.descending, 1,
                                 wide=f.wide))
-    fronts, rears = [i for i in base if _fits(i, front)], [i for i in base if _fits(i, rear)]
+    rear_empty = all(v is None for v in rear)
+    if not rear_empty and rear[2] is None:
+        rear = (rear[0], rear[1], front[2])
+    fronts = [i for i in base if _fits(i, front)]
+    rears = [] if rear_empty else [i for i in base if _fits(i, rear)]
     by_key: Dict[tuple, List[Visible]] = {}
     for i in rears:
-        by_key.setdefault(_model_key(i), []).append(i)
-    kits, paired_f, paired_r = [], set(), set()
+        key = _model_key(i)
+        if key is not None:
+            by_key.setdefault(key, []).append(i)
+    limit = KITS_MAX + 1
+    kits, paired = [], set()
     for i in fronts:
-        for j in by_key.get(_model_key(i), ()):
-            if _size_key(i) != _size_key(j):
-                kits.append((i, j))
-                paired_f.add(id(i))
-                paired_r.add(id(j))
-    return {"kits": kits, "front": [i for i in fronts if id(i) not in paired_f], "rear": [i for i in rears if id(i) not in paired_r]}
+        key = _model_key(i)
+        for j in by_key.get(key, ()) if key is not None else ():
+            if j is i or _size_key(i) == _size_key(j):
+                continue
+            if _fits(j, front) and _fits(i, rear) and _size_key(j) < _size_key(i):
+                continue                                          # the mirror (j, i) is the set: the narrower in front
+            kits.append((i, j))
+            paired.update((id(i), id(j)))
+            if len(kits) >= limit:
+                break
+        if len(kits) >= limit:
+            break
+    alone_f = [i for i in fronts if id(i) not in paired]
+    shown_f = {id(i) for i in alone_f}
+    return {"kits": kits, "front": alone_f, "rear": [i for i in rears if id(i) not in paired and id(i) not in shown_f],
+            "rear_empty": rear_empty}

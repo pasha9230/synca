@@ -10,7 +10,7 @@ import pytest
 
 from panel_helpers import post
 from test_catalog_multi import office, view
-from test_shop import make_shop, page, tochki_row
+from test_shop import NOW, make_shop, page, tochki_row
 from tires_sync import user_prefs
 from tires_sync.panel import client_catalog as cc
 
@@ -152,7 +152,7 @@ def test_the_mixed_sets_are_pairs_of_one_model_then_each_axis_alone(tmp_path):
 def test_one_front_tyre_may_be_in_several_sets_and_no_pair_says_so(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
     to_view2(client)
-    html = page(client, "/shop?mixed=1&fw=205&fh=55&fd=16")                                         # the rear: any
+    html = page(client, "/shop?mixed=1&fw=205&fh=55&fd=16&rd=18")                                   # the rear: any width of R18
     assert groups(results(html))["Комплект 1"] == [("205/55 R16", "2"), ("245/45 R18", "2")]
     html = page(client, "/shop?mixed=1&fw=205&rw=195")                                              # another brand behind
     got = groups(results(html))
@@ -172,10 +172,11 @@ def test_mixed_sets_pair_by_brand_model_season_and_studs():
     f225, f245, r255 = item(O(225, 45, 18)), item(O(245, 40, 18)), item(O(255, 35, 18))
     other = [item(O(255, 35, 19), "b"), item(O(255, 35, 19, model="N")), item(O(255, 35, 19, season="summer")), item(O(255, 35, 19, studded=True))]
     f = cc.filters_of(_Args(), set())
-    sets = cc.mixed_sets([f225, f245, r255] + other, f, (None, None, 18), (255, 35, None))
+    sets = cc.mixed_sets([f225, f245, r255] + other, f, (None, None, None), (255, 35, None))
     assert [(a.offer.width, b.offer.width) for a, b in sets["kits"]] == [(225, 255), (245, 255)]      # one rear in two sets
-    assert {id(i) for i in sets["rear"]} == {id(i) for i in other}  # another brand, model, season or studs: never a pair
-    assert sets["front"] == [r255]                                # fits the front too, and a pair is never of one size
+    assert {id(i) for i in sets["rear"]} == set()                 # alone and fitting both axes: once, in «Только передняя»
+    assert {id(i) for i in sets["front"]} == {id(i) for i in other}  # another brand, model, season or studs: never a pair
+    assert r255 not in sets["front"]                              # in a set: in no «Только …», and a pair is never of one size
 
 
 class _Args(dict):
@@ -216,3 +217,117 @@ def test_the_catalog_of_the_office_is_untouched(tmp_path):
         view(conn, "office", state)
         html = owner.get("/catalog?w=225").get_data(as_text=True)
         assert "shop-ms" not in html and "shop_v2.js" not in html and "Вид 2" not in html and "filters-view" not in html
+
+
+# The review of «Вид 2» (2026-11-10): the sets are of one real model, RunFlat with RunFlat, ordered pairs with no mirror, the rear radius
+# of the front, the counters and the columns of the client.
+
+class _O:
+    def __init__(self, w, h, d, model="M", season="winter", studded=False, runflat=False):
+        from types import SimpleNamespace
+        self.width, self.height, self.diameter, self.model_raw, self.studded, self.runflat = w, h, d, model, studded, runflat
+        self.season = SimpleNamespace(value=season)
+        self.stock = 4
+
+
+def _item(o, brand="a", warehouse=1):
+    return cc.Visible(o, 100, warehouse, brand, brand.upper())
+
+
+def _sets(items, front, rear):
+    return cc.mixed_sets(items, cc.filters_of(_Args(), set()), front, rear)
+
+
+def _widths(sets):
+    return [(a.offer.width, b.offer.width) for a, b in sets["kits"]]
+
+
+def test_positions_without_a_model_are_never_paired():
+    f, r = _item(_O(225, 45, 18, model="")), _item(_O(255, 35, 18, model="  "))
+    sets = _sets([f, r], (225, None, None), (255, None, None))
+    assert sets["kits"] == [] and sets["front"] == [f] and sets["rear"] == [r]
+
+
+def test_runflat_pairs_only_with_runflat():
+    f, r, rf_f, rf_r = (_item(_O(225, 45, 18)), _item(_O(255, 35, 18, runflat=True)), _item(_O(225, 45, 18, runflat=True)),
+                        _item(_O(255, 35, 18, runflat=True)))
+    assert _sets([f, r], (225, None, None), (255, None, None))["kits"] == []
+    assert _widths(_sets([rf_f, rf_r], (225, None, None), (255, None, None))) == [(225, 255)]
+
+
+def test_overlapping_axes_give_one_ordered_pair_and_each_tyre_once():
+    a, b, c = _item(_O(225, 45, 18)), _item(_O(255, 35, 18)), _item(_O(235, 40, 18, model="N"))
+    sets = _sets([b, a, c], (None, None, 18), (None, None, 18))
+    assert _widths(sets) == [(225, 255)]                          # no (255, 225): the narrower in front, no mirror
+    assert sets["front"] == [c] and sets["rear"] == []             # alone: once, never in both «Только …»
+    assert all(x is not y for x, y in sets["kits"])
+
+
+def test_a_tyre_in_a_set_is_in_no_only_list(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    to_view2(client)
+    html = page(client, "/shop?mixed=1&rw=245&rh=45&rd=18")                                         # the front: any
+    got = groups(results(html))
+    assert got["Комплект 1"] == [("205/55 R16", "2"), ("245/45 R18", "2")] and found(html) == 1
+    assert ("245/45 R18", "2") not in got["Только передняя ось"] and got["Только задняя ось"] == []
+
+
+def test_the_rear_takes_the_front_radius_and_an_empty_rear_asks_for_its_width(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    to_view2(client)
+    got = groups(results(page(client, "/shop?mixed=1&fw=205&fh=55&fd=16&rw=245")))                 # 245 R16: none in stock
+    assert got["Комплект"] == "нет"
+    html = page(client, "/shop?mixed=1&fw=205&fh=55&fd=16")
+    assert "Укажите ширину задней оси" in html and "data-kit" not in html and found(html) == 0
+    assert groups(results(html))["Только передняя ось"] == [("205/55 R16", "2")]
+
+
+def test_an_empty_rear_builds_no_sets_and_the_sets_stop_past_the_limit(monkeypatch):
+    many = [_item(_O(225, 45, 18))] + [_item(_O(255, 35 + k, 18)) for k in range(10)]
+    sets = _sets(many, (225, None, None), (None, None, None))
+    assert sets["kits"] == [] and sets["rear_empty"] and sets["front"] == many[:1]
+    monkeypatch.setattr(cc, "KITS_MAX", 2)
+    assert len(_sets(many, (225, None, None), (255, None, None))["kits"]) == 3                       # KITS_MAX + 1: «more» is known
+
+
+def test_the_note_of_the_cut_is_of_the_sets_or_of_the_only_lists(tmp_path, monkeypatch):
+    app, client, conn, _ = make_shop(tmp_path, tochki=[tochki_row("T1", rest=3)])
+    to_view2(client)
+    monkeypatch.setattr(cc, "KITS_MAX", 1)
+    html = results(page(client, "/shop?mixed=1&rw=245&rh=45&rd=18"))                               # 1 set, 2 fronts alone
+    assert "Показаны первые" not in html and "Без пары показаны не все шины" in html
+
+
+@pytest.mark.parametrize("both", [True, False])
+def test_the_sets_keep_the_clients_columns_and_the_warehouse(tmp_path, both):
+    app, client, conn, _ = make_shop(tmp_path, tochki=[tochki_row("T1", rest=3)], warehouses=(1, 2) if both else (1,))
+    to_view2(client)
+    html = results(page(client, MIXED))
+    assert "<th>Сезон</th>" in html and 'class="c-season"' in html
+    assert ("<th>Склад</th>" in html and '<td class="c-wh">Склад 1</td>' in html) == both and ('class="c-wh"' in html) == both
+    user_prefs.put(conn, "buyer", cc.COLUMNS_KEY, ["season", "wh"], NOW)
+    html = results(page(client, MIXED))
+    assert "<th>Сезон</th>" not in html and 'class="c-season"' not in html and 'class="c-wh"' not in html
+    assert groups(html)["Комплект 1"] == [("205/55 R16", "2"), ("245/45 R18", "2")]
+
+
+def test_view2_has_all_season_and_a_link_with_it_keeps_it(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    to_view2(client)
+    box = block(page(client, "/shop?s=all"))
+    assert 'name="s" value="all" checked' in box and 'title="Всесезонные"' in box and 'name="s" value="" checked' not in box
+
+
+def test_no_set_of_warehouse_2_when_it_is_off_for_the_client(tmp_path):
+    rear = dict(tochki_row("T9", rest=6), thorn=False, width="255", height="40", diameter="18", name="Ikon Tyres Test Model 255/40 R18 99T")
+    url = "/shop?mixed=1&fw=205&fh=55&fd=16&rw=255&rh=40&rd=18"
+    (tmp_path / "on").mkdir()
+    (tmp_path / "off").mkdir()
+    app, client, conn, _ = make_shop(tmp_path / "on", tochki=[rear], warehouses=(1, 2))
+    to_view2(client)
+    assert groups(results(page(client, url)))["Комплект 1"] == [("205/55 R16", "2"), ("255/40 R18", "2")]  # both on: a set of both
+    app, client, conn, _ = make_shop(tmp_path / "off", tochki=[rear], warehouses=(1,))
+    to_view2(client)
+    html = results(page(client, url))
+    got = groups(html)
+    assert got["Комплект"] == "нет" and got["Только задняя ось"] == [] and "255/40" not in html
