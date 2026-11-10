@@ -325,12 +325,13 @@ def _marked(conn, item_id, returned: int, since: str = "") -> int:
 
 
 SOLD_EARLY = "Продано до согласования возврата"
+ISSUED_NO_RETURN = "Заказ выдан, возврат не нужен"         # «Выдали» before the agreement: no sale, a neutral record (the owner 2026-11-10)
 
 
-def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None) -> int:
-    """The tyres of a mark «На возврат» were sold before the return was agreed (the owner 2026-11-10): the mark of this stay goes and its pieces
-    leave oth_return (a real «Вернуть поставщику» stays) — of every position (`item_id` None) or `pieces` of one («Взять с ОТХ»: the mark keeps
-    the rest). One record in the journal. No commit. Returns the pieces released."""
+def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, why: str = SOLD_EARLY) -> int:
+    """The tyres of a mark «На возврат» were sold (or given to the client, `why` ISSUED_NO_RETURN) before the return was agreed (the owner
+    2026-11-10): the mark of this stay goes and its pieces leave oth_return (a real «Вернуть поставщику» stays) — of every position (`item_id`
+    None) or `pieces` of one («Взять с ОТХ»: the mark keeps the rest). One record in the journal. No commit. Returns the pieces released."""
     since = _oth_since(conn, order_id)
     names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM order_item WHERE order_id = ?", (order_id,))}
     done = []
@@ -351,9 +352,9 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None) ->
         done.append((item, off))
     conn.execute("DELETE FROM oth_return WHERE order_id = ? AND qty <= 0", (order_id,))
     if done:
-        orders.add_event(conn, order_id, now, who, "field", "%s: метка «На возврат» снята — %s" % (SOLD_EARLY, "; ".join(
+        orders.add_event(conn, order_id, now, who, "field", "%s: метка «На возврат» снята — %s" % (why, "; ".join(
             "%s, %d шт." % (names.get(i, "позиция"), n) for i, n in done)))
-        _audit(conn, now, who, "oth_sold_early", {"order": int(order_id), "items": {str(i): n for i, n in done}})
+        _audit(conn, now, who, "oth_sold_early" if why == SOLD_EARLY else "oth_issued_early", {"order": int(order_id), "items": {str(i): n for i, n in done}})
     return sum(n for _, n in done)
 
 
@@ -816,7 +817,9 @@ def office_logins(conn) -> list:
 
 def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
     """«Выдали», from «На ОТХ» or «На возврат» (the owner 2026-11-04): the client is linked again, the agreement of the return (if any) goes and the
-    order goes to «Выполнено», with the answer, in one transaction; the task of the return closes. After the act МХ-3: refused. (outcome, answer, done)."""
+    order goes to «Выполнено», with the answer, in one transaction; the task of the return closes. Not agreed yet (the owner 2026-11-10): the mark
+    «На возврат» goes and the task is done as not needed («Заказ выдан, возврат не нужен»), never «Продано до согласования». After the act МХ-3:
+    refused. (outcome, answer, done)."""
     card = orders.get_card(conn, card["id"])                     # the stage as it is now
     label = card.get("webmim_number") or str(card["id"])
     if (return_plan(conn, card["id"]) or {}).get("signed_at"):
@@ -829,8 +832,11 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
     if done is None:
         conn.rollback()
         return "не выполнено: нет этапа «Выполнено»", "Не получилось: в воронке нет этапа «Выполнено».", False
-    plan = return_plan(conn, card["id"])
+    plan = return_plan(conn, card["id"])                         # read before it goes: agreed or not decides what left_return writes
     conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % card["id"],))
+    if plan is None:                                             # not agreed: the client took the tyres, the return is not needed (the owner 2026-11-10)
+        drop_marks(conn, card["id"], now, who, why=ISSUED_NO_RETURN)
+        _end_tasks(conn, card["id"], True, ISSUED_NO_RETURN[:1].lower() + ISSUED_NO_RETURN[1:], now, who)
     if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount:
         conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (DROPPED_KEY % card["id"], json.dumps(plan, ensure_ascii=False)))     # for «Отменить» (point_log.undo)
         orders.add_event(conn, card["id"], now, who, "field", "Согласование возврата снято: точка ответила, что заказ выдали")
@@ -952,17 +958,22 @@ def left_return(conn, card_id, stage: dict, now: str, who: str) -> None:
     """The order left «На ОТХ» / «На возврат» by any path, or went from «На возврат» back on sale on «На ОТХ» (orders.move_card, in its transaction: no commit, the
     owner 2026-11-04): the open tasks of the return close by themselves — done when the order closes (won, closed), cancelled when it goes back to work or is lost.
     Won with no agreement (sold before it, the owner 2026-11-10): the mark «На возврат» goes (drop_marks) and the task is cancelled."""
-    from . import tasks
     done = stage["kind"] in ("won", "closed")
-    early = stage["kind"] == "won" and return_plan(conn, card_id) is None       # sold before the return was agreed (the owner 2026-11-10)
+    early = (stage["kind"] == "won" and return_plan(conn, card_id) is None      # sold before the return was agreed (the owner 2026-11-10); an agreement
+             and not store_value(conn, DROPPED_KEY % card_id))                  # «Выдали» dropped just before the move was there: nothing «до согласования»
     if early:
         drop_marks(conn, card_id, now, who)
         done = False                                                             # nothing was agreed: the task is cancelled, not done
+    _end_tasks(conn, card_id, done, SOLD_EARLY.lower() if early else "заказ на этапе «%s»" % stage["name"], now, who)
+
+
+def _end_tasks(conn, card_id, done: bool, why: str, now: str, who: str) -> None:
+    """The open tasks of the return of the order close, done or cancelled, with `why` in the journal. No commit."""
+    from . import tasks
     for task_id, kind, title in conn.execute("SELECT id, kind, title FROM callback_task WHERE order_id = ? AND title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL",
                                              (card_id,) + RETURN_TITLES).fetchall():
         conn.execute("UPDATE callback_task SET %s = ?, done_by = ? WHERE id = ?" % ("done_at" if done else "cancelled_at"), (now, who, task_id))
-        orders.add_event(conn, card_id, now, who, "task", "Задача %s: %s — %s" % ("выполнена" if done else "отменена", tasks._what(kind, title),
-                         SOLD_EARLY.lower() if early else "заказ на этапе «%s»" % stage["name"]), level="grey")
+        orders.add_event(conn, card_id, now, who, "task", "Задача %s: %s — %s" % ("выполнена" if done else "отменена", tasks._what(kind, title), why), level="grey")
         _audit(conn, now, who, "callback_done" if done else "callback_cancel", {"task": int(task_id)})
 
 
