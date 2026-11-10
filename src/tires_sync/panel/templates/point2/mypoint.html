@@ -90,8 +90,7 @@
 {% if point %}<a class="p2-ico p2-ico--primary" href="/my-point/handed{% if choose %}?p={{ point.id }}{% endif %}#handoff" data-handoff-open data-tour="handoff" aria-label="Передать клиента">{{ icon("plus") }}<span class="p2-ico-t">Передать клиента</span></a>{% endif %}
 </div>
 </header>
-{% if user.role == "point" %}<p class="p2-sub p2-notify-state" data-notify-state></p>{# what notify.js says of the notifications: small, none when empty #}
-<div class="mp-fresh" data-notify-fresh hidden><span>Есть новое.</span> <a class="btn btn--primary btn--sm" href="/my-point">Обновить</a></div>{% endif %}
+{% if user.role == "point" %}<p class="p2-sub p2-notify-state" data-notify-state></p>{# what notify.js says of the notifications: small, none when empty #}{% endif %}
 {% if choose and points %}<form method="get" action="/my-point" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
 {% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
 {% else %}
