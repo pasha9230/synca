@@ -173,10 +173,10 @@ def test_the_order_and_its_positions_are_made_and_written_to_the_order(tmp_path)
     assert result["state"] == "done" and result["ok"]
     sent = fake.posts("/api/v2/orders")[0][2]
     # the owner 2026-10-29, as he fills the form by hand: «безнал», «Отсрочка», «Доставка», contact «Админ», the point's phone; 2026-11-06:
-    # the hours 10:00-17:00 (not the point's 10:00-18:00), both notes «грузим на ОТХ», «Собственный номер» empty (no externalNumber); no data of the client
+    # the hours 10:00-17:00 (not the point's 10:00-18:00), «Собственный номер» empty (no externalNumber); 2026-11-10: the note for the supplier «Грузим на ОТХ», the note of the order empty; no data of the client
     assert sent == {"orderDate": "24.10.26", "paymentType": 3, "paymentTerms": 2, "shipmentType": 1, "deliveryAddressId": "77",
                     "deliveryTime": "10:00-17:00", "deliveryPerson": "Админ", "deliveryPhone": "+7(911)222-33-44",
-                    "noteForSupplier": "грузим на ОТХ", "noteForSelf": "грузим на ОТХ"}
+                    "noteForSupplier": "Грузим на ОТХ", "noteForSelf": ""}
     assert "externalNumber" not in sent
     assert [c[2] for c in fake.posts("/items")] == [{"goodsId": "111", "territoryId": TERRITORY, "stockType": 0, "quantity": 5},
                                                      {"goodsId": "222", "territoryId": TERRITORY, "stockType": 0, "quantity": 2}]
@@ -339,7 +339,7 @@ def test_the_fields_of_webmim_are_the_same_for_every_point(tmp_path):
         assert webmim_create.problems(conn, orders.get_card(conn, mine), TODAY) == []
         data = webmim_create.fields(conn, orders.get_card(conn, mine))
         assert (data["time"], data["person"], data["phone"], data["note"], data["self_note"]) == (
-            "10:00-17:00", "Админ", "+7(911)222-33-44", "грузим на ОТХ", "грузим на ОТХ")
+            "10:00-17:00", "Админ", "+7(911)222-33-44", "Грузим на ОТХ", "")
         assert "external" not in data
 
 
@@ -1046,7 +1046,7 @@ def test_the_live_server_takes_a_persons_press(tmp_path):
     result = place(conn, mine, fake, server="prod")
     assert result["ok"] and "боевой сервер" in result["text"] and webmim_create.get_state(conn, mine)["server"] == "prod"
     sent = fake.posts("/api/v2/orders")[0][2]
-    assert sent["deliveryTime"] == "10:00-17:00" and sent["noteForSupplier"] == sent["noteForSelf"] == "грузим на ОТХ" and "externalNumber" not in sent
+    assert sent["deliveryTime"] == "10:00-17:00" and sent["noteForSupplier"] == "Грузим на ОТХ" and sent["noteForSelf"] == "" and "externalNumber" not in sent
 
 
 def test_an_order_made_on_one_server_is_not_continued_on_another(tmp_path, monkeypatch):
@@ -1195,7 +1195,7 @@ def test_the_live_server_shows_the_window_with_the_sum_and_takes_the_press(panel
     assert "только по слову владельца" not in html and "Заказать в МИМ</button>" in html and "настоящий заказ у поставщика" in html
     window = html[html.index("Подтверждение заказа в МИМ"):html.index("data-supplier-go")]
     assert "Сумма закупки" in window and "24 000" in window.replace("\xa0", " ").replace("&nbsp;", " ")        # 4 + 2 tyres × 4 000
-    for words in ("адрес WebMIM 77", "08.10.2026", "Шина 111", "Шина 222", "10:00-17:00", "грузим на ОТХ", "Примечание к заказу",
+    for words in ("адрес WebMIM 77", "08.10.2026", "Шина 111", "Шина 222", "10:00-17:00", "Примечание для поставщика</dt><dd>Грузим на ОТХ", "Примечание к заказу</dt><dd>пусто",
                   "Собственный номер</dt><dd>пусто"):
         assert words in window
     assert "10:00-18:00" not in window

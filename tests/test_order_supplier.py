@@ -35,7 +35,7 @@ def test_a_whole_order_of_webmim_is_all_green_and_ready(tmp_path):
     assert all(state == "ok" for state, _ in lines(view).values()), lines(view)
     assert view["fields"] == webmim_create.fields(conn, orders.get_card(conn, mine))
     assert view["fingerprint"] == webmim_create.fingerprint(conn, orders.get_card(conn, mine))
-    assert "Админ" in lines(view)["contact"][1] and "«грузим на ОТХ»" in lines(view)["contact"][1]            # the owner 2026-11-06
+    assert "Админ" in lines(view)["contact"][1] and "«Грузим на ОТХ»" in lines(view)["contact"][1]            # the owner 2026-11-10
     assert "+7(911)222-33-44" in lines(view)["phone"][1] and lines(view)["time"][1] == "10:00-17:00"          # not the point's 10:00-18:00
     assert view["sum"] == 24000                                                          # 4 + 2 tyres × 4 000: the window shows it
 
@@ -172,7 +172,7 @@ def test_the_page_shows_the_lines_and_the_window(panel):
     html = owner_client(app).get("/orders/%d" % mine).get_data(as_text=True)
     assert "Заказ поставщику" in html and "data-supplier-check" in html and "Заказать в МИМ</button>" in html
     for words in ("Признак оплаты</dt><dd>Отсрочка", "Вид оплаты</dt><dd>безнал", "Контактное лицо</dt><dd>Админ", "Контактный телефон</dt><dd>+7(911)222-33-44",
-                  "Примечание для поставщика</dt><dd>грузим на ОТХ", "Время работы клиента</dt><dd>10:00-17:00", "Примечание к заказу</dt><dd>грузим на ОТХ",
+                  "Примечание для поставщика</dt><dd>Грузим на ОТХ", "Время работы клиента</dt><dd>10:00-17:00", "Примечание к заказу</dt><dd>пусто",
                   "Собственный номер</dt><dd>пусто", "Сумма закупки", "Подтвердить</button>"):
         assert words in html, words
     assert re.search(r'name="seen" value="[0-9a-f]{16}"', html)
