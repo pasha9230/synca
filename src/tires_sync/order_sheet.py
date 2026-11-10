@@ -33,6 +33,7 @@ OWNERS = ("Примечание",)                    # never filled (the owner 
 OPTIONAL = ("Аккаунт",)                     # the owner 2026-11-02: sent apart («extra»), written only where the sheet has the column; a sheet
                                             # without it (or a script before 2026-11-02, which never reads «extra») takes the rest all the same.
                                             # Not written once: when the value changes (changes) a written row follows it, over a correction in the cell
+                                            # (the owner 2026-11-10: the responsible changed — the written rows are theirs; here the panel wins)
 SENT = tuple(c for c in COLUMNS if c not in OWNERS + OPTIONAL)  # what a new row is written with (a sheet without «Примечание» still takes it)
 ASKED = tuple(c for c in COLUMNS if c != "Примечание" and c not in OPTIONAL)   # what «Проверить» needs; never «tires_id» (the script's KEY_COLUMN:
                                                                # it adds the hidden column by itself, the panel never sends nor reads it)

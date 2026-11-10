@@ -3,13 +3,15 @@
    posts the fingerprint of what it showed) or «Заказать в 4 Точки» (the text for the cabinet of 4 Точки and «Оформил вручную»).
    For the right «supplier» only, never for a point. #}
 {% if mim_window %}{# «Сверка с кабинетом MIM» right after «Оформить в WebMIM» (the owner 2026-11-09): the window stays; app.js asks
-   /orders/<id>/webmim/cabinet (webmim_cabinet.poll) every few seconds for about a minute #}
+   /orders/<id>/webmim/cabinet (webmim_cabinet.poll) every few seconds for about a minute; a number in the card already: no ask of the cabinet; a failed ask stops
+   the asking, «Проверить ещё раз» asks once more (the owner 2026-11-10) #}
 <div class="modal-backdrop send-window is-open" id="mim-cabinet-window" role="dialog" aria-modal="true" aria-labelledby="mim-cabinet-h"><div class="modal">
 <div class="modal-head"><h3 id="mim-cabinet-h">Подтверждение заказа в МИМ · №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack" data-mim-cabinet="/orders/{{ c.id }}/webmim/cabinet" data-csrf="{{ csrf_token() }}">
 <p class="small">Заказ оформлен в WebMIM. Номер перемещения берём из кабинета MIM («№ Счета»): как только он есть, сообщения «заказ оформлен», которые его ждут, уйдут сами.</p>
 <b>Сверка с кабинетом MIM</b>
 <p class="small" data-mim-state role="status" aria-live="polite">проверяю…</p>
+<div><button type="button" class="btn btn--secondary btn--sm" data-mim-retry hidden>Проверить ещё раз</button></div>
 <dl class="supplier-fields" data-mim-fields hidden>
 <dt>№ заказа</dt><dd data-mim="order_number"></dd><dt>№ Счета</dt><dd data-mim="invoice"></dd><dt>Статус</dt><dd data-mim="status"></dd>
 {% if has_right("money") %}<dt>Сумма MIM</dt><dd data-mim="sum"></dd><dt>Сумма заказа</dt><dd data-mim="purchase"></dd>{% endif %}
