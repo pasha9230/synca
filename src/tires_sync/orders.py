@@ -1075,15 +1075,37 @@ def _refuse_move(conn, card_id, now: str, author: str, why: str, journal: bool) 
     return OrderError(why)
 
 
+def _sell_record(conn, card: dict, now: str, author: str, journal: bool, commit: bool) -> bool:
+    """A record of storage moved to «Выполнено» by the office: the point's «Продать» (order_oth.sell) with the same checks (the act МХ-3, the
+    tyres given back to the supplier), the same agreement and question dropped, the rules of «Выполнено» without the client's messages, and the
+    same «Отменить» of the point; «История точки» has the sale by its author. A refusal is a red record of the journal, as any refused move."""
+    from . import order_oth, point_log
+    if not commit:
+        raise _refuse_move(conn, card["id"], now, author, "Запись хранения переводится в «Выполнено» только продажей с ОТХ, отдельным действием.", journal)
+    if card["stage"].get("code") not in order_oth.RETURNING:
+        raise _refuse_move(conn, card["id"], now, author, "Запись хранения закрывается в «Выполнено» только продажей с «%s» или «%s»: она на этапе «%s"
+                           "»." % (stage_name(conn, "oth"), stage_name(conn, RETURN_GIVEN), card["stage"]["name"]), journal)
+    outcome, answer, done = order_oth.sell(conn, card, author, now, office=True)
+    if not done:
+        if outcome.startswith(("уже ", "не перенесён")):                 # somebody moved it first: as any move made first by somebody
+            return False
+        raise _refuse_move(conn, card["id"], now, author, "запись хранения закрывается в «Выполнено» как «Продать» точки. " + answer, journal)
+    point_log.record(conn, now, author, card["point_id"], "oth_sold", card["id"], outcome + " (офис: перевод в «Выполнено»)")
+    point_log.remember(conn, card, "oth_sold", card["point_id"], author, now)
+    return True
+
+
 def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[dict] = None, chain: tuple = (), fire_rules: bool = True,
-              journal: bool = True, commit: bool = True, oth_split: bool = True) -> bool:
+              journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False) -> bool:
     """Move a card to a stage. The fields that come with the move are saved first; the move itself needs the stage's required data.
     `fire_rules=False` (the bulk move) leaves the rules of the new stage asleep: no task, no message for hundreds of cards at once.
     A refusal goes to the journal as a red record; not with `journal=False` (the bulk move) and not for a rule (`chain` is given only by the
     rules: their task writes its own red «…: ошибка (…)», one record is enough). `commit=False`: in the caller's transaction (order_merge),
     nothing saved and no rule fired; a refusal or a move made first by somebody rolls the caller's transaction back.
     A client's order that goes to «На ОТХ» is cancelled and its tyres become a record of storage (oth_storage, the owner 2026-11-10);
-    `oth_split=False`: the order itself goes back there (an undo, «Вернуть на ОТХ» of an order that stood there before)."""
+    `oth_split=False`: the order itself goes back there (an undo, «Вернуть на ОТХ» of an order that stood there before).
+    A record of storage goes to «Выполнено» by any way (the board, the card, the bulk move, a chat, a rule) only as the point's «Продать»
+    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself."""
     stage = get_stage(conn, stage_id)
     changed = update_card(conn, card_id, changes, now, author, commit=False, link_client=False) if changes else []   # not saved until
     card = get_card(conn, card_id)                                                                               # the move is allowed
@@ -1096,6 +1118,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         return False
     journal = journal and not chain
     from . import oth_storage
+    if stage["code"] == "done" and not oth_sold and oth_storage.is_record(conn, card_id):
+        return _sell_record(conn, card, now, author, journal, commit)
     twice = oth_storage.why_not_move(conn, card, stage)                     # the same tyres never on «На ОТХ» twice (the review 2026-11-10)
     if twice:
         raise _refuse_move(conn, card_id, now, author, twice, journal)

@@ -3,12 +3,17 @@ by hand by mistake goes back on «На ОТХ» (3); any move of a record to «�
 points of the review: the panel's routes of the record, a second split after a give-back, one sale per «Продать»."""
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
-from test_oth_sale import new_order, take
+from panel_helpers import post
+from test_oth_sale import new_order, panel, take
+from test_oth_seventh_day import started
 from test_oth_storage import LATER, MOVED, at_point, split
 from test_order_reserve import db, stage
-from tires_sync import order_merge, orders, oth_stock, oth_storage
+from tires_sync import (order_bulk, order_engine as engine, order_merge, order_oth, order_rules as rules, order_templates as tpl, orders, oth_sale,
+                        oth_stock, oth_storage, point_log)
 
 OTH_SPLIT = True
 LATE = "2026-10-22T10:00:00"
@@ -76,3 +81,115 @@ def test_a_record_closed_by_the_take_or_the_give_back_never_goes_back(tmp_path, 
     with pytest.raises(orders.OrderError, match="Запись хранения №%d закрыта" % x):
         orders.move_card(conn, x, stage(conn, "oth"), LATE, "o")
     assert code(conn, x) == "cancel" and oth_stock.pieces(conn) == {}
+
+
+# ---- 4: any move of a record to «Выполнено» is the point's «Продать» -------------------------------------------------------------------
+
+def sale_rules(conn):
+    """The sale of «Выполнено» and a message to the client, as on production."""
+    done = stage(conn, "done")
+    rules.add_rule(conn, done, "enter", 0, "record_sale", None, "", "auto", None)
+    thanks = tpl.add_template(conn, "Клиенту: спасибо", "client", "{client_name}, спасибо за покупку!")
+    rules.add_rule(conn, done, "enter", 0, "message", thanks, "", "auto", None)
+    conn.commit()
+    return done
+
+
+def sales(conn, cid):
+    return conn.execute("SELECT pieces FROM sale WHERE note = ? AND reversed_at IS NULL", ("Заказ №%d" % cid,)).fetchall()
+
+
+def sold_like_the_point(conn, x, who):
+    rec = orders.get_card(conn, x)
+    assert rec["stage"]["code"] == "done" and rec["client_name"] == "" and oth_stock.pieces(conn) == {}
+    assert sales(conn, x) == [(4,)] and len(rec["sale_ids"]) == 1                                   # one sale, the rule's
+    [event] = [e for e in orders.list_events(conn, x) if e["text"] == order_oth.OFFICE_SOLD]
+    assert event["author"] == who
+    done = stage(conn, "done")
+    messages = [t for t in engine.list_tasks(conn, x) if t["kind"] == "message" and t["stage_id"] == done]
+    assert messages and all(t["status"] == "skipped" and t["result"] == order_oth.SOLD_SKIP for t in messages)
+    [row] = [r for r in point_log.history(conn, rec["point_id"]) if r["kind"] == "oth_sold"]
+    assert row["author"] == who and row["order_id"] == x                                            # «История точки»
+    assert point_log._kept(conn, x)[1]["action"] == "oth_sold"                                      # the point's «Отменить» (after the storno)
+
+
+def test_the_office_moving_a_record_to_done_sells_it_as_the_point_does(tmp_path):
+    conn = db(tmp_path)
+    sale_rules(conn)
+    started(conn)
+    cid, x = split(conn)
+    order_oth.ask_seventh_day(conn, "2026-10-27T12:30:00")
+    assert order_oth.question_open(conn, orders.get_card(conn, x))
+    assert orders.move_card(conn, x, stage(conn, "done"), "2026-10-27T13:00:00", "офис")
+    sold_like_the_point(conn, x, "офис")
+    assert not order_oth.question_open(conn, orders.get_card(conn, x))                              # the question of the seventh day: answered
+    assert not any(e["text"] == "Точка продала шины с ОТХ" for e in orders.list_events(conn, x))
+
+
+def test_the_agreement_of_the_return_is_dropped_and_the_undo_brings_it_back(tmp_path):
+    conn = db(tmp_path)
+    cid, x = split(conn)
+    order_oth.agree(conn, orders.get_card(conn, x), date(2026, 10, 21), LATER, "офис")
+    assert orders.get_card(conn, x)["stage"]["code"] == orders.RETURN_GIVEN and order_oth.return_plan(conn, x)
+    assert orders.move_card(conn, x, stage(conn, "done"), LATE, "офис")
+    assert code(conn, x) == "done" and order_oth.return_plan(conn, x) is None
+    rec = orders.get_card(conn, x)
+    point_log.undo(conn, rec, rec["point"], "менеджер Бета", "2026-10-22T11:00:00")
+    assert code(conn, x) == orders.RETURN_GIVEN and order_oth.return_plan(conn, x) is not None and oth_storage.record_ids(conn) == {x}
+
+
+def test_tyres_given_back_to_the_supplier_refuse_the_move_as_they_refuse_the_sale(tmp_path):
+    conn = db(tmp_path)
+    cid, x = split(conn)
+    order_oth.mark_returned(conn, orders.get_card(conn, x)["items"][0]["id"], LATER, "o", qty=2)
+    conn.commit()
+    with pytest.raises(orders.OrderError, match="часть шин уже возвращена поставщику"):
+        orders.move_card(conn, x, stage(conn, "done"), LATE, "офис")
+    assert code(conn, x) == "oth"
+    refused = [e["text"] for e in orders.list_events(conn, x) if e["kind"] == "refused"]
+    assert len(refused) == 1 and "как «Продать» точки" in refused[0]                               # one red record, not two
+
+
+def test_the_bulk_move_sells_a_record_and_moves_a_plain_order_as_before(tmp_path):
+    conn = db(tmp_path)
+    sale_rules(conn)
+    cid, x = split(conn)
+    plain = new_order(conn, qty=2)
+    done = stage(conn, "done")
+    plan = order_bulk.check(conn, [x, plain], done, "")
+    assert {c["id"] for c in plan["ok"]} == {x, plain}
+    out = order_bulk.run(conn, tmp_path / "x.db", [x, plain], done, "", plan["sign"], LATE, "офис")
+    assert out["moved"] == 2
+    sold_like_the_point(conn, x, "офис")
+    assert code(conn, plain) == "done" and sales(conn, plain) == []                                 # the bulk move fires no rule of a plain order
+
+
+def test_the_card_and_the_board_of_the_panel_sell_a_record(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    sale_rules(conn)
+    cid, x = split(conn)
+    r = post(owner, "/orders/%d/move" % x, tok, stage_id=str(stage(conn, "done")))
+    assert r.status_code in (200, 302)
+    sold_like_the_point(conn, x, "owner")
+
+
+def test_the_points_sell_of_a_record_records_the_sale_once(tmp_path):
+    conn = db(tmp_path)
+    sale_rules(conn)
+    cid, x = split(conn)
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "менеджер Бета", LATE)
+    assert done, answer
+    assert sales(conn, x) == [(4,)] and len(orders.get_card(conn, x)["sale_ids"]) == 1
+    assert [e["kind"] for e in orders.list_events(conn, x) if e["text"] == "Точка продала шины с ОТХ"] == ["point"]
+    again = order_oth.sell(conn, orders.get_card(conn, x), "менеджер Бета", LATE)
+    assert not again[2] and sales(conn, x) == [(4,)]
+
+
+def test_a_record_cancelled_by_mistake_goes_to_done_only_from_oth(tmp_path):
+    conn = db(tmp_path)
+    cid, x = split(conn)
+    orders.move_card(conn, x, stage(conn, "cancel"), LATER, "o", changes={"cancel_reason": "другое: ошиблись"})
+    with pytest.raises(orders.OrderError, match="только продажей с «На ОТХ»"):
+        orders.move_card(conn, x, stage(conn, "done"), LATE, "офис")
+    assert code(conn, x) == "cancel"
+

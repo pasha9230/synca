@@ -818,6 +818,7 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 
 
 SOLD_SKIP = "шины проданы с ОТХ другому покупателю: прежнему клиенту не пишем"
+OFFICE_SOLD = "Продано с ОТХ: запись хранения переведена в «Выполнено» в панели"
 
 
 def given_back(conn, order_id) -> bool:
@@ -825,12 +826,14 @@ def given_back(conn, order_id) -> bool:
     return conn.execute("SELECT 1 FROM oth_return WHERE order_id = ? AND qty > 0 LIMIT 1", (order_id,)).fetchone() is not None
 
 
-def sell(conn, card: dict, who: str, now: str) -> tuple:
+def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     """«Продать» of «Рабочее место» (the owner 2026-11-10): the tyres on «На ОТХ» or «На возврат» went to a buyer from the street, the whole order goes
     to «Выполнено» in one transaction. Not answer_issued: no question of the seventh day is needed (an open one closes: «sold»), and the client put
     aside is NOT linked again (the buyer is another person: the order stays without a client). An unsigned agreement of the return goes, kept for
     «Отменить» (DROPPED_KEY); the task of the return closes with the move. The rules of «Выполнено» run as for any order (the sale is theirs), but
-    their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done)."""
+    their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done).
+    `office`: a record of storage the office moved to «Выполнено» (orders.move_card → _sell_record, the owner 2026-11-10): the same sale, its
+    record in the journal says so; the refusal is the caller's to write."""
     card = orders.get_card(conn, card["id"])                     # the stage as it is now
     label = card.get("webmim_number") or str(card["id"])
     if (return_plan(conn, card["id"]) or {}).get("signed_at"):
@@ -856,9 +859,12 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
         conn.rollback()
         return ("не выполнено: акт МХ-3 подписан", "Заказ №%s: акт МХ-3 уже подписан, шины отданы поставщику. Отметить «Продать» нельзя: напишите офису." % label, False)
     _answer(conn, card, "sold", now)                             # an open question of the seventh day is answered by the sale
-    orders.add_event(conn, card["id"], now, who, "point", "Точка продала шины с ОТХ")
+    if office:
+        orders.add_event(conn, card["id"], now, who, "field", OFFICE_SOLD)
+    else:
+        orders.add_event(conn, card["id"], now, who, "point", "Точка продала шины с ОТХ")
     try:
-        moved = orders.move_card(conn, card["id"], done["id"], now, who)
+        moved = orders.move_card(conn, card["id"], done["id"], now, who, journal=not office, oth_sold=True)
     except orders.OrderError as err:                                                 # rolled back with the rest
         return "не выполнено: %s" % err, "Не получилось: %s" % err, False
     if not moved:
