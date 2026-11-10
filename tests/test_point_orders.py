@@ -97,7 +97,7 @@ def test_the_owner_board_is_unchanged(w):
     login(client)
     page = _page(client)
     assert "Ещё ⋯" in page and 'name="p"' in page and "pt-desk" not in page and "data-point-nav" not in page
-    assert 'data-card="%d"' % w["made"]["ours"] in page and "data-real-stage" not in page and 'content="width=1280' in page
+    assert 'data-card="%d"' % w["made"]["ours"] in page and "data-real-stage" not in page and 'content="width=device-width' in page   # the office's phone (2026-11-10)
 
 
 def test_the_point_moves_its_own_sale_between_the_four_stages_only(w):
