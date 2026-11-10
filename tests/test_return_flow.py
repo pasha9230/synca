@@ -262,7 +262,7 @@ def test_the_act_on_the_page_closes_it_and_the_undo_puts_it_back(tmp_path, clock
     _t, page = press(mine, cid, "act_signed")
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == "return" and card["return_amount"] == 16000.0 and "возврат закрыт" in page
-    assert 'action="/my-point/%d/undo"' % cid in workplace(mine)
+    assert 'action="/my-point/%d/undo"' % cid not in workplace(mine)    # the owner 2026-11-10: no list on the page; the office corrects it,
     clock["now"] = "2026-10-27T12:10:00"
     r = post(mine, "/my-point/%d/undo" % cid, "tok")
     assert "отменена" in mine.get(r.headers["Location"]).get_data(as_text=True)

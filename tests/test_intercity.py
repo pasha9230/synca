@@ -275,8 +275,8 @@ def test_the_courier_mark_is_undone_and_the_track_tasks_are_cancelled(tmp_path, 
     mine = manager(app, conn, pid)
     press(mine, card, "shipped")
     assert code(conn, card) == "done" and track_tasks(conn, card)
-    page = workplace(mine)
-    assert 'action="/my-point/%d/undo"' % card in page and "«Передал курьеру ТК»" in page
+    page = workplace(mine)              # the owner 2026-11-10: no list «Отменить отметку» on the page; the order is gone from it,
+    assert 'action="/my-point/%d/undo"' % card not in page          # the office corrects it; the undo itself still works (below)
     clock["now"] = T2
     r = post(mine, "/my-point/%d/undo" % card, "tok")
     assert r.status_code == 302

@@ -4,11 +4,13 @@
 // звук браузер даёт каждой странице после нажатия на ней (кроме сайтов, которым он доверяет): пока звука нет, «Рабочее место» просит нажать;
 // браузер без WebAudio не просит (нажатие звук не даст), а говорит, что звука не будет.
 // Что уже показано, помнится отдельно для каждого входа (общий ПК точки). Без внешних сервисов: работает, пока страница открыта.
+// «Рабочее место» (/my-point) на новое обновляется само (решение владельца 2026-11-10, вместо «Есть новое. Обновить»), но только когда точка
+// ничего не делает: ~10 с без нажатий, клавиш и прокрутки, не открыто окно (подтверждение, «Передать клиента»), «ОТКАЗ» или меню, фокус не
+// в поле ввода, нет уходящей формы. Занята — ждёт простоя. Не чаще раза в 30 с. Вкладка и поиск остаются (они в адресе), прокрутка — тоже.
 (function () {
   "use strict";
   var KEY = "tires.notify.seen:", EVERY = 30000, MAX_SHOWN = 3, NOTHING = "новое видно только на странице и в колокольчике.";
-  var button = document.querySelector("[data-notify-enable]"), state = document.querySelector("[data-notify-state]"),
-      fresh = document.querySelector("[data-notify-fresh]");
+  var button = document.querySelector("[data-notify-enable]"), state = document.querySelector("[data-notify-state]");
   var supported = "Notification" in window, audio = null, Ctx = window.AudioContext || window.webkitAudioContext;
 
   function showState() {
@@ -101,10 +103,71 @@
       var added = items.filter(function (it) { return !known[it.key]; });
       if (!added.length) return;
       ring();
-      if (fresh) fresh.hidden = false;
+      refreshSoon();
       added.slice(0, MAX_SHOWN).forEach(tell);
       if (added.length > MAX_SHOWN) tell({key: "more", title: "Ещё " + (added.length - MAX_SHOWN), text: "Новое на «Рабочем месте»", href: "/my-point"});
     }).catch(function () { /* no connection: the bell shows it; the next look tries again */ });
+  }
+
+  // --- «Рабочее место» обновляется само, пока точка ничего не делает --------------------------------------------------------------------
+  var PAGE = !!(window.location && window.location.pathname === "/my-point"), IDLE = 10000, WAIT = 2000;
+  var SCROLL = "tires.mypoint.scroll", LAST = "tires.mypoint.reloaded";
+  var active = Date.now(), sending = false, waiting = null, reloaded = 0;
+  var BUSY = ".modal-backdrop.is-open, dialog[open], [aria-modal='true'].is-open, details.mp-refuse[open], details.mp-handover[open], " +
+             "details.pt-menu[open], details.mp-more[open], #bell-pop:not([hidden]), [aria-busy='true']";
+
+  function session(name, value) {
+    try {
+      if (value === undefined) return window.sessionStorage.getItem(name);
+      if (value === null) window.sessionStorage.removeItem(name); else window.sessionStorage.setItem(name, value);
+    } catch (e) { /* private window: no memory between the loads */ }
+    return null;
+  }
+  function typing() {
+    var el = document.activeElement;
+    if (!el || !el.matches) return false;
+    return el.matches("textarea, select, [contenteditable=''], [contenteditable='true'], input:not([type=button]):not([type=submit]):not([type=reset]):not([type=hidden])");
+  }
+  function idle() {                                       // the point does nothing: no press, key or scroll lately, no window, no field, no form going
+    if (Date.now() - active < IDLE || sending || typing()) return false;
+    return !document.querySelector(BUSY);
+  }
+  function soon() {                                       // not more often than once in 30 s, this load and the one before
+    var last = Math.max(reloaded, Number(session(LAST)) || 0);
+    return Date.now() - last < EVERY;
+  }
+  function reload() {
+    reloaded = Date.now();
+    session(LAST, String(reloaded));
+    var url = String(window.location.href).split("#")[0];
+    session(SCROLL, JSON.stringify({url: url, y: window.scrollY || window.pageYOffset || 0}));
+    window.location.replace(url);                         // a GET of the same address (the tab, the search): never a form sent again
+  }
+  function tryRefresh() {
+    waiting = null;
+    if (idle() && !soon()) { reload(); return; }
+    waiting = setTimeout(tryRefresh, WAIT);               // busy: look again a little later, until the point is idle
+  }
+  function refreshSoon() {
+    if (PAGE && !waiting) tryRefresh();
+  }
+  function moved() { active = Date.now(); }
+
+  if (PAGE) {
+    ["click", "keydown", "touchstart", "pointerdown", "wheel", "input", "scroll"].forEach(function (name) {
+      document.addEventListener(name, moved, {passive: true, capture: true});
+    });
+    window.addEventListener("scroll", moved, {passive: true});
+    window.addEventListener("submit", function (e) { if (!e.defaultPrevented) sending = true; });     // asked by a window: not yet sent
+    window.addEventListener("pageshow", function (e) { if (e.persisted) { sending = false; moved(); } });
+    try {                                                 // back where the point was before the refresh
+      var was = JSON.parse(session(SCROLL) || "null");
+      session(SCROLL, null);
+      if (was && was.url === String(window.location.href).split("#")[0] && was.y > 0) {
+        var put = function () { window.scrollTo(0, was.y); active = 0; };
+        if (document.readyState === "complete") put(); else window.addEventListener("load", put);
+      }
+    } catch (e) { /* nothing kept */ }
   }
 
   if (button && supported) {

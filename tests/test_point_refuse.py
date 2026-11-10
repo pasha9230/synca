@@ -108,8 +108,9 @@ def test_the_old_buttons_are_gone_from_the_panel(tmp_path):
 def test_refuse_can_be_undone_and_the_client_is_linked_again(tmp_path):
     app, _client, conn, pid, card = at_point(tmp_path)
     mine = manager(app, conn, pid)
-    _t, page = refuse(mine, card, "year")
-    assert "«ОТКАЗ»" in page
+    refuse(mine, card, "year")
+    oth = mine.get("/my-point?tab=oth").get_data(as_text=True)                          # «Отменить «ОТКАЗ»» in the card on «На ОТХ» (no list
+    assert 'data-undo-card="%d"' % card in oth and "Отменить «ОТКАЗ»" in oth            # over the orders: the owner 2026-11-10)
     r = post(mine, "/my-point/%d/undo" % card, "tok")
     assert r.status_code == 302
     got = orders.get_card(conn, card)

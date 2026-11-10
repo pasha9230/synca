@@ -325,7 +325,7 @@ def _issued(conn, point_id, today: str) -> list:
     who marked it and the press still to undo (point_log.undoable). Nothing of money."""
     since = (date.fromisoformat(today) - timedelta(days=ISSUED_DAYS)).isoformat()
     done = orders.stage_name(conn, "done")
-    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM + ("oth",)}     # and «Выдали» from «На ОТХ» (the owner 2026-11-09)
+    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM + ("oth", orders.RETURN_GIVEN)}     # and «Выдали»/«Продать» from «На ОТХ» and «На возврат» (2026-11-09, 2026-11-10)
     rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'done' "
                         "AND c.entered_at >= ? ORDER BY c.entered_at DESC, c.id DESC", (point_id, since)).fetchall()
     mine = points.own_sales(conn, point_id) if rows else set()
@@ -549,8 +549,7 @@ def register(app) -> None:
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns,
-                               undo=[dict(u, label=mgr.label(u["card"])) for u in point_log.undo_list(conn, point_id)]
-                               if point_id is not None else [], undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
+                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
