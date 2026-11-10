@@ -445,8 +445,8 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     One transaction (the old order emptied is moved to «Отмена» in it). Returns the pieces taken; OthSaleError says why nothing was.
     Tyres of a record of storage (oth_storage, the owner 2026-11-10) are taken whole only: every position of the record, or nothing."""
     from . import oth_storage
-    source = next((r for r in oth_stock._rows(conn, manual=False) if r["item_id"] == int(from_item)), None) if int(from_item) > 0 else None
-    if source is not None and oth_storage.is_record(conn, source["order_id"]):
+    owner = conn.execute("SELECT order_id FROM order_item WHERE id = ?", (int(from_item),)).fetchone()     # a manual row (below zero): none
+    if owner is not None and oth_storage.is_record(conn, owner[0]):
         return oth_storage.take(conn, card_id, from_item, now, author)
     return _take_order(conn, card_id, line_id, from_item, now, author)
 
