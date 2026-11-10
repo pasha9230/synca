@@ -34,6 +34,7 @@ ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "refuse": mgr.REFUSE,
                                                                         # (the owner 2026-11-05); the two answers to «Клиент забрал?»
            "act_signed": "акт МХ-3 подписан",                           # «Подписал акт и отдал»: the return of «На ОТХ» (order_oth.sign_act)
            "oth_issued": "выдали (ОТХ)", "oth_here": "на точке (ОТХ)",  # the two answers to the seventh day on «На ОТХ» (the owner 2026-11-02)
+           "oth_sold": "продано (ОТХ)",                                 # «Продать»: the tyres on «На ОТХ» sold to a buyer from the street (the owner 2026-11-10)
            "shipped": mgr.SHIP}                                         # «Передал курьеру ТК»: an order to another city (order_intercity, 2026-11-02)
 PICKUP = ("issued", "reserve_issued", "reserve_here", "refuse")    # what a client's pickup means: never for an order to another city
 REFUSE_CHOICES = {"year": mgr.REFUSE_REASONS[0], "size": mgr.REFUSE_REASONS[1], "other": ""}    # «Другой»: the text typed
@@ -126,6 +127,8 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
                 "Заказ №%s: акт МХ-3 подписан, шины отданы, возврат закрыт." % mgr.label(card), True)
     if action == "oth_issued":                                                  # «Выдали» to «Заказ выдали или он на точке?»
         return order_oth.answer_issued(conn, card, who, now)
+    if action == "oth_sold":                                                    # «Продать»: no question is needed, no client comes back
+        return order_oth.sell(conn, card, who, now)
     if action == "oth_here":
         return order_oth.answer_here(conn, card, who, now)
     if action == "reserve_issued":                                              # «Выдан» to the question is «выдал»
@@ -263,7 +266,7 @@ TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "
         "issued": "Выдано"}                        # the owner 2026-11-09: what the point gave out in the last ISSUED_DAYS (_issued)
 DEFAULT_TAB = "here"
 ISSUED_DAYS = 30
-CONFIRM = ("issued", "reserve_issued", "oth_issued")   # the owner 2026-11-09: a hand-out is confirmed with the order's number, tyres and client
+CONFIRM = ("issued", "reserve_issued", "oth_issued", "oth_sold")   # the owner 2026-11-09: a hand-out is confirmed with the order's number, tyres and client
 ALERTS_READ = 500                                  # the notes read to find the point's newest alerts among the bot's answers (two weeks kept)
 
 
@@ -283,6 +286,22 @@ def issue_lines(card: dict) -> list:
     lines = ["№ заказа: %s" % (card["webmim_number"] or "нет (заказ в панели №%d)" % card["id"])]     # no word «MIM» at a point (30.10)
     lines += ["%s × %s" % (i["name"], i["qty"]) for i in card["items"] if i["qty"] >= 1] or ["Шины не указаны"]
     return lines + ["Клиент: %s" % (card["client_name"] or "без имени")]
+
+
+def sell_lines(card: dict) -> list:
+    """What the point checks before «Продать» (the owner 2026-11-10): the order's number, the tyres with the quantity, the price of one and the
+    sum — point_lines' own (the price written in the order), and what the press does. No client: the buyer is not the order's."""
+    lines = ["№ заказа: %s" % (card["webmim_number"] or "нет (заказ в панели №%d)" % card["id"])]
+    rows = point_lines(card)
+    for i in rows:
+        lines.append("%s × %d шт." % (i["name"], i["qty"]) + (": %s ₽ за шт., сумма %s ₽" % (_rub(i["unit"]), _rub(i["sum"])) if i["unit"] else ": цена не указана"))
+    if len(rows) > 1 and all(i["unit"] for i in rows):
+        lines.append("Сумма продажи: %s ₽" % _rub(sum(i["sum"] for i in rows)))     # not «Итого»: the card «На ОТХ» has no client's total (2026-10-30)
+    return lines + ([] if rows else ["Шины не указаны"]) + ["Шины проданы с ОТХ; заказ закроется как выполненный."]
+
+
+def _rub(value: float) -> str:
+    return ("%.2f" % value).rstrip("0").rstrip(".").replace(".", ",") if value != int(value) else "{:,}".format(int(value)).replace(",", " ")
 
 
 def point_lines(card: dict) -> list:
@@ -469,6 +488,8 @@ def register(app) -> None:
                           "hold": date.fromisoformat(until).strftime("%d.%m.%Y") if until else "",     # «Резерв: Хранение шин до …» (2026-11-09)
                           "since": card["entered_at"], "lines": point_lines(card),     # «на точке с 07.11», «на ОТХ с 31.10»: the stage came then
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
+                          "sell_lines": sell_lines(card) if code in order_oth.RETURNING else [],     # «Продать» (2026-11-10): until the act МХ-3 is signed
+                          "can_sell": code in order_oth.RETURNING and not (order_oth.return_plan(conn, card["id"]) or {}).get("signed_at"),
                           "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
                           "ret_label": order_oth.point_label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
@@ -502,6 +523,7 @@ def register(app) -> None:
             row["returning"] = row["card"]["id"] in returning
         for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
             ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
+            ret["sell"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["can_sell"]), None)     # «Продать» until the act is signed
         tab = request.args.get("tab", "")
         tab = tab if tab in TABS else DEFAULT_TAB
         shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not (r["asked"] or r["oth_asked"]))     # the questions first
@@ -553,7 +575,8 @@ def register(app) -> None:
         """«Подтвердите выдачу» without the script (the owner 2026-11-09; with it, the same lines in the panel's window, app.js): the
         order's number, the tyres, the client; «Да, выдал» sends the same press (its token) once more with confirm=yes, «Отмена» goes back."""
         from urllib.parse import parse_qs, urlsplit
-        return render_template("mypoint_confirm.html", card=card, action=action, token=token, lines=issue_lines(card), label=mgr.label(card),
+        return render_template("mypoint_confirm.html", card=card, action=action, token=token, label=mgr.label(card), sell=action == "oth_sold",
+                               lines=sell_lines(card) if action == "oth_sold" else issue_lines(card),
                                p=point_id if own_point() is None else None, back=back,
                                tab=(parse_qs(urlsplit(back).query).get("tab") or [""])[0])
 
@@ -582,7 +605,7 @@ def register(app) -> None:
         if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
             flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
-        if action in CONFIRM and request.form.get("confirm") != "yes" and not (order_intercity.on(card) and action != "oth_issued"):
+        if action in CONFIRM and request.form.get("confirm") != "yes" and not (order_intercity.on(card) and action not in ("oth_issued", "oth_sold")):
             return _confirm_issue(card, action, token, point_id, back)        # nothing is taken nor changed until «Да, выдал»
         now = local_iso()
         claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,'обрабатывается')",
