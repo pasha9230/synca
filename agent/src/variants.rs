@@ -113,11 +113,13 @@ pub fn distinct_copy(img: &DynamicImage, others: &[String], account_id: i64, sha
 }
 
 /// Left half of the frame (the tread), a jittered window per seed, tone-adjusted, scaled to the frame size.
+/// The window has the shape of the frame: a square from a square frame, 2:3 from a vertical one (the frames before 2026-11-09).
 pub fn tread_crop(img: &DynamicImage, seed: u64) -> DynamicImage {
     let mut rng = StdRng::seed_from_u64(seed ^ 0x7ead);
     let (w, h) = img.dimensions();
     let cw = (w as f32 * rng.gen_range(0.44..0.52)) as u32;
-    let ch = ((cw as f32 * 1.5) as u32).min(h);
+    let shape = if h > w { 1.5 } else { h as f32 / w as f32 };
+    let ch = ((cw as f32 * shape) as u32).clamp(1, h);
     let x0 = (w as f32 * rng.gen_range(0.0..0.06)) as u32;
     let mid = h as f32 * rng.gen_range(0.45..0.55);
     let y0 = ((mid - ch as f32 / 2.0).max(0.0) as u32).min(h - ch);
@@ -190,6 +192,47 @@ pub(crate) mod tests {
         assert_eq!(a.dimensions(), img.dimensions());
         assert_eq!(bytes(&a), bytes(&tread_crop(&img, 1)));
         assert_ne!(bytes(&a), bytes(&tread_crop(&img, 2)));
+    }
+
+    fn mean_diff(a: &image::RgbaImage, b: &image::RgbaImage) -> f32 {
+        let d: u64 = a.pixels().zip(b.pixels()).map(|(x, y)| (0..3).map(|c| (x[c] as i32 - y[c] as i32).unsigned_abs() as u64).sum::<u64>()).sum();
+        d as f32 / (a.width() * a.height() * 3) as f32
+    }
+
+    /// A square frame gives a square crop of a square window: a circle stays a circle (a 2:3 window would squeeze it).
+    #[test]
+    fn crop_of_a_square_frame_is_square_and_not_stretched() {
+        let mut px = image::RgbaImage::from_pixel(1024, 1024, image::Rgba([230, 230, 230, 255]));
+        for (x, y, p) in px.enumerate_pixels_mut() {
+            let (dx, dy) = (x as f32 - 256.0, y as f32 - 512.0);
+            if dx * dx + dy * dy < 120.0 * 120.0 {
+                *p = image::Rgba([20, 20, 20, 255]);
+            }
+        }
+        let crop = tread_crop(&DynamicImage::ImageRgba8(px), 5).to_luma8();
+        assert_eq!(crop.dimensions(), (1024, 1024));
+        let dark: Vec<(u32, u32)> = crop.enumerate_pixels().filter(|(_, _, p)| p[0] < 100).map(|(x, y, _)| (x, y)).collect();
+        let span = |f: fn(&(u32, u32)) -> u32| dark.iter().map(f).max().unwrap() - dark.iter().map(f).min().unwrap();
+        let (sx, sy) = (span(|p| p.0) as f32, span(|p| p.1) as f32);
+        assert!(sx > 300.0 && (sx / sy - 1.0).abs() < 0.03, "sx={sx} sy={sy}");
+    }
+
+    /// A vertical frame (made before the square ones) is cropped exactly as before: the 2:3 window, the same numbers.
+    #[test]
+    fn crop_of_a_vertical_frame_is_unchanged() {
+        let img = fixture();
+        let (w, h) = img.dimensions();
+        assert!(h > w);
+        let seed = 9u64;
+        let mut rng = StdRng::seed_from_u64(seed ^ 0x7ead);
+        let cw = (w as f32 * rng.gen_range(0.44..0.52)) as u32;
+        let ch = ((cw as f32 * 1.5) as u32).min(h);
+        let x0 = (w as f32 * rng.gen_range(0.0..0.06)) as u32;
+        let mid = h as f32 * rng.gen_range(0.45..0.55);
+        let y0 = ((mid - ch as f32 / 2.0).max(0.0) as u32).min(h - ch);
+        let old = imageops::resize(&imageops::crop_imm(&img.to_rgba8(), x0, y0, cw.min(w - x0), ch).to_image(), w, h, FilterType::CatmullRom);
+        let old = tone(&DynamicImage::ImageRgba8(old), &mut rng).to_rgba8();
+        assert_eq!(mean_diff(&old, &tread_crop(&img, seed).to_rgba8()), 0.0);
     }
 
     #[test]

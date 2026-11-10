@@ -5,7 +5,7 @@
 {% set badge = {"pending": "badge--warn", "approved": "badge--ok", "rejected": "badge--err", "withdrawn": "badge--neutral"} %}
 {% set label = {"pending": "Ждёт решения", "approved": "Одобрен", "rejected": "Отклонён", "withdrawn": "Снят"} %}
 {% set kinds = {"three_quarter": "Вполоборота", "set4": "Комплект 4 шт."} %}
-{% set dkinds = {"crop": "вырезка", "card": "карточка", "copy": "копия"} %}
+{% set dkinds = {"crop": "вырезка", "card": "карточка", "copy": "копия", "feed": "JPEG для фида"} %}
 <header class="page-head"><div><h1>Генерация<span class="help-q" tabindex="0" data-tip="Кадры, нарисованные агентом. Одобренные уходят в фид, если включён выключатель ниже.">?</span></h1></div></header>
 <section class="card">
 {% if can_post("photos_switch") %}<form method="post" action="/photos/switch" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="tab" value="{{ tab }}">

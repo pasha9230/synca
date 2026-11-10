@@ -149,7 +149,9 @@ mod tests {
         let img = crate::variants::tests::fixture();
         let mut others = vec![variants::ahash(&img)];
         let card = make(&todo[0], &img, "aa", &mut others).unwrap();
-        assert_eq!(card.dimensions(), (card::CARD_W, card::CARD_H));
+        assert_eq!(card.dimensions(), (card::CARD_W, card::CARD_H_VERTICAL));   // the fixture is a vertical frame
+        let square = DynamicImage::ImageRgba8(image::imageops::resize(&img.to_rgba8(), 1024, 1024, image::imageops::FilterType::Triangle));
+        assert_eq!(make(&todo[0], &square, "aa", &mut others).unwrap().dimensions(), (card::CARD_W, card::CARD_H));
         let copy = make(&todo[1], &img, "aa", &mut others).unwrap();
         assert_eq!(others.len(), 2);
         assert_eq!(copy.dimensions(), img.dimensions());

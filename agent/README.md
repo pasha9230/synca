@@ -17,6 +17,9 @@ Keys and the token are never logged; the token is sent only to URLs with the sam
 
 A paid result is first saved to `~/.config/tires/pending/<job_id>.png/.json`, uploaded with 3 retries, and deleted on success; if upload finally fails the job is failed with its cost. Pending files are retried at the start of each run (a 409 keeps the files).
 
+## Frames
+Since 2026-11-09 a frame is a square (the owner: Avito previews are square): OpenAI is asked for `1024x1024` (`openai.rs`, `IMAGE_SIZE`; `1024x1536` before) and the prompt asks for the whole tire or stack inside the frame, centered, with 8-10% free on every side (`prompt.rs`). A size card is `1024x1024`, a tread crop is a square window scaled to the frame. A vertical frame made before keeps its shape: its card is `1024x1536` and its crop is the 2:3 window, as before, so a set approved earlier stays one shape until the owner approves a new frame. Copies, crops and cards are uploaded as JPEG; the generated frame is uploaded as the PNG OpenAI returned, and the panel makes the JPEG for the feed of the primary account when the frame is approved (`photo_library.make_feed_copy`).
+
 ## Run
     export PATH=/opt/homebrew/opt/rustup/bin:$PATH
     TIRES_PANEL_URL=https://panel.example cargo run --release --manifest-path agent/Cargo.toml -- generate --limit 1

@@ -463,3 +463,59 @@ def test_review_close_up_alone_has_no_card_caption(tmp_path):
     login(c)
     block = extra_block(c.get("/photos/review?tab=pending").get_data(as_text=True))
     assert "Крупный план" in block and "Карточка" not in block
+
+
+def _png(size, noisy=True):
+    import io
+    import random
+    from PIL import Image
+    rnd = random.Random(7)
+    image = Image.new("RGBA", size, (90, 90, 90, 255))
+    if noisy:                                                  # a photo-like picture: a flat one would compress to nothing
+        image.putdata([(rnd.randrange(60, 200),) * 3 + (255,) for _ in range(size[0] * size[1])])
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def test_approve_makes_the_jpeg_for_the_feed_and_keeps_the_png(tmp_path):
+    """The owner 2026-11-09: the feed of the primary account gets a JPEG (quality 88, no metadata), the PNG stays in the library."""
+    from PIL import Image
+    from tires_sync import connections, photo_library
+    app, conn = make(tmp_path)
+    root = app.config["PHOTOS_ROOT"]
+    data = _png((1024, 1024))
+    source = photo_library.save_photo(conn, root, data, "generated", "t")
+    conn.execute("UPDATE set_frame SET photo_id = ? WHERE id = 2", (source,))
+    conn.commit()
+    c = app.test_client()
+    assert post(c, "/photos/frame/2/approve", login(c)).status_code == 302
+    kind, copy = conn.execute("SELECT kind, photo_id FROM account_photo WHERE account_id = ? AND source_photo_id = ?",
+                              (connections.PRIMARY_ACCOUNT, source)).fetchone()
+    sha, ext, width, height, size = conn.execute("SELECT sha256, ext, width, height, bytes FROM photo WHERE id = ?", (copy,)).fetchone()
+    assert (kind, ext, width, height) == ("feed", "jpg", 1024, 1024) and size < len(data)
+    with Image.open("%s/%s.jpg" % (root, sha)) as image:
+        assert image.format == "JPEG" and image.mode == "RGB" and image.size == (1024, 1024)
+        assert not image.getexif() and "icc_profile" not in image.info and "comment" not in image.info
+    png = conn.execute("SELECT sha256, ext FROM photo WHERE id = ?", (source,)).fetchone()
+    with open("%s/%s.%s" % (root, png[0], png[1]), "rb") as handle:
+        assert handle.read() == data                           # the original is untouched
+    photo_library.make_feed_copy(conn, root, source, "t")      # once more: the same file, one row
+    assert conn.execute("SELECT COUNT(*) FROM account_photo WHERE kind = 'feed'").fetchone()[0] == 1
+    page = c.get("/photos/review?tab=pending").get_data(as_text=True)
+    assert c.get("/photos/review?tab=approved").status_code == 200 and "Traceback" not in page
+
+
+def test_feed_jpeg_only_from_a_png_and_never_breaks_an_approval(tmp_path):
+    from tires_sync import photo_library
+    app, conn = make(tmp_path)
+    c = app.test_client()
+    assert post(c, "/photos/frame/2/approve", login(c)).status_code == 302    # photo 2: a jpg row with no file
+    assert status(conn, 2) == "approved"
+    assert conn.execute("SELECT COUNT(*) FROM account_photo").fetchone()[0] == 0
+    root = app.config["PHOTOS_ROOT"]
+    conn.execute("INSERT INTO photo (id, sha256, ext, width, height, bytes, source, created) VALUES (9, ?, 'png', 1, 1, 1, 'x', 't')", ("%064x" % 9,))
+    assert photo_library.make_feed_copy(conn, root, 9, "t") is None            # the file is missing: no copy, no error
+    vertical = photo_library.save_photo(conn, root, _png((64, 96), noisy=False), "generated", "t")
+    copy = photo_library.make_feed_copy(conn, root, vertical, "t")
+    assert conn.execute("SELECT width, height FROM photo WHERE id = ?", (copy,)).fetchone() == (64, 96)   # the shape of the source
