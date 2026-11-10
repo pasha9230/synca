@@ -3,7 +3,6 @@
 «На возврат» and its task."""
 from __future__ import annotations
 
-import re
 from datetime import date
 
 from panel_helpers import post
@@ -71,3 +70,81 @@ def test_a_sale_still_writes_sold_before_the_agreement(tmp_path, clock):
     assert any(t.startswith(order_oth.SOLD_EARLY) for t in texts(conn, card)) and not any(t.startswith(ISSUED) for t in texts(conn, card))
 
 
+# ---- 2. «Отменить» and «Вернуть на ОТХ» bring the mark «На возврат» and its task back -----------------------------------------------------
+
+def press(client, card, action, tab="oth"):
+    from test_mypoint import token
+    page = client.get("/my-point?tab=%s" % tab).get_data(as_text=True)
+    r = post(client, "/my-point/%d/%s" % (card, action), "tok", token=token(page, card, action), confirm="yes")
+    assert r.status_code == 302, r.status_code
+
+
+def undo(client, conn, card, clock):
+    clock["now"] = T2
+    r = post(client, "/my-point/%d/undo" % card, "tok")
+    assert r.status_code == 302 and "отменена" in client.get(r.headers["Location"]).get_data(as_text=True)
+
+
+def mark_is_back(conn, card, item, qty=4):
+    now = orders.get_card(conn, card)
+    assert now["stage"]["code"] == "oth"
+    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (qty,)
+    mark = order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])
+    assert mark and mark["qty"] == qty                                                  # «Ожидает согласование возврата» again
+    assert order_oth.pieces_here(conn, now) == {item: 4} and not order_oth.given_back(conn, card)
+    assert sum(order_oth.goods_on_oth(conn).values()) == 4                             # and on sale until agreed
+    [task] = conn.execute("SELECT id, assignee, title FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (card,)).fetchall()
+    first = conn.execute("SELECT assignee FROM callback_task WHERE order_id = ? ORDER BY id LIMIT 1", (card,)).fetchone()[0]
+    assert task[2] == order_oth.RETURN_TASK and task[1] == first and mark["task"] == task[0]     # the same responsible
+    return task
+
+
+def test_sold_then_undone_the_mark_and_the_task_are_back_and_the_tyres_on_sale(tmp_path, clock):
+    app, conn, pid, card, item, owner = marked(tmp_path)
+    mine = manager(app, conn, pid)
+    sell(mine, card)
+    assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (card,)).fetchone() and open_tasks(conn, card) == 0
+    undo(mine, conn, card, clock)
+    mark_is_back(conn, card, item)
+    assert any(t.startswith("Метка «На возврат» возвращена") for t in texts(conn, card))
+    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=oth").get_data(as_text=True)
+
+
+def test_issued_then_undone_the_mark_and_the_task_are_back(tmp_path, clock):
+    app, conn, pid, card, item, owner = marked(tmp_path)
+    ask(conn, card)
+    mine = manager(app, conn, pid)
+    press(mine, card, "oth_issued")
+    assert orders.get_card(conn, card)["stage"]["code"] == "done" and open_tasks(conn, card) == 0
+    undo(mine, conn, card, clock)
+    mark_is_back(conn, card, item)
+    assert order_oth.question_open(conn, orders.get_card(conn, card))
+
+
+def test_a_part_of_a_mark_marked_then_sold_and_undone_brings_back_only_that_part(tmp_path, clock):
+    app, conn, pid, card, item, owner = marked(tmp_path, qty=3)
+    mine = manager(app, conn, pid)
+    sell(mine, card)
+    undo(mine, conn, card, clock)
+    mark_is_back(conn, card, item, qty=3)
+
+
+def test_taken_then_given_back_to_oth_the_mark_is_back(tmp_path):
+    from test_oth_sale import T, code, new_order, take
+    from tests.test_order_reserve import card_at, db
+    from tires_sync import oth_sale
+    conn = db(tmp_path)
+    old = card_at(conn, "oth", T)
+    item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (old,)).fetchone()[0]
+    assert order_oth.item_to_return(conn, item, T, "o", "3")
+    first, second = new_order(conn, qty=2), new_order(conn, qty=2)
+    assert take(conn, first) == 2 and take(conn, second) == 2                           # 1 free + 1 of the mark, then the 2 left of it
+    assert code(conn, old) == "cancel" and open_tasks(conn, old) == 0
+    oth_sale.untake(conn, second, orders.get_card(conn, second)["items"][0]["id"], "2026-10-29T12:00:00", "o")
+    now = orders.get_card(conn, old)
+    assert code(conn, old) == "oth" and conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (2,)
+    assert order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])["qty"] == 2 and open_tasks(conn, old) == 1
+    oth_sale.untake(conn, first, orders.get_card(conn, first)["items"][0]["id"], "2026-10-29T12:30:00", "o")
+    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (3,)
+    assert order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])["qty"] == 3 and open_tasks(conn, old) == 1
+    assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [4] and not order_oth.given_back(conn, old)

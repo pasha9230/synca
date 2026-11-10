@@ -328,10 +328,43 @@ SOLD_EARLY = "Продано до согласования возврата"
 ISSUED_NO_RETURN = "Заказ выдан, возврат не нужен"         # «Выдали» before the agreement: no sale, a neutral record (the owner 2026-11-10)
 
 
-def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, why: str = SOLD_EARLY) -> int:
+MARKS_KEY = "oth_dropped_marks:%d"     # app_state, per order: {slot: {item: {"qty", "by"}}} — the marks «На возврат» drop_marks took off, until «Отменить»
+MOVE = "move"                          # (slot MOVE: the sale or «Выдали» that closed the order) or «Вернуть на ОТХ» (slot take_slot) brings them back
+
+
+def take_slot(order_id, from_item) -> str:
+    """The slot of the marks a «Взять с ОТХ» of the order `order_id` took from the position `from_item`."""
+    return "take:%d:%d" % (int(order_id), int(from_item))
+
+
+def _dropped(conn, order_id) -> dict:
+    try:
+        kept = json.loads(store_value(conn, MARKS_KEY % int(order_id)) or "{}")
+    except ValueError:
+        kept = {}
+    return kept if isinstance(kept, dict) else {}
+
+
+def _keep_dropped(conn, order_id, kept: dict) -> None:
+    kept = {k: v for k, v in kept.items() if v}
+    if kept:
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (MARKS_KEY % int(order_id), json.dumps(kept, ensure_ascii=False)))
+    else:
+        conn.execute("DELETE FROM app_state WHERE key = ?", (MARKS_KEY % int(order_id),))
+
+
+def forget_dropped(conn, order_id, slot: str = MOVE) -> None:
+    """A new sale or «Выдали»: the marks an earlier one took off are not this one's to bring back. No commit."""
+    kept = _dropped(conn, order_id)
+    if kept.pop(slot, None) is not None:
+        _keep_dropped(conn, order_id, kept)
+
+
+def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, why: str = SOLD_EARLY, slot: str = MOVE) -> int:
     """The tyres of a mark «На возврат» were sold (or given to the client, `why` ISSUED_NO_RETURN) before the return was agreed (the owner
     2026-11-10): the mark of this stay goes and its pieces leave oth_return (a real «Вернуть поставщику» stays) — of every position (`item_id`
-    None) or `pieces` of one («Взять с ОТХ»: the mark keeps the rest). One record in the journal. No commit. Returns the pieces released."""
+    None) or `pieces` of one («Взять с ОТХ»: the mark keeps the rest). What went is kept under `slot` (MARKS_KEY) for restore_marks. One record
+    in the journal. No commit. Returns the pieces released."""
     since = _oth_since(conn, order_id)
     names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM order_item WHERE order_id = ?", (order_id,))}
     done = []
@@ -341,6 +374,11 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
         off = marked if pieces is None else min(marked, int(pieces))
         if off <= 0:
             continue
+        by = ""
+        for (value,) in conn.execute("SELECT value FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),)).fetchall():
+            mark = json.loads(value)
+            if str(mark.get("at") or "") >= since:
+                by = str(mark.get("by") or "")
         conn.execute("UPDATE oth_return SET qty = qty - ? WHERE item_id = ?", (off, item))
         if off < marked:                                                             # a part taken: the mark holds the rest
             for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),)).fetchall():
@@ -349,13 +387,80 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
                     conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(dict(mark, qty=marked - off), ensure_ascii=False), key))
         else:
             conn.execute("DELETE FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),))
-        done.append((item, off))
+        done.append((item, off, by))
     conn.execute("DELETE FROM oth_return WHERE order_id = ? AND qty <= 0", (order_id,))
     if done:
+        kept = _dropped(conn, order_id)
+        place = {} if slot == MOVE else kept.get(slot) or {}                         # MOVE: one sale's own; a take adds to its slot
+        for item, off, by in done:
+            was = place.get(str(item)) or {}
+            place[str(item)] = {"qty": int(was.get("qty") or 0) + off, "by": by or was.get("by") or who}
+        kept[slot] = place
+        _keep_dropped(conn, order_id, kept)
         orders.add_event(conn, order_id, now, who, "field", "%s: метка «На возврат» снята — %s" % (why, "; ".join(
-            "%s, %d шт." % (names.get(i, "позиция"), n) for i, n in done)))
-        _audit(conn, now, who, "oth_sold_early" if why == SOLD_EARLY else "oth_issued_early", {"order": int(order_id), "items": {str(i): n for i, n in done}})
-    return sum(n for _, n in done)
+            "%s, %d шт." % (names.get(i, "позиция"), n) for i, n, _by in done)))
+        _audit(conn, now, who, "oth_sold_early" if why == SOLD_EARLY else "oth_issued_early", {"order": int(order_id), "items": {str(i): n for i, n, _by in done}})
+    return sum(n for _, n, _by in done)
+
+
+def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, pieces=None) -> int:
+    """«Отменить» of the sale or «Выдали» (slot MOVE), «Вернуть на ОТХ» of a take (take_slot, at most `pieces`): the marks «На возврат» drop_marks took
+    off are back on the positions — in oth_return, «Ожидает согласование возврата», on sale until agreed — and the task of the return with them, as
+    item_to_return sets it: the open one names them, else a new one (the order's responsible, the term of the setting from now). Only on «На ОТХ» /
+    «На возврат» not agreed. Commits (tasks.add). Returns the pieces marked again."""
+    kept = _dropped(conn, order_id)
+    place = kept.pop(slot, None) or {}
+    card = orders.get_card(conn, order_id)
+    if not place or card["stage"]["code"] not in RETURNING or return_plan(conn, order_id) is not None:
+        _keep_dropped(conn, order_id, kept)
+        return 0
+    since = _oth_since(conn, order_id)
+    items = {i["id"]: i for i in card["items"]}
+    left = None if pieces is None else int(pieces)
+    back, rest = [], {}
+    for key, entry in place.items():
+        item, wanted = int(key), int(entry.get("qty") or 0)
+        held = int((conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() or (0,))[0])
+        n = min(wanted, int(items[item]["qty"]) - held if item in items else 0, wanted if left is None else left)
+        if wanted - max(n, 0) > 0 and item in items:
+            rest[key] = dict(entry, qty=wanted - max(n, 0))                         # another take's pieces, still in another order
+        if n <= 0:
+            continue
+        if left is not None:
+            left -= n
+        conn.execute("INSERT INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET "
+                     "qty = oth_return.qty + excluded.qty, at = excluded.at, author = excluded.author", (item, order_id, n, now, who))
+        back.append((item, n, str(entry.get("by") or who)))
+    if rest:
+        kept[slot] = rest
+    _keep_dropped(conn, order_id, kept)
+    if not back:
+        return 0
+    what = "; ".join("%s, %d шт." % (items[i]["name"], n) for i, n, _by in back)
+    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Метка «%s», шины в продаже до согласования возврата." % (
+        why, what, LABELS[AGREE]))
+    _audit(conn, now, who, "oth_marks_back", {"order": int(order_id), "items": {str(i): n for i, n, _by in back}})
+    marks = []
+    for item, n, by in back:
+        key = _item_key(item, card["entered_at"])
+        old = json.loads(store_value(conn, key) or "null") or {}
+        same = str(old.get("at") or "") >= since and old.get("qty")                  # a part left by a take: it holds these pieces too
+        mark = {"qty": int(old.get("qty") or 0) + n if same else n, "at": old["at"] if same else now, "by": old.get("by") if same else by, "task": 0}
+        if same and old.get("waiting"):
+            mark["waiting"] = old["waiting"]
+        marks.append((key, mark))
+    found = conn.execute("SELECT id FROM callback_task WHERE order_id = ? AND title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL ORDER BY id LIMIT 1",
+                         (order_id,) + RETURN_TITLES).fetchone()
+    if found:                                                                        # one open task per order: it names these too
+        from . import tasks
+        conn.execute("UPDATE callback_task SET note = substr(note || ', ' || ?, 1, ?) WHERE id = ?", ("позиция: " + what, tasks.NOTE_MAX, found[0]))
+        task = found[0]
+    else:
+        task = _return_task(conn, card, now, who, "позиция: " + what)                # commits it all
+    for key, mark in marks:
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(dict(mark, task=task), ensure_ascii=False)))
+    conn.commit()
+    return sum(n for _i, n, _by in back)
 
 
 def pieces_here(conn, card: dict) -> Dict[int, int]:
@@ -834,6 +939,7 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
         return "не выполнено: нет этапа «Выполнено»", "Не получилось: в воронке нет этапа «Выполнено».", False
     plan = return_plan(conn, card["id"])                         # read before it goes: agreed or not decides what left_return writes
     conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % card["id"],))
+    forget_dropped(conn, card["id"])                             # the marks an earlier sale or «Выдали» took off: not this one's
     if plan is None:                                             # not agreed: the client took the tyres, the return is not needed (the owner 2026-11-10)
         drop_marks(conn, card["id"], now, who, why=ISSUED_NO_RETURN)
         _end_tasks(conn, card["id"], True, ISSUED_NO_RETURN[:1].lower() + ISSUED_NO_RETURN[1:], now, who)
@@ -891,6 +997,7 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
         conn.rollback()
         return "не выполнено: нет этапа «Выполнено»", "Не получилось: в воронке нет этапа «Выполнено».", False
     conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % card["id"],))      # an agreement an earlier «Выдали» dropped: not this sale's
+    forget_dropped(conn, card["id"])                                                          # nor the marks it took off
     if return_plan(conn, card["id"]) is not None:                # agreed (or the act signed) between the check above and the write: nothing is sold
         conn.rollback()
         return AGREED_REFUSED, AGREED_ANSWER % label, False
