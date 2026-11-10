@@ -2,7 +2,7 @@
 {% from "_ui.html" import icon %}
 {% block title %}Заказы · Tires Sync{% endblock %}
 {% block page_class %} page--wide{% endblock %}
-{% block viewport %}{% if current_user().role == "point" %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
 {% block body_class %}{% if current_user().role == "point" %}pt-ui pt-orders-page{% endif %}{% endblock %}
 {% block head %}{% if current_user().role == "point" %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block content %}

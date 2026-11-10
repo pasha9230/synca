@@ -2,7 +2,7 @@
    is red; «Новая задача» without an order; «Выполнено» with what came of it, «Отменить». A point sees only its own. #}
 {% extends "base.html" %}
 {% import "_inquiry.html" as inq_ui %}
-{% block viewport %}{% if point %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
 {% block body_class %}{% if point %}pt-ui pt-tasks-page{% endif %}{% endblock %}
 {% block head %}{% if point %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block title %}Задачи · Tires Sync{% endblock %}

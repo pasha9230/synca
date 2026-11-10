@@ -1,0 +1,266 @@
+/* The office on a phone (the owner 2026-11-10): the panel of the owner, the partner and the managers on a narrow screen.
+   Only @media for a narrow window and only body.ofc (base.html: every page but a point's): a computer (1024+) sees nothing of this file,
+   a point's cabinet (body.pt-ui, point.css, mypoint.css) and the client's /shop (shop_base.html) never get .ofc.
+   Up to 1023: the frame (the menu slides out of the «бургер», the page scrolls as a whole, no page wider than the window).
+   Up to 760: the phone (fingers 44 px, text 14 px, fields 16 px so iOS does not zoom, tables as cards or scrolled in their own box). */
+
+.mnav-btn{display:none}
+
+@media (max-width:1023px){
+  body.ofc,body.ofc.o2{min-width:0}
+  html.is-nav-lock,html.is-nav-lock body{overflow:hidden}
+  body.ofc .app,body.ofc .app.is-collapsed{display:block;height:auto;min-height:100vh}
+  body.ofc .main{overflow:visible;min-width:0}
+  body.ofc .page{max-width:none;min-width:0}
+  /* the menu: off the screen on the left, slides in over the page; the shade behind it closes it */
+  body.ofc .sidebar{position:fixed;top:0;bottom:0;left:0;z-index:60;width:min(300px,86vw);transform:translateX(-102%);transition:transform .2s ease;
+    box-shadow:var(--sh-xl);overscroll-behavior:contain;padding-bottom:calc(var(--s-5) + env(safe-area-inset-bottom))}
+  body.ofc .app.is-nav-open .sidebar{transform:none}
+  body.ofc .app.is-collapsed .sidebar{padding-left:var(--s-3);padding-right:var(--s-3)}
+  body.ofc .app.is-collapsed .sb-logo{flex-direction:row;font-size:var(--fs-xl);padding:0 var(--s-3) var(--s-5)}
+  body.ofc .app.is-collapsed .sb-label{font-size:var(--fs-xs);padding:var(--s-1) var(--s-3) var(--s-2);height:auto}
+  body.ofc .app.is-collapsed .sb-fold{display:flex}
+  body.ofc .sb-toggle{display:none}
+  .mnav-shade{display:none}
+  body.ofc .app.is-nav-open .mnav-shade{display:block;position:fixed;inset:0;z-index:59;background:var(--overlay)}
+  /* the top strip: the menu, «Работать как точка», the bell; it stays on top while the page scrolls */
+  body.ofc .topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:var(--s-2);height:auto;min-height:52px;
+    padding:4px 12px;padding-top:calc(4px + env(safe-area-inset-top));background:var(--gray-0);border-bottom:1px solid var(--gray-200)}
+  body.ofc .mnav-btn{display:grid;place-items:center;width:44px;height:44px;margin-left:-6px;border:0;border-radius:var(--r-md);background:none;color:var(--gray-900);cursor:pointer;flex:none}
+  body.ofc .mnav-btn:focus-visible{outline:0;box-shadow:var(--ring)}
+  body.ofc .mnav-btn svg{width:24px;height:24px}
+  body.ofc .as-point{position:relative;top:auto;left:auto}
+  body.ofc .as-point summary{height:auto}
+  body.ofc .bell{margin-left:auto;order:2}
+  body.ofc .as-point{order:1;min-width:0}
+  @media (prefers-reduced-motion:reduce){body.ofc .sidebar{transition:none}}
+}
+
+@media (max-width:760px){
+  /* the sizes of a computer (12/13/14) are too small for a phone: the tokens grow, the page keeps its proportions */
+  body.ofc{--fs-xs:14px;--fs-sm:14px;--fs-md:15px;--fs-lg:17px;font-size:var(--fs-md)}
+  body.ofc .page,body.ofc .page--wide{padding:var(--s-4) var(--s-4) calc(var(--s-12) + env(safe-area-inset-bottom));gap:var(--s-4)}
+  body.ofc h1{font-size:var(--fs-2xl)}
+  /* the menu by a finger */
+  body.ofc .sb-link{min-height:44px;font-size:15px}
+  body.ofc .sb-fold{min-height:40px}
+  body.ofc .sb-foot .icon-btn{width:44px;height:44px}
+  body.ofc .as-point summary{min-height:40px;display:inline-flex;align-items:center}
+  body.ofc .as-point-item{min-height:44px}
+  /* the small print of a computer is 12–13 px: 14 on a phone */
+  body.ofc .small,body.ofc .xs,body.ofc small{font-size:var(--fs-md)}
+  /* a field under 16 px makes iOS zoom the page in */
+  body.ofc input:not([type=checkbox]):not([type=radio]):not([type=hidden]),body.ofc select,body.ofc textarea{font-size:16px}
+  body.ofc .input,body.ofc .select,body.ofc select{min-height:44px}
+  /* the columns of a computer one under the other */
+  body.ofc .grid-2,body.ofc .grid-3,body.ofc .grid-main-side{grid-template-columns:minmax(0,1fr)}
+  body.ofc .page-head{align-items:flex-start}
+  body.ofc .page-head>*{min-width:0}
+  /* buttons by a finger */
+  body.ofc .btn{min-height:44px}
+  body.ofc .icon-btn{min-width:44px;min-height:44px}
+  body.ofc .row,body.ofc .row-wrap{flex-wrap:wrap}
+  /* a long word or a link never widens the page */
+  body.ofc .page{overflow-wrap:anywhere}
+  body.ofc img,body.ofc video{max-width:100%;height:auto}
+  /* the sign-in */
+  body.ofc .auth-card{width:auto;max-width:100%;margin:var(--s-4)}
+}
+
+/* ---- 1) «Заказы»: the head, the filters, the board, the list ---- */
+@media (max-width:760px){
+  body.ofc .page-head .actions{margin-left:0;flex-wrap:wrap;width:100%;gap:var(--s-2)}
+  body.ofc .seg a,body.ofc .seg label,body.ofc .seg button{height:44px;font-size:var(--fs-md)}
+  body.ofc .menu-item{min-height:44px}
+  body.ofc .o2-filters{padding:var(--s-3)}
+  body.ofc .o2-filters .field,body.ofc .o2-filters .o2-f-wide{flex:1 1 100%;max-width:none;min-width:0}
+  body.ofc .o2-filters .select{max-width:none}
+  body.ofc .o2-filters .label,body.ofc .o2-filter-on{font-size:var(--fs-sm)}
+  body.ofc .o2-dates{flex-wrap:wrap}
+  body.ofc .o2-dates .input{flex:1 1 130px;width:auto}
+  /* the board: the stages one under another, not side by side (no scrolling sideways); an empty stage is a line to open */
+  body.ofc .board{flex-direction:column;overflow:visible;gap:var(--s-3)}
+  body.ofc .board .col,body.ofc.o2 .o2-board .col,body.ofc.o2 .o2-board .col:not(.is-folded){flex:none;min-width:0;min-height:0;width:100%}
+  body.ofc .board .col.is-folded,body.ofc.o2 .o2-board .col.is-folded{flex:none;min-width:0}
+  body.ofc .board .col.is-folded .col-head{flex-direction:row;padding:0 var(--s-3);min-height:48px}
+  body.ofc .board .col.is-folded .col-name{writing-mode:horizontal-tb}
+  body.ofc .board .col-head{flex-wrap:nowrap;min-height:48px;font-size:var(--fs-md)}
+  body.ofc.o2 .o2-board .col-head .sum,body.ofc .board .col-head .sum{flex-basis:auto;margin-left:auto;padding-left:0;white-space:nowrap}
+  body.ofc.o2 .o2-board .col-head{position:static}
+  body.ofc .o2-count,body.ofc .o2-meta,body.ofc .o2-inner,body.ofc .o2-wm--none,body.ofc .o2-stage,body.ofc .o2-stat .t{font-size:var(--fs-sm)}
+  body.ofc .o2-card{font-size:var(--fs-md)}
+  body.ofc .o2-card{padding:var(--s-3)}
+}
+
+/* ---- tables on a phone: a row is a card «колонка — значение» (app.js 8b gives every cell data-mlabel); the header row keeps only
+   its checkbox «выбрать все»; a table with data-m-scroll stays a table and scrolls in its own box (.table-wrap) ---- */
+@media (max-width:760px){
+  body.ofc .table-wrap{border-top:0}
+  body.ofc table.m-cards,body.ofc table.m-cards>tbody,body.ofc table.m-cards>tfoot,body.ofc table.m-cards>tbody>tr,body.ofc table.m-cards>tfoot>tr{display:block;width:100%}
+  body.ofc table.m-cards{font-size:var(--fs-md)}
+  body.ofc table.m-cards>thead{display:block}
+  body.ofc table.m-cards>thead>tr{display:flex;flex-wrap:wrap;gap:var(--s-2)}
+  body.ofc table.m-cards>thead>tr:not(:last-child){display:none}
+  body.ofc table.m-cards>thead th{display:none;position:static}
+  body.ofc table.m-cards>thead th:has(input,select,button){display:flex;align-items:center;height:auto;min-height:44px;background:none;border:0;padding:0 var(--s-2)}
+  body.ofc table.m-cards>tbody>tr{position:relative;margin:0 0 var(--s-2);padding:var(--s-2) var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-lg);background:var(--gray-0)}
+  body.ofc table.m-cards>tfoot>tr{padding:var(--s-2) var(--s-3)}
+  body.ofc table.m-cards>tbody>tr>td,body.ofc table.m-cards>tfoot>tr>td{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s-3);
+    height:auto;min-height:0;padding:5px 0;border:0;background:none;text-align:right;white-space:normal;overflow-wrap:anywhere;max-width:none;width:auto}
+  body.ofc table.m-cards>tbody>tr>td::before,body.ofc table.m-cards>tfoot>tr>td::before{content:attr(data-mlabel);flex:0 1 45%;text-align:left;color:var(--gray-500);font-size:var(--fs-sm);overflow-wrap:normal}
+  body.ofc table.m-cards>tbody>tr>td[data-mlabel=""]::before,body.ofc table.m-cards>tfoot>tr>td[data-mlabel=""]::before,body.ofc table.m-cards td.m-span::before,body.ofc table.m-cards td:not([data-mlabel])::before{content:none}
+  body.ofc table.m-cards>tbody>tr>td[data-mlabel=""],body.ofc table.m-cards td.m-span{justify-content:flex-start;text-align:left}
+  body.ofc table.m-cards td.m-span{display:block}
+  body.ofc table.m-cards>tbody>tr>td:empty,body.ofc table.m-cards>tfoot>tr>td:empty{display:none}
+  body.ofc table.m-cards>tbody>tr>td>*{min-width:0}
+  body.ofc table.m-cards .nowrap,body.ofc table.m-cards>tbody>tr>td[style*=nowrap]{white-space:normal!important}
+  body.ofc table.m-cards td form{display:flex;flex-wrap:wrap;gap:var(--s-2);min-width:0;max-width:100%;justify-content:flex-end}
+  body.ofc table.m-cards td .btn{white-space:normal;max-width:100%}
+  body.ofc table.m-cards td .input{min-width:0;max-width:100%}
+  /* a checkbox cell: a finger-sized box at the corner of the card */
+  body.ofc table.m-cards>tbody>tr>td:has(>label>input[type=checkbox]:only-child),body.ofc table.m-cards>tbody>tr>td:has(>input[type=checkbox]:only-child){position:absolute;top:2px;right:2px;padding:0;width:44px;height:44px;justify-content:center;align-items:center;z-index:1}
+  body.ofc table.m-cards>tbody>tr:has(>td>label>input[type=checkbox]:only-child)>td:nth-child(2),body.ofc table.m-cards>tbody>tr:has(>td>input[type=checkbox]:only-child)>td:nth-child(2){padding-right:44px}
+  body.ofc table.m-cards input[type=checkbox]{width:20px;height:20px}
+  /* a table left as a table: its own scroll, with a hint that it goes on to the right */
+  body.ofc .table-wrap:has(>table:not(.m-cards)){overflow-x:auto;-webkit-overflow-scrolling:touch;
+    background:linear-gradient(to right,var(--gray-0) 30%,transparent) left/24px 100% no-repeat local,linear-gradient(to left,var(--gray-0) 30%,transparent) right/24px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%,rgba(16,24,40,.18),transparent) left/10px 100% no-repeat scroll,radial-gradient(farthest-side at 100% 50%,rgba(16,24,40,.18),transparent) right/10px 100% no-repeat scroll}
+}
+
+/* ---- 2) the window of an order: the columns one under another; a folded column is a line to open it ---- */
+@media (max-width:760px){
+  body.ofc .o2c-head{padding:var(--s-2) var(--s-3)}
+  body.ofc .o2c-back{min-height:44px;font-size:var(--fs-md)}
+  body.ofc .o2c-inner,body.ofc .o2c-phone,body.ofc .o2c-stage,body.ofc .o2c-colhead,body.ofc .o2c-tab{font-size:var(--fs-sm)}
+  body.ofc .o2c-body{flex-direction:column;min-height:0}
+  body.ofc .o2c-col,body.ofc .o2c-col[data-cc]{flex:none;min-width:0;width:100%}
+  body.ofc .o2c-col+.o2c-split+.o2c-col,body.ofc .o2c-col+.o2c-col{border-top:1px solid var(--gray-200)}
+  body.ofc .o2c-split{display:none}
+  body.ofc .o2c-col.is-off{flex:none;min-width:0}
+  body.ofc .o2c-col.is-off .o2c-strip{flex-direction:row;width:100%;height:auto;min-height:48px;padding:0 var(--s-3);font-size:var(--fs-md)}
+  body.ofc .o2c-strip span:not(.sb-count){writing-mode:horizontal-tb}
+  body.ofc .o2c-colhead{min-height:48px}
+  body.ofc .o2c-scroll{padding:var(--s-3) var(--s-2)}
+  body.ofc .o2c-tab{min-height:40px;padding:0 var(--s-3)}
+  body.ofc .o2c-tabs{gap:var(--s-2)}
+  /* the stages, the fields and the small buttons of the window by a finger */
+  body.ofc .owin-stage{min-height:44px}
+  body.ofc .owin-stages{gap:var(--s-2)}
+  body.ofc .input--sm,body.ofc .select--sm,body.ofc .owin-tagin{min-height:44px}
+  body.ofc .btn--sm{min-height:44px}
+  /* the line «добавить позицию»: the search on its own line; the positions: the name on top, the numbers under it (as point.css does) */
+  body.ofc .owin-add{flex-wrap:wrap}
+  body.ofc .owin-add>:is(.grow,.suggest-wrap,.field:first-child){flex:1 1 100%}
+  body.ofc .owin-add>.owin-qty{flex:0 0 72px;width:auto}
+  body.ofc .owin-add>.owin-price{flex:1 1 auto;width:auto}
+  body.ofc .owin-plus{min-width:44px}
+  body.ofc .owin-items,body.ofc .owin-items tbody{display:block;width:100%}
+  body.ofc .owin-items tr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:8px 0;border-bottom:1px solid var(--gray-200)}
+  body.ofc .owin-items td{display:block;padding:0;border-bottom:0;min-width:0}
+  body.ofc .owin-items td.owin-iname{flex:1 1 100%;width:auto;overflow-wrap:anywhere}
+  body.ofc .owin-items td.owin-iqty{flex:1 1 auto;white-space:normal}
+  body.ofc .owin-items td.owin-isum{margin-left:auto;white-space:nowrap}
+  body.ofc .owin-items .input--sm{min-height:44px}
+  body.ofc .owin-foot{flex-wrap:wrap}
+  body.ofc .owin-foot .btn{flex:1 1 auto}
+  body.ofc .owin-hint,body.ofc .owin-buy,body.ofc .owin-code,body.ofc .supplier-mark{font-size:var(--fs-sm)}
+}
+
+/* ---- 3) «Чаты»: as a messenger on a phone — the list, or the open chat with «назад» (the arrow .o2-cl-back); the answer stays at the
+   bottom of the screen, above the keyboard (sticky in the page, never fixed over it) ---- */
+@media (max-width:760px){
+  body.ofc.o2-chats-page .page{padding:0 0 env(safe-area-inset-bottom);gap:0}
+  body.ofc.o2 .chats-layout.o2-cl,body.ofc.o2 .chats-layout.o2-cl.is-deal-folded{grid-template-columns:minmax(0,1fr);grid-template-areas:"list";border:0;border-radius:0;min-height:0}
+  body.ofc.o2 .chats-layout.o2-cl.has-cur{grid-template-areas:"main"}
+  body.ofc.o2 .chats-layout.o2-cl.has-cur .o2-cl-list{display:none}
+  body.ofc.o2 .chats-layout.o2-cl:not(.has-cur) .o2-cl-pane{display:none}
+  body.ofc.o2 .o2-cl-list{border-right:0}
+  body.ofc.o2 .o2-cl-top{position:static}
+  body.ofc .o2-chip{height:40px;padding:0 14px;border-radius:20px;font-size:var(--fs-sm)}
+  body.ofc .o2-cl-chips{gap:var(--s-2)}
+  body.ofc .o2-cl-search-box .input{height:44px}
+  body.ofc .o2-t,body.ofc .o2-r3,body.ofc .o2-cnt,body.ofc .o2-cl-sub{font-size:var(--fs-sm)}
+  body.ofc.o2 .o2-cl-row{padding:12px 16px}
+  /* the open chat: the head with «назад», the order line and the buttons wrap; the messages wide enough to read */
+  body.ofc .o2-cl-back{display:grid;place-items:center;width:44px;height:44px;flex:none;margin-left:-8px;color:var(--gray-700)}
+  body.ofc.o2 .o2-cl-head{padding:4px 8px;flex-wrap:wrap}
+  body.ofc .o2-cl-acts{flex-wrap:wrap}
+  body.ofc .o2-order-line,body.ofc.o2 .o2-cl-product{flex-wrap:wrap;padding:8px 12px;font-size:var(--fs-sm)}
+  body.ofc .o2-order-line .o2-ol-text{flex:1 1 100%}
+  body.ofc .o2-order-line .btn,body.ofc .o2-order-line form{flex:1 1 auto}
+  body.ofc .o2-order-line form .btn{width:100%}
+  body.ofc .o2-ad-name{flex:1 1 0}
+  body.ofc .o2-ad-links{margin-left:0}
+  body.ofc .o2-ad-links a.muted{min-height:44px;display:inline-flex;align-items:center}
+  body.ofc.o2 .o2-cl-msgs{padding:12px}
+  body.ofc.o2 .o2-cl-msgs .msg{max-width:88%;font-size:15px;line-height:21px}
+  body.ofc.o2 .o2-cl-comp{position:sticky;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+  body.ofc .o2-cl-line{gap:var(--s-2)}
+  body.ofc .o2-cl-line .textarea{min-height:44px;font-size:16px}
+  body.ofc .o2-cl-line .btn{height:44px}
+  body.ofc .o2-cl-line .chat-photo-pick{height:44px;width:44px}
+  body.ofc.o2 .o2-cl-send .chat-send-note{padding-left:0}
+  /* «Отправить» keeps its icon, the word hides: the field gets the width */
+  body.ofc .o2-cl-line .btn--primary{padding:0 12px}
+  /* «Панель заказа»: the whole screen, its own scroll, the × in reach */
+  body.ofc .o2-order-panel{top:0;left:0;right:0;width:auto;z-index:45}
+  body.ofc.o2-panel-open .page{padding-right:0}
+  body.ofc .o2-op-close{width:44px;height:44px;top:4px;right:4px}
+  body.ofc .o2-panel-foot>*{flex:1 1 auto}
+}
+
+/* ---- 7) the bell: in the strip, a finger's size; its window takes the width of the screen under the strip ---- */
+@media (max-width:1023px){
+  body.ofc .bell{position:relative;top:auto;right:auto}
+}
+@media (max-width:760px){
+  body.ofc .bell-btn{width:44px;height:44px}
+  body.ofc .bell-btn .i{width:20px;height:20px}
+  body.ofc .bell-pop{left:8px;right:8px;top:calc(56px + env(safe-area-inset-top));width:auto;max-width:none;max-height:calc(100dvh - 72px);display:flex;flex-direction:column}
+  body.ofc .bell-pop[hidden]{display:none}
+  body.ofc .bell-list{max-height:none;flex:1 1 auto;min-height:0}
+  body.ofc .bell-close{width:44px;height:44px;margin:-10px -12px -10px 0}
+  body.ofc .bell-row{padding:12px 16px}
+  body.ofc .bell-all{min-height:48px}
+}
+
+/* ---- 4) «Каталог»: the filters (lists of widths, profiles, diameters) by a finger, the positions as cards ---- */
+@media (max-width:760px){
+  body.ofc .seg{flex-wrap:wrap;max-width:100%;overflow:visible}
+  body.ofc .seg>*{flex:1 1 auto;justify-content:center;border-bottom:1px solid var(--gray-300);margin-bottom:-1px}
+  body.ofc .o2-filters .msel-sum,body.ofc .msel-sum{width:100%;min-height:44px}
+  body.ofc .msel-list{width:100%;max-width:none;max-height:min(360px,60dvh)}
+  body.ofc .msel-opt{min-height:44px;font-size:var(--fs-md);padding:0 10px}
+  body.ofc .msel-opt input{width:20px;height:20px}
+  body.ofc .msel-chips{max-width:none}
+  body.ofc .msel-chip,body.ofc .msel-clear{height:36px;font-size:var(--fs-sm);padding:0 12px}
+  body.ofc label.check{min-height:44px;display:flex;align-items:center;gap:var(--s-2)}
+  body.ofc label.check input{width:20px;height:20px}
+  body.ofc .help-q{font-size:var(--fs-sm)}
+  body.ofc .card-head{flex-wrap:wrap;padding:var(--s-3) var(--s-4)}
+  body.ofc .card-head h3{white-space:normal}
+  body.ofc details.card>summary.card-head{min-height:48px}
+  /* a card of a position: the photo and the name on top across the card, the buttons in a row that wraps */
+  body.ofc table.m-cards>tbody>tr>td.w-thumb{float:left;padding:0 var(--s-3) 0 0;border:0}
+  body.ofc table.m-cards>tbody>tr>td.w-thumb::before,body.ofc table.m-cards>tbody>tr>td.t-namecol::before{content:none}
+  body.ofc table.m-cards>tbody>tr>td.t-namecol{display:block;text-align:left;padding-right:44px;min-height:48px;font-weight:500}
+  body.ofc table.m-cards>tbody>tr>td.t-namecol+td,body.ofc table.m-cards>tbody>tr>td.w-thumb+td{clear:both}
+  body.ofc table.m-cards>tbody>tr>td.t-actions{flex-wrap:wrap;justify-content:flex-end;gap:var(--s-2)}
+  body.ofc table.m-cards>tbody>tr>td.t-actions::before{flex:1 1 100%}
+  body.ofc table.m-cards>tbody>tr>td.t-actions>*{flex:1 1 auto}
+  body.ofc table.m-cards>tbody>tr>td.t-actions .btn,body.ofc table.m-cards>tbody>tr>td.t-actions form{width:100%}
+  body.ofc .o2-code{font-size:var(--fs-sm)}
+}
+
+/* ---- 6) «Главная», «Мои дела» and the common blocks: the lists of things to do, tabs, empty states, the feet of the forms ---- */
+@media (max-width:760px){
+  body.ofc .checklist li{grid-template-columns:minmax(0,1fr) auto;gap:var(--s-2) var(--s-3);padding:var(--s-3) var(--s-4)}
+  body.ofc .checklist li>:first-child{grid-column:1/-1}
+  body.ofc .tabs{flex-wrap:wrap;gap:0 var(--s-4)}
+  body.ofc .tabs a{min-height:44px;padding-bottom:0;white-space:nowrap}
+  body.ofc .tabs2{display:flex}
+  body.ofc .tabs2 a{min-height:44px;font-size:var(--fs-md)}
+  body.ofc .empty{padding:var(--s-8) var(--s-4)}
+  body.ofc .card-foot,body.ofc .form-foot,body.ofc .actions{flex-wrap:wrap}
+  body.ofc .card-body{padding:var(--s-4)}
+}

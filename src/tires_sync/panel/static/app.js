@@ -267,6 +267,57 @@
     });
   })();
 
+  // 8a) Меню телефона («бургер» в верхней полосе, office-mobile.css): выезжает слева, закрывается фоном, Esc и переходом
+  (function () {
+    var app = document.querySelector(".app"), btn = document.querySelector("[data-mnav]");
+    if (!app || !btn) return;
+    var shade = document.createElement("div");
+    shade.className = "mnav-shade"; shade.setAttribute("aria-hidden", "true"); app.appendChild(shade);
+    var set = function (open) {
+      app.classList.toggle("is-nav-open", open);
+      btn.setAttribute("aria-expanded", String(open));
+      document.documentElement.classList.toggle("is-nav-lock", open);
+    };
+    btn.addEventListener("click", function () { set(!app.classList.contains("is-nav-open")); });
+    shade.addEventListener("click", function () { set(false); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && app.classList.contains("is-nav-open")) { set(false); btn.focus(); } });
+    app.querySelectorAll(".sidebar .sb-link").forEach(function (a) { a.addEventListener("click", function () { set(false); }); });
+  })();
+
+  // 8b) Таблицы на телефоне карточками (office-mobile.css, table.m-cards): каждой ячейке — название её колонки из шапки
+  //     (data-mlabel, учитывая colspan). Только на узком экране офиса; таблицы, пришедшие позже (каталог), — по MutationObserver.
+  //     Таблица с data-m-scroll остаётся таблицей и прокручивается в своём блоке.
+  (function () {
+    if (!document.body.classList.contains("ofc") || !window.matchMedia) return;
+    var narrow = window.matchMedia("(max-width:760px)");
+    var label = function (table) {
+      if (table.hasAttribute("data-m-scroll") || table.closest("[data-m-scroll]")) return;
+      var head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1], names = [];
+      if (head) Array.prototype.forEach.call(head.cells, function (th) {
+        var text = th.querySelector("input,select,button") ? "" : th.textContent.replace(/\s+/g, " ").trim();
+        for (var k = 0; k < (th.colSpan || 1); k++) names.push(text);
+      });
+      var bodies = Array.prototype.slice.call(table.tBodies); if (table.tFoot) bodies.push(table.tFoot);
+      bodies.forEach(function (body) {
+        Array.prototype.forEach.call(body.rows, function (tr) {
+          var at = 0;
+          Array.prototype.forEach.call(tr.cells, function (td) {
+            var span = td.colSpan || 1;
+            if (span === 1 && !td.hasAttribute("data-mlabel")) td.setAttribute("data-mlabel", names[at] || "");
+            if (span > 1) td.classList.add("m-span");
+            at += span;
+          });
+        });
+      });
+      table.classList.add("m-cards");
+    };
+    var run = function () { if (narrow.matches) document.querySelectorAll(".page table.table").forEach(label); };
+    var timer = 0;
+    new MutationObserver(function () { clearTimeout(timer); timer = setTimeout(run, 60); }).observe(document.body, { childList: true, subtree: true });
+    if (narrow.addEventListener) narrow.addEventListener("change", run);
+    run();
+  })();
+
   // 9) Всплывающая расшифровка: [data-tip-title] + [data-tip]
   (function () {
     var pop = document.createElement("div");
