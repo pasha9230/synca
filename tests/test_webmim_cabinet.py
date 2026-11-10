@@ -511,3 +511,34 @@ def test_the_minute_of_the_chats_runs_the_repeats_and_its_failure_is_only_a_warn
     cli._mim_retry_look(conn, box, at(3))                                # never raises into the reading of the chats
     err = capsys.readouterr().err
     assert "повтор чтения кабинета MIM не выполнен (RuntimeError)" in err and "AUTH-SECRET" not in err
+
+
+def test_a_read_that_finds_no_number_yet_keeps_the_next_repeats(tmp_path, monkeypatch):
+    """Review of run/2026-11-10f (the owner 2026-11-10): the login got in, but the order has no «№ Счета» in the cabinet yet — the repeats at
+    ~5 and ~15 minutes still go, then only the hourly reading (as after three refusals)."""
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    cabinet = Cabinet([row(5002)])                                        # in: the list has no number of this order yet
+    done = repeat(conn, cabinet, at(2), deliver, vk)
+    assert done["asked"] == 1 and done["written"] == 0 and plan_of(conn, mine)["tries"] == 1 and logins(cabinet) == 1
+    assert repeat(conn, cabinet, at(4), deliver, vk)["asked"] == 0 and logins(cabinet) == 1
+    assert repeat(conn, cabinet, at(5), deliver, vk)["asked"] == 1 and plan_of(conn, mine)["tries"] == 2 and logins(cabinet) == 2
+    cabinet.rows = [row(5002), row(5001)]                                 # there by the third repeat
+    done = repeat(conn, cabinet, at(15), deliver, vk)
+    assert done["asked"] == 1 and done["written"] == 1 and plan_of(conn, mine) == {}
+    assert orders.get_card(conn, mine)["transfer_number"] == INVOICE and len(deliver.sent) == 1
+
+
+def test_three_reads_with_no_number_leave_it_to_the_hourly_reading(tmp_path, monkeypatch):
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    cabinet = Cabinet([row(5002)])
+    for minute in (2, 5, 15):
+        assert repeat(conn, cabinet, at(minute), deliver, vk)["asked"] == 1
+    assert plan_of(conn, mine) == {} and logins(cabinet) == 3                    # no more repeats
+    assert repeat(conn, cabinet, at(59), deliver, vk)["asked"] == 0 and logins(cabinet) == 3
+    assert [t for t, _ in events(conn, mine)].count(webmim_cabinet.GAVE_UP) == 0     # not a failure: the hourly reading takes it
+    client = cabinet_of(Cabinet([row(5001)]))()
+    with client:
+        webmim_cabinet.safe_hourly(conn, client, "prod", "2026-10-23T13:00:00", None)
+    assert orders.get_card(conn, mine)["transfer_number"] == INVOICE
