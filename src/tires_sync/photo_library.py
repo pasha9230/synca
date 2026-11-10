@@ -416,7 +416,9 @@ def make_feed_copy(conn, root: Path, photo_id: int, now: str) -> Optional[int]:
                 flat = image.convert("RGB")
         out = io.BytesIO()
         flat.save(out, "JPEG", quality=FEED_JPEG_QUALITY, optimize=True)     # a new picture: no EXIF, no ICC, no text chunks
-    except Exception:
+    except Exception:                                       # the frame goes to the feed as the PNG it is; said in the journal (review 2026-11-10)
+        import logging
+        logging.getLogger("tires_sync.photo_library").exception("JPEG для фида не сделан, кадр %s уйдёт в фид как PNG", photo_id)
         return None
     copy_id = save_photo(conn, root, out.getvalue(), FEED_KIND, now)
     with conn:
