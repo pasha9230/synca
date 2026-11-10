@@ -64,7 +64,8 @@ def test_each_tab_holds_its_own_orders(w):
     assert _cards(_page(w["point"], "/my-point?tab=moving")) == [w["made"]["moving"]]
     oth = _page(w["point"], "/my-point?tab=oth")
     assert _cards(oth) == [w["made"]["oth"]] and "на ОТХ с" in oth and "срока продажи нет" not in oth   # the day on the plaque (2026-11-09)
-    assert "/my-point/%d/" % w["made"]["oth"] not in oth                                          # no press on our tyres at the point
+    presses = set(re.findall(r'action="/my-point/%d/(\w+)"' % w["made"]["oth"], oth))
+    assert presses == {"oth_sold"}                # our tyres at the point: no press but «Продать» (the owner 2026-11-10; none before)
     assert _cards(_page(w["point"], "/my-point?tab=return")) == [] and "Возвратов поставщику сейчас нет" in _page(w["point"], "/my-point?tab=return")
     r = w["point"].get("/my-point?tab=handed")                                                # the old tab: its section
     assert r.status_code == 302 and r.headers["Location"].endswith("/my-point/handed")

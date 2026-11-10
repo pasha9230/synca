@@ -296,7 +296,7 @@ def sell_lines(card: dict) -> list:
     for i in rows:
         lines.append("%s × %d шт." % (i["name"], i["qty"]) + (": %s ₽ за шт., сумма %s ₽" % (_rub(i["unit"]), _rub(i["sum"])) if i["unit"] else ": цена не указана"))
     if len(rows) > 1 and all(i["unit"] for i in rows):
-        lines.append("Итого: %s ₽" % _rub(sum(i["sum"] for i in rows)))
+        lines.append("Сумма продажи: %s ₽" % _rub(sum(i["sum"] for i in rows)))     # not «Итого»: the card «На ОТХ» has no client's total (2026-10-30)
     return lines + ([] if rows else ["Шины не указаны"]) + ["Шины проданы с ОТХ; заказ закроется как выполненный."]
 
 
