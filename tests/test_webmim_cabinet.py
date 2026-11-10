@@ -33,7 +33,7 @@ def waits_for_the_number(conn):
         templates.update_template(conn, template["id"], name, audience, "Заказ {webmim_number}, перемещение {transfer_number}")
 
 
-def placed_order(tmp_path, cabinet=None, server="prod", login="api-bot"):
+def placed_order(tmp_path, cabinet=None, server="prod", login="api-bot", fail=None):
     """A placed order on the live server whose messages to the client (Avito) and the point (VK) need the transfer number; on_placed done."""
     conn = db(tmp_path, server=server)
     if login != "api-bot":
@@ -42,6 +42,7 @@ def placed_order(tmp_path, cabinet=None, server="prod", login="api-bot"):
     waits_for_the_number(conn)
     fake = FakeWebmim()
     fake.cabinet = cabinet
+    fake.fail = {key: list(actions) for key, actions in (fail or {}).items()}
     client = client_of(fake)
     result = webmim_create.place(conn, mine, client, server, NOW, __import__("datetime").date(2026, 10, 23), "owner", sleep=lambda _s: None)
     client.close()                                                       # the route's finally: the press's logout
@@ -388,3 +389,125 @@ def test_the_window_stays_after_the_press_and_asks_the_cabinet(tmp_path, monkeyp
     again = client.post("/orders/%d/webmim/cabinet" % mine, data={"csrf": "tok"}).get_json()
     assert again["final"] and again["text"] == "Номер перемещения %s вписан" % INVOICE and len(fake.calls) == calls
     assert "Сверка с кабинетом MIM" not in client.get("/orders/%d" % mine).get_data(as_text=True)       # once: only right after the press
+
+
+# ---- the repeats after a refused read (the owner 2026-11-10: ~2, ~5, ~15 minutes, then hourly) ---------------------------------------
+
+PRESS_REFUSED = {("POST", "/api/v3/auth/login"): ["timeout"]}            # the press's own read of the cabinet: the login times out
+
+
+def at(minutes, seconds=0):
+    return "2026-10-23T12:%02d:%02d" % (minutes, seconds)
+
+
+def repeat(conn, cabinet, now, deliver, vk):
+    return webmim_cabinet.retry_due(conn, cabinet_of(cabinet), now,
+                                    lambda card_id: order_placed.send_waiting(conn, card_id, now, "повтор", deliver, vk))
+
+
+def plan_of(conn, mine):
+    return webmim_cabinet._state(conn, webmim_cabinet.RETRY % mine)
+
+
+def test_a_refused_read_at_the_press_is_repeated_two_minutes_later_and_the_messages_go_once(tmp_path, monkeypatch):
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    assert orders.get_card(conn, mine)["transfer_number"] == "" and not deliver.sent and not vk.sent and fake.sessions == 0
+    assert plan_of(conn, mine) == {"since": NOW, "tries": 0, "number": "5001"}
+    cabinet = Cabinet([row(5002), row(5001)])
+    assert repeat(conn, cabinet, at(1, 59), deliver, vk)["asked"] == 0 and cabinet.calls == []      # not yet: no login
+    done = repeat(conn, cabinet, at(2), deliver, vk)
+    assert done["asked"] == 1 and done["written"] == 1 and logins(cabinet) == 1 and cabinet.logouts == 1
+    assert orders.get_card(conn, mine)["transfer_number"] == INVOICE and len(deliver.sent) == 1 and len(vk.sent) == 1
+    assert plan_of(conn, mine) == {}
+    assert repeat(conn, cabinet, at(5), deliver, vk)["asked"] == 0 and logins(cabinet) == 1        # done: never again
+    client = cabinet_of(cabinet)()
+    with client:                                                         # the hourly reading after it: nothing waits, nothing goes twice
+        assert webmim_cabinet.safe_hourly(conn, client, "prod", at(7), None) == ""
+    assert logins(cabinet) == 1 and len(deliver.sent) == 1 and len(vk.sent) == 1
+
+
+@pytest.mark.parametrize("by", ["person", "hourly"])
+def test_a_number_in_before_the_repeat_costs_no_login_and_nothing_goes_twice(tmp_path, monkeypatch, by):
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    assert plan_of(conn, mine)["tries"] == 0
+    if by == "person":
+        orders.update_card(conn, mine, {"transfer_number": "26R-7777777"}, at(1), "owner")
+    else:
+        client = cabinet_of(Cabinet([row(5001)]))()
+        with client:
+            webmim_cabinet.safe_hourly(conn, client, "prod", at(1),
+                                       lambda card_id: order_placed.send_waiting(conn, card_id, at(1), "почасовое чтение WebMIM", deliver, vk))
+    sent = (len(deliver.sent), len(vk.sent))
+    cabinet = Cabinet([row(5001)])
+    done = repeat(conn, cabinet, at(2), deliver, vk)
+    assert done["asked"] == 0 and done["dropped"] == 1 and cabinet.calls == [] and plan_of(conn, mine) == {}
+    assert (len(deliver.sent), len(vk.sent)) == sent
+
+
+@pytest.mark.parametrize("login, listing, logged_in", [(BUSY_LOGIN, 200, False),
+                                                        ((200, {}, json.dumps({"result": False, "message": "Превышено количество подключений"}).encode()), 200, False),
+                                                        (None, 429, True), (None, "net", True)])
+def test_three_refused_repeats_are_one_grey_record_and_no_more_repeats(tmp_path, monkeypatch, login, listing, logged_in):
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    cabinet = Cabinet([row(5001)], login=login, listing=listing)
+    for minute, tries in ((2, 1), (4, 1), (5, 2), (14, 2), (15, 3)):
+        repeat(conn, cabinet, at(minute), deliver, vk)
+        assert plan_of(conn, mine)["tries"] == tries and logins(cabinet) == tries
+    assert cabinet.logouts == (3 if logged_in else 0)                   # every session made is closed
+    grey = [t for t, level in events(conn, mine) if level == "grey" and t.startswith("Номер перемещения из кабинета MIM не прочитан")]
+    assert grey.count(webmim_cabinet.GAVE_UP) == 1 and len(grey) <= 3   # the press's failure, the repeats' one (once), the end
+    for minute in (16, 30, 59):
+        assert repeat(conn, cabinet, at(minute), deliver, vk)["asked"] == 0
+    poll(conn, mine, cabinet, at(31))                                    # a later failed ask of the window plans nothing anew
+    assert repeat(conn, cabinet, "2026-10-23T13:00:00", deliver, vk)["asked"] == 0 and plan_of(conn, mine)["done"] is True
+    assert logins(cabinet) == 4 and not deliver.sent and orders.get_card(conn, mine)["transfer_number"] == ""
+    assert [t for t, _ in events(conn, mine)].count(webmim_cabinet.GAVE_UP) == 1
+
+
+def test_the_repeat_never_asks_within_the_gap_of_the_window(tmp_path, monkeypatch):
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    webmim_cabinet._put(conn, webmim_cabinet.LAST, {"at": at(2)})       # the window has just asked (any order)
+    conn.commit()
+    cabinet = Cabinet([row(5001)])
+    assert repeat(conn, cabinet, at(2, webmim_cabinet.GAP - 1), deliver, vk)["asked"] == 0 and cabinet.calls == []
+    assert plan_of(conn, mine)["tries"] == 0                             # not counted: the next minute asks
+    assert repeat(conn, cabinet, at(2, webmim_cabinet.GAP), deliver, vk)["written"] == 1 and logins(cabinet) == 1
+
+
+def test_a_list_the_login_never_sees_is_not_repeated(tmp_path, monkeypatch):
+    monkeypatch.setattr("tires_sync.reliability.default_sleep", lambda _s: None)
+    conn, mine, fake, deliver, vk, lines = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    cabinet = Cabinet([row(5001)], listing=403)
+    repeat(conn, cabinet, at(2), deliver, vk)
+    assert plan_of(conn, mine) == {} and cabinet.logouts == 1
+    assert repeat(conn, cabinet, at(5), deliver, vk)["asked"] == 0 and logins(cabinet) == 1
+
+
+def test_a_wrong_password_at_the_press_plans_no_repeat(tmp_path):
+    conn, mine, *_ = placed_order(tmp_path, cabinet=[])
+    poll(conn, mine, Cabinet(login=(200, {}, json.dumps({"result": False, "message": "bad"}).encode())))
+    assert plan_of(conn, mine) == {}
+    poll(conn, mine, Cabinet(login=BUSY_LOGIN), "2026-10-23T12:06:00")   # the window refused for the limit: repeats planned from then
+    assert plan_of(conn, mine) == {"since": "2026-10-23T12:06:00", "tries": 0, "number": "5001"}
+
+
+def test_the_minute_of_the_chats_runs_the_repeats_and_its_failure_is_only_a_warning(tmp_path, monkeypatch, capsys):
+    from tires_sync import cli
+    conn, mine, *_ = placed_order(tmp_path, cabinet=[row(5001)], fail=PRESS_REFUSED)
+    box = SecretBox(Fernet.generate_key())
+    asked = []
+    monkeypatch.setattr(webmim_cabinet, "retry_due", lambda c, client_of, now, send: asked.append((now, send is not None)) or
+                        {"asked": 1, "written": 1, "dropped": 0, "gave_up": 0})
+    cli._mim_retry_look(conn, box, at(2))
+    assert asked == [(at(2), True)] and "кабинет MIM, повтор: заказов 1, вписано 1" in capsys.readouterr().out
+
+    def boom(*_a):
+        raise RuntimeError("AUTH-SECRET")
+    monkeypatch.setattr(webmim_cabinet, "retry_due", boom)
+    cli._mim_retry_look(conn, box, at(3))                                # never raises into the reading of the chats
+    err = capsys.readouterr().err
+    assert "повтор чтения кабинета MIM не выполнен (RuntimeError)" in err and "AUTH-SECRET" not in err
