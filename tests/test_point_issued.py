@@ -194,7 +194,7 @@ def test_no_list_of_presses_above_the_orders_the_card_keeps_its_undo(tmp_path, c
     for page in (mine.get("/my-point").get_data(as_text=True), issued_tab(mine)):
         assert "data-undo-list" not in page and "Отменить отметку" not in page and "Заказ вернётся туда, где был до отметки;" not in page
     here = mine.get("/my-point").get_data(as_text=True)
-    assert 'data-undo-card="%d"' % second in here and "Отменить «Приехал»" in here                  # in the order's card
+    assert 'data-undo-card="%d"' % second in here and "Не приехал" in here                          # in the order's card (2026-11-10)
     assert 'data-undo-card="%d"' % card in block(issued_tab(mine))                                  # in «Выдано»
     clock["now"] = T2
     assert post(mine, "/my-point/%d/undo" % second, "tok").status_code == 302
@@ -207,7 +207,7 @@ def test_no_undo_in_the_card_after_a_later_move(tmp_path, clock, view):
     mine = manager(app, conn, pid)
     press(mine, second, "arrived")
     page = mine.get("/my-point").get_data(as_text=True)
-    assert 'data-undo-card="%d"' % second in page and "Отменить «Приехал»" in page
+    assert 'data-undo-card="%d"' % second in page and "Не приехал" in page
     orders.move_card(conn, second, _stage(conn, "moving"), "2026-10-16T12:00:00", "owner")      # the office moved it since
     conn.commit()
     page = mine.get("/my-point?tab=moving").get_data(as_text=True)
@@ -241,3 +241,27 @@ def test_a_stage_name_with_wildcards_and_a_round_trip(tmp_path, clock):
     orders.move_card(conn, second, done, "2026-10-15T09:00:00", "owner")
     conn.commit()
     assert cards(issued_tab(manager(app, conn, pid))) == [second, card]
+
+
+def test_the_undo_of_arrived_is_a_quiet_not_arrived_under_the_order(tmp_path, clock, view):
+    """The owner 2026-11-10: «Отменить «Приехал»» is «Не приехал», a quiet grey text under the order (not a button of the weight of
+    «Выдал»/«ОТКАЗ», not in their row); its window says the order goes back to «Едут». The other undos keep their words."""
+    app, owner, conn, pid, card = setup(tmp_path, view)
+    second = _card(conn, pid, webmim="700306", code="moving")
+    mine = manager(app, conn, pid)
+    press(mine, second, "arrived")
+    page = mine.get("/my-point").get_data(as_text=True)
+    art = re.search(r'<article[^>]*id="order-%d".*?</article>' % second, page, re.S).group(0)
+    assert "Отменить «Приехал»" not in page and "Не приехал" in art
+    undo = re.search(r'<div class="([^"]*)" data-card-undo>(.*?)</form></div>', art, re.S)
+    assert undo.group(1) == "mp-undo"                                                      # its own line, not the row of «Выдал»/«ОТКАЗ»
+    assert '<button class="mp-undo-quiet" data-undo-arrived>Не приехал</button>' in undo.group(2)
+    assert "btn--" not in undo.group(2)                                                    # no button style of the main presses
+    assert 'data-confirm-title="Заказ № 700306 вернётся в «Едут»?"' in undo.group(2) and 'data-confirm-ok="Не приехал"' in undo.group(2)
+    actions = art.index("Выдал")
+    assert art.index("data-card-undo") > actions                                           # under the presses of the card
+    press(mine, card, "issued")
+    assert "Отменить «Выдал»" in block(issued_tab(mine)) and "mp-undo-quiet" not in block(issued_tab(mine))   # the others: as they were
+    clock["now"] = T2
+    assert post(mine, "/my-point/%d/undo" % second, "tok").status_code == 302
+    assert orders.get_card(conn, second)["stage"]["code"] == "moving"
