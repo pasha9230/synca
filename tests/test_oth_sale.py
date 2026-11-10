@@ -842,31 +842,26 @@ def _open_return_tasks(conn, cid):
     return conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (cid,)).fetchone()[0]
 
 
-def test_tyres_marked_for_the_return_are_taken_before_the_agreement(tmp_path):
+def test_tyres_marked_for_the_return_are_not_taken_by_a_new_order(tmp_path):
+    """The owner 2026-11-10 (later): «шины с меткой «На возврат» не надо на Авито, их просто может продать точка с ОТХ» (offline, «Продать»):
+    the pieces of the mark are neither in the feed's stock nor offered to «Взять с ОТХ»; the free pieces are."""
     conn = db(tmp_path)
     old = card_at(conn, "oth", T)
     item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (old,)).fetchone()[0]
     assert order_oth.item_to_return(conn, item, T, "o", "3")
-    assert oth_stock.by_point(conn) == {("1", point_id(conn)): 4} and _open_return_tasks(conn, old) == 1
-    assert take(conn, new_order(conn, qty=2)) == 2                                      # 1 free, 1 of the mark
-    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (2,)
+    assert oth_stock.by_point(conn) == {("1", point_id(conn)): 1} and _open_return_tasks(conn, old) == 1
+    assert take(conn, new_order(conn, qty=1)) == 1                                      # the one free piece
     entered = orders.get_card(conn, old)["entered_at"]
-    assert order_oth.item_mark(order_oth.item_marks(conn), item, entered)["qty"] == 2 and _open_return_tasks(conn, old) == 1
-    assert any(e["text"].startswith(order_oth.SOLD_EARLY) and "1 шт." in e["text"] for e in orders.list_events(conn, old))
-    assert take(conn, new_order(conn, qty=2)) == 2                                      # the rest: the old order is emptied
-    assert code(conn, old) == "cancel" and _open_return_tasks(conn, old) == 0
-    assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (old,)).fetchone()
-    assert conn.execute("SELECT cancelled_at FROM callback_task WHERE order_id = ?", (old,)).fetchone()[0] == LATER
+    assert order_oth.item_mark(order_oth.item_marks(conn), item, entered)["qty"] == 3 and _open_return_tasks(conn, old) == 1
+    assert oth_stock.by_point(conn) == {}
 
 
-def test_the_last_mark_taken_cancels_the_task_and_the_rest_stays_on_sale(tmp_path):
+def test_a_position_marked_whole_is_not_offered_and_the_rest_stays_on_sale(tmp_path):
     conn = db(tmp_path)
     old = card_at(conn, "oth", T)
     orders.add_item(conn, old, goods_id="2", name="Шина 2", brand_key="nokian", season="winter", diameter=16, territory="1",
                     qty=2, sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=T, author="o")
     item = conn.execute("SELECT id FROM order_item WHERE order_id = ? AND goods_id = '1'", (old,)).fetchone()[0]
     assert order_oth.item_to_return(conn, item, T, "o")                                  # all 4 of the first position
-    assert take(conn, new_order(conn, qty=4)) == 4
-    assert code(conn, old) == "oth" and _open_return_tasks(conn, old) == 0
-    assert conn.execute("SELECT cancelled_at FROM callback_task WHERE order_id = ?", (old,)).fetchone()[0] == LATER
     assert oth_stock.by_point(conn) == {("2", point_id(conn)): 2}
+    assert code(conn, old) == "oth" and _open_return_tasks(conn, old) == 1

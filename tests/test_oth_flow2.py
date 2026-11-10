@@ -440,7 +440,7 @@ def test_a_position_keeps_the_stage_leaves_the_sale_has_the_label_and_the_task(t
     now = orders.get_card(conn, cid)
     assert now["stage"]["code"] == "oth" and order_oth.return_plan(conn, cid) is None
     assert order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])["qty"] == 3
-    assert oth_stock.pieces(conn, manual=False) == {"1": 4, "2": 2}                        # on sale until agreed (the owner 2026-11-10; was off sale, 2026-11-04)
+    assert oth_stock.pieces(conn, manual=False) == {"1": 1, "2": 2}  # the owner 2026-11-10 (later): a mark «На возврат» is sold by the point only, not on Avito
     assert [(r["qty"], r["left"], r["marked_qty"]) for r in order_oth.stock(conn)["stock"] if r["item_id"] == item] == [(4, 1, 3)]
     assert [r["qty"] for r in order_oth.stock(conn)["returned"] if r["item_id"] == item] == [3]
     [task] = open_tasks(conn, cid)

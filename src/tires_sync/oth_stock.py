@@ -41,8 +41,9 @@ def _order_rows(conn) -> list:
         agreed = {r[0] for r in conn.execute("SELECT order_id FROM oth_return_plan")}
     except sqlite3.OperationalError:                      # a base without the orders' tables
         return []
-    return [dict(r, manual=None) for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test
-            and int(r["qty"]) > 0 and r["order_id"] not in agreed and r["stage_code"] == "oth"]
+    rows = [dict(r, qty=int(r["qty"]) - int(r.get("marked_qty") or 0)) for r in rows]     # the owner 2026-11-10: the pieces of a mark «На возврат»
+    return [dict(r, manual=None) for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test    # are sold by
+            and int(r["qty"]) > 0 and r["order_id"] not in agreed and r["stage_code"] == "oth"]                                         # the point only, not on Avito
 
 
 def manual_rows(conn) -> list:

@@ -285,7 +285,7 @@ def marked(tmp_path, qty=None):
 def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_on_the_button(tmp_path, clock):
     from tires_sync import oth_stock
     app, conn, pid, card, item, owner = marked(tmp_path)
-    assert sum(order_oth.goods_on_oth(conn).values()) == 4 and sum(oth_stock.pieces(conn, manual=False).values()) == 4
+    assert sum(order_oth.goods_on_oth(conn).values()) == 4 and sum(oth_stock.pieces(conn, manual=False).values()) == 0  # the owner 2026-11-10 (later): not on Avito, the point sells it
     [row] = order_oth.stock(conn)["stock"]
     assert (row["qty"], row["left"], row["marked_qty"]) == (4, 0, 4)                      # on sale; a real «Вернуть поставщику» has nothing to take
     assert 'action="/my-point/%d/oth_sold"' % card in manager(app, conn, pid).get("/my-point?tab=oth").get_data(as_text=True)
