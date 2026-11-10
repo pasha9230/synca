@@ -129,14 +129,32 @@ def _normalized(models: FrozenSet[str]) -> Tuple[Tuple[str, str], ...]:
     return tuple((m, normalize_model(m)) for m in sorted(models))
 
 
+_COMMERCIAL_MARK = re.compile(r"(?<![A-Z0-9])C[ \-]?(\d{1,2})(?![A-Z0-9])")
+
+
+def commercial_marks(model: str) -> FrozenSet[str]:
+    """The numbered commercial marks of a model name: «Autograph Ice C4» → {C4} («C 4», «C-4» and a Cyrillic «С» are the same mark).
+    «CS-2», «CA-1», «CW51», «V-525», «iS37» hold none: the letter «C» must stand alone before the number."""
+    return frozenset("C" + number for number in _COMMERCIAL_MARK.findall(model.upper().translate(_LOOKALIKES)))
+
+
+def keeps_commercial_mark(model_raw: str, avito_model: str) -> bool:
+    """The Avito model names every commercial mark of the supplier's model: «… Ice C4» is not «… Ice C3», not «… Ice 8» and not «… Eco»."""
+    return commercial_marks(model_raw) <= commercial_marks(avito_model)
+
+
 def resolve_model(
     avito_brand: str,
     model_raw: str,
     confirmed: Dict[Tuple[str, str], str],
     ref: Dict[str, FrozenSet[str]],
+    commercial: bool = False,
 ) -> Optional[str]:
+    """`commercial`: the position is a tire of type «C» (owner, 2026-11-10). A saved pair that changes or loses its commercial mark
+    (C4 → C3, C2 → 8, C2 → nothing) is not taken for it: the commercial model is not in the reference, the nearest one is another tire.
+    The position stays unmatched and waits on «Сопоставления». What is found by the name itself (below) keeps the name whole."""
     key = (avito_brand, normalize_model(model_raw))
-    if key in confirmed:
+    if key in confirmed and not (commercial and not keeps_commercial_mark(model_raw, confirmed[key])):
         return confirmed[key]
     for model, norm in _normalized(ref.get(avito_brand, frozenset())):
         if norm == key[1]:

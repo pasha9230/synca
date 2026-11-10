@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from . import truck
 from .catalog import resolve_brand, resolve_model
+from .filters import is_commercial_c
 from .tire_match import brand_form, model_form
 
 MAX_AGE_DAYS = 30                                  # an older listing is not taken (the plan, section 2)
@@ -64,8 +66,11 @@ def ours_from_parsed(offers: Dict[str, object], ref, brand_map, confirmed, wante
         offer = offers.get(goods_id)
         if offer is None:
             continue
-        brand = resolve_brand(offer.brand_key, ref, brand_map)
-        model = resolve_model(brand, offer.model_raw, confirmed, ref) if brand else None
+        if is_commercial_c(offer):                                       # «C»: the names of the truck section (truck.py)
+            brand, model = truck.resolve(offer.brand_key, offer.model_raw, confirmed, brand_map)
+        else:
+            brand = resolve_brand(offer.brand_key, ref, brand_map)
+            model = resolve_model(brand, offer.model_raw, confirmed, ref) if brand else None
         if brand and model:
             found[goods_id] = ours_of(offer, brand, model, (prices or {}).get(goods_id))
     return found

@@ -14,7 +14,7 @@ from .models import Offer, Season
 _DIGITS = re.compile(r"^\d+$")
 
 
-COMMERCIAL_TYPES = ("C", "LT")
+NOT_TAKEN_TYPES = ("LT",)      # owner 2026-11-10: «C» is taken and published like a passenger tire; «LT» still is not
 
 
 @dataclass
@@ -23,7 +23,7 @@ class ParseResult:
     issues: Dict[str, List[str]] = field(default_factory=dict)
     other_territories: Dict[str, int] = field(default_factory=dict)
     unavailable: set = field(default_factory=set)  # suppliers whose unload could not be used this time
-    commercial_skipped: int = 0                    # commercial tires (C / LT): not passenger tires, never taken from the unload
+    commercial_skipped: int = 0                    # «LT» tires: never taken from the unload («C» is taken since 2026-11-10)
     stocks: Dict[str, int] = field(default_factory=dict)   # the known stock of positions that are not offers (a row with an error elsewhere, a stale supplier)
 
 
@@ -129,8 +129,8 @@ def parse_unload(xml_bytes: bytes, territory_rn: str, supplier: int = 1) -> Pars
         if territory != territory_rn:
             other[territory] += 1
             continue
-        if _text(node, "SCARTYPE").strip().upper() in COMMERCIAL_TYPES:
-            result.commercial_skipped += 1               # owner's decision 2026-10-14: they are not passenger tires and do not pass the mapping
+        if _text(node, "SCARTYPE").strip().upper() in NOT_TAKEN_TYPES:
+            result.commercial_skipped += 1               # owner's decisions 2026-10-14 and 2026-11-10: «LT» is not taken, «C» is
             continue
         gid = _text(node, "NNOMMODIF") or _derived_id(node)
         if supplier != 1:

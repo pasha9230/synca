@@ -3103,7 +3103,8 @@ def _cmd_mappings(args) -> int:
     pending = pending_mappings(ev, ref)
     print("pairs awaiting confirmation: %d (goods: %d)" % (len(pending), sum(p.goods_count for p in pending)))
     for p in pending:
-        print("%-14s %-34s x%-3d -> %s" % (p.brand, p.model_raw, p.goods_count, p.suggestions))
+        print("%-14s %-34s x%-3d -> %s%s" % (p.brand, p.model_raw, p.goods_count, p.suggestions,
+                                              "  (грузовой раздел)" if p.section else ""))
     return 0
 
 
