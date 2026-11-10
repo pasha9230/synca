@@ -95,6 +95,9 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, 
         raise ValueError("the catalog of nobody")                 # never the person signed in by default
     items = _visible(app, conn, _offers(app, conn).offers.values(), login)
     f = cc.filters_of(request.args, {i.brand for i in items}, wide=new)
+    both = cc.both_warehouses(conn, login)             # one warehouse on: no filter and no column «Склад» (the owner 2026-11-10)
+    if not both:
+        f.warehouse = 0                               # a `wh` of an old link or of the kept filters: not a filter any more
     found = cc.apply(items, f)
     total = len(found)
     pages = max(1, -(-total // cc.PAGE))
@@ -122,7 +125,7 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, 
                size={k: " ".join(map(str, v)) for k, v in (("w", f.widths), ("h", f.heights), ("d", f.diameters))},
                size_options=cc.size_values(items), filters_reset=_reset_link(base, here),
                pick=cc.size_pick(base, here, {"w": f.widths, "h": f.heights, "d": f.diameters}, cc.size_values(items)),
-               recent=[], hidden=[], columns=cc.COLUMNS)
+               recent=[], hidden=[] if both else ["wh"], columns=cc.columns_of(both), wh_both=both)
     if new:
         out.update(_new_catalog(base, f, here, items))
     return out
@@ -203,7 +206,7 @@ def _cart_view(app, conn, login: str) -> dict:
     points = [{"id": p["id"], "name": p["name"], "address": p.get("address") or "", "hours": p.get("hours") or ""}
               for p in order_points.list_points(conn) if p["id"] not in tests]
     return {"lines": lines, "rows": rows, "total": shop_cart.total(lines), "profile": shop_cart.profile(conn, login), "points": points,
-            "error": "", "form": {}}
+            "error": "", "form": {}, "wh_both": cc.both_warehouses(conn, login)}
 
 
 def _cart_new(conn, login: str) -> dict:
@@ -255,7 +258,7 @@ def register(app) -> None:
         f = values["f"]                             # «Недавние» and «Колонки» of the client's own page only (never the owner's preview)
         recent = cc.remember_sizes(conn, login, cc.searched_sizes(f.widths, f.heights, f.diameters, f.sizes), now().isoformat(timespec="seconds"))
         here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS]
-        values.update(recent=cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login))
+        values.update(recent=cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login) + ([] if values["wh_both"] else ["wh"]))
         return _page("shop.html", conn, login, **values)
 
     @app.route("/shop/columns", methods=["POST"])

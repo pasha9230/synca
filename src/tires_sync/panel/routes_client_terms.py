@@ -74,13 +74,15 @@ def register(app) -> None:
     @app.route("/client-terms")
     def users_clients_page():
         conn = get_conn()
-        clients = [dict(u, terms=ct.rows(conn, u["login"])) for u in users.list_users(conn) if u["role"] == "client"]
+        clients = [dict(u, terms=ct.rows(conn, u["login"]), wh=ct.warehouses_text(ct.warehouses(conn, u["login"]))) for u in users.list_users(conn) if u["role"] == "client"]
         return render_template("users_clients.html", clients=clients, describe=ct.describe)
 
     def client_page(conn, login, status=200, typed=None):
         own, ours = ct.rows(conn, login), ct.active_ours(conn)
         rows = rows_of(brand_choices(app, conn, own), ours, own, typed)
-        return render_template("users_client.html", login=login, info=users.get_role(conn, login), rows=rows, typed=typed), status
+        from .routes_users import _typed_wh
+        return render_template("users_client.html", login=login, info=users.get_role(conn, login), rows=rows, typed=typed,
+                               wh=_typed_wh(typed, "", ct.warehouses(conn, login))), status
 
     @app.route("/client-terms/c/<login>")
     def users_client_page(login):
@@ -93,9 +95,13 @@ def register(app) -> None:
         login = _client_or_404(conn, login)
         try:
             data = parse_form(request.form)
+            shown = ct.parse_warehouses(request.form)          # all read first, written in one transaction: a refusal changes nothing
             keys = {cc.bare_brand(k) for k in request.form.getlist("bk")}
+            if shown is not None:
+                ct.set_warehouses(conn, login, shown, now_iso(), author(), commit=False)
             ct.save_rows(conn, login, dict({k: ct.EMPTY for k in keys if k}, **data), now_iso(), author())   # an emptied brand: as ours
         except ct.TermsError as err:
+            conn.rollback()
             flash(str(err), "field:" + err.field if err.field else "error")
             return client_page(conn, login, 400, request.form)
         flash("Условия клиента %s сохранены." % login, "ok")

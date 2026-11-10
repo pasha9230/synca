@@ -56,13 +56,14 @@
 <label class="field"><span class="label">Имя или компания</span><input class="input" name="display_name" value="{{ invite_form.get('display_name', '') if invite_form else '' }}" placeholder="например, Алексей"></label>
 <label class="field"><span class="label">Роль</span><select class="select" name="role">{% for key, label in roles.items() %}<option value="{{ key }}"{% if key == chosen %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
 <label class="field inv-point"><span class="label">Точка</span><select class="select" name="point_id"><option value="">—</option>{% for pid, name in points.items() %}<option value="{{ pid }}">{{ name }}</option>{% endfor %}</select></label>
-<details class="field inv-terms" style="flex-basis:100%"{% if invite_typed %} open{% endif %}><summary class="strong">Условия клиента: свой % брендов</summary>
+<details class="field inv-terms" style="flex-basis:100%"{% if invite_typed %} open{% endif %}><summary class="strong">Условия клиента: склады и свой % брендов</summary>
 <div class="stack" style="padding-top:var(--s-3)">
+{% with wh = invite_wh, prefix = "c_" %}{% include "_client_warehouses.html" %}{% endwith %}
 {% with rows = invite_rows, table_id = "invite-brands", prefix = "c_" %}{% include "_client_brands.html" %}{% endwith %}
-<p class="small muted">Свой % ляжет в профиль клиента, когда он примет приглашение; потом его меняют в «Условия клиентов».</p></div></details>
+<p class="small muted">Склады и свой % лягут в профиль клиента, когда он примет приглашение; потом его меняют в «Условия клиентов».</p></div></details>
 <button class="btn btn--primary">Создать ссылку</button>{% if can_post("users_invite") %}</form>{% else %}</fieldset>{% endif %}
 {% if invites %}<table class="table" style="margin-top:var(--s-3)"><thead><tr><th>Роль</th><th>Имя</th><th>Действует до</th><th>Кто создал</th><th></th></tr></thead><tbody>
-{% for i in invites %}<tr><td>{{ roles.get(i.role, i.role) }}{% if i.point_id %} · {{ points.get(i.point_id, "точка №%s" % i.point_id) }}{% endif %}</td><td>{{ i.display_name }}{% if i.terms %}<div class="small muted">{{ describe(i.terms.rows)|join(" · ") }}</div>{% endif %}</td><td>{{ i.expires|dt_utc }}</td><td>{{ i.created_by }}</td>
+{% for i in invites %}<tr><td>{{ roles.get(i.role, i.role) }}{% if i.point_id %} · {{ points.get(i.point_id, "точка №%s" % i.point_id) }}{% endif %}</td><td>{{ i.display_name }}{% if i.terms %}<div class="small muted">{{ wh_text(i.terms.warehouses) }} · {{ describe(i.terms.rows)|join(" · ") }}</div>{% endif %}</td><td>{{ i.expires|dt_utc }}</td><td>{{ i.created_by }}</td>
 <td>{% if can_post("users_invite_revoke") %}<form method="post" action="/users/invites/{{ i.id }}/revoke" class="inline">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--danger-outline btn--sm">Отозвать</button>{% if can_post("users_invite_revoke") %}</form>{% else %}</fieldset>{% endif %}</td></tr>{% endfor %}
 </tbody></table>{% endif %}</section>
 <section class="card" style="margin-top:var(--s-4)"><div class="card-body" style="overflow-x:auto"><h2>Что видит каждая роль</h2>

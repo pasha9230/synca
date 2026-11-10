@@ -363,6 +363,7 @@ def accept_invite(conn, token: str, login: str, password: str, now: str) -> str:
                 client_terms.save_rows(conn, login, terms["rows"], now, login, commit=False, whole=True)
             except client_terms.TermsError as err:   # our % changed since: a client's % would leave −50…300
                 raise client_terms.TermsError("Условия приглашения устарели: попросите новую ссылку.") from err
+            client_terms.set_warehouses(conn, login, terms["warehouses"], now, login, commit=False)
         conn.commit()
         return login
     except sqlite3.IntegrityError:                        # the same login taken by another invitation a moment ago

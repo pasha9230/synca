@@ -11,7 +11,7 @@ import pytest
 
 from helpers import catalog_xml, commodity_xml, make_offer
 from panel_helpers import login, make_app
-from tires_sync import connections, settings_store, share_photos, store, users
+from tires_sync import client_terms, connections, settings_store, share_photos, store, users
 from tires_sync.models import Season
 from tires_sync.panel import client_catalog as cc, service, shop_photos
 from tires_sync.panel.data import load_merged, load_reference
@@ -102,10 +102,12 @@ def set_ours(conn, pricing: dict) -> None:
     conn.commit()
 
 
-def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), rows_of=()):
+def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), rows_of=(), warehouses=None):
     """An app with the rows of WebMIM, 4tochki (switch off: shown in the catalog only) and a client «buyer». `role`: OUR % (up to R17,
     from R18) of the brands of the rows (IKON winter, LAUFENN summer, IKON of 4 Точки winter; None: no % of ours); `rows_of`: the buyer's
-    own rows ((bare key, small, small_abs, large, large_abs), …) — the owner 2026-10-31: the client's % = ours + the shift."""
+    own rows ((bare key, small, small_abs, large, large_abs), …) — the owner 2026-10-31: the client's % = ours + the shift. `warehouses`:
+    the warehouses on for the buyer; by default a shop with 4tochki rows switches «Склад 2» on (the owner 2026-11-10: it is off for a
+    client until the owner switches it on — these tests are about a client who has both), a shop without them keeps the default."""
     app = make_app(tmp_path, PHOTO_FETCH=fake_fetch)
     open(app.config["UNLOAD_PATH"], "wb").write(catalog_xml(*rows))
     conn = store.connect(app.config["DB_PATH"])
@@ -120,6 +122,10 @@ def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), rows_of=()):
     set_ours(conn, {k: role for k in keys} if role != (None, None) else {})
     conn.executemany("INSERT INTO client_brand_pct (login, brand_key, small, small_abs, large, large_abs) VALUES ('buyer', ?, ?, ?, ?, ?)", rows_of)
     conn.commit()
+    if warehouses is None and tochki:
+        warehouses = (1, 2)
+    if warehouses is not None:
+        client_terms.set_warehouses(conn, "buyer", warehouses, NOW, "o")
     client = app.test_client()
     with client.session_transaction() as session:
         session["user"] = "buyer"

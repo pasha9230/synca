@@ -144,7 +144,7 @@ def head(html) -> list:
 
 @pytest.mark.parametrize("state", ["off", "all"])
 def test_country_and_year_are_two_columns_and_the_client_hides_and_keeps_them(tmp_path, state):
-    app, client, conn, _ = make_shop(tmp_path)
+    app, client, conn, _ = make_shop(tmp_path, warehouses=(1, 2))        # both warehouses on (the owner 2026-11-10: else no «Склад»)
     view(conn, "client", state)
     html = page(client)
     names = head(html)
