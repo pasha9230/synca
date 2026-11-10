@@ -406,12 +406,16 @@ def offers(conn, card: dict) -> Dict[int, List[dict]]:
         if r["order_id"] != card["id"]:
             stock.setdefault(str(r["goods_id"]), []).append(r)
     blocked = why_not(conn, card)
+    from . import oth_storage
+    records = oth_storage.record_ids(conn)
     out: Dict[int, List[dict]] = {}
     for line in lines:
         for r in stock.get(str(line["goods_id"]), ()):
             why = blocked
             if why is None and card["point_id"] and card["point_id"] != r["point_id"]:
                 why = "Шины лежат на «%s», а заказ на «%s»: взять нельзя." % (_point_name(r), card["point"]["name"] if card["point"] else card["point_id"])
+            if why is None and r["order_id"] in records:                 # a record of storage: whole or not at all
+                why = oth_storage.why_not_whole(conn, card, r["order_id"])
             out.setdefault(line["id"], []).append({"from_item": r["item_id"], "from_order": r["order_id"], "point_id": r["point_id"],
                                                    "point": _point_name(r), "qty": int(r["qty"]), "take": min(int(r["qty"]), int(line["qty"])),
                                                    "why": why})
@@ -438,7 +442,17 @@ def _stage(conn, code: str) -> dict:
 
 def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     """«Взять с ОТХ»: the supplier's position `line_id` of the order gives up to its pieces to tyres of the position `from_item` lying on «На ОТХ».
-    One transaction (the old order emptied is moved to «Отмена» in it). Returns the pieces taken; OthSaleError says why nothing was."""
+    One transaction (the old order emptied is moved to «Отмена» in it). Returns the pieces taken; OthSaleError says why nothing was.
+    Tyres of a record of storage (oth_storage, the owner 2026-11-10) are taken whole only: every position of the record, or nothing."""
+    from . import oth_storage
+    source = next((r for r in oth_stock._rows(conn, manual=False) if r["item_id"] == int(from_item)), None) if int(from_item) > 0 else None
+    if source is not None and oth_storage.is_record(conn, source["order_id"]):
+        return oth_storage.take(conn, card_id, from_item, now, author)
+    return _take_order(conn, card_id, line_id, from_item, now, author)
+
+
+def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit: bool = True) -> int:
+    """take() of the tyres of one position. `commit` False: in the caller's transaction (oth_storage.take: every position of a record)."""
     card = orders.get_card(conn, card_id)
     why = why_not(conn, card)
     if why:
@@ -497,11 +511,12 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     _sync_numbers(conn, card_id, before, now, author, note=True)
     left = conn.execute("SELECT COALESCE(SUM(qty), 0) FROM order_item WHERE order_id = ?", (old["id"],)).fetchone()[0]
     if left > 0:
-        conn.commit()
+        if commit:
+            conn.commit()
         return pieces
     try:
         moved = orders.move_card(conn, old["id"], cancel["id"], now, author, changes={"cancel_reason": TAKEN_REASON % card_id}, fire_rules=False,
-                                 journal=False)
+                                 journal=False, commit=commit)
     except orders.OrderError as err:                                  # rolled back, the take with it
         raise OthSaleError("Шины не взяты: старый заказ №%d не закрылся (%s)." % (old["id"], err)) from None
     if not moved:                                                     # moved by somebody meanwhile: move_card rolled it all back
@@ -564,8 +579,9 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
         raise OthSaleError("По заказу №%d согласован возврат поставщику (акт МХ-3): шины новому клиенту не передать." % old_id)
     if old["sale_ids"]:                                                 # an order with a sale never changes its client (the plan of 2026-11-06)
         raise OthSaleError("По заказу №%d записана продажа: клиента не сменить." % old_id)
-    from . import oth_swap
-    if oth_swap.why_not(conn, old) is None:                             # every tyre goes: the order itself takes the client (oth_swap)
+    from . import oth_swap, oth_storage
+    stored = oth_storage.is_record(conn, old_id)                        # a record of storage: a new order takes it whole (the owner 2026-11-10)
+    if not stored and oth_swap.why_not(conn, old) is None:              # every tyre goes: the order itself takes the client (oth_swap)
         oth_swap.to_client(conn, old_id, name, phone, now, author)
         return int(old_id)
     rows = [r for r in oth_stock._rows(conn) if r["order_id"] == old_id]
@@ -587,6 +603,10 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
     try:
         if len(made) != len(rows):                                      # never a position left out of the takes
             raise OthSaleError("позиции нового заказа не совпали с шинами на ОТХ")
+        if stored:                                                      # every position in one transaction, or none
+            if oth_storage.take(conn, new, rows[0]["item_id"], now, author) != sum(int(r["qty"]) for r in rows):
+                raise OthSaleError("на ОТХ осталось меньше шин, чем было")
+            return new
         for r, line_id in zip(rows, made):
             if take(conn, new, line_id, r["item_id"], now, author) != int(r["qty"]):     # some taken a moment ago in another tab
                 raise OthSaleError("на ОТХ осталось меньше шин, чем было")
@@ -642,12 +662,14 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     orders.add_event(conn, link["from_order"], now, author, "item", "Шины вернулись на ОТХ из заказа №%d: %s × %d" % (card_id, line["name"], pieces))
     _audit(conn, now, author, "oth_untake", {"order": int(card_id), "item": line["id"], "from_order": link["from_order"], "qty": pieces})
     _sync_numbers(conn, card_id, before, now, author)
+    from . import oth_storage
+    oth_storage.untaken(conn, link["from_order"], now)
     if not reopen:
         conn.commit()
         return pieces
     oth = _stage(conn, "oth")
     try:
-        moved = orders.move_card(conn, link["from_order"], oth["id"], now, author, fire_rules=False, journal=False)
+        moved = orders.move_card(conn, link["from_order"], oth["id"], now, author, fire_rules=False, journal=False, oth_split=False)
     except orders.OrderError as err:
         raise OthSaleError("Шины не возвращены: заказ №%d не встал на ОТХ (%s)." % (link["from_order"], err)) from None
     if not moved:

@@ -17,12 +17,20 @@
 <div class="ocard-main">
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}
 {% if back_ask %}<div class="flash flash--info" id="oth-back" role="alert" data-oth-back><div class="flash-text stack"><b>{{ back_ask.question }}</b>
-<span class="small">Заказ стоит на «На ОТХ». Новый клиент берёт все шины: этот заказ продолжается с ним (имя и телефон меняются, прежний клиент отвязывается), клиенту уходит «можно забирать». Если переходят не все шины (возвращённые поставщику, шина точки), новый заказ этой точки берёт остальные с ОТХ.</span>
+{% if storage %}<span class="small">Это запись хранения: шины заказа №{{ storage.order }}, клиент отказался. Новый клиент: создаётся новый заказ этой точки, он берёт всю запись (номер WebMIM, перемещение, позиции), клиенту уходит «можно забирать». Тот же клиент: заказ №{{ storage.order }} возвращается из «Отмены».</span>
+{% else %}<span class="small">Заказ стоит на «На ОТХ». Новый клиент берёт все шины: этот заказ продолжается с ним (имя и телефон меняются, прежний клиент отвязывается), клиенту уходит «можно забирать». Если переходят не все шины (возвращённые поставщику, шина точки), новый заказ этой точки берёт остальные с ОТХ.</span>{% endif %}
 <form method="post" action="/orders/{{ c.id }}/oth-back" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <label class="check"><input type="radio" name="answer" value="new" checked> Новый клиент</label>
 <div class="grid-2"><label class="field"><span class="label">Имя</span><input class="input" name="client_name" maxlength="200"></label><label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="client_phone" maxlength="40" placeholder="+7 900 000-00-00"></label></div>
-<label class="check"><input type="radio" name="answer" value="same"> Тот же клиент ({{ c.client_name or "без имени" }}) — заказ просто перейдёт на «{{ stage_name("at_point") }}»</label>
+<label class="check"><input type="radio" name="answer" value="same"> {% if storage %}Тот же клиент — заказ №{{ storage.order }} вернётся из «Отмены» на «{{ stage_name("at_point") }}»{% else %}Тот же клиент ({{ c.client_name or "без имени" }}) — заказ просто перейдёт на «{{ stage_name("at_point") }}»{% endif %}</label>
 <div><button class="btn btn--primary btn--sm">Перевести на «{{ stage_name("at_point") }}»</button></div></form></div></div>
+{% endif %}
+{% if storage %}<div class="flash flash--info" id="oth-storage" data-oth-storage><div class="flash-text stack">
+{% if storage.record == c.id %}<b>Запись хранения: шины без клиента</b><span class="small">Из заказа №<a href="/orders/{{ storage.order }}">{{ storage.order }}</a> (клиент отказался). Новый клиент берёт запись целиком новым заказом («Взять с ОТХ» в новом заказе).</span>
+{% else %}<b>Заказ отменён: клиент отказался</b><span class="small">Шины лежат на ОТХ, запись №<a href="/orders/{{ storage.record }}">{{ storage.record }}</a>.</span>{% endif %}
+{% if storage.why %}<span class="small muted">{{ storage.why }}</span>
+{% elif storage.can %}<form method="post" action="/orders/{{ c.id }}/storage-back" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--sm">Вернуть заказ клиенту</button> <span class="small muted">тот же клиент передумал: заказ №{{ storage.order }} снова на «{{ stage_name("at_point") }}», номер без «О»</span></form>{% endif %}
+</div></div>
 {% endif %}
 {% if oth_ask %}<div class="flash flash--info" id="oth-offer" role="alert" data-oth-offer><div class="flash-text stack"><b>{{ oth_ask.question }}</b>
 <span class="small">Заказ уходит в «{{ oth_ask.target.name }}». Если шины лежат на точке, их можно оставить нашим товаром на ОТХ.{% if oth_ask.cancel_reason %} Причина: {{ oth_ask.cancel_reason }}.{% endif %}</span>

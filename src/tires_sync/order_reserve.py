@@ -526,7 +526,8 @@ def _release_held(conn, now: str, notify: Notify) -> None:
         try:
             held = json.loads(value)
             card = orders.get_card(conn, int(key.rsplit(":", 1)[1]))
-            if card["stage"]["code"] == "oth" and card["entered_at"] == held["entered"]:
+            from . import oth_storage                               # cancelled by the move, the tyres still in its record: the call is still to make
+            if (card["stage"]["code"] == "oth" or oth_storage.waits(conn, card)) and card["entered_at"] == held["entered"]:
                 _tell_moved(conn, card, held["call"], notify, now)
         except Exception:                                       # one broken row must not stop the others
             conn.rollback()

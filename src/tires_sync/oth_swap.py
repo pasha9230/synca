@@ -30,6 +30,9 @@ def why_not(conn, card: dict) -> Optional[str]:
     """Why the order on «На ОТХ» cannot give all its tyres to a new client in place; None: it can."""
     if card["stage"]["code"] != "oth":
         return "Заказ не на «На ОТХ»."
+    from . import oth_storage
+    if oth_storage.is_record(conn, card["id"]):                        # the owner 2026-11-10: a record of storage never takes a client itself
+        return "Запись хранения: её шины берёт новый заказ целиком."
     if card["sale_ids"]:
         return "По заказу записана продажа."
     if conn.execute("SELECT 1 FROM oth_return_plan WHERE order_id = ?", (card["id"],)).fetchone():
@@ -173,6 +176,9 @@ def take_target(conn, card_id, line_id, from_item) -> Optional[int]:
         return None                                                   # a merge: its fees and «Разъединить» are B's
     source = next((r for r in oth_stock._rows(conn, manual=False) if r["item_id"] == int(from_item)), None)
     if source is None or source["order_id"] == b["id"] or str(source["goods_id"]) != str(line["goods_id"]):
+        return None
+    from . import oth_storage
+    if oth_storage.is_record(conn, source["order_id"]):                # a record of storage: the new order takes it (oth_storage.take)
         return None
     if b["point_id"] and b["point_id"] != source["point_id"]:
         return None
