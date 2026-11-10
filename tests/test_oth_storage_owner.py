@@ -193,3 +193,59 @@ def test_a_record_cancelled_by_mistake_goes_to_done_only_from_oth(tmp_path):
         orders.move_card(conn, x, stage(conn, "done"), LATE, "офис")
     assert code(conn, x) == "cancel"
 
+
+# ---- the review (low): the panel's routes of a record, a second split, one sale ------------------------------------------------------------
+
+def _taken_by_route(owner, tok, conn, x):
+    b = new_order(conn, qty=4)
+    line = next(i for i in orders.get_card(conn, b)["items"])
+    source = orders.get_card(conn, x)["items"][0]["id"]
+    r = post(owner, "/orders/%d/items/%d/oth-take" % (b, line["id"]), tok, from_item=str(source))
+    assert r.status_code == 302
+    return b
+
+
+def test_the_routes_take_and_untake_a_record_whole(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    cid, x = split(conn)
+    b = _taken_by_route(owner, tok, conn, x)
+    assert len(oth_sale.taken_ids(conn, b)) == 1 and code(conn, x) == "cancel" and oth_stock.pieces(conn) == {}
+    assert oth_storage.record(conn, x)["state"] == oth_storage.TAKEN and oth_storage.record(conn, x)["to"] == b
+    [item] = oth_sale.taken_ids(conn, b)
+    r = post(owner, "/orders/%d/items/%d/oth-untake" % (b, item), tok)
+    assert r.status_code == 302 and oth_sale.taken_ids(conn, b) == set()
+    assert code(conn, x) == "oth" and oth_storage.record(conn, x)["state"] == oth_storage.HELD and oth_stock.pieces(conn) == {"1": 4}
+
+
+def test_the_route_back_of_a_record_to_a_new_client_takes_it_whole(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    cid, x = split(conn)
+    post(owner, "/orders/%d/move" % x, tok, stage_id=str(stage(conn, "at_point")))                 # asks «новый клиент или тот же?»
+    assert code(conn, x) == "oth"
+    r = post(owner, "/orders/%d/oth-back" % x, tok, answer="new", client_name="Пётр", client_phone="+7 900 555 66 77")
+    assert r.status_code == 302
+    new = int(r.headers["Location"].rsplit("/", 1)[1])
+    assert new != x and code(conn, new) == "at_point" and orders.get_card(conn, new)["client_name"] == "Пётр"
+    assert code(conn, x) == "cancel" and oth_storage.record(conn, x)["to"] == new and oth_stock.pieces(conn) == {}
+    assert code(conn, cid) == "cancel" and oth_storage.why_not_back(conn, cid)                    # the old client is too late
+
+
+def test_the_route_back_of_a_record_to_the_same_client_gives_the_order_back(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    cid, x = split(conn)
+    post(owner, "/orders/%d/move" % x, tok, stage_id=str(stage(conn, "at_point")))
+    r = post(owner, "/orders/%d/oth-back" % x, tok, answer="same")
+    assert r.status_code == 302
+    assert code(conn, cid) == "at_point" and code(conn, x) == "cancel" and oth_storage.record(conn, x)["state"] == oth_storage.BACK
+    assert oth_stock.pieces(conn) == {} and conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 2
+
+
+def test_given_back_to_the_client_and_on_oth_again_makes_one_new_record_of_four(tmp_path):
+    conn = db(tmp_path)
+    cid, x = split(conn)
+    assert orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
+    assert oth_stock.pieces(conn) == {}
+    assert orders.move_card(conn, cid, stage(conn, "oth"), LATE, "o", changes={"cancel_reason": "отказ"})
+    second = oth_storage.record_of(conn, cid)
+    assert second not in (None, x) and oth_storage.record_ids(conn) == {x, second}
+    assert code(conn, x) == "cancel" and code(conn, second) == "oth" and oth_stock.pieces(conn) == {"1": 4}     # 4, not 8
