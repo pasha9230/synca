@@ -224,3 +224,21 @@ def test_a_recorded_sale_is_not_undone_by_the_point_until_the_office_reverses_it
     orders.reverse_sales(conn, card, T2, "owner")
     assert post(mine, "/my-point/%d/undo" % card, "tok").status_code == 302
     assert orders.get_card(conn, card)["stage"]["code"] == "oth" and sales(conn, card) == []
+
+
+def test_tyres_partly_given_back_to_the_supplier_are_not_sold_by_the_point(tmp_path, clock):
+    """Review 2026-11-10: «Вернуть поставщику» of a part keeps the order on «На ОТХ» with its whole quantity; a sale of the whole order
+    would count the tyres the supplier already has. The point gets no button and a press is refused: the office sorts it out."""
+    app, owner, conn, pid, card = setup(tmp_path)
+    mine = manager(app, conn, pid)
+    tok = token(mine.get("/my-point?tab=oth").get_data(as_text=True), card, "oth_sold")
+    item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (card,)).fetchone()[0]
+    order_oth.mark_returned(conn, item, "2026-10-14T10:00:00", "owner", qty=2)
+    conn.commit()
+    assert "oth_sold" not in mine.get("/my-point?tab=oth").get_data(as_text=True)
+    post(mine, "/my-point/%d/oth_sold" % card, "tok", token=tok, confirm="yes")
+    assert orders.get_card(conn, card)["stage"]["code"] == "oth" and not sales(conn, card)
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
+    assert not done and "возвращ" in answer and "офис" in answer
+    assert "Точка продала шины с ОТХ" not in texts(conn, card)
+

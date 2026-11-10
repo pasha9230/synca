@@ -806,6 +806,11 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 SOLD_SKIP = "шины проданы с ОТХ другому покупателю: прежнему клиенту не пишем"
 
 
+def given_back(conn, order_id) -> bool:
+    """Some tyres of the order are marked «Вернуть поставщику» (oth_return): the point does not sell such an order by one press (review 2026-11-10)."""
+    return conn.execute("SELECT 1 FROM oth_return WHERE order_id = ? AND qty > 0 LIMIT 1", (order_id,)).fetchone() is not None
+
+
 def sell(conn, card: dict, who: str, now: str) -> tuple:
     """«Продать» of «Рабочее место» (the owner 2026-11-10): the tyres on «На ОТХ» or «На возврат» went to a buyer from the street, the whole order goes
     to «Выполнено» in one transaction. Not answer_issued: no question of the seventh day is needed (an open one closes: «sold»), and the client put
@@ -820,6 +825,10 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
     if card["stage"]["code"] not in RETURNING:
         conn.rollback()
         return "уже отмечено", "Заказ №%s уже отмечен или ушёл с «На ОТХ»: обновите страницу." % label, False
+    if given_back(conn, card["id"]):                             # the sale is of the whole order: its quantity would count them too
+        conn.rollback()
+        return ("не выполнено: часть шин возвращена поставщику", "Заказ №%s: часть шин уже возвращена поставщику. Отметить «Продать» нельзя: "
+                "напишите офису, сколько шин продано." % label, False)
     done = next((s for s in orders.list_stages(conn) if s["code"] == "done"), None)
     if done is None:
         conn.rollback()
@@ -829,6 +838,9 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
     if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount:
         conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (DROPPED_KEY % card["id"], json.dumps(plan, ensure_ascii=False)))     # for «Отменить» (point_log.undo)
         orders.add_event(conn, card["id"], now, who, "field", "Согласование возврата снято: точка продала шины с ОТХ")
+    if (return_plan(conn, card["id"]) or {}).get("signed_at"):   # the act was signed between the check above and the write: nothing is sold
+        conn.rollback()
+        return ("не выполнено: акт МХ-3 подписан", "Заказ №%s: акт МХ-3 уже подписан, шины отданы поставщику. Отметить «Продать» нельзя: напишите офису." % label, False)
     _answer(conn, card, "sold", now)                             # an open question of the seventh day is answered by the sale
     orders.add_event(conn, card["id"], now, who, "point", "Точка продала шины с ОТХ")
     try:
