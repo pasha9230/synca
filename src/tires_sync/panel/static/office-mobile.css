@@ -311,3 +311,10 @@
   body.ofc .owin-stages{flex-wrap:wrap;overflow-x:visible}
   body.ofc table.m-cards td.t-namecol *{white-space:normal;text-overflow:clip;overflow:visible}
 }
+
+/* ---- the last small targets: a bare «Ещё ⋯» / «Дополнительно», the arrows of «Колонки» ---- */
+@media (max-width:760px){
+  body.ofc .page summary:not([class]){padding-block:10px}
+  body.ofc .cols-move .btn{min-width:44px}
+  body.ofc .cols-list li{min-height:44px}
+}
