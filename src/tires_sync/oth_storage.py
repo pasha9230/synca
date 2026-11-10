@@ -98,7 +98,8 @@ def source_of(conn, card_id) -> Optional[int]:
 def why_not_move(conn, card: dict, stage: dict) -> Optional[str]:
     """Why the move of `card` to `stage` would put the same tyres on «На ОТХ» twice (the review 2026-11-10); None: it would not.
     Б1: the order cancelled by the split never goes to «На ОТХ» or «На возврат» again, its tyres lie (or lay) in its record.
-    Б2: a closed record (given back, taken, cancelled by hand) never goes back there, but by «Вернуть на ОТХ» of the order that took it."""
+    Б2: a closed record (given back, taken) never goes back there, but by «Вернуть на ОТХ» of the order that took it; a record the office
+    cancelled by hand by mistake goes back on «На ОТХ» (cancelled_by_mistake, the owner 2026-11-10)."""
     if stage["code"] not in ("oth", orders.RETURN_GIVEN):
         return None
     x = record_of(conn, card["id"])
@@ -106,10 +107,30 @@ def why_not_move(conn, card: dict, stage: dict) -> Optional[str]:
         return ("Заказ отменён переводом на ОТХ: его шины в записи хранения №%d. На «%s» он не переводится, шины уже там или их взял другой "
                 "заказ. Тот же клиент: «Вернуть заказ клиенту»." % (x, stage["name"]))
     mark = record(conn, card["id"])
+    if mark is not None and stage["code"] == "oth" and cancelled_by_mistake(conn, card):
+        return None                                                     # the owner 2026-11-10: the office's wrong «Отмена» is undone
     if mark is not None and card["stage"].get("code") not in FROM_OPEN and mark.get("state") != REOPEN:
         return ("Запись хранения №%d закрыта (этап «%s»): на «%s» она не возвращается. Шины снова на ОТХ только через «Вернуть на ОТХ» "
                 "в заказе, который их взял." % (card["id"], card["stage"].get("name") or "", stage["name"]))
     return None
+
+
+def cancelled_by_mistake(conn, card: dict) -> bool:
+    """A record on «Отмена» the office put there by hand (the owner 2026-11-10: it may go back on «На ОТХ»): never taken by an order nor given
+    back to its client (the mark still holds the tyres), every tyre of the split still in it, no sale. Not a record closed by the take or the
+    give-back: those go back only by «Вернуть на ОТХ» of the order that took it, or never."""
+    mark = record(conn, card["id"])
+    if mark is None or card["stage"].get("code") != "cancel" or mark.get("state") != HELD or mark.get("to") or card["sale_ids"]:
+        return False
+    return sum(int(i["qty"]) for i in card["items"]) == int(mark.get("pieces") or 0)
+
+
+def reopen(conn, card: dict, now: str, author: str) -> None:
+    """The record cancelled by mistake stands on «На ОТХ» again (orders.move_card, in its transaction): no new split, the same tyres, the
+    record still holds them. No commit."""
+    conn.execute("UPDATE order_card SET cancel_reason = '' WHERE id = ?", (card["id"],))
+    orders.add_event(conn, card["id"], now, author, "field", "Запись хранения снова на ОТХ: отмена была ошибкой (её шины не брали и клиенту не возвращали)")
+    _audit(conn, now, author, "oth_storage_reopen", {"record": int(card["id"]), "order": (record(conn, card["id"]) or {}).get("order")})
 
 
 def splits(conn, card: dict) -> bool:

@@ -1,6 +1,7 @@
 """The review of the record of storage (oth_storage, the owner 2026-11-10) and the owner's answers of 2026-11-10:
 Б1 a cancelled order whose tyres lie in a record never goes to «На ОТХ» again (a second record, the tyres twice in the feed);
-Б2 a closed record (given back, taken, cancelled by hand) never stands on «На ОТХ» again but by «Вернуть на ОТХ» of the order that took it;
+Б2 a closed record (given back, taken) never stands on «На ОТХ» again but by «Вернуть на ОТХ» of the order that took it (cancelled by hand by
+mistake: it may, the owner 2026-11-10, tests/test_oth_storage_owner.py);
 В1 «Вернуть на ОТХ» gives back the whole record in one transaction; В2/В3 a record has no «Выдали» (the tyres are given out from «На точке»),
 «Продать» closes it in «Выполнено» without a client and «Отменить» puts it back without a new split; В7 the point is told nothing in VK
 when an order goes to «На ОТХ»; М2 «Доставка в другой город» and the numbers by position go with the tyres; М3 any error of the split rolls
@@ -63,19 +64,13 @@ def given_back(conn):
     return cid, x
 
 
-def cancelled_by_hand(conn):
-    cid, x = split(conn)
-    assert orders.move_card(conn, x, stage(conn, "cancel"), LATER, "o", changes={"cancel_reason": "другое: ошиблись"})
-    return cid, x
-
-
 def taken_by_b(conn):
     cid, x = split(conn)
     take(conn, new_order(conn, qty=4), now=LATER)
     return cid, x
 
 
-@pytest.mark.parametrize("closed", [given_back, cancelled_by_hand, taken_by_b])
+@pytest.mark.parametrize("closed", [given_back, taken_by_b])          # cancelled by hand: back on «На ОТХ» (test_oth_storage_owner.py)
 def test_a_closed_record_never_stands_on_oth_again(tmp_path, closed):
     conn = db(tmp_path)
     cid, x = closed(conn)

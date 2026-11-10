@@ -1110,6 +1110,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
             made = oth_storage.split(conn, card, stage, now, author)        # the client's order is cancelled, its tyres are the record's
             stored, stage = made["record"], made["stage"]
             card = dict(get_card(conn, card_id), stage=card["stage"])
+        elif stage["code"] == "oth" and oth_storage.cancelled_by_mistake(conn, card):
+            oth_storage.reopen(conn, card, now, author)                     # the office's wrong «Отмена» of a record (the owner 2026-11-10)
         elif stage["kind"] == "open" and stage["code"] not in ("oth", RETURN_GIVEN) and oth_storage.is_record(conn, card_id):
             raise OrderError("Это запись хранения (шины без клиента): её шины берёт новый заказ («Взять с ОТХ», «Новый клиент») "
                              "или прежний клиент («Вернуть заказ клиенту»).")
