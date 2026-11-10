@@ -252,3 +252,19 @@ def test_a_c_tire_and_a_passenger_tire_of_one_size_are_not_the_same_tire_for_the
     passenger.find("Brand").text = "Cordiant"
     c = c_ad(brand_key="CORDIANT", brand_raw="Cordiant", model_raw="Business CA")
     assert "same_tire" not in {f.rule for f in feed_check.check_feed([passenger, c], ctx(reference={}))}
+
+
+@pytest.mark.parametrize("speed, load", [("H", "107/105"), ("V", "190/188"), ("R", "112/110C")])
+def test_the_key_of_a_c_tire_is_the_same_from_the_candidate_and_from_its_saved_ad(speed, load):
+    """An index the section has not is not written: the saved ad gives the same key (retired_ad, the oldest Id), never None."""
+    cand = evaluate({"7": c_offer(speed=speed, load=load)}, {}, settings(), REF, {}).ok["7"]
+    key = identity(cand)
+    assert key is not None and identity_of_ad(ad_to_text(render_ad(cand, 6000, "P1", make_settings(), TODAY))) == key
+
+
+def test_two_c_lots_that_differ_only_by_an_unwritten_speed_are_one_tire_for_the_build_and_the_check():
+    h = evaluate({"7": c_offer(speed="H")}, {}, settings(), REF, {}).ok["7"]
+    v = evaluate({"8": c_offer(goods_id="8", speed="V")}, {}, settings(), REF, {}).ok["8"]
+    assert identity(h) == identity(v)                                  # their ads are alike for Avito: one is published (same_tire.dedupe)
+    ads = [render_ad(c, 6000, "P1", make_settings(), TODAY) for c in (h, v)]
+    assert "same_tire" in {f.rule for f in feed_check.check_feed(ads, ctx(stocks={"7": 12, "8": 12}))}
