@@ -7,7 +7,7 @@
 <div class="modal-body stack">
 <form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids.cancel }}">
 <fieldset class="field" data-cancel-kinds><legend class="label">Причина</legend><div class="row" style="gap:var(--s-3);flex-wrap:wrap">
-<label><input type="radio" name="cancel_kind" value="отменил клиент" required> отменил клиент</label><label><input type="radio" name="cancel_kind" value="не выкупил"> не выкупил</label><label><input type="radio" name="cancel_kind" value="другое"> другое</label></div></fieldset>
+<label><input type="radio" name="cancel_kind" value="отменил клиент" required> отменил клиент</label><label><input type="radio" name="cancel_kind" value="не выкупил"> не выкупил</label><label><input type="radio" name="cancel_kind" value="отказ клиента"> отказ клиента</label><label><input type="radio" name="cancel_kind" value="другое"> другое</label></div></fieldset>
 <label class="field"><span class="label">Подробнее (для «другое» — обязательно)</span><input class="input" name="cancel_reason" maxlength="280" placeholder="Например: нашёл дешевле"></label>
 <div><button class="btn btn--danger-outline btn--sm">Отменить заказ</button></div></form>
 {% if not own_sale %}<hr>
