@@ -236,7 +236,7 @@ def test_the_reminder_never_goes_to_an_order_that_left_the_point_meanwhile(tmp_p
 
 # ---- the answers of 2026-11-02 (the owner, the lead) --------------------------------------------------------------------------------
 
-def test_the_move_is_told_to_the_point_and_to_the_owner_and_the_partner(tmp_path):
+def test_the_move_is_told_to_the_responsible_never_to_the_point(tmp_path):
     from tires_sync import order_notify, users
     conn, cid, _chat, deliver, vk = told(tmp_path)
     users.add_user(conn, "zaman", "password-123", DAY + "T10:00:00", role="partner")
@@ -246,7 +246,7 @@ def test_the_move_is_told_to_the_point_and_to_the_owner_and_the_partner(tmp_path
     reserve.check(conn, NEXT + "T09:07:00", lambda card, text: (got.append((card.get("responsible"), bool(card.get("to_staff")), text)), "ok")[1],
                   deliver, vk)
     note = "Заказ №5200001 переведён на «На ОТХ»: клиент не ответил на напоминание о сроке резерва"
-    assert [g for g in got if g[2] == note] == [("", False, note)]                        # the point: the note
+    assert [g for g in got if g[2] == note or not g[0]] == []                             # the point hears nothing (the owner 2026-11-10)
     assert [g[:2] for g in got if g[2].startswith("Позвонить клиенту")] == [("owner", True)]   # the order's responsible only: «Позвонить клиенту» (2026-11-04)
     card = orders.get_card(conn, cid)
     assert order_notify.route(conn, dict(card, responsible="", to_staff=False))["channel"] == "vk"          # the point's own way

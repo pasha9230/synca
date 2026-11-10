@@ -381,17 +381,15 @@ def _client_step(conn, card: dict, today: date, now: str, hours, deliver, notify
 
 
 def _tell_moved(conn, card: dict, call: str, notify: Optional[Notify], now: str) -> None:
-    """The owner 2026-11-02: the move to «На ОТХ» is told to the point (its «Рабочее место» or VK, as the alerts of the order go to a point)
-    and to its responsible (order_alerts.told_people, the owner 2026-11-03), through the tick's own alerts; each says how it went in the journal (order_notify).
-    The owner 2026-11-04: the responsible's alert is `call` («Позвонить клиенту»); the point's stays the note."""
+    """The move to «На ОТХ» is told to its responsible (order_alerts.told_people, the owner 2026-11-03) through the tick's own alerts, as `call`
+    («Позвонить клиенту», the owner 2026-11-04); each says how it went in the journal (order_notify). The point is told nothing: the owner
+    2026-11-10 («точке в ВК не надо отправлять сообщение»; the note «Точке и офису: заказ переведён на «На ОТХ»» went to it before)."""
     if notify is None:
         return
     from . import order_alerts, order_oth
-    moved = message_texts.text(conn, message_texts.MOVED_NOTE, order_label=order_manager.label(card))
-    for who in [""] + order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)):
-        # "": nobody of the staff answers, so the alert goes to the point; then its responsible only (2026-11-03)
+    for who in order_alerts.told_people(conn, card["id"], order_oth.office_logins(conn)):
         try:
-            notify(dict(card, responsible=who, to_staff=bool(who)), call if who else moved)
+            notify(dict(card, responsible=who, to_staff=True), call)
         except Exception:                                       # noqa: BLE001 - the move is done; the journal has its record
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the alert of the move to OTH of card %s failed", card["id"])
