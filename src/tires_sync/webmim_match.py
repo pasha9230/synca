@@ -65,6 +65,17 @@ def digits(text) -> str:
     return re.sub(r"\D", "", str(text or ""))
 
 
+def own_number(text) -> str:
+    """The digits of the WebMIM number an order of the panel holds; '' for «123О» — the number of an order cancelled by the move to «На ОТХ»
+    (oth_storage, the owner 2026-11-10): the order of WebMIM №123 is the one of the record or the order holding the tyres, never of both."""
+    return "" if refused(text) else digits(text)
+
+
+def refused(text) -> bool:
+    from .oth_storage import refused_number
+    return refused_number(text)
+
+
 def _text(value, limit: int) -> str:
     return "" if value is None else str(value).strip()[:limit]
 
@@ -228,7 +239,7 @@ def _index(snap: List[dict]) -> Tuple[Dict[str, dict], Dict[str, dict]]:
 
 def paired(card: dict, by_id: Dict[str, dict], by_number: Dict[str, dict]) -> Optional[dict]:
     """The WebMIM order of the card's «ID заказа WebMIM» (first) or «Номер заказа WebMIM»."""
-    order_id, number = digits(card.get("webmim_id")), digits(card.get("webmim_number"))
+    order_id, number = digits(card.get("webmim_id")), own_number(card.get("webmim_number"))
     return (by_id.get(order_id) if order_id else None) or (by_number.get(number) if number else None)
 
 
@@ -373,7 +384,7 @@ def card_block(conn, card: dict, with_hints: bool = True) -> dict:
     order = None if test_order or borrowed else paired(card, by_id, by_number)
     out = {"server": webmim_orders.SERVER_NAMES[server], "seen_at": seen_at(conn, server), "order": order, "differences": [], "hints": [], "purchase": {},
            "test": server != "prod", "test_order": test_order, "borrowed": borrowed,
-           "not_found": bool(order is None and not test_order and not borrowed and (card.get("webmim_number") or card.get("webmim_id")))}
+           "not_found": bool(order is None and not test_order and not borrowed and ((card.get("webmim_number") and not refused(card.get("webmim_number"))) or card.get("webmim_id")))}
     ordered = oth_sale.supplier_items(conn, card) if card.get("id") is not None else card.get("items") or []     # «с ОТХ»: not WebMIM's
     items = [{"goods_id": str(i["goods_id"]), "name": i["name"], "qty": i["qty"]} for i in ordered]
     if order is not None:
@@ -409,8 +420,8 @@ def reconcile(conn, today: date, days: int = DAYS) -> dict:
         stage = stages.get(card["stage_id"]) or {"name": "", "code": "", "kind": ""}
         card["stage"] = stage["name"]
         if card["webmim_number"] or card["webmim_id"]:
-            if paired(card, by_id, by_number) is None:
-                not_found.append(card)
+            if paired(card, by_id, by_number) is None and (card["webmim_id"] or not refused(card["webmim_number"])):
+                not_found.append(card)                     # not «123О» (cancelled by the move to «На ОТХ»): its order of WebMIM is the record's
             continue
         if card["deal_kind"] == "stock" or stage["code"] == "cancel" or stage.get("kind") == "lost":
             continue
