@@ -22,10 +22,11 @@ def reliability_unbound(monkeypatch):
 @pytest.fixture(autouse=True)
 def orders_on_oth_the_old_way(request, monkeypatch):
     """The owner 2026-11-10: a move of a client's order to «На ОТХ» cancels it and makes a record of storage (oth_storage). The orders that stood
-    on «На ОТХ» before live on as they were: the tests written for them put an order there the old way and guard those ways. A module with
-    `OTH_SPLIT = True` (tests/test_oth_storage.py and the tests of the new ways) runs as production does."""
+    on «На ОТХ» before live on as they were: the tests written for them put an order there the old way and guard those ways (there is no
+    other way to make such an order now: production always splits, no switch). A module with `OTH_SPLIT = True` (tests/test_oth_storage.py
+    and the tests of the new ways) runs as production does."""
     from tires_sync import oth_storage
-    monkeypatch.setattr(oth_storage, "DEFAULT", bool(getattr(request.module, "OTH_SPLIT", False)))
+    monkeypatch.setattr(oth_storage, "SPLIT", bool(getattr(request.module, "OTH_SPLIT", False)))
 
 
 @pytest.fixture(autouse=True)

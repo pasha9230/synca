@@ -16,7 +16,7 @@ come back, Х is closed «Возвращено в заказ №A»; refused onc
 
 The orders that stood on «На ОТХ» / «На возврат» before live on as they were: nothing is migrated, a record is only made by a move.
 No table of its own: app_state keeps Х → its record (MARK) and A → its live Х (OF); the journal of actions keeps the split.
-`oth_split` = «off» in app_state turns the split off (the moves go as before 2026-11-10): the way back without a release."""
+The split is always on (the owner 2026-11-10: no switch in the base); SPLIT is for the tests of the orders put on «На ОТХ» the old way only."""
 from __future__ import annotations
 
 import json
@@ -25,8 +25,7 @@ from typing import Dict, List, Optional
 
 from . import orders
 
-DEFAULT = True                      # the tests of the orders that stand on «На ОТХ» the old way run with False (tests/conftest.py)
-SWITCH = "oth_split"                # app_state: «off» → no split, «on» → split; absent: DEFAULT
+SPLIT = True                        # never changed in production; the tests of the orders on «На ОТХ» the old way set False (tests/conftest.py)
 MARK = "oth_storage:%d"             # Х → {"order": A, "at", "by", "items": {A's item: Х's item}, "pieces", "was": {...}, "state", "to"}
 OF = "oth_stored:%d"                # A → Х, while A stands cancelled by the split (dropped when A gets the tyres back)
 REFUSED = "отказ клиента"           # orders.CANCEL_KINDS
@@ -36,11 +35,6 @@ HELD, TAKEN, BACK = "held", "taken", "back"
 REOPEN = "reopen"                   # only inside the transaction of untake: the record taken back stands on «На ОТХ» again (why_not_move)
 FROM_OPEN = ("oth", orders.RETURN_GIVEN, "done")    # a record moved to «На ОТХ» from these is not closed («Отменить» of «Продать» is from «Выполнено»)
 _MARKED = re.compile(r"\d\s*[ОоOo]$")       # typed by hand too: a Latin «O», a small letter
-
-
-def enabled(conn) -> bool:
-    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (SWITCH,)).fetchone()
-    return DEFAULT if row is None else str(row[0]).strip().lower() != "off"
 
 
 def refused_number(number) -> bool:
@@ -119,10 +113,10 @@ def why_not_move(conn, card: dict, stage: dict) -> Optional[str]:
 
 
 def splits(conn, card: dict) -> bool:
-    """A move of this order to «На ОТХ» makes a record of storage: a client's order (a name, a phone, a chat or a linked client) while the
-    split is on. Not a record itself, nor an order nobody ordered (split off by a return: order_oth._split_off). A merged order and an
-    order with pieces added under a second WebMIM number keep their numbers by position (order_merge, order_webmim): they go the old way."""
-    if not enabled(conn) or is_record(conn, card["id"]):
+    """A move of this order to «На ОТХ» makes a record of storage: a client's order (a name, a phone, a chat or a linked client). Not a record itself, nor an
+    order nobody ordered (split off by a return: order_oth._split_off). A merged order and an order with pieces added
+    under a second WebMIM number keep their numbers by position (order_merge, order_webmim): they go the old way."""
+    if not SPLIT or is_record(conn, card["id"]):
         return False
     if conn.execute("SELECT 1 FROM order_oth_client WHERE order_id = ?", (card["id"],)).fetchone():
         return False                                                    # stood on «На ОТХ» the old way, its client put aside: our stock already

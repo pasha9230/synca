@@ -305,10 +305,10 @@ def test_the_order_is_not_given_back_while_the_phone_has_another_open_order(tmp_
 
 def test_an_old_order_on_oth_is_sold_undone_issued_and_put_back_as_before(tmp_path, monkeypatch):
     conn = db(tmp_path)
-    monkeypatch.setattr(oth_storage, "DEFAULT", False)
+    monkeypatch.setattr(oth_storage, "SPLIT", False)
     old = at_point(conn)
     orders.move_card(conn, old, stage(conn, "oth"), MOVED, "o", changes={"cancel_reason": "Клиент не пришёл"})
-    monkeypatch.setattr(oth_storage, "DEFAULT", True)
+    monkeypatch.setattr(oth_storage, "SPLIT", True)
     assert code(conn, old) == "oth" and not oth_storage.is_record(conn, old)
     outcome, answer, done = sell(conn, old)
     assert done and code(conn, old) == "done" and records(conn) == set()

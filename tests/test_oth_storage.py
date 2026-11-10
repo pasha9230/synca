@@ -103,12 +103,14 @@ def test_a_refused_move_leaves_nothing_behind(tmp_path):
     assert orders.get_card(conn, cid)["webmim_number"] == number(cid) and conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 1
 
 
-def test_the_switch_turns_the_split_off(tmp_path):
+def test_no_switch_in_the_base_turns_the_split_off(tmp_path):
+    """The owner 2026-11-10: the split is always on; the former key «oth_split» = «off» in app_state changes nothing."""
     conn = db(tmp_path)
-    conn.execute("INSERT INTO app_state (key, value) VALUES (?, 'off')", (oth_storage.SWITCH,))
+    conn.execute("INSERT INTO app_state (key, value) VALUES ('oth_split', 'off')")
     cid = at_point(conn)
     orders.move_card(conn, cid, stage(conn, "oth"), MOVED, "o", changes={"cancel_reason": "отказ"})
-    assert orders.get_card(conn, cid)["stage"]["code"] == "oth" and oth_storage.record_ids(conn) == set()
+    assert orders.get_card(conn, cid)["stage"]["code"] == "cancel" and oth_storage.record_ids(conn) == {record(conn, cid)}
+    assert not hasattr(oth_storage, "enabled") and not hasattr(oth_storage, "SWITCH")
 
 
 # ---- every way to «На ОТХ» --------------------------------------------------------------------------------------------------------------
@@ -209,7 +211,7 @@ def test_the_stock_of_oth_is_what_it_would_be_the_old_way(tmp_path, monkeypatch)
     (tmp_path / "old").mkdir()
     new = db(tmp_path / "new")
     split(new)
-    monkeypatch.setattr(oth_storage, "DEFAULT", False)
+    monkeypatch.setattr(oth_storage, "SPLIT", False)
     old = db(tmp_path / "old")
     cid = at_point(old)
     orders.move_card(old, cid, stage(old, "oth"), MOVED, "o", changes={"cancel_reason": "Клиент не пришёл"})
@@ -434,10 +436,10 @@ def test_the_clients_cabinet_shows_the_order_cancelled(tmp_path):
 
 def old_way(conn, monkeypatch):
     """An order put on «На ОТХ» before the release: the same order stands there, its client unlinked."""
-    monkeypatch.setattr(oth_storage, "DEFAULT", False)
+    monkeypatch.setattr(oth_storage, "SPLIT", False)
     cid = at_point(conn)
     orders.move_card(conn, cid, stage(conn, "oth"), MOVED, "o", changes={"cancel_reason": "Клиент не пришёл"})
-    monkeypatch.setattr(oth_storage, "DEFAULT", True)
+    monkeypatch.setattr(oth_storage, "SPLIT", True)
     assert orders.get_card(conn, cid)["stage"]["code"] == "oth" and not oth_storage.is_record(conn, cid)
     return cid
 
