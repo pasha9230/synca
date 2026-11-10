@@ -78,7 +78,8 @@ _STOCK_SQL = ("SELECT i.id, i.order_id, i.goods_id, i.code, i.name, i.qty, c.poi
               "LEFT JOIN point p ON p.id = c.point_id LEFT JOIN oth_return r ON r.item_id = i.id WHERE s.code IN ('oth', 'return_given') AND i.qty >= 1 "
               "AND NOT EXISTS (SELECT 1 FROM oth_return_plan rp WHERE rp.order_id = c.id AND rp.signed_at IS NOT NULL) ")
 # «На возврат» (return_given, the owner 2026-11-03): the tyres lie at the point until the act МХ-3, ours; never on sale (oth_stock, goods_on_oth, the owner
-# 2026-11-04: from «Согласуем» on); the act signed (a refund still to fill) — they are the supplier's
+# 2026-11-04: from «Согласуем» on); the act signed (a refund still to fill) — they are the supplier's. A mark «На возврат» of a position on «На ОТХ»
+# is on sale until agreed (stock, the owner 2026-11-10)
 _STOCK_KEYS = ("item_id", "order_id", "goods_id", "code", "name", "ordered", "point_id", "point", "since", "until", "returned_at", "returned_by",
                "returned_qty", "stage_code")
 MAX_PIECES = 10000
@@ -94,9 +95,18 @@ def _with_left(row: dict) -> dict:
 def stock(conn) -> Dict[str, List[dict]]:
     """The positions of the orders standing in «На ОТХ» or «На возврат», oldest first: {"stock": the pieces still ours, "returned": the pieces marked
     «возвращено поставщику»}. A position returned in part is in both; `qty` is the pieces of that list (left there, returned here).
+    The owner 2026-11-10: the pieces of a mark «На возврат» on «На ОТХ» (`marked_qty`, «Ожидает согласование возврата») are on sale until the return
+    is agreed: in the stock too (the feed, «Взять с ОТХ»); `left` stays what a real «Вернуть поставщику» may take.
     No price: the purchase price needs its own right, and the page is about where the goods are."""
     rows = [_with_left(dict(zip(_STOCK_KEYS, r))) for r in conn.execute(_STOCK_SQL + "ORDER BY c.entered_at, i.order_id, i.id")]
-    return {"stock": [dict(r, qty=r["left"]) for r in rows if r["left"] > 0],
+    since: Dict[int, str] = {}
+    for r in rows:
+        r["marked_qty"] = 0
+        if r["stage_code"] == "oth" and r["returned_qty"] > 0:
+            if r["order_id"] not in since:
+                since[r["order_id"]] = _oth_since(conn, r["order_id"])
+            r["marked_qty"] = _marked(conn, r["item_id"], int(r["returned_qty"]), since[r["order_id"]])
+    return {"stock": [dict(r, qty=r["left"] + r["marked_qty"]) for r in rows if r["left"] + r["marked_qty"] > 0],
             "returned": [dict(r, qty=r["returned_qty"]) for r in rows if r["returned_qty"] > 0]}
 
 
@@ -312,6 +322,39 @@ def _marked(conn, item_id, returned: int, since: str = "") -> int:
         if str(mark.get("at") or "") >= best:
             best, qty = str(mark.get("at") or ""), int(mark.get("qty") or 0)
     return max(min(qty, returned), 0)
+
+
+SOLD_EARLY = "Продано до согласования возврата"
+
+
+def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None) -> int:
+    """The tyres of a mark «На возврат» were sold before the return was agreed (the owner 2026-11-10): the mark of this stay goes and its pieces
+    leave oth_return (a real «Вернуть поставщику» stays) — of every position (`item_id` None) or `pieces` of one («Взять с ОТХ»: the mark keeps
+    the rest). One record in the journal. No commit. Returns the pieces released."""
+    since = _oth_since(conn, order_id)
+    names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM order_item WHERE order_id = ?", (order_id,))}
+    done = []
+    for item, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ?" + ("" if item_id is None else " AND item_id = %d" % int(item_id)),
+                                  (order_id,)).fetchall():
+        marked = _marked(conn, item, int(qty), since)
+        off = marked if pieces is None else min(marked, int(pieces))
+        if off <= 0:
+            continue
+        conn.execute("UPDATE oth_return SET qty = qty - ? WHERE item_id = ?", (off, item))
+        if off < marked:                                                             # a part taken: the mark holds the rest
+            for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),)).fetchall():
+                mark = json.loads(value)
+                if str(mark.get("at") or "") >= since:
+                    conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(dict(mark, qty=marked - off), ensure_ascii=False), key))
+        else:
+            conn.execute("DELETE FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),))
+        done.append((item, off))
+    conn.execute("DELETE FROM oth_return WHERE order_id = ? AND qty <= 0", (order_id,))
+    if done:
+        orders.add_event(conn, order_id, now, who, "field", "%s: метка «На возврат» снята — %s" % (SOLD_EARLY, "; ".join(
+            "%s, %d шт." % (names.get(i, "позиция"), n) for i, n in done)))
+        _audit(conn, now, who, "oth_sold_early", {"order": int(order_id), "items": {str(i): n for i, n in done}})
+    return sum(n for _, n in done)
 
 
 def pieces_here(conn, card: dict) -> Dict[int, int]:
@@ -804,19 +847,24 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 
 
 SOLD_SKIP = "шины проданы с ОТХ другому покупателю: прежнему клиенту не пишем"
+AGREED_REFUSED = "не выполнено: возврат согласован"
+AGREED_ANSWER = "Заказ №%s: возврат уже согласован с поставщиком, шины едут на возврат. Отметить «Продать» нельзя: напишите офису."
 
 
 def given_back(conn, order_id) -> bool:
-    """Some tyres of the order are marked «Вернуть поставщику» (oth_return): the point does not sell such an order by one press (review 2026-11-10)."""
-    return conn.execute("SELECT 1 FROM oth_return WHERE order_id = ? AND qty > 0 LIMIT 1", (order_id,)).fetchone() is not None
+    """Some tyres of the order really went back to the supplier («Вернуть поставщику»): the point does not sell such an order by one press (review
+    2026-11-10). The pieces of oth_return that are a mark «На возврат» (_marked, «Ожидает согласование возврата») lie at the point: not given back."""
+    since = _oth_since(conn, order_id)
+    return any(int(qty) - _marked(conn, item_id, int(qty), since) > 0
+               for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (order_id,)).fetchall())
 
 
 def sell(conn, card: dict, who: str, now: str) -> tuple:
     """«Продать» of «Рабочее место» (the owner 2026-11-10): the tyres on «На ОТХ» or «На возврат» went to a buyer from the street, the whole order goes
     to «Выполнено» in one transaction. Not answer_issued: no question of the seventh day is needed (an open one closes: «sold»), and the client put
-    aside is NOT linked again (the buyer is another person: the order stays without a client). An unsigned agreement of the return goes, kept for
-    «Отменить» (DROPPED_KEY); the task of the return closes with the move. The rules of «Выполнено» run as for any order (the sale is theirs), but
-    their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done)."""
+    aside is NOT linked again (the buyer is another person: the order stays without a client). Only until the return is agreed (the owner
+    2026-11-10): agreed, refused; the mark «На возврат» and the task go with the move (left_return). The rules of «Выполнено» run as for any order
+    (the sale is theirs), but their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done)."""
     card = orders.get_card(conn, card["id"])                     # the stage as it is now
     label = card.get("webmim_number") or str(card["id"])
     if (return_plan(conn, card["id"]) or {}).get("signed_at"):
@@ -825,6 +873,9 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
     if card["stage"]["code"] not in RETURNING:
         conn.rollback()
         return "уже отмечено", "Заказ №%s уже отмечен или ушёл с «На ОТХ»: обновите страницу." % label, False
+    if return_plan(conn, card["id"]) is not None:                # agreed: the tyres go back to the supplier (the owner 2026-11-10)
+        conn.rollback()
+        return AGREED_REFUSED, AGREED_ANSWER % label, False
     if given_back(conn, card["id"]):                             # the sale is of the whole order: its quantity would count them too
         conn.rollback()
         return ("не выполнено: часть шин возвращена поставщику", "Заказ №%s: часть шин уже возвращена поставщику. Отметить «Продать» нельзя: "
@@ -833,14 +884,10 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
     if done is None:
         conn.rollback()
         return "не выполнено: нет этапа «Выполнено»", "Не получилось: в воронке нет этапа «Выполнено».", False
-    plan = return_plan(conn, card["id"])
-    conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % card["id"],))
-    if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount:
-        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (DROPPED_KEY % card["id"], json.dumps(plan, ensure_ascii=False)))     # for «Отменить» (point_log.undo)
-        orders.add_event(conn, card["id"], now, who, "field", "Согласование возврата снято: точка продала шины с ОТХ")
-    if (return_plan(conn, card["id"]) or {}).get("signed_at"):   # the act was signed between the check above and the write: nothing is sold
+    conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % card["id"],))      # an agreement an earlier «Выдали» dropped: not this sale's
+    if return_plan(conn, card["id"]) is not None:                # agreed (or the act signed) between the check above and the write: nothing is sold
         conn.rollback()
-        return ("не выполнено: акт МХ-3 подписан", "Заказ №%s: акт МХ-3 уже подписан, шины отданы поставщику. Отметить «Продать» нельзя: напишите офису." % label, False)
+        return AGREED_REFUSED, AGREED_ANSWER % label, False
     _answer(conn, card, "sold", now)                             # an open question of the seventh day is answered by the sale
     orders.add_event(conn, card["id"], now, who, "point", "Точка продала шины с ОТХ")
     try:
@@ -864,6 +911,18 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
 def close_return_tasks(conn, order_id, now: str, who: str, result: str) -> int:
     """The open tasks of the return of the order are done by themselves (the lead 2026-11-02): agreed. Never raises: the answer stands; returns how many were closed."""
     return _close_tasks(conn, order_id, RETURN_TITLES, "done", now, who, result)
+
+
+def sold_early_tasks(conn, order_id, now: str, who: str) -> int:
+    """drop_marks of a part («Взять с ОТХ») left the order on «На ОТХ» with no mark «На возврат» of this stay: nothing waits for the agreement,
+    its task is cancelled. Commits."""
+    card = orders.get_card(conn, order_id)
+    if card["stage"]["code"] != "oth" or return_plan(conn, order_id) is not None:
+        return 0
+    since = _oth_since(conn, order_id)
+    if any(str(m.get("at") or "") >= since for key, m in item_marks(conn).items() if int(key.split(":")[1]) in {i["id"] for i in card["items"]}):
+        return 0
+    return _close_tasks(conn, order_id, RETURN_TITLES, "cancel", now, who, SOLD_EARLY.lower())
 
 
 def _close_tasks(conn, order_id, titles: tuple, how: str, now: str, who: str, result: str = "") -> int:
@@ -891,13 +950,19 @@ def restore_plan(conn, order_id) -> None:
 
 def left_return(conn, card_id, stage: dict, now: str, who: str) -> None:
     """The order left «На ОТХ» / «На возврат» by any path, or went from «На возврат» back on sale on «На ОТХ» (orders.move_card, in its transaction: no commit, the
-    owner 2026-11-04): the open tasks of the return close by themselves — done when the order closes (won, closed), cancelled when it goes back to work or is lost."""
+    owner 2026-11-04): the open tasks of the return close by themselves — done when the order closes (won, closed), cancelled when it goes back to work or is lost.
+    Won with no agreement (sold before it, the owner 2026-11-10): the mark «На возврат» goes (drop_marks) and the task is cancelled."""
     from . import tasks
     done = stage["kind"] in ("won", "closed")
+    early = stage["kind"] == "won" and return_plan(conn, card_id) is None       # sold before the return was agreed (the owner 2026-11-10)
+    if early:
+        drop_marks(conn, card_id, now, who)
+        done = False                                                             # nothing was agreed: the task is cancelled, not done
     for task_id, kind, title in conn.execute("SELECT id, kind, title FROM callback_task WHERE order_id = ? AND title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL",
                                              (card_id,) + RETURN_TITLES).fetchall():
         conn.execute("UPDATE callback_task SET %s = ?, done_by = ? WHERE id = ?" % ("done_at" if done else "cancelled_at"), (now, who, task_id))
-        orders.add_event(conn, card_id, now, who, "task", "Задача %s: %s — заказ на этапе «%s»" % ("выполнена" if done else "отменена", tasks._what(kind, title), stage["name"]), level="grey")
+        orders.add_event(conn, card_id, now, who, "task", "Задача %s: %s — %s" % ("выполнена" if done else "отменена", tasks._what(kind, title),
+                         SOLD_EARLY.lower() if early else "заказ на этапе «%s»" % stage["name"]), level="grey")
         _audit(conn, now, who, "callback_done" if done else "callback_cancel", {"task": int(task_id)})
 
 
@@ -1268,9 +1333,9 @@ def _item_key(item_id, entered: str) -> str:
 
 
 def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
-    """«На возврат» of one position (the owner 2026-11-04): a part of an order has no stage of its own, so the order stays on «На ОТХ»; its pieces leave the
-    sale as on «Согласуем»: they are marked in oth_return (the block «Возвращено поставщику» of the page, with its «Отменить»), the position shows «Согласуем»
-    while the responsible's task is open. False: moved already."""
+    """«На возврат» of one position (the owner 2026-11-04): a part of an order has no stage of its own, so the order stays on «На ОТХ»; its pieces are
+    marked in oth_return (the block «Возвращено поставщику» of the page, with its «Отменить») and stay on sale until the return is agreed (stock, the
+    owner 2026-11-10), the position shows «Согласуем» while the responsible's task is open. False: moved already."""
     item = _stock_item(conn, item_id)
     card = orders.get_card(conn, item["order_id"])
     if card["stage"]["code"] != "oth":
@@ -1295,7 +1360,7 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
         conn.rollback()
         return False
     _add_returned(conn, item, pieces, now, who)
-    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Метка «%s», шины сняты с продажи, заказ остаётся на «%s»." % (
+    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Метка «%s», шины в продаже до согласования возврата, заказ остаётся на «%s»." % (
         item["name"], pieces, LABELS[AGREE], card["stage"]["name"]))
     _audit(conn, now, who, "oth_item_to_return", {"order": card["id"], "item": item["item_id"], "qty": pieces})
     what = "позиция: %s, %d шт." % (item["name"], pieces)
