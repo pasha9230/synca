@@ -9,7 +9,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional
 
+from . import truck
 from .candidates import Candidate
+from .filters import is_commercial_c
 from .description import CONTROL_CHARS, DEFAULT_TEMPLATE, render_description
 from .models import Season, Settings
 
@@ -204,6 +206,30 @@ def title_from_template(template: str, c: Candidate, tail: str = "", limit: int 
     return text if text and len(text) <= limit else ""
 
 
+def first_load_index(load: str) -> str:
+    """«107/105», «112/110C» → the first index, «107», «112»."""
+    return re.sub(r"\D+$", "", str(load or "").split("/")[0].strip())
+
+
+def _truck_fields(ad: ET.Element, o, pack: int) -> None:
+    """The tags of the truck section that a passenger ad has not (owner, 2026-11-10): the number of tires the price is for, the vehicle,
+    the carcass and the tube; the speed and the load index only when the section's list has them (no H or V there: not written)."""
+    lists = truck.values()
+    add = lambda name, text: setattr(ET.SubElement(ad, name), "text", text)
+    quantity = "за %d шт." % pack
+    if quantity in lists.get("Quantity", ()):
+        add("Quantity", quantity)
+    speed = str(o.speed or "").strip().upper()
+    if speed and speed in lists.get("SpeedIndex", ()):
+        add("SpeedIndex", speed)
+    load = first_load_index(o.load)
+    if load and load in lists.get("LoadIndex", ()):
+        add("LoadIndex", load)
+    add("VehicleType", truck.VEHICLE_TYPE)
+    add("Construction", truck.CONSTRUCTION)
+    add("TubeType", truck.TUBE_TYPE)
+
+
 def render_ad(
     c: Candidate, price: int, point: str, settings: Settings, today: date, template: Optional[str] = None,
     pack: int = 1, title_template: Optional[str] = None, old_models=None,
@@ -214,11 +240,12 @@ def render_ad(
     def add(name: str, text: str) -> None:
         ET.SubElement(ad, name).text = CONTROL_CHARS.sub("", text)
 
+    in_truck = is_commercial_c(o)                                    # «C»: the truck section (truck.py), its own tags
     add("Id", o.goods_id if pack == 1 else "%s-x%d" % (o.goods_id, pack))
     add("Category", "Запчасти и аксессуары")
     add("GoodsType", "Шины, диски и колёса")
     add("AdType", "Товар приобретен на продажу")
-    add("ProductType", "Легковые шины")
+    add("ProductType", truck.PRODUCT_TYPE if in_truck else "Легковые шины")
     add("Condition", "Новое")
     add("DateEnd", stable_date_end(today, settings.date_end_days, settings.date_end_renew_days).isoformat())
     own_title = title_from_template(title_template, c, "" if pack == 1 else "комплект %d шт." % pack) if title_template else ""
@@ -229,27 +256,32 @@ def render_ad(
     add("TireSectionWidth", str(o.width))
     add("TireAspectRatio", str(o.height))
     add("RimDiameter", str(o.diameter))
-    add("MultiItem", MULTI_ITEM)
+    if not in_truck:
+        add("MultiItem", MULTI_ITEM)
     add("WholesaleType", WHOLESALE)
-    add("FreeTireService", "Нет")
+    if not in_truck:
+        add("FreeTireService", "Нет")
     if settings.point_text.get(point):
         add("Address", settings.point_text[point])
     else:
         add("SellerAddressID", point)
     add("ContactPhone", settings.contact_phone)
     add("TireType", _tire_type(o.season, o.studded))
-    if o.runflat:
-        add("RunFlat", "Да")
-    if o.speed:
-        add("SpeedIndex", o.speed)
-    if o.load:
-        add("LoadIndex", o.load.split("/")[0].strip())
-    homologation = homologation_brand(o.homologation)
-    if homologation:
-        add("Homologation", homologation)
-    year = o.mnf_year.strip()
-    if year.isdigit() and len(year) == 4 and 2003 <= int(year) <= today.year:     # Avito's list: 1990, 2001, 2003 .. this year
-        add("TireYear", year)
+    if in_truck:
+        _truck_fields(ad, o, pack)
+    else:
+        if o.runflat:
+            add("RunFlat", "Да")
+        if o.speed:
+            add("SpeedIndex", o.speed)
+        if o.load:
+            add("LoadIndex", o.load.split("/")[0].strip())
+        homologation = homologation_brand(o.homologation)
+        if homologation:
+            add("Homologation", homologation)
+        year = o.mnf_year.strip()
+        if year.isdigit() and len(year) == 4 and 2003 <= int(year) <= today.year:     # Avito's list: 1990, 2001, 2003 .. this year
+            add("TireYear", year)
     shown = c
     if pack != 1 and o.code:
         shown = replace(c, offer=replace(o, code="%s-x%d" % (o.code, pack)))
@@ -262,6 +294,12 @@ def render_ad(
     return ad
 
 
+# A truck-section ad («C»): the same required fields; the values of the tags the feed writes come from the section's lists (truck.values).
+TRUCK_CHECKED = ("Category", "GoodsType", "AdType", "ProductType", "Condition", "TireType", "WholesaleType", "Brand", "Model",
+                 "TireSectionWidth", "TireAspectRatio", "RimDiameter", "Quantity", "SpeedIndex", "LoadIndex", "VehicleType", "Construction",
+                 "TubeType")
+
+
 def validate_ad(ad: ET.Element) -> List[str]:
     errors: List[str] = []
     for name in REQUIRED:
@@ -269,7 +307,9 @@ def validate_ad(ad: ET.Element) -> List[str]:
             continue
         if not (ad.findtext(name) or "").strip():
             errors.append("empty:%s" % name)
-    for name, allowed in ALLOWED.items():
+    in_truck = truck.is_truck_ad(ad)
+    lists = truck.values() if in_truck else {}
+    for name, allowed in (((n, lists.get(n, frozenset())) for n in TRUCK_CHECKED) if in_truck else ALLOWED.items()):
         value = ad.findtext(name)
         if value is not None and value not in allowed:
             errors.append("bad_value:%s" % name)
@@ -304,7 +344,11 @@ def sale_terms(ad: ET.Element) -> ET.Element:
     for name in NOT_SOLD_THIS_WAY:
         for node in ad.findall(name):
             ad.remove(node)
-    _set_one(ad, "MultiItem", MULTI_ITEM)
+    if truck.is_truck_ad(ad):                                # the truck section has no MultiItem (its template)
+        for node in ad.findall("MultiItem"):
+            ad.remove(node)
+    else:
+        _set_one(ad, "MultiItem", MULTI_ITEM)
     _set_one(ad, "WholesaleType", WHOLESALE)
     return ad
 
@@ -312,6 +356,8 @@ def sale_terms(ad: ET.Element) -> ET.Element:
 def ad_from_text(text: str) -> ET.Element:
     ad = ET.fromstring(text)
     for name in OBSOLETE_TAGS:
+        if name == "Quantity" and truck.is_truck_ad(ad):     # the truck section takes it («за 1 шт.», «за 4 шт.»)
+            continue
         for node in ad.findall(name):
             ad.remove(node)
     return sale_terms(ad)

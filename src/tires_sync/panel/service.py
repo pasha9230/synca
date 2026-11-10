@@ -1009,8 +1009,13 @@ def _unbuilt_candidate(conn, settings, ref, offer):
         note = "некорректная цена поставщика"
     else:
         price = position_price(offer, settings)
-    brand = resolve_brand(offer.brand_key, ref, store.load_brand_map(conn))
-    model = resolve_model(brand, offer.model_raw, store.load_confirmed_mappings(conn), ref, commercial=offer.car_type.strip().upper() == "C") if brand else None
+    from .. import truck
+    from ..filters import is_commercial_c
+    if is_commercial_c(offer):                                    # «C»: the truck section's names (truck.py)
+        brand, model = truck.resolve(offer.brand_key, offer.model_raw, store.load_confirmed_mappings(conn), store.load_brand_map(conn))
+    else:
+        brand = resolve_brand(offer.brand_key, ref, store.load_brand_map(conn))
+        model = resolve_model(brand, offer.model_raw, store.load_confirmed_mappings(conn), ref) if brand else None
     return Candidate(offer.goods_id, offer, price, brand or offer.brand_raw, model or offer.model_raw), note
 
 
@@ -1061,8 +1066,10 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
             item["cartypes"].add(offer.car_type.upper())
     keys = (set(counts) | {b for b, _ in enabled} | {k.split("|")[0] for k in pricing}) - set(raw.get("excluded_brands") or ())
     rows = []
+    from .. import truck
     for key in sorted(keys, key=lambda k: (-sum(counts[k].values()) if k in counts else 0, k)):
         avito = resolve_brand(key, ref, brand_map)
+        avito_truck = resolve_brand(key, truck.reference(), brand_map)    # the brand of its «C» models in the truck section
         seasons = {}
         for season in SEASONS:
             rule = pricing.get("%s|%s" % (key, season))
@@ -1077,17 +1084,19 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
         model_rows = []
         for item in sorted(models.get(key, {}).values(), key=lambda m: (-m["goods"], m["name"])):
             found, proposal, tier, options = None, None, "none", []
-            if avito:
-                commercial = "C" in item["cartypes"]                       # a «C» tire: only under its own commercial model (catalog.resolve_model)
-                found = resolve_model(avito, item["name"], confirmed, ref, commercial=commercial)
+            commercial = "C" in item["cartypes"]          # a «C» tire: the truck section, only under its own commercial model (truck.py)
+            brand_of, ref_of = (avito_truck, truck.reference()) if commercial else (avito, ref)
+            if brand_of:
+                found = truck.resolve_truck_model(brand_of, item["name"], confirmed) if commercial else resolve_model(brand_of, item["name"], confirmed, ref)
                 if not found and proposals:
-                    tier, options = classify_model(avito, item["name"], ref)
+                    tier, options = classify_model(brand_of, item["name"], ref_of)
                     if commercial:                                          # never hint at the nearest other model (C4 → C3)
                         options = [o for o in options if keeps_commercial_mark(item["name"], o)]
                     proposal = options[0] if options and tier in ("prefix", "code") else None
             model_rows.append(dict(item, seasons=[k for k in KIND_ORDER if k in item["seasons"]], cartypes=sorted(item["cartypes"]),
                                    avito_model=found, proposal=proposal, tier=tier, options=list(options),
-                                   commercial_wait="C" in item["cartypes"] and not found,
+                                   section=truck.SECTION if commercial else "", section_brand=brand_of,
+                                   commercial_wait=commercial and not found,
                                    commercial_marks=sorted(commercial_marks(item["name"])) if "C" in item["cartypes"] else [],
                                    sizes=["%d/%d R%d (%d)" % (w, h, d, stock) for (d, w, h), (_, stock) in sorted(item["sizes"].items())]))
         rows.append({

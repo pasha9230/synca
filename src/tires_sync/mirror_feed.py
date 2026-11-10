@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from . import photo_library, store
+from . import photo_library, store, truck
 from .catalog import normalize_model, resolve_brand
 from .feed import sale_terms, stable_date_end
 from .pricing import position_price
@@ -63,6 +63,15 @@ SHAPE_TAGS = ("NDS", "WholesaleType", "MultiItem", "ContactPhone")
 OBSOLETE_AD_TAGS = ("TargetAudience", "Quantity")
 
 
+def _drop_obsolete(ad: ET.Element) -> None:
+    """OBSOLETE_AD_TAGS off an ad; an ad of the truck section («C», truck.py) keeps its Quantity: that template has it."""
+    for name in OBSOLETE_AD_TAGS:
+        if name == "Quantity" and truck.is_truck_ad(ad):
+            continue
+        for node in ad.findall(name):
+            ad.remove(node)
+
+
 def match_shape(conn, account_id: int, ads: Iterable[ET.Element]) -> None:
     """Make the new ads look like the ads of the file as far as the account's own way of selling goes: the same
     VAT, wholesale and contact phone (the phone belongs to the Avito account). Minimum order is not sent (`feed.sale_terms`)."""
@@ -71,7 +80,7 @@ def match_shape(conn, account_id: int, ads: Iterable[ET.Element]) -> None:
         return
     donor = ET.fromstring(row[0])
     for ad in ads:
-        if ad.find("RunFlat") is None:
+        if ad.find("RunFlat") is None and not truck.is_truck_ad(ad):   # (the truck section has no RunFlat)
             ET.SubElement(ad, "RunFlat").text = "Нет"                  # named explicitly: only the positions the supplier marks are «Да»
         for tag in SHAPE_TAGS:
             source = donor.find(tag)
@@ -608,9 +617,7 @@ def render(conn, account_id: int, today: date, settings, skip: Iterable[str] = (
         if ad_id in skipped:
             continue
         ad = ET.fromstring(raw)
-        for name in OBSOLETE_AD_TAGS:
-            for node in ad.findall(name):
-                ad.remove(node)
+        _drop_obsolete(ad)
         sale_terms(ad)
         if ad_id in runflat:
             node = ad.find("RunFlat")
@@ -653,9 +660,7 @@ def render(conn, account_id: int, today: date, settings, skip: Iterable[str] = (
                     ET.SubElement(images, "Image", url=url)
         root.append(ad)
     for ad in extra_ads:                                         # the positions the file did not have, made by our own rules
-        for name in OBSOLETE_AD_TAGS:
-            for node in ad.findall(name):
-                ad.remove(node)
+        _drop_obsolete(ad)
         sale_terms(ad)                                           # the file's shape may have brought its own MultiItem and minimum order
         if contact_phone:                                        # they took the file's phone with the rest of the shape: the account's own wins
             node = ad.find("ContactPhone")

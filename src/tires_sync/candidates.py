@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
+from . import truck
 from .catalog import resolve_brand, resolve_model
 from .filters import exclusion_reason, is_commercial_c
 from .models import Offer, Settings
@@ -40,6 +41,7 @@ class Evaluation:
     oth_no_price: Dict[str, int] = field(default_factory=dict)  # code -> manual pieces not counted in this account: gone, no own price
     oth_price: Dict[str, int] = field(default_factory=dict)    # code -> own price of a gone position on «Свой остаток» held or back on its saved ad
     held: Dict[str, Tuple[float, float, str]] = field(default_factory=dict)  # code -> (anchor, supplier's price, why): priced from the anchor (price_guard)
+    truck: Set[str] = field(default_factory=set)               # unmatched codes of «C» positions: they wait for a model of the truck section
 
 
 def evaluate(
@@ -80,15 +82,19 @@ def evaluate(
             problems.append("bad_price:%s" % offer.base_price)
         else:
             price = position_price(offer, settings)                          # its own price in this account first, else the brand's
-        avito_brand = resolve_brand(offer.brand_key, ref, brand_map)
-        avito_model = None
+        truck_section = is_commercial_c(offer)                               # «C»: only the lists of the truck section (truck.py)
+        if truck_section:
+            avito_brand, avito_model = truck.resolve(offer.brand_key, offer.model_raw, confirmed, brand_map)
+        else:
+            avito_brand = resolve_brand(offer.brand_key, ref, brand_map)
+            avito_model = resolve_model(avito_brand, offer.model_raw, confirmed, ref) if avito_brand is not None else None
         if avito_brand is None:
             problems.append("brand_not_in_reference:%s" % offer.brand_key)
-        else:
-            avito_model = resolve_model(avito_brand, offer.model_raw, confirmed, ref, commercial=is_commercial_c(offer))
-            if avito_model is None:
-                problems.append("model_needs_mapping:%s" % offer.model_raw)
-                ev.unmatched[gid] = (avito_brand, offer.model_raw)
+        elif avito_model is None:
+            problems.append("model_needs_mapping:%s" % offer.model_raw)
+            ev.unmatched[gid] = (avito_brand, offer.model_raw)
+            if truck_section:
+                ev.truck.add(gid)
         if problems:
             ev.problems[gid] = problems
         else:

@@ -1,8 +1,10 @@
-"""Commercial tires of type «C» are published like passenger ones, «LT» is still not taken (owner's decision 2026-11-10, which replaces the
-one of 2026-10-14 for «C»). A «C» position whose commercial model is not in the Avito reference is not published under the nearest other
-model: it stays unmatched and waits on «Сопоставления»."""
+"""Commercial tires of type «C» are published, «LT» is still not taken (owner's decision 2026-11-10, which replaces the one of 2026-10-14 for
+«C»). Since the second decision of 2026-11-10 («Все «C»») a «C» goes to the truck section of Avito (tests/test_truck_section.py): its model
+comes only from that section's list. A «C» position whose commercial model is not there is not published under the nearest other model:
+it stays unmatched and waits on «Сопоставления» marked «грузовой раздел»."""
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from datetime import date
 
 import pytest
@@ -98,18 +100,22 @@ def test_guard_for_passenger_tires_matching_is_what_it_was():
 
 
 def test_a_c_position_without_its_model_is_unmatched_and_waits_on_the_mappings():
-    offers = {"1": make_offer(goods_id="1", model_raw="Ikon Autograph Ice C4", car_type="C"),
+    # The truck list has «Character Ice C2», not C3; the passenger reference (REF) is not read for a «C» at all, nor its saved pairs
+    confirmed = {**CONFIRMED, ("Ikon Tyres", normalize_model("Ikon Character Ice C3")): "Character Ice 8"}
+    offers = {"1": make_offer(goods_id="1", model_raw="Ikon Character Ice C3", car_type="C"),
               "2": make_offer(goods_id="2", model_raw="Ikon Autograph Snow C4", car_type="C")}
-    ev = evaluate(offers, {}, make_settings(), REF, CONFIRMED)
+    ev = evaluate(offers, {}, make_settings(), REF, confirmed)
     assert set(ev.ok) == {"2"} and ev.ok["2"].avito_model == "Autograph Snow C4"
-    assert ev.unmatched == {"1": ("Ikon Tyres", "Ikon Autograph Ice C4")} and ev.problems["1"] == ["model_needs_mapping:Ikon Autograph Ice C4"]
-    assert [(p.brand, p.model_raw, p.goods_ids) for p in pending_mappings(ev, REF)] == [("Ikon Tyres", "Ikon Autograph Ice C4", ["1"])]
+    assert ev.unmatched == {"1": ("Ikon Tyres", "Ikon Character Ice C3")} and ev.problems["1"] == ["model_needs_mapping:Ikon Character Ice C3"]
+    assert [(p.brand, p.model_raw, p.goods_ids, p.section) for p in pending_mappings(ev, REF)] == [
+        ("Ikon Tyres", "Ikon Character Ice C3", ["1"], "truck")]
 
 
 def test_a_c_candidate_is_priced_and_passes_the_stock_threshold_like_a_passenger_tire():
     from tires_sync.decide import decide
     settings = make_settings()
-    offers = {"1": make_offer(goods_id="1", car_type="C", stock=settings.min_stock), "2": make_offer(goods_id="2", car_type="C", stock=settings.min_stock - 1),
+    offers = {"1": make_offer(goods_id="1", car_type="C", model_raw="Autograph Snow C4", stock=settings.min_stock),
+              "2": make_offer(goods_id="2", car_type="C", model_raw="Autograph Snow C4", stock=settings.min_stock - 1),
               "3": make_offer(goods_id="3", stock=settings.min_stock), "4": make_offer(goods_id="4", stock=settings.min_stock - 1)}
     ev = evaluate(offers, {}, settings, REF, {})
     assert ev.ok["1"].price == ev.ok["3"].price
@@ -134,39 +140,54 @@ def test_the_ad_of_a_c_tire_has_the_first_load_index_and_the_owners_title():
 def _mappings_page(tmp_path, monkeypatch=None):
     from tires_sync import store
     from test_mappings_review_fixes import setup
-    app, client, _tok = setup(tmp_path)
+    app, client, tok = setup(tmp_path)
     (tmp_path / "reference.txt").write_text(
         '<Shiny>\n<make name="Ikon Tyres">\n<model name="Test Model"/>\n<model name="Autograph Ice C3"/>\n<model name="Autograph Snow C4"/>\n</make>\n</Shiny>',
         encoding="utf-8")
     open(app.config["UNLOAD_PATH"], "wb").write(catalog_xml(
-        commodity_xml(NNOMMODIF="1", SMODEL="Ikon Autograph Ice C4", SCARTYPE="C", SMNFCODE="K1"),
+        commodity_xml(NNOMMODIF="1", SMODEL="Ikon Character Ice C3", SCARTYPE="C", SMNFCODE="K1"),
         commodity_xml(NNOMMODIF="2", SMODEL="Ikon Autograph Snow C4", SCARTYPE="C", SMNFCODE="K2")))
-    return app, client, store
+    return app, client, store, tok
 
 
 def test_the_mappings_page_shows_the_waiting_c_model_and_never_hints_at_the_other_model(tmp_path):
-    app, client, store = _mappings_page(tmp_path)
+    app, client, store, _tok = _mappings_page(tmp_path)
     page = client.get("/mappings?a=all").get_data(as_text=True)
-    row = page.split('class="t-name">Ikon Autograph Ice C4')[1].split("</tr>")[0]
+    row = page.split('class="t-name">Ikon Character Ice C3')[1].split("</tr>")[0]
     assert ">C</span>" in row and "коммерческая шина: без пары не публикуется, ждёт решения владельца" in row
-    assert "пара с моделью без «C4» в названии не действует" in row
-    assert 'value="Autograph Ice C3"' not in row                                         # the nearest other model is not offered as the hint
+    assert "грузовой раздел" in row and "модель из справочника грузового раздела" in row
+    assert "пара с моделью без «C3» в названии не действует" in row
+    assert 'value="Character Ice C2"' not in row                                         # the nearest other model is not offered as the hint
+    assert 'name="section" value="truck"' in row and 'list="dl-truck"' in row          # confirmed from the truck section's list
+    assert '<datalist id="dl-truck">' in page and '<option value="Character Ice C2">' in page
     found = page.split('class="t-name">Ikon Autograph Snow C4')[1].split("</tr>")[0]
     assert "без пары не публикуется" not in found and "Autograph Snow C4" in found
 
 
 def test_a_wrong_pair_saved_for_a_c_model_leaves_it_waiting_on_the_page(tmp_path):
-    app, client, store = _mappings_page(tmp_path)
+    app, client, store, _tok = _mappings_page(tmp_path)
     with app.app_context():
         from tires_sync.panel.common import get_conn
-        store.upsert_mapping(get_conn(), "Ikon Tyres", "Ikon Autograph Ice C4", "Autograph Ice C3")
+        store.upsert_mapping(get_conn(), "Ikon Tyres", "Ikon Character Ice C3", "Character Ice C2")          # a passenger pair: not read
+        store.upsert_mapping(get_conn(), "truck:Ikon Tyres", "Ikon Character Ice C3", "Character Ice C2")    # another number: not taken
     page = client.get("/mappings").get_data(as_text=True)                                 # the list of models without a pair
-    assert 'class="t-name">Ikon Autograph Ice C4' in page and 'class="t-name">Ikon Autograph Snow C4' not in page
+    assert 'class="t-name">Ikon Character Ice C3' in page and 'class="t-name">Ikon Autograph Snow C4' not in page
 
 
-@pytest.mark.xfail(strict=True, reason="feed_check rule `commercial` (critical for our own feed) still stops a feed with a «C» ad: "
-                                       "the rule is changed only by the owner's word (docs/feed-check-rules.md)")
+def test_the_owner_confirms_a_c_model_from_the_truck_list_on_the_page(tmp_path):
+    from panel_helpers import post
+    app, client, store, tok = _mappings_page(tmp_path)
+    saved = lambda: store.load_confirmed_mappings(store.connect(app.config["DB_PATH"]))
+    form = {"brand": "Ikon Tyres", "section": "truck", "model_raw": "Ikon Character Ice C3", "avito_model": "Autograph Ice C3"}
+    post(client, "/mappings/model", tok, **form)                                          # a model of the passenger reference only: refused
+    post(client, "/mappings/model", tok, **dict(form, avito_model="Character Ice C2"))     # in the truck list, another number: refused
+    assert saved() == {}
+    post(client, "/mappings/model", tok, **dict(form, model_raw="Ikon Autograph Ice C4 new", avito_model="autograph ice c4"))
+    assert saved() == {("truck:Ikon Tyres", normalize_model("Ikon Autograph Ice C4 new")): "Autograph Ice C4"}
+
+
 def test_a_feed_with_a_c_ad_passes_the_check_before_publication(tmp_path):
+    """The rule `commercial` stops a «C» in the passenger section only; the «C» ad of the truck section passes the whole check."""
     from helpers import settings_dict
     from tires_sync import connections, cycle, store
     from tires_sync.catalog import parse_reference
@@ -176,10 +197,14 @@ def test_a_feed_with_a_c_ad_passes_the_check_before_publication(tmp_path):
     init_settings(conn, settings_dict(guard_min=10), "2026-11-10T12:00:00")
     connections.create_account(conn, "A", "2026-11-10T12:00:00", "o")
     xml = catalog_xml(commodity_xml(NNOMMODIF="1"), commodity_xml(
-        NNOMMODIF="2", SCARTYPE="C", SLOAD="107/105", SMODIFNAME="IKON 205/65/16 R 107/105C Test Model",
-        SMODIFNAME_ORIG="Ikon  205/65/16  R 107/105C Test Model"))
+        NNOMMODIF="2", SCARTYPE="C", SLOAD="107/105", SSPEED="R", SHEIGHT="65", SMODEL="Ikon Character Ice C2",
+        SMODIFNAME="IKON 205/65/16 R 107/105C Character Ice C2", SMODIFNAME_ORIG="Ikon  205/65/16  R 107/105C Character Ice C2"))
     results = cycle.run_for_accounts(conn, xml, ref, date(2026, 11, 10), tmp_path / "feed")
     assert results[0].ok, results[0].error
+    token = connections.list_accounts(conn)[0]["feed_token"]
+    ads = {a.findtext("Id"): a for a in ET.parse(str(tmp_path / "feed" / token / "next" / "avito_feed.xml")).getroot().findall("Ad")}
+    assert ads["2"].findtext("ProductType") == "Шины для грузовиков и спецтехники" and ads["2"].findtext("Model") == "Character Ice C2"
+    assert ads["1"].findtext("ProductType") == "Легковые шины"
 
 
 def test_the_clients_shop_and_the_panel_catalog_open_with_a_c_position(tmp_path):

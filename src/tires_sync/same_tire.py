@@ -11,19 +11,25 @@ import xml.etree.ElementTree as ET
 from typing import Callable, Dict, Iterable, Optional, Tuple
 
 from .candidates import Candidate, Evaluation
+from . import truck
 from .feed import _tire_type
+from .filters import is_commercial_c
 
 
-def _key(brand, model, width, height, diameter, tire_type, load, speed, runflat) -> Optional[Tuple]:
+def _key(brand, model, width, height, diameter, tire_type, load, speed, runflat, in_truck: bool = False) -> Optional[Tuple]:
+    """`in_truck`: a «C» tire (the truck section, truck.py) is never the same tire as a passenger one of that size: its key has one more
+    element. A passenger key is what it always was (retired_ad keeps the keys of the ads taken off)."""
     load, speed = str(load or "").split("/")[0].strip(), str(speed or "").strip().upper()
     if not (brand and model and load and speed):
         return None                                                    # not enough to say two ads are the same tire
-    return (str(brand).strip().upper(), str(model).upper().replace(" ", ""), str(width), str(height), str(diameter), tire_type, load, speed, bool(runflat))
+    key = (str(brand).strip().upper(), str(model).upper().replace(" ", ""), str(width), str(height), str(diameter), tire_type, load, speed, bool(runflat))
+    return key + ("truck",) if in_truck else key
 
 
 def identity(c: Candidate) -> Optional[Tuple]:
     o = c.offer
-    return _key(c.avito_brand, c.avito_model, o.width, o.height, o.diameter, _tire_type(o.season, bool(o.studded)), o.load, o.speed, o.runflat)
+    return _key(c.avito_brand, c.avito_model, o.width, o.height, o.diameter, _tire_type(o.season, bool(o.studded)), o.load, o.speed, o.runflat,
+                is_commercial_c(o))
 
 
 def identity_of_ad(text: str) -> Optional[Tuple]:
@@ -34,7 +40,7 @@ def identity_of_ad(text: str) -> Optional[Tuple]:
         return None
     g = lambda tag: (ad.findtext(tag) or "").strip()
     return _key(g("Brand"), g("Model"), g("TireSectionWidth"), g("TireAspectRatio"), g("RimDiameter"), g("TireType"), g("LoadIndex"), g("SpeedIndex"),
-                g("RunFlat") == "Да")
+                g("RunFlat") == "Да", truck.is_truck_ad(ad))
 
 
 def dedupe(ev: Evaluation, published: Iterable[str], min_stock: int, live_id_of: Optional[Callable[[str], str]] = None,

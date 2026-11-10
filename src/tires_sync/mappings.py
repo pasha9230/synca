@@ -5,9 +5,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
-from . import store
+from . import store, truck
 from .candidates import Evaluation
-from .catalog import classify_model, normalize_model
+from .catalog import classify_model, keeps_commercial_mark, normalize_model
+from .filters import is_commercial_c
 
 
 class MappingError(Exception):
@@ -23,31 +24,45 @@ class PendingMapping:
     suggestions: List[str]
     tier: str = "none"
     proposal: Optional[str] = None
+    section: str = ""                    # truck.SECTION: a «C» model, it waits for a model of the truck section (its lists, not the passenger ones)
 
 
 CONFIDENT = ("prefix", "code")
 
 
 def pending_mappings(ev: Evaluation, ref: Dict[str, FrozenSet[str]]) -> List[PendingMapping]:
-    groups: Dict[Tuple[str, str], List[str]] = defaultdict(list)
-    shown: Dict[Tuple[str, str], str] = {}
+    groups: Dict[Tuple[str, str, str], List[str]] = defaultdict(list)
+    shown: Dict[Tuple[str, str, str], str] = {}
+    truck_codes = getattr(ev, "truck", set())
     for gid, (brand, model) in ev.unmatched.items():
-        key = (brand, normalize_model(model))
+        key = (brand, normalize_model(model), truck.SECTION if gid in truck_codes else "")
         groups[key].append(gid)
         shown.setdefault(key, " ".join(model.split()))         # spelling variants (spaces, case) are one model
     result = []
     for key, ids in groups.items():
-        brand, model = key[0], shown[key]
-        tier, candidates = classify_model(brand, model, ref)
-        proposal = candidates[0] if tier in CONFIDENT else None
+        brand, model, section = key[0], shown[key], key[2]
+        tier, candidates = classify_model(brand, model, truck.reference() if section else ref)
+        if section:                                            # never the nearest other model (C4 → C3)
+            candidates = [c for c in candidates if keeps_commercial_mark(model, c)]
+        proposal = candidates[0] if tier in CONFIDENT and candidates else None
         result.append(PendingMapping(brand, model, len(ids), sorted(ids), candidates[:3] if tier == "none" else candidates,
-                                     tier, proposal))
+                                     tier, proposal, section))
     result.sort(key=lambda p: (-p.goods_count, p.brand, p.model_raw))
     return result
 
 
 def confirm_mapping(conn, brand: str, model_raw: str, avito_model: str, ref: Dict[str, FrozenSet[str]],
-                    now: str, author: str) -> None:
+                    now: str, author: str, section: str = "") -> None:
+    """`section` truck.SECTION: a model of a «C» position, only from the truck section's list, saved apart from the passenger pairs."""
+    if section == truck.SECTION:
+        if avito_model not in truck.reference().get(brand, frozenset()):
+            raise MappingError("Модели «%s» нет в справочнике Авито грузового раздела (бренд «%s»)." % (avito_model, brand))
+        if not keeps_commercial_mark(model_raw, avito_model):
+            raise MappingError("У модели «%s» другой номер «C», чем у «%s»: это другая шина." % (avito_model, model_raw))
+        store.upsert_mapping(conn, truck.pair_brand(brand), model_raw, avito_model)
+        store.write_audit(conn, now, author, "mapping_confirm",
+                          {"brand": brand, "model_raw": model_raw, "avito_model": avito_model, "section": section})
+        return
     if avito_model not in ref.get(brand, frozenset()):
         raise MappingError("Модели «%s» нет у бренда «%s» в справочнике Авито." % (avito_model, brand))
     store.upsert_mapping(conn, brand, model_raw, avito_model)
@@ -89,6 +104,8 @@ def auto_mappings(conn, parsed, ref, now: str, author: str, apply: bool = False)
     brand_map, confirmed = store.load_brand_map(conn), store.load_confirmed_mappings(conn)
     pairs: Dict[Tuple[str, str], list] = {}
     for offer in parsed.offers.values():
+        if is_commercial_c(offer):
+            continue                                           # «C»: the truck section's lists, confirmed by the owner (truck.py)
         brand = resolve_brand(offer.brand_key, ref, brand_map)
         if brand is None:
             continue

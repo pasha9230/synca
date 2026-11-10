@@ -11,7 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from . import oth_stock
+from functools import lru_cache
+
+from . import oth_stock, truck
 from .catalog import normalize_model, resolve_brand
 from .feed import validate_ad
 from .photo_library import is_library_link
@@ -62,6 +64,9 @@ class Context:
     oth: FrozenSet[str] = frozenset()                   # positions on «На ОТХ» (oth_stock.pieces): our own tires at a point, not judged by stock
     oth_places: Optional[Dict[str, FrozenSet[str]]] = None      # code -> what its first line may name (points with its tyres, cycle._oth_places); None: not judged
     live_models: Dict[str, str] = field(default_factory=dict)   # Id -> Model of the ad Avito reads now (the published file)
+    # the ads of the truck section («C», truck.py) are judged by its own template and lists, every other rule as for a passenger ad
+    truck_template_tags: FrozenSet[str] = field(default_factory=truck.template_tags)
+    truck_reference: Dict[str, FrozenSet[str]] = field(default_factory=truck.reference)
 
 
 def load_rules(path=RULES_PATH) -> dict:
@@ -123,8 +128,9 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
     twins: Dict[str, str] = {}
     for ad in ads:
         ad_id = ad.findtext("Id") or ""
+        in_truck = truck.is_truck_ad(ad)
         tags = [c.tag for c in ad]
-        extra = sorted({t for t in tags if t not in ctx.template_tags})
+        extra = sorted({t for t in tags if t not in (ctx.truck_template_tags if in_truck else ctx.template_tags)})
         if extra:
             add("template_tags", ad_id, ", ".join(extra))
         errors = validate_ad(ad)
@@ -137,7 +143,7 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
         seen.setdefault(key, ad_id)
         tire = tuple((ad.findtext(t) or "").strip().upper().replace(" ", "") for t in
                      ("Brand", "Model", "TireSectionWidth", "TireAspectRatio", "RimDiameter", "TireType", "LoadIndex", "SpeedIndex")) + (
-            (ad.findtext("RunFlat") or "").strip() == "Да",)
+            (ad.findtext("RunFlat") or "").strip() == "Да",) + (("truck",) if in_truck else ())    # a «C» and a passenger tire: two tires
         if tire in tires and tires[tire] != ad_id and code_of(tires[tire]) != code_of(ad_id):
             add("same_tire", ad_id, "%s и %s" % (tires[tire], ad_id))
         tires.setdefault(tire, ad_id)
@@ -173,13 +179,14 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
         if pack and not ctx.pack4:
             add("pack4", ad_id)
         title = ad.findtext("Title") or ""
-        if COMMERCIAL.search(title):
+        if COMMERCIAL.search(title) and not in_truck:          # a «C» belongs to the truck section (owner, 2026-11-10), not to the passenger one
             add("commercial", ad_id)
-        if ctx.reference:
+        reference = ctx.truck_reference if in_truck else ctx.reference
+        if reference:
             brand = (ad.findtext("Brand") or "").strip()
             model = (ad.findtext("Model") or "").strip()
-            avito_brand = resolve_brand(brand.upper(), ctx.reference, {}) if brand else None
-            if avito_brand is None or normalize_model(model) not in {normalize_model(m) for m in ctx.reference.get(avito_brand, ())}:
+            avito_brand = resolve_brand(brand.upper(), reference, {}) if brand else None
+            if avito_brand is None or normalize_model(model) not in _normalized_models(reference.get(avito_brand, frozenset())):
                 add("model_in_reference", ad_id, "%s / %s" % (brand, model))
         studs = _studs_conflict(ad, title)
         if studs:
@@ -201,6 +208,11 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
     if ctx.previous_count and len(ads) < ctx.previous_count * (1 - float(params["shrink_warning_fraction"])):
         add("shrink", "", "было %d, стало %d" % (ctx.previous_count, len(ads)))
     return out
+
+
+@lru_cache(maxsize=64)
+def _normalized_models(models: FrozenSet[str]) -> FrozenSet[str]:
+    return frozenset(normalize_model(m) for m in models)
 
 
 def _tochki_rules(ad, ad_id: str, code: str, pack: bool, ctx: Context, twins: Dict[str, str], code_of, add) -> None:
