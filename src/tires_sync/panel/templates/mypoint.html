@@ -76,6 +76,8 @@
 <div class="mp-title"><h1>Рабочее место{% if point %} · {{ point.name }}{% endif %}</h1>{% if point %}<span class="mp-sub" data-tab-title>{{ tabs[tab] }}</span>{% endif %}</div>
 <div class="pt-top-actions">
 <a class="btn btn--secondary btn--sm pt-bell" href="/my-point?notes=1{% if choose and point %}&amp;p={{ point.id }}{% endif %}" aria-label="Оповещения{% if alerts_new %}: {{ alerts_new }} новых{% endif %}">{{ icon("alert", "i-sm") }}{% if alerts_new %}<b>{{ alerts_new }}</b>{% endif %}</a>
+{# «Включить уведомления» beside «Оповещения» (the owner 2026-11-10); notify.js shows it while the browser has not been asked #}
+{% if user.role == "point" %}<button type="button" class="btn btn--secondary btn--sm" data-notify-enable hidden>Включить уведомления</button>{% endif %}
 {% if point %}<a class="btn btn--secondary btn--sm" href="/my-point/handed{% if choose %}?p={{ point.id }}{% endif %}" data-handoff-open data-tour="handoff">{{ icon("plus", "i-sm") }}Передать клиента</a>{% endif %}
 {# «Что делать сейчас» of the cards (onboarding_texts.POINT): a line in each card; folded for every card (user_pref «hint.point») #}
 <form method="post" action="/orders/hint/fold" class="mp-hints-fold pt-hints-fold"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="where" value="point"><input type="hidden" name="back" value="/my-point?{{ {'p': point.id if choose and point else '', 'tab': tab if tab != 'here' else '', 'q': query}|dictsort|selectattr(1)|list|urlencode }}"><input type="hidden" name="fold" value="{{ '0' if not hints else '1' }}"><button class="btn btn--secondary btn--sm">{{ "Свернуть подсказки" if hints else "Показать подсказки" }}</button></form>
@@ -85,9 +87,9 @@
 <a href="/account/password">Свой пароль</a><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="pt-menu-out">Выйти</button></form></div></details>
 </div>
 </header>
+{% if user.role == "point" %}<p class="mp-sub mp-notify-state" data-notify-state></p>{% endif %}{# what notify.js says of the notifications: small, none when empty #}
 {% if choose and points %}<form method="get" action="/my-point" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
-{% if user.role == "point" %}<div class="mp-notify" data-notify-box><button type="button" class="btn btn--secondary btn--sm" data-notify-enable hidden>Включить уведомления</button><span class="mp-sub" data-notify-state></span>
-<div class="mp-fresh" data-notify-fresh hidden><span>Есть новое.</span> <a class="btn btn--primary btn--sm" href="/my-point">Обновить</a></div></div>{% endif %}
+{% if user.role == "point" %}<div class="mp-fresh" data-notify-fresh hidden><span>Есть новое.</span> <a class="btn btn--primary btn--sm" href="/my-point">Обновить</a></div>{% endif %}
 {% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
 {% else %}
 <form method="get" action="/my-point" class="mp-search" role="search"><label class="field"><span class="label">Найти заказ точки</span><span class="mp-search-row"><input class="input" type="search" name="q" maxlength="80" value="{{ query }}" placeholder="Номер заказа, перемещения, телефон или имя" autocomplete="off"><button class="btn btn--secondary">Найти</button></span></label>{{ pin }}{% if tab != "here" %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}</form>
