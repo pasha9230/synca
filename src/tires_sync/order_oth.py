@@ -694,8 +694,8 @@ def _finish_one(conn, key: str, value: str, now: str, notify) -> None:
     if point and point.get("channel") != points.PANEL and not (conn.execute("SELECT 1 FROM app_state WHERE key = ?", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])),)).fetchone()):
         label = order_manager.label(card)
         text = message_texts.text(conn, message_texts.RETURN_STATUS, order_label=label)
-        if question_open(conn, card):
-            text += " " + message_texts.text(conn, message_texts.RETURN_ASK, order_label=label)
+        if question_open(conn, card):                                                # a record of storage: never «выдал» (the owner 2026-11-10)
+            text += " " + (RECORD_ASK % (label, label) if card.get("oth_record") else message_texts.text(conn, message_texts.RETURN_ASK, order_label=label))
         conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])), now))
         conn.commit()
         notify(dict(card, responsible="", to_staff=False), text)                     # "": the alert goes to the point (order_notify.route, as tell_point)
@@ -730,8 +730,17 @@ def _stuck(conn, card: dict, now: str, why: str) -> None:
     conn.commit()
 
 
+RECORD_QUESTION = "Шины на точке?"     # a record of storage (oth_storage): no client to give them to, they are sold by «Продать» (the owner 2026-11-10)
+RECORD_ASK = "Шины заказа №%s на точке? Ответьте «на точке %s». Если их купили, нажмите «Продать» в кабинете точки."
+RECORD_ISSUED = ("Заказ №%s: шины на ОТХ без клиента, «Выдали» для них не отмечается (выдают с «На точке»). Если шины купили, нажмите «Продать» "
+                 "в кабинете точки.")
+
+
 def question(conn, card: dict, now: str) -> str:
-    """The words of the question (the owner's template «Точке: ОТХ 7-й день» if there is one, else the sample)."""
+    """The words of the question (the owner's template «Точке: ОТХ 7-й день» if there is one, else the sample); a record of storage is
+    asked only whether its tyres are there (RECORD_QUESTION)."""
+    if card.get("oth_record"):
+        return RECORD_QUESTION
     from .order_templates import OTH_ASK_SAMPLE, render
     row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", OTH_ASK_SAMPLE[:2]).fetchone()
     return render(conn, card, row[0] if row else OTH_ASK_SAMPLE[2], now)[0].strip()
@@ -773,9 +782,14 @@ def office_logins(conn) -> list:
 
 def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
     """«Выдали», from «На ОТХ» or «На возврат» (the owner 2026-11-04): the client is linked again, the agreement of the return (if any) goes and the
-    order goes to «Выполнено», with the answer, in one transaction; the task of the return closes. After the act МХ-3: refused. (outcome, answer, done)."""
+    order goes to «Выполнено», with the answer, in one transaction; the task of the return closes. After the act МХ-3: refused. (outcome, answer, done).
+    A record of storage has no «Выдали» (the owner 2026-11-10: given out from «На точке», sold from «На ОТХ» by «Продать»): refused, the
+    question stays open for «На точке»."""
     card = orders.get_card(conn, card["id"])                     # the stage as it is now
     label = card.get("webmim_number") or str(card["id"])
+    if card.get("oth_record"):
+        conn.rollback()
+        return "не подходит: запись хранения, нужно «Продать»", RECORD_ISSUED % label, False
     if (return_plan(conn, card["id"]) or {}).get("signed_at"):
         conn.rollback()
         return ("не выполнено: акт МХ-3 подписан", "Заказ №%s: акт МХ-3 уже подписан, шины отданы поставщику. Отметить «Выдали» нельзя: напишите офису." % label, False)

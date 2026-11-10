@@ -33,6 +33,8 @@ REFUSED = "отказ клиента"           # orders.CANCEL_KINDS
 LETTER = "О"                        # the Cyrillic capital: «123О» is the number of the cancelled order of the client
 BACK_REASON = "другое: Возвращено в заказ №%d"
 HELD, TAKEN, BACK = "held", "taken", "back"
+REOPEN = "reopen"                   # only inside the transaction of untake: the record taken back stands on «На ОТХ» again (why_not_move)
+FROM_OPEN = ("oth", orders.RETURN_GIVEN, "done")    # a record moved to «На ОТХ» from these is not closed («Отменить» of «Продать» is from «Выполнено»)
 _MARKED = re.compile(r"\d\s*[ОоOo]$")       # typed by hand too: a Latin «O», a small letter
 
 
@@ -99,6 +101,23 @@ def source_of(conn, card_id) -> Optional[int]:
     return int(mark["order"]) if mark else None
 
 
+def why_not_move(conn, card: dict, stage: dict) -> Optional[str]:
+    """Why the move of `card` to `stage` would put the same tyres on «На ОТХ» twice (the review 2026-11-10); None: it would not.
+    Б1: the order cancelled by the split never goes to «На ОТХ» or «На возврат» again, its tyres lie (or lay) in its record.
+    Б2: a closed record (given back, taken, cancelled by hand) never goes back there, but by «Вернуть на ОТХ» of the order that took it."""
+    if stage["code"] not in ("oth", orders.RETURN_GIVEN):
+        return None
+    x = record_of(conn, card["id"])
+    if x is not None:
+        return ("Заказ отменён переводом на ОТХ: его шины в записи хранения №%d. На «%s» он не переводится, шины уже там или их взял другой "
+                "заказ. Тот же клиент: «Вернуть заказ клиенту»." % (x, stage["name"]))
+    mark = record(conn, card["id"])
+    if mark is not None and card["stage"].get("code") not in FROM_OPEN and mark.get("state") != REOPEN:
+        return ("Запись хранения №%d закрыта (этап «%s»): на «%s» она не возвращается. Шины снова на ОТХ только через «Вернуть на ОТХ» "
+                "в заказе, который их взял." % (card["id"], card["stage"].get("name") or "", stage["name"]))
+    return None
+
+
 def splits(conn, card: dict) -> bool:
     """A move of this order to «На ОТХ» makes a record of storage: a client's order (a name, a phone, a chat or a linked client) while the
     split is on. Not a record itself, nor an order nobody ordered (split off by a return: order_oth._split_off). A merged order and an
@@ -153,6 +172,9 @@ def split(conn, card: dict, oth_stage: dict, now: str, author: str) -> dict:
         pieces += int(item["qty"])
         # tyres the order took from «На ОТХ» before (a chain): they are the record's now, with the order they were bought by
         conn.execute("UPDATE order_item_oth SET item_id = ?, order_id = ? WHERE item_id = ?", (cur.lastrowid, x, item["id"]))
+        conn.execute("UPDATE order_item_mim SET item_id = ?, order_id = ? WHERE item_id = ?", (cur.lastrowid, x, item["id"]))     # its numbers too
+    conn.execute("INSERT OR IGNORE INTO order_intercity (order_id, enabled, city, carrier, track, updated_at, updated_by) "
+                 "SELECT ?, enabled, city, carrier, track, ?, ? FROM order_intercity WHERE order_id = ?", (x, now, author, a))     # «Доставка в другой город»
     conn.execute("UPDATE order_card SET webmim_id = ?, webmim_number = ?, webmim_status = ?, transfer_number = ?, updated_at = ? WHERE id = ?",
                  (row["webmim_id"], without_letter(row["webmim_number"]), row["webmim_status"], row["transfer_number"], now, x))
     conn.execute("INSERT OR IGNORE INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
@@ -217,12 +239,17 @@ def restore(conn, a_id, now: str, author: str) -> int:
     mark = record(conn, x)
     row = orders._row(conn, x)
     a = orders._row(conn, a_id)
+    busy = orders.open_order_conflict(conn, a["client_phone"], a["point_id"], besides=int(a_id)) if a["client_phone"] else None
+    if busy is not None:                                                # one open order per phone and point (orders.create_card)
+        raise orders.OrderError("У клиента с телефоном %s уже есть открытый заказ №%d: этот заказ не вернуть, работайте в том." % (
+            a["client_phone"], busy["id"]))
     number = row["webmim_number"] or without_letter(a["webmim_number"])
     conn.execute("UPDATE order_card SET webmim_id = ?, webmim_number = ?, webmim_status = ?, transfer_number = ?, cancel_reason = ?, updated_at = ? WHERE id = ?",
                  (row["webmim_id"], number, row["webmim_status"] or a["webmim_status"], row["transfer_number"], "", now, a_id))
     conn.execute("UPDATE order_card SET webmim_id = '', webmim_number = '', transfer_number = '', updated_at = ? WHERE id = ?", (now, x))
     for old, new in (mark.get("items") or {}).items():                 # the tyres taken from «На ОТХ» before the split: the order's again
         conn.execute("UPDATE order_item_oth SET item_id = ?, order_id = ? WHERE item_id = ?", (int(old), a_id, int(new)))
+        conn.execute("UPDATE order_item_mim SET item_id = ?, order_id = ? WHERE item_id = ?", (int(old), a_id, int(new)))
     cancel = next(s for s in orders.list_stages(conn) if s["code"] == "cancel")
     if not orders.move_card(conn, x, cancel["id"], now, author, changes={"cancel_reason": BACK_REASON % a_id}, fire_rules=False, journal=False,
                             commit=False):
@@ -289,10 +316,12 @@ def _day(iso: str) -> str:
 def take(conn, card_id, from_item, now: str, author: str) -> int:
     """«Взять с ОТХ» of a record of storage: every tyre of it or none, in one transaction (oth_sale._take_order per position: the purchase
     of the record, «с ОТХ», the numbers; the record emptied goes to «Отмена» «Шины переданы в заказ №B»). The sale price of each position is
-    the record's, or the ad's of the order's account when that is higher. Returns the pieces taken; OthSaleError says why nothing was."""
+    the record's, or the ad's of the order's account when that is higher. Returns the pieces taken; OthSaleError says why nothing was.
+    Its own transaction, never inside the caller's: an open one is a RuntimeError and nothing of it is committed (the callers,
+    oth_sale.take and to_new_client, have none open)."""
     from . import oth_sale, order_oth
     if conn.in_transaction:
-        conn.commit()
+        raise RuntimeError("oth_storage.take: открыта транзакция вызывающего, взятие записи хранения идёт своей транзакцией")
     conn.execute("BEGIN IMMEDIATE")
     try:
         source = next((r for r in oth_stock_rows(conn) if r["item_id"] == int(from_item)), None)
@@ -348,8 +377,24 @@ def _money(value) -> str:
     return ("%.2f" % float(value)).rstrip("0").rstrip(".").replace(".", ",")
 
 
-def untaken(conn, x_id, now: str) -> None:
-    """«Вернуть на ОТХ» gave the tyres back to the record (oth_sale.untake, in its transaction): it is held again."""
-    mark = record(conn, x_id)
-    if mark and mark.get("state") == TAKEN:
-        _put(conn, MARK % int(x_id), dict(mark, state=HELD, to=None))
+def untake(conn, card_id, x_id, now: str, author: str) -> int:
+    """«Вернуть на ОТХ» of a position taken from the record `x_id`: every position the order took from it goes back, in one transaction
+    (oth_sale._untake_order per position), and the record stands on «На ОТХ» again, held (the review 2026-11-10: a record is never split by
+    a give-back). Its own transaction, as take. Returns the pieces given back; OthSaleError says why nothing was."""
+    from . import oth_sale
+    if conn.in_transaction:
+        raise RuntimeError("oth_storage.untake: открыта транзакция вызывающего, возврат записи хранения идёт своей транзакцией")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        mark = record(conn, x_id) or {}
+        mine = sorted(i for i, link in oth_sale.taken(conn, card_id).items() if link["from_order"] == int(x_id))
+        if mark.get("state") == TAKEN:
+            _put(conn, MARK % int(x_id), dict(mark, state=REOPEN))  # why_not_move: the one way back of a closed record
+        pieces = sum(oth_sale._untake_order(conn, card_id, item, now, author, commit=False) for item in mine)
+        if mark:
+            _put(conn, MARK % int(x_id), dict(mark, state=HELD, to=None))
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return pieces

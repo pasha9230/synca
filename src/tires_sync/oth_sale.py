@@ -622,7 +622,8 @@ def _undo_new(conn, new: int, now: str, author: str) -> None:
     from . import trash
     try:
         for item_id in list(taken(conn, new)):
-            untake(conn, new, item_id, now, author)
+            if item_id in taken(conn, new):                             # a record goes back whole with its first position
+                untake(conn, new, item_id, now, author)
         trash.delete_order(conn, new, now, author)
     except Exception as err:                                            # noqa: BLE001
         conn.rollback()
@@ -633,7 +634,18 @@ def _undo_new(conn, new: int, now: str, author: str) -> None:
 
 def untake(conn, card_id, item_id, now: str, author: str) -> int:
     """«Вернуть на ОТХ»: the position «с ОТХ» leaves the order and its pieces go back to the old order's position; the old order closed by
-    the take stands in «На ОТХ» again. Returns the pieces given back."""
+    the take stands in «На ОТХ» again. Returns the pieces given back.
+    Tyres of a record of storage go back whole (oth_storage.untake, the review 2026-11-10): every position taken from it, in one transaction."""
+    link = taken(conn, card_id).get(int(item_id))
+    if link is not None and link["from_order"]:
+        from . import oth_storage
+        if oth_storage.is_record(conn, link["from_order"]):
+            return oth_storage.untake(conn, card_id, link["from_order"], now, author)
+    return _untake_order(conn, card_id, item_id, now, author)
+
+
+def _untake_order(conn, card_id, item_id, now: str, author: str, commit: bool = True) -> int:
+    """untake() of one position. `commit` False: in the caller's transaction (oth_storage.untake: every position of a record)."""
     card = orders.get_card(conn, card_id)
     link = taken(conn, card_id).get(int(item_id))
     if link is None:
@@ -662,14 +674,13 @@ def untake(conn, card_id, item_id, now: str, author: str) -> int:
     orders.add_event(conn, link["from_order"], now, author, "item", "Шины вернулись на ОТХ из заказа №%d: %s × %d" % (card_id, line["name"], pieces))
     _audit(conn, now, author, "oth_untake", {"order": int(card_id), "item": line["id"], "from_order": link["from_order"], "qty": pieces})
     _sync_numbers(conn, card_id, before, now, author)
-    from . import oth_storage
-    oth_storage.untaken(conn, link["from_order"], now)
     if not reopen:
-        conn.commit()
+        if commit:
+            conn.commit()
         return pieces
     oth = _stage(conn, "oth")
     try:
-        moved = orders.move_card(conn, link["from_order"], oth["id"], now, author, fire_rules=False, journal=False, oth_split=False)
+        moved = orders.move_card(conn, link["from_order"], oth["id"], now, author, fire_rules=False, journal=False, oth_split=False, commit=commit)
     except orders.OrderError as err:
         raise OthSaleError("Шины не возвращены: заказ №%d не встал на ОТХ (%s)." % (link["from_order"], err)) from None
     if not moved:

@@ -984,7 +984,8 @@ def missing_for(card: dict, stage: dict, placed: Optional[dict] = None) -> List[
             gaps.append("позиции")
         if not card["point_id"]:
             gaps.append("точка")
-        record = bool(card.get("oth_record")) and code == "oth"          # a record of storage back on «На ОТХ»: no client, the tyres are there
+        record = bool(card.get("oth_record")) and code in ("oth", "done")     # a record of storage: no client, the tyres are there; «Выполнено»:
+        # «Продать» of the point sold them to a buyer from the street (order_oth.sell, the owner 2026-11-10); any other order needs its client
         if not card["delivery_date"] and not card.get("in_stock") and not record:       # the tyres lie at the point already (oth_sale.IN_STOCK)
             gaps.append("дата доставки")
         if not card["client_phone"] and not record:
@@ -1094,12 +1095,15 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
             conn.commit()                                                       # no move, but the fields that came are kept
         return False
     journal = journal and not chain
+    from . import oth_storage
+    twice = oth_storage.why_not_move(conn, card, stage)                     # the same tyres never on «На ОТХ» twice (the review 2026-11-10)
+    if twice:
+        raise _refuse_move(conn, card_id, now, author, twice, journal)
     gaps = missing_for(card, stage, _placed_stage(conn))
     if gaps:
         raise _refuse_move(conn, card_id, now, author, "Чтобы перейти в «%s», заполните: %s." % (stage["name"], ", ".join(gaps)), journal)
     if card["sale_ids"] and stage["kind"] not in ("won", "closed"):
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
-    from . import oth_storage
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)
     try:
         if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in ("oth", RETURN_GIVEN) and oth_storage.splits(conn, card):
@@ -1116,6 +1120,9 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
             card = dict(get_card(conn, card_id), stage=card["stage"])
     except OrderError as err:
         raise _refuse_move(conn, card_id, now, author, str(err), journal) from None
+    except Exception:                                                       # any other failure of the split: nothing of it is left to commit
+        conn.rollback()
+        raise
     if stage["kind"] == "lost":
         from . import oth_sale
         held = oth_sale.holds(conn, card_id)                                    # the tyres taken from «На ОТХ» would be lost with the order
