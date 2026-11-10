@@ -93,6 +93,12 @@ def audit_text(entry: dict) -> str:
         return "Заказ №%s на ОТХ: клиент №%s отвязан" % (d.get("order", "?"), d.get("client", "?"))
     if action == "oth_split":
         return "Заказ №%s: часть шин выделена в заказ №%s (%s)" % (d.get("order", "?"), d.get("new", "?"), "на возврат" if d.get("stage") == "return_given" else "остаток на ОТХ")
+    if action == "oth_storage_split":
+        return "Заказ №%s отменён (отказ клиента): шины на ОТХ, запись хранения №%s" % (d.get("order", "?"), d.get("record", "?"))
+    if action == "oth_storage_take":
+        return "ОТХ: заказ №%s взял запись хранения №%s целиком (%s шт.)" % (d.get("order", "?"), d.get("record", "?"), d.get("pieces", "?"))
+    if action == "oth_storage_back":
+        return "ОТХ: заказ №%s возвращён клиенту, запись хранения №%s закрыта" % (d.get("order", "?"), d.get("record", "?"))
     if action == "callback_extend":
         return "Задача №%s продлена до %s" % (d.get("task", "?"), str(d.get("to") or "?").replace("T", " "))
     if action == "oth_client_swap":
