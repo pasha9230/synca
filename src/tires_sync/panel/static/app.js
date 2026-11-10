@@ -270,7 +270,7 @@
   // 8a) Меню телефона («бургер» в верхней полосе, office-mobile.css): выезжает слева, закрывается фоном, Esc и переходом
   (function () {
     var app = document.querySelector(".app"), btn = document.querySelector("[data-mnav]");
-    if (!app || !btn) return;
+    if (!app || !btn || !document.body.classList.contains("ofc")) return;
     var shade = document.createElement("div");
     shade.className = "mnav-shade"; shade.setAttribute("aria-hidden", "true"); app.appendChild(shade);
     var set = function (open) {

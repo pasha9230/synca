@@ -4,7 +4,7 @@
    Up to 1023: the frame (the menu slides out of the «бургер», the page scrolls as a whole, no page wider than the window).
    Up to 760: the phone (fingers 44 px, text 14 px, fields 16 px so iOS does not zoom, tables as cards or scrolled in their own box). */
 
-.mnav-btn{display:none}
+.mnav-btn,.mnav-shade{display:none}               /* the «бургер» and its shade: nothing of them on a computer */
 
 @media (max-width:1023px){
   body.ofc,body.ofc.o2{min-width:0}
@@ -21,7 +21,6 @@
   body.ofc .app.is-collapsed .sb-label{font-size:var(--fs-xs);padding:var(--s-1) var(--s-3) var(--s-2);height:auto}
   body.ofc .app.is-collapsed .sb-fold{display:flex}
   body.ofc .sb-toggle{display:none}
-  .mnav-shade{display:none}
   body.ofc .app.is-nav-open .mnav-shade{display:block;position:fixed;inset:0;z-index:59;background:var(--overlay)}
   /* the top strip: the menu, «Работать как точка», the bell; it stays on top while the page scrolls */
   body.ofc .topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:var(--s-2);height:auto;min-height:52px;
@@ -163,6 +162,7 @@
   body.ofc .owin-items .input--sm{min-height:44px}
   body.ofc .owin-foot{flex-wrap:wrap}
   body.ofc .owin-foot .btn{flex:1 1 auto}
+  body.ofc .owin-grid,body.ofc .o2c-scroll .owin-grid{grid-template-columns:minmax(0,1fr)}
   body.ofc .owin-hint,body.ofc .owin-buy,body.ofc .owin-code,body.ofc .supplier-mark{font-size:var(--fs-sm)}
 }
 
@@ -226,7 +226,7 @@
 
 /* ---- 4) «Каталог»: the filters (lists of widths, profiles, diameters) by a finger, the positions as cards ---- */
 @media (max-width:760px){
-  body.ofc .seg{flex-wrap:wrap;max-width:100%;overflow:visible}
+  body.ofc .seg{flex-wrap:wrap;flex-shrink:1;min-width:0;max-width:100%;overflow:visible}
   body.ofc .seg>*{flex:1 1 auto;justify-content:center;border-bottom:1px solid var(--gray-300);margin-bottom:-1px}
   body.ofc .o2-filters .msel-sum,body.ofc .msel-sum{width:100%;min-height:44px}
   body.ofc .msel-list{width:100%;max-width:none;max-height:min(360px,60dvh)}
@@ -263,4 +263,40 @@
   body.ofc .empty{padding:var(--s-8) var(--s-4)}
   body.ofc .card-foot,body.ofc .form-foot,body.ofc .actions{flex-wrap:wrap}
   body.ofc .card-body{padding:var(--s-4)}
+}
+
+/* ---- «Список»: the actions with the chosen orders — a sheet at the bottom of the screen (its own scroll, «×» drops the choice);
+   the page gets room under the list so that the last card is never under the sheet ---- */
+@media (max-width:760px){
+  body.ofc .o2-listwrap{display:block}
+  body.ofc .o2-bulk{position:fixed;left:0;right:0;bottom:0;z-index:35;max-height:50dvh;margin:0;border-radius:var(--r-xl) var(--r-xl) 0 0;
+    box-shadow:0 -8px 24px rgba(16,24,40,.18);padding-bottom:env(safe-area-inset-bottom)}
+  body.ofc .o2-bulk[hidden]{display:none}
+  body.ofc .o2-bulk-body{overflow-y:auto;overscroll-behavior:contain;min-height:0}
+  body.ofc .o2-bulk-list li{font-size:var(--fs-sm)}
+  body.ofc .o2-bulk-list button{min-width:44px;min-height:44px}
+  body.ofc:has(.o2-bulk:not([hidden])) .page{padding-bottom:calc(52dvh + var(--s-4))}
+}
+
+/* ---- windows (.modal): the whole screen width, the window scrolls as a whole, its buttons stay in sight at the bottom ---- */
+@media (max-width:760px){
+  body.ofc .modal-backdrop{padding:var(--s-2);padding-top:calc(var(--s-2) + env(safe-area-inset-top));overscroll-behavior:contain}
+  body.ofc .modal{max-width:none}
+  body.ofc .modal-head{padding:var(--s-3) var(--s-4)}
+  body.ofc .modal-head .icon-btn,body.ofc .modal-head .close{min-width:44px;min-height:44px}
+  body.ofc .modal-body{padding:var(--s-4)}
+  body.ofc .modal-foot{position:sticky;bottom:calc(-1 * var(--s-2));z-index:2;flex-wrap:wrap;padding:var(--s-3) var(--s-4) calc(var(--s-3) + env(safe-area-inset-bottom));
+    background:var(--gray-0);border-radius:0 0 var(--r-xl) var(--r-xl)}
+  body.ofc .modal-foot .btn{flex:1 1 auto}
+}
+
+/* ---- the small print of the new view's own pages (hard 12–13 px in office2-pages.css): 14 on a phone ---- */
+@media (max-width:760px){
+  body.ofc.o2 .page-head .sub,body.ofc .o2-code,body.ofc .o2-code a,body.ofc .o2-client .crm-items,body.ofc .o2-wn-date{font-size:var(--fs-sm)}
+}
+/* ---- a tablet (761–1023): the phone's cards are not used; a table wider than the window scrolls in its own box ---- */
+@media (min-width:761px) and (max-width:1023px){
+  body.ofc .card:has(>table.table),body.ofc .card:has(>form>table.table){overflow-x:auto}
+  body.ofc .seg{flex-wrap:wrap;flex-shrink:1;min-width:0;max-width:100%}
+  body.ofc .card-head{flex-wrap:wrap}
 }
