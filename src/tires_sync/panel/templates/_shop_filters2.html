@@ -1,0 +1,53 @@
+{# «Вид 2» of the client's block of the filters (the owner 2026-11-09…10, by the catalog of the supplier the client knows; drawn here):
+   «Недавние»; «Ширина | Профиль | Диаметр» — three glued lists of ANY size (client_catalog.ANY_SIZES and the stock), the chosen ones as
+   chips in a column inside the field, the counter in the corner; «Производитель» — the brands the client sees, chips in a row;
+   «Подбор разношироких шин» (`mixed=1`: «Передняя ось», «Задняя ось», one value per field, empty = any); the season, the studs;
+   «Сбросить фильтры». No «Показать»: static/shop_v2.js asks the rows anew a second after a value is chosen. Without the script the
+   typed values go by Enter (the button of the search sends the form). #}
+{% from "_ui.html" import icon %}
+{% from "_shop_icons.html" import stud_icon, fview_toggle with context %}
+{% set opts = {} %}{% for p in pick2 %}{% set _ = opts.update({p.key: p.options}) %}{% endfor %}
+{% macro size_multi(p) -%}
+<div class="shop-ms" data-ms data-name="{{ p.key }}"{% if p.key == "d" %} data-prefix="R"{% endif %}>
+<span class="shop-ms-label" id="ms-{{ p.key }}-l">{{ p.label }}</span><b class="shop-ms-n" data-ms-n{% if not p.on %} hidden{% endif %}>{{ p.on|length }}</b>
+<div class="shop-ms-box"><ul class="shop-ms-chips" data-ms-chips>{% for v, url in p.chips %}<li class="shop-ms-chip"><input type="hidden" name="{{ p.key }}" value="{{ v }}"><span>{{ "R" if p.key == "d" }}{{ v }}</span><a class="shop-ms-x" href="{{ url }}" data-ms-x title="Убрать" aria-label="Убрать {{ p.label|lower }} {{ "R" if p.key == "d" }}{{ v }}">{{ icon("x") }}</a></li>{% endfor %}</ul>
+<input class="shop-ms-in" id="f2-{{ p.key }}" name="{{ p.key }}" autocomplete="off" inputmode="numeric" maxlength="4" placeholder="{{ "" if p.on else "Все" }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ms-{{ p.key }}-list" aria-labelledby="ms-{{ p.key }}-l">
+<ul class="shop-ms-list" id="ms-{{ p.key }}-list" role="listbox" aria-labelledby="ms-{{ p.key }}-l" hidden>{% for v in p.options %}<li role="option" data-v="{{ v }}"{% if v in p.on %} aria-selected="true"{% endif %}>{{ "R" if p.key == "d" }}{{ v }}</li>{% endfor %}</ul></div></div>
+{%- endmacro %}
+{% macro size_one(a, k, label, value) -%}
+<div class="shop-ms shop-ms--one" data-ms data-one data-name="{{ a }}{{ k }}"{% if k == "d" %} data-prefix="R"{% endif %}>
+<span class="shop-ms-label" id="ms-{{ a }}{{ k }}-l">{{ label }}</span>
+<div class="shop-ms-box"><input class="shop-ms-in" id="f2-{{ a }}{{ k }}" name="{{ a }}{{ k }}" value="{{ value if value is not none else "" }}" autocomplete="off" inputmode="numeric" maxlength="4" placeholder="Любая" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ms-{{ a }}{{ k }}-list" aria-labelledby="ms-{{ a }}{{ k }}-l">
+<ul class="shop-ms-list" id="ms-{{ a }}{{ k }}-list" role="listbox" aria-labelledby="ms-{{ a }}{{ k }}-l" hidden>{% for v in opts[k] %}<li role="option" data-v="{{ v }}"{% if v == value %} aria-selected="true"{% endif %}>{{ "R" if k == "d" }}{{ v }}</li>{% endfor %}</ul></div></div>
+{%- endmacro %}
+{% macro brands() -%}
+<div class="shop-ms shop-ms--brand" data-ms data-name="b" data-text>
+<span class="shop-ms-label" id="ms-b-l">Производитель</span><b class="shop-ms-n" data-ms-n{% if not brand_pick.on %} hidden{% endif %}>{{ brand_pick.on|length }}</b>
+<div class="shop-ms-box"><ul class="shop-ms-chips" data-ms-chips>{% for key, label in brand_pick.on %}{% set url = brand_pick.chips[loop.index0][1] %}<li class="shop-ms-chip"><input type="hidden" name="b" value="{{ key }}"><span>{{ label }}</span><a class="shop-ms-x" href="{{ url }}" data-ms-x title="Убрать" aria-label="Убрать {{ label }}">{{ icon("x") }}</a></li>{% endfor %}</ul>
+<input class="shop-ms-in" id="f2-b" name="b" autocomplete="off" maxlength="40" placeholder="{{ "" if brand_pick.on else "Все бренды" }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ms-b-list" aria-labelledby="ms-b-l">
+<ul class="shop-ms-list" id="ms-b-list" role="listbox" aria-labelledby="ms-b-l" hidden>{% for key, label in brand_pick.options %}<li role="option" data-v="{{ key }}"{% if key in brand_pick.on|map("first") %} aria-selected="true"{% endif %}>{{ label }}</li>{% endfor %}</ul></div></div>
+{%- endmacro %}
+<section class="card shop-v2" aria-label="Подбор шин">
+<form method="get" action="{{ base }}" class="o2-filters shop-v2f" data-fv2>
+<input type="hidden" name="o" value="{{ f.sort }}">{% if f.descending %}<input type="hidden" name="r" value="1">{% endif %}{% if view == "tiles" %}<input type="hidden" name="v" value="tiles">{% endif %}
+{% if recent and mixed is none %}<div class="shop-v2-recent" aria-label="Недавние размеры"><span class="shop-v2-cap">Недавние</span>{% for label, url in recent %}<a class="shop-v2-rchip" href="{{ url }}">{{ label }}</a>{% endfor %}</div>{% endif %}
+{% if mixed is none %}<div class="shop-v2-row"><div class="shop-ms-glue" role="group" aria-label="Размер">{% for p in pick2 %}{{ size_multi(p) }}{% endfor %}</div>{{ brands() }}</div>
+{% else %}{% for a, label, vals in axes %}<div class="shop-v2-row shop-v2-axis"><span class="shop-v2-axis-t">{{ label }}</span><div class="shop-ms-glue" role="group" aria-label="{{ label }}">{% for k, l in (("w", "Ширина"), ("h", "Профиль"), ("d", "Диаметр")) %}{{ size_one(a, k, l, vals[loop.index0]) }}{% endfor %}</div></div>{% endfor %}
+<div class="shop-v2-row">{{ brands() }}</div>{% endif %}
+<div class="shop-v2-row shop-v2-row2">
+<label class="check shop-v2-mixed"><input type="checkbox" name="mixed" value="1"{% if mixed is not none %} checked{% endif %} data-ms-mixed>Подбор разношироких шин</label>
+<div class="seg shop-v2-seg" role="group" aria-label="Сезон">
+<label><input type="radio" name="s" value=""{% if not f.season %} checked{% endif %}>Все</label>
+<label title="Лето"><input type="radio" name="s" value="summer"{% if f.season == "summer" %} checked{% endif %}><span class="shop-ico shop-ico--sun">{{ icon("sun") }}</span>Лето</label>
+<label title="Зима"><input type="radio" name="s" value="winter"{% if f.season == "winter" %} checked{% endif %}><span class="shop-ico shop-ico--snow">{{ icon("snow") }}</span>Зима</label></div>
+<div class="seg shop-v2-seg" role="group" aria-label="Шипы">
+<label><input type="radio" name="t" value=""{% if not f.studs %} checked{% endif %}>Все</label>
+<label title="Шипы"><input type="radio" name="t" value="studded"{% if f.studs == "studded" %} checked{% endif %}><span class="shop-ico shop-ico--stud">{{ stud_icon() }}</span>Шипы</label>
+<label title="Без шипов"><input type="radio" name="t" value="friction"{% if f.studs == "friction" %} checked{% endif %}>Без шипов</label></div>
+{% if wh_both %}<div class="seg shop-v2-seg" id="f-wh" role="group" aria-label="Склад">
+{% for key, label in ((0, "Все"), (1, "Склад 1"), (2, "Склад 2")) %}<label><input type="radio" name="wh" value="{{ key or '' }}"{% if f.warehouse == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div>{% endif %}
+<div class="shop-v2-search"><input class="input" name="q" value="{{ f.query }}" placeholder="Бренд, модель" aria-label="Поиск" maxlength="120"><button class="btn btn--primary shop-v2-go" title="Найти">{{ icon("search") }}<span class="sr-only">Найти</span></button></div>
+</div>
+<div class="shop-v2-foot"><a class="shop-v2-reset" href="{{ filters_reset }}">{{ icon("minus-circle") }}Сбросить фильтры</a></div>
+</form><div class="shop-fhead"><h2 class="shop-fhead-t">Подбор шин</h2>{{ fview_toggle() }}</div></section>
+<script src="{{ url_for('static', filename='shop_v2.js') }}" defer></script>

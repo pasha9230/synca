@@ -3,6 +3,8 @@
    sources). «Склад 1 / 2» stays (the client's own filter, the tour lights it) while both warehouses are on for the client (`wh_both`). No script (the CSP of /shop): «Показать» sends the form.
    On a phone the fields wrap (shop.css .shop-o2f). #}
 {% from "_catalog_filters.html" import filter_rows %}
+{% from "_shop_icons.html" import fview_toggle with context %}
+{% if fview == 2 %}{% include "_shop_filters2.html" %}{% else %}
 <div class="o2 shop-o2f"><section class="card o2-cat-filters">
 <form method="get" action="{{ base }}" class="filters o2-filters">
 <input type="hidden" name="o" value="{{ f.sort }}">{% if f.descending %}<input type="hidden" name="r" value="1">{% endif %}{% if view == "tiles" %}<input type="hidden" name="v" value="tiles">{% endif %}
@@ -11,5 +13,5 @@
 {% for key, label in ((0, "Все"), (1, "Склад 1"), (2, "Склад 2")) %}<label><input type="radio" name="wh" value="{{ key or '' }}"{% if f.warehouse == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div></div>{% endif %}
 <button class="btn btn--primary o2-reset">Показать</button>
 {% endcall %}
-</form>
-</section></div>
+</form>{% if cart %}<div class="shop-fhead">{{ fview_toggle() }}</div>{% endif %}{# drawn after the form, shown above it (shop.css) #}
+</section></div>{% endif %}

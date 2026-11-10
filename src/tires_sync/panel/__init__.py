@@ -323,7 +323,7 @@ def create_app(config: dict) -> Flask:
 
     @app.after_request
     def security_headers(response):
-        from flask import request
+        from flask import g, request
         if request.path.startswith("/s/"):
             # the public client page: no cookies, no indexing, no referrer, nothing but our own pictures and styles
             response.headers.pop("Set-Cookie", None)
@@ -344,13 +344,13 @@ def create_app(config: dict) -> Flask:
             "frame-ancestors 'none'")
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if request.endpoint in ("shop_page", "shop_photo", "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",
-                                "shop_profile_page", "shop_profile_save", "shop_order_cancel", "shop_columns") \
+                                "shop_profile_page", "shop_profile_save", "shop_order_cancel", "shop_columns", "shop_filters_view") \
                 or (request.endpoint == "whatsnew_page" and _client_signed_in()):    # «Что нового» in the client's frame
             # the client's catalog: no scripts, no picture from outside (a supplier's host is never asked by the client's browser), not kept
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; "
-                "frame-ancestors 'none'")
-            response.headers.setdefault("Cache-Control", "private, no-store")
+                "frame-ancestors 'none'" + ("; script-src 'self'; connect-src 'self'" if getattr(g, "shop_script", False) else ""))
+            response.headers.setdefault("Cache-Control", "private, no-store")       # «Вид 2» of /shop: our own script only
         return response
 
     from . import routes, routes_addresses, routes_alerts, routes_catalog, routes_connections, routes_description, routes_drafts, routes_economics, routes_feedupdate, routes_history, routes_funnel, routes_chats, routes_health, routes_img, routes_main, routes_mappings, routes_mypoint, routes_order_bulk, routes_order_cleanup, routes_orders, routes_pairs, routes_agent, routes_market, routes_photos, routes_points, routes_share, routes_users, routes_vk, routes_clients, routes_analytics, routes_avito_webhook, routes_search, routes_calls, routes_sheet, routes_inquiry, routes_shop, routes_client_terms, tour

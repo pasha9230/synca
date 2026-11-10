@@ -35,7 +35,8 @@ SEASONS = {"summer": "Лето", "winter": "Зима", "all": "Всесезон�
 SORTS = ("brand", "size", "price", "stock")
 PAGE = 50
 PARAMS = ("size", "q", "s", "t", "wh", "b", "xb", "o", "r", "p", "v",     # the only parameters the links of the page carry on
-          "w", "h", "d", "sf")                                         # «Новый вид»: the width, the height, the radius; the filters folded
+          "w", "h", "d", "sf",                                         # «Новый вид»: the width, the height, the radius; the filters folded
+          "mixed", "fw", "fh", "fd", "rw", "rh", "rd")                 # «Вид 2»: the mixed-width sets, the front and the rear axis
 MAX_VALUES = 30                       # the values of one of the width, the height, the radius ticked at once
 MAX_TEXT = 120                        # the length of a text filter (the size line, the search)
 MAX_SIZES = 20
@@ -318,7 +319,7 @@ def _name(offer) -> str:
     return name
 
 
-def row(item: Visible, photo: Optional[str]) -> dict:
+def row(item: Visible, photo: Optional[str], qty: int = QTY_DEFAULT) -> dict:
     """The only thing the template gets of a position: exactly FIELDS."""
     o = item.offer
     stock = STOCK_MANY if item.warehouse == 2 and o.stock >= service.STOCK_CAP else str(o.stock)
@@ -327,7 +328,7 @@ def row(item: Visible, photo: Optional[str]) -> dict:
            "load": o.load or "", "speed": o.speed or "", "runflat": bool(o.runflat), "country": o.country or "", "year": o.mnf_year or "",
            "stock": stock, "warehouse": WAREHOUSE_TOCHKI if item.warehouse == 2 else WAREHOUSE_MAIN, "price": item.price, "photo": photo}
     most = max(1, min(int(o.stock), shop_cart.MAX_QTY))                 # the cart takes no more (shop_cart.put cuts it there too)
-    out.update(qty=min(QTY_DEFAULT, most), qty_max=most)
+    out.update(qty=min(qty, most), qty_max=most)
     return out
 
 
@@ -370,3 +371,76 @@ def size_values(items: List[Visible]) -> dict:
     """The widths, the heights and the radii of the positions the client sees (the chips of «Новый вид»), each sorted."""
     return {"w": sorted({i.offer.width for i in items}), "h": sorted({i.offer.height for i in items}),
             "d": sorted({i.offer.diameter for i in items})}
+
+
+# «Вид 2» of the client's filters (the owner 2026-11-09…10, by the catalog of the supplier the client knows): the width, the profile,
+# the radius as three glued lists of ANY size (not only of the stock), the brands as a list, the mixed-width sets (front / rear).
+VIEW_KEY = "shop.fview"               # user_pref of the client: 1 or 2, the view of the block of the filters
+QTY_AXIS = 2                          # «Количество» of a tyre of a mixed set: 2 per axis, never more than the stock
+KITS_MAX = PAGE                       # the sets shown at most (and the rows of «Только передняя / задняя ось»)
+ANY_SIZES = {"w": list(range(125, 400, 10)), "h": list(range(25, 90, 5)), "d": list(range(10, 25))}   # «выбрать любой размер как в мим»
+AXES = (("f", "Передняя ось"), ("r", "Задняя ось"))
+
+
+def filters_view(conn, login: str) -> int:
+    """The view of the block of the filters the client chose (1 by default): kept until the client changes it."""
+    return 2 if login and user_prefs.get(conn, login, VIEW_KEY, 1) == 2 else 1
+
+
+def save_filters_view(conn, login: str, value, now: str) -> int:
+    view = 2 if str(value) == "2" else 1
+    user_prefs.put(conn, login, VIEW_KEY, view, now)
+    return view
+
+
+def size_pick2(base: str, pairs, chosen: dict, options: dict) -> list:
+    """The three glued lists of «Вид 2»: any size of ANY_SIZES and of the stock (and the chosen ones), the chosen as chips each with
+    the link without it."""
+    out = size_pick(base, pairs, chosen, options)
+    for p in out:
+        p["options"] = sorted(set(ANY_SIZES[p["key"]]) | set(p["options"]))
+    return out
+
+
+def brand_pick(base: str, pairs, items: List[Visible], chosen) -> dict:
+    """«Производитель» of «Вид 2»: the brands the client sees (never another's), the chosen as chips each with the link without it."""
+    labels = dict(brand_list(items))
+    on = [b for b in chosen if b in labels]
+    rest = [(k, v) for k, v in pairs if k not in ("b", "p")]
+    return {"options": brand_list(items), "on": [(b, labels[b]) for b in on],
+            "chips": [(labels[b], _url(base, rest + [("b", x) for x in on if x != b])) for b in on]}
+
+
+def axis_of(args, prefix: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """One axis of a mixed set (`fw`, `fh`, `fd` or `rw`, `rh`, `rd`): one value each, None (any) when empty."""
+    return tuple((size_numbers(args, prefix + k, 1) or [None])[0] for k in ("w", "h", "d"))
+
+
+def _fits(item: Visible, axis) -> bool:
+    o = item.offer
+    return all(v is None or v == got for v, got in zip(axis, (o.width, o.height, o.diameter)))
+
+
+def _model_key(item: Visible) -> tuple:
+    o = item.offer
+    return item.brand, " ".join((o.model_raw or "").split()).casefold(), o.season.value, bool(o.studded)
+
+
+def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
+    """The mixed-width sets (the owner 2026-11-10): a tyre of the front axis and one of the rear of one model of one brand, season
+    and studs, of another size; one front may be in several sets. Then the tyres of each axis that are in no set. The other filters
+    (the brands, the season, the studs, the warehouse, the search) act on both axes; the sort is the page's."""
+    base = apply(items, Filters([], [], "", f.brands, f.without, f.season, f.studs, f.warehouse, f.query, f.sort, f.descending, 1,
+                                wide=f.wide))
+    fronts, rears = [i for i in base if _fits(i, front)], [i for i in base if _fits(i, rear)]
+    by_key: Dict[tuple, List[Visible]] = {}
+    for i in rears:
+        by_key.setdefault(_model_key(i), []).append(i)
+    kits, paired_f, paired_r = [], set(), set()
+    for i in fronts:
+        for j in by_key.get(_model_key(i), ()):
+            if _size_key(i) != _size_key(j):
+                kits.append((i, j))
+                paired_f.add(id(i))
+                paired_r.add(id(j))
+    return {"kits": kits, "front": [i for i in fronts if id(i) not in paired_f], "rear": [i for i in rears if id(i) not in paired_r]}
