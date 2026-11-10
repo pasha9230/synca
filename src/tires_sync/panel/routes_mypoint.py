@@ -489,7 +489,7 @@ def register(app) -> None:
                           "since": card["entered_at"], "lines": point_lines(card),     # «на точке с 07.11», «на ОТХ с 31.10»: the stage came then
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "sell_lines": sell_lines(card) if code in order_oth.RETURNING else [],     # «Продать» (2026-11-10): until the act МХ-3 is signed
-                          "can_sell": (code in order_oth.RETURNING and not (order_oth.return_plan(conn, card["id"]) or {}).get("signed_at")
+                          "can_sell": (code in order_oth.RETURNING and order_oth.return_plan(conn, card["id"]) is None     # until agreed (2026-11-10)
                                        and not order_oth.given_back(conn, card["id"])),
                           "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
