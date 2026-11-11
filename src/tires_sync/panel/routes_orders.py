@@ -28,7 +28,8 @@ log = logging.getLogger(__name__)
 MONEY_PAGE = "/orders/settings/money"                # «Настройки заказов › Расчёты»: «Ставки» and «Подписи долей» (п. 28 of the audit, 2026-11-08)
 
 
-AUTOSAVED = ("client_name", "client_phone", "point_id", "deal_kind", "responsible")     # saved by themselves on change (order_autosave)
+AUTOSAVED = ("client_name", "client_phone", "point_id", "deal_kind", "responsible", "delivery_date")     # saved by themselves on change (order_autosave;
+# the date: the owner 2026-11-11, «Оформить в MIM» takes the stored one)
 ORDER_PARTS = ("items", "wants", "money", "intercity", "webmim")        # the parts of the order page a form comes back to (old links name them as ?tab=)
 
 
@@ -1459,7 +1460,7 @@ def register(app) -> None:
     @app.route("/orders/<int:card_id>/autosave", methods=["POST"])
     @login_required
     def order_autosave(card_id):
-        """One field of the window saved by itself (the owner 2026-11-02: the client's name, the phone, the point, the deal, the responsible),
+        """One field of the window saved by itself (the owner 2026-11-02: the client's name, the phone, the point, the deal, the responsible; 2026-11-11: the date),
         checked and written in the journal as «Сохранить» does; the rights are «Сохранить»'s (a point has none). JSON: {ok, value} — the
         value as stored, for the window's `was` — or {ok: false, error}."""
         conn = get_conn()
