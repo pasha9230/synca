@@ -272,7 +272,8 @@ for _section, _endpoints in {
     "analytics": ("economics_page", "economics_brand", "economics_params", "economics_sales", "economics_sale_add", "economics_sales_export",
                   "economics_sale_new", "economics_sale_reverse", "economics_terms", "economics_apply_pricing", "economics_terms_delete",
                   "economics_terms_import", "economics_terms_save", "economics_terms_update", "economics_funnel", "orders_report", "orders_settings_money",
-                  "orders_report_export"),
+                  "orders_report_export",
+                  "ads_analytics_page"),        # «Аналитика рекламы» (the owner 2026-11-11): the owner and the partner, never a point
     "setup": ("draft", "draft_cancel", "draft_confirm", "catalog_review", "publish_result", "summary_toggle",      # a draft shows the markups: the owner's
               "settings_page", "settings_notify_page", "settings_brands_page", "settings_brand_card", "settings_draft", "settings_pending", "settings_exclusions_page", "settings_pricing",
               "history", "history_rollback", "connections_page", "connections_add_account", "connections_account_brand_pricing",

@@ -311,6 +311,24 @@ class AvitoClient:
             "fields": ["uniqViews", "uniqContacts", "uniqFavorites"], "periodGrouping": "day"})
         return (data.get("result") or {}).get("items", [])
 
+    def item_analytics(self, user_id, date_from: str, date_to: str, metrics: List[str], limit: int = 1000, offset: int = 0) -> dict:
+        """stats v2 «itemAnalytics» grouped by ad (a read, although Avito wants a POST): the spending in kopecks, views, contacts of the
+        days date_from..date_to both included. One request a minute per method (Avito); the answer as it came (ads_spend reads it)."""
+        if not 1 <= limit <= 1000:
+            raise ValueError("limit must be 1..1000")
+        return self._request("POST", "/stats/v2/accounts/%s/items" % user_id, safe=True, payload={
+            "dateFrom": date_from, "dateTo": date_to, "metrics": list(metrics), "grouping": "item", "limit": limit, "offset": offset})
+
+    def promotions_by_items(self, avito_ids: List[int]) -> dict:
+        """The promotion of these ads, at most 200 (a read with a POST): the manual price of a view and its daily limit, or the auto one."""
+        if not 1 <= len(avito_ids) <= 200:
+            raise ValueError("promotions_by_items takes 1..200 ads")
+        return self._request("POST", "/cpxpromo/1/getPromotionsByItemIds", safe=True, payload={"itemIds": [int(i) for i in avito_ids]})
+
+    def item_bids(self, avito_id: int) -> dict:
+        """The prices of a view Avito offers for one ad (20 requests a minute): the current, the recommended, the bounds and the options."""
+        return self._request("GET", "/cpxpromo/1/getBids/%d" % int(avito_id))
+
     def stocks_info(self, avito_ids: List[int], retry: bool = True) -> List[dict]:
         """What Avito shows as the stock of these ads, at most STOCK_INFO_CHUNK (a read, although Avito wants a POST): item_id, quantity
         (less Avito's own reservations), is_multiple, is_unlimited, is_out_of_stock. One unknown id fails the whole request (400)."""
