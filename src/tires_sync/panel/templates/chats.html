@@ -4,7 +4,7 @@
 {% from "_handoff_dialog.html" import handoff_button with context %}
 {% block title %}Чаты · Tires Sync{% endblock %}
 {# a point's phone (2026-10-31, point-mobile): its own width, the frame of «Рабочее место», the list or the open chat; the office keeps 1280 #}
-{% block viewport %}{% if current_user().role == "point" %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
 {% block body_class %}{% if current_user().role == "point" %}pt-ui pt-chats-page{% if current %} is-chat-open{% endif %}{% endif %}{% endblock %}
 {% block head %}{% if current_user().role == "point" %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block content %}

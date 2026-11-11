@@ -19,12 +19,12 @@
 {# the sections (the owner 2026-10-30, the prototype renderClientDesk): on a computer in the header, on a phone at the bottom (shop.css) #}
 <nav class="shop-nav" aria-label="Разделы" data-tour="shop-nav">
 <a href="/shop"{% if p == "/shop" %} class="is-active" aria-current="page"{% endif %}>{{ icon("tire") }}<span>Каталог</span></a>
-<a href="/shop/cart"{% if p.startswith("/shop/cart") %} class="is-active" aria-current="page"{% endif %} data-tour="cart">{{ icon("box-down") }}<span>Корзина</span>{% if cart_count %} <b class="shop-count">{{ cart_count }}</b>{% endif %}</a>
+<a href="/shop/cart"{% if p.startswith("/shop/cart") %} class="is-active" aria-current="page"{% endif %} data-tour="cart" data-ico title="Корзина">{{ icon("cart") }}<span>Корзина</span>{% if cart_count %} <b class="shop-count">{{ cart_count }}</b>{% endif %}</a>
 <a href="/shop/orders"{% if p.startswith("/shop/orders") %} class="is-active" aria-current="page"{% endif %}>{{ icon("clipboard") }}<span>Мои заказы</span>{% if orders_count %} <b class="shop-count" title="Заказы в работе">{{ orders_count }}</b>{% endif %}</a>
-<a href="/shop/profile"{% if p.startswith("/shop/profile") or p.startswith("/account") %} class="is-active" aria-current="page"{% endif %}>{{ icon("users") }}<span>Профиль</span></a>
+<a href="/shop/profile"{% if p.startswith("/shop/profile") or p.startswith("/account") %} class="is-active" aria-current="page"{% endif %} data-ico title="Профиль">{{ icon("user") }}<span>Профиль</span></a>
 <a href="/whats-new"{% if p.startswith("/whats-new") %} class="is-active" aria-current="page"{% endif %}>{{ icon("sparkle") }}<span>Что нового</span>{% if whatsnew_dot() %}<i class="wn-dot" title="Есть новое"><span class="sr-only">есть новое</span></i>{% endif %}</a></nav>
 <div class="shop-top-right">{% if me.display_name %}<span class="shop-me">{{ me.display_name }}</span>{% endif %}<form method="post" action="/tour/again" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="tour-again" data-tour="again" aria-label="Пройти обзор заново"><span class="tour-again-long">Пройти обзор заново</span><span class="tour-again-short">Обзор</span></button></form>
-<form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти" aria-label="Выйти">{{ icon("logout") }}</button></form></div></div>
+<form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon-btn" title="Выйти">{{ icon("logout") }}<span class="sr-only">Выйти</span></button></form></div></div>
 </header>
 <main class="main"><div class="page">
 <div class="msgs" role="status" aria-live="polite">{% for kind, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ 'flash--err' if kind == 'error' or kind.startswith('field:') else ('flash--ok' if kind == 'ok' else 'flash--info') }}"{% if kind == 'error' or kind.startswith('field:') %} role="alert"{% endif %}><div class="flash-text">{{ message }}</div></div>{% endfor %}</div>

@@ -2,6 +2,7 @@
    2026-10-31 п. 20-25): only `rows` of client_catalog.FIELDS; the filters in a card above the rows (_shop_filters.html, the look of the
    office's catalog, the owner 2026-11-09), no «Кроме брендов», the photo in the row, the chips of the filters on. No script (the CSP of /shop). #}
 {% from "_ui.html" import icon %}
+{% from "_shop_icons.html" import season_icons, cart_button, sort_arrow, view_seg %}
 {% if empty %}
 <div class="card"><div class="empty"><h3>Ассортимент ещё не настроен</h3><p>Как только менеджер откроет вам каталог, здесь появятся шины с вашими ценами.</p></div></div>
 {% else %}
@@ -9,17 +10,17 @@
 <div class="shop-cat shop2 shop2-cat shop-cat--top">
 <section class="shop-results shop2-results" data-tour="catalog">
 <div class="shop2-tools">
-<div class="shop2-title"><h1>Каталог</h1><span class="muted">найдено {{ total }}{% if pages > 1 %} · стр. {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
+<div class="shop2-title"><h1>Каталог</h1><span class="muted" data-found>найдено {{ total }}{% if mixed %} компл.{% endif %}{% if pages > 1 %} · стр. {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
 <div class="shop2-sortrow">
-<div class="shop2-sort" role="group" aria-label="Сортировка">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div>
-{% include "_shop_columns.html" %}<div class="shop-seg shop2-view" role="group" aria-label="Вид"><a href="{{ view_links.table }}"{% if view != "tiles" %} class="is-active" aria-current="true"{% endif %}>Таблица</a><a href="{{ view_links.tiles }}"{% if view == "tiles" %} class="is-active" aria-current="true"{% endif %}>Плитка</a></div>
+<div class="shop2-sort" role="group" aria-label="Сортировка">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{{ sort_arrow(f, key) }}</a>{% endfor %}</div>
+{% include "_shop_columns.html" %}{{ view_seg(view, view_links, "shop2-view") }}
 </div>
 {% if chips %}<div class="shop2-on" aria-label="Включённые фильтры">{% for label, url in chips %}<a class="shop2-on-chip" href="{{ url }}" title="Убрать">{{ label }}{{ icon("x") }}</a>{% endfor %}<a class="shop2-on-reset" href="{{ reset_link }}">Сбросить</a></div>{% endif %}
 {% if f.unknown %}<span class="shop-unknown">Не понял: {{ f.unknown|join(" ") }}</span>{% endif %}
 </div>
 {% macro buy(r) %}<form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
-<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty_max }}" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--primary btn--sm">{{ "Ещё" if r.in_cart else "В корзину" }}</button></form>{% if r.in_cart %}<span class="shop-in-cart shop2-in-cart">{{ icon("check") }}в корзине: {{ r.in_cart }} шт.</span>{% endif %}{% endmacro %}
-{% macro season(r) %}<span class="shop2-tag {{ 'shop2-tag--winter' if r.season == 'Зима' else ('shop2-tag--summer' if r.season == 'Лето' else '') }}">{% if r.season == "Зима" %}{{ icon("snow") }}{% elif r.season == "Лето" %}{{ icon("sun") }}{% endif %}{{ r.season or "—" }}</span>{% if r.studs %}<span class="shop2-tag" title="Шипованные">шипы</span>{% endif %}{% endmacro %}
+<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty_max }}" inputmode="numeric" aria-label="Количество, шт.">{{ cart_button(r) }}</form>{% if r.in_cart %}<span class="shop-in-cart shop2-in-cart">{{ icon("check") }}в корзине: {{ r.in_cart }} шт.</span>{% endif %}{% endmacro %}
+{% macro season(r) %}{{ season_icons(r) }}{% endmacro %}
 {% macro photo(r, cls) %}{% if r.photo %}<img class="{{ cls }}" src="{{ r.photo }}" alt="" loading="lazy">{% else %}<span class="{{ cls }} shop2-nophoto" title="Фото нет">{{ icon("tire") }}</span>{% endif %}{% endmacro %}
 {% if rows and view == "tiles" %}<div class="shop-tiles shop2-tiles">{% for r in rows %}<article class="shop-tile shop2-tile">
 <a class="shop-tile-ph shop2-open" href="#tire-{{ loop.index }}" id="row-{{ loop.index }}" title="Карточка шины">{{ photo(r, "shop2-tile-img") }}</a>
@@ -41,7 +42,8 @@
 {% if "price" not in hidden %}<td class="c-price num"><b class="strong">{{ r.price|money }}</b></td>{% endif %}
 {% if cart %}<td class="c-buy">{{ buy(r) }}</td>{% endif %}
 </tr>{% endfor %}</tbody></table></div>
-{% else %}<div class="card"><div class="empty"><h3>Ничего не найдено</h3><p>Измените или <a href="{{ reset_link }}">сбросьте фильтры</a>.</p></div></div>{% endif %}
+{% elif mixed is not none %}{% include "_shop_mixed.html" %}
+{% else %}<div class="card"><div class="empty"><h3>{{ "Товары не найдены" if fview == 2 else "Ничего не найдено" }}</h3><p>Измените или <a href="{{ reset_link }}">сбросьте фильтры</a>.</p></div></div>{% endif %}
 {# the card of a tyre (the owner 2026-11-02: a big photo): opened by its link (#tire-N, :target), closed back to its row #}
 {% for r in rows %}<div class="shop2-sheet" id="tire-{{ loop.index }}" role="dialog" aria-label="{{ r.brand }} {{ r.model or r.name }}">
 <a class="shop2-sheet-bg" href="#row-{{ loop.index }}" aria-label="Закрыть" tabindex="-1"></a>

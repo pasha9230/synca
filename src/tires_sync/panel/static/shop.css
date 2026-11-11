@@ -428,3 +428,104 @@ body.shop span.shop2-tile-img{display:flex;align-items:center;justify-content:ce
   .shop-o2f .o2-fwide{flex:1 1 100%;min-width:0}
   .shop-o2f .seg{max-width:100%;flex-wrap:wrap}
 }
+
+/* «Вид 1 / Вид 2» of the block of the filters (the owner 2026-11-10): the switch in the top right corner of the block */
+.shop-fhead{display:flex;align-items:center;justify-content:flex-end;gap:12px;min-width:0}
+.shop-o2f .o2-cat-filters{display:flex;flex-direction:column}
+.shop-o2f .shop-fhead{padding:10px 16px 0}
+.shop .shop-fhead{order:-1}
+.shop-fhead-t{margin:0;margin-right:auto;font-size:15px;font-weight:600}
+.shop-fview{display:inline-flex;margin:0;border:1px solid var(--cl-border);border-radius:6px;overflow:hidden;flex:none}
+.shop-fview button{border:0;background:#fff;padding:4px 10px;font:inherit;font-size:12px;color:var(--cl-text-2);cursor:pointer}
+.shop-fview button+button{border-left:1px solid var(--cl-border)}
+.shop-fview button.is-active{background:var(--cl-primary-bg);color:var(--cl-primary);font-weight:600}
+/* «Вид 2»: the glued lists, the chips in a column inside a field, the counter in the corner */
+.shop-v2{padding:12px 16px 14px;margin-bottom:16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.shop-v2f{display:flex;flex-direction:column;gap:12px;margin:0;min-width:0}
+.shop-v2-recent{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.shop-v2-cap{font-size:12px;color:var(--cl-text-3)}
+.shop-v2-rchip{display:inline-flex;align-items:center;height:26px;padding:0 10px;border:1px solid var(--cl-border);border-radius:13px;
+  font-size:13px;color:var(--cl-text);text-decoration:none;background:#fff}
+.shop-v2-rchip:hover{border-color:var(--cl-primary);color:var(--cl-primary)}
+.shop-v2-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px 16px;min-width:0}
+.shop-v2-axis{align-items:flex-end}
+.shop-v2-axis-t{flex:0 0 110px;font-size:13px;font-weight:600;padding-bottom:10px}
+.shop-ms-glue{display:flex;align-items:stretch;min-width:0;flex:0 1 auto}
+.shop-ms{position:relative;display:flex;flex-direction:column;width:132px;min-width:0;padding-top:16px}
+.shop-ms-label{position:absolute;top:0;left:2px;font-size:11px;color:var(--cl-text-3);line-height:14px}
+.shop-ms-n{position:absolute;top:10px;right:-6px;z-index:3;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#D92D20;
+  color:#fff;font-size:11px;line-height:18px;text-align:center;font-weight:600}
+.shop-ms-n[hidden]{display:none}
+.shop-ms-box{flex:1;display:flex;flex-direction:column;min-height:38px;border:1px solid var(--cl-border);background:#fff;cursor:text}
+.shop-ms-glue>.shop-ms+.shop-ms .shop-ms-box{border-left:0}
+.shop-ms-glue>.shop-ms:first-child .shop-ms-box{border-radius:6px 0 0 6px}
+.shop-ms-glue>.shop-ms:last-child .shop-ms-box{border-radius:0 6px 6px 0}
+.shop-ms--brand{width:300px;max-width:100%}
+.shop-ms--brand .shop-ms-box{border-radius:6px}
+.shop-ms.is-open .shop-ms-box{border-color:var(--cl-primary);box-shadow:0 0 0 1px var(--cl-primary);position:relative;z-index:2}
+.shop-ms-chips{list-style:none;margin:0;padding:4px 4px 0;display:flex;flex-direction:column;gap:4px}
+.shop-ms-chips:empty{display:none}
+.shop-ms--brand .shop-ms-chips{flex-direction:row;flex-wrap:wrap}
+.shop-ms-chip{display:flex;align-items:center;justify-content:space-between;gap:4px;height:26px;padding:0 4px 0 8px;border-radius:4px;
+  background:var(--cl-primary-bg);color:var(--cl-primary);font-size:13px;font-weight:600}
+.shop-ms-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shop-ms-x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:4px;
+  background:none;color:inherit;cursor:pointer;flex:none}
+.shop-ms-x:hover{background:rgba(0,0,0,.08)}
+.shop-ms-x .i{width:12px;height:12px}
+.shop-ms-in{width:100%;min-width:0;height:36px;border:0;outline:0;background:transparent;padding:0 10px;font:inherit;font-size:14px}
+.shop-ms-list{position:absolute;z-index:40;left:0;top:calc(100% + 2px);min-width:100%;max-height:260px;overflow:auto;margin:0;padding:4px;
+  list-style:none;background:#fff;border:1px solid var(--cl-border);border-radius:6px;box-shadow:0 8px 24px rgba(16,24,40,.12)}
+.shop-ms-list[hidden]{display:none}
+.shop-ms-list [role=option]{padding:6px 10px;border-radius:4px;cursor:pointer;font-size:14px;white-space:nowrap}
+.shop-ms-list [role=option][hidden]{display:none}
+.shop-ms-list [role=option]:hover,.shop-ms-list [role=option].is-active{background:var(--cl-primary-bg)}
+.shop-ms-list [role=option][aria-selected=true]{color:var(--cl-primary);font-weight:600}
+.shop-ms-list [role=option][aria-selected=true]::after{content:" ✓"}
+.shop-v2-row2{align-items:center}
+.shop-v2-mixed{white-space:nowrap}
+.shop-v2-seg label{gap:4px}
+.shop-v2-search{display:flex;margin-left:auto;min-width:0}
+.shop-v2-search .input{width:200px;min-width:0;border-radius:6px 0 0 6px}
+.shop-v2-go{border-radius:0 6px 6px 0;padding:0 12px}
+.shop-v2-foot{display:flex}
+.shop-v2-reset{display:inline-flex;align-items:center;gap:6px;color:var(--cl-text-2);font-size:13px;text-decoration:none}
+.shop-v2-reset:hover{color:#D92D20}
+.shop-v2-reset .i{width:16px;height:16px}
+/* the icons of a row (season, studs), the cart button, the sort, «Таблица / Плитка» */
+.shop-ico-season{display:inline-flex;align-items:center;gap:2px;vertical-align:middle}
+.shop-ico{display:inline-flex;align-items:center}
+.shop-ico .i{width:18px;height:18px}
+.shop-ico--sun{color:#D97706}
+.shop-ico--snow,.shop-ico--stud{color:#0E7490}
+.shop .shop-spike{fill:#D92D20;stroke:#fff;stroke-width:1.2}
+.shop-sort-i{width:12px;height:12px;vertical-align:-1px}
+.shop-seg--ico a{display:inline-flex;align-items:center;justify-content:center;padding:0 8px}
+.shop-seg--ico .i{width:16px;height:16px}
+.shop-buy-btn{gap:4px}
+.shop-buy-btn .i{width:16px;height:16px}
+@media (min-width:721px){
+  .shop .shop-buy-btn{width:34px;padding:0;justify-content:center}
+  .shop .shop-buy-btn .shop-buy-t{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  .shop .shop-nav a[data-ico]>span{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  .shop .shop-nav a[data-ico]{position:relative}
+}
+/* the mixed-width sets: «Комплект N» a band over its two rows */
+.shop-kit-head th{background:var(--cl-primary-bg);color:var(--cl-primary);font-weight:600;text-align:left;padding:6px 12px}
+.shop-kit-axis{display:inline-block;min-width:42px;font-size:11px;color:var(--cl-text-3)}
+.shop-kit-none td{color:var(--cl-text-3);padding:8px 12px}
+@media (max-width:720px){
+  .shop-v2{padding:12px}
+  .shop-v2-row{gap:10px}
+  .shop-ms-glue{flex:1 1 100%}
+  .shop-ms{flex:1 1 0;width:auto}
+  .shop-ms--brand{flex:1 1 100%;width:auto}
+  .shop-v2-axis-t{flex:1 1 100%;padding:0}
+  .shop-ms-in{font-size:16px;height:40px}
+  .shop-v2-seg{max-width:100%;flex-wrap:wrap}
+  .shop-v2-search{flex:1 1 100%;margin-left:0}
+  .shop-v2-search .input{flex:1;width:auto;font-size:16px}
+  .shop-fview button{padding:6px 10px}
+  .shop-mixed tr.shop-kit-head,.shop-mixed tr.shop-kit-none{display:block;padding:0;border:0}
+  .shop-mixed tr.shop-kit-head th,.shop-mixed tr.shop-kit-none td{display:block}
+}

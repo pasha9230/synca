@@ -798,12 +798,14 @@ def test_the_way_out_after_a_move_through_the_panel(tmp_path):
     assert [e for e in orders.list_events(conn, cid) if e["text"].startswith("Задача отменена: Вернуть")]
 
 
-def test_issued_before_the_agreement_cancels_it(tmp_path):
-    """«Выдали» is «Выполнено» with no agreement: nothing was agreed, the task is cancelled (the owner 2026-11-10; was done)."""
+def test_issued_before_the_agreement_closes_it_as_not_needed(tmp_path):
+    """«Выдали» with no agreement: the client took the tyres, the task is done as not needed — «Заказ выдан, возврат не нужен», never «продано
+    до согласования», which is a sale's only (the owner 2026-11-10, review of run/2026-11-10f; the run had it cancelled)."""
     conn, cid = _moved_on_day7(tmp_path)
     assert order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")[2]
-    assert conn.execute("SELECT done_at, cancelled_at FROM callback_task WHERE order_id = ?", (cid,)).fetchone() == (None, "2026-10-26T13:00:00")
-    assert any(e["text"].endswith("продано до согласования возврата") for e in orders.list_events(conn, cid))
+    assert conn.execute("SELECT done_at, cancelled_at FROM callback_task WHERE order_id = ?", (cid,)).fetchone() == ("2026-10-26T13:00:00", None)
+    assert any(e["text"].endswith("заказ выдан, возврат не нужен") for e in orders.list_events(conn, cid))
+    assert not any("продано до согласования" in e["text"].lower() for e in orders.list_events(conn, cid))
 
 
 # ---- 7. the timer: extra ticks are harmless, windows hold ------------------------------------------------------------------------------

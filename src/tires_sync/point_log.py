@@ -129,10 +129,11 @@ def undoable(conn, card: dict, point_id) -> Optional[dict]:
     if (rec.get("point") != point_id or card["stage_id"] != rec.get("to_stage") or (card["entered_at"] or "") != rec.get("to_entered")
             or card["sale_ids"]):
         return None
-    if rec.get("action") in ("oth_issued", "oth_sold") and conn.execute(
-            "SELECT 1 FROM oth_return WHERE order_id = ? UNION ALL SELECT 1 FROM oth_return_plan WHERE order_id = ? LIMIT 1",
-            (card["id"], card["id"])).fetchone():
-        return None                                                       # back on «На ОТХ» would drop the marks of the return (order_oth.detach)
+    if rec.get("action") in ("oth_issued", "oth_sold"):
+        from . import order_oth                                           # back on «На ОТХ» drops oth_return (order_oth.detach): a real «Вернуть
+        if order_oth.given_back(conn, card["id"]) or conn.execute(        # поставщику» would be lost; a mark «На возврат» comes back (restore_marks,
+                "SELECT 1 FROM oth_return_plan WHERE order_id = ?", (card["id"],)).fetchone():     # the owner 2026-11-10), or after the agreement
+            return None                                                   # it is decided (the plan comes back: restore_plan)
     if rec.get("action") == "act_signed" and orders.get_stage(conn, rec.get("from_stage"))["code"] == "oth":
         return None                                                       # the same: back on «На ОТХ» drops the agreement (review 2026-11-03)
     if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind IN ('point', 'stage') AND id > ? LIMIT 1",
@@ -204,15 +205,17 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
         conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
         if stage["code"] == orders.RETURN_GIVEN:                          # «Выдали» linked the client; the goods go back again (2026-11-04)
             order_oth.detach(conn, card, now, author)
-            order_oth.restore_plan(conn, card["id"])                      # after detach: it drops the marks and the plan of a stay
+        order_oth.restore_plan(conn, card["id"])                          # after detach (move_card's on «На ОТХ»): it drops the marks and the plan of a stay
     if rec["action"] == "oth_sold":                                       # the sale from «На ОТХ»: no client was linked, nothing to unlink
         conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value LIKE 'sold|%'",      # only a question the sale itself closed
                      ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
         if stage["code"] == orders.RETURN_GIVEN:
             order_oth.restore_plan(conn, card["id"])                      # the agreement the sale dropped
+    undone_issue = rec["action"] in ("oth_issued", "oth_sold")
+    if undone_issue:                                                      # the marks «На возврат» the press took off, with their task (the owner 2026-11-10)
+        order_oth.restore_marks(conn, card["id"], now, author, order_oth.MOVE, "отметка %s отменена" % rec["name"])
     label = card.get("webmim_number") or str(card["id"])
     until = rec["from_until"]
-    undone_issue = rec["action"] in ("oth_issued", "oth_sold")
     text = "Точка «%s» отменила отметку %s по заказу №%s (%s): заказ снова на этапе «%s»%s. %s" % (
         point["name"], rec["name"], label, who, stage["name"],
         ", резерв до %s.%s.%s" % (until[8:10], until[5:7], until[:4]) if stage["code"] == "at_point" and len(until) == 10 else "", UNDO_HINT)

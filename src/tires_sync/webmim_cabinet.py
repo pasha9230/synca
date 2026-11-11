@@ -14,7 +14,8 @@ Where it is read (GETs only; the session is closed by the client's close(): sess
 - a WebMIM number typed by a person in the order window (after_save, the owner 2026-11-09: the partner places orders by hand in the
   cabinet): within that save, one quick login and read, its logout; the save never fails for it;
 - the repeats (retry_due, every minute with the chats, the owner 2026-11-10): one of the above refused for the session limit, a 429 or
-  a timeout — the order is read again about 2, 5 and 15 minutes after that failure, then only hourly (a grey record once).
+  a timeout — the order is read again about 2, 5 and 15 minutes after that failure, then only hourly (a grey record once); a repeat that got in
+  but found no number of the order yet keeps the ones left (the owner 2026-11-10).
 The live server only: an invoice of the test server is never ours (as webmim_invoice.after_place). No API user (an empty login): off,
 everything as before. A list the login does not see: a grey record of the order, everything as before.
 
@@ -557,10 +558,13 @@ def retry_due(conn, client_of: Callable[[], object], now: str, send: Optional[Se
         return counts
     found = {seen["order_number"]: seen for seen in map(info, rows)}
     for number, card_id in due.items():
+        seen = found.get(number)
+        if (seen is None or not seen["invoice"]) and int(_state(conn, RETRY % card_id).get("tries", 0) or 0) < len(RETRY_AFTER):
+            later(conn, card_id, number, now)                            # in, but no number yet: the next repeats still go (the owner 2026-11-10)
+            continue
         _drop(conn, card_id)
         conn.commit()
-        seen = found.get(number)
-        if seen is None or not seen["invoice"]:
+        if seen is None or not seen["invoice"]:                          # none by the last repeat: the hourly reading, as before
             later(conn, card_id, number, now)
             continue
         result, _lines = take(conn, card_id, seen, now, send)

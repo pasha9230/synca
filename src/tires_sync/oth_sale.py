@@ -19,6 +19,7 @@ never stored: order_sheet counts it from the order of purchase, with the two num
 from __future__ import annotations
 
 import json
+import logging
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from . import orders, oth_stock
@@ -483,7 +484,8 @@ def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit
             raise
     from . import order_oth                                         # the pieces of a mark «На возврат» are on sale until agreed (the owner
     free = int(item["qty"]) - int((conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item["id"],)).fetchone() or (0,))[0])     # 2026-11-10)
-    marked = pieces - free > 0 and order_oth.drop_marks(conn, old["id"], now, author, item_id=item["id"], pieces=pieces - free)
+    marked = pieces - free > 0 and order_oth.drop_marks(conn, old["id"], now, author, item_id=item["id"], pieces=pieces - free,
+                                                        slot=order_oth.take_slot(card_id, item["id"]))     # «Вернуть на ОТХ» brings them back
     # the limit in the statement itself: a take a moment ago in another tab never lets the pieces go below the ones marked returned
     if conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ? AND qty - ? >= COALESCE((SELECT qty FROM oth_return WHERE item_id = ?), 0) "
                     "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth') "
@@ -680,8 +682,9 @@ def _untake_order(conn, card_id, item_id, now: str, author: str, commit: bool = 
     _audit(conn, now, author, "oth_untake", {"order": int(card_id), "item": line["id"], "from_order": link["from_order"], "qty": pieces})
     _sync_numbers(conn, card_id, before, now, author)
     if not reopen:
-        if commit:
-            conn.commit()
+        if commit:                                                    # _marks_back commits: never inside the caller's transaction (oth_storage.untake:
+            conn.commit()                                             # a record's take dropped no mark «На возврат», its stock has none)
+            _marks_back(conn, card_id, link, pieces, now, author)
         return pieces
     oth = _stage(conn, "oth")
     try:
@@ -690,7 +693,19 @@ def _untake_order(conn, card_id, item_id, now: str, author: str, commit: bool = 
         raise OthSaleError("Шины не возвращены: заказ №%d не встал на ОТХ (%s)." % (link["from_order"], err)) from None
     if not moved:
         raise OthSaleError("Шины не возвращены: заказ №%d только что изменили. Обновите страницу." % link["from_order"])
+    if commit:                                                        # as above: not in the caller's transaction
+        _marks_back(conn, card_id, link, pieces, now, author)
     return pieces
+
+
+def _marks_back(conn, card_id, link: dict, pieces: int, now: str, author: str) -> None:
+    """After «Вернуть на ОТХ»: the marks «На возврат» the take took off are back with their task (the owner 2026-11-10). Never raises: the tyres are back."""
+    from . import order_oth
+    try:
+        order_oth.restore_marks(conn, link["from_order"], now, author, order_oth.take_slot(card_id, link["from_item"]), "шины вернулись на ОТХ", pieces=pieces)
+    except Exception:                                                 # noqa: BLE001
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the marks «На возврат» of order %s were not brought back", link["from_order"])
 
 
 def _untake_manual(conn, card: dict, line: dict, link: dict, before: List[int], now: str, author: str) -> int:
