@@ -255,6 +255,19 @@ CREATE TABLE IF NOT EXISTS ad_stat (
     views INTEGER NOT NULL DEFAULT 0, contacts INTEGER NOT NULL DEFAULT 0, favorites INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (account_id, avito_id, day)
 );
+-- «Аналитика рекламы» (the owner 2026-11-11, read only): what Avito took for an ad on a day, in rubles (stats v2 gives kopecks), with the
+-- views and contacts of the same answer. avito_id 0 is the mark «the day was read» (a day without spending leaves no other row)
+CREATE TABLE IF NOT EXISTS ad_spend_day (
+    account_id INTEGER NOT NULL, avito_id INTEGER NOT NULL, day TEXT NOT NULL, spend REAL NOT NULL DEFAULT 0,
+    presence REAL NOT NULL DEFAULT 0, promo REAL NOT NULL DEFAULT 0, views INTEGER NOT NULL DEFAULT 0, contacts INTEGER NOT NULL DEFAULT 0,
+    read_at TEXT NOT NULL DEFAULT '', PRIMARY KEY (account_id, avito_id, day)
+);
+-- the last reading of an ad's price of a view (cpxpromo), in rubles; options: the JSON of Avito's bids[] as read (prices in rubles)
+CREATE TABLE IF NOT EXISTS ad_bid (
+    account_id INTEGER NOT NULL, avito_id INTEGER NOT NULL, taken_at TEXT NOT NULL, mode TEXT NOT NULL DEFAULT '',
+    bid REAL, day_limit REAL, rec_bid REAL, min_bid REAL, max_bid REAL, options TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (account_id, avito_id)
+);
 CREATE TABLE IF NOT EXISTS retired_ad (
     account_id INTEGER NOT NULL, goods_id TEXT NOT NULL, ad_id TEXT NOT NULL, identity TEXT NOT NULL, removed_at TEXT NOT NULL,
     PRIMARY KEY (account_id, goods_id)

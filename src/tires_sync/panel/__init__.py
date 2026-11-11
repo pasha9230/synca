@@ -354,7 +354,7 @@ def create_app(config: dict) -> Flask:
             response.headers.setdefault("Cache-Control", "private, no-store")       # «Вид 2» of /shop: our own script only
         return response
 
-    from . import routes, routes_addresses, routes_alerts, routes_catalog, routes_connections, routes_description, routes_drafts, routes_economics, routes_feedupdate, routes_history, routes_funnel, routes_chats, routes_health, routes_img, routes_main, routes_mappings, routes_mypoint, routes_order_bulk, routes_order_cleanup, routes_orders, routes_pairs, routes_agent, routes_market, routes_photos, routes_points, routes_share, routes_users, routes_vk, routes_clients, routes_analytics, routes_avito_webhook, routes_search, routes_calls, routes_sheet, routes_inquiry, routes_shop, routes_client_terms, tour
+    from . import routes, routes_addresses, routes_alerts, routes_catalog, routes_connections, routes_description, routes_drafts, routes_economics, routes_feedupdate, routes_history, routes_funnel, routes_chats, routes_health, routes_img, routes_main, routes_mappings, routes_mypoint, routes_order_bulk, routes_order_cleanup, routes_orders, routes_pairs, routes_agent, routes_market, routes_photos, routes_points, routes_share, routes_users, routes_vk, routes_clients, routes_analytics, routes_ads, routes_avito_webhook, routes_search, routes_calls, routes_sheet, routes_inquiry, routes_shop, routes_client_terms, tour
 
     routes.register(app)
     tour.register(app)
@@ -387,6 +387,7 @@ def create_app(config: dict) -> Flask:
     routes_clients.register(app)
     routes_calls.register(app)
     routes_analytics.register(app)
+    routes_ads.register(app)
     routes_mypoint.register(app)
     routes_avito_webhook.register(app)
     routes_search.register(app)

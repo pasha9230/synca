@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% macro rub2(v) %}{% if v is none %}—{% else %}{{ v|pct(2) }}&nbsp;₽{% endif %}{% endmacro %}
+{% macro share(v) %}{% if v is none %}<span class="muted">—</span>{% else %}{{ v|pct }}&nbsp;%{% endif %}{% endmacro %}
+{% block title %}Аналитика рекламы · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Аналитика рекламы<span class="help-q" tabindex="0" data-tip="Сколько Авито взяло за каждое объявление (размещение и продвижение вместе) и сколько оно принесло. ДРР — доля расходов на рекламу: от выручки и от маржи продаж по объявлению. Продажа привязана к объявлению через чат заказа. Только просмотр: здесь ничего не меняется на Авито.">?</span></h1>
+<p class="small muted">С {{ data.since }} по {{ data.until }} (сегодняшний день ещё не закрыт Авито). Расходы собираются раз в сутки.</p></div></header>
+<section class="card">
+<div class="card-head">
+<div class="seg" role="group" aria-label="Период">{% for n, label in periods.items() %}<a href="/economics/ads?p={{ n }}&s={{ data.sort }}"{% if n == data.days %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+<div class="seg" role="group" aria-label="Сортировка">{% for key, label in sorts.items() %}<a href="/economics/ads?p={{ data.days }}&s={{ key }}"{% if key == data.sort %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+</div>
+{% if not data.accounts %}
+<div class="empty"><div class="empty-icon">{{ icon("chart") }}</div><h3>Нет аккаунтов с фидом</h3></div>
+{% endif %}
+{% for acc in data.accounts %}
+<div class="card-head"><div><h3 style="font-size:var(--fs-lg)">{{ acc.name }}</h3>
+<p class="small muted">Расходы загружены за {{ acc.covered }} из {{ data.days }} дн.{% if acc.covered < data.days %} — период неполный, суммы меньше настоящих{% endif %}.{% if acc.error %} Последний сбор не удался: {{ acc.error }}{% endif %}</p></div></div>
+<div class="tiles" style="padding:var(--s-4) var(--s-5)">
+<div class="tile tile--brand"><span class="tile-label">Расходы</span><span class="tile-value">{{ acc.total.spend|money }}</span><span class="tile-sub">объявлений {{ acc.total.ads }}</span></div>
+<div class="tile"><span class="tile-label">Просмотры</span><span class="tile-value">{{ acc.total.views }}</span><span class="tile-sub">контакты {{ acc.total.contacts }} · просмотр {{ rub2(acc.total.view_cost) }}</span></div>
+<div class="tile"><span class="tile-label">Продано</span><span class="tile-value">{{ acc.total.pieces }} шт.</span><span class="tile-sub">выручка {{ acc.total.revenue|money }} · маржа {{ acc.total.margin|money }}</span></div>
+<div class="tile"><span class="tile-label">ДРР</span><span class="tile-value">{{ share(acc.total.drr) }}</span><span class="tile-sub">от маржи {{ share(acc.total.drr_margin) }}</span></div>
+</div>
+{% if acc.rows %}
+<div class="table-wrap"><table class="table table--plain table--econ">
+<thead><tr><th>Объявление</th><th class="num">Расходы</th><th class="num">Просмотры</th><th class="num">Контакты</th><th class="num">Цена просмотра (факт)</th><th class="num">Продано</th><th class="num">Выручка</th><th class="num">Маржа</th><th class="num">ДРР выручки</th><th class="num">ДРР маржи</th><th>Цена просмотра на Авито</th><th class="num">В день</th></tr></thead>
+<tbody>{% for r in acc.rows %}<tr>
+<td><div class="t-name"><a class="gname" href="https://www.avito.ru/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">{{ r.title or ("№%s" % r.avito_id) }}</a></div><span class="xs muted">{{ r.ad_id or "наш Id не известен" }}</span></td>
+<td class="num"><b class="strong">{{ r.spend|money }}</b>{% if r.promo %}<div class="xs muted">продвижение {{ r.promo|money }}</div>{% endif %}</td>
+<td class="num">{{ r.views }}</td><td class="num">{{ r.contacts }}</td><td class="num">{{ rub2(r.view_cost) }}</td>
+<td class="num">{% if r.pieces %}{{ r.pieces }} шт.{% else %}<span class="muted">—</span>{% endif %}</td>
+<td class="num">{% if r.pieces %}{{ r.revenue|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+<td class="num">{% if r.pieces %}{{ r.margin|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+<td class="num">{{ share(r.drr) }}</td><td class="num">{{ share(r.drr_margin) }}</td>
+<td>{% if r.bid %}<div>{% if r.bid.mode == "manual" %}своя {{ rub2(r.bid.bid) }}{% if r.bid.day_limit %}, лимит {{ r.bid.day_limit|money }}/день{% endif %}{% elif r.bid.mode == "auto" %}авто{% else %}{% if r.bid.bid is not none %}{{ rub2(r.bid.bid) }}{% else %}не продвигается{% endif %}{% endif %}</div>
+{% if r.bid.rec_bid %}<div class="xs">рекомендуемая {{ rub2(r.bid.rec_bid) }}</div>{% endif %}
+{% if r.bid.min_bid or r.bid.max_bid %}<div class="xs muted">от {{ rub2(r.bid.min_bid) }} до {{ rub2(r.bid.max_bid) }}</div>{% endif %}
+{% for o in r.bid.options %}<div class="xs muted">{{ rub2(o.bid) }}{% for k, v in o.info.items() %} · {{ k }}: {{ v }}{% endfor %}</div>{% endfor %}
+<div class="xs muted"><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · {{ r.bid.taken_at|dt_utc }}</div>
+{% else %}<span class="muted">—</span>{% endif %}</td>
+<td class="num">{% if r.per_day is not none %}{{ r.per_day|money }}{% else %}—{% endif %}{% if r.bid and r.bid.rec_per_day %}<div class="xs muted">по рекомендуемой ≈ {{ r.bid.rec_per_day|money }}</div>{% endif %}</td>
+</tr>{% endfor %}</tbody></table></div>
+{% if acc.count > acc.rows|length %}<p class="small muted" style="padding:0 var(--s-5)">Показаны первые {{ acc.rows|length }} из {{ acc.count }}.</p>{% endif %}
+{% else %}
+<div class="empty"><p>За период нет расходов и продаж по объявлениям{% if not acc.covered %}: расходы ещё не собраны{% endif %}.</p></div>
+{% endif %}
+{% endfor %}
+<div class="card-head"><div><h3 style="font-size:var(--fs-lg)">Без объявления</h3>
+<p class="small muted">Продажи, которые не связаны с объявлением через чат заказа: ручные, заказы без чата, аккаунты без фида.</p></div></div>
+<div class="tiles" style="padding:var(--s-4) var(--s-5)">
+<div class="tile"><span class="tile-label">Продаж</span><span class="tile-value">{{ data.none.count }}</span><span class="tile-sub">{{ data.none.pieces }} шт.</span></div>
+<div class="tile"><span class="tile-label">Выручка</span><span class="tile-value">{{ data.none.revenue|money }}</span><span class="tile-sub">маржа {{ data.none.margin|money }}</span></div>
+</div>
+<div class="card-foot"><p class="small muted">Как читать: «Расходы» — всё, что Авито взяло за объявление: размещение и продвижение. «Цена просмотра (факт)» — расходы, делённые на просмотры. «В день» — расходы за период, делённые на загруженные дни; «по рекомендуемой» — сколько стоили бы те же просмотры по рекомендованной цене. ДРР — расходы в процентах от выручки или маржи продаж объявления; прочерк — продаж или маржи нет. Цены просмотра читаются раз в сутки для объявлений с продвижением за последние 30 дней.</p></div>
+</section>
+{% endblock %}

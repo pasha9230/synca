@@ -57,7 +57,8 @@
 {% endcall %}{% endif %}
 {% if can("home") %}{% call sb_section("analytics", "Аналитика") %}
 <a class="sb-link{% if path.startswith('/analytics') %} is-active{% endif %}" href="/analytics">{{ icon("arrow-up") }}Продажи и воронка</a>
-{% if can("analytics") and has_right("money") %}<a class="sb-link{% if path.startswith('/economics') %} is-active{% endif %}" href="/economics">{{ icon("chart") }}Юнит-экономика</a>
+{% if can("analytics") and has_right("money") %}<a class="sb-link{% if path.startswith('/economics') and not path.startswith('/economics/ads') %} is-active{% endif %}" href="/economics">{{ icon("chart") }}Юнит-экономика</a>
+<a class="sb-link{% if path.startswith('/economics/ads') %} is-active{% endif %}" href="/economics/ads">{{ icon("chart") }}Аналитика рекламы</a>
 <a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>{% endif %}
 {% endcall %}{% endif %}
 {% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}

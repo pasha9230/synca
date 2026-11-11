@@ -13,7 +13,7 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import ad_stats, avito_report, avito_stock, catalog_archive, feed_now, price_push, catalog_probe, chat_deals, chats, mirror_feed, order_engine, users, store
+from . import ad_stats, ads_spend, avito_report, avito_stock, catalog_archive, feed_now, price_push, catalog_probe, chat_deals, chats, mirror_feed, order_engine, users, store
 from .candidates import evaluate
 from .catalog import parse_reference
 from .config import load_settings
@@ -332,6 +332,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ss.add_argument("--days", type=int, default=7, help="сколько последних дней обновлять (до 270; первый запуск удобно с 30)")
     ss.add_argument("--stats", action="store_true", help="собрать статистику, даже если сегодня уже собрана (без флага: раз в день, "
                     "остальные запуски обновляют только список объявлений)")
+    sp = sub.add_parser("ads-spend-collect", help="собрать расходы на рекламу и цены просмотра по объявлениям (только чтение из Авито)")
+    sp.add_argument("--db", required=True)
+    sp.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    sp.add_argument("--account", type=int, default=0, help="номер аккаунта; без него все аккаунты с фидом")
+    sp.add_argument("--days", type=int, default=ads_spend.DAYS_PER_RUN, help="сколько дней читать за запуск (запрос в минуту)")
+    sp.add_argument("--dry-run", action="store_true", help="в копию базы в памяти: показать формы ответов и числа, ничего не сохранять")
     al = sub.add_parser("alert", help="отправить сообщение в Telegram (для служб systemd при сбое)")
     al.add_argument("--db", required=True)
     al.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
@@ -2960,8 +2966,55 @@ def _cmd_avito_stats(args) -> int:
             store.set_state(conn, day_key, today.isoformat())
         print("аккаунт «%s»: объявлений %d, новых сопоставлений с нашими %d, строк статистики %s" % (
             account["name"], result["ads"], result["mapped"], result["days"] if stats else "— (сегодня уже собрана)"))
+        _collect_ads_spend(conn, client, account, today, daily=stats)
     if stats_runs:
         _collect_avito_reports(conn, box)                                # the cycle reads them every hour anyway
+    return 1 if failed else 0
+
+
+def _collect_ads_spend(conn, client, account, today, daily: bool, days_limit: int = ads_spend.DAYS_PER_RUN) -> bool:
+    """«Аналитика рекламы»: the spending of the days due and, daily, the prices of a view (read only). A failure is printed (Avito's ones are
+    kept for the page too); it never fails the statistics run (a new collection must not alert every night until its answers are known)."""
+    try:
+        result = ads_spend.collect(conn, client, account["id"], today, datetime.utcnow(), ads_spend.Pacer(time.monotonic, time.sleep),
+                                   daily=daily, days_limit=days_limit)
+    except Exception as err:            # noqa: BLE001 — the answers are not seen live yet: an odd one never stops the statistics run
+        conn.rollback()
+        print("аккаунт «%s»: расходы на рекламу не собраны (%s: %s)" % (account["name"], type(err).__name__, err), file=sys.stderr)
+        return False
+    for note in result["notes"]:
+        print("  форма ответа Авито %s" % note, file=sys.stderr)
+    if result["days"] or result["bids"]:
+        print("аккаунт «%s»: расходы на рекламу за дней %d (строк %d, не из списка объявлений %d), цен просмотра %d" % (
+            account["name"], result["days"], result["rows"], result["unknown"], result["bids"]))
+    return True
+
+
+def _cmd_ads_spend_collect(args) -> int:
+    """Read Avito's spending and prices of a view now (read only from Avito). --dry-run: into a copy of the base in memory, nothing kept."""
+    box = load_box(args.key_file)
+    if box is None:
+        raise ValueError("мастер-ключ недоступен (проверьте --key-file или TIRES_SECRET_KEY_FILE)")
+    conn = store.connect(args.db)
+    if args.dry_run:
+        copy = store.open_db(":memory:")
+        conn.backup(copy)
+        conn.close()
+        conn = copy
+    accounts = [connections.get_account(conn, args.account)] if args.account else connections.list_feed_accounts(conn)
+    failed = 0
+    for account in accounts:
+        if account is None:
+            raise ValueError("аккаунт №%d не найден" % args.account)
+        client_id = connections.get_secret(conn, box, "avito", account["id"], "client_id")
+        client_secret = connections.get_secret(conn, box, "avito", account["id"], "client_secret")
+        if not client_id or not client_secret:
+            print("аккаунт «%s»: ключи не заданы, пропущен" % account["name"])
+            continue
+        client = AvitoClient(client_id, client_secret, http=_http(), now=_epoch)
+        failed += not _collect_ads_spend(conn, client, account, date.today(), daily=True, days_limit=args.days)
+    if args.dry_run:
+        print("пробный запуск: в базу ничего не записано")
     return 1 if failed else 0
 
 
@@ -3137,6 +3190,8 @@ def main(argv=None) -> int:
             return _cmd_avito_status(args)
         if args.command == "avito-stats":
             return _cmd_avito_stats(args)
+        if args.command == "ads-spend-collect":
+            return _cmd_ads_spend_collect(args)
         if args.command == "catalog-probe":
             return _cmd_catalog_probe(args)
         if args.command == "mirror-go-live":
