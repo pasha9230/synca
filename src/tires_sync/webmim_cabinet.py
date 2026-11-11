@@ -437,10 +437,17 @@ def poll(conn, card_id: int, client_of: Callable[[], object], now: str, send: Op
 def _own_number(conn, card_id: int, number: str) -> bool:
     """The WebMIM number is this order's own: not borrowed with tyres «с ОТХ», not typed into another order too (as _targets)."""
     from . import oth_sale, webmim_match
-    if card_id in oth_sale.borrowed_ids(conn):
+    if card_id in oth_sale.borrowed_ids(conn) or card_id in _foreign(conn, SERVER):
         return False
     return all(other == card_id for other, typed in conn.execute("SELECT id, webmim_number FROM order_card WHERE webmim_number != ''")
                if webmim_match.own_number(typed) == number)
+
+
+def _foreign(conn, server: str) -> set:
+    """The orders whose typed number is of another customer's order in the snapshot (webmim_match.foreign_cards): the cabinet of the API user
+    lists that other order under the same number, its invoice and its sum are not theirs."""
+    from . import webmim_match
+    return webmim_match.foreign_cards(conn, webmim_match.snapshot(conn, server))
 
 
 # ---- hourly -----------------------------------------------------------------------------------------------------------------------------
@@ -450,7 +457,7 @@ def _targets(conn, server: str) -> Dict[str, int]:
     of two orders is left alone: a person sorts it). The key as after_save reads it (_typed): «5001/2» is no number of WebMIM's."""
     from . import oth_sale, webmim_match
     kinds = {s["id"]: s["kind"] for s in orders.list_stages(conn)}
-    elsewhere = webmim_match.made_elsewhere(conn, server) | oth_sale.borrowed_ids(conn)
+    elsewhere = webmim_match.made_elsewhere(conn, server) | oth_sale.borrowed_ids(conn) | _foreign(conn, server)
     seen: Dict[str, List[int]] = {}
     for card_id, number, transfer, stage in conn.execute(
             "SELECT id, webmim_number, transfer_number, stage_id FROM order_card WHERE webmim_number != ''"):

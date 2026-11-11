@@ -183,6 +183,8 @@ def _targets(conn, server: str, rows: Dict[str, dict]) -> Dict[str, dict]:
     by_number = {webmim_match.digits(o["number"]): o for o in rows.values() if webmim_match.digits(o["number"])}
     kinds = {s["id"]: s["kind"] for s in orders.list_stages(conn)}
     elsewhere = webmim_match.made_elsewhere(conn, server) | oth_sale.borrowed_ids(conn)
+    snap = {o["id"]: o for o in webmim_match.snapshot(conn, server)}
+    elsewhere |= webmim_match.foreign_cards(conn, list(snap.values()))   # the number of another customer's order: not theirs
     out: Dict[str, dict] = {}
     for card_id, webmim_id, number, transfer, stage in conn.execute(
             "SELECT id, webmim_id, webmim_number, transfer_number, stage_id FROM order_card WHERE webmim_id != '' OR webmim_number != ''"):
@@ -191,10 +193,13 @@ def _targets(conn, server: str, rows: Dict[str, dict]) -> Dict[str, dict]:
         order = webmim_match.paired({"webmim_id": webmim_id, "webmim_number": number}, by_id, by_number)
         if order is not None:
             out.setdefault(order["id"], {"order": order, "cards": [], "extras": []})["cards"].append((card_id, transfer, kinds.get(stage) == "open"))
-    for card_id, item_id, number, transfer, stage in conn.execute(
-            "SELECT e.order_id, e.item_id, e.webmim_number, e.transfer_number, c.stage_id FROM order_mim_extra e JOIN order_card c ON c.id = e.order_id "
-            "WHERE e.webmim_number != ''"):
+    for card_id, item_id, number, transfer, stage, created_at, goods_id in conn.execute(
+            "SELECT e.order_id, e.item_id, e.webmim_number, e.transfer_number, c.stage_id, c.created_at, i.goods_id FROM order_mim_extra e "
+            "JOIN order_card c ON c.id = e.order_id LEFT JOIN order_item i ON i.id = e.item_id WHERE e.webmim_number != ''"):
         order = by_number.get(webmim_match.digits(number))         # a typed number: never looked up among the ids (webmim_match.paired)
+        if order is not None and webmim_match.foreign({"created_at": created_at}, {str(goods_id)} if goods_id is not None else set(),
+                                                      snap.get(order["id"])):
+            continue                                               # another customer's order of the same number (webmim_match.foreign)
         if order is not None:
             out.setdefault(order["id"], {"order": order, "cards": [], "extras": []})["extras"].append((card_id, item_id, transfer, kinds.get(stage) == "open"))
     return {k: v for k, v in out.items() if len(v["cards"]) <= 1}

@@ -20,6 +20,7 @@
 {% else %}<p class="small text-ok">Позиции и количество совпадают с панелью.</p>{% endif %}{% endif %}
 {% elif w.test_order %}<p class="small" data-webmim-test-order>Тестовый заказ WebMIM №{{ c.webmim_number or c.webmim_id }}: создан кнопкой на другом сервере, с заказами выбранного сервера не сопоставляется.</p>
 {% elif w.borrowed %}<p class="small muted" data-webmim-borrowed>Номер {{ c.webmim_number }} взят с шинами с ОТХ из заказа, по которому они куплены: своего заказа в WebMIM у этого заказа нет.</p>
+{% elif w.foreign %}<p class="small muted" data-webmim-foreign>Заказ №{{ w.foreign.number or c.webmim_number }} учётке панели не виден (вероятно, оформлен под другим заказчиком). Сверка недоступна.</p>
 {% elif w.not_found %}<p class="small">Номера {{ c.webmim_number or c.webmim_id }} нет в снимке WebMIM этого сервера: заказ старше окна снимка или номер другой.</p>
 {% elif c.deal_kind == "stock" %}<p class="small muted">Сделка из наличия точки: заказа в WebMIM не ждём.</p>
 {% elif w.test %}<p class="small muted">Выбран тестовый сервер WebMIM: его заказы не наши, подсказок и сопоставления нет.</p>
