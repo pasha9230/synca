@@ -45,7 +45,7 @@ def test_the_cabinet_gives_the_transfer_number_to_the_record_only(tmp_path, monk
     orders.move_card(conn, cid, stage(conn, "oth"), MOVED, "o", changes={"cancel_reason": "отказ"})
     x = record(conn, cid)
     assert webmim_cabinet._targets(conn, "prod") == {number(cid): x}
-    assert webmim_cabinet._own_number(conn, x, number(cid)) and webmim_cabinet._typed(number(cid) + "О") == ""
+    assert webmim_cabinet._own_number(conn, x, number(cid)) and webmim_cabinet._typed(number(cid) + "О") == webmim_cabinet._typed(number(cid) + " О") == ""
     b = new_order(conn, qty=4)
     take(conn, b, now=LATER)
     assert webmim_cabinet._targets(conn, "prod") == {}                                   # a borrowed number: as before

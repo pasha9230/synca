@@ -29,7 +29,8 @@ SPLIT = True                        # never changed in production; the tests of 
 MARK = "oth_storage:%d"             # Х → {"order": A, "at", "by", "items": {A's item: Х's item}, "pieces", "was": {...}, "state", "to"}
 OF = "oth_stored:%d"                # A → Х, while A stands cancelled by the split (dropped when A gets the tyres back)
 REFUSED = "отказ клиента"           # orders.CANCEL_KINDS
-LETTER = "О"                        # the Cyrillic capital: «123О» is the number of the cancelled order of the client
+LETTER = " О"                       # a space and the Cyrillic capital (the owner 2026-11-11): «5367654 О», «26R-3568954 О» are the numbers of
+                                    # the cancelled order of the client; «123О» typed by hand earlier reads the same (refused_number)
 BACK_REASON = "другое: Возвращено в заказ №%d"
 HELD, TAKEN, BACK = "held", "taken", "back"
 REOPEN = "reopen"                   # only inside the transaction of untake: the record taken back stands on «На ОТХ» again (why_not_move)
@@ -38,7 +39,8 @@ _MARKED = re.compile(r"\d\s*[ОоOo]$")       # typed by hand too: a Latin «O»
 
 
 def refused_number(number) -> bool:
-    """«123О»: the WebMIM number of an order cancelled by the split — never the number «123» of the order that holds the tyres."""
+    """«123 О» (or «123О»): a WebMIM or transfer number of an order cancelled by the split — never the number «123» of the order that holds
+    the tyres."""
     return bool(_MARKED.search(str(number or "").strip()))
 
 
@@ -195,8 +197,8 @@ def split(conn, card: dict, oth_stage: dict, now: str, author: str) -> dict:
     conn.execute("INSERT OR IGNORE INTO webmim_create (order_id, server, state, first_at, started_at, author, webmim_id, result, updated_at) "
                  "SELECT ?, server, state, first_at, started_at, author, webmim_id, result, updated_at FROM webmim_create WHERE order_id = ? AND state = 'done'",
                  (x, a))                                               # the order of WebMIM the button made is the record's: its server, its day
-    conn.execute("UPDATE order_card SET webmim_id = '', webmim_number = ?, transfer_number = '', cancel_reason = ?, updated_at = ? WHERE id = ?",
-                 (with_letter(row["webmim_number"]), _reason(card.get("cancel_reason")), now, a))
+    conn.execute("UPDATE order_card SET webmim_id = '', webmim_number = ?, transfer_number = ?, cancel_reason = ?, updated_at = ? WHERE id = ?",
+                 (with_letter(row["webmim_number"]), with_letter(row["transfer_number"]), _reason(card.get("cancel_reason")), now, a))   # both stay with « О» (2026-11-11)
     edited = orders.LABELS["reserve_until"] + ": "
     for at, who, text, level in conn.execute("SELECT at, author, text, level FROM order_event WHERE order_id = ? AND kind = 'field' "
                                              "AND (text LIKE 'Резерв%' OR text LIKE ?) ORDER BY id", (a, edited + "%")).fetchall():
@@ -259,8 +261,9 @@ def restore(conn, a_id, now: str, author: str) -> int:
         raise orders.OrderError("У клиента с телефоном %s уже есть открытый заказ №%d: этот заказ не вернуть, работайте в том." % (
             a["client_phone"], busy["id"]))
     number = row["webmim_number"] or without_letter(a["webmim_number"])
+    transfer = row["transfer_number"] or without_letter(a["transfer_number"])
     conn.execute("UPDATE order_card SET webmim_id = ?, webmim_number = ?, webmim_status = ?, transfer_number = ?, cancel_reason = ?, updated_at = ? WHERE id = ?",
-                 (row["webmim_id"], number, row["webmim_status"] or a["webmim_status"], row["transfer_number"], "", now, a_id))
+                 (row["webmim_id"], number, row["webmim_status"] or a["webmim_status"], transfer, "", now, a_id))
     conn.execute("UPDATE order_card SET webmim_id = '', webmim_number = '', transfer_number = '', updated_at = ? WHERE id = ?", (now, x))
     for old, new in (mark.get("items") or {}).items():                 # the tyres taken from «На ОТХ» before the split: the order's again
         conn.execute("UPDATE order_item_oth SET item_id = ?, order_id = ? WHERE item_id = ?", (int(old), a_id, int(new)))
