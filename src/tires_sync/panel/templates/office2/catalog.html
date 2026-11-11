@@ -4,26 +4,22 @@
    office2/_catalog_table.html; the same fields, forms, ids and scripts as catalog.html (app.js: #items, #stage, #bulk, #bulk-price, #pv). #}
 {% from "_ui.html" import icon, season %}
 {% from "office2/_o2.html" import stud %}
-{% from "_catalog_filters.html" import filter_rows %}
+{% from "_catalog_filters.html" import mim_rows %}
 {% block title %}Каталог · Tires Sync{% endblock %}
 {% block page_class %} page--wide{% endblock %}
 {% block body_class %}o2 o2-catalog-page{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='office_catalog.css') }}">{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Каталог<span class="help-q" tabindex="0" data-tip="Все позиции поставщика и то, попадают ли они в фид. Здесь можно вручную добавить или снять отдельную позицию. Наценки и публикация брендов: «Настройки → Бренды и наценки», сопоставление моделей: «Сопоставления».">?</span></h1></div>
 <div class="actions">{% if can_post("feed_update_fetch") %}<form method="post" action="/feed/update/fetch" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary" title="Скачать выгрузку поставщика, показать изменения, обновить фид и запустить загрузку на Авито">{{ icon("refresh") }}Принудительная синхронизация</button></form>{% endif %}</div></header>
-{% if supplier_tabs %}<nav class="tabs o2-tabs">{% for t in supplier_tabs %}<a{% if t.on %} class="is-active"{% endif %} href="{{ t.url }}">{{ t.label }} <span class="badge badge--neutral">{{ t.count }}</span></a>{% endfor %}</nav>{% endif %}
+<div id="oc-tabs" data-oc-live>{% if supplier_tabs %}<nav class="tabs o2-tabs">{% for t in supplier_tabs %}<a{% if t.on %} class="is-active"{% endif %} href="{{ t.url }}">{{ t.label }} <span class="badge badge--neutral">{{ t.count }}</span></a>{% endfor %}</nav>{% endif %}</div>
 <section class="card o2-cat-filters">
-<form method="get" action="/catalog" class="filters o2-filters" data-autosubmit>
+<form method="get" action="/catalog" class="filters o2-filters oc-filters" data-oc>
 <input type="hidden" name="o" value="{{ sort }}">{% if descending %}<input type="hidden" name="r" value="1">{% endif %}{% if sup %}<input type="hidden" name="sup" value="{{ sup }}">{% endif %}{% if page_size != 100 %}<input type="hidden" name="n" value="{{ page_size }}">{% endif %}
-{% call filter_rows(pick, size_text, size_unknown, q, season, studs, "/catalog" ~ ("?sup=" ~ sup if sup else ""), recent=recent) %}
+{% call mim_rows(mim, brand_choices, size_text, size_unknown, q, season, studs, recent=recent) %}
 <div class="field o2-fsel"><span class="label">Статус</span><select class="select" name="st"><option value=""{% if status == "all" %} selected{% endif %}>Все</option><option value="feed"{% if status == "feed" %} selected{% endif %}>В фиде</option><option value="no"{% if status == "no" %} selected{% endif %}>Не в фиде</option><option value="nopair"{% if status == "nopair" %} selected{% endif %}>Нет пары</option><option value="problem"{% if status == "problem" %} selected{% endif %}>Проблемы</option><option value="gone"{% if status == "gone" %} selected{% endif %}>Нет у поставщика</option></select></div>
 {% if has_right("money") %}<div class="field"><span class="label">Цены</span><label class="check" title="Только позиции, у которых стоит своя цена хотя бы на одном аккаунте (применённая или в черновике), любой бренд и поставщик, в том числе ушедшие от поставщика"><input type="checkbox" name="own" value="1"{% if own_only %} checked{% endif %}> Ручные цены</label></div>{% endif %}
 {% if market_on %}<div class="field o2-fsel"><span class="label">Рынок</span><select class="select" name="mk"><option value="">Все</option><option value="over"{% if market_over %} selected{% endif %}>Дороже рынка</option></select></div>{% endif %}
-<div class="field"><span class="label">Бренды</span><details class="brand-pick" data-no-autosubmit><summary class="select">{% if chosen_brands %}{{ chosen_brands|length }} {{ plural(chosen_brands|length, "бренд", "бренда", "брендов") }}{% else %}Все{% endif %}{% if without_brands %} · кроме {{ without_brands|length }}{% endif %}</summary>
-<div class="brand-pick-body"><div class="row small muted"><span class="grow">Бренд</span><span>Показать</span><span>Кроме</span></div>
-{% for c in brand_choices %}<div class="row"><span class="grow">{{ c.label }} <span class="muted xs">{{ c.count }}</span></span><label class="check" title="Показать только отмеченные бренды"><input type="checkbox" name="b" value="{{ c.key }}"{% if c.key in chosen_brands %} checked{% endif %} aria-label="Показать {{ c.label }}"></label><label class="check" title="Не показывать этот бренд"><input type="checkbox" name="xb" value="{{ c.key }}"{% if c.key in without_brands %} checked{% endif %} aria-label="Кроме {{ c.label }}"></label></div>{% endfor %}
-<button class="btn btn--secondary btn--sm">Показать</button> <span class="muted xs">Только вид каталога: фид не меняется.</span></div></details></div>
 <noscript><button class="btn btn--secondary">Показать</button></noscript>
 {% endcall %}
 </form>
@@ -65,8 +61,8 @@
 <label class="field"><span class="label">Сколько (% не больше {{ bulk_pct_max }}, ₽ не больше {{ bulk_rub_max }})</span><input class="input input--num" name="value" form="bulk" inputmode="decimal" placeholder="5" autocomplete="off"></label>
 <fieldset class="field"><legend class="label">Аккаунты</legend><div class="row" style="gap:var(--s-3);flex-wrap:wrap">{% for a in feed_accounts %}<label><input type="checkbox" name="a" value="{{ a.id }}" form="bulk"{% if loop.first %} checked{% endif %}> {{ a.name }}</label>{% endfor %}</div><span class="hint">отметьте, где включить ту же цену</span></fieldset>
 <label class="row owin-check"><input type="checkbox" name="redo" value="1" form="bulk"><span>«От закупки»: изменить и позиции, у которых уже есть своя цена (иначе они не тронуты)</span></label>
-<label class="row owin-check"><input type="checkbox" name="all" value="1" form="bulk"><span>Все {{ total }} по фильтру, не только отмеченные (не больше {{ bulk_limit }})</span></label>
-<input type="hidden" name="filter" value="{{ filter_query }}" form="bulk"><input type="hidden" name="total" value="{{ total }}" form="bulk"><input type="hidden" name="fp" value="{{ filter_fp }}" form="bulk">
+<label class="row owin-check"><input type="checkbox" name="all" value="1" form="bulk"><span>Все <span id="oc-bulk-total" data-oc-live>{{ total }}</span> по фильтру, не только отмеченные (не больше {{ bulk_limit }})</span></label>
+<span id="oc-bulk-filter" data-oc-live><input type="hidden" name="filter" value="{{ filter_query }}" form="bulk"><input type="hidden" name="total" value="{{ total }}" form="bulk"><input type="hidden" name="fp" value="{{ filter_fp }}" form="bulk"></span>
 <p class="small muted">Сначала покажем «было → стало» по каждой позиции и аккаунту, оттуда — в черновик; на Авито ничего не изменится, пока вы не нажмёте «Применить». Ниже закупки или дальше 30 % от цены фида — нужно подтвердить ещё раз. Ушедшие от поставщика позиции считаются от последней известной закупки.</p>
 </div>
 <div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Отмена</button>
@@ -75,5 +71,6 @@
 </div></div>{% endif %}
 {% if wait %}{% include "_catalog_wait.html" %}{% endif %}
 {% if can_post("catalog_own_price_inline") %}<script src="{{ url_for('static', filename='own_price.js') }}"></script>{% endif %}
+<script src="{{ url_for('static', filename='office_catalog.js') }}" defer></script>
 <div class="modal-backdrop" id="pv"><div class="modal"><div class="modal-head"><h3>Предпросмотр объявления</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div><div class="modal-body" id="pvbody"></div><div class="modal-foot"><button type="button" class="btn btn--secondary" data-close-modal>Закрыть</button></div></div></div>
 {% endblock %}

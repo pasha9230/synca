@@ -33,3 +33,60 @@
 {{ caller() }}
 <a class="btn btn--secondary o2-reset" href="{{ reset }}">Сбросить</a></div>
 {%- endmacro %}
+{# The office's block of the filters as the catalog of MIM (office2/catalog.html; lane office-catalog-mim, the owner 2026-11-11; the
+   client's «Вид 2», _shop_filters2.html, the sample): «Ширина | Профиль | Диаметр» — three glued fields of ANY size, typed digits narrow
+   the list, a click or Tab takes a value, the chosen ones as chips with a cross in a column inside the field, the counter in the corner;
+   «Производитель» with «Только / Кроме»; «Разноширокие» (`mixed=1`: «Передняя ось», «Задняя ось», one value per field, empty = any);
+   the season, the studs, «Импортные / Отечественные», «В наличии от», «Цена от / до». No «Показать»: static/office_catalog.js asks
+   the rows anew a second after a change; without the script the button of <noscript> sends the form (a size typed «205 215» is read). #}
+{% from "office2/_o2.html" import winter_stud %}
+{% macro oc_multi(p) -%}
+<div class="oc-ms" data-oc-ms data-name="{{ p.key }}"{% if p.key == "d" %} data-prefix="R"{% endif %}>
+<span class="oc-ms-label" id="oc-{{ p.key }}-l">{{ p.label }}</span><b class="oc-ms-n" data-oc-n{% if not p.on %} hidden{% endif %}>{{ p.on|length }}</b>
+<div class="oc-ms-box"><ul class="oc-ms-chips" data-oc-chips>{% for v, url in p.chips %}<li class="oc-ms-chip"><input type="hidden" name="{{ p.key }}" value="{{ v }}"><span>{{ "R" if p.key == "d" }}{{ v }}</span><a class="oc-ms-x" href="{{ url }}" data-oc-x tabindex="-1" title="Убрать" aria-label="Убрать {{ p.label|lower }} {{ "R" if p.key == "d" }}{{ v }}">{{ icon("x") }}</a></li>{% endfor %}</ul>
+<input class="oc-ms-in" id="f-{{ p.key }}" name="{{ p.key }}" autocomplete="off" inputmode="numeric" maxlength="4" placeholder="{{ "" if p.on else "Все" }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="oc-{{ p.key }}-list" aria-labelledby="oc-{{ p.key }}-l">
+<ul class="oc-ms-list" id="oc-{{ p.key }}-list" role="listbox" aria-labelledby="oc-{{ p.key }}-l" hidden>{% for v in p.options %}<li role="option" data-v="{{ v }}"{% if v in p.on %} aria-selected="true"{% endif %}>{{ "R" if p.key == "d" }}{{ v }}</li>{% endfor %}</ul></div></div>
+{%- endmacro %}
+{% macro oc_one(a, k, label, value, options) -%}
+<div class="oc-ms oc-ms--one" data-oc-ms data-one data-name="{{ a }}{{ k }}"{% if k == "d" %} data-prefix="R"{% endif %}>
+<span class="oc-ms-label" id="oc-{{ a }}{{ k }}-l">{{ label }}</span>
+<div class="oc-ms-box"><input class="oc-ms-in" id="f-{{ a }}{{ k }}" name="{{ a }}{{ k }}" value="{{ value if value is not none else "" }}" autocomplete="off" inputmode="numeric" maxlength="4" placeholder="Любая" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="oc-{{ a }}{{ k }}-list" aria-labelledby="oc-{{ a }}{{ k }}-l">
+<ul class="oc-ms-list" id="oc-{{ a }}{{ k }}-list" role="listbox" aria-labelledby="oc-{{ a }}{{ k }}-l" hidden>{% for v in options %}<li role="option" data-v="{{ v }}"{% if v == value %} aria-selected="true"{% endif %}>{{ "R" if k == "d" }}{{ v }}</li>{% endfor %}</ul></div></div>
+{%- endmacro %}
+{% macro oc_brands(m, brand_choices) -%}
+<div class="oc-ms oc-ms--brand" data-oc-ms data-name="{{ "xb" if m.brand_mode == "x" else "b" }}" data-text>
+<span class="oc-ms-label" id="oc-b-l">Производитель</span><b class="oc-ms-n" data-oc-n{% if not m.brands %} hidden{% endif %}>{{ m.brands|length }}</b>
+<span class="oc-bm" role="group" aria-label="Как отбирать бренды"><label title="Показать только выбранные бренды"><input type="radio" name="bm" value=""{% if m.brand_mode != "x" %} checked{% endif %} data-oc-bm>Только</label><label title="Показать все, кроме выбранных"><input type="radio" name="bm" value="x"{% if m.brand_mode == "x" %} checked{% endif %} data-oc-bm>Кроме</label></span>
+<div class="oc-ms-box"><ul class="oc-ms-chips" data-oc-chips>{% for c in m.brands %}<li class="oc-ms-chip{% if c.name == "xb" %} oc-ms-chip--x{% endif %}"><input type="hidden" name="{{ c.name }}" value="{{ c.key }}"><span>{{ c.label }}</span><a class="oc-ms-x" href="{{ c.url }}" data-oc-x tabindex="-1" title="Убрать" aria-label="Убрать {{ c.label }}">{{ icon("x") }}</a></li>{% endfor %}</ul>
+<input class="oc-ms-in" id="f-b" autocomplete="off" maxlength="40" placeholder="{{ "" if m.brands else "Все бренды" }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="oc-b-list" aria-labelledby="oc-b-l">
+<ul class="oc-ms-list" id="oc-b-list" role="listbox" aria-labelledby="oc-b-l" hidden>{% for c in brand_choices %}<li role="option" data-v="{{ c.key }}" data-label="{{ c.label }}"{% if c.key in m.brands|map(attribute="key") %} aria-selected="true"{% endif %}>{{ c.label }} <span class="muted xs">{{ c.count }}</span></li>{% endfor %}</ul></div></div>
+{%- endmacro %}
+{% macro mim_rows(m, brand_choices, size_text, size_unknown, q, season, studs, recent=()) -%}
+{% if recent and not m.mixed %}<div class="o2-recent" aria-label="Недавние размеры"><span class="label">Недавние</span>{% for label, url in recent %}<a class="msel-chip o2-recent-chip" href="{{ url }}">{{ label }}</a>{% endfor %}</div>{% endif %}
+{% set opts = {} %}{% for p in m.pick2 %}{% set _ = opts.update({p.key: p.options}) %}{% endfor %}
+{% if not m.mixed %}<div class="oc-row"><div class="oc-glue" role="group" aria-label="Размер">{% for p in m.pick2 %}{{ oc_multi(p) }}{% endfor %}</div>{{ oc_brands(m, brand_choices) }}</div>
+{% else %}{% for a, label, vals in m.axes %}<div class="oc-row oc-axis"><span class="oc-axis-t">{{ label }}</span><div class="oc-glue" role="group" aria-label="{{ label }}">{% for k, l in (("w", "Ширина"), ("h", "Профиль"), ("d", "Диаметр")) %}{{ oc_one(a, k, l, vals[loop.index0], opts[k]) }}{% endfor %}</div></div>{% endfor %}
+<div class="oc-row">{{ oc_brands(m, brand_choices) }}</div>{% endif %}
+<div class="oc-row oc-row2">
+<label class="check oc-mixed"><input type="checkbox" name="mixed" value="1"{% if m.mixed %} checked{% endif %} data-oc-mixed>Разноширокие</label>
+<div class="seg" role="group" aria-label="Сезон">
+<label><input type="radio" name="s" value=""{% if not season %} checked{% endif %}>Все</label>
+<label title="Лето"><input type="radio" name="s" value="summer"{% if season == "summer" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span>Лето</label>
+<label title="Зима"><input type="radio" name="s" value="winter"{% if season == "winter" %} checked{% endif %}><span class="ico-snow">{{ icon("snow") }}</span>Зима</label>
+<label title="Всесезонные"><input type="radio" name="s" value="all"{% if season == "all" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span><span class="ico-snow">{{ icon("snow") }}</span>Всесезонные</label></div>
+<div class="seg" role="group" aria-label="Шипы">
+<label><input type="radio" name="t" value=""{% if not studs %} checked{% endif %}>Все</label>
+<label title="Зима, шипы"><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}>{{ winter_stud() }}Шипы</label>
+<label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div>
+<div class="seg" role="group" aria-label="Происхождение" title="По стране бренда из выгрузки: Россия — отечественные">
+<label><input type="radio" name="c" value=""{% if not m.origin %} checked{% endif %}>Все</label>
+{% for key, label in m.origins.items() %}<label><input type="radio" name="c" value="{{ key }}"{% if m.origin == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div>
+<label class="oc-num">В наличии от <input class="input input--num" name="sn" value="{{ m.stock_min or "" }}" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="1" data-oc-num> шт.</label>
+<span class="oc-num">Цена от <input class="input input--num" name="pf" value="{{ m.price_from if m.price_from is not none else "" }}" inputmode="numeric" maxlength="7" autocomplete="off" aria-label="Цена от, ₽" data-oc-num> до <input class="input input--num" name="pt" value="{{ m.price_to if m.price_to is not none else "" }}" inputmode="numeric" maxlength="7" autocomplete="off" aria-label="Цена до, ₽" data-oc-num> ₽</span>
+</div>
+<div class="o2-frow o2-frow--2 oc-row3">
+{% if not m.mixed %}<div class="field o2-fwide"><span class="label">Размеры</span><input class="input" name="size" value="{{ size_text }}" placeholder="205/55R16 225/45R18" title="Несколько размеров целиком через пробел">{% if size_unknown %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}</div>{% endif %}
+<div class="field o2-fwide"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ q }}" placeholder="Размер, название, артикул" title="Например: 205/55 R16, Ikon, часть названия или артикул"></div></div>
+{{ caller() }}
+<a class="btn btn--secondary o2-reset" href="{{ m.reset }}">Сбросить</a></div>
+{%- endmacro %}

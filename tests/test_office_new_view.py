@@ -187,10 +187,10 @@ def test_a_late_task_of_the_chat_shows_on_the_folded_button(w):
 def test_the_catalog_has_the_filters_in_rows_the_season_tags_and_the_bulk_panels(w):
     flag(w, "all")
     html = w["owner"].get("/catalog").get_data(as_text=True)
-    assert 'class="filters o2-filters" data-autosubmit' in html and html.count('class="o2-frow') == 2
-    for field in ('name="w"', 'name="size"', 'name="q"', 'name="s"', 'name="t"', 'name="st"', 'name="own"', 'name="b"', 'name="xb"'):
+    assert 'class="filters o2-filters oc-filters" data-oc' in html and "office_catalog.js" in html     # the block as MIM (2026-11-11)
+    for field in ('name="w"', 'name="size"', 'name="q"', 'name="s"', 'name="t"', 'name="st"', 'name="own"', 'data-name="b"', 'name="bm" value="x"'):
         assert field in html, field
-    assert 'class="ico-sun"' in html and 'class="ico-snow"' in html and "o2-stud" in html          # sun, snowflake, the stud
+    assert 'class="ico-sun"' in html and 'class="ico-snow"' in html and "o2-wstud" in html         # sun, snowflake, winter with studs
     assert 'class="o2-season o2-season--winter"' in html
     assert 'id="items" data-url=' in html and 'id="stage"' in html and 'id="bulk"' in html and 'id="bulk-price"' in html
     assert 'class="bulkbar o2-bulkbar"' in html and "Своя цена выбранным…" in html and 'formaction="/catalog/own-price/bulk"' in html
