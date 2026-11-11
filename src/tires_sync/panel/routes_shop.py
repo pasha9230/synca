@@ -10,7 +10,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlsplit
 
-from flask import Response, abort, current_app, flash, make_response, redirect, render_template, request
+from flask import Response, abort, current_app, flash, g, make_response, redirect, render_template, request
 
 from .. import order_manager, order_points, orders, oth_stock, photo_cache, shop_cart, store, tochki_feed
 from ..settings_store import active_settings
@@ -86,11 +86,12 @@ def _goods_of(view, token: str):
     return found[1].get(token)
 
 
-def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, new: bool = False) -> dict:
+def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, new: bool = False, fview: int = 1) -> dict:
     """What the catalog page of the client `login` shows (the client's own /shop, and the owner's preview «глазами клиента» at `base`):
     the same rows, filters and prices. `photos=False`: no photo links (the owner's preview; /shop/photo is the client's own). `cart`: each
     row gets `key` (the opaque token of «В корзину»), the client's own page only. `new` («Новый вид» of the client): the width, the
-    height and the radius by several values, the wider search, the chips of the filters on, the filters folded (`sf=0`)."""
+    height and the radius by several values, the wider search, the chips of the filters on, the filters folded (`sf=0`). `fview` 2: the
+    block of the filters «Вид 2» (the glued lists, the brands, the mixed-width sets: _view2)."""
     if not login:
         raise ValueError("the catalog of nobody")                 # never the person signed in by default
     items = _visible(app, conn, _offers(app, conn).offers.values(), login)
@@ -128,6 +129,40 @@ def catalog(app, conn, login: str, base: str, photos: bool, cart: bool = False, 
                recent=[], hidden=[] if both else ["wh"], columns=cc.columns_of(both), wh_both=both)
     if new:
         out.update(_new_catalog(base, f, here, items))
+    out.update(fview=fview, mixed=None)
+    if fview == 2:
+        out.update(_view2(app, conn, login, base, f, here, items, shots, cart))
+    return out
+
+
+def _view2(app, conn, login: str, base: str, f, here: list, items, shots, cart: bool) -> dict:
+    """«Вид 2» of the block of the filters (the owner 2026-11-09…10): the three glued lists of any size, «Производитель», the
+    mixed-width sets. With «Подбор разношироких шин» (`mixed=1`) the rows are the sets (a front and a rear tyre of one model, 2 of
+    each by default), then the tyres of each axis in no set; no pages."""
+    out = dict(pick2=cc.size_pick2(base, here, {"w": f.widths, "h": f.heights, "d": f.diameters}, cc.size_values(items)),
+               brand_pick=cc.brand_pick(base, here, items, f.brands), mixed=None, any_sizes=cc.ANY_SIZES)
+    if request.args.get("mixed") != "1":
+        return out
+    axes = {p: cc.axis_of(request.args, p) for p, _ in cc.AXES}
+    out.update(axes=[(p, label, axes[p]) for p, label in cc.AXES], recent=[], rows=[], pager={}, pages=1, page=1)
+
+    def line(i):
+        r = cc.row(i, "/shop/photo/%s" % cc.photo_token(app.secret_key, i.offer.goods_id) if shots and shots.ready(i.offer) else None,
+                   qty=cc.QTY_AXIS)
+        if cart:
+            r.update(key=cc.photo_token(app.secret_key, i.offer.goods_id), in_cart=have.get(i.offer.goods_id, 0))
+        return r
+    have = shop_cart.cart(conn, login) if cart else {}
+    if not any(v is not None for a in axes.values() for v in a):
+        out.update(mixed={"asked": False, "kits": [], "front": [], "rear": [], "more": False, "only_more": False},
+                   total=0)
+        return out
+    sets = cc.mixed_sets(items, f, axes["f"], axes["r"])
+    cut = cc.KITS_MAX
+    out.update(total=len(sets["kits"][:cut]), mixed={
+        "asked": True, "kits": [(line(a), line(b)) for a, b in sets["kits"][:cut]], "front": [line(i) for i in sets["front"][:cut]],
+        "rear": [line(i) for i in sets["rear"][:cut]], "more": len(sets["kits"]) > cut,
+        "only_more": any(len(sets[k]) > cut for k in ("front", "rear"))})
     return out
 
 
@@ -254,12 +289,22 @@ def register(app) -> None:
     @app.route("/shop")
     def shop_page():
         conn, login = get_conn(), current_user()["login"]
-        values = catalog(app, conn, login, "/shop", photos=True, cart=True, new=ui_new())
+        fview = cc.filters_view(conn, login)
+        values = catalog(app, conn, login, "/shop", photos=True, cart=True, new=ui_new(), fview=fview)
+        if fview == 2:
+            g.shop_script = True                    # «Вид 2» updates the rows by itself: its own script of /static (the CSP lets only it)
         f = values["f"]                             # «Недавние» and «Колонки» of the client's own page only (never the owner's preview)
         recent = cc.remember_sizes(conn, login, cc.searched_sizes(f.widths, f.heights, f.diameters, f.sizes), now().isoformat(timespec="seconds"))
         here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS]
-        values.update(recent=cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login) + ([] if values["wh_both"] else ["wh"]))
+        values.update(recent=[] if values.get("mixed") is not None else cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login) + ([] if values["wh_both"] else ["wh"]))
         return _page("shop.html", conn, login, **values)
+
+    @app.route("/shop/filters-view", methods=["POST"])
+    def shop_filters_view():
+        """«Вид 1 / Вид 2» of the block of the filters: kept for the client (user_pref shop.fview); back to the catalog page it came from."""
+        conn, login = get_conn(), current_user()["login"]
+        cc.save_filters_view(conn, login, request.form.get("fv", ""), now().isoformat(timespec="seconds"))
+        return redirect(_back_to_catalog() or "/shop")
 
     @app.route("/shop/columns", methods=["POST"])
     def shop_columns():

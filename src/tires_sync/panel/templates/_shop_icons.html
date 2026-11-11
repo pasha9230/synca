@@ -1,0 +1,25 @@
+{# The client's own icons (/shop, the owner 2026-11-10; drawn here, in the look of the panel, nothing of another's catalog): the season
+   and the studs of a row with the word in the tip and for a screen reader, the cart button of a row, the arrow of the sort. #}
+{% from "_ui.html" import icon %}
+{% macro stud_icon() -%}
+<svg class="i shop-ico-stud" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2v20M2.2 7l15.6 10M2.2 17L17.8 7"/><path class="shop-spike" d="M18 11.5l4.5 9h-9z"/></svg>
+{%- endmacro %}
+{% macro season_icons(r) -%}
+<span class="shop-ico-season">{%- if r.season == "Лето" -%}<span class="shop-ico shop-ico--sun" title="Лето">{{ icon("sun") }}</span>
+{%- elif r.season == "Всесезонные" -%}<span class="shop-ico shop-ico--sun" title="Всесезонные">{{ icon("sun") }}</span><span class="shop-ico shop-ico--snow" title="Всесезонные">{{ icon("snow") }}</span>
+{%- elif r.season == "Зима" and not r.studs -%}<span class="shop-ico shop-ico--snow" title="Зима, без шипов">{{ icon("snow") }}</span>
+{%- elif not r.season and not r.studs %}—{% endif -%}
+{%- if r.studs %}<span class="shop-ico shop-ico--stud" title="{{ r.season ~ ', ' if r.season }}шипы">{{ stud_icon() }}</span>{% endif -%}
+{%- if r.season or r.studs %}<span class="sr-only">{{ r.season }}{% if r.studs %}{{ " · " if r.season }}шипы{% endif %}</span>{% endif -%}</span>
+{%- endmacro %}
+{% macro cart_button(r) -%}
+<button class="btn btn--primary btn--sm shop-buy-btn" title="{{ 'Ещё в корзину' if r.in_cart else 'В корзину' }}">{{ icon("cart") }}<span class="shop-buy-t">{{ "Ещё" if r.in_cart else "В корзину" }}</span></button>
+{%- endmacro %}
+{% macro sort_arrow(f, key) -%}
+{%- if f.sort == key %} {{ icon("arrow-down" if f.descending else "arrow-up", "shop-sort-i") }}<span class="sr-only">{{ "по убыванию" if f.descending else "по возрастанию" }}</span>{% endif -%}
+{%- endmacro %}
+{% macro view_seg(view, view_links, cls="") -%}
+<div class="shop-seg shop-seg--ico {{ cls }}" role="group" aria-label="Вид"><a href="{{ view_links.table }}" title="Таблица"{% if view != "tiles" %} class="is-active" aria-current="true"{% endif %}>{{ icon("list") }}<span class="sr-only">Таблица</span></a><a href="{{ view_links.tiles }}" title="Плитка"{% if view == "tiles" %} class="is-active" aria-current="true"{% endif %}>{{ icon("grid") }}<span class="sr-only">Плитка</span></a></div>
+{%- endmacro %}
+{# «Вид 1 / Вид 2» of the block (the owner 2026-11-10): kept for the client (user_pref shop.fview, /shop/filters-view); the client's own page only #}
+{% macro fview_toggle() %}{% if cart %}<form method="post" action="/shop/filters-view" class="shop-fview"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><span class="sr-only">Вид блока подбора</span>{% for n in (1, 2) %}<button name="fv" value="{{ n }}"{% if (fview or 1) == n %} class="is-active" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>Вид {{ n }}</button>{% endfor %}</form>{% endif %}{% endmacro %}

@@ -39,7 +39,7 @@ def test_a_row_in_the_cart_says_so(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
     add(client, keys(page(client))[0], qty="4")
     html = page(client)
-    assert "в корзине: 4 шт." in html and ">Ещё</button>" in html
+    assert "в корзине: 4 шт." in html and ">Ещё</span></button>" in html                  # the cart button with its icon (2026-11-10)
 
 
 def test_the_profile_keeps_the_name_the_phone_and_the_address_and_the_checkout_offers_them(tmp_path):

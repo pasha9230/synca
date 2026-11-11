@@ -339,6 +339,10 @@ _MORE_TEXTS = {
                                    else "Шины снова в продаже: заказ №%s снова на ОТХ (не возвращаем)" % d.get("order", "?")),
     "oth_sold_early": lambda d: "Продано до согласования возврата: заказ №%s, метка «На возврат» снята с %s шт." % (
         d.get("order", "?"), sum(int(v) for v in (d.get("items") or {}).values()) or "?"),
+    "oth_issued_early": lambda d: "Заказ выдан, возврат не нужен: заказ №%s, метка «На возврат» снята с %s шт." % (
+        d.get("order", "?"), sum(int(v) for v in (d.get("items") or {}).values()) or "?"),
+    "oth_marks_back": lambda d: "Метка «На возврат» возвращена: заказ №%s, %s шт." % (
+        d.get("order", "?"), sum(int(v) for v in (d.get("items") or {}).values()) or "?"),
     "oth_return_amount": lambda d: "Возврат поставщику: заказ №%s, сумма возврата %s ₽ — закупка шин" % (d.get("order", "?"), d.get("amount", "?")),
     "stage_off_board": lambda d: "Этап «%s» убран с доски: его заказы — в «Списке», в поиске и в фильтре «Этап»" % (d.get("name") or d.get("stage", "?")),
     "client_own_name": lambda d: "Клиент %s сменил своё имя: %s → %s" % (_q(d.get("login")), _q(d.get("from") or "—"), _q(d.get("to") or "—")),

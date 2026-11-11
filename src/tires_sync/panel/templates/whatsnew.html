@@ -1,7 +1,7 @@
 {# «Что нового» (routes_whatsnew, the owner 2026-11-02): the updates newest first, the items of the viewer's role only; the owner and the
    partner see all with the roles each is shown to. The client's frame for a client, the point's phone sections for a point. #}
 {% extends "shop_base.html" if client else "base.html" %}
-{% block viewport %}{% if point %}width=device-width, initial-scale=1{% else %}width=1280{% endif %}{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
 {% block body_class %}{% if point %}pt-ui pt-whatsnew-page{% endif %}{% endblock %}
 {% block head %}{% if point %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block title %}Что нового{% if not client %} · Tires Sync{% endif %}{% endblock %}

@@ -216,7 +216,7 @@ def test_a_merge_keeps_the_kind_and_the_text_of_the_tasks(tmp_path):
 
 def test_the_point_gets_the_page_for_a_phone_and_the_office_the_wide_one(tmp_path):
     """The lead 2026-10-31: the point works from a phone — /tasks is device-width, one column, big «Выполнено», «Задачи» in its bottom
-    sections with the counter; the office keeps width=1280 and the table."""
+    sections with the counter; the office keeps the table (its phone: office-mobile.css shows the rows as cards, the owner 2026-11-10)."""
     app, client, tok, conn, alpha, beta = setup(tmp_path)
     gamma = manager(app, conn, alpha)
     new(gamma, title="Себе", date="2026-10-23", time="13:00")                                # due today: counted
@@ -226,7 +226,8 @@ def test_the_point_gets_the_page_for_a_phone_and_the_office_the_wide_one(tmp_pat
     nav = page[page.index("data-point-nav"):].split("</nav>")[0]
     assert 'href="/tasks" class="is-active"' in nav and "<b>1</b>" in nav
     office = client.get("/tasks").get_data(as_text=True)
-    assert '<meta name="viewport" content="width=1280">' in office and 'class="table"' in office and "pt-tasks-page" not in office
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in office and 'class="table"' in office and "pt-tasks-page" not in office
+    assert "data-point-nav" not in office and "mnav-btn" in office
 
 
 def test_the_review_tails_whom_to_call_a_points_task_of_another_point_the_deleted_order_and_the_journal(tmp_path):
