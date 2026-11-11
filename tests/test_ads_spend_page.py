@@ -25,6 +25,8 @@ def app_with_data(tmp_path):
     conn.execute("INSERT INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (1, 4242, 'G1', 'Nokian Hakka 205/55 R16', '2026-11-11')")
     conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, views, contacts) VALUES (1, 4242, '2026-11-09', 1234.5, 500, 7)")
     conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day) VALUES (1, 0, '2026-11-09')")
+    conn.execute("INSERT INTO ad_bid (account_id, avito_id, taken_at, mode, bid, day_limit, rec_bid, min_bid, max_bid, options) "
+                 "VALUES (1, 4242, '2026-11-11T01:20:00', 'manual', 3.5, 300, 5, 1, 30, '[{\"bid\": 9.0, \"info\": {\"maxForecast\": 20}}]')")
     conn.commit()
     return app, conn
 
@@ -46,6 +48,7 @@ def test_the_owner_sees_the_spending_the_dash_and_the_menu_item(tmp_path):
     assert "Расходы загружены за 1 из 7 дн." in page and "2,47&nbsp;₽" in page            # 1234.5 / 500 views
     assert "с 2026-11-04 по 2026-11-10" in page.lower() and 'href="/economics/ads"' in page
     assert "Без объявления" in page
+    assert "своя 3,50&nbsp;₽" in page and "рекомендуемая 5,00&nbsp;₽" in page and "maxForecast: 20" in page and "cpxpromo/4242" in page
     for query in ("?p=30&s=drr", "?p=90&s=drr_margin", "?p=13&s=bad", ""):
         assert owner.get("/economics/ads" + query).status_code == 200
 

@@ -38,7 +38,7 @@
 {% if r.bid.rec_bid %}<div class="xs">рекомендуемая {{ rub2(r.bid.rec_bid) }}</div>{% endif %}
 {% if r.bid.min_bid or r.bid.max_bid %}<div class="xs muted">от {{ rub2(r.bid.min_bid) }} до {{ rub2(r.bid.max_bid) }}</div>{% endif %}
 {% for o in r.bid.options %}<div class="xs muted">{{ rub2(o.bid) }}{% for k, v in o.info.items() %} · {{ k }}: {{ v }}{% endfor %}</div>{% endfor %}
-<div class="xs muted"><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · {{ r.bid.taken_at[:10] }}</div>
+<div class="xs muted"><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · {{ r.bid.taken_at|dt_utc }}</div>
 {% else %}<span class="muted">—</span>{% endif %}</td>
 <td class="num">{% if r.per_day is not none %}{{ r.per_day|money }}{% else %}—{% endif %}{% if r.bid and r.bid.rec_per_day %}<div class="xs muted">по рекомендуемой ≈ {{ r.bid.rec_per_day|money }}</div>{% endif %}</td>
 </tr>{% endfor %}</tbody></table></div>

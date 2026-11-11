@@ -2997,7 +2997,7 @@ def _cmd_ads_spend_collect(args) -> int:
         raise ValueError("мастер-ключ недоступен (проверьте --key-file или TIRES_SECRET_KEY_FILE)")
     conn = store.connect(args.db)
     if args.dry_run:
-        copy = sqlite3.connect(":memory:")
+        copy = store.open_db(":memory:")
         conn.backup(copy)
         conn.close()
         conn = copy
