@@ -1369,7 +1369,7 @@ def _google_sheet(conn, key_file) -> None:
         print("предупреждение: Google-таблица не отправлена (%s)" % type(err).__name__, file=sys.stderr)
 
 
-def _placed_sender(conn, box):
+def _placed_sender(conn, box, who: str = "почасовое чтение WebMIM"):
     """send(order) for webmim_cabinet: the messages «заказ оформлен» that waited for the transfer number (order_placed.send_waiting) through
     the bot's channels; None without the key (they keep waiting)."""
     if box is None:
@@ -1382,7 +1382,7 @@ def _placed_sender(conn, box):
             vk = vk_send.sender_for(conn, box, http=_http())
         except Exception:      # noqa: BLE001  the point's message waits
             vk = None
-        return order_placed.send_waiting(conn, card_id, now, "почасовое чтение WebMIM", _chat_deliver(conn, box, now), vk)
+        return order_placed.send_waiting(conn, card_id, now, who, _chat_deliver(conn, box, now), vk)
     return send
 
 
@@ -2713,6 +2713,21 @@ def _critical_look(conn, box, now: str) -> None:
         print("предупреждение: критичные сбои по заказам не переданы (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
+def _mim_retry_look(conn, box, now: str) -> None:
+    """Every minute with the chats: the repeats of «№ Счета» of MIM's cabinet whose time has come (webmim_cabinet.retry_due, the owner
+    2026-11-10: ~2, ~5, ~15 minutes after a read refused for the session limit). No login when nothing is due. In its own guard, as
+    _handoff_look: a failure here is a warning, never a failed reading of the chats."""
+    try:
+        from . import webmim_cabinet, webmim_match
+        done = webmim_cabinet.retry_due(conn, lambda: webmim_match.client_for(conn, box, _http(), webmim_cabinet.SERVER), now,
+                                        _placed_sender(conn, box, "повтор чтения кабинета MIM"))
+        if done["asked"]:
+            print("кабинет MIM, повтор: заказов %d, вписано %d, без повторов дальше %d" % (done["asked"], done["written"], done["gave_up"]))
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: повтор чтения кабинета MIM не выполнен (%s)" % type(err).__name__, file=sys.stderr)
+
+
 def _inquiry_look(conn, box, now: str) -> None:
     """Every minute with the chats: the statuses of the inquiries (three days to «отказ»), the start of «Срочно ответить», and the safety
     net of the points in the panel (an alert nobody opened in 15 working minutes goes to the owner). In its own guard, as _handoff_look."""
@@ -2815,6 +2830,7 @@ def _chats_sync_locked(conn, box, args, now) -> int:
     _handoff_look(conn, box, now)
     _inquiry_look(conn, box, now)
     _critical_look(conn, box, now)
+    _mim_retry_look(conn, box, now)
     if full:
         chats.clean_old(conn, now)
     print("сделок создано %d, чатов привязано %d, телефонов записано %d, имён из чата %d" % (made["created"], made["linked"], made["phones"], made.get("names", 0)))

@@ -173,7 +173,7 @@ def test_undo_from_the_new_workplace(w):
     flag(w["conn"], "all")
     conn, ids, pt = w["conn"], w["ids"], w["point"]
     _tok, page = press(pt, ids["moving"], "arrived")
-    assert 'data-undo="%d"' % ids["moving"] in page and 'href="#p2-undo"' in page
+    assert 'data-undo-card="%d"' % ids["moving"] in page and 'href="#p2-undo"' not in page    # in the card, no list (the owner 2026-11-10)
     r = post(pt, "/my-point/%d/undo" % ids["moving"], "tok")
     assert r.status_code == 302
     assert orders.get_card(conn, ids["moving"])["stage"]["code"] == "moving"

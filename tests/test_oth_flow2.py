@@ -440,7 +440,8 @@ def test_a_position_keeps_the_stage_leaves_the_sale_has_the_label_and_the_task(t
     now = orders.get_card(conn, cid)
     assert now["stage"]["code"] == "oth" and order_oth.return_plan(conn, cid) is None
     assert order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])["qty"] == 3
-    assert oth_stock.pieces(conn, manual=False) == {"1": 1, "2": 2}                        # off sale as «Ожидает согласование возврата» is (the owner 2026-11-04)
+    assert oth_stock.pieces(conn, manual=False) == {"1": 1, "2": 2}  # the owner 2026-11-10 (later): a mark «На возврат» is sold by the point only, not on Avito
+    assert [(r["qty"], r["left"], r["marked_qty"]) for r in order_oth.stock(conn)["stock"] if r["item_id"] == item] == [(4, 1, 3)]
     assert [r["qty"] for r in order_oth.stock(conn)["returned"] if r["item_id"] == item] == [3]
     [task] = open_tasks(conn, cid)
     assert task["kind"] == "return" and task["assignee"] == "ivan" and "Nokian 205/55 R16, 3 шт." in task["note"]
@@ -777,7 +778,8 @@ def test_the_task_of_the_seventh_day_is_due_in_two_working_days(tmp_path):
 
 # ---- 6. the task closes by itself on any way out ---------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("code, column", [("at_point", "cancelled_at"), ("done", "done_at"), ("return", "done_at")])
+# «Выполнено» with no agreement: sold before it, nothing was agreed — cancelled (the owner 2026-11-10; was done)
+@pytest.mark.parametrize("code, column", [("at_point", "cancelled_at"), ("done", "cancelled_at"), ("return", "done_at")])
 def test_any_manual_move_out_closes_the_task(tmp_path, code, column):
     conn, cid = _moved_on_day7(tmp_path)
     assert open_tasks(conn, cid)
@@ -796,10 +798,12 @@ def test_the_way_out_after_a_move_through_the_panel(tmp_path):
     assert [e for e in orders.list_events(conn, cid) if e["text"].startswith("Задача отменена: Вернуть")]
 
 
-def test_issued_still_closes_it_as_done(tmp_path):
+def test_issued_before_the_agreement_cancels_it(tmp_path):
+    """«Выдали» is «Выполнено» with no agreement: nothing was agreed, the task is cancelled (the owner 2026-11-10; was done)."""
     conn, cid = _moved_on_day7(tmp_path)
     assert order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")[2]
-    assert conn.execute("SELECT done_at FROM callback_task WHERE order_id = ?", (cid,)).fetchone()[0] == "2026-10-26T13:00:00"
+    assert conn.execute("SELECT done_at, cancelled_at FROM callback_task WHERE order_id = ?", (cid,)).fetchone() == (None, "2026-10-26T13:00:00")
+    assert any(e["text"].endswith("продано до согласования возврата") for e in orders.list_events(conn, cid))
 
 
 # ---- 7. the timer: extra ticks are harmless, windows hold ------------------------------------------------------------------------------

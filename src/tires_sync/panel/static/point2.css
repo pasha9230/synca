@@ -243,3 +243,16 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .mp-refuse-why legend{font-weight:600;padding:0 4px}
 .mp-refuse-why label{display:flex;align-items:center;gap:6px;min-height:32px}
 .mp-refuse-why input[type=text]{width:100%;min-height:36px;box-sizing:border-box}
+/* «Не приехал» (the owner 2026-11-10): the undo of «Приехал» is a quiet grey text under the order, not a button beside «Выдал»/«ОТКАЗ» */
+.p2w .mp-undo{margin-top:4px}
+.p2w .mp-undo-quiet{background:none;border:0;padding:2px 0;height:auto;min-height:0;color:var(--p2-text-3);font:inherit;font-size:12px;text-decoration:underline;cursor:pointer}
+.p2w .mp-undo-quiet:hover{color:var(--p2-text-2)}
+/* «Включить уведомления» in the head beside «Оповещения», its state a small line under the head, none when empty (the owner 2026-11-10) */
+.p2w .p2-notify-on{white-space:nowrap}
+.p2w .p2-notify-state{margin:-8px 0 12px;font-size:12px}
+.p2w .p2-notify-state:empty{display:none}
+@media (max-width: 760px){
+  .p2-head:has(.p2-notify-on:not([hidden])){flex-wrap:wrap}
+  .p2-head-acts:has(.p2-notify-on:not([hidden])){flex-wrap:wrap}
+  .p2w .p2-notify-on{font-size:13px}
+}

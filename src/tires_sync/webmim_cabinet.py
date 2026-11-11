@@ -12,7 +12,9 @@ Where it is read (GETs only; the session is closed by the client's close(): sess
   stops the asking until the person presses «Проверить ещё раз» (the owner 2026-11-10);
 - hourly (webmim_match.run → safe_hourly): the open orders without a number, the session of the snapshot, one login a run;
 - a WebMIM number typed by a person in the order window (after_save, the owner 2026-11-09: the partner places orders by hand in the
-  cabinet): within that save, one quick login and read, its logout; the save never fails for it.
+  cabinet): within that save, one quick login and read, its logout; the save never fails for it;
+- the repeats (retry_due, every minute with the chats, the owner 2026-11-10): one of the above refused for the session limit, a 429 or
+  a timeout — the order is read again about 2, 5 and 15 minutes after that failure, then only hourly (a grey record once).
 The live server only: an invoice of the test server is never ours (as webmim_invoice.after_place). No API user (an empty login): off,
 everything as before. A list the login does not see: a grey record of the order, everything as before.
 
@@ -38,6 +40,8 @@ FRESH = 60                         # seconds: an answer older than this is never
 GAP = 4                            # seconds: the window asks the cabinet at most once in so many (every order and tab together)
 LAST = "webmim_cabinet_last"       # app_state: {"at": when the window asked last}
 SEEN = "webmim_cabinet_seen:%d"    # app_state: the last answer for the window of an order (another tab is shown it, not asked again)
+RETRY = "webmim_cabinet_retry:%d"  # app_state: {"since": the refused read, "tries": repeats made, "number": WebMIM's, "done": no more}
+RETRY_AFTER = (120, 300, 900)      # seconds after the refused read: the three repeats (the owner 2026-11-10: ~2, ~5, ~15 minutes)
 AUTHOR = webmim_invoice.AUTHOR
 
 Send = Callable[[int], List[str]]  # (order) → the lines of order_placed.send_waiting with the senders of the caller
@@ -186,6 +190,26 @@ def note(conn, card_id: int, text: str, now: str) -> None:
     conn.commit()
 
 
+def busy_cabinet(err: Exception) -> bool:
+    """The cabinet was busy or slow, not wrong: the session limit, a 429, a timeout or the network. A new ask soon may get in."""
+    if isinstance(err, OSError):
+        return True
+    text = str(err)
+    return isinstance(err, webmim_orders.OrdersError) and (err.status == 429 or "код 429" in text or "лимит одновременных сессий" in text)
+
+
+def failed(conn, card_id: int, err: Exception, now: str) -> None:
+    """A failed read: the grey record once (note); the cabinet busy — the repeats of the order are planned (once: never anew after
+    the third). Commits."""
+    note(conn, card_id, _why(err), now)
+    if not busy_cabinet(err):
+        return
+    number = _typed(orders._row(conn, card_id)["webmim_number"])
+    if number and not _state(conn, RETRY % card_id):
+        _put(conn, RETRY % card_id, {"since": now, "tries": 0, "number": number})
+        conn.commit()
+
+
 # ---- right after the press -------------------------------------------------------------------------------------------------------------
 
 def after_place(conn, card_id: int, client, now: str, server: str) -> str:
@@ -200,7 +224,7 @@ def after_place(conn, card_id: int, client, now: str, server: str) -> str:
     try:
         row = _find(client, number, quick=True)
     except (OSError, webmim_orders.OrdersError) as err:
-        note(conn, card_id, _why(err), now)
+        failed(conn, card_id, err, now)
         return "failed"
     seen = info(row) if row is not None else None
     if seen is None or not seen["invoice"]:
@@ -273,7 +297,7 @@ def after_save(conn, card_id: int, client_of: Callable[[], object], now: str, se
         with client:
             row = _find(client, number, quick=True)
     except (OSError, webmim_orders.OrdersError) as err:
-        note(conn, card_id, _why(err), now)
+        failed(conn, card_id, err, now)
         return "failed", []
     seen = info(row) if row is not None else None
     if seen is None or not seen["invoice"]:
@@ -387,7 +411,7 @@ def poll(conn, card_id: int, client_of: Callable[[], object], now: str, send: Op
         with client:
             row = _find(client, number)
     except (OSError, webmim_orders.OrdersError) as err:
-        note(conn, card_id, _why(err), now)
+        failed(conn, card_id, err, now)
         seen_not = isinstance(err, webmim_orders.OrdersError) and err.status in (401, 403, 404)
         refused = isinstance(err, webmim_orders.OrdersError) and webmim_orders.WRONG_PASSWORD in str(err)
         if seen_not or refused:                                   # the login never sees the list: a new ask changes nothing
@@ -460,6 +484,87 @@ def hourly(conn, client, server: str, now: str, send: Optional[Send]) -> dict:
         result, lines = take(conn, targets[number], seen, now, send)
         counts[result] = counts.get(result, 0) + 1
         counts["sent"] += sum(1 for line in lines if line.startswith("Клиенту отправлено") or (line.startswith("Точке «") and "» отправлено «" in line))
+    return counts
+
+
+# ---- the repeats (every minute with the chats) ------------------------------------------------------------------------------------------
+
+GAVE_UP = ("Номер перемещения из кабинета MIM не прочитан после трёх повторов, впишите сами или дождитесь ежечасного чтения.")
+
+
+def _plans(conn) -> Dict[int, dict]:
+    out: Dict[int, dict] = {}
+    for key, _value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'webmim_cabinet_retry:%'").fetchall():
+        try:
+            out[int(key.rsplit(":", 1)[1])] = _state(conn, key)
+        except ValueError:
+            continue
+    return out
+
+
+def _drop(conn, card_id: int) -> None:
+    conn.execute("DELETE FROM app_state WHERE key = ?", (RETRY % card_id,))
+
+
+def retry_due(conn, client_of: Callable[[], object], now: str, send: Optional[Send]) -> dict:
+    """The repeats whose time has come (failed: RETRY_AFTER after the refused read): one quick login a run for all of them, the first
+    page of the list, take() of each found (the hourly reading's own write and send: once). An order not waiting any more (its number in
+    already, by a person, the window or the hour; closed; renumbered; the cabinet off): its repeat is dropped, no login. Within the window's
+    GAP: no login, the next minute asks. The third repeat refused: a grey record once and no more repeats. Never a login when nothing is due."""
+    counts = {"asked": 0, "written": 0, "dropped": 0, "gave_up": 0}
+    plans = _plans(conn)
+    if not plans:
+        return counts
+    on = enabled(conn)
+    targets = _targets(conn, SERVER) if on else {}
+    due: Dict[str, int] = {}
+    for card_id, plan in plans.items():
+        number = str(plan.get("number", ""))
+        if not on or not number or targets.get(number) != card_id:
+            _drop(conn, card_id)
+            counts["dropped"] += 1
+            continue
+        tries = int(plan.get("tries", 0) or 0)
+        if not plan.get("done") and tries < len(RETRY_AFTER) and _seconds(now, str(plan.get("since", ""))) >= RETRY_AFTER[tries]:
+            due[number] = card_id
+    conn.commit()
+    if not due or _turn(conn, next(iter(due.values())), now) is not None:
+        return counts
+    client = client_of()
+    if client is None:
+        return counts
+    for card_id in due.values():                                     # the try counted before the login: a crash never repeats it at once
+        plan = plans[card_id]
+        _put(conn, RETRY % card_id, dict(plan, tries=int(plan.get("tries", 0) or 0) + 1))
+    conn.commit()
+    counts["asked"] = len(due)
+    try:
+        with client:
+            rows = client.cabinet_orders(1, PER_PAGE, quick=True)
+    except (OSError, webmim_orders.OrdersError) as err:
+        for card_id in due.values():
+            note(conn, card_id, _why(err), now)
+            plan = _state(conn, RETRY % card_id)
+            if not busy_cabinet(err):                                    # the login never sees the list: the hourly reading, as before
+                _drop(conn, card_id)
+            elif int(plan.get("tries", 0) or 0) >= len(RETRY_AFTER):
+                if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND author = ? AND text = ?",
+                                (card_id, AUTHOR, GAVE_UP)).fetchone() is None:
+                    orders.add_event(conn, card_id, now, AUTHOR, "webmim", GAVE_UP, "grey")
+                _put(conn, RETRY % card_id, dict(plan, done=True))
+                counts["gave_up"] += 1
+            conn.commit()
+        return counts
+    found = {seen["order_number"]: seen for seen in map(info, rows)}
+    for number, card_id in due.items():
+        _drop(conn, card_id)
+        conn.commit()
+        seen = found.get(number)
+        if seen is None or not seen["invoice"]:
+            later(conn, card_id, number, now)
+            continue
+        result, _lines = take(conn, card_id, seen, now, send)
+        counts["written"] += result == "written"
     return counts
 
 

@@ -155,7 +155,7 @@ def test_issued_on_the_page_closes_it_and_can_be_undone_with_the_question_open_a
     app, conn, pid, here, mine = asked_on_page(tmp_path)
     press(mine, here, "oth_issued")
     assert orders.get_card(conn, here)["stage"]["code"] == "done"
-    page = workplace(mine)
+    page = mine.get("/my-point?tab=issued").get_data(as_text=True)    # the owner 2026-11-10: «Отменить» in «Выдано», no list on the page
     assert 'action="/my-point/%d/undo"' % here in page
     clock["now"] = "2026-10-26T14:00:00"
     r = post(mine, "/my-point/%d/undo" % here, "tok")

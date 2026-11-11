@@ -49,10 +49,9 @@ body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) 
 .mp-facts div{display:flex;gap:var(--s-1)}
 .mp-facts dt{color:var(--gray-500)}
 .mp-facts dd{margin:0;color:var(--gray-900);font-weight:600}
-.mp-notify{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2) var(--s-3);margin-bottom:var(--s-4)}
-.mp-notify [data-notify-state]{margin:0}
-.mp-fresh{display:flex;align-items:center;gap:var(--s-2);width:100%;padding:var(--s-2) var(--s-3);border-radius:var(--r-lg);background:var(--primary-50);color:var(--gray-900)}
-.mp-fresh[hidden]{display:none}
+/* the state of the notifications (notify.js): a small line under the head, nothing when empty (the owner 2026-11-10) */
+.mp-notify-state{margin:calc(-1 * var(--s-2)) 0 var(--s-3);font-size:12px}
+.mp-notify-state:empty{display:none}
 .mp-note-text{color:var(--gray-900);white-space:pre-line;overflow-wrap:anywhere}
 .mp-text{white-space:pre-line;overflow-wrap:anywhere;color:var(--gray-900);font-size:var(--fs-sm);line-height:1.45}
 .mp-counters{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s-2);margin-bottom:var(--s-4)}
@@ -92,3 +91,7 @@ body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) 
 .mp-refuse-why legend{font-weight:600;padding:0 4px}
 .mp-refuse-why label{display:flex;align-items:center;gap:6px;min-height:32px}
 .mp-refuse-why input[type=text]{width:100%;min-height:36px;box-sizing:border-box}
+/* «Не приехал» (the owner 2026-11-10): the undo of «Приехал» is a quiet grey text under the order, not a button beside «Выдал»/«ОТКАЗ» */
+.mp-undo{margin-top:var(--s-1)}
+.mp-undo-quiet{background:none;border:0;padding:2px 0;color:var(--gray-500);font:inherit;font-size:12px;text-decoration:underline;cursor:pointer;min-height:0}
+.mp-undo-quiet:hover{color:var(--gray-700)}

@@ -481,6 +481,9 @@ def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit
         except orders.OrderError:
             conn.rollback()
             raise
+    from . import order_oth                                         # the pieces of a mark «На возврат» are on sale until agreed (the owner
+    free = int(item["qty"]) - int((conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item["id"],)).fetchone() or (0,))[0])     # 2026-11-10)
+    marked = pieces - free > 0 and order_oth.drop_marks(conn, old["id"], now, author, item_id=item["id"], pieces=pieces - free)
     # the limit in the statement itself: a take a moment ago in another tab never lets the pieces go below the ones marked returned
     if conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ? AND qty - ? >= COALESCE((SELECT qty FROM oth_return WHERE item_id = ?), 0) "
                     "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth') "
@@ -511,8 +514,10 @@ def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit
     _sync_numbers(conn, card_id, before, now, author, note=True)
     left = conn.execute("SELECT COALESCE(SUM(qty), 0) FROM order_item WHERE order_id = ?", (old["id"],)).fetchone()[0]
     if left > 0:
-        if commit:
-            conn.commit()
+        if commit:                                                    # sold_early_tasks commits: never inside the caller's transaction (oth_storage.take
+            conn.commit()                                             # takes only the stock, which has no pieces of a mark «На возврат»)
+            if marked:
+                order_oth.sold_early_tasks(conn, old["id"], now, author)
         return pieces
     try:
         moved = orders.move_card(conn, old["id"], cancel["id"], now, author, changes={"cancel_reason": TAKEN_REASON % card_id}, fire_rules=False,

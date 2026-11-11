@@ -59,7 +59,7 @@ def close(conn, cid, result, at="2026-10-22T10:00:00"):
 
 def test_1_a_position_marked_for_the_return_is_on_sale_again(tmp_path):
     conn, cid, item = marked_position(tmp_path)
-    assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}                 # off sale while the return is agreed
+    assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}  # the owner 2026-11-10 (later): a mark «На возврат» is sold by the point only, not on Avito
     close(conn, cid, "Не возвращаем, продаём")
     assert oth_stock.pieces(conn, manual=False) == {"1": 4, "2": 2}                 # back on sale by itself
     assert order_oth.goods_on_oth(conn) == {"1": 4, "2": 2}
@@ -132,7 +132,8 @@ def test_1_an_agreed_return_is_never_undone(tmp_path):
 def test_1_another_result_changes_nothing(tmp_path):
     conn, cid, item = marked_position(tmp_path)
     close(conn, cid, "договорились")
-    assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}
+    assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}  # the owner 2026-11-10 (later): a mark «На возврат» is sold by the point only, not on Avito
+    assert conn.execute("SELECT qty FROM oth_return WHERE order_id = ?", (cid,)).fetchone() == (2,)
     (tmp_path / "w").mkdir()
     conn2, cid2 = whole_returning(tmp_path / "w")
     close(conn2, cid2, "договорились")
@@ -146,7 +147,7 @@ def test_2_waiting_is_not_a_refusal_the_position_still_waits(tmp_path, result):
     conn, cid, item = marked_position(tmp_path)
     close(conn, cid, result)
     card = orders.get_card(conn, cid)
-    assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}                 # still off sale
+    assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}  # the owner 2026-11-10 (later): a mark «На возврат» is sold by the point only, not on Avito
     assert not order_oth._kept(conn, card)
     mark = order_oth.item_mark(order_oth.item_marks(conn), item, card["entered_at"])
     assert mark and mark["qty"] == 2                                                # «Ожидает согласование возврата · 2 шт.» stays
