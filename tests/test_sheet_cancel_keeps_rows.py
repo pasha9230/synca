@@ -1,7 +1,7 @@
-"""No row of the Google table is ever removed (the owner 2026-11-11: «Не удаляй строки вообще», it overrides his word of 2026-11-07 «удаляй
+"""No row of the Google table is ever removed (the owner 2026-11-11: «Не удаляй строки вообще», it overrides the owner's word of 2026-11-07 «удаляй
 такие заказы из таблицы»): an order cancelled before its tyres came to the point keeps its rows and gets «Этап»: «Отмена» as any other; the
-command sheet-cancel-remove only refuses. A row the panel removed before (`_removed`) is not made again while its order stays on «Отмена»;
-back from «Отмена», it is written again, as before."""
+command sheet-cancel-remove only refuses. A row the panel removed before (`_removed`) is never made again: on «Отмена»
+or back from it."""
 from __future__ import annotations
 
 import json
@@ -62,7 +62,7 @@ def test_a_cancel_keeps_the_rows_and_updates_the_stage_and_no_remove_goes(table,
     assert not any(v.get("_removed") for v in written(conn, mine).values())
 
 
-def test_a_row_removed_before_the_change_is_not_made_again_on_cancel_and_comes_back_off_it(table):
+def test_a_row_removed_before_the_change_is_never_made_again_on_cancel_or_off_it(table):
     conn, box, fake = table
     mine = placed(conn)
     sheet.flush(conn, box, fake, NOW)
@@ -78,10 +78,10 @@ def test_a_row_removed_before_the_change_is_not_made_again_on_cancel_and_comes_b
     sheet.flush(conn, box, fake, LATEST, full=True)
     assert len(fake.data_posts()) == posts and not mine_rows(fake, mine)  # never made again while on «Отмена»
     orders.move_card(conn, mine, stage(conn, "placed")["id"], LATEST, "owner")
-    sheet.flush(conn, box, fake, LATEST)
-    back = mine_rows(fake, mine)
-    assert len(back) == 2 and all(r["Этап"] == "Заказ оформлен" for r in back.values())
-    assert "Заказ вернули из «Отмены»: строки снова записаны в Google-таблицу: 2 стр." in events(conn, mine)
+    sheet.flush(conn, box, fake, LATEST)                                   # back from «Отмена»: still never made again (the owner 2026-11-11)
+    assert not mine_rows(fake, mine) and not any(r["key"] in rows for p in fake.data_posts()[posts:] for r in p["rows"])
+    assert all(v == {"_removed": True} for v in written(conn, mine).values())
+    assert not any("снова записаны" in e or "убрана из заказа" in e for e in events(conn, mine))
     assert no_remove_sent(fake)
 
 
