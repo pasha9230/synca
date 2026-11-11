@@ -416,19 +416,31 @@ def axis_of(args, prefix: str) -> Tuple[Optional[int], Optional[int], Optional[i
     return tuple((size_numbers(args, prefix + k, 1) or [None])[0] for k in ("w", "h", "d"))
 
 
+def fits_axis(size, axis) -> bool:
+    """A size (width, height, diameter) fits an axis of a mixed set: each field empty (None, any) or equal."""
+    return all(v is None or v == got for v, got in zip(axis, size))
+
+
+def _offer_size(o) -> tuple:
+    return o.width, o.height, o.diameter
+
+
 def _fits(item: Visible, axis) -> bool:
-    o = item.offer
-    return all(v is None or v == got for v, got in zip(axis, (o.width, o.height, o.diameter)))
+    return fits_axis(_offer_size(item.offer), axis)
 
 
-def _model_key(item: Visible) -> Optional[tuple]:
+def offer_model_key(brand, o) -> Optional[tuple]:
     """What the two tyres of a set share: the brand, the model, the season, the studs and RunFlat (the review 2026-11-10). A position
-    with no model has no key: never in a set (two «no model» are not one model), only in «Только передняя / задняя ось»."""
-    o = item.offer
+    with no model has no key: never in a set (two «no model» are not one model), only in «Только передняя / задняя ось». One for the
+    client's /shop and the office's catalog (lane office-catalog-mim)."""
     model = " ".join((o.model_raw or "").split()).casefold()
     if not model:
         return None
-    return item.brand, model, o.season.value, bool(o.studded), bool(getattr(o, "runflat", False))
+    return brand, model, o.season.value, bool(o.studded), bool(getattr(o, "runflat", False))
+
+
+def _model_key(item: Visible) -> Optional[tuple]:
+    return offer_model_key(item.brand, item.offer)
 
 
 def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
@@ -441,21 +453,29 @@ def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
     page's."""
     base = apply(items, Filters([], [], "", f.brands, f.without, f.season, f.studs, f.warehouse, f.query, f.sort, f.descending, 1,
                                 wide=f.wide))
-    fronts = [i for i in base if _fits(i, front)]
-    rears = [i for i in base if _fits(i, rear)]
-    by_key: Dict[tuple, List[Visible]] = {}
+    return pair_axes(base, lambda i: _offer_size(i.offer), _model_key, front, rear)
+
+
+def pair_axes(items, size_of, key_of, front, rear) -> dict:
+    """The pairing of mixed_sets on any rows (the client's Visible, the office's rows of the catalog): `size_of(row)` its (width, height,
+    diameter), `key_of(row)` what the two tyres of a set share (offer_model_key) or None; `items` already filtered and sorted. At most
+    KITS_MAX + 1 sets; then the rows of each axis in no set, each once (one fitting both axes: front)."""
+    fronts = [i for i in items if fits_axis(size_of(i), front)]
+    rears = [i for i in items if fits_axis(size_of(i), rear)]
+    order = lambda i: (size_of(i)[2], size_of(i)[0], size_of(i)[1])       # _size_key: the diameter, the width, the height
+    by_key: Dict[tuple, list] = {}
     for i in rears:
-        key = _model_key(i)
+        key = key_of(i)
         if key is not None:
             by_key.setdefault(key, []).append(i)
     limit = KITS_MAX + 1
     kits, paired = [], set()
     for i in fronts:
-        key = _model_key(i)
+        key = key_of(i)
         for j in by_key.get(key, ()) if key is not None else ():
-            if j is i or _size_key(i) == _size_key(j):
+            if j is i or order(i) == order(j):
                 continue
-            if _fits(j, front) and _fits(i, rear) and _size_key(j) < _size_key(i):
+            if fits_axis(size_of(j), front) and fits_axis(size_of(i), rear) and order(j) < order(i):
                 continue                                          # the mirror (j, i) is the set: the narrower in front
             kits.append((i, j))
             paired.update((id(i), id(j)))
