@@ -1085,6 +1085,29 @@
   // 2 с после ввода и при уходе с поля, телефон только при уходе с поля (data-autosave-whole: десять цифр недописанного номера — уже «номер»,
   // заказ ушёл бы к чужому клиенту), список сразу при выборе; рядом «сохранено» или ошибка. Права и проверки те же, что у «Сохранить»
   // (/orders/<id>/autosave); ответ даёт сохранённое значение, оно уходит в «was» окна, чтобы «Сохранить» потом сравнивал с ним
+  //     «Дата доставки» (2026-11-11): только целая дата (набор с клавиатуры в Chrome проходит через «02» до «25», и каждая — уже дата),
+  //     через 2 с после последней смены или при уходе с поля; после записи «Заказ поставщику» и «Оформить в WebMIM» перечитываются со
+  //     страницы заказа (новая дата в «Подтверждении», новый отпечаток seen), открытое окно «Подтверждение» остаётся открытым с новыми
+  //     данными; пока не перечитано, «Подтвердить» закрыта. Сервер по-прежнему отказывает, если данные поменялись после показа окна
+  function supplierBusy(on) {
+    document.querySelectorAll("form[data-supplier-go] button:not([data-close-modal])").forEach(function (b) { b.disabled = on; });
+  }
+  function supplierRefresh(page, mark) {             // the parts of the page that the date changes, read again from the page itself
+    return fetch(page, {credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
+      .then(function (r) { if (!r.ok || r.redirected) throw new Error("page"); return r.text(); })
+      .then(function (html) {
+        var fresh = new DOMParser().parseFromString(html, "text/html");
+        var sec = document.getElementById("supplier"), newSec = fresh.getElementById("supplier");
+        var win = document.getElementById("supplier-window"), newWin = fresh.getElementById("supplier-window");
+        var open = !!(win && win.classList.contains("is-open"));
+        if (sec && newSec) { newSec = document.importNode(newSec, true); sec.replaceWith(newSec); sec = newSec; }
+        if (win) win.remove();                       // gone from the page (a ✗ now): the window closes, «Заказ поставщику» says why
+        if (newWin && sec) { newWin = document.importNode(newWin, true); if (open) newWin.classList.add("is-open"); sec.after(newWin); }
+        var wm = document.querySelector("[data-owin-wm]"), newWm = fresh.querySelector("[data-owin-wm]");
+        if (wm && newWm) wm.replaceWith(document.importNode(newWm, true));
+      })
+      .catch(function () { supplierBusy(false); mark("сохранено; обновите страницу перед заказом поставщику", true); });
+  }
   document.querySelectorAll("form[data-owin]").forEach(function (form) {
     var fields = form.querySelectorAll("[data-autosave]"), was = form.querySelector("input[name=was]"), csrf = form.querySelector("input[name=csrf]");
     var url = String(form.getAttribute("action") || "").replace(/\/save$/, "/autosave");
@@ -1099,11 +1122,20 @@
         if (bad) mark.setAttribute("role", "alert"); else mark.removeAttribute("role");
         if (!bad && text) hide = setTimeout(function () { mark.textContent = ""; }, 3000);
       }
-      function save() {
+      var isDate = field.type === "date";
+      function whole() {                                                    // a date: empty (cleared) or whole, as orders._clean takes it
+        if (!isDate) return true;
+        if (field.validity && field.validity.badInput) return false;        // half typed: the browser gives "" for it
+        var m = /^(\d{4})-\d{2}-\d{2}$/.exec(field.value);
+        return field.value === "" || (!!m && +m[1] >= 2020 && +m[1] <= 2100);
+      }
+      function save(leaving) {
         clearTimeout(timer);
+        if (!whole()) { if (leaving === true) show("Не сохранено: дата не полная", true); return; }
         if (field.value === saved) { if (mark.getAttribute("role") === "alert") show("", false); return; }   // typed back: nothing to save
         if (busy) { again = true; return; }                                 // one request a field at a time: the newest value goes after it
         busy = true;
+        if (isDate) supplierBusy(true);
         var value = field.value, data = new FormData();
         data.append("csrf", csrf.value); data.append("was", was.value); data.append("field", field.name); data.append(field.name, value);
         show("сохраняю…", false);
@@ -1115,16 +1147,22 @@
             });
           })
           .then(function (res) {
-            if (!res.ok) { show("Не сохранено: " + (res.error || "ошибка"), true); return; }
+            if (!res.ok) { if (isDate) supplierBusy(false); show("Не сохранено: " + (res.error || "ошибка"), true); return; }
             saved = value;
             try { var shown = JSON.parse(was.value); shown[field.name] = res.value; was.value = JSON.stringify(shown); } catch (e) { /* «Сохранить» takes all */ }
             show("сохранено", false);
+            if (isDate) return supplierRefresh(url.replace(/\/autosave$/, ""), show);
           })
-          .catch(function () { show("Не сохранено: проверьте соединение", true); })
+          .catch(function () { if (isDate) supplierBusy(false); show("Не сохранено: проверьте соединение", true); })
           .then(function () { busy = false; if (again) { again = false; save(); } });
       }
       if (field.tagName === "SELECT") {
         field.addEventListener("change", save);
+      } else if (isDate) {                                                  // each key of a typed date is a «change»: wait for the last
+        var later = function () { clearTimeout(timer); timer = setTimeout(save, 2000); };
+        field.addEventListener("input", later);
+        field.addEventListener("change", later);
+        field.addEventListener("blur", function () { save(true); });
       } else {
         if (!field.hasAttribute("data-autosave-whole")) field.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(save, 2000); });
         field.addEventListener("change", save);
