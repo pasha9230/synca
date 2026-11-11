@@ -1077,7 +1077,7 @@ def _refuse_move(conn, card_id, now: str, author: str, why: str, journal: bool) 
 
 def _sell_record(conn, card: dict, now: str, author: str, journal: bool, commit: bool) -> bool:
     """A record of storage moved to «Выполнено» by the office: the point's «Продать» (order_oth.sell) with the same checks (the act МХ-3, the
-    tyres given back to the supplier), the same agreement and question dropped, the rules of «Выполнено» without the client's messages, and the
+    tyres given back to the supplier, the return agreed: the owner 2026-11-10), the same question answered, the rules of «Выполнено» without the client's messages, and the
     same «Отменить» of the point; «История точки» has the sale by its author. A refusal is a red record of the journal, as any refused move."""
     from . import order_oth, point_log
     if not commit:

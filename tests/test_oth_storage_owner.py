@@ -126,16 +126,18 @@ def test_the_office_moving_a_record_to_done_sells_it_as_the_point_does(tmp_path)
     assert not any(e["text"] == "Точка продала шины с ОТХ" for e in orders.list_events(conn, x))
 
 
-def test_the_agreement_of_the_return_is_dropped_and_the_undo_brings_it_back(tmp_path):
+def test_an_agreed_record_refuses_the_move_as_the_point_refuses_the_sale(tmp_path):
+    """The owner 2026-11-10: agreed, the tyres go back to the supplier, «Продать» is refused; the office's move to «Выполнено» is the same sale
+    (_sell_record): refused, the agreement and the record stay. (Before 2026-11-10 it dropped the agreement, «Отменить» brought it back.)"""
     conn = db(tmp_path)
     cid, x = split(conn)
     order_oth.agree(conn, orders.get_card(conn, x), date(2026, 10, 21), LATER, "офис")
     assert orders.get_card(conn, x)["stage"]["code"] == orders.RETURN_GIVEN and order_oth.return_plan(conn, x)
-    assert orders.move_card(conn, x, stage(conn, "done"), LATE, "офис")
-    assert code(conn, x) == "done" and order_oth.return_plan(conn, x) is None
-    rec = orders.get_card(conn, x)
-    point_log.undo(conn, rec, rec["point"], "менеджер Бета", "2026-10-22T11:00:00")
+    with pytest.raises(orders.OrderError, match="возврат уже согласован"):
+        orders.move_card(conn, x, stage(conn, "done"), LATE, "офис")
     assert code(conn, x) == orders.RETURN_GIVEN and order_oth.return_plan(conn, x) is not None and oth_storage.record_ids(conn) == {x}
+    refused = [e["text"] for e in orders.list_events(conn, x) if e["kind"] == "refused"]
+    assert len(refused) == 1 and "как «Продать» точки" in refused[0]
 
 
 def test_tyres_given_back_to_the_supplier_refuse_the_move_as_they_refuse_the_sale(tmp_path):
