@@ -272,20 +272,21 @@ def test_a_tyre_in_a_set_is_in_no_only_list(tmp_path):
     assert ("245/45 R18", "2") not in got["Только передняя ось"] and got["Только задняя ось"] == []
 
 
-def test_the_rear_takes_the_front_radius_and_an_empty_rear_asks_for_its_width(tmp_path):
+def test_an_empty_field_of_an_axis_is_any_value_as_in_mim(tmp_path):
+    """The owner 2026-11-10: an empty field is any value (no radius taken from the front, no width asked for the rear)."""
     app, client, conn, _ = make_shop(tmp_path)
     to_view2(client)
-    got = groups(results(page(client, "/shop?mixed=1&fw=205&fh=55&fd=16&rw=245")))                 # 245 R16: none in stock
-    assert got["Комплект"] == "нет"
     html = page(client, "/shop?mixed=1&fw=205&fh=55&fd=16")
-    assert "Укажите ширину задней оси" in html and "data-kit" not in html and found(html) == 0
-    assert groups(results(html))["Только передняя ось"] == [("205/55 R16", "2")]
+    assert "Укажите ширину задней оси" not in html
+    got = groups(results(html))
+    assert ("205/55 R16", "2") in [row for k, rows in got.items() if k.startswith("Комплект") and rows != "нет" for row in rows] \
+        or got["Только передняя ось"] == [("205/55 R16", "2")]
 
 
-def test_an_empty_rear_builds_no_sets_and_the_sets_stop_past_the_limit(monkeypatch):
+def test_an_empty_rear_pairs_any_size_of_the_model_and_the_sets_stop_past_the_limit(monkeypatch):
     many = [_item(_O(225, 45, 18))] + [_item(_O(255, 35 + k, 18)) for k in range(10)]
     sets = _sets(many, (225, None, None), (None, None, None))
-    assert sets["kits"] == [] and sets["rear_empty"] and sets["front"] == many[:1]
+    assert len(sets["kits"]) == 10 and all(a is many[0] for a, _ in sets["kits"]) and sets["front"] == []
     monkeypatch.setattr(cc, "KITS_MAX", 2)
     assert len(_sets(many, (225, None, None), (255, None, None))["kits"]) == 3                       # KITS_MAX + 1: «more» is known
 

@@ -434,18 +434,15 @@ def _model_key(item: Visible) -> Optional[tuple]:
 def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
     """The mixed-width sets (the owner 2026-11-10): a tyre of the front axis and one of the rear of one model (_model_key), of another
     size; one front may be in several sets. A set is ordered: its front of the front axis, its rear of the rear; when both tyres fit
-    both axes, the narrower is in front, the mirror is never shown. A rear with no radius takes the front's (a mixed set is of one
-    radius); an empty rear builds no set (`rear_empty`: «Укажите ширину задней оси»), never the whole catalog. At most KITS_MAX + 1
+    both axes, the narrower is in front, the mirror is never shown. An empty field is any value, as in MIM (the owner 2026-11-10: no
+    radius taken from the front, no width asked for the rear); the sets are grouped by model, so even an empty axis is cheap. At most KITS_MAX + 1
     sets are built (the one past the limit tells «more»). Then the tyres in no set, each once (one fitting both axes: «Только
     передняя»). The other filters (the brands, the season, the studs, the warehouse, the search) act on both axes; the sort is the
     page's."""
     base = apply(items, Filters([], [], "", f.brands, f.without, f.season, f.studs, f.warehouse, f.query, f.sort, f.descending, 1,
                                 wide=f.wide))
-    rear_empty = all(v is None for v in rear)
-    if not rear_empty and rear[2] is None:
-        rear = (rear[0], rear[1], front[2])
     fronts = [i for i in base if _fits(i, front)]
-    rears = [] if rear_empty else [i for i in base if _fits(i, rear)]
+    rears = [i for i in base if _fits(i, rear)]
     by_key: Dict[tuple, List[Visible]] = {}
     for i in rears:
         key = _model_key(i)
@@ -468,5 +465,4 @@ def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
             break
     alone_f = [i for i in fronts if id(i) not in paired]
     shown_f = {id(i) for i in alone_f}
-    return {"kits": kits, "front": alone_f, "rear": [i for i in rears if id(i) not in paired and id(i) not in shown_f],
-            "rear_empty": rear_empty}
+    return {"kits": kits, "front": alone_f, "rear": [i for i in rears if id(i) not in paired and id(i) not in shown_f]}

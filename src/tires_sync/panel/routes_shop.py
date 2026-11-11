@@ -154,7 +154,7 @@ def _view2(app, conn, login: str, base: str, f, here: list, items, shots, cart: 
         return r
     have = shop_cart.cart(conn, login) if cart else {}
     if not any(v is not None for a in axes.values() for v in a):
-        out.update(mixed={"asked": False, "kits": [], "front": [], "rear": [], "more": False, "only_more": False, "rear_empty": False},
+        out.update(mixed={"asked": False, "kits": [], "front": [], "rear": [], "more": False, "only_more": False},
                    total=0)
         return out
     sets = cc.mixed_sets(items, f, axes["f"], axes["r"])
@@ -162,7 +162,7 @@ def _view2(app, conn, login: str, base: str, f, here: list, items, shots, cart: 
     out.update(total=len(sets["kits"][:cut]), mixed={
         "asked": True, "kits": [(line(a), line(b)) for a, b in sets["kits"][:cut]], "front": [line(i) for i in sets["front"][:cut]],
         "rear": [line(i) for i in sets["rear"][:cut]], "more": len(sets["kits"]) > cut,
-        "only_more": any(len(sets[k]) > cut for k in ("front", "rear")), "rear_empty": sets["rear_empty"]})
+        "only_more": any(len(sets[k]) > cut for k in ("front", "rear"))})
     return out
 
 
