@@ -1,6 +1,9 @@
 """The chats and the card of an order on a point's phone (2026-10-31, point-mobile): a point gets the width of its phone, the frame of
-«Рабочее место» (point.css, the sections at the bottom); the office keeps the page of a computer (1280), as before."""
+«Рабочее место» (point.css, the sections at the bottom). The office (the owner 2026-11-10, office-mobile): the width of its phone too, but its
+own frame (body.ofc, the «бургер», office-mobile.css), never the point's; a computer sees the same page as before."""
 from __future__ import annotations
+
+import re
 
 from test_buttons_by_rights import cheap_hashes, world  # noqa: F401  (fixtures)
 
@@ -29,7 +32,7 @@ def test_a_point_gets_its_phone_on_the_chats_and_the_card(world):
     assert "pt-card-page" in card and "data-point-nav" in card and 'data-sec="orders"' not in card     # «Заказы» hidden (the owner 2026-11-02)
 
 
-def test_the_office_keeps_the_computer_page(world):
+def test_the_office_gets_its_own_phone_frame_not_the_points(world):
     app, people, pages, ids = world
     for role in ("owner", "partner", "chats", "viewer"):
         for url in _urls(ids):
@@ -38,5 +41,6 @@ def test_the_office_keeps_the_computer_page(world):
             if r.status_code != 200:                                       # a role without the section: its own answer, untouched
                 continue
             page = r.get_data(as_text=True)
-            assert DESK in page and PHONE not in page, (role, url)
+            assert PHONE in page and DESK not in page, (role, url)
+            assert 'class="mnav-btn" data-mnav' in page and "office-mobile.css" in page and re.search(r'<body class="[^"]*\bofc\b', page), (role, url)
             assert "pt-ui" not in page and "point.css" not in page and "data-point-nav" not in page and "pt-chats-back" not in page, (role, url)
