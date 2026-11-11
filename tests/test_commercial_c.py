@@ -1,7 +1,8 @@
 """Commercial tires of type «C» are published, «LT» is still not taken (owner's decision 2026-11-10, which replaces the one of 2026-10-14 for
 «C»). Since the second decision of 2026-11-10 («Все «C»») a «C» goes to the truck section of Avito (tests/test_truck_section.py): its model
 comes only from that section's list. A «C» position whose commercial model is not there is not published under the nearest other model:
-it stays unmatched and waits on «Сопоставления» marked «грузовой раздел»."""
+it stays unmatched and waits on «Сопоставления» marked «грузовой раздел». Since 2026-11-11 a «C» whose very model is in the passenger
+reference is a passenger ad (tests/test_commercial_split.py): «Autograph Snow C4» below is such a one."""
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -100,7 +101,7 @@ def test_guard_for_passenger_tires_matching_is_what_it_was():
 
 
 def test_a_c_position_without_its_model_is_unmatched_and_waits_on_the_mappings():
-    # The truck list has «Character Ice C2», not C3; the passenger reference (REF) is not read for a «C» at all, nor its saved pairs
+    # The truck list has «Character Ice C2», not C3; REF has no C3 either, and its saved passenger pairs are not read for a «C»
     confirmed = {**CONFIRMED, ("Ikon Tyres", normalize_model("Ikon Character Ice C3")): "Character Ice 8"}
     offers = {"1": make_offer(goods_id="1", model_raw="Ikon Character Ice C3", car_type="C"),
               "2": make_offer(goods_id="2", model_raw="Ikon Autograph Snow C4", car_type="C")}
@@ -158,7 +159,8 @@ def test_the_mappings_page_shows_the_waiting_c_model_and_never_hints_at_the_othe
     assert "грузовой раздел" in row and "модель из справочника грузового раздела" in row
     assert "пара с моделью без «C3» в названии не действует" in row
     assert 'value="Character Ice C2"' not in row                                         # the nearest other model is not offered as the hint
-    assert 'name="section" value="truck"' in row and 'list="dl-truck"' in row          # confirmed from the truck section's list
+    assert '<option value="truck" selected>' in row and 'list="dl-truck"' in row       # confirmed from the truck section's list by default
+    assert 'name="section"' in row                                                       # or a passenger model instead (test_commercial_confirm)
     assert '<datalist id="dl-truck">' in page and '<option value="Character Ice C2">' in page
     found = page.split('class="t-name">Ikon Autograph Snow C4')[1].split("</tr>")[0]
     assert "без пары не публикуется" not in found and "Autograph Snow C4" in found

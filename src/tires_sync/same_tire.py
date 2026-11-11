@@ -14,7 +14,6 @@ from typing import Callable, Dict, Iterable, Optional, Tuple
 from .candidates import Candidate, Evaluation
 from . import truck
 from .feed import _tire_type
-from .filters import is_commercial_c
 
 
 def _key(brand, model, width, height, diameter, tire_type, load, speed, runflat, in_truck: bool = False) -> Optional[Tuple]:
@@ -37,7 +36,7 @@ def _key(brand, model, width, height, diameter, tire_type, load, speed, runflat,
 def identity(c: Candidate) -> Optional[Tuple]:
     o = c.offer
     return _key(c.avito_brand, c.avito_model, o.width, o.height, o.diameter, _tire_type(o.season, bool(o.studded)), o.load, o.speed, o.runflat,
-                is_commercial_c(o))
+                truck.in_section(c))
 
 
 def identity_of_ad(text: str) -> Optional[Tuple]:

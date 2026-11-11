@@ -892,6 +892,25 @@ def retired_ad_of(conn, account_id: int, goods_id: str):
     return (row[0], row[1]) if row and row[1] else None
 
 
+def truck_bound_codes(conn, account_id: Optional[int] = None) -> Set[str]:
+    """Codes of the positions this account (None: any account) has an ad of in the truck section (truck.PRODUCT_TYPE): in its last
+    published feed, or taken off and kept with its Id (retired_ad: it comes back on that ad). Such a «C» stays in the truck section
+    (truck.resolve_c). The Ids of those ads are in the set too: a code returning under its own Id that another code's truck ad carried
+    stays in the truck section as well (an Id never changes its category). Reads only."""
+    mark = "<ProductType>Шины для грузовиков и спецтехники</ProductType>"
+    where, args = ("instr(snapshot, ?) > 0", (mark,)) if account_id is None else ("account_id = ? AND instr(snapshot, ?) > 0", (account_id, mark))
+    codes = set()
+    for goods_id, snapshot in conn.execute("SELECT goods_id, snapshot FROM published_state WHERE " + where, args):
+        codes.add(goods_id)
+        found = re.search(r"<Id>(.*?)</Id>", snapshot or "")
+        if found:                                  # the Id itself: a code whose own Id it is (another code took it over, same_tire)
+            codes.add(html.unescape(found.group(1)).strip())
+    for goods_id, ad_id in conn.execute("SELECT goods_id, ad_id FROM retired_ad WHERE " + where, args):
+        codes |= {goods_id, ad_id}
+    codes.discard("")
+    return codes
+
+
 def load_retired(conn, account_id: int, today) -> list:
     """[(goods_id, Id, identity, removed_at)] of every ad that was taken off the feed (they are kept for good)."""
     out = []

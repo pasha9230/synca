@@ -77,11 +77,11 @@ def register(app) -> None:
             label = (row["brand_key"] + " " + row["avito_brand"]).casefold()
             if only_brand and row["brand_key"] != only_brand:
                 continue
-            visible = [m for m in models if (show_all or not m["avito_model"])
+            visible = [m for m in models if (show_all or not m["avito_model"] or m.get("truck_pair") and m.get("c_hint"))
                        and (not query or query in m["name"].casefold() or query in label)]
             for m in visible:
                 m["kind"] = suggestion_kind(m)
-                m["hint"] = m["proposal"] or (m["options"][0] if m["options"] else "")
+                m["hint"] = m["proposal"] or (m["options"][0] if m["options"] else "") or m.get("c_hint") or ""
                 m["pct"] = round(100 * difflib.SequenceMatcher(None, loose_form(m["name"]), loose_form(m["hint"])).ratio()) if m["hint"] else 0
                 if m["kind"] in counts:
                     counts[m["kind"]] += 1
@@ -210,9 +210,14 @@ def register(app) -> None:
     @app.route("/mappings/model", methods=["POST"])
     @login_required
     def confirm_model():
-        section = truck.SECTION if request.form.get("section") == truck.SECTION else ""
-        ref = truck.reference() if section else load_reference(app.config["REFERENCE_PATH"])
+        section = request.form.get("section", "")
+        section = section if section in (truck.SECTION, truck.PASSENGER_SECTION) else ""
+        ref = truck.reference() if section == truck.SECTION else load_reference(app.config["REFERENCE_PATH"])
         brand = request.form.get("brand", "")
+        if section == truck.SECTION and request.form.get("truck_brand"):           # a «C» row: the form carries both brands
+            brand = request.form["truck_brand"]
+        elif section == truck.PASSENGER_SECTION and request.form.get("passenger_brand"):
+            brand = request.form["passenger_brand"]
         act = request.form.get("act", "") or "manual"
         typed = request.form.get("proposal", "") if act == "accept" else request.form.get("avito_model", "")
         target = canonical_model(ref, brand, typed)
@@ -225,7 +230,18 @@ def register(app) -> None:
             ok = True
         except MappingError as err:
             message, ok = str(err), False
-        flash("Сопоставление сохранено." if ok else message)
+        if ok and section == truck.SECTION and truck.confirmed_passenger_model(
+                request.form.get("passenger_brand", ""), request.form.get("model_raw", ""), load_reference(app.config["REFERENCE_PATH"]),
+                store.load_confirmed_mappings(get_conn())):
+            message = ("Грузовая пара сохранена, но у модели есть подтверждённая легковая: она важнее, позиции без объявления в "
+                       "грузовом разделе остаются в легковом. Грузовая пара действует для тех, что уже в грузовом разделе.")
+            flash(message)
+            publish_flash(app, ok)
+            return redirect(safe_path(request.form.get("next", "")) or "/mappings")
+        if ok and section == truck.PASSENGER_SECTION:
+            message = ("Сопоставление сохранено: «C» пойдёт в легковой раздел. Позиции, у которых уже есть объявление в грузовом разделе, "
+                       "остаются в нём (Авито не переносит объявление в другую категорию под тем же Id).")
+        flash(message if ok and section == truck.PASSENGER_SECTION else ("Сопоставление сохранено." if ok else message))
         publish_flash(app, ok)
         return redirect(safe_path(request.form.get("next", "")) or "/mappings")
 

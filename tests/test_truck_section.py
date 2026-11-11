@@ -1,4 +1,5 @@
-"""Commercial tires «C» go to the Avito section «Шины для грузовиков и спецтехники» (owner, 2026-11-10, «Все «C»»): the ad takes the fields of
+"""Commercial tires «C» without a model of the passenger reference go to the Avito section «Шины для грузовиков и спецтехники» (owner,
+2026-11-10, narrowed 2026-11-11: a «C» with a passenger model is a passenger ad, tests/test_commercial_split.py): the ad takes the fields of
 that section's template, Brand and Model come only from its lists; Id, Title, Description, Price, phone, address are those of a passenger ad.
 A passenger ad is what it was (the watchman). The check before publication judges a truck ad by its own template and lists."""
 from __future__ import annotations
@@ -114,16 +115,17 @@ def test_a_size_that_is_not_in_the_section_lists_makes_the_ad_invalid():
 
 
 def test_brand_and_model_come_only_from_the_truck_lists():
-    offers = {"1": c_offer(goods_id="1", brand_key="CORDIANT", brand_raw="Cordiant", model_raw="BUSINESS CA"),
+    # 2026-11-11: «Autograph Ice C3» of the passenger reference makes «2» a passenger ad (it waited for the truck list before)
+    offers = {"1": c_offer(goods_id="1", brand_key="CORDIANT", brand_raw="Cordiant", model_raw="BUSINESS CW 2"),
               "2": c_offer(goods_id="2", brand_key="IKON TYRES", model_raw="Autograph Ice C3"),      # in the passenger reference only
               "3": c_offer(goods_id="3", brand_key="КАМА", brand_raw="КАМА", model_raw="Нет Такой"),
               "4": c_offer(goods_id="4", brand_key="NO SUCH BRAND", model_raw="Business CA")}
     ev = evaluate(offers, {}, settings(), REF, {})
-    assert (ev.ok["1"].avito_brand, ev.ok["1"].avito_model) == ("Cordiant", "Business CA")
-    assert ev.unmatched["2"] == ("Ikon Tyres", "Autograph Ice C3") and "2" in ev.truck
+    assert (ev.ok["1"].avito_brand, ev.ok["1"].avito_model, ev.ok["1"].truck_section) == ("Cordiant", "Business CW 2", True)
+    assert (ev.ok["2"].avito_brand, ev.ok["2"].avito_model, ev.ok["2"].truck_section) == ("Ikon Tyres", "Autograph Ice C3", False)
     assert ev.unmatched["3"][0] == "КАМА (Нижнекамский шинный завод)"
     assert ev.problems["4"] == ["brand_not_in_reference:NO SUCH BRAND"]
-    assert ev.truck == {"2", "3"}
+    assert ev.truck == {"3"}
 
 
 def test_a_model_with_another_commercial_number_is_never_taken():
@@ -192,10 +194,10 @@ def test_a_saved_truck_ad_keeps_its_quantity_and_gets_no_multi_item():
 
 
 def test_a_c_tire_and_a_passenger_tire_of_one_size_are_two_tires():
-    cand = evaluate({"7": c_offer(model_raw="Business CA", brand_key="CORDIANT", brand_raw="Cordiant")}, {},
+    cand = evaluate({"7": c_offer(model_raw="Business CW 2", brand_key="CORDIANT", brand_raw="Cordiant")}, {},   # not a passenger model of REF
                     settings(), REF, {}).ok["7"]
     passenger = Candidate("8", make_offer(goods_id="8", width=205, height=65, diameter=16, speed="R", load="107/105", season=cand.offer.season),
-                          5000, "Cordiant", "Business CA")
+                          5000, "Cordiant", "Business CW 2")
     assert identity(cand) != identity(passenger) and identity(cand)[:9] == identity(passenger)
     assert len(identity(passenger)) == 9                                   # a passenger key as retired_ad keeps it
     truck_ad = render_ad(cand, 6000, "P1", make_settings(), TODAY)
@@ -248,9 +250,9 @@ def test_a_truck_ad_is_still_judged_by_the_rules(change, rule):
 
 def test_a_c_tire_and_a_passenger_tire_of_one_size_are_not_the_same_tire_for_the_check():
     passenger = passenger_ad("101", width=205, height=65, diameter=16, speed="R", load="107/105")
-    passenger.find("Model").text = "Business CA"
+    passenger.find("Model").text = "Business CW 2"
     passenger.find("Brand").text = "Cordiant"
-    c = c_ad(brand_key="CORDIANT", brand_raw="Cordiant", model_raw="Business CA")
+    c = c_ad(brand_key="CORDIANT", brand_raw="Cordiant", model_raw="Business CW 2")                   # not a passenger model of REF
     assert "same_tire" not in {f.rule for f in feed_check.check_feed([passenger, c], ctx(reference={}))}
 
 

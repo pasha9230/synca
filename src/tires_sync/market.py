@@ -66,8 +66,8 @@ def ours_from_parsed(offers: Dict[str, object], ref, brand_map, confirmed, wante
         offer = offers.get(goods_id)
         if offer is None:
             continue
-        if is_commercial_c(offer):                                       # «C»: the names of the truck section (truck.py)
-            brand, model = truck.resolve(offer.brand_key, offer.model_raw, confirmed, brand_map)
+        if is_commercial_c(offer):                                       # «C»: the passenger model, else the truck section (truck.py)
+            brand, model, _ = truck.resolve_c(offer.brand_key, offer.model_raw, ref, confirmed, brand_map)
         else:
             brand = resolve_brand(offer.brand_key, ref, brand_map)
             model = resolve_model(brand, offer.model_raw, confirmed, ref) if brand else None

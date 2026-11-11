@@ -199,6 +199,11 @@ def _build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--feed-root", required=True)
     fc.add_argument("--published", action="store_true", help="проверить опубликованный фид, а не черновик")
     fc.add_argument("--account", type=int, default=0, help="номер аккаунта; без него все")
+    cm = sub.add_parser("commercial-sections", help="коммерческие «C» выгрузки: в какой раздел Авито пойдёт каждая (легковой, если модель есть в легковом справочнике, иначе грузовой); считает на временной копии базы, ничего не меняет и не отправляет")
+    cm.add_argument("--db", required=True)
+    cm.add_argument("--unload", required=True)
+    cm.add_argument("--reference", required=True)
+    cm.add_argument("--dry-run", action="store_true", help="ничего не значит: команда всегда только читает")
     oc = sub.add_parser("overrides-clear-aged", help="снять ручное «вкл» у всех позиций «старше N лет» (исключение «старше» снова работает); без --apply только показывает список")
     oc.add_argument("--db", required=True)
     oc.add_argument("--unload", required=True)
@@ -2218,6 +2223,35 @@ def _wait_price_of(conn, parsed, ref, now: str):
     return price_of
 
 
+def _cmd_commercial_sections(args) -> int:
+    """The section of every «C» position on the live data (truck.sections_of), for a look before a release: the base is read into a
+    throw-away copy (load_all_parsed may note a supplier there), nothing is published or sent."""
+    from . import truck
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        copy = str(Path(folder) / "copy.db")
+        source, target = store.open_db(args.db), store.open_db(copy)
+        source.execute("PRAGMA query_only=ON")
+        source.backup(target)
+        source.close()
+        target.close()
+        conn = store.connect(copy)
+        parsed, _, notes = load_all_parsed(conn, active_settings(conn), Path(args.unload))
+        for note in notes:
+            print(note)
+        ref = parse_reference(Path(args.reference).read_text(encoding="utf-8"))
+        rows = truck.sections_of(parsed.offers, ref, store.load_confirmed_mappings(conn), store.load_brand_map(conn),
+                                 frozenset(store.truck_bound_codes(conn)))    # an ad in the truck section in some account: it stays there
+        conn.close()
+    for row in rows:
+        print("%s\t%s\t%s\t%s\t%s" % (row["code"], row["brand_key"], row["model_raw"], row["section"],
+                                      "%s / %s" % (row["avito_brand"], row["avito_model"]) if row["avito_model"] else "ждёт пары"))
+    passenger = sum(1 for r in rows if r["section"] == truck.PASSENGER_LABEL)
+    waiting = sum(1 for r in rows if r["section"] == truck.SECTION_LABEL and not r["avito_model"])
+    print("всего «C»: %d; легковой раздел: %d; грузовой раздел: %d (из них ждут пары: %d)" % (len(rows), passenger, len(rows) - passenger, waiting))
+    return 0
+
+
 def _cmd_wait_count(args) -> int:
     """How many messages «появилось в наличии» the next cycle would send, for a look before a release: the check runs on a throw-away copy of the
     base (the base itself is only read), nothing is sent to anybody. Only numbers of orders are printed."""
@@ -3218,6 +3252,8 @@ def main(argv=None) -> int:
             return _cmd_ids_unrenew(args)
         if args.command == "feed-check":
             return _cmd_feed_check(args)
+        if args.command == "commercial-sections":
+            return _cmd_commercial_sections(args)
         if args.command == "overrides-clear-aged":
             return _cmd_overrides_clear_aged(args)
         if args.command == "match-report":

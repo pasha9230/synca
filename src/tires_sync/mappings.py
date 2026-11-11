@@ -53,13 +53,23 @@ def pending_mappings(ev: Evaluation, ref: Dict[str, FrozenSet[str]]) -> List[Pen
 
 def confirm_mapping(conn, brand: str, model_raw: str, avito_model: str, ref: Dict[str, FrozenSet[str]],
                     now: str, author: str, section: str = "") -> None:
-    """`section` truck.SECTION: a model of a «C» position, only from the truck section's list, saved apart from the passenger pairs."""
+    """`section` truck.SECTION: a model of a «C» position, only from the truck section's list, saved apart from the passenger pairs.
+    truck.PASSENGER_SECTION: a passenger model for a «C» position (from `ref`, the passenger reference), saved apart too (truck.resolve_c)."""
     if section == truck.SECTION:
         if avito_model not in truck.reference().get(brand, frozenset()):
             raise MappingError("Модели «%s» нет в справочнике Авито грузового раздела (бренд «%s»)." % (avito_model, brand))
         if not keeps_commercial_mark(model_raw, avito_model):
             raise MappingError("У модели «%s» другой номер «C», чем у «%s»: это другая шина." % (avito_model, model_raw))
         store.upsert_mapping(conn, truck.pair_brand(brand), model_raw, avito_model)
+        store.write_audit(conn, now, author, "mapping_confirm",
+                          {"brand": brand, "model_raw": model_raw, "avito_model": avito_model, "section": section})
+        return
+    if section == truck.PASSENGER_SECTION:               # a «C» model goes to the passenger section with this model (owner, 2026-11-11)
+        if avito_model not in ref.get(brand, frozenset()):
+            raise MappingError("Модели «%s» нет у бренда «%s» в легковом справочнике Авито." % (avito_model, brand))
+        if not keeps_commercial_mark(model_raw, avito_model):
+            raise MappingError("У модели «%s» другой номер «C», чем у «%s»: это другая шина." % (avito_model, model_raw))
+        store.upsert_mapping(conn, truck.passenger_pair_brand(brand), model_raw, avito_model)   # a truck pair of the model stays (truck_bound)
         store.write_audit(conn, now, author, "mapping_confirm",
                           {"brand": brand, "model_raw": model_raw, "avito_model": avito_model, "section": section})
         return
