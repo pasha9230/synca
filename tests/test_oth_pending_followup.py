@@ -130,6 +130,8 @@ def test_a_part_of_a_mark_marked_then_sold_and_undone_brings_back_only_that_part
 
 
 def test_taken_then_given_back_to_oth_the_mark_is_back(tmp_path):
+    """The owner 2026-11-10 (evening): the pieces of a mark «На возврат» are sold by the point only, never taken by «Взять с ОТХ»
+    (oth_stock). So only the free piece is taken; its give-back leaves the mark, its pieces and its task as they were."""
     from test_oth_sale import T, code, new_order, take
     from tests.test_order_reserve import card_at, db
     from tires_sync import oth_sale
@@ -137,14 +139,13 @@ def test_taken_then_given_back_to_oth_the_mark_is_back(tmp_path):
     old = card_at(conn, "oth", T)
     item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (old,)).fetchone()[0]
     assert order_oth.item_to_return(conn, item, T, "o", "3")
-    first, second = new_order(conn, qty=2), new_order(conn, qty=2)
-    assert take(conn, first) == 2 and take(conn, second) == 2                           # 1 free + 1 of the mark, then the 2 left of it
-    assert code(conn, old) == "cancel" and open_tasks(conn, old) == 0
-    oth_sale.untake(conn, second, orders.get_card(conn, second)["items"][0]["id"], "2026-10-29T12:00:00", "o")
-    now = orders.get_card(conn, old)
-    assert code(conn, old) == "oth" and conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (2,)
-    assert order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])["qty"] == 2 and open_tasks(conn, old) == 1
-    oth_sale.untake(conn, first, orders.get_card(conn, first)["items"][0]["id"], "2026-10-29T12:30:00", "o")
-    assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (3,)
-    assert order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])["qty"] == 3 and open_tasks(conn, old) == 1
+    first = new_order(conn, qty=1)
+    assert take(conn, first) == 1                                                       # the one free piece
+    entered = orders.get_card(conn, old)["entered_at"]
+    assert order_oth.item_mark(order_oth.item_marks(conn), item, entered)["qty"] == 3 and open_tasks(conn, old) == 1
+    oth_sale.untake(conn, first, orders.get_card(conn, first)["items"][0]["id"], "2026-10-29T12:00:00", "o")
+    assert code(conn, old) == "oth" and conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (3,)
+    assert order_oth.item_mark(order_oth.item_marks(conn), item, entered)["qty"] == 3 and open_tasks(conn, old) == 1
     assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [4] and not order_oth.given_back(conn, old)
+
+
