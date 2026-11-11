@@ -477,10 +477,10 @@ def followed(conn, card_id: int) -> set:
 
 def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey: bool = False) -> List[dict]:
     """What to send: a new position with every column (`create`), a written one with the columns of UPDATED that changed and the cells
-    of CHECK as written (the script writes nothing into a row that no longer has them). A row the script did not find (the owner deleted or
-    rewrote it) is not made again. `follow`: the rows whose quantity follows the order too (FOLLOWED: a position that gave tyres from «На ОТХ»
-    to a new order, the owner 2026-10-29). OPTIONAL columns that changed go in «extra» (never an empty one into a new row). `grey`: the order
-    stands before «Заказ оформлен» (listed): its rows are filled grey, and the fill goes when it is placed again (`shade`, the owner
+    of CHECK as written (the script writes nothing into a row that no longer has them). A row marked `_missing` (rewritten by hand, or
+    said «missing» by a script before 2026-11-11) is not sent; one the script finds gone is made again by send_order. `follow`: the rows
+    whose quantity follows the order too (FOLLOWED: a position that gave tyres from «На ОТХ» to a new order, the owner 2026-10-29). OPTIONAL
+    columns that changed go in «extra» (never an empty one into a new row). `grey`: the order stands before «Заказ оформлен» (listed): its rows are filled grey, and the fill goes when it is placed again (`shade`, the owner
     2026-11-02: the rows are never taken out)."""
     out = []
     for mark, fields in now_rows.items():
@@ -600,6 +600,33 @@ def _failed(conn, card_id: int, failing: int, why: str, now: str, seen: int) -> 
     return "ошибка: %s" % why
 
 
+GONE, EDITED = "gone", "edited"        # the script from 2026-11-11: the mark is not in the sheet / the row has another code or phone
+REMADE = "Строка Google-таблицы пропала — создана заново: %d стр."
+EDITED_LINE = ("Строка Google-таблицы изменена вручную (артикул/телефон) — проверьте её; обновления этой строки не идут: %d стр.")
+
+
+def _status(replies: List[dict], mark: str) -> str:
+    return next((str(r.get("status")) for r in replies if str(r.get("key")) == mark), "")
+
+
+def _recreate(http: Transport, url: str, secret: str, ops: List[dict], replies: List[dict], current: Dict[str, dict], lost: List[str],
+              grey: bool) -> Tuple[List[dict], List[dict], str]:
+    """The rows the script answered «gone» for (its mark is nowhere in the sheet: deleted by hand or by a failure, the owner 2026-11-11) are
+    sent again at once with every column, as a new position (changes). Returns the ops and the answers with those rows put in their place,
+    and why the second send failed ("": it went). A failed one leaves them «gone»: not taken, they go again at the next send."""
+    if not lost:
+        return ops, replies, ""
+    again = changes({m: current[m] for m in lost}, {}, grey=grey)
+    try:
+        answer = call(http, url, {"secret": secret, "sheet": SHEET, "rows": again})
+    except SheetError as err:
+        return ops, replies, str(err)[:200]
+    fresh = [r for r in answer.get("results") or [] if isinstance(r, dict)]
+    ops = [op for op in ops if op["key"] not in lost] + again
+    replies = [r for r in replies if str(r.get("key")) not in lost] + fresh
+    return ops, replies, ""
+
+
 def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: str) -> str:
     """Send what changed in one order (claimed by the caller); returns what happened, in words. No row is ever removed (the owner
     2026-11-11): an order on «Отмена» gets its columns as any other; a row removed before that (`_removed`) is never made again."""
@@ -622,20 +649,26 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     except SheetError as err:
         return _failed(conn, card_id, failing, str(err), now, seen)
     replies = [r for r in answer.get("results") or [] if isinstance(r, dict)]
+    lost_rows = [op["key"] for op in ops if not op["create"] and _status(replies, op["key"]) == GONE]
+    ops, replies, failed = _recreate(http, url, secret, ops, replies, current, lost_rows, grey=not listed(conn, card_id))
     results = {str(r.get("key")): str(r.get("status")) for r in replies}
     shaded = {str(r.get("key")): r.get("shade") for r in replies}          # the fill the script made (a script before 2026-11-02 says nothing)
-    why = next((str(r.get("error"))[:200] for r in replies if r.get("error")), "")
+    why = next((str(r.get("error"))[:200] for r in replies if r.get("error")), "") or failed
     unshaded = [op for op in ops if "shade" in op and results.get(op["key"]) in ("created", "updated") and shaded.get(op["key"]) is not op["shade"]]
     if unshaded and not why:
         why = "скрипт таблицы не умеет заливать строки: нужно новое развертывание Apps Script"
     made = [op for op in ops if op["create"] and results.get(op["key"]) in ("created", "updated") and op not in unshaded]   # updated: made
     kept = [op for op in ops if not op["create"] and results.get(op["key"]) == "updated" and op not in unshaded]            # by a lost answer
-    missing = [op for op in ops if results.get(op["key"]) == "missing"]
+    missing = [op for op in ops if results.get(op["key"]) == "missing"]   # the script before 2026-11-11: gone or edited, it cannot tell
+    edited = [op for op in ops if results.get(op["key"]) == EDITED]
+    remade = [op for op in made if op["key"] in lost_rows]
     for op in made + kept:
         written[op["key"]] = dict(written.get(op["key"], {}), **op["fields"], **op.get("extra", {}))
         if "shade" in op:
             written[op["key"]]["_grey"] = op["shade"]
-    for op in missing:
+        elif op in remade:                                                 # made again white: no fill of the lost row is left
+            written[op["key"]].pop("_grey", None)
+    for op in missing + edited:
         written[op["key"]] = dict(written.get(op["key"], {}), _missing=True)
     lines = []
     if made:
@@ -651,7 +684,11 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     if missing:
         lines.append("Строка Google-таблицы изменена или удалена вручную (другой артикул или строки нет): %d стр. "
                      "Заново не создаём, обновления этих строк не идут." % len(missing))
-    lost = [op for op in ops if op not in made + kept + missing]
+    if remade:
+        lines.append(REMADE % len(remade))
+    if edited:
+        lines.append(EDITED_LINE % len(edited))
+    lost = [op for op in ops if op not in made + kept + missing + edited]
     if lost and not failing:                                               # the script did not take them: they go again (said once)
         lines.append("Google-таблица не приняла %d стр.%s: отправим ещё раз." % (len(lost), " (%s)" % why if why else ""))
     for line in lines:
@@ -661,6 +698,95 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
                   _retry_at(now, failing + 1) if lost else "", seen, card_id))
     conn.commit()
     return " ".join(lines)
+
+
+# ---- the rows marked «missing» before 2026-11-11 -------------------------------------------------------------------------------------
+# A script before 2026-11-11 said «missing» both for a row deleted and for one rewritten by hand: the panel marked them `_missing` and left
+# them. `python -m tires_sync sheet-restore-missing` asks the new script about them once, with nothing to write and no creation: «gone»
+# makes the row again (as send_order does), «edited» leaves it marked, «updated» (the row is there as written) takes the mark off.
+
+def restore_candidates(conn) -> List[Tuple[int, str]]:
+    """(order, mark) of the rows marked `_missing` of the open orders (OPEN_STAGES, «Вести заказы, оформленные с»), the position still in the
+    order. Never a row the panel removed (`_removed`) nor a position taken out of the order (`_gone`)."""
+    kept, day = _kept(conn)
+    found = []
+    for card_id, rows in conn.execute("SELECT s.order_id, s.rows FROM sheet_order s JOIN order_card c ON c.id = s.order_id JOIN order_stage st"
+                                      " ON st.id = c.stage_id WHERE st.code IN (%s)" % ",".join("?" * len(OPEN_STAGES)) + kept +
+                                      " ORDER BY s.order_id", list(OPEN_STAGES) + day).fetchall():
+        for mark, row in json.loads(rows or "{}").items():
+            if row.get("_missing") and not row.get("_removed") and not row.get("_gone"):
+                found.append((card_id, mark))
+    return found
+
+
+def restore_missing(conn, box, http: Transport, now: str, dry_run: bool = False) -> List[dict]:
+    """The rows of restore_candidates, order by order: {"order_id", "key", "result"}. `dry_run`: the list only, nothing is sent nor written.
+    result: «создана заново», «изменена вручную, оставлена», «на месте, обновления снова идут», «старый скрипт: не различает, оставлена»,
+    «ошибка: …», «занят другой отправкой», «проверка не отправлялась»."""
+    found = restore_candidates(conn)
+    if dry_run:
+        return [{"order_id": o, "key": m, "result": "проверка не отправлялась"} for o, m in found]
+    s = settings(conn)
+    if not (s["enabled"] and s["url"]):
+        raise SheetError("Google-таблица выключена или адрес не задан: включите её в «Подключения → Google-таблица».")
+    secret = _secret(conn, box, s) if box is not None else None
+    if not secret:
+        raise SheetError("Секрет Google-таблицы не задан (или ключ не передан): ничего не отправлено.")
+    out: List[dict] = []
+    for card_id in sorted({o for o, _ in found}):
+        marks = [m for o, m in found if o == card_id]
+        if not _claim(conn, card_id, now):
+            out += [{"order_id": card_id, "key": m, "result": "занят другой отправкой"} for m in marks]
+            continue
+        out += _restore_order(conn, card_id, marks, s["url"], secret, http, now)
+    return out
+
+
+def _restore_order(conn, card_id: int, marks: List[str], url: str, secret: str, http: Transport, now: str) -> List[dict]:
+    row = conn.execute("SELECT placed_at, rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()
+    placed_at, written = row[0], json.loads(row[1] or "{}")
+    current = rows_of(conn, card_id, placed_at)
+    marks = [m for m in marks if m in current]
+    asked = [{"key": m, "create": False, "fields": {}, "check": {c: written[m].get(c, "") for c in CHECK}} for m in marks]
+    release = lambda: (conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ?", (card_id,)), conn.commit())
+    if not asked:
+        release()
+        return []
+    try:
+        answer = call(http, url, {"secret": secret, "sheet": SHEET, "rows": asked})
+    except SheetError as err:
+        release()
+        return [{"order_id": card_id, "key": m, "result": "ошибка: %s" % err} for m in marks]
+    replies = [r for r in answer.get("results") or [] if isinstance(r, dict)]
+    grey = not listed(conn, card_id)
+    lost = [m for m in marks if _status(replies, m) == GONE]
+    ops, replies, failed = _recreate(http, url, secret, asked, replies, current, lost, grey=grey)
+    out, remade = [], 0
+    for m in marks:
+        status = _status(replies, m)
+        if m in lost and status in ("created", "updated"):
+            op = next(op for op in ops if op["key"] == m)
+            written[m] = dict(op["fields"], **op.get("extra", {}))
+            if "shade" in op:
+                written[m]["_grey"] = op["shade"]
+            remade += 1
+            said = "создана заново"
+        elif status == EDITED:
+            said = "изменена вручную, оставлена"
+        elif status == "updated":
+            written[m].pop("_missing", None)
+            said = "на месте, обновления снова идут"
+        elif status == "missing":
+            said = "старый скрипт: не различает, оставлена"
+        else:
+            reason = failed or next((str(r.get("error"))[:200] for r in replies if str(r.get("key")) == m and r.get("error")), "") or status or "нет ответа"
+            said = "ошибка: %s" % reason
+        out.append({"order_id": card_id, "key": m, "result": said})
+    if remade:
+        orders.add_event(conn, card_id, now, AUTHOR, "sheet", REMADE % remade)
+    conn.execute("UPDATE sheet_order SET rows = ?, claim_until = '' WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
+    conn.commit()
+    return out
 
 
 def flush(conn, box, http: Transport, now: str, full: bool = False) -> Dict[int, str]:
