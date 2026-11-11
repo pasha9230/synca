@@ -843,8 +843,8 @@ def _finish_one(conn, key: str, value: str, now: str, notify) -> None:
     if point and point.get("channel") != points.PANEL and not (conn.execute("SELECT 1 FROM app_state WHERE key = ?", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])),)).fetchone()):
         label = order_manager.label(card)
         text = message_texts.text(conn, message_texts.RETURN_STATUS, order_label=label)
-        if question_open(conn, card):
-            text += " " + message_texts.text(conn, message_texts.RETURN_ASK, order_label=label)
+        if question_open(conn, card):                                                # a record of storage: never «выдал» (the owner 2026-11-10)
+            text += " " + (RECORD_ASK % (label, label) if card.get("oth_record") else message_texts.text(conn, message_texts.RETURN_ASK, order_label=label))
         conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])), now))
         conn.commit()
         notify(dict(card, responsible="", to_staff=False), text)                     # "": the alert goes to the point (order_notify.route, as tell_point)
@@ -879,8 +879,17 @@ def _stuck(conn, card: dict, now: str, why: str) -> None:
     conn.commit()
 
 
+RECORD_QUESTION = "Шины на точке?"     # a record of storage (oth_storage): no client to give them to, they are sold by «Продать» (the owner 2026-11-10)
+RECORD_ASK = "Шины заказа №%s на точке? Ответьте «на точке %s». Если их купили, нажмите «Продать» в кабинете точки."
+RECORD_ISSUED = ("Заказ №%s: шины на ОТХ без клиента, «Выдали» для них не отмечается (выдают с «На точке»). Если шины купили, нажмите «Продать» "
+                 "в кабинете точки.")
+
+
 def question(conn, card: dict, now: str) -> str:
-    """The words of the question (the owner's template «Точке: ОТХ 7-й день» if there is one, else the sample)."""
+    """The words of the question (the owner's template «Точке: ОТХ 7-й день» if there is one, else the sample); a record of storage is
+    asked only whether its tyres are there (RECORD_QUESTION)."""
+    if card.get("oth_record"):
+        return RECORD_QUESTION
     from .order_templates import OTH_ASK_SAMPLE, render
     row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = ? ORDER BY id LIMIT 1", OTH_ASK_SAMPLE[:2]).fetchone()
     return render(conn, card, row[0] if row else OTH_ASK_SAMPLE[2], now)[0].strip()
@@ -924,9 +933,14 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
     """«Выдали», from «На ОТХ» or «На возврат» (the owner 2026-11-04): the client is linked again, the agreement of the return (if any) goes and the
     order goes to «Выполнено», with the answer, in one transaction; the task of the return closes. Not agreed yet (the owner 2026-11-10): the mark
     «На возврат» goes and the task is done as not needed («Заказ выдан, возврат не нужен»), never «Продано до согласования». After the act МХ-3:
-    refused. (outcome, answer, done)."""
+    refused. (outcome, answer, done).
+    A record of storage has no «Выдали» (the owner 2026-11-10: given out from «На точке», sold from «На ОТХ» by «Продать»): refused, the
+    question stays open for «На точке»."""
     card = orders.get_card(conn, card["id"])                     # the stage as it is now
     label = card.get("webmim_number") or str(card["id"])
+    if card.get("oth_record"):
+        conn.rollback()
+        return "не подходит: запись хранения, нужно «Продать»", RECORD_ISSUED % label, False
     if (return_plan(conn, card["id"]) or {}).get("signed_at"):
         conn.rollback()
         return ("не выполнено: акт МХ-3 подписан", "Заказ №%s: акт МХ-3 уже подписан, шины отданы поставщику. Отметить «Выдали» нельзя: напишите офису." % label, False)
@@ -959,6 +973,7 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 
 
 SOLD_SKIP = "шины проданы с ОТХ другому покупателю: прежнему клиенту не пишем"
+OFFICE_SOLD = "Продано с ОТХ: запись хранения переведена в «Выполнено» в панели"
 AGREED_REFUSED = "не выполнено: возврат согласован"
 AGREED_ANSWER = "Заказ №%s: возврат уже согласован с поставщиком, шины едут на возврат. Отметить «Продать» нельзя: напишите офису."
 
@@ -971,12 +986,14 @@ def given_back(conn, order_id) -> bool:
                for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (order_id,)).fetchall())
 
 
-def sell(conn, card: dict, who: str, now: str) -> tuple:
+def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     """«Продать» of «Рабочее место» (the owner 2026-11-10): the tyres on «На ОТХ» or «На возврат» went to a buyer from the street, the whole order goes
     to «Выполнено» in one transaction. Not answer_issued: no question of the seventh day is needed (an open one closes: «sold»), and the client put
     aside is NOT linked again (the buyer is another person: the order stays without a client). Only until the return is agreed (the owner
     2026-11-10): agreed, refused; the mark «На возврат» and the task go with the move (left_return). The rules of «Выполнено» run as for any order
-    (the sale is theirs), but their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done)."""
+    (the sale is theirs), but their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done).
+    `office`: a record of storage the office moved to «Выполнено» (orders.move_card → _sell_record, the owner 2026-11-10): the same sale, its
+    record in the journal says so; the refusal is the caller's to write."""
     card = orders.get_card(conn, card["id"])                     # the stage as it is now
     label = card.get("webmim_number") or str(card["id"])
     if (return_plan(conn, card["id"]) or {}).get("signed_at"):
@@ -1002,9 +1019,12 @@ def sell(conn, card: dict, who: str, now: str) -> tuple:
         conn.rollback()
         return AGREED_REFUSED, AGREED_ANSWER % label, False
     _answer(conn, card, "sold", now)                             # an open question of the seventh day is answered by the sale
-    orders.add_event(conn, card["id"], now, who, "point", "Точка продала шины с ОТХ")
+    if office:
+        orders.add_event(conn, card["id"], now, who, "field", OFFICE_SOLD)
+    else:
+        orders.add_event(conn, card["id"], now, who, "point", "Точка продала шины с ОТХ")
     try:
-        moved = orders.move_card(conn, card["id"], done["id"], now, who)
+        moved = orders.move_card(conn, card["id"], done["id"], now, who, journal=not office, oth_sold=True)
     except orders.OrderError as err:                                                 # rolled back with the rest
         return "не выполнено: %s" % err, "Не получилось: %s" % err, False
     if not moved:

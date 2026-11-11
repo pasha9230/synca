@@ -210,8 +210,10 @@ def why_not_delete(conn, order_id) -> Optional[str]:
 # ---- the merge -----------------------------------------------------------------------------------------------------------------------
 
 def _why_not_source(conn, card: dict) -> Optional[str]:
-    from . import order_intercity, oth_sale
+    from . import order_intercity, oth_sale, oth_storage
     label = _label(card)
+    if oth_storage.is_record(conn, card["id"]):                         # the owner 2026-11-10: a record is taken whole, never merged
+        return "Заказ №%s — запись хранения ОТХ: объединить её нельзя. Шины с ОТХ берутся кнопкой «Взять с ОТХ»." % label
     found = into(conn, card["id"])
     if found:
         return "Заказ №%s уже объединён в заказ №%d." % (label, found)

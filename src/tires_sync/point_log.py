@@ -180,7 +180,7 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
     author = "менеджер %s (%s)" % (point["name"], who)
     stage = orders.get_stage(conn, rec["from_stage"])
     last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event WHERE order_id = ?", (card["id"],)).fetchone()[0]
-    if not orders.move_card(conn, card["id"], stage["id"], now, author, fire_rules=False, commit=False):     # a refusal rolls back the claim
+    if not orders.move_card(conn, card["id"], stage["id"], now, author, fire_rules=False, commit=False, oth_split=False):     # a refusal rolls back the claim
         conn.rollback()
         raise orders.OrderError("Заказ только что перенесли: отметку уже не отменить.")
     conn.execute("UPDATE order_card SET entered_at = ?, reserve_until = ?, cancel_reason = ? WHERE id = ?",

@@ -37,7 +37,7 @@ OLD_NAMES_2026_11_03 = {"moving": "Перемещение на точку", "at_
                         "return": "Возврат"}
 RENAMED_KEY = "stage_names_2026_11_03"          # app_state: the renaming was done (an owner's later name equal to an old one is never touched)
 # «Отмена» and «Отказ/невыкуп» are one stage with the reason (the owner 2026-10-29); the reason is a text of cancel_reason
-CANCEL_KINDS = ("отменил клиент", "не выкупил", "другое")
+CANCEL_KINDS = ("отменил клиент", "не выкупил", "отказ клиента", "другое")     # «отказ клиента»: the tyres went to «На ОТХ» (oth_storage, 2026-11-10)
 NOT_BOUGHT = "не выкупил"
 OLD_CANCEL_NAME = "Отмена"                      # the name of «cancel» before the merge: renamed only while the owner kept it
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -242,7 +242,7 @@ def cancel_reason_of(kind, text) -> str:
     «другое: …» (the text is needed). OrderError for a choice not of CANCEL_KINDS or «другое» without a text."""
     kind, text = str(kind or "").strip(), " ".join(str(text or "").split())
     if kind not in CANCEL_KINDS:
-        raise OrderError("Причина отмены: отменил клиент, не выкупил или другое.")
+        raise OrderError("Причина отмены: отменил клиент, не выкупил, отказ клиента или другое.")
     if kind == "другое" and not text:
         raise OrderError("Причина отмены «другое»: напишите, что случилось.")
     return (kind + (": " + text if text else ""))[:300]
@@ -664,6 +664,8 @@ def get_card(conn, card_id) -> dict:
     card["in_stock"] = int(card_id) in oth_sale.in_stock_ids(conn, [card_id])   # every tyre taken from «На ОТХ»: no date of delivery (2026-10-30)
     from . import order_intercity
     card["intercity"] = order_intercity.of(conn, card_id)                       # «Доставка в другой город» (2026-11-02)
+    from . import oth_storage
+    card["oth_record"] = oth_storage.is_record(conn, card_id)                   # a record of storage: tyres at the point, no client (2026-11-10)
     return card
 
 
@@ -982,11 +984,13 @@ def missing_for(card: dict, stage: dict, placed: Optional[dict] = None) -> List[
             gaps.append("позиции")
         if not card["point_id"]:
             gaps.append("точка")
-        if not card["delivery_date"] and not card.get("in_stock"):       # the tyres lie at the point already (oth_sale.IN_STOCK)
+        record = bool(card.get("oth_record")) and code in ("oth", "done")     # a record of storage: no client, the tyres are there; «Выполнено»:
+        # «Продать» of the point sold them to a buyer from the street (order_oth.sell, the owner 2026-11-10); any other order needs its client
+        if not card["delivery_date"] and not card.get("in_stock") and not record:       # the tyres lie at the point already (oth_sale.IN_STOCK)
             gaps.append("дата доставки")
-        if not card["client_phone"]:
+        if not card["client_phone"] and not record:
             gaps.append("телефон клиента")
-        if not card["client_name"]:
+        if not card["client_name"] and not record:
             gaps.append("имя клиента")
     if code == "wait":
         if not (card["client_name"] or card["client_phone"]):
@@ -1071,13 +1075,37 @@ def _refuse_move(conn, card_id, now: str, author: str, why: str, journal: bool) 
     return OrderError(why)
 
 
+def _sell_record(conn, card: dict, now: str, author: str, journal: bool, commit: bool) -> bool:
+    """A record of storage moved to «Выполнено» by the office: the point's «Продать» (order_oth.sell) with the same checks (the act МХ-3, the
+    tyres given back to the supplier, the return agreed: the owner 2026-11-10), the same question answered, the rules of «Выполнено» without the client's messages, and the
+    same «Отменить» of the point; «История точки» has the sale by its author. A refusal is a red record of the journal, as any refused move."""
+    from . import order_oth, point_log
+    if not commit:
+        raise _refuse_move(conn, card["id"], now, author, "Запись хранения переводится в «Выполнено» только продажей с ОТХ, отдельным действием.", journal)
+    if card["stage"].get("code") not in order_oth.RETURNING:
+        raise _refuse_move(conn, card["id"], now, author, "Запись хранения закрывается в «Выполнено» только продажей с «%s» или «%s»: она на этапе «%s"
+                           "»." % (stage_name(conn, "oth"), stage_name(conn, RETURN_GIVEN), card["stage"]["name"]), journal)
+    outcome, answer, done = order_oth.sell(conn, card, author, now, office=True)
+    if not done:
+        if outcome.startswith(("уже ", "не перенесён")):                 # somebody moved it first: as any move made first by somebody
+            return False
+        raise _refuse_move(conn, card["id"], now, author, "запись хранения закрывается в «Выполнено» как «Продать» точки. " + answer, journal)
+    point_log.record(conn, now, author, card["point_id"], "oth_sold", card["id"], outcome + " (офис: перевод в «Выполнено»)")
+    point_log.remember(conn, card, "oth_sold", card["point_id"], author, now)
+    return True
+
+
 def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[dict] = None, chain: tuple = (), fire_rules: bool = True,
-              journal: bool = True, commit: bool = True) -> bool:
+              journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False) -> bool:
     """Move a card to a stage. The fields that come with the move are saved first; the move itself needs the stage's required data.
     `fire_rules=False` (the bulk move) leaves the rules of the new stage asleep: no task, no message for hundreds of cards at once.
     A refusal goes to the journal as a red record; not with `journal=False` (the bulk move) and not for a rule (`chain` is given only by the
     rules: their task writes its own red «…: ошибка (…)», one record is enough). `commit=False`: in the caller's transaction (order_merge),
-    nothing saved and no rule fired; a refusal or a move made first by somebody rolls the caller's transaction back."""
+    nothing saved and no rule fired; a refusal or a move made first by somebody rolls the caller's transaction back.
+    A client's order that goes to «На ОТХ» is cancelled and its tyres become a record of storage (oth_storage, the owner 2026-11-10);
+    `oth_split=False`: the order itself goes back there (an undo, «Вернуть на ОТХ» of an order that stood there before).
+    A record of storage goes to «Выполнено» by any way (the board, the card, the bulk move, a chat, a rule) only as the point's «Продать»
+    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself."""
     stage = get_stage(conn, stage_id)
     changed = update_card(conn, card_id, changes, now, author, commit=False, link_client=False) if changes else []   # not saved until
     card = get_card(conn, card_id)                                                                               # the move is allowed
@@ -1089,11 +1117,38 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
             conn.commit()                                                       # no move, but the fields that came are kept
         return False
     journal = journal and not chain
+    from . import oth_storage
+    if stage["code"] == "done" and not oth_sold and oth_storage.is_record(conn, card_id):
+        return _sell_record(conn, card, now, author, journal, commit)
+    twice = oth_storage.why_not_move(conn, card, stage)                     # the same tyres never on «На ОТХ» twice (the review 2026-11-10)
+    if twice:
+        raise _refuse_move(conn, card_id, now, author, twice, journal)
     gaps = missing_for(card, stage, _placed_stage(conn))
     if gaps:
         raise _refuse_move(conn, card_id, now, author, "Чтобы перейти в «%s», заполните: %s." % (stage["name"], ", ".join(gaps)), journal)
     if card["sale_ids"] and stage["kind"] not in ("won", "closed"):
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
+    stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)
+    try:
+        if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in ("oth", RETURN_GIVEN) and oth_storage.splits(conn, card):
+            made = oth_storage.split(conn, card, stage, now, author)        # the client's order is cancelled, its tyres are the record's
+            stored, stage = made["record"], made["stage"]
+            card = dict(get_card(conn, card_id), stage=card["stage"])
+        elif stage["code"] == "oth" and oth_storage.cancelled_by_mistake(conn, card):
+            oth_storage.reopen(conn, card, now, author)                     # the office's wrong «Отмена» of a record (the owner 2026-11-10)
+        elif stage["kind"] == "open" and stage["code"] not in ("oth", RETURN_GIVEN) and oth_storage.is_record(conn, card_id):
+            raise OrderError("Это запись хранения (шины без клиента): её шины берёт новый заказ («Взять с ОТХ», «Новый клиент») "
+                             "или прежний клиент («Вернуть заказ клиенту»).")
+        elif card["stage"].get("code") == "cancel" and stage["kind"] == "open" and oth_storage.record_of(conn, card_id) is not None:
+            if stage["code"] != "at_point":
+                raise OrderError("Заказ отменён переводом на ОТХ: вернуть его клиенту можно только на этап «%s»." % stage_name(conn, "at_point"))
+            oth_storage.restore(conn, card_id, now, author)                 # the same client is back: the numbers and the tyres are the order's again
+            card = dict(get_card(conn, card_id), stage=card["stage"])
+    except OrderError as err:
+        raise _refuse_move(conn, card_id, now, author, str(err), journal) from None
+    except Exception:                                                       # any other failure of the split: nothing of it is left to commit
+        conn.rollback()
+        raise
     if stage["kind"] == "lost":
         from . import oth_sale
         held = oth_sale.holds(conn, card_id)                                    # the tyres taken from «На ОТХ» would be lost with the order
@@ -1136,7 +1191,9 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     if not commit:                                         # in the caller's transaction (order_merge): it saves, no rule wakes
         return True
     conn.commit()
-    if fire_rules:
+    if fire_rules and stored is not None:
+        _fire_rules(conn, stored, now, ())      # the rules of «На ОТХ» are the record's; none of «Отмена»: the client is written nothing
+    elif fire_rules:
         _fire_rules(conn, card_id, now, chain)
     return True
 
@@ -1207,6 +1264,8 @@ def board_matches(wanted: tuple, card_id: int, name: str, phone: str, first_item
         return (card_id == number or (len(digits) >= 4 and digits in phone_digits)
                 or bool(webmim_number and re.sub(r"\D", "", webmim_number) == digits)
                 or bool(transfer and len(digits) >= 4 and re.sub(r"\D", "", transfer).endswith(digits)))
+    if webmim_number and needle == webmim_number.lower().strip():         # «123О»: the cancelled order of a client whose tyres went to «На ОТХ»
+        return True
     hay = " ".join([name.lower(), first_item.lower()] + [str(i).lower() for i in items])
     if needle in hay or (len(digits) >= 3 and digits in phone_digits) or (len(needle) >= 6 and needle in transfer):
         return True

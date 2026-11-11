@@ -64,7 +64,7 @@ def test_the_move_after_12_hours_tells_the_responsible_to_call_with_the_line(tmp
     to_ivan = [t for who, t in told if who == "ivan"]
     assert to_ivan == ["Позвонить клиенту: заказ №%d переведён на «На ОТХ», клиент не ответил на напоминание о сроке резерва. %s — /orders/%d" % (
         5200000 + cid, line, cid)]
-    assert [t for who, t in told if who == ""] == ["Заказ №%d переведён на «На ОТХ»: клиент не ответил на напоминание о сроке резерва" % (5200000 + cid)]
+    assert [t for who, t in told if who == ""] == []                                       # the point hears nothing (the owner 2026-11-10)
     [record] = [e for e in orders.list_events(conn, cid) if e["text"].startswith("Позвонить клиенту")]
     assert record["level"] == "yellow" and line in record["text"]
     assert not [e for e in orders.list_events(conn, cid) if "не ответил за 12 часов" in e["text"] and e["level"] != "grey"]      # one alert, not two
@@ -876,9 +876,9 @@ def test_the_night_move_is_on_time_and_its_alerts_wait_for_nine_once(tmp_path):
     reserve.check(conn, NEXT + "T08:59:00", calls(told), deliver, vk)
     assert told == []
     reserve.check(conn, NEXT + "T09:07:00", calls(told), deliver, vk)
-    assert sorted(who for who, _t in told) == ["", "ivan"] and any(t.startswith("Позвонить клиенту") for _w, t in told)
+    assert sorted(who for who, _t in told) == ["ivan"] and any(t.startswith("Позвонить клиенту") for _w, t in told)     # never the point (2026-11-10)
     reserve.check(conn, NEXT + "T10:07:00", calls(told), deliver, vk)
-    assert len(told) == 2
+    assert len(told) == 1
 
 
 def test_an_order_taken_back_before_nine_has_no_call(tmp_path):

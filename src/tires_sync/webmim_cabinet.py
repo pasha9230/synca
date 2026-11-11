@@ -219,7 +219,7 @@ def after_place(conn, card_id: int, client, now: str, server: str) -> str:
     from . import webmim_match
     if client is None or server != SERVER or not enabled(conn):
         return "off"
-    number = webmim_match.digits(orders._row(conn, card_id)["webmim_number"])
+    number = webmim_match.own_number(orders._row(conn, card_id)["webmim_number"])
     if not number:
         return "no-number"
     try:
@@ -389,7 +389,7 @@ def poll(conn, card_id: int, client_of: Callable[[], object], now: str, send: Op
     state = webmim_create.get_state(conn, card_id)
     if not enabled(conn) or not state or state["server"] != SERVER or state["state"] != "done":
         return dict(out, state="off", final=True, text="сверка с кабинетом MIM — для заказа, оформленного кнопкой на боевом сервере")
-    number = webmim_match.digits(card["webmim_number"])
+    number = webmim_match.own_number(card["webmim_number"])
     if not number:
         return dict(out, state="none", final=True, text="у заказа нет номера WebMIM")
     if not _own_number(conn, card_id, number):
@@ -440,7 +440,7 @@ def _own_number(conn, card_id: int, number: str) -> bool:
     if card_id in oth_sale.borrowed_ids(conn):
         return False
     return all(other == card_id for other, typed in conn.execute("SELECT id, webmim_number FROM order_card WHERE webmim_number != ''")
-               if webmim_match.digits(typed) == number)
+               if webmim_match.own_number(typed) == number)
 
 
 # ---- hourly -----------------------------------------------------------------------------------------------------------------------------

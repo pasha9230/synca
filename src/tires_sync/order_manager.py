@@ -446,6 +446,9 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
         return dispute(point, "«%s», а заказ в другой город" % word,
                        "Заказ №%s — в другой город, клиент за ним не придёт: если отдали шины курьеру ТК, напишите «передал курьеру %s». "
                        "Сообщение передано владельцу." % (label(card), label(card)))
+    if card.get("oth_record") and (word in OTH_ISSUED or BUILTIN.get(word, ((), None))[1] == "done"):     # a record of storage: «Продать»
+        from . import order_oth                                                         # in the cabinet, never «выдал» (the owner 2026-11-10)
+        return finish(*order_oth.answer_issued(conn, card, "менеджер %s" % point["name"], now)[:2])
     if code in ("oth", orders.RETURN_GIVEN) and (word == HERE or word in OTH_ISSUED):  # the answer of a VK point to the seventh day
         from . import order_oth
         if order_oth.question_open(conn, card) or (word != HERE and (order_oth.return_plan(conn, card["id"]) or {}).get("signed_at")):

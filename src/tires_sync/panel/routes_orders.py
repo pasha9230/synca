@@ -17,7 +17,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_swap, point_log, user_prefs
+from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -1227,7 +1227,7 @@ def register(app) -> None:
             **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=point_entity(orders.card_view(card, conn), card) if own_point() else orders.card_view(card, conn), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
-            oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card),
+            oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card), storage=_storage(conn, card),
             to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
             oth_return_parts=order_oth.return_parts(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},     # «сколько примет поставщик»
             oth_here=order_oth.pieces_here(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},
@@ -1810,6 +1810,49 @@ def register(app) -> None:
                                        vk_http=app.config.get("VK_HTTP") or urllib_transport)
         flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")
 
+    def _storage(conn, card: dict):
+        """The block of a record of storage, and of the order cancelled by the move to «На ОТХ» while it may still get the tyres back
+        (oth_storage, the owner 2026-11-10); None for any other order and for a point."""
+        if own_point() is not None:
+            return None
+        order = oth_storage.source_of(conn, card["id"])
+        mark = oth_storage.record(conn, card["id"]) if order else None
+        if order and (mark.get("state") != oth_storage.HELD or card["stage"]["code"] not in order_oth.RETURNING):
+            return None                                                    # taken or given back: an order closed like any other
+        if order is None:
+            order = card["id"] if oth_storage.record_of(conn, card["id"]) is not None and card["stage"]["code"] == "cancel" else None
+        if order is None or oth_storage.record_of(conn, order) is None:
+            return None
+        return {"order": order, "record": oth_storage.record_of(conn, order), "why": oth_storage.why_not_back(conn, order),
+                "can": can_post("order_storage_back")}
+
+    def storage_back(conn, card_id):
+        """«Вернуть заказ клиенту»: the order cancelled by the move to «На ОТХ» leaves «Отмена» for «Товар на точке» with its numbers, its
+        record is closed (orders.move_card → oth_storage.restore). From the card of the record or of the order."""
+        order = oth_storage.source_of(conn, card_id) or card_id
+        if own_point() is not None or oth_storage.record_of(conn, order) is None or (order != card_id and oth_storage.record_of(conn, order) != card_id):
+            flash("Вернуть заказ клиенту нельзя: шины уже не в записи хранения этого заказа.", "error")
+            return back(card_id)
+        try:
+            stage = next(s for s in orders.list_stages(conn) if s["code"] == "at_point")
+            stamp = local_iso()
+            if orders.move_card(conn, order, stage["id"], stamp, author()):
+                flash("Заказ №%d возвращён клиенту: снова на «%s», номер WebMIM без «О»." % (order, stage["name"]))
+                offer_send(conn, order, stamp)                             # the messages of the stage, as any move of the card
+            else:
+                flash("Заказ уже перевели.")
+        except (orders.OrderError, StopIteration) as err:
+            flash(str(err) or "Нет этапа «%s»." % orders.stage_name(conn, "at_point"), "error")
+            return back(card_id)
+        return redirect("/orders/%d" % order)
+
+    @app.route("/orders/<int:card_id>/storage-back", methods=["POST"])
+    @login_required
+    def order_storage_back(card_id):
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        return storage_back(conn, card_id)
+
     @app.route("/orders/<int:card_id>/oth-back", methods=["POST"])
     @login_required
     def order_oth_back(card_id):
@@ -1821,6 +1864,9 @@ def register(app) -> None:
             session.pop("oth_back", None)
             flash("Заказ уже не на «На ОТХ».", "error")
             return back(card_id)
+        if request.form.get("answer") == "same" and oth_storage.is_record(conn, card_id):      # a record of storage: its order comes back
+            session.pop("oth_back", None)
+            return storage_back(conn, card_id)
         if request.form.get("answer") == "same":
             session.pop("oth_back", None)
             try:

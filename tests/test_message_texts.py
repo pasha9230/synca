@@ -155,14 +155,15 @@ def test_the_page_lists_saves_resets_and_journals_and_only_the_owner_changes(tmp
     assert 'id="t-%s"' % mt.MOVED_NOTE in shown and 'action="/orders/templates/text"' not in shown
 
 
-def test_the_moved_note_goes_with_the_owners_text(tmp_path):
+def test_the_moved_note_goes_to_nobody_even_with_the_owners_text(tmp_path):
+    """The owner 2026-11-10: «точке в ВК не надо отправлять сообщение» of a move to «На ОТХ»; the responsible still hears «Позвонить клиенту»."""
     from test_reserve_noon import NEXT, told
     conn, cid, _chat, deliver, vk = told(tmp_path)
     mt.save(conn, mt.MOVED_NOTE, "Заказ {order_label} — на ОТХ", "owner", NOW)
     got = []
     deliver.at = NEXT + "T09:07:00"
     reserve.check(conn, NEXT + "T09:07:00", lambda card, text: (got.append(text), "ok")[1], deliver, vk)
-    assert "Заказ 5200001 — на ОТХ" in got
+    assert "Заказ 5200001 — на ОТХ" not in got and any(t.startswith("Позвонить клиенту") for t in got)
 
 
 def test_the_cancelled_return_goes_to_the_point_with_the_owners_text(tmp_path, monkeypatch):
