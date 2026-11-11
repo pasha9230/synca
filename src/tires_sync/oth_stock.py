@@ -41,9 +41,21 @@ def _order_rows(conn) -> list:
         agreed = {r[0] for r in conn.execute("SELECT order_id FROM oth_return_plan")}
     except sqlite3.OperationalError:                      # a base without the orders' tables
         return []
+    whole = returning_records(conn, rows)                                                  # the owner 2026-11-11: a record of storage goes whole
     rows = [dict(r, qty=int(r["qty"]) - int(r.get("marked_qty") or 0)) for r in rows]     # the owner 2026-11-10: the pieces of a mark «На возврат»
     return [dict(r, manual=None) for r in rows if r["goods_id"] and r["goods_id"] != orders.POINT_GOODS and r["point_id"] not in test    # are sold by
-            and int(r["qty"]) > 0 and r["order_id"] not in agreed and r["stage_code"] == "oth"]                                         # the point only, not on Avito
+            and int(r["qty"]) > 0 and r["order_id"] not in agreed and r["order_id"] not in whole and r["stage_code"] == "oth"]          # the point only, not on Avito
+
+
+def returning_records(conn, rows=None) -> set:
+    """The records of storage (oth_storage) with a mark «На возврат» on any of their tyres (`marked_qty` of order_oth.stock): the whole record
+    goes back to the supplier or is sold by the point whole (the owner 2026-11-11: «если на ОТХ 4, то и продадим 4 или вернём 4»), so none of
+    its tyres is in the stock of OTH (the feed, «Взять с ОТХ»). The orders put on «На ОТХ» the old way (no record) are not here."""
+    from . import order_oth, oth_storage
+    if rows is None:
+        rows = order_oth.stock(conn)["stock"]
+    marked = {r["order_id"] for r in rows if int(r.get("marked_qty") or 0) > 0}
+    return marked & oth_storage.record_ids(conn) if marked else set()
 
 
 def manual_rows(conn) -> list:

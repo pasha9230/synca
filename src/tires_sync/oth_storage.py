@@ -36,6 +36,7 @@ HELD, TAKEN, BACK = "held", "taken", "back"
 REOPEN = "reopen"                   # only inside the transaction of untake: the record taken back stands on «На ОТХ» again (why_not_move)
 FROM_OPEN = ("oth", orders.RETURN_GIVEN, "done")    # a record moved to «На ОТХ» from these is not closed («Отменить» of «Продать» is from «Выполнено»)
 _MARKED = re.compile(r"\d\s*[ОоOo]$")       # typed by hand too: a Latin «O», a small letter
+RETURN_WHOLE = "Запись на возврат поставщику целиком: брать с ОТХ нельзя."    # the owner 2026-11-11: one tyre marked «На возврат», the whole record goes
 
 
 def refused_number(number) -> bool:
@@ -292,6 +293,12 @@ def _stock(conn, x_id) -> List[dict]:
     return [r for r in oth_stock._rows(conn, manual=False) if r["order_id"] == int(x_id)]
 
 
+def returning(conn, x_id) -> bool:
+    """The record has a tyre marked «На возврат» (oth_stock.returning_records): the whole record is on its way back, nothing of it is taken."""
+    from . import oth_stock
+    return int(x_id) in oth_stock.returning_records(conn)
+
+
 def whole_text(rows: List[dict]) -> str:
     return "С ОТХ берётся вся запись: %d шт." % sum(int(r["qty"]) for r in rows)
 
@@ -301,6 +308,8 @@ def why_not_whole(conn, card: dict, x_id, lines: Optional[List[dict]] = None) ->
     wanted than lie there. None: every tyre of the record goes."""
     from . import oth_sale
     from .order_merge import placed_ids
+    if returning(conn, x_id):
+        return RETURN_WHOLE
     rows = _stock(conn, x_id)
     if not rows:
         return "Этих шин на ОТХ уже нет: обновите страницу."
@@ -343,6 +352,9 @@ def take(conn, card_id, from_item, now: str, author: str) -> int:
     conn.execute("BEGIN IMMEDIATE")
     try:
         source = next((r for r in oth_stock_rows(conn) if r["item_id"] == int(from_item)), None)
+        owner = conn.execute("SELECT order_id FROM order_item WHERE id = ?", (int(from_item),)).fetchone()
+        if source is None and owner is not None and returning(conn, owner[0]):
+            raise oth_sale.OthSaleError(RETURN_WHOLE)
         if source is None:
             raise oth_sale.OthSaleError("Этих шин на ОТХ уже нет: их взяли, вернули поставщику или запись ушла с ОТХ. Обновите страницу.")
         x = int(source["order_id"])
