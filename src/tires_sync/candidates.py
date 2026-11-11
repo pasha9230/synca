@@ -18,6 +18,7 @@ class Candidate:
     price: int
     avito_brand: str
     avito_model: str
+    truck_section: Optional[bool] = None    # a «C» in the truck section (truck.resolve_c); None: not decided here, by its type (truck.in_section)
 
 
 @dataclass
@@ -41,7 +42,7 @@ class Evaluation:
     oth_no_price: Dict[str, int] = field(default_factory=dict)  # code -> manual pieces not counted in this account: gone, no own price
     oth_price: Dict[str, int] = field(default_factory=dict)    # code -> own price of a gone position on «Свой остаток» held or back on its saved ad
     held: Dict[str, Tuple[float, float, str]] = field(default_factory=dict)  # code -> (anchor, supplier's price, why): priced from the anchor (price_guard)
-    truck: Set[str] = field(default_factory=set)               # unmatched codes of «C» positions: they wait for a model of the truck section
+    truck: Set[str] = field(default_factory=set)               # unmatched codes of «C» positions (no passenger model): they wait for a model of the truck section
 
 
 def evaluate(
@@ -82,9 +83,9 @@ def evaluate(
             problems.append("bad_price:%s" % offer.base_price)
         else:
             price = position_price(offer, settings)                          # its own price in this account first, else the brand's
-        truck_section = is_commercial_c(offer)                               # «C»: only the lists of the truck section (truck.py)
-        if truck_section:
-            avito_brand, avito_model = truck.resolve(offer.brand_key, offer.model_raw, confirmed, brand_map)
+        truck_section = False
+        if is_commercial_c(offer):                                           # «C»: the passenger model, else the truck section (truck.py)
+            avito_brand, avito_model, truck_section = truck.resolve_c(offer.brand_key, offer.model_raw, ref, confirmed, brand_map)
         else:
             avito_brand = resolve_brand(offer.brand_key, ref, brand_map)
             avito_model = resolve_model(avito_brand, offer.model_raw, confirmed, ref) if avito_brand is not None else None
@@ -98,5 +99,5 @@ def evaluate(
         if problems:
             ev.problems[gid] = problems
         else:
-            ev.ok[gid] = Candidate(gid, offer, price, avito_brand, avito_model)
+            ev.ok[gid] = Candidate(gid, offer, price, avito_brand, avito_model, truck_section)
     return ev

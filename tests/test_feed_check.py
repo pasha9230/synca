@@ -53,7 +53,7 @@ def test_a_good_ad_passes_every_rule():
     ({"Price": "0"}, {}, "price"),
     ({"Title": "Шина  с двойным пробелом"}, {}, "title"),
     ({"Title": "x" * 71}, {}, "title"),
-    ({"Title": "Ikon 205/65 109/107 C Character"}, {}, "commercial"),
+    ({"Title": "Ikon 205/65 109/107 C Character", "Model": "Нет Такой"}, {}, "commercial"),   # a «C» under a passenger model passes (2026-11-11)
     ({"Images": None}, {}, "photo"),
     ({"Model": "Нет Такой"}, {}, "model_in_reference"),
     ({"ContactPhone": "+79990000000"}, {}, "phone"),

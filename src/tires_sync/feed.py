@@ -11,7 +11,6 @@ from typing import List, Optional
 
 from . import truck
 from .candidates import Candidate
-from .filters import is_commercial_c
 from .description import CONTROL_CHARS, DEFAULT_TEMPLATE, render_description
 from .models import Season, Settings
 
@@ -240,7 +239,7 @@ def render_ad(
     def add(name: str, text: str) -> None:
         ET.SubElement(ad, name).text = CONTROL_CHARS.sub("", text)
 
-    in_truck = is_commercial_c(o)                                    # «C»: the truck section (truck.py), its own tags
+    in_truck = truck.in_section(c)                                   # «C» without a passenger model: the truck section (truck.py), its own tags
     add("Id", o.goods_id if pack == 1 else "%s-x%d" % (o.goods_id, pack))
     add("Category", "Запчасти и аксессуары")
     add("GoodsType", "Шины, диски и колёса")

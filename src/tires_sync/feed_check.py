@@ -179,8 +179,8 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
         if pack and not ctx.pack4:
             add("pack4", ad_id)
         title = ad.findtext("Title") or ""
-        if COMMERCIAL.search(title) and not in_truck:          # a «C» belongs to the truck section (owner, 2026-11-10), not to the passenger one
-            add("commercial", ad_id)
+        if COMMERCIAL.search(title) and not in_truck and not _passenger_c(ad, ctx.reference):
+            add("commercial", ad_id)                           # a «C» goes to the passenger section only under a model of its reference (owner, 2026-11-11)
         reference = ctx.truck_reference if in_truck else ctx.reference
         if reference:
             brand = (ad.findtext("Brand") or "").strip()
@@ -213,6 +213,15 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
 @lru_cache(maxsize=64)
 def _normalized_models(models: FrozenSet[str]) -> FrozenSet[str]:
     return frozenset(normalize_model(m) for m in models)
+
+
+def _passenger_c(ad: ET.Element, reference: Dict[str, FrozenSet[str]]) -> bool:
+    """A «C» ad of the passenger section under a model of the passenger reference (owner, 2026-11-11: truck.passenger_model); without the
+    reference it cannot be told, and the rule `commercial` judges it as before."""
+    brand = (ad.findtext("Brand") or "").strip()
+    model = (ad.findtext("Model") or "").strip()
+    avito_brand = resolve_brand(brand.upper(), reference, {}) if brand and reference else None
+    return avito_brand is not None and normalize_model(model) in _normalized_models(reference.get(avito_brand, frozenset()))
 
 
 def _tochki_rules(ad, ad_id: str, code: str, pack: bool, ctx: Context, twins: Dict[str, str], code_of, add) -> None:
