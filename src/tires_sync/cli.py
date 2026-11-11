@@ -165,6 +165,10 @@ def _build_parser() -> argparse.ArgumentParser:
     se.add_argument("--db", required=True)
     se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «На возврат»")
     se.add_argument("--dry-run", action="store_true", help="только показать список, ничего не ставить в очередь")
+    sc = sub.add_parser("sheet-cancel-remove", help="отключено: строки Google-таблицы не удаляются (решение владельца 2026-11-11)")
+    sc.add_argument("--db", required=True)
+    sc.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    sc.add_argument("--dry-run", action="store_true", help="только посчитать и показать, ничего не менять и не отправлять")
     of = sub.add_parser("oth-numbers-fill", help="вписать номер WebMIM и перемещение из заказа-источника заказам, взявшим шины с ОТХ до правила 2026-11-04: только перечисленным; вписанное человеком остаётся, никому ничего не отправляется")
     of.add_argument("--db", required=True)
     of.add_argument("--order", type=int, action="append", required=True, help="номер заказа панели; можно несколько раз")
@@ -1323,6 +1327,13 @@ def _cmd_sheet_enroll(args) -> int:
         return 1
     print("в очередь Google-таблицы: %d заказов; строки запишет ближайшая отправка (orders-tick)" % len(done))
     return 0
+
+
+def _cmd_sheet_cancel_remove(args) -> int:
+    """sheet-cancel-remove: switched off (the owner 2026-11-11: «Не удаляй строки вообще»). Nothing is read, written or sent; only said."""
+    print("ошибка: удаление строк из Google-таблицы отключено решением владельца 2026-11-11; ничего не изменено и не отправлено",
+          file=sys.stderr)
+    return 1
 
 
 def _google_sheet(conn, key_file) -> None:
@@ -3192,6 +3203,8 @@ def main(argv=None) -> int:
             return _cmd_orders_fill_responsible(args)
         if args.command == "sheet-enroll":
             return _cmd_sheet_enroll(args)
+        if args.command == "sheet-cancel-remove":
+            return _cmd_sheet_cancel_remove(args)
         if args.command == "oth-numbers-fill":
             return _cmd_oth_numbers_fill(args)
         if args.command == "vk-catchup":

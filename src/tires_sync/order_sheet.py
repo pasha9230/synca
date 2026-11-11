@@ -486,11 +486,11 @@ def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey
     for mark, fields in now_rows.items():
         before = written.get(mark)
         extra = {c: fields[c] for c in OPTIONAL if c in fields and fields[c] != (before or {}).get(c, "")}
-        if before is None:
+        if before is None or before.get("_removed"):                    # a row removed on «Отмена» before 2026-11-11 is made again
             op = {"key": mark, "create": True, "fields": {c: fields[c] for c in SENT}}
             if grey:
                 op["shade"] = True
-        elif not before.get("_missing") and not before.get("_removed"):  # a row removed before 2026-11-11 is never made again (the owner)
+        elif not before.get("_missing"):
             diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
             shade = grey != bool(before.get("_grey"))
             if not diff and not extra and not shade:
@@ -565,6 +565,15 @@ def check(conn, box, http: Transport) -> str:
     return said
 
 
+# ---- rows removed before 2026-11-11 ----------------------------------------------------------------------------------------------
+# From 2026-11-07 the panel removed the rows of an order cancelled before its tyres reached the point (the op «remove»). The owner
+# 2026-11-11: «Не удаляй строки вообще»: no row is ever removed now; such an order keeps its rows and gets its columns («Этап»: «Отмена»)
+# as any other. A row removed back then is marked `_removed` in sheet_order.rows: while the order stays on «Отмена» it is not made again
+# (or the old cancels would all come back at once); taken back from «Отмена», its rows are written again, as before.
+
+BACK_LINE = "Заказ вернули из «Отмены»: строки снова записаны в Google-таблицу: %d стр."
+
+
 # ---- sending ------------------------------------------------------------------------------------------------------------------------
 
 def _retry_at(now: str, failing: int) -> str:
@@ -595,13 +604,16 @@ def _failed(conn, card_id: int, failing: int, why: str, now: str, seen: int) -> 
 
 
 def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: str) -> str:
-    """Send what changed in one order (claimed by the caller); returns what happened, in words. The rows are never deleted (the owner
-    2026-11-11): a cancelled order keeps its rows, its «Этап» goes as any change; a row removed before that (`_removed`) is never made again."""
+    """Send what changed in one order (claimed by the caller); returns what happened, in words. No row is ever removed (the owner
+    2026-11-11): an order on «Отмена» gets its columns as any other; a row removed before that (`_removed`) is not made again on «Отмена»."""
     row = conn.execute("SELECT placed_at, rows, failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()
     placed_at, written, failing = row[0], json.loads(row[1] or "{}"), row[2]
     seen = _last_event(conn, card_id)                                      # before the rows: a change made while Google answers is looked at again
     current = rows_of(conn, card_id, placed_at)
+    if orders.get_card(conn, card_id)["stage"]["code"] == "cancel":
+        current = {m: f for m, f in current.items() if not written.get(m, {}).get("_removed")}
     ops = changes(current, written, followed(conn, card_id), grey=not listed(conn, card_id))   # back before «Заказ оформлен»: grey
+    recreated = {op["key"] for op in ops if op["create"] and written.get(op["key"], {}).get("_removed")}
     gone = [m for m in written if m not in current and not written[m].get("_gone") and not written[m].get("_removed")]
     for m in gone:
         written[m]["_gone"] = True
@@ -626,17 +638,22 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     kept = [op for op in ops if not op["create"] and results.get(op["key"]) == "updated" and op not in unshaded]            # by a lost answer
     missing = [op for op in ops if results.get(op["key"]) == "missing"]
     for op in made + kept:
-        written[op["key"]] = dict(written.get(op["key"], {}), **op["fields"], **op.get("extra", {}))
+        base = {} if op["key"] in recreated else written.get(op["key"], {})
+        written[op["key"]] = dict(base, **op["fields"], **op.get("extra", {}))
         if "shade" in op:
             written[op["key"]]["_grey"] = op["shade"]
     for op in missing:
         written[op["key"]] = dict(written.get(op["key"], {}), _missing=True)
     lines = []
+    again = [op for op in made if op["key"] in recreated]
+    if again:
+        lines.append(BACK_LINE % len(again))
+    made = [op for op in made if op["key"] not in recreated]
     if made:
         lines.append("Записано в Google-таблицу: %d стр." % len(made))
     if any(op["fields"] or op.get("extra") for op in kept):
         lines.append("Google-таблица обновлена: %s." % _names([op for op in kept if op["fields"] or op.get("extra")]))
-    greyed = [op for op in made + kept if op.get("shade") is True]
+    greyed = [op for op in made + again + kept if op.get("shade") is True]
     cleared = [op for op in kept if op.get("shade") is False]
     if greyed:
         lines.append("Заказ на этапе до «Заказ оформлен»: строки Google-таблицы залиты серым: %d стр." % len(greyed))
@@ -645,7 +662,7 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     if missing:
         lines.append("Строка Google-таблицы изменена или удалена вручную (другой артикул или строки нет): %d стр. "
                      "Заново не создаём, обновления этих строк не идут." % len(missing))
-    lost = [op for op in ops if op not in made + kept + missing]
+    lost = [op for op in ops if op not in made + again + kept + missing]
     if lost and not failing:                                               # the script did not take them: they go again (said once)
         lines.append("Google-таблица не приняла %d стр.%s: отправим ещё раз." % (len(lost), " (%s)" % why if why else ""))
     for line in lines:
