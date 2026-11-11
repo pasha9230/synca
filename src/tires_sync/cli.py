@@ -165,7 +165,7 @@ def _build_parser() -> argparse.ArgumentParser:
     se.add_argument("--db", required=True)
     se.add_argument("--open", action="store_true", required=True, help="открытые заказы: от «Заказ оформлен» до «На ОТХ» и «На возврат»")
     se.add_argument("--dry-run", action="store_true", help="только показать список, ничего не ставить в очередь")
-    sc = sub.add_parser("sheet-cancel-remove", help="убрать из Google-таблицы строки заказов, отменённых до прихода шин на точку (старые отмены; запуск вручную по слову владельца)")
+    sc = sub.add_parser("sheet-cancel-remove", help="отключено: строки Google-таблицы не удаляются (решение владельца 2026-11-11)")
     sc.add_argument("--db", required=True)
     sc.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     sc.add_argument("--dry-run", action="store_true", help="только посчитать и показать, ничего не менять и не отправлять")
@@ -1330,26 +1330,10 @@ def _cmd_sheet_enroll(args) -> int:
 
 
 def _cmd_sheet_cancel_remove(args) -> int:
-    """sheet-cancel-remove: the rows of the orders cancelled before their tyres reached the point leave the Google table (order_sheet.
-    remove_cancelled). --dry-run lists and counts them only. Run by hand after a copy of the base, by the owner's word (2026-11-07)."""
-    from . import order_sheet
-    conn = store.connect(args.db)
-    found = order_sheet.cancelled_before_point(conn)
-    for card in found:
-        print("№%d · %s · %s" % (card["id"], card["cancel_reason"] or "без причины", card["client_name"] or "без имени"))
-    if args.dry_run:
-        print("заказов: %d (ничего не изменено, в таблицу ничего не отправлено)" % len(found))
-        return 0
-    try:
-        done = order_sheet.remove_cancelled(conn, load_box(args.key_file) if args.key_file else None, _http(),
-                                            moscow_now().isoformat(timespec="seconds"), apply=True)
-    except order_sheet.SheetError as err:
-        print("ошибка: %s" % err, file=sys.stderr)
-        return 1
-    for card_id, said in done.items():
-        print("№%d: %s" % (card_id, said))
-    print("заказов: %d" % len(done))
-    return 0
+    """sheet-cancel-remove: switched off (the owner 2026-11-11: «Не удаляй строки вообще»). Nothing is read, written or sent; only said."""
+    print("ошибка: удаление строк из Google-таблицы отключено решением владельца 2026-11-11; ничего не изменено и не отправлено",
+          file=sys.stderr)
+    return 1
 
 
 def _google_sheet(conn, key_file) -> None:
