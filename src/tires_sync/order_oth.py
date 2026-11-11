@@ -986,6 +986,18 @@ def given_back(conn, order_id) -> bool:
                for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (order_id,)).fetchall())
 
 
+def _record_part(conn, card: dict) -> Optional[tuple]:
+    """(pieces in it, pieces of the split) of a record of storage with a mark «На возврат» that no longer holds every tyre it was made with
+    (the owner 2026-11-11: such a record is sold or returned whole: «если на ОТХ 4, то и продадим 4 или вернём 4»); None: it holds them all, it
+    has no mark, or it is no record (the orders put on «На ОТХ» the old way are sold as before)."""
+    from . import oth_storage
+    mark = oth_storage.record(conn, card["id"])
+    if mark is None or card["stage"]["code"] != "oth" or not oth_storage.returning(conn, card["id"]):
+        return None
+    have, made = sum(int(i["qty"]) for i in card["items"]), int(mark.get("pieces") or 0)
+    return (have, made) if have < made else None
+
+
 def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     """«Продать» of «Рабочее место» (the owner 2026-11-10): the tyres on «На ОТХ» or «На возврат» went to a buyer from the street, the whole order goes
     to «Выполнено» in one transaction. Not answer_issued: no question of the seventh day is needed (an open one closes: «sold»), and the client put
@@ -1009,6 +1021,11 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
         conn.rollback()
         return ("не выполнено: часть шин возвращена поставщику", "Заказ №%s: часть шин уже возвращена поставщику. Отметить «Продать» нельзя: "
                 "напишите офису, сколько шин продано." % label, False)
+    part = _record_part(conn, card)
+    if part:                                                     # the owner 2026-11-11: a record with a mark «На возврат» is sold whole only
+        conn.rollback()
+        return ("не выполнено: запись хранения не целиком", "Заказ №%s: запись на возврат поставщику продаётся только целиком, в ней %d из %d шт. "
+                "Отметить «Продать» нельзя: напишите офису." % ((label,) + part), False)
     done = next((s for s in orders.list_stages(conn) if s["code"] == "done"), None)
     if done is None:
         conn.rollback()

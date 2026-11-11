@@ -588,6 +588,8 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
         raise OthSaleError("По заказу №%d записана продажа: клиента не сменить." % old_id)
     from . import oth_swap, oth_storage
     stored = oth_storage.is_record(conn, old_id)                        # a record of storage: a new order takes it whole (the owner 2026-11-10)
+    if stored and oth_storage.returning(conn, old_id):                  # a tyre of it marked «На возврат»: the whole record goes back (2026-11-11)
+        raise OthSaleError(oth_storage.RETURN_WHOLE)
     if not stored and oth_swap.why_not(conn, old) is None:              # every tyre goes: the order itself takes the client (oth_swap)
         oth_swap.to_client(conn, old_id, name, phone, now, author)
         return int(old_id)
