@@ -1,0 +1,28 @@
+{# «Подбор разношироких шин» of «Вид 2» (the owner 2026-11-10; routes_shop._view2): «Комплект N» — the tyre of the front axis, under it
+   the one of the rear, one model of one brand, season and studs; each its own price, stock, «Количество» (2 by default) and cart; no
+   sum of the set. Then «Только передняя ось», «Только задняя ось». The cells are those of the catalog's table (a phone: cards). #}
+{% from "_ui.html" import icon %}
+{% from "_shop_icons.html" import season_icons, cart_button %}
+{% set cols = 3 + (1 if "season" not in hidden else 0) + (1 if "wh" not in hidden else 0) + (1 if "stock" not in hidden else 0) + (1 if "price" not in hidden else 0) + (1 if cart else 0) %}
+{% macro line(r, axis) -%}
+<tr class="shop-kit-line{% if cart %} has-buy{% endif %}">
+<td class="c-photo w-thumb">{% if r.photo %}<img class="thumb" src="{{ r.photo }}" alt="" width="36" height="36" loading="lazy">{% else %}<div class="thumb">нет фото</div>{% endif %}</td>
+<td class="c-tire"><b>{{ r.brand }}</b> {{ r.model or r.name }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} <span class="badge badge--neutral">RunFlat</span>{% endif %}</td>
+<td class="c-size">{% if axis %}<span class="shop-kit-axis">{{ axis }}</span> {% endif %}{{ r.size }}</td>
+{% if "season" not in hidden %}<td class="c-season">{{ season_icons(r) }}</td>{% endif %}
+{% if "wh" not in hidden %}<td class="c-wh">{{ r.warehouse }}</td>{% endif %}
+{% if "stock" not in hidden %}<td class="c-stock num">{{ r.stock }} шт.</td>{% endif %}
+{% if "price" not in hidden %}<td class="c-price num"><b class="strong">{{ r.price|money }}</b></td>{% endif %}
+{% if cart %}<td class="c-buy"><form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
+<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty_max }}" inputmode="numeric" aria-label="Количество, шт.">{{ cart_button(r) }}</form>{% if r.in_cart %}<span class="shop-in-cart">в корзине: {{ r.in_cart }} шт.</span>{% endif %}</td>{% endif %}
+</tr>
+{%- endmacro %}
+{% macro head(text) %}<tr class="shop-kit-head"><th colspan="{{ cols }}" scope="colgroup">{{ text }}</th></tr>{% endmacro %}
+{% if not mixed.asked %}<div class="card"><div class="empty"><h3>Укажите размеры осей</h3><p>Выберите ширину, профиль или диаметр передней и задней оси: пустое поле — любое значение.</p></div></div>
+{% else %}<div class="table-wrap card shop-mixed-wrap"><table class="table shop-table shop-mixed">
+<thead><tr><th class="w-thumb"><span class="sr-only">Фото</span></th><th>Шина</th><th>Размер</th>{% if "season" not in hidden %}<th>Сезон</th>{% endif %}{% if "wh" not in hidden %}<th>Склад</th>{% endif %}{% if "stock" not in hidden %}<th class="num">Остаток</th>{% endif %}{% if "price" not in hidden %}<th class="num">Цена за шт.</th>{% endif %}{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
+{% for a, b in mixed.kits %}<tbody class="shop-kit" data-kit>{{ head("Комплект %d" % loop.index) }}{{ line(a, "Перед") }}{{ line(b, "Зад") }}</tbody>
+{% else %}<tbody class="shop-kit">{{ head("Комплект") }}<tr class="shop-kit-none"><td colspan="{{ cols }}">Нет подходящих</td></tr></tbody>{% endfor %}
+<tbody class="shop-kit" data-only="front">{{ head("Только передняя ось") }}{% for r in mixed.front %}{{ line(r, "") }}{% else %}<tr class="shop-kit-none"><td colspan="{{ cols }}">Нет</td></tr>{% endfor %}</tbody>
+<tbody class="shop-kit" data-only="rear">{{ head("Только задняя ось") }}{% for r in mixed.rear %}{{ line(r, "") }}{% else %}<tr class="shop-kit-none"><td colspan="{{ cols }}">Нет</td></tr>{% endfor %}</tbody>
+</table></div>{% if mixed.more %}<p class="muted xs">Показаны первые {{ mixed.kits|length }} комплектов: уточните размеры или бренд.</p>{% endif %}{% if mixed.only_more %}<p class="muted xs">Без пары показаны не все шины: уточните размеры или бренд.</p>{% endif %}{% endif %}

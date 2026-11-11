@@ -438,6 +438,7 @@ def test_the_forms_of_the_client_are_only_the_own_password():
                        "shop_profile_page", "shop_profile_save",                              # its own «Профиль» (the owner 2026-10-30)
                        "shop_order_cancel",                                                   # its own early order cancelled (the owner 2026-10-31)
                        "shop_columns",                                                        # «Колонки» of its own table (the owner 2026-11-09)
+                       "shop_filters_view",                                                   # «Вид 1 / Вид 2» of its own filters (the owner 2026-11-10)
                        "whatsnew_page"}                                                       # «Что нового» (GET only; the owner 2026-11-02)
 
 

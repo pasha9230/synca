@@ -2,22 +2,23 @@
    `cart` (the client's own page): «В корзину» by the row's opaque `key`. The new design (the owner 2026-10-30, the prototype
    renderClientDesk): the filters in a card above (_shop_filters.html, the look of the office's catalog, the owner 2026-11-09), the sort,
    «Таблица» / «Плитка» (`view`, a link) and the rows. #}
+{% from "_shop_icons.html" import season_icons, cart_button, sort_arrow, view_seg %}
 {% if empty %}
 <div class="card"><div class="empty"><h3>Ассортимент ещё не настроен</h3><p>Как только менеджер откроет вам каталог, здесь появятся шины с вашими ценами.</p></div></div>
 {% else %}
 {% include "_shop_filters.html" %}
 <div class="shop-cat shop-cat--top">
 <section class="shop-results" data-tour="catalog">
-<div class="shop-tools"><div class="shop-tools-title"><h1>Каталог</h1><span class="muted">Найдено {{ total }}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
-<div class="shop-sort"><span class="muted">Сортировка:</span><div class="sortbar">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{% if f.sort == key %} {{ "↓" if f.descending else "↑" }}{% endif %}</a>{% endfor %}</div></div>
-{% include "_shop_columns.html" %}<div class="shop-seg" role="group" aria-label="Вид"><a href="{{ view_links.table }}"{% if view != "tiles" %} class="is-active" aria-current="true"{% endif %}>Таблица</a><a href="{{ view_links.tiles }}"{% if view == "tiles" %} class="is-active" aria-current="true"{% endif %}>Плитка</a></div></div>
+<div class="shop-tools"><div class="shop-tools-title"><h1>Каталог</h1><span class="muted" data-found>Найдено {{ total }}{% if mixed %} компл.{% endif %}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
+<div class="shop-sort"><span class="muted">Сортировка:</span><div class="sortbar">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{{ sort_arrow(f, key) }}</a>{% endfor %}</div></div>
+{% include "_shop_columns.html" %}{{ view_seg(view, view_links) }}</div>
 {% macro buy(r) %}<form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
-<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty_max }}" inputmode="numeric" aria-label="Количество, шт."><button class="btn btn--primary btn--sm">{{ "Ещё" if r.in_cart else "В корзину" }}</button></form>{% if r.in_cart %}<span class="shop-in-cart">в корзине: {{ r.in_cart }} шт.</span>{% endif %}{% endmacro %}
+<input class="input input--num" type="number" name="qty" value="{{ r.qty }}" min="1" max="{{ r.qty_max }}" inputmode="numeric" aria-label="Количество, шт.">{{ cart_button(r) }}</form>{% if r.in_cart %}<span class="shop-in-cart">в корзине: {{ r.in_cart }} шт.</span>{% endif %}{% endmacro %}
 {% if rows and view == "tiles" %}<div class="shop-tiles">{% for r in rows %}<article class="shop-tile">
 <div class="shop-tile-ph">{% if r.photo %}<img src="{{ r.photo }}" alt="" loading="lazy">{% else %}<span class="thumb">нет фото</span>{% endif %}</div>
 <div class="shop-tile-name"><b>{{ r.brand }}</b> {{ r.model or r.name }}</div>
 <div class="shop-tile-meta">{{ r.size }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} · RunFlat{% endif %}</div>
-<div class="shop-tile-meta"><span class="shop-tag">{{ r.season or "—" }}{% if r.studs %} · шип{% endif %}</span> <span class="muted">{% if wh_both %}{{ r.warehouse }} · {% endif %}{{ r.stock }} шт.</span></div>
+<div class="shop-tile-meta"><span class="shop-tag">{{ season_icons(r) }}</span> <span class="muted">{% if wh_both %}{{ r.warehouse }} · {% endif %}{{ r.stock }} шт.</span></div>
 <div class="shop-tile-price"><b class="strong">{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
 {% if cart %}{{ buy(r) }}{% endif %}</article>{% endfor %}</div>
 {% elif rows %}<div class="table-wrap"><table class="table shop-table">
@@ -27,14 +28,15 @@
 <td class="c-photo w-thumb">{% if r.photo %}<img class="thumb" src="{{ r.photo }}" alt="" width="36" height="36" loading="lazy">{% else %}<div class="thumb">нет фото</div>{% endif %}</td>
 <td class="c-tire"><b>{{ r.brand }}</b> {{ r.model or r.name }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} <span class="badge badge--neutral">RunFlat</span>{% endif %}</td>
 <td class="c-size">{{ r.size }}</td>
-{% if "season" not in hidden %}<td class="c-season">{{ r.season or "—" }}{% if r.studs %} · шип{% endif %}</td>{% endif %}
+{% if "season" not in hidden %}<td class="c-season">{{ season_icons(r) }}</td>{% endif %}
 {% if "country" not in hidden %}<td class="c-country">{{ r.country or "—" }}</td>{% endif %}{% if "year" not in hidden %}<td class="c-year">{{ r.year or "—" }}</td>{% endif %}
 {% if "wh" not in hidden %}<td class="c-wh">{{ r.warehouse }}</td>{% endif %}
 {% if "stock" not in hidden %}<td class="c-stock num">{{ r.stock }} шт.</td>{% endif %}
 {% if "price" not in hidden %}<td class="c-price num"><b class="strong">{{ r.price|money }}</b></td>{% endif %}
 {% if cart %}<td class="c-buy">{{ buy(r) }}</td>{% endif %}
 </tr>{% endfor %}</tbody></table></div>
-{% else %}<div class="empty"><h3>Ничего не найдено</h3><p>Измените или сбросьте фильтры.</p></div>{% endif %}
+{% elif mixed is not none %}{% include "_shop_mixed.html" %}
+{% else %}<div class="empty"><h3>{{ "Товары не найдены" if fview == 2 else "Ничего не найдено" }}</h3><p>Измените или сбросьте фильтры.</p></div>{% endif %}
 {% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
 </section>
 </div>
