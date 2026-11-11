@@ -1,7 +1,8 @@
 """The Avito section of commercial tires of type «C»: «Транспорт → Запчасти и аксессуары → Шины, диски и колёса → Шины для грузовиков и
 спецтехники», in the feed of the same account. The owner 2026-11-11 (it changes «Все «C»» of 2026-11-10): a «C» whose model is in the passenger
 reference (its very name, truck.passenger_model) is published in the passenger section like any passenger tire (passenger_model, resolve_c); only
-the others go to this section. Its template and lists are in data/avito-templates
+the others go to this section. On «Сопоставления» the owner may confirm a passenger model for a «C» (confirmed_passenger_model, saved under
+`c:<brand>`): it goes to the passenger section too; a position that already has an ad in this section stays here (resolve_c, truck_bound). Its template and lists are in data/avito-templates
 (gruzovye-shiny-2026-11-10.xml: the tags; .json: the values Avito takes for each tag).
 
 A «C» position of this section is matched only against its lists (its Brand and its Model: one list of models for every brand), never against the
@@ -91,6 +92,28 @@ def resolve_truck_model(brand: str, model_raw: str, confirmed: Dict[Tuple[str, s
     return found if found is not None and keeps_commercial_mark(model_raw, found) else None
 
 
+PASSENGER_SECTION = "c_passenger"       # the form's `section` of a passenger model the owner confirms for a «C» (owner, 2026-11-11)
+PASSENGER_PAIR_PREFIX = "c:"              # the brand of that pair in the table `mapping` (no new column): a passenger tire never reads it
+
+
+def passenger_pair_brand(brand: str) -> str:
+    """The brand under which a passenger model confirmed for a «C» position is saved: apart from the passenger pairs of the same brand
+    (an old pair of a passenger tire with the same name does not move a «C» to the passenger section) and from the truck ones."""
+    return PASSENGER_PAIR_PREFIX + brand
+
+
+def confirmed_passenger_model(brand: Optional[str], model_raw: str, ref: Dict[str, FrozenSet[str]],
+                              confirmed: Dict[Tuple[str, str], str]) -> Optional[str]:
+    """The passenger model the owner confirmed for this «C» model on «Сопоставления» (owner, 2026-11-11): only a model of the brand in
+    the passenger reference that keeps every commercial number of the name; None: none (or no longer in the reference)."""
+    if not brand:
+        return None
+    saved = confirmed.get((passenger_pair_brand(brand), normalize_model(model_raw)))
+    if saved is not None and saved in ref.get(brand, ()) and keeps_commercial_mark(model_raw, saved):
+        return saved
+    return None
+
+
 def passenger_model(brand: Optional[str], model_raw: str, ref: Dict[str, FrozenSet[str]]) -> Optional[str]:
     """The model of a «C» position in the passenger reference (owner, 2026-11-11): its very name after normalize_model, as a passenger
     model is found without a pair (catalog: «exact», with the Cyrillic look-alikes, or «prefix», the brand in front), only one, with every
@@ -104,13 +127,18 @@ def passenger_model(brand: Optional[str], model_raw: str, ref: Dict[str, FrozenS
 
 
 def resolve_c(brand_key: str, model_raw: str, ref: Dict[str, FrozenSet[str]], confirmed: Dict[Tuple[str, str], str],
-              brand_map: Optional[Dict[str, str]] = None) -> Tuple[Optional[str], Optional[str], bool]:
-    """(Avito brand, Avito model, in the truck section) of a «C» position: the passenger section when its model is in the passenger
-    reference (passenger_model), else this section by its lists (resolve)."""
-    brand = resolve_brand(brand_key, ref, brand_map)
-    model = passenger_model(brand, model_raw, ref)
-    if model is not None:
-        return brand, model, False
+              brand_map: Optional[Dict[str, str]] = None, truck_bound: bool = False) -> Tuple[Optional[str], Optional[str], bool]:
+    """(Avito brand, Avito model, in the truck section) of a «C» position (owner, 2026-11-11), first that applies: the passenger model the
+    owner confirmed for it (confirmed_passenger_model), its very name in the passenger reference (passenger_model), the truck section by
+    its lists and its confirmed truck pair (resolve; None: it waits for a pair).
+    `truck_bound`: this account already has an ad of the position in the truck section (published, or taken off and kept with its Id,
+    store.truck_bound_codes). It stays there: Avito does not move an ad to another category under the same Id, so a passenger model never
+    takes it over (it applies to the positions that have no such ad yet)."""
+    if not truck_bound:
+        brand = resolve_brand(brand_key, ref, brand_map)
+        model = confirmed_passenger_model(brand, model_raw, ref, confirmed) or passenger_model(brand, model_raw, ref)
+        if model is not None:
+            return brand, model, False
     brand, model = resolve(brand_key, model_raw, confirmed, brand_map)
     return brand, model, True
 
@@ -123,7 +151,7 @@ def in_section(c) -> bool:
 
 
 def sections_of(offers, ref: Dict[str, FrozenSet[str]], confirmed: Dict[Tuple[str, str], str],
-                brand_map: Optional[Dict[str, str]] = None) -> list:
+                brand_map: Optional[Dict[str, str]] = None, truck_bound: FrozenSet[str] = frozenset()) -> list:
     """Every «C» position of the unload with the section it goes to (resolve_c), for a look on the live data (cli `commercial-sections`):
     dicts code, brand_key, model_raw, section («легковой раздел» / «грузовой раздел»), avito_brand, avito_model (None: waits for a pair).
     Reads only; whether the position is published (stock, price, the owner's switches) is not judged here."""
@@ -131,7 +159,7 @@ def sections_of(offers, ref: Dict[str, FrozenSet[str]], confirmed: Dict[Tuple[st
     for code, offer in sorted(offers.items()):
         if not is_commercial_c(offer):
             continue
-        brand, model, in_truck = resolve_c(offer.brand_key, offer.model_raw, ref, confirmed, brand_map)
+        brand, model, in_truck = resolve_c(offer.brand_key, offer.model_raw, ref, confirmed, brand_map, code in truck_bound)
         rows.append({"code": code, "brand_key": offer.brand_key, "model_raw": " ".join(offer.model_raw.split()),
                      "section": SECTION_LABEL if in_truck else PASSENGER_LABEL, "avito_brand": brand, "avito_model": model})
     return rows

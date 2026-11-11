@@ -53,8 +53,10 @@ def evaluate(
     confirmed: Dict[Tuple[str, str], str],
     brand_map: Optional[Dict[str, str]] = None,
     oth: FrozenSet[str] = frozenset(),
+    truck_bound: FrozenSet[str] = frozenset(),
 ) -> Evaluation:
-    """`oth`: the codes on «На ОТХ» (oth_stock): their excluded brand or season switched off does not keep them out (filters)."""
+    """`oth`: the codes on «На ОТХ» (oth_stock): their excluded brand or season switched off does not keep them out (filters).
+    `truck_bound`: the codes this account has an ad of in the truck section (store.truck_bound_codes): such a «C» stays there (truck.resolve_c)."""
     ev = Evaluation()
     for gid, items in issues.items():
         ev.problems[gid] = list(items)
@@ -85,7 +87,8 @@ def evaluate(
             price = position_price(offer, settings)                          # its own price in this account first, else the brand's
         truck_section = False
         if is_commercial_c(offer):                                           # «C»: the passenger model, else the truck section (truck.py)
-            avito_brand, avito_model, truck_section = truck.resolve_c(offer.brand_key, offer.model_raw, ref, confirmed, brand_map)
+            avito_brand, avito_model, truck_section = truck.resolve_c(offer.brand_key, offer.model_raw, ref, confirmed, brand_map,
+                                                                             gid in truck_bound)
         else:
             avito_brand = resolve_brand(offer.brand_key, ref, brand_map)
             avito_model = resolve_model(avito_brand, offer.model_raw, confirmed, ref) if avito_brand is not None else None

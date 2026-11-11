@@ -159,7 +159,8 @@ def test_the_mappings_page_shows_the_waiting_c_model_and_never_hints_at_the_othe
     assert "грузовой раздел" in row and "модель из справочника грузового раздела" in row
     assert "пара с моделью без «C3» в названии не действует" in row
     assert 'value="Character Ice C2"' not in row                                         # the nearest other model is not offered as the hint
-    assert 'name="section" value="truck"' in row and 'list="dl-truck"' in row          # confirmed from the truck section's list
+    assert '<option value="truck" selected>' in row and 'list="dl-truck"' in row       # confirmed from the truck section's list by default
+    assert 'name="section"' in row                                                       # or a passenger model instead (test_commercial_confirm)
     assert '<datalist id="dl-truck">' in page and '<option value="Character Ice C2">' in page
     found = page.split('class="t-name">Ikon Autograph Snow C4')[1].split("</tr>")[0]
     assert "без пары не публикуется" not in found and "Autograph Snow C4" in found

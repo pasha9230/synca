@@ -1058,6 +1058,7 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
             studs[offer.brand_key]["studded" if offer.studded else "friction"] += 1
         item = models[offer.brand_key].setdefault(normalize_model(offer.model_raw), {"key": normalize_model(offer.model_raw), "name": " ".join(offer.model_raw.split()), "goods": 0, "stock": 0, "seasons": set(), "cartypes": set(), "sizes": {}})
         item["goods"] += 1
+        item.setdefault("codes", set()).add(offer.goods_id)
         size = item["sizes"].setdefault((offer.diameter, offer.width, offer.height), [0, 0])
         size[0] += 1
         size[1] += offer.stock
@@ -1068,6 +1069,7 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
     keys = (set(counts) | {b for b, _ in enabled} | {k.split("|")[0] for k in pricing}) - set(raw.get("excluded_brands") or ())
     rows = []
     from .. import truck
+    bound = store.truck_bound_codes(conn)          # positions with an ad in the truck section in some account: they stay there (truck.resolve_c)
     for key in sorted(keys, key=lambda k: (-sum(counts[k].values()) if k in counts else 0, k)):
         avito = resolve_brand(key, ref, brand_map)
         avito_truck = resolve_brand(key, truck.reference(), brand_map)    # the brand of its «C» models in the truck section
@@ -1086,9 +1088,15 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
         for item in sorted(models.get(key, {}).values(), key=lambda m: (-m["goods"], m["name"])):
             found, proposal, tier, options = None, None, "none", []
             commercial = "C" in item["cartypes"]          # a «C» tire: the passenger section when its model is there, else the truck one (truck.py)
-            passenger_c = truck.passenger_model(avito, item["name"], ref) if commercial else None
-            if passenger_c:
+            codes = item.pop("codes", set())
+            kept = len(codes & bound) if commercial else 0          # its positions that stay in the truck section (an ad there already)
+            c_passenger = truck.confirmed_passenger_model(avito, item["name"], ref, confirmed) if commercial else None
+            passenger_c = (c_passenger or truck.passenger_model(avito, item["name"], ref)) if commercial else None
+            truck_pair = None
+            if passenger_c and kept < len(codes):
                 commercial = False                        # (owner, 2026-11-11): matched like a passenger model, no truck pair is waited for
+            elif passenger_c:
+                passenger_c = None                        # every position of it has an ad in the truck section: it stays there
             brand_of, ref_of = (avito_truck, truck.reference()) if commercial else (avito, ref)
             if brand_of:
                 found = (truck.resolve_truck_model(brand_of, item["name"], confirmed) if commercial
@@ -1098,16 +1106,32 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
                     if commercial:                                          # never hint at the nearest other model (C4 → C3)
                         options = [o for o in options if keeps_commercial_mark(item["name"], o)]
                     proposal = options[0] if options and tier in ("prefix", "code") else None
+            c_section, c_hint = "", ""                    # a «C» of the truck section: the passenger model the owner may confirm instead
+            if commercial and avito and kept < len(codes):
+                truck_pair = found
+                p_tier, p_options = classify_model(avito, item["name"], ref)
+                p_options = [o for o in p_options if keeps_commercial_mark(item["name"], o)]
+                if p_tier == "none":                      # a far guess is no hint (Character Ice C3 ≠ Autograph Ice C3): only the name's beginning
+                    p_options = [o for o in p_options if (" ".join(item["name"].casefold().split()) + " ").startswith(" ".join(o.casefold().split()) + " ")]
+                if p_options and proposals:
+                    c_hint, c_section = p_options[0], truck.PASSENGER_SECTION
+                    if not found:                         # the hint of the row: from the passenger reference, «Подтвердить» → the passenger section
+                        tier, options = p_tier, p_options
+                        proposal = p_options[0] if p_tier in ("prefix", "code") else None
             model_rows.append(dict(item, seasons=[k for k in KIND_ORDER if k in item["seasons"]], cartypes=sorted(item["cartypes"]),
                                    avito_model=found, proposal=proposal, tier=tier, options=list(options),
                                    section=truck.SECTION if commercial else "", section_brand=brand_of,
                                    section_label=truck.SECTION_LABEL if commercial else (truck.PASSENGER_LABEL if passenger_c else ""),
                                    commercial_wait=commercial and not found,
                                    commercial_marks=sorted(commercial_marks(item["name"])) if "C" in item["cartypes"] else [],
+                                   c_choice=commercial and bool(avito) and bool(avito_truck),   # a «C» of the truck section: the form picks the section
+                                   c_section=c_section or (truck.PASSENGER_SECTION if passenger_c and not commercial else truck.SECTION if commercial else ""),
+                                   c_hint=c_hint, c_passenger=c_passenger, truck_pair=truck_pair, truck_kept=kept, passenger_brand=avito,
+                                   truck_brand=avito_truck,
                                    sizes=["%d/%d R%d (%d)" % (w, h, d, stock) for (d, w, h), (_, stock) in sorted(item["sizes"].items())]))
         rows.append({
             "models": model_rows,
-            "avito_models": sorted(ref.get(avito, frozenset())) if avito and any(not m["avito_model"] for m in model_rows) else [],
+            "avito_models": sorted(ref.get(avito, frozenset())) if avito and any(not m["avito_model"] or m["c_hint"] for m in model_rows) else [],
             "brand_key": key,
             "goods": sum(counts[key].values()) if key in counts else 0,
             "avito_brand": avito,

@@ -2234,7 +2234,8 @@ def _cmd_commercial_sections(args) -> int:
         for note in notes:
             print(note)
         ref = parse_reference(Path(args.reference).read_text(encoding="utf-8"))
-        rows = truck.sections_of(parsed.offers, ref, store.load_confirmed_mappings(conn), store.load_brand_map(conn))
+        rows = truck.sections_of(parsed.offers, ref, store.load_confirmed_mappings(conn), store.load_brand_map(conn),
+                                 frozenset(store.truck_bound_codes(conn)))    # an ad in the truck section in some account: it stays there
         conn.close()
     for row in rows:
         print("%s\t%s\t%s\t%s\t%s" % (row["code"], row["brand_key"], row["model_raw"], row["section"],

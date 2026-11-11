@@ -879,6 +879,16 @@ def retired_ad_of(conn, account_id: int, goods_id: str):
     return (row[0], row[1]) if row and row[1] else None
 
 
+def truck_bound_codes(conn, account_id: Optional[int] = None) -> Set[str]:
+    """Codes of the positions this account (None: any account) has an ad of in the truck section (truck.PRODUCT_TYPE): in its last
+    published feed, or taken off and kept with its Id (retired_ad: it comes back on that ad). Such a «C» stays in the truck section
+    (truck.resolve_c). Reads only."""
+    mark = "<ProductType>Шины для грузовиков и спецтехники</ProductType>"
+    where, args = ("instr(snapshot, ?) > 0", (mark,)) if account_id is None else ("account_id = ? AND instr(snapshot, ?) > 0", (account_id, mark))
+    codes = {r[0] for r in conn.execute("SELECT goods_id FROM published_state WHERE " + where, args)}
+    return codes | {r[0] for r in conn.execute("SELECT goods_id FROM retired_ad WHERE " + where, args)}
+
+
 def load_retired(conn, account_id: int, today) -> list:
     """[(goods_id, Id, identity, removed_at)] of every ad that was taken off the feed (they are kept for good)."""
     out = []

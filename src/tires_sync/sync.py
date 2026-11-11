@@ -184,7 +184,7 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     all_names, order_names = oth_stock.places(conn), oth_stock.places(conn, manual=False)
     oth_names = {code: (order_names.get(code, ()) if code in no_manual else names) for code, names in all_names.items()}
     ev = evaluate(parsed.offers, parsed.issues, settings, ref, store.load_confirmed_mappings(conn),
-                  store.load_brand_map(conn), oth=frozenset(on_oth))
+                  store.load_brand_map(conn), oth=frozenset(on_oth), truck_bound=frozenset(store.truck_bound_codes(conn, acct)))
     ev.oth_offers, ev.oth_price = gone_offers, gone_prices
     ev.oth_no_price = {code: on_oth_all - orders_oth.get(code, 0) for code, on_oth_all in manual_total.items() if code in no_price}
     for gid, stock in getattr(parsed, "stocks", {}).items():                # a broken row or a stale supplier: a known fall below the threshold takes it off

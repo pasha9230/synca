@@ -217,9 +217,10 @@ def test_the_mappings_page_says_where_each_c_goes_and_a_passenger_c_waits_for_no
     page = client.get("/mappings?a=all").get_data(as_text=True)
     passenger = page.split('class="t-name">Ikon Autograph Eco C3')[1].split("</tr>")[0]
     assert truck.PASSENGER_LABEL in passenger and truck.SECTION_LABEL not in passenger
-    assert "без пары не публикуется" not in passenger and 'name="section"' not in passenger and "сопоставлена" in passenger
+    assert "без пары не публикуется" not in passenger and 'value="truck"' not in passenger and "сопоставлена" in passenger
+    assert 'name="section" value="c_passenger"' in passenger              # «Сохранить» keeps it in the passenger section (test_commercial_confirm)
     waiting = page.split('class="t-name">Ikon Character Ice C3')[1].split("</tr>")[0]
-    assert truck.SECTION_LABEL in waiting and "без пары не публикуется" in waiting and 'name="section" value="truck"' in waiting
+    assert truck.SECTION_LABEL in waiting and "без пары не публикуется" in waiting and '<option value="truck" selected>' in waiting
     unmatched = client.get("/mappings").get_data(as_text=True)              # the list of models without a pair
     assert 'class="t-name">Ikon Character Ice C3' in unmatched and 'class="t-name">Ikon Autograph Eco C3' not in unmatched
 
