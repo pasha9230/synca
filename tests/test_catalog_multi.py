@@ -58,9 +58,9 @@ def test_the_office_ticks_two_widths_and_old_links_still_read(tmp_path):
     assert get("?w=225&w=195") == ["C1", "C3", "C5", "C7"]                                     # 225 and 195, never 205
     assert get("?w=205&w=225&h=55&d=16") == ["C1", "C2", "C6"]
     assert get("?w=225+195") == get("?w=225,195") == ["C1", "C3", "C5", "C7"] and get("?w=205") == ["C2", "C4", "C6"]
-    html = owner.get("/catalog?w=225&w=195").get_data(as_text=True)
-    box = size_list(html, "w")
-    assert 'name="w" value="225" checked' in box and 'name="w" value="195" checked' in box and 'name="w" value="205">' in box
+    html = owner.get("/catalog?w=225&w=195").get_data(as_text=True)     # the block as MIM (lane office-catalog-mim): chips of the field, the list
+    box = re.search(r'data-oc-ms data-name="w">(.*?)</ul></div></div>', filters(html), re.S).group(1)
+    assert 'name="w" value="195"' in box and 'name="w" value="225"' in box and 'data-v="205">' in box
 
 
 def test_one_reading_of_the_sizes_for_both():
@@ -72,7 +72,7 @@ def test_one_reading_of_the_sizes_for_both():
     assert routes_catalog._nums(MultiDict([("w", "abc")]), "w") is None and cc.size_numbers(MultiDict(), "w") == []
 
 
-@pytest.mark.parametrize("who", ["office", "client"])
+@pytest.mark.parametrize("who", ["client"])       # the office: the block as MIM since 2026-11-11 (tests/test_office_catalog_mim.py)
 def test_no_update_on_tab_or_a_key(tmp_path, who):
     """Tab goes from «Ширина» to «Профиль» to «Диаметр»: the row is never sent on a change (app.js data-autosubmit), the page is asked
     anew by «Показать» of a list, by Enter or by a chip."""

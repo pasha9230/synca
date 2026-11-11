@@ -3,10 +3,13 @@
 {% macro stud(cls="") -%}
 <svg class="i o2-stud {{ cls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l3.2 7.5H8.8z" fill="currentColor" stroke="none"/><circle cx="12" cy="16" r="5.5"/><circle cx="12" cy="16" r="1.6" fill="currentColor" stroke="none"/></svg>
 {%- endmacro %}
+{% macro winter_stud(cls="") -%}{# зима с шипами одним значком: снежинка и красный треугольник шипа (как у клиента, _shop_icons.html; lane office-catalog-mim) #}
+<svg class="i o2-wstud {{ cls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2v20M2.2 7l15.6 10M2.2 17L17.8 7"/><path class="o2-spike" d="M18 11.5l4.5 9h-9z"/></svg>
+{%- endmacro %}
 {% macro season_tag(kind) -%}{# каталог: только значок, слово — в подсказке и для экранного чтеца (владелец 2026-11-09) #}
 {%- if kind == "summer" -%}<span class="o2-season o2-season--summer" title="Лето">{{ icon("sun") }}<span class="sr-only">Лето</span></span>
 {%- elif kind == "all" -%}<span class="o2-season o2-season--all" title="Всесезонные">{{ icon("sun") }}{{ icon("snow") }}<span class="sr-only">Всесезон</span></span>
-{%- elif kind == "winter_studded" -%}<span class="o2-season o2-season--winter" title="Зима">{{ icon("snow") }}<span class="sr-only">Зима</span></span><span class="o2-season o2-season--stud" title="Шипы">{{ stud() }}<span class="sr-only">Шипы</span></span>
+{%- elif kind == "winter_studded" -%}<span class="o2-season o2-season--winter o2-season--wstud" title="Зима, шипы">{{ winter_stud() }}<span class="sr-only">Зима, шипы</span></span>
 {%- elif kind == "winter" -%}<span class="o2-season o2-season--winter" title="Зима">{{ icon("snow") }}<span class="sr-only">Зима</span></span>
 {%- endif -%}
 {%- endmacro %}

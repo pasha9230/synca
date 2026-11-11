@@ -101,6 +101,70 @@ def _view_only(args) -> dict:
     return {k: v for k, v in _view_filters(args).items() if k != "unknown"}
 
 
+SEASONS = ("summer", "winter", "all")      # «Сезон»: «Всесезонные» too (lane office-catalog-mim, the owner 2026-11-11)
+ORIGINS = {"imp": "Импортные", "dom": "Отечественные"}
+DOMESTIC = {"россия", "russia", "рф"}      # the country of the brand (SBRANDCOUNTRY of WebMIM) that makes a tyre «Отечественные»
+MIXED_DROP = ("w", "h", "d", "size")       # «Разноширокие»: the axes stand for the size fields
+
+
+def origin_of(offer) -> str:
+    """«imp» / «dom» by the country of the position (WebMIM gives the country of the brand); "" when it is not known (4 точки send none):
+    such a position is in neither of «Импортные», «Отечественные», only in «Все»."""
+    country = " ".join(str(getattr(offer, "country", "") or "").split()).casefold()
+    if not country:
+        return ""
+    return "dom" if country in DOMESTIC else "imp"
+
+
+def _origin(args) -> str:
+    return args.get("c") if args.get("c") in ORIGINS else ""
+
+
+def _filter(parsed, args, season, studs):
+    """The filters of the page on the positions: the size fields, the season, the studs, the supplier, the whole sizes, the brands and
+    «Импортные / Отечественные». With «Разноширокие» the size fields are not read: the axes pick the rows (_mixed)."""
+    if args.get("mixed") == "1":
+        args = MultiDict(_pairs(args, MIXED_DROP))
+    shown = service.filter_offers(parsed, _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs, _num(args, "sup"),
+                                  **_view_only(args))
+    origin = _origin(args)
+    if origin:
+        shown = service._Filtered({g: o for g, o in shown.offers.items() if origin_of(o) == origin}, getattr(shown, "issues", {}))
+    return shown
+
+
+def _rows_filter(items, args) -> list:
+    """«В наличии от N шт.» and «Цена от / до» (our price of the column «Наша цена»; a position without a price is not in a price range)."""
+    least, low, high = _num(args, "sn"), _num(args, "pf"), _num(args, "pt")
+    if least:
+        items = [i for i in items if (i.get("stock") or 0) >= least]
+    if low is not None or high is not None:
+        items = [i for i in items if i.get("price") is not None and (low is None or i["price"] >= low) and (high is None or i["price"] <= high)]
+    return items
+
+
+SIZE_TEXT = re.compile(r"^(\d+)/(\d+) R(\d+)$")
+
+
+def _row_size(item) -> tuple:
+    match = SIZE_TEXT.match(item.get("size") or "")
+    return tuple(int(g) for g in match.groups()) if match else (None, None, None)
+
+
+def _mixed(items, args, offers) -> dict:
+    """«Разноширокие» of the office (as the client's «Вид 2», client_catalog.pair_axes): «Комплект N» — a row of the front axis and one of
+    the rear of one model; then «Только передняя ось», «Только задняя ось». An empty field of an axis is any value; no axis given: nothing
+    asked. `offers`: goods_id -> the position (the model key needs RunFlat)."""
+    axes = {p: client_catalog.axis_of(args, p) for p, _ in client_catalog.AXES}
+    if not any(v is not None for a in axes.values() for v in a):
+        return {"asked": False, "axes": axes, "kits": [], "front": [], "rear": [], "more": False, "only_more": False}
+    key_of = lambda i: client_catalog.offer_model_key(i["brand"], offers[i["goods_id"]]) if i["goods_id"] in offers else None
+    sets = client_catalog.pair_axes(items, _row_size, key_of, axes["f"], axes["r"])
+    cut = client_catalog.KITS_MAX
+    return {"asked": True, "axes": axes, "kits": sets["kits"][:cut], "front": sets["front"][:cut], "rear": sets["rear"][:cut],
+            "more": len(sets["kits"]) > cut, "only_more": any(len(sets[k]) > cut for k in ("front", "rear"))}
+
+
 def _pairs(args, drop=()) -> list:
     """The parameters of the address as (name, value) pairs, every value of a repeated one (the brands) kept, `drop` left out."""
     items = args.items(multi=True) if hasattr(args, "getlist") else args.items()
@@ -117,8 +181,7 @@ def _gone_view(conn, raw, args, season, studs, live, ref=None) -> list:
     known = {o.goods_id: (o, info) for o, info in catalog_archive.gone_offers(conn) if o.goods_id not in live}      # the page may hold a fresher unload than the last cycle
     if not known:
         return []
-    shown = service.filter_offers(service.hide_excluded(service._Filtered({g: o for g, (o, _) in known.items()}, {}), raw, conn, ref),
-                                  _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs, _num(args, "sup"), **_view_only(args))
+    shown = _filter(service.hide_excluded(service._Filtered({g: o for g, (o, _) in known.items()}, {}), raw, conn, ref), args, season, studs)
     return [known[g] for g in shown.offers]
 
 
@@ -191,8 +254,7 @@ def _held_view(conn, raw, args, season, studs, held, ref=None) -> list:
     if not held:
         return []
     known = {o.goods_id: (o, at) for o, at in held}
-    shown = service.filter_offers(service.hide_excluded(service._Filtered({g: o for g, (o, _) in known.items()}, {}), raw, conn, ref),
-                                  _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs, _num(args, "sup"), **_view_only(args))
+    shown = _filter(service.hide_excluded(service._Filtered({g: o for g, (o, _) in known.items()}, {}), raw, conn, ref), args, season, studs)
     terms = service.search_terms(args.get("q", ""))
     if terms:
         from ..catalog import resolve_brand
@@ -294,15 +356,14 @@ def register(app) -> None:
         staged = staging.summary(conn)
         changes = {} if staged["stale"] else staged["changes"]
         effective = _view_settings(conn, raw, changes)
-        season = args.get("s") if args.get("s") in ("summer", "winter") else None
+        season = args.get("s") if args.get("s") in SEASONS else None
         studs = args.get("t") if args.get("t") in ("studded", "friction") else None
         status = args.get("st") if args.get("st") in ("feed", "no", "nopair", "problem", "gone") else "all"
         sort = args.get("o") if args.get("o") in service.SORT_KEYS else "brand"
         descending = args.get("r") == "1"
         parsed, view_only = tochki_feed.catalog_view(conn, parsed, app.config["UNLOAD_PATH"])      # 4tochki before its switch: shown, never published
         parsed = service.hide_excluded(parsed, raw, conn, ref)                                    # 4tochki: worked brands only
-        filtered = service.filter_offers(parsed, _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), season, studs,
-                                         _num(args, "sup"), **_view_only(args))
+        filtered = _filter(parsed, args, season, studs)
         held_all = _held_offers(conn, settings, app.config["UNLOAD_PATH"])                    # an old second unload: shown, never published
         held_ids = {o.goods_id for o, _ in held_all}
         gone = _gone_view(conn, raw, args, season, studs, set(parsed.offers) | held_ids, ref) if status in ("all", "gone") else []
@@ -320,6 +381,7 @@ def register(app) -> None:
             items = [i for i in items if i["scode"] == "model_needs_mapping"]
         elif status == "problem":
             items = [i for i in items if i["problem"]]
+        items = _rows_filter(items, args)
         own_only = args.get("own") == "1" and has_right("money")
         if own_only:                                                  # «Ручные цены» (the owner 2026-11-03): an own price in an account, applied or in the draft
             feed_ids = {a["id"] for a in connections.list_feed_accounts(conn)}      # an account without a feed: its own prices reach no Avito
@@ -331,11 +393,16 @@ def register(app) -> None:
         market_over = market_on and args.get("mk") == "over"
         if market_over:                                               # «Дороже рынка»: our price above the median of enough data
             items = [i for i in items if market.dearer(i["price"], snaps.get(i["goods_id"]))]
+        mixed = None
+        if args.get("mixed") == "1":                                  # «Разноширокие»: the sets, no pages
+            offers = {**{o.goods_id: o for o, _ in gone}, **{o.goods_id: o for o, _ in held_all}, **parsed.offers}
+            mixed = _mixed(items, args, offers)
+            items = list({i["goods_id"]: i for a, b in mixed["kits"] for i in (a, b)}.values()) + mixed["front"] + mixed["rear"]
         total = len(items)
         size = _page_size(args)
-        pages = max(1, -(-total // size))
+        pages = 1 if mixed else max(1, -(-total // size))
         page = min(max(_num(args, "p") or 1, 1), pages)
-        shown = items[(page - 1) * size: page * size]
+        shown = items if mixed else items[(page - 1) * size: page * size]
         if not has_right("money"):                                    # the supplier's price is a purchase price: not even in the HTML
             shown = [dict(i, supplier_price=None, purchase=None) for i in shown]
         accounts = connections.list_feed_accounts(conn)
@@ -366,11 +433,15 @@ def register(app) -> None:
         shown = [dict(i, oth=on_oth.get(i["goods_id"])) for i in shown]
         if market_on:
             shown = [dict(i, market=_market_cell(i["price"], snaps.get(i["goods_id"]))) for i in shown]
+        if mixed:                                                     # the sets of the rows as drawn (each row enriched once)
+            row = {i["goods_id"]: i for i in shown}
+            mixed = dict(mixed, kits=[(row[a["goods_id"]], row[b["goods_id"]]) for a, b in mixed["kits"]],
+                         front=[row[i["goods_id"]] for i in mixed["front"]], rear=[row[i["goods_id"]] for i in mixed["rear"]])
         return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids,
                     all_ids=[i["goods_id"] for i in items],                # every position of the filter, every page («все по фильтру»)
                     market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
                     page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
-                    studs=studs or "", status=status, sort=sort, descending=descending, own_only=own_only)
+                    studs=studs or "", status=status, sort=sort, descending=descending, own_only=own_only, mixed=mixed)
 
     def table_context(args, next_url=None):
         args = MultiDict(_pairs(args, ("wait",)))                        # the window «В лист ожидания» is no filter of the table
@@ -451,14 +522,34 @@ def register(app) -> None:
         for key in view["brands"] + view["without"]:                          # a brand chosen that has only gone or held positions: kept in the form
             shown.setdefault(key, 0)
         brand_choices = sorted(({"key": k, "label": label(k), "count": n} for k, n in shown.items()), key=lambda c: (c["label"].casefold(), c["key"]))
+        here = _pairs(args, ("wait",))
+        options = service.size_options(b["parsed"])
         return render_template(
             office_page("catalog.html"), size={k: " ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
             size_text=(args.get("size") or "")[:client_catalog.MAX_TEXT], size_unknown=view["unknown"], brand_choices=brand_choices, chosen_brands=view["brands"],
             without_brands=view["without"], feed_brands=_feed_brands(conn, counts, suppliers) if can_post("connections_excluded_brand") else None,
-            size_options=service.size_options(b["parsed"]), supplier_tabs=supplier_tabs, wait=wait,
-            pick=client_catalog.size_pick("/catalog", _pairs(args, ("wait",)), {k: _nums(args, k) or () for k in ("w", "h", "d")},
-                                          service.size_options(b["parsed"])),
+            size_options=options, supplier_tabs=supplier_tabs, wait=wait,
+            pick=client_catalog.size_pick("/catalog", here, {k: _nums(args, k) or () for k in ("w", "h", "d")}, options),
+            mim=_mim_block(args, here, options, brand_choices, view),
             recent=client_catalog.recent_links("/catalog", _pairs(args, ("wait",)), client_catalog.recent_sizes(conn, current_user()["login"])), **b)
+
+    def _mim_block(args, here, options, brand_choices, view) -> dict:
+        """The block of the filters of the office's «Новый вид» as the catalog of MIM (lane office-catalog-mim, the owner 2026-11-11; the
+        client's «Вид 2» the sample): the three glued fields of ANY size (client_catalog.size_pick2), «Производитель» with «Кроме», the
+        axes of «Разноширокие», «Импортные / Отечественные», «В наличии от», «Цена от / до». The values only: office2/catalog.html draws it."""
+        labels = {c["key"]: c["label"] for c in brand_choices}
+        rest = [(k, v) for k, v in here if k not in ("p",)]
+
+        def chips(name):
+            on = view["brands" if name == "b" else "without"]
+            return [{"key": key, "name": name, "label": labels.get(key, re.sub(r"^S\d+:", "", key)),
+                     "url": client_catalog._url("/catalog", [(k, v) for k, v in rest if not (k == name and v == key)])} for key in on]
+        mixed = args.get("mixed") == "1"
+        return {"pick2": client_catalog.size_pick2("/catalog", here, {k: _nums(args, k) or () for k in ("w", "h", "d")}, options),
+                "brands": chips("b") + chips("xb"), "brand_mode": "x" if args.get("bm") == "x" or (view["without"] and not view["brands"]) else "",
+                "mixed": mixed, "axes": [(p, label, client_catalog.axis_of(args, p)) for p, label in client_catalog.AXES],
+                "origin": _origin(args), "origins": ORIGINS, "stock_min": _num(args, "sn"), "price_from": _num(args, "pf"),
+                "price_to": _num(args, "pt"), "reset": "/catalog" + ("?sup=%d" % _num(args, "sup") if _num(args, "sup") else "")}
 
     def _feed_brands(conn, counts, suppliers):
         """«Бренды в фиде» of the owner: every brand on view and every brand taken off, with what one button does to it. The change is the
