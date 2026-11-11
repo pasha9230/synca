@@ -133,6 +133,36 @@ def test_the_truck_bound_codes_are_read_from_the_published_and_the_retired_ads(t
     assert store.truck_bound_codes(conn) == {"1", "3", "4"}
 
 
+def test_a_code_returning_under_an_id_another_code_carried_in_the_truck_section_stays_there(tmp_path):
+    """A's truck ad was taken over by B (same tire), B was taken off: A comes back under the Id «A» — no passenger ad under that Id."""
+    conn = store.connect(tmp_path / "t.db")
+    conn.execute("INSERT INTO retired_ad (account_id, goods_id, ad_id, identity, removed_at, snapshot) VALUES (1, 'B', 'A', '[]', ?, ?)",
+                 (NOW, truck_ad("A")))
+    store.upsert_published(conn, PublishedItem("C", 5000, 4000.0, "P1"), truck_ad("D"), account_id=1)
+    conn.commit()
+    assert {"A", "B", "C", "D"} <= store.truck_bound_codes(conn, 1)
+
+
+def test_saving_a_truck_pair_over_a_passenger_one_says_the_passenger_one_wins(tmp_path):
+    app, client, tok = _page(tmp_path, commodity_xml(NNOMMODIF="1", SMARKA="Kumho", SMODEL="CW-51", SCARTYPE="C", SMNFCODE="K1"))
+    conn = store.connect(app.config["DB_PATH"])
+    store.upsert_mapping(conn, truck.passenger_pair_brand("Kumho"), "CW-51", "Winter PorTran CW51")
+    from panel_helpers import post
+    post(client, "/mappings/model", tok, brand="Kumho", truck_brand="Kumho", passenger_brand="Kumho", section="truck",
+         model_raw="CW-51", avito_model="Winter PorTran CW51", next="/mappings")
+    assert "у модели есть подтверждённая легковая" in client.get("/mappings").get_data(as_text=True)
+
+
+def test_a_c_of_a_brand_out_of_the_truck_list_can_still_take_a_passenger_model(tmp_path):
+    rows = commodity_xml(NNOMMODIF="1", SMARKA="Ikon Tyres", SMODEL="Ikon Test Model X", SCARTYPE="C", SMNFCODE="K1")
+    app, client, tok = _page(tmp_path, rows)
+    page = client.get("/mappings").get_data(as_text=True)
+    row = _row(page, "Ikon Test Model X")
+    if "Ikon Tyres" not in truck.values()["Brand"]:
+        assert 'name="truck_brand" value=""' in row
+    assert '<option value="c_passenger"' in row
+
+
 def test_the_cycle_keeps_a_published_truck_c_in_the_truck_section(tmp_path):
     from tires_sync import sync
     from tires_sync.webmim import parse_unload

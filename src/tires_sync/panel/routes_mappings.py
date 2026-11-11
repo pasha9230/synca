@@ -230,6 +230,14 @@ def register(app) -> None:
             ok = True
         except MappingError as err:
             message, ok = str(err), False
+        if ok and section == truck.SECTION and truck.confirmed_passenger_model(
+                request.form.get("passenger_brand", ""), request.form.get("model_raw", ""), load_reference(app.config["REFERENCE_PATH"]),
+                store.load_confirmed_mappings(get_conn())):
+            message = ("Грузовая пара сохранена, но у модели есть подтверждённая легковая: она важнее, позиции без объявления в "
+                       "грузовом разделе остаются в легковом. Грузовая пара действует для тех, что уже в грузовом разделе.")
+            flash(message)
+            publish_flash(app, ok)
+            return redirect(safe_path(request.form.get("next", "")) or "/mappings")
         if ok and section == truck.PASSENGER_SECTION:
             message = ("Сопоставление сохранено: «C» пойдёт в легковой раздел. Позиции, у которых уже есть объявление в грузовом разделе, "
                        "остаются в нём (Авито не переносит объявление в другую категорию под тем же Id).")

@@ -1058,7 +1058,9 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
             studs[offer.brand_key]["studded" if offer.studded else "friction"] += 1
         item = models[offer.brand_key].setdefault(normalize_model(offer.model_raw), {"key": normalize_model(offer.model_raw), "name": " ".join(offer.model_raw.split()), "goods": 0, "stock": 0, "seasons": set(), "cartypes": set(), "sizes": {}})
         item["goods"] += 1
-        item.setdefault("codes", set()).add(offer.goods_id)
+        item.setdefault("codes", set())
+        if offer.car_type.upper() == "C":
+            item["codes"].add(offer.goods_id)               # the «C» positions of the model (a truck ad keeps them there)
         size = item["sizes"].setdefault((offer.diameter, offer.width, offer.height), [0, 0])
         size[0] += 1
         size[1] += offer.stock
@@ -1124,9 +1126,9 @@ def brands_overview(conn, raw: dict, parsed, ref, proposals: bool = True) -> lis
                                    section_label=truck.SECTION_LABEL if commercial else (truck.PASSENGER_LABEL if passenger_c else ""),
                                    commercial_wait=commercial and not found,
                                    commercial_marks=sorted(commercial_marks(item["name"])) if "C" in item["cartypes"] else [],
-                                   c_choice=commercial and bool(avito) and bool(avito_truck),   # a «C» of the truck section: the form picks the section
+                                   c_choice=commercial and bool(avito),   # a «C» of the truck section: the form picks the section
                                    c_section=c_section or (truck.PASSENGER_SECTION if passenger_c and not commercial else truck.SECTION if commercial else ""),
-                                   c_hint=c_hint, c_passenger=c_passenger, truck_pair=truck_pair, truck_kept=kept, passenger_brand=avito,
+                                   c_hint=c_hint, c_passenger=c_passenger if passenger_c else None, truck_pair=truck_pair, truck_kept=kept, passenger_brand=avito,
                                    truck_brand=avito_truck,
                                    sizes=["%d/%d R%d (%d)" % (w, h, d, stock) for (d, w, h), (_, stock) in sorted(item["sizes"].items())]))
         rows.append({
