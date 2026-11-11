@@ -1,5 +1,5 @@
 """The owner 2026-11-10 (the partner asked): a client's order that goes to «На ОТХ» is cancelled at once — «Отмена» with the reason «отказ
-клиента», its WebMIM number gets «О», the transfer number is cleared, the client stays linked and hears nothing — and its tyres become a
+клиента», its WebMIM and transfer numbers get « О» (2026-11-11; the transfer was cleared before), the client stays linked and hears nothing — and its tyres become a
 record of storage: an order without a client on «На ОТХ» with the point, the positions, the numbers and the dates. A new client takes a
 record whole only; the same client gets the order back. The orders already on «На ОТХ» live on the old way (the guard at the end)."""
 from __future__ import annotations
@@ -61,7 +61,7 @@ def test_the_clients_order_is_cancelled_with_the_letter_and_the_record_holds_eve
     cid, x = split(conn)
     a, rec = orders.get_card(conn, cid), orders.get_card(conn, x)
     assert a["stage"]["code"] == "cancel" and a["cancel_reason"] == "отказ клиента: Клиент не пришёл"
-    assert a["webmim_number"] == number(cid) + "О" and a["transfer_number"] == "" and a["webmim_id"] == ""
+    assert a["webmim_number"] == number(cid) + " О" and a["transfer_number"] == TRANSFER + " О" and a["webmim_id"] == ""
     assert a["client_name"] == "Иван" and linked(conn, cid)                              # their cancelled order
     assert [(i["goods_id"], i["qty"]) for i in a["items"]] == [("1", 4)]                 # what the client had ordered stays in it
     assert "Шины переданы на ОТХ, запись №%d" % x in texts(conn, cid)
@@ -342,7 +342,7 @@ def test_the_new_client_refuses_too_and_the_tyres_are_a_record_again(tmp_path):
     orders.move_card(conn, b, stage(conn, "at_point"), "2026-10-22T10:00:00", "o")
     orders.move_card(conn, b, stage(conn, "oth"), "2026-10-24T10:00:00", "o", changes={"cancel_reason": "передумал"})
     y = record(conn, b)
-    assert orders.get_card(conn, b)["stage"]["code"] == "cancel" and orders.get_card(conn, b)["webmim_number"] == number(cid) + "О"
+    assert orders.get_card(conn, b)["stage"]["code"] == "cancel" and orders.get_card(conn, b)["webmim_number"] == number(cid) + " О"
     rec = orders.get_card(conn, y)
     assert rec["stage"]["code"] == "oth" and (rec["webmim_number"], rec["transfer_number"]) == (number(cid), TRANSFER)
     assert oth_stock.pieces(conn) == {"1": 4} and oth_sale.holds(conn, b) == [] and oth_sale.holds(conn, y) == [x]
@@ -364,7 +364,7 @@ def test_the_same_client_gets_the_order_back(tmp_path):
     assert oth_stock.pieces(conn) == {} and oth_storage.record_of(conn, cid) is None
     assert any(t.startswith("Заказ возвращён клиенту") for t in texts(conn, cid))
     orders.move_card(conn, cid, stage(conn, "oth"), "2026-10-25T10:00:00", "o", changes={"cancel_reason": "снова отказ"})
-    assert record(conn, cid) != x and orders.get_card(conn, cid)["webmim_number"] == number(cid) + "О"      # a refusal again: a new record
+    assert record(conn, cid) != x and orders.get_card(conn, cid)["webmim_number"] == number(cid) + " О"      # a refusal again: a new record
 
 
 def test_the_order_is_not_given_back_once_the_record_is_taken_or_goes_elsewhere(tmp_path):
@@ -377,7 +377,7 @@ def test_the_order_is_not_given_back_once_the_record_is_taken_or_goes_elsewhere(
     with pytest.raises(orders.OrderError, match="уже взял заказ №%d" % b):
         orders.move_card(conn, cid, stage(conn, "at_point"), LATER, "o")
     a = orders.get_card(conn, cid)
-    assert a["stage"]["code"] == "cancel" and a["webmim_number"] == number(cid) + "О"
+    assert a["stage"]["code"] == "cancel" and a["webmim_number"] == number(cid) + " О"
     assert orders.get_card(conn, b)["webmim_number"] == number(cid)
 
 
@@ -419,9 +419,9 @@ def test_the_search_by_the_number_finds_the_cancelled_order_and_the_one_holding_
         groups = search.run(conn, q, scope, datetime(2026, 10, 21, 12, 0))["groups"]
         return sorted(int(i["url"].rsplit("/", 1)[1]) for g in groups if g["key"] == "orders" for i in g["items"])
     assert found(number(cid)) == [cid, x]
-    assert found(number(cid) + "О") == [cid]
+    assert found(number(cid) + " О") == [cid]
     wanted = orders.board_query(number(cid))
-    assert orders.board_matches(wanted, cid, "Иван", "", "", number(cid) + "О") and orders.board_matches(wanted, x, "", "", "", number(cid))
+    assert orders.board_matches(wanted, cid, "Иван", "", "", number(cid) + " О") and orders.board_matches(wanted, x, "", "", "", number(cid))
     assert mgr.find_orders(conn, int(number(cid))) == [x]                                # the points' bot: the one that holds the tyres
     assert mgr.label(orders.get_card(conn, x)) == number(cid)
 
