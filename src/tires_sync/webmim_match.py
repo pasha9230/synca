@@ -243,6 +243,40 @@ def paired(card: dict, by_id: Dict[str, dict], by_number: Dict[str, dict]) -> Op
     return (by_id.get(order_id) if order_id else None) or (by_number.get(number) if number else None)
 
 
+def foreign(card: dict, goods_ids, order: Optional[dict]) -> bool:
+    """The WebMIM order found by the card's typed number is another customer's (the lead 2026-11-12): a WebMIM number is unique within one
+    customer only, the API user of the panel sees its own customer's orders, and an order placed by hand in the cabinet under another customer
+    may carry the number of one of them. Foreign: found by the number (not by the card's id), its positions read and not one goodsId in common
+    with the card's positions (`goods_ids`), and created before the card (the card's own order is never placed before the card exists; the
+    moment the number was typed tells nothing: every order is older than its number in the panel). One shared position: a pair, as before."""
+    if order is None or (digits(card.get("webmim_id")) and digits(card.get("webmim_id")) == order["id"]):
+        return False
+    if order.get("items") is None or not goods_ids:
+        return False                                           # nothing to compare: the pair stands
+    made, there = str(card.get("created_at") or "")[:19], str(order.get("create_date") or "")[:19]
+    if not made or not there or there >= made:
+        return False
+    return not ({str(g) for g in goods_ids} & {str(i["goods_id"]) for i in order["items"]})
+
+
+def foreign_cards(conn, snap: List[dict]) -> set:
+    """The panel's orders whose typed WebMIM number finds a foreign order of the snapshot (foreign): no pair, nothing of that order is
+    written into them (status, sum, transfer number, positions, messages). The one place every pairing by the number asks."""
+    by_id, by_number = _index(snap)
+    found = {}
+    for card in _cards(conn, "WHERE webmim_number != ''"):
+        order = paired(card, by_id, by_number)
+        if order is not None and order.get("items") is not None:
+            found[card["id"]] = (card, order)
+    if not found:
+        return set()
+    goods: Dict[int, set] = {}
+    for card_id, goods_id in conn.execute("SELECT order_id, goods_id FROM order_item WHERE order_id IN (%s)" % ",".join("?" * len(found)),
+                                          tuple(found)):
+        goods.setdefault(card_id, set()).add(str(goods_id))
+    return {card_id for card_id, (card, order) in found.items() if foreign(card, goods.get(card_id, set()), order)}
+
+
 def made_elsewhere(conn, server: str) -> set:
     """The panel's orders made by «Оформить в WebMIM» on another server than `server` and still holding that order's id: their number is of the
     other server's (a test order is never a live one), so they are not paired, suggested or reconciled here."""
@@ -271,6 +305,7 @@ def _pairs(conn, snap: List[dict]) -> Dict[str, List[int]]:
     elsewhere = made_elsewhere(conn, snap[0]["server"]) if snap else set()
     from . import oth_sale
     elsewhere |= oth_sale.borrowed_ids(conn)                     # the number of tyres taken from OTH: the WebMIM order is the first order's
+    elsewhere |= foreign_cards(conn, snap)                       # another customer's order of the same number: not this card's
     for card in _cards(conn, "WHERE webmim_id != '' OR webmim_number != ''"):
         if card["id"] in elsewhere:
             continue
@@ -382,15 +417,20 @@ def card_block(conn, card: dict, with_hints: bool = True) -> dict:
     from . import oth_sale
     borrowed = card.get("id") is not None and card["id"] in oth_sale.borrowed_ids(conn, card["id"])     # the number of its tyres, no order of its own
     order = None if test_order or borrowed else paired(card, by_id, by_number)
-    out = {"server": webmim_orders.SERVER_NAMES[server], "seen_at": seen_at(conn, server), "order": order, "differences": [], "hints": [], "purchase": {},
-           "test": server != "prod", "test_order": test_order, "borrowed": borrowed,
-           "not_found": bool(order is None and not test_order and not borrowed and ((card.get("webmim_number") and not refused(card.get("webmim_number"))) or card.get("webmim_id")))}
     ordered = oth_sale.supplier_items(conn, card) if card.get("id") is not None else card.get("items") or []     # «с ОТХ»: not WebMIM's
     items = [{"goods_id": str(i["goods_id"]), "name": i["name"], "qty": i["qty"]} for i in ordered]
+    alien = None
+    if order is not None and (card["id"] in foreign_cards(conn, snap) if card.get("id") is not None
+                              else foreign(card, {i["goods_id"] for i in items}, order)):
+        alien, order = order, None                                     # the number of another customer's order: no pair, grey
+    out = {"server": webmim_orders.SERVER_NAMES[server], "seen_at": seen_at(conn, server), "order": order, "differences": [], "hints": [], "purchase": {},
+           "test": server != "prod", "test_order": test_order, "borrowed": borrowed, "foreign": alien,
+           "not_found": bool(order is None and alien is None and not test_order and not borrowed
+                             and ((card.get("webmim_number") and not refused(card.get("webmim_number"))) or card.get("webmim_id")))}
     if order is not None:
         out["differences"] = differences(items, order)
         out["purchase"] = purchase_check(ordered, order)
-    elif with_hints and server == "prod" and not out["not_found"] and not test_order and not borrowed and card.get("deal_kind") != "stock":
+    elif with_hints and server == "prod" and not out["not_found"] and alien is None and not test_order and not borrowed and card.get("deal_kind") != "stock":
         out["hints"] = hints(card, items, snap, taken(conn, snap))
     return out
 
@@ -414,13 +454,14 @@ def reconcile(conn, today: date, days: int = DAYS) -> dict:
     unpaired, not_found = [], []
     from . import oth_sale
     elsewhere = made_elsewhere(conn, server) | oth_sale.borrowed_ids(conn)     # neither a pair of their own to look for
+    alien = foreign_cards(conn, snap)
     for card in cards:
         if card["id"] in elsewhere:
             continue
         stage = stages.get(card["stage_id"]) or {"name": "", "code": "", "kind": ""}
         card["stage"] = stage["name"]
         if card["webmim_number"] or card["webmim_id"]:
-            if paired(card, by_id, by_number) is None and (card["webmim_id"] or not refused(card["webmim_number"])):
+            if (paired(card, by_id, by_number) is None or card["id"] in alien) and (card["webmim_id"] or not refused(card["webmim_number"])):
                 not_found.append(card)                     # not «123О» (cancelled by the move to «На ОТХ»): its order of WebMIM is the record's
             continue
         if card["deal_kind"] == "stock" or stage["code"] == "cancel" or stage.get("kind") == "lost":
