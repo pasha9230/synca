@@ -173,6 +173,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--db", required=True)
     sr.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     sr.add_argument("--dry-run", action="store_true", help="только показать список, ничего не отправлять и не менять")
+    idm = sub.add_parser("inbox-dismiss", help="закрыть строки «Входящих» без ответа (статус ignored): точке и клиенту ничего не отправляется; только перечисленные")
+    idm.add_argument("--db", required=True)
+    idm.add_argument("--id", type=int, action="append", required=True, help="номер строки «Входящих» (manager_message.id); можно несколько раз")
+    idm.add_argument("--dry-run", action="store_true", help="только показать текст строк, ничего не записывать")
     of = sub.add_parser("oth-numbers-fill", help="вписать номер WebMIM и перемещение из заказа-источника заказам, взявшим шины с ОТХ до правила 2026-11-04: только перечисленным; вписанное человеком остаётся, никому ничего не отправляется")
     of.add_argument("--db", required=True)
     of.add_argument("--order", type=int, action="append", required=True, help="номер заказа панели; можно несколько раз")
@@ -1305,6 +1309,31 @@ def _cmd_alerts_clear_all(args) -> int:
     print("людей: %d; красных записей закрыть для всех: %d; заказов отметить прочитанными (по людям): %d%s"
           % (found["people"], found["red"], found["seen"], "" if args.apply else " — ничего не записано, нужен --apply"))
     return 0
+
+
+def _cmd_inbox_dismiss(args) -> int:
+    """inbox-dismiss (the owner 2026-11-12): order_manager.dismiss for the lines named; --dry-run shows them and writes nothing. 1: a line refused."""
+    from . import order_manager
+    conn = store.connect(args.db)
+    now, refused = moscow_now().isoformat(timespec="seconds"), 0
+    try:
+        for item_id in dict.fromkeys(args.id):
+            row = conn.execute("SELECT status, text FROM manager_message WHERE id = ?", (item_id,)).fetchone()
+            if args.dry_run:
+                print("%d: %s" % (item_id, "нет такой строки" if row is None else "[%s] %s" % (row[0], row[1])))
+                refused += row is None or row[0] != "new"
+                continue
+            try:
+                order_manager.dismiss(conn, item_id, now, "система (inbox-dismiss)")
+                print("%d: закрыто без ответа: %s" % (item_id, row[1]))
+            except order_manager.OrderError as err:
+                print("%d: не закрыто: %s" % (item_id, err))
+                refused += 1
+    finally:
+        conn.close()
+    if args.dry_run:
+        print("ничего не записано (--dry-run)")
+    return 1 if refused else 0
 
 
 def _cmd_oth_numbers_fill(args) -> int:
@@ -3319,6 +3348,8 @@ def main(argv=None) -> int:
             return _cmd_sheet_cancel_remove(args)
         if args.command == "sheet-restore-missing":
             return _cmd_sheet_restore_missing(args)
+        if args.command == "inbox-dismiss":
+            return _cmd_inbox_dismiss(args)
         if args.command == "oth-numbers-fill":
             return _cmd_oth_numbers_fill(args)
         if args.command == "vk-catchup":

@@ -2426,6 +2426,17 @@ def register(app) -> None:
             flash(str(err))
         return redirect("/orders/inbox")
 
+    @app.route("/orders/inbox/<int:message_id>/dismiss", methods=["POST"])
+    @login_required
+    def orders_inbox_dismiss(message_id):
+        """«Закрыть без ответа»: the line is closed, nothing goes to the point or the client (manager.dismiss)."""
+        try:
+            manager.dismiss(get_conn(), message_id, local_iso(), author())
+            flash("Закрыто без ответа. Точке ничего не отправлено.")
+        except orders.OrderError as err:
+            flash(str(err))
+        return redirect("/orders/inbox")
+
     @app.route("/orders/inbox/<int:message_id>/confirm", methods=["POST"])
     @login_required
     def orders_inbox_confirm(message_id):

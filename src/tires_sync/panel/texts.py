@@ -133,6 +133,8 @@ def audit_text(entry: dict) -> str:
         if d.get("manual"):
             return "ОТХ: заказ №%s взял %s шт. из своего остатка" % (d.get("order", "?"), d.get("qty", "?"))
         return "ОТХ: заказ №%s взял %s шт. с ОТХ заказа №%s" % (d.get("order", "?"), d.get("qty", "?"), d.get("from_order", "?"))
+    if action == "inbox_dismiss":
+        return "Входящие: строка %s закрыта без ответа («%s»)" % (d.get("id", "?"), d.get("text", ""))
     if action == "oth_untake":
         if d.get("manual"):
             return "ОТХ: заказ №%s вернул %s шт. в свой остаток" % (d.get("order", "?"), d.get("qty", "?"))
