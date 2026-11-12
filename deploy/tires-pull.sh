@@ -303,12 +303,19 @@ check_of() {   # $1 имя проверки; CHECK: «none» или «стату
       else "\(.status) \(.conclusion // "none") \(if (.completed_at // "") == "" then 0 else (.completed_at | fromdateiso8601) end)"
       end' "$TMP/checks" 2>/dev/null) || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
   [[ "$CHECK" =~ ^(none|[a-z_]{1,20}\ [a-z_]{1,20}\ [0-9]{1,12})$ ]] || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
+  # был ли у этой проверки законченный не зелёный прогон (перезапуск красной ещё идёт)
+  HAD_RED=$(jq -r --arg name "$1" --arg app "$CHECK_APP" --arg sha "$MASTER" '
+    any((.check_runs // [])[] | select(.name == $name and .app.slug == $app and .head_sha == $sha);
+        .status == "completed" and .conclusion != "success")' "$TMP/checks" 2>/dev/null) \
+    || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
+  [[ "$HAD_RED" =~ ^(true|false)$ ]] || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
 }
 # Сначала проверка master: зелёная — выкладываем, законченная не зелёная — не выкладываем никогда (и без [RED]).
 # Без [RED], пока её нет или она идёт, годится зелёная проверка ветки; нет и её — в строке то, что видно.
+# Красную проверку master перезапустили и перезапуск идёт: ждём его, ветку не спрашиваем.
 check_of "$CHECK_NAME"
 USED=$CHECK_NAME
-if [ "$RED" = 0 ] && [[ "$CHECK" != completed\ * ]]; then
+if [ "$RED" = 0 ] && [[ "$CHECK" != completed\ * ]] && [ "$HAD_RED" = false ]; then
   M_CHECK=$CHECK
   check_of "$BRANCH_CHECK"
   if [[ "$CHECK" == "completed success "* ]] || { [ "$M_CHECK" = none ] && [ "$CHECK" != none ]; }; then

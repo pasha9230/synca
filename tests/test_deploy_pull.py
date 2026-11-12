@@ -678,3 +678,51 @@ def test_bad_branch_check_setting_alerts(env, value):
     assert env.run(TIRES_PULL_BRANCH_CHECK=value) == 1
     assert "неверные настройки" in env.one_line()
     assert env.urls() == [] and env.sudo_calls() == []
+
+
+def test_rerun_of_red_master_check_is_awaited_even_with_green_branch(env):
+    env.respond(checks=[check_run(id_=1, name="pytest"), check_run(id_=2, conclusion="failure"),
+                        check_run(id_=3, status="in_progress", conclusion=None, done=None)])
+    assert env.run() == 0
+    assert "тесты in_progress («tests / pytest»)" in env.one_line()
+    assert env.sudo_calls() == []
+    assert not any("check_name=pytest&" in u for u in env.urls())
+
+
+def test_latest_branch_check_red_over_old_green(env):
+    env.respond(checks=[check_run(id_=1, name="pytest"), check_run(id_=2, name="pytest", conclusion="failure")])
+    assert env.run() == 0
+    assert "тесты failure («pytest»)" in env.one_line()
+    assert env.sudo_calls() == []
+
+
+@pytest.mark.parametrize("cached", [f"{'c' * 40} 0", f"{NEW} 2", f"{NEW}", "мусор"])
+def test_bad_red_cache_is_not_trusted(env, cached):
+    env.token()
+    (env.state / "red").write_text(cached + "\n")
+    env.respond(message="x [RED]", checks=[check_run(name="pytest")])
+    assert env.run() == 0
+    assert any("/git/commits/" in u for u in env.urls())
+    assert "[RED]" in env.one_line() and env.sudo_calls() == []
+
+
+def test_cached_red_still_refuses_the_branch_check(env):
+    env.token()
+    env.respond(message="x [RED]", checks=[check_run(name="pytest")])
+    assert env.run() == 0 and env.run() == 0
+    assert sum("/git/commits/" in u for u in env.urls()) == 1
+    assert "[RED]" in env.one_line() and env.sudo_calls() == []
+
+
+def test_without_token_and_red_two_check_requests_then_pause(env):
+    env.respond(checks=[check_run(status="in_progress", conclusion=None, done=None)])
+    assert env.run() == 0
+    assert sum("/check-runs" in u for u in env.urls()) == 2
+    assert env.run() == 0
+    assert sum("/check-runs" in u for u in env.urls()) == 2      # следующий вопрос не раньше чем через 5 минут
+
+
+def test_no_checks_at_all_names_both(env):
+    env.respond(checks=[])
+    assert env.run() == 0
+    assert "проверок «tests / pytest» и «pytest» ещё нет" in env.one_line()
