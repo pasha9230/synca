@@ -162,7 +162,8 @@ def _mixed(items, args, offers) -> dict:
     sets = client_catalog.pair_axes(items, _row_size, key_of, axes["f"], axes["r"])
     cut = client_catalog.KITS_MAX
     return {"asked": True, "axes": axes, "kits": sets["kits"][:cut], "front": sets["front"][:cut], "rear": sets["rear"][:cut],
-            "more": len(sets["kits"]) > cut, "only_more": any(len(sets[k]) > cut for k in ("front", "rear"))}
+            "more": len(sets["kits"]) > cut, "only_more": any(len(sets[k]) > cut for k in ("front", "rear")),
+            "front_unset": sets["front_unset"], "rear_unset": sets["rear_unset"]}
 
 
 def _pairs(args, drop=()) -> list:

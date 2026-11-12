@@ -1129,7 +1129,11 @@ def _close_tasks(conn, order_id, titles: tuple, how: str, now: str, who: str, re
 
 def restore_plan(conn, order_id) -> None:
     """«Отменить» of «Выдали»: the agreement it dropped is back as it was, with the pieces of oth_return it held (the marks «На возврат»). No commit."""
-    plan = json.loads(store_value(conn, DROPPED_KEY % order_id) or "null")
+    raw = store_value(conn, DROPPED_KEY % order_id)
+    plan = _mark_of(raw) if raw else None                                        # a broken record: skipped, as drop_marks skips a broken mark
+    if raw and not (plan and all(k in plan for k in ("agreed_at", "agreed_by", "return_date"))):
+        plan = None
+        logging.getLogger("tires_sync.orders").warning("the dropped agreement of order %s is broken: not restored", order_id)
     conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % order_id,))
     if plan:
         conn.execute("INSERT OR REPLACE INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date, signed_at, signed_by) VALUES (?,?,?,?,NULL,'')",

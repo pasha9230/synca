@@ -1442,3 +1442,15 @@ def test_a_position_with_a_real_return_cannot_be_marked_by_hand(tmp_path):
         order_oth.item_to_return(conn, item, "2026-10-21T11:00:00", "o", "2")
     assert open_tasks(conn, cid) == [] and order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0   # the real mark still keeps it
 
+
+
+@pytest.mark.parametrize("raw", ["{broken", "[1, 2]", '{"agreed_at": "2026-11-01T10:00:00"}'])
+def test_a_broken_dropped_agreement_does_not_break_the_undo(tmp_path, raw):
+    """The review 2026-11-12: restore_plan reads the agreement «Выдали» dropped; a broken record (not JSON, not an object, no fields) is
+    skipped as drop_marks skips a broken mark — the undo goes on, the record goes, no agreement is made up."""
+    from tires_sync import store
+    conn = store.connect(str(tmp_path / "state.db"))
+    store.set_state(conn, order_oth.DROPPED_KEY % 7, raw)
+    order_oth.restore_plan(conn, 7)
+    assert not store.get_state(conn, order_oth.DROPPED_KEY % 7)
+    assert conn.execute("SELECT COUNT(*) FROM oth_return_plan").fetchone()[0] == 0

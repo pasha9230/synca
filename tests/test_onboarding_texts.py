@@ -169,3 +169,24 @@ def test_a_viewer_who_changes_nothing_sees_no_steps_of_buttons_not_theirs(tmp_pa
     client, _ = person(app, "viewer")
     page = client.get("/orders/%d" % card).get_data(as_text=True)
     assert "data-stage-hint" not in page and "Что делать сейчас" not in page
+
+
+def test_a_hint_of_a_step_is_once_on_each_tab_of_the_point(tmp_path):
+    """The design review 2026-11-12: a hint of a step once, under its first card, not under every card. The tabs of «Рабочее место»
+    are pages of their own (?tab=), so «once on the page» is once on each tab: two cards on «На ОТХ», two on «Согласование возврата»."""
+    app = make_app(tmp_path)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    orders._ensure_return_given_stage(conn)
+    alfa = points.save_point(conn, {"name": "Альфа", "manager_name": "А", "channel": "panel"})
+    stages = {s["code"]: s for s in orders.list_stages(conn)}
+    for k, code in enumerate(("oth", "oth", orders.RETURN_GIVEN, orders.RETURN_GIVEN)):
+        card = orders.create_card(conn, {"client_name": "Иван", "client_phone": "+7900111220%d" % k, "point_id": str(alfa)}, NOW, "o")
+        conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stages[code]["id"], card))
+    store.set_state(conn, "ui_new.point", "all")                                    # «Новый вид» of the point: point2/mypoint.html
+    conn.commit()
+    client, _ = person(app, "point", alfa)
+    for tab, hint in (("oth", "oth"), ("agree", "returning"), ("oth", "oth")):
+        page = client.get("/my-point?tab=%s" % tab).get_data(as_text=True)
+        assert page.count('<article class="mp-card') == 2, tab
+        assert re.findall(r'data-point-hint="(\w+)"', page) == [hint], tab

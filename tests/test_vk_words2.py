@@ -336,3 +336,29 @@ def test_the_owner_confirms_a_disputed_give(tmp_path):
 
 def test_the_texts_for_the_points_name_give():
     assert "отдал" in mgr.HINT
+
+
+def test_a_line_closed_without_an_answer_is_never_revived_by_the_confirmation(tmp_path, monkeypatch):
+    """The review 2026-11-12: «Закрыть без ответа» and «Подтвердить» of one line of «Входящие» at once. Closed first: the confirmation
+    claims nothing and moves nothing; closed while the command runs: the order is moved (it was done), the line stays 'ignored'."""
+    conn, pid, _ = setup(tmp_path)
+    card = _webmim(conn, pid, 5259052, "at_point")
+    _with_amount(conn, card)
+    mgr.dispatch(conn, "r", "111", "возврат отдал", None, NOW)
+    [item] = mgr.list_inbox(conn)
+    conn.execute("UPDATE manager_message SET status = 'ignored' WHERE id = ?", (item["id"],))     # the dismiss of another request,
+    monkeypatch.setattr(mgr, "get_message", lambda conn_, i: item)                                # after this one read the line
+    with pytest.raises(orders.OrderError):
+        mgr.confirm(conn, item["id"], "5259052", NOW, "owner")
+    assert _code(conn, card) == "at_point"
+    conn.execute("UPDATE manager_message SET status = 'new' WHERE id = ?", (item["id"],))
+    conn.commit()
+    real = mgr.returned
+
+    def dismissed_meanwhile(conn_, *a, **k):
+        mgr.dismiss(conn_, item["id"], NOW, "owner")
+        return real(conn_, *a, **k)
+    monkeypatch.setattr(mgr, "returned", dismissed_meanwhile)
+    reply = mgr.confirm(conn, item["id"], "5259052", NOW, "owner")
+    assert _code(conn, card) == "return" and "закрыли без ответа" in reply
+    assert conn.execute("SELECT status, COALESCE(answer, '') FROM manager_message WHERE id = ?", (item["id"],)).fetchone() == ("ignored", "")

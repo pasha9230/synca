@@ -174,9 +174,9 @@ def test_mixed_sets_pair_by_brand_model_season_and_studs():
     f = cc.filters_of(_Args(), set())
     sets = cc.mixed_sets([f225, f245, r255] + other, f, (None, None, None), (255, 35, None))
     assert [(a.offer.width, b.offer.width) for a, b in sets["kits"]] == [(225, 255), (245, 255)]      # one rear in two sets
-    assert {id(i) for i in sets["rear"]} == set()                 # alone and fitting both axes: once, in «Только передняя»
-    assert {id(i) for i in sets["front"]} == {id(i) for i in other}  # another brand, model, season or studs: never a pair
-    assert r255 not in sets["front"]                              # in a set: in no «Только …», and a pair is never of one size
+    assert sets["front"] == [] and sets["front_unset"]            # the front not given: no «Только передняя» of the whole catalog
+    assert {id(i) for i in sets["rear"]} == {id(i) for i in other}  # another brand, model, season or studs: never a pair
+    assert r255 not in sets["rear"]                               # in a set: in no «Только …», and a pair is never of one size
 
 
 class _Args(dict):
@@ -295,8 +295,22 @@ def test_the_note_of_the_cut_is_of_the_sets_or_of_the_only_lists(tmp_path, monke
     app, client, conn, _ = make_shop(tmp_path, tochki=[tochki_row("T1", rest=3)])
     to_view2(client)
     monkeypatch.setattr(cc, "KITS_MAX", 1)
-    html = results(page(client, "/shop?mixed=1&rw=245&rh=45&rd=18"))                               # 1 set, 2 fronts alone
+    html = results(page(client, "/shop?mixed=1&fd=16&rd=15"))                                      # no set, 2 R16 fronts alone
     assert "Показаны первые" not in html and "Без пары показаны не все шины" in html
+
+
+def test_an_axis_not_given_lists_no_tyres_alone_but_asks_for_it(tmp_path):
+    """An empty axis is any value for the sets (as in MIM), but «Только передняя / задняя ось» of it is never the whole catalog."""
+    app, client, conn, _ = make_shop(tmp_path)
+    to_view2(client)
+    html = results(page(client, "/shop?mixed=1&rw=245&rh=45&rd=18"))                               # the front: not given
+    got = groups(html)
+    assert got["Комплект 1"] == [("205/55 R16", "2"), ("245/45 R18", "2")] and got["Только передняя ось"] == []
+    assert "Укажите размер передней оси" in html and "Укажите размер задней оси" not in html
+    html = results(page(client, "/shop?mixed=1&fw=205&fh=55&fd=16"))                              # the rear: not given
+    assert groups(html)["Только задняя ось"] == [] and "Укажите размер задней оси" in html
+    sets = _sets([_item(_O(225, 45, 18)), _item(_O(255, 35, 18, model="N"))], (None, None, None), (255, None, None))
+    assert sets["front"] == [] and sets["front_unset"] and not sets["rear_unset"] and len(sets["rear"]) == 1
 
 
 @pytest.mark.parametrize("both", [True, False])
