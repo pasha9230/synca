@@ -1022,14 +1022,14 @@ def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who
     return sent, note
 
 
-NO_CHAT_NOTE = "У заказа нет чата Авито: клиенту ничего не отправлено, ответственному задача «Позвонить, товары приехали»."
+NO_CHAT_NOTE = "У заказа нет чата Авито: клиенту ничего не отправлено, клиенту позвонит ответственный (задача «Позвонить, товары приехали»)."
 
 
 def _silent(conn, card: dict) -> bool:
     """An order without an Avito chat (order_call.no_chat): its client is called, not written to."""
     from . import order_call
     try:
-        return order_call.no_chat(conn, card)
+        return order_call.called(conn, card)
     except Exception:                                          # noqa: BLE001 - as before: the owner is told
         conn.rollback()
         return False

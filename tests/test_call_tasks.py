@@ -97,6 +97,7 @@ def test_an_order_with_a_chat_gets_no_task(tmp_path):
 
 def test_no_double_on_a_second_tick_or_a_move_back_and_forth(tmp_path):
     conn = db(tmp_path)
+    started(conn)
     cid = at_point(conn)
     for when in ("2026-10-15T11:07:00", "2026-10-15T12:07:00"):
         order_call.tick(conn, when)
@@ -109,23 +110,93 @@ def test_no_double_on_a_second_tick_or_a_move_back_and_forth(tmp_path):
     assert len(calls(conn, cid, open_only=False)) == 1 and calls(conn, cid) == []
 
 
-def test_a_task_open_is_never_doubled_by_the_tick_of_the_same_day(tmp_path):
+def started(conn, when="2026-10-01T00:07:00"):
+    """The first tick of the tasks «Позвонить» (order_call.SINCE_KEY): the stays after it are the tick's."""
+    order_call.tick(conn, when)
+
+
+def test_left_and_back_the_same_day_opens_the_same_task_again(tmp_path):
     conn = db(tmp_path)
     cid = at_point(conn)
-    conn.execute("DELETE FROM callback_task")                                           # made another way: the tick makes it once
-    conn.commit()
-    order_call.tick(conn, "2026-10-15T11:07:00")
-    order_call.tick(conn, "2026-10-15T12:07:00")
-    assert len(calls(conn, cid)) == 1
-    order_call.tick(conn, "2026-10-16T09:07:00")                                        # an order standing there since before: not again
+    first = calls(conn, cid)[0][0]
+    orders.move_card(conn, cid, stage(conn, "moving"), "2026-10-15T11:00:00", "o")     # by mistake
+    assert calls(conn, cid) == []
+    orders.move_card(conn, cid, stage(conn, "at_point"), "2026-10-15T11:05:00", "o")
+    rows = calls(conn, cid, open_only=False)
+    assert [r[0] for r in rows] == [first] and rows[0][6] is None                       # one task, open again
+    assert any(e["text"].startswith("Задача снова открыта") for e in orders.list_events(conn, cid))
+
+
+def test_a_client_called_is_not_called_again_after_a_move_back_another_day(tmp_path):
+    conn = db(tmp_path)
+    cid = at_point(conn)
+    tasks.close(conn, calls(conn, cid)[0][0], "done", "2026-10-15T12:10:00", "owner", "позвонил")
+    orders.move_card(conn, cid, stage(conn, "done"), "2026-10-15T12:20:00", "o")         # by mistake
+    orders.move_card(conn, cid, stage(conn, "at_point"), "2026-10-16T10:00:00", "o")
+    order_call.tick(conn, "2026-10-16T11:07:00")
+    assert len(calls(conn, cid, open_only=False)) == 1 and calls(conn, cid) == []
+
+
+def test_a_task_a_person_cancelled_is_not_made_again_by_the_tick(tmp_path):
+    conn = db(tmp_path)
+    started(conn)
+    cid = at_point(conn)
+    tasks.close(conn, calls(conn, cid)[0][0], "cancel", "2026-10-15T10:30:00", "owner")
+    for when in ("2026-10-15T11:07:00", "2026-10-15T12:07:00", "2026-10-16T09:07:00"):
+        order_call.tick(conn, when)
+    assert len(calls(conn, cid, open_only=False)) == 1 and calls(conn, cid) == []
+
+
+def test_the_tick_makes_the_task_of_a_move_past_move_card_once_also_the_next_day(tmp_path):
+    conn = db(tmp_path)
+    started(conn)
+    cid = card_at(conn, "moving", "2026-10-14T10:00:00", avito_chat="")
+    orders.move_card(conn, cid, stage(conn, "at_point"), "2026-10-15T23:30:00", "o", fire_rules=False)   # the bulk move, late
+    assert calls(conn, cid, open_only=False) == []
+    order_call.tick(conn, "2026-10-16T00:07:00")
+    order_call.tick(conn, "2026-10-16T01:07:00")
     assert len(calls(conn, cid, open_only=False)) == 1
 
 
-def test_a_bulk_move_makes_no_task(tmp_path):
+def test_an_undo_of_the_point_brings_the_task_back(tmp_path):
+    conn = db(tmp_path)
+    started(conn)
+    cid = at_point(conn)
+    first = calls(conn, cid)[0][0]
+    orders.move_card(conn, cid, stage(conn, "done"), "2026-10-15T11:00:00", "o")        # «Выдал» by mistake
+    conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ? WHERE id = ?", (stage(conn, "at_point"), ARRIVE, cid))   # «Отменить» (point_log.undo)
+    conn.commit()
+    order_call.tick(conn, "2026-10-15T11:07:00")
+    assert [r[0] for r in calls(conn, cid)] == [first]
+
+
+def test_orders_standing_there_before_the_first_tick_get_no_arrival_task_but_the_last_day_one(tmp_path):
+    conn = db(tmp_path)
+    cid = at_point(conn)
+    conn.execute("DELETE FROM callback_task")                                           # as an order that came before this code
+    conn.commit()
+    order_call.tick(conn, "2026-10-16T09:07:00")                                        # the first tick
+    assert calls(conn, cid, open_only=False) == []
+    order_call.tick(conn, DAY + "T12:30:00")
+    assert [r[1] for r in calls(conn, cid)] == [order_call.EXPIRES]
+
+
+def test_a_bulk_move_makes_no_task_at_once(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "moving", "2026-10-14T10:00:00", avito_chat="")
     orders.move_card(conn, cid, stage(conn, "at_point"), ARRIVE, "o", fire_rules=False)
     assert calls(conn, cid, open_only=False) == []
+
+
+def test_an_order_of_a_points_own_account_is_the_points(tmp_path, monkeypatch):
+    from tires_sync import order_points
+    monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": 1})
+    conn = db(tmp_path)
+    cid = at_point(conn)
+    assert calls(conn, cid, open_only=False) == []
+    point = []
+    order_arrived.check(conn, "2026-10-15T12:07:00", lambda logins, text: None, lambda card, text: point.append(text))
+    assert len(point) == 1                                                              # the point is told as before (the owner 2026-10-26)
 
 
 # ---- leaving «На точке» ----------------------------------------------------------------------------------------------------------------
@@ -262,6 +333,7 @@ def test_the_office_feed_gives_its_own_call_tasks(tmp_path):
     assert data["items"][0]["key"].startswith("call-task-") and data["items"][0]["href"] == "/orders/%d" % cid
     page = client.get("/tasks").get_data(as_text=True)
     assert 'data-feed="/tasks/feed"' in page and "Важное · Позвонить, товары приехали" in page
+    assert "Клиенту не сообщили" not in client.get("/orders/%d" % cid).get_data(as_text=True)     # the card's line: the task instead
 
 
 def test_the_journal_actions_are_moscow_time():

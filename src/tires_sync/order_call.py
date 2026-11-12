@@ -5,9 +5,13 @@ responsible gets a task instead, marked «Важное», with the client, the p
 - «Позвонить, истекает срок резерва» on the last day of the reservation from 12:30 (Moscow), once per stay and date.
 An order without a chat: order_card.avito_chat empty and no avito_chat bound to it (no_chat). Not an order to another city (no client comes).
 The task goes to tasks.default_assignee (the order's responsible, else its maker, of the office; else the owner), as the other tasks of the
-system. No second open task of the same title; a done «товары приехали» of the same day is not made again (a move back and forth). The order
-leaves «На точке»: its open tasks «Позвонить…» are cancelled as no longer needed (tasks.close: the journal and the audit). The order is never
-moved to «На ОТХ» from here: a person decides.
+system. No doubles (`arrived`): an open task is kept; a done «товары приехали» to the same phone is not made again (the client was called; a
+move back by hand); a task a person cancelled in this stay is not made again; one the system cancelled today (the order left «На точке» and
+came back: a move by mistake, «Отменить» of the point) is opened again, not doubled. The order leaves «На точке»: its open tasks «Позвонить…»
+are cancelled as no longer needed (tasks.close by «система»: the journal and the audit). The tick (hourly and 12:30) makes what a move
+past orders.move_card left out (a bulk move, a merge, an undo of the point), for the stays since the first tick of this code only (SINCE_KEY:
+no tasks for the orders standing there before). An order of a point's own Avito account (order_points.of_account) is the point's: no task
+(order_arrived tells the point, the owner 2026-10-26). The order is never moved to «На ОТХ» from here: a person decides.
 The sound (notify.js): an open task rings its assignee's open panel every 2 hours from its creation, day and night (the owner's decision),
 a new key per 2 hours (sounds); a done or cancelled task rings no more."""
 from __future__ import annotations
@@ -30,6 +34,8 @@ EXPIRES_KEY = "call_task_expires:%d:%s:%s"         # app_state, per order, stay 
 SOUND_EVERY = timedelta(hours=2)
 NOTE_MAX = 1000                                     # the system's own text: longer than a person's note (tasks.NOTE_MAX)
 LEFT = "заказ ушёл с этапа «%s», задача не нужна"
+REOPENED = "Задача снова открыта: %s — заказ вернулся на этап «%s»"
+SINCE_KEY = "call_tasks_since"                      # app_state: the first tick of the tasks «Позвонить» (no tasks for older stays)
 log = logging.getLogger("tires_sync.orders")
 
 
@@ -40,8 +46,17 @@ def no_chat(conn, card: dict) -> bool:
     return conn.execute("SELECT 1 FROM avito_chat WHERE order_id = ? LIMIT 1", (card["id"],)).fetchone() is None
 
 
+def called(conn, card: dict) -> bool:
+    """The client of the order is called, not written to: no Avito chat, and not an order of a point's own account (the point's, order_arrived).
+    The alerts these tasks replace are not made for such an order (order_manager, order_arrived, order_reserve)."""
+    if not no_chat(conn, card):
+        return False
+    from . import order_points
+    return order_points.of_account(conn, card["id"]) is None
+
+
 def _wanted(conn, card: dict) -> bool:
-    return card["stage"].get("code") == STAGE and not (card.get("intercity") or {}).get("on") and no_chat(conn, card)
+    return card["stage"].get("code") == STAGE and not (card.get("intercity") or {}).get("on") and called(conn, card)
 
 
 def _when(iso) -> str:
@@ -79,16 +94,33 @@ def _make(conn, card: dict, title: str, now: str) -> int:
     return task_id
 
 
+def _reopen(conn, card: dict, task_id: int, now: str) -> int:
+    from . import store, tasks
+    conn.execute("UPDATE callback_task SET cancelled_at = NULL, done_by = '' WHERE id = ? AND cancelled_at IS NOT NULL", (task_id,))
+    orders.add_event(conn, card["id"], now, AUTHOR, "task", REOPENED % (tasks._what("other", ARRIVED), orders.stage_name(conn, STAGE)), level="grey")
+    store.write_audit(conn, now, AUTHOR, "callback", {"task": int(task_id), "order": card["id"], "reopened": True})
+    return task_id
+
+
 def arrived(conn, card_id, now: str) -> Optional[int]:
-    """The order entered «На точке» (or stands there since today): «Позвонить, товары приехали», unless one is open or one of today is done.
-    Returns the task's id or None. Never raises."""
+    """The order stands on «На точке»: «Позвонить, товары приехали» (made, or opened again), unless it needs none (the doubles: the module's
+    text). Returns the task's id when one was made or opened, else None. Never raises."""
+    from . import connections
     try:
         card = orders.get_card(conn, card_id)
         if not _wanted(conn, card) or _open(conn, card["id"], ARRIVED):
             return None
-        if conn.execute("SELECT 1 FROM callback_task WHERE order_id = ? AND title = ? AND done_at IS NOT NULL AND substr(created_at, 1, 10) = ? LIMIT 1",
-                        (card["id"], ARRIVED, now[:10])).fetchone():
-            return None                                                   # called today already: a move back and forth calls nobody again
+        phone = connections.format_phone(card.get("client_phone") or "") or "не указан"
+        stay = str(card.get("entered_at") or "")
+        for task_id, text, created, done, cancelled, by in conn.execute(
+                "SELECT id, note, created_at, done_at, cancelled_at, done_by FROM callback_task WHERE order_id = ? AND title = ? ORDER BY id DESC",
+                (card["id"], ARRIVED)).fetchall():
+            if done and "телефон %s." % phone in str(text or ""):
+                return None                                               # this client was called: a move back calls nobody again
+            if cancelled and by != AUTHOR and str(created) >= stay:
+                return None                                               # a person cancelled it in this stay: their decision
+            if cancelled and by == AUTHOR and str(cancelled)[:10] == now[:10]:
+                return _reopen(conn, card, task_id, now)                  # left and came back today: the same task again
         return _make(conn, card, ARRIVED, now)
     except Exception:
         conn.rollback()
@@ -96,12 +128,14 @@ def arrived(conn, card_id, now: str) -> Optional[int]:
         return None
 
 
-def expiring(conn, card: dict, now: str) -> Optional[int]:
-    """The last day of the reservation from 12:30: «Позвонить, истекает срок резерва», once per stay and date. Never raises."""
+def expiring(conn, card: dict, now: str, past: bool = True) -> Optional[int]:
+    """The last day of the reservation from 12:30: «Позвонить, истекает срок резерва», once per stay and date; `past`: a date already gone
+    too (the tick missed the day; not for the stays before SINCE_KEY, told by the old alert of the reservation). Never raises."""
     try:
-        if not _wanted(conn, card) or card.get("reserve_until") != now[:10] or now[11:16] < EXPIRES_AT:
+        until = str(card.get("reserve_until") or "")
+        if not _wanted(conn, card) or not until or until > now[:10] or (until == now[:10] and now[11:16] < EXPIRES_AT) or (until < now[:10] and not past):
             return None
-        key = EXPIRES_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""), card["reserve_until"])
+        key = EXPIRES_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""), until)
         if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (key,)).fetchone():
             return None
         conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, now))
@@ -145,10 +179,17 @@ def moved(conn, card_id, was: str, to: str, now: str, make: bool = True) -> None
         close_left(conn, card_id, now)
 
 
+def _since(conn, now: str) -> str:
+    conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (SINCE_KEY, now))
+    conn.commit()
+    return conn.execute("SELECT value FROM app_state WHERE key = ?", (SINCE_KEY,)).fetchone()[0]
+
+
 def tick(conn, now: str) -> int:
-    """The hourly tick (and 12:30): the tasks of the orders whose stage changed another way (a merge, a hand-over), the last day of the
-    reservation, the open tasks of orders gone from «На точке». Returns how many tasks were made."""
+    """The hourly tick (and 12:30): the open tasks of orders gone from «На точке» closed; for the stays at the point since the first tick, the
+    task of the arrival a move past orders.move_card left out and the last day of the reservation. Returns how many tasks were made or opened."""
     made = 0
+    since = _since(conn, now)
     for (card_id,) in conn.execute("SELECT DISTINCT order_id FROM callback_task WHERE title IN (?, ?) AND done_at IS NULL AND cancelled_at IS NULL "
                                    "AND order_id IS NOT NULL", TITLES).fetchall():
         close_left(conn, card_id, now)
@@ -160,11 +201,10 @@ def tick(conn, now: str) -> int:
             conn.rollback()
             log.exception("card %s was not read for the tasks «Позвонить»", card_id)
             continue
-        if str(card.get("entered_at") or "")[:10] == now[:10] and not conn.execute(
-                "SELECT 1 FROM callback_task WHERE order_id = ? AND title = ? AND created_at >= ? LIMIT 1",
-                (card_id, ARRIVED, card["entered_at"])).fetchone():
-            made += arrived(conn, card_id, now) is not None              # came today another way: not the orders standing there before
-        made += expiring(conn, card, now) is not None
+        new = str(card.get("entered_at") or "") >= since                  # came after the first tick: not an order standing there before
+        if new:
+            made += arrived(conn, card_id, now) is not None
+        made += expiring(conn, card, now, past=new) is not None
     return made
 
 

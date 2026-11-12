@@ -832,7 +832,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
             if (card.get("intercity") or {}).get("on"):      # to another city (order_intercity): no reservation, no reminder, no «На ОТХ»
                 continue
             until = date.fromisoformat(card["reserve_until"])
-            silent = order_call.no_chat(conn, card)          # no Avito chat: nothing to the client, «Позвонить…» to the responsible (order_call)
+            silent = order_call.called(conn, card)          # no Avito chat: nothing to the client, «Позвонить…» to the responsible (order_call)
             try:
                 _point_step(conn, card, today, now, hours, working, deliver, point_send, notify)
             except Exception:                                 # the alert of the manager still goes

@@ -143,7 +143,7 @@ def check(conn, now: str, tell: Tell, tell_point: Optional[Callable[[dict, str],
     made = 0
     for found in untold(conn, now):
         card, why = found["card"], found["reason"]
-        if order_call.no_chat(conn, card):                              # no Avito chat: «Позвонить, товары приехали» instead (2026-11-12)
+        if order_call.called(conn, card):                              # no Avito chat: «Позвонить, товары приехали» instead (2026-11-12)
             continue
         key = KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""))
         last = store.get_state(conn, key)
