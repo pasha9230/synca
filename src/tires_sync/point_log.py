@@ -177,50 +177,54 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
     if conn.execute("DELETE FROM app_state WHERE key = ? AND value = ?", (UNDO_KEY % card["id"], rec["raw"])).rowcount != 1:
         conn.rollback()
         raise orders.OrderError("Отметку уже отменили.")
-    author = "менеджер %s (%s)" % (point["name"], who)
-    stage = orders.get_stage(conn, rec["from_stage"])
-    last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event WHERE order_id = ?", (card["id"],)).fetchone()[0]
-    if not orders.move_card(conn, card["id"], stage["id"], now, author, fire_rules=False, commit=False, oth_split=False):     # a refusal rolls back the claim
+    try:                                                                  # one transaction: any error rolls the claim and the moves back
+        author = "менеджер %s (%s)" % (point["name"], who)
+        stage = orders.get_stage(conn, rec["from_stage"])
+        last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event WHERE order_id = ?", (card["id"],)).fetchone()[0]
+        if not orders.move_card(conn, card["id"], stage["id"], now, author, fire_rules=False, commit=False, oth_split=False):     # a refusal rolls back the claim
+            conn.rollback()
+            raise orders.OrderError("Заказ только что перенесли: отметку уже не отменить.")
+        conn.execute("UPDATE order_card SET entered_at = ?, reserve_until = ?, cancel_reason = ? WHERE id = ?",
+                     (rec["from_entered"], rec["from_until"], rec["from_reason"], card["id"]))
+        conn.execute("DELETE FROM order_event WHERE order_id = ? AND id > ? AND kind = 'field' AND text LIKE 'Резерв: товар на точке%'",
+                     (card["id"], last))                                  # the move's new date is not the order's: the date put back is in the text
+        if stage["code"] == "at_point" and conn.execute("SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent'", (
+                "reserve-%d-%s" % (card["id"], "".join(ch for ch in rec["from_entered"] if ch.isdigit())),)).fetchone():
+            from . import order_reserve                                   # a reminder of before the undo moves nothing to «На ОТХ» (the lead 2026-11-02)
+            orders.add_event(conn, card["id"], now, "система", "reserve", "Напоминание о сроке резерва до отмены отметки не считается: на «На ОТХ» "
+                             "заказ сам не переведётся %s" % (order_reserve.OTH_MARK % rec["from_entered"]), level="grey")
+        if rec["action"] == "act_signed":                                     # the return is agreed again, the act not signed, the refund as it was
+            kind, reason, amount = (rec.get("from_return") or ["", "", 0.0])[:3]
+            conn.execute("UPDATE order_card SET return_kind = ?, return_reason = ?, return_amount = ? WHERE id = ?", (kind, reason, amount, card["id"]))
+            conn.execute("UPDATE oth_return_plan SET signed_at = NULL, signed_by = '' WHERE order_id = ?", (card["id"],))
+        if rec["action"] == "refuse":                                         # its red «Отказ клиента на точке …» told of a move that is undone
+            from . import order_alerts
+            for (red,) in conn.execute("SELECT id FROM order_event WHERE order_id = ? AND kind = 'point' AND level = 'red' AND text LIKE ? AND id <= ? ORDER BY id",
+                                       (card["id"], "Отказ клиента на точке%", int(rec.get("last_event") or 0))).fetchall()[-1:]:
+                order_alerts.resolve(conn, red, now, author)
+        if rec["action"] == "oth_issued":                                     # the question of the seventh day is open again
+            conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
+            if stage["code"] == orders.RETURN_GIVEN:                          # «Выдали» linked the client; the goods go back again (2026-11-04)
+                order_oth.detach(conn, card, now, author)
+            order_oth.restore_plan(conn, card["id"])                          # after detach (move_card's on «На ОТХ»): it drops the marks and the plan of a stay
+        if rec["action"] == "oth_sold":                                       # the sale from «На ОТХ»: no client was linked, nothing to unlink
+            conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value LIKE 'sold|%'",      # only a question the sale itself closed
+                         ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
+            if stage["code"] == orders.RETURN_GIVEN:
+                order_oth.restore_plan(conn, card["id"])                      # the agreement the sale dropped
+        undone_issue = rec["action"] in ("oth_issued", "oth_sold")
+        if undone_issue:                                                      # the marks «На возврат» the press took off, with their task (the owner 2026-11-10)
+            order_oth.restore_marks(conn, card["id"], now, author, order_oth.MOVE, "отметка %s отменена" % rec["name"])
+        label = card.get("webmim_number") or str(card["id"])
+        until = rec["from_until"]
+        text = "Точка «%s» отменила отметку %s по заказу №%s (%s): заказ снова на этапе «%s»%s. %s" % (
+            point["name"], rec["name"], label, who, stage["name"],
+            ", резерв до %s.%s.%s" % (until[8:10], until[5:7], until[:4]) if stage["code"] == "at_point" and len(until) == 10 else "", UNDO_HINT)
+        orders.add_event(conn, card["id"], now, author, "point", text, level="yellow")
+        conn.commit()
+    except Exception:                                                     # an OrderError has rolled back already; anything else: here
         conn.rollback()
-        raise orders.OrderError("Заказ только что перенесли: отметку уже не отменить.")
-    conn.execute("UPDATE order_card SET entered_at = ?, reserve_until = ?, cancel_reason = ? WHERE id = ?",
-                 (rec["from_entered"], rec["from_until"], rec["from_reason"], card["id"]))
-    conn.execute("DELETE FROM order_event WHERE order_id = ? AND id > ? AND kind = 'field' AND text LIKE 'Резерв: товар на точке%'",
-                 (card["id"], last))                                  # the move's new date is not the order's: the date put back is in the text
-    if stage["code"] == "at_point" and conn.execute("SELECT 1 FROM chat_send_log WHERE token = ? AND status = 'sent'", (
-            "reserve-%d-%s" % (card["id"], "".join(ch for ch in rec["from_entered"] if ch.isdigit())),)).fetchone():
-        from . import order_reserve                                   # a reminder of before the undo moves nothing to «На ОТХ» (the lead 2026-11-02)
-        orders.add_event(conn, card["id"], now, "система", "reserve", "Напоминание о сроке резерва до отмены отметки не считается: на «На ОТХ» "
-                         "заказ сам не переведётся %s" % (order_reserve.OTH_MARK % rec["from_entered"]), level="grey")
-    if rec["action"] == "act_signed":                                     # the return is agreed again, the act not signed, the refund as it was
-        kind, reason, amount = (rec.get("from_return") or ["", "", 0.0])[:3]
-        conn.execute("UPDATE order_card SET return_kind = ?, return_reason = ?, return_amount = ? WHERE id = ?", (kind, reason, amount, card["id"]))
-        conn.execute("UPDATE oth_return_plan SET signed_at = NULL, signed_by = '' WHERE order_id = ?", (card["id"],))
-    if rec["action"] == "refuse":                                         # its red «Отказ клиента на точке …» told of a move that is undone
-        from . import order_alerts
-        for (red,) in conn.execute("SELECT id FROM order_event WHERE order_id = ? AND kind = 'point' AND level = 'red' AND text LIKE ? AND id <= ? ORDER BY id",
-                                   (card["id"], "Отказ клиента на точке%", int(rec.get("last_event") or 0))).fetchall()[-1:]:
-            order_alerts.resolve(conn, red, now, author)
-    if rec["action"] == "oth_issued":                                     # the question of the seventh day is open again
-        conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
-        if stage["code"] == orders.RETURN_GIVEN:                          # «Выдали» linked the client; the goods go back again (2026-11-04)
-            order_oth.detach(conn, card, now, author)
-        order_oth.restore_plan(conn, card["id"])                          # after detach (move_card's on «На ОТХ»): it drops the marks and the plan of a stay
-    if rec["action"] == "oth_sold":                                       # the sale from «На ОТХ»: no client was linked, nothing to unlink
-        conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value LIKE 'sold|%'",      # only a question the sale itself closed
-                     ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
-        if stage["code"] == orders.RETURN_GIVEN:
-            order_oth.restore_plan(conn, card["id"])                      # the agreement the sale dropped
-    undone_issue = rec["action"] in ("oth_issued", "oth_sold")
-    if undone_issue:                                                      # the marks «На возврат» the press took off, with their task (the owner 2026-11-10)
-        order_oth.restore_marks(conn, card["id"], now, author, order_oth.MOVE, "отметка %s отменена" % rec["name"])
-    label = card.get("webmim_number") or str(card["id"])
-    until = rec["from_until"]
-    text = "Точка «%s» отменила отметку %s по заказу №%s (%s): заказ снова на этапе «%s»%s. %s" % (
-        point["name"], rec["name"], label, who, stage["name"],
-        ", резерв до %s.%s.%s" % (until[8:10], until[5:7], until[:4]) if stage["code"] == "at_point" and len(until) == 10 else "", UNDO_HINT)
-    orders.add_event(conn, card["id"], now, author, "point", text, level="yellow")
-    conn.commit()
+        raise
     if rec["action"] == "shipped":                                        # the track number is not awaited any more (order_intercity)
         from . import order_intercity
         order_intercity.close_track_tasks(conn, card["id"], "cancel", now, author, "отметка «Передал курьеру ТК» отменена")

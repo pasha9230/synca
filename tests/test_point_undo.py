@@ -203,3 +203,23 @@ def test_an_undone_issue_is_not_moved_to_oth_by_the_reminder_of_before(tmp_path,
     undo(mine, card)
     assert not reserve._no_answer_step(conn, orders.get_card(conn, card), "2026-10-16T23:00:00")
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
+
+
+def test_an_unexpected_error_inside_the_undo_rolls_it_all_back(tmp_path, clock, told, monkeypatch):
+    """The review 2026-11-12: an error that is not an OrderError inside «Отменить» (here: the journal's record) rolls back the claim and
+    the move, never leaves them hanging in the open transaction for whoever commits next; the undo can be pressed again."""
+    app, client, tok, conn, pid, card = ready(tmp_path, SENT)
+    mine = manager(app, conn, pid)
+    press(mine, card, "arrived")
+    pressed = state(conn, card)
+    real = orders.add_event
+
+    def broken(conn_, order_id, *a, **k):
+        if "отменила отметку" in str(a):
+            raise RuntimeError("журнал недоступен")
+        return real(conn_, order_id, *a, **k)
+    monkeypatch.setattr(orders, "add_event", broken)
+    with pytest.raises(RuntimeError):
+        point_log.undo(conn, orders.get_card(conn, card), points.get_point(conn, pid), "Анна", T2)
+    assert not conn.in_transaction and state(conn, card) == pressed                     # nothing half-done waits for a commit
+    assert point_log.undoable(conn, orders.get_card(conn, card), pid) is not None       # the claim is back: «Отменить» works again
