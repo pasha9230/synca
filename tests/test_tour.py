@@ -141,7 +141,7 @@ def test_every_step_of_the_point_lights_an_element_of_its_workplace(tmp_path):
     assert order_oth.return_plan(conn, oth)
     orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")                    # a card on «На точке», the tab the page opens on
     mine = manager(app, conn, pid)
-    html = text(mine.get("/my-point"))
+    html = text(mine.get("/my-point?tab=here"))
     steps = tour.steps_for("point")
     assert shown(html) == [s["title"] for s in steps] == ["Рабочее место", "Вкладки", "Поиск", "Передать клиента", "Карточка заказа",
                                                           "Возврат поставщику", tour.AGAIN["title"]]

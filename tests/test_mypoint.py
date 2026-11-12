@@ -161,7 +161,7 @@ def test_issued_closes_the_order_and_tells_the_client_nothing(tmp_path):
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and to_client(app) == [] == to_client(vk_app)
     assert [(k, t) for k, t, _l in journal(conn, card)] == [(k, t) for k, t, _l in journal(vk_conn, vk_card)]
     assert "отмечено: выдан" in page
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert 'id="order-%d"' % card not in page                                             # a closed order leaves the list
     assert 'action="/my-point/%d/undo"' % card not in page                                # no list of presses over the orders (the owner 2026-11-10)
     page = mine.get("/my-point?tab=issued").get_data(as_text=True)
@@ -236,7 +236,7 @@ def test_each_button_of_a_card_is_its_own_press(tmp_path):
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
     conn.commit()
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert token(page, card, "refuse") != token(page, card, "issued")
     conn.execute("UPDATE order_card SET client_phone = '' WHERE id = ?", (card,))   # «На ОТХ» refused: the press is taken, the order stays
     conn.commit()

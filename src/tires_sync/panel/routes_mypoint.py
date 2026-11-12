@@ -266,13 +266,14 @@ TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "
         "issued": "Выдано"}                        # the owner 2026-11-09: what the point gave out in the last ISSUED_DAYS (_issued)
 # the owner 2026-11-12 (the partner's answers): «Согласование возврата» is a tab of its own between «На ОТХ» and «На возврат», and the chosen
 # tab says in small letters what lies in it (the texts are the owner's, word for word; a tuple: a line each)
-TAB_NOTES = {"moving": ("Ждём доставки. Отметьте «Приехал», как прибудут на точку!",),
+TAB_NOTES = {"moving": ("Ждём доставки, отметьте «Приехал», как прибудут на точку.",),         # the owner's task of 2026-11-12: the new texts
              "here": ("Эти позиции у нас, ожидаем выкупа заказчиком.",),
-             "oth": ("Невыкуп, у нас на хранении 7 дней. Если продаёте — впишите данные покупателя.", "Можно продать, +50 рублей / шт!"),
-             "agree": ("Отправили запрос на оформление возврата этих позиций. Теперь для продажи нужна проверка.",),
-             "return": ("Эти товары согласованы на возврат! Возвраты возможны в пн, ср, пт.",),
-             "issued": ("Заказы, которые отмечены как реализованные.",)}
-DEFAULT_TAB = "here"
+             "oth": ("Невыкуп, хранение 7 дней. Если продаёте, впишите данные покупателя.", "Можно продать, +50 рублей за штуку."),
+             "agree": ("Отправили запрос на оформление возврата этих позиций. Для продажи нужна проверка.",),
+             "return": ("Эти товары согласованы на возврат. Возвраты возможны в Пн, Ср, Пт. Распечатайте Акт МХ-3.",),
+             "issued": ("Заказы, отмеченные как реализованные заказчику.",)}
+DEFAULT_TAB = "moving"                             # the owner's task of 2026-11-12: «Рабочее место» opens on «Едут» (was «На точке»)
+ACT_COLOURS = 4                                    # the colours of «1 Акт на несколько заказов» (.mp-act-mark--1…): by the dates, then round
 ISSUED_DAYS = 30
 CONFIRM = ("issued", "reserve_issued", "oth_issued", "oth_sold")   # the owner 2026-11-09: a hand-out is confirmed with the order's number, tyres and client
 ALERTS_READ = 500                                  # the notes read to find the point's newest alerts among the bot's answers (two weeks kept)
@@ -413,10 +414,32 @@ def _found(conn, query: str, point_id: int) -> list:
     return groups[0]["items"] if groups else []
 
 
+def _full_date(value: str) -> str:
+    try:
+        return date.fromisoformat(value).strftime("%d.%m.%Y") if value else ""
+    except ValueError:
+        return ""
+
+
+def mark_shared_acts(rows: list) -> None:
+    """«1 Акт на несколько заказов» (the owner's task of 2026-11-12): an act (a point and a date of the return) of several orders of
+    «На возврат» gives each of them the same act_mark, the number of its colour: 1…ACT_COLOURS by the dates of the return, then round. The
+    orders of an act of its own and those without an act get none."""
+    shared = {}
+    for row in rows:
+        if row.get("act_file"):
+            shared.setdefault(row["act_file"]["id"], []).append(row)
+    groups = sorted((g for g in shared.values() if len(g) > 1), key=lambda g: (g[0]["act_file"]["return_date"], g[0]["act_file"]["id"]))
+    for n, group in enumerate(groups):
+        for row in group:
+            row["act_mark"] = n % ACT_COLOURS + 1
+
+
 def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
     return [{"card": r["card"], "label": mgr.label(r["card"]), "date": _short_date(r["plan"]["return_date"]),
+             "return_by": _full_date(r["plan"]["return_date"]),                 # «Вернуть дд.мм.гггг» by the number (the task of 2026-11-12)
              "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"]),
              "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"])}      # «Скачать акт» (the owner 2026-11-12)
             for r in order_oth.to_return(conn, point_id)]
@@ -543,6 +566,7 @@ def register(app) -> None:
         today_ret = order_oth.return_day(conn, point_id, now) if point_id is not None else None
         if today_ret:
             today_ret["act_file"] = oth_return_act.find(conn, point_id, today_ret["date"])
+        mark_shared_acts(returns + [row for row in cards if _in_tab(row, "return") and not row["returning"]])
         for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
             ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
         tab = request.args.get("tab", "")
@@ -564,7 +588,7 @@ def register(app) -> None:
                 f["tab"] = tab_of.get(oid, "")
                 if f["tab"] in ("oth", "agree", "return"):                               # our tyres at the point: the client is gone (the owner 2026-10-30)
                     f["title"] = "Заказ №%d · шины на ОТХ" % oid
-        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, hot=hot, issued=issued,
+        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
@@ -683,14 +707,15 @@ def register(app) -> None:
     @app.route("/my-point/return-act/<int:act_id>")
     @login_required
     def mypoint_return_act(act_id):
-        """«Скачать акт» of a return (oth_return_act): the file of the person's own point only (the office: of the point it looks at, ?p=);
-        another point's id is a 404, as one that is not there."""
+        """«Скачать акт МХ-3» of a return (oth_return_act): the file of the person's own point only (the office: of the point it looks at,
+        ?p=); another point's id is a 404, as one that is not there. «Распечатать» (?print=1, the task of 2026-11-12): the same file with
+        the same rights, shown in the browser to print instead of saved."""
         from .routes_catalog_oth import act_response
         conn = get_conn()
         act = oth_return_act.file(conn, act_id)
         if act is None or act["point_id"] != _point_id(conn):
             abort(404)
-        return act_response(act)
+        return act_response(act, inline=request.args.get("print") == "1")
 
     @app.route("/points/history")
     @login_required
@@ -719,10 +744,10 @@ def register(app) -> None:
         who = current_user()["login"]                                           # notify.js keeps what it has seen per person (a shared PC)
         if point_id is None:
             return jsonify({"who": who, "items": []})
-        from .routes_alerts import grouped, href, with_orders
+        from .routes_alerts import HERE, grouped, href, with_orders
         cards, now = _cards(conn, point_id), local_iso()
         items = [{"key": "question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
-                  "href": "/my-point"} for card in cards if reserve.question_open(conn, card, now)]      # of the stay: a new stay rings again
+                  "href": HERE} for card in cards if reserve.question_open(conn, card, now)]      # of the stay: a new stay rings again
         items += [{"key": "oth-question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Заказ № %s: выдали или на точке?"
                    % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in _oth_cards(conn, point_id)
                   if order_oth.question_open(conn, card)]
@@ -732,7 +757,8 @@ def register(app) -> None:
                           "text": "%s Заказы: %s." % (order_oth.RETURN_DAY_BODY, ", ".join("№ %s" % n for n in today["orders"])),
                           "href": "/my-point?tab=return"})
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
-                   else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "", "href": "/my-point"} for card in cards]
+                   else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "",
+                   "href": HERE if card["stage"]["code"] == "at_point" else "/my-point"} for card in cards]     # «Едут» is the page itself
         try:
             point = points.get_point(conn, point_id)
         except points.PointError:                                               # the manager's point was deleted: nothing to show

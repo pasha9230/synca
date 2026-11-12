@@ -136,13 +136,13 @@ def test_the_point_sees_a_short_hint_on_its_cards_and_folds_it(tmp_path):
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stages["at_point"]["id"], card))
     conn.commit()
     client, _ = person(app, "point", alfa)
-    page = client.get("/my-point").get_data(as_text=True)
+    page = client.get("/my-point?tab=here").get_data(as_text=True)
     assert 'data-point-hint="here"' in page and "Свернуть подсказки" in page
     page = client.get("/my-point?tab=oth").get_data(as_text=True)
     assert 'name="back" value="/my-point?tab=oth"' in page                      # back to the same tab («На точке» is the page's own)
     r = client.post("/orders/hint/fold", data={"csrf": "tok", "where": "point", "fold": "1", "back": "/my-point"})
     assert r.status_code == 302
-    page = client.get("/my-point").get_data(as_text=True)
+    page = client.get("/my-point?tab=here").get_data(as_text=True)
     assert "data-point-hint=" not in page and "Показать подсказки" in page
 
 

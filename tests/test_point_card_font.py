@@ -50,7 +50,7 @@ def test_the_old_view_draws_them_as_the_tyre():
 
 def test_the_new_cards_mark_the_sum_and_keep_the_rest(w):  # noqa: F811
     flag(w["conn"], "all")
-    html = w["point"].get("/my-point").get_data(as_text=True)
+    html = w["point"].get("/my-point?tab=here").get_data(as_text=True)
     assert 'class="p2-sum" data-point-sum' in html and 'class="p2-sub" data-point-sum' not in html
     assert 'class="p2-who mp-name"' in html and 'class="p2-q"' in html
     assert '<span class="mp-no" data-no>' in html and 'class="p2-sub">Сегодня последний день хранения' in html

@@ -55,9 +55,10 @@ def test_the_six_tabs_and_the_default_one(w):
     names = re.findall(r'data-tab="([a-z]+)"', page)
     assert names == ["moving", "here", "oth", "agree", "return", "issued"]     # «Согласование возврата»: 2026-11-12;                          # «Переданные клиенты»: a section of its own
     assert ">Едут<" in page and ">На точке<" in page and ">На ОТХ<" in page and ">Согласование возврата<" in page and ">На возврат<" in page and ">Выдано<" in page   # 2026-11-09
-    assert _active(page) == "here" and _cards(page) == [w["made"]["at_point"]]
+    assert _active(page) == "moving"                                            # the page opens on «Едут» (the owner's task of 2026-11-12; was «На точке»)
+    assert _cards(_page(w["point"], "/my-point?tab=here")) == [w["made"]["at_point"]]
     for old in ("all", "ending", "asked", "nonsense"):
-        assert _active(_page(w["point"], "/my-point?tab=" + old)) == "here", old
+        assert _active(_page(w["point"], "/my-point?tab=" + old)) == "moving", old
 
 
 def test_each_tab_holds_its_own_orders(w):
@@ -87,7 +88,7 @@ def test_the_question_of_the_last_day_is_a_line_of_its_card_and_first(w, monkeyp
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stages["at_point"], asked))
     conn.commit()
     monkeypatch.setattr(order_reserve, "question_open", lambda conn, card, now: card["id"] == asked)
-    page = _page(w["point"])
+    page = _page(w["point"], "/my-point?tab=here")
     assert _cards(page)[0] == asked
     card = page[page.index('id="order-%d"' % asked):].split("</article>")[0]
     assert "Клиент забрал заказ № " in card and "/my-point/%d/reserve_issued" % asked in card and "/my-point/%d/reserve_here" % asked in card
@@ -170,7 +171,7 @@ def test_the_card_is_the_webmim_number_the_tyres_and_the_client_and_the_phone_is
     conn = w["conn"]
     orders.update_card(conn, w["made"]["at_point"], {"webmim_number": "5287827"}, NOW, "o")
     conn.commit()
-    page = _page(w["point"])
+    page = _page(w["point"], "/my-point?tab=here")
     card = page[page.index('id="order-%d"' % w["made"]["at_point"]):].split("</article>")[0]
     top, more = card.split('<details class="mp-more">')
     assert "№ 5287827" in top and "data-tyres" in top and "Клиент at_point" in top

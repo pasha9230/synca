@@ -54,7 +54,7 @@ def test_the_question_is_a_row_of_the_bell_of_its_point_only(tmp_path, clock):
     assert questions(mine) == []                                                            # not asked yet: no row
     asked(conn, card)
     rows = questions(mine)
-    assert [(r["title"], r["level"], r["href"], r["order_id"]) for r in rows] == [(QUESTION, "yellow", "/my-point", card)]
+    assert [(r["title"], r["level"], r["href"], r["order_id"]) for r in rows] == [(QUESTION, "yellow", "/my-point?tab=here", card)]     # the tab by name: the page opens on «Едут» (2026-11-12)
     assert bell(mine)["count"] >= 1
     assert QUESTION in mine.get("/alerts").get_data(as_text=True)
     assert questions(theirs) == [] and QUESTION not in theirs.get("/alerts").get_data(as_text=True)     # another point: never
@@ -103,7 +103,7 @@ def test_a_return_the_point_pressed_is_a_green_row_of_its_bell_until_the_order_m
     vk_return(conn, card)                                                                  # no amount: the order stays «На точке»
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
     for person in (mine, mate):
-        assert [(r["level"], r["href"], r["order_id"]) for r in returns(person)] == [("green", "/my-point", card)]
+        assert [(r["level"], r["href"], r["order_id"]) for r in returns(person)] == [("green", "/my-point?tab=here", card)]
     assert returns(theirs) == [] and returns(owner) == []                                  # the staff keep their yellow «заполните сумму»
     assert any("заполните сумму возврата" in it["text"] for it in bell(owner)["items"])
     orders.update_card(conn, card, dict(return_amount="16000"), DAY + "T12:00:00", "o")
