@@ -572,6 +572,11 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the reminder of the returns to give failed")
+    try:
+        order_oth.tell_return_day(conn, now)                  # «Сегодня возврат!» from 09:00 (the owner 2026-11-12): the panel of the point only
+    except Exception:
+        conn.rollback()
+        logging.getLogger("tires_sync.orders").exception("the day of the return was not told")
     _silent_moves(conn, now, notify)
     try:
         order_oth.ask_seventh_day(conn, now, notify)          # any hour: the moves and the tasks on time, their alerts in the alert hours (2026-11-05)

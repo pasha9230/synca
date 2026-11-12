@@ -123,7 +123,7 @@ def by_order(rows: List[dict]) -> List[dict]:
     return result
 
 
-POINT_ROWS = ("question", "return")                             # routes_alerts.point_rows: «Клиент забрал?», «возврат отмечен, ждёт суммы»
+POINT_ROWS = ("question", "return", "return_day")                             # routes_alerts.point_rows: «Клиент забрал?», «возврат отмечен, ждёт суммы»
 POINT_RECORDS = {                                                # the point's own records of the journal (the owner 2026-11-07)
     "field": ("Возврат с ОТХ согласован с поставщиком", "Согласование возврата с поставщиком отменено"),     # order_oth.agree, unagree
 }
