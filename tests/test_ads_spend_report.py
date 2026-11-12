@@ -135,7 +135,7 @@ def test_the_orders_without_an_ad_say_why(tmp_path):
     conn.commit()
     none = ads_spend.report(conn, TODAY, 7)["none"]
     assert (none["count"], none["pieces"], none["revenue"], none["margin"]) == (4, 14, 64000.0, 12400.0)
-    assert none["reasons"] == {"no_chat": 1, "no_item": 1, "no_feed": 1, "manual": 1}
+    assert none["reasons"] == {"no_chat": 1, "no_item": 1, "no_feed": 1, "call_no_item": 0, "manual": 1}
 
 
 # ---- the ads out of the list ---------------------------------------------------------------------------------------------------------

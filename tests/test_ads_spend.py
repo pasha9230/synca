@@ -241,7 +241,8 @@ def test_a_sale_belongs_to_the_ad_of_the_chat_of_its_order_and_the_rest_is_witho
     assert len(one["rows"]) == 1 and one["total"]["drr"] == 1.5
     assert (two["rows"][0]["drr"], two["rows"][0]["drr_margin"]) == (0.8, None)
     assert data["none"] == {"pieces": 10, "revenue": 12000.0, "margin": 1200.0, "count": 3, "no_purchase": 0,     # and why (2026-11-12)
-                            "reasons": {"no_chat": 1, "no_item": 0, "no_feed": 1, "manual": 1}}
+                            "call_pieces": 0, "call_revenue": 0.0, "call_count": 0,                            # none by a call (2026-11-13)
+                            "reasons": {"no_chat": 1, "no_item": 0, "no_feed": 1, "call_no_item": 0, "manual": 1}}
 
 
 def test_the_sort_by_drr_puts_the_dashes_last(tmp_path):
