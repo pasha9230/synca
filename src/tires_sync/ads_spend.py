@@ -661,13 +661,14 @@ def _account(conn, account: dict, today: date, since: str, until: str, sold: dic
             r["bid_why"] = ("нет расходов за последние %d дн., цена не запрашивается" % BID_DAYS if r["avito_id"] not in queued
                             else "последний сбор не удался (причина над таблицей)" if error else "очередь ещё не дошла")
     total = _total(rows)
+    every = rows                                                        # all the ads of the period, uncut and unfiltered (ads_tree)
     due = [r for r in rows if r["avito_id"] in queued]
     strangers = _sort([r for r in rows if not r["title"] and not r["ad_id"]], "spend")
     rows = [r for r in rows if r["title"] or r["ad_id"]]
     shown = [r for r in rows if (only != "sales" or r["pieces"]) and (only != "spend" or r["spend"])]
     shown = _sort(shown, sort)
     return {"id": aid, "name": account["name"], "covered": covered, "rows": shown[:ROWS_MAX], "count": len(shown), "total": total,
-            "error": error, "columns": _filled(shown), "bids_of": len(due), "bids_read": sum(1 for r in due if r["bid"] is not None),
+            "error": error, "columns": _filled(shown), "every": every, "bids_of": len(due), "bids_read": sum(1 for r in due if r["bid"] is not None),
             "strangers": {"count": len(strangers), "spend": round(sum(r["spend"] for r in strangers), 2),
                           "views": sum(r["views"] for r in strangers), "rows": strangers[:ROWS_MAX]}}
 
