@@ -918,9 +918,24 @@ def question_open(conn, card: dict) -> bool:
     return not (return_plan(conn, card["id"]) or {}).get("signed_at")
 
 
+NEED_ACT = False     # E4, the owner still decides (2026-11-12): False — the date of the return is the agreement (as before); True — the date and the act (PDF) both
+
+
+def agreed(conn, card: dict) -> bool:
+    """What counts as the agreement of a return (E4), in one place: a plan with its date; with NEED_ACT, the act МХ-3 of the point and that date
+    attached as well (oth_return_act). The point's tabs read it (to_agree, agreeing)."""
+    plan = return_plan(conn, card["id"])
+    if plan is None:
+        return False
+    if not NEED_ACT:
+        return True
+    from . import oth_return_act
+    return oth_return_act.find(conn, card.get("point_id"), plan["return_date"]) is not None
+
+
 def to_agree(conn, card: dict) -> bool:
     """«На возврат» and the return not agreed yet («Согласуем»): the point's «На возврат», waiting for the office."""
-    return card["stage"]["code"] == orders.RETURN_GIVEN and return_plan(conn, card["id"]) is None
+    return card["stage"]["code"] == orders.RETURN_GIVEN and not agreed(conn, card)
 
 
 def agreeing(conn, card: dict) -> bool:
@@ -928,13 +943,37 @@ def agreeing(conn, card: dict) -> bool:
     agreed yet, or on «На ОТХ» with a position marked for the return (item_to_return) — the whole order then: a record is sold or returned
     whole (the owner 2026-11-11). Agreed (a plan with its date): no longer."""
     code = card["stage"]["code"]
-    if code not in RETURNING or return_plan(conn, card["id"]) is not None:
+    if code not in RETURNING or agreed(conn, card):
         return False
     if code == orders.RETURN_GIVEN:
         return True
     since = _oth_since(conn, card["id"])
     return any(_marked(conn, item_id, int(qty), since) > 0
                for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (card["id"],)).fetchall())
+
+
+def agreeing_since(conn, card: dict) -> str:
+    """The moment the order came to «Согласование возврата» (E2, the owner 2026-11-12), read from what is kept already: on «На возврат» the
+    move there (entered_at), or the later «Согласование … отменено» of this stay (unagree); on «На ОТХ» the first mark «На возврат» of a position
+    (item_to_return, ITEM_KEY «at») of this stay. '' when the order is not on the agreement."""
+    if not agreeing(conn, card):
+        return ""
+    entered = str(card.get("entered_at") or "")
+    if card["stage"]["code"] == orders.RETURN_GIVEN:
+        row = conn.execute("SELECT MAX(at) FROM order_event WHERE order_id = ? AND kind = 'field' AND text LIKE ? AND at >= ?",
+                           (card["id"], "Согласование возврата с поставщиком отменено%", entered)).fetchone()
+        return max(entered, str(row[0] or "")) if row else entered
+    since = _oth_since(conn, card["id"]) or entered
+    found = []
+    for (item_id,) in conn.execute("SELECT item_id FROM oth_return WHERE order_id = ? AND qty > 0", (card["id"],)).fetchall():
+        for (value,) in conn.execute("SELECT value FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item_id),)):
+            try:
+                at = str(json.loads(value).get("at") or "")
+            except (ValueError, AttributeError):
+                continue
+            if at >= since:
+                found.append(at)
+    return min(found) if found else since
 
 
 def store_value(conn, key: str) -> str:
@@ -1473,7 +1512,8 @@ def tell_return_day(conn, now: str) -> int:
 def return_day(conn, point_id, now: str) -> Optional[dict]:
     """«Сегодня возврат!» of the point as it stands now, None when there is none: not told today (tell_return_day), or «Подписал акт и отдал»
     is pressed for every order of the date. {"date", "at" (told), "ids", "orders" (the numbers the point knows), "text", "sound": the hour
-    of RETURN_DAY_SOUNDS that came last — the key of the sound changes with it, so an open page rings three times}."""
+    of RETURN_DAY_SOUNDS that came last — the key of the sound changes with it, so an open page rings three times; "not_taken": the mark of
+    «Водитель не забрал» (oth_point_return) or None — with it the sound stays the hour of the press: no new key, no ring}."""
     from . import order_manager
     day = now[:10]
     if point_id is None:
@@ -1482,9 +1522,11 @@ def return_day(conn, point_id, now: str) -> Optional[dict]:
     ids = [r[0] for r in conn.execute("SELECT c.id " + RETURN_DAY_SQL + "AND c.point_id = ? ORDER BY c.id", (day,) + RETURNING + (int(point_id),))] if row else []
     if not ids:
         return None
-    sound = max([h for h in RETURN_DAY_SOUNDS if h <= now[11:13]] or RETURN_DAY_SOUNDS[:1])
+    from .oth_point_return import not_taken
+    stopped = not_taken(conn, point_id, day)                                         # «Водитель не забрал» (G): the sound of the date stops
+    sound = stopped.get("sound") or RETURN_DAY_SOUNDS[0] if stopped else max([h for h in RETURN_DAY_SOUNDS if h <= now[11:13]] or RETURN_DAY_SOUNDS[:1])
     return {"date": day, "at": row[0], "ids": ids, "orders": [order_manager.label(orders.get_card(conn, i)) for i in ids],
-            "text": "%s %s" % (RETURN_DAY_TITLE, RETURN_DAY_BODY), "sound": sound}
+            "text": "%s %s" % (RETURN_DAY_TITLE, RETURN_DAY_BODY), "sound": sound, "not_taken": stopped}
 
 
 def task_days(conn) -> int:
@@ -1511,15 +1553,23 @@ def working_due(now: str, days: int) -> str:
     return moment.isoformat(timespec="minutes")
 
 
+def office_assignee(conn, card_id) -> str:
+    """Whom a task of the return of an order goes to: its responsible of the office; nobody of the office answers for it (none, or a user of a
+    point, who cannot write to the supplier: the lead 2026-11-05) — the owner's login, as every task of an order without a responsible."""
+    from . import order_alerts, order_notify
+    owner = order_notify.get_owner_login(conn)
+    kinds = order_alerts.people_kinds(conn)
+    person = order_alerts.responsibles(conn, kinds, card_id).get(card_id)
+    return person if person and kinds.get(person) == "staff" else owner
+
+
 def _return_task(conn, card: dict, now: str, who: str, what: str = "", commit: bool = True) -> int:
     """The one task of a return, by hand or on the seventh day: kind «Вернуть», to the order's responsible (nobody of the staff answers for it: the owner's login), due by
     the setting. tasks.add saves the caller's changes with it (its audit commits); `commit` False: the caller saves it."""
-    from . import order_alerts, order_notify, tasks
+    from . import order_notify, tasks
     owner = order_notify.get_owner_login(conn)
-    kinds = order_alerts.people_kinds(conn)
-    person = order_alerts.responsibles(conn, kinds, card["id"]).get(card["id"])      # a user of a point cannot write to the supplier: the owner's (the lead 2026-11-05)
     return tasks.add(conn, kind="return", title=RETURN_TASK, due_at=working_due(now, task_days(conn)), now=now, author=who, owner_login=owner,
-                     assignee=person if person and kinds.get(person) == "staff" else owner, order_id=card["id"], commit=commit,
+                     assignee=office_assignee(conn, card["id"]), order_id=card["id"], commit=commit,
                      note="Заказ №%s, точка «%s»%s, /orders/%d" % (card.get("webmim_number") or card["id"], (card.get("point") or {}).get("name") or "не указана",
                                                                   ", " + what if what else "", card["id"]))
 
