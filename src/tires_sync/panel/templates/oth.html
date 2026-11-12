@@ -20,6 +20,18 @@
 </tr>{% endfor %}</tbody></table></div>
 {% else %}<div class="empty"><div class="empty-icon">{{ icon("check") }}</div><h3>{{ "Заказов на ОТХ нет" if manual or point else "На ОТХ ничего нет" }}</h3><p>Здесь появятся позиции заказов, переведённых на этап «На ОТХ».</p></div>{% endif %}
 </section>
+{# the act of a return as a file (the owner 2026-11-12): one PDF per point and date; the point downloads it on «Рабочее место» #}
+{% if can_post("oth_return_act_upload") or acts %}<section class="card" id="return-acts" data-return-acts><div class="card-head"><h3>Акты возврата</h3><span class="sub">PDF на точку и дату возврата: точка скачает акт на «Рабочем месте» и в уведомлении «Сегодня возврат!»</span></div>
+{% if can_post("oth_return_act_upload") %}<form method="post" action="/oth/return-act" enctype="multipart/form-data" class="filters" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label class="field"><span class="label">Точка</span><select class="select" name="point" required><option value="">Выберите</option>{% for p in act_points %}<option value="{{ p.id }}"{% if p.id == point %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Дата возврата</span><input class="input" type="date" name="return_date" value="{{ act_day }}" required></label>
+<label class="field"><span class="label">Файл акта (PDF, до 1,9 МБ)</span><input class="input" type="file" name="file" accept="application/pdf,.pdf" required></label>
+<button class="btn btn--secondary btn--sm" title="Повторная загрузка на ту же точку и дату заменит файл">Прикрепить акт</button></form>{% endif %}
+{% if acts %}<div class="table-wrap"><table class="table">
+<thead><tr><th>Точка</th><th>Дата возврата</th><th>Файл</th><th>Кто и когда</th><th class="t-actions" style="width:1%"></th></tr></thead>
+<tbody>{% for a in acts %}<tr><td>{{ a.point }}</td><td class="nowrap">{{ a.return_date|day }}</td><td><a href="/oth/return-act/{{ a.id }}">{{ a.name }}</a> <span class="xs muted">{{ "%.0f"|format(a.size / 1024) }} КБ</span></td><td class="small">{{ author_label(a.uploaded_by) }} · {{ a.uploaded_at|dt }}</td>
+<td class="t-actions" style="white-space:nowrap">{% if can_post("oth_return_act_delete") %}<form method="post" action="/oth/return-act/{{ a.id }}/delete" data-once data-confirm="Удалить акт возврата?"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ keep_form }}<button class="btn btn--secondary btn--xs">Удалить</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+{% else %}<p class="muted small">Актов пока нет.</p>{% endif %}</section>{% endif %}
 {% if manual %}<section class="card" data-oth-manual-list><div class="card-head"><h3>Свой остаток <span class="badge badge--neutral">{{ manual|sum(attribute="qty") }} шт.</span></h3><span class="sub">внесён вручную в карточке позиции; считается как ОТХ</span></div><div class="table-wrap"><table class="table">
 <thead><tr><th>Товар</th><th>Код</th><th class="num">Сколько</th><th>Где лежит</th><th>Кто и когда</th><th>Заметка</th><th class="t-actions" style="width:1%"></th></tr></thead>
 <tbody>{% for r in manual %}<tr{% if can("catalog") %} data-href="{{ r.url }}" class="is-link"{% endif %}>

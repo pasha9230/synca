@@ -95,3 +95,6 @@ body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) 
 .mp-undo{margin-top:var(--s-1)}
 .mp-undo-quiet{background:none;border:0;padding:2px 0;color:var(--gray-500);font:inherit;font-size:12px;text-decoration:underline;cursor:pointer;min-height:0}
 .mp-undo-quiet:hover{color:var(--gray-700)}
+.mp-today{flex-wrap:wrap;margin-bottom:12px}
+.mp-act-file{margin:8px 0 0}
+.mp-today .mp-act-file{flex:0 0 100%}   /* «Скачать акт» of a return (2026-11-12): a full-width button, as the others of the card */
