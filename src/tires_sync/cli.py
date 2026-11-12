@@ -1256,6 +1256,7 @@ def _cmd_orders_tick(args) -> int:
     conn = store.connect(args.db)
     made = order_engine.fire_stale(conn, moscow_now().isoformat(timespec="seconds"))
     print("новых задач по правилам «завис на этапе»: %d" % made)
+    _call_tasks(conn)
     _reserve_alerts(conn, args.key_file)
     _arrived_alerts(conn, args.key_file)
     _daily_summary(conn, args.key_file)
@@ -1524,6 +1525,16 @@ def _chat_deliver(conn, box, now: str):
             raise chats.ChatError("У аккаунта не заданы ключи Авито.")
         chats.send_reply(conn, AvitoClient(client_id, client_secret, http=_http(), now=_epoch, allow_write=True), chat_row, text, token, now, "система")
     return deliver
+
+
+def _call_tasks(conn) -> None:
+    """«Позвонить…» of the orders without an Avito chat (order_call): no keys needed, nothing to a client. A failure is only a warning."""
+    try:
+        from . import order_call
+        print("задач «Позвонить» по заказам без чата: %d" % order_call.tick(conn, moscow_now().isoformat(timespec="seconds")))
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: задачи «Позвонить» не проверены (%s: %s)" % (type(err).__name__, str(err)[:120]), file=sys.stderr)
 
 
 def _reserve_alerts(conn, key_file) -> None:

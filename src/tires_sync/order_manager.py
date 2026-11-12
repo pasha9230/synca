@@ -1022,6 +1022,19 @@ def tell_client_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who
     return sent, note
 
 
+NO_CHAT_NOTE = "У заказа нет чата Авито: клиенту ничего не отправлено, ответственному задача «Позвонить, товары приехали»."
+
+
+def _silent(conn, card: dict) -> bool:
+    """An order without an Avito chat (order_call.no_chat): its client is called, not written to."""
+    from . import order_call
+    try:
+        return order_call.no_chat(conn, card)
+    except Exception:                                          # noqa: BLE001 - as before: the owner is told
+        conn.rollback()
+        return False
+
+
 def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str, body: Optional[str] = None) -> Tuple[bool, str]:
     """«Можно забирать» to the client of the order, once per arrival (the send token is the order and the moment it reached the point).
     Never raises: when it does not go, a red record in the journal and a line in «Входящие» tell the owner to send it by hand. The line's id
@@ -1048,6 +1061,8 @@ def _tell_arrived(conn, card_id, deliver: Optional[Deliver], now: str, who: str,
             _arrived_close(conn, task, now, who)
         elif status == "failed":
             _arrived_wait(conn, card, token, copy, why, now, own_text=body is not None)
+        if status == "failed" and _silent(conn, card):          # no Avito chat (the owner 2026-11-12): no red record, no line of «Входящие»;
+            return False, NO_CHAT_NOTE                          # the responsible calls (order_call), the message waits for a chat bound later
     if status == "sent":
         return True, "Клиенту отправлено сообщение «можно забирать»."
     by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."

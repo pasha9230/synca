@@ -566,7 +566,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     the community); its «на точке» tells the client (`here`). A date that is already past asks nobody."""
     if notify is None:
         return 0
-    from . import order_oth
+    from . import order_call, order_oth
     try:
         order_oth.remind_handover(conn, now, notify)          # from 08:59 (the owner 2026-11-04): before the first hour of the others
     except Exception:
@@ -605,19 +605,22 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
             if (card.get("intercity") or {}).get("on"):      # to another city (order_intercity): no reservation, no reminder, no «На ОТХ»
                 continue
             until = date.fromisoformat(card["reserve_until"])
+            silent = order_call.no_chat(conn, card)          # no Avito chat: nothing to the client, «Позвонить…» to the responsible (order_call)
             try:
                 _point_step(conn, card, today, now, hours, working, deliver, point_send, notify)
             except Exception:                                 # the alert of the manager still goes
                 conn.rollback()
                 logging.getLogger("tires_sync.orders").exception("the reserve question to the point of card %s failed", card_id)
             try:
-                if not _own_sale(conn, card, own):
+                if not silent and not _own_sale(conn, card, own):
                     _client_step(conn, orders.get_card(conn, card_id), today, now, hours, deliver, notify)
             except Exception:
                 conn.rollback()
                 logging.getLogger("tires_sync.orders").exception("the reserve reminder to the client of card %s failed", card_id)
             kind = "due" if until <= today else ("before" if until - timedelta(days=1) == today else "")
             if not kind or not alerts_on:                     # a tick late in the evening: the next morning's tells it (the mark is not set)
+                continue
+            if silent and kind == "due":                      # the task «Позвонить, истекает срок резерва» instead (the owner 2026-11-12)
                 continue
             marker = _marker(kind, card["reserve_until"])
             if _done(conn, card_id, marker):

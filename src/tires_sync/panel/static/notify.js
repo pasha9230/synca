@@ -10,6 +10,8 @@
 (function () {
   "use strict";
   var KEY = "tires.notify.seen:", EVERY = 30000, MAX_SHOWN = 3, NOTHING = "новое видно только на странице и в колокольчике.";
+  // Офис (решение владельца 2026-11-12): тот же звук по своим задачам «Позвонить…» заказов без чата, ключ меняется каждые 2 часа (/tasks/feed).
+  var me = document.currentScript, FEED = (me && me.getAttribute("data-feed")) || "/my-point/feed";
   var button = document.querySelector("[data-notify-enable]"), state = document.querySelector("[data-notify-state]");
   var supported = "Notification" in window, audio = null, Ctx = window.AudioContext || window.webkitAudioContext;
 
@@ -90,7 +92,7 @@
 
   var memory = null;                                      // what this page has seen when the browser keeps nothing
   function check() {
-    fetch("/my-point/feed", {credentials: "same-origin", headers: {"Accept": "application/json"}}).then(function (r) {
+    fetch(FEED, {credentials: "same-origin", headers: {"Accept": "application/json"}}).then(function (r) {
       if (!r.ok || r.redirected) throw new Error(r.status);                    // an expired login answers with the login page
       return r.json();
     }).then(function (data) {
@@ -106,7 +108,7 @@
       ring();
       refreshSoon();
       added.slice(0, MAX_SHOWN).forEach(tell);
-      if (added.length > MAX_SHOWN) tell({key: "more", title: "Ещё " + (added.length - MAX_SHOWN), text: "Новое на «Рабочем месте»", href: "/my-point"});
+      if (added.length > MAX_SHOWN) tell({key: "more", title: "Ещё " + (added.length - MAX_SHOWN), text: FEED === "/my-point/feed" ? "Новое на «Рабочем месте»" : "Новые задачи", href: FEED === "/my-point/feed" ? "/my-point" : "/tasks"});
     }).catch(function () { /* no connection: the bell shows it; the next look tries again */ });
   }
 

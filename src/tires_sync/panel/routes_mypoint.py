@@ -742,8 +742,10 @@ def register(app) -> None:
         conn = get_conn()
         point_id = _point_id(conn)
         who = current_user()["login"]                                           # notify.js keeps what it has seen per person (a shared PC)
+        from .. import order_call
+        calls = order_call.sounds(conn, who, local_iso())                      # one's own tasks «Позвонить…» (working as a point too)
         if point_id is None:
-            return jsonify({"who": who, "items": []})
+            return jsonify({"who": who, "items": calls})
         from .routes_alerts import HERE, grouped, href, with_orders
         cards, now = _cards(conn, point_id), local_iso()
         items = [{"key": "question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
@@ -769,4 +771,4 @@ def register(app) -> None:
         if own_point() is not None:                                             # the bell of the manager of the point: only theirs (routes_alerts)
             items += [{"key": "alert-%s-%s" % (r["id"], r["more"]), "title": "Чат без заказа" if r.get("chat_row") else "Заказ №%d" % r["order_id"],
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]
-        return jsonify({"who": who, "items": items})
+        return jsonify({"who": who, "items": items + calls})
