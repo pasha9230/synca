@@ -32,6 +32,8 @@ def panel_numbers_from(conn, first):
 
 def card_at(conn, pid, code="moving"):
     card = orders.create_card(conn, dict(client_name="Иван", client_phone=free_phone(conn, "+7 900 111 22 33"), point_id=pid, delivery_date="2026-10-15"), NOW, "o")
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (card,))    # typed, none bound: not «без чата»
+    conn.commit()
     orders.add_item(conn, card, goods_id="1", name="Nokian", brand_key="nokian", season="winter", diameter=16, territory="1", qty=4,
                     sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=NOW, author="o")
     orders.move_card(conn, card, stage(conn, "placed"), NOW, "o")

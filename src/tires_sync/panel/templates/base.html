@@ -122,7 +122,7 @@
 <div id="toasts" aria-live="polite"></div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% if session.get("user") and can("alerts") %}<script src="{{ url_for('static', filename='bell.js') }}"></script>{% endif %}
-{% if session.get("user") and current_user().role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}"></script>{% endif %}
+{% if session.get("user") and current_user().role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}"></script>{% elif session.get("user") and current_user().role not in ("client", "viewer") %}<script src="{{ url_for('static', filename='notify.js') }}" data-feed="/tasks/feed"></script>{# the office: its own tasks «Позвонить…» ring (order_call) #}{% endif %}
 {% if session.get("user") %}<script src="{{ url_for('static', filename='topbar.js') }}"></script>
 <script src="{{ url_for('static', filename='tour.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}

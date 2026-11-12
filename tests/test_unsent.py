@@ -124,10 +124,9 @@ def test_an_order_without_a_chat_shows_the_waiting_message_with_its_text(arrived
     assert row["kind"] == "task" and "нет чата Авито" in row["why"] and row["text"] == "Заказ 5000777 приехал, можно забирать"
     assert conn.execute("SELECT COUNT(*) FROM order_unsent").fetchone()[0] == 0                      # one place, never twice
     inbox = "SELECT status FROM manager_message WHERE message_id LIKE 'arrived-%'"
-    assert conn.execute(inbox).fetchone()[0] == "new"                                               # «можно забирать» waits in «Входящие» too
+    assert conn.execute(inbox).fetchone() is None                     # the owner 2026-11-12: no line of «Входящие», «Позвонить…» instead
     unsent.sent_by_hand(conn, card, "task", row["id"], at(60), "owner")
     assert unsent.of_order(conn, card) == [] and engine.get_task(conn, row["id"])["status"] == "done"
-    assert conn.execute(inbox).fetchone()[0] == "answered"                                          # the lead's review: never written twice
     sent, _note = mgr.tell_client_arrived(conn, card, None, at(120), "точка")                         # «приехал» again: never back
     assert unsent.of_order(conn, card) == []
 

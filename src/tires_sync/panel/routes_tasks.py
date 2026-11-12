@@ -6,9 +6,9 @@ client). A manager of a point is checked here, on the server, not by the buttons
 and sets a task only to itself, of an order of its own point or of none (never a chat nor a client)."""
 from __future__ import annotations
 
-from flask import abort, flash, redirect, render_template, request
+from flask import abort, flash, jsonify, redirect, render_template, request
 
-from .. import order_notify, tasks, users
+from .. import order_call, order_notify, tasks, users
 from .common import author, can, current_user, get_conn, login_required, own_point, safe_path
 from .routes_alerts import may_take
 from .routes_design import office_page, point_page
@@ -91,6 +91,13 @@ def register(app) -> None:
 
     app.jinja_env.globals.update(tasks_for=tasks_for, may_task=may_set, task_people=task_people, task_default=task_default,
                                  task_kinds=tasks.KINDS)
+
+    @app.route("/tasks/feed")
+    @login_required
+    def tasks_feed():
+        """For notify.js of the office (read-only): the person's own open tasks «Позвонить…» (order_call.sounds), a new key every 2 hours."""
+        who = current_user()["login"]
+        return jsonify({"who": who, "items": order_call.sounds(get_conn(), who, local_iso())})
 
     @app.route("/tasks")
     @login_required

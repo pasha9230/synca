@@ -187,6 +187,8 @@ def test_the_inbox_shows_the_text_with_a_copy_button(tmp_path):
     pid = points.save_point(conn, {"name": "Гамма", "manager_name": "А", "channel": "vk"})
     tpl.add_template(conn, mgr.ARRIVED_TEMPLATE, "client", "Здравствуйте, {client_name}! Заказ №{order_no} можно забирать.")
     cid = make(client, tok, point_id=str(pid))
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (cid,))   # typed, none bound: not «без чата»
+    conn.commit()
     mgr.tell_client_arrived(conn, cid, None, "2026-10-13T12:00:00", "бот")
     body = client.get("/orders/inbox").get_data(as_text=True)
     m = re.search(r'<textarea[^>]*id="inbox-copy-(\d+)"[^>]*>([^<]*)</textarea>', body)

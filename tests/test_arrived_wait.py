@@ -41,7 +41,8 @@ def test_without_a_chat_it_waits_in_the_card_with_its_text(env):
     assert not sent
     [task] = waiting(conn, card)
     assert task["status"] == "pending" and task["kind"] == "message" and "5000777" in task["body"]
-    assert any(e["level"] == "red" and "не отправлено" in e["text"] for e in orders.list_events(conn, card))
+    assert not any(e["level"] == "red" for e in orders.list_events(conn, card))          # the owner 2026-11-12: «Позвонить…» instead (order_call)
+    assert conn.execute("SELECT COUNT(*) FROM manager_message").fetchone()[0] == 0
 
 
 def test_a_chat_bound_later_sends_it_once(env):
@@ -115,6 +116,8 @@ def test_a_message_lacking_values_waits_as_an_error_and_is_not_sent_by_itself(en
 def test_answered_in_the_inbox_by_hand_is_never_sent_by_itself(env):
     """D1: the owner copied the text from «Входящие», wrote to the client and answered the line: a chat bound later sends nothing."""
     conn, chat_row, card = env
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (card,))   # a chat typed in the card, none bound: not «без чата» (order_call)
+    conn.commit()
     mgr.tell_client_arrived(conn, card, None, NOW, "точка")
     [line] = [r[0] for r in conn.execute("SELECT id FROM manager_message")]
     mgr.answer(conn, line, "написал клиенту сам", LATER)

@@ -9,7 +9,7 @@ import pytest
 import json
 
 from test_vk_commands import GROUP, PEER, SECRET, SENT, _card, _stage, ready, to_client, to_points
-from tires_sync import order_manager as mgr, orders, vk_callback
+from tires_sync import order_call, order_manager as mgr, orders, vk_callback
 
 BOT = int("-" + GROUP)
 
@@ -58,8 +58,8 @@ def test_two_forwarded_lines_move_both_and_the_answer_lists_both(tmp_path):
     rows = log(conn)
     assert rows["vk-4242#5000100"].startswith("заказ перенесён") and rows["vk-4242#5000200"].startswith("заказ перенесён")
     assert rows["vk-4242"].startswith("пакет: 2 заказа")
-    assert [m["text"] for m in mgr.list_inbox(conn)] == [                 # no dispute: only the usual line of an order without a chat
-        "Заказ №5000200: клиенту не отправлено «можно забирать» — у заказа нет чата Авито. Отправьте вручную."]
+    assert mgr.list_inbox(conn) == []                                     # no dispute; the order without a chat: no line (the owner 2026-11-12)
+    assert [r[0] for r in conn.execute("SELECT title FROM callback_task WHERE order_id = ?", (second,))] == [order_call.ARRIVED]   # a call instead
 
 
 def test_a_repeat_of_the_event_does_nothing_more(tmp_path):

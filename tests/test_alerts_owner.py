@@ -137,8 +137,8 @@ def test_telegram_of_an_order_goes_to_its_responsible_only(tmp_path):
     told = []
     mine = card(conn, "zamantyres", pid)
     robot = card(conn, "", pid)
-    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE code = 'at_point') WHERE id IN (?, ?)",
-                 (mine["id"], robot["id"]))
+    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE code = 'at_point'), avito_chat = 'https://example.com/chat/1' "
+                 "WHERE id IN (?, ?)", (mine["id"], robot["id"]))          # a chat typed, none bound: not «без чата» (order_call)
     conn.commit()
     found = [{"card": orders.get_card(conn, mine["id"]), "reason": "нет чата"}, {"card": orders.get_card(conn, robot["id"]), "reason": "нет чата"}]
     order_arrived.untold, keep = (lambda c, now: found), order_arrived.untold

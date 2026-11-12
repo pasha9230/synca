@@ -1012,6 +1012,9 @@ def register(app) -> None:
             from .. import order_points
             if order_points.of_account(conn, card["id"]) is None:
                 return None
+        from .. import order_call
+        if order_call.called(conn, card):                                # no Avito chat: the task «Позвонить…» instead (the owner 2026-11-12)
+            return None
         now = local_iso()
         if order_arrived.told(conn, card, now):
             return None

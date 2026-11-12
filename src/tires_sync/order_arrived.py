@@ -138,11 +138,13 @@ def check(conn, now: str, tell: Tell, tell_point: Optional[Callable[[dict, str],
     for it, the owner when a point user does; never a point nor
     «система») and marked in its journal (yellow the first time), once a day while it stays untold. An order of a point's own Avito account
     is the point's (the owner 2026-10-26): `tell_point(card, text)` only. Returns how many were told. Writes nothing to a client."""
-    from . import order_alerts, order_notify, order_points
+    from . import order_alerts, order_call, order_notify, order_points
     owner = order_notify.get_owner_login(conn)
     made = 0
     for found in untold(conn, now):
         card, why = found["card"], found["reason"]
+        if order_call.called(conn, card):                              # no Avito chat: «Позвонить, товары приехали» instead (2026-11-12)
+            continue
         key = KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""))
         last = store.get_state(conn, key)
         if last and _hours(last, now) < REPEAT_HOURS:

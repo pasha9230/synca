@@ -1191,6 +1191,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     if not commit:                                         # in the caller's transaction (order_merge): it saves, no rule wakes
         return True
     conn.commit()
+    from . import order_call                     # an order without an Avito chat: «Позвонить…» to its responsible (the owner 2026-11-12)
+    order_call.moved(conn, card_id, card["stage"].get("code"), stage["code"], now, make=fire_rules)
     if fire_rules and stored is not None:
         _fire_rules(conn, stored, now, ())      # the rules of «На ОТХ» are the record's; none of «Отмена»: the client is written nothing
     elif fire_rules:

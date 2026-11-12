@@ -308,7 +308,8 @@ for _section, _endpoints in {
              "ads_analytics_columns",                   # «Колонки» of «Аналитика рекламы»: one's own setting (routes_ads: who sees the page only)
              "search", "search_json",                   # the search of the top bar: every role; search.scope_for narrows what it finds
              "tour_done", "tour_again",                 # «Обзор» (panel/tour.py): one's own mark «пройден», every role
-             "whatsnew_page"),                          # «Что нового» (routes_whatsnew): every role, its own items
+             "whatsnew_page",                           # «Что нового» (routes_whatsnew): every role, its own items
+             "tasks_feed"),                             # the sound of one's own tasks «Позвонить…» (order_call.sounds): read-only
     "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel"),
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
              "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",   # its cart, its orders,
