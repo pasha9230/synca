@@ -61,7 +61,8 @@ def dot_on(client, url):
 
 # what a section of the panel is called, in the titles of the items: the menus (base.html, _point_nav.html), and the menu itself
 SECTIONS = {"Главная", "Заказы", "Задачи", "Чаты", "Звонки", "CRM", "Уведомления", "Каталог", "Каталог для клиента", "Генерация", "Фиды", "На ОТХ",
-            "Подключения", "Настройки заказов", "Шаблоны сообщений", "История", "Новый вид", "Пользователи", "Рабочее место", "Меню"}
+            "Подключения", "Настройки заказов", "Шаблоны сообщений", "История", "Новый вид", "Пользователи", "Рабочее место", "Меню",
+            "Сопоставления", "Аналитика рекламы"}             # №5: two more items of the menu (base.html)
 # never in an item a point or a client reads (the owner 2026-11-05); and in no item at all, the repository is public
 NOT_FOR_POINT = re.compile(r"закуп|наценк|прибыл|маржа|логин|аккаунт", re.IGNORECASE)
 PUBLIC_NEVER = re.compile(r"\+?\d[\d ()-]{9,}\d|https?://|\b[\w-]+\.(?:ru|com|net|org)\b", re.IGNORECASE)
@@ -158,6 +159,50 @@ def test_the_point_sees_only_its_items_of_the_fourth_update(tmp_path):
     assert shown and all("point" in i["roles"] for i in shown)
     assert len(shown) == sum("point" in i["roles"] for i in fourth["items"])
     for hidden in ("Заказы WebMIM", "Закупка изменилась", "Автосообщение клиенту"):
+        assert hidden not in html, hidden
+
+
+def test_the_fifth_update_is_shipped_and_every_role_has_its_items():
+    """№5 (the lead 2026-11-12): what came after №4, by role. Every role finds items of its own; what a point sees is tagged for it, and
+    says nothing of WebMIM, the purchase or the accounts (the owner 2026-10-30); a client reads only of its catalog."""
+    [fifth] = [u for u in whatsnew.load() if u["number"] == 5]
+    assert fifth["title"] == "Обновление панели №5" and fifth["date"] == "12.11.2026"
+    roles = {i["title"]: i["roles"] for i in fifth["items"]}
+    assert len(roles) == len(fifth["items"]), "two items of №5 under one title"
+    for role in users.ROLES:
+        assert any(role in r for r in roles.values()), role
+    for title, r in roles.items():
+        assert whatsnew.SEES_ALL <= r, title                         # no item is hidden from those who see them all
+        if title.startswith("Рабочее место: "):
+            assert "point" in r, title
+        if "client" in r:
+            assert title.startswith("Каталог для клиента: ") and r == {"owner", "partner", "client"}, title
+    assert roles["Рабочее место: шесть вкладок с подписями"] == {"owner", "partner", "point"}
+    assert roles["Рабочее место: «Продать» шины с ОТХ"] == {"owner", "partner", "point"}
+    assert roles["Уведомления: у точки только её дела"] == {"owner", "partner", "point"}
+    assert roles["Заказы: переписка с клиентом прямо в окне заказа"] == {"owner", "partner", "chats", "viewer", "point"}
+    assert roles["Заказы: аккаунт Авито у чата заказа"] == {"owner", "partner", "chats"}
+    assert roles["Аналитика рекламы: новый раздел"] == {"owner", "partner"}
+    for item in fifth["items"]:
+        text = item["title"] + " " + str(item["body"])
+        assert not re.search(r"\bметк", text, re.IGNORECASE), item["title"]     # the owner's words: a stage has «статусы», not «метки»
+        if "point" in item["roles"]:
+            assert not re.search(r"webmim|\bmim\b|мим\b|закуп|прибыл", text, re.IGNORECASE), item["title"]
+    # the final state only: «Продать» of a point is of the tab «На ОТХ» alone (2026-11-12 over 2026-11-10)
+    sell = str(next(i["body"] for i in fifth["items"] if i["title"] == "Рабочее место: «Продать» шины с ОТХ"))
+    assert "только во вкладке «На ОТХ»" in sell
+
+
+def test_the_point_sees_only_its_items_of_the_fifth_update(tmp_path):
+    app = make_app(tmp_path)
+    pid = points.save_point(conn_of(app), {"name": "Янино", "manager_name": "А", "channel": "vk"})
+    client, _conn = person(app, "point", point_id=pid)
+    html = page(client)
+    [fifth] = [u for u in whatsnew.load() if u["number"] == 5]
+    shown = [i for i in fifth["items"] if str(escape(i["title"])) in html]
+    assert shown and all("point" in i["roles"] for i in shown)
+    assert len(shown) == sum("point" in i["roles"] for i in fifth["items"])
+    for hidden in ("Аналитика рекламы", "кабинета MIM", "Google-таблица"):
         assert hidden not in html, hidden
 
 
