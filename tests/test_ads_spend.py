@@ -168,9 +168,13 @@ def test_the_daily_run_reads_the_prices_of_a_view_of_the_ads_with_spending(tmp_p
 
 # ---- the report ----------------------------------------------------------------------------------------------------------------------
 
-def spend(conn, account, avito_id, day, rub, views=0, contacts=0):
+def spend(conn, account, avito_id, day, rub, views=0, contacts=0, listed=True):
+    """`listed`: the ad is in the list of the account (avito_ad): an ad without a name and our Id is one of «не из нашего фида» (2026-11-12)."""
     conn.execute("INSERT OR REPLACE INTO ad_spend_day (account_id, avito_id, day, spend, views, contacts) VALUES (?,?,?,?,?,?)",
                  (account, avito_id, day, rub, views, contacts))
+    if listed:
+        conn.execute("INSERT OR IGNORE INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (?, ?, ?, ?, '2026-11-11')",
+                     (account, avito_id, "G%d" % avito_id, "№%d" % avito_id))
 
 
 def mark(conn, account, days):
@@ -236,7 +240,8 @@ def test_a_sale_belongs_to_the_ad_of_the_chat_of_its_order_and_the_rest_is_witho
     assert (row["avito_id"], row["spend"], row["pieces"], row["revenue"], row["margin"], row["drr"], row["drr_margin"]) == (5, 300.0, 4, 20000.0, 3000.0, 1.5, 10.0)
     assert len(one["rows"]) == 1 and one["total"]["drr"] == 1.5
     assert (two["rows"][0]["drr"], two["rows"][0]["drr_margin"]) == (0.8, None)
-    assert data["none"] == {"pieces": 10, "revenue": 12000.0, "margin": 1200.0, "count": 3}
+    assert data["none"] == {"pieces": 10, "revenue": 12000.0, "margin": 1200.0, "count": 3, "no_purchase": 0,     # and why (2026-11-12)
+                            "reasons": {"no_chat": 1, "no_item": 0, "no_feed": 1, "manual": 1}}
 
 
 def test_the_sort_by_drr_puts_the_dashes_last(tmp_path):
