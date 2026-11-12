@@ -131,6 +131,8 @@ def test_mixed_partial_axes_are_any_and_no_axis_asks(tmp_path):
     table = get(owner, "?mixed=1&fd=18").split('id="items"')[1]                       # the front R18, the rear any: a set of each model
     kits = re.findall(r"Комплект \d", table)
     assert kits == ["Комплект 1", "Комплект 2"]
+    rear = table[table.index("Только задняя ось"):]
+    assert "Укажите размер задней оси" in rear and not re.findall(r">(C\d)<", rear)    # the rear not given: not the whole catalog
     assert "Укажите размеры осей" in get(owner, "?mixed=1")
     assert "Укажите размеры осей" in get(owner, "?mixed=1&w=225")                      # the size fields are not read in this mode
     assert codes(get(owner, "?mixed=1&fw=225&rw=255&c=imp")) == []                      # the other filters act on both axes

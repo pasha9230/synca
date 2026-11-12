@@ -459,7 +459,10 @@ def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
 def pair_axes(items, size_of, key_of, front, rear) -> dict:
     """The pairing of mixed_sets on any rows (the client's Visible, the office's rows of the catalog): `size_of(row)` its (width, height,
     diameter), `key_of(row)` what the two tyres of a set share (offer_model_key) or None; `items` already filtered and sorted. At most
-    KITS_MAX + 1 sets; then the rows of each axis in no set, each once (one fitting both axes: front)."""
+    KITS_MAX + 1 sets; then the rows of each axis in no set, each once (one fitting both axes: front). An axis with no field given is
+    any value for the sets, but its «Только … ось» is empty (`front_unset` / `rear_unset`: the page asks for the axis), never the whole
+    catalog."""
+    front_unset, rear_unset = all(v is None for v in front), all(v is None for v in rear)
     fronts = [i for i in items if fits_axis(size_of(i), front)]
     rears = [i for i in items if fits_axis(size_of(i), rear)]
     order = lambda i: (size_of(i)[2], size_of(i)[0], size_of(i)[1])       # _size_key: the diameter, the width, the height
@@ -483,6 +486,7 @@ def pair_axes(items, size_of, key_of, front, rear) -> dict:
                 break
         if len(kits) >= limit:
             break
-    alone_f = [i for i in fronts if id(i) not in paired]
+    alone_f = [] if front_unset else [i for i in fronts if id(i) not in paired]
     shown_f = {id(i) for i in alone_f}
-    return {"kits": kits, "front": alone_f, "rear": [i for i in rears if id(i) not in paired and id(i) not in shown_f]}
+    alone_r = [] if rear_unset else [i for i in rears if id(i) not in paired and id(i) not in shown_f]
+    return {"kits": kits, "front": alone_f, "rear": alone_r, "front_unset": front_unset, "rear_unset": rear_unset}

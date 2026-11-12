@@ -162,7 +162,8 @@ def _view2(app, conn, login: str, base: str, f, here: list, items, shots, cart: 
     out.update(total=len(sets["kits"][:cut]), mixed={
         "asked": True, "kits": [(line(a), line(b)) for a, b in sets["kits"][:cut]], "front": [line(i) for i in sets["front"][:cut]],
         "rear": [line(i) for i in sets["rear"][:cut]], "more": len(sets["kits"]) > cut,
-        "only_more": any(len(sets[k]) > cut for k in ("front", "rear"))})
+        "only_more": any(len(sets[k]) > cut for k in ("front", "rear")),
+        "front_unset": sets["front_unset"], "rear_unset": sets["rear_unset"]})
     return out
 
 
