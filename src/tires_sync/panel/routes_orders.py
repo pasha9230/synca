@@ -2478,7 +2478,11 @@ def register(app) -> None:
             item = manager.get_message(conn, message_id)
             send, deliver, notify = inbox_channel(app, conn, local_iso())
             reply = manager.confirm(conn, message_id, request.form.get("order_no"), local_iso(), author(), deliver, notify)
-            flash(("Подтверждено. %s %s" % (reply, _to_point(conn, item, reply, bot=True))).strip())
+            closed = conn.execute("SELECT status FROM manager_message WHERE id = ?", (message_id,)).fetchone()
+            if closed and closed[0] == "ignored":                          # «Закрыть без ответа» came meanwhile: nothing goes to the point
+                flash(("Подтверждено. %s Сообщение тем временем закрыли без ответа: точке ничего не отправлено." % reply).strip())
+            else:
+                flash(("Подтверждено. %s %s" % (reply, _to_point(conn, item, reply, bot=True))).strip())
         except orders.OrderError as err:
             flash(str(err))
         return redirect("/orders/inbox")
