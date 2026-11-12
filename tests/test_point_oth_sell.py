@@ -165,7 +165,9 @@ def test_after_the_signed_act_it_is_refused_and_the_button_is_gone(tmp_path, clo
     mine = manager(app, conn, pid)
     tok = token(mine.get("/my-point?tab=oth").get_data(as_text=True), card, "oth_sold")
     orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
-    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=agree").get_data(as_text=True)      # «Согласуем»: still sold
+    assert "oth_sold" not in mine.get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12 (over 10.11): on «На ОТХ» only
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
+    assert not done and outcome == order_oth.AGREEING_REFUSED and answer == order_oth.AGREEING_ANSWER
     order_oth.agree(conn, orders.get_card(conn, card), date.fromisoformat("2026-10-17"), "2026-10-15T10:00:00", "owner")
     assert "oth_sold" not in mine.get("/my-point?tab=return").get_data(as_text=True)    # agreed: going back (the owner 2026-11-10; was sold)
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
@@ -193,9 +195,9 @@ def test_undo_puts_the_order_back_on_oth_and_it_can_be_sold_again(tmp_path, cloc
     assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=oth").get_data(as_text=True)
 
 
-def test_undo_from_the_return_brings_back_the_question_and_the_task(tmp_path, clock):
-    """«На возврат» not agreed yet («Согласуем»): sold by the point, the task of the return is cancelled (the owner 2026-11-10: sold before the
-    agreement); «Отменить» brings the order, its question and its task back. (Before 2026-11-10 an agreed one was sold too: no longer.)"""
+def test_on_the_return_not_agreed_the_point_sells_nothing_the_question_and_the_task_stay(tmp_path, clock):
+    """«На возврат» not agreed yet: the owner 2026-11-12 took «Продать» of the point off it (the decision of 2026-11-10 «sold until agreed» is
+    over: the point sells on «На ОТХ» only). No button, the server refuses; the order, its question and its task stay as they were."""
     app, owner, conn, pid, card = setup(tmp_path)
     conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (order_oth.SINCE_KEY, "2026-10-01T00:00:00"))
     orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
@@ -203,14 +205,12 @@ def test_undo_from_the_return_brings_back_the_question_and_the_task(tmp_path, cl
     order_oth.moved_by_hand(conn, dict(before, stage=dict(before["stage"], code="oth")), "2026-10-15T09:00:00", "owner")     # its task, its question
     assert open_tasks(conn, card) == 1 and order_oth.question_open(conn, orders.get_card(conn, card))
     mine = manager(app, conn, pid)
-    sell(mine, card, tab="agree")
-    assert orders.get_card(conn, card)["stage"]["code"] == "done" and open_tasks(conn, card) == 0
-    assert conn.execute("SELECT done_at, cancelled_at FROM callback_task WHERE order_id = ?", (card,)).fetchone() == (None, T1)
-    clock["now"] = T2
-    assert post(mine, "/my-point/%d/undo" % card, "tok").status_code == 302
+    assert "oth_sold" not in "".join(mine.get("/my-point?tab=" + t).get_data(as_text=True) for t in ("oth", "agree", "return"))
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T1)
+    assert not done and answer == "Шины на согласовании возврата: продать можно после отмены согласования оператором"
     now = orders.get_card(conn, card)
     assert now["stage"]["code"] == orders.RETURN_GIVEN and linked(conn, card) is None and order_oth.return_plan(conn, card) is None
-    assert order_oth.question_open(conn, now) and open_tasks(conn, card) == 1          # the question the sale closed, the task again
+    assert order_oth.question_open(conn, now) and open_tasks(conn, card) == 1          # nothing closed, nothing cancelled
 
 
 def test_a_recorded_sale_is_not_undone_by_the_point_until_the_office_reverses_it(tmp_path, clock):
@@ -244,17 +244,18 @@ def test_tyres_partly_given_back_to_the_supplier_are_not_sold_by_the_point(tmp_p
 
 
 
-def test_tyres_marked_for_the_return_not_agreed_yet_are_sold_by_the_point(tmp_path, clock):
-    """10.11 (c13acc4): the mark «На возврат» of the positions («Ожидает согласование возврата», item_to_return) is kept in oth_return too, and
-    «Продать» took it for tyres given back: the button was gone. The tyres lie at the point: the button is there and sells the order."""
+def test_tyres_marked_for_the_return_not_agreed_yet_are_not_sold_by_the_point(tmp_path, clock):
+    """10.11 (c13acc4) the point sold the tyres with the mark «На возврат» of the positions (item_to_return) until the return was agreed. The owner
+    2026-11-12 took it back: the order is on «Согласование возврата», the point has no «Продать» there and the server refuses; the office sells."""
     app, owner, conn, pid, card = setup(tmp_path)
     item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (card,)).fetchone()[0]
     assert order_oth.item_to_return(conn, item, "2026-10-14T10:00:00", "owner")                 # all 4 of 4
     assert not order_oth.given_back(conn, card)
     mine = manager(app, conn, pid)
-    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=agree").get_data(as_text=True)
-    sell(mine, card, tab="agree")
-    assert orders.get_card(conn, card)["stage"]["code"] == "done" and "Точка продала шины с ОТХ" in texts(conn, card)
+    assert "oth_sold" not in "".join(mine.get("/my-point?tab=" + t).get_data(as_text=True) for t in ("oth", "agree", "return"))
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
+    assert not done and answer == order_oth.AGREEING_ANSWER
+    assert orders.get_card(conn, card)["stage"]["code"] == "oth" and "Точка продала шины с ОТХ" not in texts(conn, card)
 
 
 def test_a_real_return_of_a_part_after_the_mark_still_keeps_the_button_off(tmp_path, clock):
@@ -282,13 +283,13 @@ def marked(tmp_path, qty=None):
     return app, conn, pid, card, item, owner
 
 
-def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_on_the_button(tmp_path, clock):
+def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_off_the_points_button(tmp_path, clock):
     from tires_sync import oth_stock
     app, conn, pid, card, item, owner = marked(tmp_path)
     assert sum(order_oth.goods_on_oth(conn).values()) == 4 and sum(oth_stock.pieces(conn, manual=False).values()) == 0  # the owner 2026-11-10 (later): not on Avito, the point sells it
     [row] = order_oth.stock(conn)["stock"]
     assert (row["qty"], row["left"], row["marked_qty"]) == (4, 0, 4)                      # on sale; a real «Вернуть поставщику» has nothing to take
-    assert 'action="/my-point/%d/oth_sold"' % card in manager(app, conn, pid).get("/my-point?tab=agree").get_data(as_text=True)
+    assert "oth_sold" not in manager(app, conn, pid).get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12: the office sells
     assert any("шины в продаже до согласования возврата" in t for t in texts(conn, card))
     page = owner.get("/oth").get_data(as_text=True)
     assert "data-item-return>Ожидает согласование возврата · 4 шт., в продаже до согласования" in page and "в продаже 4" in page
@@ -317,12 +318,13 @@ def test_a_part_agreed_goes_on_return_the_rest_stays_on_sale_with_the_button(tmp
     assert 'action="/my-point/%d/oth_sold"' % card in page and 'action="/my-point/%d/oth_sold"' % new not in page
 
 
-def test_sold_before_the_agreement_drops_the_mark_cancels_the_task_and_sells_once(tmp_path, clock):
+def test_sold_by_the_office_before_the_agreement_drops_the_mark_cancels_the_task_and_sells_once(tmp_path, clock):
+    """The owner 2026-11-12: the point no longer sells on the agreement of the return; the office does, as before (the move to «Выполнено»)."""
     app, conn, pid, card, item, owner = marked(tmp_path)
     rules.add_rule(conn, _stage(conn, "done"), "enter", 0, "record_sale", None, "", "auto", None)
     conn.commit()
     assert open_tasks(conn, card) == 1
-    sell(manager(app, conn, pid), card, tab="agree")
+    orders.move_card(conn, card, _stage(conn, "done"), T1, "owner")
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and sales(conn, card) == [(4, 20000.0, 16000.0)]
     assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (card,)).fetchone()
     assert not conn.execute("SELECT 1 FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % item,)).fetchone()

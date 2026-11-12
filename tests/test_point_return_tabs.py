@@ -1,6 +1,8 @@
 """The owner 2026-11-12 (the partner's answers; «Го» on the plan). «Рабочее место» of a point:
 1. six tabs, «Согласование возврата» between «На ОТХ» and «На возврат»: the orders of «На возврат» not agreed yet and those of «На ОТХ» with a
-   position on the agreement of the return (the whole order: a record is sold or returned whole); the chosen tab says what lies in it."""
+   position on the agreement of the return (the whole order: a record is sold or returned whole); the chosen tab says what lies in it;
+2. «Продать» of the point is on «На ОТХ» only (over the decision of 2026-11-10 «sold until agreed»): on «Согласование возврата» and «На возврат»
+   there is no button and the server refuses; the office sells and takes the agreement off as before."""
 from __future__ import annotations
 
 import re
@@ -8,7 +10,8 @@ from datetime import date
 
 import pytest
 
-from test_mypoint import manager
+from panel_helpers import post
+from test_mypoint import manager, token
 from test_point_new_view import flag
 from test_point_oth_sell import setup
 from test_vk_commands import _stage
@@ -111,3 +114,70 @@ def test_the_search_names_the_new_tab(tmp_path, clock, view):
     to_return_stage(conn, card)
     page = manager(app, conn, pid).get("/my-point?q=%d" % card).get_data(as_text=True)
     assert 'data-found-tab="agree">Согласование возврата<' in page
+
+
+# ---- 2. «Продать» of the point: on «На ОТХ» only ------------------------------------------------------------------------------------
+
+REFUSED = "Шины на согласовании возврата: продать можно после отмены согласования оператором"
+
+
+def events(conn, card) -> list:
+    return [r[0] for r in conn.execute("SELECT text FROM order_event WHERE order_id = ? ORDER BY id", (card,))]
+
+
+def test_the_button_is_on_oth_only(tmp_path, clock, view):
+    app, owner, conn, pid, card = setup(tmp_path, view)
+    mine = manager(app, conn, pid)
+    assert 'action="/my-point/%d/oth_sold"' % card in tab(mine, "oth")
+    order_oth.item_to_return(conn, item_of(conn, card), "2026-10-14T10:00:00", "owner")
+    assert has(tab(mine, "agree"), card)
+    assert all("oth_sold" not in tab(mine, key) for key in routes_mypoint.TABS)           # in the card
+    to_return_stage(conn, card)
+    assert has(tab(mine, "agree"), card) and all("oth_sold" not in tab(mine, key) for key in routes_mypoint.TABS)
+    order_oth.agree(conn, orders.get_card(conn, card), date.fromisoformat("2026-10-16"), "2026-10-15T12:00:00", "owner")
+    page = tab(mine, "return")
+    assert 'data-return="%d"' % card in page and "oth_sold" not in page                   # on the plaque of the return
+
+
+@pytest.mark.parametrize("how", ["marked", "stage"])
+def test_a_press_of_an_old_page_is_refused_in_plain_words_and_changes_nothing(tmp_path, clock, how):
+    app, owner, conn, pid, card = setup(tmp_path)
+    mine = manager(app, conn, pid)
+    tok = token(tab(mine, "oth"), card, "oth_sold")                                       # the page was open before the office marked the return
+    if how == "marked":
+        order_oth.item_to_return(conn, item_of(conn, card), "2026-10-14T10:00:00", "owner", 1)
+    else:
+        to_return_stage(conn, card)
+    before = orders.get_card(conn, card)["stage"]["code"]
+    r = post(mine, "/my-point/%d/oth_sold" % card, "tok", token=tok, confirm="yes")
+    assert r.status_code == 302 and REFUSED in mine.get(r.headers["Location"]).get_data(as_text=True)
+    assert orders.get_card(conn, card)["stage"]["code"] == before and "Точка продала шины с ОТХ" not in events(conn, card)
+    assert order_oth.sell(conn, orders.get_card(conn, card), "gamma", T1) == (order_oth.AGREEING_REFUSED, REFUSED, False)
+
+
+def test_the_office_sells_on_the_agreement_as_before(tmp_path, clock):
+    app, owner, conn, pid, card = setup(tmp_path)
+    order_oth.item_to_return(conn, item_of(conn, card), "2026-10-14T10:00:00", "owner")
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "owner", T1, office=True)
+    assert done and orders.get_card(conn, card)["stage"]["code"] == "done"
+
+
+def test_the_agreement_taken_off_by_the_office_leaves_the_order_on_the_agreement_tab(tmp_path, clock):
+    """«Отменить согласование» of the office works as before: the date goes, the order waits for the agreement again — still not the point's to sell."""
+    app, owner, conn, pid, card = setup(tmp_path)
+    to_return_stage(conn, card)
+    order_oth.agree(conn, orders.get_card(conn, card), date.fromisoformat("2026-10-16"), "2026-10-15T12:00:00", "owner")
+    assert order_oth.unagree(conn, orders.get_card(conn, card), "2026-10-15T13:00:00", "owner")
+    mine = manager(app, conn, pid)
+    page = tab(mine, "agree")
+    assert has(page, card) and "oth_sold" not in page and 'data-return="%d"' % card not in tab(mine, "return")
+
+
+def test_the_mark_taken_off_by_the_office_gives_the_button_back(tmp_path, clock):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = item_of(conn, card)
+    order_oth.item_to_return(conn, item, "2026-10-14T10:00:00", "owner")
+    order_oth.unmark_returned(conn, item, "2026-10-14T11:00:00", "owner")
+    mine = manager(app, conn, pid)
+    assert not order_oth.agreeing(conn, orders.get_card(conn, card))
+    assert 'action="/my-point/%d/oth_sold"' % card in tab(mine, "oth") and not has(tab(mine, "agree"), card)

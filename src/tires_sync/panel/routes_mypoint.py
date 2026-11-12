@@ -500,8 +500,10 @@ def register(app) -> None:
                           "since": card["entered_at"], "lines": point_lines(card),     # «на точке с 07.11», «на ОТХ с 31.10»: the stage came then
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "sell_lines": sell_lines(card) if code in order_oth.RETURNING else [],     # «Продать» (2026-11-10): until the act МХ-3 is signed
-                          "can_sell": (code in order_oth.RETURNING and order_oth.return_plan(conn, card["id"]) is None     # until agreed (2026-11-10)
-                                       and not order_oth.given_back(conn, card["id"])),
+                          # «Продать» of the point (the owner 2026-11-12, over 2026-11-10): on «На ОТХ» only; on the agreement of the
+                          # return and agreed there is no button (order_oth.sell refuses too): the office cancels the agreement first
+                          "can_sell": (code == "oth" and order_oth.return_plan(conn, card["id"]) is None
+                                       and not order_oth.agreeing(conn, card) and not order_oth.given_back(conn, card["id"])),
                           "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
                           "agreeing": order_oth.agreeing(conn, card),          # «Согласование возврата» (the owner 2026-11-12)
@@ -536,7 +538,6 @@ def register(app) -> None:
             row["returning"] = row["card"]["id"] in returning
         for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
             ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
-            ret["sell"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["can_sell"]), None)     # «Продать» until the act is signed
         tab = request.args.get("tab", "")
         tab = tab if tab in TABS else DEFAULT_TAB
         shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not (r["asked"] or r["oth_asked"]))     # the questions first

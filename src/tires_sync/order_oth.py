@@ -999,6 +999,8 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 SOLD_SKIP = "шины проданы с ОТХ другому покупателю: прежнему клиенту не пишем"
 OFFICE_SOLD = "Продано с ОТХ: запись хранения переведена в «Выполнено» в панели"
 AGREED_REFUSED = "не выполнено: возврат согласован"
+AGREEING_REFUSED = "не выполнено: шины на согласовании возврата"
+AGREEING_ANSWER = "Шины на согласовании возврата: продать можно после отмены согласования оператором"     # the owner 2026-11-12, word for word
 AGREED_ANSWER = "Заказ №%s: возврат уже согласован с поставщиком, шины едут на возврат. Отметить «Продать» нельзя: напишите офису."
 
 
@@ -1026,7 +1028,8 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     """«Продать» of «Рабочее место» (the owner 2026-11-10): the tyres on «На ОТХ» or «На возврат» went to a buyer from the street, the whole order goes
     to «Выполнено» in one transaction. Not answer_issued: no question of the seventh day is needed (an open one closes: «sold»), and the client put
     aside is NOT linked again (the buyer is another person: the order stays without a client). Only until the return is agreed (the owner
-    2026-11-10): agreed, refused; the mark «На возврат» and the task go with the move (left_return). The rules of «Выполнено» run as for any order
+    2026-11-10): agreed, refused; the mark «На возврат» and the task go with the move (left_return). The owner 2026-11-12: the point sells on
+    «На ОТХ» only — an order on the agreement of the return (`agreeing`) is refused to it, the office (`office`) sells it as before. The rules of «Выполнено» run as for any order
     (the sale is theirs), but their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done).
     `office`: a record of storage the office moved to «Выполнено» (orders.move_card → _sell_record, the owner 2026-11-10): the same sale, its
     record in the journal says so; the refusal is the caller's to write."""
@@ -1041,6 +1044,9 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     if return_plan(conn, card["id"]) is not None:                # agreed: the tyres go back to the supplier (the owner 2026-11-10)
         conn.rollback()
         return AGREED_REFUSED, AGREED_ANSWER % label, False
+    if not office and agreeing(conn, card):                      # the owner 2026-11-12 (over 2026-11-10): the point sells on «На ОТХ» only; on the
+        conn.rollback()                                          # agreement of the return the office sells, or takes the agreement off first
+        return AGREEING_REFUSED, AGREEING_ANSWER, False
     if given_back(conn, card["id"]):                             # the sale is of the whole order: its quantity would count them too
         conn.rollback()
         return ("не выполнено: часть шин возвращена поставщику", "Заказ №%s: часть шин уже возвращена поставщику. Отметить «Продать» нельзя: "
