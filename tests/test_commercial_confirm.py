@@ -143,6 +143,39 @@ def test_a_code_returning_under_an_id_another_code_carried_in_the_truck_section_
     assert {"A", "B", "C", "D"} <= store.truck_bound_codes(conn, 1)
 
 
+def _retire(conn, account_id, goods_id, ad_id):
+    conn.execute("INSERT INTO retired_ad (account_id, goods_id, ad_id, identity, removed_at, snapshot) VALUES (?, ?, ?, '[]', ?, ?)",
+                 (account_id, goods_id, ad_id, NOW, truck_ad(ad_id)))
+
+
+def test_an_id_with_the_tail_of_the_second_account_holds_its_code_there_in_the_truck_section(tmp_path):
+    """Account 2: the own Id of A is «A_a2». B's truck ad carried it (published) and F's (taken off): A and E come back in the truck section."""
+    conn = store.connect(tmp_path / "t.db")
+    store.upsert_published(conn, PublishedItem("B", 5000, 4000.0, "P1"), truck_ad("A_a2"), account_id=2)
+    _retire(conn, 2, "F", "E_a2")
+    conn.commit()
+    assert {"A", "A_a2", "B", "E", "E_a2", "F"} <= store.truck_bound_codes(conn, 2)
+    assert {"A", "E"} <= store.truck_bound_codes(conn)                                # any account: each Id by the tail of its own
+    assert not {"A", "E", "A_a2", "B"} & store.truck_bound_codes(conn, 1)            # account 1 is not touched
+    confirmed = {**truck_pair("Cordiant", "Бизнес CA-2", "Business CA"), **passenger_pair("Cordiant", "Бизнес CA-2", "Business CA 2")}
+    offers = {"A": c_offer(goods_id="A", model_raw="Бизнес CA-2"), "E": c_offer(goods_id="E", model_raw="Бизнес CA-2", width=215)}
+    for acct, in_truck in ((2, True), (1, False)):
+        ev = evaluate(offers, {}, settings(), REF, confirmed, truck_bound=frozenset(store.truck_bound_codes(conn, acct)))
+        assert (ev.ok["A"].truck_section, ev.ok["E"].truck_section) == (in_truck, in_truck)
+
+
+def test_the_tail_of_another_account_or_the_first_one_gives_no_code(tmp_path):
+    conn = store.connect(tmp_path / "t.db")
+    store.upsert_published(conn, PublishedItem("B", 5000, 4000.0, "P1"), truck_ad("A_a3"), account_id=2)
+    _retire(conn, 2, "F", "E_a1")
+    _retire(conn, 1, "H", "G_a2")
+    conn.commit()
+    assert not {"A", "E"} & store.truck_bound_codes(conn, 2)
+    assert {"A_a3", "E_a1"} <= store.truck_bound_codes(conn, 2)
+    assert "G" not in store.truck_bound_codes(conn, 1)
+    assert not {"A", "E", "G"} & store.truck_bound_codes(conn)
+
+
 def test_saving_a_truck_pair_over_a_passenger_one_says_the_passenger_one_wins(tmp_path):
     app, client, tok = _page(tmp_path, commodity_xml(NNOMMODIF="1", SMARKA="Kumho", SMODEL="CW-51", SCARTYPE="C", SMNFCODE="K1"))
     conn = store.connect(app.config["DB_PATH"])
