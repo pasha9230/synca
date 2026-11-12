@@ -249,7 +249,8 @@ def test_the_point_s_return_tab_shows_the_stage_and_its_label(tmp_path, clock):
     app, conn, pid, cid, mine = on_page(tmp_path)
     assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN             # from the start, the question or not (2026-11-04)
     assert 'id="order-%d"' % cid not in mine.get("/my-point?tab=oth").get_data(as_text=True)
-    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    assert 'id="order-%d"' % cid not in mine.get("/my-point?tab=return").get_data(as_text=True)     # «На возврат»: the agreed only (2026-11-12)
+    page = mine.get("/my-point?tab=agree").get_data(as_text=True)
     assert 'id="order-%d"' % cid in page and "data-return-label>Ожидает согласование возврата<" in page
     assert "/act_signed" not in page                                                      # no hand-over before the agreement
 
@@ -351,7 +352,7 @@ def test_the_new_view_of_the_point_shows_na_vozvrat_with_its_label(tmp_path, clo
     app, conn, pid, cid, mine = on_page(tmp_path)
     flag(conn, "all")
     press(mine, cid, "oth_here")
-    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    page = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # not agreed yet: «Согласование возврата» (2026-11-12)
     assert is_new(page) and 'id="order-%d"' % cid in page
     block = page[page.index('id="order-%d"' % cid):].split("</article>")[0]
     assert "data-return-label>Ожидает согласование возврата<" in block and "на возврат" in block and 'data-point-hint="returning"' in block

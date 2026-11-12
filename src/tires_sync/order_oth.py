@@ -915,6 +915,20 @@ def to_agree(conn, card: dict) -> bool:
     return card["stage"]["code"] == orders.RETURN_GIVEN and return_plan(conn, card["id"]) is None
 
 
+def agreeing(conn, card: dict) -> bool:
+    """The order is on the agreement of its return (the owner 2026-11-12, «Согласование возврата» of «Рабочее место»): on «На возврат» and not
+    agreed yet, or on «На ОТХ» with a position marked for the return (item_to_return) — the whole order then: a record is sold or returned
+    whole (the owner 2026-11-11). Agreed (a plan with its date): no longer."""
+    code = card["stage"]["code"]
+    if code not in RETURNING or return_plan(conn, card["id"]) is not None:
+        return False
+    if code == orders.RETURN_GIVEN:
+        return True
+    since = _oth_since(conn, card["id"])
+    return any(_marked(conn, item_id, int(qty), since) > 0
+               for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (card["id"],)).fetchall())
+
+
 def store_value(conn, key: str) -> str:
     row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
     return row[0] if row else ""

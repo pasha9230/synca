@@ -165,7 +165,7 @@ def test_after_the_signed_act_it_is_refused_and_the_button_is_gone(tmp_path, clo
     mine = manager(app, conn, pid)
     tok = token(mine.get("/my-point?tab=oth").get_data(as_text=True), card, "oth_sold")
     orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
-    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=return").get_data(as_text=True)     # «Согласуем»: still sold
+    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=agree").get_data(as_text=True)      # «Согласуем»: still sold
     order_oth.agree(conn, orders.get_card(conn, card), date.fromisoformat("2026-10-17"), "2026-10-15T10:00:00", "owner")
     assert "oth_sold" not in mine.get("/my-point?tab=return").get_data(as_text=True)    # agreed: going back (the owner 2026-11-10; was sold)
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
@@ -203,7 +203,7 @@ def test_undo_from_the_return_brings_back_the_question_and_the_task(tmp_path, cl
     order_oth.moved_by_hand(conn, dict(before, stage=dict(before["stage"], code="oth")), "2026-10-15T09:00:00", "owner")     # its task, its question
     assert open_tasks(conn, card) == 1 and order_oth.question_open(conn, orders.get_card(conn, card))
     mine = manager(app, conn, pid)
-    sell(mine, card, tab="return")
+    sell(mine, card, tab="agree")
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and open_tasks(conn, card) == 0
     assert conn.execute("SELECT done_at, cancelled_at FROM callback_task WHERE order_id = ?", (card,)).fetchone() == (None, T1)
     clock["now"] = T2
@@ -252,8 +252,8 @@ def test_tyres_marked_for_the_return_not_agreed_yet_are_sold_by_the_point(tmp_pa
     assert order_oth.item_to_return(conn, item, "2026-10-14T10:00:00", "owner")                 # all 4 of 4
     assert not order_oth.given_back(conn, card)
     mine = manager(app, conn, pid)
-    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=oth").get_data(as_text=True)
-    sell(mine, card)
+    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=agree").get_data(as_text=True)
+    sell(mine, card, tab="agree")
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and "Точка продала шины с ОТХ" in texts(conn, card)
 
 
@@ -288,7 +288,7 @@ def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_on_the_button(tmp_
     assert sum(order_oth.goods_on_oth(conn).values()) == 4 and sum(oth_stock.pieces(conn, manual=False).values()) == 0  # the owner 2026-11-10 (later): not on Avito, the point sells it
     [row] = order_oth.stock(conn)["stock"]
     assert (row["qty"], row["left"], row["marked_qty"]) == (4, 0, 4)                      # on sale; a real «Вернуть поставщику» has nothing to take
-    assert 'action="/my-point/%d/oth_sold"' % card in manager(app, conn, pid).get("/my-point?tab=oth").get_data(as_text=True)
+    assert 'action="/my-point/%d/oth_sold"' % card in manager(app, conn, pid).get("/my-point?tab=agree").get_data(as_text=True)
     assert any("шины в продаже до согласования возврата" in t for t in texts(conn, card))
     page = owner.get("/oth").get_data(as_text=True)
     assert "data-item-return>Ожидает согласование возврата · 4 шт., в продаже до согласования" in page and "в продаже 4" in page
@@ -322,7 +322,7 @@ def test_sold_before_the_agreement_drops_the_mark_cancels_the_task_and_sells_onc
     rules.add_rule(conn, _stage(conn, "done"), "enter", 0, "record_sale", None, "", "auto", None)
     conn.commit()
     assert open_tasks(conn, card) == 1
-    sell(manager(app, conn, pid), card)
+    sell(manager(app, conn, pid), card, tab="agree")
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and sales(conn, card) == [(4, 20000.0, 16000.0)]
     assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (card,)).fetchone()
     assert not conn.execute("SELECT 1 FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % item,)).fetchone()

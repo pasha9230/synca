@@ -65,14 +65,14 @@ def test_issued_after_the_agreement_writes_nothing_of_a_sale_before_it(tmp_path,
 
 def test_a_sale_still_writes_sold_before_the_agreement(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path)
-    sell(manager(app, conn, pid), card)
+    sell(manager(app, conn, pid), card, tab="agree")
     assert task_rows(conn, card) == [(None, T1)]
     assert any(t.startswith(order_oth.SOLD_EARLY) for t in texts(conn, card)) and not any(t.startswith(ISSUED) for t in texts(conn, card))
 
 
 # ---- 2. «Отменить» and «Вернуть на ОТХ» bring the mark «На возврат» and its task back -----------------------------------------------------
 
-def press(client, card, action, tab="oth"):
+def press(client, card, action, tab="agree"):     # a marked order: «Согласование возврата» (2026-11-12)
     from test_mypoint import token
     page = client.get("/my-point?tab=%s" % tab).get_data(as_text=True)
     r = post(client, "/my-point/%d/%s" % (card, action), "tok", token=token(page, card, action), confirm="yes")
@@ -102,12 +102,12 @@ def mark_is_back(conn, card, item, qty=4):
 def test_sold_then_undone_the_mark_and_the_task_are_back_and_the_tyres_on_sale(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path)
     mine = manager(app, conn, pid)
-    sell(mine, card)
+    sell(mine, card, tab="agree")
     assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (card,)).fetchone() and open_tasks(conn, card) == 0
     undo(mine, conn, card, clock)
     mark_is_back(conn, card, item)
     assert any(t.startswith("Метка «На возврат» возвращена") for t in texts(conn, card))
-    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=oth").get_data(as_text=True)
+    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=agree").get_data(as_text=True)
 
 
 def test_issued_then_undone_the_mark_and_the_task_are_back(tmp_path, clock):
@@ -124,7 +124,7 @@ def test_issued_then_undone_the_mark_and_the_task_are_back(tmp_path, clock):
 def test_a_part_of_a_mark_marked_then_sold_and_undone_brings_back_only_that_part(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path, qty=3)
     mine = manager(app, conn, pid)
-    sell(mine, card)
+    sell(mine, card, tab="agree")
     undo(mine, conn, card, clock)
     mark_is_back(conn, card, item, qty=3)
 

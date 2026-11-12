@@ -64,6 +64,8 @@
 .pt .mp-tab.is-active{background:none;color:var(--pt-primary);border-bottom-color:var(--pt-primary)}
 .pt .mp-tab b{font-size:12px;font-weight:400;min-width:20px;height:20px;line-height:20px;padding:0 6px;border-radius:10px;background:var(--pt-fill-2);color:var(--pt-text-2);text-align:center}
 .pt .mp-tab--hot b{background:var(--pt-error);color:#fff}
+/* what lies in the chosen tab (the owner 2026-11-12): small, a line each */
+.pt .mp-tab-note{display:flex;flex-direction:column;gap:2px;margin:0 0 12px}
 
 /* a card */
 .pt .mp-block > h2{font-size:14px;font-weight:400;color:var(--pt-text-3)}
@@ -122,6 +124,9 @@
   /* the stages of «Рабочее место» are chips on top; the sections of the point are at the bottom (the owner 2026-10-30) */
   .pt .mp-tabs,.pt .pt-chips{border:0;gap:4px;overflow-x:auto;scrollbar-width:none;margin:0 16px 12px;padding:2px 0}
   .pt .mp-tab,.pt .pt-chip{flex:none;border:1px solid var(--pt-border);border-radius:18px;height:36px;padding:0 10px;font-size:13px;white-space:nowrap}
+  .pt .mp-tabs{flex-wrap:wrap;overflow:visible}     /* six tabs (the owner 2026-11-12): they wrap, a finger's 44 px each */
+  .pt .mp-tab{height:44px;border-radius:22px}
+  .pt .mp-tab-note{margin:0 16px 12px}
   .pt .mp-tab.is-active,.pt .pt-chip.is-active{border-color:var(--pt-primary);background:var(--pt-primary-bg);color:var(--pt-primary);font-weight:500}
 }
 

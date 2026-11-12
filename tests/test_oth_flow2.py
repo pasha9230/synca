@@ -639,7 +639,7 @@ def test_the_point_sees_the_statuses_and_no_button_before_the_agreement(tmp_path
     pid = orders.get_card(conn, cid)["point_id"]
     mine = manager(app, conn, pid)
     post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
-    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    page = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # «Согласование возврата»: its own tab (the owner 2026-11-12)
     assert "Ожидает согласование возврата" in page and "/act_signed" not in page
     agree_return(client, cid, tok)
     day = order_oth.return_plan(conn, cid)["return_date"]

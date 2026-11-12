@@ -50,11 +50,11 @@ def _cards(page):
 
 # --- вкладки -----------------------------------------------------------------------------------------------------------------------
 
-def test_the_five_tabs_and_the_default_one(w):
+def test_the_six_tabs_and_the_default_one(w):
     page = _page(w["point"])
     names = re.findall(r'data-tab="([a-z]+)"', page)
-    assert names == ["moving", "here", "oth", "return", "issued"]                            # «Переданные клиенты»: a section of its own
-    assert ">Едут<" in page and ">На точке<" in page and ">На ОТХ<" in page and ">На возврат<" in page and ">Выдано<" in page   # 2026-11-09
+    assert names == ["moving", "here", "oth", "agree", "return", "issued"]     # «Согласование возврата»: 2026-11-12;                          # «Переданные клиенты»: a section of its own
+    assert ">Едут<" in page and ">На точке<" in page and ">На ОТХ<" in page and ">Согласование возврата<" in page and ">На возврат<" in page and ">Выдано<" in page   # 2026-11-09
     assert _active(page) == "here" and _cards(page) == [w["made"]["at_point"]]
     for old in ("all", "ending", "asked", "nonsense"):
         assert _active(_page(w["point"], "/my-point?tab=" + old)) == "here", old
