@@ -104,6 +104,19 @@ def sync_account(conn, client, account_id: int, now: str, sleep: Callable[[float
     return {"seen": seen, "new": new, "whole": whole}
 
 
+def item_of(call: dict) -> str:
+    """The ad of a call when Avito gives one: itemId (its documentation) or a near spelling, or {item: {id}}. The answers seen on the server
+    (2026-10-23, and the 2 884 calls kept by 2026-11-13) have none: empty then."""
+    item = call.get("item")
+    for value in (call.get("itemId"), call.get("itemID"), call.get("item_id"), item.get("id") if isinstance(item, dict) else None):
+        try:
+            if value is not None and int(value) > 0:
+                return str(int(value))
+        except (TypeError, ValueError):
+            continue
+    return ""
+
+
 def _keep(conn, account_id: int, call: dict, at: str, point_id, own: set, now: str) -> bool:
     talk = _seconds(call.get("talkDuration"))
     until = _iso(datetime.fromisoformat(at) + timedelta(days=RECORD_DAYS))
@@ -115,7 +128,7 @@ def _keep(conn, account_id: int, call: dict, at: str, point_id, own: set, now: s
         "INSERT OR IGNORE INTO avito_call (account_id, call_id, call_at, buyer_phone, seller_phone, virtual_phone, item_id, talk_seconds, "
         "wait_seconds, answered, point_id, record_state, record_until, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (account_id, call_id, at, _phone(call.get("buyerPhone")), _phone(call.get("sellerPhone")), _phone(call.get("virtualPhone")),
-         str(call.get("itemId") or ""), talk, _seconds(call.get("waitingDuration")), 1 if talk > 0 else 0, point_id,
+         item_of(call), talk, _seconds(call.get("waitingDuration")), 1 if talk > 0 else 0, point_id,
          "wait" if talk > 0 else "", until, now))
     if cur.rowcount != 1:
         if talk > 0:                                                       # seen before it was answered (a call still ringing): the answer comes in

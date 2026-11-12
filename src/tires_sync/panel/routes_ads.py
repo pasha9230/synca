@@ -13,8 +13,9 @@ from .common import current_user, get_conn, local_today, login_required, now_iso
 
 PERIOD_NAMES = {7: "7 дней", 30: "30 дней", 90: "90 дней"}
 FILTER_NAMES = {"": "Все", "sales": "Только с продажами", "spend": "Только с расходами"}
-REASON_NAMES = {ads_spend.NO_CHAT: "у заказа нет чата Авито", ads_spend.NO_ITEM: "в чате заказа нет объявления",
-                ads_spend.NO_FEED: "чат аккаунта без фида", ads_spend.MANUAL: "продажа вручную"}
+REASON_NAMES = {ads_spend.NO_CHAT: "у заказа нет чата Авито и звонка", ads_spend.NO_ITEM: "в чате заказа нет объявления",
+                ads_spend.NO_FEED: "чат или звонок аккаунта без фида", ads_spend.CALL_NO_ITEM: "звонок без объявления, аккаунт без фида",
+                ads_spend.MANUAL: "продажа вручную"}
 PATH = "/economics/ads"
 
 
