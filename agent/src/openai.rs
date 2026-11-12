@@ -111,20 +111,50 @@ pub struct OpenAi {
 
 impl OpenAi {
     pub fn new(key: &str, proxy: Option<&str>) -> Result<Self> {
-        let mut b = ureq::AgentBuilder::new();
+        let mut via = None;
         if let Some(p) = proxy.map(str::trim).filter(|p| !p.is_empty()) {
             if !(p.starts_with("http://") || p.starts_with("socks5://")) {
                 bail!("proxy must start with http:// or socks5://");
             }
             // never put the address into the error: it may hold a password
-            b = b.proxy(ureq::Proxy::new(p).map_err(|_| anyhow!("bad proxy address"))?);
+            via = Some(parse_proxy(p).ok_or_else(|| anyhow!("bad proxy address"))?);
         }
-        Ok(OpenAi { key: key.trim().to_string(), http: b.build() })
+        Ok(OpenAi { key: key.trim().to_string(), http: crate::net::through(via, TIMEOUT) })
     }
 
     pub fn edit(&self, model: &str, prompt: &str, images: &[Vec<u8>]) -> Result<Generated> {
         edit(&self.http, &self.key, model, prompt, images)
     }
+}
+
+/// The whole request to OpenAI, from the connection to the last byte of the answer.
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The proxy address, read as ureq 2 read it: `scheme://[user:password@]host[:port]`, the user and the password
+/// taken letter for letter (ureq 3 would read `#`, `?` and `%41` in a password as parts of a URL).
+/// `socks5://` as it has always worked here: the proxy resolves api.openai.com, this machine does not ask its own
+/// DNS for it (ureq 3 calls that socks5h; its plain socks5 resolves locally).
+fn parse_proxy(p: &str) -> Option<ureq::Proxy> {
+    let p = p.trim_end_matches('/');
+    let (protocol, rest) = match p.strip_prefix("http://") {
+        Some(rest) => (ureq::ProxyProtocol::Http, rest),
+        None => (ureq::ProxyProtocol::Socks5h, p.strip_prefix("socks5://")?),
+    };
+    let (creds, address) = match rest.rsplit_once('@') {
+        Some((creds, address)) => (Some(creds), address),
+        None => (None, rest),
+    };
+    let mut parts = address.split(':');
+    let host = parts.next().filter(|h| !h.is_empty())?;
+    let mut b = ureq::Proxy::builder(protocol).host(host);
+    if let Some(port) = parts.next().and_then(|port| port.parse().ok()) {
+        b = b.port(port);                                                  // no port or not a number: 80 / 1080, as before
+    }
+    if let Some(creds) = creds {
+        let (user, password) = creds.split_once(':')?;
+        b = b.username(user).password(password);
+    }
+    b.build().ok()
 }
 
 /// The generated frame: a square, as Avito shows previews (the owner 2026-11-09; 1024x1536 before).
@@ -146,30 +176,25 @@ fn edit(http: &ureq::Agent, key: &str, model: &str, prompt: &str, images: &[Vec<
         .collect();
     let b = boundary();
     let body = multipart(&b, &edit_fields(model, prompt), &files);
-    let res = http.post("https://api.openai.com/v1/images/edits")
-        .set("Authorization", &format!("Bearer {key}"))
-        .set("Content-Type", &format!("multipart/form-data; boundary={b}"))
-        .timeout(std::time::Duration::from_secs(300))
-        .send_bytes(&body);
+    let res = http.post(ENDPOINT)
+        .header("Authorization", &format!("Bearer {key}"))
+        .header("Content-Type", &format!("multipart/form-data; boundary={b}"))
+        .send(&body[..]);
     match res {
-        Ok(r) => parse_response(&r.into_string()?),
-        Err(ureq::Error::Status(code, r)) => {
-            let text: String = r.into_string().unwrap_or_default().chars().take(400).collect();
+        Ok(r) if r.status().is_client_error() || r.status().is_server_error() => {
+            let code = r.status().as_u16();
+            let text: String = r.into_body().read_to_string().unwrap_or_default().chars().take(400).collect();
             Err(OpenAiHttp(code, text).into())
         }
-        Err(e) if UNREACHABLE.contains(&e.kind()) => Err(OpenAiUnreachable(e.kind().to_string()).into()),
-        Err(e) => bail!("OpenAI request failed: {}", e.kind()),
+        Ok(r) => parse_response(&r.into_body().read_to_string().map_err(|e| anyhow!("OpenAI answer not read: {}", crate::net::kind(&e)))?),
+        Err(e) => match crate::net::unreached(&e) {
+            Some(label) => Err(OpenAiUnreachable(label.to_string()).into()),
+            None => bail!("OpenAI request failed: {}", crate::net::kind(&e)),
+        },
     }
 }
 
-/// Failures before anything reached OpenAI (the proxy or the network is down): nothing is paid for.
-const UNREACHABLE: [ureq::ErrorKind; 5] = [
-    ureq::ErrorKind::Dns,
-    ureq::ErrorKind::ConnectionFailed,
-    ureq::ErrorKind::ProxyConnect,
-    ureq::ErrorKind::ProxyUnauthorized,
-    ureq::ErrorKind::InvalidProxyUrl,
-];
+const ENDPOINT: &str = "https://api.openai.com/v1/images/edits";
 
 /// OpenAI was not reached at all (the proxy, the VPN or the network is down).
 #[derive(Debug)]
@@ -233,6 +258,94 @@ mod tests {
         let ai = OpenAi::new("k", Some(&format!("socks5://127.0.0.1:{port}"))).unwrap();
         let e = ai.edit("m", "p", &[vec![0x89, b'P', b'N', b'G']]).err().unwrap();
         assert!(is_fatal(&e), "{e:#}");
+    }
+
+    /// A fake proxy on 127.0.0.1: reads what the agent sends first, answers with `replies` in turn, hangs up.
+    fn fake_proxy(replies: Vec<&'static [u8]>) -> (u16, std::thread::JoinHandle<Vec<Vec<u8>>>) {
+        use std::io::Write;
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut seen = Vec::new();
+            for reply in replies {
+                let mut buf = [0u8; 2048];
+                let mut got = Vec::new();
+                loop {
+                    let n = s.read(&mut buf).unwrap();
+                    got.extend_from_slice(&buf[..n]);
+                    if n == 0 || !got.starts_with(b"CONNECT ") || got.ends_with(b"\r\n\r\n") {   // an HTTP request comes in pieces
+                        break;
+                    }
+                }
+                seen.push(got);
+                s.write_all(reply).unwrap();
+            }
+            seen
+        });
+        (port, h)
+    }
+
+    /// `socks5://`: the proxy gets the name api.openai.com and resolves it itself; this machine's DNS is not asked.
+    #[test]
+    fn socks_proxy_is_given_the_name_of_openai_not_an_address() {
+        let (port, h) = fake_proxy(vec![&[5, 0], &[5, 1, 0, 1, 0, 0, 0, 0, 0, 0]]);   // no auth; then "general failure"
+        let ai = OpenAi::new("sk-testkey", Some(&format!("socks5://127.0.0.1:{port}"))).unwrap();
+        let e = ai.edit("m", "p", &[vec![0x89, b'P', b'N', b'G']]).err().unwrap();
+        let seen = h.join().unwrap();
+        let mut want = vec![5, 1, 0, 3, 14];                                          // CONNECT, by domain name, 14 bytes
+        want.extend(b"api.openai.com");
+        want.extend(443u16.to_be_bytes());
+        assert_eq!(seen[1], want);
+        assert!(is_fatal(&e), "{e:#}");                                               // nothing was sent to OpenAI
+        assert!(!format!("{e:#}").contains("testkey") && !format!("{e:#}").contains(&port.to_string()), "{e:#}");
+    }
+
+    /// `http://` with a password: CONNECT to api.openai.com:443; the key is not shown to the proxy, a refusal is "unreachable".
+    #[test]
+    fn http_proxy_gets_a_connect_to_openai_and_never_the_key() {
+        let (port, h) = fake_proxy(vec![b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"]);
+        let ai = OpenAi::new("sk-testkey", Some(&format!("http://user:SECRETPW@127.0.0.1:{port}"))).unwrap();
+        let e = ai.edit("m", "p", &[vec![0x89, b'P', b'N', b'G']]).err().unwrap();
+        let asked = String::from_utf8(h.join().unwrap().remove(0)).unwrap();
+        assert!(asked.starts_with("CONNECT api.openai.com:443 HTTP/1.1\r\n"), "{asked}");
+        assert!(asked.contains("Proxy-Authorization: Basic ") && !asked.contains("testkey"), "{asked}");
+        assert!(is_fatal(&e), "{e:#}");
+        let text = format!("{e:#}");
+        assert!(text.contains("Provided proxy credentials are incorrect") && !text.contains("SECRETPW") && !text.contains("testkey"), "{text}");
+    }
+
+    #[test]
+    fn the_whole_request_has_five_minutes_and_the_address_is_fixed() {
+        assert_eq!(TIMEOUT, std::time::Duration::from_secs(300));
+        assert_eq!(ENDPOINT, "https://api.openai.com/v1/images/edits");
+    }
+
+    /// The address is read as before: remote DNS for socks5, default ports, the password letter for letter.
+    #[test]
+    fn proxy_address_is_read_as_before() {
+        let p = parse_proxy("socks5://u:p@proxy.example:1081/").unwrap();
+        assert_eq!((p.protocol(), p.host(), p.port(), p.resolve_target()), (ureq::ProxyProtocol::Socks5h, "proxy.example", 1081, false));
+        assert_eq!((p.username(), p.password()), (Some("u"), Some("p")));
+        let p = parse_proxy("socks5://10.0.0.1").unwrap();
+        assert_eq!((p.host(), p.port(), p.username()), ("10.0.0.1", 1080, None));
+        assert_eq!(parse_proxy("http://proxy.example").unwrap().port(), 80);
+        for password in ["pa#ss", "a?b", "ab%41", "x^{}|<>`\"y", "p:q", "пароль"] {
+            let p = parse_proxy(&format!("http://user:{password}@192.0.2.7:3128")).unwrap();
+            assert_eq!((p.host(), p.port(), p.username(), p.password()), ("192.0.2.7", 3128, Some("user"), Some(password)), "{password}");
+        }
+        assert!(parse_proxy("http://useronly@h:1").is_none() && parse_proxy("http://").is_none() && parse_proxy("ftp://h:1").is_none());
+    }
+
+    /// The password reaches the proxy exactly as typed in the panel.
+    #[test]
+    fn http_proxy_gets_the_password_letter_for_letter() {
+        let (port, h) = fake_proxy(vec![b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"]);
+        let ai = OpenAi::new("k", Some(&format!("http://user:pa#ss%41@127.0.0.1:{port}"))).unwrap();
+        assert!(ai.edit("m", "p", &[vec![0x89, b'P', b'N', b'G']]).is_err());
+        let asked = String::from_utf8(h.join().unwrap().remove(0)).unwrap();
+        let want = base64::engine::general_purpose::STANDARD.encode("user:pa#ss%41");
+        assert!(asked.contains(&format!("Proxy-Authorization: Basic {want}\r\n")), "{asked}");
     }
 
     #[test]
