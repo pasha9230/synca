@@ -216,17 +216,24 @@ def return_date(today) -> str:
     return today.isoformat()
 
 
+OFF_DAY = "Дата возврата не в день возвратов (пн, ср, пт)"     # the owner 2026-11-12: a hint in the order's event and in the flash, no refusal
+
+
 def check_return_day(value, today) -> str:
-    """The date the operator entered: a real date, not in the past, Monday, Wednesday or Friday. ISO; OthError says what is wrong."""
+    """The date the operator entered: a real date, not in the past. ISO; OthError says what is wrong. Monday, Wednesday and Friday are what the
+    form offers (return_date), not a rule (the owner 2026-11-12): another day is taken, and `off_day` says so."""
     try:
         day = date.fromisoformat(str(value or "").strip())
     except ValueError:
         raise OthError("Укажите дату возврата.") from None
     if day < today:
-        raise OthError("Дата возврата уже прошла: укажите понедельник, среду или пятницу не раньше сегодняшнего дня.")
-    if day.weekday() not in RETURN_DAYS:
-        raise OthError("Возврат поставщику только в понедельник, среду или пятницу: ближайший день — %s." % _short(return_date(day)))
+        raise OthError("Дата возврата уже прошла: укажите день не раньше сегодняшнего.")
     return day.isoformat()
+
+
+def off_day(day: str) -> bool:
+    """The agreed date (ISO) is not a day of the supplier's returns: the hint OFF_DAY goes with it."""
+    return date.fromisoformat(day).weekday() not in RETURN_DAYS
 
 
 def _short(iso: str) -> str:
@@ -638,7 +645,8 @@ def _agree_whole(conn, card: dict, day: str, now: str, author: str, commit: bool
                     (card["id"], now, author, day)).rowcount != 1:
         conn.rollback()
         return return_plan(conn, card["id"])["return_date"]
-    orders.add_event(conn, card["id"], now, author, "field", "Возврат с ОТХ согласован с поставщиком: передать на возврат %s (%s)." % (_short(day), ACT))
+    orders.add_event(conn, card["id"], now, author, "field", "Возврат с ОТХ согласован с поставщиком: передать на возврат %s (%s).%s" % (
+        _short(day), ACT, " %s." % OFF_DAY if off_day(day) else ""))
     _audit(conn, now, author, "oth_return_agreed", {"order": int(card["id"]), "date": day})
     conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (AGREED_KEY % card["id"], day))     # a VK point hears it (tell_agreed)
     if not commit:                                                                    # a part (_agree_part): an order already on «На возврат», saved by the caller
@@ -1407,7 +1415,8 @@ REMIND_KEY = "oth_handover_remind:%d:%s"         # per order and day
 
 def remind_handover(conn, now: str, notify) -> int:
     """The point did not press «Подписал акт и отдал» by the agreed date: on every later Monday, Wednesday and Friday from 08:59 to the end of the working
-    hours it is told again, once a day, until it presses. Returns how many were told."""
+    hours it is told again, once a day, until it presses. Returns how many were told. The agreed date may be any day (the owner 2026-11-12): the
+    reminder still goes on the supplier's days after it."""
     from . import message_texts, order_manager
     today = date.fromisoformat(now[:10])
     if today.weekday() not in RETURN_DAYS or now[11:16] < HANDOVER_AT or int(now[11:13]) >= order_manager.duty_settings(conn)["hours"][1]:

@@ -1047,7 +1047,7 @@ def register(app) -> None:
     @login_required
     def order_oth_agreed(card_id):
         """«Согласовано с поставщиком» for an order on «На возврат» or «На ОТХ» (the owner and the partner): the date of the return the operator
-        entered (Monday, Wednesday, Friday; order_oth.check_return_day), the point sees it."""
+        entered (any day not in the past; not Monday, Wednesday or Friday: a hint, order_oth.OFF_DAY), the point sees it."""
         conn = get_conn()
         card = card_or_404(conn, card_id)
         typed = {k[len("return_qty_"):]: v for k, v in request.form.items() if k.startswith("return_qty_") and k[len("return_qty_"):].isdigit()}
@@ -1064,6 +1064,8 @@ def register(app) -> None:
             day = order_oth.agree(conn, card, (local_now()).date(), local_iso(), author(), request.form.get("return_date", ""), qty=qty,
                                   seen=seen if typed else None)            # the pieces the form showed: a second press or tab changes nothing
             flash("Возврат согласован: точка передаст шины поставщику %s.%s и подпишет акт МХ-3." % (day[8:10], day[5:7]), "ok")
+            if order_oth.off_day(day):                                     # a hint, not a refusal (the owner 2026-11-12)
+                flash(order_oth.OFF_DAY + ".")
         except (order_oth.OthError, orders.OrderError) as err:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
@@ -1229,7 +1231,7 @@ def register(app) -> None:
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
             c=card, entity=point_entity(orders.card_view(card, conn), card) if own_point() else orders.card_view(card, conn), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card), storage=_storage(conn, card),
-            to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()),
+            to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()), oth_today=local_now().date().isoformat(),
             oth_return_parts=order_oth.return_parts(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},     # «сколько примет поставщик»
             oth_here=order_oth.pieces_here(conn, card) if card["stage"]["code"] in order_oth.RETURNING else {},
             oth_return_seen=",".join("%d:%d" % kv for kv in sorted(order_oth.pieces_here(conn, card).items())) if card["stage"]["code"] in order_oth.RETURNING else "",

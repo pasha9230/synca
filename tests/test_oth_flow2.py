@@ -648,9 +648,8 @@ def test_the_point_sees_the_statuses_and_no_button_before_the_agreement(tmp_path
 
 
 @pytest.mark.parametrize("day, words", [
-    ("2026-11-05", "только в понедельник, среду или пятницу"),    # Thursday
-    ("2026-11-07", "только в понедельник, среду или пятницу"),    # Saturday
-    ("2026-11-02", "уже прошла"),                                 # Monday, in the past
+    ("2026-11-02", "уже прошла"),                                 # Monday, in the past (a Thursday, a Saturday: taken with a hint, the owner
+    ("2026-11-03", "уже прошла"),                                 # 2026-11-12 — tests/test_point_return_tabs.py); yesterday, not a return day
     ("", "Укажите дату"),
     ("завтра", "Укажите дату"),
 ])

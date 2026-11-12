@@ -2,7 +2,9 @@
 1. six tabs, «Согласование возврата» between «На ОТХ» and «На возврат»: the orders of «На возврат» not agreed yet and those of «На ОТХ» with a
    position on the agreement of the return (the whole order: a record is sold or returned whole); the chosen tab says what lies in it;
 2. «Продать» of the point is on «На ОТХ» only (over the decision of 2026-11-10 «sold until agreed»): on «Согласование возврата» and «На возврат»
-   there is no button and the server refuses; the office sells and takes the agreement off as before."""
+   there is no button and the server refuses; the office sells and takes the agreement off as before;
+4. the date of the return: Monday, Wednesday and Friday are a hint, not a rule — the nearest of them is offered, any day not in the past is
+   taken, another day is said in the order's event and in the flash; the reminder of an overdue date works for such a day too."""
 from __future__ import annotations
 
 import re
@@ -181,3 +183,63 @@ def test_the_mark_taken_off_by_the_office_gives_the_button_back(tmp_path, clock)
     mine = manager(app, conn, pid)
     assert not order_oth.agreeing(conn, orders.get_card(conn, card))
     assert 'action="/my-point/%d/oth_sold"' % card in tab(mine, "oth") and not has(tab(mine, "agree"), card)
+
+
+# ---- 4. the date of the return: a hint, not a refusal -------------------------------------------------------------------------------
+
+HINT = "Дата возврата не в день возвратов (пн, ср, пт)"
+TODAY = date.fromisoformat("2026-11-03")                                                  # a Tuesday
+
+
+def test_the_nearest_day_of_the_supplier_is_offered_as_before():
+    assert order_oth.return_date(TODAY) == "2026-11-04" and order_oth.return_date(date.fromisoformat("2026-11-04")) == "2026-11-04"
+    assert order_oth.return_date(date.fromisoformat("2026-11-07")) == "2026-11-09"       # Saturday → Monday
+
+
+@pytest.mark.parametrize("day, off", [("2026-11-03", True), ("2026-11-04", False), ("2026-11-05", True), ("2026-11-08", True), ("2026-11-09", False)])
+def test_any_day_not_in_the_past_is_taken_and_another_day_is_said_in_the_event(tmp_path, clock, day, off):
+    app, owner, conn, pid, card = setup(tmp_path)
+    assert order_oth.check_return_day(day, TODAY) == day and order_oth.off_day(day) is off
+    assert order_oth.agree(conn, orders.get_card(conn, card), TODAY, "2026-11-03T10:00:00", "owner", day) == day
+    assert order_oth.return_plan(conn, card)["return_date"] == day
+    [said] = [t for t in events(conn, card) if t.startswith("Возврат с ОТХ согласован с поставщиком")]
+    assert (HINT in said) is off and "передать на возврат %s.%s" % (day[8:10], day[5:7]) in said
+
+
+@pytest.mark.parametrize("day", ["2026-11-02", "", "завтра"])
+def test_the_past_and_no_date_are_still_refused(tmp_path, clock, day):
+    app, owner, conn, pid, card = setup(tmp_path)
+    with pytest.raises(order_oth.OthError):
+        order_oth.agree(conn, orders.get_card(conn, card), TODAY, "2026-11-03T10:00:00", "owner", day)
+    assert order_oth.return_plan(conn, card) is None
+
+
+@pytest.mark.parametrize("day, off", [("2099-01-01", True), ("2099-01-02", False)])       # a Thursday, a Friday
+def test_the_flash_of_the_office_says_the_hint_and_the_form_takes_any_day_from_today(tmp_path, clock, day, off):
+    app, owner, conn, pid, card = setup(tmp_path)
+    form = owner.get("/orders/%d" % card).get_data(as_text=True)
+    today = routes_orders_today(app)
+    assert re.search(r'name="return_date" value="%s" min="%s"' % (order_oth.return_date(date.fromisoformat(today)), today), form)
+    r = post(owner, "/orders/%d/oth-agreed" % card, "tok", return_date=day)
+    page = owner.get(r.headers["Location"]).get_data(as_text=True)
+    assert order_oth.return_plan(conn, card)["return_date"] == day and "Возврат согласован" in page
+    assert (HINT in page) is off
+
+
+def routes_orders_today(app) -> str:
+    from tires_sync.panel import routes_orders
+    with app.test_request_context():
+        return routes_orders.local_now().date().isoformat()
+
+
+def test_an_overdue_date_out_of_the_suppliers_days_is_reminded_on_the_next_of_them(tmp_path, clock):
+    app, owner, conn, pid, card = setup(tmp_path)
+    order_oth.agree(conn, orders.get_card(conn, card), TODAY, "2026-11-03T10:00:00", "owner", "2026-11-05")     # a Thursday
+    told = []
+    notify = lambda c, text: told.append(text)                                            # noqa: E731
+    assert order_oth.remind_handover(conn, "2026-11-05T10:00:00", notify) == 0           # the day itself: not overdue, not a day of the supplier
+    assert order_oth.remind_handover(conn, "2026-11-06T10:00:00", notify) == 1           # Friday: the next day of the supplier
+    assert len(told) == 1 and "05.11" in told[0]
+    assert order_oth.remind_handover(conn, "2026-11-06T11:00:00", notify) == 0           # once a day
+    assert order_oth.remind_handover(conn, "2026-11-07T10:00:00", notify) == 0           # Saturday: never
+    assert order_oth.remind_handover(conn, "2026-11-09T10:00:00", notify) == 1           # Monday again, until the act is signed
