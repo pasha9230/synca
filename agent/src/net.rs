@@ -1,5 +1,6 @@
 //! How the agent talks HTTP (ureq 3), with the behaviour it had on ureq 2 spelled out instead of left to defaults:
-//! no proxy from the environment (HTTP_PROXY, ALL_PROXY...), 30 seconds to connect, at most 5 redirects,
+//! no proxy from the environment (HTTP_PROXY, ALL_PROXY...), 30 seconds to connect, at most 4 redirects,
+//! a new connection for every request (ureq 3 does not retry a request on a kept connection the server has dropped),
 //! and a failure before any request was sent is told apart from a failure in the middle of one.
 use std::time::Duration;
 use ureq::config::Config;
@@ -8,7 +9,8 @@ use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver
 use ureq::unversioned::transport::{ConnectionDetails, Connector, DefaultConnector, NextTimeout, Transport};
 
 const CONNECT: Duration = Duration::from_secs(30);
-const REDIRECTS: u32 = 5;
+/// ureq 2 with its default of 5 followed at most 4 redirects and failed on the fifth; ureq 3 counts the ones it follows.
+const REDIRECTS: u32 = 4;
 
 /// The request never left: name resolution, the connection, the proxy or the TLS handshake failed.
 /// The text is a fixed label, never the error itself: that may hold the proxy address with its password.
@@ -61,6 +63,7 @@ pub fn agent(proxy: Option<ureq::Proxy>, overall: Option<Duration>, redirects: u
         .proxy(proxy)
         .timeout_connect(Some(CONNECT))
         .timeout_global(overall)
+        .max_idle_connections(0)
         .max_redirects(redirects)
         .max_redirects_will_error(redirects > 0)
         .http_status_as_error(status_as_error)
@@ -128,22 +131,33 @@ mod tests {
         (url, h)
     }
 
+    /// Run in a child process with proxy variables set (see the next test): this process's environment is not touched.
     #[test]
-    fn the_environment_proxy_is_never_used() {
-        // a proxy that would refuse everything: with it in use the request below could not succeed
-        let dead = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
-            std::env::set_var(name, format!("http://127.0.0.1:{dead}"));
-        }
-        std::env::remove_var("NO_PROXY");
-        std::env::remove_var("no_proxy");
+    #[ignore]
+    fn child_with_a_proxy_in_the_environment() {
+        assert!(std::env::var("ALL_PROXY").is_ok() && ureq::Proxy::try_from_env().is_some(), "run by the_environment_proxy_is_never_used");
         let (url, h) = serve("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok", 1);
         let a = direct();
         assert!(a.config().proxy().is_none());
         assert!(through(None, Duration::from_secs(5)).config().proxy().is_none());
+        assert!(agent(None, None, 0, true).config().proxy().is_none());
         let body = a.get(&url).call().unwrap().into_body().read_to_string().unwrap();
         assert_eq!(body, "ok");
         assert!(h.join().unwrap()[0].starts_with("GET / HTTP/1.1"));
+    }
+
+    #[test]
+    fn the_environment_proxy_is_never_used() {
+        // a proxy that refuses everything: were it used, the request in the child could not succeed
+        let dead = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args(["--exact", "net::tests::child_with_a_proxy_in_the_environment", "--ignored"]);
+        for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
+            child.env(name, format!("http://127.0.0.1:{dead}"));
+        }
+        let out = child.env_remove("NO_PROXY").env_remove("no_proxy").output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success() && text.contains("1 passed"), "{text}");
     }
 
     #[test]
@@ -151,11 +165,11 @@ mod tests {
         let a = direct();
         assert_eq!(a.config().timeouts().connect, Some(Duration::from_secs(30)));
         assert_eq!(a.config().timeouts().global, None);
-        assert_eq!(a.config().max_redirects(), 5);
+        assert_eq!((a.config().max_redirects(), a.config().max_idle_connections()), (4, 0));
         let o = through(None, Duration::from_secs(300));
         assert_eq!(o.config().timeouts().connect, Some(Duration::from_secs(30)));
         assert_eq!(o.config().timeouts().global, Some(Duration::from_secs(300)));
-        assert_eq!(o.config().max_redirects(), 5);
+        assert_eq!((o.config().max_redirects(), o.config().max_idle_connections()), (4, 0));
     }
 
     #[test]
