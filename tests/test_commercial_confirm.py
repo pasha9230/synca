@@ -176,6 +176,40 @@ def test_the_tail_of_another_account_or_the_first_one_gives_no_code(tmp_path):
     assert not {"A", "E", "G"} & store.truck_bound_codes(conn)
 
 
+def test_an_adopted_id_another_code_carried_in_the_truck_section_holds_the_code_in_the_second_account(tmp_path):
+    """Account 2 adopted «Z123» for A (mirror-adopt, no tail). B's truck ad carried it (published), F's carried «Z456» of E (taken off):
+    A and E come back under their own Ids, Avito keeps those Ids in the truck section, so they stay there."""
+    from tires_sync import mirror_feed
+    conn = store.connect(tmp_path / "t.db")
+    mirror_feed.bind_ids(conn, 2, {"A": "Z123", "E": "Z456"}, NOW, "test")
+    store.upsert_published(conn, PublishedItem("B", 5000, 4000.0, "P1"), truck_ad("Z123"), account_id=2)
+    _retire(conn, 2, "F", "Z456")
+    conn.commit()
+    assert {"A", "B", "Z123", "E", "F", "Z456"} <= store.truck_bound_codes(conn, 2)
+    assert {"A", "E"} <= store.truck_bound_codes(conn)                                # any account: each by the adopted Ids of its own
+    assert not {"A", "E"} & store.truck_bound_codes(conn, 1)                          # account 1 is not touched
+    confirmed = {**truck_pair("Cordiant", "Бизнес CA-2", "Business CA"), **passenger_pair("Cordiant", "Бизнес CA-2", "Business CA 2")}
+    offers = {"A": c_offer(goods_id="A", model_raw="Бизнес CA-2")}
+    for acct, in_truck in ((2, True), (1, False)):
+        ev = evaluate(offers, {}, settings(), REF, confirmed, truck_bound=frozenset(store.truck_bound_codes(conn, acct)))
+        assert ev.ok["A"].truck_section == in_truck
+
+
+def test_an_adopted_id_in_the_first_account_or_in_a_passenger_ad_gives_no_code(tmp_path):
+    """The same Id «Z123» in the truck section of account 1 says nothing of account 2; without truck ads the adoptions add nothing."""
+    from tires_sync import mirror_feed
+    conn = store.connect(tmp_path / "t.db")
+    mirror_feed.bind_ids(conn, 2, {"A": "Z123"}, NOW, "test")
+    conn.commit()
+    assert store.truck_bound_codes(conn, 2) == set() and store.truck_bound_codes(conn) == set()
+    store.upsert_published(conn, PublishedItem("B", 5000, 4000.0, "P1"), passenger_ad("Z123"), account_id=2)
+    store.upsert_published(conn, PublishedItem("C", 5000, 4000.0, "P1"), truck_ad("Z123"), account_id=1)
+    conn.commit()
+    assert "A" not in store.truck_bound_codes(conn, 2)
+    assert "A" not in store.truck_bound_codes(conn, 1)
+    assert "A" not in store.truck_bound_codes(conn)
+
+
 def test_saving_a_truck_pair_over_a_passenger_one_says_the_passenger_one_wins(tmp_path):
     app, client, tok = _page(tmp_path, commodity_xml(NNOMMODIF="1", SMARKA="Kumho", SMODEL="CW-51", SCARTYPE="C", SMNFCODE="K1"))
     conn = store.connect(app.config["DB_PATH"])

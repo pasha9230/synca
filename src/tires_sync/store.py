@@ -897,17 +897,28 @@ def truck_bound_codes(conn, account_id: Optional[int] = None) -> Set[str]:
     published feed, or taken off and kept with its Id (retired_ad: it comes back on that ad). Such a «C» stays in the truck section
     (truck.resolve_c). The Ids of those ads are in the set too: a code returning under its own Id that another code's truck ad carried
     stays in the truck section as well (an Id never changes its category). An Id with the tail of its own account (`<code>_a2` in the
-    second) gives the code without it as well: that is the own Id of the code there; another account's tail is left as it is. Reads only."""
+    second) gives the code without it as well: that is the own Id of the code there; another account's tail is left as it is. So does an Id
+    the account adopted for a code (mirror_feed.adopted_maps: the Ids the cabinet already had, without a tail). Reads only."""
     mark = "<ProductType>Шины для грузовиков и спецтехники</ProductType>"
     where, args = ("instr(snapshot, ?) > 0", (mark,)) if account_id is None else ("account_id = ? AND instr(snapshot, ?) > 0", (account_id, mark))
     codes = set()
+    adopted: Dict[int, Dict[str, Set[str]]] = {}   # account → {adopted Id: its codes}, read once per account
+
+    def id_codes(ad_id: str, acct: int) -> Set[str]:
+        if acct not in adopted:
+            from .mirror_feed import adopted_maps  # mirror_feed imports store: imported here, not at the top
+            adopted[acct] = {}
+            for code, bound in adopted_maps(conn, acct)[0].items():
+                adopted[acct].setdefault(bound, set()).add(code)
+        return _id_codes(ad_id, acct) | adopted[acct].get(ad_id, set())
+
     for acct, goods_id, snapshot in conn.execute("SELECT account_id, goods_id, snapshot FROM published_state WHERE " + where, args):
         codes.add(goods_id)
         found = re.search(r"<Id>(.*?)</Id>", snapshot or "")
         if found:                                  # the Id itself: a code whose own Id it is (another code took it over, same_tire)
-            codes |= _id_codes(html.unescape(found.group(1)).strip(), acct)
+            codes |= id_codes(html.unescape(found.group(1)).strip(), acct)
     for acct, goods_id, ad_id in conn.execute("SELECT account_id, goods_id, ad_id FROM retired_ad WHERE " + where, args):
-        codes |= {goods_id} | _id_codes(ad_id or "", acct)
+        codes |= {goods_id} | id_codes(ad_id or "", acct)
     codes.discard("")
     return codes
 
