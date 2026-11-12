@@ -2064,7 +2064,13 @@ def register(app) -> None:
             commands_by_stage={s["id"]: rules.list_commands(conn, s["id"]) for s in stages}, stage_names={s["id"]: s["name"] for s in stages},
             template_names={t["id"]: t["name"] for t in templates.list_templates(conn)}, point_names={p["id"]: p["name"] for p in points.list_points(conn)},
             default_responsible=orders.default_responsible(conn), responsible_options=_responsible_options(app, conn, orders.default_responsible(conn)),
-            duty=manager.duty_settings(conn), weekdays=manager.WEEKDAYS, today=local_now().date().isoformat(), return_task_days=order_oth.task_days(conn), return_task=order_oth.RETURN_TASK)
+            duty=manager.duty_settings(conn), weekdays=manager.WEEKDAYS, today=local_now().date().isoformat(), return_task_days=order_oth.task_days(conn), return_task=order_oth.RETURN_TASK,
+            reserve_words=_reserve_words(conn))
+
+    def _reserve_words(conn):
+        from .. import order_reserve
+        kept = order_reserve.words(conn)
+        return [{"key": key, "name": name, "value": kept[key]} for key, name in order_reserve.OUTCOMES.items()]
 
     def _settings_back():
         return redirect("/orders/settings")
@@ -2107,6 +2113,16 @@ def register(app) -> None:
             flash("Срок задачи на возврат: %d раб. дн." % days)
         except order_oth.OthError as err:
             flash(str(err))
+        return _settings_back()
+
+    @app.route("/orders/settings/reserve-words", methods=["POST"])
+    @login_required
+    def orders_reserve_words():
+        """«Ответ клиента на напоминание о резерве» (the owner 2026-11-12): the three lists of words, through commas (order_reserve.words)."""
+        from .. import order_reserve
+        f = request.form
+        order_reserve.set_words(get_conn(), f.get("took"), f.get("extend"), f.get("refuse"), local_iso(), author())
+        flash("Слова ответа клиента сохранены.")
         return _settings_back()
 
     @app.route("/orders/settings/stage/add", methods=["POST"])

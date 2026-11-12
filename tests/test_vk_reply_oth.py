@@ -149,7 +149,7 @@ def test_every_line_of_the_bot_to_a_point_about_one_order_names_it(tmp_path):
              for key in (message_texts.RESERVE_ASK, message_texts.MOVED_NOTE, message_texts.HANDOVER_REMIND, message_texts.RETURN_STATUS,
                          message_texts.RETURN_AGREED, message_texts.UNAGREED, message_texts.UNTOLD_POINT)]
     lines += ["Готово: заказ №%s на этапе «Товар на точке»." % label, order_reserve.WROTE_TASK % label,
-              order_reserve.NOT_SENT_TASK % (label, "нет чата"), order_reserve.NO_DATE_TASK % (label, "заберу 12 числа, 5 штук")]
+              order_reserve.NOT_SENT_TASK % (label, "нет чата")]
     for line in lines:
         assert reply_no(mgr.signed(line), conn=conn) == int(label), line
     for kind, until in (("before", "2026-11-09"), ("after", "2026-11-07"), ("after", "2026-11-08")):       # the panel's number: find_named knows it

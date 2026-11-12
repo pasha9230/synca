@@ -1,8 +1,10 @@
 """The owner 2026-11-06 (a client who had written «забрал и поставил» got the end of the reservation the next day): the reminder of the last
 day has the owner's new text; a client who wrote in the last 3 days gets nothing, the responsible gets «Клиент писал, проверьте заказ №…»;
-a date in the client's answer moves the reservation (no answer to the client); no date, or one further than 30 days, is the responsible's;
-a reminder that did not go (402) starts no 12 hours and is the responsible's; the sync's send again after a 402 never reaches an order
-that left «Товар на точке». No real send: the transports are fakes."""
+a reminder that did not go (402) starts no wait and is the responsible's; the sync's send again after a 402 never reaches an order
+that left «Товар на точке». No real send: the transports are fakes.
+The owner 2026-11-12 (ТЗ): a date in the client's answer moves nothing any more and the responsible is no longer told of an answer; the
+wait is 8 hours and only «забрал», «продлить», «отказ» are read (test_reserve_answers.py). The tests of the dates below say so now;
+reply_date itself is not called by the panel, its own tests stay."""
 from __future__ import annotations
 
 from datetime import date
@@ -96,7 +98,7 @@ def test_a_client_who_wrote_in_the_orders_chat_gets_nothing_and_the_responsible_
     [record] = [e for e in orders.list_events(conn, cid) if "клиент-писал" in e["text"]]
     assert record["level"] == "yellow"
     read_chats(conn, "2099-01-01T00:00:00")
-    tick(conn, NEXT + "T01:07:00", deliver, notify)                     # nothing went: no 12 hours
+    tick(conn, NEXT + "T01:07:00", deliver, notify)                     # nothing went: no wait
     assert code(conn, cid) == "at_point"
 
 
@@ -137,19 +139,15 @@ def test_an_answer_to_the_reminder_is_not_a_reason_for_the_task(tmp_path):
 
 # ---- 3. a date in the answer -------------------------------------------------------------------------------------------------------
 
-def test_a_date_in_the_answer_moves_the_reservation_and_writes_who_what_and_the_date(tmp_path):
+def test_a_date_in_the_answer_moves_nothing_since_2026_11_12(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
     said(conn, chat, DAY + "T14:00:00", "Заберу 20.10, спасибо")
     tick(conn, DAY + "T15:07:00", deliver, notify)
-    assert until(conn, cid) == "2026-10-20"
-    [record] = [e for e in orders.list_events(conn, cid) if "резерв:ответ" in e["text"]]
-    assert "Иван" in record["text"] and "«Заберу 20.10, спасибо»" in record["text"] and "20.10.2026" in record["text"]
+    assert until(conn, cid) == DAY                                      # the owner 2026-11-12: «продлить до названной даты» is gone
+    assert not [e for e in orders.list_events(conn, cid) if "резерв:ответ" in e["text"]]
     assert len(deliver.sent) == 1                                       # the reminder only: no answer to the client
     tick(conn, NEXT + "T03:07:00", deliver, notify)
-    assert code(conn, cid) == "at_point"                                # no «На ОТХ» after 12 hours
-    tick(conn, NEXT + "T10:07:00", deliver, notify)
-    assert sum("резерв:ответ" in e["text"] for e in orders.list_events(conn, cid)) == 1     # the message is read once
-
+    assert code(conn, cid) == "oth"                                     # none of the three outcomes in the 8 hours
 
 @pytest.mark.parametrize("text, expected", [
     ("12.11", "2026-11-12"), ("12/11", "2026-11-12"), ("12.11.2026", "2026-11-12"), ("12 ноября", "2026-11-12"), ("12-го ноября", "2026-11-12"),
@@ -173,44 +171,38 @@ def test_no_date_two_dates_and_a_far_one(text, status):
     assert reply_date.parse(text, date(2026, 11, 6))[0] == status
 
 
-def test_the_date_of_the_answer_counts_from_the_day_it_was_written(tmp_path):
+def test_a_date_written_after_the_wait_is_not_read(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
     said(conn, chat, DAY + "T23:30:00", "завтра")
     tick(conn, NEXT + "T00:07:00", deliver, notify)
-    assert until(conn, cid) == "2026-10-19"
-
+    assert code(conn, cid) == "oth" and not [e for e in orders.list_events(conn, cid) if "резерв:ответ" in e["text"]]
 
 # ---- 4. no date, or further than 30 days ---------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("text", ["ок, понял", "заберу 30.11", "Сегодня не успею", "завтра не смогу"])
-def test_no_date_or_a_far_one_is_the_responsibles_and_moves_nothing(tmp_path, text):
+def test_no_date_or_a_far_one_tells_nobody_and_moves_nothing(tmp_path, text):
     conn, cid, chat, deliver, notify = told(tmp_path)
     said(conn, chat, DAY + "T14:00:00", text)
     tick(conn, DAY + "T15:07:00", deliver, notify)
-    [alert] = [t for _c, t in notify.sent if "Клиент ответил" in t]
-    assert "№5200001" in alert and "«%s»" % text in alert
-    assert until(conn, cid) == DAY
     tick(conn, DAY + "T16:07:00", deliver, notify)
+    assert until(conn, cid) == DAY and code(conn, cid) == "at_point"
     tick(conn, NEXT + "T03:07:00", deliver, notify)
-    assert code(conn, cid) == "at_point" and until(conn, cid) == DAY
-    assert len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1 and len(deliver.sent) == 1
-
+    assert code(conn, cid) == "oth"                                     # the owner 2026-11-12: another answer does not keep the order
+    assert not [t for _c, t in notify.sent if "Клиент ответил" in t] and len(deliver.sent) == 1
 
 # ---- the night -----------------------------------------------------------------------------------------------------------------------
 
-def test_at_night_a_date_moves_the_reservation_and_no_date_waits_for_the_alert_hours(tmp_path):
+def test_at_night_nothing_is_read_and_nobody_is_told_of_an_answer(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
     said(conn, chat, NEXT + "T01:00:00", "подъеду 21.10")
     tick(conn, NEXT + "T02:07:00", deliver, notify)
-    assert until(conn, cid) == "2026-10-21" and notify.sent == [n for n in notify.sent if "Клиент ответил" not in n[1]]
+    assert code(conn, cid) == "oth" and not [t for _c, t in notify.sent if "Клиент ответил" in t]
     (tmp_path / "b").mkdir()
     conn, cid, chat, deliver, notify = told(tmp_path / "b")
     said(conn, chat, NEXT + "T01:00:00", "а можно подольше?")
     tick(conn, NEXT + "T02:07:00", deliver, notify)
-    assert not [t for _c, t in notify.sent if "Клиент ответил" in t] and code(conn, cid) == "at_point"
     tick(conn, NEXT + "T10:07:00", deliver, notify)
-    assert len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1 and until(conn, cid) == DAY
-
+    assert code(conn, cid) == "oth" and not [t for _c, t in notify.sent if "Клиент ответил" in t]
 
 # ---- an answer not about the order, an order that left -----------------------------------------------------------------------------
 
@@ -283,7 +275,7 @@ class Refused(Deliver):
         raise chats.ChatSendRetry("Авито отказал (402), система повторит сама.")
 
 
-def test_a_refused_reminder_starts_no_twelve_hours_and_is_the_responsibles(tmp_path):
+def test_a_refused_reminder_starts_no_wait_and_is_the_responsibles(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     chat_of(conn, cid)
@@ -296,7 +288,7 @@ def test_a_refused_reminder_starts_no_twelve_hours_and_is_the_responsibles(tmp_p
     read_chats(conn, "2099-01-01T00:00:00")
     tick(conn, DAY + "T13:07:00", deliver, notify)
     tick(conn, NEXT + "T03:07:00", deliver, notify)
-    assert code(conn, cid) == "at_point"                                # no 12 hours from a send that did not go by itself
+    assert code(conn, cid) == "at_point"                                # no wait from a send that did not go by itself
     assert len([t for c, t in notify.sent if "не ушло" in t]) == 1
 
 
@@ -313,24 +305,21 @@ def test_the_send_again_after_a_402_stops_for_an_order_that_left_the_point(tmp_p
     assert chats._stopped(conn, chat, token) != ""
 
 
-def test_a_later_refusal_or_far_date_in_the_same_batch_wins_over_an_earlier_date(tmp_path):
+def test_dates_in_a_batch_of_answers_move_nothing_and_tell_nobody(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
     said(conn, chat, DAY + "T14:00:00", "завтра")
     said(conn, chat, DAY + "T14:01:00", "ой, лучше 20.12")
-    said(conn, chat, DAY + "T14:02:00", "спасибо")                     # says nothing: the far date before it decides
+    said(conn, chat, DAY + "T14:02:00", "спасибо")
     tick(conn, DAY + "T15:07:00", deliver, notify)
-    assert until(conn, cid) == DAY and len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1
+    assert until(conn, cid) == DAY and not [t for _c, t in notify.sent if "Клиент ответил" in t]
 
-
-def test_after_the_date_moved_the_answers_are_the_managers(tmp_path):
+def test_after_the_date_moved_by_hand_the_answers_are_the_managers(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
-    said(conn, chat, DAY + "T14:00:00", "заберу 20.10")
-    tick(conn, DAY + "T15:07:00", deliver, notify)
-    said(conn, chat, DAY + "T16:00:00", "спасибо")
-    said(conn, chat, DAY + "T16:01:00", "сегодня")
+    orders.update_card(conn, cid, {"reserve_until": "2026-10-20"}, DAY + "T14:30:00", "o")
+    said(conn, chat, DAY + "T16:00:00", "отказ")
+    said(conn, chat, DAY + "T16:01:00", "продлите")
     tick(conn, DAY + "T17:07:00", deliver, notify)
-    assert until(conn, cid) == "2026-10-20" and not [t for _c, t in notify.sent if "Клиент ответил" in t]
-
+    assert until(conn, cid) == "2026-10-20" and code(conn, cid) == "at_point" and not [t for _c, t in notify.sent if "Клиент ответил" in t]
 
 def test_the_task_once_given_no_reminder_goes_when_the_3_days_run_out_later_that_day(tmp_path):
     conn, cid, chat, deliver, notify = ready(tmp_path)
@@ -340,30 +329,28 @@ def test_the_task_once_given_no_reminder_goes_when_the_3_days_run_out_later_that
     assert deliver.sent == [] and len([t for _c, t in notify.sent if "Клиент писал" in t]) == 1
 
 
-def test_a_call_in_the_chat_after_the_reminder_is_told_to_the_responsible(tmp_path):
+def test_a_call_in_the_chat_after_the_reminder_keeps_nothing_and_tells_nobody(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
     said(conn, chat, DAY + "T20:30:00", "Звонок через Авито: пропущен", kind="call")
     tick(conn, NEXT + "T03:07:00", deliver, notify)
-    assert code(conn, cid) == "at_point"                                # a call keeps it at the point, as before
+    assert code(conn, cid) == "oth"                                     # the owner 2026-11-12: only the three outcomes keep it
     tick(conn, NEXT + "T10:07:00", deliver, notify)
-    [alert] = [t for _c, t in notify.sent if "Клиент ответил" in t]
-    assert "Звонок через Авито: пропущен" in alert and until(conn, cid) == DAY
+    assert not [t for _c, t in notify.sent if "Клиент ответил" in t]
 
-
-def test_answers_without_a_date_are_told_to_the_responsible_once(tmp_path):
+def test_answers_without_the_words_are_never_told_to_the_responsible(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
     for at in ("T14:00:00", "T15:30:00", "T16:30:00"):
         said(conn, chat, DAY + at, "здравствуйте")
         tick(conn, DAY + at[:3] + ":07:00".replace(":07", ":%02d" % 50), deliver, notify)
-    assert len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1
-    said(conn, chat, DAY + "T17:00:00", "заберу 20.10")                 # a date still moves the reservation
+    assert not [t for _c, t in notify.sent if "Клиент ответил" in t]
+    said(conn, chat, DAY + "T17:00:00", "заберу 20.10")                 # a date moves nothing
     tick(conn, DAY + "T17:50:00", deliver, notify)
-    assert until(conn, cid) == "2026-10-20"
-
+    assert until(conn, cid) == DAY
 
 def test_the_time_the_client_wrote_decides_not_the_order_the_sync_stored_them(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
-    said(conn, chat, DAY + "T13:05:00", "Ой, не смогу, напишу позже")    # a page stored newest first: the later one has the lower id
-    said(conn, chat, DAY + "T13:00:00", "Заберу завтра")
+    said(conn, chat, DAY + "T13:05:00", "отказ")                        # a page stored newest first: the later one has the lower id
+    said(conn, chat, DAY + "T13:00:00", "продлите")
     tick(conn, DAY + "T14:07:00", deliver, notify)
-    assert until(conn, cid) == DAY and len([t for _c, t in notify.sent if "Клиент ответил" in t]) == 1
+    assert code(conn, cid) == "oth"                                     # «продлите» first (a record of it), then the refusal
+    assert len([e for e in orders.list_events(conn, cid) if "Резерв продлён на 2 дня" in e["text"]]) == 1
