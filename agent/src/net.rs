@@ -61,8 +61,14 @@ impl Resolver for Resolve {
 /// `redirects` 0: the 3xx answer itself is returned, nothing is followed.
 /// `status_as_error`: 4xx and 5xx come back as `Error::StatusCode` (without the body).
 pub fn agent(proxy: Option<ureq::Proxy>, overall: Option<Duration>, redirects: u32, status_as_error: bool) -> ureq::Agent {
+    build(proxy, overall, redirects, status_as_error, false)
+}
+
+/// `https_only`: a plain `http://` URL is refused before anything is sent.
+fn build(proxy: Option<ureq::Proxy>, overall: Option<Duration>, redirects: u32, status_as_error: bool, https_only: bool) -> ureq::Agent {
     let config = ureq::Agent::config_builder()
         .proxy(proxy)
+        .https_only(https_only)
         .timeout_connect(Some(CONNECT))
         .timeout_global(overall)
         .max_idle_connections(0)
@@ -83,9 +89,10 @@ pub fn download() -> ureq::Agent {
     agent(None, Some(PANEL), 0, true)
 }
 
-/// The agent for OpenAI: the given proxy or none, the whole request within `overall`; the status is read by the caller.
+/// The agent for OpenAI: the given proxy or none, the whole request within `overall`, https only (the key is never sent
+/// in the clear, not even after a redirect); the status is read by the caller.
 pub fn through(proxy: Option<ureq::Proxy>, overall: Duration) -> ureq::Agent {
-    agent(proxy, Some(overall), REDIRECTS, false)
+    build(proxy, Some(overall), REDIRECTS, false, true)
 }
 
 /// Some(label) when nothing was sent (so nothing could be paid for).
@@ -206,6 +213,19 @@ mod tests {
         assert_eq!(unreached(&e), None, "{e}");
         assert_eq!(kind(&e), "Network Error");
         h.join().unwrap();
+    }
+
+    #[test]
+    fn openai_agent_is_https_only_and_the_panel_ones_are_not() {
+        assert!(through(None, Duration::from_secs(5)).config().https_only());
+        assert!(!direct().config().https_only() && !download().config().https_only());
+        // a plain http URL is refused before anything is sent: the listener is never connected to
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/", l.local_addr().unwrap());
+        let e = through(None, Duration::from_secs(5)).post(&url).header("Authorization", "Bearer sk-x").send("x").err().unwrap();
+        assert!(matches!(e, ureq::Error::RequireHttpsOnly(_)), "{e}");
+        assert!(l.accept().is_err());
     }
 
     #[test]
