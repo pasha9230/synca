@@ -1,57 +1,18 @@
 {% extends "base.html" %}
 {% from "_ui.html" import icon %}
-{% macro rub2(v) %}{% if v is none %}—{% else %}{{ v|pct(2) }}&nbsp;₽{% endif %}{% endmacro %}
+{# «Аналитика рекламы» как в Roistat (the owner 2026-11-12): the tree of groups (ads_tree), «Итого» on top and the head stuck while the
+   table scrolls in its own frame, the sort by a click on a head (a plain link), «Колонки», the change against the previous period. #}
+{% macro rub2(v) %}{% if v is none %}<span class="muted">—</span>{% else %}{{ v|pct(2) }}&nbsp;₽{% endif %}{% endmacro %}
 {% macro share(v) %}{% if v is none %}<span class="muted">—</span>{% else %}{{ v|pct }}&nbsp;%{% endif %}{% endmacro %}
-{% set aid = data.account.id if data.account else "" %}
-{% macro href(p=data.days, s=data.sort, a=aid, f=data.only) %}{{ "/economics/ads?p=%s&s=%s&a=%s" % (p, s, a) ~ ("&f=" ~ f if f else "") }}{% endmacro %}
-{% block title %}Аналитика рекламы · Tires Sync{% endblock %}
-{% block content %}
-<header class="page-head"><div><h1>Аналитика рекламы<span class="help-q" tabindex="0" data-tip="Сколько Авито взяло за объявления каждого аккаунта (размещение и продвижение вместе) и сколько они принесли. ДРР — доля расходов на рекламу: от выручки и от маржи продаж. Продажа — заказ на этапе «Выполнено» или «Отправлен в ТК», привязанный к объявлению через чат заказа. Только просмотр: здесь ничего не меняется на Авито.">?</span></h1>
-<p class="small muted">С {{ data.since }} по {{ data.until }} (сегодняшний день ещё не закрыт Авито). Расходы собираются раз в сутки.</p></div></header>
-<section class="card">
-<div class="card-head" style="flex-wrap:wrap">
-<div class="seg" role="group" aria-label="Период">{% for n, label in periods.items() %}<a href="{{ href(p=n) }}"{% if n == data.days %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
-<div class="seg" role="group" aria-label="Сортировка">{% for key, label in sorts.items() %}<a href="{{ href(s=key) }}"{% if key == data.sort %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
-</div>
-{% if not data.accounts %}
-<div class="empty"><div class="empty-icon">{{ icon("chart") }}</div><h3>Нет аккаунтов с фидом</h3></div>
-{% else %}
-{% set t = data.summary.total %}
-<div class="card-head"><div><h3 style="font-size:var(--fs-lg)">По аккаунтам Авито</h3>
-<p class="small muted">Маржа — как в «Продажах»: выручка минус закупка с условиями поставщика, комиссия и продвижение позиции.</p></div></div>
-<div class="table-wrap"><table class="table table--plain table--econ" id="ads-summary" data-m-scroll>
-<thead><tr><th>Аккаунт</th><th class="num">Расходы</th><th class="num">Доля расходов</th><th class="num">Просмотры</th><th class="num">Контакты</th><th class="num">Цена просмотра (факт)</th><th class="num">Цена контакта</th><th class="num">Продано</th><th class="num">Выручка</th><th class="num">Маржа</th><th class="num">ДРР выручки</th><th class="num">ДРР маржи</th></tr></thead>
-<tbody>{% for line in data.summary.rows + [t] %}<tr{% if loop.last %} class="strong"{% endif %}>
-<td>{% if not loop.last %}<a href="{{ href(a=line.id) }}">{{ line.name }}</a>{% else %}<b>{{ line.name }}</b>{% endif %}</td>
-<td class="num"><b class="strong">{{ line.spend|money }}</b></td><td class="num">{{ share(line.share) }}</td>
-<td class="num">{{ line.views }}</td><td class="num">{{ line.contacts }}</td><td class="num">{{ rub2(line.view_cost) }}</td><td class="num">{{ rub2(line.contact_cost) }}</td>
-<td class="num">{{ line.pieces }} шт.</td><td class="num">{{ line.revenue|money }}</td><td class="num">{{ line.margin|money }}</td>
-<td class="num">{{ share(line.drr) }}</td><td class="num">{{ share(line.drr_margin) }}</td>
-</tr>{% endfor %}</tbody></table></div>
-{% if t.no_purchase %}<p class="small muted" style="padding:var(--s-2) var(--s-5) 0">В {{ t.no_purchase }} заказах не указана закупка: их выручка учтена, маржа — нет.</p>{% endif %}
-
-{% set acc = data.account %}
-<div class="card-head" style="flex-wrap:wrap">
-<div class="seg" role="tablist" aria-label="Аккаунт">{% for a in data.accounts %}<a role="tab" href="{{ href(a=a.id) }}"{% if a.id == acc.id %} class="is-active" aria-current="true" aria-selected="true"{% endif %}>{{ a.name }}</a>{% endfor %}</div>
-<div class="seg" role="group" aria-label="Фильтр">{% for key, label in filters.items() %}<a href="{{ href(f=key) }}"{% if key == data.only %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
-</div>
-<div class="card-head"><div><h3 style="font-size:var(--fs-lg)">{{ acc.name }}</h3>
-<p class="small muted">Расходы загружены за {{ acc.covered }} из {{ data.days }} дн{% if acc.covered < data.days %}. — период неполный, суммы меньше настоящих{% endif %}.{% if acc.error %} Последний сбор не удался: {{ acc.error }}{% endif %}</p>
-{% if acc.bids_of %}<p class="small muted">Цена просмотра прочитана у {{ acc.bids_read }} из {{ acc.bids_of }} объявлений{% if acc.bids_read < acc.bids_of %}, остальные дочитываются{% endif %}.</p>{% endif %}</div></div>
-{% set cols = acc.columns %}
-{% if acc.rows %}
-<div class="table-wrap"><table class="table table--plain table--econ" id="ads-table" data-m-scroll>
-<thead><tr><th>Объявление</th>{% if "spend" in cols %}<th class="num">Расходы</th>{% endif %}{% if "views" in cols %}<th class="num">Просмотры</th>{% endif %}{% if "contacts" in cols %}<th class="num">Контакты</th>{% endif %}{% if "view_cost" in cols %}<th class="num">Цена просмотра (факт)</th>{% endif %}{% if "pieces" in cols %}<th class="num">Продано</th>{% endif %}{% if "revenue" in cols %}<th class="num">Выручка</th>{% endif %}{% if "margin" in cols %}<th class="num">Маржа</th>{% endif %}{% if "drr" in cols %}<th class="num">ДРР выручки</th>{% endif %}{% if "drr_margin" in cols %}<th class="num">ДРР маржи</th>{% endif %}{% if "bid" in cols %}<th>Цена просмотра на Авито</th>{% endif %}{% if "per_day" in cols %}<th class="num">В день</th>{% endif %}</tr></thead>
-<tbody>{% for r in acc.rows %}<tr>
-<td><div class="t-name"><a class="gname" href="https://www.avito.ru/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">{{ r.title or ("№%s" % r.avito_id) }}</a></div><span class="xs muted">{{ r.ad_id or "наш Id не известен" }}</span></td>
-{% if "spend" in cols %}<td class="num"><b class="strong">{{ r.spend|money }}</b>{% if r.promo %}<div class="xs muted">продвижение {{ r.promo|money }}</div>{% endif %}</td>{% endif %}
-{% if "views" in cols %}<td class="num">{{ r.views }}</td>{% endif %}{% if "contacts" in cols %}<td class="num">{{ r.contacts }}</td>{% endif %}
-{% if "view_cost" in cols %}<td class="num">{{ rub2(r.view_cost) }}</td>{% endif %}
-{% if "pieces" in cols %}<td class="num">{% if r.pieces %}{{ r.pieces }} шт.{% if r.orders > 1 %}<div class="xs muted">заказов {{ r.orders }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
-{% if "revenue" in cols %}<td class="num">{% if r.pieces %}{{ r.revenue|money }}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
-{% if "margin" in cols %}<td class="num">{% if r.pieces %}{{ r.margin|money }}{% if r.no_purchase %}<div class="xs muted">без закупки: {{ r.no_purchase }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
-{% if "drr" in cols %}<td class="num">{{ share(r.drr) }}</td>{% endif %}{% if "drr_margin" in cols %}<td class="num">{{ share(r.drr_margin) }}</td>{% endif %}
-{% if "bid" in cols %}<td data-bid="{{ r.avito_id }}">{% if r.bid %}<div>{{ r.bid.short }}</div>{% if r.bid.limit %}<div class="xs">лимит {{ r.bid.limit|money }} в день</div>{% endif %}
+{% macro delta(d, key) %}{% if d and key in d and d[key] is not none %}{% set up = d[key] > 0 %}{% set good = up if key == "pieces" else not up %}<span class="ads-delta {{ 'is-good' if good else 'is-bad' }}{% if d[key] == 0 %} is-flat{% endif %}" title="Против прошлых {{ data.days }} дн. ({{ data.prev_since }} — {{ data.prev_until }})">{{ "▲" if up else "▼" if d[key] < 0 else "=" }}&nbsp;{{ (d[key]|abs)|pct }}&nbsp;%</span>{% endif %}{% endmacro %}
+{% macro value(key, m) %}{% set v = m[key] %}
+{%- if key in ("spend", "revenue", "margin") %}{{ v|money }}
+{%- elif key == "profit" %}<span class="{{ 'ads-neg' if v < 0 else 'ads-pos' if v > 0 else '' }}">{{ v|money }}</span>
+{%- elif key == "roi" %}{% if v is none %}<span class="muted">—</span>{% else %}<span class="{{ 'ads-neg' if v < 0 else 'ads-pos' if v > 0 else '' }}">{{ v|pct }}&nbsp;%</span>{% endif %}
+{%- elif key in ("view_cost", "contact_cost", "sale_cost") %}{{ rub2(v) }}
+{%- elif key in ("contact_conv", "sale_conv", "drr") %}{{ share(v) }}
+{%- else %}{{ '{:,}'.format(v)|replace(',', ' ') }}{% endif %}{% endmacro %}
+{% macro bid_cell(r) %}<td data-bid="{{ r.avito_id }}">{% if r.bid %}<div>{{ r.bid.short }}</div>{% if r.bid.limit %}<div class="xs">лимит {{ r.bid.limit|money }} в день</div>{% endif %}
 <details class="xs muted"><summary>подробнее</summary>
 {% if r.bid.rec_bid %}<div>рекомендуемая {{ rub2(r.bid.rec_bid) }}</div>{% endif %}
 {% if r.bid.min_bid or r.bid.max_bid %}<div>от {{ rub2(r.bid.min_bid) }} до {{ rub2(r.bid.max_bid) }}</div>{% endif %}
@@ -60,23 +21,77 @@
 <div><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · прочитано {{ r.bid.taken_at|dt_utc }}</div>
 {% if r.bid_fail %}<div>последнее чтение не удалось ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}</div>{% endif %}
 </details>
-{% else %}<span class="muted" tabindex="0" data-tip-title="Цена просмотра не прочитана" data-tip="{% if r.bid_fail %}Авито отказал ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}{% else %}{{ r.bid_why }}{% endif %}">не прочитано</span>{% endif %}</td>{% endif %}
-{% if "per_day" in cols %}<td class="num">{% if r.per_day is not none %}{{ r.per_day|money }}{% else %}—{% endif %}</td>{% endif %}
+{% else %}<span class="muted" tabindex="0" data-tip-title="Цена просмотра не прочитана" data-tip="{% if r.bid_fail %}Авито отказал ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}{% else %}{{ r.bid_why }}{% endif %}">не прочитано</span>{% endif %}</td>{% endmacro %}
+{% block title %}Аналитика рекламы · Tires Sync{% endblock %}
+{% block head %}<style>
+.ads-wrap{max-height:75vh;overflow:auto;max-width:100%;border-top:1px solid var(--gray-200)}
+.ads-wrap .table{min-width:100%}
+.ads-wrap thead th{position:sticky;top:0;z-index:3}
+.ads-wrap thead tr.ads-total th{top:36px;z-index:3;background:var(--gray-0,#fff);color:inherit;font-size:inherit;font-weight:600;height:auto;padding:8px 12px;text-align:right;white-space:nowrap}
+.ads-wrap thead tr.ads-total th:first-child{text-align:left}
+.ads-wrap th:first-child,.ads-wrap td:first-child{position:sticky;left:0;z-index:2;background:var(--gray-0,#fff);min-width:220px;max-width:340px}
+.ads-wrap thead th:first-child{z-index:4;background:var(--gray-50);overflow:hidden;text-overflow:ellipsis}
+.ads-wrap thead tr.ads-total th:first-child{background:var(--gray-0,#fff)}
+.ads-wrap th a{color:inherit;text-decoration:none}.ads-wrap th a:hover{text-decoration:underline}
+.ads-wrap th.is-sorted a{color:var(--gray-900,#111);font-weight:600}
+.ads-wrap td.num{white-space:nowrap}
+tr.ads-group>td{font-weight:500}tr.ads-group.d0>td{background:var(--gray-50)}tr.ads-group.d0>td:first-child{background:var(--gray-50)}
+.ads-tog{border:0;background:none;padding:0 4px 0 0;cursor:pointer;font:inherit;color:var(--gray-600)}
+.ads-lvl{font-size:var(--fs-xs);color:var(--gray-500);font-weight:400}
+.ads-neg{color:var(--err-600)}.ads-pos{color:var(--ok-700)}
+.ads-delta{display:block;font-size:var(--fs-xs);font-weight:400}.ads-delta.is-good{color:var(--ok-700)}.ads-delta.is-bad{color:var(--err-600)}.ads-delta.is-flat{color:var(--gray-500)}
+.ads-tools{display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:flex-start}
+.ads-tools{min-width:0;max-width:100%}.ads-tools details{position:relative;max-width:100%}.ads-tools summary{white-space:normal;max-width:100%;height:auto;text-align:left}
+@media (max-width:600px){.ads-wrap th:first-child,.ads-wrap td:first-child{min-width:150px;max-width:190px}}
+.ads-pop{position:absolute;z-index:30;top:100%;left:0;margin-top:4px;background:var(--gray-0,#fff);border:1px solid var(--gray-200);border-radius:var(--r-lg,8px);box-shadow:var(--sh-lg);padding:var(--s-3);min-width:240px;max-width:calc(100vw - 32px)}
+.ads-pop label{display:flex;gap:6px;align-items:center;padding:2px 0}
+.ads-levels{display:grid;grid-template-columns:auto 1fr;gap:6px 8px;align-items:center}
+</style>{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Аналитика рекламы<span class="help-q" tabindex="0" data-tip="Сколько Авито взяло за объявления каждого аккаунта (размещение и продвижение вместе) и сколько они принесли. Таблица — дерево: аккаунт, бренд, модель, размер, объявление; уровни выбираются в «Группировке». Сортировка — по клику на заголовок колонки. Продажа — заказ на этапе «Выполнено» или «Отправлен в ТК», привязанный к объявлению через чат заказа. Только просмотр: здесь ничего не меняется на Авито.">?</span></h1>
+<p class="small muted">С {{ data.since }} по {{ data.until }} (сегодняшний день ещё не закрыт Авито). Сравнение — с {{ data.prev_since }} по {{ data.prev_until }}. Расходы собираются раз в сутки.</p></div></header>
+<section class="card">
+{% if not data.accounts %}
+<div class="empty"><div class="empty-icon">{{ icon("chart") }}</div><h3>Нет аккаунтов с фидом</h3></div>
+{% else %}
+<div class="card-head" style="flex-wrap:wrap">
+<div class="seg" role="group" aria-label="Период">{% for n, label in periods.items() %}<a href="{{ url(p=n) }}"{% if n == data.days %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+<div class="seg" role="group" aria-label="Фильтр">{% for key, label in filters.items() %}<a href="{{ url(f=key) }}"{% if key == data.only %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+<div class="ads-tools">
+<details><summary class="btn btn--secondary btn--sm">Группировка: {% for l in data.levels %}{{ levels[l] }}{% if not loop.last %} → {% endif %}{% endfor %}</summary>
+<form method="get" action="/economics/ads" class="ads-pop"><input type="hidden" name="p" value="{{ data.days }}"><input type="hidden" name="s" value="{{ data.sort }}">{% if not data.desc %}<input type="hidden" name="d" value="asc">{% endif %}{% if data.only %}<input type="hidden" name="f" value="{{ data.only }}">{% endif %}
+<div class="ads-levels">{% for n in range(levels|length) %}<label for="ads-l{{ n }}" class="small">Уровень {{ n + 1 }}</label><select id="ads-l{{ n }}" name="l" class="input input--sm"><option value="">—</option>{% for key, label in levels.items() %}<option value="{{ key }}"{% if data.levels[n] == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>{% endfor %}</div>
+<p class="xs muted">Уровни идут сверху вниз, «—» выключает уровень, повтор не учитывается. «Объявление» — последний уровень: ниже него ничего нет. Выбор запоминается.</p>
+<button class="btn btn--primary btn--sm">Показать</button> <a class="btn btn--ghost btn--sm" href="{{ url(g=['account', 'brand', 'ad']) }}">По умолчанию</a></form></details>
+<details><summary class="btn btn--secondary btn--sm">Колонки</summary>
+<form method="post" action="/economics/ads/columns" class="ads-pop"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="{{ here }}">
+{% for key, label, tip in columns %}<label class="check small"><input type="checkbox" name="show" value="{{ key }}"{% if key not in hidden %} checked{% endif %}>{{ label }}</label>{% endfor %}
+<p class="xs muted">Колонки, пустые у всех объявлений, не показываются. Выбор запоминается.</p><button class="btn btn--primary btn--sm">Сохранить</button></form></details>
+</div>
+</div>
+<div class="card-head"><div>
+{% for acc in data.accounts %}<p class="small muted"><b>{{ acc.name }}</b>. Расходы загружены за {{ acc.covered }} из {{ data.days }} дн{% if acc.covered < data.days %}. — период неполный, суммы меньше настоящих{% endif %}.{% if acc.error %} Последний сбор не удался: {{ acc.error }}{% endif %}{% if acc.bids_of %} Цена просмотра прочитана у {{ acc.bids_read }} из {{ acc.bids_of }} объявлений{% if acc.bids_read < acc.bids_of %}, остальные дочитываются{% endif %}.{% endif %}</p>{% endfor %}
+</div></div>
+{% if data.rows %}
+{% set t = data.total %}
+<div class="ads-wrap" data-m-scroll><table class="table table--plain table--econ" id="ads-tree" data-m-scroll>
+<thead><tr><th>{% for l in data.levels %}{{ levels[l] }}{% if not loop.last %} → {% endif %}{% endfor %}</th>
+{% for key, label, tip in shown %}<th class="{{ 'num' if key != 'bid' else '' }}{% if key == data.sort %} is-sorted{% endif %}">{% if key == "bid" %}{{ label }}{% else %}<a href="{{ url(s=key, d='asc' if key == data.sort and data.desc else '') }}"{% if key == data.sort %} aria-sort="{{ 'descending' if data.desc else 'ascending' }}"{% endif %}>{{ label }}{% if key == data.sort %} {{ "▼" if data.desc else "▲" }}{% endif %}</a>{% endif %}<span class="help-q" tabindex="0" data-tip-title="{{ label }}" data-tip="{{ tip }}">?</span></th>{% endfor %}</tr>
+<tr class="ads-total"><th>Итого <span class="ads-lvl">{{ t.count }} объявл.</span></th>
+{% for key, label, tip in shown %}<th class="num">{% if key != "bid" %}{{ value(key, t.m) }}{{ delta(t.delta, key) }}{% endif %}</th>{% endfor %}</tr></thead>
+<tbody>{% for r in data.rows %}<tr class="ads-{{ r.kind }} d{{ r.depth }}" data-node="{{ r.id }}" data-parent="{{ r.parent }}" data-depth="{{ r.depth }}">
+<td style="padding-left:calc(12px + {{ r.depth }} * 18px)">{% if r.kind == "group" %}{% if not r.leaf_level %}<button type="button" class="ads-tog" aria-expanded="true" hidden>▾</button>{% endif %}<span class="ads-lvl">{{ levels[r.level] }}</span> <span{% if r.label == no_data %} class="muted"{% endif %}>{{ r.label }}</span> <span class="ads-lvl">· {{ r.count }}</span>
+{% elif r.kind == "ad" %}<div class="t-name"><a class="gname" href="https://www.avito.ru/{{ r.ad.avito_id }}" rel="noopener noreferrer" target="_blank">{{ r.label }}</a></div><span class="xs muted">{{ r.ad.ad_id or "наш Id не известен" }}{% if "account" not in data.levels %} · {{ r.account }}{% endif %}</span>
+{% else %}<span class="small muted">Показаны первые {{ r.shown }} из {{ r.of }}.</span>{% endif %}</td>
+{% for key, label, tip in shown %}{% if r.kind == "more" %}<td></td>{% elif key == "bid" %}{% if r.kind == "ad" %}{{ bid_cell(r.ad) }}{% else %}<td></td>{% endif %}{% else %}<td class="num">{% if key == "spend" %}<b class="strong">{{ value(key, r.m) }}</b>{% if r.kind == "ad" and r.ad.promo %}<div class="xs muted">продвижение {{ r.ad.promo|money }}</div>{% endif %}{% else %}{{ value(key, r.m) }}{% endif %}{% if key == "margin" and r.m.no_purchase %}<div class="xs muted">без закупки: {{ r.m.no_purchase }}</div>{% endif %}{{ delta(r.delta, key) }}</td>{% endif %}{% endfor %}
 </tr>{% endfor %}</tbody></table></div>
-{% if acc.count > acc.rows|length %}<p class="small muted" style="padding:0 var(--s-5)">Показаны первые {{ acc.rows|length }} из {{ acc.count }}.</p>{% endif %}
+{% if t.m.no_purchase %}<p class="small muted" style="padding:var(--s-2) var(--s-5) 0">В {{ t.m.no_purchase }} заказах не указана закупка: их выручка учтена, маржа — нет.</p>{% endif %}
 {% elif data.only == "sales" %}
 <div class="empty"><p>Нет объявлений с продажами за период.</p></div>
 {% elif data.only == "spend" %}
 <div class="empty"><p>Нет объявлений с расходами за период.</p></div>
 {% else %}
 <div class="empty"><p>За период нет расходов и продаж по объявлениям.</p></div>
-{% endif %}
-{% if acc.strangers.count %}
-<details style="padding:var(--s-3) var(--s-5)"><summary class="small">Объявления не из нашего фида: {{ acc.strangers.count }}, расходы {{ acc.strangers.spend|money }}</summary>
-<p class="xs muted">Авито взяло за них деньги, но в списке объявлений аккаунта их нет с начала сбора: сняты раньше или размещены не нашим фидом. Названия и нашего Id нет ни в чатах, ни в отправленных остатках и ценах.</p>
-<div class="table-wrap"><table class="table table--plain" data-m-scroll><thead><tr><th>Объявление</th><th class="num">Расходы</th><th class="num">Просмотры</th></tr></thead>
-<tbody>{% for r in acc.strangers.rows %}<tr><td><a href="https://www.avito.ru/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">№{{ r.avito_id }}</a></td><td class="num">{{ r.spend|money }}</td><td class="num">{{ r.views }}</td></tr>{% endfor %}</tbody></table></div>
-</details>
 {% endif %}
 {% endif %}
 <div class="card-head"><div><h3 style="font-size:var(--fs-lg)">Без объявления</h3>
@@ -85,6 +100,7 @@
 <div class="tile"><span class="tile-label">Заказов и продаж</span><span class="tile-value">{{ data.none.count }}</span><span class="tile-sub">{{ data.none.pieces }} шт.</span></div>
 <div class="tile"><span class="tile-label">Выручка</span><span class="tile-value">{{ data.none.revenue|money }}</span><span class="tile-sub">маржа {{ data.none.margin|money }}</span></div>
 </div>
-<div class="card-foot"><p class="small muted">Как читать: «Расходы» — всё, что Авито взяло за объявление: размещение и продвижение. «Цена просмотра (факт)» — расходы, делённые на просмотры. «В день» — расходы за период, делённые на загруженные дни. Продажа — заказ на этапе «Выполнено» или «Отправлен в ТК», день — когда он туда перешёл; если по заказу записана продажа, берётся она. ДРР — расходы в процентах от выручки или маржи продаж объявления; прочерк — продаж или маржи нет. Колонки, пустые у всех объявлений аккаунта, не показываются. «Цена просмотра на Авито» читается не чаще раза в сутки у объявлений, за которые Авито брал деньги в последние 30 дней, по очереди; подробности — по «подробнее»; если цены ещё нет, причина — в подсказке.</p></div>
+<div class="card-foot"><p class="small muted">Как читать: строка группы складывает свои объявления, формулы считаются от сумм группы. «Без данных» — у объявления нет нашего Id или его позиции нет в каталоге. Сортировка — по клику на заголовок: первый клик — по убыванию, второй — по возрастанию; сортируются строки внутри каждой группы, прочерки внизу. Стрелка под суммой — изменение против прошлого периода той же длины: зелёная — к лучшему, красная — к худшему. Прочерк — делить не на что. Подробности формулы — в «?» у заголовка. «Цена просмотра на Авито» читается не чаще раза в сутки у объявлений, за которые Авито брал деньги в последние 30 дней, по очереди; подробности — по «подробнее»; если цены ещё нет, причина — в подсказке.</p></div>
 </section>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='ads_tree.js') }}"></script>{% endblock %}

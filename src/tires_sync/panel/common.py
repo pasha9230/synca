@@ -305,6 +305,7 @@ for _section, _endpoints in {
     "self": ("account_password_page", "account_password", "orders_list_columns",     # «Колонки» of the list of orders: one's own setting
              "orders_hint_fold",                        # «Что делать сейчас» folded: one's own setting
              "order_card_layout",                       # the columns of the order's card in «Новый вид»: one's own setting
+             "ads_analytics_columns",                   # «Колонки» of «Аналитика рекламы»: one's own setting (routes_ads: who sees the page only)
              "search", "search_json",                   # the search of the top bar: every role; search.scope_for narrows what it finds
              "tour_done", "tour_again",                 # «Обзор» (panel/tour.py): one's own mark «пройден», every role
              "whatsnew_page"),                          # «Что нового» (routes_whatsnew): every role, its own items
