@@ -1329,7 +1329,7 @@ def dismiss(conn, item_id, now: str, author: str) -> dict:
         raise OrderError("Такого сообщения нет.")
     if row[1] != "new":
         raise OrderError("Это сообщение уже закрыто." if row[1] == "ignored" else "На это сообщение уже ответили: закрыть без ответа нельзя.")
-    cur = conn.execute("UPDATE manager_message SET status = 'ignored', answered_at = ? WHERE id = ? AND status = 'new'", (now, item_id))
+    cur = conn.execute("UPDATE manager_message SET status = 'ignored', answered_at = ? WHERE id = ? AND status != 'ignored'", (now, item_id))
     if cur.rowcount != 1:
         raise OrderError("Это сообщение уже разобрано.")
     conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)",
@@ -1372,7 +1372,7 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
         raise OrderError("Команда «%s» не подходит к заказу №%s на этапе «%s»: переведите заказ вручную и ответьте точке."
                          % (word, label(card), card["stage"]["name"]))
     claimed = conn.execute("UPDATE order_command_log SET outcome = 'подтверждается' WHERE message_id = ? AND outcome LIKE ? AND EXISTS "
-                           "(SELECT 1 FROM manager_message WHERE id = ? AND status = 'new')",       # «Закрыть без ответа» was first: nothing
+                           "(SELECT 1 FROM manager_message WHERE id = ? AND status != 'ignored')",  # «Закрыть без ответа» was first: nothing
                            (item["message_id"], DISPUTE + "%", item_id))
     conn.commit()
     if claimed.rowcount != 1:
@@ -1404,7 +1404,7 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
         conn.commit()
         raise
     reply = reply.replace("— отмечено", "— отмечено (подтвердил владелец)", 1)
-    closed = conn.execute("UPDATE manager_message SET status = 'answered', answer = ?, answered_at = ? WHERE id = ? AND status = 'new'",
+    closed = conn.execute("UPDATE manager_message SET status = 'answered', answer = ?, answered_at = ? WHERE id = ? AND status != 'ignored'",
                           (reply, now, item_id)).rowcount != 1     # «Закрыть без ответа» came meanwhile: the line stays closed, never revived
     conn.execute("UPDATE order_command_log SET outcome = ?, order_id = ? WHERE message_id = ?", ("подтверждено (%s): %s" % (author, outcome), card["id"], item["message_id"]))
     conn.commit()
