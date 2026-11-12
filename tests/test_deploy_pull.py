@@ -38,6 +38,7 @@ case "$url" in
   */check-runs*) name=checks ;;
   */compare/*) name=compare ;;
   */commits/master) name=master ;;
+  */git/commits/*) name=commit ;;
   *) echo "неизвестный адрес $url" >&2; exit 3 ;;
 esac
 cp "$FAKE/$name.body" "$out"
@@ -107,7 +108,7 @@ class Env:
         (self.dstate / "previous-release").write_text(str(self.releases / "r-older") + "\n")
         self.now = NOW
         self.extra = {}
-        self.respond(master=NEW, checks=[check_run()], compare="ahead")
+        self.respond(master=NEW, checks=[check_run()], compare="ahead", message="Слияние ветки захода")
 
     def rolled_back(self, at):
         import os
@@ -115,9 +116,15 @@ class Env:
         p.write_text("")
         os.utime(p, (at, at))
 
-    def respond(self, master=None, checks=None, compare=None, master_code=200, checks_code=200, compare_code=200):
+    def respond(self, master=None, checks=None, compare=None, master_code=200, checks_code=200, compare_code=200,
+                message=None, commit_sha=None, commit_code=200):
         if master is not None:
             (self.fake / "master.body").write_text(master)
+            self.master = master
+        if message is not None:
+            self.message = message
+        # ответ на /git/commits/<sha>: коммит master с сообщением self.message (commit_sha: чужой коммит в ответе)
+        (self.fake / "commit.body").write_text(json.dumps({"sha": commit_sha or self.master, "message": self.message}))
         if checks is not None:
             (self.fake / "checks.body").write_text(json.dumps({"total_count": len(checks), "check_runs": checks}))
         if compare is not None:
@@ -125,6 +132,7 @@ class Env:
         (self.fake / "master.code").write_text(str(master_code))
         (self.fake / "checks.code").write_text(str(checks_code))
         (self.fake / "compare.code").write_text(str(compare_code))
+        (self.fake / "commit.code").write_text(str(commit_code))
 
     def token(self, value=TOKEN):
         (self.cred / "tires-pull.github-token").write_text(value + "\n")
@@ -197,7 +205,8 @@ def test_master_already_deployed_makes_one_request(env):
     (check_run(conclusion="cancelled"), "тесты cancelled"),
     (check_run(conclusion="skipped"), "тесты skipped"),
     (check_run(app="evil-app"), "ещё нет"),
-    (check_run(name="pytest"), "ещё нет"),
+    (check_run(name="shard 1/4"), "ещё нет"),
+    (check_run(name="tests / shard 1/4"), "ещё нет"),
     (check_run(sha="c" * 40), "ещё нет"),
 ])
 def test_not_green_is_never_deployed(env, run, expect):
@@ -304,7 +313,7 @@ def test_network_failure_alerts_once_after_30(env):
     assert not (env.state / "net-fails").exists()
 
 
-@pytest.mark.parametrize("which", ["master_code", "checks_code", "compare_code"])
+@pytest.mark.parametrize("which", ["master_code", "checks_code", "compare_code", "commit_code"])
 @pytest.mark.parametrize("code", [403, 404, 429, 500])
 def test_http_errors_do_nothing(env, which, code):
     env.respond(**{which: code})
@@ -470,7 +479,7 @@ def test_without_token_checks_are_asked_every_5_minutes(env):
     assert env.run() == 0
     assert env.run() == 0
     assert "спрошу снова через 5 мин" in env.one_line()
-    assert sum("/check-runs" in u for u in env.urls()) == 1
+    assert sum("check_name=tests%20%2F%20pytest&" in u for u in env.urls()) == 1
     env.respond(checks=[check_run()])
     env.now += 5 * 60
     assert env.run() == 0
@@ -545,9 +554,9 @@ def test_garbage_check_json_does_nothing(env):
 
 
 def test_custom_check_name_is_encoded(env):
-    env.respond(checks=[check_run(name="pytest")])
-    assert env.run(TIRES_PULL_CHECK="pytest") == 0
-    assert any("check_name=pytest&" in u for u in env.urls())
+    env.respond(checks=[check_run(name="ci / pytest")])
+    assert env.run(TIRES_PULL_CHECK="ci / pytest") == 0
+    assert any("check_name=ci%20%2F%20pytest&" in u for u in env.urls())
     assert len(env.sudo_calls()) == 1
 
 
@@ -572,3 +581,100 @@ def test_pull_timer_passes_tires_deploy_timer_rules():
     assert all(b == 9 or 32 <= b <= 126 for b in timer if b != 10)
     for line in timer.decode().splitlines():
         assert re.fullmatch(keys, line), line
+
+
+# --- метка [RED] и проверка ветки (решение владельца 2026-11-13): без [RED] хватает зелёной «pytest» ветки на том же
+# коммите, с [RED] нужна «tests / pytest» прогона master; красная «tests / pytest» останавливает всегда.
+
+def test_without_red_green_branch_check_is_enough(env):
+    env.respond(checks=[check_run(name="pytest")])
+    assert env.run() == 0
+    assert env.sudo_calls() == [f"-n /usr/local/sbin/tires-deploy deploy {NEW}"]
+    assert any(f"/git/commits/{NEW}" in u for u in env.urls())
+    assert any("check_name=pytest&" in u for u in env.urls())
+
+
+def test_without_red_branch_green_while_master_run_goes(env):
+    env.respond(checks=[check_run(id_=1, name="pytest"),
+                        check_run(id_=2, status="in_progress", conclusion=None, done=None)])
+    assert env.run() == 0
+    assert len(env.sudo_calls()) == 1
+
+
+def test_without_red_master_check_alone_is_enough_and_asked_once(env):
+    assert env.run() == 0
+    assert len(env.sudo_calls()) == 1
+    assert sum("/check-runs" in u for u in env.urls()) == 1     # зелёная «tests / pytest»: ветку не спрашиваем
+
+
+@pytest.mark.parametrize("message", ["Слияние run/x [RED]", "[red] цены\n\nподробности", "a\n\nКритичное [Red]"])
+def test_red_needs_the_master_check(env, message):
+    env.token()
+    env.respond(message=message, checks=[check_run(name="pytest")])
+    assert env.run() == 0
+    assert "[RED]" in env.one_line() and "ещё нет" in env.one_line()
+    assert env.sudo_calls() == []
+    assert not any("check_name=pytest&" in u for u in env.urls())   # проверку ветки при [RED] не спрашиваем
+    env.respond(checks=[check_run(name="pytest"), check_run(id_=11, status="in_progress", conclusion=None, done=None)])
+    assert env.run() == 0
+    assert "тесты in_progress" in env.one_line() and env.sudo_calls() == []
+    env.respond(checks=[check_run(name="pytest"), check_run(id_=11)])
+    assert env.run() == 0
+    assert len(env.sudo_calls()) == 1
+
+
+def test_red_answer_is_asked_once_per_commit(env):
+    env.token()
+    env.respond(message="x [RED]", checks=[check_run(status="queued", conclusion=None, done=None)])
+    assert env.run() == 0 and env.run() == 0
+    assert sum("/git/commits/" in u for u in env.urls()) == 1
+    env.respond(checks=[check_run()])
+    assert env.run() == 0
+    assert len(env.sudo_calls()) == 1
+    assert env.run() == 0                                        # выложен: запись о метке снята
+    assert not (env.state / "red").exists()
+
+
+@pytest.mark.parametrize("run,expect", [
+    (check_run(name="pytest", status="in_progress", conclusion=None, done=None), "тесты in_progress («pytest»)"),
+    (check_run(name="pytest", status="queued", conclusion=None, done=None), "тесты queued («pytest»)"),
+    (check_run(name="pytest", conclusion="failure"), "тесты failure («pytest»)"),
+    (check_run(name="pytest", conclusion="cancelled"), "тесты cancelled («pytest»)"),
+    (check_run(name="pytest", app="evil-app"), "ещё нет"),
+    (check_run(name="pytest", sha="c" * 40), "ещё нет"),
+])
+def test_without_red_branch_check_not_green_is_not_deployed(env, run, expect):
+    env.respond(checks=[run])
+    assert env.run() == 0
+    assert expect in env.one_line()
+    assert env.sudo_calls() == []
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+def test_red_master_check_stops_even_with_green_branch(env, conclusion):
+    env.respond(checks=[check_run(id_=1, name="pytest"), check_run(id_=2, conclusion=conclusion)])
+    assert env.run() == 0
+    assert f"тесты {conclusion} («tests / pytest»)" in env.one_line()
+    assert env.sudo_calls() == []
+
+
+def test_branch_check_counts_for_min_age(env):
+    env.respond(checks=[check_run(name="pytest", done=NOW - 5 * 60)])
+    assert env.run(TIRES_PULL_MIN_AGE_MIN=20) == 0
+    assert "зелёные 5 мин" in env.one_line() and env.sudo_calls() == []
+
+
+@pytest.mark.parametrize("body", ['{"sha": "%s"}' % NEW, '{"sha": "%s", "message": "x"}' % ("c" * 40), "not json"])
+def test_unclear_commit_answer_does_nothing(env, body):
+    (env.fake / "commit.body").write_text(body)
+    assert env.run() == 0
+    assert "коммит bbbbbbb: ответ не разобран" in env.one_line()
+    assert env.sudo_calls() == [] and not (env.state / "red").exists()
+    assert not any("/check-runs" in u for u in env.urls())
+
+
+@pytest.mark.parametrize("value", ["tests / pytest", "bad;name"])
+def test_bad_branch_check_setting_alerts(env, value):
+    assert env.run(TIRES_PULL_BRANCH_CHECK=value) == 1
+    assert "неверные настройки" in env.one_line()
+    assert env.urls() == [] and env.sudo_calls() == []

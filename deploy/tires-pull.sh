@@ -8,8 +8,9 @@
 # Что делает за прогон (одна строка в журнал, journalctl -u tires-pull):
 #   1. читает у GitHub последний коммит master (только чтение; токен на чтение из $CREDENTIALS_DIRECTORY,
 #      без файла запросы идут без токена);
-#   2. если он не выложен, проверка тестов (по умолчанию «tests / pytest» от github-actions) у него
-#      зелёная не меньше MIN_AGE минут, он потомок выложенного, раньше не выкладывался (откат, неудача) и
+#   2. если он не выложен, проверка тестов у него зелёная не меньше MIN_AGE минут (только от github-actions и
+#      для этого коммита: «tests / pytest» прогона master или, если в сообщении коммита нет метки [RED],
+#      «pytest» прогона ветки на том же коммите; красная «tests / pytest» останавливает всегда), он потомок выложенного, раньше не выкладывался (откат, неудача) и
 #      последним действием tires-deploy был не откат (после отката только ручная выкладка), зовёт `sudo -n /usr/local/sbin/tires-deploy deploy <sha>`. Блокировку,
 #      копию базы, ожидание тишины, проверку панели, возврат кода, таймеры и feed-check делает tires-deploy;
 #   3. красный, идущий или непонятный коммит не выкладывается никогда; сбой сети: ничего не делает.
@@ -21,7 +22,8 @@
 #
 # Переменные (задаёт служба, владелец меняет через `systemctl edit tires-pull.service`):
 #   TIRES_PULL_REPO          владелец/репозиторий на GitHub
-#   TIRES_PULL_CHECK         имя проверки тестов (по умолчанию «tests / pytest»)
+#   TIRES_PULL_CHECK         имя проверки тестов master (по умолчанию «tests / pytest»), её ждёт коммит с [RED]
+#   TIRES_PULL_BRANCH_CHECK  имя проверки тестов ветки (по умолчанию «pytest»), хватает коммиту без [RED]
 #   TIRES_PULL_MIN_AGE_MIN   сколько минут тесты должны быть зелёными до выкладки (0..1440)
 # Остальные TIRES_PULL_* (пути) нужны только тестам: tests/test_deploy_pull.py.
 # Пишется под bash 3.2 тоже (тесты на Маке), на сервере bash 5.
@@ -30,6 +32,7 @@ umask 077
 
 REPO_SLUG=${TIRES_PULL_REPO:-pasha9230/tires-avito-sync}
 CHECK_NAME=${TIRES_PULL_CHECK:-tests / pytest}
+BRANCH_CHECK=${TIRES_PULL_BRANCH_CHECK:-pytest}
 CHECK_APP=github-actions
 MIN_AGE_MIN=${TIRES_PULL_MIN_AGE_MIN:-0}
 API=https://api.github.com
@@ -163,8 +166,9 @@ mkdir -p "$STATE" 2>/dev/null || true
 { [ -d "$STATE" ] && [ -w "$STATE" ]; } || end 1 "СТОП: нет папки состояния $STATE"
 if ! [[ "$REPO_SLUG" =~ ^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$ ]] || [[ "$REPO_SLUG" == *..* ]] \
     || ! [[ "$CHECK_NAME" =~ ^[A-Za-z0-9\ _./()-]{1,100}$ ]] \
+    || ! [[ "$BRANCH_CHECK" =~ ^[A-Za-z0-9\ _./()-]{1,100}$ ]] || [ "$BRANCH_CHECK" = "$CHECK_NAME" ] \
     || ! [[ "$MIN_AGE_MIN" =~ ^[0-9]{1,4}$ ]] || [ "$MIN_AGE_MIN" -gt 1440 ]; then
-  alert_once config "СТОП: неверные настройки (TIRES_PULL_REPO, TIRES_PULL_CHECK или TIRES_PULL_MIN_AGE_MIN), ничего не выкладываю"
+  alert_once config "СТОП: неверные настройки (TIRES_PULL_REPO, TIRES_PULL_CHECK, TIRES_PULL_BRANCH_CHECK или TIRES_PULL_MIN_AGE_MIN), ничего не выкладываю"
 fi
 { command -v jq && command -v curl && command -v flock && command -v sudo; } >/dev/null \
   || alert_once config "СТОП: нет jq, curl, flock или sudo, ничего не выкладываю"
@@ -206,7 +210,7 @@ STALL_SHA=$MASTER STALL_SINCE=$s_at
 read_state "$MASTER"
 if [ "$MASTER" = "$DEPLOYED" ]; then
   STALL_SHA=
-  rm -f -- "$STATE/fail" "$STATE/seen" "$STATE/checked" "$STATE"/alerted-stall-* 2>/dev/null
+  rm -f -- "$STATE/fail" "$STATE/seen" "$STATE/checked" "$STATE/red" "$STATE"/alerted-stall-* 2>/dev/null
   end 0 "выложен ${MASTER:0:7}, нового нет"
 fi
 if is_blocked "$MASTER"; then
@@ -264,21 +268,63 @@ if [ -z "$CURL_AUTH" ] && [ -f "$STATE/checked" ]; then
   fi
 fi
 
+# --- метка [RED] в сообщении коммита (решение владельца 2026-11-13) ---
+# Без метки хватает зелёной проверки ветки (BRANCH_CHECK): тимлид вливает ветку в master только --ff-only после
+# её полного прогона, коммит тот же, и повторный прогон master тот же код не проверяет. С меткой [RED] (любым
+# регистром; критичное слияние) ждём только свежий прогон master (CHECK_NAME). Сообщение коммита не меняется:
+# ответ хранится в $STATE/red до выкладки этого коммита, второй раз GitHub не спрашиваем.
+RED=
+if [ -f "$STATE/red" ]; then
+  r_sha= r_val=
+  read -r r_sha r_val < "$STATE/red" || true
+  if [ "$r_sha" = "$MASTER" ] && [[ "$r_val" =~ ^[01]$ ]]; then RED=$r_val; fi
+fi
+if [ -z "$RED" ]; then
+  api_get "/repos/$REPO_SLUG/git/commits/$MASTER" application/vnd.github+json "$TMP/commit" \
+    || net_fail "коммит ${MASTER:0:7}: $API_ERR"
+  RED=$(jq -r --arg sha "$MASTER" '
+    if .sha != $sha or (.message | type) != "string" then "bad"
+    elif (.message | test("\\[RED\\]"; "i")) then "1" else "0" end' "$TMP/commit" 2>/dev/null) \
+    || net_fail "коммит ${MASTER:0:7}: ответ не разобран"
+  [[ "$RED" =~ ^[01]$ ]] || net_fail "коммит ${MASTER:0:7}: ответ не разобран"
+  printf '%s %s\n' "$MASTER" "$RED" 2>/dev/null > "$STATE/red" || true
+fi
+
 # --- проверка тестов этого коммита (только от github-actions и только для этого коммита) ---
-NAME_URI=$(jq -rn --arg s "$CHECK_NAME" '$s|@uri')
-api_get "/repos/$REPO_SLUG/commits/$MASTER/check-runs?check_name=$NAME_URI&filter=latest&per_page=100" \
-  application/vnd.github+json "$TMP/checks" || net_fail "тесты ${MASTER:0:7}: $API_ERR"
-CHECK=$(jq -r --arg name "$CHECK_NAME" --arg app "$CHECK_APP" --arg sha "$MASTER" '
-  [ (.check_runs // [])[] | select(.name == $name and .app.slug == $app and .head_sha == $sha) ]
-  | sort_by(.id) | last
-  | if . == null then "none"
-    else "\(.status) \(.conclusion // "none") \(if (.completed_at // "") == "" then 0 else (.completed_at | fromdateiso8601) end)"
-    end' "$TMP/checks" 2>/dev/null) || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
-[[ "$CHECK" =~ ^(none|[a-z_]{1,20}\ [a-z_]{1,20}\ [0-9]{1,12})$ ]] || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
-[ "$CHECK" != none ] || not_ready "ждём ${MASTER:0:7}: проверки «$CHECK_NAME» ещё нет"
+check_of() {   # $1 имя проверки; CHECK: «none» или «статус вывод время_окончания» последнего прогона
+  local uri
+  uri=$(jq -rn --arg s "$1" '$s|@uri')
+  api_get "/repos/$REPO_SLUG/commits/$MASTER/check-runs?check_name=$uri&filter=latest&per_page=100" \
+    application/vnd.github+json "$TMP/checks" || net_fail "тесты ${MASTER:0:7}: $API_ERR"
+  CHECK=$(jq -r --arg name "$1" --arg app "$CHECK_APP" --arg sha "$MASTER" '
+    [ (.check_runs // [])[] | select(.name == $name and .app.slug == $app and .head_sha == $sha) ]
+    | sort_by(.id) | last
+    | if . == null then "none"
+      else "\(.status) \(.conclusion // "none") \(if (.completed_at // "") == "" then 0 else (.completed_at | fromdateiso8601) end)"
+      end' "$TMP/checks" 2>/dev/null) || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
+  [[ "$CHECK" =~ ^(none|[a-z_]{1,20}\ [a-z_]{1,20}\ [0-9]{1,12})$ ]] || net_fail "тесты ${MASTER:0:7}: ответ не разобран"
+}
+# Сначала проверка master: зелёная — выкладываем, законченная не зелёная — не выкладываем никогда (и без [RED]).
+# Без [RED], пока её нет или она идёт, годится зелёная проверка ветки; нет и её — в строке то, что видно.
+check_of "$CHECK_NAME"
+USED=$CHECK_NAME
+if [ "$RED" = 0 ] && [[ "$CHECK" != completed\ * ]]; then
+  M_CHECK=$CHECK
+  check_of "$BRANCH_CHECK"
+  if [[ "$CHECK" == "completed success "* ]] || { [ "$M_CHECK" = none ] && [ "$CHECK" != none ]; }; then
+    USED=$BRANCH_CHECK
+  else
+    CHECK=$M_CHECK
+  fi
+fi
+if [ "$RED" = 1 ]; then
+  [ "$CHECK" != none ] || not_ready "ждём ${MASTER:0:7}: [RED], проверки «$CHECK_NAME» ещё нет"
+else
+  [ "$CHECK" != none ] || not_ready "ждём ${MASTER:0:7}: проверок «$CHECK_NAME» и «$BRANCH_CHECK» ещё нет"
+fi
 read -r C_STATUS C_CONCL C_DONE <<<"$CHECK"
-[ "$C_STATUS" = completed ] || not_ready "ждём ${MASTER:0:7}: тесты $C_STATUS"
-[ "$C_CONCL" = success ] || not_ready "не выкладываю ${MASTER:0:7}: тесты $C_CONCL"
+[ "$C_STATUS" = completed ] || not_ready "ждём ${MASTER:0:7}: тесты $C_STATUS («$USED»)"
+[ "$C_CONCL" = success ] || not_ready "не выкладываю ${MASTER:0:7}: тесты $C_CONCL («$USED»)"
 [ "$C_DONE" -gt 0 ] || net_fail "тесты ${MASTER:0:7}: нет времени окончания"
 if [ "$MIN_AGE_MIN" -gt 0 ] && [ $(( NOW - C_DONE )) -lt $(( MIN_AGE_MIN * 60 )) ]; then
   not_ready "ждём ${MASTER:0:7}: тесты зелёные $(( (NOW - C_DONE) / 60 )) мин, выкладываю после $MIN_AGE_MIN"
