@@ -34,6 +34,9 @@ only in the messages after the reminder, the client's answer is read by three li
 last day (`_extend`); «Отказ» moves the order to «На ОТХ» at once (`_refused`), also the staff's message of the one word «Отказ». Words of
 two outcomes in one message are no answer (`decide`). Anything else, and anything after the 8 hours, is not read: the order goes to «На
 ОТХ» when the wait ends. The date in the client's answer is read no more (reply_date), the responsible is no longer told of an answer.
+The owner 2026-11-12: an unclear answer in these hours (a word of the lists right after «не», or words of two outcomes) brings the client
+one question per stay, «Уточните, пожалуйста…» of «Шаблоны сообщений» (`unclear`, `_clarify`); the answer to it is read by the same lists,
+the 8 hours stay as they were. Nothing goes to VK.
 """
 from __future__ import annotations
 
@@ -70,8 +73,9 @@ NOT_A_MESSAGE = "('system', 'deleted', 'call')"   # avito_message.kind: a call i
 WROTE_MARK = "[резерв:клиент-писал:%s]"           # once per stay at the point
 WROTE_TASK = "Клиент писал, проверьте заказ №%s"   # the owner's words
 NOT_SENT_TASK = "Напоминание о сроке резерва по заказу №%s клиенту не ушло (%s). Свяжитесь с клиентом."
+CLARIFY_MARK = "[резерв:уточнение:%s]"            # once per stay at the point: the question about an unclear answer (`_clarify`)
 REPLY_MARK = "[резерв:ответ:%d]"                  # a record of an answer read: the id of its message
-ANSWER_KEY = "reserve_answer:%d:%s"               # app_state, per order and stay: {"seen": the last avito_message.id read, "took": at, "extended": date}
+ANSWER_KEY = "reserve_answer:%d:%s"               # app_state, per order and stay: {"seen": the last avito_message.id read, "took": at, "extended": date, "asked": the message id of `_clarify`}
 EXTEND_DAYS = 2                                   # «Продлить»: the reservation moves by this, once per order
 WORDS_KEY = "orders.reserve_words"                # app_state: {"took": "…", "extend": "…", "refuse": "…"}, words through commas (orders_settings)
 OUTCOMES = {"took": "Забрал", "extend": "Продлить", "refuse": "Отказ"}
@@ -445,8 +449,13 @@ def found_outcomes(text: str, lists: dict) -> set:
     """The outcomes whose words stand in the message: whole words, any case, anywhere in the phrase. The owner 2026-11-12: a word right after
     «не» does not count («я не забрал» is not «Забрал»), unless the phrase of the list starts with «не» itself («не нужно»); where phrases of
     the lists overlap, the longest one wins and the shorter one inside it does not count («уже купил» is «Отказ», not also «купил»)."""
+    return {h[2] for h in _hits(text, lists)[0]}
+
+
+def _hits(text: str, lists: dict) -> tuple:
+    """([(start, end, outcome)] of the words that count, [(start, end, outcome)] of the words right after «не» that did not count)."""
     said = _tokens(text)
-    hits = []
+    hits, negated = [], []
     for outcome in OUTCOMES:
         for phrase in _phrases(lists.get(outcome, "")):
             want = _tokens(phrase)
@@ -454,10 +463,20 @@ def found_outcomes(text: str, lists: dict) -> set:
                 if said[i:i + len(want)] != want:
                     continue
                 if want[0] != "не" and i > 0 and said[i - 1] == "не":
+                    negated.append((i, i + len(want), outcome))
                     continue
                 hits.append((i, i + len(want), outcome))
     kept = [h for h in hits if not any(o[0] <= h[0] and h[1] <= o[1] and o[1] - o[0] > h[1] - h[0] for o in hits)]
-    return {h[2] for h in kept}
+    return kept, [n for n in negated if not any(o[0] <= n[0] - 1 and n[1] <= o[1] for o in kept)]   # «не» inside a phrase that counts
+
+
+def unclear(text: str, lists: dict) -> bool:
+    """The owner 2026-11-12: the client's message is an unclear answer, worth one question (`_clarify`): words of two different outcomes
+    (none inside another), or no outcome while a word of the lists stood right after «не» («не забрал», «пока не взял»). A message
+    without words of the lists is no answer, nobody asks about it."""
+    kept, negated = _hits(text, lists)
+    found = {h[2] for h in kept}
+    return len(found) > 1 or (not found and bool(negated))
 
 
 def decide(found: set) -> str:
@@ -634,7 +653,7 @@ def _refused(conn, card: dict, message, now: str) -> bool:
     return _to_oth(conn, card, now, REFUSED_REASON, head + ": отказ, заказ переведён на «%s»", head + ": отказ") is not None
 
 
-def _reply_step(conn, card: dict, now: str) -> None:
+def _reply_step(conn, card: dict, now: str, deliver: Optional[order_manager.Deliver] = None) -> None:
     """The owner 2026-11-12: the messages of the 8 hours after the reminder, each read once (ANSWER_KEY «seen»), mean «Забрал», «Продлить»,
     «Отказ» or nothing (`_plan`). Nothing is read once the client wrote «забрал», the date was moved by hand, or the goods went back."""
     sent = _reminder(conn, card)
@@ -654,7 +673,13 @@ def _reply_step(conn, card: dict, now: str) -> None:
     state["seen"] = max(m[0] for m in found)                   # read up to the newest row; the sync may store a page newest first
     if not _move(conn, key, was, json.dumps(state, ensure_ascii=False, sort_keys=True)):     # another tick read them
         return
-    for outcome, message in _plan(found, state, words(conn)):
+    lists = words(conn)
+    plan = _plan(found, state, lists)
+    if not plan:                                               # no outcome read: an unclear answer brings one question
+        message = next((m for m in found if m[2] == "in" and unclear(m[3], lists)), None)
+        if message is not None:
+            _clarify(conn, card, sent, state, message, deliver, now)
+    for outcome, message in plan:
         if outcome == "took":
             _took(conn, card, message, state, now)
         elif outcome == "extend":
@@ -662,6 +687,44 @@ def _reply_step(conn, card: dict, now: str) -> None:
                 card = orders.get_card(conn, card["id"])
         elif outcome == "refuse":
             _refused(conn, card, message, now)
+
+
+def _clarify(conn, card: dict, sent, state: dict, message, deliver: Optional[order_manager.Deliver], now: str) -> None:
+    """The owner 2026-11-12: «Уточните, пожалуйста…» (message_texts.RESERVE_CLARIFY) to the client, once per stay (ANSWER_KEY «asked»), only
+    before the end of the 8 hours, never after «Продлить». The wait stays as it was: no clear answer, the order goes to «На ОТХ» at its end.
+    The send as the reminder's (a send token, no second one); one that did not go is a red record and a line in «Входящие», not sent again."""
+    stay = card["entered_at"] or ""
+    if state.get("asked") or state.get("extended") or now >= (datetime.fromisoformat(sent[0]) + NO_ANSWER).isoformat(timespec="seconds"):
+        return
+    if _done(conn, card["id"], OTH_MARK % stay):
+        return
+    state["asked"] = message[0]
+    _keep_answer(conn, card, state)
+    conn.commit()                                              # asked once, whatever comes of the send
+    name = message_texts.BY_KEY[message_texts.RESERVE_CLARIFY]["name"]
+    marker = CLARIFY_MARK % stay
+    token = "reserve-clarify-%d-%s" % (card["id"], re.sub(r"\D", "", stay))
+    status, why, copy = order_manager.send_to_client(conn, card, message_texts.body(conn, message_texts.RESERVE_CLARIFY), token, deliver, now)
+    mark = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (token,)).fetchone() if status == "unknown" else None
+    own = bool(mark) and mark[0] in ("retry", "lost")              # a 402 the sync sends again, a lost one: their own words, as tell_client
+    head = "Клиент %s ответил на напоминание о сроке резерва неясно: «%s»" % (_who(card), (message[3] or "")[:200])
+    if status == "sent":
+        text, level = "%s. Клиенту отправлено «%s» %s" % (head, name, marker), "green"
+    elif own:
+        text, level = "%s. Сообщение клиенту «%s»: %s %s" % (head, name, why, marker), "yellow" if mark[0] == "retry" else "red"
+    elif status == "unknown":
+        text, level = ("%s. Сообщение клиенту «%s»: %s. Проверьте чат Авито заказа: если сообщения там нет, напишите клиенту вручную, повторно "
+                       "не отправляйте %s" % (head, name, why, marker)), "red"
+    else:
+        text, level = "%s. Сообщение клиенту не отправлено («%s»): %s. Напишите клиенту вручную %s" % (head, name, why, marker), "red"
+    orders.add_event(conn, card["id"], now, "система", "reserve", text, level=level)
+    if status != "sent":
+        by_hand = "Проверьте чат Авито заказа: если сообщение там есть, повторно не отправляйте." if status == "unknown" else "Отправьте вручную."
+        said = why if own else "%s. %s" % (why, by_hand)
+        conn.execute("INSERT OR IGNORE INTO manager_message (message_id, at, point_id, sender, text, status) SELECT ?,?,?,?,?,'new' "
+                     + chats.NOT_SENT_MEANWHILE, (token, now, card.get("point_id"), "система", "Заказ №%s: клиенту не отправлено «%s» — %s" % (
+                         card.get("webmim_number") or card["id"], name, said) + (order_manager.COPY_MARK + copy if copy else ""), token))
+    conn.commit()
 
 
 def _due(conn, card: dict, sent, state: dict, now: str) -> bool:
@@ -769,7 +832,7 @@ def _own_sale(conn, card: dict, cache: dict) -> bool:
     return card["id"] in cache[card["point_id"]]
 
 
-def _silent_moves(conn, now: str, notify: Notify) -> None:
+def _silent_moves(conn, now: str, notify: Notify, deliver: Optional[order_manager.Deliver] = None) -> None:
     """Every tick, at night too: the answers to the reminder (`_reply_step`); the orders whose 8 hours after it brought no outcome go to
     «На ОТХ» (`_no_answer_step`)."""
     own: dict = {}
@@ -778,7 +841,7 @@ def _silent_moves(conn, now: str, notify: Notify) -> None:
         try:
             card = orders.get_card(conn, card_id)
             if not (card.get("intercity") or {}).get("on") and not _own_sale(conn, card, own):   # to another city (order_intercity): no
-                _reply_step(conn, card, now)                  # reservation, no reminder, no «На ОТХ»; the point's own sale neither
+                _reply_step(conn, card, now, deliver)         # reservation, no reminder, no «На ОТХ»; the point's own sale neither
                 _no_answer_step(conn, orders.get_card(conn, card_id), now, notify)
         except Exception:
             conn.rollback()
@@ -804,7 +867,7 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the day of the return was not told")
-    _silent_moves(conn, now, notify)
+    _silent_moves(conn, now, notify, deliver)
     try:
         order_oth.ask_seventh_day(conn, now, notify)          # any hour: the moves and the tasks on time, their alerts in the alert hours (2026-11-05)
     except Exception:
