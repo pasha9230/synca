@@ -137,17 +137,19 @@ def test_a_refused_confirmation_leaves_the_line_waiting(tmp_path):
     assert mgr.get_message(conn, item["id"])["status"] == "new" and orders.get_card(conn, card)["stage"]["code"] == "moving"
 
 
-def test_no_chat_missing_point_data_or_a_failed_send_is_red_and_waits_in_the_inbox(tmp_path):
+def test_no_chat_is_quiet_missing_point_data_or_a_failed_send_is_red_and_waits_in_the_inbox(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path, (400, {"error": "forbidden"}))
     bare = _card(conn, pid, webmim="600200")                                                     # no Avito chat
     hook(app, conn, "приехал 600200", event="n1")
     assert orders.get_card(conn, bare)["stage"]["code"] == "at_point" and to_client(app) == []
-    assert "нет чата Авито" in mgr.list_inbox(conn)[0]["text"] and "не отправлено" in to_points(app)[-1][1].lower()
-    assert [e["level"] for e in orders.list_events(conn, bare) if e["kind"] == "chat"] == ["red"]
+    assert mgr.list_inbox(conn) == [] and "не отправлено" in to_points(app)[-1][1].lower()      # the owner 2026-11-12: no red record,
+    assert [e["level"] for e in orders.list_events(conn, bare) if e["kind"] == "chat"] == []      # no line: «Позвонить…» (order_call)
     hook(app, conn, "приехал 5000100", event="n2")                                               # Avito refuses
     assert orders.get_card(conn, card)["stage"]["code"] == "at_point"
     assert "сбой отправки" in mgr.list_inbox(conn)[0]["text"] and "red" in [e["level"] for e in orders.list_events(conn, card)]
     plain = _card(conn, points.save_point(conn, dict(name="Альфа", channel="vk", vk_peer_id="888")), webmim="600300")
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (plain,))   # typed, none bound: not «без чата»
+    conn.commit()
     hook(app, conn, "приехал 600300", event="n3", sender="888")                                  # the point has no address, hours, map
     assert "не хватает" in mgr.list_inbox(conn)[0]["text"] and len(to_client(app)) == 1                 # only the refused try of 5000100
 

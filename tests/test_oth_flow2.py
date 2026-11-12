@@ -276,8 +276,10 @@ def _on_oth_page(tmp_path, responsible="ivan"):
     app, client, tok, conn, pid, card = ready(tmp_path)
     staff(conn)
     started(conn)
-    cid = _card(conn, pid, webmim="700200", code="at_point")
+    cid = _card(conn, pid, webmim="700200")
     conn.execute("UPDATE order_card SET responsible = ?, avito_chat = ? WHERE id = ?", (responsible, CHAT_FIELD, cid))   # with a chat: no «Позвонить…»
+    conn.commit()
+    orders.move_card(conn, cid, _stage(conn, "at_point"), ENTERED, "o")
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
     return app, client, tok, conn, cid
 
