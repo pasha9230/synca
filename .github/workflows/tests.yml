@@ -9,18 +9,56 @@ on:
 permissions:
   contents: read
 
-# Тесты идут на машинах GitHub (ubuntu-latest): Python 3.12 как на сервере, pip install -e ".[dev]", pytest -n auto.
-# Задача одна и называется pytest, поэтому проверка остаётся «tests / pytest» (её ждут tires-pull и защита master).
+# Тесты идут на машинах GitHub (ubuntu-latest): Python 3.12 как на сервере, pip install -e ".[dev]".
+# Решение владельца 2026-11-13: тесты делятся на 4 части по файлам (.github/split_tests.py, веса по времени в
+# .github/test-durations.json), каждая часть на своей машине с -n auto. Задача split проверяет, что каждый
+# собранный тест попал ровно в одну часть. Итоговая задача называется pytest и зелёная, только если зелёные
+# split и все 4 части, поэтому проверка остаётся «pytest» при push ветки и «tests / pytest» из deploy.yml
+# (их ждут tires-pull и защита master). Имя итоговой задачи не менять.
 # Частных документов владельца (Apps Script) и схем поставщика в публичной копии нет: их тесты пропускаются.
 # Подробнее: deploy/AUTODEPLOY.md, раздел «Тесты перед выкладкой».
+# Без concurrency: одна группа держит в очереди только один ожидающий прогон и отменяет более старый,
+# а это мог бы быть прогон master из deploy.yml; на ubuntu-latest прогоны идут параллельно, это безопасно.
 
 jobs:
-  pytest:
-    name: pytest
+  split:
+    name: split check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Без concurrency: одна группа держит в очереди только один ожидающий прогон и отменяет более старый,
-    # а это мог бы быть прогон master из deploy.yml; на ubuntu-latest прогоны идут параллельно, это безопасно.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: install (pyproject, [dev])
+        run: python -m pip install -e ".[dev]"
+      - name: every collected test is in exactly one part
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/split"; mkdir -p "$d"
+          python .github/split_tests.py plan 4
+          python -m pytest tests --collect-only -q -p no:cacheprovider | grep '::' | sort > "$d/all"
+          for k in 1 2 3 4; do
+            mapfile -t files < <(python .github/split_tests.py list "$k" 4)
+            [ "${#files[@]}" -gt 0 ] || { echo "часть $k пустая"; exit 1; }
+            python -m pytest "${files[@]}" --collect-only -q -p no:cacheprovider | grep '::' > "$d/part$k"
+            echo "часть $k: $(wc -l < "$d/part$k") тестов, файлов ${#files[@]}"
+          done
+          cat "$d"/part1 "$d"/part2 "$d"/part3 "$d"/part4 | sort > "$d/parts"
+          echo "всего: $(wc -l < "$d/all"), в частях: $(wc -l < "$d/parts")"
+          [ -s "$d/all" ] || { echo "не собрано ни одного теста"; exit 1; }
+          diff "$d/all" "$d/parts" > "$d/diff" || { echo "тест потерян или попал в две части:"; head -50 "$d/diff"; exit 1; }
+
+  shard:
+    name: shard ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -30,5 +68,30 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: install (pyproject, [dev])
         run: python -m pip install -e ".[dev]"
-      - name: full run (-n auto)
-        run: python -m pytest tests -q --tb=short -n auto
+      - name: part ${{ matrix.shard }} of 4 (-n auto)
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(python .github/split_tests.py list "$SHARD" 4)
+          echo "файлов: ${#files[@]}"
+          python -m pytest "${files[@]}" -q --tb=short -n auto -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/junit.xml"
+      - name: time by file (for .github/test-durations.json)
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/junit.xml" ] && python .github/split_tests.py weights "$RUNNER_TEMP/junit.xml" || true
+
+  pytest:
+    name: pytest
+    needs: [split, shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: split and all 4 parts are green
+        env:
+          SPLIT: ${{ needs.split.result }}
+          SHARDS: ${{ needs.shard.result }}
+        run: |
+          echo "split: $SPLIT, части: $SHARDS"
+          [ "$SPLIT" = success ] && [ "$SHARDS" = success ]
