@@ -16,7 +16,7 @@ from test_point_new_view import flag, w  # noqa: F401  (the fixture)
 from test_reserve_date import Notify, said, tick, told, until
 from test_reserve_noon import DAY, NEXT, code, read_chats
 from test_vk_commands import ready as panel_ready
-from tires_sync import order_points as points, order_reserve as reserve, orders, store, vk_send
+from tires_sync import message_texts as mt, order_points as points, order_reserve as reserve, orders, store, vk_send
 from tires_sync.cli import main
 from tires_sync.panel import MOSCOW_AUDIT
 
@@ -104,7 +104,8 @@ def test_two_outcomes_in_one_message_do_nothing_and_the_wait_goes_on(tmp_path):
     said(conn, chat, DAY + "T13:00:00", "Купил бы, но продлите")             # «купил» and «продлите»: none inside the other (owner 2026-11-12)
     run(conn, DAY + "T13:07:00", deliver, notify)
     assert code(conn, cid) == "at_point" and until(conn, cid) == DAY and tasks_of(conn, cid) == [] and alerts(notify) == []
-    assert not events(conn, cid, "ответил на напоминание")
+    assert [e for e in events(conn, cid, "ответил на напоминание") if "[резерв:уточнение:" not in e["text"]] == []
+    assert [t for _c, t, token in deliver.sent if token.startswith("reserve-clarify-")] == [mt.BY_KEY[mt.RESERVE_CLARIFY]["default"]]   # 2026-11-12: one question
     run(conn, END, deliver, notify)
     assert code(conn, cid) == "oth"
 
