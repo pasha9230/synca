@@ -3057,21 +3057,34 @@ def _cmd_avito_stats(args) -> int:
 
 
 def _collect_ads_spend(conn, client, account, today, daily: bool, days_limit: int = ads_spend.DAYS_PER_RUN) -> bool:
-    """«Аналитика рекламы»: the spending of the days due and, daily, the prices of a view (read only). A failure is printed (Avito's ones are
+    """«Аналитика рекламы»: the spending of the days due and the prices of a view due (read only). A failure is printed (Avito's ones are
     kept for the page too); it never fails the statistics run (a new collection must not alert every night until its answers are known)."""
     try:
         result = ads_spend.collect(conn, client, account["id"], today, datetime.utcnow(), ads_spend.Pacer(time.monotonic, time.sleep),
-                                   daily=daily, days_limit=days_limit)
+                                   daily=daily, days_limit=days_limit, bids=True)
     except Exception as err:            # noqa: BLE001 — the answers are not seen live yet: an odd one never stops the statistics run
         conn.rollback()
         print("аккаунт «%s»: расходы на рекламу не собраны (%s: %s)" % (account["name"], type(err).__name__, err), file=sys.stderr)
         return False
     for note in result["notes"]:
-        print("  форма ответа Авито %s" % note, file=sys.stderr)
-    if result["days"] or result["bids"]:
-        print("аккаунт «%s»: расходы на рекламу за дней %d (строк %d, не из списка объявлений %d), цен просмотра %d" % (
-            account["name"], result["days"], result["rows"], result["unknown"], result["bids"]))
+        print("  %s" % note if note.startswith("отказ Авито") else "  форма ответа Авито %s" % note, file=sys.stderr)
+    if result["days"] or result["bids"] or result.get("bid_fails"):
+        print(ads_spend_line(account["name"], result))
     return True
+
+
+def ads_spend_line(name: str, result: dict) -> str:
+    """The line of the service log about one account: the days read and what is odd in them, the prices of a view read and refused."""
+    get = result.get
+    line = "аккаунт «%s»: расходы на рекламу за дней %d" % (name, result["days"])
+    if result["days"]:
+        line += " (%s…%s, из них без строк %d; строк %d, не из списка объявлений %d" % (
+            get("first_day", ""), get("last_day", ""), get("empty_days", 0), result["rows"], result["unknown"])
+        if get("unknown_ids") or get("removed_ids"):
+            line += ": объявлений нет в списке %d, например %s; в списке, но сняты %d" % (
+                get("unknown_ids", 0), ", ".join(str(i) for i in get("unknown_sample", [])) or "—", get("removed_ids", 0))
+        line += ")"
+    return line + ", цен просмотра %d (отказов %d, осталось в очереди %d)" % (result["bids"], get("bid_fails", 0), get("bid_left", 0))
 
 
 def _cmd_ads_spend_collect(args) -> int:

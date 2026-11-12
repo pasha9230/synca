@@ -34,12 +34,14 @@
 <td class="num">{% if r.pieces %}{{ r.revenue|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
 <td class="num">{% if r.pieces %}{{ r.margin|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
 <td class="num">{{ share(r.drr) }}</td><td class="num">{{ share(r.drr_margin) }}</td>
-<td>{% if r.bid %}<div>{% if r.bid.mode == "manual" %}своя {{ rub2(r.bid.bid) }}{% if r.bid.day_limit %}, лимит {{ r.bid.day_limit|money }}/день{% endif %}{% elif r.bid.mode == "auto" %}авто{% else %}{% if r.bid.bid is not none %}{{ rub2(r.bid.bid) }}{% else %}не продвигается{% endif %}{% endif %}</div>
+<td>{% if r.bid %}<div>{% if r.bid.mode == "auto" %}авто{% elif r.bid.bid is not none %}{% if r.bid.mode == "manual" %}своя {% endif %}{{ rub2(r.bid.bid) }}{% else %}цена просмотра не задана{% endif %}</div>
+{% if r.bid.day_limit %}<div class="xs">лимит {{ r.bid.day_limit|money }} в день</div>{% endif %}
 {% if r.bid.rec_bid %}<div class="xs">рекомендуемая {{ rub2(r.bid.rec_bid) }}</div>{% endif %}
 {% if r.bid.min_bid or r.bid.max_bid %}<div class="xs muted">от {{ rub2(r.bid.min_bid) }} до {{ rub2(r.bid.max_bid) }}</div>{% endif %}
-{% for o in r.bid.options %}<div class="xs muted">{{ rub2(o.bid) }}{% for k, v in o.info.items() %} · {{ k }}: {{ v }}{% endfor %}</div>{% endfor %}
-<div class="xs muted"><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · {{ r.bid.taken_at|dt_utc }}</div>
-{% else %}<span class="muted">—</span>{% endif %}</td>
+{% for o in r.bid.options %}<div class="xs muted">вариант {{ rub2(o.bid) }}{% for k, v in o.info.items() %} · {{ k }}: {{ v }}{% endfor %}</div>{% endfor %}
+<div class="xs muted"><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · прочитано {{ r.bid.taken_at|dt_utc }}</div>
+{% if r.bid_fail %}<div class="xs muted">последнее чтение не удалось ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}</div>{% endif %}
+{% else %}<span class="muted">не прочитано</span><div class="xs muted">{% if r.bid_fail %}Авито отказал ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}{% else %}{{ r.bid_why }}{% endif %}</div>{% endif %}</td>
 <td class="num">{% if r.per_day is not none %}{{ r.per_day|money }}{% else %}—{% endif %}{% if r.bid and r.bid.rec_per_day %}<div class="xs muted">по рекомендуемой ≈ {{ r.bid.rec_per_day|money }}</div>{% endif %}</td>
 </tr>{% endfor %}</tbody></table></div>
 {% if acc.count > acc.rows|length %}<p class="small muted" style="padding:0 var(--s-5)">Показаны первые {{ acc.rows|length }} из {{ acc.count }}.</p>{% endif %}
@@ -53,6 +55,6 @@
 <div class="tile"><span class="tile-label">Продаж</span><span class="tile-value">{{ data.none.count }}</span><span class="tile-sub">{{ data.none.pieces }} шт.</span></div>
 <div class="tile"><span class="tile-label">Выручка</span><span class="tile-value">{{ data.none.revenue|money }}</span><span class="tile-sub">маржа {{ data.none.margin|money }}</span></div>
 </div>
-<div class="card-foot"><p class="small muted">Как читать: «Расходы» — всё, что Авито взяло за объявление: размещение и продвижение. «Цена просмотра (факт)» — расходы, делённые на просмотры. «В день» — расходы за период, делённые на загруженные дни; «по рекомендуемой» — сколько стоили бы те же просмотры по рекомендованной цене. ДРР — расходы в процентах от выручки или маржи продаж объявления; прочерк — продаж или маржи нет. Цены просмотра читаются раз в сутки для объявлений с продвижением за последние 30 дней.</p></div>
+<div class="card-foot"><p class="small muted">Как читать: «Расходы» — всё, что Авито взяло за объявление: размещение и продвижение. «Цена просмотра (факт)» — расходы, делённые на просмотры. «В день» — расходы за период, делённые на загруженные дни; «по рекомендуемой» — сколько стоили бы те же просмотры по рекомендованной цене. ДРР — расходы в процентах от выручки или маржи продаж объявления; прочерк — продаж или маржи нет. «Цена просмотра на Авито» читается не чаще раза в сутки у объявлений, за которые Авито брал деньги в последние 30 дней: за запуск сбора — часть объявлений, по очереди. «Не прочитано» — цены ещё нет, рядом причина.</p></div>
 </section>
 {% endblock %}

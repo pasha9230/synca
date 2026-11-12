@@ -4,7 +4,9 @@ the current price of a view and the options Avito offers. Nothing here writes to
 
 Collection: stats v2 «itemAnalytics» grouped by ad, one request for one day (the table keeps days: 7 / 30 / 90 are sums of days), at most one
 request a minute; the first runs fill the last HISTORY_DAYS days DAYS_PER_RUN at a time, newest first, then «yesterday» and the day before
-(Avito corrects the recent days). The prices of a view (cpxpromo) once a day for the ads promoted in the last 30 days.
+(Avito corrects the recent days). The prices of a view (cpxpromo): of the ads Avito took money for in the last BID_DAYS days (whatever
+Avito calls the money: the pay per view of tyres comes as «presence») and of those read before, BIDS_PER_RUN a run, the longest unread
+first, each at most once in BID_FRESH_HOURS; an ad Avito refuses keeps the refusal (the state `ads_bid_fail:<account>`) for the page.
 The shapes of Avito's answers have not been seen live: they are read leniently, and the first answer of each method is kept (its keys,
 never its values) in the state `ads_spend_shape:<method>` and printed by the command."""
 from __future__ import annotations
@@ -23,10 +25,12 @@ DAYS_PER_RUN = 10           # days of the backfill in one run (a minute each): t
 REFRESH_DAYS = 2            # the daily run reads yesterday and the day before again
 STATS_PAUSE = 61.0          # itemAnalytics: one request a minute per method (Avito)
 PROMO_CHUNK = 200           # getPromotionsByItemIds: ads per request
-PROMO_PAUSE = 6.0           # its limit is not written: ten a minute, to be safe
-BIDS_PAUSE = 3.1            # getBids: 20 a minute
-BIDS_PER_RUN = 60
-BID_DAYS = 30               # the ads promoted within these days get their prices of a view read
+CPX_PAUSE = 4.0             # cpxpromo, both methods together: 15 a minute against Avito's 20 (the client's repeats fit in the rest)
+BIDS_PER_RUN = 60           # ads a run: 4 minutes of an account; the runs every 2 hours pass 720 ads a day
+BID_DAYS = 30               # the ads with spending within these days get their prices of a view read
+BID_FRESH_HOURS = 20        # an ad read (or refused) within these hours is not asked again: once a day each
+FAILS_MAX = 2000            # refusals kept per account
+SAMPLE = 3                  # ids of an example in the log line
 RATE_PAUSE = 600            # seconds without requests of the account after Avito answered 429 through all the repeats
 PERIODS = (7, 30, 90)
 ROWS_MAX = 300              # rows of one account on the page
@@ -206,26 +210,41 @@ def _read_day(conn, client, user_id, day: str, pacer: Pacer, notes: List[str]) -
         data = client.item_analytics(user_id, day, day, list(METRICS), limit=PAGE, offset=offset)
         _note_shape(conn, "itemAnalytics", data, notes)
         page = parse_spend(data)
+        entries = _list_in(data, "groupings", "items")
+        if not page:                                         # nothing to take: what such an answer looks like, once (an empty day or another shape)
+            _note_shape(conn, "itemAnalytics (пустой ответ)" if not entries else "itemAnalytics (строки без id)", data, notes)
         rows += page
-        if len(_list_in(data, "groupings", "items")) < PAGE:
+        if len(entries) < PAGE:
             return rows
         offset += PAGE
 
 
+def _ad_lists(conn, account_id: int) -> Tuple[set, set]:
+    """The ads of the account's list (avito_ad: filled from Avito's active ads only, a row is never deleted) and those of them Avito
+    showed at the last reading of the list; the rest of the list are removed ads."""
+    rows = conn.execute("SELECT avito_id, seen_at FROM avito_ad WHERE account_id = ?", (account_id,)).fetchall()
+    last = max((r[1] or "" for r in rows), default="")
+    return {r[0] for r in rows}, {r[0] for r in rows if (r[1] or "") == last}
+
+
 def collect(conn, client, account_id: int, today: date, now: datetime, pacer: Pacer, daily: bool = True,
-            days_limit: int = DAYS_PER_RUN) -> dict:
-    """Read the spending of the days due (days_to_read) and, on the daily run, the prices of a view. Each day is kept as soon as it is
-    read (a failure later keeps it). Raises AvitoError / OSError; after a 429 that outlived the repeats the account rests RATE_PAUSE.
-    The result: days, rows, unknown (ads of the answers the list of the account does not know: a sign that the ids are not the ads'),
-    bids, notes (the shapes of the first answers)."""
+            days_limit: int = DAYS_PER_RUN, bids: Optional[bool] = None) -> dict:
+    """Read the spending of the days due (days_to_read) and the prices of a view (`bids`; by default on the daily run). Each day is kept
+    as soon as it is read (a failure later keeps it). Raises AvitoError / OSError; after a 429 that outlived the repeats the account
+    rests RATE_PAUSE.
+    The result: days, rows, first_day / last_day, empty_days (answers without a row), unknown (rows of ads the list of the account does
+    not hold), unknown_ids (such ads), unknown_sample (some of them), removed_ids (ads of the list Avito no longer shows as active),
+    bids, bid_fails, bid_left (due, beyond this run), notes (the shapes of the answers and the refusals)."""
     from .avito import AvitoError, RateLimited
     stamp = now.isoformat(timespec="seconds")
     until = store.get_state(conn, _pause_key(account_id))
     if until and until > stamp:
         raise RateLimited(429, None, "пауза после ответа 429 до %s" % until[11:16])
     notes: List[str] = []
-    result = {"days": 0, "rows": 0, "unknown": 0, "bids": 0, "notes": notes}
-    known = {row[0] for row in conn.execute("SELECT avito_id FROM avito_ad WHERE account_id = ?", (account_id,))}
+    result = {"days": 0, "rows": 0, "unknown": 0, "bids": 0, "notes": notes, "first_day": "", "last_day": "", "empty_days": 0,
+              "unknown_ids": 0, "unknown_sample": [], "removed_ids": 0, "bid_fails": 0, "bid_left": 0}
+    known, active = _ad_lists(conn, account_id)
+    strangers, removed = set(), set()
     try:
         user_id = connections.cabinet_user_id(conn, client, account_id)
         for day in days_to_read(conn, account_id, today, daily, days_limit):
@@ -240,8 +259,15 @@ def collect(conn, client, account_id: int, today: date, now: datetime, pacer: Pa
             result["days"] += 1
             result["rows"] += len(rows)
             result["unknown"] += sum(1 for r in rows if r["avito_id"] not in known)
-        if daily:
-            result["bids"] = collect_bids(conn, client, account_id, today, stamp, pacer, notes)
+            result["empty_days"] += not rows
+            result["first_day"] = min(result["first_day"] or day, day)
+            result["last_day"] = max(result["last_day"], day)
+            strangers.update(r["avito_id"] for r in rows if r["avito_id"] not in known)
+            removed.update(r["avito_id"] for r in rows if r["avito_id"] in known and r["avito_id"] not in active)
+            result.update(unknown_ids=len(strangers), unknown_sample=sorted(strangers)[:SAMPLE], removed_ids=len(removed))
+        if daily if bids is None else bids:
+            got = collect_bids(conn, client, account_id, today, stamp, pacer, notes)
+            result.update(bids=got["taken"], bid_fails=got["failed"], bid_left=got["left"])
         conn.execute("DELETE FROM ad_spend_day WHERE account_id = ? AND day < ?", (account_id, (today - timedelta(days=KEEP_DAYS)).isoformat()))
         conn.commit()
     except RateLimited:
@@ -257,43 +283,113 @@ def collect(conn, client, account_id: int, today: date, now: datetime, pacer: Pa
     return result
 
 
-def collect_bids(conn, client, account_id: int, today: date, stamp: str, pacer: Pacer, notes: List[str]) -> int:
-    """The promotion and the prices of a view of the ads promoted within BID_DAYS (most spent first) and those read before, at most
-    BIDS_PER_RUN. An ad Avito refuses (it cannot be promoted) is left as it was; a 429 stops the account (the caller)."""
-    from .avito import AvitoError, RateLimited
+def fail_key(account_id: int) -> str:
+    return "ads_bid_fail:%d" % account_id
+
+
+def bid_fails(conn, account_id: int) -> Dict[int, dict]:
+    """avito_id → {at, why} of the ads whose price of a view Avito refused at the last try (gone at the next good reading)."""
+    try:
+        raw = json.loads(store.get_state(conn, fail_key(account_id)) or "{}")
+    except ValueError:
+        return {}
+    out = {}
+    for key, value in raw.items() if isinstance(raw, dict) else []:
+        if isinstance(value, dict) and str(key).isdigit():
+            out[int(key)] = {"at": str(value.get("at") or ""), "why": str(value.get("why") or "")}
+    return out
+
+
+def refusal(err) -> Tuple[str, str]:
+    """Avito's refusal for the page and for the log: (the status, the code and Avito's words; the same with the keys of the answer's
+    body, never its values). The request and its token are not in an AvitoError."""
+    why = "ответ %s" % err.status + (", код %s" % err.code if err.code is not None else "")
+    words = " ".join(str(err.message or "").split())[:160]
+    if words and words != "HTTP %s" % err.status:
+        why += ": %s" % words
+    try:
+        fields = shape(json.loads(err.body)) if err.body else ""
+    except ValueError:
+        fields = "не JSON"
+    return why, why + (" (поля %s)" % fields[:300] if fields else "")
+
+
+def bid_queue(conn, account_id: int, today: date, stamp: str, fails: Dict[int, dict]) -> List[int]:
+    """The ads whose price of a view is due, in the order of reading: those with spending within BID_DAYS (most spent first), then the
+    rest of those read before; of them the never tried first, then the longest untried (a refusal is a try: a refused ad does not hold
+    the head of the queue). Tried within BID_FRESH_HOURS: not due."""
     since = (today - timedelta(days=BID_DAYS)).isoformat()
     ids = [row[0] for row in conn.execute(
-        "SELECT avito_id FROM ad_spend_day WHERE account_id = ? AND avito_id <> ? AND day >= ? GROUP BY avito_id HAVING SUM(promo) > 0 "
-        "ORDER BY SUM(promo) DESC", (account_id, MARK, since))]
+        "SELECT avito_id FROM ad_spend_day WHERE account_id = ? AND avito_id <> ? AND day >= ? GROUP BY avito_id HAVING SUM(spend) > 0 "
+        "ORDER BY SUM(spend) DESC, avito_id", (account_id, MARK, since))]
+    tried = {row[0]: row[1] or "" for row in conn.execute("SELECT avito_id, taken_at FROM ad_bid WHERE account_id = ?", (account_id,))}
     seen = set(ids)
-    ids += [row[0] for row in conn.execute("SELECT avito_id FROM ad_bid WHERE account_id = ? ORDER BY taken_at", (account_id,)) if row[0] not in seen]
-    ids = ids[:BIDS_PER_RUN]
-    promotions: Dict[int, dict] = {}
-    for start in range(0, len(ids), PROMO_CHUNK):
-        pacer.wait("promotions", PROMO_PAUSE)
-        data = client.promotions_by_items(ids[start:start + PROMO_CHUNK])
-        _note_shape(conn, "getPromotionsByItemIds", data, notes)
-        promotions.update(parse_promotions(data))
-    taken = 0
-    for avito_id in ids:
-        pacer.wait("bids", BIDS_PAUSE)
-        try:
-            data = client.item_bids(avito_id)
-        except RateLimited:
-            raise
-        except AvitoError:
-            continue
-        _note_shape(conn, "getBids", data, notes)
-        bids = parse_bids(data)
-        promo = promotions.get(avito_id, {})
-        conn.execute(
-            "INSERT OR REPLACE INTO ad_bid (account_id, avito_id, taken_at, mode, bid, day_limit, rec_bid, min_bid, max_bid, options) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (account_id, avito_id, stamp, promo.get("mode", ""), promo.get("bid") if promo.get("bid") is not None else bids["bid"],
-             promo.get("day_limit"), bids["rec_bid"], bids["min_bid"], bids["max_bid"], json.dumps(bids["options"], ensure_ascii=False)))
-        conn.commit()
-        taken += 1
-    return taken
+    ids += sorted(k for k in tried if k not in seen)
+    for avito_id, fail in fails.items():
+        tried[avito_id] = max(tried.get(avito_id, ""), fail["at"])
+    fresh = (datetime.fromisoformat(stamp) - timedelta(hours=BID_FRESH_HOURS)).isoformat(timespec="seconds")
+    due = [k for k in ids if tried.get(k, "") <= fresh]
+    return sorted(due, key=lambda k: tried.get(k, ""))                     # stable: equal tries stay in the order of the spending
+
+
+def collect_bids(conn, client, account_id: int, today: date, stamp: str, pacer: Pacer, notes: List[str]) -> dict:
+    """The promotion and the prices of a view of the first BIDS_PER_RUN ads of bid_queue: reads only. An ad Avito refuses keeps what was
+    read before and the refusal (bid_fails); a refused getPromotionsByItemIds leaves the mode and the daily limit as they were; each
+    kind of refusal is noted once a run. A 429 stops the account (the caller): what is read by then is kept.
+    The result: taken, failed, left (due ads beyond this run)."""
+    from .avito import AvitoError, RateLimited
+    fails = bid_fails(conn, account_id)
+    queue = bid_queue(conn, account_id, today, stamp, fails)
+    ids = queue[:BIDS_PER_RUN]
+    refused: Dict[str, int] = {}
+    promotions: Optional[Dict[int, dict]] = {}
+    taken = failed = 0
+    try:
+        for start in range(0, len(ids), PROMO_CHUNK):
+            pacer.wait("cpxpromo", CPX_PAUSE)
+            try:
+                data = client.promotions_by_items(ids[start:start + PROMO_CHUNK])
+            except RateLimited:
+                raise
+            except AvitoError as err:
+                refused["getPromotionsByItemIds: " + refusal(err)[1]] = 1
+                promotions = None
+                break
+            _note_shape(conn, "getPromotionsByItemIds", data, notes)
+            promotions.update(parse_promotions(data))
+        for avito_id in ids:
+            pacer.wait("cpxpromo", CPX_PAUSE)
+            try:
+                data = client.item_bids(avito_id)
+            except RateLimited:
+                raise
+            except AvitoError as err:
+                why, logged = refusal(err)
+                fails[avito_id] = {"at": stamp, "why": why}
+                refused["getBids: " + logged] = refused.get("getBids: " + logged, 0) + 1
+                failed += 1
+                continue
+            _note_shape(conn, "getBids", data, notes)
+            bids = parse_bids(data)
+            if promotions is None:                                          # the promotion was not read: the mode and the limit of the last reading
+                old = conn.execute("SELECT mode, bid, day_limit FROM ad_bid WHERE account_id = ? AND avito_id = ?", (account_id, avito_id)).fetchone()
+                promo = {"mode": old[0], "bid": None, "day_limit": old[2]} if old else {}
+            else:
+                promo = promotions.get(avito_id, {})
+            conn.execute(
+                "INSERT OR REPLACE INTO ad_bid (account_id, avito_id, taken_at, mode, bid, day_limit, rec_bid, min_bid, max_bid, options) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (account_id, avito_id, stamp, promo.get("mode", ""), promo.get("bid") if promo.get("bid") is not None else bids["bid"],
+                 promo.get("day_limit"), bids["rec_bid"], bids["min_bid"], bids["max_bid"], json.dumps(bids["options"], ensure_ascii=False)))
+            conn.commit()
+            fails.pop(avito_id, None)
+            taken += 1
+    finally:
+        notes += ["отказ Авито %s%s" % (text, " ×%d" % count if count > 1 else "") for text, count in refused.items()]
+        old = (datetime.fromisoformat(stamp) - timedelta(days=BID_DAYS)).isoformat(timespec="seconds")      # an ad long out of the queue
+        fails = dict(sorted(((k, v) for k, v in fails.items() if v["at"] >= old), key=lambda kv: kv[1]["at"])[-FAILS_MAX:])
+        store.set_state(conn, fail_key(account_id), json.dumps({str(k): v for k, v in fails.items()}, ensure_ascii=False))
+    return {"taken": taken, "failed": failed, "left": len(queue) - len(ids)}
 
 
 # ---- the report ----------------------------------------------------------------------------------------------------------------------
@@ -346,7 +442,7 @@ def _row(avito_id, title, ad_id, spend: dict, sold: dict, bid: Optional[dict], c
            "promo": round(spend.get("promo", 0.0), 2), "views": views, "contacts": spend.get("contacts", 0),
            "view_cost": round(total / views, 2) if views else None, "pieces": sold.get("pieces", 0), "revenue": revenue, "margin": margin,
            "drr": drr(total, revenue), "drr_margin": drr(total, margin),
-           "per_day": round(total / covered, 2) if covered else None, "bid": None}
+           "per_day": round(total / covered, 2) if covered else None, "bid": None, "bid_fail": None, "bid_why": ""}
     if bid:
         try:
             options = json.loads(bid["options"] or "[]")
@@ -395,13 +491,23 @@ def report(conn, today: date, days: int, sort: str = "spend") -> dict:
         ads = {row[0]: (row[1], row[2]) for row in conn.execute("SELECT avito_id, title, ad_id FROM avito_ad WHERE account_id = ?", (aid,))}
         cols = ("avito_id", "taken_at", "mode", "bid", "day_limit", "rec_bid", "min_bid", "max_bid", "options")
         bids = {row[0]: dict(zip(cols, row)) for row in conn.execute("SELECT %s FROM ad_bid WHERE account_id = ?" % ", ".join(cols), (aid,))}
+        fails = bid_fails(conn, aid)
+        error = store.get_state(conn, error_key(aid)) or ""
+        queued = {row[0] for row in conn.execute(
+            "SELECT avito_id FROM ad_spend_day WHERE account_id = ? AND avito_id <> ? AND day >= ? GROUP BY avito_id HAVING SUM(spend) > 0",
+            (aid, MARK, (today - timedelta(days=BID_DAYS)).isoformat()))}
         keys = set(spend) | {k[1] for k in sold if k[0] == aid}
         rows = [_row(k, ads.get(k, ("", ""))[0], ads.get(k, ("", ""))[1], spend.get(k, {}), sold.get((aid, k), {}), bids.get(k), covered)
                 for k in keys]
         rows = [r for r in rows if r["spend"] or r["views"] or r["pieces"]]
+        for r in rows:                                                      # why there is no price of a view, or why it is an old one
+            r["bid_fail"] = fails.get(r["avito_id"])
+            if r["bid"] is None and r["bid_fail"] is None:
+                r["bid_why"] = ("нет расходов за последние %d дн., цена не запрашивается" % BID_DAYS if r["avito_id"] not in queued
+                                else "последний сбор не удался (причина над таблицей)" if error else "очередь ещё не дошла")
         rows = _sort(rows, sort)
         accounts.append({"id": aid, "name": account["name"], "covered": covered, "rows": rows[:ROWS_MAX], "count": len(rows),
-                         "total": _total(rows), "error": store.get_state(conn, error_key(aid)) or ""})
+                         "total": _total(rows), "error": error})
     for (aid, _), bucket in sold.items():                                   # a sale through an account without a feed: not on the page
         if aid not in shown:
             for k in ("pieces", "revenue", "margin", "count"):
