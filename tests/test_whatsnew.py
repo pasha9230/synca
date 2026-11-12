@@ -185,12 +185,23 @@ def test_the_fifth_update_is_shipped_and_every_role_has_its_items():
     assert roles["Аналитика рекламы: новый раздел"] == {"owner", "partner"}
     for item in fifth["items"]:
         text = item["title"] + " " + str(item["body"])
-        assert not re.search(r"\bметк", text, re.IGNORECASE), item["title"]     # the owner's words: a stage has «статусы», not «метки»
         if "point" in item["roles"]:
             assert not re.search(r"webmim|\bmim\b|мим\b|закуп|прибыл", text, re.IGNORECASE), item["title"]
     # the final state only: «Продать» of a point is of the tab «На ОТХ» alone (2026-11-12 over 2026-11-10)
     sell = str(next(i["body"] for i in fifth["items"] if i["title"] == "Рабочее место: «Продать» шины с ОТХ"))
     assert "только во вкладке «На ОТХ»" in sell
+
+
+BADGE = re.compile(r"\bметк\w* «1 Акт на несколько заказов»", re.IGNORECASE)      # a badge on the card is a «метка», not a status
+
+
+def test_no_item_since_the_fifth_update_calls_a_status_a_mark():
+    """The owner's words (2026-11-12): a stage has «статусы», not «метки» — in every item of №5 and after; the one «метка» left is the
+    badge on the card «1 Акт на несколько заказов» (№6)."""
+    for number, item in shipped_items():
+        if number >= 5:
+            text = BADGE.sub("", item["title"] + " " + str(item["body"]))
+            assert not re.search(r"\bметк", text, re.IGNORECASE), (number, item["title"])
 
 
 def test_the_point_sees_only_its_items_of_the_fifth_update(tmp_path):
