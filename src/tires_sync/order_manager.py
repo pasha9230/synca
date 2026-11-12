@@ -1371,8 +1371,9 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
     if not fits:
         raise OrderError("Команда «%s» не подходит к заказу №%s на этапе «%s»: переведите заказ вручную и ответьте точке."
                          % (word, label(card), card["stage"]["name"]))
-    claimed = conn.execute("UPDATE order_command_log SET outcome = 'подтверждается' WHERE message_id = ? AND outcome LIKE ?",
-                           (item["message_id"], DISPUTE + "%"))
+    claimed = conn.execute("UPDATE order_command_log SET outcome = 'подтверждается' WHERE message_id = ? AND outcome LIKE ? AND EXISTS "
+                           "(SELECT 1 FROM manager_message WHERE id = ? AND status = 'new')",       # «Закрыть без ответа» was first: nothing
+                           (item["message_id"], DISPUTE + "%", item_id))
     conn.commit()
     if claimed.rowcount != 1:
         raise OrderError("Это сообщение уже разобрано.")
@@ -1403,10 +1404,11 @@ def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[De
         conn.commit()
         raise
     reply = reply.replace("— отмечено", "— отмечено (подтвердил владелец)", 1)
-    conn.execute("UPDATE manager_message SET status = 'answered', answer = ?, answered_at = ? WHERE id = ?", (reply, now, item_id))
+    closed = conn.execute("UPDATE manager_message SET status = 'answered', answer = ?, answered_at = ? WHERE id = ? AND status = 'new'",
+                          (reply, now, item_id)).rowcount != 1     # «Закрыть без ответа» came meanwhile: the line stays closed, never revived
     conn.execute("UPDATE order_command_log SET outcome = ?, order_id = ? WHERE message_id = ?", ("подтверждено (%s): %s" % (author, outcome), card["id"], item["message_id"]))
     conn.commit()
-    return reply
+    return reply + (" Сообщение тем временем закрыли без ответа: оно осталось закрытым." if closed else "")
 
 
 def note_stuck(conn, now: str, before: str) -> int:
