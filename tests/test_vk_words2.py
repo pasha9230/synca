@@ -360,5 +360,5 @@ def test_a_line_closed_without_an_answer_is_never_revived_by_the_confirmation(tm
         return real(conn_, *a, **k)
     monkeypatch.setattr(mgr, "returned", dismissed_meanwhile)
     reply = mgr.confirm(conn, item["id"], "5259052", NOW, "owner")
-    assert _code(conn, card) == "return" and "закрыли без ответа" in reply
+    assert _code(conn, card) == "return" and "закрыли без ответа" not in reply            # the point never gets the panel's note (review 13.11)
     assert conn.execute("SELECT status, COALESCE(answer, '') FROM manager_message WHERE id = ?", (item["id"],)).fetchone() == ("ignored", "")
