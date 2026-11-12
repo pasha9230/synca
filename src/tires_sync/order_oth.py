@@ -1442,6 +1442,51 @@ def remind_handover(conn, now: str, notify) -> int:
     return told
 
 
+RETURN_DAY_AT = "09:00"                          # the owner 2026-11-12: on the day of the return the point is told «Сегодня возврат!»
+RETURN_DAY_SOUNDS = ("09", "12", "15")           # an open page of the point rings at each of these hours (a key of /my-point/feed each)
+RETURN_DAY_KEY = "oth_return_day:%d:%s"          # per point and date: told once, however many orders
+RETURN_DAY_TITLE = "Сегодня возврат!"
+RETURN_DAY_BODY = "Распечатайте акт и передайте с шинами доставке поставщика."
+RETURN_DAY_MARK = "Важное"
+RETURN_DAY_SQL = ("FROM oth_return_plan r JOIN order_card c ON c.id = r.order_id JOIN order_stage s ON s.id = c.stage_id "
+                  "WHERE r.signed_at IS NULL AND r.return_date = ? AND s.code IN (?, ?) ")
+
+
+def tell_return_day(conn, now: str) -> int:
+    """The day of the return, from 09:00 (Moscow): a point that works in the panel is told «Сегодня возврат!» once per point and date, for
+    its orders agreed for today whose act is not signed (the stages of to_return). The notice is the panel's only (the owner 2026-11-12):
+    a mark of app_state that return_day shows in the bell, on «Рабочее место» and rings by; nothing is written to VK, to a client or to the
+    journal of an order, and a point that works in VK gets nothing. A run later than 09:00 tells at once; a second run tells nobody again.
+    Returns how many points were told."""
+    from . import order_points as points
+    day = now[:10]
+    if now[11:16] < RETURN_DAY_AT:
+        return 0
+    told = 0
+    for (point_id,) in conn.execute("SELECT DISTINCT c.point_id " + RETURN_DAY_SQL + "AND c.point_id IN (SELECT id FROM point WHERE channel = ?) "
+                                    "ORDER BY c.point_id", (day,) + RETURNING + (points.PANEL,)).fetchall():
+        told += conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (RETURN_DAY_KEY % (point_id, day), now)).rowcount
+    conn.commit()
+    return told
+
+
+def return_day(conn, point_id, now: str) -> Optional[dict]:
+    """«Сегодня возврат!» of the point as it stands now, None when there is none: not told today (tell_return_day), or «Подписал акт и отдал»
+    is pressed for every order of the date. {"date", "at" (told), "ids", "orders" (the numbers the point knows), "text", "sound": the hour
+    of RETURN_DAY_SOUNDS that came last — the key of the sound changes with it, so an open page rings three times}."""
+    from . import order_manager
+    day = now[:10]
+    if point_id is None:
+        return None
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (RETURN_DAY_KEY % (int(point_id), day),)).fetchone()
+    ids = [r[0] for r in conn.execute("SELECT c.id " + RETURN_DAY_SQL + "AND c.point_id = ? ORDER BY c.id", (day,) + RETURNING + (int(point_id),))] if row else []
+    if not ids:
+        return None
+    sound = max([h for h in RETURN_DAY_SOUNDS if h <= now[11:13]] or RETURN_DAY_SOUNDS[:1])
+    return {"date": day, "at": row[0], "ids": ids, "orders": [order_manager.label(orders.get_card(conn, i)) for i in ids],
+            "text": "%s %s" % (RETURN_DAY_TITLE, RETURN_DAY_BODY), "sound": sound}
+
+
 def task_days(conn) -> int:
     """«Срок задачи на возврат», working days."""
     text = store_value(conn, TASK_DAYS_KEY)

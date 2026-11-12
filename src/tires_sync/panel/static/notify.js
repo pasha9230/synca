@@ -81,7 +81,8 @@
 
   // The question «Клиент забрал?» comes twice: as itself (question-<order>-<stay>) and as its row of the bell (alert-question-<order>-<stay>-0):
   // one key, so one sound and one notification. Its stay is in the key: the order back at the point is asked anew and rings again.
-  function keyOf(key) { var m = /^alert-(question-\d+-\d*)-\d+$/.exec(String(key)); return m ? m[1] : String(key); }
+  // «Сегодня возврат!» the same: itself (return-day-<date>-<hour>) and its row of the bell; the hour (09, 12, 15) makes it ring three times.
+  function keyOf(key) { var m = /^alert-((?:question|return-day)-\d+-\d*)-\d+$/.exec(String(key)); return m ? m[1] : String(key); }
   function once(items) {
     var had = {};
     return items.filter(function (it) { var k = keyOf(it.key); if (had[k]) return false; had[k] = true; it.key = k; return true; });

@@ -261,3 +261,5 @@ a.p2-line:hover{border-color:var(--p2-primary)}
   .p2-head-acts:has(.p2-notify-on:not([hidden])){flex-wrap:wrap}
   .p2w .p2-notify-on{font-size:13px}
 }
+.mp-act-file{height:44px;justify-self:start}   /* «Скачать акт» of a return (2026-11-12) */
+.p2-mx3 .mp-act-file,.p2-mx3 .mp-handover{grid-column:1 / -1}

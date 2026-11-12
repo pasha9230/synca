@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from flask import abort, flash, redirect, render_template, request
+from flask import Response, abort, flash, redirect, render_template, request
 
-from .. import connections, oth_manual, oth_stock, order_oth, order_sheet, orders, store
+from .. import connections, oth_manual, oth_return_act, oth_stock, order_oth, order_points, order_sheet, orders, store
 from ..settings_store import active_settings
 from .common import author, can_post, current_user, get_conn, has_right, login_required, now_iso
 
@@ -117,6 +117,15 @@ def _known(conn, goods_id: str) -> bool:
                                or conn.execute("SELECT 1 FROM oth_manual WHERE goods_id = ?", (goods_id,)).fetchone() is not None)
 
 
+def act_response(act):
+    """The act of a return as a PDF to download; 404 when there is none."""
+    if act is None:
+        abort(404)
+    return Response(act["data"], mimetype="application/pdf", headers={
+        "Content-Disposition": "attachment; filename=\"act-%s.pdf\"; filename*=UTF-8''%s" % (act["return_date"], quote(act["name"])),
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
 def _back() -> str:
     """Where a form of «На ОТХ» returns: the page with the point it was sent from (the owner 2026-11-10: the filter of the point stays until
     the person takes it off; the hidden field `point` of oth.html). A point (the role) has no filter of points: the bare page, as before."""
@@ -177,7 +186,41 @@ def register(app) -> None:
             data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
             own = [r for r in own if r["point_id"] == point]
         tab = "returned" if request.args.get("tab") == "returned" else "stock"     # two tabs (the owner 2026-11-08)
-        return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, tab=tab, **data)
+        from .routes_orders import local_now
+        return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, tab=tab,
+                               acts=oth_return_act.listed(conn), act_points=[p for p in order_points.list_points(conn) if p["id"] not in test],
+                               act_day=order_oth.return_date(local_now().date()), **data)
+
+    @app.route("/oth/return-act", methods=["POST"])
+    @login_required
+    def oth_return_act_upload():
+        """The act of a return (PDF) for a point and a date of the return (the owner 2026-11-12); the file of the same pair is replaced."""
+        from .routes_orders import local_iso                              # Moscow time: the journal (panel.MOSCOW_AUDIT)
+        upload = request.files.get("file")
+        data = upload.read(oth_return_act.ACT_MAX + 1) if upload else b""
+        try:
+            _act, replaced = oth_return_act.save(get_conn(), request.form.get("point"), request.form.get("return_date"),
+                                                 upload.filename if upload else "", data, local_iso(), author())
+            flash("Акт возврата заменён." if replaced else "Акт возврата прикреплён: точка увидит кнопку «Скачать акт».")
+        except oth_return_act.ActError as err:
+            flash(str(err))
+        return redirect(_back() + "#return-acts")
+
+    @app.route("/oth/return-act/<int:act_id>/delete", methods=["POST"])
+    @login_required
+    def oth_return_act_delete(act_id):
+        from .routes_orders import local_iso
+        try:
+            oth_return_act.delete(get_conn(), act_id, local_iso(), author())
+            flash("Акт возврата удалён.")
+        except oth_return_act.ActError as err:
+            flash(str(err))
+        return redirect(_back() + "#return-acts")
+
+    @app.route("/oth/return-act/<int:act_id>")
+    @login_required
+    def oth_return_act_file(act_id):
+        return act_response(oth_return_act.file(get_conn(), act_id))
 
     @app.route("/oth/to-return", methods=["POST"])
     @login_required

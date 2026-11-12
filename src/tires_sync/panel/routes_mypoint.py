@@ -23,7 +23,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
@@ -417,7 +417,8 @@ def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
     return [{"card": r["card"], "label": mgr.label(r["card"]), "date": _short_date(r["plan"]["return_date"]),
-             "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"])}
+             "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"]),
+             "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"])}      # «Скачать акт» (the owner 2026-11-12)
             for r in order_oth.to_return(conn, point_id)]
 
 
@@ -536,6 +537,12 @@ def register(app) -> None:
         returning = {r["card"]["id"] for r in returns}
         for row in cards:
             row["returning"] = row["card"]["id"] in returning
+        for row in cards:                                                       # given, waits for the amount: the act of its date by its card
+            plan = order_oth.return_plan(conn, row["card"]["id"]) if row["ret_state"] == "signed" else None
+            row["act_file"] = oth_return_act.find(conn, point_id, plan["return_date"]) if plan else None
+        today_ret = order_oth.return_day(conn, point_id, now) if point_id is not None else None
+        if today_ret:
+            today_ret["act_file"] = oth_return_act.find(conn, point_id, today_ret["date"])
         for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
             ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
         tab = request.args.get("tab", "")
@@ -563,6 +570,7 @@ def register(app) -> None:
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns,
+                               return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
 
     def _undo(card_id):
@@ -672,6 +680,18 @@ def register(app) -> None:
         flash(answer, "ok")
         return redirect(back)
 
+    @app.route("/my-point/return-act/<int:act_id>")
+    @login_required
+    def mypoint_return_act(act_id):
+        """«Скачать акт» of a return (oth_return_act): the file of the person's own point only (the office: of the point it looks at, ?p=);
+        another point's id is a 404, as one that is not there."""
+        from .routes_catalog_oth import act_response
+        conn = get_conn()
+        act = oth_return_act.file(conn, act_id)
+        if act is None or act["point_id"] != _point_id(conn):
+            abort(404)
+        return act_response(act)
+
     @app.route("/points/history")
     @login_required
     def points_history():
@@ -706,6 +726,11 @@ def register(app) -> None:
         items += [{"key": "oth-question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Заказ № %s: выдали или на точке?"
                    % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in _oth_cards(conn, point_id)
                   if order_oth.question_open(conn, card)]
+        today = order_oth.return_day(conn, point_id, now)                      # «Сегодня возврат!»: a new key at 09:00, 12:00 and 15:00
+        if today:
+            items.append({"key": "return-day-%s-%s" % (today["date"].replace("-", ""), today["sound"]), "title": order_oth.RETURN_DAY_TITLE,
+                          "text": "%s Заказы: %s." % (order_oth.RETURN_DAY_BODY, ", ".join("№ %s" % n for n in today["orders"])),
+                          "href": "/my-point?tab=return"})
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
                    else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "", "href": "/my-point"} for card in cards]
         try:

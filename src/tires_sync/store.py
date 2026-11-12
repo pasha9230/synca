@@ -143,6 +143,11 @@ CREATE INDEX IF NOT EXISTS oth_return_order ON oth_return (order_id);
 -- partner), then the point signs the paper act МХ-3 and gives the tyres (order_oth.agree / sign_act)
 CREATE TABLE IF NOT EXISTS oth_return_plan (order_id INTEGER PRIMARY KEY, agreed_at TEXT NOT NULL, agreed_by TEXT NOT NULL, return_date TEXT NOT NULL,
     signed_at TEXT, signed_by TEXT NOT NULL DEFAULT '');
+-- the act of a return as a file (oth_return_act, the owner 2026-11-12): one PDF per point and date of the return, the file itself in `data`
+CREATE TABLE IF NOT EXISTS oth_return_act (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, return_date TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL,
+    data BLOB NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by TEXT NOT NULL DEFAULT '', UNIQUE (point_id, return_date)
+);
 -- «Взять с ОТХ» (oth_sale, the owner 2026-10-29): the position item_id of a new order is `qty` tyres taken from the position from_item of the
 -- order from_order standing on «На ОТХ» (its quantity was lowered by them). sale_id: its sale once written (counted at the purchase of the old
 -- order, never at WebMIM's price of the new one). undone_at: given back by «Вернуть на ОТХ» (the row stays: the Google table follows it).

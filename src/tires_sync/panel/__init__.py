@@ -27,7 +27,7 @@ MOSCOW_AUDIT = frozenset({
     "ids_rebound", "inbox_dismiss", "inquiry", "inquiry_failed", "inquiry_merged", "mirror_adopt", "mirror_reissue", "mirror_reissue_own", "mirror_unreissue_own",
     "order_chat_link", "order_chat_unlink", "order_delete", "order_item_mim", "order_item_purchase", "order_merge", "order_mim_extra", "order_rate",
     "order_restore", "order_unmerge", "oth_return", "oth_return_undo", "orders_bulk_delete", "orders_bulk_move", "orders_bulk_undo", "orders_cleanup_new", "orders_fill_responsible",
-    "oth_act_signed", "oth_back_on_sale", "oth_sold_early", "oth_issued_early", "oth_marks_back", "oth_client_swap", "oth_detach", "oth_item_to_return", "oth_manual_no_id", "oth_manual_no_price",
+    "oth_act_file_added", "oth_act_file_deleted", "oth_act_file_replaced", "oth_act_signed", "oth_back_on_sale", "oth_sold_early", "oth_issued_early", "oth_marks_back", "oth_client_swap", "oth_detach", "oth_item_to_return", "oth_manual_no_id", "oth_manual_no_price",
     "oth_new_client", "oth_numbers", "oth_reattach", "oth_return_agreed", "oth_return_amount", "oth_return_unagreed", "oth_split", "oth_storage_back",
     "oth_storage_reopen", "oth_storage_split", "oth_storage_take", "oth_take",
     "oth_untake", "point_action", "price_guard_accept", "price_guard_keep", "return_flow_migrated", "shop_order_cancel", "staff_note",

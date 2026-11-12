@@ -66,6 +66,12 @@ def point_rows(conn, point_id, now: str) -> list:
     question in /my-point/feed (its stay at the point), so that notify.js rings for the two once. And «возврат отмечен» (green) of an order
     the point gave back in this stay with no amount yet: it stays «На точке» until the manager fills the amount (and moves it to «Возврат»)."""
     found = []
+    today = order_oth.return_day(conn, point_id, now)            # «Сегодня возврат!» (the owner 2026-11-12): one row per date, marked «Важное»
+    if today:                                                    # the id is its key of /my-point/feed (the hour of the sound): one ring for the two
+        found.append({"id": "return-day-%s-%s" % (today["date"].replace("-", ""), today["sound"]), "order_id": today["ids"][0], "at": today["at"],
+                      "author": "", "kind": "return_day", "level": "yellow", "more": 0, "href": "/my-point?tab=return",
+                      "title": "%s · %s" % (order_oth.RETURN_DAY_MARK, order_oth.RETURN_DAY_TITLE),
+                      "text": "%s Заказы: %s." % (order_oth.RETURN_DAY_BODY, ", ".join("№ %s" % n for n in today["orders"]))})
     for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? "
                                    "AND s.code = 'at_point'", (point_id,)):
         card = orders.get_card(conn, card_id)

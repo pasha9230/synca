@@ -348,6 +348,10 @@ NEEDS.update(feed_update_now="supplier")
 # stays the catalog's, «Вернуть поставщику» stays the owner's
 SECTION_OF.update(oth_to_return="orders")
 NEEDS.update(oth_to_return="supplier")
+# the act of a return as a file (oth_return_act, the owner 2026-11-12): attached and deleted by the owner and the partner, as «На возврат»
+# above; the office downloads it with «Заказы», the point its own point's from «Рабочее место» (routes_mypoint checks the point)
+SECTION_OF.update(oth_return_act_upload="orders", oth_return_act_delete="orders", oth_return_act_file="orders", mypoint_return_act="mypoint")
+NEEDS.update(oth_return_act_upload="supplier", oth_return_act_delete="supplier")
 NEEDS["catalog_oth_manual"] = "supplier"                          # the owner and the partner only (the lead 2026-11-03), never as a point
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})
@@ -364,6 +368,7 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "calls_page", "call_record", "call_create_order", "call_handoff",            # the calls of the point's account (own_call)
                          "tasks_page", "task_new", "task_close",      # «Задачи»: its own only, to itself only (routes_tasks checks it)
                          "order_unsent_by_hand",                       # «Отправил вручную» by its own orders (card_id of the address)
+                         "mypoint_return_act",                         # «Скачать акт» of a return of its own point (2026-11-12)
                          "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
                          "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
