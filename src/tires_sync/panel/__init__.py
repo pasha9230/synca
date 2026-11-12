@@ -21,6 +21,7 @@ REQUIRED = ("SECRET_KEY", "PASSWORD_HASH", "DB_PATH", "UNLOAD_PATH", "REFERENCE_
 # early). Some are told by their author: «ids_bound» and «account_live» (audit_dt); a sale («sale_added», «sale_reversed») from an order is
 # Moscow, typed by hand UTC: both are shown as UTC.
 MOSCOW_AUDIT = frozenset({
+    "ads_bid_set", "ads_bid_threshold",       # «Изменить цену просмотра» (ads_bid_set): local_iso
     "alerts_clear_all", "alerts_resolve_done", "autosend_add", "autosend_cancel", "autosend_update", "avito_price_push", "avito_stock_push", "avito_stock_restore", "avito_webhook_subscribe",
     "avito_webhook_unsubscribe", "callback", "callback_cancel", "callback_done", "callback_extend", "chat_assign", "chat_assign_default",
     "chat_delete", "chat_handover", "chat_handover_taken", "chat_restore", "client_own_name", "clients_linked", "critical", "id_scheme",
@@ -354,7 +355,7 @@ def create_app(config: dict) -> Flask:
             response.headers.setdefault("Cache-Control", "private, no-store")       # «Вид 2» of /shop: our own script only
         return response
 
-    from . import routes, routes_addresses, routes_alerts, routes_catalog, routes_connections, routes_description, routes_drafts, routes_economics, routes_feedupdate, routes_history, routes_funnel, routes_chats, routes_health, routes_img, routes_main, routes_mappings, routes_mypoint, routes_order_bulk, routes_order_cleanup, routes_orders, routes_pairs, routes_agent, routes_market, routes_photos, routes_points, routes_share, routes_users, routes_vk, routes_clients, routes_analytics, routes_ads, routes_avito_webhook, routes_search, routes_calls, routes_sheet, routes_inquiry, routes_shop, routes_client_terms, tour
+    from . import routes, routes_addresses, routes_alerts, routes_catalog, routes_connections, routes_description, routes_drafts, routes_economics, routes_feedupdate, routes_history, routes_funnel, routes_chats, routes_health, routes_img, routes_main, routes_mappings, routes_mypoint, routes_order_bulk, routes_order_cleanup, routes_orders, routes_pairs, routes_agent, routes_market, routes_photos, routes_points, routes_share, routes_users, routes_vk, routes_clients, routes_analytics, routes_ads, routes_ads_bid, routes_avito_webhook, routes_search, routes_calls, routes_sheet, routes_inquiry, routes_shop, routes_client_terms, tour
 
     routes.register(app)
     tour.register(app)
@@ -388,6 +389,7 @@ def create_app(config: dict) -> Flask:
     routes_calls.register(app)
     routes_analytics.register(app)
     routes_ads.register(app)
+    routes_ads_bid.register(app)
     routes_mypoint.register(app)
     routes_avito_webhook.register(app)
     routes_search.register(app)

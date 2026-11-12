@@ -319,15 +319,27 @@ class AvitoClient:
         return self._request("POST", "/stats/v2/accounts/%s/items" % user_id, safe=True, payload={
             "dateFrom": date_from, "dateTo": date_to, "metrics": list(metrics), "grouping": "item", "limit": limit, "offset": offset})
 
-    def promotions_by_items(self, avito_ids: List[int]) -> dict:
+    def promotions_by_items(self, avito_ids: List[int], retry: bool = True) -> dict:
         """The promotion of these ads, at most 200 (a read with a POST): the manual price of a view and its daily limit, or the auto one."""
         if not 1 <= len(avito_ids) <= 200:
             raise ValueError("promotions_by_items takes 1..200 ads")
-        return self._request("POST", "/cpxpromo/1/getPromotionsByItemIds", safe=True, payload={"itemIds": [int(i) for i in avito_ids]})
+        return self._request("POST", "/cpxpromo/1/getPromotionsByItemIds", safe=True, retry=retry,
+                             payload={"itemIds": [int(i) for i in avito_ids]})
 
-    def item_bids(self, avito_id: int) -> dict:
+    def item_bids(self, avito_id: int, retry: bool = True) -> dict:
         """The prices of a view Avito offers for one ad (20 requests a minute): the current, the recommended, the bounds and the options."""
-        return self._request("GET", "/cpxpromo/1/getBids/%d" % int(avito_id))
+        return self._request("GET", "/cpxpromo/1/getBids/%d" % int(avito_id), retry=retry)
+
+    def set_manual_bid(self, item_id: int, action_type_id: int, bid_penny: int, limit_penny: int) -> dict:
+        """The manual price of a view of one ad and its daily limit, in kopecks (POST /cpxpromo/1/setManual; 20 requests a minute with the
+        reads of cpxpromo). A write that spends money: one attempt whatever the answer (never retried: a repeat could write twice); a 429
+        is RateLimited. The answer as it came."""
+        self._require_write()
+        values = (item_id, action_type_id, bid_penny, limit_penny)
+        if any(isinstance(v, bool) or not isinstance(v, int) or v <= 0 for v in values):
+            raise ValueError("item_id, action_type_id, bid_penny and limit_penny must be positive whole numbers")
+        return self._request("POST", "/cpxpromo/1/setManual", retry=False, payload={
+            "itemID": item_id, "actionTypeID": action_type_id, "bidPenny": bid_penny, "limitPenny": limit_penny})
 
     def stocks_info(self, avito_ids: List[int], retry: bool = True) -> List[dict]:
         """What Avito shows as the stock of these ads, at most STOCK_INFO_CHUNK (a read, although Avito wants a POST): item_id, quantity

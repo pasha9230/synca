@@ -60,6 +60,7 @@
 <div><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · прочитано {{ r.bid.taken_at|dt_utc }}</div>
 {% if r.bid_fail %}<div>последнее чтение не удалось ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}</div>{% endif %}
 </details>
+{% include "_ads_bid_button.html" %}
 {% else %}<span class="muted" tabindex="0" data-tip-title="Цена просмотра не прочитана" data-tip="{% if r.bid_fail %}Авито отказал ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}{% else %}{{ r.bid_why }}{% endif %}">не прочитано</span>{% endif %}</td>{% endif %}
 {% if "per_day" in cols %}<td class="num">{% if r.per_day is not none %}{{ r.per_day|money }}{% else %}—{% endif %}</td>{% endif %}
 </tr>{% endfor %}</tbody></table></div>
