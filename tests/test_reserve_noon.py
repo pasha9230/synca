@@ -1,6 +1,7 @@
 """The owner 2026-11-02: on the last day of the reservation the client gets «срок резерва истекает» by itself from 12:30, whatever the point
-answered (the point is still asked as before); when the client writes nothing in that chat for 12 hours after it, the order goes to «На ОТХ»
-by itself — not when the point marked «выдан», the order left «Товар на точке», the date was moved, or the reminder did not go."""
+answered (the point is still asked as before); when the 8 hours after it (the owner 2026-11-12; 12 before, and any message of the client
+kept the order) bring none of «забрал», «продлить», «отказ» (test_reserve_answers.py), the order goes to «На ОТХ» by itself — not when the
+point marked «выдан», the order left «Товар на точке», the date was moved, or the reminder did not go."""
 from __future__ import annotations
 
 import pytest
@@ -116,39 +117,36 @@ def told(tmp_path, error=None):
     return conn, cid, chat, deliver, vk
 
 
-def test_twelve_hours_of_silence_move_the_order_to_oth_not_a_second_earlier(tmp_path):
+def test_eight_hours_of_silence_move_the_order_to_oth_not_a_second_earlier(tmp_path):
     conn, cid, _chat, _deliver, _vk = told(tmp_path)
-    assert not reserve._no_answer_step(conn, orders.get_card(conn, cid), NEXT + "T00:29:59")
+    assert not reserve._no_answer_step(conn, orders.get_card(conn, cid), DAY + "T20:29:59")
     assert code(conn, cid) == "at_point"
-    assert reserve._no_answer_step(conn, orders.get_card(conn, cid), NEXT + "T00:30:00")
+    assert reserve._no_answer_step(conn, orders.get_card(conn, cid), DAY + "T20:30:00")
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == "oth" and card["cancel_reason"] == reserve.NO_ANSWER_REASON
-    [record] = [e for e in orders.list_events(conn, cid) if "не ответил за 12 часов" in e["text"]]
-    assert record["text"].startswith("Клиент не ответил за 12 часов на напоминание о сроке резерва: заказ переведён на «На ОТХ»")
+    [record] = [e for e in orders.list_events(conn, cid) if "заказ переведён на «На ОТХ»" in e["text"]]
+    assert record["text"].startswith("За 8 часов после напоминания о сроке резерва клиент не написал ни «забрал», ни «продлить», ни «отказ»: "
+                                     "заказ переведён на «На ОТХ»")
     assert record["author"] == "система"
 
-
-def test_the_tick_moves_it_at_night_once(tmp_path):
-    conn, cid, _chat, deliver, vk = told(tmp_path)                                      # the lead 2026-11-04: on time; before: from 09:00
-    tick(conn, NEXT + "T00:07:00", deliver, vk)                                         # not yet 12 hours
+def test_the_tick_moves_it_in_the_evening_once(tmp_path):
+    conn, cid, _chat, deliver, vk = told(tmp_path)                                      # the lead 2026-11-04: on time, at any hour
+    tick(conn, DAY + "T20:07:00", deliver, vk)                                          # not yet 8 hours
     assert code(conn, cid) == "at_point"
-    tick(conn, NEXT + "T01:07:00", deliver, vk)
+    tick(conn, DAY + "T21:07:00", deliver, vk)
     assert code(conn, cid) == "oth"
     tick(conn, NEXT + "T09:07:00", deliver, vk)
     assert code(conn, cid) == "oth"
     tick(conn, NEXT + "T10:07:00", deliver, vk)
-    assert sum("не ответил за 12 часов" in e["text"] for e in orders.list_events(conn, cid)) == 1
+    assert sum("заказ переведён на «На ОТХ»" in e["text"] for e in orders.list_events(conn, cid)) == 1
 
-
-def test_a_message_of_the_client_after_the_reminder_keeps_the_order_at_the_point(tmp_path):
+def test_a_message_of_the_client_after_the_wait_no_longer_keeps_the_order_at_the_point(tmp_path):
     conn, cid, chat, deliver, vk = told(tmp_path)
-    wrote(conn, chat, DAY + "T23:59:00")
+    wrote(conn, chat, DAY + "T23:59:00")                                                # «продлите, пожалуйста», after the 8 hours
     tick(conn, NEXT + "T09:07:00", deliver, vk)
     tick(conn, NEXT + "T10:07:00", deliver, vk)
-    assert code(conn, cid) == "at_point"
-    assert sum("Клиент ответил на напоминание о сроке резерва: на «На ОТХ» не переводим" in e["text"] for e in orders.list_events(conn, cid)) == 1
-    assert sum(e["text"].startswith("Ответственному: «Клиент ответил") for e in orders.list_events(conn, cid)) == 1    # no date: 2026-11-06
-
+    assert code(conn, cid) == "oth"                                                     # the owner 2026-11-12: it kept the order before
+    assert not [e for e in orders.list_events(conn, cid) if "не переводим" in e["text"] or e["text"].startswith("Ответственному: «Клиент ответил")]
 
 def test_our_own_messages_and_the_clients_before_the_reminder_do_not_count(tmp_path):
     conn, cid, chat, deliver, vk = told(tmp_path)
@@ -210,21 +208,20 @@ def test_chats_not_read_lately_move_nothing(tmp_path):
     assert code(conn, cid) == "oth"
 
 
-def test_an_answer_in_another_chat_of_the_order_or_only_in_the_chats_preview_keeps_it(tmp_path):
+def test_an_answer_in_another_chat_of_the_order_is_read_and_the_chats_preview_alone_keeps_nothing(tmp_path):
     conn, cid, chat, deliver, vk = told(tmp_path)
     account = conn.execute("SELECT account_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
     other = conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at, synced_at) VALUES (?, 'c-other', ?, ?, ?)",
                          (account, cid, DAY, "2099-01-01T00:00:00")).lastrowid
-    wrote(conn, other, DAY + "T18:00:00")
+    wrote(conn, other, DAY + "T18:00:00")                                               # «продлите, пожалуйста» in the 8 hours: +2 days
     tick(conn, NEXT + "T09:07:00", deliver, vk)
-    assert code(conn, cid) == "at_point"
+    assert code(conn, cid) == "at_point" and orders.get_card(conn, cid)["reserve_until"] == "2026-10-20"
     (tmp_path / "b").mkdir()
     conn, cid, chat, deliver, vk = told(tmp_path / "b")
     conn.execute("UPDATE avito_chat SET last_dir = 'in', last_at = ? WHERE id = ?", (DAY + "T18:00:00", chat))   # the list says so, the messages not yet
     conn.commit()
     tick(conn, NEXT + "T09:07:00", deliver, vk)
-    assert code(conn, cid) == "at_point"
-
+    assert code(conn, cid) == "oth"                                                     # the owner 2026-11-12: a message with no word keeps nothing
 
 def test_the_reminder_never_goes_to_an_order_that_left_the_point_meanwhile(tmp_path):
     """D4: the card read again after the question may be on another stage (a «Выдал» in between)."""

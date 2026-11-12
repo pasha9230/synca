@@ -393,6 +393,15 @@ def collect_bids(conn, client, account_id: int, today: date, stamp: str, pacer: 
 
 
 # ---- the report ----------------------------------------------------------------------------------------------------------------------
+# The owner 2026-11-12: a summary per Avito account with the total above, the ads of one account below (tabs); the sales of an ad from the
+# orders on a won stage (the table «Продажи» is empty while nobody records the sales of the orders), the short cell of the price of a view,
+# no column empty for every row, the ads out of the list in one line.
+
+FILTERS = ("", "sales", "spend")
+NEAR = 5                    # options of the price of a view shown: the nearest to the current price
+NO_CHAT, NO_ITEM, NO_FEED, MANUAL = "no_chat", "no_item", "no_feed", "manual"
+COLUMNS = ("spend", "views", "contacts", "view_cost", "pieces", "revenue", "margin", "drr", "drr_margin", "bid", "per_day")
+
 
 def bounds(today: date, days: int) -> Tuple[str, str]:
     """The period ends yesterday: today's spending is not whole yet."""
@@ -407,31 +416,153 @@ def drr(spend: float, base: float) -> Optional[float]:
     return round(spend / base * 100, 1)
 
 
-def sales_by_ad(conn, since: str, until: str) -> Tuple[Dict[Tuple[int, int], dict], dict]:
-    """The sales of the days (not reversed) by the ad they came from: the order of the sale (order_card.sale_ids) → its chat → the chat's
-    ad (avito_chat.item_id; an order with several chats: the first chat with an ad). The rest (manual sales, an order without a chat with
-    an ad) is «без объявления»."""
-    link: Dict[int, Tuple[int, int]] = {}
-    for sale_ids, account_id, item_id in conn.execute(
-            "SELECT c.sale_ids, ch.account_id, ch.item_id FROM order_card c JOIN avito_chat ch ON ch.id = ("
-            "SELECT MIN(x.id) FROM avito_chat x WHERE x.order_id = c.id AND x.item_id <> '') WHERE c.sale_ids NOT IN ('', '[]')"):
-        try:
-            ids, avito_id = json.loads(sale_ids or "[]"), int(item_id)
-        except (ValueError, TypeError):
+def _won_days(conn, cards: Dict[int, str]) -> Dict[int, str]:
+    """The day each order of `cards` (id → entered_at) came to a won stage and stayed on won stages since: by the journal of the order
+    (a move between two won stages keeps the first day); an order without such records: the day it entered its stage now."""
+    from . import analytics, orders
+    stages = [s for s in orders.list_stages(conn) if s["kind"] == "won"]
+    won = {s["name"] for s in stages} | {old for code, old in orders.OLD_NAMES_2026_11_03.items() if code in {s["code"] for s in stages}}
+    since: Dict[int, Optional[str]] = {}
+    for order_id, at, kind, text in conn.execute(
+            "SELECT order_id, at, kind, text FROM order_event WHERE kind IN ('created', 'stage') ORDER BY order_id, id"):
+        if order_id not in cards:
             continue
+        name = analytics._entered(kind, text)
+        if name is None:
+            continue
+        if name not in won:
+            since[order_id] = None
+        elif since.get(order_id) is None:
+            since[order_id] = at
+    return {k: (since.get(k) or entered or "")[:10] for k, entered in cards.items()}
+
+
+def _chat_links(conn) -> Tuple[Dict[int, Tuple[int, int]], set]:
+    """order → (account, ad) of its first chat with an ad (avito_chat.item_id); and the orders with a chat at all."""
+    link: Dict[int, Tuple[int, int]] = {}
+    for order_id, account_id, item_id in conn.execute(
+            "SELECT ch.order_id, ch.account_id, ch.item_id FROM avito_chat ch WHERE ch.id = ("
+            "SELECT MIN(x.id) FROM avito_chat x WHERE x.order_id = ch.order_id AND x.item_id <> '') AND ch.order_id IS NOT NULL"):
+        try:
+            link[order_id] = (account_id, int(item_id))
+        except (TypeError, ValueError):
+            continue
+    chats = {r[0] for r in conn.execute("SELECT DISTINCT order_id FROM avito_chat WHERE order_id IS NOT NULL")}
+    return link, chats
+
+
+def sold_units(conn, since: str, until: str) -> List[dict]:
+    """What was sold in the days, per order (or per manual sale): {order (None for a manual sale), pieces, revenue, margin (None: a
+    purchase not typed), no_purchase}. An order with a sale in «Продажи» (order_card.sale_ids) is counted by its sales (not reversed, the
+    day of the sale), once; an order without one, by its positions when it stands on a won stage («Выполнено», «Отправлен в ТК») and came
+    to it in the days: pieces = qty, revenue = qty × sale_unit, the margin of economics.unit (the purchase with its terms, the commission and
+    the promotion of the position: the formula of a sale, orders.totals). A cancelled order and a record of storage of «На ОТХ» (an order
+    without a client, oth_storage) are no sale; an order that took tyres from «На ОТХ» for a new client is one."""
+    from . import orders, oth_storage
+    units: List[dict] = []
+    by_sale: Dict[int, int] = {}
+    with_sales = set()
+    for card_id, sale_ids in conn.execute("SELECT id, sale_ids FROM order_card WHERE sale_ids NOT IN ('', '[]')"):
+        try:
+            ids = json.loads(sale_ids or "[]")
+        except ValueError:
+            continue
+        with_sales.add(card_id)
         for sale_id in ids if isinstance(ids, list) else []:
             if isinstance(sale_id, int):
-                link[sale_id] = (account_id, avito_id)
-    by_ad: Dict[Tuple[int, int], dict] = {}
-    none = {"pieces": 0, "revenue": 0.0, "margin": 0.0, "count": 0}
+                by_sale[sale_id] = card_id
+    grouped: Dict[object, dict] = {}
     for sale_id, pieces, revenue, margin in conn.execute(
             "SELECT id, pieces, sale_total, margin_total FROM sale WHERE day >= ? AND day <= ? AND reversed_at IS NULL", (since, until)):
-        bucket = by_ad.setdefault(link[sale_id], {"pieces": 0, "revenue": 0.0, "margin": 0.0, "count": 0}) if sale_id in link else none
-        bucket["pieces"] += pieces
-        bucket["revenue"] += revenue
-        bucket["margin"] += margin
-        bucket["count"] += 1
+        key = ("order", by_sale[sale_id]) if sale_id in by_sale else ("sale", sale_id)
+        unit = grouped.setdefault(key, {"order": by_sale.get(sale_id), "pieces": 0, "revenue": 0.0, "margin": 0.0, "no_purchase": 0})
+        unit["pieces"] += pieces
+        unit["revenue"] += revenue
+        unit["margin"] += margin
+    units += grouped.values()
+    records = oth_storage.record_ids(conn)
+    cards = {card_id: entered for card_id, entered in conn.execute(
+        "SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.kind = 'won'")
+        if card_id not in with_sales and card_id not in records}
+    days = _won_days(conn, cards)
+    cards = [k for k in cards if since <= days[k] <= until]
+    for card_id, items in orders.items_of(conn, cards).items():
+        items = [i for i in items if int(i["qty"]) >= 1]                     # a position emptied by «Взять с ОТХ»: nothing sold
+        if not items:
+            continue
+        money = orders.totals(items)
+        units.append({"order": card_id, "pieces": money["qty"], "revenue": money["sale"],
+                      "margin": money["margin"] if money["margin"] is not None else
+                      round(sum(i["money"]["margin"] for i in items if float(i["supplier_price"]) > 0), 2),
+                      "no_purchase": 1 if money["margin"] is None else 0})
+    return units
+
+
+def _bucket() -> dict:
+    return {"pieces": 0, "revenue": 0.0, "margin": 0.0, "count": 0, "no_purchase": 0}
+
+
+def _add(bucket: dict, unit: dict) -> None:
+    bucket["pieces"] += unit["pieces"]
+    bucket["revenue"] += unit["revenue"]
+    bucket["margin"] += unit["margin"]
+    bucket["count"] += 1
+    bucket["no_purchase"] += unit["no_purchase"]
+
+
+def sales_by_ad(conn, since: str, until: str, feed: Iterable[int] = ()) -> Tuple[Dict[Tuple[int, int], dict], dict]:
+    """The sales of the days (sold_units) by the ad they came from: the order → its first chat with an ad (avito_chat.item_id) → the ad and
+    the account of the chat. The rest is «без объявления», with why: no chat, a chat without an ad, the chat of an account without a feed
+    (`feed`: the ids of the feed accounts), a manual sale."""
+    link, chats = _chat_links(conn)
+    feed = set(feed)
+    by_ad: Dict[Tuple[int, int], dict] = {}
+    none = dict(_bucket(), reasons={NO_CHAT: 0, NO_ITEM: 0, NO_FEED: 0, MANUAL: 0})
+    for unit in sold_units(conn, since, until):
+        order_id = unit["order"]
+        key = link.get(order_id) if order_id is not None else None
+        if key is not None and key[0] in feed:
+            _add(by_ad.setdefault(key, _bucket()), unit)
+            continue
+        _add(none, unit)
+        none["reasons"][MANUAL if order_id is None else NO_FEED if key is not None else NO_ITEM if order_id in chats else NO_CHAT] += 1
     return by_ad, none
+
+
+def bid_short(bid: dict) -> str:
+    """The price of a view in a word: «авто», «своя 5,00 ₽», «5,00 ₽» (the mode not read), «не задана»."""
+    if bid.get("mode") == "auto":
+        return "авто"
+    if bid.get("bid") is None:
+        return "не задана"
+    text = ("%.2f" % bid["bid"]).replace(".", ",") + "\u00a0₽"
+    return "своя " + text if bid.get("mode") == "manual" else text
+
+
+def _forecast(info: dict) -> str:
+    low = next((v for k, v in info.items() if "forecast" in k.lower() and "min" in k.lower()), None)
+    high = next((v for k, v in info.items() if "forecast" in k.lower() and "max" in k.lower()), None)
+    one = next((v for k, v in info.items() if "forecast" in k.lower()), None)
+    if low is not None and high is not None:
+        return "%s–%s" % (low, high)
+    if high is not None:
+        return "до %s" % high
+    if low is not None:
+        return "от %s" % low
+    return "" if one is None else str(one)
+
+
+def near_options(options: List[dict], current: Optional[float]) -> List[dict]:
+    """At most NEAR options of Avito, the nearest to the current price (or the first ones, without a price), in the order of the price;
+    each with its forecast of views in a word («10–20») and the rest of its fields."""
+    good = [o for o in options if isinstance(o, dict) and isinstance(o.get("bid"), (int, float))]
+    if current is not None:
+        good = sorted(sorted(good, key=lambda o: (abs(o["bid"] - current), o["bid"]))[:NEAR], key=lambda o: o["bid"])
+    out = []
+    for o in good[:NEAR]:
+        info = o.get("info") if isinstance(o.get("info"), dict) else {}
+        out.append({"bid": o["bid"], "forecast": _forecast(info), "info": info})
+    return out
 
 
 def _row(avito_id, title, ad_id, spend: dict, sold: dict, bid: Optional[dict], covered: int) -> dict:
@@ -441,6 +572,7 @@ def _row(avito_id, title, ad_id, spend: dict, sold: dict, bid: Optional[dict], c
     row = {"avito_id": avito_id, "title": title, "ad_id": ad_id, "spend": round(total, 2), "presence": round(spend.get("presence", 0.0), 2),
            "promo": round(spend.get("promo", 0.0), 2), "views": views, "contacts": spend.get("contacts", 0),
            "view_cost": round(total / views, 2) if views else None, "pieces": sold.get("pieces", 0), "revenue": revenue, "margin": margin,
+           "orders": sold.get("count", 0), "no_purchase": sold.get("no_purchase", 0),
            "drr": drr(total, revenue), "drr_margin": drr(total, margin),
            "per_day": round(total / covered, 2) if covered else None, "bid": None, "bid_fail": None, "bid_why": ""}
     if bid:
@@ -450,7 +582,8 @@ def _row(avito_id, title, ad_id, spend: dict, sold: dict, bid: Optional[dict], c
             options = []
         rec = bid["rec_bid"]
         row["bid"] = {"mode": bid["mode"], "bid": bid["bid"], "day_limit": bid["day_limit"], "rec_bid": rec, "min_bid": bid["min_bid"],
-                      "max_bid": bid["max_bid"], "options": options, "taken_at": bid["taken_at"],
+                      "max_bid": bid["max_bid"], "options": options, "taken_at": bid["taken_at"], "short": bid_short(bid),
+                      "limit": bid["day_limit"], "near": near_options(options if isinstance(options, list) else [], bid["bid"] if bid["bid"] is not None else rec),
                       "rec_per_day": round(rec * views / covered, 2) if rec and covered else None}
     return row
 
@@ -464,53 +597,104 @@ def _sort(rows: List[dict], by: str) -> List[dict]:
 def _total(rows: Iterable[dict]) -> dict:
     rows = list(rows)
     spend, revenue, margin = (round(sum(r[k] for r in rows), 2) for k in ("spend", "revenue", "margin"))
-    views = sum(r["views"] for r in rows)
-    return {"ads": len(rows), "spend": spend, "views": views, "contacts": sum(r["contacts"] for r in rows),
-            "view_cost": round(spend / views, 2) if views else None, "pieces": sum(r["pieces"] for r in rows), "revenue": revenue,
-            "margin": margin, "drr": drr(spend, revenue), "drr_margin": drr(spend, margin)}
+    views, contacts = sum(r["views"] for r in rows), sum(r["contacts"] for r in rows)
+    return {"ads": len(rows), "spend": spend, "views": views, "contacts": contacts,
+            "view_cost": round(spend / views, 2) if views else None, "contact_cost": round(spend / contacts, 2) if contacts else None,
+            "pieces": sum(r["pieces"] for r in rows), "revenue": revenue, "margin": margin, "drr": drr(spend, revenue),
+            "drr_margin": drr(spend, margin), "no_purchase": sum(r.get("no_purchase", 0) for r in rows)}
 
 
-def report(conn, today: date, days: int, sort: str = "spend") -> dict:
-    """The page: per feed account its ads (those with spending, views or sales in the period), their totals, how many days of the period
-    are read; the sales without an ad apart. Read only."""
+def _filled(rows: List[dict]) -> set:
+    """The columns of COLUMNS some row has a value in: a dash is no value, nor a zero of a sum (a ДРР of 0 % is one)."""
+    shares = ("drr", "drr_margin", "view_cost")
+    return {c for c in COLUMNS if any(r[c] is not None and (c in shares or r[c] != 0) for r in rows)}
+
+
+def _names_out_of_the_list(conn, account_id: int, ids: Iterable[int]) -> Dict[int, Tuple[str, str]]:
+    """The name and our Id of the ads the list of the account (avito_ad) has not: it holds the ads active since its first reading only, so
+    an ad closed before, or between two readings, is not there. The name of a chat about the ad (avito_chat.item_title), our Id of the
+    stock or the price sent to the ad (avito_stock, avito_price); the same account only (never another account's values)."""
+    wanted = {int(i) for i in ids}
+    out: Dict[int, List[str]] = {}
+    if not wanted:
+        return {}
+    for item_id, title in conn.execute("SELECT item_id, item_title FROM avito_chat WHERE account_id = ? AND item_id <> '' AND item_title <> '' "
+                                       "ORDER BY id DESC", (account_id,)):
+        try:
+            key = int(item_id)
+        except (TypeError, ValueError):
+            continue
+        if key in wanted:
+            out.setdefault(key, ["", ""])
+            out[key][0] = out[key][0] or str(title)
+    for table in ("avito_stock", "avito_price"):
+        for avito_id, ad_id in conn.execute("SELECT avito_id, ad_id FROM %s WHERE account_id = ? AND ad_id <> ''" % table, (account_id,)):
+            if avito_id in wanted:
+                out.setdefault(avito_id, ["", ""])
+                out[avito_id][1] = out[avito_id][1] or str(ad_id)
+    return {k: (v[0], v[1]) for k, v in out.items()}
+
+
+def _account(conn, account: dict, today: date, since: str, until: str, sold: dict, sort: str, only: str) -> dict:
+    aid = account["id"]
+    covered = conn.execute("SELECT COUNT(*) FROM ad_spend_day WHERE account_id = ? AND avito_id = ? AND day >= ? AND day <= ?",
+                           (aid, MARK, since, until)).fetchone()[0]
+    spend = {row[0]: {"spend": row[1], "presence": row[2], "promo": row[3], "views": row[4], "contacts": row[5]} for row in conn.execute(
+        "SELECT avito_id, SUM(spend), SUM(presence), SUM(promo), SUM(views), SUM(contacts) FROM ad_spend_day "
+        "WHERE account_id = ? AND avito_id <> ? AND day >= ? AND day <= ? GROUP BY avito_id", (aid, MARK, since, until))}
+    ads = {row[0]: (row[1], row[2]) for row in conn.execute("SELECT avito_id, title, ad_id FROM avito_ad WHERE account_id = ?", (aid,))}
+    cols = ("avito_id", "taken_at", "mode", "bid", "day_limit", "rec_bid", "min_bid", "max_bid", "options")
+    bids = {row[0]: dict(zip(cols, row)) for row in conn.execute("SELECT %s FROM ad_bid WHERE account_id = ?" % ", ".join(cols), (aid,))}
+    fails = bid_fails(conn, aid)
+    error = store.get_state(conn, error_key(aid)) or ""
+    queued = {row[0] for row in conn.execute(
+        "SELECT avito_id FROM ad_spend_day WHERE account_id = ? AND avito_id <> ? AND day >= ? GROUP BY avito_id HAVING SUM(spend) > 0",
+        (aid, MARK, (today - timedelta(days=BID_DAYS)).isoformat()))}
+    keys = set(spend) | {k[1] for k in sold if k[0] == aid}
+    ads.update(_names_out_of_the_list(conn, aid, keys - set(ads)))
+    rows = [_row(k, ads.get(k, ("", ""))[0], ads.get(k, ("", ""))[1], spend.get(k, {}), sold.get((aid, k), {}), bids.get(k), covered)
+            for k in keys]
+    rows = [r for r in rows if r["spend"] or r["views"] or r["pieces"]]
+    for r in rows:                                                      # why there is no price of a view, or why it is an old one
+        r["bid_fail"] = fails.get(r["avito_id"])
+        if r["bid"] is None and r["bid_fail"] is None:
+            r["bid_why"] = ("нет расходов за последние %d дн., цена не запрашивается" % BID_DAYS if r["avito_id"] not in queued
+                            else "последний сбор не удался (причина над таблицей)" if error else "очередь ещё не дошла")
+    total = _total(rows)
+    due = [r for r in rows if r["avito_id"] in queued]
+    strangers = _sort([r for r in rows if not r["title"] and not r["ad_id"]], "spend")
+    rows = [r for r in rows if r["title"] or r["ad_id"]]
+    shown = [r for r in rows if (only != "sales" or r["pieces"]) and (only != "spend" or r["spend"])]
+    shown = _sort(shown, sort)
+    return {"id": aid, "name": account["name"], "covered": covered, "rows": shown[:ROWS_MAX], "count": len(shown), "total": total,
+            "error": error, "columns": _filled(shown), "bids_of": len(due), "bids_read": sum(1 for r in due if r["bid"] is not None),
+            "strangers": {"count": len(strangers), "spend": round(sum(r["spend"] for r in strangers), 2),
+                          "views": sum(r["views"] for r in strangers), "rows": strangers[:ROWS_MAX]}}
+
+
+def _summary(accounts: List[dict]) -> dict:
+    """A line per account and the total: the account's totals and its share in the spending of all accounts."""
+    lines = [dict(a["total"], id=a["id"], name=a["name"]) for a in accounts]
+    total = dict(_total(lines), name="Итого")
+    total["ads"] = sum(t["ads"] for t in lines)
+    for line in lines + [total]:
+        line["share"] = round(line["spend"] / total["spend"] * 100, 1) if total["spend"] > 0 else None
+    return {"rows": lines, "total": total}
+
+
+def report(conn, today: date, days: int, sort: str = "spend", account: Optional[int] = None, only: str = "") -> dict:
+    """The page: the summary per feed account and the total; per account its ads (those with spending, views or sales in the period, `only`
+    those with sales / with spending), their totals (whatever the filter), how many days of the period are read, how many prices of a view
+    are read; `account` the one shown (the first by default); the sales without an ad apart, with why. Read only."""
     if days not in PERIODS:
         raise ValueError("period must be one of %s" % (PERIODS,))
     sort = sort if sort in SORTS else "spend"
+    only = only if only in FILTERS else ""
     since, until = bounds(today, days)
-    sold, none = sales_by_ad(conn, since, until)
-    accounts = []
-    shown = set()
-    for account in connections.list_feed_accounts(conn):
-        aid = account["id"]
-        shown.add(aid)
-        covered = conn.execute("SELECT COUNT(*) FROM ad_spend_day WHERE account_id = ? AND avito_id = ? AND day >= ? AND day <= ?",
-                               (aid, MARK, since, until)).fetchone()[0]
-        spend = {row[0]: {"spend": row[1], "presence": row[2], "promo": row[3], "views": row[4], "contacts": row[5]} for row in conn.execute(
-            "SELECT avito_id, SUM(spend), SUM(presence), SUM(promo), SUM(views), SUM(contacts) FROM ad_spend_day "
-            "WHERE account_id = ? AND avito_id <> ? AND day >= ? AND day <= ? GROUP BY avito_id", (aid, MARK, since, until))}
-        ads = {row[0]: (row[1], row[2]) for row in conn.execute("SELECT avito_id, title, ad_id FROM avito_ad WHERE account_id = ?", (aid,))}
-        cols = ("avito_id", "taken_at", "mode", "bid", "day_limit", "rec_bid", "min_bid", "max_bid", "options")
-        bids = {row[0]: dict(zip(cols, row)) for row in conn.execute("SELECT %s FROM ad_bid WHERE account_id = ?" % ", ".join(cols), (aid,))}
-        fails = bid_fails(conn, aid)
-        error = store.get_state(conn, error_key(aid)) or ""
-        queued = {row[0] for row in conn.execute(
-            "SELECT avito_id FROM ad_spend_day WHERE account_id = ? AND avito_id <> ? AND day >= ? GROUP BY avito_id HAVING SUM(spend) > 0",
-            (aid, MARK, (today - timedelta(days=BID_DAYS)).isoformat()))}
-        keys = set(spend) | {k[1] for k in sold if k[0] == aid}
-        rows = [_row(k, ads.get(k, ("", ""))[0], ads.get(k, ("", ""))[1], spend.get(k, {}), sold.get((aid, k), {}), bids.get(k), covered)
-                for k in keys]
-        rows = [r for r in rows if r["spend"] or r["views"] or r["pieces"]]
-        for r in rows:                                                      # why there is no price of a view, or why it is an old one
-            r["bid_fail"] = fails.get(r["avito_id"])
-            if r["bid"] is None and r["bid_fail"] is None:
-                r["bid_why"] = ("нет расходов за последние %d дн., цена не запрашивается" % BID_DAYS if r["avito_id"] not in queued
-                                else "последний сбор не удался (причина над таблицей)" if error else "очередь ещё не дошла")
-        rows = _sort(rows, sort)
-        accounts.append({"id": aid, "name": account["name"], "covered": covered, "rows": rows[:ROWS_MAX], "count": len(rows),
-                         "total": _total(rows), "error": error})
-    for (aid, _), bucket in sold.items():                                   # a sale through an account without a feed: not on the page
-        if aid not in shown:
-            for k in ("pieces", "revenue", "margin", "count"):
-                none[k] += bucket[k]
-    none = {"pieces": none["pieces"], "revenue": round(none["revenue"], 2), "margin": round(none["margin"], 2), "count": none["count"]}
-    return {"days": days, "since": since, "until": until, "sort": sort, "accounts": accounts, "none": none}
+    feed = connections.list_feed_accounts(conn)
+    sold, none = sales_by_ad(conn, since, until, [a["id"] for a in feed])
+    accounts = [_account(conn, a, today, since, until, sold, sort, only) for a in feed]
+    chosen = next((a for a in accounts if a["id"] == account), accounts[0] if accounts else None)
+    none = dict(none, revenue=round(none["revenue"], 2), margin=round(none["margin"], 2))
+    return {"days": days, "since": since, "until": until, "sort": sort, "only": only, "accounts": accounts, "account": chosen,
+            "summary": _summary(accounts), "none": none}

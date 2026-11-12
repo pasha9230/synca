@@ -67,7 +67,7 @@ def test_the_move_after_12_hours_tells_the_responsible_to_call_with_the_line(tmp
     assert [t for who, t in told if who == ""] == []                                       # the point hears nothing (the owner 2026-11-10)
     [record] = [e for e in orders.list_events(conn, cid) if e["text"].startswith("Позвонить клиенту")]
     assert record["level"] == "yellow" and line in record["text"]
-    assert not [e for e in orders.list_events(conn, cid) if "не ответил за 12 часов" in e["text"] and e["level"] != "grey"]      # one alert, not two
+    assert not [e for e in orders.list_events(conn, cid) if "заказ переведён на «На ОТХ»" in e["text"] and e["level"] != "grey"]      # one alert, not two
 
 
 def test_the_call_goes_once_and_the_rules_of_the_move_are_the_same(tmp_path):
@@ -80,7 +80,7 @@ def test_the_call_goes_once_and_the_rules_of_the_move_are_the_same(tmp_path):
     fresh(conn2, chat2, NEXT + "T00:29:00")
     tick(conn2, DAY + "T12:30:00", deliver, vk)
     late = []
-    assert not reserve._no_answer_step(conn2, orders.get_card(conn2, cid2), NEXT + "T00:29:59", calls(late))
+    assert not reserve._no_answer_step(conn2, orders.get_card(conn2, cid2), DAY + "T20:29:59", calls(late))     # 8 hours (2026-11-12)
     assert late == []
 
 
@@ -870,9 +870,9 @@ def _silent(tmp_path):
 def test_the_night_move_is_on_time_and_its_alerts_wait_for_nine_once(tmp_path):
     conn, cid, deliver, vk = _silent(tmp_path)
     told = []
-    reserve.check(conn, NEXT + "T00:29:00", calls(told), deliver, vk)
+    reserve.check(conn, DAY + "T20:29:00", calls(told), deliver, vk)                       # the wait is 8 hours (the owner 2026-11-12): 20:30
     assert orders.get_card(conn, cid)["stage"]["code"] == "at_point"
-    reserve.check(conn, NEXT + "T00:37:00", calls(told), deliver, vk)
+    reserve.check(conn, DAY + "T20:37:00", calls(told), deliver, vk)
     assert orders.get_card(conn, cid)["stage"]["code"] == "oth" and told == []              # nobody is woken
     reserve.check(conn, NEXT + "T08:59:00", calls(told), deliver, vk)
     assert told == []
