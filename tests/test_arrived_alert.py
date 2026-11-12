@@ -140,7 +140,7 @@ def test_the_card_shows_the_line_and_the_button(tmp_path, monkeypatch):
     orders.ensure_pipeline(conn, NOW)
     card = orders.create_card(conn, dict(client_name="Татьяна", webmim_number="5000777"), NOW, "o")
     at_point = conn.execute("SELECT id FROM order_stage WHERE code = 'at_point'").fetchone()[0]
-    conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ? WHERE id = ?", (at_point, NOW, card))
+    conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ?, avito_chat = 'https://example.com/chat/1' WHERE id = ?", (at_point, NOW, card))   # typed, none bound: not «без чата»
     conn.commit()
     monkeypatch.setattr(routes_orders, "local_iso", lambda: LATE)
     page = owner.get("/orders/%d" % card).get_data(as_text=True)
