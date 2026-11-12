@@ -1220,6 +1220,13 @@ def register(app) -> None:
                 chat_ref = None                                          # «Открыть чат» of the field: a chat of another account
             if bind:
                 bind = dict(bind, **{k: None for k in ("other", "offer") if bind[k] and chats_store.get_chat(conn, bind[k]["chat"])["account_id"] != account})
+        # each chat names its Avito account and opens «Чаты» on that account (the partner 2026-11-12: «не видно, с какого аккаунта диалог»);
+        # a point never sees an account's name (2026-10-29) and its page «Чаты» is its own account's anyway: the bare address
+        names = {} if own_point() is not None else {a["id"]: a["name"] for a in connections.list_accounts(conn)}
+        links = [dict(ch, account_name=names.get(ch["account_id"], ""), url=chat_url(ch)) for ch in links]
+        if chat_ref and not chat_ref[1] and own_point() is None:        # «Открыть чат» of the field: the same address
+            found = chats_store.get_chat(conn, int(chat_ref[0].rsplit("/", 1)[1]))
+            chat_ref = (chat_url(found), False) if found else chat_ref
         sendable = [ch for ch in links if ch["account_id"] in {                                      # (a point: its own account's only)
             a["id"] for a in connections.list_accounts(conn) if a["chats_enabled"] and a["chats_send"]}]
         order_chat = order_chat_view(conn, links, sendable)
@@ -1259,6 +1266,11 @@ def register(app) -> None:
             supplier_number=order_supplier.number_of(conn, card_id),
             ad_position=deals.ad_position_chat(conn, card) if own_point() is None and can_post("order_ad_position") else None), status, {
             "Cache-Control": "no-store"}            # «Назад» reads the order again: the positions a press added are shown (хвост З6)
+
+    def chat_url(chat):
+        """The chat on the page «Чаты», opened on its own account (the list at the left is that account's), whatever account the person
+        keeps there: an address from elsewhere, so the kept choice stays (page_prefs). A point's page is its account's: no `acc`."""
+        return "/chats/%d" % chat["id"] + ("" if own_point() is not None else "?acc=%d" % chat["account_id"])
 
     def order_chat_view(conn, links, sendable):
         """The column «Чат Авито» of the order window (the owner 2026-11-09: see the dialog and write to the client from the order): the whole

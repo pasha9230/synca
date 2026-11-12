@@ -228,3 +228,68 @@ def test_the_auto_message_block_is_gone_and_a_waiting_one_is_a_line_with_cancel(
     r = post(client, "/orders/%d/autosend/%d/cancel" % (card, aid), tok)
     assert r.status_code == 302 and auto.get(conn, aid)["status"] == "cancelled"
     assert 'data-autosend="%d"' % aid not in window(client, card)
+
+
+# The partner 2026-11-12: «из заказа не видно, с какого аккаунта Авито диалог, и «Чаты» открываются на последнем выбранном аккаунте».
+
+ACC_BADGE = r'<span class="badge badge--neutral order-chat-acc"[^>]*>%s</span>'
+
+
+def test_the_window_names_the_chat_s_account_and_its_links_open_the_chats_on_it(tmp_path, view):
+    app, client, tok, conn, tanya = page(tmp_path, view)
+    html = window(client, tanya["order_id"])
+    assert re.search(ACC_BADGE % "Основной", html)                                 # one account in the whole system: named all the same
+    address = "/chats/%d?acc=%d" % (tanya["id"], tanya["account_id"])
+    assert html.count('href="%s"' % address) >= 2                                  # the chat's line and «Открыть»
+    assert 'href="/chats/%d"' % tanya["id"] not in html                            # no link of the window opens the kept account
+
+
+def test_the_link_opens_the_dialog_on_its_account_and_keeps_the_person_s_choice_of_the_chats(tmp_path, view):
+    from tires_sync import user_prefs
+    app, client, tok, conn, tanya = page(tmp_path, view)
+    other = connections.create_account(conn, "Второй", NOW, "o")
+    conn.execute("UPDATE account SET chats_enabled = 1 WHERE id = ?", (other,))
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, peer_name, last_at, last_text) VALUES (?, 'u2u-other', 'Чужой', '2026-10-13T09:00:00', 'Про другое')", (other,))
+    conn.commit()
+    client.get("/chats?acc=%d" % other, headers={"Referer": "http://localhost/chats"})        # the person's own choice on the page: kept
+    login = conn.execute("SELECT login FROM user_pref WHERE key = 'f.chats_page'").fetchone()[0]
+    kept = user_prefs.get(conn, login, "f.chats_page")
+    assert kept == {"acc": [str(other)]}
+    html = window(client, tanya["order_id"])
+    address = re.search(r'href="(/chats/%d\?acc=\d+)"' % tanya["id"], html).group(1)
+    assert address == "/chats/%d?acc=%d" % (tanya["id"], tanya["account_id"])
+    r = client.get(address, headers={"Referer": "http://localhost/orders/%d" % tanya["order_id"]})
+    assert r.status_code == 200
+    chats_html = r.get_data(as_text=True)
+    assert "Здравствуйте, это актуально?" in chats_html and 'name="acc" value="%d"' % tanya["account_id"] in chats_html   # the dialog, the list of its account
+    assert "Чужой" not in chats_html                                                            # not the kept account's list
+    assert user_prefs.get(conn, login, "f.chats_page") == kept                                  # the walk from the order saved nothing
+    assert client.get("/chats", headers={"Referer": "http://localhost/"}).headers["Location"].endswith("/chats?acc=%d" % other)
+
+
+def test_the_field_s_open_chat_link_goes_to_the_chat_s_account_too(tmp_path):
+    app, client, tok, conn, tanya = page(tmp_path, "old")
+    conn.execute("UPDATE order_card SET avito_chat = ? WHERE id = ?", ("Ч-%d" % tanya["id"], tanya["order_id"]))
+    conn.commit()
+    html = window(client, tanya["order_id"])
+    assert '<a class="small" href="/chats/%d?acc=%d">Открыть чат</a>' % (tanya["id"], tanya["account_id"]) in html
+
+
+def test_a_point_sees_no_account_badge_and_its_links_stay_bare(tmp_path, view):
+    app, client, tok, conn, tanya = page(tmp_path, view)
+    card = tanya["order_id"]
+    alpha = conn.execute("INSERT INTO point (name, avito_account_id) VALUES ('Альфа', ?)", (tanya["account_id"],)).lastrowid
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (alpha, card))
+    conn.commit()
+    html = window(other_user(app, conn, "gamma", "point", point_id=alpha), card)
+    assert "Здравствуйте, это актуально?" in html
+    assert "order-chat-acc" not in html and "Основной" not in column(html)
+    assert 'href="/chats/%d"' % tanya["id"] in html and "?acc=" not in html
+
+
+def test_an_order_without_a_chat_opens_without_the_badge(tmp_path, view):
+    app, client, tok, conn, tanya = page(tmp_path, view)
+    other = orders.create_card(conn, {"client_name": "Без чата"}, NOW, "owner")
+    conn.commit()
+    html = window(client, other)
+    assert "order-chat-acc" not in html and "/chats/%d" % tanya["id"] not in html
