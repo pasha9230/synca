@@ -12,7 +12,7 @@ import pytest
 
 from test_mypoint import manager
 from test_oth_sale import new_order, panel, take
-from test_oth_seventh_day import started
+from test_oth_seventh_day import asked_by_hand, started
 from test_oth_storage import ARRIVED, LATER, MOVED, TRANSFER, at_point, number, record, split
 from test_order_reserve import POINT_VK, db, stage
 from tires_sync import (order_manager as mgr, order_oth, order_reserve as reserve, orders, oth_sale, oth_stock, oth_storage, point_log)
@@ -140,7 +140,7 @@ def test_a_failed_give_back_of_a_record_changes_nothing(tmp_path, monkeypatch):
 def on_the_return(conn):
     started(conn)
     cid, x = split(conn)
-    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
+    asked_by_hand(conn, x)                                                                    # the question of a move by hand (E1: not the 7th day)
     return cid, x
 
 
@@ -181,7 +181,7 @@ def test_the_cabinet_of_the_point_has_no_issued_for_a_record(tmp_path):
     app, owner, tok, conn = panel(tmp_path)
     started(conn)
     cid, x = split(conn)
-    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
+    asked_by_hand(conn, x)
     mine = manager(app, conn, orders.get_card(conn, x)["point_id"])
     page = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # not agreed yet: «Согласование возврата» (2026-11-12)
     assert 'action="/my-point/%d/oth_here"' % x in page and "oth_sold" not in page        # «Продать»: on «На ОТХ» only (the owner 2026-11-12)

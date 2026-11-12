@@ -9,7 +9,7 @@ import pytest
 
 from panel_helpers import post
 from test_oth_sale import new_order, panel, take
-from test_oth_seventh_day import started
+from test_oth_seventh_day import asked_by_hand, started
 from test_oth_storage import LATER, MOVED, at_point, split
 from test_order_reserve import db, stage
 from tires_sync import (order_bulk, order_engine as engine, order_merge, order_oth, order_rules as rules, order_templates as tpl, orders, oth_sale,
@@ -118,7 +118,7 @@ def test_the_office_moving_a_record_to_done_sells_it_as_the_point_does(tmp_path)
     sale_rules(conn)
     started(conn)
     cid, x = split(conn)
-    order_oth.ask_seventh_day(conn, "2026-10-27T12:30:00")
+    asked_by_hand(conn, x, "2026-10-27T12:30:00")                                                  # E1: the question of a move by hand
     assert order_oth.question_open(conn, orders.get_card(conn, x))
     assert orders.move_card(conn, x, stage(conn, "done"), "2026-10-27T13:00:00", "офис")
     sold_like_the_point(conn, x, "офис")

@@ -736,7 +736,9 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> str:
 # the point is asked at the same time «Заказ выдали или он на точке?» on its «Рабочее место» («мало ли они продали его»), once per stay (app_state ASK_KEY of
 # the stay on «На возврат», moved by one UPDATE only). «Выдали»: the client came after all, the order is linked to its client again and closed as
 # issued, the agreement (if any) and the task go. «На точке» only marks the answer; silence changes nothing: the return goes on. The order's
-# responsible has one task, RETURN_TASK; «Согласовано с поставщиком» (agree) starts the act МХ-3.
+# responsible has one task, RETURN_TASK; «Согласовано с поставщиком» (agree) starts the act МХ-3. The owner 2026-11-12 (E1): the seventh day asks the
+# point nothing any more (no question on «Рабочее место», no record «задан вопрос», no VK status): the task of the responsible only. The question
+# of a move by hand (moved_by_hand) is as it was.
 HOLD_DAYS = 6
 ALERT_FROM = 9                                   # order_reserve.FIRST_HOUR: no alert before 09:00
 PENDING_KEY = "oth_moved_pending:%d"             # app_state, saved with the move to «На возврат»: {"since", "entered", "auto", "who", "task"}, what follows it (finish_moved)
@@ -774,8 +776,8 @@ _HELD_SQL = ("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON 
 
 
 def ask_seventh_day(conn, now: str, notify=None) -> int:
-    """The tick, at any hour: the orders on «На ОТХ» whose seventh day has come go to «На возврат» and their point is asked (the owner 2026-11-04), the question
-    and PENDING_KEY saved with the move; what follows the move (finish_moved) is repaired by the next tick if it fails. Only those that entered «На ОТХ» since
+    """The tick, at any hour: the orders on «На ОТХ» whose seventh day has come go to «На возврат» (the owner 2026-11-04; the point is asked
+    nothing since 2026-11-12), PENDING_KEY saved with the move; what follows the move (finish_moved) is repaired by the next tick if it fails. Only those that entered «На ОТХ» since
     the first tick of this rule (the owner 2026-11-02: no mass move of the old ones; SINCE_KEY, kept by the first tick). Not one whose return is agreed already
     (the act МХ-3 is on its way), nor one with tyres marked «возвращено поставщику» (the lead 2026-11-02), nor a point's own sale, nor an order to another
     city (order_intercity, the owner 2026-11-02), nor one without a point. Returns how many moved."""
@@ -802,11 +804,9 @@ def ask_seventh_day(conn, now: str, notify=None) -> int:
 def _move_on_day7(conn, card: dict, now: str) -> int:
     card_id = card["id"]
     stage = _returning_stage(conn)                                                   # read first: making it commits
-    point = card.get("point") or {}
-    conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (ASK_KEY % (card_id, re.sub(r"\D", "", now)), "asked|" + now))
+    # the owner 2026-11-12 (E1): no question to the point on the seventh day, nor its status in VK; the task of the responsible stays
     conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (PENDING_KEY % card_id, json.dumps(
         {"since": card["entered_at"], "entered": now, "auto": True, "who": "система"}, ensure_ascii=False)))
-    orders.add_event(conn, card_id, now, "система", "point", "Точке «%s» задан вопрос: «%s»" % (point.get("name") or "", question(conn, card, now)), level="grey")
     try:
         if not orders.move_card(conn, card_id, stage["id"], now, "система", journal=False):
             conn.rollback()
@@ -824,7 +824,7 @@ def in_alert_hours(conn, now: str) -> bool:
 
 
 def finish_moved(conn, now: str, notify) -> None:
-    """Every tick: what follows a move to «На возврат» (PENDING_KEY): the task at any hour; in the alert hours the responsible's alert (seventh day only) and a
+    """Every tick: what follows a move to «На возврат» (PENDING_KEY): the task at any hour; in the alert hours the responsible's alert (seventh day only) and, for a move by hand only, a
     VK point's status with the question. The key goes last: a crash or a failure is repaired by the next tick, each alert once. An order that left: nothing."""
     for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'oth_moved_pending:%'").fetchall():
         try:
@@ -856,7 +856,7 @@ def _finish_one(conn, key: str, value: str, now: str, notify) -> None:
     if held.get("auto"):
         _tell_agree(conn, dict(card, entered_at=held["since"]), now, notify)
     point = card.get("point") or {}
-    if point and point.get("channel") != points.PANEL and not (conn.execute("SELECT 1 FROM app_state WHERE key = ?", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])),)).fetchone()):
+    if point and not held.get("auto") and point.get("channel") != points.PANEL and not (conn.execute("SELECT 1 FROM app_state WHERE key = ?", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])),)).fetchone()):
         label = order_manager.label(card)
         text = message_texts.text(conn, message_texts.RETURN_STATUS, order_label=label)
         if question_open(conn, card):                                                # a record of storage: never «выдал» (the owner 2026-11-10)
