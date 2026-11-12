@@ -173,20 +173,20 @@ def test_the_label_stands_in_the_points_card_until_the_point_marks_the_order(w):
     conn, cid = w["conn"], w["ids"]["here"]
     for state in ("", "all"):                                                           # the old view and the new one
         flag(conn, state)
-        assert reserve.TOOK_LABEL not in w["point"].get("/my-point").get_data(as_text=True)
+        assert reserve.TOOK_LABEL not in w["point"].get("/my-point?tab=here").get_data(as_text=True)
     card = orders.get_card(conn, cid)
     store.set_state(conn, reserve._answer_key(card), '{"took": "2026-10-13T14:00:00"}')
     conn.commit()
     assert reserve.TOOK_LABEL == "Клиент пишет, что забрал заказ, отметьте корректный статус!"
     for state in ("", "all"):
         flag(conn, state)
-        html = w["point"].get("/my-point").get_data(as_text=True)
+        html = w["point"].get("/my-point?tab=here").get_data(as_text=True)
         [label] = re.findall(r'<p class="mp-took"[^>]*>([^<]*)</p>', html)
         assert label == reserve.TOOK_LABEL and 'style="font-size:16px' in html and 'data-client-took="%d"' % cid in html
     done = next(s["id"] for s in orders.list_stages(conn) if s["code"] == "done")
     orders.move_card(conn, cid, done, "2026-10-13T15:00:00", "o")                       # the hand-out; the refusal moves it away the same way
     assert not reserve.took_open(conn, orders.get_card(conn, cid))
-    assert reserve.TOOK_LABEL not in w["point"].get("/my-point").get_data(as_text=True)
+    assert reserve.TOOK_LABEL not in w["point"].get("/my-point?tab=here").get_data(as_text=True)
 
 
 # ---- 4. «Продлить» --------------------------------------------------------------------------------------------------------------------
@@ -348,6 +348,11 @@ def test_the_wait_list_names_the_orders_the_next_tick_moves_and_writes_nothing(t
     assert main(["reserve-wait-list", "--db", str(tmp_path / "x.db"), "--now", DAY + "T21:30:00"]) == 0
     out = capsys.readouterr().out
     assert "уйдут на «На ОТХ» при ближайшей проверке: 1" in out
+    assert main(["reserve-wait-list", "--db", str(tmp_path / "no.db")]) == 2 and not (tmp_path / "no.db").exists()
+    again = store.open_db(str(tmp_path / "x.db"))
+    again.execute("PRAGMA query_only = ON")                                             # as the command opens it: a write is refused
+    with pytest.raises(Exception, match="readonly"):
+        again.execute("UPDATE order_card SET reserve_until = ''")
     assert "заказ №%s | точка: Бета | напоминание ушло %s 12:30:00 | прошло 9,0 ч | прошло 8 часов без ответа" % (NUMBER, DAY) in out
 
 

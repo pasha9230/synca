@@ -1341,11 +1341,14 @@ def _cmd_inbox_dismiss(args) -> int:
 
 def _cmd_reserve_wait_list(args) -> int:
     """reserve-wait-list: order_reserve.wait_list over a base opened for reading only (the owner sees it before the 8 hours go live)."""
-    import sqlite3
     from pathlib import Path
     from . import order_reserve
     now = args.now or moscow_now().isoformat(timespec="seconds")
-    conn = sqlite3.connect(Path(args.db).resolve().as_uri() + "?mode=ro", uri=True)
+    if not Path(args.db).is_file():
+        print("ошибка: базы %s нет" % args.db, file=sys.stderr)
+        return 2
+    conn = store.open_db(args.db)                               # not store.connect: no schema, no migration is written
+    conn.execute("PRAGMA query_only = ON")                      # any write fails
     try:
         found = order_reserve.wait_list(conn, now)
     finally:
