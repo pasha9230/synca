@@ -705,6 +705,7 @@ def _marks_back(conn, card_id, link: dict, pieces: int, now: str, author: str) -
     from . import order_oth
     try:
         order_oth.restore_marks(conn, link["from_order"], now, author, order_oth.take_slot(card_id, link["from_item"]), "шины вернулись на ОТХ", pieces=pieces)
+        conn.commit()
     except Exception:                                                 # noqa: BLE001
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the marks «На возврат» of order %s were not brought back", link["from_order"])
