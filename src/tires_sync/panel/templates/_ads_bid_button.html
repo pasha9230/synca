@@ -1,0 +1,2 @@
+{# «Изменить цену просмотра» in the cell of the price of a view (ads_analytics.html, one line): the owner and the partner (routes_ads_bid) #}
+{% if can_post("ads_bid_set_price") and current_user().role in ("owner", "partner") %}<div class="xs"><a href="/economics/ads/bid/{{ acc.id }}/{{ r.avito_id }}" class="btn btn--secondary btn--xs">Изменить цену просмотра</a></div>{% endif %}

@@ -12,7 +12,7 @@
 {%- elif key in ("cpm", "cpl", "cpa") %}{{ rub2(v) }}
 {%- elif key in ("contact_conv", "sale_conv", "drr") %}{{ share(v) }}
 {%- else %}{{ '{:,}'.format(v)|replace(',', ' ') }}{% endif %}{% endmacro %}
-{% macro bid_cell(r) %}<td data-bid="{{ r.avito_id }}">{% if r.bid %}<div>{{ r.bid.short }}</div>{% if r.bid.limit %}<div class="xs">лимит {{ r.bid.limit|money }} в день</div>{% endif %}
+{% macro bid_cell(r, aid) %}<td data-bid="{{ r.avito_id }}">{% if r.bid %}<div>{{ r.bid.short }}</div>{% if r.bid.limit %}<div class="xs">лимит {{ r.bid.limit|money }} в день</div>{% endif %}
 <details class="xs muted"><summary>подробнее</summary>
 {% if r.bid.rec_bid %}<div>рекомендуемая {{ rub2(r.bid.rec_bid) }}</div>{% endif %}
 {% if r.bid.min_bid or r.bid.max_bid %}<div>от {{ rub2(r.bid.min_bid) }} до {{ rub2(r.bid.max_bid) }}</div>{% endif %}
@@ -21,6 +21,7 @@
 <div><a href="https://www.avito.ru/cpxpromo/{{ r.avito_id }}" rel="noopener noreferrer" target="_blank">в кабинете</a> · прочитано {{ r.bid.taken_at|dt_utc }}</div>
 {% if r.bid_fail %}<div>последнее чтение не удалось ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}</div>{% endif %}
 </details>
+{% with acc = {"id": aid} %}{% include "_ads_bid_button.html" %}{% endwith %}
 {% else %}<span class="muted" tabindex="0" data-tip-title="Цена просмотра не прочитана" data-tip="{% if r.bid_fail %}Авито отказал ({{ r.bid_fail.at|dt_utc }}): {{ r.bid_fail.why }}{% else %}{{ r.bid_why }}{% endif %}">не прочитано</span>{% endif %}</td>{% endmacro %}
 {% block title %}Аналитика рекламы · Tires Sync{% endblock %}
 {% block head %}<style>
@@ -84,7 +85,7 @@ tr.ads-group>td{font-weight:500}tr.ads-group.d0>td{background:var(--gray-50)}tr.
 {% elif r.kind == "ad" and not r.ad.avito_id %}<div class="t-name">{{ r.label }}</div><span class="xs muted">продажи клиентов, звонивших в аккаунт, объявление звонка не известно{% if "account" not in data.levels %} · {{ r.account }}{% endif %}</span>
 {% elif r.kind == "ad" %}<div class="t-name"><a class="gname" href="https://www.avito.ru/{{ r.ad.avito_id }}" rel="noopener noreferrer" target="_blank">{{ r.label }}</a></div><span class="xs muted">{{ r.ad.ad_id or "наш Id не известен" }}{% if "account" not in data.levels %} · {{ r.account }}{% endif %}</span>
 {% else %}<span class="small muted">Показаны первые {{ r.shown }} из {{ r.of }}.</span>{% endif %}</td>
-{% for key, label, tip in shown %}{% if r.kind == "more" %}<td></td>{% elif key == "bid" %}{% if r.kind == "ad" and r.ad.avito_id %}{{ bid_cell(r.ad) }}{% else %}<td></td>{% endif %}{% else %}<td class="num">{% if key == "spend" %}<b class="strong">{{ value(key, r.m) }}</b>{% if r.kind == "ad" and r.ad.promo %}<div class="xs muted">продвижение {{ r.ad.promo|money }}</div>{% endif %}{% else %}{{ value(key, r.m) }}{% endif %}{% if key == "margin" and r.m.no_purchase %}<div class="xs muted">без закупки: {{ r.m.no_purchase }}</div>{% endif %}{{ delta(r.delta, key) }}</td>{% endif %}{% endfor %}
+{% for key, label, tip in shown %}{% if r.kind == "more" %}<td></td>{% elif key == "bid" %}{% if r.kind == "ad" and r.ad.avito_id %}{{ bid_cell(r.ad, r.account_id) }}{% else %}<td></td>{% endif %}{% else %}<td class="num">{% if key == "spend" %}<b class="strong">{{ value(key, r.m) }}</b>{% if r.kind == "ad" and r.ad.promo %}<div class="xs muted">продвижение {{ r.ad.promo|money }}</div>{% endif %}{% else %}{{ value(key, r.m) }}{% endif %}{% if key == "margin" and r.m.no_purchase %}<div class="xs muted">без закупки: {{ r.m.no_purchase }}</div>{% endif %}{{ delta(r.delta, key) }}</td>{% endif %}{% endfor %}
 </tr>{% endfor %}</tbody></table></div>
 {% if t.m.no_purchase %}<p class="small muted" style="padding:var(--s-2) var(--s-5) 0">В {{ t.m.no_purchase }} заказах не указана закупка: их выручка учтена, маржа — нет.</p>{% endif %}
 {% elif data.only == "sales" %}

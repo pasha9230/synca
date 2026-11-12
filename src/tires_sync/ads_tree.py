@@ -202,7 +202,7 @@ def _tree(leaves: List[dict], levels: Tuple[str, ...], sort: str, desc: bool, pa
             r = n["leaf"]["row"]
             out.append({"kind": "ad", "id": "%s/%d.%d" % (parent, n["leaf"]["account_id"], r["avito_id"]), "parent": parent, "depth": depth,
                         "label": r["title"] or "№%s" % r["avito_id"], "level": level, "m": n["m"], "ad": r, "count": 1, "delta": None,
-                        "account": n["leaf"]["account"]})
+                        "account": n["leaf"]["account"], "account_id": n["leaf"]["account_id"]})
         if len(nodes) > ads_spend.ROWS_MAX:
             out.append({"kind": "more", "id": parent + "/more", "parent": parent, "depth": depth, "label": "", "level": level,
                         "m": {}, "count": len(nodes) - ads_spend.ROWS_MAX, "delta": None, "shown": ads_spend.ROWS_MAX, "of": len(nodes)})

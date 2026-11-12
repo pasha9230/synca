@@ -354,6 +354,11 @@ NEEDS.update(oth_to_return="supplier")
 # above; the office downloads it with «Заказы», the point its own point's from «Рабочее место» (routes_mypoint checks the point)
 SECTION_OF.update(oth_return_act_upload="orders", oth_return_act_delete="orders", oth_return_act_file="orders", mypoint_return_act="mypoint")
 NEEDS.update(oth_return_act_upload="supplier", oth_return_act_delete="supplier")
+# «Изменить цену просмотра» of «Аналитика рекламы» (ads_bid_set, the owner 2026-11-13): the owner and the partner. The window is the
+# analytics' (the money right); the writes are in «orders» with the money right, as the partner changes nothing in «analytics»; each view
+# checks the role itself as well (routes_ads_bid)
+SECTION_OF.update(ads_bid_page="analytics", ads_bid_set_price="orders", ads_bid_undo="orders", ads_bid_threshold="orders")
+NEEDS.update(ads_bid_set_price="money", ads_bid_undo="money", ads_bid_threshold="money")
 NEEDS["catalog_oth_manual"] = "supplier"                          # the owner and the partner only (the lead 2026-11-03), never as a point
 NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" and e not in NEEDS
               and e.startswith(("connections_", "account_", "addresses_", "point_rules", "photos_agent", "description_"))})

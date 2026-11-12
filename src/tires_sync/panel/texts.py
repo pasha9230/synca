@@ -229,6 +229,24 @@ def _acc(d: dict) -> str:
     return "аккаунт №%s" % _q(d.get("account_id", d.get("account")))
 
 
+def _bid_pair(bid, limit) -> str:
+    def rub(v):
+        return "—" if v in (None, "") else ("%.2f" % float(v)).replace(".", ",") + " ₽"
+    return "%s, лимит %s" % (rub(bid), rub(limit))
+
+
+def _ads_bid_text(d: dict) -> str:
+    """«Изменить цену просмотра» (ads_bid_set): was → wanted, and what Avito showed after it."""
+    was, want, got = d.get("was") or {}, d.get("want") or {}, d.get("got")
+    text = "Цена просмотра%s, %s, объявление %s: %s → %s" % (
+        " возвращена" if d.get("kind") == "undo" else "", _q(d.get("account")) if d.get("account") else _acc(d),
+        _q(d.get("avito_id")), ("авто" if was.get("mode") == "auto" else _bid_pair(was.get("bid"), was.get("day_limit"))),
+        _bid_pair(want.get("bid"), want.get("limit")))
+    if isinstance(got, dict):
+        return text + ("; Авито: %s" % _bid_pair(got.get("bid"), got.get("day_limit"))) + ("" if d.get("ok") else " — не совпало")
+    return text + ("; не записано: %s" % _q(d.get("answer")) if d.get("ok") is False and d.get("answer") else "")
+
+
 def _ui_group(key) -> str:
     from .routes_design import UI_GROUPS
     return _pick(UI_GROUPS, key, _q(key))
@@ -407,6 +425,8 @@ _MORE_TEXTS = {
     "avito_price_queued": lambda d: "Цены на Авито, %s: в очереди %s%s" % (_acc(d), _count(d.get("count")), " (проверка, не отправляются)" if d.get("mode") == "dry" else ""),
     "avito_price_push": lambda d: "Цены отправлены на Авито, %s: отправлено %s, ошибок %s, не отправлено %s, пропущено %s" % (
         _acc(d), _count(d.get("sent")), _count(d.get("failed")), _count(d.get("not_sent")), _count(d.get("skipped"))),
+    "ads_bid_set": _ads_bid_text,
+    "ads_bid_threshold": lambda d: "Порог дневного лимита цены просмотра для «Подтверждаю»: %s → %s ₽" % (_q(d.get("was")), _q(d.get("now"))),
     "feed_now_started": lambda d: "Запущен сбор фида по кнопке «Собрать фид сейчас»",
     "feed_now_refused": lambda d: "Сбор фида по кнопке не запущен: %s" % _q(d.get("why")),
     "avito_upload_started": lambda d: "Запущена загрузка на Авито, %s" % _acc(d),
