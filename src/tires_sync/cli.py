@@ -169,6 +169,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--db", required=True)
     sc.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     sc.add_argument("--dry-run", action="store_true", help="только посчитать и показать, ничего не менять и не отправлять")
+    sr = sub.add_parser("sheet-restore-missing", help="строки Google-таблицы, помеченные «изменена или удалена вручную», у открытых заказов: спросить новый скрипт; пропавшие создать заново, правленные руками оставить (сделайте копию базы до этого)")
+    sr.add_argument("--db", required=True)
+    sr.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    sr.add_argument("--dry-run", action="store_true", help="только показать список, ничего не отправлять и не менять")
     of = sub.add_parser("oth-numbers-fill", help="вписать номер WebMIM и перемещение из заказа-источника заказам, взявшим шины с ОТХ до правила 2026-11-04: только перечисленным; вписанное человеком остаётся, никому ничего не отправляется")
     of.add_argument("--db", required=True)
     of.add_argument("--order", type=int, action="append", required=True, help="номер заказа панели; можно несколько раз")
@@ -1345,6 +1349,23 @@ def _cmd_sheet_cancel_remove(args) -> int:
     print("ошибка: удаление строк из Google-таблицы отключено решением владельца 2026-11-11; ничего не изменено и не отправлено",
           file=sys.stderr)
     return 1
+
+
+def _cmd_sheet_restore_missing(args) -> int:
+    """sheet-restore-missing: the rows marked `_missing` of the open orders are asked about once (no creation): «gone» is made again,
+    «edited» stays. --dry-run lists them only, nothing is sent. Run by hand after a copy of the base and after the script of 2026-11-11."""
+    from . import order_sheet
+    conn = store.connect(args.db)
+    try:
+        box = None if args.dry_run or not args.key_file else load_box(args.key_file)
+        done = order_sheet.restore_missing(conn, box, _http(), moscow_now().isoformat(timespec="seconds"), dry_run=args.dry_run)
+    except order_sheet.SheetError as err:
+        print("ошибка: %s" % err, file=sys.stderr)
+        return 1
+    for d in done:
+        print("№%d · %s · %s" % (d["order_id"], d["key"], d["result"]))
+    print("строк: %d%s" % (len(done), " (проверка: ничего не отправлено и не записано)" if args.dry_run else ""))
+    return 0
 
 
 def _google_sheet(conn, key_file) -> None:
@@ -3296,6 +3317,8 @@ def main(argv=None) -> int:
             return _cmd_sheet_enroll(args)
         if args.command == "sheet-cancel-remove":
             return _cmd_sheet_cancel_remove(args)
+        if args.command == "sheet-restore-missing":
+            return _cmd_sheet_restore_missing(args)
         if args.command == "oth-numbers-fill":
             return _cmd_oth_numbers_fill(args)
         if args.command == "vk-catchup":
