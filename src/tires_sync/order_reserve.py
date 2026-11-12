@@ -442,16 +442,22 @@ def _phrases(line: str) -> list:
 
 
 def found_outcomes(text: str, lists: dict) -> set:
-    """The outcomes whose words stand in the message: whole words, any case, anywhere in the phrase («уже купил» has «купил» too)."""
+    """The outcomes whose words stand in the message: whole words, any case, anywhere in the phrase. The owner 2026-11-12: a word right after
+    «не» does not count («я не забрал» is not «Забрал»), unless the phrase of the list starts with «не» itself («не нужно»); where phrases of
+    the lists overlap, the longest one wins and the shorter one inside it does not count («уже купил» is «Отказ», not also «купил»)."""
     said = _tokens(text)
-    found = set()
+    hits = []
     for outcome in OUTCOMES:
         for phrase in _phrases(lists.get(outcome, "")):
             want = _tokens(phrase)
-            if any(said[i:i + len(want)] == want for i in range(len(said) - len(want) + 1)):
-                found.add(outcome)
-                break
-    return found
+            for i in range(len(said) - len(want) + 1):
+                if said[i:i + len(want)] != want:
+                    continue
+                if want[0] != "не" and i > 0 and said[i - 1] == "не":
+                    continue
+                hits.append((i, i + len(want), outcome))
+    kept = [h for h in hits if not any(o[0] <= h[0] and h[1] <= o[1] and o[1] - o[0] > h[1] - h[0] for o in hits)]
+    return {h[2] for h in kept}
 
 
 def decide(found: set) -> str:

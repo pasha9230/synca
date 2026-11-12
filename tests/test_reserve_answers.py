@@ -81,7 +81,11 @@ def test_the_wait_is_eight_hours_and_silence_moves_the_order_to_oth_at_20_30(tmp
     ("забрал", "took"), ("Забрала вчера", "took"), ("мы ЗАБРАЛИ, спасибо", "took"), ("уже получил", "took"), ("Купил.", "took"), ("взял", "took"),
     ("Продлить", "extend"), ("продлите пожалуйста", "extend"), ("Завтра заберу", "extend"),
     ("отказ", "refuse"), ("Отказываюсь", "refuse"), ("уже не нужно", "refuse"), ("не буду брать", "refuse"), ("передумал", "refuse"),
-    ("уже купил", ""), ("купил, продлите", ""), ("ок", ""), ("", ""), ("завтра", ""), ("забралась", ""), ("нужно подумать", ""),
+    ("уже купил", "refuse"), ("Уже купил в другом месте", "refuse"),                    # the owner 2026-11-12: the longest phrase wins
+    ("я не забрал ещё", ""), ("не взял пока", ""), ("не получил", ""),                     # the owner 2026-11-12: «не» before the word
+    ("не нужно", "refuse"), ("не буду брать", "refuse"),                                    # a phrase of the list starting with «не» itself
+    ("не буду продлевать, завтра заберу", ""),                                              # two outcomes, none inside the other: no answer
+    ("купил, продлите", ""), ("ок", ""), ("", ""), ("завтра", ""), ("забралась", ""), ("нужно подумать", ""),
 ])
 def test_the_first_lists_are_the_owners_and_read_whole_words_in_any_case(text, outcome):
     assert reserve.WORDS_DEFAULT == {"took": "забрал, забрала, забрали, получил, купил, взял", "extend": "продлить, продлите, завтра заберу",
@@ -90,13 +94,14 @@ def test_the_first_lists_are_the_owners_and_read_whole_words_in_any_case(text, o
 
 
 def test_words_of_two_outcomes_are_no_answer_and_the_rule_is_one_function():
-    assert reserve.found_outcomes("уже купил", reserve.WORDS_DEFAULT) == {"took", "refuse"}
+    assert reserve.found_outcomes("уже купил", reserve.WORDS_DEFAULT) == {"refuse"}           # «купил» inside the longer «уже купил» does not count
+    assert reserve.found_outcomes("купил, продлите", reserve.WORDS_DEFAULT) == {"took", "extend"}
     assert reserve.decide({"took", "refuse"}) == "" and reserve.decide({"refuse"}) == "refuse" and reserve.decide(set()) == ""
 
 
 def test_two_outcomes_in_one_message_do_nothing_and_the_wait_goes_on(tmp_path):
     conn, cid, chat, deliver, notify = told(tmp_path)
-    said(conn, chat, DAY + "T13:00:00", "Уже купил в другом месте")
+    said(conn, chat, DAY + "T13:00:00", "Купил бы, но продлите")             # «купил» and «продлите»: none inside the other (owner 2026-11-12)
     run(conn, DAY + "T13:07:00", deliver, notify)
     assert code(conn, cid) == "at_point" and until(conn, cid) == DAY and tasks_of(conn, cid) == [] and alerts(notify) == []
     assert not events(conn, cid, "ответил на напоминание")
