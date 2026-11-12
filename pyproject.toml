@@ -1,7 +1,7 @@
 [project]
 name = "tires-sync"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = ["flask>=3.1", "cryptography>=50.0.2", "Pillow>=12.3.0", "openpyxl>=3.1.5"]
 
 [project.optional-dependencies]
