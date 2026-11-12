@@ -10,7 +10,7 @@ import pytest
 
 from panel_helpers import agree_return, post
 from test_oth_seventh_day import ENTERED, on_oth, started
-from test_order_reserve import card_at, db, ok, stage
+from test_order_reserve import CHAT_FIELD, card_at, db, ok, stage
 from test_reserve_noon import DAY, NEXT, ready as reserve_ready, tick
 from test_vk_commands import _card, _stage, ready
 from tires_sync import message_texts, order_alerts, order_manager as mgr, order_oth, order_reserve as reserve, orders, oth_stock, tasks, users
@@ -277,7 +277,7 @@ def _on_oth_page(tmp_path, responsible="ivan"):
     staff(conn)
     started(conn)
     cid = _card(conn, pid, webmim="700200", code="at_point")
-    conn.execute("UPDATE order_card SET responsible = ? WHERE id = ?", (responsible, cid))
+    conn.execute("UPDATE order_card SET responsible = ?, avito_chat = ? WHERE id = ?", (responsible, CHAT_FIELD, cid))   # with a chat: no «Позвонить…»
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
     return app, client, tok, conn, cid
 

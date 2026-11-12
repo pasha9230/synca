@@ -164,7 +164,8 @@ def test_the_point_lands_on_my_point_and_notify_runs_on_its_pages_only(tmp_path)
     r = mine.get("/")
     assert r.status_code == 302 and r.headers["Location"].endswith("/my-point")
     assert "notify.js" in mine.get("/chats").get_data(as_text=True)
-    assert "notify.js" not in client.get("/orders").get_data(as_text=True)                       # the owner: not
+    office = client.get("/orders").get_data(as_text=True)                                         # the owner: not the point's feed,
+    assert "notify.js" in office and 'data-feed="/tasks/feed"' in office                          # its own tasks «Позвонить…» (2026-11-12)
     assert "Включить уведомления" not in client.get("/my-point").get_data(as_text=True)
 
 

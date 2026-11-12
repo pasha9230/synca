@@ -58,6 +58,8 @@ def test_a_402_without_the_messenger_api_is_named(env):
 
 def test_the_alert_goes_to_the_responsible_and_the_owner_once_a_day_with_the_link(env, monkeypatch):
     conn, chat_row, card = env
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (card,))   # a chat typed in the card, none bound: not «без чата» (order_call)
+    conn.commit()
     told = []
     monkeypatch.setenv("TIRES_PUBLIC_BASE", "https://panel.test")
     tell = lambda logins, text: told.append((tuple(logins), text))
@@ -258,6 +260,8 @@ def test_told_another_way_ends_it_and_sends_nothing(env):
 
 def test_an_order_of_a_points_account_is_told_the_point_only(env, monkeypatch):
     conn, chat_row, card = env
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (card,))   # a chat typed in the card, none bound: not «без чата» (order_call)
+    conn.commit()
     from tires_sync import order_points
     monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": 1})
     staff, point = [], []
@@ -267,6 +271,8 @@ def test_an_order_of_a_points_account_is_told_the_point_only(env, monkeypatch):
 
 def test_only_the_staff_and_the_owner_are_told(env):
     conn, chat_row, card = env
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (card,))   # a chat typed in the card, none bound: not «без чата» (order_call)
+    conn.commit()
     from tires_sync import users
     from tires_sync import order_points as points
     pid = points.save_point(conn, dict(name="Бета", manager_name="А", channel="vk", vk_peer_id="555"))

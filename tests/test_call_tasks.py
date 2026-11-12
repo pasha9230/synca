@@ -41,7 +41,7 @@ def staffed(conn):
 
 def at_point(conn, responsible=""):
     """An order of a made-up client moved to «На точке» without a chat, its responsible set before."""
-    cid = card_at(conn, "moving", "2026-10-14T10:00:00")
+    cid = card_at(conn, "moving", "2026-10-14T10:00:00", avito_chat="")
     if responsible:
         conn.execute("UPDATE order_card SET responsible = ? WHERE id = ?", (responsible, cid))
         conn.commit()
@@ -84,11 +84,11 @@ def test_nobody_answers_for_it_the_owner_gets_it_as_the_other_tasks(tmp_path):
 
 def test_an_order_with_a_chat_gets_no_task(tmp_path):
     conn = db(tmp_path)
-    cid = card_at(conn, "moving", "2026-10-14T10:00:00")
+    cid = card_at(conn, "moving", "2026-10-14T10:00:00", avito_chat="")
     chat_of(conn, cid)
     orders.move_card(conn, cid, stage(conn, "at_point"), ARRIVE, "o")
     assert calls(conn, cid, open_only=False) == []
-    other = card_at(conn, "moving", "2026-10-14T10:00:00")
+    other = card_at(conn, "moving", "2026-10-14T10:00:00", avito_chat="")
     conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (other,))   # the field filled by hand
     conn.commit()
     orders.move_card(conn, other, stage(conn, "at_point"), ARRIVE, "o")
@@ -123,7 +123,7 @@ def test_a_task_open_is_never_doubled_by_the_tick_of_the_same_day(tmp_path):
 
 def test_a_bulk_move_makes_no_task(tmp_path):
     conn = db(tmp_path)
-    cid = card_at(conn, "moving", "2026-10-14T10:00:00")
+    cid = card_at(conn, "moving", "2026-10-14T10:00:00", avito_chat="")
     orders.move_card(conn, cid, stage(conn, "at_point"), ARRIVE, "o", fire_rules=False)
     assert calls(conn, cid, open_only=False) == []
 
@@ -219,7 +219,7 @@ def test_the_arrival_writes_no_red_record_nor_a_line_of_the_inbox(tmp_path):
 
 def test_an_order_with_a_chat_is_as_before(tmp_path):
     conn = db(tmp_path)
-    cid = card_at(conn, "moving", "2026-10-14T10:00:00")
+    cid = card_at(conn, "moving", "2026-10-14T10:00:00", avito_chat="")
     chat = chat_of(conn, cid)
     orders.move_card(conn, cid, stage(conn, "at_point"), ARRIVE, "o")
     notify = Notify()
