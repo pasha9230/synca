@@ -129,13 +129,13 @@ def asked_on_page(tmp_path):
     return app, conn, pid, here, manager(app, conn, pid)
 
 
-def test_the_banner_is_on_the_return_tab_and_its_feed_rings(tmp_path, clock):
+def test_the_banner_is_on_the_agreement_tab_and_its_feed_rings(tmp_path, clock):
     app, conn, pid, here, mine = asked_on_page(tmp_path)
-    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    page = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # not agreed yet: «Согласование возврата» (2026-11-12)
     block = page[page.index('data-oth-question="%d"' % here):].split("</div></div>")[0]
     assert "Заказ выдали или он на точке?" in block
     assert "/my-point/%d/oth_issued" % here in block and "/my-point/%d/oth_here" % here in block
-    assert re.search(r'mp-tab--hot" href="/my-point\?tab=return', page)
+    assert re.search(r'mp-tab--hot" href="/my-point\?tab=agree', page)
     keys = [i["key"] for i in mine.get("/my-point/feed").get_json()["items"]]
     assert any(k.startswith("oth-question-%d-" % here) for k in keys)
 
@@ -145,8 +145,8 @@ def test_here_on_the_page_only_closes_the_question(tmp_path, clock):
     _t, page = press(mine, here, "oth_here")
     assert "Возврат поставщику идёт дальше" in page
     assert orders.get_card(conn, here)["stage"]["code"] == orders.RETURN_GIVEN
-    back = mine.get("/my-point?tab=return").get_data(as_text=True)
-    assert "Ждут согласования возврата" in back and 'id="order-%d"' % here in back and "возврат согласуют с поставщиком" in back
+    back = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # the block «Ждут согласования возврата» is the tab now
+    assert 'data-tab="agree" aria-current="page"' in back and 'id="order-%d"' % here in back and "возврат согласуют с поставщиком" in back
     assert 'data-oth-question="%d"' % here not in back
     assert [r["kind"] for r in point_log.history(conn, pid)][0] == "oth_here"
 

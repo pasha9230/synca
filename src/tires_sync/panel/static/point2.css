@@ -80,6 +80,9 @@ a.p2-line:hover{border-color:var(--p2-primary)}
   font-weight:400;text-align:center}
 .p2w .mp-tab--hot b{background:var(--p2-err);color:var(--gray-0)}
 .p2-tab-s{display:none}
+/* what lies in the chosen tab (the owner 2026-11-12): small, a line each */
+.mp-tab-note{display:flex;flex-direction:column;gap:2px;margin:0 0 12px}
+.mp-tab-note b{color:var(--p2-text);font-weight:600}
 .p2w .mp-block{display:flex;flex-direction:column;gap:8px}
 .p2w .mp-block > h2{font-size:13px;font-weight:400;color:var(--p2-text-3)}
 .p2w .mp-empty{color:var(--p2-text-3);padding:24px 0;text-align:center;margin:0}
@@ -178,8 +181,9 @@ a.p2-line:hover{border-color:var(--p2-primary)}
   .p2-ico{min-width:44px;height:44px;padding:0 8px}
   .p2-ico-t{display:none}
   .p2w > :not(.p2-head):not(.mp-tabs):not(.p2-nav){margin-left:12px;margin-right:12px}
-  .p2w .mp-tabs{margin:0 12px 10px;border:0;gap:4px}
-  .p2w .mp-tab{flex:1 1 0;justify-content:center;border:1px solid var(--p2-border);border-radius:var(--p2-r);padding:0 4px;height:36px;font-size:13px;background:var(--p2-bg)}
+  /* six tabs (the owner 2026-11-12): two rows of three, the page never scrolls sideways, a finger's 44 px each */
+  .p2w .mp-tabs{margin:0 12px 10px;border:0;gap:4px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:visible}
+  .p2w .mp-tab{justify-content:center;border:1px solid var(--p2-border);border-radius:var(--p2-r);padding:0 2px;gap:4px;height:44px;font-size:12px;background:var(--p2-bg);min-width:0}
   .p2w .mp-tab.is-active{border-color:var(--p2-primary);background:var(--p2-primary-bg);color:var(--p2-primary)}
   .p2w .mp-tab b{min-width:18px;height:18px;line-height:18px;padding:0 4px;font-size:11px}
   .p2-tab-l{display:none}

@@ -42,7 +42,7 @@ def marked_position(tmp_path, qty="2"):
 
 
 def whole_returning(tmp_path):
-    """An order moved to «На возврат» by hand (the label «Ожидает согласование возврата»: «Согласуем»), its task open."""
+    """An order moved to «На возврат» by hand (the label «Согласование возврата»: «Согласуем»), its task open."""
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
@@ -150,7 +150,7 @@ def test_2_waiting_is_not_a_refusal_the_position_still_waits(tmp_path, result):
     assert oth_stock.pieces(conn, manual=False) == {"1": 2, "2": 2}  # the owner 2026-11-10 (later): a mark «На возврат» is sold by the point only, not on Avito
     assert not order_oth._kept(conn, card)
     mark = order_oth.item_mark(order_oth.item_marks(conn), item, card["entered_at"])
-    assert mark and mark["qty"] == 2                                                # «Ожидает согласование возврата · 2 шт.» stays
+    assert mark and mark["qty"] == 2                                                # «Согласование возврата · 2 шт.» stays
     assert not any(t.startswith("Шины снова в продаже") for _l, t in events(conn, cid))
 
 
@@ -159,7 +159,7 @@ def test_2_the_seventh_day_still_moves_and_the_agreement_is_as_usual(tmp_path):
     close(conn, cid, "Пока не возвращаем, ждём ответа")
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Ожидает согласование возврата"
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласование возврата"
     order_oth.agree(conn, card, TODAY, "2026-10-26T13:00:00", "o")
     assert order_oth.point_label_of(order_oth.return_plan(conn, cid)).startswith("Согласовано на возврат")
 
@@ -178,7 +178,7 @@ def test_2_the_whole_order_waits_on_return(tmp_path):
     conn, cid = whole_returning(tmp_path)
     close(conn, cid, "пока не возвращаем, ждём")
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Ожидает согласование возврата"
+    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласование возврата"
     order_oth.agree(conn, card, TODAY, NOW, "o")
     assert order_oth.point_label_of(order_oth.return_plan(conn, cid)).startswith("Согласовано на возврат")
 

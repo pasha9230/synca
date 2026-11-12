@@ -28,7 +28,7 @@ def token(page, card, action):
     return found.group(1)
 
 
-TABS = ("here", "moving", "oth", "return")             # «Рабочее место» has no «Все» (the owner 2026-10-30): a card is on its own tab
+TABS = ("here", "moving", "oth", "agree", "return")             # «Рабочее место» has no «Все» (the owner 2026-10-30): a card is on its own tab
 
 
 def workplace(client, p=None):

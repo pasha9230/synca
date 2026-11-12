@@ -95,7 +95,7 @@ def _with_left(row: dict) -> dict:
 def stock(conn) -> Dict[str, List[dict]]:
     """The positions of the orders standing in «На ОТХ» or «На возврат», oldest first: {"stock": the pieces still ours, "returned": the pieces marked
     «возвращено поставщику»}. A position returned in part is in both; `qty` is the pieces of that list (left there, returned here).
-    The owner 2026-11-10: the pieces of a mark «На возврат» on «На ОТХ» (`marked_qty`, «Ожидает согласование возврата») are on sale until the return
+    The owner 2026-11-10: the pieces of a mark «На возврат» on «На ОТХ» (`marked_qty`, «Согласование возврата») are on sale until the return
     is agreed: in the stock too (the feed, «Взять с ОТХ»); `left` stays what a real «Вернуть поставщику» may take.
     No price: the purchase price needs its own right, and the page is about where the goods are."""
     rows = [_with_left(dict(zip(_STOCK_KEYS, r))) for r in conn.execute(_STOCK_SQL + "ORDER BY c.entered_at, i.order_id, i.id")]
@@ -203,7 +203,7 @@ SIGNED_ASK = SIGNED_HEAD + "заполните сумму возврата и п
 RETURN_REASON = "возврат с ОТХ поставщику (%s)" % ACT
 RETURNING = ("oth", orders.RETURN_GIVEN)        # the stages a return is agreed and signed from (the orders agreed before 2026-11-03 are on oth)
 AGREE, AGREED, SIGNED = "agree", "agreed", "signed"
-LABELS = {AGREE: "Ожидает согласование возврата", AGREED: "Согласовано, отдать до %s", SIGNED: "Отдано, нужна сумма возврата"}
+LABELS = {AGREE: "Согласование возврата", AGREED: "Согласовано, отдать до %s", SIGNED: "Отдано, нужна сумма возврата"}
 POINT_LABELS = {AGREE: LABELS[AGREE], AGREED: "Согласовано на возврат, %s", SIGNED: LABELS[SIGNED]}     # «Рабочее место» (2026-11-04)
 RETURN_DAYS = (0, 2, 4)                         # the supplier takes the tyres on Monday, Wednesday and Friday (the owner 2026-11-04)
 FILTERS = {AGREE: LABELS[AGREE], AGREED: "Согласовано"}          # the filter «На возврат» of the board (SIGNED is «Согласовано» there)
@@ -216,17 +216,24 @@ def return_date(today) -> str:
     return today.isoformat()
 
 
+OFF_DAY = "Дата возврата не в день возвратов (пн, ср, пт)"     # the owner 2026-11-12: a hint in the order's event and in the flash, no refusal
+
+
 def check_return_day(value, today) -> str:
-    """The date the operator entered: a real date, not in the past, Monday, Wednesday or Friday. ISO; OthError says what is wrong."""
+    """The date the operator entered: a real date, not in the past. ISO; OthError says what is wrong. Monday, Wednesday and Friday are what the
+    form offers (return_date), not a rule (the owner 2026-11-12): another day is taken, and `off_day` says so."""
     try:
         day = date.fromisoformat(str(value or "").strip())
     except ValueError:
         raise OthError("Укажите дату возврата.") from None
     if day < today:
-        raise OthError("Дата возврата уже прошла: укажите понедельник, среду или пятницу не раньше сегодняшнего дня.")
-    if day.weekday() not in RETURN_DAYS:
-        raise OthError("Возврат поставщику только в понедельник, среду или пятницу: ближайший день — %s." % _short(return_date(day)))
+        raise OthError("Дата возврата уже прошла: укажите день не раньше сегодняшнего.")
     return day.isoformat()
+
+
+def off_day(day: str) -> bool:
+    """The agreed date (ISO) is not a day of the supplier's returns: the hint OFF_DAY goes with it."""
+    return date.fromisoformat(day).weekday() not in RETURN_DAYS
 
 
 def _short(iso: str) -> str:
@@ -414,7 +421,7 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
 
 def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, pieces=None) -> int:
     """«Отменить» of the sale or «Выдали» (slot MOVE), «Вернуть на ОТХ» of a take (take_slot, at most `pieces`): the marks «На возврат» drop_marks took
-    off are back on the positions — in oth_return, «Ожидает согласование возврата», on sale until agreed — and the task of the return with them, as
+    off are back on the positions — in oth_return, «Согласование возврата», on sale until agreed — and the task of the return with them, as
     item_to_return sets it: the open one names them, else a new one (the order's responsible, the term of the setting from now). Only on «На ОТХ» /
     «На возврат» not agreed. No commit: the caller saves it with the rest of its undo. Returns the pieces marked again."""
     kept = _dropped(conn, order_id)
@@ -446,7 +453,7 @@ def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, piece
     if not back:
         return 0
     what = "; ".join("%s, %d шт." % (items[i]["name"], n) for i, n, _by in back)
-    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Метка «%s», шины в продаже до согласования возврата." % (
+    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Статус «%s», шины в продаже до согласования возврата." % (
         why, what, LABELS[AGREE]))
     _audit(conn, now, who, "oth_marks_back", {"order": int(order_id), "items": {str(i): n for i, n, _by in back}})
     marks = []
@@ -638,7 +645,8 @@ def _agree_whole(conn, card: dict, day: str, now: str, author: str, commit: bool
                     (card["id"], now, author, day)).rowcount != 1:
         conn.rollback()
         return return_plan(conn, card["id"])["return_date"]
-    orders.add_event(conn, card["id"], now, author, "field", "Возврат с ОТХ согласован с поставщиком: передать на возврат %s (%s)." % (_short(day), ACT))
+    orders.add_event(conn, card["id"], now, author, "field", "Возврат с ОТХ согласован с поставщиком: передать на возврат %s (%s).%s" % (
+        _short(day), ACT, " %s." % OFF_DAY if off_day(day) else ""))
     _audit(conn, now, author, "oth_return_agreed", {"order": int(card["id"]), "date": day})
     conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (AGREED_KEY % card["id"], day))     # a VK point hears it (tell_agreed)
     if not commit:                                                                    # a part (_agree_part): an order already on «На возврат», saved by the caller
@@ -915,6 +923,20 @@ def to_agree(conn, card: dict) -> bool:
     return card["stage"]["code"] == orders.RETURN_GIVEN and return_plan(conn, card["id"]) is None
 
 
+def agreeing(conn, card: dict) -> bool:
+    """The order is on the agreement of its return (the owner 2026-11-12, «Согласование возврата» of «Рабочее место»): on «На возврат» and not
+    agreed yet, or on «На ОТХ» with a position marked for the return (item_to_return) — the whole order then: a record is sold or returned
+    whole (the owner 2026-11-11). Agreed (a plan with its date): no longer."""
+    code = card["stage"]["code"]
+    if code not in RETURNING or return_plan(conn, card["id"]) is not None:
+        return False
+    if code == orders.RETURN_GIVEN:
+        return True
+    since = _oth_since(conn, card["id"])
+    return any(_marked(conn, item_id, int(qty), since) > 0
+               for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (card["id"],)).fetchall())
+
+
 def store_value(conn, key: str) -> str:
     row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
     return row[0] if row else ""
@@ -985,12 +1007,14 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 SOLD_SKIP = "шины проданы с ОТХ другому покупателю: прежнему клиенту не пишем"
 OFFICE_SOLD = "Продано с ОТХ: запись хранения переведена в «Выполнено» в панели"
 AGREED_REFUSED = "не выполнено: возврат согласован"
+AGREEING_REFUSED = "не выполнено: шины на согласовании возврата"
+AGREEING_ANSWER = "Шины на согласовании возврата: продать можно после отмены согласования оператором"     # the owner 2026-11-12, word for word
 AGREED_ANSWER = "Заказ №%s: возврат уже согласован с поставщиком, шины едут на возврат. Отметить «Продать» нельзя: напишите офису."
 
 
 def given_back(conn, order_id) -> bool:
     """Some tyres of the order really went back to the supplier («Вернуть поставщику»): the point does not sell such an order by one press (review
-    2026-11-10). The pieces of oth_return that are a mark «На возврат» (_marked, «Ожидает согласование возврата») lie at the point: not given back."""
+    2026-11-10). The pieces of oth_return that are a mark «На возврат» (_marked, «Согласование возврата») lie at the point: not given back."""
     since = _oth_since(conn, order_id)
     return any(int(qty) - _marked(conn, item_id, int(qty), since) > 0
                for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (order_id,)).fetchall())
@@ -1012,7 +1036,8 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     """«Продать» of «Рабочее место» (the owner 2026-11-10): the tyres on «На ОТХ» or «На возврат» went to a buyer from the street, the whole order goes
     to «Выполнено» in one transaction. Not answer_issued: no question of the seventh day is needed (an open one closes: «sold»), and the client put
     aside is NOT linked again (the buyer is another person: the order stays without a client). Only until the return is agreed (the owner
-    2026-11-10): agreed, refused; the mark «На возврат» and the task go with the move (left_return). The rules of «Выполнено» run as for any order
+    2026-11-10): agreed, refused; the mark «На возврат» and the task go with the move (left_return). The owner 2026-11-12: the point sells on
+    «На ОТХ» only — an order on the agreement of the return (`agreeing`) is refused to it, the office (`office`) sells it as before. The rules of «Выполнено» run as for any order
     (the sale is theirs), but their messages to the client are skipped: the order's chat is the old client's. After the act МХ-3: refused. (outcome, answer, done).
     `office`: a record of storage the office moved to «Выполнено» (orders.move_card → _sell_record, the owner 2026-11-10): the same sale, its
     record in the journal says so; the refusal is the caller's to write."""
@@ -1027,6 +1052,9 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     if return_plan(conn, card["id"]) is not None:                # agreed: the tyres go back to the supplier (the owner 2026-11-10)
         conn.rollback()
         return AGREED_REFUSED, AGREED_ANSWER % label, False
+    if not office and agreeing(conn, card):                      # the owner 2026-11-12 (over 2026-11-10): the point sells on «На ОТХ» only; on the
+        conn.rollback()                                          # agreement of the return the office sells, or takes the agreement off first
+        return AGREEING_REFUSED, AGREEING_ANSWER, False
     if given_back(conn, card["id"]):                             # the sale is of the whole order: its quantity would count them too
         conn.rollback()
         return ("не выполнено: часть шин возвращена поставщику", "Заказ №%s: часть шин уже возвращена поставщику. Отметить «Продать» нельзя: "
@@ -1168,7 +1196,7 @@ def task_closed(conn, task: dict, how: str, result: str, who: str, now: str) -> 
 
 
 def _still_waiting(conn, card: dict, task: dict) -> None:
-    """«пока», «ждём»: the marks «На возврат» of the positions of this stay closed with the task keep «Ожидает согласование возврата» (item_marks)
+    """«пока», «ждём»: the marks «На возврат» of the positions of this stay closed with the task keep «Согласование возврата» (item_marks)
     until the agreement or the seventh day. No commit."""
     if card["stage"]["code"] != "oth":
         return                                                                       # «На возврат»: the label is the stage's, nothing to keep
@@ -1387,7 +1415,8 @@ REMIND_KEY = "oth_handover_remind:%d:%s"         # per order and day
 
 def remind_handover(conn, now: str, notify) -> int:
     """The point did not press «Подписал акт и отдал» by the agreed date: on every later Monday, Wednesday and Friday from 08:59 to the end of the working
-    hours it is told again, once a day, until it presses. Returns how many were told."""
+    hours it is told again, once a day, until it presses. Returns how many were told. The agreed date may be any day (the owner 2026-11-12): the
+    reminder still goes on the supplier's days after it."""
     from . import message_texts, order_manager
     today = date.fromisoformat(now[:10])
     if today.weekday() not in RETURN_DAYS or now[11:16] < HANDOVER_AT or int(now[11:13]) >= order_manager.duty_settings(conn)["hours"][1]:
@@ -1527,7 +1556,7 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
         conn.rollback()
         return False
     _add_returned(conn, item, pieces, now, who)
-    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Метка «%s», шины в продаже до согласования возврата, заказ остаётся на «%s»." % (
+    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Статус «%s», шины в продаже до согласования возврата, заказ остаётся на «%s»." % (
         item["name"], pieces, LABELS[AGREE], card["stage"]["name"]))
     _audit(conn, now, who, "oth_item_to_return", {"order": card["id"], "item": item["item_id"], "qty": pieces})
     what = "позиция: %s, %d шт." % (item["name"], pieces)

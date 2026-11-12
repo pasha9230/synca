@@ -262,8 +262,16 @@ def _hand_over(conn, point: dict, back: str):
 # «Рабочее место» (the owner 2026-10-29): the tabs of the point's orders, each with its count; an order may be in two of them.
 # the tabs of «Рабочее место» (the owner 2026-10-30, the new design: a list of the point's work, no «Все», «Резерв истекает» nor «Ждут ответа»;
 # the question «Клиент забрал?» is a line of its card on «На точке», first); an old address (all, ending, asked, …) opens DEFAULT_TAB
-TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "return": "На возврат",      # «Переданные клиенты»: a section of its own
+TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "agree": "Согласование возврата", "return": "На возврат",
         "issued": "Выдано"}                        # the owner 2026-11-09: what the point gave out in the last ISSUED_DAYS (_issued)
+# the owner 2026-11-12 (the partner's answers): «Согласование возврата» is a tab of its own between «На ОТХ» and «На возврат», and the chosen
+# tab says in small letters what lies in it (the texts are the owner's, word for word; a tuple: a line each)
+TAB_NOTES = {"moving": ("Ждём доставки. Отметьте «Приехал», как прибудут на точку!",),
+             "here": ("Эти позиции у нас, ожидаем выкупа заказчиком.",),
+             "oth": ("Невыкуп, у нас на хранении 7 дней. Если продаёте — впишите данные покупателя.", "Можно продать, +50 рублей / шт!"),
+             "agree": ("Отправили запрос на оформление возврата этих позиций. Теперь для продажи нужна проверка.",),
+             "return": ("Эти товары согласованы на возврат! Возвраты возможны в пн, ср, пт.",),
+             "issued": ("Заказы, которые отмечены как реализованные.",)}
 DEFAULT_TAB = "here"
 ISSUED_DAYS = 30
 CONFIRM = ("issued", "reserve_issued", "oth_issued", "oth_sold")   # the owner 2026-11-09: a hand-out is confirmed with the order's number, tyres and client
@@ -272,11 +280,14 @@ ALERTS_READ = 500                                  # the notes read to find the 
 
 def _in_tab(row: dict, tab: str) -> bool:
     """«Едут»: «Заказ оформлен» and «Перемещение на точку» (the owner 2026-10-29); «На точке»: «Товар на точке», waiting for the client; «На ОТХ»:
-    our tyres at the point (the owner 2026-10-30); «На возврат»: the orders of the stage «На возврат» (the owner 2026-11-03: «Согласуем», or
-    agreed and the act МХ-3 not signed yet), and one of «На ОТХ» agreed before the stage came."""
+    our tyres at the point (the owner 2026-10-30). The owner 2026-11-12: «Согласование возврата»: the orders of the stage «На возврат» whose
+    return is not agreed yet, and those of «На ОТХ» with a position marked for the return (the whole order: a record is sold or returned whole);
+    «На возврат»: agreed (the date is set, the act МХ-3 not signed yet; one of «На ОТХ» agreed before the stage came too) and the act signed."""
     code = row["card"]["stage"]["code"]
-    returning = code == orders.RETURN_GIVEN or bool(row.get("returning"))
-    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": code == "oth" and not returning, "return": returning,
+    agreed = bool(row.get("returning"))
+    agreeing = not agreed and bool(row.get("agreeing"))
+    return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": code == "oth" and not agreed and not agreeing, "agree": agreeing,
+            "return": agreed or (code == orders.RETURN_GIVEN and not agreeing),
             "issued": False}[tab]                                       # «Выдано» is not of these cards: _issued
 
 
@@ -489,10 +500,13 @@ def register(app) -> None:
                           "since": card["entered_at"], "lines": point_lines(card),     # «на точке с 07.11», «на ОТХ с 31.10»: the stage came then
                           "ends": code == "at_point" and bool(until) and until <= tomorrow, "delivery": _short_date(delivery) if delivery else (oth_sale.IN_STOCK if card["in_stock"] else ""),
                           "sell_lines": sell_lines(card) if code in order_oth.RETURNING else [],     # «Продать» (2026-11-10): until the act МХ-3 is signed
-                          "can_sell": (code in order_oth.RETURNING and order_oth.return_plan(conn, card["id"]) is None     # until agreed (2026-11-10)
-                                       and not order_oth.given_back(conn, card["id"])),
+                          # «Продать» of the point (the owner 2026-11-12, over 2026-11-10): on «На ОТХ» only; on the agreement of the
+                          # return and agreed there is no button (order_oth.sell refuses too): the office cancels the agreement first
+                          "can_sell": (code == "oth" and order_oth.return_plan(conn, card["id"]) is None
+                                       and not order_oth.agreeing(conn, card) and not order_oth.given_back(conn, card["id"])),
                           "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
+                          "agreeing": order_oth.agreeing(conn, card),          # «Согласование возврата» (the owner 2026-11-12)
                           "ret_label": order_oth.point_label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "ret_state": order_oth.state_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "oth_question": order_oth.question(conn, card, now) if code in order_oth.RETURNING else "",
@@ -524,15 +538,15 @@ def register(app) -> None:
             row["returning"] = row["card"]["id"] in returning
         for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
             ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
-            ret["sell"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["can_sell"]), None)     # «Продать» until the act is signed
         tab = request.args.get("tab", "")
         tab = tab if tab in TABS else DEFAULT_TAB
         shown = sorted((r for r in cards if _in_tab(r, tab)), key=lambda r: not (r["asked"] or r["oth_asked"]))     # the questions first
         counts = {key: sum(1 for r in cards if _in_tab(r, key)) for key in TABS}
         issued = _issued(conn, point_id, today) if point_id is not None else []
         counts["issued"] = len(issued)
-        hot = {"here": any(r["asked"] for r in cards), "oth": any(r["oth_asked"] and r["card"]["stage"]["code"] == "oth" for r in cards),
-               "return": any(r.get("returning") or (r["oth_asked"] and r["card"]["stage"]["code"] == orders.RETURN_GIVEN) for r in cards)}                                   # the tabs that wait for the point
+        hot = {"here": any(r["asked"] for r in cards), "oth": any(r["oth_asked"] and _in_tab(r, "oth") for r in cards),
+               "agree": any(r["oth_asked"] and _in_tab(r, "agree") for r in cards),
+               "return": any(r.get("returning") or (r["oth_asked"] and _in_tab(r, "return")) for r in cards)}     # the tabs that wait for the point
         query = str(request.args.get("q") or "").strip()[:search.QUERY_MAX]
         found = _found(conn, query, point_id) if query and point_id is not None else None
         if found:                                                                # the search looks at every order of the point: say its tab
@@ -541,9 +555,9 @@ def register(app) -> None:
             for f in found:
                 oid = int(f["url"].rsplit("/", 1)[-1]) if f.get("url", "").rsplit("/", 1)[-1].isdigit() else None
                 f["tab"] = tab_of.get(oid, "")
-                if f["tab"] in ("oth", "return"):                               # our tyres at the point: the client is gone (the owner 2026-10-30)
+                if f["tab"] in ("oth", "agree", "return"):                               # our tyres at the point: the client is gone (the owner 2026-10-30)
                     f["title"] = "Заказ №%d · шины на ОТХ" % oid
-        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, hot=hot, issued=issued,
+        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, hot=hot, issued=issued,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,

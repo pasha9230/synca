@@ -50,22 +50,28 @@ def test_a_record_with_a_mark_is_not_offered_and_not_taken(tmp_path):
         oth_sale.to_new_client(conn, x, "Пётр", "+7 900 000 11 22", LATER, "o")
 
 
-def test_the_point_sells_the_marked_record_whole(tmp_path):
+def test_the_office_sells_the_marked_record_whole_and_the_point_does_not(tmp_path):
+    """The owner 2026-11-12: a record on the agreement of its return is not the point's to sell (was: sold whole by the point); the office sells it."""
     conn = db(tmp_path)
     cid, x = marked_record(conn)
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "менеджер Бета", SOLD)
+    assert not done and answer == order_oth.AGREEING_ANSWER and code(conn, x) == "oth"
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "owner", SOLD, office=True)
     assert done, answer
     assert code(conn, x) == "done" and [i["qty"] for i in orders.get_card(conn, x)["items"]] == [4]
     assert conn.execute("SELECT qty FROM oth_return WHERE order_id = ?", (x,)).fetchone() is None    # the mark went with the sale
 
 
-def test_the_point_never_sells_a_part_of_a_marked_record(tmp_path):
-    """2 of the 4 tyres of the record are left in it (taken the old way before 2026-11-11, or the quantity lowered): «Продать» is refused."""
+def test_nobody_sells_a_part_of_a_marked_record(tmp_path):
+    """2 of the 4 tyres of the record are left in it (taken the old way before 2026-11-11, or the quantity lowered): the sale is refused — to the
+    point as any order on the agreement of the return (the owner 2026-11-12), to the office because the record goes whole."""
     conn = db(tmp_path)
     cid, x = marked_record(conn)
     conn.execute("UPDATE order_item SET qty = 2 WHERE order_id = ?", (x,))
     conn.commit()
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "менеджер Бета", SOLD)
+    assert not done and answer == order_oth.AGREEING_ANSWER
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "owner", SOLD, office=True)
     assert not done and "только целиком" in answer and "2 из 4 шт." in answer
     assert code(conn, x) == "oth"
 

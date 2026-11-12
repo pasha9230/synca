@@ -65,14 +65,14 @@ def test_issued_after_the_agreement_writes_nothing_of_a_sale_before_it(tmp_path,
 
 def test_a_sale_still_writes_sold_before_the_agreement(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path)
-    sell(manager(app, conn, pid), card)
+    orders.move_card(conn, card, _stage(conn, "done"), T1, "owner")     # the office: the point no longer sells on the agreement (the owner 2026-11-12)
     assert task_rows(conn, card) == [(None, T1)]
     assert any(t.startswith(order_oth.SOLD_EARLY) for t in texts(conn, card)) and not any(t.startswith(ISSUED) for t in texts(conn, card))
 
 
 # ---- 2. «Отменить» and «Вернуть на ОТХ» bring the mark «На возврат» and its task back -----------------------------------------------------
 
-def press(client, card, action, tab="oth"):
+def press(client, card, action, tab="agree"):     # a marked order: «Согласование возврата» (2026-11-12)
     from test_mypoint import token
     page = client.get("/my-point?tab=%s" % tab).get_data(as_text=True)
     r = post(client, "/my-point/%d/%s" % (card, action), "tok", token=token(page, card, action), confirm="yes")
@@ -90,7 +90,7 @@ def mark_is_back(conn, card, item, qty=4):
     assert now["stage"]["code"] == "oth"
     assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (qty,)
     mark = order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])
-    assert mark and mark["qty"] == qty                                                  # «Ожидает согласование возврата» again
+    assert mark and mark["qty"] == qty                                                  # «Согласование возврата» again
     assert order_oth.pieces_here(conn, now) == {item: 4} and not order_oth.given_back(conn, card)
     assert sum(order_oth.goods_on_oth(conn).values()) == 4                             # and on sale until agreed
     [task] = conn.execute("SELECT id, assignee, title FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (card,)).fetchall()
@@ -99,15 +99,15 @@ def mark_is_back(conn, card, item, qty=4):
     return task
 
 
-def test_sold_then_undone_the_mark_and_the_task_are_back_and_the_tyres_on_sale(tmp_path, clock):
+def test_the_point_does_not_sell_a_marked_order_the_mark_and_the_task_stay(tmp_path, clock):
+    """Was «sold then undone» (10.11). The owner 2026-11-12: on the agreement of the return the point has no «Продать»; nothing is dropped."""
     app, conn, pid, card, item, owner = marked(tmp_path)
     mine = manager(app, conn, pid)
-    sell(mine, card)
-    assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (card,)).fetchone() and open_tasks(conn, card) == 0
-    undo(mine, conn, card, clock)
-    mark_is_back(conn, card, item)
-    assert any(t.startswith("Метка «На возврат» возвращена") for t in texts(conn, card))
-    assert 'action="/my-point/%d/oth_sold"' % card in mine.get("/my-point?tab=oth").get_data(as_text=True)
+    assert "oth_sold" not in mine.get("/my-point?tab=agree").get_data(as_text=True)
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T1)
+    assert not done and answer == order_oth.AGREEING_ANSWER
+    mark_is_back(conn, card, item)                                                         # never went: the mark, the task, the stock
+    assert not any(t.startswith(order_oth.SOLD_EARLY) for t in texts(conn, card))
 
 
 def test_issued_then_undone_the_mark_and_the_task_are_back(tmp_path, clock):
@@ -121,10 +121,12 @@ def test_issued_then_undone_the_mark_and_the_task_are_back(tmp_path, clock):
     assert order_oth.question_open(conn, orders.get_card(conn, card))
 
 
-def test_a_part_of_a_mark_marked_then_sold_and_undone_brings_back_only_that_part(tmp_path, clock):
+def test_a_part_of_a_mark_marked_then_issued_and_undone_brings_back_only_that_part(tmp_path, clock):
+    """Was «sold and undone»: the point no longer sells on the agreement (the owner 2026-11-12); «Выдали» drops and brings back the same mark."""
     app, conn, pid, card, item, owner = marked(tmp_path, qty=3)
+    ask(conn, card)
     mine = manager(app, conn, pid)
-    sell(mine, card)
+    press(mine, card, "oth_issued")
     undo(mine, conn, card, clock)
     mark_is_back(conn, card, item, qty=3)
 

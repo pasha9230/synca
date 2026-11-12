@@ -183,8 +183,8 @@ def test_the_cabinet_of_the_point_has_no_issued_for_a_record(tmp_path):
     cid, x = split(conn)
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
     mine = manager(app, conn, orders.get_card(conn, x)["point_id"])
-    page = mine.get("/my-point?tab=return").get_data(as_text=True)
-    assert 'action="/my-point/%d/oth_here"' % x in page and 'action="/my-point/%d/oth_sold"' % x in page
+    page = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # not agreed yet: «Согласование возврата» (2026-11-12)
+    assert 'action="/my-point/%d/oth_here"' % x in page and "oth_sold" not in page        # «Продать»: on «На ОТХ» only (the owner 2026-11-12)
     assert 'action="/my-point/%d/oth_issued"' % x not in page
 
 
