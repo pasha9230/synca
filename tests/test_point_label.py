@@ -148,7 +148,7 @@ def test_the_chat_of_another_account_and_the_clients_words_are_hidden_from_a_poi
     for role in ("owner", "partner", "chats"):                           # nobody else: as before
         client = w["owner"] if role == "owner" else person(w["app"], role)[0]
         page = text(client, "/orders/%d" % w["away"])
-        assert 'href="/chats/%d"' % w["away_chat"] in page and "секретные слова" in page, role
+        assert 'href="/chats/%d?acc=' % w["away_chat"] in page and "секретные слова" in page, role   # on the chat's account (2026-11-12)
 
 
 def test_the_chat_of_the_points_own_account_and_its_words_are_shown(w):
