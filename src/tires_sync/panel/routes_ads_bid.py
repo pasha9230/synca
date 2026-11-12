@@ -64,6 +64,13 @@ def _amount(name: str):
         raise ads_bid_set.BidError("«%s»: нужно число." % {"bid": "Цена просмотра", "own": "Своё значение", "limit": "Сколько тратить в день"}.get(name, name))
 
 
+def _seen():
+    """«Было» the form showed (the price and the limit; empty: none); None when the form has no such fields (an old form)."""
+    if "was_bid" not in request.form or "was_limit" not in request.form:
+        return None
+    return {"bid": _amount("was_bid"), "limit": _amount("was_limit")}
+
+
 def register(app) -> None:
     def page(account_id: int, avito_id: int) -> str:
         return "/economics/ads/bid/%d/%d" % (account_id, avito_id)
@@ -105,7 +112,7 @@ def register(app) -> None:
             raise ads_bid_set.BidError("У аккаунта не заданы ключи Авито.")
         result = ads_bid_set.change(conn, ad["account"], avito_id, bid, limit, confirmed=request.form.get("confirm") == "1",
                                     token=request.form.get("token", ""), at=local_iso(), stamp=now_iso(), now=_epoch(), author=author(),
-                                    writer=lambda: _client(keys, write=True), kind=kind)
+                                    writer=lambda: _client(keys, write=True), kind=kind, seen=_seen(), reader=lambda: _client(keys))
         flash(result["text"], "ok" if result["ok"] and not result["duplicate"] else ("info" if result["duplicate"] else "error"))
 
     @app.route("/economics/ads/bid/<int:account_id>/<int:avito_id>", methods=["POST"])
