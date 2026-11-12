@@ -95,7 +95,7 @@ def _with_left(row: dict) -> dict:
 def stock(conn) -> Dict[str, List[dict]]:
     """The positions of the orders standing in «На ОТХ» or «На возврат», oldest first: {"stock": the pieces still ours, "returned": the pieces marked
     «возвращено поставщику»}. A position returned in part is in both; `qty` is the pieces of that list (left there, returned here).
-    The owner 2026-11-10: the pieces of a mark «На возврат» on «На ОТХ» (`marked_qty`, «Ожидает согласование возврата») are on sale until the return
+    The owner 2026-11-10: the pieces of a mark «На возврат» on «На ОТХ» (`marked_qty`, «Согласование возврата») are on sale until the return
     is agreed: in the stock too (the feed, «Взять с ОТХ»); `left` stays what a real «Вернуть поставщику» may take.
     No price: the purchase price needs its own right, and the page is about where the goods are."""
     rows = [_with_left(dict(zip(_STOCK_KEYS, r))) for r in conn.execute(_STOCK_SQL + "ORDER BY c.entered_at, i.order_id, i.id")]
@@ -203,7 +203,7 @@ SIGNED_ASK = SIGNED_HEAD + "заполните сумму возврата и п
 RETURN_REASON = "возврат с ОТХ поставщику (%s)" % ACT
 RETURNING = ("oth", orders.RETURN_GIVEN)        # the stages a return is agreed and signed from (the orders agreed before 2026-11-03 are on oth)
 AGREE, AGREED, SIGNED = "agree", "agreed", "signed"
-LABELS = {AGREE: "Ожидает согласование возврата", AGREED: "Согласовано, отдать до %s", SIGNED: "Отдано, нужна сумма возврата"}
+LABELS = {AGREE: "Согласование возврата", AGREED: "Согласовано, отдать до %s", SIGNED: "Отдано, нужна сумма возврата"}
 POINT_LABELS = {AGREE: LABELS[AGREE], AGREED: "Согласовано на возврат, %s", SIGNED: LABELS[SIGNED]}     # «Рабочее место» (2026-11-04)
 RETURN_DAYS = (0, 2, 4)                         # the supplier takes the tyres on Monday, Wednesday and Friday (the owner 2026-11-04)
 FILTERS = {AGREE: LABELS[AGREE], AGREED: "Согласовано"}          # the filter «На возврат» of the board (SIGNED is «Согласовано» there)
@@ -414,7 +414,7 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
 
 def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, pieces=None) -> int:
     """«Отменить» of the sale or «Выдали» (slot MOVE), «Вернуть на ОТХ» of a take (take_slot, at most `pieces`): the marks «На возврат» drop_marks took
-    off are back on the positions — in oth_return, «Ожидает согласование возврата», on sale until agreed — and the task of the return with them, as
+    off are back on the positions — in oth_return, «Согласование возврата», on sale until agreed — and the task of the return with them, as
     item_to_return sets it: the open one names them, else a new one (the order's responsible, the term of the setting from now). Only on «На ОТХ» /
     «На возврат» not agreed. No commit: the caller saves it with the rest of its undo. Returns the pieces marked again."""
     kept = _dropped(conn, order_id)
@@ -446,7 +446,7 @@ def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, piece
     if not back:
         return 0
     what = "; ".join("%s, %d шт." % (items[i]["name"], n) for i, n, _by in back)
-    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Метка «%s», шины в продаже до согласования возврата." % (
+    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Статус «%s», шины в продаже до согласования возврата." % (
         why, what, LABELS[AGREE]))
     _audit(conn, now, who, "oth_marks_back", {"order": int(order_id), "items": {str(i): n for i, n, _by in back}})
     marks = []
@@ -1006,7 +1006,7 @@ AGREED_ANSWER = "Заказ №%s: возврат уже согласован с
 
 def given_back(conn, order_id) -> bool:
     """Some tyres of the order really went back to the supplier («Вернуть поставщику»): the point does not sell such an order by one press (review
-    2026-11-10). The pieces of oth_return that are a mark «На возврат» (_marked, «Ожидает согласование возврата») lie at the point: not given back."""
+    2026-11-10). The pieces of oth_return that are a mark «На возврат» (_marked, «Согласование возврата») lie at the point: not given back."""
     since = _oth_since(conn, order_id)
     return any(int(qty) - _marked(conn, item_id, int(qty), since) > 0
                for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ? AND qty > 0", (order_id,)).fetchall())
@@ -1188,7 +1188,7 @@ def task_closed(conn, task: dict, how: str, result: str, who: str, now: str) -> 
 
 
 def _still_waiting(conn, card: dict, task: dict) -> None:
-    """«пока», «ждём»: the marks «На возврат» of the positions of this stay closed with the task keep «Ожидает согласование возврата» (item_marks)
+    """«пока», «ждём»: the marks «На возврат» of the positions of this stay closed with the task keep «Согласование возврата» (item_marks)
     until the agreement or the seventh day. No commit."""
     if card["stage"]["code"] != "oth":
         return                                                                       # «На возврат»: the label is the stage's, nothing to keep
@@ -1547,7 +1547,7 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
         conn.rollback()
         return False
     _add_returned(conn, item, pieces, now, who)
-    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Метка «%s», шины в продаже до согласования возврата, заказ остаётся на «%s»." % (
+    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Статус «%s», шины в продаже до согласования возврата, заказ остаётся на «%s»." % (
         item["name"], pieces, LABELS[AGREE], card["stage"]["name"]))
     _audit(conn, now, who, "oth_item_to_return", {"order": card["id"], "item": item["item_id"], "qty": pieces})
     what = "позиция: %s, %d шт." % (item["name"], pieces)

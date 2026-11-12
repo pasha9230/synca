@@ -292,7 +292,7 @@ def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_off_the_points_but
     assert "oth_sold" not in manager(app, conn, pid).get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12: the office sells
     assert any("шины в продаже до согласования возврата" in t for t in texts(conn, card))
     page = owner.get("/oth").get_data(as_text=True)
-    assert "data-item-return>Ожидает согласование возврата · 4 шт., в продаже до согласования" in page and "в продаже 4" in page
+    assert "data-item-return>Согласование возврата · 4 шт., в продаже до согласования" in page and "в продаже 4" in page
     assert "шины снимаются с продажи" not in page and 'action="/oth/return"' not in page     # nothing left for a real «Вернуть поставщику»
 
 

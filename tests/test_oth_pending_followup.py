@@ -90,7 +90,7 @@ def mark_is_back(conn, card, item, qty=4):
     assert now["stage"]["code"] == "oth"
     assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (qty,)
     mark = order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])
-    assert mark and mark["qty"] == qty                                                  # «Ожидает согласование возврата» again
+    assert mark and mark["qty"] == qty                                                  # «Согласование возврата» again
     assert order_oth.pieces_here(conn, now) == {item: 4} and not order_oth.given_back(conn, card)
     assert sum(order_oth.goods_on_oth(conn).values()) == 4                             # and on sale until agreed
     [task] = conn.execute("SELECT id, assignee, title FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (card,)).fetchall()

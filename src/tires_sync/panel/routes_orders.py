@@ -1163,7 +1163,7 @@ def register(app) -> None:
         if order_oth.unagree(conn, card, now, author()):
             told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, message_texts.text(conn, message_texts.UNAGREED, order_label=manager.label(card)), now,
                                            vk_http=app.config.get("VK_HTTP") or urllib_transport)
-            flash("Согласование отменено: метка «%s», шины не в продаже, точка не видит дату. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
+            flash("Согласование отменено: статус «%s», шины не в продаже, точка не видит дату. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
         else:
             flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
         return redirect("/orders/%d" % card_id)
