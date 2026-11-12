@@ -48,8 +48,12 @@ def test_the_owner_sees_the_spending_the_dash_and_the_menu_item(tmp_path):
     assert "Расходы загружены за 1 из 7 дн." in page and "2,47&nbsp;₽" in page            # 1234.5 / 500 views
     assert "с 2026-11-04 по 2026-11-10" in page.lower() and 'href="/economics/ads"' in page
     assert "Без объявления" in page
-    assert "своя 3,50&nbsp;₽" in page and "рекомендуемая 5,00&nbsp;₽" in page and "maxForecast: 20" in page and "cpxpromo/4242" in page
-    assert "лимит 300\u00a0₽ в день" in page and "вариант 9,00&nbsp;₽" in page and "прочитано 11.11.2026 04:20:00" in page
+    cell = page.split('data-bid="4242"', 1)[1].split("</td>", 1)[0]
+    short, more = cell.split("<details", 1)                      # the cell: the price and the limit; the rest unfolds (the owner 2026-11-12)
+    assert "своя 3,50\u00a0₽" in short and "лимит 300\u00a0₽ в день" in short and "рекомендуемая" not in short and "вариант" not in short
+    assert "рекомендуемая 5,00&nbsp;₽" in more and "9,00&nbsp;₽ — прогноз до 20 просмотров" in more and "cpxpromo/4242" in more
+    assert "прочитано 11.11.2026 04:20:00" in more
+    assert "Цена просмотра прочитана у 1 из 1 объявлений" in page
     assert "не прочитано" not in page and "не продвигается" not in page and "продвижения нет" not in page
     for query in ("?p=30&s=drr", "?p=90&s=drr_margin", "?p=13&s=bad", ""):
         assert owner.get("/economics/ads" + query).status_code == 200
@@ -92,11 +96,57 @@ def test_an_ad_without_a_price_says_not_read_and_why(tmp_path):
     login(owner)
     page = owner.get("/economics/ads?p=90").get_data(as_text=True)
     cell = {name: page.split(name, 1)[1].split("</tr>", 1)[0] for name in ("Отказная", "Очередная", "Давняя", "Nokian Hakka")}
+    assert "<details" not in cell["Отказная"] and 'data-tip="' in cell["Отказная"]                   # one word, the reason in the hint
     assert "не прочитано" in cell["Отказная"] and "Авито отказал (11.11.2026 04:20:00): ответ 404, код 404: item is not available" in cell["Отказная"]
     assert "не прочитано" in cell["Очередная"] and "очередь ещё не дошла" in cell["Очередная"]
     assert "не прочитано" in cell["Давняя"] and "нет расходов за последние 30 дн." in cell["Давняя"]
-    assert "своя 3,50&nbsp;₽" in cell["Nokian Hakka"] and "не прочитано" not in cell["Nokian Hakka"]            # the old price stays, with the failure
+    assert "своя 3,50\u00a0₽" in cell["Nokian Hakka"] and "не прочитано" not in cell["Nokian Hakka"]            # the old price stays, with the failure
     assert "последнее чтение не удалось (11.11.2026 06:20:00): ответ 500" in cell["Nokian Hakka"]
     store.set_state(conn, "ads_spend_error:1", "2026-11-11T04:20:00: Авито ограничило частоту запросов (429)")
     page = owner.get("/economics/ads?p=90").get_data(as_text=True)
     assert "последний сбор не удался (причина над таблицей)" in page.split("Очередная", 1)[1].split("</tr>", 1)[0]
+
+
+def two_accounts(tmp_path):
+    app, conn = app_with_data(tmp_path)
+    connections.create_account(conn, "Шина-Колесо", "2026-11-01T10:00:00", "o")
+    conn.execute("INSERT INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (2, 777, 'K1', 'Cordiant 175/70 R13', '2026-11-11')")
+    conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, views, contacts) VALUES (2, 777, '2026-11-09', 100, 50, 2)")
+    conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, views) VALUES (2, 31337, '2026-11-09', 25, 5)")   # not in the list
+    conn.commit()
+    owner = app.test_client()
+    login(owner)
+    return owner, conn
+
+
+def test_the_summary_shows_both_accounts_and_the_table_one_of_them(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    page = owner.get("/economics/ads?p=7").get_data(as_text=True)
+    summary = page.split('id="ads-summary"', 1)[1].split("</table>", 1)[0]
+    assert "Основной" in summary and "Шина-Колесо" in summary and "Итого" in summary and "1\u00a0360\u00a0₽" in summary
+    assert "Nokian Hakka" in page and "Cordiant" not in page                          # the first account by default
+    assert 'href="/economics/ads?p=7&amp;s=spend&amp;a=2"' in page
+    page = owner.get("/economics/ads?p=7&s=drr&a=2").get_data(as_text=True)
+    assert "Cordiant" in page and "Nokian Hakka" not in page.split('id="ads-summary"', 1)[1].split("</table>", 1)[1]
+    assert 'href="/economics/ads?p=30&amp;s=drr&amp;a=2"' in page and 'href="/economics/ads?p=7&amp;s=spend&amp;a=2"' in page
+    assert "Объявления не из нашего фида: 1" in page and "31337" in page
+    assert owner.get("/economics/ads?a=abc&f=x").status_code == 200
+
+
+def test_the_empty_columns_are_hidden_and_the_filters_kept_in_the_links(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    page = owner.get("/economics/ads?p=7&a=2").get_data(as_text=True)
+    table = page.split('id="ads-table"', 1)[1].split("</table>", 1)[0]
+    assert "Продано" not in table and "Маржа" not in table and "Цена просмотра на Авито" not in table and "Расходы" in table
+    assert 'href="/economics/ads?p=7&amp;s=spend&amp;a=2&amp;f=sales"' in page
+    page = owner.get("/economics/ads?p=7&a=2&f=sales").get_data(as_text=True)
+    assert "Cordiant" not in page and "Нет объявлений с продажами" in page
+    assert 'href="/economics/ads?p=30&amp;s=spend&amp;a=2&amp;f=sales"' in page
+
+
+def test_the_page_stands_on_an_empty_base(tmp_path):
+    app = make_app(tmp_path, NOW=lambda: NOW)
+    owner = app.test_client()
+    login(owner)
+    response = owner.get("/economics/ads")
+    assert response.status_code == 200 and "Нет аккаунтов с фидом" in response.get_data(as_text=True)

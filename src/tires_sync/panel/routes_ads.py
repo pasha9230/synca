@@ -9,6 +9,9 @@ from .common import get_conn, local_today, login_required
 
 PERIOD_NAMES = {7: "7 дней", 30: "30 дней", 90: "90 дней"}
 SORT_NAMES = {"spend": "По расходам", "drr": "По ДРР от выручки", "drr_margin": "По ДРР от маржи"}
+FILTER_NAMES = {"": "Все", "sales": "Только с продажами", "spend": "Только с расходами"}
+REASON_NAMES = {ads_spend.NO_CHAT: "у заказа нет чата Авито", ads_spend.NO_ITEM: "в чате заказа нет объявления",
+                ads_spend.NO_FEED: "чат аккаунта без фида", ads_spend.MANUAL: "продажа вручную"}
 
 
 def register(app) -> None:
@@ -21,5 +24,9 @@ def register(app) -> None:
             days = 30
         days = days if days in ads_spend.PERIODS else 30
         sort = request.args.get("s", "")
-        data = ads_spend.report(get_conn(), local_today(), days, sort if sort in ads_spend.SORTS else "spend")
-        return render_template("ads_analytics.html", data=data, periods=PERIOD_NAMES, sorts=SORT_NAMES, rows_max=ads_spend.ROWS_MAX)
+        account = request.args.get("a", "")
+        only = request.args.get("f", "")
+        data = ads_spend.report(get_conn(), local_today(), days, sort if sort in ads_spend.SORTS else "spend",
+                                account=int(account) if account.isdigit() else None, only=only if only in ads_spend.FILTERS else "")
+        return render_template("ads_analytics.html", data=data, periods=PERIOD_NAMES, sorts=SORT_NAMES, filters=FILTER_NAMES,
+                               rows_max=ads_spend.ROWS_MAX, reasons=REASON_NAMES)
