@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from flask import Response, abort, flash, redirect, render_template, request
 
-from .. import connections, oth_manual, oth_return_act, oth_stock, order_oth, order_points, order_sheet, orders, store
+from .. import connections, oth_manual, oth_point_return, oth_return_act, oth_stock, order_oth, order_points, order_sheet, orders, store
 from ..settings_store import active_settings
 from .common import author, can_post, current_user, get_conn, has_right, login_required, now_iso
 
@@ -167,6 +167,8 @@ def register(app) -> None:
         codes = {r[0]: r[1] for r in conn.execute("SELECT c.id, s.code FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_given')")}
         agreed = order_oth.plans(conn)
         titles = {cid: order_sheet.mim_title(conn, orders.get_card(conn, cid)) for cid, code in codes.items() if code == "oth"}   # 2026-11-06
+        actable = {cid for cid in codes if oth_point_return.can_act(conn, orders.get_card(conn, cid))}     # one act for several orders (E3)
+        boxed = set()
         for row in data["stock"]:
             row["oth_title"] = titles.get(row["order_id"], "")
             when = dates.get(row["order_id"], {})
@@ -174,6 +176,8 @@ def register(app) -> None:
             row.update(oth_since=when.get("oth_since") or row["since"],                      # no reserve columns (П19, 2026-11-08)
                        return_label="" if on_oth else order_oth.label_of(agreed.get(row["order_id"])),
                        can_to_return=on_oth and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
+            row["act_box"] = row["order_id"] in actable and row["order_id"] not in boxed     # the first row of the order has its checkbox
+            boxed.add(row["order_id"])
         for row in data["returned"]:
             row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) == "oth" else None
         own = manual_list(conn)
@@ -204,6 +208,30 @@ def register(app) -> None:
             flash("Акт возврата заменён." if replaced else "Акт возврата прикреплён: точка увидит кнопку «Скачать акт».")
         except oth_return_act.ActError as err:
             flash(str(err))
+        return redirect(_back() + "#return-acts")
+
+    @app.route("/oth/return-act/orders", methods=["POST"])
+    @login_required
+    def oth_return_act_orders():
+        """One act for several orders of one point (E3, the owner 2026-11-12): the orders ticked, the date of the return, one PDF. Every
+        order is agreed for the date as by «Согласовано»; the act is kept on the pair «point + date». Orders of two points: refused."""
+        from .routes_orders import local_iso, local_now
+        upload = request.files.get("file")
+        data = upload.read(oth_return_act.ACT_MAX + 1) if upload else b""
+        try:
+            done = oth_point_return.act_for_orders(get_conn(), request.form.getlist("order"), request.form.get("return_date"),
+                                                   upload.filename if upload else "", data, local_now().date(), local_iso(), author())
+        except (order_oth.OthError, oth_return_act.ActError) as err:
+            flash(str(err), "error")
+            return redirect(_back() + "#return-acts")
+        day = "%s.%s" % (done["date"][8:10], done["date"][5:7])
+        if done["agreed"]:
+            flash("Возврат %s согласован: заказы %s. Акт возврата %s." % (day, ", ".join("№%d" % i for i in done["agreed"]),
+                                                                     "заменён" if done["replaced"] else "прикреплён"), "ok")
+        for card_id, why in done["failed"].items():
+            flash("Заказ №%d не согласован: %s" % (card_id, why), "error")
+        if order_oth.off_day(done["date"]):
+            flash(order_oth.OFF_DAY + ".")
         return redirect(_back() + "#return-acts")
 
     @app.route("/oth/return-act/<int:act_id>/delete", methods=["POST"])

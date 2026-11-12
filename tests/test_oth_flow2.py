@@ -9,7 +9,7 @@ import re
 import pytest
 
 from panel_helpers import agree_return, post
-from test_oth_seventh_day import ENTERED, on_oth, started
+from test_oth_seventh_day import ENTERED, asked_by_hand, on_oth, started
 from test_order_reserve import CHAT_FIELD, card_at, db, ok, stage
 from test_reserve_noon import DAY, NEXT, ready as reserve_ready, tick
 from test_vk_commands import _card, _stage, ready
@@ -541,6 +541,13 @@ def _moved_on_day7(tmp_path):
     return conn, cid
 
 
+def _asked(tmp_path):
+    """On «На возврат» with the question open: a move by hand (the seventh day asks nothing since 2026-11-12, E1)."""
+    conn, cid, card = _held(tmp_path)
+    asked_by_hand(conn, cid)
+    return conn, cid
+
+
 def test_day_7_12_30_moves_not_12_29_and_the_old_orders_stay(tmp_path):
     conn = db(tmp_path)
     old = card_at(conn, "at_point", "2026-10-15T10:00:00")
@@ -564,7 +571,7 @@ def test_a_stale_asked_on_oth_does_not_break_the_move(tmp_path):
     assert order_oth.question_open(conn, card)
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
     now = orders.get_card(conn, cid)
-    assert now["stage"]["code"] == orders.RETURN_GIVEN and order_oth.question_open(conn, now)
+    assert now["stage"]["code"] == orders.RETURN_GIVEN and not order_oth.question_open(conn, now)     # E1: the seventh day asks nothing
 
 
 def test_a_sale_blocks_the_move_with_one_yellow_record(tmp_path):
@@ -579,14 +586,14 @@ def test_a_sale_blocks_the_move_with_one_yellow_record(tmp_path):
 
 
 def test_silence_changes_nothing(tmp_path):
-    conn, cid = _moved_on_day7(tmp_path)
+    conn, cid = _asked(tmp_path)
     reserve.check(conn, "2026-11-02T10:00:00", calls([]))
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.question_open(conn, card) and len(open_tasks(conn, cid)) == 1
 
 
 def test_issued_from_na_vozvrat_links_the_client_closes_the_task_and_no_reminder_follows(tmp_path):
-    conn, cid = _moved_on_day7(tmp_path)
+    conn, cid = _asked(tmp_path)
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (cid,)).fetchone() is None
     assert order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")[2]
     assert orders.get_card(conn, cid)["stage"]["code"] == "done"
@@ -597,7 +604,7 @@ def test_issued_from_na_vozvrat_links_the_client_closes_the_task_and_no_reminder
 
 
 def test_issued_after_the_agreement_drops_the_plan_and_after_the_act_is_refused(tmp_path):
-    conn, cid = _moved_on_day7(tmp_path)
+    conn, cid = _asked(tmp_path)
     order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T12:40:00", "owner")
     assert order_oth.question_open(conn, orders.get_card(conn, cid))
     assert order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")[2]
@@ -605,7 +612,7 @@ def test_issued_after_the_agreement_drops_the_plan_and_after_the_act_is_refused(
     assert order_oth.remind_handover(conn, "2026-11-02T09:00:00", calls([])) == 0
     other = card_at(conn, "at_point", "2026-10-15T10:00:00")
     on_oth(conn, other, "2026-10-21T11:00:00")
-    assert order_oth.ask_seventh_day(conn, "2026-10-27T12:30:00") == 1
+    asked_by_hand(conn, other, "2026-10-27T12:30:00")
     order_oth.agree(conn, orders.get_card(conn, other), orders.date.fromisoformat("2026-10-27"), "2026-10-27T12:40:00", "owner")
     conn.execute("UPDATE order_item SET supplier_price = 0 WHERE order_id = ?", (other,))    # no purchase: the act signed, still «На возврат»
     conn.commit()
@@ -802,7 +809,7 @@ def test_the_way_out_after_a_move_through_the_panel(tmp_path):
 def test_issued_before_the_agreement_closes_it_as_not_needed(tmp_path):
     """«Выдали» with no agreement: the client took the tyres, the task is done as not needed — «Заказ выдан, возврат не нужен», never «продано
     до согласования», which is a sale's only (the owner 2026-11-10, review of run/2026-11-10f; the run had it cancelled)."""
-    conn, cid = _moved_on_day7(tmp_path)
+    conn, cid = _asked(tmp_path)
     assert order_oth.answer_issued(conn, orders.get_card(conn, cid), "точка", "2026-10-26T13:00:00")[2]
     assert conn.execute("SELECT done_at, cancelled_at FROM callback_task WHERE order_id = ?", (cid,)).fetchone() == ("2026-10-26T13:00:00", None)
     assert any(e["text"].endswith("заказ выдан, возврат не нужен") for e in orders.list_events(conn, cid))
@@ -907,7 +914,7 @@ def _agreed_and_asked(tmp_path):
     started(conn)
     cid = _card(conn, pid, webmim="700200", code="at_point")
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
-    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
+    asked_by_hand(conn, cid)
     order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T13:00:00", "owner")
     return app, conn, cid, manager(app, conn, pid)
 
@@ -1137,7 +1144,7 @@ def test_a_vk_point_gets_the_status_and_the_question_and_answers_issued(tmp_path
     from test_vk_commands import hook
     app, conn, cid = _vk_order(tmp_path)
     told = []
-    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls(told))
+    asked_by_hand(conn, cid, notify=calls(told))
     [to_point] = [t for who, t in told if who == ""]
     assert "Согласование возврата" in to_point and "выдал 700300" in to_point and "на точке 700300" in to_point
     assert not [e for e in orders.list_events(conn, cid) if "она может не увидеть" in e["text"]]
@@ -1149,7 +1156,7 @@ def test_a_vk_point_gets_the_status_and_the_question_and_answers_issued(tmp_path
 def test_a_vk_point_answers_here_and_a_second_word_goes_to_the_owner(tmp_path):
     from test_vk_commands import hook
     app, conn, cid = _vk_order(tmp_path)
-    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls([]))
+    asked_by_hand(conn, cid, notify=calls([]))
     hook(app, conn, "на точке 700300", event="e1")
     card = orders.get_card(conn, cid)
     assert card["stage"]["code"] == orders.RETURN_GIVEN and not order_oth.question_open(conn, card)
@@ -1301,7 +1308,7 @@ def test_the_bell_of_a_leftover_question_goes_to_the_oth_tab(tmp_path):
 
 def _asked_vk(tmp_path, agreed=True):
     app, conn, cid = _vk_order(tmp_path)
-    order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls([]))
+    asked_by_hand(conn, cid, notify=calls([]))
     if agreed:
         order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-26"), "2026-10-26T13:00:00", "owner")
     return app, conn, cid

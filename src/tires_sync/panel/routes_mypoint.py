@@ -23,7 +23,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
@@ -35,6 +35,7 @@ ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "refuse": mgr.REFUSE,
            "act_signed": "акт МХ-3 подписан",                           # «Подписал акт и отдал»: the return of «На ОТХ» (order_oth.sign_act)
            "oth_issued": "выдали (ОТХ)", "oth_here": "на точке (ОТХ)",  # the two answers to the seventh day on «На ОТХ» (the owner 2026-11-02)
            "oth_sold": "продано (ОТХ)",                                 # «Продать»: the tyres on «На ОТХ» sold to a buyer from the street (the owner 2026-11-10)
+           "oth_buyer": "есть покупатель (ОТХ)",                        # «Есть покупатель» of «Согласование возврата»: a task to the office (E2, 2026-11-12)
            "shipped": mgr.SHIP}                                         # «Передал курьеру ТК»: an order to another city (order_intercity, 2026-11-02)
 PICKUP = ("issued", "reserve_issued", "reserve_here", "refuse")    # what a client's pickup means: never for an order to another city
 REFUSE_CHOICES = {"year": mgr.REFUSE_REASONS[0], "size": mgr.REFUSE_REASONS[1], "other": ""}    # «Другой»: the text typed
@@ -131,6 +132,8 @@ def act(conn, card: dict, action: str, who: str, now: str, deliver, notify, tell
         return order_oth.sell(conn, card, who, now)
     if action == "oth_here":
         return order_oth.answer_here(conn, card, who, now)
+    if action == "oth_buyer":                                                   # «Есть покупатель»: the office sells, from the card (E2)
+        return oth_point_return.tell_buyer(conn, card, (card.get("point") or {}).get("name") or "", who, now)
     if action == "reserve_issued":                                              # «Выдан» to the question is «выдал»
         action = "issued"
     if action == "reserve_here":                                                # the VK «на точке»: marks the answer (the reminder: at 12:30, 2026-11-02)
@@ -532,6 +535,7 @@ def register(app) -> None:
                           "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
                           "agreeing": order_oth.agreeing(conn, card),          # «Согласование возврата» (the owner 2026-11-12)
+                          "can_buyer": oth_point_return.can_tell_buyer(conn, card, now),     # «Есть покупатель», 2 days of the agreement (E2)
                           "ret_label": order_oth.point_label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "ret_state": order_oth.state_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
                           "oth_question": order_oth.question(conn, card, now) if code in order_oth.RETURNING else "",
@@ -567,6 +571,7 @@ def register(app) -> None:
         today_ret = order_oth.return_day(conn, point_id, now) if point_id is not None else None
         if today_ret:
             today_ret["act_file"] = oth_return_act.find(conn, point_id, today_ret["date"])
+            today_ret["token"] = secrets.token_hex(12)
         mark_shared_acts(returns + [row for row in cards if _in_tab(row, "return") and not row["returning"]])
         for ret in returns:                                                     # agreed, the question still open: on the plaque, the only place of the order
             ret["asked"] = next((row for row in cards if row["card"]["id"] == ret["card"]["id"] and row["oth_asked"]), None)
@@ -595,7 +600,8 @@ def register(app) -> None:
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns,
-                               return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK,
+                               return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
+                               buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL)
 
     def _undo(card_id):
@@ -677,6 +683,26 @@ def register(app) -> None:
         flash(answer, "info" if ok else "error")
         return redirect(back)
 
+    @app.route("/my-point/return-day/not-taken", methods=["POST"])
+    @login_required
+    def mypoint_not_taken():
+        """«Водитель не забрал» of «Сегодня возврат!» (G, the owner 2026-11-12): the point's own date of today only; the comment is optional.
+        The office gets one task and a row of its bell (oth_point_return.driver_not_taken); the window says what to do next."""
+        conn = get_conn()
+        point_id = _point_id(conn)
+        try:
+            point = points.get_point(conn, point_id)
+        except points.PointError:
+            abort(403)
+        now = local_iso()
+        back = _back(point_id)
+        answer, ok, new = oth_point_return.driver_not_taken(conn, point_id, point["name"], str(request.form.get("comment") or "")[:oth_point_return.COMMENT_MAX * 2],
+                                                       author(), now)
+        if new:                                                                 # «История точки»: what was done, not a repeat
+            point_log.record(conn, now, author(), point_id, "not_taken", None, answer)
+        flash(answer, "info" if ok else "error")
+        return redirect(back)
+
     @app.route("/my-point/handoff/<int:card_id>/cancel", methods=["POST"])
     @login_required
     def mypoint_handoff_cancel(card_id):
@@ -755,7 +781,7 @@ def register(app) -> None:
                    % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in _oth_cards(conn, point_id)
                   if order_oth.question_open(conn, card)]
         today = order_oth.return_day(conn, point_id, now)                      # «Сегодня возврат!»: a new key at 09:00, 12:00 and 15:00
-        if today:
+        if today and not today["not_taken"]:                                    # «Водитель не забрал» (G): the sound of the date stops
             items.append({"key": "return-day-%s-%s" % (today["date"].replace("-", ""), today["sound"]), "title": order_oth.RETURN_DAY_TITLE,
                           "text": "%s Заказы: %s." % (order_oth.RETURN_DAY_BODY, ", ".join("№ %s" % n for n in today["orders"])),
                           "href": "/my-point?tab=return"})

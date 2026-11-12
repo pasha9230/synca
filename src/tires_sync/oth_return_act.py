@@ -44,6 +44,18 @@ def file(conn, act_id) -> Optional[dict]:
     return dict(_meta(row[:-1]), data=bytes(row[-1])) if row else None
 
 
+def check(filename, data: bytes) -> str:
+    """The file of an act as it is to be kept: its name; ActError when there is none, it is not a PDF or it is too big."""
+    name = os.path.basename(str(filename or "").replace("\\", "/")).strip()[:NAME_MAX]
+    if not data:
+        raise ActError("Выберите файл акта (PDF).")
+    if not name.lower().endswith(".pdf") or bytes(data[:5]) != b"%PDF-":
+        raise ActError("Акт возврата: только файл PDF.")
+    if len(data) > ACT_MAX:
+        raise ActError("Файл больше %.1f МБ: сохраните акт в PDF меньшего размера." % (ACT_MAX / 1_000_000))
+    return name
+
+
 def save(conn, point_id, day, filename, data: bytes, now: str, author: str) -> Tuple[int, bool]:
     """Attach the PDF to the point and the date; the file of the same pair is replaced (its id stays). Returns (id, replaced).
     ActError: no such point, not a date, no file, not a PDF, too big."""
@@ -55,13 +67,7 @@ def save(conn, point_id, day, filename, data: bytes, now: str, author: str) -> T
         day = date.fromisoformat(str(day or "").strip()).isoformat()
     except ValueError:
         raise ActError("Укажите дату возврата.") from None
-    name = os.path.basename(str(filename or "").replace("\\", "/")).strip()[:NAME_MAX]
-    if not data:
-        raise ActError("Выберите файл акта (PDF).")
-    if not name.lower().endswith(".pdf") or bytes(data[:5]) != b"%PDF-":
-        raise ActError("Акт возврата: только файл PDF.")
-    if len(data) > ACT_MAX:
-        raise ActError("Файл больше %.1f МБ: сохраните акт в PDF меньшего размера." % (ACT_MAX / 1_000_000))
+    name = check(filename, data)
     old = find(conn, point["id"], day)
     detail = {"point": point["id"], "point_name": point["name"], "date": day, "name": name}
     if old:

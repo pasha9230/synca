@@ -172,7 +172,8 @@ def test_the_seventh_day_on_oth_asks_nothing_for_an_order_to_another_city(tmp_pa
     for c in (card, plain):
         orders.move_card(conn, c, _stage(conn, "oth"), NOW, "o", changes={"cancel_reason": "Клиент не пришёл"})
     assert order_oth.ask_seventh_day(conn, "2026-10-19T13:00:00") == 1
-    assert not order_oth.question_open(conn, orders.get_card(conn, card)) and order_oth.question_open(conn, orders.get_card(conn, plain))
+    assert orders.get_card(conn, card)["stage"]["code"] == "oth" and orders.get_card(conn, plain)["stage"]["code"] == orders.RETURN_GIVEN     # E1: no question at all
+    assert not order_oth.question_open(conn, orders.get_card(conn, card)) and not order_oth.question_open(conn, orders.get_card(conn, plain))
 
 
 # ---- «Передал курьеру ТК» from VK --------------------------------------------------------------------------------------------------------

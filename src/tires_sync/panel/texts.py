@@ -124,6 +124,11 @@ def audit_text(entry: dict) -> str:
         what = {"oth_act_file_added": "прикреплён", "oth_act_file_replaced": "заменён", "oth_act_file_deleted": "удалён"}[action]
         return "ОТХ: акт возврата %s — точка «%s», дата возврата %s, файл «%s»" % (
             what, d.get("point_name") or d.get("point", "?"), d.get("date", "?"), d.get("name", "?"))
+    if action == "oth_buyer_found":
+        return "ОТХ: заказ №%s, точка нашла покупателя — офису поставлена задача" % d.get("order", "?")
+    if action == "oth_not_taken":
+        return "ОТХ: водитель не забрал возврат %s — точка №%s, заказы %s" % (d.get("date", "?"), d.get("point", "?"),
+                                                                            ", ".join("№%s" % i for i in d.get("orders") or []) or "?")
     if action == "oth_act_signed":
         return "ОТХ: заказ №%s, точка подписала акт МХ-3 и отдала шины поставщику" % d.get("order", "?")
     if action == "price_guard_accept":

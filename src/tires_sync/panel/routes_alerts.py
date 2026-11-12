@@ -38,6 +38,9 @@ def _grouped(conn, login: str) -> list:
     own_prefix = as_point_author(conn, login, "")[:-1] if user["real_role"] in AS_POINT_ROLES else ""      # «<name> за точку «»
     rows = order_alerts.page_rows(conn, login, now, staff=False if user["as_point"] is not None else None, own_prefix=own_prefix)
     if point is None:
+        if user["as_point"] is None:                              # «Водитель не забрал» (G): the owner's, the partner's, the operators'
+            from .. import oth_point_return
+            rows = sorted(oth_point_return.office_rows(conn, login) + rows, key=lambda r: r["at"] or "", reverse=True)
         return rows
     account = point_account()                                     # the manager of a point: the orders of the point, the chats of its account
     ids = {r["order_id"] for r in rows if r["order_id"] is not None}

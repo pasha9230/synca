@@ -165,7 +165,7 @@ def test_the_journal_names_no_purchase_the_audit_keeps_it(tmp_path):
 
 def test_signed_tyres_are_not_ours_on_the_oth_page_and_the_point_texts_follow_the_state(tmp_path, clock):
     app, conn, pid, cid, mine = on_page(tmp_path)
-    press(mine, cid, "oth_here")
+    assert 'data-oth-question="%d"' % cid not in mine.get("/my-point?tab=agree").get_data(as_text=True)     # E1: the seventh day asks nothing
     agreed(conn, cid)
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     assert 'data-return="%d"' % cid in page and "Шины отданы поставщику" not in page        # agreed: the act to sign, nothing given yet
@@ -257,7 +257,7 @@ def test_the_point_s_return_tab_shows_the_stage_and_its_label(tmp_path, clock):
 
 def test_the_act_on_the_page_closes_it_and_the_undo_puts_it_back(tmp_path, clock):
     app, conn, pid, cid, mine = on_page(tmp_path)
-    press(mine, cid, "oth_here")
+    assert 'data-oth-question="%d"' % cid not in mine.get("/my-point?tab=agree").get_data(as_text=True)     # E1: the seventh day asks nothing
     agreed(conn, cid)
     clock["now"] = "2026-10-27T12:00:00"
     _t, page = press(mine, cid, "act_signed")
@@ -351,7 +351,7 @@ def test_the_new_view_of_the_point_shows_na_vozvrat_with_its_label(tmp_path, clo
     from test_point_new_view import flag, is_new
     app, conn, pid, cid, mine = on_page(tmp_path)
     flag(conn, "all")
-    press(mine, cid, "oth_here")
+    assert 'data-oth-question="%d"' % cid not in mine.get("/my-point?tab=agree").get_data(as_text=True)     # E1: the seventh day asks nothing
     page = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # not agreed yet: «Согласование возврата» (2026-11-12)
     assert is_new(page) and 'id="order-%d"' % cid in page
     block = page[page.index('id="order-%d"' % cid):].split("</article>")[0]
