@@ -259,3 +259,55 @@
   body.pt-card-page .owin-items td.owin-iqty{flex:1 1 auto;white-space:normal}
   body.pt-card-page .owin-items td.owin-isum{margin-left:auto;white-space:nowrap}
 }
+
+/* The window of an order at a point: the colours and sizes of Ant Design too (the owner 2026-11-12: «мы же хотели всё сделать в Ant Design»;
+   «Рабочее место» has them inside .pt). The markup and the scripts are the office's (order_card.html), so nothing is redrawn: the panel's own
+   tokens get Ant's values on this page alone, and every element of the window follows (buttons, fields, tags, cards, the chat, the modals).
+   «Строгий» (body.ui-new) keeps its own values, as .ui-new .pt does. The stages' colours are the stored codes, untouched. */
+body.pt-card-page:not(.ui-new){
+  --primary-25:#f0f7ff;--primary-50:#e6f4ff;--primary-100:#bae0ff;--primary-200:#91caff;--primary-300:#69b1ff;
+  --primary-500:#4096ff;--primary-600:#1677ff;--primary-700:#0958d9;--primary-800:#003eb3;
+  --gray-0:#ffffff;--gray-25:#fafafa;--gray-50:#f5f5f5;--gray-100:#f0f0f0;--gray-200:#f0f0f0;--gray-300:#d9d9d9;
+  --gray-400:#bfbfbf;--gray-500:#8c8c8c;--gray-600:#595959;--gray-700:#434343;--gray-800:#262626;--gray-900:#1f1f1f;
+  --ok-50:#f6ffed;--ok-200:#b7eb8f;--ok-500:#52c41a;--ok-600:#389e0d;--ok-700:#237804;
+  --warn-50:#fffbe6;--warn-200:#ffe58f;--warn-300:#ffd666;--warn-500:#faad14;--warn-600:#d48806;--warn-700:#d46b08;
+  --err-25:#fff2f0;--err-50:#fff2f0;--err-200:#ffccc7;--err-500:#ff4d4f;--err-600:#ff4d4f;--err-700:#cf1322;
+  --pend-50:#fff7e6;--pend-100:#ffe7ba;--pend-200:#ffd591;--pend-500:#fa8c16;--pend-600:#d46b08;--pend-700:#ad4e00;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif;--font-head:var(--font);
+  --lh:1.5715;
+  --r-xs:4px;--r-sm:4px;--r-md:6px;--r-lg:8px;--r-xl:8px;
+  --sh-xs:0 2px 0 rgba(0,0,0,.02);--sh-sm:0 2px 0 rgba(0,0,0,.02);
+  --sh-md:0 6px 16px 0 rgba(0,0,0,.08),0 3px 6px -4px rgba(0,0,0,.12),0 9px 28px 8px rgba(0,0,0,.05);--sh-lg:var(--sh-md);--sh-xl:var(--sh-md);
+  --ring:0 0 0 2px var(--gray-0),0 0 0 4px var(--primary-600);   /* :root computes it from its own values: again here */
+  --overlay:rgba(0,0,0,.45)
+}
+body.pt-card-page:not(.ui-new) a:not(.btn){color:var(--primary-600)}
+body.pt-card-page:not(.ui-new) .crumbs a:not(.btn){color:var(--gray-600)}
+body.pt-card-page:not(.ui-new) .btn{font-weight:400}
+body.pt-card-page:not(.ui-new) .btn--primary{box-shadow:0 2px 0 rgba(5,145,255,.1)}
+body.pt-card-page:not(.ui-new) .btn--primary:hover{background:var(--primary-500);border-color:var(--primary-500)}
+body.pt-card-page:not(.ui-new) .btn--secondary:hover{background:var(--gray-0);border-color:var(--primary-500);color:var(--primary-500)}
+body.pt-card-page:not(.ui-new) .btn--danger-outline{border-color:var(--err-500);color:var(--err-500)}
+body.pt-card-page:not(.ui-new) .btn--link{color:var(--primary-600);font-weight:400}
+body.pt-card-page:not(.ui-new) .owin-body .input,body.pt-card-page:not(.ui-new) .owin-body .select,body.pt-card-page:not(.ui-new) .owin-body .textarea{background-color:var(--gray-0)}
+body.pt-card-page:not(.ui-new) .input:hover,body.pt-card-page:not(.ui-new) .select:hover,body.pt-card-page:not(.ui-new) .textarea:hover{border-color:var(--primary-500)}
+body.pt-card-page:not(.ui-new) .input:focus,body.pt-card-page:not(.ui-new) .select:focus,body.pt-card-page:not(.ui-new) .textarea:focus{border-color:var(--primary-600);box-shadow:0 0 0 2px rgba(5,145,255,.2)}
+body.pt-card-page:not(.ui-new) .label{font-weight:400;color:var(--gray-900)}
+body.pt-card-page:not(.ui-new) .badge{border-radius:4px;font-weight:400;padding:0 7px;line-height:20px}   /* Ant's Tag */
+body.pt-card-page:not(.ui-new) .card{box-shadow:none}
+body.pt-card-page:not(.ui-new) .owin-head{background:#001529}                 /* Ant's dark header */
+body.pt-card-page:not(.ui-new) .owin-stage,body.pt-card-page:not(.ui-new) .owin-tag,body.pt-card-page:not(.ui-new) .owin-tagin,body.pt-card-page:not(.ui-new) .owin-tag-x{border-radius:4px}
+body.pt-card-page:not(.ui-new) .msg{border-radius:8px}
+body.pt-card-page:not(.ui-new) .msg--out{background:var(--primary-50)}
+body.pt-card-page:not(.ui-new) .menu-item:hover,body.pt-card-page:not(.ui-new) .menu-item:focus-visible{background:var(--gray-50)}
+
+/* The reply field of a chat at a point (the owner 2026-11-12: a messenger's line, no huge buttons): the paperclip, the field that grows with
+   the text, a round «send»; the note under it only names the chosen photo or an error. The form is the office's (_chat_composer.html). */
+.pt-send{display:flex;flex-direction:column;gap:4px}
+.pt-send-line{display:flex;align-items:flex-end;gap:8px}
+.pt-send .icon-btn{flex:none;width:44px;height:44px;border-radius:50%}
+.pt-send .pt-send-line .textarea{flex:1 1 auto;min-width:0;height:auto;min-height:44px;max-height:168px;padding:10px 16px;border-radius:22px;font-size:16px;line-height:22px;resize:none;field-sizing:content;box-shadow:none}
+.pt-send .pt-send-go{flex:none;width:44px;height:44px;min-height:0;padding:0;border-radius:50%}
+.pt-send .chat-send-note{white-space:normal}
+.pt-send .chat-send-note:not(:has([data-photo-note]:not(:empty))){display:none}
+body.pt-card-page .order-chat .chat-composer{padding-left:0;padding-right:0}
