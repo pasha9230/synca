@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Прошлое состояние
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: watch-state
           key: watch-state-${{ github.run_id }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Запомнить состояние
         if: steps.check.outputs.changed == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: watch-state
           key: watch-state-${{ github.run_id }}-${{ github.run_attempt }}
