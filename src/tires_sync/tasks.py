@@ -10,6 +10,7 @@ one only to itself (of an order of its own point or of none) and sees and closes
 cancelled (grey: no alert)."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -92,10 +93,11 @@ def default_assignee(conn, owner_login: str, author: str, order_id=None, chat_ro
 # ---- set, close ---------------------------------------------------------------------------------------------------------------------------
 
 def add(conn, *, kind: str, title: str, due_at: str, note: str, now: str, author: str, assignee: Optional[str] = None, owner_login: str = "owner",
-        client_id=None, order_id=None, chat_row=None, allowed: Optional[set] = None, journal_author: Optional[str] = None) -> int:
+        client_id=None, order_id=None, chat_row=None, allowed: Optional[set] = None, journal_author: Optional[str] = None, commit: bool = True) -> int:
     """A task. `assignee` None: default_assignee; else one of `allowed` (the logins of assignees(); the caller narrows it for a point).
     «Перезвонить» needs whom to call (an order, a chat or a client); another kind may be of none. The order's journal gets its line.
-    `journal_author`: who the journal and the audit name when not the login (panel/common.author: «<name> за точку «X»»)."""
+    `journal_author`: who the journal and the audit name when not the login (panel/common.author: «<name> за точку «X»»).
+    Saved (its audit commits); `commit` False: the caller saves it."""
     if kind not in KINDS:
         raise TaskError("Выберите, что сделать.")
     due = str(due_at or "").strip()[:16]
@@ -130,8 +132,12 @@ def add(conn, *, kind: str, title: str, due_at: str, note: str, now: str, author
     if order_id:
         _journal(conn, order_id, now, journal_author or author, "Задача: %s — %s, до %s" % (_what(kind, title), users.person_name(conn, assignee),
                                                                                          _shown(due)))
-    store.write_audit(conn, now, journal_author or author, "callback", {"task": task_id, "client": client_id, "order": order_id, "chat": chat_row, "due": due,
-                                                     "to": assignee, "kind": kind})
+    detail = {"task": task_id, "client": client_id, "order": order_id, "chat": chat_row, "due": due, "to": assignee, "kind": kind}
+    if commit:
+        store.write_audit(conn, now, journal_author or author, "callback", detail)
+    else:
+        conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, journal_author or author, "callback",
+                                                                                         json.dumps(detail, ensure_ascii=False)))
     return task_id
 
 

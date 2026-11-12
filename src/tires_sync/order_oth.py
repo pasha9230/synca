@@ -360,6 +360,15 @@ def forget_dropped(conn, order_id, slot: str = MOVE) -> None:
         _keep_dropped(conn, order_id, kept)
 
 
+def _mark_of(value) -> Optional[dict]:
+    """A saved mark «На возврат», None when the value is broken: skipped, as _marked does (it has counted no pieces of it)."""
+    try:
+        mark = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return mark if isinstance(mark, dict) else None
+
+
 def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, why: str = SOLD_EARLY, slot: str = MOVE) -> int:
     """The tyres of a mark «На возврат» were sold (or given to the client, `why` ISSUED_NO_RETURN) before the return was agreed (the owner
     2026-11-10): the mark of this stay goes and its pieces leave oth_return (a real «Вернуть поставщику» stays) — of every position (`item_id`
@@ -376,14 +385,14 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
             continue
         by = ""
         for (value,) in conn.execute("SELECT value FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),)).fetchall():
-            mark = json.loads(value)
-            if str(mark.get("at") or "") >= since:
+            mark = _mark_of(value)
+            if mark is not None and str(mark.get("at") or "") >= since:
                 by = str(mark.get("by") or "")
         conn.execute("UPDATE oth_return SET qty = qty - ? WHERE item_id = ?", (off, item))
         if off < marked:                                                             # a part taken: the mark holds the rest
             for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),)).fetchall():
-                mark = json.loads(value)
-                if str(mark.get("at") or "") >= since:
+                mark = _mark_of(value)
+                if mark is not None and str(mark.get("at") or "") >= since:
                     conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(dict(mark, qty=marked - off), ensure_ascii=False), key))
         else:
             conn.execute("DELETE FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % int(item),))
@@ -407,7 +416,7 @@ def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, piece
     """«Отменить» of the sale or «Выдали» (slot MOVE), «Вернуть на ОТХ» of a take (take_slot, at most `pieces`): the marks «На возврат» drop_marks took
     off are back on the positions — in oth_return, «Ожидает согласование возврата», on sale until agreed — and the task of the return with them, as
     item_to_return sets it: the open one names them, else a new one (the order's responsible, the term of the setting from now). Only on «На ОТХ» /
-    «На возврат» not agreed. Commits (tasks.add). Returns the pieces marked again."""
+    «На возврат» not agreed. No commit: the caller saves it with the rest of its undo. Returns the pieces marked again."""
     kept = _dropped(conn, order_id)
     place = kept.pop(slot, None) or {}
     card = orders.get_card(conn, order_id)
@@ -456,10 +465,9 @@ def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, piece
         conn.execute("UPDATE callback_task SET note = substr(note || ', ' || ?, 1, ?) WHERE id = ?", ("позиция: " + what, tasks.NOTE_MAX, found[0]))
         task = found[0]
     else:
-        task = _return_task(conn, card, now, who, "позиция: " + what)                # commits it all
+        task = _return_task(conn, card, now, who, "позиция: " + what, commit=False)
     for key, mark in marks:
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, json.dumps(dict(mark, task=task), ensure_ascii=False)))
-    conn.commit()
     return sum(n for _i, n, _by in back)
 
 
@@ -958,7 +966,9 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
         drop_marks(conn, card["id"], now, who, why=ISSUED_NO_RETURN)
         _end_tasks(conn, card["id"], True, ISSUED_NO_RETURN[:1].lower() + ISSUED_NO_RETURN[1:], now, who)
     if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount:
-        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (DROPPED_KEY % card["id"], json.dumps(plan, ensure_ascii=False)))     # for «Отменить» (point_log.undo)
+        held = conn.execute("SELECT item_id, qty, at, author FROM oth_return WHERE order_id = ?", (card["id"],)).fetchall()     # the undo's detach drops them
+        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (DROPPED_KEY % card["id"], json.dumps(dict(plan, held=[list(r) for r in held]),
+                                                                                                         ensure_ascii=False)))     # for «Отменить» (point_log.undo)
         orders.add_event(conn, card["id"], now, who, "field", "Согласование возврата снято: точка ответила, что заказ выдали")
     reattach(conn, card["id"], now, who)
     orders.add_event(conn, card["id"], now, who, "point", "Точка ответила на 7-й день ОТХ: заказ выдали")
@@ -1090,12 +1100,14 @@ def _close_tasks(conn, order_id, titles: tuple, how: str, now: str, who: str, re
 
 
 def restore_plan(conn, order_id) -> None:
-    """«Отменить» of «Выдали»: the agreement it dropped is back as it was. No commit."""
+    """«Отменить» of «Выдали»: the agreement it dropped is back as it was, with the pieces of oth_return it held (the marks «На возврат»). No commit."""
     plan = json.loads(store_value(conn, DROPPED_KEY % order_id) or "null")
     conn.execute("DELETE FROM app_state WHERE key = ?", (DROPPED_KEY % order_id,))
     if plan:
         conn.execute("INSERT OR REPLACE INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date, signed_at, signed_by) VALUES (?,?,?,?,NULL,'')",
                      (order_id, plan["agreed_at"], plan["agreed_by"], plan["return_date"]))
+        for item, qty, at, author in plan.get("held") or []:
+            conn.execute("INSERT OR REPLACE INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, ?, ?, ?)", (item, order_id, qty, at, author))
 
 
 def left_return(conn, card_id, stage: dict, now: str, who: str) -> None:
@@ -1425,15 +1437,15 @@ def working_due(now: str, days: int) -> str:
     return moment.isoformat(timespec="minutes")
 
 
-def _return_task(conn, card: dict, now: str, who: str, what: str = "") -> int:
+def _return_task(conn, card: dict, now: str, who: str, what: str = "", commit: bool = True) -> int:
     """The one task of a return, by hand or on the seventh day: kind «Вернуть», to the order's responsible (nobody of the staff answers for it: the owner's login), due by
-    the setting. tasks.add saves the caller's changes with it (its audit commits)."""
+    the setting. tasks.add saves the caller's changes with it (its audit commits); `commit` False: the caller saves it."""
     from . import order_alerts, order_notify, tasks
     owner = order_notify.get_owner_login(conn)
     kinds = order_alerts.people_kinds(conn)
     person = order_alerts.responsibles(conn, kinds, card["id"]).get(card["id"])      # a user of a point cannot write to the supplier: the owner's (the lead 2026-11-05)
     return tasks.add(conn, kind="return", title=RETURN_TASK, due_at=working_due(now, task_days(conn)), now=now, author=who, owner_login=owner,
-                     assignee=person if person and kinds.get(person) == "staff" else owner, order_id=card["id"],
+                     assignee=person if person and kinds.get(person) == "staff" else owner, order_id=card["id"], commit=commit,
                      note="Заказ №%s, точка «%s»%s, /orders/%d" % (card.get("webmim_number") or card["id"], (card.get("point") or {}).get("name") or "не указана",
                                                                   ", " + what if what else "", card["id"]))
 
