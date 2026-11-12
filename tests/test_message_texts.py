@@ -181,6 +181,8 @@ def test_the_untold_arrival_goes_to_the_point_with_the_owners_text(env, monkeypa
     from test_arrived_alert import LATE
     from tires_sync import order_arrived, order_points
     conn, _chat_row, card = env
+    conn.execute("UPDATE order_card SET avito_chat = 'https://example.com/chat/1' WHERE id = ?", (card,))   # typed, none bound: not «без чата»
+    conn.commit()
     monkeypatch.setattr(order_points, "of_account", lambda c, order_id: {"id": 1})
     mt.save(conn, mt.UNTOLD_POINT, "№{order_label}: не ушло ({why})", "owner", NOW)
     point = []
