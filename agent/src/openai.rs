@@ -111,19 +111,31 @@ pub struct OpenAi {
 
 impl OpenAi {
     pub fn new(key: &str, proxy: Option<&str>) -> Result<Self> {
-        let mut b = ureq::AgentBuilder::new();
+        let mut via = None;
         if let Some(p) = proxy.map(str::trim).filter(|p| !p.is_empty()) {
             if !(p.starts_with("http://") || p.starts_with("socks5://")) {
                 bail!("proxy must start with http:// or socks5://");
             }
             // never put the address into the error: it may hold a password
-            b = b.proxy(ureq::Proxy::new(p).map_err(|_| anyhow!("bad proxy address"))?);
+            via = Some(ureq::Proxy::new(&remote_dns(p)).map_err(|_| anyhow!("bad proxy address"))?);
         }
-        Ok(OpenAi { key: key.trim().to_string(), http: b.build() })
+        Ok(OpenAi { key: key.trim().to_string(), http: crate::net::through(via, TIMEOUT) })
     }
 
     pub fn edit(&self, model: &str, prompt: &str, images: &[Vec<u8>]) -> Result<Generated> {
         edit(&self.http, &self.key, model, prompt, images)
+    }
+}
+
+/// The whole request to OpenAI, from the connection to the last byte of the answer.
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// `socks5://` as it has always worked here: the proxy resolves api.openai.com, this machine does not ask its own
+/// DNS for it. ureq 3 spells that `socks5h://` (its plain `socks5://` resolves locally).
+fn remote_dns(proxy: &str) -> String {
+    match proxy.strip_prefix("socks5://") {
+        Some(rest) => format!("socks5h://{rest}"),
+        None => proxy.to_string(),
     }
 }
 
@@ -146,30 +158,25 @@ fn edit(http: &ureq::Agent, key: &str, model: &str, prompt: &str, images: &[Vec<
         .collect();
     let b = boundary();
     let body = multipart(&b, &edit_fields(model, prompt), &files);
-    let res = http.post("https://api.openai.com/v1/images/edits")
-        .set("Authorization", &format!("Bearer {key}"))
-        .set("Content-Type", &format!("multipart/form-data; boundary={b}"))
-        .timeout(std::time::Duration::from_secs(300))
-        .send_bytes(&body);
+    let res = http.post(ENDPOINT)
+        .header("Authorization", &format!("Bearer {key}"))
+        .header("Content-Type", &format!("multipart/form-data; boundary={b}"))
+        .send(&body[..]);
     match res {
-        Ok(r) => parse_response(&r.into_string()?),
-        Err(ureq::Error::Status(code, r)) => {
-            let text: String = r.into_string().unwrap_or_default().chars().take(400).collect();
+        Ok(r) if r.status().is_client_error() || r.status().is_server_error() => {
+            let code = r.status().as_u16();
+            let text: String = r.into_body().read_to_string().unwrap_or_default().chars().take(400).collect();
             Err(OpenAiHttp(code, text).into())
         }
-        Err(e) if UNREACHABLE.contains(&e.kind()) => Err(OpenAiUnreachable(e.kind().to_string()).into()),
-        Err(e) => bail!("OpenAI request failed: {}", e.kind()),
+        Ok(r) => parse_response(&r.into_body().read_to_string().map_err(|e| anyhow!("OpenAI answer not read: {}", crate::net::kind(&e)))?),
+        Err(e) => match crate::net::unreached(&e) {
+            Some(label) => Err(OpenAiUnreachable(label.to_string()).into()),
+            None => bail!("OpenAI request failed: {}", crate::net::kind(&e)),
+        },
     }
 }
 
-/// Failures before anything reached OpenAI (the proxy or the network is down): nothing is paid for.
-const UNREACHABLE: [ureq::ErrorKind; 5] = [
-    ureq::ErrorKind::Dns,
-    ureq::ErrorKind::ConnectionFailed,
-    ureq::ErrorKind::ProxyConnect,
-    ureq::ErrorKind::ProxyUnauthorized,
-    ureq::ErrorKind::InvalidProxyUrl,
-];
+const ENDPOINT: &str = "https://api.openai.com/v1/images/edits";
 
 /// OpenAI was not reached at all (the proxy, the VPN or the network is down).
 #[derive(Debug)]
@@ -233,6 +240,69 @@ mod tests {
         let ai = OpenAi::new("k", Some(&format!("socks5://127.0.0.1:{port}"))).unwrap();
         let e = ai.edit("m", "p", &[vec![0x89, b'P', b'N', b'G']]).err().unwrap();
         assert!(is_fatal(&e), "{e:#}");
+    }
+
+    /// A fake proxy on 127.0.0.1: reads what the agent sends first, answers with `replies` in turn, hangs up.
+    fn fake_proxy(replies: Vec<&'static [u8]>) -> (u16, std::thread::JoinHandle<Vec<Vec<u8>>>) {
+        use std::io::Write;
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut seen = Vec::new();
+            for reply in replies {
+                let mut buf = [0u8; 2048];
+                let mut got = Vec::new();
+                loop {
+                    let n = s.read(&mut buf).unwrap();
+                    got.extend_from_slice(&buf[..n]);
+                    if n == 0 || !got.starts_with(b"CONNECT ") || got.ends_with(b"\r\n\r\n") {   // an HTTP request comes in pieces
+                        break;
+                    }
+                }
+                seen.push(got);
+                s.write_all(reply).unwrap();
+            }
+            seen
+        });
+        (port, h)
+    }
+
+    /// `socks5://`: the proxy gets the name api.openai.com and resolves it itself; this machine's DNS is not asked.
+    #[test]
+    fn socks_proxy_is_given_the_name_of_openai_not_an_address() {
+        let (port, h) = fake_proxy(vec![&[5, 0], &[5, 1, 0, 1, 0, 0, 0, 0, 0, 0]]);   // no auth; then "general failure"
+        let ai = OpenAi::new("sk-testkey", Some(&format!("socks5://127.0.0.1:{port}"))).unwrap();
+        let e = ai.edit("m", "p", &[vec![0x89, b'P', b'N', b'G']]).err().unwrap();
+        let seen = h.join().unwrap();
+        let mut want = vec![5, 1, 0, 3, 14];                                          // CONNECT, by domain name, 14 bytes
+        want.extend(b"api.openai.com");
+        want.extend(443u16.to_be_bytes());
+        assert_eq!(seen[1], want);
+        assert!(is_fatal(&e), "{e:#}");                                               // nothing was sent to OpenAI
+        assert!(!format!("{e:#}").contains("testkey") && !format!("{e:#}").contains(&port.to_string()), "{e:#}");
+    }
+
+    /// `http://` with a password: CONNECT to api.openai.com:443; the key is not shown to the proxy, a refusal is "unreachable".
+    #[test]
+    fn http_proxy_gets_a_connect_to_openai_and_never_the_key() {
+        let (port, h) = fake_proxy(vec![b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"]);
+        let ai = OpenAi::new("sk-testkey", Some(&format!("http://user:SECRETPW@127.0.0.1:{port}"))).unwrap();
+        let e = ai.edit("m", "p", &[vec![0x89, b'P', b'N', b'G']]).err().unwrap();
+        let asked = String::from_utf8(h.join().unwrap().remove(0)).unwrap();
+        assert!(asked.starts_with("CONNECT api.openai.com:443 HTTP/1.1\r\n"), "{asked}");
+        assert!(asked.contains("Proxy-Authorization: Basic ") && !asked.contains("testkey"), "{asked}");
+        assert!(is_fatal(&e), "{e:#}");
+        let text = format!("{e:#}");
+        assert!(text.contains("Provided proxy credentials are incorrect") && !text.contains("SECRETPW") && !text.contains("testkey"), "{text}");
+    }
+
+    #[test]
+    fn the_whole_request_has_five_minutes_and_the_address_is_fixed() {
+        assert_eq!(TIMEOUT, std::time::Duration::from_secs(300));
+        assert_eq!(ENDPOINT, "https://api.openai.com/v1/images/edits");
+        assert_eq!(remote_dns("socks5://u:p@h:1080"), "socks5h://u:p@h:1080");
+        assert_eq!(remote_dns("http://u:p@h:3128"), "http://u:p@h:3128");
     }
 
     #[test]

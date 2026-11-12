@@ -1,9 +1,9 @@
 //! Subtle per-account copies and tread crops of approved frames (no mirroring, ever).
 use image::imageops::{self, FilterType};
 use image::{DynamicImage, GenericImageView};
-use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
+use imageproc::geometric_transformations::{rotate_about_center, Border, Interpolation};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 const HASH_SIZE: u32 = 32;
 pub const MIN_DISTANCE: u32 = 6;
@@ -53,20 +53,34 @@ pub fn to_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
 }
 
 fn gauss(rng: &mut StdRng) -> f32 {
-    let (u1, u2): (f32, f32) = (rng.gen_range(1e-6..1.0), rng.gen());
+    let (u1, u2): (f32, f32) = (rng.random_range(1e-6..1.0), rng.random());
     (-2.0 * u1.ln()).sqrt() * (std::f32::consts::TAU * u2).cos()
 }
 
+/// A channel shift in -3.0..=3.0, drawn bit for bit as rand 0.8 drew it. Newer rand rounds a closed float range
+/// differently, which moves single pixels of a copy; the same seed must keep giving the same picture.
+fn shift(rng: &mut StdRng) -> f32 {
+    const LOW: f32 = -3.0;
+    const HIGH: f32 = 3.0;
+    let unit = |bits: u32| f32::from_bits(0x3f80_0000 | (bits >> 9)) - 1.0;   // 23 random bits -> [0, 1)
+    let max = unit(u32::MAX);
+    let mut scale = (HIGH - LOW) / max;
+    while scale * max + LOW > HIGH {
+        scale = f32::from_bits(scale.to_bits() - 1);
+    }
+    unit(rng.random::<u32>()) * scale + LOW
+}
+
 fn sign(rng: &mut StdRng) -> f32 {
-    if rng.gen_bool(0.5) { 1.0 } else { -1.0 }
+    if rng.random_bool(0.5) { 1.0 } else { -1.0 }
 }
 
 /// Brightness/contrast +-4 %, per-channel shift +-3, gaussian noise sigma 1.5..3.
 fn tone(img: &DynamicImage, rng: &mut StdRng) -> DynamicImage {
-    let bright = 1.0 + sign(rng) * rng.gen_range(0.01..0.04_f32);
-    let contrast = 1.0 + sign(rng) * rng.gen_range(0.01..0.04_f32);
-    let shift: [f32; 3] = [rng.gen_range(-3.0..=3.0), rng.gen_range(-3.0..=3.0), rng.gen_range(-3.0..=3.0)];
-    let sigma = rng.gen_range(1.5..3.0_f32);
+    let bright = 1.0 + sign(rng) * rng.random_range(0.01..0.04_f32);
+    let contrast = 1.0 + sign(rng) * rng.random_range(0.01..0.04_f32);
+    let shift: [f32; 3] = [shift(rng), shift(rng), shift(rng)];
+    let sigma = rng.random_range(1.5..3.0_f32);
     let mut px = img.to_rgba8();
     for p in px.pixels_mut() {
         let n = gauss(rng) * sigma;
@@ -82,14 +96,14 @@ fn tone(img: &DynamicImage, rng: &mut StdRng) -> DynamicImage {
 pub fn copy_variant(img: &DynamicImage, seed: u64) -> DynamicImage {
     let mut rng = StdRng::seed_from_u64(seed);
     let (w, h) = img.dimensions();
-    let angle = sign(&mut rng) * rng.gen_range(0.3..1.0_f32);
+    let angle = sign(&mut rng) * rng.random_range(0.3..1.0_f32);
     let rgba = img.to_rgba8();
     let edge = *rgba.get_pixel(0, 0);
-    let rotated = rotate_about_center(&rgba, angle.to_radians(), Interpolation::Bilinear, edge);
+    let rotated = rotate_about_center(&rgba, angle.to_radians(), Interpolation::Bilinear, Border::Constant(edge));
     let (s, c) = (angle.abs().to_radians().sin(), angle.abs().to_radians().cos());
     let need_x = (h as f32 * s / 2.0 + w as f32 * (1.0 - c) / 2.0) / w as f32 + 0.002;
     let need_y = (w as f32 * s / 2.0 + h as f32 * (1.0 - c) / 2.0) / h as f32 + 0.002;
-    let side = |need: f32, rng: &mut StdRng| rng.gen_range(0.01..0.04_f32).max(need);
+    let side = |need: f32, rng: &mut StdRng| rng.random_range(0.01..0.04_f32).max(need);
     let (l, r) = (side(need_x, &mut rng), side(need_x, &mut rng));
     let (t, b) = (side(need_y, &mut rng), side(need_y, &mut rng));
     let (x0, y0) = ((w as f32 * l) as u32, (h as f32 * t) as u32);
@@ -117,11 +131,11 @@ pub fn distinct_copy(img: &DynamicImage, others: &[String], account_id: i64, sha
 pub fn tread_crop(img: &DynamicImage, seed: u64) -> DynamicImage {
     let mut rng = StdRng::seed_from_u64(seed ^ 0x7ead);
     let (w, h) = img.dimensions();
-    let cw = (w as f32 * rng.gen_range(0.44..0.52)) as u32;
+    let cw = (w as f32 * rng.random_range(0.44..0.52)) as u32;
     let shape = if h > w { 1.5 } else { h as f32 / w as f32 };
     let ch = ((cw as f32 * shape) as u32).clamp(1, h);
-    let x0 = (w as f32 * rng.gen_range(0.0..0.06)) as u32;
-    let mid = h as f32 * rng.gen_range(0.45..0.55);
+    let x0 = (w as f32 * rng.random_range(0.0..0.06)) as u32;
+    let mid = h as f32 * rng.random_range(0.45..0.55);
     let y0 = ((mid - ch as f32 / 2.0).max(0.0) as u32).min(h - ch);
     let cropped = imageops::crop_imm(&img.to_rgba8(), x0, y0, cw.min(w - x0), ch).to_image();
     let big = imageops::resize(&cropped, w, h, FilterType::CatmullRom);
@@ -225,14 +239,26 @@ pub(crate) mod tests {
         assert!(h > w);
         let seed = 9u64;
         let mut rng = StdRng::seed_from_u64(seed ^ 0x7ead);
-        let cw = (w as f32 * rng.gen_range(0.44..0.52)) as u32;
+        let cw = (w as f32 * rng.random_range(0.44..0.52)) as u32;
         let ch = ((cw as f32 * 1.5) as u32).min(h);
-        let x0 = (w as f32 * rng.gen_range(0.0..0.06)) as u32;
-        let mid = h as f32 * rng.gen_range(0.45..0.55);
+        let x0 = (w as f32 * rng.random_range(0.0..0.06)) as u32;
+        let mid = h as f32 * rng.random_range(0.45..0.55);
         let y0 = ((mid - ch as f32 / 2.0).max(0.0) as u32).min(h - ch);
         let old = imageops::resize(&imageops::crop_imm(&img.to_rgba8(), x0, y0, cw.min(w - x0), ch).to_image(), w, h, FilterType::CatmullRom);
         let old = tone(&DynamicImage::ImageRgba8(old), &mut rng).to_rgba8();
         assert_eq!(mean_diff(&old, &tread_crop(&img, seed).to_rgba8()), 0.0);
+    }
+
+    /// The numbers rand 0.8 gave for `gen_range(-3.0..=3.0)` as the third draw of a seed: the copies depend on them.
+    #[test]
+    fn channel_shift_is_drawn_as_before() {
+        for (seed, want) in [(1u64, 1.7824783_f32), (32420, 0.12759352), (0xcbf29ce484222325, 1.2906637)] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (_, _): (f32, f32) = (rng.random_range(1e-6..1.0), rng.random());
+            assert_eq!(shift(&mut rng), want, "seed {seed}");
+        }
+        let mut rng = StdRng::seed_from_u64(7);
+        assert!((0..10_000).all(|_| (-3.0..=3.0).contains(&shift(&mut rng))));
     }
 
     #[test]

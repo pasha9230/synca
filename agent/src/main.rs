@@ -1,6 +1,7 @@
 mod api;
 mod card;
 mod copies;
+mod net;
 mod openai;
 mod pending;
 mod prompt;
