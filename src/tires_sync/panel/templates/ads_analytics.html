@@ -8,8 +8,8 @@
 {% macro value(key, m) %}{% set v = m[key] %}
 {%- if key in ("spend", "revenue", "margin") %}{{ v|money }}
 {%- elif key == "profit" %}<span class="{{ 'ads-neg' if v < 0 else 'ads-pos' if v > 0 else '' }}">{{ v|money }}</span>
-{%- elif key == "roi" %}{% if v is none %}<span class="muted">—</span>{% else %}<span class="{{ 'ads-neg' if v < 0 else 'ads-pos' if v > 0 else '' }}">{{ v|pct }}&nbsp;%</span>{% endif %}
-{%- elif key in ("view_cost", "contact_cost", "sale_cost") %}{{ rub2(v) }}
+{%- elif key == "romi" %}{% if v is none %}<span class="muted">—</span>{% else %}<span class="{{ 'ads-neg' if v < 0 else 'ads-pos' if v > 0 else '' }}">{{ v|pct }}&nbsp;%</span>{% endif %}
+{%- elif key in ("cpm", "cpl", "cpa") %}{{ rub2(v) }}
 {%- elif key in ("contact_conv", "sale_conv", "drr") %}{{ share(v) }}
 {%- else %}{{ '{:,}'.format(v)|replace(',', ' ') }}{% endif %}{% endmacro %}
 {% macro bid_cell(r) %}<td data-bid="{{ r.avito_id }}">{% if r.bid %}<div>{{ r.bid.short }}</div>{% if r.bid.limit %}<div class="xs">лимит {{ r.bid.limit|money }} в день</div>{% endif %}

@@ -45,7 +45,7 @@ def test_the_owner_sees_the_spending_the_dash_and_the_menu_item(tmp_path):
     login(owner)
     page = owner.get("/economics/ads?p=7").get_data(as_text=True)
     assert "Аналитика рекламы" in page and "Nokian Hakka 205/55 R16" in page and "1 234 ₽" in page
-    assert "Расходы загружены за 1 из 7 дн." in page and "2,47&nbsp;₽" in page            # 1234.5 / 500 views
+    assert "Расходы загружены за 1 из 7 дн." in page and "2469,00&nbsp;₽" in page         # CPM: 1234.5 / 500 views × 1000
     assert "с 2026-11-04 по 2026-11-10" in page.lower() and 'href="/economics/ads"' in page
     assert "Без объявления" in page
     cell = page.split('data-bid="4242"', 1)[1].split("</td>", 1)[0]
@@ -133,8 +133,8 @@ def test_the_tree_shows_the_accounts_the_brands_and_the_ads_with_the_total_on_to
     heads = [h.split("</th>", 1)[0] for h in head.split("<th")[2:]]
     order = [h.split(">", 2)[2].split("<", 1)[0].split(" ▼")[0] if "<a " in h else "" for h in heads]
     labels = [o for o in order if o]
-    assert labels[:6] == ["Расходы", "Просмотры", "Цена просмотра", "Контакты", "Конверсия в контакт", "Цена контакта"]
-    assert "Прибыль" in labels and "ROI" in labels and labels.index("Прибыль") < labels.index("ROI")
+    assert labels[:6] == ["Расходы", "Просмотры", "CPM", "Контакты", "Конверсия в контакт", "CPL"]
+    assert "Прибыль" in labels and "ROMI" in labels and labels.index("Прибыль") < labels.index("ROMI")
     assert "Цена просмотра на Авито" in head and 'data-tip="Маржа − расходы на рекламу.' in head
     assert 'class="ads-neg"' in body                                                    # a loss: the profit in red
     assert owner.get("/economics/ads?a=abc&f=x&g=nonsense").status_code == 200
@@ -168,10 +168,10 @@ def test_the_levels_are_kept_in_the_address_and_for_the_person(tmp_path):
 
 def test_the_columns_are_chosen_and_kept_for_the_person(tmp_path):
     owner, conn = two_accounts(tmp_path)
-    response = owner.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend", "roi"], "back": "/economics/ads?p=7&g=brand,ad"})
+    response = owner.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend", "romi"], "back": "/economics/ads?p=7&g=brand,ad"})
     assert response.status_code == 302 and response.headers["Location"].endswith("/economics/ads?p=7&g=brand,ad")
     head = owner.get("/economics/ads?p=7").get_data(as_text=True).split('id="ads-tree"', 1)[1].split("<tbody>", 1)[0]
-    assert ">Расходы" in head and ">ROI" in head and ">Просмотры" not in head and "Цена просмотра на Авито" not in head
+    assert ">Расходы" in head and ">ROMI" in head and ">Просмотры" not in head and "Цена просмотра на Авито" not in head
     assert owner.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend"], "back": "https://example.com/x"}).headers["Location"].endswith("/economics/ads")
     assert owner.post("/economics/ads/columns", data={"show": ["spend"]}).status_code == 400              # no csrf
 
@@ -182,7 +182,7 @@ def test_the_empty_columns_are_hidden_and_the_filters_kept_in_the_links(tmp_path
     conn.commit()
     page = owner.get("/economics/ads?p=7").get_data(as_text=True)
     head = page.split('id="ads-tree"', 1)[1].split("<tbody>", 1)[0]
-    assert "Продажи, шт." not in head and "s=margin\"" not in head and "Цена просмотра на Авито" not in head and "Расходы" in head
+    assert ">Продано" not in head and "s=margin\"" not in head and "Цена просмотра на Авито" not in head and "Расходы" in head
     assert 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=spend&amp;f=sales"' in page
     page = owner.get("/economics/ads?p=7&f=sales").get_data(as_text=True)
     assert "Cordiant" not in page and "Нет объявлений с продажами" in page

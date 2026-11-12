@@ -149,11 +149,11 @@ def test_the_attributes_are_read_in_one_query_for_the_page(tmp_path):
 
 def test_the_sort_both_ways_inside_every_group_and_the_empty_values_below(tmp_path):
     conn = shop(tmp_path)
-    down = ads_tree.build(conn, TODAY, 7, ("account", "ad"), sort="contact_cost", desc=True)
+    down = ads_tree.build(conn, TODAY, 7, ("account", "ad"), sort="cpl", desc=True)
     one = groups(down)["Аккаунт 1"]
     # cost of a contact: 11 → 30, 12 → 20, 14 → 40, 13 and 15 have no contacts (a dash)
     assert [r["ad"]["avito_id"] for r in children(down, one)] == [14, 11, 12, 13, 15]
-    up = ads_tree.build(conn, TODAY, 7, ("account", "ad"), sort="contact_cost", desc=False)
+    up = ads_tree.build(conn, TODAY, 7, ("account", "ad"), sort="cpl", desc=False)
     assert [r["ad"]["avito_id"] for r in children(up, groups(up)["Аккаунт 1"])] == [12, 11, 14, 13, 15]
     assert [r["label"] for r in up["rows"] if r["depth"] == 0] == ["Аккаунт 2", "Аккаунт 1"]             # 200/7 against 515/16
     assert ads_tree.build(conn, TODAY, 7, ("ad",), sort="bad")["sort"] == "spend"
@@ -163,15 +163,15 @@ def test_the_sort_both_ways_inside_every_group_and_the_empty_values_below(tmp_pa
 
 def test_the_formulas_of_the_funnel():
     m = ads_tree.metrics({"spend": 500.0, "views": 200, "contacts": 8, "pieces": 4, "orders": 2, "revenue": 20000.0, "margin": 4000.0})
-    assert (m["view_cost"], m["contact_conv"], m["contact_cost"], m["sale_conv"], m["sale_cost"]) == (2.5, 4.0, 62.5, 25.0, 125.0)
-    assert (m["profit"], m["drr"], m["roi"]) == (3500.0, 2.5, 700.0)
+    assert (m["cpm"], m["contact_conv"], m["cpl"], m["sale_conv"], m["cpa"]) == (2500.0, 4.0, 62.5, 25.0, 125.0)
+    assert (m["profit"], m["drr"], m["romi"]) == (3500.0, 2.5, 700.0)
     loss = ads_tree.metrics({"spend": 500.0, "views": 0, "contacts": 0, "pieces": 0, "orders": 0, "revenue": 0.0, "margin": 0.0})
-    assert [loss[k] for k in ("view_cost", "contact_conv", "contact_cost", "sale_conv", "sale_cost", "drr")] == [None] * 6
-    assert (loss["profit"], loss["roi"]) == (-500.0, -100.0)
+    assert [loss[k] for k in ("cpm", "contact_conv", "cpl", "sale_conv", "cpa", "drr")] == [None] * 6
+    assert (loss["profit"], loss["romi"]) == (-500.0, -100.0)
     free = ads_tree.metrics({"spend": 0.0, "views": 10, "contacts": 1, "pieces": 1, "orders": 1, "revenue": 100.0, "margin": 30.0})
-    assert free["roi"] is None and free["view_cost"] == 0.0 and free["profit"] == 30.0 and free["drr"] == 0.0
-    assert [c[0] for c in ads_tree.COLUMNS] == ["spend", "views", "view_cost", "contacts", "contact_conv", "contact_cost", "pieces", "sale_conv",
-                                                "sale_cost", "revenue", "margin", "profit", "drr", "roi", "bid"]
+    assert free["romi"] is None and free["cpm"] == 0.0 and free["profit"] == 30.0 and free["drr"] == 0.0
+    assert [c[0] for c in ads_tree.COLUMNS] == ["spend", "views", "cpm", "contacts", "contact_conv", "cpl", "pieces", "sale_conv",
+                                                "cpa", "revenue", "margin", "profit", "drr", "romi", "bid"]
     assert all(c[2] for c in ads_tree.COLUMNS)                                                              # every column explains itself
 
 
@@ -202,15 +202,15 @@ def test_the_filter_keeps_the_ads_with_sales_and_the_columns_empty_everywhere(tm
     data = ads_tree.build(conn, TODAY, 7, ("ad",), only="sales")
     assert sorted(r["ad"]["avito_id"] for r in data["rows"]) == [11, 22]
     assert data["total"]["m"]["spend"] == 300.0
-    assert "bid" not in data["filled"] and {"spend", "pieces", "roi"} <= data["filled"]
+    assert "bid" not in data["filled"] and {"spend", "pieces", "romi"} <= data["filled"]
     assert ads_tree.build(conn, TODAY, 7, ("ad",), only="bad")["only"] == ""
 
 
 def test_the_columns_and_the_levels_are_kept_for_the_person(tmp_path):
     conn = db(tmp_path)
     assert ads_tree.hidden_columns(conn, "owner") == list(ads_tree.HIDDEN_DEFAULT)
-    ads_tree.save_columns(conn, "owner", ["spend", "roi", "nonsense"], "2026-11-12T10:00:00")
-    assert set(ads_tree.hidden_columns(conn, "owner")) == {c[0] for c in ads_tree.COLUMNS} - {"spend", "roi"}
+    ads_tree.save_columns(conn, "owner", ["spend", "romi", "nonsense"], "2026-11-12T10:00:00")
+    assert set(ads_tree.hidden_columns(conn, "owner")) == {c[0] for c in ads_tree.COLUMNS} - {"spend", "romi"}
     assert ads_tree.saved_levels(conn, "owner") == ads_tree.DEFAULT_LEVELS
     ads_tree.save_levels(conn, "owner", ("brand", "width"), "2026-11-12T10:00:00")
     assert ads_tree.saved_levels(conn, "owner") == ("brand", "width") and ads_tree.saved_levels(conn, "partner") == ads_tree.DEFAULT_LEVELS

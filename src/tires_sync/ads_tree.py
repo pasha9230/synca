@@ -30,19 +30,19 @@ SUMS = ("spend", "views", "contacts", "pieces", "orders", "revenue", "margin", "
 COLUMNS = (
     ("spend", "Расходы", "Всё, что Авито взяло за объявления за период: размещение и продвижение."),
     ("views", "Просмотры", "Просмотры объявлений за период по статистике Авито."),
-    ("view_cost", "Цена просмотра", "Расходы ÷ просмотры. Прочерк — просмотров нет."),
+    ("cpm", "CPM", "Цена тысячи просмотров: расходы ÷ просмотры × 1000. Прочерк — просмотров нет."),
     ("contacts", "Контакты", "Контакты за период по статистике Авито: показ телефона и сообщения."),
     ("contact_conv", "Конверсия в контакт", "Контакты ÷ просмотры × 100 %. Прочерк — просмотров нет."),
-    ("contact_cost", "Цена контакта", "Расходы ÷ контакты. Прочерк — контактов нет."),
-    ("pieces", "Продажи, шт.", "Шины, проданные по объявлению: заказы на этапе «Выполнено» или «Отправлен в ТК», "
+    ("cpl", "CPL", "Цена контакта: расходы ÷ контакты. Прочерк — контактов нет."),
+    ("pieces", "Продано", "Шины, проданные по объявлению: заказы на этапе «Выполнено» или «Отправлен в ТК», "
                                "пришедшие через чат объявления, и записанные по ним продажи."),
     ("sale_conv", "Конверсия в продажу", "Заказы с продажей ÷ контакты × 100 %. Считаются заказы, а не штуки. Прочерк — контактов нет."),
-    ("sale_cost", "Цена продажи", "Расходы ÷ проданные штуки. Прочерк — продаж нет."),
+    ("cpa", "CPA", "Цена продажи: расходы ÷ проданные штуки. Прочерк — продаж нет."),
     ("revenue", "Выручка", "Сумма продаж объявления за период."),
     ("margin", "Маржа", "Как в «Продажах»: выручка минус закупка с условиями поставщика, комиссия и продвижение позиции."),
     ("profit", "Прибыль", "Маржа − расходы на рекламу. Минус — реклама не окупилась."),
     ("drr", "ДРР", "Доля рекламных расходов: расходы ÷ выручка × 100 %. Прочерк — выручки нет."),
-    ("roi", "ROI", "(Маржа − расходы) ÷ расходы × 100 %. Прочерк — расходов нет."),
+    ("romi", "ROMI", "Окупаемость рекламы: (маржа − расходы на рекламу) ÷ расходы на рекламу × 100 %. Прочерк — расходов нет."),
     ("bid", "Цена просмотра на Авито", "Текущая цена просмотра объявления в кабинете Авито и дневной лимит. Только в строке объявления."),
 )
 SORTABLE = tuple(c[0] for c in COLUMNS if c[0] != "bid")
@@ -99,9 +99,9 @@ def metrics(sums: dict) -> dict:
     for k in ("spend", "revenue", "margin", "promo"):
         m[k] = round(float(m[k]), 2)
     spend = m["spend"]
-    m.update(view_cost=_div(spend, m["views"]), contact_conv=_div(m["contacts"], m["views"], 100, 1), contact_cost=_div(spend, m["contacts"]),
-             sale_conv=_div(m["orders"], m["contacts"], 100, 1), sale_cost=_div(spend, m["pieces"]), profit=round(m["margin"] - spend, 2),
-             drr=ads_spend.drr(spend, m["revenue"]), roi=_div(m["margin"] - spend, spend, 100, 1))
+    m.update(cpm=_div(spend, m["views"], 1000), contact_conv=_div(m["contacts"], m["views"], 100, 1), cpl=_div(spend, m["contacts"]),
+             sale_conv=_div(m["orders"], m["contacts"], 100, 1), cpa=_div(spend, m["pieces"]), profit=round(m["margin"] - spend, 2),
+             drr=ads_spend.drr(spend, m["revenue"]), romi=_div(m["margin"] - spend, spend, 100, 1))
     return m
 
 
@@ -226,7 +226,7 @@ def _tree(leaves: List[dict], levels: Tuple[str, ...], sort: str, desc: bool, pa
 
 def _filled(leaves: List[dict]) -> set:
     """The columns some ad has a value in: a dash is none, nor a zero of a sum."""
-    out = {c for c in SORTABLE if any(leaf["m"][c] is not None and (leaf["m"][c] != 0 or c in ("drr", "roi", "view_cost")) for leaf in leaves)}
+    out = {c for c in SORTABLE if any(leaf["m"][c] is not None and (leaf["m"][c] != 0 or c in ("drr", "romi", "cpm")) for leaf in leaves)}
     if any(leaf["row"]["bid"] for leaf in leaves):                       # as before: the column comes with the first price read
         out.add("bid")
     return out
