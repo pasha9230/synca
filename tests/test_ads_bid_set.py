@@ -4,7 +4,7 @@ server, «Подтверждаю» for a jump or a big limit, one write per form
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from cryptography.fernet import Fernet
@@ -30,6 +30,8 @@ class FakeAvito:
     def __init__(self, bid=350, limit=30000, mode="manual", set_status=200):
         self.bid, self.limit, self.mode, self.set_status = bid, limit, mode, set_status
         self.shown = None                      # (bid, limit) Avito shows after a write instead of what was set
+        self.fail = None                       # None, an HTTP status of the reads, or "network": the reads fail
+        self.lose_promotions = False           # the next getPromotionsByItemIds gets no answer
         self.calls = []
 
     def __call__(self, method, url, headers, body):
@@ -38,11 +40,18 @@ class FakeAvito:
         self.calls.append((method, path, data))
         if path == "/token/":
             return 200, {}, b'{"access_token": "t", "expires_in": 3600}'
+        if self.fail and path.startswith("/cpxpromo/") and path != "/cpxpromo/1/setManual":
+            if self.fail == "network":
+                raise OSError("connection reset")
+            return self.fail, {}, b'{"error": {"code": 403, "message": "forbidden"}}'
         if path == "/cpxpromo/1/getBids/%d" % AD:
             return 200, {}, json.dumps({"actionTypeID": 5, "manual": {
                 "bidPenny": self.bid, "recBidPenny": 500, "minBidPenny": 100, "maxBidPenny": 3000,
                 "bids": [{"valuePenny": v, "minForecast": v // 50, "maxForecast": v // 25} for v in (200, 300, 350, 400, 500, 900, 1500)]}}).encode()
         if path == "/cpxpromo/1/getPromotionsByItemIds":
+            if self.lose_promotions:
+                self.lose_promotions = False
+                raise OSError("connection reset")
             if self.mode == "auto":
                 entry = {"itemID": AD, "actionTypeID": 5, "autoPromotion": {"budgetPenny": 50000}}
             else:
@@ -92,19 +101,37 @@ def as_user(app, conn, login_name, role, point_id=None):
     return client
 
 
+def _field(text, name):
+    return text.split('name="%s" value="' % name, 1)[1].split('"', 1)[0] if 'name="%s" value="' % name in text else None
+
+
+def _remember(client, text):
+    """«Было» of the form the window shows, sent back with the next press as the browser sends it."""
+    if _field(text, "was_bid") is not None:
+        client.was = {"was_bid": _field(text, "was_bid"), "was_limit": _field(text, "was_limit")}
+    return text
+
+
 def opened(client):
     """The window as a person opens it (the fresh read) and its form token."""
     page = client.get(PAGE)
     assert page.status_code == 200
-    text = page.get_data(as_text=True)
-    return text, text.split('name="token" value="', 1)[1].split('"', 1)[0]
+    text = _remember(client, page.get_data(as_text=True))
+    return text, _field(text, "token")
 
 
 def send(client, token, url=PAGE, csrf="tok", **form):
-    data = dict(form, token=token)
+    data = dict(getattr(client, "was", {}), **form)
+    data["token"] = token
     if csrf:
         data["csrf"] = csrf
-    return client.post(url, data=data, follow_redirects=True)
+    response = client.post(url, data=data, follow_redirects=True)
+    _remember(client, response.get_data(as_text=True))
+    return response
+
+
+def later(app, minutes):
+    app.config["NOW"] = lambda: NOW + timedelta(minutes=minutes)
 
 
 def journal(conn):
@@ -414,3 +441,104 @@ def test_the_history_of_an_ad_survives_many_changes_of_others(tmp_path):
     for n in range(600):
         store.write_audit(conn, "2026-11-13T12:00:01", "owner", ads_bid_set.AUDIT, {"account_id": 1, "avito_id": 9000 + n, "sent": True, "ok": True})
     assert ads_bid_set.undo_values(conn, 1, AD)["bid"] == 3.5
+
+
+# ---- a fresh reading before a write, two tabs (review 2026-11-13) --------------------------------------------------------------------
+
+def test_an_old_reading_is_read_again_and_the_jump_is_counted_from_it(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)                                                # 3.50 read at 12:00
+    later(app, 11)
+    http.bid = 100                                                          # lowered in the cabinet to 1.00 meanwhile
+    reads = len(http.reads())
+    text = send(owner, token, pick="own", own="5,00", limit="300", was_bid="1.00").get_data(as_text=True)
+    assert len(http.reads()) == reads + 2                                   # getBids and getPromotionsByItemIds before the write
+    assert http.writes() == [] and "больше чем на 50 %" in text and "1,00 ₽ → 5,00 ₽" in text    # 3.50 → 5.00 would be +43 %
+    send(owner, token, pick="own", own="5,00", limit="300", was_bid="1.00", confirm="1")
+    assert [w[2]["bidPenny"] for w in http.writes()] == [500]
+    (_, _, detail), = journal(conn)
+    assert detail["was"] == {"mode": "manual", "bid": 1.0, "day_limit": 300.0}
+
+
+def test_a_reading_of_less_than_ten_minutes_is_not_read_again(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    later(app, 9)
+    reads = len(http.reads())
+    send(owner, token, pick="4.00", limit="300")
+    assert len(http.writes()) == 1 and len(http.reads()) == reads + 1         # the control read only
+
+
+@pytest.mark.parametrize("fail", [403, 500, "network"])
+def test_a_failed_fresh_read_writes_nothing(tmp_path, fail):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    later(app, 11)
+    http.fail = fail
+    text = send(owner, token, pick="4.00", limit="300").get_data(as_text=True)
+    assert http.writes() == [] and journal(conn) == [] and "цена не записана" in text
+    http.fail = None                                                        # the form is not burnt: a later press goes through
+    send(owner, token, pick="4.00", limit="300")
+    assert len(http.writes()) == 1
+
+
+def test_the_second_tab_is_refused_and_the_journal_is_right(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, first = opened(owner)
+    _, second = opened(owner)                                               # both show 3.50, 300
+    send(owner, first, pick="4.00", limit="250", was_bid="3.50", was_limit="300.00")
+    text = send(owner, second, pick="4.50", limit="300", was_bid="3.50", was_limit="300.00").get_data(as_text=True)
+    assert "Цену уже изменили (сейчас 4,00 ₽, лимит 250,00 ₽). Обновите окно." in text
+    assert [(w[2]["bidPenny"], w[2]["limitPenny"]) for w in http.writes()] == [(400, 25000)]
+    (_, _, detail), = journal(conn)
+    assert detail["was"] == {"mode": "manual", "bid": 3.5, "day_limit": 300.0} and detail["want"] == {"bid": 4.0, "limit": 250.0}
+    assert ads_bid_set.undo_values(conn, 1, AD)["bid"] == 3.5
+
+
+def test_a_change_in_the_cabinet_seen_by_the_fresh_read_refuses_the_write(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    later(app, 30)
+    http.bid, http.limit = 420, 20000
+    text = send(owner, token, pick="4.00", limit="300").get_data(as_text=True)
+    assert http.writes() == [] and "Цену уже изменили (сейчас 4,20 ₽, лимит 200,00 ₽)" in text
+
+
+def test_a_form_without_was_writes_nothing(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    owner.was = {}
+    text = send(owner, token, pick="4.00", limit="300").get_data(as_text=True)
+    assert http.writes() == [] and "Форма устарела" in text
+
+
+def test_after_a_lost_control_read_the_next_write_reads_first(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    http.lose_promotions = True                                             # the control read after the write gets no answer
+    send(owner, token, pick="4.00", limit="250")
+    assert conn.execute("SELECT bid FROM ad_bid WHERE avito_id = ?", (AD,)).fetchone()[0] == 3.5    # the window still shows 3.50
+    reads = len(http.reads())
+    text = send(owner, "s" * 32, pick="4.50", limit="300", was_bid="3.50", was_limit="300.00").get_data(as_text=True)
+    assert len(http.reads()) == reads + 2 and len(http.writes()) == 1
+    assert "Цену уже изменили (сейчас 4,00 ₽, лимит 250,00 ₽)" in text
+
+
+def test_undo_after_two_changes_from_one_tab_puts_back_the_middle_one(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    text = send(owner, token, pick="4.00", limit="250").get_data(as_text=True)     # the window after the write: a new form, «было» 4.00
+    send(owner, _field(text, "token"), pick="4.50", limit="250")
+    undo = ads_bid_set.undo_values(conn, 1, AD)
+    assert (undo["bid"], undo["limit"]) == (4.0, 250.0)
+    send(owner, "u" * 32, url=PAGE + "/undo")
+    assert [(w[2]["bidPenny"], w[2]["limitPenny"]) for w in http.writes()] == [(400, 25000), (450, 25000), (400, 25000)]
+    assert [d["was"]["bid"] for _, _, d in journal(conn)] == [3.5, 4.0, 4.5]

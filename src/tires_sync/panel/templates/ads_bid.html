@@ -19,6 +19,7 @@
 {% if can_write %}
 <form method="post" action="{{ here }}" data-once data-bid-form>
 <input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ token }}">
+<input type="hidden" name="was_bid" value="{{ num(state.bid) }}"><input type="hidden" name="was_limit" value="{{ num(state.day_limit) }}">
 <fieldset class="field"><legend class="label">Цена просмотра</legend>
 {% for o in near %}<label class="row" style="gap:var(--s-2)"><input type="radio" name="pick" value="{{ num(o.bid) }}"{% if state.bid is not none and o.bid == state.bid %} checked{% endif %}> {{ rub(o.bid) }}{% if o.forecast %} — прогноз {{ o.forecast }} просмотров{% endif %}{% if state.bid is not none and o.bid == state.bid %} <span class="muted">(сейчас)</span>{% endif %}</label>
 {% endfor %}
@@ -40,6 +41,7 @@
 {% if undo.note %}<p class="small" role="note"><b>{{ undo.note }}</b></p>{% endif %}
 {% if can_write and undo.bid is not none %}<form method="post" action="{{ here }}/undo" data-once>
 <input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ token }}u">
+<input type="hidden" name="was_bid" value="{{ num(state.bid) }}"><input type="hidden" name="was_limit" value="{{ num(state.day_limit) }}">
 <label class="row" style="gap:var(--s-2)"><input type="checkbox" name="confirm" value="1"> <span>Подтверждаю <span class="small muted">(если возврат меняет цену больше чем на {{ (jump * 100)|int }} % или лимит выше порога)</span></span></label>
 <button class="btn btn--secondary">Вернуть прежнюю</button></form>{% endif %}
 {% endif %}
