@@ -119,29 +119,87 @@ def two_accounts(tmp_path):
     return owner, conn
 
 
-def test_the_summary_shows_both_accounts_and_the_table_one_of_them(tmp_path):
+def test_the_tree_shows_the_accounts_the_brands_and_the_ads_with_the_total_on_top(tmp_path):
+    """Как в Roistat (the owner 2026-11-12): one tree instead of the summary and the tabs of the accounts; «Итого» in the head."""
     owner, conn = two_accounts(tmp_path)
     page = owner.get("/economics/ads?p=7").get_data(as_text=True)
-    summary = page.split('id="ads-summary"', 1)[1].split("</table>", 1)[0]
-    assert "Основной" in summary and "Шина-Колесо" in summary and "Итого" in summary and "1\u00a0360\u00a0₽" in summary
-    assert "Nokian Hakka" in page and "Cordiant" not in page                          # the first account by default
-    assert 'href="/economics/ads?p=7&amp;s=spend&amp;a=2"' in page
-    page = owner.get("/economics/ads?p=7&s=drr&a=2").get_data(as_text=True)
-    assert "Cordiant" in page and "Nokian Hakka" not in page.split('id="ads-summary"', 1)[1].split("</table>", 1)[1]
-    assert 'href="/economics/ads?p=30&amp;s=drr&amp;a=2"' in page and 'href="/economics/ads?p=7&amp;s=spend&amp;a=2"' in page
-    assert "Объявления не из нашего фида: 1" in page and "31337" in page
-    assert owner.get("/economics/ads?a=abc&f=x").status_code == 200
+    table = page.split('id="ads-tree"', 1)[1].split("</table>", 1)[0]
+    head, body = table.split("<tbody>", 1)
+    assert "Итого" in head and "1\u00a0360\u00a0₽" in head and "ads-total" in head
+    assert "Основной" in body and "Шина-Колесо" in body and "Nokian Hakka" in body and "Cordiant" in body
+    assert "№31337" in body and "Без данных" in body                                    # no our Id: «Без данных», under its account
+    assert 'aria-label="Сортировка"' not in page and 'id="ads-summary"' not in page          # the buttons of the sort are gone
+    assert "Объявления не из нашего фида" not in page
+    heads = [h.split("</th>", 1)[0] for h in head.split("<th")[2:]]
+    order = [h.split(">", 2)[2].split("<", 1)[0].split(" ▼")[0] if "<a " in h else "" for h in heads]
+    labels = [o for o in order if o]
+    assert labels[:6] == ["Расходы", "Просмотры", "Цена просмотра", "Контакты", "Конверсия в контакт", "Цена контакта"]
+    assert "Прибыль" in labels and "ROI" in labels and labels.index("Прибыль") < labels.index("ROI")
+    assert "Цена просмотра на Авито" in head and 'data-tip="Маржа − расходы на рекламу.' in head
+    assert 'class="ads-neg"' in body                                                    # a loss: the profit in red
+    assert owner.get("/economics/ads?a=abc&f=x&g=nonsense").status_code == 200
+
+
+def test_the_sort_is_a_link_on_the_head_down_first_then_up(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    page = owner.get("/economics/ads?p=7").get_data(as_text=True)
+    assert 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=views"' in page
+    assert 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=spend&amp;d=asc"' in page and "Расходы ▼" in page
+    page = owner.get("/economics/ads?p=7&s=views").get_data(as_text=True)
+    assert "Просмотры ▼" in page and 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=views&amp;d=asc"' in page
+    body = page.split("<tbody>", 1)[1]
+    assert body.index("Основной") < body.index("Шина-Колесо")                             # 500 views against 55
+    page = owner.get("/economics/ads?p=7&s=views&d=asc").get_data(as_text=True)
+    assert "Просмотры ▲" in page and 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=views"' in page
+    body = page.split("<tbody>", 1)[1]
+    assert body.index("Шина-Колесо") < body.index("Основной")
+    assert 'href="/economics/ads?p=30&amp;g=account,brand,ad&amp;s=views&amp;d=asc"' in page          # the period keeps the sort
+
+
+def test_the_levels_are_kept_in_the_address_and_for_the_person(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    page = owner.get("/economics/ads?p=7&l=diameter&l=&l=ad").get_data(as_text=True)
+    assert "Группировка: Диаметр → Объявление" in page and 'href="/economics/ads?p=7&amp;g=diameter,ad&amp;s=spend&amp;d=asc"' in page
+    page = owner.get("/economics/ads").get_data(as_text=True)                              # the bare address: the levels kept
+    assert "Группировка: Диаметр → Объявление" in page
+    page = owner.get("/economics/ads?g=brand").get_data(as_text=True)
+    assert "Группировка: Бренд</summary>" in page and "Nokian Hakka" not in page.split("<tbody>", 1)[1]      # no level «ad»
+
+
+def test_the_columns_are_chosen_and_kept_for_the_person(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    response = owner.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend", "roi"], "back": "/economics/ads?p=7&g=brand,ad"})
+    assert response.status_code == 302 and response.headers["Location"].endswith("/economics/ads?p=7&g=brand,ad")
+    head = owner.get("/economics/ads?p=7").get_data(as_text=True).split('id="ads-tree"', 1)[1].split("<tbody>", 1)[0]
+    assert ">Расходы" in head and ">ROI" in head and ">Просмотры" not in head and "Цена просмотра на Авито" not in head
+    assert owner.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend"], "back": "https://example.com/x"}).headers["Location"].endswith("/economics/ads")
+    assert owner.post("/economics/ads/columns", data={"show": ["spend"]}).status_code == 400              # no csrf
 
 
 def test_the_empty_columns_are_hidden_and_the_filters_kept_in_the_links(tmp_path):
     owner, conn = two_accounts(tmp_path)
-    page = owner.get("/economics/ads?p=7&a=2").get_data(as_text=True)
-    table = page.split('id="ads-table"', 1)[1].split("</table>", 1)[0]
-    assert "Продано" not in table and "Маржа" not in table and "Цена просмотра на Авито" not in table and "Расходы" in table
-    assert 'href="/economics/ads?p=7&amp;s=spend&amp;a=2&amp;f=sales"' in page
-    page = owner.get("/economics/ads?p=7&a=2&f=sales").get_data(as_text=True)
+    conn.execute("DELETE FROM ad_bid")
+    conn.commit()
+    page = owner.get("/economics/ads?p=7").get_data(as_text=True)
+    head = page.split('id="ads-tree"', 1)[1].split("<tbody>", 1)[0]
+    assert "Продажи, шт." not in head and "s=margin\"" not in head and "Цена просмотра на Авито" not in head and "Расходы" in head
+    assert 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=spend&amp;f=sales"' in page
+    page = owner.get("/economics/ads?p=7&f=sales").get_data(as_text=True)
     assert "Cordiant" not in page and "Нет объявлений с продажами" in page
-    assert 'href="/economics/ads?p=30&amp;s=spend&amp;a=2&amp;f=sales"' in page
+    assert 'href="/economics/ads?p=30&amp;g=account,brand,ad&amp;s=spend&amp;f=sales"' in page
+
+
+def test_the_change_against_the_previous_period_is_shown_on_the_total_and_the_top_level(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, views) VALUES (1, 4242, '2026-11-01', 1000, 10)")
+    conn.commit()
+    page = owner.get("/economics/ads?p=7").get_data(as_text=True)
+    head, body = page.split('id="ads-tree"', 1)[1].split("</table>", 1)[0].split("<tbody>", 1)
+    assert "▲&nbsp;35,9&nbsp;%" in head and "ads-delta is-bad" in head                     # 1359,5 against 1000: more spending, in red
+    rows = body.split("</tr>")
+    first = next(r for r in rows if "Основной" in r)
+    assert "▲&nbsp;23,4&nbsp;%" in first                                                  # 1234,5 against 1000
+    assert all("ads-delta" not in r for r in rows if 'data-depth="1"' in r or 'data-depth="2"' in r)
 
 
 def test_the_page_stands_on_an_empty_base(tmp_path):
@@ -150,3 +208,16 @@ def test_the_page_stands_on_an_empty_base(tmp_path):
     login(owner)
     response = owner.get("/economics/ads")
     assert response.status_code == 200 and "Нет аккаунтов с фидом" in response.get_data(as_text=True)
+
+
+def test_the_columns_of_the_partner_are_kept_and_the_others_may_not_post_them(tmp_path):
+    app, conn = app_with_data(tmp_path)
+    partner = as_user(app, conn, "partner1", "partner")
+    with partner.session_transaction() as s:
+        s["csrf"] = "tok"
+    assert partner.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend"]}).status_code == 302
+    assert ">Просмотры" not in partner.get("/economics/ads").get_data(as_text=True).split('id="ads-tree"', 1)[1].split("<tbody>", 1)[0]
+    viewer = as_user(app, conn, "viewer1", "viewer")
+    with viewer.session_transaction() as s:
+        s["csrf"] = "tok"
+    assert viewer.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend"]}).status_code == 403
