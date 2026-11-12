@@ -35,7 +35,7 @@ def test_the_point_sees_the_old_order_of_tyres_taken_from_oth_and_nothing_on_an_
     _quiet(monkeypatch)
     assert post(owner, "/orders/%d/oth-at-point" % cid, tok).status_code == 302
     plain = card_at(conn, "at_point", T)
-    page = manager(app, conn, point_id(conn)).get("/my-point").get_data(as_text=True)
+    page = manager(app, conn, point_id(conn)).get("/my-point?tab=here").get_data(as_text=True)
     card = page.split('id="order-%d"' % cid)[1].split("</article>")[0]
     assert "Шины с ОТХ, заказ №%s" % _webmim(conn, old) in card
     assert "Шины с ОТХ" not in page.split('id="order-%d"' % plain)[1].split("</article>")[0]

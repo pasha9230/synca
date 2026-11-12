@@ -117,12 +117,12 @@ def _known(conn, goods_id: str) -> bool:
                                or conn.execute("SELECT 1 FROM oth_manual WHERE goods_id = ?", (goods_id,)).fetchone() is not None)
 
 
-def act_response(act):
-    """The act of a return as a PDF to download; 404 when there is none."""
+def act_response(act, inline: bool = False):
+    """The act of a return as a PDF to download (inline: to show in the browser, «Распечатать» of a point); 404 when there is none."""
     if act is None:
         abort(404)
     return Response(act["data"], mimetype="application/pdf", headers={
-        "Content-Disposition": "attachment; filename=\"act-%s.pdf\"; filename*=UTF-8''%s" % (act["return_date"], quote(act["name"])),
+        "Content-Disposition": ("inline" if inline else "attachment") + "; filename=\"act-%s.pdf\"; filename*=UTF-8''%s" % (act["return_date"], quote(act["name"])),
         "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
 

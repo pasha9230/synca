@@ -263,3 +263,19 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 }
 .mp-act-file{height:44px;justify-self:start}   /* «Скачать акт» of a return (2026-11-12) */
 .p2-mx3 .mp-act-file,.p2-mx3 .mp-handover{grid-column:1 / -1}
+/* the owner's task of 2026-11-12: «Вернуть дд.мм.гггг» by the number; «Скачать акт МХ-3» and «Распечатать» side by side; the mark of an act
+   of several orders, a colour per act */
+.mp-return-by{font-size:18px;font-weight:700;color:var(--p2-text);white-space:nowrap;margin-left:6px;vertical-align:middle}
+.mp-act-links{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
+.p2-mx3 .mp-act-links{grid-column:1 / -1;margin-top:0}
+.p2-mx3 .mp-act-links .btn,.mp-act-links .btn{width:auto;height:44px;flex:0 1 auto;justify-content:center}
+@media (max-width:1023px){
+  .p2-mx3 .mp-act-links .btn,.mp-act-links .btn{flex:1 1 140px}
+  .mp-act-links .mp-act-mark{flex:0 0 100%;justify-content:center}
+  .mp-return-by{display:inline-block;margin-left:0}
+}
+.mp-act-mark{color:var(--act);background:var(--act-bg);border-color:var(--act-border);display:inline-flex;align-items:center;min-height:24px;padding:2px 8px;border:1px solid;border-radius:4px;font-size:12px;font-weight:600;line-height:1.3}
+.mp-act-mark--1{--act:#0550AE;--act-bg:#DDF4FF;--act-border:#80CCFF}
+.mp-act-mark--2{--act:#6639BA;--act-bg:#FBEFFF;--act-border:#D8B9FF}
+.mp-act-mark--3{--act:#0B6B5F;--act-bg:#D9F7F0;--act-border:#8ADBCB}
+.mp-act-mark--4{--act:#953800;--act-bg:#FFF1E5;--act-border:#FFB77C}

@@ -213,7 +213,7 @@ def test_the_return_button_is_gone_from_an_order_at_the_point(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
-    assert "/my-point/%d/returned" % here not in _text(mine.get("/my-point"))
+    assert "/my-point/%d/returned" % here not in _text(mine.get("/my-point?tab=here"))
     assert post(mine, "/my-point/%d/returned" % here, "tok", token="a" * 24).status_code == 404
     assert not any(e["text"] == mgr.RETURN_LINE for e in orders.list_events(conn, here))
 
@@ -372,7 +372,7 @@ def test_the_point_refuses_and_the_order_goes_to_oth_without_a_question(tmp_path
     app, client, tok, conn, pid, card = ready(tmp_path)
     here = _card(conn, pid, webmim="700200", code="at_point")
     mine = manager(app, conn, pid)
-    page = _text(mine.get("/my-point"))
+    page = _text(mine.get("/my-point?tab=here"))
     assert 'action="/my-point/%d/to_oth"' % here not in page and "data-oth-offer" not in page
     token = re.search(r'action="/my-point/%d/refuse".*?name="token" value="([0-9a-f]+)"' % here, page, re.S).group(1)
     r = post(mine, "/my-point/%d/refuse" % here, "tok", token=token, reason="size")
@@ -438,13 +438,13 @@ def test_the_tabs_count_and_list_the_points_orders(tmp_path):
     mine = manager(app, conn, pid)
     page = _text(mine.get("/my-point"))
     assert _tab_counts(page) == {"moving": 2, "here": 2, "oth": 1, "agree": 0, "return": 0, "issued": 0}   # «Едут»: placed and moving (the owner 2026-10-30)
-    assert _listed(page) == {ending, later}                                                  # «На точке» opens first
+    assert _listed(page) == {card, placed}                                                   # «Едут» opens first (the owner's task of 2026-11-12; was «На точке»)
     for tab, wanted in (("moving", {card, placed}), ("here", {ending, later}), ("oth", {oth})):
         shown = _text(mine.get("/my-point?tab=%s" % tab))
         assert _listed(shown) == wanted, tab
         assert 'data-tab="%s" aria-current="page"' % tab in shown, tab                       # the tab is kept in the address
-    for old in ("nonsense", "all", "ending", "asked"):                                      # an old address: «На точке»
-        assert _listed(_text(mine.get("/my-point?tab=" + old))) == {ending, later}, old
+    for old in ("nonsense", "all", "ending", "asked"):                                      # an old address: the tab the page opens on
+        assert _listed(_text(mine.get("/my-point?tab=" + old))) == {card, placed}, old
 
 
 def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tmp_path):
@@ -468,11 +468,11 @@ def test_the_card_shows_the_top_and_the_buttons_and_hides_the_rest_under_more(tm
 def test_a_press_brings_back_to_the_tab_it_came_from(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
-    page = _text(mine.get("/my-point?tab=moving"))
-    token = re.search(r'action="/my-point/%d/arrived".*?name="token" value="([0-9a-f]+)"' % card, page, re.S).group(1)
-    r = mine.post("/my-point/%d/arrived" % card, data={"csrf": "tok", "token": token}, headers={"Referer": "http://localhost/my-point?tab=moving"})
-    assert r.status_code == 302 and r.headers["Location"].endswith("/my-point?tab=moving")
-    assert 'name="tab" value="moving"' in page                                               # the search keeps the tab too
+    page = _text(mine.get("/my-point?tab=oth"))                                              # not the tab the page opens on («Едут», 2026-11-12)
+    token = re.search(r'action="/my-point/%d/arrived".*?name="token" value="([0-9a-f]+)"' % card, _text(mine.get("/my-point?tab=moving")), re.S).group(1)
+    r = mine.post("/my-point/%d/arrived" % card, data={"csrf": "tok", "token": token}, headers={"Referer": "http://localhost/my-point?tab=oth"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/my-point?tab=oth")
+    assert 'name="tab" value="oth"' in page                                                  # the search keeps the tab too
 
 
 def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_stay_off_sale(tmp_path):

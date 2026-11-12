@@ -169,7 +169,7 @@ def test_the_undo_is_kept_without_a_time_limit(tmp_path, clock, told):
 def test_the_card_has_the_date_under_the_number_a_big_issue_and_refuse_with_its_window(tmp_path, clock):
     app, client, tok, conn, pid, card = ready(tmp_path, SENT)
     orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-13T12:00:00", "o")
-    page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
+    page = manager(app, conn, pid).get("/my-point?tab=here").get_data(as_text=True)
     head = re.search(r'<div class="mp-card-head">(.*?)</div>', page[page.index('id="order-%d"' % card):], re.S).group(1)
     assert head.index("№ 5000100") < head.index("от 13.10.2026") < head.index("на точке")    # one under another, centred by .mp-card-head
     issued = re.search(r'action="/my-point/%d/issued".*?<button class="([^"]+)"' % card, page, re.S).group(1)

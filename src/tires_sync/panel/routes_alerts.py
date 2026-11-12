@@ -59,6 +59,9 @@ def _grouped(conn, login: str) -> list:
     return sorted(rows, key=lambda r: r["at"] or "", reverse=True)
 
 
+HERE = "/my-point?tab=here"         # an order waiting at the point: its tab by name, the page itself opens on «Едут» (the task of 2026-11-12)
+
+
 def point_rows(conn, point_id, now: str) -> list:
     """The rows of the bell of the point itself (lane 3; the owner 2026-10-26: a point hears of its news in the panel): the open question
     «Клиент забрал?» of each order there (order_reserve.question_open), until the point answers or its working day ends. Computed, never
@@ -80,14 +83,14 @@ def point_rows(conn, point_id, now: str) -> list:
         if back and not card["return_amount"]:                     # the amount is in: it waits for the move to «Возврат» only (review)
             found.append({"id": "return-%d" % back[0], "order_id": card_id, "at": back[1], "author": "", "kind": "return", "level": "green",
                           "more": 0, "title": "Заказ № %s: возврат отмечен, ждёт суммы от менеджера" % mgr.label(card),
-                          "text": "Сумму возврата вносит менеджер, после этого заказ уйдёт с точки.", "href": "/my-point"})
+                          "text": "Сумму возврата вносит менеджер, после этого заказ уйдёт с точки.", "href": HERE})
         if not reserve.question_open(conn, card, now):
             continue
         stay = re.sub(r"\D", "", card["entered_at"] or "")
         asked = (store.get_state(conn, reserve.ASK_KEY % (card_id, stay)) or "").split("|", 1)[-1]
         found.append({"id": "question-%d-%s" % (card_id, stay), "order_id": card_id, "at": asked,
                       "author": "", "kind": "question", "level": "yellow", "more": 0, "title": "Клиент забрал заказ № %s?" % mgr.label(card),
-                      "text": "Ответьте на «Рабочем месте»: «Выдан» или «На точке».", "href": "/my-point"})
+                      "text": "Ответьте на «Рабочем месте»: «Выдан» или «На точке».", "href": HERE})
     return found
 
 

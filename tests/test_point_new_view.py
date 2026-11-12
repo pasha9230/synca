@@ -112,7 +112,7 @@ def test_the_office_never_gets_the_point_screens(w):
 def test_the_workplace_cards_tabs_and_questions(w):
     flag(w["conn"], "all")
     ids = w["ids"]
-    here = w["point"].get("/my-point").get_data(as_text=True)
+    here = w["point"].get("/my-point?tab=here").get_data(as_text=True)
     assert 'data-tab-count="here">3<' in here and 'data-tab-count="moving">1<' in here and 'data-tab-count="oth">1<' in here
     assert "mp-tab--hot" in here
     # «Клиент забрал?»: its answers in the question, «Выдал» and «ОТКАЗ» hidden while it hangs (the owner 2026-11-02, 2026-11-05)
@@ -172,7 +172,8 @@ def test_refuse_from_the_new_workplace_goes_to_oth(w):
 def test_undo_from_the_new_workplace(w):
     flag(w["conn"], "all")
     conn, ids, pt = w["conn"], w["ids"], w["point"]
-    _tok, page = press(pt, ids["moving"], "arrived")
+    press(pt, ids["moving"], "arrived")
+    page = pt.get("/my-point?tab=here").get_data(as_text=True)                          # the order is on «На точке» now; the page opens on «Едут» (2026-11-12)
     assert 'data-undo-card="%d"' % ids["moving"] in page and 'href="#p2-undo"' not in page    # in the card, no list (the owner 2026-11-10)
     r = post(pt, "/my-point/%d/undo" % ids["moving"], "tok")
     assert r.status_code == 302

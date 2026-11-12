@@ -140,7 +140,7 @@ def test_no_return_button_and_its_press_is_refused_the_vk_command_stays(tmp_path
     coming = _card(conn, pid, webmim="700200")
     at_point(conn, card)
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert "/returned" not in page and 'data-confirm-title="Возврат поставщику' not in page
     for order in (card, coming):
         assert post(mine, "/my-point/%d/returned" % order, "tok", token="b" * 24).status_code == 404
@@ -168,7 +168,7 @@ def question(page):
 def test_no_question_before_the_bot_asked(tmp_path, clock):
     app, client, tok, conn, pid, card = ready(tmp_path)
     at_point(conn, card)
-    page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
+    page = manager(app, conn, pid).get("/my-point?tab=here").get_data(as_text=True)
     assert question(page) == "" and "mp-tab--hot" not in page
 
 
@@ -178,7 +178,7 @@ def test_the_question_is_on_top_and_here_only_marks_the_answer(tmp_path, clock):
     at_point(conn, card)
     asked(conn, card)
     mine = manager(app, conn, pid)
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     block = question(page)
     assert "Клиент забрал заказ № 5000100?" in block and "Татьяна" in block
     assert 'class="mp-ask"' in block and re.findall(r'<article class="mp-card[^"]*" id="order-(\d+)"', page)[0] == str(card)   # first
@@ -201,9 +201,9 @@ def test_an_answer_in_vk_first_closes_the_question_on_the_page(tmp_path, clock):
     at_point(conn, card)
     asked(conn, card)
     mine = manager(app, conn, pid)
-    stale = token(mine.get("/my-point").get_data(as_text=True), card, "reserve_here")
+    stale = token(mine.get("/my-point?tab=here").get_data(as_text=True), card, "reserve_here")
     reserve.here(conn, orders.get_card(conn, card), "менеджер Бета", DAY + "T11:30:00", lambda *a, **k: ("sent", "", ""))
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert question(page) == "" and "mp-tab--hot" not in page
     r = post(mine, "/my-point/%d/reserve_here" % card, "tok", token=stale)
     assert "уже отмечен" in mine.get(r.headers["Location"]).get_data(as_text=True) and to_client(app) == []
@@ -227,9 +227,9 @@ def test_the_question_leaves_at_the_end_of_the_working_day_and_a_late_here_tells
     at_point(conn, card)
     asked(conn, card)
     mine = manager(app, conn, pid)
-    stale = token(mine.get("/my-point").get_data(as_text=True), card, "reserve_here")
+    stale = token(mine.get("/my-point?tab=here").get_data(as_text=True), card, "reserve_here")
     clock["now"] = DAY + "T20:30:00"
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert question(page) == ""
     r = post(mine, "/my-point/%d/reserve_here" % card, "tok", token=stale)
     assert "ответ пришёл после конца рабочего дня" in mine.get(r.headers["Location"]).get_data(as_text=True) and to_client(app) == []
@@ -260,7 +260,7 @@ def test_a_point_in_the_panel_is_asked_on_its_page_and_its_here_is_marked(tmp_pa
     assert any(e["text"].startswith("Точке «Бета» задан вопрос на «Рабочем месте»") and e["level"] == "grey" for e in events)
     assert not [e for e in events if e["level"] == "yellow" and "точку не спросить" in e["text"]]
     mine = manager(app, conn, pid)
-    assert "Клиент забрал заказ № 5000100?" in question(mine.get("/my-point").get_data(as_text=True))
+    assert "Клиент забрал заказ № 5000100?" in question(mine.get("/my-point?tab=here").get_data(as_text=True))
     _t, page = press(mine, card, "reserve_here")
     assert "отмечено: на точке" in page and to_client(app) == []                            # the client: by the tick at 12:30 (2026-11-02)
     reserve.check(conn, DAY + "T21:00:00", lambda c, t: "ok", lambda *a, **k: None, None)   # the evening tick: answered, no silence record
@@ -276,4 +276,4 @@ def test_a_silent_point_in_the_panel_is_a_yellow_record_as_in_vk(tmp_path, clock
     reserve.check(conn, DAY + "T21:00:00", lambda c, t: "ok", lambda *a, **k: None, None)
     assert [e["text"] for e in orders.list_events(conn, card) if "не ответила до конца рабочего дня" in e["text"]]
     clock["now"] = DAY + "T21:05:00"
-    assert question(manager(app, conn, pid).get("/my-point").get_data(as_text=True)) == ""
+    assert question(manager(app, conn, pid).get("/my-point?tab=here").get_data(as_text=True)) == ""

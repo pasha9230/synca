@@ -98,3 +98,16 @@ body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) 
 .mp-today{flex-wrap:wrap;margin-bottom:12px}
 .mp-act-file{margin:8px 0 0}
 .mp-today .mp-act-file{flex:0 0 100%}   /* «Скачать акт» of a return (2026-11-12): a full-width button, as the others of the card */
+/* the owner's task of 2026-11-12: «Вернуть дд.мм.гггг» by the number; «Скачать акт МХ-3» and «Распечатать» side by side; the mark of an act
+   of several orders, a colour per act */
+.mp-return-by{font:700 var(--fs-xl)/1.2 var(--font-head);color:var(--gray-900);white-space:nowrap}
+.mp-card--return .mp-card-head{flex-wrap:wrap;justify-content:flex-start}
+.mp-act-links{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0 0}
+.mp-today .mp-act-links{flex:0 0 100%}
+.mp-act-links .mp-act-file{flex:1 1 140px;margin:0;min-height:44px}
+.mp-act-links .mp-act-mark{flex:0 0 100%;justify-content:center}
+.mp-act-mark{color:var(--act);background:var(--act-bg);border-color:var(--act-border);display:inline-flex;align-items:center;min-height:24px;padding:2px 8px;border:1px solid;border-radius:4px;font-size:12px;font-weight:600;line-height:1.3}
+.mp-act-mark--1{--act:#0550AE;--act-bg:#DDF4FF;--act-border:#80CCFF}
+.mp-act-mark--2{--act:#6639BA;--act-bg:#FBEFFF;--act-border:#D8B9FF}
+.mp-act-mark--3{--act:#0B6B5F;--act-bg:#D9F7F0;--act-border:#8ADBCB}
+.mp-act-mark--4{--act:#953800;--act-bg:#FFF1E5;--act-border:#FFB77C}

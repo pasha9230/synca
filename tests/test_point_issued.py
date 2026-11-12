@@ -122,7 +122,7 @@ def test_the_owner_working_as_the_point_sees_its_issued(tmp_path, clock, view):
 
 def test_the_press_form_carries_the_lines_and_an_empty_confirm(tmp_path, clock, view):
     app, owner, conn, pid, card = setup(tmp_path, view)
-    page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
+    page = manager(app, conn, pid).get("/my-point?tab=here").get_data(as_text=True)
     form = re.search(r'<form method="post" action="/my-point/%d/issued"[^>]*>.*?</form>' % card, page, re.S).group(0)
     assert 'data-confirm-ok="Да, выдал"' in form and "data-confirm-lines" in form
     assert "№ заказа: 5000100\nNokian Hakkapeliitta 10 × 4\nКлиент: Татьяна" in form
@@ -132,7 +132,7 @@ def test_the_press_form_carries_the_lines_and_an_empty_confirm(tmp_path, clock, 
 def test_without_yes_nothing_changes_and_the_server_asks(tmp_path, clock, view):
     app, owner, conn, pid, card = setup(tmp_path, view)
     mine = manager(app, conn, pid)
-    tok = token(mine.get("/my-point").get_data(as_text=True), card, "issued")
+    tok = token(mine.get("/my-point?tab=here").get_data(as_text=True), card, "issued")
     r = post(mine, "/my-point/%d/issued" % card, "tok", token=tok)
     page = r.get_data(as_text=True)
     assert r.status_code == 200 and "data-issue-confirm" in page
@@ -148,7 +148,7 @@ def test_without_yes_nothing_changes_and_the_server_asks(tmp_path, clock, view):
 
 def test_the_confirm_page_keeps_the_point_and_the_tab_of_the_owner(tmp_path, clock):
     app, owner, conn, pid, card = setup(tmp_path, "old")
-    tok = token(owner.get("/my-point?p=%d" % pid).get_data(as_text=True), card, "issued")
+    tok = token(owner.get("/my-point?p=%d&tab=here" % pid).get_data(as_text=True), card, "issued")
     r = owner.post("/my-point/%d/issued" % card, data={"csrf": "tok", "token": tok, "p": str(pid)},
                    headers={"Referer": "http://localhost/my-point?p=%d&tab=here" % pid})
     page = r.get_data(as_text=True)
@@ -170,7 +170,7 @@ def test_a_bad_token_changes_nothing_and_asks_nothing(tmp_path, clock):
 def test_undo_in_the_card_only_while_undoable_and_it_works(tmp_path, clock, view):
     app, owner, conn, pid, card = setup(tmp_path, view)
     mine = manager(app, conn, pid)
-    here = mine.get("/my-point").get_data(as_text=True)
+    here = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert 'data-undo-card="%d"' % card not in here                                     # nothing pressed yet
     press(mine, card, "issued")
     page = issued_tab(mine)
@@ -180,7 +180,7 @@ def test_undo_in_the_card_only_while_undoable_and_it_works(tmp_path, clock, view
     r = post(mine, "/my-point/%d/undo" % card, "tok")
     assert r.status_code == 302 and orders.get_card(conn, card)["stage"]["code"] == "at_point"
     assert cards(issued_tab(mine)) == []
-    assert 'data-undo-card="%d"' % card not in mine.get("/my-point").get_data(as_text=True)    # undone: nothing more to undo
+    assert 'data-undo-card="%d"' % card not in mine.get("/my-point?tab=here").get_data(as_text=True)    # undone: nothing more to undo
 
 
 def test_no_list_of_presses_above_the_orders_the_card_keeps_its_undo(tmp_path, clock, view):
@@ -191,9 +191,9 @@ def test_no_list_of_presses_above_the_orders_the_card_keeps_its_undo(tmp_path, c
     mine = manager(app, conn, pid)
     press(mine, second, "arrived")
     press(mine, card, "issued")
-    for page in (mine.get("/my-point").get_data(as_text=True), issued_tab(mine)):
+    for page in (mine.get("/my-point?tab=here").get_data(as_text=True), issued_tab(mine)):
         assert "data-undo-list" not in page and "Отменить отметку" not in page and "Заказ вернётся туда, где был до отметки;" not in page
-    here = mine.get("/my-point").get_data(as_text=True)
+    here = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert 'data-undo-card="%d"' % second in here and "Не приехал" in here                          # in the order's card (2026-11-10)
     assert 'data-undo-card="%d"' % card in block(issued_tab(mine))                                  # in «Выдано»
     clock["now"] = T2
@@ -206,7 +206,7 @@ def test_no_undo_in_the_card_after_a_later_move(tmp_path, clock, view):
     second = _card(conn, pid, webmim="700301", code="moving")
     mine = manager(app, conn, pid)
     press(mine, second, "arrived")
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     assert 'data-undo-card="%d"' % second in page and "Не приехал" in page
     orders.move_card(conn, second, _stage(conn, "moving"), "2026-10-16T12:00:00", "owner")      # the office moved it since
     conn.commit()
@@ -250,7 +250,7 @@ def test_the_undo_of_arrived_is_a_quiet_not_arrived_under_the_order(tmp_path, cl
     second = _card(conn, pid, webmim="700306", code="moving")
     mine = manager(app, conn, pid)
     press(mine, second, "arrived")
-    page = mine.get("/my-point").get_data(as_text=True)
+    page = mine.get("/my-point?tab=here").get_data(as_text=True)
     art = re.search(r'<article[^>]*id="order-%d".*?</article>' % second, page, re.S).group(0)
     assert "Отменить «Приехал»" not in page and "Не приехал" in art
     undo = re.search(r'<div class="([^"]*)" data-card-undo>(.*?)</form></div>', art, re.S)
