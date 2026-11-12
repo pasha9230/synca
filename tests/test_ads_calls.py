@@ -159,6 +159,10 @@ def test_the_report_has_the_calls_of_an_ad_and_of_the_account_and_no_division_by
     assert (total["pieces"], total["revenue"], total["ads"]) == (6, 26000.0, 2)
     summary = ads_spend.report(conn, TODAY, 7)["summary"]
     assert summary["total"]["calls"] == 4 and summary["total"]["call_cost"] == 100.0
+    from tires_sync import ads_tree                                     # review 13.11: the tree counts the sales through calls without an ad too
+    tree = ads_tree.build(conn, TODAY, 7, ("account", "ad"))
+    assert tree["total"]["m"]["pieces"] == total["pieces"] and tree["total"]["m"]["revenue"] == total["revenue"]
+    assert any(r["kind"] == "ad" and r["label"] == ads_spend.CALLS_NO_ITEM_TITLE and r["m"]["revenue"] == 6000.0 for r in tree["rows"])
 
 
 def test_an_account_without_spending_or_calls_has_dashes(tmp_path):

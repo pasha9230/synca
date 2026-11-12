@@ -544,6 +544,9 @@ def _call_links(conn, units: Dict[int, str]) -> Dict[int, Tuple[int, Optional[in
     return out
 
 
+CALLS_NO_ITEM_TITLE = "Звонки без объявления"
+
+
 def _bucket() -> dict:
     return {"pieces": 0, "revenue": 0.0, "margin": 0.0, "count": 0, "no_purchase": 0, "call_pieces": 0, "call_revenue": 0.0, "call_count": 0}
 
@@ -781,7 +784,8 @@ def _account(conn, account: dict, today: date, since: str, until: str, sold: dic
     no_item["call_cost"] = None                                         # no spending of its own: the price of a call is the account's
     total = _total(rows + [no_item])                                    # the account's sales and calls with them
     total["ads"] = len(rows)
-    every = rows                                                        # all the ads of the period, uncut and unfiltered (ads_tree)
+    every = rows + ([dict(no_item, avito_id=0, title=CALLS_NO_ITEM_TITLE, ad_id="", bid=None, bid_fail=None, bid_why="", promo=0.0)]
+                    if no_item["pieces"] or no_item.get("calls") else [])  # the tree counts the account's sales through calls without an ad too
     due = [r for r in rows if r["avito_id"] in queued]
     strangers = _sort([r for r in rows if not r["title"] and not r["ad_id"]], "spend")
     rows = [r for r in rows if r["title"] or r["ad_id"]]
