@@ -110,6 +110,8 @@ def test_e2_the_moment_of_the_status_on_oth_is_the_first_mark_and_unagree_starts
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == ""             # agreed: not on the agreement
     assert order_oth.unagree(conn, orders.get_card(conn, other), "2026-10-21T09:00:00", "owner")
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == "2026-10-21T09:00:00"
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-17T12:30:00", "система")     # the 7th day after the mark
+    assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"           # the status went on: no new 2 days
 
 
 # ---- E3 ---------------------------------------------------------------------------------------------------------------------------------

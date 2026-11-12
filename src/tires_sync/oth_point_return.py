@@ -70,6 +70,9 @@ def can_tell_buyer(conn, card: dict, now: str) -> bool:
 
 def tell_buyer(conn, card: dict, point_name: str, who: str, now: str) -> tuple:
     """«Есть покупатель» → «Да»: one urgent task to the responsible; (outcome, answer, done) as the presses of «Рабочее место»."""
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")                                                  # two tabs at once: the second waits, then sees the task
     card = orders.get_card(conn, card["id"])                                         # as it is now
     label = card.get("webmim_number") or str(card["id"])
     if not can_tell_buyer(conn, card, now):
@@ -201,6 +204,8 @@ def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, 
         except (order_oth.OthError, orders.OrderError) as err:                     # moved meanwhile: the others still go
             conn.rollback()
             failed[card["id"]] = str(err)
-    _act, replaced = oth_return_act.save(conn, point_id, day, filename, data, now, author)
+    replaced = False
+    if agreed:                                                                       # nothing agreed: no act of the pair either
+        _act, replaced = oth_return_act.save(conn, point_id, day, filename, data, now, author)
     return {"date": day, "point": point_id, "agreed": agreed, "failed": failed, "replaced": replaced}
 

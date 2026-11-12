@@ -959,10 +959,6 @@ def agreeing_since(conn, card: dict) -> str:
     if not agreeing(conn, card):
         return ""
     entered = str(card.get("entered_at") or "")
-    if card["stage"]["code"] == orders.RETURN_GIVEN:
-        row = conn.execute("SELECT MAX(at) FROM order_event WHERE order_id = ? AND kind = 'field' AND text LIKE ? AND at >= ?",
-                           (card["id"], "Согласование возврата с поставщиком отменено%", entered)).fetchone()
-        return max(entered, str(row[0] or "")) if row else entered
     since = _oth_since(conn, card["id"]) or entered
     found = []
     for (item_id,) in conn.execute("SELECT item_id FROM oth_return WHERE order_id = ? AND qty > 0", (card["id"],)).fetchall():
@@ -973,6 +969,11 @@ def agreeing_since(conn, card: dict) -> str:
                 continue
             if at >= since:
                 found.append(at)
+    if card["stage"]["code"] == orders.RETURN_GIVEN:                  # a mark on «На ОТХ» before the move: the status went on (review)
+        row = conn.execute("SELECT MAX(at) FROM order_event WHERE order_id = ? AND kind = 'field' AND text LIKE ? AND at >= ?",
+                           (card["id"], "Согласование возврата с поставщиком отменено%", entered)).fetchone()
+        cancelled = str(row[0] or "") if row else ""
+        return cancelled or min([at for at in found if at <= entered] + [entered])
     return min(found) if found else since
 
 
