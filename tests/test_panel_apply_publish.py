@@ -58,7 +58,9 @@ def test_accounts_with_publication_off_are_not_published_and_the_user_is_told(tm
     staging.set_override(conn, "1", "off", T)
     post(client, "/draft/%d/confirm" % draft_id(conn), tok, publish="1")
     assert not (folder / "avito_feed.xml").exists()
-    assert "публикация выключена" in client.get("/").get_data(as_text=True).lower()
+    home = client.get("/").get_data(as_text=True)
+    assert "Публикация фида выключена" in home                 # «Требует внимания» says it once (the badge of «Фид» is not repeated: 2026-11-12)
+    assert home.lower().count("публикация выключена") == 0 and home.count("Публикация фида выключена") == 1
 
 
 def test_large_removal_needs_the_checkbox_for_publishing_too_and_then_goes_through(tmp_path):

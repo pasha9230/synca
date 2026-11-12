@@ -133,8 +133,8 @@ def test_the_workplace_is_made_for_a_phone_and_the_rest_keeps_its_width(w):
     page = _page(w["point"])
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in page and 'class="pt-ui"' in page
     assert "point.css" in page and 'class="pt mp-wrap"' in page
-    other = _page(w["point"], "/alerts")              # «Заказы» (2026-10-30), «Чаты» and the card of an order (2026-10-31, point-mobile) have their phone too
-    assert '<meta name="viewport" content="width=1280">' in other and "pt-ui" not in other and "point.css" not in other
+    other = _page(w["point"], "/alerts")              # «Заказы» (2026-10-30), «Чаты» and the card of an order (2026-10-31, point-mobile) have their phone too;
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in other and "pt-ui" in other and "point.css" in other  # «Уведомления» too (2026-11-12)
 
 
 def test_the_phone_menu_names_only_the_points_own_pages(w):

@@ -20,7 +20,7 @@ body.ui-new{
   --r-xs:4px; --r-sm:4px; --r-md:6px; --r-lg:6px; --r-xl:6px;
   --sh-xs:none; --sh-sm:none;
   --sh-md:0 0 0 1px #D0D7DE,0 8px 24px rgba(66,74,83,.12); --sh-lg:var(--sh-md); --sh-xl:var(--sh-md);
-  --s-2:7px; --s-3:10px; --s-4:14px; --s-6:20px; --s-8:28px;
+  --s-2:8px; --s-3:12px; --s-4:12px; --s-5:16px; --s-6:16px; --s-8:24px;   /* the grid of 8 (small 4), compact as the browser at 80 % (the design review 2026-11-12; was 7/10/14/20/28) */
   --ring:0 0 0 2px var(--gray-0),0 0 0 4px var(--primary-600);   /* :root computes it from its own values: again here */
   /* этапы воронки: код старой палитры из базы → токен «Строгого» (routes_design.STAGE_TOKENS, фильтр stage_color) */
   --stage-violet:#4F46E5; --stage-violet-light:#8250DF; --stage-blue:#0969DA; --stage-sky:#218BFF; --stage-amber:#BF8700;
@@ -89,7 +89,7 @@ h1{font-size:var(--fs-3xl)} h2{font-size:var(--fs-xl)} h3{font-size:var(--fs-lg)
 p{margin:0;text-wrap:pretty}
 a{color:var(--primary-700);text-decoration:none}
 a:hover{color:var(--primary-800);text-decoration:underline}
-code,.mono{font-family:var(--font-mono);font-size:.92em}
+code,.mono{font-family:var(--font-mono);font-size:inherit}   /* the size of the line it stands in: no 11.96 / 12.88 px off the scale */
 svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 svg.i-sm{width:14px;height:14px}
 hr{border:0;border-top:1px solid var(--gray-200);margin:var(--s-4) 0}
@@ -238,7 +238,7 @@ a.tile:hover{border-color:var(--primary-300);text-decoration:none;box-shadow:var
 .btn--ghost{background:none;border-color:transparent;color:var(--gray-600)}
 .btn--ghost:hover{background:var(--gray-100);color:var(--gray-900)}
 .btn--sm{height:32px;padding:0 12px;font-size:var(--fs-sm);border-radius:var(--r-sm)}
-.btn--xs{height:26px;padding:0 9px;font-size:var(--fs-xs);border-radius:var(--r-sm);font-weight:600}
+.btn--xs{height:24px;padding:0 8px;font-size:var(--fs-xs);border-radius:var(--r-sm);font-weight:600}
 .btn--lg{height:44px;padding:0 18px;font-size:var(--fs-lg)}
 .btn--block{width:100%}
 .btn[disabled],.btn.is-disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
@@ -323,7 +323,7 @@ a.tile:hover{border-color:var(--primary-300);text-decoration:none;box-shadow:var
 
 /* ============ ТАБЛИЦЫ ============ */
 /* Без своей вертикальной прокрутки: длинную таблицу листает страница, вбок — только широкая таблица. */
-.table-wrap{overflow-x:auto;border-top:1px solid var(--gray-200)}
+.table-wrap{overflow-x:auto;border-top:1px solid var(--gray-200);position:relative}   /* an absolute .sr-only label inside stays in the box (it widened the page: «На ОТХ» on 768) */
 .table{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
 .table th{position:sticky;top:0;z-index:2;background:var(--gray-50);color:var(--gray-600);font-weight:500;font-size:var(--fs-xs);text-align:left;padding:0 12px;height:36px;border-bottom:1px solid var(--gray-200);white-space:nowrap}
 .table-wrap>.table:not(.table--plain)>thead{position:relative;z-index:3}   /* app.js (15) сдвигает её вниз при прокрутке страницы: поверх строк */
@@ -342,7 +342,7 @@ a.tile:hover{border-color:var(--primary-300);text-decoration:none;box-shadow:var
 .table .t-actions{text-align:right;white-space:nowrap}
 .table tfoot td{background:var(--gray-50);font-weight:600;color:var(--gray-900)}
 .table--plain th{position:static}
-.thumb{width:36px;height:36px;border-radius:var(--r-sm);border:1px solid var(--gray-200);background:repeating-linear-gradient(135deg,var(--gray-100) 0 4px,var(--gray-50) 4px 8px);display:grid;place-items:center;color:var(--gray-400);font:500 8px/1 var(--font-mono)}
+.thumb{width:36px;height:36px;border-radius:var(--r-sm);border:1px solid var(--gray-200);background:repeating-linear-gradient(135deg,var(--gray-100) 0 4px,var(--gray-50) 4px 8px);display:grid;place-items:center;color:var(--gray-400);font:500 11px/1.1 var(--font);text-align:center}   /* «нет фото» in two lines, readable (was 8 px) */
 .delta-up{color:var(--err-700)} .delta-down{color:var(--ok-700)}
 
 /* панели фильтров */
@@ -821,3 +821,19 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
 .wn-body{margin-top:var(--s-2);color:var(--gray-700)}
 .wn-body p,.wn-body ul{margin:var(--s-2) 0 0}
 .wn-body ul{padding-left:var(--s-5)}
+
+/* A phone (the design review 2026-11-12): every control under a finger is at least 44 px high, on every page of the new view (the office has
+   the most of it in office-mobile.css; this adds the point, the client's shop and what that file misses: the menu groups, «Работать как
+   точка», the tabs of the order's feed, «Обзор»). A link inside a line of text is not a control. */
+@media (max-width:760px){
+  body.ui-new .btn:not(.btn--link):not(.btn--link-gray),body.ui-new .input,body.ui-new .select,body.ui-new select,body.ui-new summary.btn,
+  body.ui-new .sb-fold,body.ui-new .o2c-tab,body.ui-new .tabs a,body.ui-new .seg a,body.ui-new .seg button,body.ui-new [role=tab],
+  body.ui-new .tour-again,body.ui-new .p2-quiet,body.ui-new .tpl-var,body.ui-new .shop-fview button{min-height:44px}
+  body.ui-new .icon-btn{min-width:44px;min-height:44px}
+  /* a long badge or button label wraps instead of widening the page («Не отправляется: шаблона нет…», «Добавить тексты…») */
+  body.ui-new .badge{white-space:normal;max-width:100%}
+  body.ui-new .row{flex-wrap:wrap}
+  body.ui-new .row>form{min-width:0;max-width:100%}
+  body.ui-new input[type=file],body.ui-new .field{max-width:100%;min-width:0}
+  body.ui-new .btn:not(.btn--link):not(.btn--link-gray){white-space:normal;height:auto;max-width:100%;text-align:center;line-height:1.25}
+}

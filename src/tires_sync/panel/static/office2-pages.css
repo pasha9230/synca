@@ -42,7 +42,7 @@ body.o2{min-width:1024px}                         /* the office of the new view 
 .o2-r1 .badge{flex:none;padding:0 6px;line-height:18px}
 .o2-t{flex:none;color:var(--o2-text-3);font-size:12px;white-space:nowrap}
 .o2-r2{display:flex;align-items:flex-start;gap:8px;margin-top:3px}
-.o2 .o2-ln{flex:1;min-width:0;font-size:15px;line-height:20px;color:var(--o2-text-2);white-space:normal;display:-webkit-box;-webkit-line-clamp:2;
+.o2 .o2-ln{flex:1;min-width:0;font-size:14px;line-height:20px;color:var(--o2-text-2);white-space:normal;display:-webkit-box;-webkit-line-clamp:2;
   -webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .o2-you{color:var(--o2-text-3)}
 .o2 .o2-cl-row.is-unread .o2-ln{color:var(--o2-text);font-weight:600}

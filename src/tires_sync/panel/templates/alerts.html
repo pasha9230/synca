@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% from "_ui.html" import icon, empty %}
+{# a point: its own frame and the sections at the bottom up to 1023 px, as «Задачи» (the design review 2026-11-12) #}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}{% if session.get("user") and current_user().role == "point" %}pt-ui pt-plain-page{% endif %}{% endblock %}
+{% block head %}{% if session.get("user") and current_user().role == "point" %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block title %}Уведомления · Tires Sync{% endblock %}
 {% block content %}
 {% set badge = {"red": "badge--err", "yellow": "badge--warn", "green": "badge--ok"} %}
@@ -18,4 +22,5 @@
 </tr>{% else %}<tr><td colspan="5">{{ empty("check-circle", "Новых уведомлений нет", "Здесь появятся события заказов и сообщения клиентов, которые вы ещё не видели.") }}</td></tr>{% endfor %}</tbody>
 </table>
 </section>
+{% if session.get("user") and current_user().role == "point" %}{% with section="alerts" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
 {% endblock %}

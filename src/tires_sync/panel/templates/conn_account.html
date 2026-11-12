@@ -43,7 +43,7 @@
 <tbody>{% for p in phones %}<tr>
 <td class="t-name">{{ p.label }}{% if p.label != p.name %} <span class="muted small">· {{ p.name }}</span>{% endif %}</td>
 <td>{% if p.phone %}<b>{{ p.phone|phone }}</b>{% else %}<span class="muted">не определён</span>{% endif %}</td>
-<td>{% if p.goes %}{{ p.goes|join(", ") }}{% else %}<span class="muted">фид не опубликован</span>{% endif %}</td>
+<td>{% if p.goes %}{{ p.goes|join(", ") }}{% elif p.text == "фид не опубликован" %}<span class="muted">—</span>{# «Статус» says it (the design review 2026-11-12) #}{% else %}<span class="muted">фид не опубликован</span>{% endif %}</td>
 <td><span class="badge badge--{{ 'ok' if p.level == 'ok' else ('warn' if p.level == 'bad' else 'neutral') }}">{{ p.text }}</span>{% for other in p.same %}<div class="small text-warn">тот же номер у «{{ other }}»</div>{% endfor %}{% if p.shared_places %}<div class="small text-warn">тот же адрес в другом аккаунте: {{ p.shared_places|join("; ") }}. Измените адрес в кабинете Авито</div>{% endif %}</td>
 </tr>{% endfor %}</tbody></table>
 {% if a.identity.phones %}{% if can_post("account_phone") %}<form method="post" action="/connections/accounts/{{ a.id }}/phone" class="card-foot" data-phone-pick>{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">

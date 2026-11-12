@@ -1,5 +1,5 @@
 /* «Рабочее место», the new design (the owner 2026-10-30, the prototype docs/ux/prototype-2026-10-30: renderPointMobile, pmCard, renderMypoint):
-   the colours and sizes of Ant Design, only inside .pt (the rest of the panel keeps its own). A phone (≤ 760 px): no menu nor top bar,
+   the colours and sizes of Ant Design, only inside .pt (the rest of the panel keeps its own). A phone or a narrow window (≤ 1023 px, as the office: the design review 2026-11-12): no menu nor top bar,
    the tabs at the bottom of the screen, buttons of 48 px; a computer: the same order, the tabs on top. No script of its own. */
 .pt{
   --pt-primary:#1677ff;--pt-primary-hover:#4096ff;--pt-primary-bg:#e6f4ff;--pt-primary-border:#91caff;
@@ -104,13 +104,13 @@
 .pt .mp-handoff-form textarea.input{height:auto}
 
 /* a phone: the whole screen is the point's, the tabs at the bottom */
-@media (max-width:760px){
+@media (max-width:1023px){
   body.pt-ui .sidebar,body.pt-ui .topbar{display:none}
   body.pt-ui .app{display:block}
   body.pt-ui .main,body.pt-ui .page{padding:0;margin:0;min-width:0;max-width:none;overflow:visible}
   body.pt-ui .msgs{margin:8px 16px 0}
   body.pt-ui{min-width:0;background:var(--pt-bg-layout, #f5f5f5)}
-  body.pt-ui.pt-whatsnew-page .page{padding:12px 16px 84px}
+  body.pt-ui.pt-whatsnew-page .page,body.pt-ui.pt-tasks-page .page,body.pt-ui.pt-plain-page .page{padding:12px 16px 84px}   /* 16 px from the edges, the bottom menu under */
   .pt{max-width:none;padding:0 0 84px}
   .pt-top{background:var(--pt-bg);border-bottom:1px solid var(--pt-border-2);padding:8px 16px;margin:0 0 12px}
   .pt-menu{display:block}
@@ -126,7 +126,7 @@
 }
 
 /* a computer: compact buttons in a row, as the prototype's desktop (desktop-5-mypoint) */
-@media (min-width:761px){
+@media (min-width:1024px){
   .pt .mp-actions{justify-content:flex-start}
   .pt .mp-actions form,.pt .mp-actions > a.mp-btn{flex:0 0 auto}
   .pt .mp-btn{width:auto;min-width:150px;height:40px;font-size:14px;padding:0 16px}
@@ -138,7 +138,7 @@
 .pt .mp-client .mp-name,.pt .mp-client .mp-sum{font-size:inherit;font-weight:500;color:var(--pt-text)}   /* the client and «Итого» as the tyres (the owner 2026-11-07) */
 .pt .mp-client .mp-sum b{font-weight:inherit}
 .pt-back{display:none}
-@media (max-width:760px){.pt-back{display:inline-flex}}
+@media (max-width:1023px){.pt-back{display:inline-flex}}
 
 
 /* the sections of a point's phone (_point_nav.html), the bell, the phone view of «Заказы»: a phone only */
@@ -153,7 +153,7 @@
 .pt .pt-ocard-link{display:flex;flex-direction:column;gap:4px;text-decoration:none;color:inherit}
 .pt .pt-ocard-moves{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .pt .pt-ocard-moves .btn{min-height:40px}
-@media (max-width:760px){
+@media (max-width:1023px){
   .pt-nav{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;
     border-top:1px solid #f0f0f0;padding-bottom:env(safe-area-inset-bottom);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
   .pt-nav a{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;min-height:60px;font-size:11px;line-height:13px;
@@ -175,12 +175,12 @@
    «Чаты»: the list alone, or the open chat alone with «← Чаты»; the order of the chat under the conversation, never folded away.
    The card: one column, the window of the order first, «Задачи по заказу» and the chats under it, the buttons under a finger. */
 .pt-chats-back{display:none}
-@media (max-width:760px){
+@media (max-width:1023px){
   body.pt-chats-page .page,body.pt-card-page .page{padding:12px 12px 84px}
   body.pt-chats-page .page-head .sub{display:none}
   body.pt-chats-page .page-head h1{font-size:20px}
   body.pt-chats-page.is-chat-open .page-head{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}   /* the h1 stays for a screen reader */
-  .pt-chats-back{display:inline-flex;align-self:flex-start;align-items:center;min-height:40px;font-size:15px;font-weight:500}
+  .pt-chats-back{display:inline-flex;align-self:flex-start;align-items:center;min-height:44px;font-size:16px;font-weight:500}
   body:is(.pt-chats-page,.pt-card-page) .msgs:not(:has(*)){display:none}
   body.pt-chats-page .chats-layout,body.pt-chats-page .chats-layout.is-deal-folded{grid-template-columns:minmax(0,1fr);grid-template-areas:"list" "main" "deal";gap:12px}
   body.pt-chats-page:not(.is-chat-open) .chats-main,body.pt-chats-page:not(.is-chat-open) .chats-layout .chats-deal{display:none}
@@ -191,13 +191,13 @@
   body.pt-chats-page.is-chat-open .chats-layout.is-deal-folded .chats-deal{display:block}
   body.pt-chats-page :is([data-deal-unfold],.chats-deal-fold){display:none!important}
   body.pt-chats-page .chat-head{padding:10px 12px;row-gap:8px}
-  body.pt-chats-page .chat-title{flex:1 1 100%;font-size:17px}
+  body.pt-chats-page .chat-title{flex:1 1 100%;font-size:16px}
   body.pt-chats-page .chat-head>.ml-auto{margin-left:0;flex:1 1 100%;flex-wrap:wrap}
   body.pt-chats-page .chat-head>.ml-auto>*{min-width:0}
   body.pt-chats-page .chat-assign,body.pt-chats-page .chat-stage{flex:1 1 100%;flex-wrap:wrap}
   body.pt-chats-page .chat-stage{order:-1}
   body.pt-chats-page :is(.chat-assign,.chat-stage) .select{flex:1 1 auto;max-width:none;height:44px;font-size:16px}
-  body.pt-chats-page .chat-head .btn{min-height:40px}
+  body.pt-chats-page .chat-head .btn{min-height:44px}
   body.pt-chats-page .chat-product{padding:8px 12px}
   body.pt-chats-page .chat-thread{padding:12px}
   body.pt-chats-page .msg{max-width:88%}
@@ -216,7 +216,7 @@
   body.pt-card-page .owin-head{padding:12px}
   body.pt-card-page .owin-top{flex-wrap:wrap;row-gap:8px}
   body.pt-card-page .owin-top .owin-title{flex:1 1 100%;white-space:normal}
-  body.pt-card-page .owin-next{flex:1 1 auto;margin-left:0;min-height:44px;font-size:15px}
+  body.pt-card-page .owin-next{flex:1 1 auto;margin-left:0;min-height:44px;font-size:16px}
   body.pt-card-page .owin-stage{padding:8px 12px}
   body.pt-card-page .owin-body{padding:12px}
   body.pt-card-page .owin-add{flex-wrap:wrap}
@@ -226,11 +226,11 @@
   body.pt-card-page .owin-foot{flex-wrap:wrap}
   body.pt-card-page .owin-foot .btn{flex:1 1 auto;min-height:44px}
 }
-@media (max-width:760px){
+@media (max-width:1023px){
   body:is(.pt-chats-page,.pt-card-page) :is(.owin-grid,.grid-2,.grid-3){grid-template-columns:minmax(0,1fr)}
   body:is(.pt-chats-page,.pt-card-page) :is(.input,.select,.textarea){font-size:16px}
-  body:is(.pt-chats-page,.pt-card-page) :is(.input,.select):not([type=checkbox]):not([type=radio]){min-height:40px}
-  body:is(.pt-chats-page,.pt-card-page) :is(.btn--sm,.btn--xs){min-height:40px}
+  body:is(.pt-chats-page,.pt-card-page) :is(.input,.select):not([type=checkbox]):not([type=radio]){min-height:44px}
+  body:is(.pt-chats-page,.pt-card-page) :is(.btn--sm,.btn--xs){min-height:44px}
   body:is(.pt-chats-page,.pt-card-page) .menu-item{min-height:44px;white-space:normal}
   body:is(.pt-chats-page,.pt-card-page) #callbacks form[action="/tasks/new"]>*{flex:1 1 100%}
   body:is(.pt-chats-page,.pt-card-page) #callbacks [data-task]>.ml-auto{margin-left:0;flex:1 1 100%;flex-wrap:wrap}

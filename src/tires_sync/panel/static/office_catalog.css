@@ -52,10 +52,11 @@
 .o2-kit-axis{display:inline-block;min-width:38px;font-size:11px;color:var(--o2-text-3)}
 .o2-kit-none td{color:var(--o2-text-3);padding:8px 12px}
 @media (max-width:720px){
-  .oc-row{gap:10px}
+  .oc-row{gap:8px}
+  .oc-num{flex-wrap:wrap;white-space:normal}   /* «от … до …» under each other when the window is narrow (no page wider than the phone) */
   .oc-glue{flex:1 1 100%}
   .oc-ms{flex:1 1 0;width:auto}
   .oc-ms--brand{flex:1 1 100%;width:auto}
   .oc-axis-t{flex:1 1 100%;padding:0}
-  .oc-ms-in{font-size:16px;height:40px}
+  .oc-ms-in{font-size:16px;height:44px}
 }

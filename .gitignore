@@ -25,3 +25,4 @@ CLAUDE.local.md
 docs/*
 !docs/feed-rules.md
 !docs/feed-check-rules.md
+tests/e2e/shots/

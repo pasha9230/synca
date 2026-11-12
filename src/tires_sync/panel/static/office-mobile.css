@@ -12,6 +12,7 @@
   body.ofc .app,body.ofc .app.is-collapsed{display:block;height:auto;min-height:100vh}
   body.ofc .main{overflow:visible;min-width:0}
   body.ofc .page{max-width:none;min-width:0}
+  body.ofc .page>*{min-width:0}   /* a wide table scrolls in its own box, never widens the page (the design review 2026-11-12) */
   /* the menu: off the screen on the left, slides in over the page; the shade behind it closes it */
   body.ofc .sidebar{position:fixed;top:0;bottom:0;left:0;z-index:60;width:min(300px,86vw);transform:translateX(-102%);transition:transform .2s ease;
     box-shadow:var(--sh-xl);overscroll-behavior:contain;padding-bottom:calc(var(--s-5) + env(safe-area-inset-bottom))}
@@ -37,14 +38,14 @@
 
 @media (max-width:760px){
   /* the sizes of a computer (12/13/14) are too small for a phone: the tokens grow, the page keeps its proportions */
-  body.ofc{--fs-xs:14px;--fs-sm:14px;--fs-md:15px;--fs-lg:17px;font-size:var(--fs-md)}
+  body.ofc{--fs-xs:14px;--fs-sm:14px;--fs-md:14px;--fs-lg:16px;font-size:var(--fs-md)}   /* text 14, larger 16: the one scale (was 15/17, the design review 2026-11-12) */
   body.ofc .page,body.ofc .page--wide{padding:var(--s-4) var(--s-4) calc(var(--s-12) + env(safe-area-inset-bottom));gap:var(--s-4)}
   body.ofc h1{font-size:var(--fs-2xl)}
   /* the menu by a finger */
-  body.ofc .sb-link{min-height:44px;font-size:15px}
-  body.ofc .sb-fold{min-height:40px}
+  body.ofc .sb-link{min-height:44px;font-size:16px}
+  body.ofc .sb-fold{min-height:44px}
   body.ofc .sb-foot .icon-btn{width:44px;height:44px}
-  body.ofc .as-point summary{min-height:40px;display:inline-flex;align-items:center}
+  body.ofc .as-point summary{min-height:44px;display:inline-flex;align-items:center}
   body.ofc .as-point-item{min-height:44px}
   /* the small print of a computer is 12–13 px: 14 on a phone */
   body.ofc .small,body.ofc .xs,body.ofc small{font-size:var(--fs-md)}
@@ -140,7 +141,7 @@
   body.ofc .o2c-strip span:not(.sb-count){writing-mode:horizontal-tb}
   body.ofc .o2c-colhead{min-height:48px}
   body.ofc .o2c-scroll{padding:var(--s-3) var(--s-2)}
-  body.ofc .o2c-tab{min-height:40px;padding:0 var(--s-3)}
+  body.ofc .o2c-tab{min-height:44px;padding:0 var(--s-3)}
   body.ofc .o2c-tabs{gap:var(--s-2)}
   /* the stages, the fields and the small buttons of the window by a finger */
   body.ofc .owin-stage{min-height:44px}
@@ -176,7 +177,7 @@
   body.ofc.o2 .chats-layout.o2-cl:not(.has-cur) .o2-cl-pane{display:none}
   body.ofc.o2 .o2-cl-list{border-right:0}
   body.ofc.o2 .o2-cl-top{position:static}
-  body.ofc .o2-chip{height:40px;padding:0 14px;border-radius:20px;font-size:var(--fs-sm)}
+  body.ofc .o2-chip{height:44px;padding:0 14px;border-radius:20px;font-size:var(--fs-sm)}
   body.ofc .o2-cl-chips{gap:var(--s-2)}
   body.ofc .o2-cl-search-box .input{height:44px}
   body.ofc .o2-t,body.ofc .o2-r3,body.ofc .o2-cnt,body.ofc .o2-cl-sub{font-size:var(--fs-sm)}
@@ -193,7 +194,7 @@
   body.ofc .o2-ad-links{margin-left:0}
   body.ofc .o2-ad-links a.muted{min-height:44px;display:inline-flex;align-items:center}
   body.ofc.o2 .o2-cl-msgs{padding:12px}
-  body.ofc.o2 .o2-cl-msgs .msg{max-width:88%;font-size:15px;line-height:21px}
+  body.ofc.o2 .o2-cl-msgs .msg{max-width:88%;font-size:14px;line-height:22px}
   body.ofc.o2 .o2-cl-comp{position:sticky;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
   body.ofc .o2-cl-line{gap:var(--s-2)}
   body.ofc .o2-cl-line .textarea{min-height:44px;font-size:16px}

@@ -19,8 +19,8 @@
 <label class="field"><span class="label">Логин</span><input class="input" name="login" value="{{ webmim.login }}" autocomplete="off"></label>
 </div>
 <div class="grid-2">
-<label class="field"><span class="label">Пароль {% if webmim_secrets.password %}<span class="badge badge--ok">задан ({{ webmim_secrets.password.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="password" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается.</span></label>
-<label class="field"><span class="label">API-ключ {% if webmim_secrets.api_key %}<span class="badge badge--ok">задан {{ webmim_secrets.api_key.mask }} ({{ webmim_secrets.api_key.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="api_key" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Значение не показывается.</span></label>
+<label class="field"><span class="label">Пароль {% if webmim_secrets.password %}<span class="badge badge--ok">задан ({{ webmim_secrets.password.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="password" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"></label>
+<label class="field"><span class="label">API-ключ {% if webmim_secrets.api_key %}<span class="badge badge--ok">задан {{ webmim_secrets.api_key.mask }} ({{ webmim_secrets.api_key.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span><input class="input" type="password" name="api_key" autocomplete="new-password" placeholder="оставьте пустым, чтобы не менять"><span class="hint">Оба значения не показываются.</span>{# one hint for the pair (the design review 2026-11-12) #}</label>
 </div>
 </div>
 <div class="card-foot"><button class="btn btn--primary">Сохранить</button>

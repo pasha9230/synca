@@ -74,9 +74,9 @@ body.o2-card .o2c-head{display:flex;align-items:center;gap:var(--s-3);flex-wrap:
 body.o2-card .o2c-back{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--gray-600)}
 body.o2-card .o2c-title{display:flex;align-items:baseline;gap:var(--s-2);flex-wrap:wrap;min-width:0}
 body.o2-card .o2c-wm{font-size:20px;font-weight:700}
-body.o2-card .o2c-wm-none{font-size:15px;font-weight:500;color:var(--gray-500)}
+body.o2-card .o2c-wm-none{font-size:16px;font-weight:500;color:var(--gray-500)}
 body.o2-card .o2c-inner{font-size:12px;color:var(--gray-500)}
-body.o2-card .o2c-client{font-size:15px;color:var(--gray-700)}
+body.o2-card .o2c-client{font-size:16px;color:var(--gray-700)}
 body.o2-card .o2c-phone{font-size:13px}
 body.o2-card .o2c-stage{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:12px;font-size:12px;background:color-mix(in srgb,var(--c) 14%,#fff);border:1px solid color-mix(in srgb,var(--c) 45%,transparent)}
 body.o2-card .o2c-stage::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--c)}

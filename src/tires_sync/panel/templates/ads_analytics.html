@@ -44,7 +44,7 @@
 </tr>{% endfor %}</tbody></table></div>
 {% if acc.count > acc.rows|length %}<p class="small muted" style="padding:0 var(--s-5)">Показаны первые {{ acc.rows|length }} из {{ acc.count }}.</p>{% endif %}
 {% else %}
-<div class="empty"><p>За период нет расходов и продаж по объявлениям{% if not acc.covered %}: расходы ещё не собраны{% endif %}.</p></div>
+<div class="empty"><p>За период нет расходов и продаж по объявлениям.</p></div>{# how many days are loaded: the line under the account name, once (the design review 2026-11-12) #}
 {% endif %}
 {% endfor %}
 <div class="card-head"><div><h3 style="font-size:var(--fs-lg)">Без объявления</h3>

@@ -25,7 +25,7 @@ body.o2 .o2-crm-grid th.t-c,body.o2 .o2-crm-grid td.t-c{text-align:center;width:
 .tpl2-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--s-4);align-items:start}
 .tpl2-vars{border:1px solid var(--gray-200);border-radius:var(--r-md);padding:var(--s-3);background:var(--gray-50)}
 .tpl2-list{display:flex;flex-direction:column;gap:2px;margin-top:var(--s-2)}
-.tpl-var{display:flex;gap:var(--s-2);align-items:baseline;text-align:left;border:0;background:none;padding:4px 6px;border-radius:6px;cursor:pointer;font:inherit;font-size:13px;color:var(--gray-900)}
+.tpl-var{display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:baseline;text-align:left;border:0;background:none;padding:4px 6px;border-radius:6px;cursor:pointer;font:inherit;font-size:13px;color:var(--gray-900)}
 .tpl-var:hover{background:var(--gray-100)}
 .tpl-var code{font-size:12px;color:var(--primary-700);white-space:nowrap}
 .tpl-var span{color:var(--gray-500)}

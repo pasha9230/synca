@@ -100,7 +100,8 @@ def test_the_office_gets_the_phone_frame_and_the_point_keeps_its_own(world):
     for url in ("/my-point", "/chats", "/alerts"):
         page = people["point"].get(url).get_data(as_text=True)
         assert "mnav-btn" not in page and not re.search(r'<body class="[^"]*\bofc\b', page), url
-    assert '<meta name="viewport" content="width=1280">' in people["point"].get("/alerts").get_data(as_text=True)   # as before
+    alerts = people["point"].get("/alerts").get_data(as_text=True)       # the design review 2026-11-12 (Б4 of 08.11): the point's frame on a phone
+    assert PHONE in alerts and re.search(r'<body class="[^"]*\bpt-ui\b', alerts) and 'class="pt-nav"' in alerts and "point.css" in alerts
 
 
 def test_the_sign_in_follows_the_phone(world):

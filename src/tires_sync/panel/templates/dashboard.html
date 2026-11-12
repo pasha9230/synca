@@ -30,11 +30,14 @@
 </ul>{% else %}<div class="card-body muted">На вас сейчас ничего не висит.</div>{% endif %}</section>
 {# the feeds: one card «Фид» — the ads of each account and when the feed was updated (П1, п. 12, 13); the last run, the readiness and the
    tiles are on «Фиды»; the morning summary is in «Настройки › Уведомления» (п. 27) #}
-{% if can("setup") and d.feeds %}<h2 style="margin-top:var(--s-4)">Фиды</h2>{# not for the chats manager and the viewer (Б1, П4) #}
+{# one heading «Фид», no «Фиды» over it; «публикация выключена» / «ещё не публиковался» only when «Требует внимания» above does not say
+   it already (the design review 2026-11-12: one fact once on a page) #}
+{% set feed_told = attn|selectattr("title", "in", ("Публикация фида выключена", "Фид ещё не публиковался"))|list %}
+{% if can("setup") and d.feeds %}{# not for the chats manager and the viewer (Б1, П4) #}
 <section class="card"><div class="card-head"><h3>Фид</h3><a class="btn btn--link small ml-auto" href="/feeds">Подробнее</a></div>
 {% set times = d.feeds|map(attribute="public_short")|unique|list %}
-{% for f in d.feeds %}<div class="list-row"><span class="grow">{{ f.title }}{% if not f.live %} <span class="badge badge--warn">публикация выключена</span>{% endif %}{% if times|length > 1 %} <span class="muted small">{% if f.public_short %}обновлён {{ f.public_short }}{% else %}ещё не публиковался{% endif %}</span>{% endif %}</span><b class="strong">{{ f.ads }}</b></div>{% endfor %}
-{% if times|length == 1 %}<div class="list-row muted small">{% if times[0] %}обновлён {{ times[0] }}{% else %}ещё не публиковался{% endif %}</div>{% endif %}
+{% for f in d.feeds %}<div class="list-row"><span class="grow">{{ f.title }}{% if not f.live and not feed_told %} <span class="badge badge--warn">публикация выключена</span>{% endif %}{% if times|length > 1 and (f.public_short or not feed_told) %} <span class="muted small">{% if f.public_short %}обновлён {{ f.public_short }}{% else %}ещё не публиковался{% endif %}</span>{% endif %}</span><b class="strong">{{ f.ads }}</b></div>{% endfor %}
+{% if times|length == 1 and (times[0] or not feed_told) %}<div class="list-row muted small">{% if times[0] %}обновлён {{ times[0] }}{% else %}ещё не публиковался{% endif %}</div>{% endif %}
 </section>{% endif %}
 </div>
 {% endblock %}

@@ -13,8 +13,9 @@
 .as-point{position:absolute;top:6px;left:16px;z-index:20}
 .as-point summary{list-style:none;cursor:pointer;height:28px}
 .as-point summary::-webkit-details-marker{display:none}
-.as-point-pop{position:absolute;top:32px;left:0;min-width:220px;max-height:60vh;overflow-y:auto;display:flex;flex-direction:column;padding:4px;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-md);box-shadow:var(--sh-lg)}
+.as-point-pop{position:absolute;top:32px;left:0;min-width:min(220px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:60vh;overflow-y:auto;display:flex;flex-direction:column;padding:4px;background:var(--gray-0);border:1px solid var(--gray-200);border-radius:var(--r-md);box-shadow:var(--sh-lg)}
 .as-point-item{text-align:left;padding:7px 10px;border:0;background:none;color:var(--gray-900);font:inherit;cursor:pointer;border-radius:var(--r-sm)}
 .as-point-item:hover{background:var(--gray-50)}
 .as-point-bar{display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--warn-50);border-bottom:1px solid var(--warn-200);color:var(--warn-700);font-weight:600}
 .as-point-exit{border:0;background:none;padding:0;color:var(--primary-700);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline}
+@media (max-width:760px){.as-point-pop{position:fixed;left:16px;right:16px;top:56px;min-width:0;max-width:none}}   /* a phone: the list inside the window */

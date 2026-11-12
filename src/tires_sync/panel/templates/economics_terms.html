@@ -22,7 +22,7 @@
 <section class="card">
 <div class="card-head"><h3>Загрузка и цены</h3></div>
 <div class="card-body row" style="gap:16px;flex-wrap:wrap;align-items:flex-end">
-{% if can_post("economics_terms_import") %}<form method="post" action="/economics/terms/import" enctype="multipart/form-data" class="row" style="gap:10px"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% if can_post("economics_terms_import") %}<form method="post" action="/economics/terms/import" enctype="multipart/form-data" class="row" style="gap:var(--s-2)"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <label class="field"><span class="label">Таблица CSV</span><input type="file" name="file" accept=".csv,text/csv"></label>
 <label class="field"><span class="label">Действует с</span><input class="input input--sm" style="width:140px" name="valid_from" value="{{ today[:8] }}01"></label>
 <button class="btn btn--secondary">{{ icon("upload") }}Загрузить</button></form>{% endif %}
