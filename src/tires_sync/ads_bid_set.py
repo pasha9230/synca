@@ -30,6 +30,7 @@ TOKEN_PREFIX = "ads_bid_token:"
 TOKEN_DAYS = 2                                # the tokens of the forms kept
 DRR_DAYS = 30
 FRESH = 600                                   # seconds: a reading older than this is read again before a write
+LOCK_SECONDS = 120                            # a lock of a write of an ad older than this is a dead one (the press fell over)
 WAIT_TEXT = "Авито просит подождать: запросов к цене просмотра слишком много. Попробуйте через минуту."
 
 
@@ -117,6 +118,14 @@ def _read_key(account_id: int, avito_id: int) -> str:
     return "ads_bid_read_at:%d:%d" % (account_id, avito_id)
 
 
+def _panel_key(account_id: int, avito_id: int) -> str:
+    return "ads_bid_panel_at:%d:%d" % (account_id, avito_id)
+
+
+def _lock_key(account_id: int, avito_id: int) -> str:
+    return "ads_bid_lock:%d:%d" % (account_id, avito_id)
+
+
 def _epoch_of(stamp) -> Optional[float]:
     """UTC epoch of a stamp of ad_bid / app_state (UTC ISO, naive or with an offset); None when it is not one."""
     try:
@@ -129,8 +138,9 @@ def _epoch_of(stamp) -> Optional[float]:
 
 
 def is_fresh(conn, state: Optional[dict], account_id: int, avito_id: int, now: float) -> bool:
-    """The price in ad_bid and actionTypeID (of the last read_fresh) are both read less than FRESH seconds ago."""
-    if not state:
+    """The price in ad_bid and actionTypeID (of the last read_fresh) are both read less than FRESH seconds ago, and the row of ad_bid is
+    the panel's own (read_fresh or the control read: the collection may have put another one meanwhile)."""
+    if not state or state.get("taken_at") != store.get_state(conn, _panel_key(account_id, avito_id)):
         return False
     taken = _epoch_of(state.get("taken_at"))
     read = _epoch_of(store.get_state(conn, _read_key(account_id, avito_id)))
@@ -174,8 +184,9 @@ def read_fresh(conn, client, account_id: int, avito_id: int, stamp: str, now: fl
     if action:
         conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (_action_key(account_id, avito_id), str(action)))
         conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (_read_key(account_id, avito_id), stamp))
-    else:
-        conn.execute("DELETE FROM app_state WHERE key = ?", (_read_key(account_id, avito_id),))
+    else:                                                                   # no type now: the old one is not written with
+        conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (_read_key(account_id, avito_id), _action_key(account_id, avito_id)))
+    conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (_panel_key(account_id, avito_id), stamp))
     conn.commit()
     return current(conn, account_id, avito_id)
 
@@ -280,9 +291,29 @@ def _fresh_state(conn, account_id: int, avito_id: int, stamp: str, now: float, r
         raise BidError("Авито не ответил на чтение цены (%s): цена не записана. Попробуйте позже." % type(err).__name__)
 
 
-def change(conn, account: dict, avito_id: int, bid, limit, *, confirmed: bool, token: str, at: str, stamp: str, now: float, author: str,
-           writer: Callable[[], object], kind: str = "set", seen: Optional[dict] = None,
-           reader: Optional[Callable[[], object]] = None) -> dict:
+def _take_lock(conn, account_id: int, avito_id: int, now: float) -> bool:
+    """One write of an ad at a time (two tabs pressed together): a key of app_state taken by INSERT OR IGNORE, a dead one taken over."""
+    key = _lock_key(account_id, avito_id)
+    conn.execute("DELETE FROM app_state WHERE key = ? AND CAST(value AS REAL) < ?", (key, now - LOCK_SECONDS))
+    taken = conn.execute("INSERT OR IGNORE INTO app_state VALUES (?, ?)", (key, repr(now))).rowcount == 1
+    conn.commit()
+    return taken
+
+
+def change(conn, account: dict, avito_id: int, bid, limit, *, now: float, **rest) -> dict:
+    """change_locked() under the lock of the ad; BidError while another write of it is going on."""
+    if not _take_lock(conn, account["id"], avito_id, now):
+        raise BidError("Цену этого объявления сейчас записывают из другого окна: цена не записана. Обновите окно.")
+    try:
+        return change_locked(conn, account, avito_id, bid, limit, now=now, **rest)
+    finally:
+        conn.execute("DELETE FROM app_state WHERE key = ?", (_lock_key(account["id"], avito_id),))
+        conn.commit()
+
+
+def change_locked(conn, account: dict, avito_id: int, bid, limit, *, confirmed: bool, token: str, at: str, stamp: str, now: float,
+                  author: str, writer: Callable[[], object], kind: str = "set", seen: Optional[dict] = None,
+                  reader: Optional[Callable[[], object]] = None) -> dict:
     """One write of the price of a view and the daily limit of one ad. `at`: Moscow time of the journal; `stamp`: UTC of ad_bid; `writer`:
     makes the client with allow_write (only here); `reader`: a read-only client for the fresh read when ad_bid is older than FRESH;
     `seen`: {"bid", "limit"} the form showed («было»), refused when Avito has other ones now. The result: {"ok", "text", "mismatch",
@@ -337,6 +368,7 @@ def change(conn, account: dict, avito_id: int, bid, limit, *, confirmed: bool, t
         got = {"mode": promo["mode"], "bid": promo["bid"], "day_limit": promo["day_limit"]}
         conn.execute("UPDATE ad_bid SET taken_at = ?, mode = ?, bid = ?, day_limit = ? WHERE account_id = ? AND avito_id = ?",
                      (stamp, promo["mode"], promo["bid"], promo["day_limit"], account_id, avito_id))
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (_panel_key(account_id, avito_id), stamp))
     else:                                                                   # what Avito has now is unknown: the next write reads it first
         conn.execute("DELETE FROM app_state WHERE key = ?", (_read_key(account_id, avito_id),))
     mismatch = got is not None and (got["bid"] != bid or got["day_limit"] != limit)

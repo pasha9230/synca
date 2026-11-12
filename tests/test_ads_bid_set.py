@@ -4,7 +4,7 @@ server, «Подтверждаю» for a jump or a big limit, one write per form
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from cryptography.fernet import Fernet
@@ -32,6 +32,7 @@ class FakeAvito:
         self.shown = None                      # (bid, limit) Avito shows after a write instead of what was set
         self.fail = None                       # None, an HTTP status of the reads, or "network": the reads fail
         self.lose_promotions = False           # the next getPromotionsByItemIds gets no answer
+        self.action = 5                        # actionTypeID in the answers (None: Avito does not name it)
         self.calls = []
 
     def __call__(self, method, url, headers, body):
@@ -45,7 +46,7 @@ class FakeAvito:
                 raise OSError("connection reset")
             return self.fail, {}, b'{"error": {"code": 403, "message": "forbidden"}}'
         if path == "/cpxpromo/1/getBids/%d" % AD:
-            return 200, {}, json.dumps({"actionTypeID": 5, "manual": {
+            return 200, {}, json.dumps({"actionTypeID": self.action, "manual": {
                 "bidPenny": self.bid, "recBidPenny": 500, "minBidPenny": 100, "maxBidPenny": 3000,
                 "bids": [{"valuePenny": v, "minForecast": v // 50, "maxForecast": v // 25} for v in (200, 300, 350, 400, 500, 900, 1500)]}}).encode()
         if path == "/cpxpromo/1/getPromotionsByItemIds":
@@ -53,10 +54,10 @@ class FakeAvito:
                 self.lose_promotions = False
                 raise OSError("connection reset")
             if self.mode == "auto":
-                entry = {"itemID": AD, "actionTypeID": 5, "autoPromotion": {"budgetPenny": 50000}}
+                entry = {"itemID": AD, "actionTypeID": self.action, "autoPromotion": {"budgetPenny": 50000}}
             else:
                 bid, limit = self.shown or (self.bid, self.limit)
-                entry = {"itemID": AD, "actionTypeID": 5, "manualPromotion": {"bidPenny": bid, "limitPenny": limit}}
+                entry = {"itemID": AD, "actionTypeID": self.action, "manualPromotion": {"bidPenny": bid, "limitPenny": limit}}
             return 200, {}, json.dumps({"items": [entry]}).encode()
         if path == "/cpxpromo/1/setManual":
             if self.set_status != 200:
@@ -542,3 +543,43 @@ def test_undo_after_two_changes_from_one_tab_puts_back_the_middle_one(tmp_path):
     send(owner, "u" * 32, url=PAGE + "/undo")
     assert [(w[2]["bidPenny"], w[2]["limitPenny"]) for w in http.writes()] == [(400, 25000), (450, 25000), (400, 25000)]
     assert [d["was"]["bid"] for _, _, d in journal(conn)] == [3.5, 4.0, 4.5]
+
+
+def test_a_fresh_read_without_action_type_does_not_write_with_the_old_one(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)                                                # actionTypeID 5 at 12:00
+    later(app, 60)
+    http.action = None
+    text = send(owner, token, pick="4.00", limit="300").get_data(as_text=True)
+    assert http.writes() == [] and "actionTypeID" in text
+
+
+def test_a_write_going_on_refuses_another_one(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    epoch = NOW.replace(tzinfo=timezone.utc).timestamp()
+    conn.execute("INSERT INTO app_state VALUES (?, ?)", ("ads_bid_lock:1:%d" % AD, repr(epoch - 5)))     # the other tab is writing
+    conn.commit()
+    text = send(owner, token, pick="4.00", limit="300").get_data(as_text=True)
+    assert http.writes() == [] and "записывают из другого окна" in text
+    conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (repr(epoch - 300), "ads_bid_lock:1:%d" % AD))   # a dead lock
+    conn.commit()
+    send(owner, token, pick="4.00", limit="300")
+    assert len(http.writes()) == 1
+    assert store.get_state(conn, "ads_bid_lock:1:%d" % AD) is None          # let go after the write
+
+
+def test_a_row_put_by_the_collection_is_read_again_before_a_write(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    later(app, 3)
+    conn.execute("UPDATE ad_bid SET taken_at = '2026-11-13T09:02:00', day_limit = 280 WHERE avito_id = ?", (AD,))   # the collection
+    conn.commit()
+    reads = len(http.reads())
+    send(owner, token, pick="4.00", limit="300")
+    assert len(http.reads()) == reads + 3 and len(http.writes()) == 1        # the fresh read, then the control read
+    (_, _, detail), = journal(conn)
+    assert detail["was"] == {"mode": "manual", "bid": 3.5, "day_limit": 300.0}
