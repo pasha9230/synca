@@ -251,7 +251,7 @@ for _section, _endpoints in {
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_autosave", "order_point_sale", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
-               "orders_inbox_confirm", "order_item_find", "order_new_page", "order_new", "orders_bulk_page", "orders_bulk_check",
+               "orders_inbox_confirm", "orders_inbox_dismiss", "order_item_find", "order_new_page", "order_new", "orders_bulk_page", "orders_bulk_check",
                "orders_bulk_run", "orders_bulk_undo_page", "orders_bulk_undo_run", "orders_cleanup_page", "orders_cleanup_run",
                "orders_bulk_tag", "orders_bulk_responsible", "orders_bulk_delete",    # the side panel of «Список» in «Новый вид»
                "deleted_page", "deleted_restore", "orders_webmim_page", "order_webmim_link", "order_webmim_create", "order_webmim_resolve", "order_webmim_cabinet",
@@ -335,7 +335,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "order_arrived_message": "send",                 # it prepares a message to the client: who may send them (review 2026-10-30)
          "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
          "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
-         "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "share_new": "send",
+         "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "orders_inbox_dismiss": "send", "share_new": "send",
          "share_create": "send"}
 SECTION_OF.update(connections_account_price_push="setup")       # «Цены сразу через API» (price_push, 2026-11-03): the owner, like «Остатки»
 NEEDS.update(connections_account_price_push="publish")

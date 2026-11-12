@@ -1303,6 +1303,26 @@ def answer(conn, message_id, text, now: str) -> None:
     conn.commit()
 
 
+DISMISS = "inbox_dismiss"                            # the audit's action of «Закрыть без ответа»
+
+
+def dismiss(conn, item_id, now: str, author: str) -> dict:
+    """«Закрыть без ответа» (the owner 2026-11-12): a waiting line of «Входящие» is closed as 'ignored', nothing is sent to anyone (VK,
+    «Рабочее место», the client); it leaves the list and the alert «нет в CRM» (missing_orders). Only a line still 'new'. Returns the line."""
+    row = conn.execute("SELECT id, status, text, COALESCE(sender, '') FROM manager_message WHERE id = ?", (item_id,)).fetchone()
+    if row is None:
+        raise OrderError("Такого сообщения нет.")
+    if row[1] != "new":
+        raise OrderError("Это сообщение уже закрыто." if row[1] == "ignored" else "На это сообщение уже ответили: закрыть без ответа нельзя.")
+    cur = conn.execute("UPDATE manager_message SET status = 'ignored', answered_at = ? WHERE id = ? AND status = 'new'", (now, item_id))
+    if cur.rowcount != 1:
+        raise OrderError("Это сообщение уже разобрано.")
+    conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)",
+                 (now, author, DISMISS, json.dumps({"id": row[0], "text": str(row[2] or "")[:300]}, ensure_ascii=False)))
+    conn.commit()
+    return {"id": row[0], "text": row[2], "sender": row[3]}
+
+
 def confirm(conn, item_id, order_no, now: str, author: str, deliver: Optional[Deliver] = None, notify: Optional[Notify] = None) -> str:
     """The owner confirms a disputed command of «Входящие» for the order they name (WebMIM's number or the panel's): the same as an
     unambiguous command, with its checks (the point's own order, a stage the word fits), the client message of «приехал» included.
