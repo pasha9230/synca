@@ -896,19 +896,29 @@ def truck_bound_codes(conn, account_id: Optional[int] = None) -> Set[str]:
     """Codes of the positions this account (None: any account) has an ad of in the truck section (truck.PRODUCT_TYPE): in its last
     published feed, or taken off and kept with its Id (retired_ad: it comes back on that ad). Such a «C» stays in the truck section
     (truck.resolve_c). The Ids of those ads are in the set too: a code returning under its own Id that another code's truck ad carried
-    stays in the truck section as well (an Id never changes its category). Reads only."""
+    stays in the truck section as well (an Id never changes its category). An Id with the tail of its own account (`<code>_a2` in the
+    second) gives the code without it as well: that is the own Id of the code there; another account's tail is left as it is. Reads only."""
     mark = "<ProductType>Шины для грузовиков и спецтехники</ProductType>"
     where, args = ("instr(snapshot, ?) > 0", (mark,)) if account_id is None else ("account_id = ? AND instr(snapshot, ?) > 0", (account_id, mark))
     codes = set()
-    for goods_id, snapshot in conn.execute("SELECT goods_id, snapshot FROM published_state WHERE " + where, args):
+    for acct, goods_id, snapshot in conn.execute("SELECT account_id, goods_id, snapshot FROM published_state WHERE " + where, args):
         codes.add(goods_id)
         found = re.search(r"<Id>(.*?)</Id>", snapshot or "")
         if found:                                  # the Id itself: a code whose own Id it is (another code took it over, same_tire)
-            codes.add(html.unescape(found.group(1)).strip())
-    for goods_id, ad_id in conn.execute("SELECT goods_id, ad_id FROM retired_ad WHERE " + where, args):
-        codes |= {goods_id, ad_id}
+            codes |= _id_codes(html.unescape(found.group(1)).strip(), acct)
+    for acct, goods_id, ad_id in conn.execute("SELECT account_id, goods_id, ad_id FROM retired_ad WHERE " + where, args):
+        codes |= {goods_id} | _id_codes(ad_id or "", acct)
     codes.discard("")
     return codes
+
+
+def _id_codes(ad_id: str, account_id: int) -> Set[str]:
+    """The Id and the code whose own Id it is in this account (connections: the first account has plain Ids, account N `<code>_aN`)."""
+    from .connections import PRIMARY_ACCOUNT
+    tail = "_a%d" % account_id
+    if account_id != PRIMARY_ACCOUNT and ad_id.endswith(tail):
+        return {ad_id, ad_id[:-len(tail)]}
+    return {ad_id}
 
 
 def load_retired(conn, account_id: int, today) -> list:
