@@ -144,23 +144,26 @@ def test_the_pacer_sleeps_only_the_rest_of_the_gap_per_method():
     assert clock.sleeps == [41.0, 61.0]
 
 
-def test_the_daily_run_reads_the_prices_of_a_view_of_the_promoted_ads(tmp_path):
+def test_the_daily_run_reads_the_prices_of_a_view_of_the_ads_with_spending(tmp_path):
     conn = db(tmp_path)
     for day, promo in (("2026-11-01", 50.0), ("2026-11-02", 0.0)):
         conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, promo) VALUES (1, 5, ?, ?, ?)", (day, promo + 10, promo))
-    conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, promo) VALUES (1, 6, '2026-11-01', 10, 0)")   # not promoted
+    conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, promo) VALUES (1, 6, '2026-11-01', 10, 0)")   # placement only: read too
+    # (the owner 2026-11-12: Avito books the pay per view of tyres as placement, promo is 0 for every ad)
     for n in range(1, 91):                                                             # the history is read: no stats request
         conn.execute("INSERT OR IGNORE INTO ad_spend_day (account_id, avito_id, day) VALUES (1, 0, date('2026-11-11', ?))", ("-%d days" % n,))
     conn.commit()
     client, http = client_for(SELF, answer(), answer(),
                               (200, {"items": [{"itemId": 5, "manualPromotion": {"bidPenny": 350, "limitPenny": 30000}}]}),
-                              (200, {"manual": {"bidPenny": 350, "recBidPenny": 500, "minBidPenny": 100, "maxBidPenny": 3000, "bids": []}}))
+                              (200, {"manual": {"bidPenny": 350, "recBidPenny": 500, "minBidPenny": 100, "maxBidPenny": 3000, "bids": []}}),
+                              (200, {"manual": {"recBidPenny": 200, "bids": []}}))
     clock = Clock()
     result = ads_spend.collect(conn, client, 1, TODAY, NOW, ads_spend.Pacer(clock.now, clock.sleep), daily=True)
-    assert result["bids"] == 1 and result["days"] == 2
-    assert json.loads(http.calls[4][3]) == {"itemIds": [5]} and http.calls[5][1].endswith("/cpxpromo/1/getBids/5")
+    assert result["bids"] == 2 and result["days"] == 2
+    assert json.loads(http.calls[4][3]) == {"itemIds": [5, 6]} and http.calls[5][1].endswith("/cpxpromo/1/getBids/5")
     assert all(call[0] in ("GET", "POST") and "setManual" not in call[1] for call in http.calls)     # reads only
-    assert conn.execute("SELECT mode, bid, day_limit, rec_bid, min_bid, max_bid FROM ad_bid").fetchall() == [("manual", 3.5, 300.0, 5.0, 1.0, 30.0)]
+    assert conn.execute("SELECT mode, bid, day_limit, rec_bid, min_bid, max_bid FROM ad_bid").fetchall() == [
+        ("manual", 3.5, 300.0, 5.0, 1.0, 30.0), ("", None, None, 2.0, None, None)]
 
 
 # ---- the report ----------------------------------------------------------------------------------------------------------------------
@@ -257,6 +260,183 @@ def test_the_report_writes_nothing(tmp_path):
     assert conn.total_changes == before
 
 
+# ---- the prices of a view: the queue, the refusals ------------------------------------------------------------------------------------
+
+BIDS_OK = (200, {"manual": {"bidPenny": 350, "recBidPenny": 500, "minBidPenny": 100, "maxBidPenny": 3000, "bids": [{"valuePenny": 900, "maxForecast": 20}]}})
+STAMP = "2026-11-11T04:20:00"
+
+
+def spent(conn, *ads, day="2026-11-05", account=1):
+    """Ads with spending Avito calls placement only (as it does for tyres): promo is 0."""
+    for avito_id, spend in ads:
+        conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, presence, promo) VALUES (?, ?, ?, ?, ?, 0)",
+                     (account, avito_id, day, spend, spend))
+    conn.commit()
+
+
+def run_bids(conn, client, stamp=STAMP, today=TODAY):
+    clock, notes = Clock(), []
+    got = ads_spend.collect_bids(conn, client, 1, today, stamp, ads_spend.Pacer(clock.now, clock.sleep), notes)
+    return got, notes, clock
+
+
+def asked_bids(http):
+    return [int(call[1].rsplit("/", 1)[1]) for call in http.calls if "/getBids/" in call[1]]
+
+
+def test_the_prices_are_read_for_any_spending_the_most_spent_first(tmp_path):
+    conn = db(tmp_path)
+    spent(conn, (7, 10.0), (8, 300.0), (9, 50.0))
+    spent(conn, (9, 500.0), day="2026-11-06")                           # 9: 550 in all
+    spent(conn, (10, 0.0))                                              # shown for free: no price is asked
+    spent(conn, (11, 900.0), day="2026-10-01")                          # older than BID_DAYS
+    spent(conn, (12, 999.0), account=2)                                 # another account's ad
+    client, http = client_for((200, {"items": []}), BIDS_OK, BIDS_OK, BIDS_OK)
+    got, notes, clock = run_bids(conn, client)
+    assert got == {"taken": 3, "failed": 0, "left": 0}
+    assert json.loads(http.calls[1][3]) == {"itemIds": [9, 8, 7]} and asked_bids(http) == [9, 8, 7]
+    assert conn.execute("SELECT avito_id, taken_at, bid, rec_bid FROM ad_bid ORDER BY avito_id").fetchall() == [
+        (7, STAMP, 3.5, 5.0), (8, STAMP, 3.5, 5.0), (9, STAMP, 3.5, 5.0)]
+    assert all("setManual" not in call[1] and "/cpxpromo/1/get" in call[1] for call in http.calls[1:])          # reads only
+
+
+def test_the_pauses_keep_cpxpromo_under_twenty_requests_a_minute_and_a_run_short(tmp_path):
+    conn = db(tmp_path)
+    spent(conn, *[(100 + n, 10.0 + n) for n in range(ads_spend.BIDS_PER_RUN + 5)])
+    client, http = client_for((200, {"items": []}), *[BIDS_OK] * ads_spend.BIDS_PER_RUN)
+    got, notes, clock = run_bids(conn, client)
+    requests = len(http.calls) - 1                                      # less the token
+    assert got["taken"] == ads_spend.BIDS_PER_RUN and got["left"] == 5 and requests == ads_spend.BIDS_PER_RUN + 1
+    assert clock.sleeps == [ads_spend.CPX_PAUSE] * (requests - 1)       # one pause for both methods of cpxpromo
+    assert 60 / ads_spend.CPX_PAUSE <= 20 - 3                           # room for the client's own repeats of a 429
+    assert sum(clock.sleeps) <= 10 * 60                                 # a run of an account: minutes, not hours
+
+
+def test_the_queue_goes_round_over_the_runs_the_longest_unread_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(ads_spend, "BIDS_PER_RUN", 2)
+    conn = db(tmp_path)
+    spent(conn, (1, 500.0), (2, 400.0), (3, 300.0), (4, 200.0), (5, 100.0))
+    order = []
+    for stamp in ("2026-11-11T04:20:00", "2026-11-11T06:20:00", "2026-11-11T08:20:00", "2026-11-11T10:20:00"):
+        client, http = client_for((200, {"items": []}), BIDS_OK, BIDS_OK)
+        try:
+            got, notes, clock = run_bids(conn, client, stamp)
+        except IndexError:                                              # no request must be made: the script would have run out
+            raise AssertionError("asked for more than was due")
+        order.append((asked_bids(http), got["left"]))
+    assert order == [([1, 2], 3), ([3, 4], 1), ([5], 0), ([], 0)]       # every ad once; read today: not asked again
+    client, http = client_for((200, {"items": []}), BIDS_OK, BIDS_OK)   # the next day: the longest unread first, not the most spent
+    spent(conn, (6, 50.0), day="2026-11-11")                            # a new ad: before those read
+    got, notes, clock = run_bids(conn, client, "2026-11-12T04:20:00", date(2026, 11, 12))
+    assert asked_bids(http) == [6, 1] and got["left"] == 4
+
+
+def test_an_ad_read_before_is_read_again_without_spending(tmp_path):
+    conn = db(tmp_path)
+    conn.execute("INSERT INTO ad_bid (account_id, avito_id, taken_at, mode, bid) VALUES (1, 77, '2026-11-01T04:00:00', 'manual', 2.0)")
+    conn.commit()
+    client, http = client_for((200, {"items": [{"itemId": 77, "manualPromotion": {"bidPenny": 400, "limitPenny": 20000}}]}), BIDS_OK)
+    got, notes, clock = run_bids(conn, client)
+    assert got["taken"] == 1
+    assert conn.execute("SELECT taken_at, mode, bid, day_limit FROM ad_bid").fetchall() == [(STAMP, "manual", 4.0, 200.0)]
+
+
+def test_a_refusal_of_avito_is_kept_and_logged_and_does_not_stop_the_rest(tmp_path):
+    conn = db(tmp_path)
+    spent(conn, (1, 500.0), (2, 400.0), (3, 300.0))
+    refused = (404, {"error": {"code": 404, "message": "item is not available for promotion"}})
+    client, http = client_for((200, {"items": []}), refused, BIDS_OK, refused)
+    got, notes, clock = run_bids(conn, client)
+    assert got == {"taken": 1, "failed": 2, "left": 0}
+    assert [r[0] for r in conn.execute("SELECT avito_id FROM ad_bid")] == [2]
+    fails = ads_spend.bid_fails(conn, 1)
+    assert set(fails) == {1, 3} and fails[1] == {"at": STAMP, "why": "ответ 404, код 404: item is not available for promotion"}
+    line = [n for n in notes if n.startswith("отказ Авито")]
+    assert line == ["отказ Авито getBids: ответ 404, код 404: item is not available for promotion (поля {error: {code: int, message: str}}) ×2"]
+    assert "Bearer" not in " ".join(notes) and "secret" not in " ".join(notes)
+    client, http = client_for((200, {"items": []}), BIDS_OK, BIDS_OK, BIDS_OK)      # the next day the refused go again in their turn; a good reading clears the refusal
+    got, notes, clock = run_bids(conn, client, "2026-11-12T04:20:00", date(2026, 11, 12))
+    assert asked_bids(http) == [1, 2, 3]
+    assert ads_spend.bid_fails(conn, 1) == {}
+
+
+def test_the_first_refusal_does_not_hide_a_later_shape(tmp_path):
+    conn = db(tmp_path)
+    spent(conn, (1, 500.0))
+    client, http = client_for((200, {"items": []}), (403, "<html>forbidden</html>"))
+    got, notes, clock = run_bids(conn, client)
+    assert got["failed"] == 1 and notes[-1] == "отказ Авито getBids: ответ 403 (поля не JSON)"
+
+
+def test_a_refused_promotions_request_keeps_the_mode_and_the_prices_are_still_read(tmp_path):
+    conn = db(tmp_path)
+    spent(conn, (1, 500.0), (2, 400.0))
+    conn.execute("INSERT INTO ad_bid (account_id, avito_id, taken_at, mode, bid, day_limit) VALUES (1, 1, '2026-11-01T04:00:00', 'manual', 2.0, 150)")
+    conn.commit()
+    client, http = client_for((400, {"error": {"code": 400, "message": "bad item"}}), BIDS_OK, BIDS_OK)
+    got, notes, clock = run_bids(conn, client)
+    assert got == {"taken": 2, "failed": 0, "left": 0}
+    assert conn.execute("SELECT avito_id, mode, bid, day_limit FROM ad_bid ORDER BY avito_id").fetchall() == [(1, "manual", 3.5, 150.0), (2, "", 3.5, None)]
+    assert notes[-1].startswith("отказ Авито getPromotionsByItemIds: ответ 400, код 400: bad item")
+
+
+def test_a_429_stops_the_prices_keeps_what_is_read_and_rests_the_account(tmp_path):
+    conn = db(tmp_path)
+    for n in range(1, 91):
+        conn.execute("INSERT OR IGNORE INTO ad_spend_day (account_id, avito_id, day) VALUES (1, 0, date('2026-11-11', ?))", ("-%d days" % n,))
+    spent(conn, (1, 500.0), (2, 400.0), (3, 300.0))
+    limited = (429, {"message": "too many"})
+    client, http = client_for(SELF, (200, {"items": []}), BIDS_OK, limited, limited, limited, limited)
+    clock = Clock()
+    with pytest.raises(RateLimited):
+        ads_spend.collect(conn, client, 1, TODAY, NOW, ads_spend.Pacer(clock.now, clock.sleep), daily=False, bids=True)
+    assert asked_bids(http) == [1, 2, 2, 2, 2]                          # the client's repeats of the second; the third is never asked
+    assert [r[0] for r in conn.execute("SELECT avito_id FROM ad_bid")] == [1]
+    assert store.get_state(conn, "ads_spend_pause:1") == "2026-11-11T04:30:00" and "429" in store.get_state(conn, ads_spend.error_key(1))
+    assert ads_spend.bid_fails(conn, 1) == {}                           # a 429 is not a refusal of the ad
+    calls = len(http.calls)
+    with pytest.raises(RateLimited):                                    # within the pause: nothing is asked
+        ads_spend.collect(conn, client, 1, TODAY, datetime(2026, 11, 11, 4, 25), ads_spend.Pacer(clock.now, clock.sleep), daily=False, bids=True)
+    assert len(http.calls) == calls
+
+
+def test_collect_tells_the_ads_out_of_the_list_from_the_removed_ones_and_the_empty_days(tmp_path):
+    conn = db(tmp_path)
+    conn.execute("INSERT INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (1, 5, 'A5', 'Шина', '2026-11-11T02:00:00')")
+    conn.execute("INSERT INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (1, 6, 'A6', 'Снятая', '2026-10-20T02:00:00')")
+    conn.execute("INSERT INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (2, 9, 'B9', 'Чужая', '2026-11-11T02:00:00')")
+    connections.create_account(conn, "Второй", "2026-11-01T10:00:00", "o")
+    client, http = client_for(SELF, answer((5, {"allSpending": 100}), (6, {"allSpending": 100}), (9, {"allSpending": 100}), (8, {"allSpending": 100})),
+                              answer((9, {"allSpending": 100})), (200, {"result": {"groupings": []}}))
+    clock = Clock()
+    result = ads_spend.collect(conn, client, 1, TODAY, NOW, ads_spend.Pacer(clock.now, clock.sleep), daily=False, days_limit=3)
+    assert (result["days"], result["rows"], result["unknown"]) == (3, 5, 3)             # rows; 9 on two days
+    assert (result["unknown_ids"], result["unknown_sample"], result["removed_ids"]) == (2, [8, 9], 1)
+    assert (result["first_day"], result["last_day"], result["empty_days"]) == ("2026-11-08", "2026-11-10", 1)
+    assert any(n.startswith("itemAnalytics (пустой ответ): {result: {groupings: []}}") for n in result["notes"])
+    from tires_sync import cli
+    assert cli.ads_spend_line("А", result) == (
+        "аккаунт «А»: расходы на рекламу за дней 3 (2026-11-08…2026-11-10, из них без строк 1; строк 5, не из списка объявлений 3: "
+        "объявлений нет в списке 2, например 8, 9; в списке, но сняты 1), цен просмотра 0 (отказов 0, осталось в очереди 0)")
+
+
+def test_reading_the_same_days_again_replaces_their_rows_and_loses_none(tmp_path):
+    conn = db(tmp_path)
+    for n in range(3, 91):
+        conn.execute("INSERT OR IGNORE INTO ad_spend_day (account_id, avito_id, day) VALUES (1, 0, date('2026-11-11', ?))", ("-%d days" % n,))
+    conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend) VALUES (1, 5, '2026-11-08', 70)")       # a day not read again
+    conn.commit()
+    first = (answer((5, {"allSpending": 1000}), (6, {"allSpending": 200})), answer((5, {"allSpending": 300})))
+    again = (answer((5, {"allSpending": 1500})), answer((5, {"allSpending": 300}), (7, {"allSpending": 100})))
+    for replies in (first, again):
+        client, http = client_for(SELF, *replies) if replies is first else client_for(*replies)
+        clock = Clock()
+        ads_spend.collect(conn, client, 1, TODAY, NOW, ads_spend.Pacer(clock.now, clock.sleep), daily=True, bids=False)
+    assert conn.execute("SELECT day, avito_id, spend FROM ad_spend_day WHERE avito_id <> 0 ORDER BY day, avito_id").fetchall() == [
+        ("2026-11-08", 5, 70.0), ("2026-11-09", 5, 3.0), ("2026-11-09", 7, 1.0), ("2026-11-10", 5, 15.0)]
+    assert conn.execute("SELECT COUNT(*) FROM ad_spend_day WHERE avito_id = 0").fetchone()[0] == 90
+
+
 # ---- the command ---------------------------------------------------------------------------------------------------------------------
 
 def test_the_statistics_run_collects_the_spending_and_its_failure_never_fails_the_run(tmp_path, monkeypatch):
@@ -270,7 +450,8 @@ def test_the_statistics_run_collects_the_spending_and_its_failure_never_fails_th
     monkeypatch.setattr(cli.ad_stats, "collect", lambda *a, **k: {"ads": 0, "mapped": 0, "days": 0})
     asked = []
 
-    def collect(conn, client, account_id, today, now, pacer, daily=True, days_limit=10):
+    def collect(conn, client, account_id, today, now, pacer, daily=True, days_limit=10, bids=None):
+        assert bids is True                                             # the prices of a view are due on every run (each ad once a day)
         asked.append(daily)
         if len(asked) == 1:
             raise RateLimited(429, None, "slow")

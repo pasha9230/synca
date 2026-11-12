@@ -49,6 +49,8 @@ def test_the_owner_sees_the_spending_the_dash_and_the_menu_item(tmp_path):
     assert "с 2026-11-04 по 2026-11-10" in page.lower() and 'href="/economics/ads"' in page
     assert "Без объявления" in page
     assert "своя 3,50&nbsp;₽" in page and "рекомендуемая 5,00&nbsp;₽" in page and "maxForecast: 20" in page and "cpxpromo/4242" in page
+    assert "лимит 300\u00a0₽ в день" in page and "вариант 9,00&nbsp;₽" in page and "прочитано 11.11.2026 04:20:00" in page
+    assert "не прочитано" not in page and "не продвигается" not in page and "продвижения нет" not in page
     for query in ("?p=30&s=drr", "?p=90&s=drr_margin", "?p=13&s=bad", ""):
         assert owner.get("/economics/ads" + query).status_code == 200
 
@@ -75,3 +77,26 @@ def test_a_point_does_not(tmp_path):
     conn.commit()
     response = as_user(app, conn, "upoint", "point", point_id=point_id).get("/economics/ads")
     assert response.status_code in (302, 403) and "Nokian Hakka" not in response.get_data(as_text=True)
+
+
+def test_an_ad_without_a_price_says_not_read_and_why(tmp_path):
+    app, conn = app_with_data(tmp_path)
+    for avito_id, title, day in ((5001, "Отказная 185/65 R15", "2026-11-09"), (5002, "Очередная 195/65 R15", "2026-11-09"),
+                                 (5003, "Давняя 215/60 R16", "2026-09-01")):
+        conn.execute("INSERT INTO avito_ad (account_id, avito_id, ad_id, title, seen_at) VALUES (1, ?, ?, ?, '2026-11-11')", (avito_id, "G%d" % avito_id, title))
+        conn.execute("INSERT INTO ad_spend_day (account_id, avito_id, day, spend, presence, views) VALUES (1, ?, ?, 100, 100, 10)", (avito_id, day))
+    store.set_state(conn, "ads_bid_fail:1", '{"5001": {"at": "2026-11-11T01:20:00", "why": "ответ 404, код 404: item is not available"},'
+                                            ' "4242": {"at": "2026-11-11T03:20:00", "why": "ответ 500"}}')
+    conn.commit()
+    owner = app.test_client()
+    login(owner)
+    page = owner.get("/economics/ads?p=90").get_data(as_text=True)
+    cell = {name: page.split(name, 1)[1].split("</tr>", 1)[0] for name in ("Отказная", "Очередная", "Давняя", "Nokian Hakka")}
+    assert "не прочитано" in cell["Отказная"] and "Авито отказал (11.11.2026 04:20:00): ответ 404, код 404: item is not available" in cell["Отказная"]
+    assert "не прочитано" in cell["Очередная"] and "очередь ещё не дошла" in cell["Очередная"]
+    assert "не прочитано" in cell["Давняя"] and "нет расходов за последние 30 дн." in cell["Давняя"]
+    assert "своя 3,50&nbsp;₽" in cell["Nokian Hakka"] and "не прочитано" not in cell["Nokian Hakka"]            # the old price stays, with the failure
+    assert "последнее чтение не удалось (11.11.2026 06:20:00): ответ 500" in cell["Nokian Hakka"]
+    store.set_state(conn, "ads_spend_error:1", "2026-11-11T04:20:00: Авито ограничило частоту запросов (429)")
+    page = owner.get("/economics/ads?p=90").get_data(as_text=True)
+    assert "последний сбор не удался (причина над таблицей)" in page.split("Очередная", 1)[1].split("</tr>", 1)[0]
