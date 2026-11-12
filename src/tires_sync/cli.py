@@ -177,6 +177,9 @@ def _build_parser() -> argparse.ArgumentParser:
     idm.add_argument("--db", required=True)
     idm.add_argument("--id", type=int, action="append", required=True, help="номер строки «Входящих» (manager_message.id); можно несколько раз")
     idm.add_argument("--dry-run", action="store_true", help="только показать текст строк, ничего не записывать")
+    rw = sub.add_parser("reserve-wait-list", help="заказы на точке, которые ближайшая проверка резерва переведёт на «На ОТХ» после напоминания клиенту (только чтение, в базу ничего не пишется)")
+    rw.add_argument("--db", required=True)
+    rw.add_argument("--now", default="", help="момент проверки по Москве, ГГГГ-ММ-ДДTЧЧ:ММ:СС; без него сейчас")
     of = sub.add_parser("oth-numbers-fill", help="вписать номер WebMIM и перемещение из заказа-источника заказам, взявшим шины с ОТХ до правила 2026-11-04: только перечисленным; вписанное человеком остаётся, никому ничего не отправляется")
     of.add_argument("--db", required=True)
     of.add_argument("--order", type=int, action="append", required=True, help="номер заказа панели; можно несколько раз")
@@ -1334,6 +1337,27 @@ def _cmd_inbox_dismiss(args) -> int:
     if args.dry_run:
         print("ничего не записано (--dry-run)")
     return 1 if refused else 0
+
+
+def _cmd_reserve_wait_list(args) -> int:
+    """reserve-wait-list: order_reserve.wait_list over a base opened for reading only (the owner sees it before the 8 hours go live)."""
+    from pathlib import Path
+    from . import order_reserve
+    now = args.now or moscow_now().isoformat(timespec="seconds")
+    if not Path(args.db).is_file():
+        print("ошибка: базы %s нет" % args.db, file=sys.stderr)
+        return 2
+    conn = store.open_db(args.db)                               # not store.connect: no schema, no migration is written
+    conn.execute("PRAGMA query_only = ON")                      # any write fails
+    try:
+        found = order_reserve.wait_list(conn, now)
+    finally:
+        conn.close()
+    print("на %s уйдут на «На ОТХ» при ближайшей проверке: %d" % (now.replace("T", " "), len(found)))
+    for row in found:
+        print("заказ №%s | точка: %s | напоминание ушло %s | прошло %s ч | %s" % (row["label"], row["point"], row["sent_at"].replace("T", " "),
+                                                                                    ("%.1f" % row["hours"]).replace(".", ","), row["why"]))
+    return 0
 
 
 def _cmd_oth_numbers_fill(args) -> int:
@@ -3363,6 +3387,8 @@ def main(argv=None) -> int:
             return _cmd_sheet_restore_missing(args)
         if args.command == "inbox-dismiss":
             return _cmd_inbox_dismiss(args)
+        if args.command == "reserve-wait-list":
+            return _cmd_reserve_wait_list(args)
         if args.command == "oth-numbers-fill":
             return _cmd_oth_numbers_fill(args)
         if args.command == "vk-catchup":

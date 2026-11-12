@@ -101,6 +101,9 @@ def audit_text(entry: dict) -> str:
         return "ОТХ: запись хранения №%s снова на ОТХ (отмена была ошибкой)" % d.get("record", "?")
     if action == "oth_storage_back":
         return "ОТХ: заказ №%s возвращён клиенту, запись хранения №%s закрыта" % (d.get("order", "?"), d.get("record", "?"))
+    if action == "reserve_words":
+        return "Настройки заказов: слова ответа на напоминание о резерве. Забрал: %s. Продлить: %s. Отказ: %s" % (
+            d.get("took") or "—", d.get("extend") or "—", d.get("refuse") or "—")
     if action == "callback_extend":
         return "Задача №%s продлена до %s" % (d.get("task", "?"), str(d.get("to") or "?").replace("T", " "))
     if action == "oth_client_swap":

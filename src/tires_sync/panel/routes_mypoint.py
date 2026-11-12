@@ -528,6 +528,7 @@ def register(app) -> None:
                           # return and agreed there is no button (order_oth.sell refuses too): the office cancels the agreement first
                           "can_sell": (code == "oth" and order_oth.return_plan(conn, card["id"]) is None
                                        and not order_oth.agreeing(conn, card) and not order_oth.given_back(conn, card["id"])),
+                          "took": reserve.took_open(conn, card),      # «Клиент пишет, что забрал заказ…» (the owner 2026-11-12)
                           "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
                           "agreeing": order_oth.agreeing(conn, card),          # «Согласование возврата» (the owner 2026-11-12)
@@ -595,7 +596,7 @@ def register(app) -> None:
                                found=found,
                                returns=returns,
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK,
-                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT)
+                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL)
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
