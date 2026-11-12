@@ -206,7 +206,9 @@ def _take_token(conn, token: str, at: str) -> bool:
 def history(conn, account_id: int, avito_id: int, limit: int = 20) -> List[dict]:
     """The journal's lines of the ad, newest first: {"at", "author", **detail}."""
     out = []
-    for at, author, detail in conn.execute("SELECT at, author, detail FROM audit WHERE action = ? ORDER BY id DESC LIMIT 500", (AUDIT,)):
+    for at, author, detail in conn.execute(
+            "SELECT at, author, detail FROM audit WHERE action = ? AND json_extract(detail, '$.account_id') = ? "
+            "AND json_extract(detail, '$.avito_id') = ? ORDER BY id DESC LIMIT ?", (AUDIT, account_id, avito_id, limit)):
         try:
             data = json.loads(detail)
         except ValueError:
@@ -237,13 +239,14 @@ def change(conn, account: dict, avito_id: int, bid, limit, *, confirmed: bool, t
     account_id = account["id"]
     if not token or len(token) > 64:
         raise BidError("Форма устарела: откройте окно заново.")
+    bid = round(bid, 2) if bid is not None else None                       # checked as sent: kopecks
+    limit = round(limit, 2) if limit is not None else None
     state = current(conn, account_id, avito_id)
     check(state, bid, limit, confirmed, threshold(conn))
     if not state.get("action_type"):
         raise BidError("Авито не назвал тип продвижения объявления (actionTypeID): записать нельзя. Откройте окно заново.")
-    bid, limit = round(bid, 2), round(limit, 2)
     last = next(iter(history(conn, account_id, avito_id, 1)), None)
-    if last and (last.get("ok") or last.get("got") is not None) and last.get("want") == {"bid": bid, "limit": limit} and \
+    if last and last.get("ok") and last.get("want") == {"bid": bid, "limit": limit} and \
             (datetime.fromisoformat(at) - datetime.fromisoformat(last["at"])).total_seconds() < SAME_WINDOW:
         return {"ok": True, "duplicate": True, "mismatch": False, "state": state,
                 "text": "Эти же значения уже отправлены меньше минуты назад: второй раз не отправляю."}
@@ -294,10 +297,10 @@ def change(conn, account: dict, avito_id: int, bid, limit, *, confirmed: bool, t
 # ---- «Вернуть прежнюю» ---------------------------------------------------------------------------------------------------------------
 
 def undo_values(conn, account_id: int, avito_id: int) -> Optional[dict]:
-    """What «Вернуть прежнюю» puts back: «было» of the last change made through the panel that Avito took. {"bid", "limit", "mode", "at",
+    """What «Вернуть прежнюю» puts back: «было» of the last change made through the panel that Avito took (none once it was put back). {"bid", "limit", "mode", "at",
     "author", "note"}; bid None when there was no price to put back (the window says so); None without a change."""
     last = next((h for h in history(conn, account_id, avito_id, 50) if h.get("sent") and (h.get("ok") or h.get("got") is not None)), None)
-    if not last:
+    if not last or last.get("kind") == "undo":                              # already put back: nothing more to return
         return None
     was = last.get("was") or {}
     note = ""

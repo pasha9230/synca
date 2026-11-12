@@ -370,3 +370,47 @@ def test_set_manual_bid_wants_positive_whole_kopecks(args):
     with pytest.raises(ValueError):
         AvitoClient("id", "secret", http=http, allow_write=True).set_manual_bid(*args)
     assert http.calls == []
+
+
+# ---- after the review -------------------------------------------------------------------------------------------------------------------
+
+def test_a_limit_below_a_kopeck_is_refused_not_a_500(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    response = send(owner, token, pick="4.00", limit="0,001")
+    assert response.status_code == 200 and "Сколько тратить в день" in response.get_data(as_text=True)
+    assert http.writes() == [] and journal(conn) == []
+
+
+def test_undo_twice_does_not_flip_back(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    send(owner, token, pick="4.00", limit="250")
+    send(owner, "u" * 32, url=PAGE + "/undo")
+    text = send(owner, "v" * 32, url=PAGE + "/undo").get_data(as_text=True)
+    assert [w[2]["bidPenny"] for w in http.writes()] == [400, 350] and "возвращать нечего" in text
+
+
+def test_after_a_mismatch_the_same_values_may_be_sent_again(tmp_path):
+    http = FakeAvito()
+    http.shown = (380, 25000)
+    app, conn, _ = setup(tmp_path, http)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    send(owner, token, pick="4.00", limit="250")
+    http.shown = None
+    _, token = opened(owner)
+    text = send(owner, token, pick="4.00", limit="250").get_data(as_text=True)
+    assert len(http.writes()) == 2 and "Цена просмотра на Авито: 4,00" in text
+
+
+def test_the_history_of_an_ad_survives_many_changes_of_others(tmp_path):
+    app, conn, http = setup(tmp_path)
+    owner = owner_of(app)
+    _, token = opened(owner)
+    send(owner, token, pick="4.00", limit="250")
+    for n in range(600):
+        store.write_audit(conn, "2026-11-13T12:00:01", "owner", ads_bid_set.AUDIT, {"account_id": 1, "avito_id": 9000 + n, "sent": True, "ok": True})
+    assert ads_bid_set.undo_values(conn, 1, AD)["bid"] == 3.5
