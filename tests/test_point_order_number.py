@@ -1,5 +1,6 @@
-"""The order's window of a point shows the order by its WebMIM number, never the panel's inner number (the owner 08.11, the prototype of the
-audit: «у точки заказ по № MIM»); the office keeps «Заказ №N»."""
+"""A point knows the order by its WebMIM number, never the panel's inner number (the owner 08.11, the prototype of the audit: «у точки заказ по
+№ MIM»); the office keeps «Заказ №N». Since the owner 13.11 a point opens no card of our order: «Рабочее место» shows the number, and the
+card sends the point there, searching by the WebMIM number (the id of the order when it has none)."""
 from __future__ import annotations
 
 import re
@@ -7,7 +8,7 @@ from datetime import datetime
 
 import pytest
 
-from panel_helpers import login, make_app
+from panel_helpers import assert_card_closed_to_point, login, make_app
 from test_mypoint import manager
 from tires_sync import order_points as points, orders, store, users
 
@@ -41,15 +42,17 @@ def page(client, cid):
 
 
 def test_the_point_sees_the_webmim_number_and_no_inner_one(w):
-    text = page(manager(w["app"], w["conn"], w["pid"]), w["cid"])
-    assert "<title>Заказ № 7712345 · Tires Sync</title>" in text
+    point = manager(w["app"], w["conn"], w["pid"])
+    where = assert_card_closed_to_point(point, w["cid"], query="7712345", hidden=("Иван Клиентов",))      # the search is by the WebMIM number
+    text = point.get(where).get_data(as_text=True)                                                  # «Рабочее место», where the card sends
     assert "№ 7712345" in text
     assert not re.search(r"№\s?%d\b" % w["cid"], text)
 
 
 def test_without_a_webmim_number_the_point_sees_the_panel_mark(w):
-    text = page(manager(w["app"], w["conn"], w["pid"]), w["bare"])
-    assert "<title>Заказ № панель %d · Tires Sync</title>" % w["bare"] in text
+    point = manager(w["app"], w["conn"], w["pid"])
+    where = assert_card_closed_to_point(point, w["bare"], query=str(w["bare"]), hidden=("Пётр",))     # no number: the search is by the id
+    assert "№ панель %d" % w["bare"] in point.get(where).get_data(as_text=True)
 
 
 def test_the_office_keeps_its_number(w):

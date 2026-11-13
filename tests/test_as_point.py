@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from panel_helpers import login, make_app, post
+from panel_helpers import assert_card_closed_to_point, login, make_app, post
 from test_roles import PASSWORD, conn_of, sign_in
 from order_fixtures import card_of_phone
 from tires_sync import order_points as points, orders, store, tasks, users
@@ -135,7 +135,7 @@ def test_as_a_point_the_panel_is_the_points_own(w):
     assert client.get("/").headers["Location"].endswith("/my-point")
     for closed in ("/connections/webmim", "/users", "/catalog", "/economics", "/ui-new", "/settings", "/orders/%d" % w["other"]):
         assert client.get(closed).status_code == 403, closed
-    assert client.get("/orders/%d" % w["mine"]).status_code == 200
+    assert_card_closed_to_point(client, w["mine"])                       # the owner 13.11: as a point, no card of our order (its own sale opens)
     assert post(client, "/orders/%d/note" % w["other"], "tok", text="x").status_code == 403
     assert post(client, "/as-point", "tok", point_id=str(w["pb"])).status_code == 409    # «Выйти» first
     assert session_point(client) == w["pa"]
@@ -425,8 +425,7 @@ def test_tasks_as_a_point_are_exactly_the_points_managers(w, staff):
     assert "менеджеру точки по заказу" in text and "менеджеру точки без заказа" in text
     assert "владельцу по заказу точки" not in text and "другой точке" not in text
     assert tasks.counter(conn, "owner", "owner", NOW, True, as_point=w["pa"])["count"] == 2
-    card = client.get("/orders/%d" % w["mine"]).get_data(as_text=True)
-    assert "менеджеру точки по заказу" in card
+    assert_card_closed_to_point(client, w["mine"], hidden=("менеджеру точки по заказу",))     # the owner 13.11: no card of our order, the task is in /tasks
     assert post(client, "/tasks/%d/cancel" % staff["owner"], "tok").status_code == 403         # the person's own: after «Выйти»
     assert post(client, "/tasks/%d/cancel" % staff["pt2"], "tok").status_code == 403
     assert post(client, "/tasks/%d/done" % staff["pt1_free"], "tok", result="ок").status_code == 302

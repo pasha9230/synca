@@ -9,7 +9,7 @@ import re
 
 import pytest
 
-from panel_helpers import post
+from panel_helpers import assert_card_closed_to_point, post
 from test_chats_pages import NOW, _photo, _sendable_page
 from tires_sync import chats, connections, orders, store, users
 
@@ -186,8 +186,8 @@ def test_a_point_sees_and_answers_its_own_account_s_chat_only(tmp_path):
     other = connections.create_account(conn, "Второй", NOW, "o")
     conn.execute("UPDATE point SET avito_account_id = ? WHERE id = ?", (other, alpha))
     conn.commit()
-    html = window(point, card)
-    assert not column(html) and "Здравствуйте, это актуально?" not in html and 'action="/chats/%d/send"' % tanya["id"] not in html
+    # now the order is not an own sale of the point: the owner 13.11, no card of it (a redirect to «Рабочее место»), so no chat in it
+    assert_card_closed_to_point(point, card, hidden=("Здравствуйте, это актуально?", 'action="/chats/%d/send"' % tanya["id"]))
     assert press(point, tanya["id"], '<div class="order-chat" data-order-chat="1"></div>', "tok", text="x").status_code == 403
 
 

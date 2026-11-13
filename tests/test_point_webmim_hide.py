@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from panel_helpers import login, post
+from panel_helpers import assert_card_closed_to_point, login, post
 from test_mypoint import manager
 from test_point_orders import w as orders_world  # noqa: F401  (the fixture of the point's «Заказы»)
 from test_vk_commands import _card, ready
@@ -53,14 +53,18 @@ def world(tmp_path, request):
 
 
 def test_the_order_card_the_point_opens_has_no_webmim_but_keeps_the_delivery(world):
+    """The owner 13.11: a point opens no card of our order — the card of it is a redirect to «Рабочее место» searching the order (its WebMIM
+    number, the number the point knows the order by), with no data of the order in the answer; the page it lands on has no WebMIM word, ID or
+    status (the delivery of the order is the cards' there)."""
     for url in ("/orders/%d" % world["here"], "/orders/%d?tab=webmim" % world["here"]):
         response = world["point"].get(url)
-        assert response.status_code == 200, url
-        page = response.get_data(as_text=True)
-        assert_no_webmim(page, url, named=True)
-        assert 'name="delivery_date"' in page and "2026-10-15" in page            # the delivery stays
-        assert TRANSFER in page                                                    # the transfer: the point receives the tyres by it
-        assert "Доставка" in page
+        assert response.status_code == 302, url
+        assert response.headers["Location"] == "/my-point?q=%s" % NUMBER, url
+        body = response.get_data(as_text=True)
+        assert 'name="delivery_date"' not in body and "Доставка" not in body and TRANSFER not in body, url     # not a card
+        assert not WORDS.search(visible(body)) and WID not in body and STATUS not in body, url
+    page = world["point"].get("/my-point?q=%s" % NUMBER).get_data(as_text=True)
+    assert_no_webmim(page, "my-point?q=", numbers=False)
 
 
 def test_the_office_still_sees_webmim_in_the_same_card(world):
@@ -74,8 +78,8 @@ def test_working_as_a_point_hides_webmim_too(world):
     owner = world["app"].test_client()
     login(owner)
     assert post(owner, "/as-point", "tok", point_id=str(world["pid"])).status_code == 302
-    page = owner.get("/orders/%d" % world["here"]).get_data(as_text=True)
-    assert_no_webmim(page, "as point", named=True)
+    assert_card_closed_to_point(owner, world["here"], query=NUMBER, hidden=(WID, STATUS, TRANSFER))   # the owner 13.11: working as a point, no card of our order
+    assert_no_webmim(owner.get("/my-point?q=%s" % NUMBER).get_data(as_text=True), "as point", numbers=False)
 
 
 def test_the_workplace_has_the_order_number_but_no_word_webmim(world):
@@ -125,18 +129,15 @@ def test_the_point_s_own_sale_form_never_writes_webmim(orders_world):
 
 
 def test_an_alert_about_webmim_is_not_the_points_and_opening_the_order_still_reads_the_journal(world):
-    """Review: the journal hides the records of WebMIM from the point; the alerts must not show them either, and opening the order marks the
-    journal read up to its newest record, a hidden one too (before: a WebMIM record left the alert lit)."""
+    """Review: the journal hides the records of WebMIM from the point; the alerts must not show them either. Since the owner 13.11 the point
+    opens no card of our order (redirect to «Рабочее место»), so the card does not read the journal for it; the office still has the record."""
     conn, m, cid = world["conn"], world["point"], world["here"]
     orders.add_event(conn, cid, "2026-10-13T12:05:00", "система", "webmim", "Создан заказ WebMIM № %s" % NUMBER, level="green")
     conn.commit()
     assert_no_webmim(m.get("/alerts").get_data(as_text=True), "alerts")
     feed = m.get("/alerts/feed").get_json()
     assert not any(WORDS.search(str(i.get("text") or "")) for i in feed["items"]), feed
-    m.get("/orders/%d" % cid)
-    newest = conn.execute("SELECT MAX(id) FROM order_event WHERE order_id = ?", (cid,)).fetchone()[0]
-    marks = [r[0] for r in conn.execute("SELECT last_id FROM order_event_seen WHERE order_id = ?", (cid,))]
-    assert newest in marks, (newest, marks)                                       # the point's mark covers the hidden newest record
+    assert_card_closed_to_point(m, cid, query=NUMBER, hidden=("Создан заказ WebMIM",))   # the owner 13.11: the point opens no card of our order any more
     office = world["office"]
     assert "Создан заказ WebMIM" in office.get("/orders/%d" % cid).get_data(as_text=True)     # the office still has it
 
@@ -152,7 +153,8 @@ def test_a_client_s_words_with_mimo_stay_the_point_s(world):
     conn, cid = world["conn"], world["here"]
     orders.add_event(conn, cid, "2026-10-13T12:06:00", "o", "field", "Комментарий: проеду мимо в 5, Мимоза")
     conn.commit()
-    assert "проеду мимо в 5" in world["point"].get("/orders/%d" % cid).get_data(as_text=True)
+    assert_card_closed_to_point(world["point"], cid, query=NUMBER)             # the owner 13.11: no card of our order for the point
+    assert "проеду мимо в 5" in world["office"].get("/orders/%d" % cid).get_data(as_text=True)     # the office reads the journal with the client's words
     for text in ("Клиент написал: проеду мимо в 5", "Мимоза", "пантомима"):
         assert not point_no_webmim({"kind": "chat", "text": text}), text
     for text in ("Создан заказ WebMIM № 1", "№ MIM 1", "Заказать в МИМ"):
@@ -162,18 +164,19 @@ def test_a_client_s_words_with_mimo_stay_the_point_s(world):
 
 def test_a_merged_order_names_its_sources_by_the_point_s_order_number_without_webmim(world):
     """A merged order names its sources by the number the point knows them by (order_label: «Рабочее место», VK, the journal's «[№…]»),
-    the same everywhere in the card; no word WebMIM, no ID, no status (review 2026-11-07: one number per order in one card)."""
+    the same everywhere in the card; no word WebMIM, no ID, no status (review 2026-11-07: one number per order in one card). Since the owner 13.11 the point opens no card of our order: «Рабочее место» names them."""
     from tires_sync import order_merge
     conn, pid = world["conn"], world["pid"]
     second = _card(conn, pid, webmim="5284061", code="at_point")
     stage = next(s["id"] for s in orders.list_stages(conn) if s["code"] == "at_point")
     merged = order_merge.merge(conn, [world["moving"], world["here"], second], stage, "2026-10-13T12:30:00", "o", client_from=world["here"])
     conn.commit()
-    page = visible(world["point"].get("/orders/%d" % merged).get_data(as_text=True))
-    assert "Объединено из" in page
+    assert_card_closed_to_point(world["point"], merged, hidden=(WID, STATUS))   # the owner 13.11: no card of our order for the point
+    page = visible(world["point"].get("/my-point?q=%d" % merged).get_data(as_text=True))     # «Рабочее место» names the sources the same way
+    assert "Объединён из" in page
     found = WORDS.search(page)
     assert not found, page[max(0, found.start() - 120):found.end() + 120]
     assert WID not in page and STATUS not in page
-    banner = page[page.index("Объединено из"):]
+    banner = page[page.index("Объединён из"):]
     banner = banner[:banner.index("</div>")]
     assert "№%s" % NUMBER in banner and "№5284061" in banner                     # the point's order numbers, as its journal names them

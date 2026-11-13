@@ -9,7 +9,7 @@ import re
 import sqlite3
 from datetime import datetime
 
-from panel_helpers import login, make_app, post
+from panel_helpers import assert_card_closed_to_point, login, make_app, post
 from test_mypoint import manager
 from tires_sync import order_alerts, orders, store, tasks, users
 
@@ -144,7 +144,7 @@ def test_a_point_sees_sets_and_closes_only_its_own(tmp_path):
         page = gamma.get("/tasks?tab=%s" % tab).get_data(as_text=True)
         assert "Точке Бета" not in page and "Офису" not in page, tab
     assert '?tab=all"' not in gamma.get("/tasks").get_data(as_text=True)                     # «Все» is the office's
-    assert "Точке Альфа" in gamma.get("/orders/%d" % own).get_data(as_text=True)
+    assert_card_closed_to_point(gamma, own, hidden=("Точке Альфа",))                          # the owner 13.11: no card of our order for a point; its task is in /tasks
     assert gamma.get("/orders/%d" % other).status_code == 403                                  # another point's order: closed as before
     for task_id in (office_task, beta_task):                                                    # another's task by a direct POST: refused
         assert post(gamma, "/tasks/%d/done" % task_id, "tok").status_code == 403

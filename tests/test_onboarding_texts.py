@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from panel_helpers import login, make_app
+from panel_helpers import assert_card_closed_to_point, login, make_app
 from test_roles import person
 from tires_sync import onboarding_texts as ot, order_points as points, orders, store, user_prefs, users
 
@@ -156,6 +156,9 @@ def test_the_point_on_the_order_card_reads_about_its_own_buttons_only(tmp_path):
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stages["moving"]["id"], card))
     conn.commit()
     client, _ = person(app, "point", alfa)
+    assert_card_closed_to_point(client, card, hidden=("Иван", "Приехал"))       # the owner 13.11: no card of our order for a point (no hints of it)
+    conn.execute("UPDATE order_card SET deal_kind = 'stock' WHERE id = ?", (card,))   # its own sale: the card opens
+    conn.commit()
     page = client.get("/orders/%d" % card).get_data(as_text=True)
     assert 'data-stage-hint="moving"' in page and "Приехал" in page and "Рабочем месте" in page
     assert "Панель сама" not in page and "Заказать в МИМ" not in page

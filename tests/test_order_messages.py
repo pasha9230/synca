@@ -10,7 +10,7 @@ import urllib.parse
 import pytest
 
 from http_fakes import ScriptedHttp
-from panel_helpers import post
+from panel_helpers import assert_card_closed_to_point, post
 from test_order_placed import Deliver, panel, ready  # noqa: F401  (panel: the fixture of the press on the page)
 from test_roles import sign_in
 from test_send_popup import _window
@@ -518,7 +518,7 @@ def test_a_second_press_while_vk_is_sending_sends_nothing(tmp_path):
 
 # ---- the journal as a point sees it (the lead 2026-10-23: the client's correspondence, «Права точек») --------------------------------------
 
-def test_a_point_sees_that_the_client_was_written_to_but_not_the_text(panel):
+def test_a_point_opens_no_card_where_the_client_was_written_to_and_its_alerts_have_no_text(panel):
     app, conn, fake, avito, box, client = panel
     mine = placed_waiting(panel)
     for t in templates.list_templates(conn):
@@ -536,10 +536,9 @@ def test_a_point_sees_that_the_client_was_written_to_but_not_the_text(panel):
     assert "Клиенту-секрет" not in alerts and "Отправлен ответ клиенту" not in alerts            # a chat record: no row since 2026-11-05
     feed = json.dumps(them.get("/alerts/feed").get_json(), ensure_ascii=False)                  # the bell: the same rows
     assert "Клиенту-секрет" not in feed and "Отправлен ответ клиенту" not in feed
-    html = them.get("/orders/%d" % mine).get_data(as_text=True)
-    assert "Клиенту-секрет" not in html                                                         # neither the task's record nor the chat's
-    assert "Клиенту отправлено сообщение «Клиенту: заказ оформлен»" in html and "Отправлен ответ клиенту" in html
-    assert "Заказ 5001, перемещение 26R-922352" in html                                          # the message to the point itself: its own
+    # the owner 13.11: a point opens no card of our order (this one is ordered from the supplier): neither the task's record nor the chat's is
+    # shown to it; how the journal reads for a point («Клиенту отправлено сообщение …», no text) is the next test's (engine.for_point)
+    assert_card_closed_to_point(them, mine, hidden=("Клиенту-секрет", "Заказ 5001, перемещение 26R-922352"))
 
 
 def test_the_records_of_the_journal_as_a_point_sees_them():
@@ -557,10 +556,11 @@ def test_the_records_of_the_journal_as_a_point_sees_them():
 
 
 @pytest.mark.parametrize("own", [False, True])
-def test_a_point_reads_the_clients_texts_only_in_an_order_of_its_own_account(panel, own):
-    """The owner 2026-10-22 («Права точек»): in an order not from the point's own Avito account the point does not read the client's
-    correspondence — neither the client's words nor what was written to the client (named only); in an order of its own account it reads
-    them as before. The card (in «Уведомления» the chat records are no rows since 2026-11-05); the message to the point itself is always whole."""
+def test_a_point_reads_no_clients_texts_in_the_card_of_an_order_of_ours_of_its_own_account_too(panel, own):
+    """The owner 2026-10-22 («Права точек»): the point does not read the client's correspondence of an order not from its own Avito account.
+    The owner 13.11: a point opens no card of an order of ours at all — an order ordered from the supplier is never its own sale, from its own
+    account or not — so the card is closed in both cases (a redirect to «Рабочее место», no text of the order in the answer); in «Уведомления»
+    the chat records are no rows since 2026-11-05. The owner reads everything."""
     from tires_sync import chats
     app, conn, fake, avito, box, client = panel
     mine = placed_waiting(panel)
@@ -578,10 +578,8 @@ def test_a_point_reads_the_clients_texts_only_in_an_order_of_its_own_account(pan
     them = app.test_client()
     sign_in(them, conn, "point1")
     alerts = them.get("/alerts").get_data(as_text=True) + json.dumps(them.get("/alerts/feed").get_json(), ensure_ascii=False)   # before the card
-    card = them.get("/orders/%d" % mine).get_data(as_text=True)
-    assert "входящий-секрет" not in alerts and ("входящий-секрет" in card) == own              # «Уведомления»: no chat rows since 2026-11-05
-    assert ("Клиенту-секрет" in card) == own and ("Клиенту отправлено сообщение «Клиенту: заказ оформлен»" in card) == (not own)
-    assert "Заказ 5001, перемещение 26R-922352" in card                                          # the message to the point: always its own
+    assert "входящий-секрет" not in alerts                                                       # «Уведомления»: no chat rows since 2026-11-05
+    assert_card_closed_to_point(them, mine, hidden=("входящий-секрет", "Клиенту-секрет", "Заказ 5001, перемещение 26R-922352"))
     owner = page(client, mine)
     assert "входящий-секрет" in owner and "Клиенту-секрет" in owner                              # the owner: everything
 

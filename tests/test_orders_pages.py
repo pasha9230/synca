@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from panel_helpers import login, make_app, post
+from panel_helpers import assert_card_closed_to_point, login, make_app, post
 from test_roles import sign_in
 from tires_sync import order_points as points, orders, store, users
 
@@ -253,6 +253,9 @@ def test_a_point_moves_but_does_not_save_and_still_has_the_cancel_window(tmp_pat
     post(client, "/orders/%d/save" % cid, tok, point_id=str(pid))
     users.add_user(conn, "gamma", "пароль-для-точки-1", "2026-10-15T12:00:00", role="point", point_id=pid)
     sign_in(client, conn, "gamma")
+    assert_card_closed_to_point(client, cid)                      # the owner 13.11: a point opens no card of our order; only its own sale («Из наличия точки»)
+    conn.execute("UPDATE order_card SET deal_kind = 'stock' WHERE id = ?", (cid,))
+    conn.commit()
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     assert '<fieldset disabled' in page and 'data-open-modal="finish-window"' in page and 'id="finish-window"' in page
     assert '<a class="menu-item menu-item--danger" href="#finish"' in page                  # a link, not a button: a disabled fieldset does not switch it off

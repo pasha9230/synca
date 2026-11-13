@@ -269,7 +269,7 @@ def test_a_point_sees_nothing_of_it(env):
 # --- the panel --------------------------------------------------------------------------------------------------------------------------
 
 def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
-    from panel_helpers import login, make_app, post
+    from panel_helpers import assert_card_closed_to_point, login, make_app, post
     from test_mypoint import manager
     app = make_app(tmp_path)
     client = app.test_client()
@@ -293,10 +293,8 @@ def test_the_card_and_the_chat_set_it_and_a_point_sees_nothing(tmp_path):
     assert 'action="/orders/%d/autosend/%d/cancel"' % (card, item["id"]) in html and 'action="/orders/%d/autosend"' % card not in html
     assert 'autosend/%d/update' % item["id"] not in html                                   # nothing to change it with
     point = manager(app, conn, alpha)
-    seen = point.get("/orders/%d" % card)
-    assert seen.status_code == 200
-    page = seen.get_data(as_text=True)
-    assert 'id="autosend"' not in page and "Договорились на завтра" not in page and "Автосообщение" not in page
+    # the owner 13.11: the point opens no card of our order, so it sees nothing of the waiting message (nor «Автосообщение») in an answer
+    assert_card_closed_to_point(point, card, hidden=('id="autosend"', "Договорились на завтра", "Автосообщение"))
     assert post(point, "/orders/%d/autosend" % card, "tok", kind="deal", due_at=due, body="x").status_code == 403
     assert post(point, "/orders/%d/autosend/%d/cancel" % (card, item["id"]), "tok").status_code == 403
     assert auto.get(conn, item["id"])["status"] == "pending"

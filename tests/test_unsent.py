@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from panel_helpers import login, make_app, post
+from panel_helpers import assert_card_closed_to_point, login, make_app, post
 from test_chat_send_refusal import Refusing, refusal
 from test_stuck_sending import NOW, Sender, env, journal, status  # noqa: F401  (env is a fixture)
 from tires_sync import chats, order_engine as engine, orders, store, unsent, users
@@ -182,8 +182,7 @@ def test_a_point_sees_and_marks_only_its_own_orders(tmp_path):
     own = card_with_unsent(conn, alpha, "+79001112233", "t-own", "Своей точке")
     other = card_with_unsent(conn, beta, "+79005556677", "t-other", "Чужой точке")
     own_id, other_id = [r[0] for r in conn.execute("SELECT id FROM order_unsent ORDER BY id")]
-    html = gamma.get("/orders/%d" % own).get_data(as_text=True)
-    assert "Своей точке" in html and 'action="/orders/%d/unsent/send/%d"' % (own, own_id) in html
+    assert_card_closed_to_point(gamma, own, hidden=("Своей точке",))          # the owner 13.11: no card of our order for a point (the block is the card's)
     assert gamma.get("/orders/%d" % other).status_code == 403
     assert post(gamma, "/orders/%d/unsent/send/%d" % (other, other_id), "tok").status_code == 403    # another point's order: refused
     assert post(gamma, "/orders/%d/unsent/send/%d" % (own, other_id), "tok").status_code == 302      # its own order, another's row: not closed

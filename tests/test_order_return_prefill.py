@@ -157,7 +157,7 @@ def test_a_purchase_not_typed_for_every_position_gives_no_supplier_suggestion(tm
 
 @pytest.mark.parametrize("role", ["point", "chats", "viewer"])
 def test_without_the_right_money_the_page_has_no_purchase_at_all(tmp_path, role):
-    app, client, tok, conn, pid, cid = setup(tmp_path)
+    app, client, tok, conn, pid, cid = setup(tmp_path, deal_kind="stock" if role == "point" else "webmim")    # the owner 13.11: a point opens only its own sale
     users.add_user(conn, "who", "пароль-для-проверки-1", "2026-10-15T12:00:00", role=role, point_id=pid if role == "point" else None)
     sign_in(client, conn, "who")
     for kind in ("supplier", "client", ""):

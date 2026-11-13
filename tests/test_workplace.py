@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from panel_helpers import agree_return, post
+from panel_helpers import agree_return, assert_card_closed_to_point, post
 from test_mypoint import hand_over, handed, manager
 from test_roles import person
 from test_vk_commands import NOW, _card, _stage, ready
@@ -45,13 +45,14 @@ def test_the_point_works_in_the_panels_frame_with_its_own_menu(tmp_path):
 
 # ---- 2. no CRM -------------------------------------------------------------------------------------------------------------------
 
-def test_the_point_has_no_crm_and_its_order_card_still_opens(tmp_path):
+def test_the_point_has_no_crm_and_its_order_is_found_in_the_workplace_not_in_a_card(tmp_path):     # the owner 13.11: no card of our order for a point
     app, client, tok, conn, pid, card = ready(tmp_path)
     mine = manager(app, conn, pid)
     client_id = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (card,)).fetchone()
     for url in ["/clients", "/clients/duplicates"] + (["/clients/%d" % client_id[0]] if client_id else []):
         assert mine.get(url).status_code == 403, url
-    page = _text(mine.get("/orders/%d" % card))
+    where = assert_card_closed_to_point(mine, card, query="5000100", hidden=("Татьяна",))     # the card of our order: «Рабочее место» with the search
+    page = _text(mine.get(where))
     assert "Татьяна" in page and "карточка клиента" not in page
     groups = mine.get("/search.json", query_string={"q": "+79001112233"}).get_json()["groups"]
     assert [g["key"] for g in groups] == ["orders"]                                         # the top search finds no client either

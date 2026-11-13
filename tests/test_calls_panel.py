@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from panel_helpers import login, make_app, post
+from panel_helpers import assert_card_closed_to_point, login, make_app, post
 from test_calls import FakeClient, call
 from order_fixtures import card_of_phone
 from tires_sync import calls, clients, connections, order_points as points, orders, store, users
@@ -222,7 +222,8 @@ def test_the_point_sees_the_name_and_only_its_own_chat_and_order(setup):
     assert manager.get("/clients/%d" % client_id).status_code == 403
     assert 'href="/chats/%d"' % own_chat in row and 'href="/chats/%d"' % other_chat not in row
     assert 'href="/orders/%d"' % own_order in row and 'href="/orders/%d"' % other_order not in row
-    assert manager.get("/chats/%d" % own_chat).status_code == 200 and manager.get("/orders/%d" % own_order).status_code == 200
+    assert manager.get("/chats/%d" % own_chat).status_code == 200
+    assert_card_closed_to_point(manager, own_order)                     # the owner 13.11: its link leads to «Рабочее место» (no card of our order)
     owner = app.test_client()
     login(owner)
     seen = _row_of(owner.get("/calls").get_data(as_text=True), ids["rows"][3])                  # the owner: the newest of all

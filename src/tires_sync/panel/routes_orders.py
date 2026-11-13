@@ -1177,7 +1177,11 @@ def register(app) -> None:
     @login_required
     def order_card_page(card_id):
         conn = get_conn()
-        return card_page(conn, card_or_404(conn, card_id))
+        card = card_or_404(conn, card_id)
+        point_id = own_point()
+        if point_id is not None and card["id"] not in points.own_sales(conn, point_id):     # the owner 13.11: a point opens no card of an order,
+            return redirect("/my-point?" + urlencode({"q": card.get("webmim_number") or card["id"]}))   # only «Рабочее место» (its own sale: the card)
+        return card_page(conn, card)
 
     def card_page(conn, card: dict, typed=None, status: int = 200):
         """The page of an order. `typed`: what the window sent and could not be saved; the window shows it again, with the error."""

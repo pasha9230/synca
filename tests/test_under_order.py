@@ -12,7 +12,7 @@ import urllib.parse
 
 import pytest
 
-from panel_helpers import post
+from panel_helpers import assert_card_closed_to_point, post
 from test_chat_deals import Fake
 from test_point_rights import bind, world
 from test_roles import person
@@ -151,7 +151,8 @@ def test_the_alert_leads_the_staff_to_the_chat_and_takes_the_client_the_point_do
     assert mgr.ASK not in w["manager"].get("/alerts").get_data(as_text=True)                    # the point sees its clients on «Рабочее место»
     r = w["manager"].get("/alerts/%d/go" % event["id"])
     assert r.status_code == 302 and handed(conn)[0]["taken"] is None
-    assert w["manager"].get("/orders/%d" % h["order"]).status_code == 200 and handed(conn)[0]["taken"] is None
+    assert_card_closed_to_point(w["manager"], h["order"])                      # the owner 13.11: no card of our order for the point; it takes nobody either
+    assert handed(conn)[0]["taken"] is None
     r = w["owner"].get("/alerts/%d/go" % event["id"])
     assert r.status_code == 302 and r.headers["Location"].endswith("/chats/%d" % w["petr"]["id"])
     taken = conn.execute("SELECT taken_at, taken_by, taken_how FROM order_handoff_source WHERE order_id = ?", (h["order"],)).fetchone()

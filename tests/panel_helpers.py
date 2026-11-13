@@ -100,3 +100,20 @@ def agree_return(client, card, tok="tok"):
     import re
     found = re.search(r'name="return_date" value="([0-9-]+)"', client.get("/orders/%d" % card).get_data(as_text=True))
     return post(client, "/orders/%d/oth-agreed" % card, tok, return_date=found.group(1) if found else "")
+
+
+def assert_card_closed_to_point(client, card_id, query=None, hidden=()):
+    """The owner 13.11: a point (or the owner working as a point) opens no card of an order that is not its own sale: the answer is a
+    redirect to «Рабочее место» searching the order (its WebMIM number, else its id), never the card; no data of the order is in the answer.
+    `query`: the expected search; `hidden`: texts of the order that must be nowhere in the answer."""
+    response = client.get("/orders/%d" % card_id)
+    assert response.status_code == 302, (card_id, response.status_code)
+    where = response.headers["Location"]
+    assert where.startswith("/my-point?q="), where
+    if query is not None:
+        assert where == "/my-point?q=%s" % query, where
+    body = response.get_data(as_text=True)
+    assert "Redirecting" in body and "<h2" not in body and "Журнал" not in body, card_id
+    for word in hidden:
+        assert word not in body and word not in where, (card_id, word)
+    return where

@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from panel_helpers import login, make_app, post
+from panel_helpers import assert_card_closed_to_point, login, make_app, post
 from test_roles import PASSWORD, _csrf, person
 from order_fixtures import card_of_phone
 from tires_sync import clients, connections, order_points as points, orders, store, users
@@ -225,7 +225,8 @@ def test_an_order_of_another_account_is_the_points_when_it_names_the_point(w):
     unnamed = card_of_phone(conn, {"client_name": "Без точки"}, NOW, "o")
     chat = _chat(conn, main, "pm", "Чат-основного", named)
     conn.commit()
-    assert m.get("/orders/%d" % named).status_code == 200 and "С основного" not in _text(m.get("/orders"))    # ours: not «Заказы» (2026-10-30)
+    assert_card_closed_to_point(m, named, hidden=("С основного",))                        # ours: no card for a point (the owner 13.11)
+    assert "С основного" not in _text(m.get("/orders"))                                    # nor in «Заказы» (2026-10-30)
     assert m.get("/orders/%d" % unnamed).status_code == 403 and "Без точки" not in _text(m.get("/orders"))     # postponed (п. 5): unchanged
     assert m.get("/chats/%d" % chat).status_code == 403                                   # the chat of the other account stays closed
     assert m.get("/clients/%d" % clients.client_of_order(conn, named)["id"]).status_code == 403          # no CRM (the owner 2026-10-29)

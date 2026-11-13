@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from panel_helpers import assert_card_closed_to_point
 from test_chats_pages import NOW
 from test_point_rights import bind, world
 from test_roles import person
@@ -109,16 +110,16 @@ def test_a_point_sees_the_label_on_the_card_the_board_and_my_point_its_own_order
     for url in ("/orders", "/orders?v=list"):                   # «Заказы» of a point: its own sales only (the owner 2026-10-30), no label
         page = text(manager, url)
         assert 'href="/orders/%d"' % w["mine"] in page and 'href="/orders/%d"' % w["away"] not in page and LABEL not in page, url
-    away = text(manager, "/orders/%d" % w["away"])
-    assert ">%s</span>" % orders.ORIGIN_OTHER in away and orders.ORIGIN_HINT in away and w["main_name"] not in away
-    assert ">Без аккаунта</span>" in text(manager, "/orders/%d" % w["bare"])
-    assert LABEL not in text(manager, "/orders/%d" % w["mine"])
+    assert_card_closed_to_point(manager, w["away"], hidden=("Клиент Основного", w["main_name"]))     # the owner 13.11: no card of our order, the label is «Рабочее место»'s
+    assert_card_closed_to_point(manager, w["bare"], hidden=("Клиент Без Чата",))
+    assert LABEL not in text(manager, "/orders/%d" % w["mine"])                              # its own sale: the card opens, with no label
 
 
 def test_a_point_without_an_avito_account_sees_every_order_labelled(w):
     manager, _ = person(w["app"], "point", w["rust"])                     # not bound: the point has no account of its own
-    page = text(manager, "/orders/%d" % w["mine"])
-    assert 'data-origin>%s</span>' % orders.ORIGIN_OTHER in page and 'data-origin>Альфа</span>' not in page   # never the account's name
+    assert_card_closed_to_point(manager, w["mine"], hidden=("Свой клиент",))      # the owner 13.11: no card of our order; the label is «Рабочее место»'s
+    page = "".join(text(manager, "/my-point?tab=" + t) for t in ("here", "moving", "oth", "return"))
+    assert "Свой клиент" in page and page.count("data-origin>%s" % orders.ORIGIN_OTHER) == 2 and "data-origin>Альфа" not in page   # all three labelled, never the account's name
 
 
 def test_the_other_roles_see_no_label(w):
@@ -141,7 +142,8 @@ def test_the_chat_of_another_account_and_the_clients_words_are_hidden_from_a_poi
     manager, _ = person(w["app"], "point", w["rust"])
     for page in (text(manager, "/alerts"), str(manager.get("/alerts/feed").get_json())):            # before the card: it marks them seen
         assert "секретные слова" not in page and "тайный звонок" not in page
-    card = text(manager, "/orders/%d" % w["away"])
+    assert_card_closed_to_point(manager, w["away"], hidden=("секретные слова", "тайный звонок", 'href="/chats/%d"' % w["away_chat"]))   # the owner 13.11: no card of our order
+    card = "".join(text(manager, "/my-point?tab=" + t) for t in ("here", "moving", "oth", "return"))     # nor the chat or the words on «Рабочее место»
     assert 'href="/chats/%d"' % w["away_chat"] not in card and "Чаты Авито" not in card
     assert "секретные слова" not in card and "тайный звонок" not in card
     assert "тайный звонок" not in text(w["owner"], "/alerts")          # the owner's alerts: no chat rows since 2026-11-05
@@ -171,7 +173,8 @@ def test_the_chat_of_another_account_named_in_the_field_is_not_offered_to_a_poin
         orders.update_card(conn, w["bare"], {"avito_chat": field}, NOW, "o")
         conn.commit()
         assert said in text(w["owner"], "/orders/%d" % w["bare"]), field                         # the owner: as before
-        page = text(manager, "/orders/%d" % w["bare"])
+        assert_card_closed_to_point(manager, w["bare"], hidden=(said, 'href="/chats/%d"' % ivan["id"]))      # the owner 13.11: no card of our order at all
+        page = text(manager, "/my-point?tab=moving")
         assert said not in page and 'href="/chats/%d"' % ivan["id"] not in page, field
 
 
@@ -184,5 +187,6 @@ def test_the_message_to_the_client_through_a_chat_of_another_account_is_not_offe
     conn.commit()
     assert 'action="/chats/%d/send"' % chat["id"] in text(client, "/orders/%d" % card_id)        # the owner: as before
     manager, _ = person(client.application, "point", rust)
-    page = text(manager, "/orders/%d" % card_id)
+    assert_card_closed_to_point(manager, card_id, hidden=('action="/chats/%d/send"' % chat["id"], "уйдёт в чат Ч-%d" % chat["id"]))    # the owner 13.11: no card of our order
+    page = text(manager, "/my-point?tab=moving")
     assert 'action="/chats/%d/send"' % chat["id"] not in page and "уйдёт в чат Ч-%d" % chat["id"] not in page

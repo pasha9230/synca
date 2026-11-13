@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from panel_helpers import login, make_app, post
+from panel_helpers import assert_card_closed_to_point, login, make_app, post
 from test_roles import PASSWORD, conn_of, sign_in
 from tires_sync import connections, order_intercity as intercity, order_points as points, orders, store, users
 
@@ -126,6 +126,9 @@ def test_a_folded_form_still_saves_and_comes_back_to_its_part(w):
 def test_a_point_sees_the_same_folded_content(w):
     client = w["app"].test_client()
     sign_in(client, w["conn"], "pt1")
+    assert_card_closed_to_point(client, w["card"], hidden=("Анна", "Псков"))           # the owner 13.11: no card of our order for a point
+    w["conn"].execute("UPDATE order_card SET deal_kind = 'stock' WHERE id = ?", (w["card"],))     # its own sale («Из наличия точки»): the card opens, folded the same
+    w["conn"].commit()
     text = page(client, "/orders/%d" % w["card"])
     assert is_folded(text, "intercity") and "Город: <b>Псков</b>" in block(text, "intercity")
     assert 'id="webmim"' not in text                                      # a point never had WebMIM: still not

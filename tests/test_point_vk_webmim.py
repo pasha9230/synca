@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 
+from panel_helpers import assert_card_closed_to_point
 from test_arrived_stage import outcome
 from test_order_manager import card_at, panel_numbers_from, setup
 from test_point_webmim_hide import world  # noqa: F401  (the point's card with WebMIM values, old and new view)
@@ -41,9 +42,9 @@ def test_the_point_s_card_journal_names_no_webmim_author(world):
     conn, cid = world["conn"], world["here"]
     orders.add_event(conn, cid, "2026-10-13T12:07:00", order_placed.AUTHOR, "chat", "Клиенту ушло сообщение «заказ оформлен»", level="grey")
     conn.commit()
-    page = world["point"].get("/orders/%d" % cid).get_data(as_text=True)
-    assert "Клиенту ушло сообщение «заказ оформлен»" in page                       # the record stays the point's
-    assert order_placed.AUTHOR not in page
+    # the owner 13.11: the point opens no card of our order (so no journal of it), «Рабочее место» names no WebMIM author either
+    where = assert_card_closed_to_point(world["point"], cid, hidden=(order_placed.AUTHOR, "Клиенту ушло сообщение"))
+    assert order_placed.AUTHOR not in world["point"].get(where).get_data(as_text=True)
     office = world["office"].get("/orders/%d" % cid).get_data(as_text=True)
     assert order_placed.AUTHOR in office                                           # the office: as before
 
