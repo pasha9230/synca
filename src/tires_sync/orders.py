@@ -1117,7 +1117,7 @@ def _sell_record(conn, card: dict, now: str, author: str, journal: bool, commit:
 
 
 def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[dict] = None, chain: tuple = (), fire_rules: bool = True,
-              journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False) -> bool:
+              journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False, oth_resume: str = "") -> bool:
     """Move a card to a stage. The fields that come with the move are saved first; the move itself needs the stage's required data.
     `fire_rules=False` (the bulk move) leaves the rules of the new stage asleep: no task, no message for hundreds of cards at once.
     A refusal goes to the journal as a red record; not with `journal=False` (the bulk move) and not for a rule (`chain` is given only by the
@@ -1126,7 +1126,9 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     A client's order that goes to «На ОТХ» is cancelled and its tyres become a record of storage (oth_storage, the owner 2026-11-10);
     `oth_split=False`: the order itself goes back there (an undo, «Вернуть на ОТХ» of an order that stood there before).
     A record of storage goes to «Выполнено» by any way (the board, the card, the bulk move, a chat, a rule) only as the point's «Продать»
-    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself."""
+    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself.
+    `oth_resume`: from «Согласование возврата» back to «На ОТХ», the stay that began at this moment goes on (order_oth.back_to_oth, the owner
+    2026-11-13): no new stay, its marks «возвращено поставщику» and its seven days kept."""
     stage = get_stage(conn, stage_id)
     changed = update_card(conn, card_id, changes, now, author, commit=False, link_client=False) if changes else []   # not saved until
     card = get_card(conn, card_id)                                                                               # the move is allowed
@@ -1189,6 +1191,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         if card["stage"].get("code") in OTH_CODES:
             card = dict(card, reserve_until="")                                 # back from «На ОТХ»: a date of an old stay is not a reservation
         _start_reserve(conn, card, now, author)
+    elif stage["code"] == "oth" and oth_resume and card["stage"].get("code") == RETURN_AGREE:
+        conn.execute("UPDATE order_card SET entered_at = ? WHERE id = ?", (oth_resume, card_id))     # the same stay on «На ОТХ»
     elif stage["code"] == "oth":
         _start_oth(conn, card, now, author)
     _leave_oth(conn, card, stage, now, author)

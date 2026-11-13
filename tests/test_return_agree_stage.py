@@ -108,8 +108,7 @@ def test_in_a_position_marked_na_vozvrat_takes_the_order_whole(tmp_path):
     assert order_oth.return_parts(conn, card_now) == {item_of(conn, card): 2}         # «Согласовано» sends back the marked pieces by default
     assert len(return_tasks(conn, card)) == 1 and "Ожидает согласование" not in " ".join(events(conn, card))
     assert "На возврат: " in " ".join(events(conn, card)) and "Заказ целиком на «Согласование возврата»" in " ".join(events(conn, card))
-    with pytest.raises(order_oth.OthError):
-        order_oth.item_to_return(conn, item_of(conn, card), T1, "owner", 1)          # the whole order is there already
+    assert not order_oth.item_to_return(conn, item_of(conn, card), T1, "owner", 1)   # marked already: nothing new
 
 
 def test_in_by_hand_the_card_button_and_a_move_to_na_vozvrat_without_an_agreement(tmp_path):
@@ -146,15 +145,16 @@ def test_out_agreed_goes_to_na_vozvrat_with_the_date(tmp_path):
     assert order_oth.sign_act(conn, card_now, "Юнона", "2026-10-16T10:00:00", "gamma") == "return"     # as before
 
 
-def test_out_agreed_a_part_the_rest_stays_ours_on_oth(tmp_path):
+def test_out_agreed_a_part_goes_to_na_vozvrat_the_rest_back_on_its_stay_on_oth(tmp_path):
     app, owner, conn, pid, card = setup(tmp_path)
     item = item_of(conn, card)
     order_oth.item_to_return(conn, item, T1, "owner", 1)
     order_oth.agree(conn, orders.get_card(conn, card), date.fromisoformat("2026-10-19"), "2026-10-16T12:00:00", "owner")
-    assert code(conn, card) == orders.RETURN_GIVEN and sum(int(i["qty"]) for i in orders.get_card(conn, card)["items"]) == 1
-    rest = order_oth.split_of(conn, card)
-    assert len(rest) == 1 and code(conn, rest[0]) == "oth" and sum(int(i["qty"]) for i in orders.get_card(conn, rest[0])["items"]) == 3
-    assert in_feed(conn, rest[0]) and not in_feed(conn, card)
+    [new] = order_oth.split_of(conn, card)                                            # the marked piece, as on «На ОТХ» before the stage
+    assert code(conn, new) == orders.RETURN_GIVEN and sum(int(i["qty"]) for i in orders.get_card(conn, new)["items"]) == 1
+    rest = orders.get_card(conn, card)
+    assert rest["stage"]["code"] == "oth" and rest["entered_at"] == ON_OTH and sum(int(i["qty"]) for i in rest["items"]) == 3
+    assert not return_tasks(conn, card) and not return_tasks(conn, new)
 
 
 def test_out_one_act_for_several_orders_takes_them_to_na_vozvrat(tmp_path):
@@ -180,7 +180,6 @@ def test_out_unagree_on_the_stage_goes_back_to_oth_on_sale(tmp_path, clock):
     app, owner, conn, pid, card = setup(tmp_path)
     stay = orders.get_card(conn, card)["entered_at"]
     order_oth.item_to_return(conn, item_of(conn, card), "2026-10-15T10:00:00", "owner", 2)
-    assert not in_feed(conn, card)
     assert _csrf(owner, card)                                                         # «Снять согласование» in the card
     assert order_oth.unagree(conn, orders.get_card(conn, card), "2026-10-16T10:00:00", "owner")
     card_now = orders.get_card(conn, card)
