@@ -26,9 +26,16 @@ def test_the_record_gets_no_row_and_the_clients_row_follows_its_tyres(tmp_path):
     assert cid in listed and x not in listed
     rows = order_sheet.rows_of(conn, cid, MOVED)
     assert rows and all(r["Этап"] == orders.stage_name(conn, "oth") and r["Реализация"] == order_sheet.REFUSED for r in rows.values())
-    conn.execute("UPDATE sheet_order SET sent_at = ?, seen_event = (SELECT MAX(id) FROM order_event) WHERE order_id = ?", (MOVED, cid))
-    conn.commit()
+    def looked():                                                                       # as send_order marks it
+        conn.execute("UPDATE sheet_order SET sent_at = ?, seen_event = ? WHERE order_id = ?", (MOVED, order_sheet._last_event(conn, cid), cid))
+        conn.commit()
+    looked()
     assert cid not in order_sheet._due(conn, LATER, False)
+    orders.add_event(conn, x, LATER, "o", "field", "Комментарий: проверка")             # the record changed without changing the row
+    conn.commit()
+    assert cid in order_sheet._due(conn, LATER, False)
+    looked()
+    assert cid not in order_sheet._due(conn, LATER, False)                              # looked at once: no longer due (review 13.11)
     assert orders.move_card(conn, x, stage(conn, "return"), LATER, "o", changes={"return_amount": 1, "return_kind": "supplier", "return_reason": "невыкуп"})   # back
     conn.commit()
     assert cid in order_sheet._due(conn, LATER, False)                                  # the record changed: the client's row is due

@@ -601,7 +601,10 @@ def _retry_at(now: str, failing: int) -> str:
 
 
 def _last_event(conn, card_id: int) -> int:
-    return conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event WHERE order_id = ?", (card_id,)).fetchone()[0]
+    """The last record of the order's journal, with the journal of the record of storage its tyres went to (the owner 13.11: its row follows
+    it; _due looks at both, so the mark seen covers both — review 13.11: else the order stays due for ever)."""
+    return conn.execute("SELECT COALESCE(MAX(id), 0) FROM order_event WHERE order_id = ? OR order_id = "
+                        "(SELECT CAST(value AS INTEGER) FROM app_state WHERE key = 'oth_stored:' || ?)", (card_id, card_id)).fetchone()[0]
 
 
 def _names(items: List[dict]) -> str:
