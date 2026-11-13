@@ -23,7 +23,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
 from .common import author, current_user, get_conn, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
@@ -315,6 +315,14 @@ def sell_lines(card: dict) -> list:
     return lines + ([] if rows else ["Шины не указаны"]) + ["Шины проданы с ОТХ; заказ закроется как выполненный."]
 
 
+def _sale_url(card_id, point_id, back: str) -> str:
+    """The window of «Продать» of a record (oth_point_sale): the point chosen (the owner, the partner) and the tab to come back to."""
+    from urllib.parse import parse_qs, urlsplit
+    tab = (parse_qs(urlsplit(back).query).get("tab") or [""])[0]
+    args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab else [])
+    return "/my-point/%d/oth-sale" % card_id + ("?" + "&".join(args) if args else "")
+
+
 def _rub(value: float) -> str:
     return ("%.2f" % value).rstrip("0").rstrip(".").replace(".", ",") if value != int(value) else "{:,}".format(int(value)).replace(",", " ")
 
@@ -384,7 +392,7 @@ def _back(point_id) -> str:
     from urllib.parse import parse_qs, urlsplit
     came = urlsplit(request.referrer or "")
     tab = (parse_qs(came.query).get("tab") or [""])[0] if came.path == "/my-point" and (not came.netloc or came.netloc == request.host) else ""
-    tab = str(request.form.get("tab") or "") or tab                     # the page «Подтвердите выдачу» keeps the tab it came from
+    tab = str(request.form.get("tab") or request.args.get("tab") or "") or tab     # «Подтвердите выдачу», the window of the sale keep the tab
     args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab in TABS and tab != DEFAULT_TAB else [])
     return "/my-point" + ("?" + "&".join(args) if args else "")
 
@@ -531,6 +539,7 @@ def register(app) -> None:
                           # return and agreed there is no button (order_oth.sell refuses too): the office cancels the agreement first
                           "can_sell": (code == "oth" and order_oth.return_plan(conn, card["id"]) is None
                                        and not order_oth.agreeing(conn, card) and not order_oth.given_back(conn, card["id"])),
+                          "sale_url": _sale_url(card["id"], point_id, "/my-point?tab=oth") if card.get("oth_record") and code == "oth" else "",     # the window (ТЗ part D)
                           "took": reserve.took_open(conn, card),      # «Клиент пишет, что забрал заказ…» (the owner 2026-11-12)
                           "asked": reserve.question_open(conn, card, now),     # «Подробнее» is no longer the VK text: point_lines (2026-11-09)
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
@@ -658,6 +667,8 @@ def register(app) -> None:
         if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
             flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
+        if action == "oth_sold" and card.get("oth_record"):                    # a record of storage is sold by the window (ТЗ part D)
+            return redirect(_sale_url(card_id, point_id, back))
         if action in CONFIRM and request.form.get("confirm") != "yes" and not (order_intercity.on(card) and action not in ("oth_issued", "oth_sold")):
             return _confirm_issue(card, action, token, point_id, back)        # nothing is taken nor changed until «Да, выдал»
         now = local_iso()
@@ -682,6 +693,75 @@ def register(app) -> None:
             point_log.remember(conn, card, action, point_id, author(), now)     # «Отменить» of a press that moved the order (2026-11-02)
         flash(answer, "info" if ok else "error")
         return redirect(back)
+
+    @app.route("/my-point/<int:card_id>/oth-sale", methods=["GET", "POST"])
+    @login_required
+    def mypoint_oth_sale(card_id):
+        """The window of «Продать» of a record of storage on «На ОТХ» (oth_point_sale, ТЗ part D): the buyer, the numbers, the pieces of
+        each position; the sum counts itself. A refusal shows the window again with what was typed and why."""
+        conn = get_conn()
+        point_id = _point_id(conn)
+        card = _own_card(conn, card_id, point_id)
+        back = _back(point_id)
+        why = oth_point_sale.why_not(conn, card)
+        if why:
+            flash(why, "error")
+            return redirect(back)
+        if request.method == "GET":
+            return _sale_window(card, point_id, back, {}, "")
+        form = request.form
+        token = str(form.get("token") or "").strip()[:64]
+        if not re.fullmatch(r"[0-9a-f]{24}", token):
+            flash("Продажа не выполнена: обновите страницу.")
+            return redirect(back)
+        pieces = {}
+        for line in oth_point_sale.lines(conn, card):
+            raw = str(form.get("qty_%d" % line["item_id"]) or "0").strip()
+            pieces[line["item_id"]] = int(raw) if raw.isascii() and raw.isdigit() else -1
+        now = local_iso()
+        claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,'обрабатывается')",
+                               ("page-" + token, now, "панель: %s" % author(), ACTIONS["oth_sold"], card["id"]))
+        conn.commit()
+        if claimed.rowcount != 1:                                               # the same press twice (a double tap, a resent form)
+            flash("Эта продажа уже выполнена.")
+            return redirect(back)
+        try:
+            sold = oth_point_sale.sell(conn, card["id"], pieces, form.get("name"), form.get("phone"), form.get("number"), form.get("transfer"),
+                                       form.get("anonymous") == "1", now, author())
+            error = ""
+        except orders.OrderError as err:
+            error = str(err)
+        except Exception:                                                        # the press must not stay «обрабатывается»
+            conn.rollback()
+            current_app.logger.exception("«Рабочее место»: the sale from «На ОТХ» of order %s failed", card_id)
+            error = "Не получилось выполнить продажу. Напишите владельцу."
+        if error:                                                               # the same window again: a new press may go
+            conn.execute("DELETE FROM order_command_log WHERE message_id = ?", ("page-" + token,))
+            conn.commit()
+            return _sale_window(orders.get_card(conn, card_id), point_id, back, form, error), 400
+        outcome = "продано с ОТХ: заказ №%d" % sold
+        conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?", (outcome, "page-" + token))
+        conn.commit()
+        point_log.record(conn, now, author(), point_id, "oth_sold", card["id"], outcome)     # «История точки»
+        flash("Заказ №%s — продано с ОТХ: заказ №%d на этапе «%s»." % (mgr.label(card), sold, orders.stage_name(conn, "done")), "info")
+        return redirect(back)
+
+    def _sale_window(card, point_id, back, form, error):
+        from urllib.parse import parse_qs, urlsplit
+        conn = get_conn()
+        rows = oth_point_sale.lines(conn, card)
+        for row in rows:
+            typed = str(form.get("qty_%d" % row["item_id"]) or "") if form else ""
+            row["qty"] = int(typed) if typed.isdigit() and int(typed) <= row["max"] else row["max"]
+            row["unit_text"], row["sum_text"] = _rub(row["unit"]), _rub(row["unit"] * row["qty"])
+        moment = local_iso()
+        return render_template("mypoint_oth_sale.html", card=card, label=mgr.label(card), rows=rows, error=error, form=form or {},
+                               number=form.get("number", card["webmim_number"]) if form else card["webmim_number"],
+                               transfer=form.get("transfer", card["transfer_number"]) if form else card["transfer_number"],
+                               total=_rub(sum(r["unit"] * r["qty"] for r in rows)), when="%s.%s.%s %s" % (moment[8:10], moment[5:7], moment[:4], moment[11:16]),
+                               token=secrets.token_hex(12), single=len(rows) == 1, bonus=oth_point_sale.BONUS, no_contact=oth_point_sale.NO_CONTACT,
+                               p=point_id if own_point() is None else None, back=back,
+                               tab=(parse_qs(urlsplit(back).query).get("tab") or [""])[0])
 
     @app.route("/my-point/return-day/not-taken", methods=["POST"])
     @login_required

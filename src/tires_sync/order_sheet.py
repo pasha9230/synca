@@ -455,9 +455,12 @@ def oth_invoice(conn, card: dict) -> List[dict]:
 def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] = None) -> dict:
     """The columns of a row that are the order's, not the position's (card_rows)."""
     sent = sent or {}
+    from . import oth_point_sale
+    sold = bool(oth_point_sale.sold_of(conn, card["id"]))      # the point sold tyres of its record (ТЗ part D, 2026-11-12): «Выполнено», «О»
     return {"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
             "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
-            "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": card["stage"]["name"], "Реализация": realization(card),
+            "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": orders.stage_name(conn, "done") if sold else card["stage"]["name"],
+            "Реализация": REFUSED if sold else realization(card),
             "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
             "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]}
 

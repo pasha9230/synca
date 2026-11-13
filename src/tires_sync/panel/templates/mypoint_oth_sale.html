@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{# The window of «Продать» of a record of storage on «На ОТХ» (oth_point_sale, the ТЗ «Невыкуп, ОТХ, возвраты», part D): the buyer's name and
+   phone (both needed unless «Клиент отказался…»), the WebMIM and transfer numbers, each position read only with its pieces (1 … on OTH), the
+   sum and the moment count themselves (oth_sale.js counts the sum again as the pieces change). Both views of the point. #}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}pt-ui{% if point_new() %} p2 p2-own{% endif %}{% endblock %}
+{% block title %}Продажа с ОТХ · Tires Sync{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='point2.css' if point_new() else 'point.css') }}">
+<style>.mp-confirm{max-width:560px;margin:16px auto;padding:16px;border:1px solid var(--gray-200);border-radius:12px;background:var(--gray-0)}
+.mp-confirm h1{font-size:20px;margin:0 0 12px}.mp-confirm .field{display:grid;gap:4px;margin:0 0 10px}.mp-confirm .input{min-height:44px;font-size:16px}
+.mp-confirm .mp-sale-line{border:1px solid var(--gray-200);border-radius:8px;padding:8px;margin:0 0 10px}
+.mp-confirm .mp-confirm-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.mp-confirm .mp-confirm-acts .btn{flex:1 1 140px;min-height:48px;font-size:17px}
+.mp-confirm .mp-sale-none{font-size:12px;display:flex;gap:6px;align-items:center;margin-top:8px}</style>{% endblock %}
+{% block content %}
+<section class="mp-confirm" aria-labelledby="mp-sale-h" data-oth-sale="{{ card.id }}">
+<h1 id="mp-sale-h">Продажа шин с ОТХ, заказ № {{ label }}</h1>
+{% if error %}<p class="mp-sub" role="alert" style="color:var(--red-600,#b42318);margin:0 0 8px" data-sale-error>{{ error }}</p>{% endif %}
+<form method="post" action="/my-point/{{ card.id }}/oth-sale" data-once data-sale-form>
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ token }}">{% if p %}<input type="hidden" name="p" value="{{ p }}">{% endif %}{% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}
+<label class="field"><span class="label">Имя покупателя</span><input class="input" name="name" maxlength="200" autocomplete="off" required data-sale-contact value="{{ form.get('name', '') }}"></label>
+<label class="field"><span class="label">Телефон</span><input class="input" type="tel" name="phone" inputmode="tel" autocomplete="off" maxlength="30" required data-sale-contact placeholder="+7 900 000-00-00" value="{{ form.get('phone', '') }}"></label>
+<label class="field"><span class="label">Номер заказа</span><input class="input" name="number" maxlength="60" value="{{ number or '' }}"></label>
+<label class="field"><span class="label">Номер перемещения</span><input class="input" name="transfer" maxlength="40" value="{{ transfer or '' }}"></label>
+{% for row in rows %}<div class="mp-sale-line" data-sale-line data-unit="{{ row.unit }}">
+<label class="field"><span class="label">Позиция</span><input class="input" value="{{ row.name }}" readonly tabindex="-1"></label>
+<label class="field"><span class="label">Количество (на ОТХ {{ row.max }} шт., по {{ row.unit_text }} ₽)</span><input class="input" type="number" name="qty_{{ row.item_id }}" min="{{ 1 if single else 0 }}" max="{{ row.max }}" step="1" required value="{{ row.qty }}" data-sale-qty></label>
+</div>{% endfor %}
+<label class="field"><span class="label">Сумма, ₽</span><input class="input" value="{{ total }}" readonly tabindex="-1" data-sale-total></label>
+<label class="field"><span class="label">Дата и время</span><input class="input" value="{{ when }}" readonly tabindex="-1"></label>
+<p class="mp-sub" style="margin:4px 0 0" data-sale-bonus>{{ bonus }}</p>
+<label class="mp-sale-none" style="font-size:12px"><input type="checkbox" name="anonymous" value="1" data-sale-none{% if form.get('anonymous') == '1' %} checked{% endif %}>{{ no_contact }}</label>
+<div class="mp-confirm-acts"><button class="btn btn--primary" data-sale-yes>Продать</button><a class="btn btn--secondary" href="{{ back }}" data-sale-cancel>Отмена</a></div>
+</form>
+</section>
+<script src="{{ url_for('static', filename='oth_sale.js') }}"></script>
+{% endblock %}
