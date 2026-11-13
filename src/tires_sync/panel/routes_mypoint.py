@@ -592,8 +592,15 @@ def register(app) -> None:
             for f in found:
                 oid = int(f["url"].rsplit("/", 1)[-1]) if f.get("url", "").rsplit("/", 1)[-1].isdigit() else None
                 f["tab"] = tab_of.get(oid, "")
+                f["id"] = oid
                 if f["tab"] in ("oth", "agree", "return"):                               # our tyres at the point: the client is gone (the owner 2026-10-30)
                     f["title"] = "Заказ №%d · шины на ОТХ" % oid
+        if found is not None:                                                    # the owner 13.11: the search shows the positions found only, as
+            ids = {f.get("id") for f in found}                                   # in their tab (with their buttons), never a link to the order
+            shown = sorted((r for r in cards if r["card"]["id"] in ids and not r.get("returning")),
+                           key=lambda r: not (r["asked"] or r["oth_asked"]))
+            issued = [r for r in issued if r["card"]["id"] in ids]
+            returns = [r for r in returns if r["card"]["id"] in ids]
         return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
