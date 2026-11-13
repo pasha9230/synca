@@ -223,8 +223,9 @@ def test_g_the_window_the_task_the_bell_the_sound_and_no_doubles(tmp_path, clock
     before = (len(to_client(app)), len(to_points(app)))
     assert post(mine, "/my-point/return-day/not-taken", "tok", comment="Машина сломалась").status_code == 302
     page = mine.get("/my-point").get_data(as_text=True)
-    box = page[page.index('data-not-taken="%s"' % DAY):].split("</details>")[0]
-    assert " open>" in box and "font-size:24px" in box and "Отправьте в следующие дни возвратов" in box and 'name="comment"' not in box
+    box = page[page.index('data-not-taken="%s"' % DAY):].split("</div>")[0]
+    assert "font-size:24px" in box and "Отправьте в следующие дни возвратов" in box and 'name="comment"' not in box
+    assert "<details" not in box and "mp-handover" not in box             # review 13.11: an open «mp-handover» would stop the page's own refresh
     [task] = open_tasks(conn, opr.NOT_TAKEN_TITLE)
     assert task["title"] == "Важное · Водитель не забрал возвраты, согласовать с менеджером" and task["order_id"] == card
     assert "Машина сломалась" in task["note"] and "/orders/%d" % card in task["note"] and "13.11" in task["note"]
