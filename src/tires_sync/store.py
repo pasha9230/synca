@@ -351,6 +351,12 @@ CREATE TABLE IF NOT EXISTS order_label (
     uploaded_at TEXT NOT NULL, uploaded_by TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS order_label_order ON order_label (order_id);
+-- «Товарный чек» sent to the order's chat (order_receipt.py, the owner 2026-11-13): the picture and the PDF, once per mark of the window
+CREATE TABLE IF NOT EXISTS order_receipt (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, title TEXT NOT NULL, total REAL NOT NULL,
+    chat_row INTEGER, image BLOB NOT NULL, pdf BLOB NOT NULL, made_at TEXT NOT NULL, made_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS order_receipt_order ON order_receipt (order_id);
 CREATE TABLE IF NOT EXISTS order_event (
     id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,
     kind TEXT NOT NULL, text TEXT NOT NULL, level TEXT NOT NULL DEFAULT ''

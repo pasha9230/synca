@@ -327,6 +327,10 @@ SECTION_OF.update(order_item_mim="orders", order_item_mim_extra="orders")    # �
 SECTION_OF.update(order_autosend_add="orders", order_autosend_update="orders", order_autosend_cancel="orders")   # «Автосообщение клиенту»
 SECTION_OF.update(order_intercity_save="orders", order_label_upload="orders", order_label_delete="orders",    # «Доставка в другой город»
                   order_label_file="orders")                                                                   # (routes_intercity, 2026-11-02)
+# «Товарный чек» (routes_receipt, the owner 2026-11-13): who sees the money of the order (the routes check «money» themselves too);
+# the send to the client's chat needs «отправлять клиенту», the seller's fields of «Настройки заказов» are changed by who sees the money
+SECTION_OF.update(order_receipt_file="orders", order_receipt_send="orders", order_receipt_kept="orders", orders_receipt_settings="orders",
+                  orders_receipt_settings_save="orders")
 SECTION_OF.update(ui_new_page="setup",                           # «Новый вид» (routes_design, 2026-11-02): the owner changes, the partner looks
                   as_point_start="self", as_point_stop="self")   # «Работать как точка»: check_access lets them by AS_POINT_PAGES
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
@@ -343,6 +347,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
 SECTION_OF.update(connections_account_price_push="setup")       # «Цены сразу через API» (price_push, 2026-11-03): the owner, like «Остатки»
 NEEDS.update(connections_account_price_push="publish")
 NEEDS.update(order_autosend_add="send", order_autosend_update="send", order_autosend_cancel="send")   # a message to the client (routes_autosend)
+NEEDS.update(order_receipt_send="send", order_receipt_file="money", orders_receipt_settings_save="money")   # «Товарный чек»
 # «Собрать фид сейчас» (feed_now, 2026-11-03): the owner and the partner (the lead's task) — exactly those who have «orders» to change and
 # the right «supplier»; the partner has no «publish» and only looks at the catalog
 SECTION_OF.update(feed_update_now="orders")
