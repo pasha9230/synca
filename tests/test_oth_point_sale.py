@@ -177,7 +177,7 @@ def test_the_table_gets_no_row_of_the_sale_and_says_done_and_o_once_every_tyre_i
     b = sell(conn, x, qty=1)
     assert {r[0] for r in conn.execute("SELECT order_id FROM sheet_order")} == queued and b not in queued
     rows = order_sheet.rows_of(conn, cid, MOVED)
-    assert rows and all(r["Этап"] == orders.stage_name(conn, "cancel") and r["Реализация"] == "" for r in rows.values())
+    assert rows and all(r["Этап"] == orders.stage_name(conn, "oth") and r["Реализация"] == order_sheet.REFUSED for r in rows.values())   # the rest on OTH
     note = "Продано с ОТХ 1 шт. в заказ №%d" % b
     assert note in orders.get_card(conn, cid)["comment"]
     ops = order_sheet.changes(rows, written)
@@ -198,11 +198,12 @@ def test_another_orders_note_is_never_sent(tmp_path):
     changed = {k: dict(v, **{"Примечание": "другое"}) for k, v in rows.items()}
     assert not order_sheet.changes(changed, rows)
 
-def test_a_cancelled_order_with_nothing_sold_keeps_its_row_as_before(tmp_path):
+def test_a_cancelled_order_with_nothing_sold_shows_the_stage_of_its_tyres(tmp_path):
+    """The owner 13.11 («Одна строка, этап по шинам»): the client's row follows the record its tyres went to, «На ОТХ» / «О»."""
     conn = db(tmp_path)
     cid, x = split(conn)
     rows = order_sheet.rows_of(conn, cid, MOVED)
-    assert all(r["Этап"] == orders.stage_name(conn, "cancel") and r["Реализация"] == "" for r in rows.values())
+    assert all(r["Этап"] == orders.stage_name(conn, "oth") and r["Реализация"] == order_sheet.REFUSED for r in rows.values())
 
 
 # ---- the feed: the stock of OTH goes down by the pieces sold and nothing else --------------------------------------------------------

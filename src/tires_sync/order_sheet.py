@@ -155,7 +155,8 @@ def listed(conn, card_id: int) -> bool:
 def enroll(conn, card_id: int, now: str) -> None:
     """The order is placed: it joins the table if the table is on and the order stands on «Заказ оформлен» or later (listed: the button
     «Оформить в WebMIM» whose move of the stage failed puts nothing in). In the caller's transaction; once (a second placing keeps the first)."""
-    if enabled(conn) and listed(conn, card_id):
+    from . import oth_storage
+    if enabled(conn) and listed(conn, card_id) and not oth_storage.is_record(conn, card_id):    # a record of storage: its client's row (13.11)
         conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (int(card_id), now))
 
 
@@ -191,9 +192,14 @@ def _due(conn, now: str, full: bool) -> List[int]:
         changed, args = (" AND (s.failing > 0 OR s.sent_at = '' OR EXISTS (SELECT 1 FROM order_event e WHERE e.order_id = s.order_id"
                          " AND e.id > s.seen_event AND e.author != ?))"), [AUTHOR]             # its own records are no change of the order
     kept, day = _kept(conn)                                                # the orders before «Вести заказы, оформленные с»: never looked at
+    if not full:                                                        # the owner 13.11: a client's row follows its record of storage
+        changed = changed[:-1] + (" OR EXISTS (SELECT 1 FROM app_state a JOIN order_event e ON e.order_id = CAST(a.value AS INTEGER)"
+                                  " WHERE a.key = 'oth_stored:' || s.order_id AND e.id > s.seen_event AND e.author != ?))")
+        args = args + [AUTHOR]
     rows = conn.execute("SELECT s.order_id FROM sheet_order s JOIN order_card c ON c.id = s.order_id WHERE (s.next_at = '' OR s.next_at <= ?)"
-                        " AND (s.claim_until = '' OR s.claim_until < ?)" + changed + kept + " ORDER BY s.order_id LIMIT ?",
-                        [now, now] + args + day + [-1 if full else BATCH])
+                        " AND (s.claim_until = '' OR s.claim_until < ?)" + changed + kept +
+                        " AND s.order_id NOT IN (SELECT CAST(substr(key, 13) AS INTEGER) FROM app_state WHERE key LIKE 'oth_storage:%')"
+                        " ORDER BY s.order_id LIMIT ?", [now, now] + args + day + [-1 if full else BATCH])
     return [r[0] for r in rows]
 
 
@@ -462,10 +468,18 @@ def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
     sales = bool(oth_point_sale.sold_of(conn, card["id"]))     # the point sold tyres of its record (ТЗ part D, 2026-11-12)
     sold = sales and oth_point_sale.all_sold(conn, card["id"])  # the owner 13.11: «Выполнено» / «О» once every tyre is sold, not for a part
     note = {NOTE_FLAG: True} if sales else {}                   # the note of the sale goes to «Примечание» (the owner 13.11)
+    from . import oth_storage
+    kept = oth_storage.record_of(conn, card["id"])              # the owner 13.11: one row, the stage of the tyres — the client's row follows
+    tyres = card                                                # the record of storage its tyres went to (the record has no row of its own)
+    if kept is not None and not sold:
+        try:
+            tyres = orders.get_card(conn, kept)
+        except orders.OrderError:
+            tyres = card
     return dict(note, **{"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
             "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
-            "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": orders.stage_name(conn, "done") if sold else card["stage"]["name"],
-            "Реализация": REFUSED if sold else realization(card),
+            "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": orders.stage_name(conn, "done") if sold else tyres["stage"]["name"],
+            "Реализация": REFUSED if sold else realization(tyres),
             "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
             "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]})
 
