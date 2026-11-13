@@ -1,5 +1,5 @@
 //! How the agent talks HTTP (ureq 3), with the behaviour it had on ureq 2 spelled out instead of left to defaults:
-//! no proxy from the environment (HTTP_PROXY, ALL_PROXY...), 30 seconds to connect, at most 4 redirects,
+//! no proxy from the environment (HTTP_PROXY, ALL_PROXY...), 30 seconds to connect (120 for a whole panel request or download), at most 4 redirects,
 //! a new connection for every request (ureq 3 does not retry a request on a kept connection the server has dropped),
 //! and a failure before any request was sent is told apart from a failure in the middle of one.
 use std::time::Duration;
@@ -9,6 +9,8 @@ use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver
 use ureq::unversioned::transport::{ConnectionDetails, Connector, DefaultConnector, NextTimeout, Transport};
 
 const CONNECT: Duration = Duration::from_secs(30);
+/// The whole request to the panel or an image download: a stalled server can no longer hold a run forever.
+const PANEL: Duration = Duration::from_secs(120);
 /// ureq 2 with its default of 5 followed at most 4 redirects and failed on the fifth; ureq 3 counts the ones it follows.
 const REDIRECTS: u32 = 4;
 
@@ -59,8 +61,14 @@ impl Resolver for Resolve {
 /// `redirects` 0: the 3xx answer itself is returned, nothing is followed.
 /// `status_as_error`: 4xx and 5xx come back as `Error::StatusCode` (without the body).
 pub fn agent(proxy: Option<ureq::Proxy>, overall: Option<Duration>, redirects: u32, status_as_error: bool) -> ureq::Agent {
+    build(proxy, overall, redirects, status_as_error, false)
+}
+
+/// `https_only`: a plain `http://` URL is refused before anything is sent.
+fn build(proxy: Option<ureq::Proxy>, overall: Option<Duration>, redirects: u32, status_as_error: bool, https_only: bool) -> ureq::Agent {
     let config = ureq::Agent::config_builder()
         .proxy(proxy)
+        .https_only(https_only)
         .timeout_connect(Some(CONNECT))
         .timeout_global(overall)
         .max_idle_connections(0)
@@ -71,14 +79,20 @@ pub fn agent(proxy: Option<ureq::Proxy>, overall: Option<Duration>, redirects: u
     ureq::Agent::with_parts(config, Connect(DefaultConnector::default()), Resolve(DefaultResolver::default()))
 }
 
-/// The agent for the panel: direct, no overall limit (as before), 4xx/5xx as errors.
+/// The agent for the panel: direct, the whole request within 120 seconds, 4xx/5xx as errors.
 pub fn direct() -> ureq::Agent {
-    agent(None, None, REDIRECTS, true)
+    agent(None, Some(PANEL), REDIRECTS, true)
 }
 
-/// The agent for OpenAI: the given proxy or none, the whole request within `overall`; the status is read by the caller.
+/// The agent for an image download: direct, within 120 seconds, no redirects followed, 4xx/5xx as errors.
+pub fn download() -> ureq::Agent {
+    agent(None, Some(PANEL), 0, true)
+}
+
+/// The agent for OpenAI: the given proxy or none, the whole request within `overall`, https only (the key is never sent
+/// in the clear, not even after a redirect); the status is read by the caller.
 pub fn through(proxy: Option<ureq::Proxy>, overall: Duration) -> ureq::Agent {
-    agent(proxy, Some(overall), REDIRECTS, false)
+    build(proxy, Some(overall), REDIRECTS, false, true)
 }
 
 /// Some(label) when nothing was sent (so nothing could be paid for).
@@ -164,8 +178,12 @@ mod tests {
     fn timeouts_and_redirects_are_the_old_ones() {
         let a = direct();
         assert_eq!(a.config().timeouts().connect, Some(Duration::from_secs(30)));
-        assert_eq!(a.config().timeouts().global, None);
+        assert_eq!(a.config().timeouts().global, Some(Duration::from_secs(120)));
         assert_eq!((a.config().max_redirects(), a.config().max_idle_connections()), (4, 0));
+        let d = download();
+        assert_eq!(d.config().timeouts().connect, Some(Duration::from_secs(30)));
+        assert_eq!(d.config().timeouts().global, Some(Duration::from_secs(120)));
+        assert_eq!((d.config().max_redirects(), d.config().max_idle_connections()), (0, 0));
         let o = through(None, Duration::from_secs(300));
         assert_eq!(o.config().timeouts().connect, Some(Duration::from_secs(30)));
         assert_eq!(o.config().timeouts().global, Some(Duration::from_secs(300)));
@@ -195,6 +213,19 @@ mod tests {
         assert_eq!(unreached(&e), None, "{e}");
         assert_eq!(kind(&e), "Network Error");
         h.join().unwrap();
+    }
+
+    #[test]
+    fn openai_agent_is_https_only_and_the_panel_ones_are_not() {
+        assert!(through(None, Duration::from_secs(5)).config().https_only());
+        assert!(!direct().config().https_only() && !download().config().https_only());
+        // a plain http URL is refused before anything is sent: the listener is never connected to
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/", l.local_addr().unwrap());
+        let e = through(None, Duration::from_secs(5)).post(&url).header("Authorization", "Bearer sk-x").send("x").err().unwrap();
+        assert!(matches!(e, ureq::Error::RequireHttpsOnly(_)), "{e}");
+        assert!(l.accept().is_err());
     }
 
     #[test]
