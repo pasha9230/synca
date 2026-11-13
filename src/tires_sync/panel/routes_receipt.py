@@ -57,7 +57,8 @@ def register(app) -> None:
             pass
         chat = send_chat(conn, card["id"])
         return {"values": values, "missing": receipts.missing(values), "total": receipts.money(total) if total is not None else "",
-                "chat": dict(chat, ref=deals.ref(chat["id"])) if chat else None, "token": secrets.token_hex(12),
+                "chat": dict(chat, ref=deals.ref(chat["id"])) if chat else None,
+                "token": ((draft or {}).get("receipt_token") or [""])[0][:64] or secrets.token_hex(12),
                 "kept": receipts.kept(conn, card["id"]), "open": bool(draft) or request.args.get("receipt") == "1",
                 "needed": bool(card.get("receipt_needed")), "seller_settings": SETTINGS_PAGE}
 
@@ -69,10 +70,11 @@ def register(app) -> None:
         if not allowed():
             abort(403)
 
-    def again(card_id, err):
-        """Back to the window with the typed values and the error."""
+    def again(card_id, err, same_mark: bool = False):
+        """Back to the window with the typed values and the error. `same_mark` (review 13.11): the picture may have gone or goes later (an
+        unsure outcome, a 402 the sync sends again): the window keeps its mark, so a press again never sends a second receipt."""
         draft = {k: [v[:receipts.FIELD_MAX] for v in request.form.getlist(k)[:receipts.LINES_MAX + 1]]
-                 for k in request.form if k not in ("csrf", "kind", "receipt_token")}
+                 for k in request.form if k not in ("csrf", "kind") and (same_mark or k != "receipt_token")}
         if len(json.dumps(draft)) <= DRAFT_MAX:          # the session is a cookie: a big window is not kept (its values come from the order again)
             session[DRAFT % card_id] = draft
         flash(str(err), "error")
@@ -93,12 +95,13 @@ def register(app) -> None:
         card_or_404(get_conn(), card_id)
         try:
             receipt = made(card_id)
+            body = receipts.jpeg(receipt) if request.form.get("kind") == "jpg" else receipts.pdf(receipt)
         except receipts.ReceiptError as err:
             return again(card_id, err)
         if request.form.get("kind") == "jpg":
-            return Response(receipts.jpeg(receipt), mimetype="image/jpeg", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+            return Response(body, mimetype="image/jpeg", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
         name = "receipt-%d.pdf" % card_id
-        return Response(receipts.pdf(receipt), mimetype="application/pdf", headers={
+        return Response(body, mimetype="application/pdf", headers={
             "Content-Disposition": "attachment; filename=\"%s\"" % name, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     def writer(conn, chat):
@@ -121,6 +124,7 @@ def register(app) -> None:
         card_or_404(conn, card_id)
         try:
             receipt = made(card_id)
+            picture = receipts.jpeg(receipt)
         except receipts.ReceiptError as err:
             return again(card_id, err)
         chat = send_chat(conn, card_id)
@@ -129,8 +133,10 @@ def register(app) -> None:
         token = str(request.form.get("receipt_token") or "").strip()[:64]
         now = local_iso()
         try:
-            chats_store.send_image(conn, writer(conn, chat), chat["id"], receipts.jpeg(receipt), token, now, author())
-        except chats_store.ChatError as err:                           # ChatSendUnknown too: its text says not to send it again
+            chats_store.send_image(conn, writer(conn, chat), chat["id"], picture, token, now, author())
+        except chats_store.ChatSendUnknown as err:                     # may have gone, or goes with the sync (402): the same mark again
+            return again(card_id, err, same_mark=True)
+        except chats_store.ChatError as err:
             return again(card_id, err)
         receipts.keep(conn, card_id, token, receipt, chat["id"], now, author())
         flash("%s отправлен клиенту в чат %s." % (receipts.title(receipt), deals.ref(chat["id"])), "ok")

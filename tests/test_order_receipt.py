@@ -287,3 +287,49 @@ def test_the_send_needs_the_right_to_send_to_the_client(tmp_path):
     finally:
         users.MATRIX["partner"]["rights"].add("send")
     assert not [c for c in app.config["AVITO_HTTP"].calls if "messenger" in c[1]]
+
+
+# ---- review 13.11 -------------------------------------------------------------------------------------------------------------------------
+
+def test_a_send_that_goes_later_keeps_the_mark_so_a_press_again_sends_no_second_receipt(tmp_path):
+    app, client, tok, conn, tanya = _sendable_page(tmp_path, (200, {"img-5": {"1600x900": "https://img.example/5.jpg"}}),
+                                                   (402, {"error": {"message": "payment required"}}))
+    card_id = tanya["order_id"]
+    _order(conn, card_id)
+    _seller(conn)
+    form = _form(client, card_id)
+    response = client.post("/orders/%d/receipt/send" % card_id, data=form)
+    assert response.status_code == 302 and "receipt=1" in response.headers["Location"]
+    again = _form(client, card_id)                                                  # the window as it comes back (the draft read once)
+    assert again["receipt_token"] == form["receipt_token"]                          # the window keeps the mark of the press
+    client.post("/orders/%d/receipt/send" % card_id, data=again)
+    sends = [c for c in app.config["AVITO_HTTP"].calls if c[1].endswith("/messages/image")]
+    assert len(sends) == 1
+
+
+def test_a_refused_send_gives_a_new_mark(tmp_path):
+    app, client, tok, conn, tanya = _sendable_page(tmp_path, (400, {"error": {"message": "bad image"}}))
+    card_id = tanya["order_id"]
+    _order(conn, card_id)
+    _seller(conn)
+    form = _form(client, card_id)
+    response = client.post("/orders/%d/receipt/send" % card_id, data=form)
+    assert response.status_code == 302 and _form(client, card_id)["receipt_token"] != form["receipt_token"]
+
+
+def test_no_font_with_russian_letters_makes_no_receipt(monkeypatch):
+    monkeypatch.setattr(receipts, "FONTS", {False: ("/nonexistent/a.ttf",), True: ("/nonexistent/b.ttf",)})
+    with pytest.raises(receipts.ReceiptError):
+        receipts._font(28)
+
+
+def test_a_receipt_too_long_for_the_sheet_is_refused_not_cut():
+    from werkzeug.datastructures import MultiDict
+    n = receipts.LINES_MAX
+    form = MultiDict([(k, "Тестов Т.Т.") for k in receipts.SELLER_FIELDS if k != "inn"] + [("inn", "123456789012"), ("number", "26R-1"),
+                     ("invoice_day", "01.11.2026"), ("day", "2026-11-13")]
+                     + [("line_name", "Ш" * receipts.FIELD_MAX)] * n + [("line_code", "К" * 60)] * n + [("line_qty", "1")] * n
+                     + [("line_unit", "шт")] * n + [("line_price", "100")] * n)
+    receipt = receipts.from_form(form)                                             # a valid window
+    with pytest.raises(receipts.ReceiptError, match="не помещается"):
+        receipts.image(receipt)

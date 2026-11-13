@@ -29,9 +29,11 @@ NUMBER_MAX = 40
 LINES_MAX = 30
 UNIT = "шт"
 MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")
-FONTS = {False: ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf",
+FONTS = {False: ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                 "/Library/Fonts/Arial Unicode.ttf",
                  "/System/Library/Fonts/Supplemental/Arial.ttf", "C:/Windows/Fonts/arial.ttf"),
-         True: ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+         True: ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
                 "C:/Windows/Fonts/arialbd.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")}
 
 
@@ -270,7 +272,7 @@ def _font(size: int, bold: bool = False):
             return ImageFont.truetype(path, size)
         except OSError:
             continue
-    return ImageFont.load_default(size=size)
+    raise ReceiptError("На сервере нет шрифта с русскими буквами: чек не сформирован. Сообщите администратору.")   # review 13.11: never squares to a client
 
 
 def _wrap(draw, text: str, font, width: int) -> List[str]:
@@ -367,6 +369,8 @@ def image(receipt: dict):
         draw.text((x + (width - draw.textlength(note, font=under)) / 2, y + 40), note, font=under, fill=ink)
         x += width + 30
     y += 90
+    if y + MARGIN // 2 > canvas.height:                                      # review 13.11: the end of a receipt is never cut off
+        raise ReceiptError("Чек не помещается на лист: сократите названия или число позиций.")
     return canvas.crop((0, 0, WIDTH, y + MARGIN // 2))
 
 
