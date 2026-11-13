@@ -300,26 +300,44 @@ def test_a_corrected_first_number_keeps_the_second_order(tmp_path):
     assert (extra["№ заказа MIM"], extra["Кол-во"]) == ("6100300", 2) and rows(conn, cid)[order_sheet.key(cid, item)]["№ заказа MIM"] == "6100299"
 
 
-def test_a_new_first_number_takes_an_empty_second_order_back(tmp_path):
+def test_a_new_first_number_takes_an_empty_second_order_back(tmp_path, monkeypatch):
     """The owner 13.11 (order 576): the quantity changed right after «Оформить», the order of WebMIM made again for every tyre and its
-    number typed: the second order still without numbers goes away, the new number covers all the pieces, one row in the table."""
+    number typed: the empty second order keeps 0 pieces, the new number covers all of them. The table already written: the first row
+    takes every piece, the second goes to 0 pieces and no profit, the profit is counted once (review 13.11)."""
+    conn = db(tmp_path)
+    cid = new_order(conn, qty=4)
+    orders.update_card(conn, cid, {"webmim_number": OWN, "transfer_number": OWN_TRANSFER}, LATER, "o")
+    parts(conn, cid)
+    item = orders.get_card(conn, cid)["items"][0]["id"]
+    monkeypatch.setattr(order_sheet, "_profits", lambda conn, card: {item: (1200.0, 20.0)})
+    orders.update_item(conn, item, 6, 6000, LATER, "o")
+    assert [p for p in parts(conn, cid) if p["kind"] == "extra"][0]["needs_numbers"]
+    written = rows(conn, cid)
+    assert written[order_sheet.extra_key(cid, item)]["Кол-во"] == 2
+    orders.update_card(conn, cid, {"webmim_number": "6100301", "transfer_number": "26R-5550009"}, LATER, "o")
+    found = parts(conn, cid)
+    assert [p["kind"] for p in found] == ["supplier"] and not found[0]["highlight"] and [x["qty"] for x in found[0]["items"]] == [6]
+    sent = {op["key"]: op["fields"] for op in order_sheet.changes(rows(conn, cid), written, order_sheet.followed(conn, cid))}
+    first, second = order_sheet.key(cid, item), order_sheet.extra_key(cid, item)
+    assert sent[first]["Кол-во"] == 6 and sent[second]["Кол-во"] == 0
+    now = rows(conn, cid)
+    assert (now[first]["Прибыль ₽"], now[second]["Прибыль ₽"]) == (1200.0, 0.0) and now[second]["Сумма продажи"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM order_event WHERE order_id = ? AND text LIKE '%второй заказ WebMIM обнулён%'", (cid,)).fetchone()[0] == 1
+    orders.update_item(conn, item, 7, 7000, LATER, "o")                        # added after the new number: the second order again
+    assert [x["qty"] for p in parts(conn, cid) if p["kind"] == "extra" for x in p["items"]] == [1]
+
+
+def test_a_new_first_number_without_a_second_order_keeps_the_pieces_added_meanwhile(tmp_path):
+    """No second order kept yet (the card not looked at after the pieces were added): the number only moves, the added pieces stay a
+    second order (review 13.11)."""
     conn = db(tmp_path)
     cid = new_order(conn, qty=4)
     orders.update_card(conn, cid, {"webmim_number": OWN, "transfer_number": OWN_TRANSFER}, LATER, "o")
     parts(conn, cid)
     item = orders.get_card(conn, cid)["items"][0]["id"]
     orders.update_item(conn, item, 6, 6000, LATER, "o")
-    assert [p for p in parts(conn, cid) if p["kind"] == "extra"][0]["needs_numbers"]
-    orders.update_card(conn, cid, {"webmim_number": "6100301", "transfer_number": "26R-5550009"}, LATER, "o")
-    found = parts(conn, cid)
-    assert [p["kind"] for p in found] == ["supplier"] and not found[0]["highlight"] and [x["qty"] for x in found[0]["items"]] == [6]
-    now = rows(conn, cid)
-    assert list(now) == [order_sheet.key(cid, item)] and now[order_sheet.key(cid, item)]["Кол-во"] == 6
-    assert conn.execute("SELECT COUNT(*) FROM order_mim_extra WHERE order_id = ?", (cid,)).fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM order_event WHERE order_id = ? AND text LIKE '%второй заказ WebMIM убран%'", (cid,)).fetchone()[0] == 1
-    orders.update_item(conn, item, 7, 7000, LATER, "o")                        # added after the new number: a second order again
-    assert [x["qty"] for p in parts(conn, cid) if p["kind"] == "extra" for x in p["items"]] == [1]
-
+    orders.update_card(conn, cid, {"webmim_number": "6100301"}, LATER, "o")
+    assert [x["qty"] for p in parts(conn, cid) if p["kind"] == "extra" for x in p["items"]] == [2]
 
 def test_the_second_row_never_goes_away_and_the_profit_is_counted_once(tmp_path, monkeypatch):
     conn = db(tmp_path)

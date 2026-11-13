@@ -78,7 +78,8 @@ def _held(conn, item: dict) -> int:
 
 def snapshot(conn, card_id, now: str, fresh: bool = False) -> bool:
     """The pieces of the supplier's positions of an order with its own number (with those it gave to other orders: _away), once; the mark
-    (item 0) keeps the number it was taken for. A number corrected later only moves the mark: what was added and its second numbers stay.
+    (item 0) keeps the number it was taken for. A number corrected later only moves the mark: what was added and its second numbers stay;
+    except a new number while every second order is still empty (_renumbered, the owner 13.11): taken again.
     `fresh` («Оформить в WebMIM»: everything in the order then is in that order of WebMIM): taken again; the rows of a second order already
     known stay (their pieces may go to 0, never away). No commit. True when taken now."""
     from . import oth_sale
@@ -101,19 +102,18 @@ def snapshot(conn, card_id, now: str, fresh: bool = False) -> bool:
 
 
 def _renumbered(conn, card: dict, was: str, now: str) -> bool:
-    """The owner 13.11 (order 576): the first number replaced by another number while no second order has a number nor a transfer: the
-    order of WebMIM was made again for every tyre, so the empty second orders go away and the snapshot is taken again. A number that
-    came after the id (the mark was the id) or a second order with a number typed: a correction, the parts stay. True when taken back."""
+    """The owner 13.11 (order 576): the first number replaced by another number while the second orders have neither a number nor a
+    transfer: the order of WebMIM was made again for every tyre, so the snapshot is taken again and the second orders keep 0 pieces (their
+    row of the table follows to 0 pieces and no profit, the first row takes every piece: nothing counted twice, review 13.11). A number that
+    came after the id (the mark was the id), no second order yet, or a second order with a number typed: a correction, the parts stay."""
     if not was or was == str(card.get("webmim_id") or "") or not card.get("webmim_number"):
         return False
-    if conn.execute("SELECT 1 FROM order_mim_extra WHERE order_id = ? AND (webmim_number != '' OR transfer_number != '') LIMIT 1",
-                    (card["id"],)).fetchone():
+    rows = conn.execute("SELECT webmim_number, transfer_number FROM order_mim_extra WHERE order_id = ?", (card["id"],)).fetchall()
+    if not rows or any(number or transfer for number, transfer in rows):
         return False
-    gone = conn.execute("DELETE FROM order_mim_extra WHERE order_id = ?", (card["id"],)).rowcount
-    if gone:
-        orders.add_event(conn, card["id"], now, "система", "field", "Номер заказа WebMIM сменён (%s → %s): новый заказ покрывает все шины, "
-                         "второй заказ WebMIM убран. Лишнюю строку «Добавленные шины» в Google-таблице удалите вручную." % (was, card["webmim_number"]),
-                         level="grey")
+    orders.add_event(conn, card["id"], now, "система", "field", "Номер заказа WebMIM сменён (%s → %s) без номера второго заказа: новый заказ "
+                     "считается заказом на все шины, второй заказ WebMIM обнулён (его строка в Google-таблице — 0 шт.)." % (was, card["webmim_number"]),
+                     level="grey")
     return True
 
 
