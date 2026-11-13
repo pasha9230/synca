@@ -277,3 +277,50 @@ def test_the_old_press_of_a_record_goes_to_the_window_and_sells_nothing(tmp_path
     r = post(mine, "/my-point/%d/oth_sold" % x, "tok", token="a" * 24, confirm="yes")
     assert r.status_code == 302 and "/my-point/%d/oth-sale" % x in r.headers["Location"]
     assert orders.get_card(conn, x)["stage"]["code"] == "oth" and oth_stock.pieces(conn) == {"1": 4}
+
+
+# ---- by the review: two tabs, another point, two parts in a row --------------------------------------------------------------------------
+
+def window_token(client, x):
+    page = client.get("/my-point/%d/oth-sale" % x).get_data(as_text=True)
+    return re.search(r'name="token" value="([0-9a-f]{24})"', page).group(1)
+
+
+def test_two_tabs_with_their_own_tokens_sell_once(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    cid, x = split(conn)
+    mine = manager(app, conn, orders.get_card(conn, x)["point_id"])
+    first, second = window_token(mine, x), window_token(mine, x)          # the window opened in two tabs
+    form = {"name": BUYER, "phone": PHONE, "qty_%d" % item(conn, x): "3"}
+    assert post(mine, "/my-point/%d/oth-sale" % x, "tok", token=first, **form).status_code == 302
+    r = post(mine, "/my-point/%d/oth-sale" % x, "tok", token=second, **form)
+    assert r.status_code == 400 and "от 1 до 1 шт." in r.get_data(as_text=True)
+    assert len(sale.sold_of(conn, cid)) == 1
+    assert [i["qty"] for i in orders.get_card(conn, x)["items"]] == [1] and oth_stock.pieces(conn) == {"1": 1}
+
+
+def test_the_manager_of_another_point_neither_sees_the_window_nor_sells(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    cid, x = split(conn)
+    other = conn.execute("INSERT INTO point (name) VALUES ('Другая точка')").lastrowid
+    conn.commit()
+    them = manager(app, conn, other)
+    assert them.get("/my-point/%d/oth-sale" % x).status_code == 403
+    r = post(them, "/my-point/%d/oth-sale" % x, "tok", token="b" * 24, **{"name": BUYER, "phone": PHONE, "qty_%d" % item(conn, x): "1"})
+    assert r.status_code == 403
+    assert sale.sold_of(conn, cid) == [] and oth_stock.pieces(conn) == {"1": 4} and orders.get_card(conn, x)["stage"]["code"] == "oth"
+
+
+def test_two_parts_in_a_row_make_two_done_orders_and_close_the_record(tmp_path):
+    app, owner, tok, conn = panel(tmp_path)
+    cid, x = split(conn)
+    first = sell(conn, x, qty=3)
+    second = sell(conn, x, qty=1, name="Ира", phone="+7 900 111 22 33")
+    assert first != second and [s["order"] for s in sale.sold_of(conn, cid)] == [first, second]
+    for b, pieces in ((first, 3), (second, 1)):
+        card = orders.get_card(conn, b)
+        assert card["stage"]["code"] == "done" and sum(i["qty"] for i in card["items"]) == pieces
+    assert orders.get_card(conn, x)["stage"]["code"] == "cancel"
+    a = orders.get_card(conn, cid)
+    assert a["stage"]["code"] == "cancel" and a["webmim_number"] == number(cid) + " О" and not a["webmim_number"].endswith("О О")
+    assert oth_stock.pieces(conn) == {}
