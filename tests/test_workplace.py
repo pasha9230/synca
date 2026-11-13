@@ -87,7 +87,7 @@ def test_the_search_line_finds_the_own_order_by_number_transfer_and_phone_only(t
 
     def found(q):
         page = _text(mine.get("/my-point", query_string={"q": q}))
-        return set(int(n) for n in re.findall(r'<a class="mp-name" href="/orders/(\d+)"', page))
+        return set(int(n) for n in re.findall(r'data-(?:order|return|found-order)="(\d+)"', page))       # the positions found, as cards (the owner 13.11)
 
     assert found(str(card)) == {card} and found("№%d" % card) == {card}
     assert found("26R-004417") == {card} and found("004417") == {card} and found("26r-0044") == {card}

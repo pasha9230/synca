@@ -99,7 +99,7 @@ def test_the_question_of_the_last_day_is_a_line_of_its_card_and_first(w, monkeyp
 
 def test_the_search_looks_at_every_order_of_the_point_and_names_its_tab(w):
     page = _page(w["point"], "/my-point?tab=moving&q=Клиент oth")
-    assert 'data-found-tab="oth"' in page and "/orders/%d" % w["made"]["oth"] in page
+    assert 'data-found-tab="oth"' in page and 'data-order="%d"' % w["made"]["oth"] in page
 
 
 # --- оповещения точке -----------------------------------------------------------------------------------------------------------
@@ -222,5 +222,5 @@ def test_the_section_is_the_points_and_the_owners_only(w, role):
 
 def test_a_found_order_on_oth_names_no_client(w):
     page = _page(w["point"], "/my-point?q=Клиент oth")
-    found = page[page.index('id="mp-found-h"'):].split("</section>")[0]
-    assert "/orders/%d" % w["made"]["oth"] in found and "шины на ОТХ" in found and "Клиент oth" not in found
+    found = page[page.index('id="mp-found-h"'):]                                                   # past the search line (it keeps the query)
+    assert 'data-order="%d"' % w["made"]["oth"] in found and 'data-found-tab="oth"' in found and "Клиент oth" not in found    # its card, the tyres only

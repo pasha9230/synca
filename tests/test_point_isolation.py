@@ -313,7 +313,8 @@ def test_our_own_number_typed_into_an_order_is_not_the_clients_phone_for_the_poi
 
 def _order_urls(client, q, page=False):
     if page:
-        return set("/orders/%s" % n for n in re.findall(r'<a class="mp-name" href="/orders/(\d+)"', _text(client.get("/my-point", query_string={"q": q}))))
+        page = _text(client.get("/my-point", query_string={"q": q}))      # the positions found, as cards (the owner 13.11: no link into the order)
+        return set("/orders/%s" % n for n in re.findall(r'data-(?:order|return|found-order)="(\d+)"', page))
     found = client.get("/search.json", query_string={"q": q}).get_json()
     return {i["url"] for g in found["groups"] if g["key"] == "orders" for i in g["items"]}
 
