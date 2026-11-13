@@ -184,7 +184,7 @@ def _sell(conn, x: int, pieces: Dict[int, int], name: str, phone: str, number, t
     orders.add_event(conn, x, now, who, "point", "Точка продала с ОТХ %d шт.: заказ №%d" % (sold, b))
     if a:
         _source(conn, a, x, b, sold, now, who)
-    oth_storage._audit(conn, now, who, "oth_point_sale", {"record": x, "order": b, "source": a, "pieces": wanted, "client": bool(name or phone)})
+    oth_storage._audit(conn, now, who, "oth_point_sale", {"record": x, "order": b, "source": a, "pieces": wanted, "sold": sold, "client": bool(name or phone)})
     return b
 
 

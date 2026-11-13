@@ -97,6 +97,9 @@ def audit_text(entry: dict) -> str:
         return "Заказ №%s отменён (отказ клиента): шины на ОТХ, запись хранения №%s" % (d.get("order", "?"), d.get("record", "?"))
     if action == "oth_storage_take":
         return "ОТХ: заказ №%s взял запись хранения №%s целиком (%s шт.)" % (d.get("order", "?"), d.get("record", "?"), d.get("pieces", "?"))
+    if action == "oth_point_sale":
+        return "ОТХ: точка продала %s шт. записи хранения №%s, заказ №%s%s" % (d.get("sold", "?"), d.get("record", "?"), d.get("order", "?"),
+                                                                          "" if d.get("client", True) else " (без имени и телефона)")
     if action == "oth_storage_reopen":
         return "ОТХ: запись хранения №%s снова на ОТХ (отмена была ошибкой)" % d.get("record", "?")
     if action == "oth_storage_back":

@@ -14,7 +14,7 @@
 {% block content %}
 <section class="mp-confirm" aria-labelledby="mp-sale-h" data-oth-sale="{{ card.id }}">
 <h1 id="mp-sale-h">Продажа шин с ОТХ, заказ № {{ label }}</h1>
-{% if error %}<p class="mp-sub" role="alert" style="color:var(--red-600,#b42318);margin:0 0 8px" data-sale-error>{{ error }}</p>{% endif %}
+{% if error %}<p class="mp-sub" role="alert" style="color:var(--err-700);margin:0 0 8px" data-sale-error>{{ error }}</p>{% endif %}
 <form method="post" action="/my-point/{{ card.id }}/oth-sale" data-once data-sale-form>
 <input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ token }}">{% if p %}<input type="hidden" name="p" value="{{ p }}">{% endif %}{% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}
 <label class="field"><span class="label">Имя покупателя</span><input class="input" name="name" maxlength="200" autocomplete="off" required data-sale-contact value="{{ form.get('name', '') }}"></label>
