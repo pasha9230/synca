@@ -247,7 +247,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_storage_back", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_ad_position", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_storage_back", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_agree_drop", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_ad_position", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_autosave", "order_point_sale", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -343,6 +343,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "order_arrived_message": "send",                 # it prepares a message to the client: who may send them (review 2026-10-30)
          "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
          "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
+         "order_oth_agree_drop": "supplier",              # «Снять согласование» of «Согласование возврата» (2026-11-13): the same
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "orders_inbox_dismiss": "send", "share_new": "send",
          "share_create": "send"}
 SECTION_OF.update(connections_account_price_push="setup")       # «Цены сразу через API» (price_push, 2026-11-03): the owner, like «Остатки»

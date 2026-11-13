@@ -30,7 +30,8 @@ KIND_NAMES = {"open": "обычный", "won": "успешный", "lost": "от
 DEFAULT_STAGES = (
     ("new", "Новый заказ", "#7F56D9", "open"), ("talk", "Переговоры", "#2E90FA", "open"), ("wait", "Ожидает наличие", "#0BA5EC", "open"),
     ("placed", "Заказ оформлен", "#F79009", "open"), ("moving", "Едет на точку", "#EF6820", "open"),
-    ("at_point", "На точке, ждём клиента", "#17B26A", "open"), ("shipped", "Отправлен в ТК", "#0E9384", "won"), ("oth", "На ОТХ", "#667085", "open"), ("return_given", "На возврат", "#DC6803", "open"),
+    ("at_point", "На точке, ждём клиента", "#17B26A", "open"), ("shipped", "Отправлен в ТК", "#0E9384", "won"), ("oth", "На ОТХ", "#667085", "open"),
+    ("return_agree", "Согласование возврата", "#F79009", "open"), ("return_given", "На возврат", "#DC6803", "open"),
     ("done", "Выполнено", "#079455", "won"), ("cancel", "Отмена", "#D92D20", "lost"), ("return", "Вернули поставщику", "#B54708", "closed"))
 # the owner 2026-11-03: the names of the stages before it (code: old default). A stage still called so is renamed once (rename_default_stages)
 OLD_NAMES_2026_11_03 = {"moving": "Перемещение на точку", "at_point": "Товар на точке", "shipped": "Отправлен", "cancel": "Отмена / невыкуп",
@@ -156,6 +157,7 @@ def ensure_pipeline(conn, now: str) -> None:
     _ensure_wait_stage(conn)
     _merge_refused_stage(conn, now)
     _ensure_return_given_stage(conn)
+    _ensure_return_agree_stage(conn)
     _ensure_shipped_stage(conn)
 
 
@@ -248,6 +250,10 @@ def cancel_reason_of(kind, text) -> str:
     return (kind + (": " + text if text else ""))[:300]
 
 RETURN_GIVEN = "return_given"
+RETURN_AGREE = "return_agree"           # «Согласование возврата» (the owner 2026-11-13): between «На ОТХ» and «На возврат», the return not agreed yet
+OTH_CODES = ("oth", RETURN_AGREE, RETURN_GIVEN)     # the tyres lie at the point, no client: «На ОТХ», «Согласование возврата», «На возврат»
+BY_MARK_KEY = "oth_agree_by_mark:%d"     # app_state: the order came to «Согласование возврата» by a mark of a position, its stay (order_oth.by_mark)
+OTH_STAY_KEY = "oth_stay:%d"            # app_state: entered_at of the order's last stay on «На ОТХ», kept when it moves on (order_oth.oth_stay)
 NO_CLIENT = "клиента нет"
 
 
@@ -255,9 +261,9 @@ def unlinked_orders(conn, ids: Optional[Iterable[int]] = None) -> set:
     """The orders the lists show without their client (the owner 2026-11-09): on «На ОТХ» and «На возврат», and in «Вернули поставщику»
     after them (order_oth.detach: the client is unlinked, the journal keeps who it was). The look only: client_name stays in the order.
     `ids`: only these are looked at."""
-    sql = ("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE (s.code IN ('oth', ?) "
+    sql = ("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE (s.code IN ('oth', ?, ?) "
            "OR (s.code = 'return' AND c.id IN (SELECT order_id FROM order_oth_client)))")
-    args: list = [RETURN_GIVEN]
+    args: list = [RETURN_AGREE, RETURN_GIVEN]
     if ids is not None:
         ids = [int(i) for i in ids]
         if not ids:
@@ -273,9 +279,25 @@ def _ensure_return_given_stage(conn) -> None:
     МХ-3 closes the order in «Вернули поставщику»."""
     if conn.execute("SELECT 1 FROM order_stage WHERE code = ?", (RETURN_GIVEN,)).fetchone():
         return
-    oth = conn.execute("SELECT position FROM order_stage WHERE code = 'oth'").fetchone()
+    oth = conn.execute("SELECT position FROM order_stage WHERE code = ?", (RETURN_AGREE,)).fetchone() or \
+        conn.execute("SELECT position FROM order_stage WHERE code = 'oth'").fetchone()     # after «Согласование возврата» when it is there
     at = (oth[0] + 1) if oth else (conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM order_stage").fetchone()[0])
     code, name, color, kind = next(d for d in DEFAULT_STAGES if d[0] == RETURN_GIVEN)
+    cur = conn.execute("INSERT INTO order_stage (code, name, color, position, kind) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM order_stage WHERE code = ?)",
+                       (code, name, color, at, kind, code))
+    if cur.rowcount == 1:                                       # the owner's own stages have no code: «code != …» alone would skip them
+        conn.execute("UPDATE order_stage SET position = position + 1 WHERE position >= ? AND (code IS NULL OR code != ?)", (at, code))
+    conn.commit()
+
+
+def _ensure_return_agree_stage(conn) -> None:
+    """A pipeline made before «Согласование возврата» existed (the owner 2026-11-13: the agreement of the return is a stage, not a status of
+    «На возврат») gets it once, right after «На ОТХ» (one statement, like «На возврат»): an open stage, on the board."""
+    if conn.execute("SELECT 1 FROM order_stage WHERE code = ?", (RETURN_AGREE,)).fetchone():
+        return
+    oth = conn.execute("SELECT position FROM order_stage WHERE code = 'oth'").fetchone()
+    at = (oth[0] + 1) if oth else (conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM order_stage").fetchone()[0])
+    code, name, color, kind = next(d for d in DEFAULT_STAGES if d[0] == RETURN_AGREE)
     cur = conn.execute("INSERT INTO order_stage (code, name, color, position, kind) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM order_stage WHERE code = ?)",
                        (code, name, color, at, kind, code))
     if cur.rowcount == 1:                                       # the owner's own stages have no code: «code != …» alone would skip them
@@ -739,7 +761,7 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
         conn.rollback()
         raise
     if link_client is None:
-        link_client = (conn.execute("SELECT code FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone() or [""])[0] not in ("oth", RETURN_GIVEN)
+        link_client = (conn.execute("SELECT code FROM order_stage WHERE id = ?", (card["stage_id"],)).fetchone() or [""])[0] not in OTH_CODES
     if "client_phone" in changed and link_client:
         _attach_client(conn, card_id, now, author)
     from . import oth_sale
@@ -972,7 +994,7 @@ def _needs_placed(stage: dict, placed: Optional[dict]) -> bool:
     """«Заказ оформлен» and every stage after it need the data of placing; so does a user stage that stands after it."""
     if stage["code"] in PLACED_CODES:
         return True
-    if stage["code"] in ("new", "talk", "wait", "cancel", "refused", "return", RETURN_GIVEN, FROM_POINT[0]):
+    if stage["code"] in ("new", "talk", "wait", "cancel", "refused", "return", RETURN_AGREE, RETURN_GIVEN, FROM_POINT[0]):
         return False
     return placed is not None and stage["position"] >= placed["position"]
 
@@ -1096,7 +1118,7 @@ def _sell_record(conn, card: dict, now: str, author: str, journal: bool, commit:
 
 
 def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[dict] = None, chain: tuple = (), fire_rules: bool = True,
-              journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False) -> bool:
+              journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False, oth_resume: str = "") -> bool:
     """Move a card to a stage. The fields that come with the move are saved first; the move itself needs the stage's required data.
     `fire_rules=False` (the bulk move) leaves the rules of the new stage asleep: no task, no message for hundreds of cards at once.
     A refusal goes to the journal as a red record; not with `journal=False` (the bulk move) and not for a rule (`chain` is given only by the
@@ -1105,13 +1127,15 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     A client's order that goes to «На ОТХ» is cancelled and its tyres become a record of storage (oth_storage, the owner 2026-11-10);
     `oth_split=False`: the order itself goes back there (an undo, «Вернуть на ОТХ» of an order that stood there before).
     A record of storage goes to «Выполнено» by any way (the board, the card, the bulk move, a chat, a rule) only as the point's «Продать»
-    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself."""
+    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself.
+    `oth_resume`: from «Согласование возврата» back to «На ОТХ», the stay that began at this moment goes on (order_oth.back_to_oth, the owner
+    2026-11-13): no new stay, its marks «возвращено поставщику» and its seven days kept."""
     stage = get_stage(conn, stage_id)
     changed = update_card(conn, card_id, changes, now, author, commit=False, link_client=False) if changes else []   # not saved until
     card = get_card(conn, card_id)                                                                               # the move is allowed
     phoned = "client_phone" in changed
     if card["stage_id"] == stage["id"]:
-        if phoned and stage["code"] not in ("oth", RETURN_GIVEN):
+        if phoned and stage["code"] not in OTH_CODES:
             _attach_client(conn, card_id, now, author)
         if commit:
             conn.commit()                                                       # no move, but the fields that came are kept
@@ -1130,13 +1154,13 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)
     try:
-        if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in ("oth", RETURN_GIVEN) and oth_storage.splits(conn, card):
+        if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in OTH_CODES and oth_storage.splits(conn, card):
             made = oth_storage.split(conn, card, stage, now, author)        # the client's order is cancelled, its tyres are the record's
             stored, stage = made["record"], made["stage"]
             card = dict(get_card(conn, card_id), stage=card["stage"])
         elif stage["code"] == "oth" and oth_storage.cancelled_by_mistake(conn, card):
             oth_storage.reopen(conn, card, now, author)                     # the office's wrong «Отмена» of a record (the owner 2026-11-10)
-        elif stage["kind"] == "open" and stage["code"] not in ("oth", RETURN_GIVEN) and oth_storage.is_record(conn, card_id):
+        elif stage["kind"] == "open" and stage["code"] not in OTH_CODES and oth_storage.is_record(conn, card_id):
             raise OrderError("Это запись хранения (шины без клиента): её шины берёт новый заказ («Взять с ОТХ», «Новый клиент») "
                              "или прежний клиент («Вернуть заказ клиенту»).")
         elif card["stage"].get("code") == "cancel" and stage["kind"] == "open" and oth_storage.record_of(conn, card_id) is not None:
@@ -1165,20 +1189,27 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
                                    "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (card_id, order_alerts.EVERYBODY)).fetchall():
         order_alerts.resolve(conn, refused, now, author)                       # the card moved: its refused moves are no longer a cause to act
     if stage["code"] == "at_point":
-        if card["stage"].get("code") in ("oth", RETURN_GIVEN):
+        if card["stage"].get("code") in OTH_CODES:
             card = dict(card, reserve_until="")                                 # back from «На ОТХ»: a date of an old stay is not a reservation
         _start_reserve(conn, card, now, author)
+    elif stage["code"] == "oth" and oth_resume and card["stage"].get("code") == RETURN_AGREE:
+        conn.execute("UPDATE order_card SET entered_at = ? WHERE id = ?", (oth_resume, card_id))     # the same stay on «На ОТХ»
     elif stage["code"] == "oth":
         _start_oth(conn, card, now, author)
     _leave_oth(conn, card, stage, now, author)
     was_code = card["stage"].get("code")
-    if (was_code in ("oth", RETURN_GIVEN) and stage["code"] not in ("oth", RETURN_GIVEN)) or (was_code == RETURN_GIVEN and stage["code"] == "oth"):
+    if was_code == "oth" and stage["code"] in (RETURN_AGREE, RETURN_GIVEN):         # the stay on «На ОТХ» its marks «На возврат» are kept by
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (OTH_STAY_KEY % int(card_id), card["entered_at"] or ""))     # (order_oth.oth_stay)
+    elif stage["code"] == RETURN_AGREE and was_code not in OTH_CODES and card["stage"].get("kind") == "open":     # from work, not after a stay
+                                                                                  # on «На ОТХ» (an undo from «Выполнено» comes back to its stay)
+        conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (OTH_STAY_KEY % int(card_id), BY_MARK_KEY % int(card_id)))
+    if (was_code in OTH_CODES and stage["code"] not in OTH_CODES) or (was_code in (RETURN_AGREE, RETURN_GIVEN) and stage["code"] == "oth"):
         from . import order_oth
         order_oth.left_return(conn, card_id, stage, now, author)
     from_oth = card["stage"].get("code") == "oth"
     after_oth = from_oth or (card["stage"].get("kind") != "open" and conn.execute(          # «На ОТХ», then a finished stage, then open again
         "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND (text LIKE ? OR text = ?) LIMIT 1", (card_id,) + OTH_MARKS).fetchone())
-    if stage["code"] not in ("oth", RETURN_GIVEN):                              # the client of the phone, after the stage's own linking:
+    if stage["code"] not in OTH_CODES:                              # the client of the phone, after the stage's own linking:
         unlinked = bool(after_oth) and conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (card_id,)).fetchone() is None
         if (phoned or unlinked) if stage["kind"] == "open" else (phoned and not from_oth):
             _attach_client(conn, card_id, now, author)                          # a new phone, or one typed on «На ОТХ» (review of З15);
@@ -1380,7 +1411,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         if not board_matches(wanted, cid, name, phone, first.get(cid, ""), webmim or "", articles=articles.get(cid, ()), items=item_names.get(cid, ())):
             continue
         stage = columns[sid]["stage"]
-        state = order_oth.state_of(plans.get(cid)) if stage["code"] == RETURN_GIVEN else ""
+        state = order_oth.state_of(plans.get(cid)) if stage["code"] in (RETURN_AGREE, RETURN_GIVEN) else ""     # «Согласование возврата»: AGREE
         if returning and (state or "-") != returning and not (returning == order_oth.AGREED and state == order_oth.SIGNED):
             continue
         seconds = _seconds_on_stage(entered, now)

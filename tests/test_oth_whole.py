@@ -45,7 +45,7 @@ def test_a_record_with_a_mark_is_not_offered_and_not_taken(tmp_path):
     with pytest.raises(oth_sale.OthSaleError, match="Запись на возврат поставщику целиком: брать с ОТХ нельзя"):
         oth_sale.take(conn, b, line, item_of(conn, x), LATER, "o")
     assert oth_storage.why_not_whole(conn, orders.get_card(conn, b), x) == oth_storage.RETURN_WHOLE
-    assert [i["qty"] for i in orders.get_card(conn, x)["items"]] == [4] and code(conn, x) == "oth" and not oth_sale.taken_ids(conn, b)
+    assert [i["qty"] for i in orders.get_card(conn, x)["items"]] == [4] and code(conn, x) == orders.RETURN_AGREE and not oth_sale.taken_ids(conn, b)     # the mark: the stage (2026-11-13)
     with pytest.raises(oth_sale.OthSaleError, match="целиком"):
         oth_sale.to_new_client(conn, x, "Пётр", "+7 900 000 11 22", LATER, "o")
 
@@ -55,7 +55,7 @@ def test_the_office_sells_the_marked_record_whole_and_the_point_does_not(tmp_pat
     conn = db(tmp_path)
     cid, x = marked_record(conn)
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "менеджер Бета", SOLD)
-    assert not done and answer == order_oth.AGREEING_ANSWER and code(conn, x) == "oth"
+    assert not done and answer == order_oth.AGREEING_ANSWER and code(conn, x) == orders.RETURN_AGREE
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "owner", SOLD, office=True)
     assert done, answer
     assert code(conn, x) == "done" and [i["qty"] for i in orders.get_card(conn, x)["items"]] == [4]
@@ -73,7 +73,7 @@ def test_nobody_sells_a_part_of_a_marked_record(tmp_path):
     assert not done and answer == order_oth.AGREEING_ANSWER
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "owner", SOLD, office=True)
     assert not done and "только целиком" in answer and "2 из 4 шт." in answer
-    assert code(conn, x) == "oth"
+    assert code(conn, x) == orders.RETURN_AGREE
 
 
 def test_a_record_without_a_mark_is_as_before(tmp_path):
@@ -103,7 +103,7 @@ def test_an_order_on_oth_the_old_way_with_a_part_marked_is_as_before(tmp_path, m
     assert oth_stock.pieces(conn) == {"1": 3} and oth_stock.returning_records(conn) == set()
     b = new_order(conn, qty=3)
     assert take(conn, b) == 3
-    assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [1] and code(conn, old) == "oth"
+    assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [1] and code(conn, old) == orders.RETURN_AGREE     # the mark: the stage
 
 
 def test_the_feed_drops_the_marked_record_whole_and_keeps_an_unmarked_one(tmp_path, capsys):

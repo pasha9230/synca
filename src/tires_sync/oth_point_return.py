@@ -1,5 +1,5 @@
 """The point and the office around the return of «На ОТХ» (the owner 2026-11-12, the task E–G):
-- «Есть покупатель» (E2): the point, on «Согласование возврата», for BUYER_DAYS since the order came to that status (order_oth.agreeing_since),
+- «Есть покупатель» (E2): the point, on «Согласование возврата», for BUYER_DAYS since the order came to that stage (order_oth.agreeing_since),
   says it found a buyer; the responsible (order_oth.office_assignee) gets one urgent task «Важное · …» with the link, the tyres and the point.
   A second press makes no second open task. The sale itself is the office's, from the card, as before; nothing is read from WebMIM.
 - one act for several orders (E3): the office picks orders of one point on the agreement or on the return, one date and one PDF; the act is

@@ -164,7 +164,7 @@ def register(app) -> None:
         conn = get_conn()
         data = order_oth.stock(conn)
         dates, marks = order_oth.reserve_dates(conn), order_oth.item_marks(conn)
-        codes = {r[0]: r[1] for r in conn.execute("SELECT c.id, s.code FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_given')")}
+        codes = {r[0]: r[1] for r in conn.execute("SELECT c.id, s.code FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_agree', 'return_given')")}
         agreed = order_oth.plans(conn)
         titles = {cid: order_sheet.mim_title(conn, orders.get_card(conn, cid)) for cid, code in codes.items() if code == "oth"}   # 2026-11-06
         actable = {cid for cid in codes if oth_point_return.can_act(conn, orders.get_card(conn, cid))}     # one act for several orders (E3)
@@ -172,14 +172,15 @@ def register(app) -> None:
         for row in data["stock"]:
             row["oth_title"] = titles.get(row["order_id"], "")
             when = dates.get(row["order_id"], {})
-            on_oth = codes.get(row["order_id"]) == "oth"
+            on_oth = row["stage_code"] == "oth"                                           # «Согласование возврата» by a mark: as «На ОТХ» (order_oth.stock)
+            marking = codes.get(row["order_id"]) in order_oth.MARKED_ON                     # «Согласование возврата»: another position may join (2026-11-13)
             row.update(oth_since=when.get("oth_since") or row["since"],                      # no reserve columns (П19, 2026-11-08)
                        return_label="" if on_oth else order_oth.label_of(agreed.get(row["order_id"])),
-                       can_to_return=on_oth and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
+                       can_to_return=marking and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
             row["act_box"] = row["order_id"] in actable and row["order_id"] not in boxed     # the first row of the order has its checkbox
             boxed.add(row["order_id"])
         for row in data["returned"]:
-            row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) == "oth" else None
+            row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) in order_oth.MARKED_ON else None
         own = manual_list(conn)
         test = oth_stock._test_points(conn)
         places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"] and r["point_id"] not in test}
@@ -258,7 +259,7 @@ def register(app) -> None:
         conn = get_conn()
         try:
             if order_oth.item_to_return(conn, int(request.form.get("item") or 0), local_iso(), author(), request.form.get("qty")):
-                flash("Позиция на возврат: статус «Согласование возврата», шины в продаже до согласования возврата, ответственному поставлена задача.")
+                flash("Позиция на возврат: заказ целиком на «%s», ответственному поставлена задача." % orders.stage_name(conn, orders.RETURN_AGREE))
             else:
                 flash("Эта позиция уже на возврат.")
         except (order_oth.OthError, ValueError) as err:

@@ -46,7 +46,7 @@ def test_e1_the_seventh_day_leaves_the_task_and_asks_the_point_nothing(tmp_path)
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append((card["responsible"], text))) == 1
     order_oth.finish_moved(conn, "2026-10-26T13:30:00", lambda card, text: told.append((card["responsible"], text)))
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN
+    assert card["stage"]["code"] == orders.RETURN_AGREE
     assert [t["title"] for t in open_tasks(conn, order_oth.RETURN_TASK, cid)] == [order_oth.RETURN_TASK]     # «Согласовать возврат» stays
     assert not order_oth.question_open(conn, card)
     assert [t for who, t in told if who == ""] == []                                      # nothing to the point (it is on VK)
@@ -110,8 +110,9 @@ def test_e2_the_moment_of_the_status_on_oth_is_the_first_mark_and_unagree_starts
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == ""             # agreed: not on the agreement
     assert order_oth.unagree(conn, orders.get_card(conn, other), "2026-10-21T09:00:00", "owner")
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == "2026-10-21T09:00:00"
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-17T12:30:00", "система")     # the 7th day after the mark
-    assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"           # the status went on: no new 2 days
+    order_oth.ask_seventh_day(conn, "2026-10-21T12:30:00")                                              # the 7th day after the mark:
+    assert orders.get_card(conn, card)["stage"]["code"] == orders.RETURN_AGREE                          # on the stage since the mark (2026-11-13)
+    assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"           # no new 2 days
 
 
 # ---- E3 ---------------------------------------------------------------------------------------------------------------------------------
