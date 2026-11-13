@@ -687,8 +687,21 @@
     trigger.addEventListener("change", sync); action.addEventListener("change", sync); sync();
   });
   // «Чаты»: the thread has no scroll of its own (owner's word 2026-11-09: only the page scrolls), so the page opens at the last message
-  function chatScroller(el) {                         // the box that scrolls the page: .main of the panel, else the document
-    for (var n = el.parentElement; n; n = n.parentElement) {
+  (function () {                                    // the owner 13.11: on a wide screen the chat box takes the screen below its top, its messages scroll
+    var box = document.querySelector("[data-chat-box]");
+    if (!box || !window.matchMedia) return;
+    var wide = window.matchMedia("(min-width: 1101px)");
+    function fit() {
+      if (!wide.matches) { box.style.height = ""; return; }
+      var top = Math.max(16, box.getBoundingClientRect().top);
+      box.style.height = Math.max(360, window.innerHeight - top - 16) + "px";
+    }
+    fit();
+    window.addEventListener("resize", fit);
+    document.addEventListener("scroll", fit, {capture: true, passive: true});
+  })();
+  function chatScroller(el) {                         // the box that scrolls the thread: the thread itself on a wide screen ([data-chat-box]), else .main of the panel, else the document
+    for (var n = el; n; n = n.parentElement) {
       var y = getComputedStyle(n).overflowY;
       if ((y === "auto" || y === "scroll") && n.scrollHeight > n.clientHeight) return n;
     }
@@ -696,7 +709,7 @@
   }
   function chatBottom(box) {                          // where the screen ends for the thread: above a reply field stuck to the bottom
     var comp = document.querySelector(".chat-composer"), view = box === document.scrollingElement || box === document.documentElement ? window.innerHeight : box.getBoundingClientRect().bottom;
-    if (comp && getComputedStyle(comp).position === "sticky") view -= comp.getBoundingClientRect().height;
+    if (comp && !(box.classList && box.classList.contains("chat-thread")) && getComputedStyle(comp).position === "sticky") view -= comp.getBoundingClientRect().height;   // the thread scrolls by itself: the field is below it
     return view;
   }
   function chatAtEnd(thread) {
@@ -707,7 +720,7 @@
     var thread = document.querySelector(".chat-thread"), last = thread && thread.lastElementChild;
     if (!last) return;
     var box = chatScroller(thread), comp = document.querySelector(".chat-composer");
-    var end = comp && getComputedStyle(comp).position !== "sticky" ? comp : last;   // the old view: the reply field under the thread in sight too
+    var end = box !== thread && comp && getComputedStyle(comp).position !== "sticky" ? comp : last;   // the old view: the reply field under the thread in sight too
     var over = end.getBoundingClientRect().bottom - chatBottom(box);
     if (over > 0) box.scrollTop += over + 8;
   }

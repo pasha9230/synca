@@ -592,6 +592,13 @@ a.menu-item{text-decoration:none}
 .chat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .chat-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-thread { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-4); }   /* no height of its own: the page scrolls and opens at the last message (app.js) */
+/* the owner 13.11: on a wide screen the conversation scrolls by itself, the head of the chat (who, the ad) and the reply field stay in
+   place; the box takes the screen below its top (app.js sets the height, this is the fallback); a phone keeps the page scrolling */
+@media (min-width: 1101px) {
+  .chats-layout .chats-main[data-chat-box] { position: sticky; top: var(--s-4); display: flex; flex-direction: column; height: calc(100vh - 180px); min-height: 360px; }
+  .chats-layout .chats-main[data-chat-box] > * { flex: none; }
+  .chats-layout .chats-main[data-chat-box] > .chat-thread { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}
 #order-chat { scroll-margin-top: max(0px, calc(100vh - 220px)); }   /* back from a send in the order window: the reply field at the bottom of the screen, the last messages above it */
 .msg { max-width: 78%; padding: var(--s-2) var(--s-3); border-radius: 10px; background: var(--gray-100); white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg--out { align-self: flex-end; background: var(--primary-100); }

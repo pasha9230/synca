@@ -32,7 +32,7 @@
 {% if c.responsible or (accounts|length > 1 and c.account_name) %}<div class="o2-r3 chat-meta">{% if accounts|length > 1 and c.account_name %}<span>{{ c.account_name }}</span>{% endif %}{% if c.responsible %}<span class="chat-who">отвечает {{ answer_names.get(c.responsible, c.responsible) }}</span>{% endif %}</div>{% endif %}</a>
 {% else %}{% if q %}{{ empty("search", "По запросу «" ~ q ~ "» чатов нет", "Проверьте написание или ищите по телефону, номеру заказа, части имени.") }}{% else %}{{ empty("chat", "Чатов нет", "Чаты появятся, когда в аккаунте включено чтение чатов.", "/connections/avito", "Подключения") if has_right("connections") else empty("chat", "Чатов нет", "Чаты появятся, когда владелец включит чтение чатов в аккаунте.") }}{% endif %}{% endfor %}
 </section>
-<section class="chats-main o2-cl-pane">
+<section class="chats-main o2-cl-pane"{% if current %} data-chat-box{% endif %}>
 {% if current %}
 {% set keep %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="f" value="{{ flt }}"><input type="hidden" name="acc" value="{{ acc or every or '' }}"><input type="hidden" name="q" value="{{ q }}">{% endset %}
 <div class="card-head chat-head o2-cl-head">

@@ -2,7 +2,9 @@
 
 Блоки страницы (окно заказа «Нового вида», чаты обоих видов, массовые действия, шаблоны сообщений, фильтры магазина,
 таблицы брендов) не имеют своей высоты с прокруткой внутри. Выпадающие окна, модальные окна и каркас страницы
-(.sidebar, .main) прокручиваются как раньше; прокрутка таблиц вбок (overflow-x) остаётся."""
+(.sidebar, .main) прокручиваются как раньше; прокрутка таблиц вбок (overflow-x) остаётся.
+Исключение (слово владельца 2026-11-13: «Нужно чтобы чат отдельно скролился и была зафиксирована информация в шапке страницы»):
+на широком экране лента открытого чата (.chat-box) прокручивается сама, шапка чата и поле ответа стоят на месте; на телефоне — как было."""
 import re
 from pathlib import Path
 
@@ -63,7 +65,17 @@ def test_page_blocks_have_no_scroll_of_their_own():
 
 def test_no_fixed_height_of_the_order_window_or_the_chats():
     assert "100vh - 150px" not in css("office2.css") and "100vh - 170px" not in css("office2.css")
-    assert "height:calc(100vh" not in css("office2-pages.css")
+    outside = "\n".join(line for line in css("office2-pages.css").splitlines() if "[data-chat-box]" not in line)
+    assert "height:calc(100vh" not in outside                   # the chat box of a wide screen only (the owner 13.11)
+
+
+def test_the_open_chat_scrolls_by_itself_on_a_wide_screen_only():
+    for name, box, thread in (("panel.css", ".chats-layout .chats-main[data-chat-box]", ".chats-layout .chats-main[data-chat-box] > .chat-thread"),
+                              ("office2-pages.css", ".o2 .o2-cl-pane[data-chat-box]", ".o2 .o2-cl-pane[data-chat-box]>.o2-cl-msgs")):
+        text = css(name)
+        assert text.index("1101px") < text.index(box), name                                      # inside the wide screen's rules only
+        assert any(scrolls(b) for b in rules(text, thread)), (name, thread)                  # the messages scroll by themselves
+        assert any("position:sticky" in b for b in rules(text, box)), (name, box)            # the head and the reply field stay in place
 
 
 def test_side_blocks_do_not_stick_taller_than_the_screen():

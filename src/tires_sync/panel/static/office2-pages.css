@@ -124,6 +124,8 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 .o2-cl-none{text-align:center}
 .o2-cl-nohist{max-width:520px;align-self:center}
 .o2 .o2-cl-comp{flex:none;position:sticky;bottom:0;z-index:2;padding:8px 12px 6px;border-top:1px solid var(--o2-border-2);background:var(--o2-bg);gap:6px}
+/* the owner 13.11: on a wide screen the messages scroll by themselves, the head and the reply field stay (app.js sets the height) */
+@media (min-width:1101px){.o2 .o2-cl-pane[data-chat-box]{position:sticky;top:16px;height:calc(100vh - 180px);min-height:360px}.o2 .o2-cl-pane[data-chat-box]>*{flex:none}.o2 .o2-cl-pane[data-chat-box]>.o2-cl-msgs{flex:1 1 auto;min-height:0;overflow-y:auto}}
 .o2-cl-send{display:flex;flex-direction:column;gap:4px}
 .o2-cl-line{display:flex;align-items:flex-end;gap:6px}
 .o2-cl-line .textarea{flex:1;min-width:0;min-height:40px;max-height:160px;resize:vertical}
