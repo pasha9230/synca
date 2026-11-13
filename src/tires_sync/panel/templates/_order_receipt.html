@@ -26,7 +26,7 @@
 <td><input class="input input--sm" name="line_unit" value="{{ l.unit }}" maxlength="10" aria-label="Ед. изм., строка {{ loop.index }}" style="width:60px"></td>
 <td><input class="input input--sm input--num" name="line_price" value="{{ l.price }}" inputmode="decimal" aria-label="Цена, строка {{ loop.index }}" style="width:110px"></td></tr>
 {% endfor %}</tbody></table></div>
-<p class="small muted">Чтобы убрать строку, сотрите её наименование. Сумма и сумма прописью считаются при формировании.{% if rw.total %} Сейчас итого: <b data-receipt-total>{{ rw.total }}</b>.{% endif %}</p>
+<p class="small muted">Строка с пустым наименованием в чек не попадёт. Сумма и сумма прописью считаются при формировании.{% if rw.total %} Сейчас итого: <b data-receipt-total>{{ rw.total }}</b>.{% endif %}</p>
 {% if not rw.chat %}<p class="small text-err" data-receipt-nochat>У заказа нет чата Авито, куда можно отправить: отправка недоступна, чек можно скачать.</p>{% elif not can_post("order_receipt_send") %}<p class="small muted">Отправлять клиенту может тот, у кого есть право «отправлять клиенту».</p>{% else %}<p class="small muted">Чек уйдёт картинкой в чат {{ rw.chat.ref }}{% if rw.chat.peer_name %} · {{ rw.chat.peer_name }}{% endif %}.</p>{% endif %}
 {% if rw.kept %}<div class="small" data-receipt-kept><span class="strong">Отправленные чеки:</span>{% for k in rw.kept %}<div>{{ k.title }} · {{ receipt_money(k.total) }} · {{ k.made_at|dt }} · <a href="/orders/{{ c.id }}/receipts/{{ k.id }}.pdf">PDF</a> · <a href="/orders/{{ c.id }}/receipts/{{ k.id }}.jpg" target="_blank" rel="noopener">картинка</a></div>{% endfor %}</div>{% endif %}
 </div>
