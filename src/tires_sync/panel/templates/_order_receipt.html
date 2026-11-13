@@ -3,7 +3,7 @@
    «Посмотреть картинку» make the file only; «Сформировать и отправить в чат» sends the picture to the order's Avito chat by this press. #}
 {% set rw = receipt_window(c) %}{% if rw %}{% set rv = rw["values"] %}
 <div class="modal-backdrop{% if rw.open %} is-open{% endif %}" id="order-receipt" role="dialog" aria-modal="true" aria-labelledby="order-receipt-h" data-receipt><div class="modal" style="max-width:1040px">
-<form method="post" action="/orders/{{ c.id }}/receipt/send" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="receipt_token" value="{{ rw.token }}">
+<form method="post" action="/orders/{{ c.id }}/receipt/send"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="receipt_token" value="{{ rw.token }}">
 <div class="modal-head"><h3 id="order-receipt-h">Товарный чек по заказу №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
 <div class="modal-body stack">
 {% if rw.missing %}<p class="small text-err" data-receipt-missing>Не заполнены реквизиты продавца: {{ rw.missing|join(", ") }}. Заполните их в <a href="{{ rw.seller_settings }}">«Настройки заказов › Товарный чек»</a> или впишите ниже.</p>{% endif %}

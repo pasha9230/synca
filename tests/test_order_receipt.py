@@ -332,7 +332,7 @@ def test_a_double_press_while_the_first_is_sending_keeps_the_mark(tmp_path):
     assert _form(client, card_id)["receipt_token"] == form["receipt_token"]
     assert not [c for c in app.config["AVITO_HTTP"].calls if c[1].endswith("/messages/image")]
     page = client.get("/orders/%d" % card_id).get_data(as_text=True)
-    assert 'action="/orders/%d/receipt/send" data-once' % card_id in page
+    assert 'action="/orders/%d/receipt/send" data-once' % card_id not in page    # the form also downloads the PDF: the server guards the send
 
 def test_no_font_with_russian_letters_makes_no_receipt(monkeypatch):
     monkeypatch.setattr(receipts, "FONTS", {False: ("/nonexistent/a.ttf",), True: ("/nonexistent/b.ttf",)})
