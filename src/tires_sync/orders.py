@@ -1422,7 +1422,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         columns[sid]["cards"].append({"id": cid, "client": oth_title or (NO_CLIENT if cid in gone else name or phone or "Без имени"), "oth_title": oth_title, "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(since.get(cid, entered)), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
-                                      "returning": order_oth.label_of(plans.get(cid)) if state and stage["code"] == RETURN_GIVEN else "", "oth_dates": on_oth.get(cid), "oth_card": oth_card})
+                                      "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid), "oth_card": oth_card})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":

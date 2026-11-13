@@ -760,7 +760,7 @@ def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
             conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date, signed_at, signed_by) VALUES (?,?,?,?,?,?) "
                          "ON CONFLICT(order_id) DO UPDATE SET signed_at = excluded.signed_at, signed_by = excluded.signed_by "
                          "WHERE oth_return_plan.signed_at IS NULL", (card["id"], now, who, now[:10], now, who))
-        if card["stage"]["code"] == "oth":
+        if card["stage"]["code"] in ("oth", orders.RETURN_AGREE):               # signed: «На возврат» (the agreed and the signed, 2026-11-13)
             try:
                 moved = orders.move_card(conn, card["id"], order_oth._returning_stage(conn)["id"], now, who)
             except OrderError as err:

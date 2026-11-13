@@ -173,13 +173,14 @@ def register(app) -> None:
             row["oth_title"] = titles.get(row["order_id"], "")
             when = dates.get(row["order_id"], {})
             on_oth = codes.get(row["order_id"]) == "oth"
+            marking = codes.get(row["order_id"]) in order_oth.MARKED_ON                     # «Согласование возврата»: another position may join (2026-11-13)
             row.update(oth_since=when.get("oth_since") or row["since"],                      # no reserve columns (П19, 2026-11-08)
                        return_label="" if on_oth else order_oth.label_of(agreed.get(row["order_id"])),
-                       can_to_return=on_oth and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
+                       can_to_return=marking and order_oth.item_mark(marks, row["item_id"], row["since"]) is None and row["order_id"] not in agreed)
             row["act_box"] = row["order_id"] in actable and row["order_id"] not in boxed     # the first row of the order has its checkbox
             boxed.add(row["order_id"])
         for row in data["returned"]:
-            row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) == "oth" else None
+            row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) in order_oth.MARKED_ON else None
         own = manual_list(conn)
         test = oth_stock._test_points(conn)
         places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"] and r["point_id"] not in test}

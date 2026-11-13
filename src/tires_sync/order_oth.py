@@ -666,6 +666,7 @@ def _agree_part(conn, card: dict, held: Dict[int, int], parts: Dict[int, int], d
             back = _agree_whole(conn, orders.get_card(conn, card["id"]), day, now, author, commit=False)
             target = card["id"]
             if card["stage"]["code"] == orders.RETURN_AGREE:                          # agreed: «На возврат» (the owner 2026-11-13), in this transaction
+                _carry_ask(conn, card, now)
                 if not orders.move_card(conn, card["id"], _returning_stage(conn)["id"], now, author, commit=False):
                     raise OthError("Заказ только что перенесли: обновите страницу.")
     except Exception:
@@ -695,6 +696,8 @@ def _agree_whole(conn, card: dict, day: str, now: str, author: str, commit: bool
     if stage is None:
         conn.commit()
     else:
+        if card["stage"]["code"] == orders.RETURN_AGREE:
+            _carry_ask(conn, card, now)
         try:
             moved = orders.move_card(conn, card["id"], stage["id"], now, author)           # commits the agreement with the move
         except orders.OrderError:
@@ -722,6 +725,7 @@ def unagree(conn, card: dict, now: str, author: str) -> bool:
     orders.add_event(conn, card["id"], now, author, "field", "Согласование возврата с поставщиком отменено: «%s», шины не в продаже." % LABELS[AGREE])
     _audit(conn, now, author, "oth_return_unagreed", {"order": int(card["id"])})
     if card["stage"]["code"] == orders.RETURN_GIVEN:                                  # back to «Согласование возврата», with the cancel, in one transaction
+        _carry_ask(conn, card, now)
         try:
             moved = orders.move_card(conn, card["id"], _agree_stage(conn)["id"], now, author, fire_rules=False)
         except orders.OrderError:
@@ -838,6 +842,14 @@ SINCE_KEY = "oth_ask_since"                      # app_state: the first tick of 
 
 def _ask_key(card: dict) -> str:
     return ASK_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""))
+
+
+def _carry_ask(conn, card: dict, now: str) -> None:
+    """The order goes on between «Согласование возврата» and «На возврат» (agree, unagree; the owner 2026-11-13): the question of the stay goes
+    with it, as when both were one stage — the next stay (entered at `now`) has it. No commit: saved with the move."""
+    value = store_value(conn, _ask_key(card))
+    if value:
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (_ask_key(dict(card, entered_at=now)), value))
 
 
 def ask_due(card: dict, now: str) -> bool:
