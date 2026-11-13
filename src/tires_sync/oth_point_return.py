@@ -1,7 +1,7 @@
 """The point and the office around the return of «На ОТХ» (the owner 2026-11-12, the task E–G):
-- «Есть покупатель» (E2): the point, on «Согласование возврата», for BUYER_DAYS since the order came to that stage (order_oth.agreeing_since),
-  says it found a buyer; the responsible (order_oth.office_assignee) gets one urgent task «Важное · …» with the link, the tyres and the point.
-  A second press makes no second open task. The sale itself is the office's, from the card, as before; nothing is read from WebMIM.
+- «Есть покупатель» (E2): the point said it found a buyer; the responsible (order_oth.office_assignee) gets one urgent task «Важное · …» with the
+  link, the tyres and the point. The owner 2026-11-13 (У3): not on «Согласование возврата» any more — the point sells from «На ОТХ» («Продать» with
+  the buyer's data); whether a button «Есть покупатель» comes on «На ОТХ» is the owner's call, so for now no stage has it (can_tell_buyer).
 - one act for several orders (E3): the office picks orders of one point on the agreement or on the return, one date and one PDF; the act is
   kept on the pair «point + date» (oth_return_act) and every order is agreed for the date as by «Согласовано» (order_oth.agree).
 - «Водитель не забрал» (G): the point, in «Сегодня возврат!», says the driver did not take the tyres (a comment if it likes). Once per point
@@ -11,16 +11,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from . import order_oth, orders, store
 
 AUTHOR = "система"
 MARK = "Важное"
-BUYER_DAYS = 2
 BUYER_TITLE = "%s · Точка нашла покупателя на шины с ОТХ: проверьте возможность продажи и оформите продажу" % MARK
-BUYER_ASK = "Есть покупатель на эти шины?"
 NOT_TAKEN_TITLE = "%s · Водитель не забрал возвраты, согласовать с менеджером" % MARK
 NOT_TAKEN_KEY = "oth_not_taken:%d:%s"            # app_state, per point and date: {"at", "by", "comment", "task", "sound", "ids"}
 NOT_TAKEN_NEXT = "Отправьте в следующие дни возвратов"
@@ -54,18 +51,12 @@ def _open_task(conn, card_id, title: str) -> Optional[int]:
 
 # ---- E2: «Есть покупатель» -------------------------------------------------------------------------------------------------------------
 
-def buyer_until(conn, card: dict) -> str:
-    """Until when «Есть покупатель» is shown (ISO, to the second): BUYER_DAYS since the order came to «Согласование возврата»; '' when not there."""
-    since = order_oth.agreeing_since(conn, card)
-    try:
-        return (datetime.fromisoformat(since) + timedelta(days=BUYER_DAYS)).isoformat(timespec="seconds") if since else ""
-    except ValueError:
-        return ""
+BUYER_OFF = "Заказ №%s: «Есть покупатель» больше не отмечается. Продать шины можно с «На ОТХ» или через офис."
 
 
 def can_tell_buyer(conn, card: dict, now: str) -> bool:
-    until = buyer_until(conn, card)
-    return bool(until) and now < until
+    """The owner 2026-11-13 (У3): «Есть покупатель» only on «На ОТХ», and there the point has «Продать» — no stage has the button for now."""
+    return False
 
 
 def tell_buyer(conn, card: dict, point_name: str, who: str, now: str) -> tuple:
@@ -77,8 +68,7 @@ def tell_buyer(conn, card: dict, point_name: str, who: str, now: str) -> tuple:
     label = card.get("webmim_number") or str(card["id"])
     if not can_tell_buyer(conn, card, now):
         conn.rollback()
-        return ("не подходит: не на согласовании возврата или прошло %d суток" % BUYER_DAYS,
-                "Заказ №%s: «Есть покупатель» можно отметить %d суток с начала согласования возврата. Напишите офису." % (label, BUYER_DAYS), False)
+        return "не подходит: «Есть покупатель» не отмечается (владелец 2026-11-13)", BUYER_OFF % label, False
     if _open_task(conn, card["id"], BUYER_TITLE):
         conn.rollback()
         return "уже отмечено", "Заказ №%s: офис уже знает о покупателе, задача открыта." % label, True

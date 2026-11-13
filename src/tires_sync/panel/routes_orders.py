@@ -1182,7 +1182,7 @@ def register(app) -> None:
     @app.route("/orders/<int:card_id>/oth-agree-drop", methods=["POST"])
     @login_required
     def order_oth_agree_drop(card_id):
-        """«Снять согласование» of an order on «Согласование возврата», nothing agreed (the owner 2026-11-13): back to «На ОТХ», on sale
+        """«Вернуть на ОТХ» (was «Снять согласование», the owner 2026-11-13 У2) of an order on «Согласование возврата», nothing agreed (the owner 2026-11-13): back to «На ОТХ», on sale
         (order_oth.back_to_oth). The same people as «Отменить согласование» (common.ACTION_RIGHTS). A second press: the order is no longer there."""
         conn = get_conn()
         card = card_or_404(conn, card_id)

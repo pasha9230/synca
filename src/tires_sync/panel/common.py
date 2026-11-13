@@ -343,7 +343,7 @@ NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catal
          "order_arrived_message": "send",                 # it prepares a message to the client: who may send them (review 2026-10-30)
          "order_oth_agreed": "supplier",                  # «Согласовано с поставщиком»: the owner and the partner (the owner 2026-10-29)
          "order_oth_unagree": "supplier",                 # «Отменить согласование»: the same people (the lead 2026-10-30)
-         "order_oth_agree_drop": "supplier",              # «Снять согласование» of «Согласование возврата» (2026-11-13): the same
+         "order_oth_agree_drop": "supplier",              # «Вернуть на ОТХ» of «Согласование возврата» (2026-11-13): the same
          "chat_send": "send", "chat_send_image": "send", "order_task_send": "send", "order_messages_send": "send", "orders_inbox_answer": "send", "orders_inbox_dismiss": "send", "share_new": "send",
          "share_create": "send"}
 SECTION_OF.update(connections_account_price_push="setup")       # «Цены сразу через API» (price_push, 2026-11-03): the owner, like «Остатки»

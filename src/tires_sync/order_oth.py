@@ -735,7 +735,7 @@ def unagree(conn, card: dict, now: str, author: str) -> bool:
     """«Снять согласование» (the owner and the partner, before the act МХ-3 is signed): the agreement goes and the order on «На возврат» goes back
     to «Согласование возврата» (the owner 2026-11-13: «На возврат» is the agreed ones only), the tyres stay off sale (the owner 2026-11-04), the point no
     longer sees the date; the task of the return is on again. One statement: a signed plan, or one cancelled a moment ago, is left as it is (a second
-    press changes nothing: «Снять согласование» of «Согласование возврата» is its own button, back_to_oth). False: nothing to cancel (or the order left)."""
+    press changes nothing: «Вернуть на ОТХ» of «Согласование возврата» is its own button, back_to_oth). False: nothing to cancel (or the order left)."""
     card = orders.get_card(conn, card["id"])                                          # the stage as it is now
     if card["stage"]["code"] not in RETURNING:
         return False
@@ -767,7 +767,7 @@ MARK_UNDONE = "Отметка «На возврат» снята: заказ с�
 
 
 def back_to_oth(conn, card: dict, now: str, author: str, why: str = BACK_TO_OTH, kept: bool = True) -> bool:
-    """An order on «Согласование возврата» with nothing agreed goes back to «На ОТХ», on sale (the owner 2026-11-13): «Снять согласование» of the
+    """An order on «Согласование возврата» with nothing agreed goes back to «На ОТХ», on sale (the owner 2026-11-13): «Вернуть на ОТХ» of the
     office, the last mark «На возврат» undone (`why` MARK_UNDONE) or its task closed «не возвращаем» (MARK_REFUSED). The same stay on «На ОТХ» goes on
     (orders.move_card oth_resume: its seven days, its real «Вернуть поставщику»), as when the order never left it; the marks «На возврат» of the stay
     go (their pieces on sale again, _back_on_sale), the tasks of the return are cancelled, no rule of the stage, nothing to the client. `kept`: the

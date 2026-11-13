@@ -2,8 +2,8 @@
 возврата» (code return_agree) is a stage between «На ОТХ» and «На возврат», not a status of «На возврат».
 - in: the seventh day on «На ОТХ», a position marked «На возврат» (the order whole), the office by hand; a move by hand to «На возврат»
   with nothing agreed goes on to the new stage;
-- out: «Согласовано» (the date; one act for several orders too) → «На возврат»; the office's sale → «Выполнено» («Есть покупатель» for two
-  days since the order came to the stage); «Снять согласование» → «На ОТХ», on sale; the last mark undone → «На ОТХ»;
+- out: «Согласовано» (the date; one act for several orders too) → «На возврат»; the office's sale → «Выполнено» (no «Есть покупатель» of the
+  point on the stage, the owner 2026-11-13 У3); «Вернуть на ОТХ» (was «Снять согласование», У2) → «На ОТХ», on sale; the last mark undone → «На ОТХ»;
 - «На возврат» holds the agreed ones only: «Отменить согласование» puts the order back on «Согласование возврата»; the act → «Вернули поставщику»;
 - the orders on the agreement now move once at the start (store._migrate), the agreed ones stay; a second run changes nothing;
 - the feed: the tyres on the agreement are not ours on OTH (as before); the Google table: the new name in «Этап», no new row."""
@@ -165,12 +165,15 @@ def test_out_one_act_for_several_orders_takes_them_to_na_vozvrat(tmp_path):
     assert done["agreed"] == [card] and code(conn, card) == orders.RETURN_GIVEN
 
 
-def test_out_the_buyer_for_two_days_since_the_stage_and_the_office_sells(tmp_path, clock):
+def test_out_no_buyer_button_of_the_point_on_the_stage_and_the_office_sells(tmp_path, clock):
+    """The owner 2026-11-13 (У3): «Есть покупатель» only on «На ОТХ» — not on «Согласование возврата» (was: for two days since the stage)."""
     app, owner, conn, pid, card = setup(tmp_path)
     to_agree_stage(conn, card, "2026-10-15T10:00:00")
     card_now = orders.get_card(conn, card)
-    assert oth_point_return.buyer_until(conn, card_now) == "2026-10-17T10:00:00"
-    assert oth_point_return.can_tell_buyer(conn, card_now, "2026-10-17T09:59:59") and not oth_point_return.can_tell_buyer(conn, card_now, "2026-10-17T10:00:00")
+    assert not oth_point_return.can_tell_buyer(conn, card_now, "2026-10-15T10:00:01")
+    clock["now"] = "2026-10-15T11:00:00"
+    page = tab(manager(app, conn, pid), "agree")
+    assert has(page, card) and 'data-oth-buyer="%d"' % card not in page and "Есть покупатель" not in page
     assert order_oth.sell(conn, card_now, "gamma", T1)[2] is False                   # the point does not sell on the agreement
     outcome, answer, done = order_oth.sell(conn, card_now, "owner", T1, office=True)
     assert done and code(conn, card) == "done" and not return_tasks(conn, card)
@@ -180,7 +183,7 @@ def test_out_unagree_on_the_stage_goes_back_to_oth_on_sale(tmp_path, clock):
     app, owner, conn, pid, card = setup(tmp_path)
     stay = orders.get_card(conn, card)["entered_at"]
     order_oth.item_to_return(conn, item_of(conn, card), "2026-10-15T10:00:00", "owner", 2)
-    assert _csrf(owner, card)                                                         # «Снять согласование» in the card
+    assert _csrf(owner, card)                                                         # «Вернуть на ОТХ» in the card
     assert not order_oth.unagree(conn, orders.get_card(conn, card), "2026-10-16T10:00:00", "owner")     # nothing agreed: not «Отменить»
     assert order_oth.back_to_oth(conn, orders.get_card(conn, card), "2026-10-16T10:00:00", "owner")
     card_now = orders.get_card(conn, card)
@@ -225,7 +228,8 @@ def _csrf(client, card) -> str:
     import re
     page = client.get("/orders/%d" % card).get_data(as_text=True)
     found = re.search(r'action="/orders/%d/oth-agree-drop".*?name="csrf" value="([^"]+)"' % card, page, re.S)
-    assert found, "no «Снять согласование» in the card"
+    assert found, "no «Вернуть на ОТХ» in the card"
+    assert ">Вернуть на ОТХ</button>" in page and "Снять согласование" not in page     # the owner 2026-11-13 (У2)
     return found.group(1)
 
 

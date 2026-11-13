@@ -1,6 +1,6 @@
 """The owner 2026-11-12, the task E–G of the return of «На ОТХ»:
 E1 the seventh day: the task of the responsible stays, the point is asked nothing (no question, nothing to VK);
-E2 «Есть покупатель» of «Согласование возврата»: 2 days, one urgent task «Важное», refused after 2 days and for another point;
+E2 «Есть покупатель» of «Согласование возврата»: removed (the owner 2026-11-13, У3) — no button on any tab, the server refuses;
 E3 one act for several orders of one point: one PDF on «point + date», every order agreed for the date; two points refused;
 E4 what counts as the agreement: one function (order_oth.agreed), the date only for now;
 G «Водитель не забрал» of «Сегодня возврат!»: the window, one task, the office's bell, the sound stops, the date stays, nothing to VK."""
@@ -15,7 +15,7 @@ from datetime import date, datetime
 import pytest
 
 from panel_helpers import post
-from test_mypoint import manager, token
+from test_mypoint import manager
 from test_point_oth_sell import setup
 from test_point_return_tabs import to_return_stage
 from test_return_act import PDF, person
@@ -58,33 +58,20 @@ def test_e1_the_seventh_day_leaves_the_task_and_asks_the_point_nothing(tmp_path)
 ENTERED = "2026-10-15T10:00:00"                     # to_return_stage: «На возврат», not agreed — «Согласование возврата»
 
 
-def test_e2_the_button_for_two_days_one_task_and_the_server_refuses_after(tmp_path, clock):
+def test_e2_no_buyer_button_on_the_agreement_nor_on_oth_and_the_server_refuses(tmp_path, clock):
+    """The owner 2026-11-13 (У3): «Есть покупатель» only on «На ОТХ», where the point has «Продать» (a button there is the owner's call): it is
+    gone from «Согласование возврата» (was: 2 days since the stage, one urgent task) and no stage has it; a press of an old page makes no task."""
     app, owner, conn, pid, card = setup(tmp_path)
     to_return_stage(conn, card)
     assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == ENTERED
     mine = manager(app, conn, pid)
     clock["now"] = "2026-10-16T11:00:00"
     page = mine.get("/my-point?tab=agree").get_data(as_text=True)
-    assert 'data-oth-buyer="%d"' % card in page and 'data-confirm-title="Есть покупатель на эти шины?"' in page
+    assert 'data-oth-buyer="%d"' % card not in page and "Есть покупатель" not in page
     assert "Есть покупатель" not in mine.get("/my-point?tab=oth").get_data(as_text=True)
-    kept = token(page, card, "oth_buyer")
-    assert post(mine, "/my-point/%d/oth_buyer" % card, "tok", token=kept).status_code == 302
-    [task] = open_tasks(conn, opr.BUYER_TITLE)
-    assert task["title"] == "Важное · Точка нашла покупателя на шины с ОТХ: проверьте возможность продажи и оформите продажу"
-    assert task["order_id"] == card and task["due_at"] == "2026-10-16T11:00" and task["kind"] == "other"
-    assert "Точка «Бета»" in task["note"] and "/orders/%d" % card in task["note"] and "Состав:" in task["note"] and "шт." in task["note"]
-    assert task["assignee"] == order_oth.office_assignee(conn, card)
-    again = token(mine.get("/my-point?tab=agree").get_data(as_text=True), card, "oth_buyer")
-    assert post(mine, "/my-point/%d/oth_buyer" % card, "tok", token=again).status_code == 302
-    assert len(open_tasks(conn, opr.BUYER_TITLE)) == 1                                     # a second press: no second open task
-    late = token(mine.get("/my-point?tab=agree").get_data(as_text=True), card, "oth_buyer")
-    clock["now"] = "2026-10-17T10:00:00"                                                   # 2 days since 15.10 10:00: gone
-    assert 'data-oth-buyer="%d"' % card not in mine.get("/my-point?tab=agree").get_data(as_text=True)
-    tasks.close(conn, task["id"], "done", "2026-10-17T10:00:00", "owner")
-    assert post(mine, "/my-point/%d/oth_buyer" % card, "tok", token=late).status_code == 302
-    assert open_tasks(conn, opr.BUYER_TITLE) == []                                         # the server refuses too
-    outcome, _answer, done = opr.tell_buyer(conn, orders.get_card(conn, card), "Бета", "менеджер", "2026-10-17T10:00:00")
-    assert not done and outcome.startswith("не подходит")
+    outcome, answer, done = opr.tell_buyer(conn, orders.get_card(conn, card), "Бета", "менеджер", "2026-10-16T11:00:00")
+    assert not done and outcome.startswith("не подходит") and "«Есть покупатель» больше не отмечается" in answer
+    assert open_tasks(conn, opr.BUYER_TITLE) == []
 
 
 def test_e2_another_point_cannot_press_it(tmp_path, clock):
@@ -103,7 +90,6 @@ def test_e2_the_moment_of_the_status_on_oth_is_the_first_mark_and_unagree_starts
     assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == ""
     assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
     assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"
-    assert opr.buyer_until(conn, orders.get_card(conn, card)) == "2026-10-18T12:00:00"
     other = _card(conn, pid, code="at_point", webmim="5000300")
     orders.move_card(conn, other, _stage(conn, orders.RETURN_GIVEN), "2026-10-20T10:00:00", "o")
     order_oth.agree(conn, orders.get_card(conn, other), date(2026, 10, 20), "2026-10-20T11:00:00", "owner", "2026-10-23")
@@ -280,10 +266,10 @@ def test_a_phone_of_375_px_has_no_horizontal_scroll(tmp_path, clock, new_view):
         from test_point_new_view import flag
         flag(conn, "all")
     more = _card(conn, pid, code="at_point", webmim="5000200")
-    to_return_stage(conn, more)                                                            # «Есть покупатель» on «Согласование возврата»
+    to_return_stage(conn, more)                                                            # an order on «Согласование возврата» (no «Есть покупатель», 2026-11-13)
     clock["now"] = "2026-10-16T11:00:00"
     mine = manager(app, conn, pid)
-    assert 'data-oth-buyer="%d"' % more in mine.get("/my-point?tab=agree").get_data(as_text=True)
+    assert 'data-oth-buyer="%d"' % more not in mine.get("/my-point?tab=agree").get_data(as_text=True)
     clock["now"] = DAY + "T09:05:00"
     post(mine, "/my-point/return-day/not-taken", "tok", comment="Длинный комментарий точки " * 8)
     cookie = mine.get_cookie("session").value
