@@ -307,15 +307,32 @@ def test_a_send_that_goes_later_keeps_the_mark_so_a_press_again_sends_no_second_
     assert len(sends) == 1
 
 
-def test_a_refused_send_gives_a_new_mark(tmp_path):
+def test_a_refused_send_keeps_its_mark(tmp_path):
+    """A refused upload: the window comes back with the same mark; a press again goes through chats.send_image's retake of a failed
+    mark (it first looks whether a message of ours is there), never a second mark."""
     app, client, tok, conn, tanya = _sendable_page(tmp_path, (400, {"error": {"message": "bad image"}}))
     card_id = tanya["order_id"]
     _order(conn, card_id)
     _seller(conn)
     form = _form(client, card_id)
-    response = client.post("/orders/%d/receipt/send" % card_id, data=form)
-    assert response.status_code == 302 and _form(client, card_id)["receipt_token"] != form["receipt_token"]
+    assert client.post("/orders/%d/receipt/send" % card_id, data=form).status_code == 302
+    assert _form(client, card_id)["receipt_token"] == form["receipt_token"]
+    assert conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (form["receipt_token"],)).fetchone()[0] == "failed"
 
+def test_a_double_press_while_the_first_is_sending_keeps_the_mark(tmp_path):
+    app, client, tok, conn, tanya = _sendable_page(tmp_path)
+    card_id = tanya["order_id"]
+    _order(conn, card_id)
+    _seller(conn)
+    form = _form(client, card_id)
+    conn.execute("INSERT INTO chat_send_log (token, chat_row, at, author, status, photo, orig_at) VALUES (?,?,?,?, 'sending', 1, ?)",
+                 (form["receipt_token"], tanya["id"], NOW, "owner", NOW))            # the first press is still on its way
+    conn.commit()
+    client.post("/orders/%d/receipt/send" % card_id, data=form)
+    assert _form(client, card_id)["receipt_token"] == form["receipt_token"]
+    assert not [c for c in app.config["AVITO_HTTP"].calls if c[1].endswith("/messages/image")]
+    page = client.get("/orders/%d" % card_id).get_data(as_text=True)
+    assert 'action="/orders/%d/receipt/send" data-once' % card_id in page
 
 def test_no_font_with_russian_letters_makes_no_receipt(monkeypatch):
     monkeypatch.setattr(receipts, "FONTS", {False: ("/nonexistent/a.ttf",), True: ("/nonexistent/b.ttf",)})

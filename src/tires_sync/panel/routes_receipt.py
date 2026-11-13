@@ -18,6 +18,7 @@ from .routes_orders import card_or_404, local_iso, local_now
 
 SETTINGS_PAGE = "/orders/settings/receipt"
 DRAFT = "receipt_draft_%d"                       # session: what the window sent and could not be made; the window shows it again
+MARK = "receipt_mark_%d"                         # session: the mark of a press that may have sent (review 13.11), apart from the draft
 DRAFT_MAX = 2400                                 # the draft as JSON with \u escapes, at most: the session cookie stays small
 
 
@@ -58,7 +59,7 @@ def register(app) -> None:
         chat = send_chat(conn, card["id"])
         return {"values": values, "missing": receipts.missing(values), "total": receipts.money(total) if total is not None else "",
                 "chat": dict(chat, ref=deals.ref(chat["id"])) if chat else None,
-                "token": ((draft or {}).get("receipt_token") or [""])[0][:64] or secrets.token_hex(12),
+                "token": str(session.pop(MARK % card["id"], "") or "")[:64] or secrets.token_hex(12),
                 "kept": receipts.kept(conn, card["id"]), "open": bool(draft) or request.args.get("receipt") == "1",
                 "needed": bool(card.get("receipt_needed")), "seller_settings": SETTINGS_PAGE}
 
@@ -74,7 +75,9 @@ def register(app) -> None:
         """Back to the window with the typed values and the error. `same_mark` (review 13.11): the picture may have gone or goes later (an
         unsure outcome, a 402 the sync sends again): the window keeps its mark, so a press again never sends a second receipt."""
         draft = {k: [v[:receipts.FIELD_MAX] for v in request.form.getlist(k)[:receipts.LINES_MAX + 1]]
-                 for k in request.form if k not in ("csrf", "kind") and (same_mark or k != "receipt_token")}
+                 for k in request.form if k not in ("csrf", "kind", "receipt_token")}
+        if same_mark:                                    # kept apart: a draft too big for the cookie never loses it
+            session[MARK % card_id] = str(request.form.get("receipt_token") or "")[:64]
         if len(json.dumps(draft)) <= DRAFT_MAX:          # the session is a cookie: a big window is not kept (its values come from the order again)
             session[DRAFT % card_id] = draft
         flash(str(err), "error")
@@ -134,10 +137,9 @@ def register(app) -> None:
         now = local_iso()
         try:
             chats_store.send_image(conn, writer(conn, chat), chat["id"], picture, token, now, author())
-        except chats_store.ChatSendUnknown as err:                     # may have gone, or goes with the sync (402): the same mark again
-            return again(card_id, err, same_mark=True)
-        except chats_store.ChatError as err:
-            return again(card_id, err)
+        except chats_store.ChatError as err:                           # any refusal of the send: the same mark again (review 13.11): an
+            return again(card_id, err, same_mark=True)                # unsure outcome, a 402, «уже отправляется» of a double press never
+                                                                      # let a second receipt go; a failed upload is retried on the same mark
         receipts.keep(conn, card_id, token, receipt, chat["id"], now, author())
         flash("%s отправлен клиенту в чат %s." % (receipts.title(receipt), deals.ref(chat["id"])), "ok")
         return redirect("/orders/%d" % card_id)
