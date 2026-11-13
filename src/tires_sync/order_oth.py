@@ -1980,7 +1980,7 @@ def _migrate(conn, now: str, done: Dict[str, int]) -> Dict[str, int]:
 
 
 # ---- the owner 2026-11-13: «Согласование возврата» is a stage; the orders on the agreement now are moved once (store._migrate) -------------
-AGREE_STAGE_KEY = "return_agree_stage_2026_11_13"     # app_state: the move was done (a second process finds it)
+AGREE_STAGE_DONE = "return_agree_stage_2026_11_13"     # app_state: the move was done (a second process finds it)
 AGREE_MIGRATED = "Этап «%s» (2026-11-13): заказ был %s, теперь на этапе."
 
 
@@ -2009,14 +2009,14 @@ def _old_agreeing(conn, card: dict) -> str:
 
 
 def migrate_agree_stage(conn, now: str) -> Dict[str, int]:
-    """Once (AGREE_STAGE_KEY), in one IMMEDIATE transaction: the pipeline gets «Согласование возврата» and the orders on the agreement of their
+    """Once (AGREE_STAGE_DONE), in one IMMEDIATE transaction: the pipeline gets «Согласование возврата» and the orders on the agreement of their
     return go there — those of «На возврат» not agreed («Согласуем») and those of «На ОТХ» with a position marked «На возврат» («Ожидает
     согласование возврата»); the agreed ones stay on «На возврат». The stay on the stage starts when the order came to the agreement (_old_agreeing):
     «Есть покупатель» keeps its two days. A record in the journal of each order; no rule of a stage fires, nothing is sent. An order with a sale
     is skipped (move_card refuses an open stage with a sale). Returns the counts (the journal of actions keeps them)."""
     done = {"from_return_given": 0, "from_oth": 0, "skipped": 0}
     try:
-        if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (AGREE_STAGE_KEY,)).fetchone():
+        if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (AGREE_STAGE_DONE,)).fetchone():
             return done
         conn.execute("SELECT 1 FROM oth_return_plan LIMIT 1")
     except Exception:                                                                 # noqa: BLE001 - a base without the orders' tables
@@ -2035,7 +2035,7 @@ def _migrate_agree_stage(conn, now: str, done: Dict[str, int]) -> Dict[str, int]
     conn.commit()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (AGREE_STAGE_KEY,)).fetchone():     # another process was first
+        if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (AGREE_STAGE_DONE,)).fetchone():     # another process was first
             conn.rollback()
             return done
         stage = next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_AGREE), None)
@@ -2070,7 +2070,7 @@ def _migrate_agree_stage(conn, now: str, done: Dict[str, int]) -> Dict[str, int]
             done["from_return_given" if card["stage"]["code"] == orders.RETURN_GIVEN else "from_oth"] += 1
         if any(done.values()):                                                        # a new base: nothing to say
             _audit(conn, now, "system", "return_agree_migrated", done)
-        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (AGREE_STAGE_KEY, now))
+        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (AGREE_STAGE_DONE, now))
     except Exception:
         conn.rollback()
         raise

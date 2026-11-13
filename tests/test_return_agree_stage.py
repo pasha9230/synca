@@ -284,7 +284,7 @@ def _old_state(conn, card_given, card_marked, card_agreed):
     conn.execute("INSERT INTO oth_return (item_id, order_id, qty, at, author) VALUES (?, ?, ?, ?, ?)", (item, card_marked, 2, "2026-10-15T09:30:00", "owner"))
     task = order_oth._return_task(conn, orders.get_card(conn, card_marked), "2026-10-15T09:30:00", "owner", commit=False)     # its task, open
     conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (order_oth._item_key(item, stay), json.dumps({"qty": 2, "at": "2026-10-15T09:30:00", "by": "owner", "task": task})))
-    conn.execute("DELETE FROM app_state WHERE key = ?", (order_oth.AGREE_STAGE_KEY,))
+    conn.execute("DELETE FROM app_state WHERE key = ?", (order_oth.AGREE_STAGE_DONE,))
     conn.commit()
 
 
@@ -315,10 +315,10 @@ def test_the_migration_moves_the_orders_on_the_agreement_once(tmp_path):
 def test_the_migration_runs_at_the_start_of_the_base(tmp_path):
     """store._migrate calls order_oth.migrate at every start: it runs the move of 2026-11-13 too, once."""
     app, owner, conn, pid, card = setup(tmp_path)
-    assert conn.execute("SELECT 1 FROM app_state WHERE key = ?", (order_oth.AGREE_STAGE_KEY,)).fetchone()     # a new base: done at its start
+    assert conn.execute("SELECT 1 FROM app_state WHERE key = ?", (order_oth.AGREE_STAGE_DONE,)).fetchone()     # a new base: done at its start
     to_return = _stage(conn, orders.RETURN_GIVEN)
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (to_return, card))                       # «Согласуем» of before
-    conn.execute("DELETE FROM app_state WHERE key = ?", (order_oth.AGREE_STAGE_KEY,))
+    conn.execute("DELETE FROM app_state WHERE key = ?", (order_oth.AGREE_STAGE_DONE,))
     conn.commit()
     order_oth.migrate(conn, "2026-11-13T09:00:00")
     assert code(conn, card) == orders.RETURN_AGREE
