@@ -488,7 +488,8 @@ def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit
                                                         slot=order_oth.take_slot(card_id, item["id"]))     # «Вернуть на ОТХ» brings them back
     # the limit in the statement itself: a take a moment ago in another tab never lets the pieces go below the ones marked returned
     if conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ? AND qty - ? >= COALESCE((SELECT qty FROM oth_return WHERE item_id = ?), 0) "
-                    "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth') "
+                    "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_agree')) "     # the source:
+                    # oth_stock (2026-11-13: an order on «Согласование возврата» by a mark gives its free pieces as on «На ОТХ» before)
                     "AND order_id NOT IN (SELECT order_id FROM oth_return_plan)",
                     (pieces, item["id"], pieces, item["id"])).rowcount != 1:
         conn.rollback()
@@ -575,7 +576,9 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
     the old order emptied goes to «Отмена» «Шины переданы в заказ №…»). The caller puts the new order on «Товар на точке» (all from OTH).
     Returns the new order; OthSaleError says why nothing was made."""
     old = orders.get_card(conn, old_id)
-    if old["stage"]["code"] != "oth":
+    from . import order_oth
+    by_mark = old["stage"]["code"] == orders.RETURN_AGREE and order_oth._any_mark(conn, old)     # 2026-11-13: «На ОТХ» with a mark before the stage
+    if old["stage"]["code"] != "oth" and not by_mark:
         raise OthSaleError("Новый клиент берёт шины заказа, который стоит на «На ОТХ»: заказ на этапе «%s»." % old["stage"]["name"])
     name, phone = " ".join(str(name or "").split())[:200], str(phone or "").strip()[:40]
     if not phone:

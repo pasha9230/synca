@@ -172,7 +172,7 @@ def register(app) -> None:
         for row in data["stock"]:
             row["oth_title"] = titles.get(row["order_id"], "")
             when = dates.get(row["order_id"], {})
-            on_oth = codes.get(row["order_id"]) == "oth"
+            on_oth = row["stage_code"] == "oth"                                           # «Согласование возврата» by a mark: as «На ОТХ» (order_oth.stock)
             marking = codes.get(row["order_id"]) in order_oth.MARKED_ON                     # «Согласование возврата»: another position may join (2026-11-13)
             row.update(oth_since=when.get("oth_since") or row["since"],                      # no reserve columns (П19, 2026-11-08)
                        return_label="" if on_oth else order_oth.label_of(agreed.get(row["order_id"])),
