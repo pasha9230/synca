@@ -252,6 +252,7 @@ def cancel_reason_of(kind, text) -> str:
 RETURN_GIVEN = "return_given"
 RETURN_AGREE = "return_agree"           # «Согласование возврата» (the owner 2026-11-13): between «На ОТХ» and «На возврат», the return not agreed yet
 OTH_CODES = ("oth", RETURN_AGREE, RETURN_GIVEN)     # the tyres lie at the point, no client: «На ОТХ», «Согласование возврата», «На возврат»
+BY_MARK_KEY = "oth_agree_by_mark:%d"     # app_state: the order came to «Согласование возврата» by a mark of a position, its stay (order_oth.by_mark)
 OTH_STAY_KEY = "oth_stay:%d"            # app_state: entered_at of the order's last stay on «На ОТХ», kept when it moves on (order_oth.oth_stay)
 NO_CLIENT = "клиента нет"
 
@@ -1199,6 +1200,9 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     was_code = card["stage"].get("code")
     if was_code == "oth" and stage["code"] in (RETURN_AGREE, RETURN_GIVEN):         # the stay on «На ОТХ» its marks «На возврат» are kept by
         conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (OTH_STAY_KEY % int(card_id), card["entered_at"] or ""))     # (order_oth.oth_stay)
+    elif stage["code"] == RETURN_AGREE and was_code not in OTH_CODES and card["stage"].get("kind") == "open":     # from work, not after a stay
+                                                                                  # on «На ОТХ» (an undo from «Выполнено» comes back to its stay)
+        conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (OTH_STAY_KEY % int(card_id), BY_MARK_KEY % int(card_id)))
     if (was_code in OTH_CODES and stage["code"] not in OTH_CODES) or (was_code in (RETURN_AGREE, RETURN_GIVEN) and stage["code"] == "oth"):
         from . import order_oth
         order_oth.left_return(conn, card_id, stage, now, author)

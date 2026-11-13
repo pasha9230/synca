@@ -159,10 +159,10 @@ def test_2_the_seventh_day_still_moves_and_the_agreement_is_as_usual(tmp_path):
     close(conn, cid, "Пока не возвращаем, ждём ответа")
     card = orders.get_card(conn, cid)                                               # 2026-11-13: the mark put it on «Согласование возврата»
     assert card["stage"]["code"] == orders.RETURN_AGREE and order_oth.agreeing(conn, card)
-    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0             # it waits there: nothing more to move
-    order_oth.agree(conn, card, TODAY, "2026-10-26T13:00:00", "o")
-    [new] = order_oth.split_of(conn, cid)                                           # the marked pieces go, as «Согласовано» по позиции always did
-    assert order_oth.point_label_of(order_oth.return_plan(conn, new)).startswith("Согласовано на возврат")
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0             # it waits there: nothing more to move, its tyres off sale
+    order_oth.agree(conn, orders.get_card(conn, cid), TODAY, "2026-10-26T13:00:00", "o")     # past the seventh day: as «На возврат» before
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert order_oth.point_label_of(order_oth.return_plan(conn, cid)).startswith("Согласовано на возврат")
 
 
 def test_2_waiting_agreed_on_oth_sends_the_marked_pieces(tmp_path):

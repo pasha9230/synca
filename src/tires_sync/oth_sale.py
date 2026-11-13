@@ -577,8 +577,7 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
     Returns the new order; OthSaleError says why nothing was made."""
     old = orders.get_card(conn, old_id)
     from . import order_oth
-    by_mark = old["stage"]["code"] == orders.RETURN_AGREE and order_oth._any_mark(conn, old)     # 2026-11-13: «На ОТХ» with a mark before the stage
-    if old["stage"]["code"] != "oth" and not by_mark:
+    if old["stage"]["code"] != "oth" and not order_oth.by_mark(conn, old):     # 2026-11-13: «На ОТХ» with a mark before the stage
         raise OthSaleError("Новый клиент берёт шины заказа, который стоит на «На ОТХ»: заказ на этапе «%s»." % old["stage"]["name"])
     name, phone = " ".join(str(name or "").split())[:200], str(phone or "").strip()[:40]
     if not phone:

@@ -326,3 +326,68 @@ def test_the_migration_runs_at_the_start_of_the_base(tmp_path):
     conn.commit()
     order_oth.migrate(conn, "2026-11-13T10:00:00")
     assert code(conn, card) == orders.RETURN_GIVEN                                    # once: the key stays
+
+
+# ---- the independent review (2026-11-13) ---------------------------------------------------------------------------------------------
+
+def _old_way(tmp_path, monkeypatch):
+    """An order on «На ОТХ» the old way (no record of storage): its free tyres are in the feed with a mark, as before the stage."""
+    from test_order_reserve import card_at, db
+    from tires_sync import oth_storage
+    monkeypatch.setattr(oth_storage, "SPLIT", False)
+    conn = db(tmp_path)
+    conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (order_oth.SINCE_KEY, "2026-10-01T00:00:00"))
+    conn.commit()
+    return conn, card_at(conn, "oth", "2026-10-14T10:00:00")
+
+
+def test_by_a_mark_the_free_tyres_are_in_the_feed_until_the_seventh_day_as_before(tmp_path, monkeypatch):
+    conn, old = _old_way(tmp_path, monkeypatch)
+    assert order_oth.item_to_return(conn, item_of(conn, old), "2026-10-16T10:00:00", "o", "1")
+    assert code(conn, old) == orders.RETURN_AGREE and in_feed(conn, old)              # 3 free of 4, as on «На ОТХ» with the mark before
+    order_oth.ask_seventh_day(conn, "2026-10-20T12:29:00")
+    assert in_feed(conn, old)
+    order_oth.ask_seventh_day(conn, "2026-10-20T12:30:00")                            # the seventh day: off sale, as the old move to «На возврат»
+    assert not in_feed(conn, old) and code(conn, old) == orders.RETURN_AGREE
+    assert order_oth.DAY7_ON_AGREE % "Согласование возврата" in events(conn, old)
+    order_oth.ask_seventh_day(conn, "2026-10-30T12:30:00")
+    assert not in_feed(conn, old) and sum(order_oth.DAY7_ON_AGREE % "Согласование возврата" == t for t in events(conn, old)) == 1
+
+
+def test_no_mark_on_an_order_on_the_stage_by_the_seventh_day(tmp_path, monkeypatch):
+    conn, old = _old_way(tmp_path, monkeypatch)
+    assert order_oth.ask_seventh_day(conn, "2026-10-20T12:30:00") == 1
+    with pytest.raises(order_oth.OthError, match="Весь заказ уже на этапе"):
+        order_oth.item_to_return(conn, item_of(conn, old), "2026-10-21T10:00:00", "o", "1")
+    assert not in_feed(conn, old)
+
+
+def test_an_agreed_order_dragged_back_to_the_stage_loses_the_agreement(tmp_path):
+    app, owner, conn, pid, card = setup(tmp_path)
+    to_agree_stage(conn, card)
+    agree(conn, card)
+    before = orders.get_card(conn, card)
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T13:00:00", "o")
+    order_oth.moved_by_hand(conn, before, "2026-10-15T13:00:00", "o")
+    assert order_oth.return_plan(conn, card) is None and order_oth.agreeing(conn, orders.get_card(conn, card)) and len(return_tasks(conn, card)) == 1
+
+
+def test_the_act_without_a_purchase_on_the_stage_does_not_break(tmp_path):
+    from tires_sync import order_manager
+    app, owner, conn, pid, card = setup(tmp_path)
+    to_agree_stage(conn, card)
+    conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date) VALUES (?, ?, ?, ?)", (card, T1, "o", "2026-10-16"))
+    conn.execute("UPDATE order_item SET supplier_price = 0 WHERE order_id = ?", (card,))
+    conn.commit()
+    assert order_oth.sign_act(conn, orders.get_card(conn, card), "Бета", "2026-10-16T10:00:00", "точка") == "signed"
+    assert code(conn, card) == orders.RETURN_GIVEN
+
+
+def test_drop_of_an_order_that_came_from_another_stage_starts_a_stay_on_oth(tmp_path):
+    app, owner, conn, pid, card = setup(tmp_path)
+    orders.move_card(conn, card, _stage(conn, "at_point"), "2026-10-15T09:00:00", "o")
+    to_agree_stage(conn, card, "2026-10-15T10:00:00")                                 # straight from «На точке»: no stay on «На ОТХ» to go on
+    assert order_oth.back_to_oth(conn, orders.get_card(conn, card), "2026-10-16T10:00:00", "o")
+    card_now = orders.get_card(conn, card)
+    assert card_now["stage"]["code"] == "oth" and card_now["entered_at"] == "2026-10-16T10:00:00"
+    assert orders.OTH_ENTERED in events(conn, card)
