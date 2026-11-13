@@ -712,11 +712,9 @@ def _agree_whole(conn, card: dict, day: str, now: str, author: str, commit: bool
 def unagree(conn, card: dict, now: str, author: str) -> bool:
     """«Снять согласование» (the owner and the partner, before the act МХ-3 is signed): the agreement goes and the order on «На возврат» goes back
     to «Согласование возврата» (the owner 2026-11-13: «На возврат» is the agreed ones only), the tyres stay off sale (the owner 2026-11-04), the point no
-    longer sees the date; the task of the return is on again. One statement: a signed plan, or one cancelled a moment ago, is left as it is. An order
-    on «Согласование возврата» (nothing agreed yet) goes back to «На ОТХ», on sale (back_to_oth). False: nothing to cancel (or the order left)."""
+    longer sees the date; the task of the return is on again. One statement: a signed plan, or one cancelled a moment ago, is left as it is (a second
+    press changes nothing: «Снять согласование» of «Согласование возврата» is its own button, back_to_oth). False: nothing to cancel (or the order left)."""
     card = orders.get_card(conn, card["id"])                                          # the stage as it is now
-    if card["stage"]["code"] == orders.RETURN_AGREE and return_plan(conn, card["id"]) is None:
-        return back_to_oth(conn, card, now, author)
     if card["stage"]["code"] not in RETURNING:
         return False
     if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount != 1:
@@ -1506,6 +1504,17 @@ def tell_agree_due(conn, now: str, notify) -> int:
             if agree_due(card, now) and not (card["point_id"] and card_id in points.own_sales(conn, card["point_id"])):
                 told += _tell_agree(conn, card, now, notify)
         except Exception:                                                            # noqa: BLE001 - one order must not stop the others
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("the alert of 6 days 12 hours of order %s failed", card_id)
+    for (card_id,) in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = ? AND NOT EXISTS ("
+                                   "SELECT 1 FROM oth_return_plan r WHERE r.order_id = c.id) ORDER BY c.id", (orders.RETURN_AGREE,)).fetchall() if since else ():
+        try:                                                                         # on «Согласование возврата» by a mark (2026-11-13): told as on
+            card = orders.get_card(conn, card_id)                                    # «На ОТХ» with that mark before — by its stay there
+            stay = dict(card, entered_at=oth_stay(conn, card))
+            if (_any_mark(conn, card) and stay["entered_at"] >= since and not _kept(conn, stay) and agree_due(stay, now)
+                    and not (card["point_id"] and card_id in points.own_sales(conn, card["point_id"]))):
+                told += _tell_agree(conn, stay, now, notify)
+        except Exception:                                                            # noqa: BLE001
             conn.rollback()
             logging.getLogger("tires_sync.orders").exception("the alert of 6 days 12 hours of order %s failed", card_id)
     return told

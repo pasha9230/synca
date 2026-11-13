@@ -1173,13 +1173,31 @@ def register(app) -> None:
         if done:
             told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, message_texts.text(conn, message_texts.UNAGREED, order_label=manager.label(card)), now,
                                            vk_http=app.config.get("VK_HTTP") or urllib_transport)
-            if card["stage"]["code"] == orders.RETURN_AGREE:                   # nothing was agreed: back on «На ОТХ», on sale (the owner 2026-11-13)
-                flash("Согласование снято: заказ снова на «%s», шины в продаже. Точке: %s." % (orders.stage_name(conn, "oth"), told), "ok")
-            else:
-                flash("Согласование отменено: заказ снова на «%s», шины не в продаже, точка не видит дату. Точке: %s." % (
-                    orders.stage_name(conn, orders.RETURN_AGREE), told), "ok")
+            flash("Согласование отменено: заказ снова на «%s», шины не в продаже, точка не видит дату. Точке: %s." % (
+                orders.stage_name(conn, orders.RETURN_AGREE), told), "ok")
         else:
             flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/oth-agree-drop", methods=["POST"])
+    @login_required
+    def order_oth_agree_drop(card_id):
+        """«Снять согласование» of an order on «Согласование возврата», nothing agreed (the owner 2026-11-13): back to «На ОТХ», on sale
+        (order_oth.back_to_oth). The same people as «Отменить согласование» (common.ACTION_RIGHTS). A second press: the order is no longer there."""
+        conn = get_conn()
+        card = card_or_404(conn, card_id)
+        if card["stage"]["code"] != orders.RETURN_AGREE or order_oth.return_plan(conn, card_id) is not None:
+            flash("Снимать нечего: заказ не на «%s» или возврат уже согласован." % orders.stage_name(conn, orders.RETURN_AGREE), "error")
+            return redirect("/orders/%d" % card_id)
+        try:
+            moved = order_oth.back_to_oth(conn, card, local_iso(), author())
+        except (order_oth.OthError, orders.OrderError) as err:
+            flash(str(err), "error")
+            return redirect("/orders/%d" % card_id)
+        if moved:
+            flash("Согласование снято: заказ снова на «%s», шины в продаже." % orders.stage_name(conn, "oth"), "ok")
+        else:
+            flash("Заказ только что перенесли: обновите страницу.", "error")
         return redirect("/orders/%d" % card_id)
 
     @app.route("/orders/<int:card_id>")

@@ -227,7 +227,8 @@ def test_the_stage_is_added_once_right_after_oth_to_an_old_pipeline(tmp_path):
     orders.ensure_pipeline(conn, NOW)
     orders.ensure_pipeline(conn, NOW)
     codes = [s["code"] for s in orders.list_stages(conn)]
-    assert codes.count(orders.RETURN_GIVEN) == 1 and codes[codes.index("oth") + 1] == orders.RETURN_GIVEN
+    assert codes.count(orders.RETURN_GIVEN) == 1 and codes[codes.index("oth") + 2] == orders.RETURN_GIVEN     # after «Согласование возврата» (2026-11-13)
+    assert codes[codes.index("oth") + 1] == orders.RETURN_AGREE
     assert [s["position"] for s in orders.list_stages(conn)] == list(range(len(codes)))
 
 

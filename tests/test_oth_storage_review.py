@@ -150,7 +150,7 @@ def test_the_seventh_day_of_a_record_asks_if_the_tyres_are_there_never_if_they_w
     card = orders.get_card(conn, x)
     assert order_oth.question_open(conn, card) and "выдали" not in order_oth.question(conn, card, LATE).lower()
     outcome, answer, done = order_oth.answer_issued(conn, card, "менеджер Бета", LATE)
-    assert not done and "«Продать»" in answer and code(conn, x) == orders.RETURN_GIVEN
+    assert not done and "«Продать»" in answer and code(conn, x) == orders.RETURN_AGREE
     assert order_oth.question_open(conn, orders.get_card(conn, x))                              # the question still waits for «На точке»
 
 
@@ -167,7 +167,7 @@ def test_the_vk_word_issued_for_a_record_is_refused_with_the_hint(tmp_path):
     conn = db(tmp_path)
     cid, x = on_the_return(conn)
     answer = mgr.handle_command(conn, "vk-1", POINT_VK, "выдал %s" % number(cid), None, LATE)
-    assert "«Продать»" in answer and code(conn, x) == orders.RETURN_GIVEN
+    assert "«Продать»" in answer and code(conn, x) == orders.RETURN_AGREE
 
 
 def test_the_vk_word_issued_for_a_record_on_oth_is_refused_with_the_hint(tmp_path):

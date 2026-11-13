@@ -181,7 +181,8 @@ def test_out_unagree_on_the_stage_goes_back_to_oth_on_sale(tmp_path, clock):
     stay = orders.get_card(conn, card)["entered_at"]
     order_oth.item_to_return(conn, item_of(conn, card), "2026-10-15T10:00:00", "owner", 2)
     assert _csrf(owner, card)                                                         # «Снять согласование» in the card
-    assert order_oth.unagree(conn, orders.get_card(conn, card), "2026-10-16T10:00:00", "owner")
+    assert not order_oth.unagree(conn, orders.get_card(conn, card), "2026-10-16T10:00:00", "owner")     # nothing agreed: not «Отменить»
+    assert order_oth.back_to_oth(conn, orders.get_card(conn, card), "2026-10-16T10:00:00", "owner")
     card_now = orders.get_card(conn, card)
     assert card_now["stage"]["code"] == "oth" and card_now["entered_at"] == stay      # the same stay: its seven days count on
     assert not return_tasks(conn, card) and in_feed(conn, card)                       # the tasks closed, the tyres in the feed again
@@ -201,6 +202,15 @@ def test_out_the_last_mark_undone_goes_back_to_oth(tmp_path):
     assert not order_oth.agreeing(conn, card_now) and not return_tasks(conn, card)
 
 
+def test_the_drop_button_twice_moves_once(tmp_path):
+    app, owner, conn, pid, card = setup(tmp_path)
+    to_agree_stage(conn, card)
+    csrf = _csrf(owner, card)
+    for _ in range(2):
+        assert owner.post("/orders/%d/oth-agree-drop" % card, data={"csrf": csrf}).status_code == 302
+    assert code(conn, card) == "oth" and sum(t.startswith("Согласование возврата снято") for t in events(conn, card)) == 1
+
+
 def test_unagree_on_na_vozvrat_puts_the_order_back_on_the_stage_with_the_task(tmp_path):
     app, owner, conn, pid, card = setup(tmp_path)
     to_agree_stage(conn, card)
@@ -214,7 +224,7 @@ def test_unagree_on_na_vozvrat_puts_the_order_back_on_the_stage_with_the_task(tm
 def _csrf(client, card) -> str:
     import re
     page = client.get("/orders/%d" % card).get_data(as_text=True)
-    found = re.search(r'action="/orders/%d/oth-unagree".*?name="csrf" value="([^"]+)"' % card, page, re.S)
+    found = re.search(r'action="/orders/%d/oth-agree-drop".*?name="csrf" value="([^"]+)"' % card, page, re.S)
     assert found, "no «Снять согласование» in the card"
     return found.group(1)
 
