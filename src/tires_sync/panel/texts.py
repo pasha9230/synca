@@ -23,7 +23,8 @@ def author_label(author: str) -> str:
     return AUTHOR_NAMES.get(author, author)
 
 
-ORDER_RATES = {"point_fee": ("Выплата точке за заказ", "₽"), "owner_share": ("Доля собственника", "%"), "handoff_fee": ("За переданного клиента", "₽")}
+ORDER_RATES = {"point_fee": ("Выплата точке за заказ", "₽"), "owner_share": ("Доля собственника", "%"), "handoff_fee": ("За переданного клиента", "₽"),
+               "oth_sale_fee": ("За шину, проданную точкой с ОТХ", "₽")}
 INQUIRY_EVENTS = {"message": "сообщение", "call": "звонок", "handoff": "передача заказа"}
 
 

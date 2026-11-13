@@ -2,7 +2,7 @@
    and «Ещё» (Передать клиента, Переданные клиенты, Задачи, Оповещения, Что нового, Свой пароль, Выйти); the same addresses and rights as
    _point_nav.html, a computer has the panel's menu instead. `section`: the one open. #}
 {% set n = point_nav() %}{% if n is not none %}
-{% set more_on = section in ("handed", "tasks", "whatsnew") %}
+{% set more_on = section in ("handed", "income", "tasks", "whatsnew") %}
 <nav class="p2-nav" aria-label="Разделы точки" data-point-nav>
 <a href="/my-point" class="{{ 'is-active' if section == 'mypoint' else '' }}"{% if section == 'mypoint' %} aria-current="page"{% endif %} data-sec="mypoint">{{ icon("layers") }}<span>Рабочее место</span>{% if n.mypoint %}<b>{{ n.mypoint }}</b>{% endif %}</a>
 {% if can("chats") %}<a href="/chats" class="{{ 'is-active' if section == 'chats' else '' }}"{% if section == 'chats' %} aria-current="page"{% endif %} data-sec="chats">{{ icon("chat") }}<span>Чаты</span>{% if nav.chat_wait %}<b class="is-hot">{{ nav.chat_wait }}</b>{% endif %}</a>{% endif %}
@@ -11,6 +11,7 @@
 <div class="p2-more-list">
 <a href="/my-point/handed#handoff"{% if section == 'handed' %} aria-current="page"{% endif %} data-sec="handed">{{ icon("plus") }}<span>Передать клиента</span></a>
 <a href="/my-point/handed" data-sec="handed-list">{{ icon("users") }}<span>Переданные клиенты</span>{% if n.handed %}<b>{{ n.handed }}</b>{% endif %}</a>
+<a href="/my-point/income"{% if section == 'income' %} aria-current="page"{% endif %} data-sec="income">{{ icon("chart") }}<span>Доход точки</span></a>
 {% if can("orders") %}<a href="/tasks"{% if section == 'tasks' %} aria-current="page"{% endif %} data-sec="tasks">{{ icon("check") }}<span>Задачи</span>{% if nav.tasks %}<b>{{ nav.tasks }}</b>{% endif %}</a>{% endif %}
 <a href="/my-point?notes=1" data-sec="notes">{{ icon("alert") }}<span>Оповещения точки</span></a>
 {% if can("alerts") %}<a href="/alerts" data-sec="alerts">{{ icon("inbox") }}<span>Уведомления</span></a>{% endif %}

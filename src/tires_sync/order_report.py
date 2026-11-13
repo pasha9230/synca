@@ -22,8 +22,9 @@ from . import sales as sales_store, store, users, webmim_match
 POINT_FEE = 75.0                     # rubles per order, paid to the point (the default: before the first dated rate)
 OWNER_SHARE = 0.5                    # of the net profit; the rest is the partner's (the default)
 HANDOFF_FEE = 50.0                   # rubles to the point for an issued order of a client it handed over, on top of the 75 (the owner 2026-10-23, п. 24)
+OTH_SALE_FEE = 50.0                  # rubles to the point for each tyre it sold from «На ОТХ» (the window «Продать», oth_point_sale.BONUS)
 HANDOFF_FEE_FROM = "2026-10-24"      # the day of the deploy: the orders of earlier days keep the old default, 0 (a past report is never recounted)
-DEFAULTS = {"point_fee": POINT_FEE, "owner_share": OWNER_SHARE, "handoff_fee": HANDOFF_FEE}
+DEFAULTS = {"point_fee": POINT_FEE, "owner_share": OWNER_SHARE, "handoff_fee": HANDOFF_FEE, "oth_sale_fee": OTH_SALE_FEE}
 MAX_POINT_FEE = 100000.0
 NO_POINT = "точка не указана"
 MANUAL = "Продажи вручную"
@@ -48,7 +49,7 @@ def rate_on(rates: List[dict], name: str, day: str) -> float:
 
 
 def set_rates(conn, valid_from: str, today: str, now: str, author: str, point_fee: Optional[float] = None,
-              owner_share: Optional[float] = None, handoff_fee: Optional[float] = None) -> List[str]:
+              owner_share: Optional[float] = None, handoff_fee: Optional[float] = None, oth_sale_fee: Optional[float] = None) -> List[str]:
     """Save the rates from `valid_from` (today or later: a past report is never recounted). Returns the names that changed; each is audited."""
     try:
         valid_from = date.fromisoformat(str(valid_from)).isoformat()
@@ -62,9 +63,12 @@ def set_rates(conn, valid_from: str, today: str, now: str, author: str, point_fe
         raise ValueError("Доля собственника: от 0 до 100 %.")
     if handoff_fee is not None and not 0 <= handoff_fee <= MAX_POINT_FEE:
         raise ValueError("Выплата точке за переданного клиента: от 0 до 100 000 ₽.")
+    if oth_sale_fee is not None and not 0 <= oth_sale_fee <= MAX_POINT_FEE:
+        raise ValueError("Бонус точке за шину, проданную с ОТХ: от 0 до 100 000 ₽.")
     rates = list_rates(conn)
     changed = []
-    for name, value in (("point_fee", point_fee), ("owner_share", owner_share), ("handoff_fee", handoff_fee)):
+    for name, value in (("point_fee", point_fee), ("owner_share", owner_share), ("handoff_fee", handoff_fee),
+                        ("oth_sale_fee", oth_sale_fee)):
         if value is None:
             continue
         value = round(float(value), 4 if name == "owner_share" else 2)        # rubles and kopecks; a share to a hundredth of a percent
@@ -101,26 +105,41 @@ def _split(net: float, by_share: Dict[float, float]) -> tuple:
     return owner, round(net - owner, 2)
 
 
-def build(conn, start: str, end: str, point: str = "") -> dict:
-    """Lines per point (most profitable first), the total and the manual sales (not in the total). Reversed sales are not counted."""
-    rates = list_rates(conn)
-    rows = _counted(conn, sales_store.list_sales(conn, start, end))       # all points: a point's fixed sum may come from an order issued elsewhere
-    names: Dict[tuple, str] = {}                                                        # point key → its name in the report
-    handed = {}                                                                         # the clients the points handed over (order_manager.handoff)
+KINDS = {"issue": "за выдачу", "handoff": "бонус за переданного клиента", "oth": "бонус за продажу с ОТХ"}   # what a point is paid for
+
+
+def _handed(conn, names: Dict[tuple, str]) -> tuple:
+    """The clients the points handed over: order → the point key that handed it (None: a point deleted), and order → the order of the
+    handoff (a merged order, a client changed on «На ОТХ»: the handoff it came from)."""
+    handed, origin = {}, {}
     for order_id, point_id, name in conn.execute("SELECT h.order_id, p.id, p.name FROM order_handoff h LEFT JOIN point p ON p.id = h.point_id"):
         handed[order_id] = ("id", point_id) if point_id is not None else None
+        origin[order_id] = order_id
         if point_id is not None:
             names.setdefault(("id", point_id), name)
     from .order_merge import handed as merged_handed
     for new, source in merged_handed(conn).items():                                     # a merged order: once, if a source was handed over
-        handed.setdefault(new, handed.get(source))
+        if new not in handed:
+            handed[new], origin[new] = handed.get(source), origin.get(source, source)
     from .oth_swap import fee_handed
     off, moved = fee_handed(conn)                                                       # the client changed on «На ОТХ» (oth_swap)
     for order_id, source in moved.items():
         if source in handed:
-            handed[order_id] = handed[source]
+            handed[order_id], origin[order_id] = handed[source], origin.get(source, source)
     for order_id in off - set(moved):
         handed.pop(order_id, None)
+    return handed, origin
+
+
+def _ledger(conn, rows: List[dict], rates: List[dict]) -> tuple:
+    """What the points are paid for the sales `rows` (all points): (names, grouped, per_point, entries). An entry is one sum to one point:
+    {key, point, day, order, kind, amount, share, pieces, handoff}: «issue» — the fee of an issued order (once per order and point, its
+    first day in the rows); «handoff» — the fixed sum for a handed-over client's issued order (bonus_point); «oth» — the bonus for the tyres
+    the point sold from «На ОТХ» (oth_point_sale): the rate «oth_sale_fee» of the sale's day × its pieces, to the point of the sale."""
+    from . import oth_point_sale, oth_sale
+    names: Dict[tuple, str] = {}
+    handed, origin = _handed(conn, names)
+    point_sold, from_oth = oth_point_sale.sale_orders(conn), oth_sale.sale_ids(conn)
     grouped: Dict[tuple, List[dict]] = {}
     for r in rows:
         if r["source"] == "order":
@@ -128,25 +147,72 @@ def build(conn, start: str, end: str, point: str = "") -> dict:
             names[key] = names.get(key) or r["point"] or NO_POINT                       # rows come latest first: the name now, else the latest one written
             grouped.setdefault(key, []).append(r)
     per_point: Dict[tuple, Dict[str, List[dict]]] = {key: {} for key in grouped}
-    bonuses: Dict[tuple, List[tuple]] = {}                                              # point → (share, sum) of the fixed sums it gets
-    handoff_lines: Dict[tuple, dict] = {}
+    entries: List[dict] = []
     for key, items in grouped.items():
         for r in items:
             per_point[key].setdefault(r["note"], []).append(r)
         for note, parts in per_point[key].items():
-            order_id = _order_id(note)
-            if order_id not in handed:
-                continue
-            day = min(r["day"] for r in parts)
-            extra, to = rate_on(rates, "handoff_fee", day), bonus_point(key, handed[order_id])      # on top of the 75 ₽
-            bonuses.setdefault(to, []).append((rate_on(rates, "owner_share", day), extra))
-            got = handoff_lines.setdefault(to, {"point": names[to], "clients": 0, "fee": 0.0})
+            order_id, day = _order_id(note), min(r["day"] for r in parts)
+            share = rate_on(rates, "owner_share", day)
+            entries.append({"key": key, "day": day, "order": order_id, "kind": "issue", "amount": rate_on(rates, "point_fee", day),
+                            "share": share, "pieces": sum(r["pieces"] for r in parts), "handoff": None})
+            if order_id in handed:
+                to = bonus_point(key, handed[order_id])                                 # on top of the 75 ₽
+                entries.append({"key": to, "day": day, "order": order_id, "kind": "handoff", "amount": rate_on(rates, "handoff_fee", day),
+                                "share": share, "pieces": 0, "handoff": origin.get(order_id, order_id)})
+            if order_id in point_sold:
+                for r in parts:
+                    if r.get("id") in from_oth and r["pieces"] > 0:
+                        entries.append({"key": key, "day": r["day"], "order": order_id, "kind": "oth", "share": rate_on(rates, "owner_share", r["day"]),
+                                        "amount": round(rate_on(rates, "oth_sale_fee", r["day"]) * r["pieces"], 2), "pieces": r["pieces"], "handoff": None})
+    for e in entries:
+        names.setdefault(e["key"], NO_POINT)
+        e["point"] = names[e["key"]]
+    return names, grouped, per_point, entries
+
+
+def accruals(conn, start: str, end: str, point_id: Optional[int] = None) -> List[dict]:
+    """The sums the points are paid in the period (the days of the sales, both included), oldest first; `point_id`: that point's only.
+    The same entries as the report's «Выплата точке» (build): reversed sales are not counted, so a sale undone takes its sums away."""
+    rates = list_rates(conn)
+    entries = _ledger(conn, sales_store.list_sales(conn, start, end), rates)[3]
+    if point_id is not None:
+        entries = [e for e in entries if e["key"] == ("id", int(point_id))]
+    entries.sort(key=lambda e: (e["day"], e["order"] or 0, list(KINDS).index(e["kind"])))
+    return entries
+
+
+def income(entries: List[dict]) -> dict:
+    """The summary of `entries`: for the issue, the bonuses (handed-over clients, sales from OTH) and the total."""
+    out = {kind: round(sum(e["amount"] for e in entries if e["kind"] == kind), 2) for kind in KINDS}
+    out["oth_pieces"] = sum(e["pieces"] for e in entries if e["kind"] == "oth")
+    out["bonus"] = round(out["handoff"] + out["oth"], 2)
+    out["total"] = round(out["issue"] + out["bonus"], 2)
+    return out
+
+
+def build(conn, start: str, end: str, point: str = "") -> dict:
+    """Lines per point (most profitable first), the total and the manual sales (not in the total). Reversed sales are not counted."""
+    rates = list_rates(conn)
+    rows = _counted(conn, sales_store.list_sales(conn, start, end))       # all points: a point's fixed sum may come from an order issued elsewhere
+    names, grouped, per_point, entries = _ledger(conn, rows, rates)
+    bonuses: Dict[tuple, List[tuple]] = {}                                              # point → (share, sum) of the fixed sums it gets
+    handoff_lines: Dict[tuple, dict] = {}
+    paid: Dict[tuple, List[dict]] = {}
+    for e in entries:
+        paid.setdefault(e["key"], []).append(e)
+        if e["kind"] == "issue":
+            continue
+        bonuses.setdefault(e["key"], []).append((e["share"], e["amount"]))
+        if e["kind"] == "handoff":
+            got = handoff_lines.setdefault(e["key"], {"point": names[e["key"]], "clients": 0, "fee": 0.0})
             got["clients"] += 1
-            got["fee"] = round(got["fee"] + extra, 2)
+            got["fee"] = round(got["fee"] + e["amount"], 2)
     if point:                                                                           # one point: its orders and the fixed sums it gets
         grouped = {k: v for k, v in grouped.items() if names[k] == point}
         bonuses = {k: v for k, v in bonuses.items() if names[k] == point}
         handoff_lines = {k: v for k, v in handoff_lines.items() if names[k] == point}
+        paid = {k: v for k, v in paid.items() if names[k] == point}
         rows = [r for r in rows if r["point"] == point]
     lines, total_by_share, used, webmim = [], {}, set(), []
     for key in list(grouped) + [k for k in bonuses if k not in grouped]:               # a point paid only for the clients it handed over
@@ -183,9 +249,12 @@ def build(conn, start: str, end: str, point: str = "") -> dict:
                       margin=round(sum(r["margin_total"] for r in manual_rows), 2))
     handoff = sorted(handoff_lines.values(), key=lambda r: r["point"])
     webmim.sort(key=lambda r: r["point"])
+    payouts = sorted((dict(income(v), point=names[k]) for k, v in paid.items()), key=lambda r: r["point"])
+    payout_total = dict(income([e for v in paid.values() for e in v]), point="Итого")
     return {"lines": lines, "total": total, "manual": manual, "rates_used": sorted(used),
             "webmim": {"count": sum(r["count"] for r in webmim), "positions": sum(r["positions"] for r in webmim), "by_point": webmim},
-            "handoff": {"lines": handoff, "clients": sum(r["clients"] for r in handoff), "fee": round(sum(r["fee"] for r in handoff), 2)}}
+            "handoff": {"lines": handoff, "clients": sum(r["clients"] for r in handoff), "fee": round(sum(r["fee"] for r in handoff), 2)},
+            "payouts": {"lines": payouts, "total": payout_total}}
 
 
 def _counted(conn, rows: List[dict]) -> List[dict]:

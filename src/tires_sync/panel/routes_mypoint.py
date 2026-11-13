@@ -24,7 +24,7 @@ from datetime import date, timedelta
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
 from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
-from .common import author, current_user, get_conn, login_required, own_point
+from .common import author, current_user, get_conn, has_right, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
 
@@ -471,6 +471,18 @@ def nav_counts(conn, point_id) -> dict:
             "orders": len(new)}
 
 
+def _handed_bonus(conn, handed: list, point_id: int, since: str, rate: float) -> None:
+    """The bonus of each handed-over client on «Переданные клиенты»: `bonus` — the sum the point got for it (its order issued, the report's
+    sum), else `bonus_wait` — what it gets once the order is issued (the rate of today), none for a client refused or cancelled."""
+    got: dict = {}
+    for e in order_report.accruals(conn, since, "9999-12-31", point_id):
+        if e["kind"] == "handoff":
+            got[e["handoff"]] = round(got.get(e["handoff"], 0.0) + e["amount"], 2)
+    for h in handed:
+        h["bonus"] = got.get(h["id"])
+        h["bonus_wait"] = rate if h["bonus"] is None and h["status"] not in ("refused", "cancelled", "done") else None
+
+
 def register(app) -> None:
     def point_nav():
         """The counters for the sections of the point's phone (the manager of a point only; None for the others), once per request."""
@@ -505,11 +517,37 @@ def register(app) -> None:
                 return done
             error, form = done
         since = (date.fromisoformat(local_iso()[:10]) - timedelta(days=HANDED_DAYS)).isoformat()
+        bonus = order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10])
+        handed = mgr.point_handoffs(conn, point_id, since) if point_id is not None else []
+        if handed:
+            _handed_bonus(conn, handed, point_id, since, bonus)
         return render_template(point_page("mypoint_handed.html"), point=point, choose=own_point() is None, user=current_user(),
                                points=points.list_points(conn) if own_point() is None else [],
-                               handed=mgr.point_handoffs(conn, point_id, since) if point_id is not None else [], seasons=mgr.SEASONS,
-                               bonus=order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10]),
+                               handed=handed, seasons=mgr.SEASONS, bonus=bonus,
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form), 400 if error else 200
+
+    @app.route("/my-point/income")
+    @login_required
+    def mypoint_income():
+        """«Доход точки»: what the point is paid in a period (order_report.accruals, the same sums as «Выплата точке» of the report): the
+        summary at the top — for the issue, the bonuses (handed-over clients, tyres sold from «На ОТХ»), the total — and the list of the
+        sums. The manager of a point sees its own only (?p= is not read for it); the others pick a point and need the right to the money."""
+        if own_point() is None and not has_right("money"):
+            abort(403)
+        conn = get_conn()
+        point_id, point = _the_point(conn)
+        today = local_now().date()
+        try:
+            start = date.fromisoformat(request.args.get("from", "").strip()[:10]).isoformat()
+            end = date.fromisoformat(request.args.get("to", "").strip()[:10]).isoformat()
+        except ValueError:
+            start, end = today.replace(day=1).isoformat(), today.isoformat()
+        if start > end:
+            start, end = end, start
+        entries = order_report.accruals(conn, start, end, point_id) if point_id is not None else []
+        return render_template(point_page("mypoint_income.html"), point=point, choose=own_point() is None, user=current_user(),
+                               points=points.list_points(conn) if own_point() is None else [], start=start, end=end,
+                               entries=list(reversed(entries)), summary=order_report.income(entries), kinds=order_report.KINDS)
 
     @app.route("/my-point", methods=["GET", "POST"])
     @login_required
@@ -766,7 +804,7 @@ def register(app) -> None:
                                number=form.get("number", card["webmim_number"]) if form else card["webmim_number"],
                                transfer=form.get("transfer", card["transfer_number"]) if form else card["transfer_number"],
                                total=_rub(sum(r["unit"] * r["qty"] for r in rows)), when="%s.%s.%s %s" % (moment[8:10], moment[5:7], moment[:4], moment[11:16]),
-                               token=secrets.token_hex(12), single=len(rows) == 1, bonus=oth_point_sale.BONUS, no_contact=oth_point_sale.NO_CONTACT,
+                               token=secrets.token_hex(12), single=len(rows) == 1, bonus=oth_point_sale.bonus_text(conn, local_iso()[:10]), no_contact=oth_point_sale.NO_CONTACT,
                                p=point_id if own_point() is None else None, back=back,
                                tab=(parse_qs(urlsplit(back).query).get("tab") or [""])[0])
 

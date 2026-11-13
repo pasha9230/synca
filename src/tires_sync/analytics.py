@@ -231,6 +231,7 @@ def money(conn, start: str, end: str) -> dict:
             "manual": {"sales": manual["sales"], "pieces": manual["pieces"], "revenue": manual["sale"], "cost": manual["cost"],
                        "profit": manual["margin"]},
             "rates_used": report["rates_used"],
+            "payouts": report["payouts"],                                                    # the fees: for the issue, the bonuses, per point
             "webmim": {"count": report["webmim"]["count"], "of": report["webmim"]["positions"]}}          # the positions whose purchase is WebMIM's (order_report)
 
 

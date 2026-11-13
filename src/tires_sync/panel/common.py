@@ -310,7 +310,7 @@ for _section, _endpoints in {
              "tour_done", "tour_again",                 # «Обзор» (panel/tour.py): one's own mark «пройден», every role
              "whatsnew_page",                           # «Что нового» (routes_whatsnew): every role, its own items
              "tasks_feed"),                             # the sound of one's own tasks «Позвонить…» (order_call.sounds): read-only
-    "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
+    "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_income", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                 "mypoint_not_taken",                    # «Водитель не забрал» of «Сегодня возврат!» (oth_point_return, 2026-11-12)
                 "mypoint_oth_sale"),                    # the window of «Продать» of a record on «На ОТХ» (oth_point_sale, ТЗ part D)
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
@@ -377,7 +377,7 @@ NEEDS.update({e: "connections" for e, s in SECTION_OF.items() if s == "setup" an
 # with their prices — of its own sale only (check_access); our orders (WebMIM), another point's and the purchase stay closed
 POINT_SALE_PAGES = frozenset({"order_point_sale", "order_item_add", "order_item_update", "order_item_delete"})
 POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told", "orders_export_file", "order_move", "order_note", "orders_list_columns", "orders_hint_fold", "account_password_page",
-                         "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
+                         "account_password", "tour_done", "tour_again", "mypoint_page", "mypoint_handed", "mypoint_income", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                          "search", "search_json",   # the search: the point's own (search.scope_for)
                          "chats_page", "chats_refresh", "alerts_page", "alerts_feed", "alerts_ack", "alerts_accept_all",       # the chats of the point's account, its alerts
                          "chat_send", "chat_send_image", "chat_status", "chat_assign", "chat_create_deal", "chat_link", "chat_unlink",

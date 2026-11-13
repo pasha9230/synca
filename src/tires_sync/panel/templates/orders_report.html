@@ -16,6 +16,10 @@
 </tbody></table>
 {% if report.lines %}{% set w = report.webmim %}<p class="small muted" data-webmim-cost>Закупка из заказов WebMIM (боевой сервер): {{ w.count }} из {{ w.positions }} поз.{% if w.count < w.positions %}; остальные — по цене поставщика, записанной в продажу{% endif %}. Цена WebMIM идёт только в этот расчёт: в заказ и продажи не записывается.{% if w.by_point|length > 1 %} По точкам: {% for r in w.by_point %}{{ r.point }} {{ r.count }} из {{ r.positions }}{{ "; " if not loop.last }}{% endfor %}.{% endif %}</p>{% endif %}
 </div></section>
+{% if report.payouts.lines %}<section class="card" style="margin-top:var(--s-4)"><div class="card-head"><h3>Выплаты точкам</h3><span class="sub">входят в «Выплату точке» выше: за выдачу заказа и бонусы (переданный клиент, каждая шина, проданная точкой с ОТХ)</span></div>
+<div class="card-body" style="overflow-x:auto"><table class="table" data-payouts><thead><tr><th>Точка</th><th>За выдачу</th><th>Бонус за переданных</th><th>Бонус за ОТХ</th><th>Бонусы всего</th><th>Итого точке</th></tr></thead><tbody>
+{% for r in report.payouts.lines + [report.payouts.total] %}<tr{% if loop.last %} class="strong"{% endif %}><td>{{ r.point }}</td><td>{{ r.issue|money }}</td><td>{{ r.handoff|money }}</td><td>{{ r.oth|money }}{% if r.oth_pieces %} <span class="muted">({{ r.oth_pieces }} шт.)</span>{% endif %}</td><td>{{ r.bonus|money }}</td><td>{{ r.total|money }}</td></tr>
+{% endfor %}</tbody></table></div></section>{% endif %}
 {# «Ставки» and «Подписи долей» are in «Настройки заказов › Расчёты» (п. 28 of the audit, 2026-11-08): here the report only #}
 {% if can("analytics") and has_right("money") %}<p class="small muted" style="margin-top:var(--s-3)">Ставки и подписи долей — в <a href="/orders/settings/money">«Настройках заказов» › «Расчёты»</a>.</p>{% endif %}
 {% endblock %}

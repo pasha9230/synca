@@ -18,13 +18,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from . import order_oth, orders, oth_sale, oth_stock, oth_storage
 
 SOLD_OF = "oth_point_sold:%d"           # A → [{"order": B, "record": Х, "pieces", "at", "by"}]: the point sold tyres of A's record
 NAME_MAX, NUMBER_MAX, TRANSFER_MAX = 200, 60, 40
-BONUS = "Бонус точке: +50 ₽ за каждую проданную шину."
+BONUS = "Бонус точке: +%s ₽ за каждую проданную шину."     # the rate «oth_sale_fee» of today (bonus_text; order_report.accruals counts it)
 NO_CONTACT = "Клиент отказался предоставлять имя и телефон"
 SOLD_NOTE = "Продано с ОТХ %d шт. в заказ №%d (%s)."
 SKIP = "продажа с ОТХ на точке: покупателю сообщения не отправляются"
@@ -56,6 +56,26 @@ def all_sold(conn, order_id) -> bool:
         return False
     left = conn.execute("SELECT COALESCE(SUM(qty), 0) FROM order_item WHERE order_id IN (%s)" % ",".join("?" * len(records)), records).fetchone()[0]
     return int(left or 0) == 0
+
+
+def bonus_text(conn, day: str) -> str:
+    from . import order_report
+    rate = order_report.rate_on(order_report.list_rates(conn), "oth_sale_fee", day)
+    return BONUS % (("%.2f" % rate).replace(".", ",").replace(",00", ""))
+
+
+def sale_orders(conn) -> Set[int]:
+    """The orders B the window «Продать» made (the audit of the sale, written in its transaction): the tyres of their sales bring the point
+    the bonus for a sale from OTH (order_report.accruals)."""
+    found: Set[int] = set()
+    for (detail,) in conn.execute("SELECT detail FROM audit WHERE action = 'oth_point_sale'"):
+        try:
+            order = json.loads(detail or "{}").get("order")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(order, int):
+            found.add(order)
+    return found
 
 
 def why_not(conn, card: dict) -> Optional[str]:

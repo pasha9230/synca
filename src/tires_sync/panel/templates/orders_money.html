@@ -4,7 +4,7 @@
 {% block content %}
 {# «Расчёты» of «Настройки заказов»: the forms «Ставки» and «Подписи долей», moved from «Отчёт по заказам» as they were (п. 28 of the audit,
    2026-11-08): the same POST /orders/report/rates, the same rights (the money; «менять» in «Настройка»), the same formulas #}
-{% set names = {"point_fee": "Выплата точке за заказ", "owner_share": "Доля собственника", "handoff_fee": "За переданного клиента"} %}
+{% set names = {"point_fee": "Выплата точке за заказ", "owner_share": "Доля собственника", "handoff_fee": "За переданного клиента", "oth_sale_fee": "За шину, проданную точкой с ОТХ"} %}
 {% set tab = "money" %}{% include "_orders_settings_head.html" %}
 <section class="card"><div class="card-body"><h2>Ставки</h2>
 <p class="sub">Новая ставка действует с выбранной даты (сегодня или позже) для заказов с этой даты; прошлые отчёты не пересчитываются.</p>
@@ -12,6 +12,7 @@
 <label class="field"><span class="label">Выплата точке, ₽ за заказ</span><input class="input" name="point_fee" inputmode="decimal" required value="{{ fee|pct(2)|replace(',00', '') }}"><input type="hidden" name="point_fee_was" value="{{ fee|pct(2)|replace(',00', '') }}"></label>
 <label class="field"><span class="label">Доля собственника, %</span><input class="input" name="owner_pct" inputmode="decimal" required value="{{ (owner_share * 100)|pct(2)|replace(',00', '') }}"><input type="hidden" name="owner_pct_was" value="{{ (owner_share * 100)|pct(2)|replace(',00', '') }}"></label>
 <label class="field"><span class="label">За переданного клиента, ₽</span><input class="input" name="handoff_fee" inputmode="decimal" required value="{{ handoff_fee|pct(2)|replace(',00', '') }}"><input type="hidden" name="handoff_fee_was" value="{{ handoff_fee|pct(2)|replace(',00', '') }}"></label>
+<label class="field"><span class="label">За шину с ОТХ, ₽</span><input class="input" name="oth_sale_fee" inputmode="decimal" required value="{{ oth_sale_fee|pct(2)|replace(',00', '') }}"><input type="hidden" name="oth_sale_fee_was" value="{{ oth_sale_fee|pct(2)|replace(',00', '') }}"></label>
 <label class="field"><span class="label">Действует с</span><input class="input" type="date" name="valid_from" min="{{ today }}" required value="{{ today }}"></label>
 <button class="btn btn--primary">Сохранить</button></form>{% endif %}
 {% if rates %}<table class="table" style="margin-top:var(--s-3)"><thead><tr><th>С даты</th><th>Ставка</th><th>Значение</th><th>Кто</th><th>Когда</th></tr></thead><tbody>

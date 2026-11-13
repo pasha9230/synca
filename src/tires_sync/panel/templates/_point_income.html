@@ -1,0 +1,17 @@
+{# «Доход точки» (routes_mypoint.mypoint_income; order_report.accruals): the period, the summary at the top — for the issue, the bonuses
+   (handed-over clients, tyres sold from «На ОТХ»), the total — and the sums one by one, newest first. Both views include it. #}
+<form method="get" action="/my-point/income" class="mp-choose mp-income-period">{% if choose and point %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}
+<label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}" required></label>
+<label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}" required></label>
+<button class="btn btn--secondary btn--sm">Показать</button></form>
+<div class="mp-counters mp-income-sum" data-income>
+<div class="mp-counter"><b data-income-issue>{{ summary.issue|money }}</b><span>за выдачу</span></div>
+<div class="mp-counter"><b data-income-bonus>{{ summary.bonus|money }}</b><span>бонусы</span></div>
+<div class="mp-counter"><b data-income-total>{{ summary.total|money }}</b><span>итого</span></div>
+</div>
+{% if summary.bonus %}<p class="mp-hint" data-income-bonuses>Бонусы: за переданных клиентов {{ summary.handoff|money }}, за продажу с ОТХ {{ summary.oth|money }}{% if summary.oth_pieces %} ({{ summary.oth_pieces }} шт.){% endif %}.</p>{% endif %}
+{% if entries %}<table class="table mp-income-list"><thead><tr><th>Дата</th><th>Заказ</th><th>За что</th><th class="num">Сумма</th></tr></thead><tbody>
+{% for e in entries %}<tr data-kind="{{ e.kind }}"><td>{{ e.day[8:10] }}.{{ e.day[5:7] }}.{{ e.day[:4] }}</td><td>{% if e.order %}№ {{ e.order }}{% endif %}</td><td>{{ kinds[e.kind] }}{% if e.kind == "oth" %}, {{ e.pieces }} шт.{% endif %}</td><td class="num">{{ e.amount|money }}</td></tr>
+{% endfor %}</tbody></table>
+{% else %}<p class="mp-empty">За этот период начислений нет.</p>{% endif %}
+<p class="mp-hint">Считается по дню продажи: выдача заказа, бонус за переданного клиента после выдачи его заказа, бонус за каждую шину, проданную с ОТХ. Отменённая продажа снимает свои начисления.</p>

@@ -827,6 +827,7 @@ def register(app) -> None:
         return render_template("orders_money.html", rates=rates, today=today, fee=order_report.rate_on(rates, "point_fee", today),
                                owner_share=order_report.rate_on(rates, "owner_share", today), defaults=order_report.DEFAULTS,
                                handoff_fee=order_report.rate_on(rates, "handoff_fee", today), labels=order_report.share_labels(conn),
+                               oth_sale_fee=order_report.rate_on(rates, "oth_sale_fee", today),
                                saved_labels=order_report.saved_share_labels(conn), label_defaults=order_report.SHARE_LABELS,
                                label_max=order_report.SHARE_LABEL_MAX)
 
@@ -849,10 +850,10 @@ def register(app) -> None:
             text = request.form.get(name, "").strip()
             return None if text == request.form.get(name + "_was", "").strip() else parse_amount(text)
         try:
-            fee, pct, handoff = typed("point_fee"), typed("owner_pct"), typed("handoff_fee")
+            fee, pct, handoff, oth = typed("point_fee"), typed("owner_pct"), typed("handoff_fee"), typed("oth_sale_fee")
             share = None if pct is None else pct / 100
             changed = order_report.set_rates(conn, request.form.get("valid_from", "").strip()[:10], local_now().date().isoformat(), local_iso(), author(),
-                                             point_fee=fee, owner_share=share, handoff_fee=handoff)
+                                             point_fee=fee, owner_share=share, handoff_fee=handoff, oth_sale_fee=oth)
         except ValueError as err:
             flash(str(err) if str(err) != "not a number" else "Ставка: нужно число.")
             return redirect(MONEY_PAGE)
