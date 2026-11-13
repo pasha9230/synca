@@ -1,0 +1,37 @@
+{# «Товарный чек» of the order (routes_receipt, the owner 2026-11-13): the values put in (the number and the day of the invoice of «Заказы WebMIM»,
+   today, the positions at the client's price, the seller of «Настройки заказов › Товарный чек»), every field can be corrected. «Скачать PDF» and
+   «Посмотреть картинку» make the file only; «Сформировать и отправить в чат» sends the picture to the order's Avito chat by this press. #}
+{% set rw = receipt_window(c) %}{% if rw %}{% set rv = rw["values"] %}
+<div class="modal-backdrop{% if rw.open %} is-open{% endif %}" id="order-receipt" role="dialog" aria-modal="true" aria-labelledby="order-receipt-h" data-receipt><div class="modal" style="max-width:1040px">
+<form method="post" action="/orders/{{ c.id }}/receipt/send"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="receipt_token" value="{{ rw.token }}">
+<div class="modal-head"><h3 id="order-receipt-h">Товарный чек по заказу №{{ c.id }}</h3><button type="button" class="icon-btn ml-auto" data-close-modal aria-label="Закрыть">{{ icon("x") }}</button></div>
+<div class="modal-body stack">
+{% if rw.missing %}<p class="small text-err" data-receipt-missing>Не заполнены реквизиты продавца: {{ rw.missing|join(", ") }}. Заполните их в <a href="{{ rw.seller_settings }}">«Настройки заказов › Товарный чек»</a> или впишите ниже.</p>{% endif %}
+{% if rv.several %}<p class="small muted">У заказа несколько заказов WebMIM: подставлен номер перемещения первого, его можно поправить.</p>{% endif %}
+<div class="grid-2">
+<label class="field"><span class="label">Номер (перемещение MIM)</span><input class="input mono" name="number" value="{{ rv.number }}" maxlength="40"></label>
+<label class="field"><span class="label">Дата счёта MIM</span><input class="input" name="invoice_day" value="{{ rv.invoice_day }}" maxlength="20" placeholder="дд.мм.гггг"></label>
+<label class="field"><span class="label">Дата чека</span><input class="input" type="date" name="day" value="{{ rv.day }}" required></label>
+<label class="field"><span class="label">Продавец (ИП и ФИО)</span><input class="input" name="seller" value="{{ rv.seller }}" maxlength="200"></label>
+<label class="field"><span class="label">ИНН</span><input class="input mono" name="inn" value="{{ rv.inn }}" maxlength="14" inputmode="numeric"></label>
+<label class="field"><span class="label">Адрес</span><input class="input" name="address" value="{{ rv.address }}" maxlength="200"></label>
+<label class="field"><span class="label">Должность отпустившего</span><input class="input" name="position" value="{{ rv.position }}" maxlength="200"></label>
+<label class="field"><span class="label">ФИО отпустившего</span><input class="input" name="person" value="{{ rv.person }}" maxlength="200"></label>
+</div>
+<div style="overflow-x:auto"><table class="table small" data-receipt-lines><thead><tr><th>№</th><th>Артикул</th><th>Наименование товара</th><th class="num">Количество</th><th>Ед. изм.</th><th class="num">Цена, ₽</th></tr></thead><tbody>
+{% for l in rv.lines + [{"code": "", "name": "", "qty": "", "unit": "шт", "price": ""}] %}<tr><td>{{ loop.index }}</td>
+<td><input class="input input--sm mono" name="line_code" value="{{ l.code }}" maxlength="60" aria-label="Артикул, строка {{ loop.index }}" style="width:120px"></td>
+<td><input class="input input--sm" name="line_name" value="{{ l.name }}" maxlength="200" aria-label="Наименование, строка {{ loop.index }}" style="min-width:260px"{% if not l.name %} placeholder="Новая строка (необязательно)"{% endif %}></td>
+<td><input class="input input--sm input--num" name="line_qty" value="{{ l.qty }}" inputmode="decimal" aria-label="Количество, строка {{ loop.index }}" style="width:80px"></td>
+<td><input class="input input--sm" name="line_unit" value="{{ l.unit }}" maxlength="10" aria-label="Ед. изм., строка {{ loop.index }}" style="width:60px"></td>
+<td><input class="input input--sm input--num" name="line_price" value="{{ l.price }}" inputmode="decimal" aria-label="Цена, строка {{ loop.index }}" style="width:110px"></td></tr>
+{% endfor %}</tbody></table></div>
+<p class="small muted">Строка с пустым наименованием в чек не попадёт. Сумма и сумма прописью считаются при формировании.{% if rw.total %} Сейчас итого: <b data-receipt-total>{{ rw.total }}</b>.{% endif %}</p>
+{% if not rw.chat %}<p class="small text-err" data-receipt-nochat>У заказа нет чата Авито, куда можно отправить: отправка недоступна, чек можно скачать.</p>{% elif not can_post("order_receipt_send") %}<p class="small muted">Отправлять клиенту может тот, у кого есть право «отправлять клиенту».</p>{% else %}<p class="small muted">Чек уйдёт картинкой в чат {{ rw.chat.ref }}{% if rw.chat.peer_name %} · {{ rw.chat.peer_name }}{% endif %}.</p>{% endif %}
+{% if rw.kept %}<div class="small" data-receipt-kept><span class="strong">Отправленные чеки:</span>{% for k in rw.kept %}<div>{{ k.title }} · {{ receipt_money(k.total) }} · {{ k.made_at|dt }} · <a href="/orders/{{ c.id }}/receipts/{{ k.id }}.pdf">PDF</a> · <a href="/orders/{{ c.id }}/receipts/{{ k.id }}.jpg" target="_blank" rel="noopener">картинка</a></div>{% endfor %}</div>{% endif %}
+</div>
+<div class="modal-foot row" style="gap:var(--s-2);flex-wrap:wrap">
+<button class="btn btn--secondary" formaction="/orders/{{ c.id }}/receipt/file" name="kind" value="pdf">Скачать PDF</button>
+<button class="btn btn--secondary" formaction="/orders/{{ c.id }}/receipt/file" name="kind" value="jpg" formtarget="_blank">Посмотреть картинку</button>
+<button class="btn btn--primary ml-auto" data-receipt-send{% if not rw.chat or not can_post("order_receipt_send") %} disabled title="{{ 'У заказа нет чата Авито' if not rw.chat else 'Нет права отправлять клиенту' }}"{% endif %}>Сформировать и отправить в чат</button>
+</div></form></div></div>{% endif %}

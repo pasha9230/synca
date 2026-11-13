@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% block title %}Товарный чек · Настройки заказов · Tires Sync{% endblock %}
+{% block content %}
+{# «Товарный чек» of «Настройки заказов» (routes_receipt, the owner 2026-11-13): the seller's fields the window «Сформировать чек» of an order
+   puts in. Kept in the panel's database, never in the code. Who sees the money of the orders changes them (the owner, the partner). #}
+{% set tab = "receipt" %}{% include "_orders_settings_head.html" %}
+<section class="card"><div class="card-body"><h2>Реквизиты продавца</h2>
+<p class="sub">Подставляются в каждый новый товарный чек. В окне чека их можно поправить для одного чека, здесь они не изменятся. Обязательны продавец и ИНН.</p>
+<form method="post" action="/orders/settings/receipt" class="stack" style="max-width:640px" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% for key, label in fields.items() %}<label class="field"><span class="label">{{ label }}{% if key in needed %} *{% endif %}</span><input class="input{% if key == 'inn' %} mono{% endif %}" name="{{ key }}" value="{{ seller[key] }}" maxlength="{{ 14 if key == 'inn' else field_max }}"{% if key == 'inn' %} inputmode="numeric"{% endif %}{% if key == 'seller' %} placeholder="ИП Фамилия Имя Отчество"{% endif %}></label>
+{% endfor %}<div><button class="btn btn--primary">Сохранить</button></div></form>
+</div></section>
+{% endblock %}

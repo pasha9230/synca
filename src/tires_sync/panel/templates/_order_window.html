@@ -107,9 +107,10 @@
 {% if not (card and c.stage.code == "oth") %}<label class="field is-wide"><span class="label">Крайняя дата резерва (по умолчанию 3 дня с приезда на точку; поставьте позже, если клиент просит продлить)</span><input class="input" type="date" name="reserve_until" value="{{ v.reserve_until }}"></label>{% endif %}
 {% endif %}
 </div></details>
-{% if ro %}<p class="hint owin-foot">Только просмотр: менять заказ может тот, у кого есть право «Заказы: менять».</p>{% else %}<div class="owin-foot"><a class="btn btn--secondary" href="{{ '/orders/%d' % c.id if card else '/orders' }}">Отмена</a><button class="btn btn--primary">{{ "Создать заказ" if o2 and not card else "Сохранить" }}</button></div>{% endif %}
+{% if ro %}<p class="hint owin-foot">Только просмотр: менять заказ может тот, у кого есть право «Заказы: менять».</p>{% else %}<div class="owin-foot">{% if card and has_right("money") and current_user().role != "point" %}<button type="button" class="btn {{ 'btn--primary' if c.receipt_needed else 'btn--secondary' }}" style="margin-right:auto" data-open-modal="order-receipt" data-receipt-open{% if c.receipt_needed %} title="В заказе отмечено «Нужен товарный чек»"{% endif %}>Сформировать чек{% if c.receipt_needed %} · нужен{% endif %}</button>{% endif %}<a class="btn btn--secondary" href="{{ '/orders/%d' % c.id if card else '/orders' }}">Отмена</a><button class="btn btn--primary">{{ "Создать заказ" if o2 and not card else "Сохранить" }}</button></div>{% endif %}
 </div>
 {% if ro %}</fieldset></div>{% else %}</form>{% endif %}
+{% if card %}{% include "_order_receipt.html" %}{% endif %}
 {% if can_delete %}
 <form id="ow-delete" method="post" action="/orders/{{ c.id }}/delete" data-once data-confirm-title="Удалить заказ №{{ c.id }}?" data-confirm="Заказ{% if c.client_name %} ({{ c.client_name }}){% endif %} уйдёт в «Удалённые», вернуть его можно там. В Авито и WebMIM ничего не меняется." data-confirm-ok="Удалить заказ" data-confirm-danger><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form>{% endif %}
 {% if card and not ro %}
