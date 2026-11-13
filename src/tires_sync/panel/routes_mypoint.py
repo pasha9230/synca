@@ -284,9 +284,8 @@ ALERTS_READ = 500                                  # the notes read to find the 
 
 def _in_tab(row: dict, tab: str) -> bool:
     """«Едут»: «Заказ оформлен» and «Перемещение на точку» (the owner 2026-10-29); «На точке»: «Товар на точке», waiting for the client; «На ОТХ»:
-    our tyres at the point (the owner 2026-10-30). The owner 2026-11-12: «Согласование возврата»: the orders of the stage «На возврат» whose
-    return is not agreed yet, and those of «На ОТХ» with a position marked for the return (the whole order: a record is sold or returned whole);
-    «На возврат»: agreed (the date is set, the act МХ-3 not signed yet; one of «На ОТХ» agreed before the stage came too) and the act signed."""
+    our tyres at the point (the owner 2026-10-30). The owner 2026-11-12, 2026-11-13: «Согласование возврата»: the orders of the stage of that
+    name (order_oth.agreeing; a position marked for the return takes the order there whole); «На возврат»: agreed (the date is set, the act МХ-3 not signed yet; one of «На ОТХ» agreed before the stage came too) and the act signed."""
     code = row["card"]["stage"]["code"]
     agreed = bool(row.get("returning"))
     agreeing = not agreed and bool(row.get("agreeing"))
@@ -340,7 +339,7 @@ def _issued(conn, point_id, today: str) -> list:
     who marked it and the press still to undo (point_log.undoable). Nothing of money."""
     since = (date.fromisoformat(today) - timedelta(days=ISSUED_DAYS)).isoformat()
     done = orders.stage_name(conn, "done")
-    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM + ("oth", orders.RETURN_GIVEN)}     # and «Выдали»/«Продать» from «На ОТХ» and «На возврат» (2026-11-09, 2026-11-10)
+    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM + orders.OTH_CODES}     # and «Выдали»/«Продать» from «На ОТХ» and «На возврат» (2026-11-09, 2026-11-10)
     rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'done' "
                         "AND c.entered_at >= ? ORDER BY c.entered_at DESC, c.id DESC", (point_id, since)).fetchall()
     mine = points.own_sales(conn, point_id) if rows else set()
@@ -393,7 +392,7 @@ def _oth_cards(conn, point_id) -> list:
     """The point's orders on «На ОТХ» and «На возврат»: the tyres the client refused lie at the point (tabs «На ОТХ», «На возврат»). Not its
     own sales («Заказы»)."""
     ids = [r[0] for r in conn.execute(
-        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (?, ?) ORDER BY c.entered_at, c.id",
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code " + order_oth.IN_RETURNING + " ORDER BY c.entered_at, c.id",
         (point_id,) + order_oth.RETURNING)]
     mine = points.own_sales(conn, point_id) if ids else set()
     return [orders.get_card(conn, card_id) for card_id in ids if card_id not in mine]

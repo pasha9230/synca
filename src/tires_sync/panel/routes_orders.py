@@ -1033,18 +1033,18 @@ def register(app) -> None:
         return {"target": target, "oth": oth, "cancel_reason": asked.get("cancel_reason", ""), "question": OTH_QUESTION}
 
     def _oth_item_marks(conn, card: dict) -> dict:
-        """Item → its «На возврат» by hand (order_oth.item_to_return), while the order is on «На ОТХ»."""
-        if card["stage"]["code"] != "oth":
+        """Item → its «На возврат» by hand (order_oth.item_to_return), while the order is on «На ОТХ» or «Согласование возврата»."""
+        if card["stage"]["code"] not in order_oth.MARKED_ON:
             return {}
-        marks = order_oth.item_marks(conn)
-        found = {i["id"]: order_oth.item_mark(marks, i["id"], card["entered_at"]) for i in card["items"]}
+        marks, stay = order_oth.item_marks(conn), order_oth.oth_stay(conn, card)
+        found = {i["id"]: order_oth.item_mark(marks, i["id"], stay) for i in card["items"]}
         return {k: v for k, v in found.items() if v}
 
     def _to_return_stage(conn, card: dict):
-        """The stage of the button «На возврат» of the card: the office, on «На ОТХ», the return not agreed."""
+        """The stage of the button «На возврат» of the card: the office, on «На ОТХ», the return not agreed: «Согласование возврата» (2026-11-13)."""
         if card["stage"]["code"] != "oth" or own_point() is not None or not can_post("order_move") or order_oth.return_plan(conn, card["id"]):
             return None
-        return next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN), None)
+        return next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_AGREE), None)
 
     @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
     @login_required
@@ -1085,7 +1085,7 @@ def register(app) -> None:
         if card_id not in {c["id"] for c in found}:
             found.insert(0, card)
         found = [c for c in found if not order_merge_store.into(conn, c["id"]) and not order_merge_store.is_target(conn, c["id"])]
-        stages = [s for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] not in ("oth", orders.RETURN_GIVEN)]
+        stages = [s for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] not in orders.OTH_CODES]
         return render_template("orders_merge.html", c=card, found=found, stages=stages, ref={c["id"]: order_merge_store._ref(c) for c in found},
                                label=manager.label)
 
@@ -1165,10 +1165,19 @@ def register(app) -> None:
         conn = get_conn()
         card = card_or_404(conn, card_id)
         now = local_iso()
-        if order_oth.unagree(conn, card, now, author()):
+        try:
+            done = order_oth.unagree(conn, card, now, author())
+        except (order_oth.OthError, orders.OrderError) as err:
+            flash(str(err), "error")
+            return redirect("/orders/%d" % card_id)
+        if done:
             told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, message_texts.text(conn, message_texts.UNAGREED, order_label=manager.label(card)), now,
                                            vk_http=app.config.get("VK_HTTP") or urllib_transport)
-            flash("Согласование отменено: статус «%s», шины не в продаже, точка не видит дату. Точке: %s." % (order_oth.LABELS[order_oth.AGREE], told), "ok")
+            if card["stage"]["code"] == orders.RETURN_AGREE:                   # nothing was agreed: back on «На ОТХ», on sale (the owner 2026-11-13)
+                flash("Согласование снято: заказ снова на «%s», шины в продаже. Точке: %s." % (orders.stage_name(conn, "oth"), told), "ok")
+            else:
+                flash("Согласование отменено: заказ снова на «%s», шины не в продаже, точка не видит дату. Точке: %s." % (
+                    orders.stage_name(conn, orders.RETURN_AGREE), told), "ok")
         else:
             flash("Отменять нечего: возврат не согласован или акт МХ-3 уже подписан.", "error")
         return redirect("/orders/%d" % card_id)
