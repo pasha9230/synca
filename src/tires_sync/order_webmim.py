@@ -88,13 +88,32 @@ def snapshot(conn, card_id, now: str, fresh: bool = False) -> bool:
     number = _number_of(card)
     mark = conn.execute("SELECT number FROM order_mim_base WHERE order_id = ? AND item_id = 0", (card["id"],)).fetchone()
     if mark is not None and not fresh:
-        if mark[0] != number:
+        if mark[0] == number:
+            return False
+        if not _renumbered(conn, card, mark[0], now):
             conn.execute("UPDATE order_mim_base SET number = ? WHERE order_id = ?", (number, card["id"]))
-        return False
+            return False
     conn.execute("DELETE FROM order_mim_base WHERE order_id = ?", (card["id"],))
     conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?, 0, 0, ?, ?)", (card["id"], now, number))
     for item in oth_sale.supplier_items(conn, card):
         conn.execute("INSERT INTO order_mim_base (order_id, item_id, qty, at, number) VALUES (?,?,?,?,?)", (card["id"], item["id"], _held(conn, item), now, number))
+    return True
+
+
+def _renumbered(conn, card: dict, was: str, now: str) -> bool:
+    """The owner 13.11 (order 576): the first number replaced by another number while no second order has a number nor a transfer: the
+    order of WebMIM was made again for every tyre, so the empty second orders go away and the snapshot is taken again. A number that
+    came after the id (the mark was the id) or a second order with a number typed: a correction, the parts stay. True when taken back."""
+    if not was or was == str(card.get("webmim_id") or "") or not card.get("webmim_number"):
+        return False
+    if conn.execute("SELECT 1 FROM order_mim_extra WHERE order_id = ? AND (webmim_number != '' OR transfer_number != '') LIMIT 1",
+                    (card["id"],)).fetchone():
+        return False
+    gone = conn.execute("DELETE FROM order_mim_extra WHERE order_id = ?", (card["id"],)).rowcount
+    if gone:
+        orders.add_event(conn, card["id"], now, "система", "field", "Номер заказа WebMIM сменён (%s → %s): новый заказ покрывает все шины, "
+                         "второй заказ WebMIM убран. Лишнюю строку «Добавленные шины» в Google-таблице удалите вручную." % (was, card["webmim_number"]),
+                         level="grey")
     return True
 
 
