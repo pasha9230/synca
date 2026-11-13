@@ -944,7 +944,7 @@ def in_alert_hours(conn, now: str) -> bool:
 
 def finish_moved(conn, now: str, notify) -> None:
     """Every tick: what follows a move to «На возврат» (PENDING_KEY): the task at any hour; in the alert hours the responsible's alert (seventh day only) and, for a move by hand only, a
-    VK point's status with the question. The key goes last: a crash or a failure is repaired by the next tick, each alert once. An order that left: nothing."""
+    VK point's status (no question since the owner 2026-11-13). The key goes last: a crash or a failure is repaired by the next tick, each alert once. An order that left: nothing."""
     for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE 'oth_moved_pending:%'").fetchall():
         try:
             _finish_one(conn, key, value, now, notify)
@@ -977,9 +977,8 @@ def _finish_one(conn, key: str, value: str, now: str, notify) -> None:
     point = card.get("point") or {}
     if point and not held.get("auto") and point.get("channel") != points.PANEL and not (conn.execute("SELECT 1 FROM app_state WHERE key = ?", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])),)).fetchone()):
         label = order_manager.label(card)
-        text = message_texts.text(conn, message_texts.RETURN_STATUS, order_label=label)
-        if question_open(conn, card):                                                # a record of storage: never «выдал» (the owner 2026-11-10)
-            text += " " + (RECORD_ASK % (label, label) if card.get("oth_record") else message_texts.text(conn, message_texts.RETURN_ASK, order_label=label))
+        text = message_texts.text(conn, message_texts.RETURN_STATUS, order_label=label)   # the owner 2026-11-13: the bot no longer asks
+                                                                                     # «выдали / на точке?» in VK — the status only
         conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?)", (TOLD_KEY % (card_id, re.sub(r"\D", "", held["entered"])), now))
         conn.commit()
         notify(dict(card, responsible="", to_staff=False), text)                     # "": the alert goes to the point (order_notify.route, as tell_point)
@@ -1015,7 +1014,6 @@ def _stuck(conn, card: dict, now: str, why: str) -> None:
 
 
 RECORD_QUESTION = "Шины на точке?"     # a record of storage (oth_storage): no client to give them to, they are sold by «Продать» (the owner 2026-11-10)
-RECORD_ASK = "Шины заказа №%s на точке? Ответьте «на точке %s». Если их купили, нажмите «Продать» в кабинете точки."
 RECORD_ISSUED = ("Заказ №%s: шины на ОТХ без клиента, «Выдали» для них не отмечается (выдают с «На точке»). Если шины купили, нажмите «Продать» "
                  "в кабинете точки.")
 

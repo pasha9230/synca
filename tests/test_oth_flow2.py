@@ -1142,12 +1142,14 @@ def test_the_undo_of_one_position_keeps_the_task_of_the_other(tmp_path):
 
 
 def test_a_vk_point_gets_the_status_and_the_question_and_answers_issued(tmp_path):
+    """The owner 2026-11-13: a VK point hears the status only, the bot no longer asks «выдали / на точке?» (was: the status and the
+    question); its «выдал N», if it writes one, still closes the order."""
     from test_vk_commands import hook
     app, conn, cid = _vk_order(tmp_path)
     told = []
     asked_by_hand(conn, cid, notify=calls(told))
     [to_point] = [t for who, t in told if who == ""]
-    assert "Согласование возврата" in to_point and "выдал 700300" in to_point and "на точке 700300" in to_point
+    assert "Согласование возврата" in to_point and "выдал" not in to_point and "на точке 700300" not in to_point
     assert not [e for e in orders.list_events(conn, cid) if "она может не увидеть" in e["text"]]
     hook(app, conn, "выдал 700300")
     assert orders.get_card(conn, cid)["stage"]["code"] == "done" and open_tasks(conn, cid) == []
@@ -1204,7 +1206,7 @@ def test_a_manual_move_tells_a_vk_point_the_status_by_the_tick(tmp_path):
     told = []
     reserve.check(conn, "2026-10-21T11:07:00", calls(told))
     [text] = [t for who, t in told if who == ""]
-    assert "Согласование возврата" in text and "выдал" in text                      # by hand: the question too (the owner 2026-11-07)
+    assert "Согласование возврата" in text and "выдал" not in text                  # the status only: no question in VK (the owner 2026-11-13; was 2026-11-07)
     assert not [t for _w, t in told if t.startswith("Нужно согласовать")]
 
 

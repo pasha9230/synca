@@ -154,6 +154,8 @@ def test_4_a_move_by_hand_asks_the_point_too(tmp_path):
 
 
 def test_4_the_vk_point_hears_the_question_after_a_move_by_hand(tmp_path):
+    """The owner 2026-11-13: after a move by hand a VK point hears the status only, without the question «выдали / на точке?» (was: the
+    status ending with RETURN_ASK); the question stays on its «Рабочее место» (test above)."""
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
@@ -161,8 +163,9 @@ def test_4_the_vk_point_hears_the_question_after_a_move_by_hand(tmp_path):
     order_oth.moved_by_hand(conn, before, "2026-10-21T12:40:00", "o")
     told = []
     order_oth.finish_moved(conn, "2026-10-21T13:00:00", lambda c, text: told.append(text) or "ok")
-    ask = message_texts.text(conn, message_texts.RETURN_ASK, order_label=mgr.label(orders.get_card(conn, cid)))
-    assert told and told[0].endswith(ask)
+    label = mgr.label(orders.get_card(conn, cid))
+    assert told == [message_texts.text(conn, message_texts.RETURN_STATUS, order_label=label)]
+    assert "выдал" not in told[0]
 
 
 # ---- 5. одна подпись «Согласование возврата» ----------------------------------------------------------------------------------
