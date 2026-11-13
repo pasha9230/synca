@@ -111,7 +111,7 @@ impl Panel {
 
     /// Download an image; the Bearer header goes only to panel URLs.
     pub fn download(&self, url: &str) -> Result<Vec<u8>> {
-        let mut req = crate::net::agent(None, None, 0, true).get(url);
+        let mut req = crate::net::download().get(url);
         if same_origin(url, &self.base) {
             req = req.header("Authorization", &self.auth());
         }
