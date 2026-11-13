@@ -164,18 +164,39 @@ def test_the_clients_order_stays_cancelled_with_the_letter(tmp_path):
 
 # ---- the Google table: no new row, the client's order says «Выполнено» / «О» -------------------------------------------------------------
 
-def test_the_table_gets_no_row_of_the_sale_and_the_clients_row_says_done_and_o(tmp_path):
+def test_the_table_gets_no_row_of_the_sale_and_says_done_and_o_once_every_tyre_is_sold(tmp_path):
+    """The owner 13.11: a part sold — the rest stays on «На ОТХ», the client's row keeps its stage, «Примечание» (and the comment of the
+    order) say what was sold; every tyre sold — «Выполнено» / «О»."""
     conn = db(tmp_path)
     turn_on(conn, SecretBox(Fernet.generate_key()))
     cid, x = split(conn)
     order_sheet.enroll(conn, cid, MOVED)                                                  # A was placed while the table was on
     conn.commit()
     queued = {r[0] for r in conn.execute("SELECT order_id FROM sheet_order")}
+    written = order_sheet.rows_of(conn, cid, MOVED)
     b = sell(conn, x, qty=1)
     assert {r[0] for r in conn.execute("SELECT order_id FROM sheet_order")} == queued and b not in queued
     rows = order_sheet.rows_of(conn, cid, MOVED)
-    assert rows and all(r["Этап"] == orders.stage_name(conn, "done") and r["Реализация"] == order_sheet.REFUSED for r in rows.values())
+    assert rows and all(r["Этап"] == orders.stage_name(conn, "cancel") and r["Реализация"] == "" for r in rows.values())
+    note = "Продано с ОТХ 1 шт. в заказ №%d" % b
+    assert note in orders.get_card(conn, cid)["comment"]
+    ops = order_sheet.changes(rows, written)
+    assert ops and all(note in op["extra"]["Примечание"] for op in ops)                   # sent over the cell, the panel's comment
+    written = {k: dict(v, **next(op for op in ops if op["key"] == k)["extra"]) for k, v in written.items()}
+    assert not order_sheet.changes(order_sheet.rows_of(conn, cid, MOVED), written)        # sent once
+    c = sell(conn, x, qty=3)                                                              # the rest
+    rows = order_sheet.rows_of(conn, cid, MOVED)
+    assert all(r["Этап"] == orders.stage_name(conn, "done") and r["Реализация"] == order_sheet.REFUSED for r in rows.values())
+    assert "Продано с ОТХ 3 шт. в заказ №%d" % c in orders.get_card(conn, cid)["comment"]
 
+
+def test_another_orders_note_is_never_sent(tmp_path):
+    conn = db(tmp_path)
+    cid, x = split(conn)
+    rows = order_sheet.rows_of(conn, cid, MOVED)
+    assert not any(order_sheet.NOTE_FLAG in r for r in rows.values())
+    changed = {k: dict(v, **{"Примечание": "другое"}) for k, v in rows.items()}
+    assert not order_sheet.changes(changed, rows)
 
 def test_a_cancelled_order_with_nothing_sold_keeps_its_row_as_before(tmp_path):
     conn = db(tmp_path)

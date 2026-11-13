@@ -30,6 +30,8 @@ COLUMNS = ("Дата счета", "№ заказа MIM", "Перемещени�
            "Цена продажи", "Сумма продажи", "Имя", "Телефон", "ПВЗ", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
            "Уведомление точке", "Уведомление клиенту", "Аккаунт", "Примечание")
 OWNERS = ("Примечание",)                    # never filled (the owner 2026-10-30): «Примечание» is the people's; «Дата» is gone (2026-11-01)
+NOTE_FLAG = "_oth_sold"                     # the owner 13.11: an order the point sold tyres of (part D): its «Примечание» is the panel's comment, sent
+                                            # when it changes (over what was typed in the cell); never for another order
 OPTIONAL = ("Аккаунт",)                     # the owner 2026-11-02: sent apart («extra»), written only where the sheet has the column; a sheet
                                             # without it (or a script before 2026-11-02, which never reads «extra») takes the rest all the same.
                                             # Not written once: when the value changes (changes) a written row follows it, over a correction in the cell
@@ -323,7 +325,8 @@ def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
     script makes them dates); the phone is sheet_phone. «Список» of the panel shows card_rows (the comment, the panel's phone)."""
     card = orders.get_card(conn, card_id)
     phone, account = sheet_phone(card["client_phone"]), account_label(conn, card)
-    return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone, "Аккаунт": account})
+    return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone, "Аккаунт": account},
+                       **({NOTE_FLAG: True, "Примечание": row["Примечание"]} if row.get(NOTE_FLAG) else {}))    # the note of a sale from OTH (13.11)
             for mark, row in card_rows(conn, card, placed_at, _sent(conn, card_id)).items()}
 
 
@@ -456,13 +459,15 @@ def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
     """The columns of a row that are the order's, not the position's (card_rows)."""
     sent = sent or {}
     from . import oth_point_sale
-    sold = bool(oth_point_sale.sold_of(conn, card["id"]))      # the point sold tyres of its record (ТЗ part D, 2026-11-12): «Выполнено», «О»
-    return {"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
+    sales = bool(oth_point_sale.sold_of(conn, card["id"]))     # the point sold tyres of its record (ТЗ part D, 2026-11-12)
+    sold = sales and oth_point_sale.all_sold(conn, card["id"])  # the owner 13.11: «Выполнено» / «О» once every tyre is sold, not for a part
+    note = {NOTE_FLAG: True} if sales else {}                   # the note of the sale goes to «Примечание» (the owner 13.11)
+    return dict(note, **{"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
             "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
             "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": orders.stage_name(conn, "done") if sold else card["stage"]["name"],
             "Реализация": REFUSED if sold else realization(card),
             "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
-            "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]}
+            "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]})
 
 
 def followed(conn, card_id: int) -> set:
@@ -488,7 +493,7 @@ def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey
     out = []
     for mark, fields in now_rows.items():
         before = written.get(mark)
-        extra = {c: fields[c] for c in OPTIONAL if c in fields and fields[c] != (before or {}).get(c, "")}
+        extra = {c: fields[c] for c in OPTIONAL + (("Примечание",) if fields.get(NOTE_FLAG) else ()) if c in fields and fields[c] != (before or {}).get(c, "")}
         if before is None:
             op = {"key": mark, "create": True, "fields": {c: fields[c] for c in SENT}}
             if grey:

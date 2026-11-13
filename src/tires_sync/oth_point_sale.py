@@ -26,6 +26,7 @@ SOLD_OF = "oth_point_sold:%d"           # A → [{"order": B, "record": Х, "pie
 NAME_MAX, NUMBER_MAX, TRANSFER_MAX = 200, 60, 40
 BONUS = "Бонус точке: +50 ₽ за каждую проданную шину."
 NO_CONTACT = "Клиент отказался предоставлять имя и телефон"
+SOLD_NOTE = "Продано с ОТХ %d шт. в заказ №%d (%s)."
 SKIP = "продажа с ОТХ на точке: покупателю сообщения не отправляются"
 
 
@@ -45,6 +46,16 @@ def sold_of(conn, order_id) -> List[dict]:
     """The sales of the point from the record of the client's order `order_id` (A); [] for any other order."""
     found = _state(conn, SOLD_OF % int(order_id))
     return found if isinstance(found, list) else []
+
+
+def all_sold(conn, order_id) -> bool:
+    """Every tyre of the records A's sales came from is sold (none left in them): the table says «Выполнено» / «О» for A only then (the owner
+    13.11: a part sold, the rest stays on «На ОТХ», A's row as it was with the note in «Примечание»)."""
+    records = sorted({int(s["record"]) for s in sold_of(conn, order_id) if s.get("record")})
+    if not records:
+        return False
+    left = conn.execute("SELECT COALESCE(SUM(qty), 0) FROM order_item WHERE order_id IN (%s)" % ",".join("?" * len(records)), records).fetchone()[0]
+    return int(left or 0) == 0
 
 
 def why_not(conn, card: dict) -> Optional[str]:
@@ -195,6 +206,8 @@ def _source(conn, a: int, x: int, b: int, sold: int, now: str, who: str) -> None
     if marked != (row["webmim_number"], row["transfer_number"]):
         conn.execute("UPDATE order_card SET webmim_number = ?, transfer_number = ?, updated_at = ? WHERE id = ?", marked + (now, a))
     orders.add_event(conn, a, now, who, "field", "Шины с ОТХ (запись №%d) продала точка: заказ №%d, %d шт." % (x, b, sold))
+    note = SOLD_NOTE % (sold, b, "%s.%s" % (now[8:10], now[5:7]))       # the owner 13.11: the comment of A says it (and its «Примечание» in the table)
+    conn.execute("UPDATE order_card SET comment = TRIM(COALESCE(comment, '') || ' ' || ?), updated_at = ? WHERE id = ?", (note, now, a))
     oth_storage._put(conn, SOLD_OF % a, sold_of(conn, a) + [{"order": b, "record": x, "pieces": sold, "at": now, "by": who}])
 
 
