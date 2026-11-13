@@ -63,6 +63,8 @@ def why_not(conn, card: dict) -> Optional[str]:
     given back to the supplier)."""
     if not card.get("oth_record") and not oth_storage.is_record(conn, card["id"]):
         return "Это не запись хранения: продажа идёт кнопкой «Продать» целиком."
+    if card["stage"]["code"] == orders.RETURN_AGREE:                                 # the stage of the agreement (2026-11-13): said so, not «ушёл»
+        return order_oth.AGREEING_ANSWER
     if card["stage"]["code"] != "oth":
         return "Заказ №%s уже ушёл с «На ОТХ»: обновите страницу." % _label(card)
     if order_oth.return_plan(conn, card["id"]) is not None:
