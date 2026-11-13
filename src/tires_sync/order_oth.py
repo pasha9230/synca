@@ -660,7 +660,10 @@ def _agree_part(conn, card: dict, held: Dict[int, int], parts: Dict[int, int], d
             new = _split_off(conn, card, parts, _returning_stage(conn), now, author, note or "согласован возврат части заказа")
             back = _agree_whole(conn, orders.get_card(conn, new), day, now, author, commit=False)
             target = new
-            if marked:                                                                # the rest is ours on its stay on «На ОТХ», as before the stage
+            if marked and _marks_left(conn, orders.get_card(conn, card["id"]), stay):     # another position's mark still waits (review 2026-11-13):
+                orders.add_event(conn, card["id"], now, author, "field", PART_AGREED_WAITS % card["stage"]["name"])     # the order stays on
+                                                                                      # the stage by that mark, its task lives (as on «На ОТХ» before)
+            elif marked:                                                              # the rest is ours on its stay on «На ОТХ», as before the stage
                 oth = next(s for s in orders.list_stages(conn) if s["code"] == "oth")
                 orders.add_event(conn, card["id"], now, author, "field", "Возврат части согласован: остаток снова на «%s»" % oth["name"])
                 if not orders.move_card(conn, card["id"], oth["id"], now, author, commit=False, oth_resume=stay):
@@ -684,11 +687,20 @@ def _agree_part(conn, card: dict, held: Dict[int, int], parts: Dict[int, int], d
         raise
     conn.commit()
     left = orders.get_card(conn, card["id"])
-    if not (left["stage"]["code"] == "oth" and any(item_mark(item_marks(conn), i["id"], left["entered_at"]) for i in left["items"])):
+    if not (left["stage"]["code"] in MARKED_ON and _marks_left(conn, left, oth_stay(conn, left))):
         close_return_tasks(conn, card["id"], now, author, "согласовано с поставщиком")     # another position still waits: its task stays
     if target != card["id"]:
         close_return_tasks(conn, target, now, author, "согласовано с поставщиком")
     return back
+
+
+PART_AGREED_WAITS = "Возврат части согласован: заказ остаётся на «%s» — другая позиция с отметкой «На возврат» ждёт согласования"
+
+
+def _marks_left(conn, card: dict, stay: str) -> bool:
+    """A position of `card` still holds a mark «На возврат» of its stay on «На ОТХ» (its task open): it waits for the agreement."""
+    marks = item_marks(conn)
+    return any(item_mark(marks, i["id"], stay) for i in card["items"])
 
 
 def _agree_whole(conn, card: dict, day: str, now: str, author: str, commit: bool = True) -> str:
@@ -906,7 +918,8 @@ def ask_seventh_day(conn, now: str, notify=None) -> int:
         try:                                                                         # on the stage by a mark (2026-11-13): its seventh day takes the
             card = orders.get_card(conn, card_id)                                    # free tyres off sale, as the move from «На ОТХ» did before
             stay = dict(card, entered_at=oth_stay(conn, card))
-            if by_mark(conn, card) and stay["entered_at"] >= since and ask_due(stay, now) and not _kept(conn, stay):
+            if (by_mark(conn, card) and card.get("point_id") and stay["entered_at"] >= since and ask_due(stay, now) and not _kept(conn, stay)
+                    and _held_by_mark(conn, card, stay["entered_at"])):                # what _HELD_SQL leaves on «На ОТХ» keeps its free tyres
                 conn.execute("DELETE FROM app_state WHERE key = ?", (orders.BY_MARK_KEY % card_id,))
                 orders.add_event(conn, card_id, now, "система", "field", DAY7_ON_AGREE % card["stage"]["name"], level="grey")
                 conn.commit()
@@ -918,6 +931,22 @@ def ask_seventh_day(conn, now: str, notify=None) -> int:
 
 
 DAY7_ON_AGREE = "7-й день на ОТХ: заказ на «%s», все его шины сняты с продажи"
+
+
+def _held_by_mark(conn, card: dict, stay: str) -> bool:
+    """An order on «Согласование возврата» by a mark, by its stay on «На ОТХ» (`stay`): what _HELD_SQL and the seventh day keep out of the move
+    from «На ОТХ» before the stage (review 2026-11-13) — not an order to another city (order_intercity), nor a point's own sale (own_sales), nor
+    one with a real «Вернуть поставщику» beyond its marks (oth_return over the mark of the stay). The point is checked by the caller."""
+    from . import order_points as points
+    if conn.execute("SELECT 1 FROM order_intercity WHERE order_id = ? AND enabled = 1", (card["id"],)).fetchone():
+        return False
+    if card.get("point_id") and card["id"] in points.own_sales(conn, card["point_id"]):
+        return False
+    for item_id, qty in conn.execute("SELECT item_id, qty FROM oth_return WHERE order_id = ?", (card["id"],)).fetchall():
+        mark = json.loads(store_value(conn, _item_key(item_id, stay)) or "null") or {}
+        if int(qty) > int(mark.get("qty") or 0):
+            return False
+    return True
 
 
 def _move_on_day7(conn, card: dict, now: str) -> int:
@@ -1535,7 +1564,7 @@ def tell_agree_due(conn, now: str, notify) -> int:
             card = orders.get_card(conn, card_id)                                    # «На ОТХ» with that mark before — by its stay there
             stay = dict(card, entered_at=oth_stay(conn, card))
             if (by_mark(conn, card) and stay["entered_at"] >= since and not _kept(conn, stay) and agree_due(stay, now)
-                    and not (card["point_id"] and card_id in points.own_sales(conn, card["point_id"]))):
+                    and _held_by_mark(conn, card, stay["entered_at"])):                  # the same orders as _HELD_SQL
                 told += _tell_agree(conn, stay, now, notify)
         except Exception:                                                            # noqa: BLE001
             conn.rollback()

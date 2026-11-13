@@ -1203,6 +1203,9 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     elif stage["code"] == RETURN_AGREE and was_code not in OTH_CODES and card["stage"].get("kind") == "open":     # from work, not after a stay
                                                                                   # on «На ОТХ» (an undo from «Выполнено» comes back to its stay)
         conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (OTH_STAY_KEY % int(card_id), BY_MARK_KEY % int(card_id)))
+    if stage["code"] == "oth" or (was_code == "oth" and stage["code"] == RETURN_AGREE):     # «пришёл по отметке» only as item_to_return (and the
+        conn.execute("DELETE FROM app_state WHERE key = ?", (BY_MARK_KEY % int(card_id),))      # migration) keep it right after this move: back on
+                                                                                  # «На ОТХ», the 7th day, by hand — a flag of an earlier mark is stale (review)
     if (was_code in OTH_CODES and stage["code"] not in OTH_CODES) or (was_code in (RETURN_AGREE, RETURN_GIVEN) and stage["code"] == "oth"):
         from . import order_oth
         order_oth.left_return(conn, card_id, stage, now, author)

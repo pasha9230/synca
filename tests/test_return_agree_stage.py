@@ -391,3 +391,74 @@ def test_drop_of_an_order_that_came_from_another_stage_starts_a_stay_on_oth(tmp_
     card_now = orders.get_card(conn, card)
     assert card_now["stage"]["code"] == "oth" and card_now["entered_at"] == "2026-10-16T10:00:00"
     assert orders.OTH_ENTERED in events(conn, card)
+
+
+# ---- the second review (2026-11-13) --------------------------------------------------------------------------------------------------
+
+def test_a_stale_by_mark_flag_never_keeps_free_tyres_in_the_feed_after_a_move_by_hand(tmp_path, monkeypatch):
+    """«пришёл по отметке» is kept by item_to_return only: a mark undone (or «Вернуть на ОТХ») and then the office's move by hand puts the order on
+    the stage as any order by hand — all its tyres off sale."""
+    conn, old = _old_way(tmp_path, monkeypatch)
+    item = item_of(conn, old)
+    assert order_oth.item_to_return(conn, item, "2026-10-16T10:00:00", "o", "1")
+    order_oth.unmark_returned(conn, item, "2026-10-16T11:00:00", "o")                 # the last mark undone: «На ОТХ», the same stay
+    assert code(conn, old) == "oth" and in_feed(conn, old)
+    to_agree_stage(conn, old, "2026-10-16T12:00:00")
+    assert code(conn, old) == orders.RETURN_AGREE and not order_oth.by_mark(conn, orders.get_card(conn, old)) and not in_feed(conn, old)
+    (tmp_path / "b").mkdir()
+    conn2, old2 = _old_way(tmp_path / "b", monkeypatch)
+    assert order_oth.item_to_return(conn2, item_of(conn2, old2), "2026-10-16T10:00:00", "o", "1")
+    assert order_oth.back_to_oth(conn2, orders.get_card(conn2, old2), "2026-10-16T11:00:00", "owner")     # «Вернуть на ОТХ»
+    assert code(conn2, old2) == "oth" and in_feed(conn2, old2)
+    to_agree_stage(conn2, old2, "2026-10-16T12:00:00")
+    assert not order_oth.by_mark(conn2, orders.get_card(conn2, old2)) and not in_feed(conn2, old2)
+
+
+def _two_marked(tmp_path, monkeypatch):
+    conn, old = _old_way(tmp_path, monkeypatch)
+    orders.add_item(conn, old, goods_id="2", name="Michelin 225/45 R17", brand_key="michelin", season="winter", diameter=17, territory="1",
+                    qty=2, sale_unit=7000, supplier_price=6000, terms=None, fee_pct=0, promo_pct=0, now="2026-10-14T10:00:00", author="o")
+    conn.commit()
+    one, two = [r[0] for r in conn.execute("SELECT id FROM order_item WHERE order_id = ? ORDER BY id", (old,)).fetchall()]
+    assert order_oth.item_to_return(conn, one, "2026-10-16T10:00:00", "o", "1")
+    assert order_oth.item_to_return(conn, two, "2026-10-16T10:30:00", "o", "1")
+    return conn, old, one, two
+
+
+def test_a_part_agreed_by_a_mark_keeps_the_order_on_the_stage_while_another_mark_waits(tmp_path, monkeypatch):
+    """Two positions marked, the supplier takes the first only: the second still waits for the agreement — the order stays on «Согласование
+    возврата» by its mark (free tyres ours until the seventh day), its one task lives (as on «На ОТХ» with two marks before the stage)."""
+    conn, old, one, two = _two_marked(tmp_path, monkeypatch)
+    assert len(return_tasks(conn, old)) == 1
+    order_oth.agree(conn, orders.get_card(conn, old), date.fromisoformat("2026-10-19"), "2026-10-17T12:00:00", "owner", qty={one: 1})
+    [new] = order_oth.split_of(conn, old)
+    assert code(conn, new) == orders.RETURN_GIVEN and not return_tasks(conn, new)
+    rest = orders.get_card(conn, old)
+    assert rest["stage"]["code"] == orders.RETURN_AGREE and order_oth.by_mark(conn, rest) and order_oth.return_plan(conn, old) is None
+    assert len(return_tasks(conn, old)) == 1 and in_feed(conn, old)
+    assert order_oth.return_parts(conn, rest) == {two: 1}                              # the next «Согласовано» sends back the second mark
+    assert order_oth.PART_AGREED_WAITS % "Согласование возврата" in events(conn, old)
+    order_oth.agree(conn, rest, date.fromisoformat("2026-10-19"), "2026-10-17T13:00:00", "owner", qty={two: 1})
+    rest = orders.get_card(conn, old)
+    assert rest["stage"]["code"] == "oth" and not return_tasks(conn, old) and in_feed(conn, old)     # no mark left: back on its stay
+
+
+def test_the_seventh_day_by_a_mark_keeps_the_free_tyres_of_a_real_return_and_of_another_city(tmp_path, monkeypatch):
+    """As _HELD_SQL kept such orders on «На ОТХ» before the stage: a real «Вернуть поставщику» beyond the mark, or a delivery to another city —
+    the seventh day leaves «пришёл по отметке» alone, the free tyres stay in the feed; an ordinary one loses them."""
+    conn, real = _old_way(tmp_path, monkeypatch)
+    item = item_of(conn, real)
+    assert order_oth.item_to_return(conn, item, "2026-10-16T10:00:00", "o", "1")
+    order_oth.mark_returned(conn, item, "2026-10-16T11:00:00", "o", 1)               # a real return beyond the mark
+    assert in_feed(conn, real)
+    (tmp_path / "b").mkdir()
+    conn2, city = _old_way(tmp_path / "b", monkeypatch)
+    assert order_oth.item_to_return(conn2, item_of(conn2, city), "2026-10-16T10:00:00", "o", "1")
+    conn2.execute("INSERT INTO order_intercity (order_id, enabled, city, carrier, updated_at) VALUES (?, 1, 'Город', 'ТК', ?)", (city, T1))
+    conn2.commit()
+    for c, card in ((conn, real), (conn2, city)):
+        order_oth.ask_seventh_day(c, "2026-10-20T12:30:00")
+        order_oth.tell_agree_due(c, "2026-10-20T13:00:00", lambda *a: "ok")
+        assert code(c, card) == orders.RETURN_AGREE and order_oth.by_mark(c, orders.get_card(c, card)) and in_feed(c, card)
+        assert order_oth.DAY7_ON_AGREE % "Согласование возврата" not in events(c, card)
+        assert not c.execute("SELECT 1 FROM app_state WHERE key LIKE 'oth_agree_due:%'").fetchone()
