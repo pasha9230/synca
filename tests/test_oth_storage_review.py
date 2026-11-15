@@ -150,24 +150,28 @@ def test_the_seventh_day_of_a_record_asks_if_the_tyres_are_there_never_if_they_w
     card = orders.get_card(conn, x)
     assert order_oth.question_open(conn, card) and "выдали" not in order_oth.question(conn, card, LATE).lower()
     outcome, answer, done = order_oth.answer_issued(conn, card, "менеджер Бета", LATE)
-    assert not done and "«Продать»" in answer and code(conn, x) == orders.RETURN_GIVEN
+    assert not done and "«Продать»" in answer and code(conn, x) == orders.RETURN_AGREE
     assert order_oth.question_open(conn, orders.get_card(conn, x))                              # the question still waits for «На точке»
 
 
 def test_the_vk_question_of_the_seventh_day_of_a_record_never_asks_issued(tmp_path):
+    """The owner 2026-11-13: the bot no longer asks a VK point «выдали / на точке?» — a record of storage hears the status only (was: the
+    question «на точке N» with the hint «Продать»); its word «на точке N», if it writes one, is still read (test below)."""
     conn = db(tmp_path)
     cid, x = on_the_return(conn)
     told = []
     order_oth.finish_moved(conn, "2026-10-26T13:00:00", lambda card, text: told.append(text) or "ok")
-    [vk] = [t for t in told if "на точке %s" % number(cid) in t]
-    assert "выдал" not in vk.lower() and "«Продать»" in vk
+    [vk] = [t for t in told if number(cid) in t]
+    assert "Согласование возврата" in vk and "выдал" not in vk.lower() and "на точке %s" % number(cid) not in vk
+    answer = mgr.handle_command(conn, "vk-1", POINT_VK, "на точке %s" % number(cid), None, LATE)
+    assert answer and not order_oth.question_open(conn, orders.get_card(conn, x))
 
 
 def test_the_vk_word_issued_for_a_record_is_refused_with_the_hint(tmp_path):
     conn = db(tmp_path)
     cid, x = on_the_return(conn)
     answer = mgr.handle_command(conn, "vk-1", POINT_VK, "выдал %s" % number(cid), None, LATE)
-    assert "«Продать»" in answer and code(conn, x) == orders.RETURN_GIVEN
+    assert "«Продать»" in answer and code(conn, x) == orders.RETURN_AGREE
 
 
 def test_the_vk_word_issued_for_a_record_on_oth_is_refused_with_the_hint(tmp_path):

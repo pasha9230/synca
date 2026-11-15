@@ -374,7 +374,7 @@ def why_not_delete(conn, card_id) -> Optional[str]:
 def why_not(conn, card: dict) -> Optional[str]:
     """Why the order can take nothing from «На ОТХ» (or give it back) now; None: it can."""
     stage = card["stage"]
-    if stage["kind"] != "open" or stage["code"] in ("oth", orders.RETURN_GIVEN) or orders._needs_placed(stage, orders._placed_stage(conn)):
+    if stage["kind"] != "open" or stage["code"] in orders.OTH_CODES or orders._needs_placed(stage, orders._placed_stage(conn)):
         return "Брать с ОТХ можно только до «Заказ оформлен»: заказ уже на этапе «%s»." % stage["name"]
     if card["sale_ids"]:
         return "По заказу записана продажа."
@@ -488,7 +488,8 @@ def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit
                                                         slot=order_oth.take_slot(card_id, item["id"]))     # «Вернуть на ОТХ» brings them back
     # the limit in the statement itself: a take a moment ago in another tab never lets the pieces go below the ones marked returned
     if conn.execute("UPDATE order_item SET qty = qty - ? WHERE id = ? AND qty - ? >= COALESCE((SELECT qty FROM oth_return WHERE item_id = ?), 0) "
-                    "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'oth') "
+                    "AND order_id IN (SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_agree')) "     # the source:
+                    # oth_stock (2026-11-13: an order on «Согласование возврата» by a mark gives its free pieces as on «На ОТХ» before)
                     "AND order_id NOT IN (SELECT order_id FROM oth_return_plan)",
                     (pieces, item["id"], pieces, item["id"])).rowcount != 1:
         conn.rollback()
@@ -575,7 +576,8 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
     the old order emptied goes to «Отмена» «Шины переданы в заказ №…»). The caller puts the new order on «Товар на точке» (all from OTH).
     Returns the new order; OthSaleError says why nothing was made."""
     old = orders.get_card(conn, old_id)
-    if old["stage"]["code"] != "oth":
+    from . import order_oth
+    if old["stage"]["code"] != "oth" and not order_oth.by_mark(conn, old):     # 2026-11-13: «На ОТХ» with a mark before the stage
         raise OthSaleError("Новый клиент берёт шины заказа, который стоит на «На ОТХ»: заказ на этапе «%s»." % old["stage"]["name"])
     name, phone = " ".join(str(name or "").split())[:200], str(phone or "").strip()[:40]
     if not phone:
@@ -671,7 +673,7 @@ def _untake_order(conn, card_id, item_id, now: str, author: str, commit: bool = 
     old = conn.execute("SELECT c.id, s.code, c.cancel_reason FROM order_item i JOIN order_card c ON c.id = i.order_id JOIN order_stage s ON s.id = c.stage_id "
                        "WHERE i.id = ? AND c.id = ?", (link["from_item"], link["from_order"])).fetchone()
     reopen = old is not None and old[1] == "cancel" and str(old[2]).startswith(TAKEN_REASON.split("%")[0])
-    if old is None or (old[1] not in ("oth", orders.RETURN_GIVEN) and not reopen):     # «На возврат» before the agreement: ours until the act, back in that order (never on sale)
+    if old is None or (old[1] not in orders.OTH_CODES and not reopen):     # «На возврат» before the agreement: ours until the act, back in that order (never on sale)
         raise OthSaleError("Заказ №%d ушёл с ОТХ: вернуть шины в него нельзя. " % link["from_order"] + NO_BACK)
     pieces = int(line["qty"])
     conn.execute("UPDATE order_item SET qty = qty + ? WHERE id = ?", (pieces, link["from_item"]))
@@ -742,7 +744,7 @@ def can_untake(conn, card_id, item_id) -> bool:
         return False
     old = conn.execute("SELECT s.code, c.cancel_reason FROM order_item i JOIN order_card c ON c.id = i.order_id JOIN order_stage s ON s.id = c.stage_id "
                        "WHERE i.id = ? AND c.id = ?", (link["from_item"], link["from_order"])).fetchone()
-    return old is not None and (old[0] in ("oth", orders.RETURN_GIVEN) or (old[0] == "cancel" and str(old[1]).startswith(TAKEN_REASON.split("%")[0])))
+    return old is not None and (old[0] in orders.OTH_CODES or (old[0] == "cancel" and str(old[1]).startswith(TAKEN_REASON.split("%")[0])))
 
 
 def all_from_oth(conn, card: dict) -> bool:

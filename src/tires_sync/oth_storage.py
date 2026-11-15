@@ -34,7 +34,7 @@ LETTER = " О"                       # a space and the Cyrillic capital (the own
 BACK_REASON = "другое: Возвращено в заказ №%d"
 HELD, TAKEN, BACK = "held", "taken", "back"
 REOPEN = "reopen"                   # only inside the transaction of untake: the record taken back stands on «На ОТХ» again (why_not_move)
-FROM_OPEN = ("oth", orders.RETURN_GIVEN, "done")    # a record moved to «На ОТХ» from these is not closed («Отменить» of «Продать» is from «Выполнено»)
+FROM_OPEN = orders.OTH_CODES + ("done",)    # a record moved to «На ОТХ» from these is not closed («Отменить» of «Продать» is from «Выполнено»)
 _MARKED = re.compile(r"\d\s*[ОоOo]$")       # typed by hand too: a Latin «O», a small letter
 RETURN_WHOLE = "Запись на возврат поставщику целиком: брать с ОТХ нельзя."    # the owner 2026-11-11: one tyre marked «На возврат», the whole record goes
 
@@ -103,7 +103,7 @@ def why_not_move(conn, card: dict, stage: dict) -> Optional[str]:
     Б1: the order cancelled by the split never goes to «На ОТХ» or «На возврат» again, its tyres lie (or lay) in its record.
     Б2: a closed record (given back, taken) never goes back there, but by «Вернуть на ОТХ» of the order that took it; a record the office
     cancelled by hand by mistake goes back on «На ОТХ» (cancelled_by_mistake, the owner 2026-11-10)."""
-    if stage["code"] not in ("oth", orders.RETURN_GIVEN):
+    if stage["code"] not in orders.OTH_CODES:
         return None
     x = record_of(conn, card["id"])
     if x is not None:

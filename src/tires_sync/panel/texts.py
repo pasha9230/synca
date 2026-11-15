@@ -377,6 +377,9 @@ _MORE_TEXTS = {
     "return_flow_migrated": lambda d: ("Схема возврата 2026-11-03: закрыто в «Вернули поставщику» %s, ждут суммы %s, на «На возврат» %s, пропущено %s%s"
                                        % (d.get("closed", 0), d.get("waiting_amount", 0), d.get("to_return_given", 0), d.get("skipped", 0),
                                           ", этап переименован" if d.get("renamed") else "")),
+    "return_agree_migrated": lambda d: "Этап «Согласование возврата» (2026-11-13): перенесено с «На возврат» %s, с «На ОТХ» %s, пропущено %s" % (
+        d.get("from_return_given", 0), d.get("from_oth", 0), d.get("skipped", 0)),
+    "oth_agree_dropped": lambda d: "Согласование возврата снято: заказ №%s снова на ОТХ%s" % (d.get("order", "?"), " (не возвращаем)" if d.get("kept") else ""),
     "oth_item_to_return": lambda d: "На возврат: позиция заказа №%s, %s шт." % (d.get("order", "?"), d.get("qty", "?")),
     "oth_back_on_sale": lambda d: ("Шины снова в продаже: заказ №%s, %s шт. (не возвращаем)" % (d.get("order", "?"), d.get("qty", "?")) if d.get("qty")
                                    else "Шины снова в продаже: заказ №%s снова на ОТХ (не возвращаем)" % d.get("order", "?")),

@@ -36,7 +36,7 @@ def test_the_card_on_na_vozvrat_has_no_letter(tmp_path):
     app, conn, pid, cid, point = on_page(tmp_path)
     stored_address(conn)
     client, _tok = owner_client(app)
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE     # the 7th day: «Согласование возврата» (2026-11-13)
     response = client.get("/orders/%d" % cid)
     assert response.status_code == 200
     page = response.get_data(as_text=True)

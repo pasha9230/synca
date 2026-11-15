@@ -851,7 +851,7 @@ def test_tyres_marked_for_the_return_are_not_taken_by_a_new_order(tmp_path):
     assert order_oth.item_to_return(conn, item, T, "o", "3")
     assert oth_stock.by_point(conn) == {("1", point_id(conn)): 1} and _open_return_tasks(conn, old) == 1
     assert take(conn, new_order(conn, qty=1)) == 1                                      # the one free piece
-    entered = orders.get_card(conn, old)["entered_at"]
+    entered = order_oth.oth_stay(conn, orders.get_card(conn, old))                      # the mark's stay on «На ОТХ» (2026-11-13)
     assert order_oth.item_mark(order_oth.item_marks(conn), item, entered)["qty"] == 3 and _open_return_tasks(conn, old) == 1
     assert oth_stock.by_point(conn) == {}
 
@@ -864,4 +864,4 @@ def test_a_position_marked_whole_is_not_offered_and_the_rest_stays_on_sale(tmp_p
     item = conn.execute("SELECT id FROM order_item WHERE order_id = ? AND goods_id = '1'", (old,)).fetchone()[0]
     assert order_oth.item_to_return(conn, item, T, "o")                                  # all 4 of the first position
     assert oth_stock.by_point(conn) == {("2", point_id(conn)): 2}
-    assert code(conn, old) == "oth" and _open_return_tasks(conn, old) == 1
+    assert code(conn, old) == orders.RETURN_AGREE and _open_return_tasks(conn, old) == 1     # the mark: the stage (2026-11-13)

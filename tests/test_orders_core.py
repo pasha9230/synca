@@ -19,7 +19,7 @@ def test_the_default_pipeline_is_seeded_once_in_the_owners_order(tmp_path):
     conn = db(tmp_path)
     orders.ensure_pipeline(conn, NOW)                                           # a second call changes nothing
     stages = orders.list_stages(conn)
-    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "shipped", "oth", "return_given", "done", "cancel", "return"]   # «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Отправлен» after «На точке, ждём клиента» (2026-11-02); «Возврат передан» after «На ОТХ» (2026-10-29); «Отмена» and «Отказ/невыкуп» are one stage (2026-10-29, test_cancel_merge)
+    assert [s["code"] for s in stages] == ["new", "talk", "wait", "placed", "moving", "at_point", "shipped", "oth", "return_agree", "return_given", "done", "cancel", "return"]   # «Согласование возврата» between «На ОТХ» and «На возврат» (2026-11-13); «Ожидает наличие» stands after the talks (owner, 2026-10-15); «Отправлен» after «На точке, ждём клиента» (2026-11-02); «Возврат передан» after «На ОТХ» (2026-10-29); «Отмена» and «Отказ/невыкуп» are one stage (2026-10-29, test_cancel_merge)
     assert [s["name"] for s in stages][:4] == ["Новый заказ", "Переговоры", "Ожидает наличие", "Заказ оформлен"]
     assert {s["code"]: s["kind"] for s in stages}["done"] == "won" and {s["code"]: s["kind"] for s in stages}["cancel"] == "lost"
     assert [s["position"] for s in stages] == list(range(len(orders.DEFAULT_STAGES)))

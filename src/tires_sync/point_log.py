@@ -204,13 +204,13 @@ def undo(conn, card: dict, point: dict, who: str, now: str, tell: Optional[Calla
                 order_alerts.resolve(conn, red, now, author)
         if rec["action"] == "oth_issued":                                     # the question of the seventh day is open again
             conn.execute("UPDATE app_state SET value = ? WHERE key = ?", ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
-            if stage["code"] == orders.RETURN_GIVEN:                          # «Выдали» linked the client; the goods go back again (2026-11-04)
+            if stage["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):   # «Выдали» linked the client; the goods go back again (2026-11-04)
                 order_oth.detach(conn, card, now, author)
             order_oth.restore_plan(conn, card["id"])                          # after detach (move_card's on «На ОТХ»): it drops the marks and the plan of a stay
         if rec["action"] == "oth_sold":                                       # the sale from «На ОТХ»: no client was linked, nothing to unlink
             conn.execute("UPDATE app_state SET value = ? WHERE key = ? AND value LIKE 'sold|%'",      # only a question the sale itself closed
                          ("asked|" + now, order_oth._ask_key(dict(card, entered_at=rec["from_entered"]))))
-            if stage["code"] == orders.RETURN_GIVEN:
+            if stage["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
                 order_oth.restore_plan(conn, card["id"])                      # the agreement the sale dropped
         undone_issue = rec["action"] in ("oth_issued", "oth_sold")
         if undone_issue:                                                      # the marks «На возврат» the press took off, with their task (the owner 2026-11-10)

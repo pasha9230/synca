@@ -87,9 +87,9 @@ def undo(client, conn, card, clock):
 
 def mark_is_back(conn, card, item, qty=4):
     now = orders.get_card(conn, card)
-    assert now["stage"]["code"] == "oth"
+    assert now["stage"]["code"] == orders.RETURN_AGREE                                  # a mark: the order on «Согласование возврата» (2026-11-13)
     assert conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (qty,)
-    mark = order_oth.item_mark(order_oth.item_marks(conn), item, now["entered_at"])
+    mark = order_oth.item_mark(order_oth.item_marks(conn), item, order_oth.oth_stay(conn, now))
     assert mark and mark["qty"] == qty                                                  # «Согласование возврата» again
     assert order_oth.pieces_here(conn, now) == {item: 4} and not order_oth.given_back(conn, card)
     assert sum(order_oth.goods_on_oth(conn).values()) == 4                             # and on sale until agreed
@@ -143,10 +143,10 @@ def test_taken_then_given_back_to_oth_the_mark_is_back(tmp_path):
     assert order_oth.item_to_return(conn, item, T, "o", "3")
     first = new_order(conn, qty=1)
     assert take(conn, first) == 1                                                       # the one free piece
-    entered = orders.get_card(conn, old)["entered_at"]
+    entered = order_oth.oth_stay(conn, orders.get_card(conn, old))                      # the mark's stay on «На ОТХ» (2026-11-13)
     assert order_oth.item_mark(order_oth.item_marks(conn), item, entered)["qty"] == 3 and open_tasks(conn, old) == 1
     oth_sale.untake(conn, first, orders.get_card(conn, first)["items"][0]["id"], "2026-10-29T12:00:00", "o")
-    assert code(conn, old) == "oth" and conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (3,)
+    assert code(conn, old) == orders.RETURN_AGREE and conn.execute("SELECT qty FROM oth_return WHERE item_id = ?", (item,)).fetchone() == (3,)
     assert order_oth.item_mark(order_oth.item_marks(conn), item, entered)["qty"] == 3 and open_tasks(conn, old) == 1
     assert [i["qty"] for i in orders.get_card(conn, old)["items"]] == [4] and not order_oth.given_back(conn, old)
 

@@ -154,6 +154,8 @@ def test_4_a_move_by_hand_asks_the_point_too(tmp_path):
 
 
 def test_4_the_vk_point_hears_the_question_after_a_move_by_hand(tmp_path):
+    """The owner 2026-11-13: after a move by hand a VK point hears the status only, without the question «выдали / на точке?» (was: the
+    status ending with RETURN_ASK); the question stays on its «Рабочее место» (test above)."""
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
@@ -161,8 +163,9 @@ def test_4_the_vk_point_hears_the_question_after_a_move_by_hand(tmp_path):
     order_oth.moved_by_hand(conn, before, "2026-10-21T12:40:00", "o")
     told = []
     order_oth.finish_moved(conn, "2026-10-21T13:00:00", lambda c, text: told.append(text) or "ok")
-    ask = message_texts.text(conn, message_texts.RETURN_ASK, order_label=mgr.label(orders.get_card(conn, cid)))
-    assert told and told[0].endswith(ask)
+    label = mgr.label(orders.get_card(conn, cid))
+    assert told == [message_texts.text(conn, message_texts.RETURN_STATUS, order_label=label)]
+    assert "выдал" not in told[0]
 
 
 # ---- 5. одна подпись «Согласование возврата» ----------------------------------------------------------------------------------
@@ -277,7 +280,8 @@ def test_9_another_result_still_moves_on_the_seventh_day(tmp_path):
     order_oth.item_to_return(conn, card["items"][0]["id"], "2026-10-21T10:00:00", "o", "1")
     [task] = conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (cid,)).fetchall()
     tasks.close(conn, task[0], "done", "2026-10-22T10:00:00", "o", "договорились")
-    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0  # 2026-11-13: the mark put it on «Согласование возврата» already
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
 
 
 # ---- 10. продлить задачу на возврат ----------------------------------------------------------------------------------------------------
@@ -428,7 +432,7 @@ def test_3_a_position_still_marked_keeps_the_task_when_another_is_given_back(tmp
     order_oth.item_to_return(conn, first, "2026-10-21T10:00:00", "o")           # A × 4 waits for the agreement
     order_oth.mark_returned(conn, second, NOW, "o")                             # B × 2 given back
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
-    assert order_oth.item_mark(order_oth.item_marks(conn), first, orders.get_card(conn, cid)["entered_at"])
+    assert order_oth.item_mark(order_oth.item_marks(conn), first, order_oth.oth_stay(conn, orders.get_card(conn, cid)))
 
 
 def test_3_a_marked_position_is_not_given_back_past_its_mark(tmp_path):
@@ -438,7 +442,7 @@ def test_3_a_marked_position_is_not_given_back_past_its_mark(tmp_path):
     order_oth.mark_returned(conn, first, NOW, "o")                             # the 2 not marked are really given back
     assert order_oth.pieces_here(conn, orders.get_card(conn, cid))[first] == 2  # the 2 marked are still at the point, waiting
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
-    assert order_oth.item_mark(order_oth.item_marks(conn), first, orders.get_card(conn, cid)["entered_at"])
+    assert order_oth.item_mark(order_oth.item_marks(conn), first, order_oth.oth_stay(conn, orders.get_card(conn, cid)))
 
 
 
@@ -451,7 +455,8 @@ def test_3_an_undone_real_return_of_a_marked_position_leaves_the_seventh_day_as_
     order_oth.item_to_return(conn, first, "2026-10-21T10:00:00", "o", "1")
     order_oth.mark_returned(conn, first, "2026-10-21T11:00:00", "o", "1")       # by mistake
     order_oth.unmark_returned(conn, first, "2026-10-21T11:05:00", "o", "1")     # «Отменить»: only the mark is left
-    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0  # 2026-11-13: the mark put it on «Согласование возврата» already
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
 
 
 def _seventh(tmp_path):
@@ -478,4 +483,5 @@ def test_4_a_new_mark_after_a_closed_task_takes_the_old_one_in(tmp_path):
     tasks.close(conn, task[0], "done", "2026-10-21T11:00:00", "o", "согласовали")
     order_oth.item_to_return(conn, item, "2026-10-21T12:00:00", "o", "1")
     assert order_oth.pieces_here(conn, orders.get_card(conn, cid))[item] == 2  # both still at the point
-    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1          # nothing really given back: the 7th day asks
+    assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 0  # 2026-11-13: the mark put it on «Согласование возврата» already
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE

@@ -133,7 +133,7 @@ def _secret(conn, box, s: dict) -> Optional[str]:
 
 # ---- the queue ----------------------------------------------------------------------------------------------------------------------
 
-LISTED_CODES = orders.PLACED_CODES + ("cancel", "refused", "return", orders.RETURN_GIVEN)   # «Заказ оформлен» and the system stages after it
+LISTED_CODES = orders.PLACED_CODES + ("cancel", "refused", "return", orders.RETURN_AGREE, orders.RETURN_GIVEN)   # «Заказ оформлен» and the system stages after it
 BEFORE_CODES = ("new", "talk", "wait", orders.FROM_POINT[0])                                  # before placing, wherever the owner puts them
 
 
@@ -160,7 +160,7 @@ def enroll(conn, card_id: int, now: str) -> None:
         conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (int(card_id), now))
 
 
-OPEN_STAGES = ("placed", "moving", "at_point", "oth", "return_given")      # «Заказ оформлен» … «На ОТХ», «На возврат»: not closed
+OPEN_STAGES = ("placed", "moving", "at_point", "oth", "return_agree", "return_given")      # «Заказ оформлен» … «На ОТХ», «Согласование возврата», «На возврат»: not closed
 
 
 def open_unlisted(conn) -> List[dict]:

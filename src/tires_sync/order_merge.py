@@ -34,7 +34,7 @@ def _label(card: dict) -> str:
 
 def _ref(card: dict) -> bool:
     """A source «справочно»: sold, or on a closed stage — its tyres are sold, at the supplier or never were."""
-    return bool(card["sale_ids"]) or card["stage"]["kind"] in ("won", "closed", "lost") or card["stage"]["code"] == orders.RETURN_GIVEN
+    return bool(card["sale_ids"]) or card["stage"]["kind"] in ("won", "closed", "lost") or card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN)
 
 
 def _placed(conn, order_id) -> bool:
@@ -221,7 +221,7 @@ def _why_not_source(conn, card: dict) -> Optional[str]:
         return "Заказ №%s уже объединён из других: сначала разъедините его." % label
     if card["stage"]["code"] == orders.SHIPPED or (card["stage"]["code"] == "done" and order_intercity.was_shipped(conn, card)):
         return "Заказ №%s уже отправлен в другой город: объединить его нельзя." % label         # the owner 2026-11-02
-    if card["stage"]["code"] == orders.RETURN_GIVEN:                     # the tyres go back to the supplier (the owner 2026-11-03)
+    if card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):     # the tyres go back to the supplier (the owner 2026-11-03)
         return "Заказ №%s на этапе «%s»: объединить его нельзя." % (label, card["stage"]["name"])
     if _ref(card):
         return None
@@ -325,7 +325,7 @@ def check(conn, ids, stage_id) -> dict:
         raise MergeError("Выберите хотя бы два заказа.")
     cards = [orders.get_card(conn, i) for i in ids]
     stage = orders.get_stage(conn, stage_id)
-    if stage["kind"] != "open" or stage["code"] in ("oth", orders.RETURN_GIVEN):
+    if stage["kind"] != "open" or stage["code"] in orders.OTH_CODES:
         raise MergeError("Новый заказ ставится на открытый этап (не «%s» и не «%s»)." % (orders.stage_name(conn, "oth"), orders.stage_name(conn, orders.RETURN_GIVEN)))
     places = {c["point_id"] for c in cards if c["point_id"]}
     if len(places) > 1:
@@ -487,7 +487,7 @@ def why_not_unmerge(conn, into_order) -> Optional[str]:
     card = orders.get_card(conn, into_order)
     if card["sale_ids"]:
         return "По заказу записана продажа: сначала сторнируйте её, потом разъединяйте."
-    if card["stage"]["kind"] in ("won", "closed") or card["stage"]["code"] == orders.RETURN_GIVEN:
+    if card["stage"]["kind"] in ("won", "closed") or card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
         return "Заказ на этапе «%s»: разъединить нельзя." % card["stage"]["name"]
     if card["stage"]["code"] == "oth" or conn.execute(                  # the new client refused: its tyres became our stock, maybe given back
             "SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND (text LIKE ? OR text = ?) AND at >= ? LIMIT 1",

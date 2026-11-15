@@ -20,7 +20,7 @@ DAY7 = "2026-10-26T13:00:00"
 
 
 def returning(conn, cid=None):
-    """An order on «На возврат» («Согласование возврата»): the seventh day moved it (the owner 2026-11-04)."""
+    """An order on «Согласование возврата» (a stage since 2026-11-13): the seventh day moved it (the owner 2026-11-04)."""
     cid = cid or card_at(conn, "at_point", "2026-10-15T10:00:00")
     on_oth(conn, cid)
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
@@ -42,7 +42,7 @@ def test_the_seventh_day_moves_the_order_to_na_vozvrat_agreeing_and_the_tyres_le
     conn = db(tmp_path)
     cid = returning(conn)
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and card["stage"]["name"] == "На возврат"
+    assert card["stage"]["code"] == orders.RETURN_AGREE and card["stage"]["name"] == "Согласование возврата"     # 2026-11-13: the stage
     assert label(conn, cid) == "Согласование возврата" and order_oth.to_agree(conn, card)
     assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: off sale from «Согласование возврата»
     assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND title = ?", (cid, order_oth.RETURN_TASK)).fetchone()[0] == 1
@@ -58,7 +58,7 @@ def test_agreed_keeps_the_stage_takes_the_tyres_off_sale_and_unagree_gives_agree
     assert [r["card"]["id"] for r in order_oth.to_return(conn, card["point_id"])] == [cid]
     assert order_oth.unagree(conn, card, "2026-10-27T11:00:00", "owner")
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласование возврата"
+    assert card["stage"]["code"] == orders.RETURN_AGREE and label(conn, cid) == "Согласование возврата"     # back on the stage (2026-11-13)
     assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: stays off sale
 
 
@@ -247,7 +247,7 @@ def on_page(tmp_path):
 
 def test_the_point_s_return_tab_shows_the_stage_and_its_label(tmp_path, clock):
     app, conn, pid, cid, mine = on_page(tmp_path)
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN             # from the start, the question or not (2026-11-04)
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE             # from the start, the question or not (2026-11-04; the stage 2026-11-13)
     assert 'id="order-%d"' % cid not in mine.get("/my-point?tab=oth").get_data(as_text=True)
     assert 'id="order-%d"' % cid not in mine.get("/my-point?tab=return").get_data(as_text=True)     # «На возврат»: the agreed only (2026-11-12)
     page = mine.get("/my-point?tab=agree").get_data(as_text=True)

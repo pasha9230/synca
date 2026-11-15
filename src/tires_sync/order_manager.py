@@ -47,7 +47,7 @@ NO_SHOW_PHRASE = re.compile(r"^\W*клиент[а-я]*\s+не\s+приш(?:[её
 RETURN, RETURNED = "возврат отдал", "шины отданы на возврат"   # the command is a phrase only: a bare «возврат» is not it
 RETURN_SURE = "подтверждаю"                                    # the second step of «возврат отдал» of the tyres of «На ОТХ» / «На возврат» (the owner 2026-11-04)
 OTH_ISSUED = ("выдал", "выдали", "выдала", ISSUE_PHRASE)        # the words of that question: «отдал» of an agreed return is the driver (the owner 2026-11-07)
-RETURN_FROM = ("at_point", "oth", orders.RETURN_GIVEN)   # the stages where the tyres are at the point (the lead 2026-10-26; «На возврат» 2026-11-03),
+RETURN_FROM = ("at_point",) + orders.OTH_CODES   # the stages where the tyres are at the point (the lead 2026-10-26; «На возврат» 2026-11-03),
                                                   # and «Отмена / невыкуп»
                                                   # with the reason «не выкупил» (it was «Отказ/невыкуп» before the merge, the owner 2026-10-29)
 
@@ -449,7 +449,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
     if card.get("oth_record") and (word in OTH_ISSUED or BUILTIN.get(word, ((), None))[1] == "done"):     # a record of storage: «Продать»
         from . import order_oth                                                         # in the cabinet, never «выдал» (the owner 2026-11-10)
         return finish(*order_oth.answer_issued(conn, card, "менеджер %s" % point["name"], now)[:2])
-    if code in ("oth", orders.RETURN_GIVEN) and (word == HERE or word in OTH_ISSUED):  # the answer of a VK point to the seventh day
+    if code in orders.OTH_CODES and (word == HERE or word in OTH_ISSUED):  # the answer of a VK point to the seventh day
         from . import order_oth
         if order_oth.question_open(conn, card) or (word != HERE and (order_oth.return_plan(conn, card["id"]) or {}).get("signed_at")):
             who = "менеджер %s" % point["name"]
@@ -477,7 +477,7 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
                            CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
         return finish(*no_show(conn, card, "менеджер %s" % point["name"], now, notify))
-    if word in GIVE and code in ("oth", orders.RETURN_GIVEN):         # the owner 2026-11-07: «отдал» of an agreed return is the hand-over to the driver
+    if word in GIVE and code in orders.OTH_CODES:         # the owner 2026-11-07: «отдал» of an agreed return is the hand-over to the driver
         from . import order_oth
         if (order_oth.return_plan(conn, card["id"]) or {}).get("agreed_at") and not order_oth.return_plan(conn, card["id"])["signed_at"]:
             word = RETURN
@@ -488,13 +488,13 @@ def _command(conn, finish, dispute, state, sender, text, reply_order_no, now: st
             return dispute(point, "«%s», а заказ на этапе «%s»" % (RETURN, card["stage"]["name"]),
                            CANCELLED % label(card) if code == "cancel" else
                            "Заказ №%s сейчас на этапе «%s»; сообщение передано владельцу." % (label(card), card["stage"]["name"]))
-        if code in ("oth", orders.RETURN_GIVEN):
+        if code in orders.OTH_CODES:
             from . import order_oth
             plan = order_oth.return_plan(conn, card["id"])
             if plan is None:                                   # the office agrees first (the lead 2026-11-05): nobody closes a refund nobody agreed
                 return finish("не выполнено: возврат ещё не согласован", "Заказ №%s: возврат ещё не согласован с поставщиком, ничего не отмечено. "
                               "Шины пока не отдавайте, дату сообщим." % label(card))
-        if code in ("oth", orders.RETURN_GIVEN) and not plan["signed_at"] and RETURN_SURE not in str(text or "").lower():
+        if code in orders.OTH_CODES and not plan["signed_at"] and RETURN_SURE not in str(text or "").lower():
             return finish("ждёт подтверждения: шины не отмечены отданными", "Заказ №%s: подтверждаете передачу поставщику (водителю)? Если да, напишите: "
                           "№%s возврат отдал %s" % (label(card), label(card), RETURN_SURE))
         return finish(*returned(conn, card, "менеджер %s" % point["name"], now))
@@ -760,7 +760,7 @@ def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
             conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date, signed_at, signed_by) VALUES (?,?,?,?,?,?) "
                          "ON CONFLICT(order_id) DO UPDATE SET signed_at = excluded.signed_at, signed_by = excluded.signed_by "
                          "WHERE oth_return_plan.signed_at IS NULL", (card["id"], now, who, now[:10], now, who))
-        if card["stage"]["code"] == "oth":
+        if card["stage"]["code"] in ("oth", orders.RETURN_AGREE):               # signed: «На возврат» (the agreed and the signed, 2026-11-13)
             try:
                 moved = orders.move_card(conn, card["id"], order_oth._returning_stage(conn)["id"], now, who)
             except OrderError as err:
