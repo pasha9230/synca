@@ -96,7 +96,7 @@ def test_the_cached_set_holds_the_supplier_once_the_clock_makes_its_file_old(tmp
 
 def test_the_catalog_shows_a_stale_second_unload_for_viewing_only_and_its_pages_answer(tmp_path):
     """Run tails5 (lead, 2026-10-25): the positions of an old file are shown for viewing only (tests/test_panel_stale_ux.py), not hidden;
-    they still have no preview, no checkbox, no action, and the panel never publishes them (test_the_panel_publication_holds_...)."""
+    they have no checkbox or feed action, and the panel never publishes them (test_the_panel_publication_holds_...)."""
     prepared(tmp_path).close()
     files(tmp_path, ONE)
     second(tmp_path, dict(NNOMMODIF="5"), fetched=datetime.utcnow().isoformat(timespec="seconds"))
@@ -108,8 +108,10 @@ def test_the_catalog_shows_a_stale_second_unload_for_viewing_only_and_its_pages_
     second(tmp_path, dict(NNOMMODIF="5"), fetched=old())
     html = client.get("/catalog").get_data(as_text=True)
     assert client.get("/").status_code == 200
-    # nothing to act on the position by its id; only «Просмотр» (the owner 2026-10-29: every catalog row has a card and a preview)
-    assert html.count("s2-5") == html.count('data-preview="s2-5"') == 1
+    # The position can keep an own price for later, but still cannot be selected for a feed action.
+    assert html.count('data-preview="s2-5"') == 1
+    assert 'type="checkbox" name="g" value="s2-5"' not in html
+    assert 'type="hidden" name="g" value="s2-5"' in html
     assert html.count("data-stale-unload>выгрузка устарела") == 1                    # shown, marked as an old unload
 
 

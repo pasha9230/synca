@@ -164,8 +164,9 @@ def test_the_catalog_shows_the_positions_of_a_stale_unload_for_viewing_only(tmp_
     html = client.get("/catalog").get_data(as_text=True)
     assert html.count("data-stale-unload>выгрузка устарела") == 2                  # both rows, marked
     assert "объявление держится как было" in html and "): не публикуется" in html
-    for trace in ('value="s2-', ':s2-', "goods_id=s2-", "wait=s2-"):     # no checkbox, stage, sale/order, wait
+    for trace in ('type="checkbox" name="g" value="s2-', ':s2-', "goods_id=s2-", "wait=s2-"):     # no checkbox, stage, sale/order, wait
         assert trace not in html, trace
+    assert 'type="hidden" name="g" value="s2-5"' in html and "data-own-later" in html  # own price for a later feed
     assert 'data-preview="s2-5"' in html and client.get("/catalog/preview/s2-5").status_code == 200   # the owner 2026-10-29: a preview for every row
     assert ':5"' in html and "goods_id=5" in html                                 # the owner's role does see the actions of own positions
     assert "нет у поставщика" not in html
