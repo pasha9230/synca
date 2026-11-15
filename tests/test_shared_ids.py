@@ -5,13 +5,21 @@ import xml.etree.ElementTree as ET
 from datetime import date
 
 from helpers import catalog_xml, commodity_xml, settings_dict
-from tires_sync import connections, cycle, mirror_feed, store
+from tires_sync import connections, cycle, mirror_feed, publishing, store
 from tires_sync.catalog import parse_reference
 from tires_sync.settings_store import init_settings
 
 NOW = "2026-10-14T12:00:00"
 REF = parse_reference('<Shiny>\n<make name="Ikon Tyres">\n<model name="Test Model"/>\n</make>\n</Shiny>')
 UNLOAD = catalog_xml(commodity_xml(NNOMMODIF="100"), commodity_xml(NNOMMODIF="101", SMNFCODE="TS2"))
+
+
+class Clock(date):
+    current = date(2026, 10, 14)
+
+    @classmethod
+    def today(cls):
+        return cls.current
 
 
 def two(tmp_path):
@@ -29,7 +37,9 @@ def ids(tmp_path, conn, account):
     return {a.findtext("Id") for a in ET.parse(tmp_path / "feed" / token / "next" / "avito_feed.xml").getroot()}
 
 
-def test_a_shared_id_is_used_until_the_date_and_then_the_position_gets_its_own(tmp_path):
+def test_a_shared_id_is_used_until_the_date_and_then_the_position_gets_its_own(tmp_path, monkeypatch):
+    Clock.current = date(2026, 10, 14)
+    monkeypatch.setattr(mirror_feed, "date", Clock)
     conn, first, second = two(tmp_path)
     cabinet = {"100": ["100"]}                                                     # the cabinet of the second account has a live ad with the plain Id
     done = mirror_feed.rebind_ids(conn, second, ["100_a%d" % second], cabinet, NOW, "o", shared={"100": "2026-11-14"}, taken={"100"})
@@ -45,6 +55,41 @@ def test_without_the_exception_a_colliding_id_is_not_bound(tmp_path):
     conn, first, second = two(tmp_path)
     done = mirror_feed.rebind_ids(conn, second, ["100_a%d" % second], {"100": ["100"]}, NOW, "o", taken={"100"})
     assert done == {}
+
+
+def test_expired_shared_id_can_leave_the_second_feed_before_the_first_recovers(tmp_path, monkeypatch):
+    Clock.current = date(2026, 11, 13)
+    monkeypatch.setattr(mirror_feed, "date", Clock)
+    conn, first, second = two(tmp_path)
+    for account in (first, second):
+        connections.set_live(conn, account, True, NOW, "o")
+    mirror_feed.rebind_ids(conn, second, ["100_a2"], {"100": ["100"]}, NOW, "o",
+                           shared={"100": "2026-11-14"}, taken={"100"})
+    initial = cycle.run_for_accounts(conn, UNLOAD, REF, Clock.current, tmp_path / "feed")
+    assert all(r.ok for r in initial), [r.error for r in initial]
+    publishing.publish_live_accounts(conn, tmp_path / "feed")
+
+    Clock.current = date(2026, 11, 14)
+    first_pass = cycle.run_for_accounts(conn, UNLOAD, REF, Clock.current, tmp_path / "feed")
+    assert not first_pass[0].ok and "cross_account_id" in first_pass[0].error
+    assert first_pass[1].ok, first_pass[1].error
+    assert "100_a2" in ids(tmp_path, conn, second)
+    assert "100" not in ids(tmp_path, conn, second)
+    publishing.publish_live_accounts(conn, tmp_path / "feed", skip_ids=(first,))
+    second_pass = cycle.run_for_accounts(conn, UNLOAD, REF, Clock.current, tmp_path / "feed")
+    assert all(r.ok for r in second_pass), [r.error for r in second_pass]
+
+
+def test_expiry_removes_other_lots_bound_to_the_same_shared_id(tmp_path):
+    conn, _first, second = two(tmp_path)
+    mirror_feed.rebind_ids(conn, second, ["100_a2"], {"100": ["100"]}, NOW, "o",
+                           shared={"100": "2026-11-14"}, taken={"100"})
+    mirror_feed.bind_ids(conn, second, {"101": "100"}, NOW, "same_tire")
+    assert mirror_feed.adopted_maps(conn, second, today=date(2026, 11, 13))[0] == {"100": "100", "101": "100"}
+    assert mirror_feed.adopted_maps(conn, second, today=date(2026, 11, 14))[0] == {}
+    mirror_feed.bind_ids(conn, second, {"100": "100_a2"}, NOW, "same_tire")
+    assert mirror_feed.expired_shared_ids(conn, second, today=date(2026, 11, 14)) == {"100"}
+    assert mirror_feed.adopted_maps(conn, second, today=date(2026, 11, 14))[0] == {"100": "100_a2"}
 
 
 def test_the_cli_binds_to_the_existing_ids_and_shares_an_id_only_when_asked_to(tmp_path, monkeypatch, capsys):
