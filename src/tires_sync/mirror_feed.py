@@ -224,7 +224,9 @@ def rebind_ids(conn, account_id: int, feed_ids: Iterable[str], cabinet_by_code: 
     («you already sell this; the first ad is published again») and blocks it. The position is bound to the Id of the existing ad instead, so Avito
     edits that ad. `cabinet_by_code` is {supplier code: [XML Ids of the cabinet's live ads, oldest first]}. Returns {code: Id} of what changed."""
     ids, images = adopted_maps(conn, account_id)
-    shared_now = _shared_raw(conn, account_id)
+    old = _adopted_raw(conn, account_id)
+    shared_now = dict(old.get("shared") or {})
+    shared_ad_ids = dict(old.get("shared_ad_ids") or {})
     taken = set(taken)
     shared = shared or {}                              # {code: date until which the Id may be the same as another account's}
     changed: Dict[str, str] = {}
@@ -238,7 +240,9 @@ def rebind_ids(conn, account_id: int, feed_ids: Iterable[str], cabinet_by_code: 
     if changed:
         ids.update(changed)
         shared_now.update({c: shared[c] for c in changed if c in shared})
-        store.set_state(conn, _adopted_key(account_id), json.dumps({"ids": ids, "images": images, "shared": shared_now}, ensure_ascii=False))
+        shared_ad_ids.update({c: changed[c] for c in changed if c in shared})
+        store.set_state(conn, _adopted_key(account_id), json.dumps(
+            {"ids": ids, "images": images, "shared": shared_now, "shared_ad_ids": shared_ad_ids}, ensure_ascii=False))
         store.write_audit(conn, now, author, "ids_rebound", {"account_id": account_id, "count": len(changed), "shared": sorted(c for c in changed if c in shared)})
     return changed
 
@@ -274,7 +278,8 @@ def bind_ids(conn, account_id: int, new_ids: Dict[str, str], now: str, author: s
     if not changed:
         return
     ids.update(changed)
-    store.set_state(conn, _adopted_key(account_id), json.dumps({"ids": ids, "images": data.get("images") or {}, "shared": data.get("shared") or {}}, ensure_ascii=False))
+    store.set_state(conn, _adopted_key(account_id), json.dumps({"ids": ids, "images": data.get("images") or {},
+              "shared": data.get("shared") or {}, "shared_ad_ids": data.get("shared_ad_ids") or {}}, ensure_ascii=False))
     store.write_audit(conn, now, author, "ids_bound", {"account_id": account_id, "ids": changed})
 
 
@@ -411,17 +416,35 @@ def adopted_maps(conn, account_id: int, today=None) -> Tuple[Dict[str, str], Dic
     data = _adopted_raw(conn, account_id)
     ids = dict(data.get("ids") or {})
     today_iso = (today or date.today()).isoformat()
-    for code, until in (data.get("shared") or {}).items():
-        if until <= today_iso:
-            ids.pop(code, None)
+    expired = _expired_ids(data, today_iso)
+    for code, ad_id in list(ids.items()):
+        if ad_id in expired:
+            ids.pop(code)
     return ids, dict(data.get("images") or {})
+
+
+def expired_shared_ids(conn, account_id: int, today=None) -> FrozenSet[str]:
+    """Previously shared Ids that this account must no longer reuse, even through another lot's binding."""
+    data = _adopted_raw(conn, account_id)
+    today_iso = (today or date.today()).isoformat()
+    return frozenset(_expired_ids(data, today_iso))
+
+
+def _expired_ids(data: dict, today_iso: str) -> set:
+    ids = data.get("ids") or {}
+    original = data.get("shared_ad_ids") or {}
+    return {original.get(code) or ids[code] for code, until in (data.get("shared") or {}).items()
+            if until <= today_iso and (code in original or code in ids)}
 
 
 def shared_ids(conn, account_id: int, today=None) -> FrozenSet[str]:
     """The Ids this account is allowed to share with another account right now."""
     data = _adopted_raw(conn, account_id)
     ids = adopted_maps(conn, account_id, today)[0]
-    return frozenset(ids[c] for c in (data.get("shared") or {}) if c in ids)
+    original = data.get("shared_ad_ids") or {}
+    return frozenset(original.get(c) or ids[c] for c, until in (data.get("shared") or {}).items()
+                     if until > (today or date.today()).isoformat() and (c in original or c in ids)
+                     and (original.get(c) or ids[c]) in ids.values())
 
 
 def adopt(conn, account_id: int, now: str, author: str) -> Dict[str, int]:
@@ -437,7 +460,7 @@ def adopt(conn, account_id: int, now: str, author: str) -> Dict[str, int]:
         raise ValueError("В файле аккаунта нет объявлений, которые можно перенести.")
     kept = _adopted_raw(conn, account_id)                         # bindings made before (a tire that took the Id of its oldest ad) win over the file's
     merged = {"ids": dict(plan["ids"], **(kept.get("ids") or {})), "images": dict(plan["images"], **(kept.get("images") or {})),
-              "shared": kept.get("shared") or {}}
+              "shared": kept.get("shared") or {}, "shared_ad_ids": kept.get("shared_ad_ids") or {}}
     store.set_state(conn, _adopted_key(account_id), json.dumps(merged, ensure_ascii=False))
     with conn:
         conn.execute("UPDATE account SET feed_mode = 'generated' WHERE id = ?", (account_id,))
@@ -476,7 +499,7 @@ def set_alias_scheme(conn, account_id: int, on: bool, now: str, author: str) -> 
     if on and not alias_scheme(conn, account_id):                         # a fresh start: the older bindings of this account (`<code>_aN`, Ids of other codes) go
         data = _adopted_raw(conn, account_id)
         store.set_state(conn, _adopted_key(account_id), json.dumps(
-            {"ids": {}, "images": data.get("images") or {}, "shared": {}}, ensure_ascii=False))
+            {"ids": {}, "images": data.get("images") or {}, "shared": {}, "shared_ad_ids": {}}, ensure_ascii=False))
     store.set_state(conn, _alias_key(account_id), "alias" if on else "")
     store.write_audit(conn, now, author, "id_scheme", {"account_id": account_id, "scheme": "alias" if on else "code"})
 
