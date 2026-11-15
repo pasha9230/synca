@@ -29,7 +29,13 @@ def ids(tmp_path, conn, account):
     return {a.findtext("Id") for a in ET.parse(tmp_path / "feed" / token / "next" / "avito_feed.xml").getroot()}
 
 
-def test_a_shared_id_is_used_until_the_date_and_then_the_position_gets_its_own(tmp_path):
+def test_a_shared_id_is_used_until_the_date_and_then_the_position_gets_its_own(tmp_path, monkeypatch):
+    class Clock(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 10, 14)
+
+    monkeypatch.setattr(mirror_feed, "date", Clock)                    # the test describes the time before the shared Id expires
     conn, first, second = two(tmp_path)
     cabinet = {"100": ["100"]}                                                     # the cabinet of the second account has a live ad with the plain Id
     done = mirror_feed.rebind_ids(conn, second, ["100_a%d" % second], cabinet, NOW, "o", shared={"100": "2026-11-14"}, taken={"100"})
