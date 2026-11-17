@@ -51,6 +51,23 @@ def test_existing_unagreed_returns_move_to_separate_stage_once(tmp_path):
     assert order_oth.migrate_agreement_stage(conn, "2026-11-17T12:01:00") == 0
 
 
+def test_return_stage_migration_retries_after_database_writer_releases_lock(tmp_path):
+    conn = db(tmp_path)
+    card_id = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, orders.RETURN_GIVEN), card_id))
+    conn.commit()
+    writer = store.open_db(tmp_path / "x.db")
+    reader = store.open_db(tmp_path / "x.db", timeout=0.01)
+    writer.execute("BEGIN IMMEDIATE")
+    try:
+        assert order_oth.migrate_agreement_stage(reader, "2026-11-17T12:00:00") == 0
+        assert reader.execute("SELECT 1 FROM app_state WHERE key = ?", (order_oth.AGREEMENT_STAGE_KEY,)).fetchone() is None
+    finally:
+        writer.rollback()
+    assert order_oth.migrate_agreement_stage(reader, "2026-11-17T12:01:00") == 1
+    assert orders.get_card(reader, card_id)["stage"]["code"] == orders.RETURN_AGREE
+
+
 @pytest.mark.parametrize("office", [False, True])
 @pytest.mark.parametrize("supplier_agreed", [False, True])
 def test_sale_is_refused_on_both_return_stages(tmp_path, office, supplier_agreed):

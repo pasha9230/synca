@@ -283,3 +283,15 @@ def register(app) -> None:
         except (order_oth.OthError, ValueError) as err:
             flash(str(err) if isinstance(err, order_oth.OthError) else "Неизвестная позиция.")
         return redirect(_back())
+
+    @app.route("/oth/cancel-return", methods=["POST"])
+    @login_required
+    def oth_cancel_return():
+        """The operator confirmed cancellation with the supplier and releases only the pending pieces."""
+        from .routes_orders import local_iso
+        try:
+            count = order_oth.cancel_item_return(get_conn(), int(request.form.get("item") or 0), local_iso(), author())
+            flash("Запрос на возврат отменён: %d шт. снова доступны на ОТХ." % count, "ok")
+        except (order_oth.OthError, ValueError) as err:
+            flash(str(err) if isinstance(err, order_oth.OthError) else "Неизвестная позиция.", "error")
+        return redirect(_back())

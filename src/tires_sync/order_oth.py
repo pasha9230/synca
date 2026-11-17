@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -312,6 +313,17 @@ def _returning_stage(conn, code=orders.RETURN_AGREE) -> dict:
 
 
 def migrate_agreement_stage(conn, now: str) -> int:
+    """Retry the one-time migration on a later connection if another writer holds the database."""
+    try:
+        return _migrate_agreement_stage(conn, now)
+    except sqlite3.OperationalError as err:
+        if "locked" not in str(err).lower():
+            raise
+        conn.rollback()
+        return 0
+
+
+def _migrate_agreement_stage(conn, now: str) -> int:
     """Move only unagreed orders from the old shared column into the new agreement column.
 
     Preserve entered_at, marks, tasks and plans: this is a presentation/state split, not a new return request.
@@ -448,7 +460,8 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
         _keep_dropped(conn, order_id, kept)
         orders.add_event(conn, order_id, now, who, "field", "%s: метка «На возврат» снята — %s" % (why, "; ".join(
             "%s, %d шт." % (names.get(i, "позиция"), n) for i, n, _by in done)))
-        _audit(conn, now, who, "oth_sold_early" if why == SOLD_EARLY else "oth_issued_early", {"order": int(order_id), "items": {str(i): n for i, n, _by in done}})
+        action = "oth_sold_early" if why == SOLD_EARLY else ("oth_return_cancelled" if slot == "cancel_return" else "oth_issued_early")
+        _audit(conn, now, who, action, {"order": int(order_id), "items": {str(i): n for i, n, _by in done}})
     return sum(n for _, n, _by in done)
 
 
@@ -1726,6 +1739,22 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
     conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(mark, ensure_ascii=False), key))
     conn.commit()
     return True
+
+
+def cancel_item_return(conn, item_id, now: str, who: str) -> int:
+    """Cancel only the pending return mark, preserving pieces already handed to the supplier."""
+    item = _stock_item(conn, item_id)
+    card = orders.get_card(conn, item["order_id"])
+    if card["stage"]["code"] != "oth" or return_plan(conn, card["id"]) is not None:
+        raise OthError("Отменить отметку можно только на ОТХ до согласования возврата.")
+    count = drop_marks(conn, card["id"], now, who, item_id=item["item_id"],
+                       why="Отмена запроса на возврат", slot="cancel_return")
+    if not count:
+        raise OthError("У позиции нет ожидающей согласования отметки возврата.")
+    if not agreeing(conn, orders.get_card(conn, card["id"])):
+        _close_tasks(conn, card["id"], RETURN_TITLES, "cancel", now, who, "запрос на возврат отменён")
+    conn.commit()
+    return count
 
 
 def item_marks(conn) -> Dict[str, dict]:
