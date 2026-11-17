@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from panel_helpers import post
 from test_mypoint import manager
 from test_point_oth_sell import T1, T2, clock, marked, open_tasks, sell, setup, texts  # noqa: F401 - clock is a fixture
@@ -63,11 +65,14 @@ def test_issued_after_the_agreement_writes_nothing_of_a_sale_before_it(tmp_path,
     assert "Согласование возврата снято: точка ответила, что заказ выдали" in texts(conn, card)
 
 
-def test_a_sale_still_writes_sold_before_the_agreement(tmp_path, clock):
+def test_a_sale_requires_cancelling_the_mark_first(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path)
-    orders.move_card(conn, card, _stage(conn, "done"), T1, "owner")     # the office: the point no longer sells on the agreement (the owner 2026-11-12)
-    assert task_rows(conn, card) == [(None, T1)]
-    assert any(t.startswith(order_oth.SOLD_EARLY) for t in texts(conn, card)) and not any(t.startswith(ISSUED) for t in texts(conn, card))
+    with pytest.raises(orders.OrderError, match="Сначала отмените согласование"):
+        orders.move_card(conn, card, _stage(conn, "done"), T1, "owner")
+    assert order_oth.return_plan(conn, card) is None and open_tasks(conn, card) == 1
+    order_oth.unmark_returned(conn, item, T1, "owner")
+    orders.move_card(conn, card, _stage(conn, "done"), T1, "owner")
+    assert not any(t.startswith(order_oth.SOLD_EARLY) for t in texts(conn, card))
 
 
 # ---- 2. «Отменить» and «Вернуть на ОТХ» bring the mark «На возврат» and its task back -----------------------------------------------------

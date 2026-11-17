@@ -166,6 +166,17 @@ def test_e3_orders_of_two_points_are_refused_and_nothing_changes(tmp_path, offic
     assert conn.execute("SELECT COUNT(*) FROM oth_return_act").fetchone()[0] == 0
 
 
+def test_act_cannot_agree_marked_order_still_on_oth(tmp_path):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
+    assert not opr.can_act(conn, orders.get_card(conn, card))
+    with pytest.raises(order_oth.OthError, match="не на согласовании"):
+        opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                           date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    assert order_oth.return_plan(conn, card) is None
+
+
 def test_e3_the_pdf_is_checked_and_another_date_of_an_agreed_order_is_refused(tmp_path, office_clock):
     app, owner, conn, pid, card = setup(tmp_path)
     ids = two_orders(conn, pid)
@@ -281,6 +292,7 @@ def test_a_phone_of_375_px_has_no_horizontal_scroll(tmp_path, clock, new_view):
         from test_point_new_view import flag
         flag(conn, "all")
     more = _card(conn, pid, code="at_point", webmim="5000200")
+    orders.move_card(conn, more, _stage(conn, "oth"), "2026-10-16T09:00:00", "o", oth_split=False)
     to_return_stage(conn, more)                                                            # «Есть покупатель» on «Согласование возврата»
     clock["now"] = "2026-10-16T11:00:00"
     mine = manager(app, conn, pid)

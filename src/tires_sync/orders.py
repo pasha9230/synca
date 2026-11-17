@@ -1137,6 +1137,11 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         return False
     journal = journal and not chain
     from . import oth_storage
+    if stage["code"] == "done" and card["stage"].get("code") == "oth":
+        from . import order_oth
+        if order_oth.agreeing(conn, card):
+            raise _refuse_move(conn, card_id, now, author,
+                               "Сначала отмените согласование возврата с поставщиком и снимите отметку с шин.", journal)
     if stage["code"] == "done" and not oth_sold and oth_storage.is_record(conn, card_id):
         return _sell_record(conn, card, now, author, journal, commit)
     twice = oth_storage.why_not_move(conn, card, stage)                     # the same tyres never on «На ОТХ» twice (the review 2026-11-10)

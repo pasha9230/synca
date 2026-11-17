@@ -163,7 +163,7 @@ def office_rows(conn, login: str) -> List[dict]:
 
 def can_act(conn, card: dict) -> bool:
     """A checkbox of the page «На ОТХ»: the order is on the agreement of its return, or agreed and the act not signed."""
-    if card["stage"]["code"] not in order_oth.RETURNING or not card.get("point_id"):
+    if card["stage"]["code"] not in (orders.RETURN_AGREE, orders.RETURN_GIVEN) or not card.get("point_id"):
         return False
     plan = order_oth.return_plan(conn, card["id"])
     return order_oth.agreeing(conn, card) or (plan is not None and not plan["signed_at"])

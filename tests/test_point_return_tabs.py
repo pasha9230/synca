@@ -157,9 +157,12 @@ def test_a_press_of_an_old_page_is_refused_in_plain_words_and_changes_nothing(tm
     assert order_oth.sell(conn, orders.get_card(conn, card), "gamma", T1) == (order_oth.AGREEING_REFUSED, REFUSED, False)
 
 
-def test_the_office_sells_on_the_agreement_as_before(tmp_path, clock):
+def test_the_office_must_cancel_the_mark_before_selling(tmp_path, clock):
     app, owner, conn, pid, card = setup(tmp_path)
     order_oth.item_to_return(conn, item_of(conn, card), "2026-10-14T10:00:00", "owner")
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "owner", T1, office=True)
+    assert not done and answer == order_oth.AGREEING_ANSWER
+    order_oth.unmark_returned(conn, item_of(conn, card), T1, "owner")
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "owner", T1, office=True)
     assert done and orders.get_card(conn, card)["stage"]["code"] == "done"
 

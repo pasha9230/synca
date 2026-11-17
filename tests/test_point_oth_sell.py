@@ -209,7 +209,7 @@ def test_on_the_return_not_agreed_the_point_sells_nothing_the_question_and_the_t
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T1)
     assert not done and answer == "Шины на согласовании возврата: продать можно после отмены согласования оператором"
     now = orders.get_card(conn, card)
-    assert now["stage"]["code"] == orders.RETURN_GIVEN and linked(conn, card) is None and order_oth.return_plan(conn, card) is None
+    assert now["stage"]["code"] == orders.RETURN_AGREE and linked(conn, card) is None and order_oth.return_plan(conn, card) is None
     assert order_oth.question_open(conn, now) and open_tasks(conn, card) == 1          # nothing closed, nothing cancelled
 
 
@@ -290,7 +290,7 @@ def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_off_the_points_but
     [row] = order_oth.stock(conn)["stock"]
     assert (row["qty"], row["left"], row["marked_qty"]) == (4, 0, 4)                      # on sale; a real «Вернуть поставщику» has nothing to take
     assert "oth_sold" not in manager(app, conn, pid).get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12: the office sells
-    assert any("шины в продаже до согласования возврата" in t for t in texts(conn, card))
+    assert any("шины сняты с продажи" in t for t in texts(conn, card))
     page = owner.get("/oth").get_data(as_text=True)
     assert "data-item-return>Согласование возврата · 4 шт., в продаже до согласования" in page and "в продаже 4" in page
     assert "шины снимаются с продажи" not in page and 'action="/oth/return"' not in page     # nothing left for a real «Вернуть поставщику»

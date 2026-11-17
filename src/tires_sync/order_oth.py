@@ -486,7 +486,7 @@ def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, piece
     if not back:
         return 0
     what = "; ".join("%s, %d шт." % (items[i]["name"], n) for i, n, _by in back)
-    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Статус «%s», шины в продаже до согласования возврата." % (
+    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Статус «%s», шины сняты с продажи до отмены согласования возврата." % (
         why, what, LABELS[AGREE]))
     _audit(conn, now, who, "oth_marks_back", {"order": int(order_id), "items": {str(i): n for i, n, _by in back}})
     marks = []
@@ -1143,8 +1143,8 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     if card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
         conn.rollback()
         return AGREEING_REFUSED, AGREEING_ANSWER, False
-    if not office and agreeing(conn, card):                      # the owner 2026-11-12 (over 2026-11-10): the point sells on «На ОТХ» only; on the
-        conn.rollback()                                          # agreement of the return the office sells, or takes the agreement off first
+    if agreeing(conn, card):
+        conn.rollback()
         return AGREEING_REFUSED, AGREEING_ANSWER, False
     if given_back(conn, card["id"]):                             # the sale is of the whole order: its quantity would count them too
         conn.rollback()
@@ -1681,8 +1681,8 @@ def _item_key(item_id, entered: str) -> str:
 
 def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
     """«На возврат» of one position (the owner 2026-11-04): a part of an order has no stage of its own, so the order stays on «На ОТХ»; its pieces are
-    marked in oth_return (the block «Возвращено поставщику» of the page, with its «Отменить») and stay on sale until the return is agreed (stock, the
-    owner 2026-11-10), the position shows «Согласуем» while the responsible's task is open. False: moved already."""
+    marked in oth_return (the block «Возвращено поставщику» of the page, with its «Отменить») and leave sale immediately; the point sees the order
+    in its agreement tab while the responsible's task is open. False: moved already."""
     item = _stock_item(conn, item_id)
     card = orders.get_card(conn, item["order_id"])
     if card["stage"]["code"] != "oth":
@@ -1707,7 +1707,7 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
         conn.rollback()
         return False
     _add_returned(conn, item, pieces, now, who)
-    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Статус «%s», шины в продаже до согласования возврата, заказ остаётся на «%s»." % (
+    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Статус «%s», шины сняты с продажи, заказ остаётся на «%s»." % (
         item["name"], pieces, LABELS[AGREE], card["stage"]["name"]))
     _audit(conn, now, who, "oth_item_to_return", {"order": card["id"], "item": item["item_id"], "qty": pieces})
     what = "позиция: %s, %d шт." % (item["name"], pieces)
