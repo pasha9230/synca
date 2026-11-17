@@ -46,7 +46,7 @@ def test_e1_the_seventh_day_leaves_the_task_and_asks_the_point_nothing(tmp_path)
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append((card["responsible"], text))) == 1
     order_oth.finish_moved(conn, "2026-10-26T13:30:00", lambda card, text: told.append((card["responsible"], text)))
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN
+    assert card["stage"]["code"] == orders.RETURN_AGREE
     assert [t["title"] for t in open_tasks(conn, order_oth.RETURN_TASK, cid)] == [order_oth.RETURN_TASK]     # «Согласовать возврат» stays
     assert not order_oth.question_open(conn, card)
     assert [t for who, t in told if who == ""] == []                                      # nothing to the point (it is on VK)
@@ -105,12 +105,13 @@ def test_e2_the_moment_of_the_status_on_oth_is_the_first_mark_and_unagree_starts
     assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"
     assert opr.buyer_until(conn, orders.get_card(conn, card)) == "2026-10-18T12:00:00"
     other = _card(conn, pid, code="at_point", webmim="5000300")
-    orders.move_card(conn, other, _stage(conn, orders.RETURN_GIVEN), "2026-10-20T10:00:00", "o")
+    orders.move_card(conn, other, _stage(conn, "oth"), "2026-10-20T09:00:00", "o", oth_split=False)
+    orders.move_card(conn, other, _stage(conn, orders.RETURN_AGREE), "2026-10-20T10:00:00", "o")
     order_oth.agree(conn, orders.get_card(conn, other), date(2026, 10, 20), "2026-10-20T11:00:00", "owner", "2026-10-23")
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == ""             # agreed: not on the agreement
     assert order_oth.unagree(conn, orders.get_card(conn, other), "2026-10-21T09:00:00", "owner")
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == "2026-10-21T09:00:00"
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-17T12:30:00", "система")     # the 7th day after the mark
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-17T12:30:00", "система")     # the 7th day after the mark
     assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"           # the status went on: no new 2 days
 
 
@@ -156,7 +157,8 @@ def test_e3_orders_of_two_points_are_refused_and_nothing_changes(tmp_path, offic
     to_return_stage(conn, card)
     gamma = other_point(conn)
     theirs = _card(conn, gamma, code="at_point", webmim="5000400")
-    orders.move_card(conn, theirs, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T10:00:00", "o")
+    orders.move_card(conn, theirs, _stage(conn, "oth"), "2026-10-15T09:00:00", "o", oth_split=False)
+    orders.move_card(conn, theirs, _stage(conn, orders.RETURN_AGREE), "2026-10-15T10:00:00", "o")
     r = act_post(owner, [card, theirs])
     assert r.status_code == 302
     assert "разных точек" in owner.get(r.headers["Location"]).get_data(as_text=True)

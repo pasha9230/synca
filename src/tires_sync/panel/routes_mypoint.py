@@ -272,7 +272,8 @@ TABS = {"moving": "Едут", "here": "На точке", "oth": "На ОТХ", "
 TAB_NOTES = {"moving": ("Ждём доставки, отметьте «Приехал», как прибудут на точку.",),         # the owner's task of 2026-11-12: the new texts
              "here": ("Эти позиции у нас, ожидаем выкупа заказчиком.",),
              "oth": ("Невыкуп, хранение 7 дней. Если продаёте, впишите данные покупателя.", "Можно продать, +50 рублей за штуку."),
-             "agree": ("Отправили запрос на оформление возврата этих позиций. Для продажи нужна проверка.",),
+             "agree": ("Шины сейчас на точке, согласуем с поставщиком и поставим на возврат.",
+                       "Если нужно их продать, согласуйте это отдельно с оператором: он должен сначала отменить запрос поставщику."),
              "return": ("Эти товары согласованы на возврат. Возвраты возможны в Пн, Ср, Пт. Распечатайте Акт МХ-3.",),
              "issued": ("Заказы, отмеченные как реализованные заказчику.",)}
 DEFAULT_TAB = "moving"                             # the owner's task of 2026-11-12: «Рабочее место» opens on «Едут» (was «На точке»)
@@ -291,7 +292,7 @@ def _in_tab(row: dict, tab: str) -> bool:
     agreed = bool(row.get("returning"))
     agreeing = not agreed and bool(row.get("agreeing"))
     return {"moving": code in ("placed", "moving"), "here": row["here"], "oth": code == "oth" and not agreed and not agreeing, "agree": agreeing,
-            "return": agreed or (code == orders.RETURN_GIVEN and not agreeing),
+            "return": agreed or (code in (orders.RETURN_AGREE, orders.RETURN_GIVEN) and not agreeing),
             "issued": False}[tab]                                       # «Выдано» is not of these cards: _issued
 
 
@@ -348,7 +349,7 @@ def _issued(conn, point_id, today: str) -> list:
     who marked it and the press still to undo (point_log.undoable). Nothing of money."""
     since = (date.fromisoformat(today) - timedelta(days=ISSUED_DAYS)).isoformat()
     done = orders.stage_name(conn, "done")
-    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM + ("oth", orders.RETURN_GIVEN)}     # and «Выдали»/«Продать» from «На ОТХ» and «На возврат» (2026-11-09, 2026-11-10)
+    sources = {s["name"] for s in orders.list_stages(conn) if s["code"] in mgr.ISSUE_FROM + orders.RETURN_STAGES}     # and «Выдали»/«Продать» from «На ОТХ» and «На возврат» (2026-11-09, 2026-11-10)
     rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'done' "
                         "AND c.entered_at >= ? ORDER BY c.entered_at DESC, c.id DESC", (point_id, since)).fetchall()
     mine = points.own_sales(conn, point_id) if rows else set()
@@ -401,7 +402,7 @@ def _oth_cards(conn, point_id) -> list:
     """The point's orders on «На ОТХ» and «На возврат»: the tyres the client refused lie at the point (tabs «На ОТХ», «На возврат»). Not its
     own sales («Заказы»)."""
     ids = [r[0] for r in conn.execute(
-        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (?, ?) ORDER BY c.entered_at, c.id",
+        "SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code IN (?, ?, ?) ORDER BY c.entered_at, c.id",
         (point_id,) + order_oth.RETURNING)]
     mine = points.own_sales(conn, point_id) if ids else set()
     return [orders.get_card(conn, card_id) for card_id in ids if card_id not in mine]
@@ -545,8 +546,8 @@ def register(app) -> None:
                           "oth_asked": order_oth.question_open(conn, card), "to_agree": order_oth.to_agree(conn, card),
                           "agreeing": order_oth.agreeing(conn, card),          # «Согласование возврата» (the owner 2026-11-12)
                           "can_buyer": oth_point_return.can_tell_buyer(conn, card, now),     # «Есть покупатель», 2 days of the agreement (E2)
-                          "ret_label": order_oth.point_label_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
-                          "ret_state": order_oth.state_of(order_oth.return_plan(conn, card["id"])) if code == orders.RETURN_GIVEN else "",
+                          "ret_label": order_oth.point_label_of(order_oth.return_plan(conn, card["id"])) if code in (orders.RETURN_AGREE, orders.RETURN_GIVEN) else "",
+                          "ret_state": order_oth.state_of(order_oth.return_plan(conn, card["id"])) if code in (orders.RETURN_AGREE, orders.RETURN_GIVEN) else "",
                           "oth_question": order_oth.question(conn, card, now) if code in order_oth.RETURNING else "",
                           "order_date": _order_day(conn, card), "from_oth": templates._oth_orders(conn, card["id"]),
                           "merged_from": ", ".join("№%s" % s["label"] for s in order_merge.sources(conn, card["id"])),     # «Шины с ОТХ, заказ №…»

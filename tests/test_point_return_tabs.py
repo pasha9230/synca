@@ -24,7 +24,7 @@ T1 = "2026-10-16T11:00:00"
 NOTES = {"moving": ["Ждём доставки, отметьте «Приехал», как прибудут на точку."],                # the owner's task of 2026-11-12: the new texts
          "here": ["Эти позиции у нас, ожидаем выкупа заказчиком."],
          "oth": ["Невыкуп, хранение 7 дней. Если продаёте, впишите данные покупателя.", "Можно продать, +50 рублей за штуку."],
-         "agree": ["Отправили запрос на оформление возврата этих позиций. Для продажи нужна проверка."],
+         "agree": ["Шины сейчас на точке, согласуем с поставщиком и поставим на возврат.", "Если нужно их продать, согласуйте это отдельно с оператором: он должен сначала отменить запрос поставщику."],
          "return": ["Эти товары согласованы на возврат. Возвраты возможны в Пн, Ср, Пт. Распечатайте Акт МХ-3."],
          "issued": ["Заказы, отмеченные как реализованные заказчику."]}
 
@@ -46,7 +46,7 @@ def item_of(conn, card):
 
 
 def to_return_stage(conn, card):
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T10:00:00", "o")
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T10:00:00", "o")
     conn.commit()
 
 
@@ -217,6 +217,7 @@ def test_the_past_and_no_date_are_still_refused(tmp_path, clock, day):
 @pytest.mark.parametrize("day, off", [("2099-01-01", True), ("2099-01-02", False)])       # a Thursday, a Friday
 def test_the_flash_of_the_office_says_the_hint_and_the_form_takes_any_day_from_today(tmp_path, clock, day, off):
     app, owner, conn, pid, card = setup(tmp_path)
+    to_return_stage(conn, card)
     form = owner.get("/orders/%d" % card).get_data(as_text=True)
     today = routes_orders_today(app)
     assert re.search(r'name="return_date" value="%s" min="%s"' % (order_oth.return_date(date.fromisoformat(today)), today), form)

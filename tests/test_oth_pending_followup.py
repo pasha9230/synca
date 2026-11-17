@@ -43,7 +43,7 @@ def test_issued_before_the_agreement_closes_the_task_as_not_needed(tmp_path, clo
 
 def test_issued_from_the_return_not_agreed_closes_the_task_as_not_needed(tmp_path, clock):
     app, owner, conn, pid, card = setup(tmp_path)
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T09:00:00", "owner")
     before = orders.get_card(conn, card)
     order_oth.moved_by_hand(conn, dict(before, stage=dict(before["stage"], code="oth")), "2026-10-15T09:00:00", "owner")
     assert open_tasks(conn, card) == 1

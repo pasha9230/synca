@@ -173,7 +173,7 @@ def test_the_hourly_tick_tells_once_with_the_move_and_a_new_stay_tells_again(tmp
     conn, cid, _card_ = _held(tmp_path)
     told = []
     reserve.check(conn, "2026-10-27T09:00:00", calls(told))                                # the seventh day was missed: moved and told, one alert
-    assert sum(t.startswith("Нужно согласовать") for _w, t in told) == 1 and orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert sum(t.startswith("Нужно согласовать") for _w, t in told) == 1 and orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
     reserve.check(conn, "2026-10-27T10:00:00", calls(told))
     assert sum(t.startswith("Нужно согласовать") for _w, t in told) == 1
     orders.move_card(conn, cid, stage(conn, "oth"), "2026-10-28T10:00:00", "o")
@@ -289,9 +289,9 @@ def test_the_button_of_the_card_moves_the_order_with_the_task_and_the_label(tmp_
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     assert "data-to-return" in page
     order_oth.set_task_days(conn, 2)
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_AGREE)))
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN
+    assert card["stage"]["code"] == orders.RETURN_AGREE
     [task] = open_tasks(conn, cid)
     assert task["title"] == order_oth.RETURN_TASK and task["kind"] == "return" and task["assignee"] == "ivan"
     assert tasks.KINDS[task["kind"]] == "Вернуть"
@@ -308,7 +308,7 @@ def test_the_window_save_and_the_due_date_of_the_setting(tmp_path):
     order_oth.moved_by_hand(conn, orders.get_card(conn, cid), "2026-11-06T15:20:00", "o")      # still on «На ОТХ»: nothing
     assert open_tasks(conn, cid) == []
     before = orders.get_card(conn, cid)
-    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-11-06T15:20:00", "o")
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_AGREE), "2026-11-06T15:20:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-11-06T15:20:00", "o")
     assert open_tasks(conn, cid)[0]["due_at"] == "2026-11-10T15:20"
 
@@ -317,7 +317,7 @@ def test_nobody_answers_the_task_goes_to_the_owner(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path, responsible="")
     conn.execute("UPDATE order_card SET created_by = 'робот' WHERE id = ?", (cid,))
     conn.commit()
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_AGREE)))
     assert open_tasks(conn, cid)[0]["assignee"] == "owner"
 
 
@@ -340,7 +340,7 @@ def test_no_double_task_the_seventh_day_after_a_move_by_hand(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
     assert len(open_tasks(conn, cid)) == 1
     order_oth.ask_seventh_day(conn, "2026-10-21T13:00:00")                                 # not on «На ОТХ»: nothing more
@@ -369,7 +369,7 @@ def test_a_move_by_hand_asks_the_question_too(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T12:40:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T12:40:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T12:40:00", "o")
     assert order_oth.question_open(conn, orders.get_card(conn, cid))
     assert order_oth.answer_here(conn, before, "точка", "2026-10-21T13:00:00")[2] is True
@@ -380,7 +380,7 @@ def test_an_agreed_return_gets_no_task_and_agreeing_closes_it(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
     assert open_tasks(conn, cid)
     order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-21"), "2026-10-21T11:00:00", "owner")
@@ -394,7 +394,7 @@ def test_back_to_work_cancels_the_task_by_hand_not_the_seventh_day_s(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
     returning = orders.get_card(conn, cid)
     orders.move_card(conn, cid, stage(conn, "at_point"), "2026-10-21T11:00:00", "o")
@@ -415,10 +415,10 @@ def test_a_broken_task_never_undoes_the_move(tmp_path, monkeypatch):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     monkeypatch.setattr(tasks, "add", lambda **kw: (_ for _ in ()).throw(RuntimeError("busy")))
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
 
 
 # ---- 4b. a position ---------------------------------------------------------------------------------------------------------------------
@@ -559,7 +559,7 @@ def test_day_7_12_30_moves_not_12_29_and_the_old_orders_stay(tmp_path):
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:29:59") == 0
     assert orders.get_card(conn, new)["stage"]["code"] == "oth"
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
-    assert orders.get_card(conn, new)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, new)["stage"]["code"] == orders.RETURN_AGREE
     assert orders.get_card(conn, old)["stage"]["code"] == "oth"                            # entered before the rule: no mass move
     assert order_oth.ask_seventh_day(conn, "2026-10-26T13:07:00") == 0
 
@@ -571,7 +571,7 @@ def test_a_stale_asked_on_oth_does_not_break_the_move(tmp_path):
     assert order_oth.question_open(conn, card)
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
     now = orders.get_card(conn, cid)
-    assert now["stage"]["code"] == orders.RETURN_GIVEN and not order_oth.question_open(conn, now)     # E1: the seventh day asks nothing
+    assert now["stage"]["code"] == orders.RETURN_AGREE and not order_oth.question_open(conn, now)     # E1: the seventh day asks nothing
 
 
 def test_a_sale_blocks_the_move_with_one_yellow_record(tmp_path):
@@ -589,7 +589,7 @@ def test_silence_changes_nothing(tmp_path):
     conn, cid = _asked(tmp_path)
     reserve.check(conn, "2026-11-02T10:00:00", calls([]))
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.question_open(conn, card) and len(open_tasks(conn, cid)) == 1
+    assert card["stage"]["code"] == orders.RETURN_AGREE and order_oth.question_open(conn, card) and len(open_tasks(conn, cid)) == 1
 
 
 def test_issued_from_na_vozvrat_links_the_client_closes_the_task_and_no_reminder_follows(tmp_path):
@@ -631,7 +631,7 @@ def test_na_vozvrat_is_off_sale_in_every_label(tmp_path, step):
         assert order_oth.unagree(conn, orders.get_card(conn, cid), "2026-10-26T14:00:00", "owner")
     assert oth_stock.pieces(conn) == {} and oth_stock.places(conn) == {} and oth_stock.by_point(conn) == {}
     assert order_oth.goods_on_oth(conn) == {}                                              # the catalog's mark
-    assert order_oth.stock(conn)["stock"][0]["stage_code"] == orders.RETURN_GIVEN          # /oth still says where the tyres lie
+    assert order_oth.stock(conn)["stock"][0]["stage_code"] == (orders.RETURN_GIVEN if step == "agreed" else orders.RETURN_AGREE)          # /oth still says where the tyres lie
 
 
 def test_the_unagree_words_say_off_sale(tmp_path):
@@ -647,7 +647,7 @@ def test_the_point_sees_the_statuses_and_no_button_before_the_agreement(tmp_path
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
     pid = orders.get_card(conn, cid)["point_id"]
     mine = manager(app, conn, pid)
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_AGREE)))
     page = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # «Согласование возврата»: its own tab (the owner 2026-11-12)
     assert "Согласование возврата" in page and "/act_signed" not in page
     agree_return(client, cid, tok)
@@ -684,12 +684,23 @@ def test_the_entered_date_is_kept_today_counts_and_a_second_press_keeps_it(tmp_p
 
 def test_the_form_offers_the_day_and_the_server_refuses_another(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-11-04T09:00:00", "owner")
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     offered = re.search(r'name="return_date" value="([0-9-]+)"', page).group(1)
     assert orders.date.fromisoformat(offered).weekday() in (0, 2, 4)
     r = post(client, "/orders/%d/oth-agreed" % cid, tok)                                   # no date: nothing is made up
     assert "Укажите дату" in client.get(r.headers["Location"]).get_data(as_text=True) and order_oth.return_plan(conn, cid) is None
     assert agree_return(client, cid, tok).status_code == 302 and order_oth.return_plan(conn, cid)["return_date"] == offered
+
+
+def test_office_cannot_skip_return_agreement_from_oth(tmp_path):
+    app, client, tok, conn, cid = _on_oth_page(tmp_path)
+    page = client.get("/orders/%d" % cid).get_data(as_text=True)
+    assert 'action="/orders/%d/oth-agreed"' % cid not in page
+    response = post(client, "/orders/%d/oth-agreed" % cid, tok, return_date="2099-01-01")
+    assert "Сначала переведите заказ" in client.get(response.headers["Location"]).get_data(as_text=True)
+    assert orders.get_card(conn, cid)["stage"]["code"] == "oth"
+    assert order_oth.return_plan(conn, cid) is None
 
 
 def _late_return(tmp_path):
@@ -725,6 +736,7 @@ def test_the_tick_reminds_at_08_59_before_its_first_hour_and_nothing_else_wakes(
 def test_the_act_needs_the_second_step_on_the_server(tmp_path):
     from test_mypoint import manager, token, workplace
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-11-04T09:00:00", "owner")
     pid = orders.get_card(conn, cid)["point_id"]
     agree_return(client, cid, tok)
     mine = manager(app, conn, pid)
@@ -743,7 +755,7 @@ def _vk_order(tmp_path, code="oth"):
     started(conn)
     cid = _card(conn, pid, webmim="700300", code="at_point")
     orders.move_card(conn, cid, _stage(conn, "oth"), ENTERED, "o", changes={"cancel_reason": "Отказ"})
-    if code == orders.RETURN_GIVEN:
+    if code == orders.RETURN_AGREE:
         orders.move_card(conn, cid, _stage(conn, code), "2026-10-21T10:00:00", "o")
     return app, conn, cid
 
@@ -752,7 +764,7 @@ def _outcomes(conn, cid):
     return [r[0] for r in conn.execute("SELECT outcome FROM order_command_log WHERE order_id = ? ORDER BY rowid", (cid,))]
 
 
-@pytest.mark.parametrize("code", ["oth", orders.RETURN_GIVEN])
+@pytest.mark.parametrize("code", ["oth", orders.RETURN_AGREE])
 @pytest.mark.parametrize("text", ["возврат отдал 700300", "№700300 возврат отдал подтверждаю"])
 def test_the_vk_return_without_an_agreement_is_refused(tmp_path, code, text):
     from test_vk_commands import hook
@@ -791,15 +803,22 @@ def test_the_task_of_the_seventh_day_is_due_in_two_working_days(tmp_path):
 def test_any_manual_move_out_closes_the_task(tmp_path, code, column):
     conn, cid = _moved_on_day7(tmp_path)
     assert open_tasks(conn, cid)
+    if code == "return":
+        with pytest.raises(orders.OrderError, match="Сначала согласуйте возврат"):
+            orders.move_card(conn, cid, stage(conn, code), "2026-10-27T09:00:00", "o",
+                             changes={"return_kind": "supplier", "return_reason": "x", "return_amount": 1})
+        order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-27"),
+                        "2026-10-27T09:30:00", "o")
     orders.move_card(conn, cid, stage(conn, code), "2026-10-27T10:00:00", "o",
                      changes={"return_kind": "supplier", "return_reason": "x", "return_amount": 1} if code == "return" else None)
     assert open_tasks(conn, cid) == []
-    assert conn.execute("SELECT %s FROM callback_task WHERE order_id = ?" % column, (cid,)).fetchone()[0] == "2026-10-27T10:00:00"
+    assert conn.execute("SELECT %s FROM callback_task WHERE order_id = ?" % column, (cid,)).fetchone()[0] == (
+        "2026-10-27T09:30:00" if code == "return" else "2026-10-27T10:00:00")
 
 
 def test_the_way_out_after_a_move_through_the_panel(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_AGREE)))
     assert open_tasks(conn, cid)
     orders.move_card(conn, cid, _stage(conn, "at_point"), "2026-10-27T11:00:00", "o")
     assert open_tasks(conn, cid) == []
@@ -963,11 +982,11 @@ def test_a_failed_task_leaves_a_yellow_record(tmp_path, monkeypatch):
     conn, cid, card = _held(tmp_path)
     monkeypatch.setattr(tasks, "add", lambda **kw: (_ for _ in ()).throw(RuntimeError("busy")))
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
     assert [e for e in orders.list_events(conn, cid) if e["level"] == "yellow" and e["text"].startswith("Задача возврата не поставлена")]
     other = card_at(conn, "at_point", "2026-10-15T10:00:00")
     was = on_oth(conn, other)
-    orders.move_card(conn, other, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, other, stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, was, "2026-10-21T10:00:00", "o")
     assert [e for e in orders.list_events(conn, other) if e["level"] == "yellow" and e["text"].startswith("Задача возврата не поставлена")]
 
@@ -1031,8 +1050,8 @@ def test_the_seventh_day_never_pulls_back_an_order_that_left_during_the_alerts(t
             orders.move_card(conn, second, stage(conn, "done"), "2026-10-26T12:30:30", "o")
         return "ok"
     order_oth.ask_seventh_day(conn, "2026-10-26T12:31:00", notify)
-    assert orders.get_card(conn, second)["stage"]["code"] in ("done", orders.RETURN_GIVEN)
-    if orders.get_card(conn, second)["stage"]["code"] == orders.RETURN_GIVEN:      # moved before the alerts: left afterwards by the person
+    assert orders.get_card(conn, second)["stage"]["code"] in ("done", orders.RETURN_AGREE)
+    if orders.get_card(conn, second)["stage"]["code"] == orders.RETURN_AGREE:      # moved before the alerts: left afterwards by the person
         orders.move_card(conn, second, stage(conn, "done"), "2026-10-26T12:32:00", "o")
     order_oth.ask_seventh_day(conn, "2026-10-26T13:07:00", notify)
     assert orders.get_card(conn, second)["stage"]["code"] == "done" and open_tasks(conn, second) == []
@@ -1060,7 +1079,7 @@ def test_a_late_catch_up_moves_on_time_and_tells_in_the_morning(tmp_path):
     conn, cid, card = _held(tmp_path)
     told = []
     reserve.check(conn, "2026-10-26T23:40:00", calls(told))
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN and len(open_tasks(conn, cid)) == 1      # the move and the task: on time
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE and len(open_tasks(conn, cid)) == 1      # the move and the task: on time
     assert told == []
     reserve.check(conn, "2026-10-27T08:59:00", calls(told))
     assert told == []
@@ -1114,7 +1133,7 @@ def test_a_position_mark_does_not_keep_the_order_from_the_seventh_day(tmp_path):
     told = []
     assert order_oth.tell_agree_due(conn, "2026-10-26T12:00:00", calls(told)) == 0
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", calls(told)) == 1
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN and len(open_tasks(conn, cid)) == 1
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE and len(open_tasks(conn, cid)) == 1
     assert [t for _w, t in told if t.startswith("Нужно согласовать")]
 
 
@@ -1159,10 +1178,10 @@ def test_a_vk_point_answers_here_and_a_second_word_goes_to_the_owner(tmp_path):
     asked_by_hand(conn, cid, notify=calls([]))
     hook(app, conn, "на точке 700300", event="e1")
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and not order_oth.question_open(conn, card)
+    assert card["stage"]["code"] == orders.RETURN_AGREE and not order_oth.question_open(conn, card)
     assert _outcomes(conn, cid)[-1] == "отмечено: шины на точке"
     hook(app, conn, "выдал 700300", event="e2")                                             # answered: no question open
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
 
 
 def test_a_vk_issued_after_the_act_is_refused_clearly(tmp_path):
@@ -1198,7 +1217,7 @@ def test_a_vk_point_hears_the_agreed_date_and_a_cancelled_one_is_not_sent(tmp_pa
 def test_a_manual_move_tells_a_vk_point_the_status_by_the_tick(tmp_path):
     app, conn, cid = _vk_order(tmp_path)
     before = orders.get_card(conn, cid)
-    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
     told = []
     reserve.check(conn, "2026-10-21T11:07:00", calls(told))
@@ -1288,7 +1307,7 @@ def test_the_link_is_full_when_the_base_is_set(tmp_path):
 
 def test_the_page_shows_the_day_it_came_to_oth_on_a_return_row(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
-    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-27T10:00:00", "o")
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_AGREE), "2026-10-27T10:00:00", "o")
     page = client.get("/oth").get_data(as_text=True)
     assert re.search(r"<td data-oth-since>20\.10(\.2026)?<", page)
 
@@ -1324,7 +1343,7 @@ def test_given_to_the_driver_never_closes_the_return_as_issued(tmp_path, text, a
     plan = order_oth.return_plan(conn, cid)
     hook(app, conn, text)
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.return_plan(conn, cid) == plan
+    assert card["stage"]["code"] == (orders.RETURN_GIVEN if agreed else orders.RETURN_AGREE) and order_oth.return_plan(conn, cid) == plan
     assert order_oth.question_open(conn, card)
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (cid,)).fetchone() is None
     to_driver = agreed and text.split()[0] in mgr.GIVE
@@ -1345,7 +1364,7 @@ def test_a_closed_task_of_a_move_by_hand_does_not_come_back(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T19:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T19:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T19:00:00", "o")
     [task_id] = [r[0] for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (cid,))]
     tasks.close(conn, task_id, "done", "2026-10-21T19:05:00", "o")
@@ -1370,7 +1389,7 @@ def test_a_closed_task_of_the_seventh_day_held_at_night_does_not_come_back(tmp_p
 def test_the_alerts_of_a_move_agreed_meanwhile_are_not_sent(tmp_path):
     app, conn, cid = _vk_order(tmp_path)
     before = orders.get_card(conn, cid)
-    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-21T22:00:00", "o")
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_AGREE), "2026-10-21T22:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T22:00:00", "o")
     order_oth.agree(conn, orders.get_card(conn, cid), orders.date.fromisoformat("2026-10-21"), "2026-10-21T22:05:00", "owner")
     told = []
@@ -1395,7 +1414,7 @@ def test_the_bulk_undo_puts_the_task_back(tmp_path):
     path = str(tmp_path / "x.db")
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
     assert open_tasks(conn, cid)
     target = stage(conn, "cancel")
@@ -1403,7 +1422,7 @@ def test_the_bulk_undo_puts_the_task_back(tmp_path):
     assert open_tasks(conn, cid) == []
     audit = conn.execute("SELECT id FROM audit WHERE action = 'orders_bulk_move' ORDER BY id DESC").fetchone()[0]
     order_bulk.undo(conn, path, audit, [cid], "2026-10-22T11:00:00", "o")
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
 
 
@@ -1417,14 +1436,15 @@ def test_an_agreement_of_an_earlier_stay_does_not_survive_a_return_to_work(tmp_p
     assert order_oth.return_plan(conn, cid) is None
     assert [e for e in orders.list_events(conn, cid) if e["text"].startswith("Согласование возврата снято")]
     before = orders.get_card(conn, cid)
-    orders.move_card(conn, cid, _stage(conn, orders.RETURN_GIVEN), "2026-10-23T10:00:00", "o")  # refused again, straight back by hand
+    orders.move_card(conn, cid, _stage(conn, "oth"), "2026-10-23T09:00:00", "o")
+    orders.move_card(conn, cid, _stage(conn, orders.RETURN_AGREE), "2026-10-23T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-23T10:00:00", "o")
     assert order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласование возврата"
     assert [t["title"] for t in open_tasks(conn, cid)] == [order_oth.RETURN_TASK]
     told = []
     assert order_oth.remind_handover(conn, "2026-10-26T09:00:00", calls(told)) == 0
     hook(app, conn, "№700300 возврат отдал подтверждаю")
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE
 
 
 def test_a_closed_stage_keeps_the_agreement_for_the_undo(tmp_path):

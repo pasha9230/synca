@@ -164,7 +164,7 @@ def test_after_the_signed_act_it_is_refused_and_the_button_is_gone(tmp_path, clo
     app, owner, conn, pid, card = setup(tmp_path)
     mine = manager(app, conn, pid)
     tok = token(mine.get("/my-point?tab=oth").get_data(as_text=True), card, "oth_sold")
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T09:00:00", "owner")
     assert "oth_sold" not in mine.get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12 (over 10.11): on «На ОТХ» only
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
     assert not done and outcome == order_oth.AGREEING_REFUSED and answer == order_oth.AGREEING_ANSWER
@@ -200,7 +200,7 @@ def test_on_the_return_not_agreed_the_point_sells_nothing_the_question_and_the_t
     over: the point sells on «На ОТХ» only). No button, the server refuses; the order, its question and its task stay as they were."""
     app, owner, conn, pid, card = setup(tmp_path)
     conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (order_oth.SINCE_KEY, "2026-10-01T00:00:00"))
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T09:00:00", "owner")
     before = orders.get_card(conn, card)
     order_oth.moved_by_hand(conn, dict(before, stage=dict(before["stage"], code="oth")), "2026-10-15T09:00:00", "owner")     # its task, its question
     assert open_tasks(conn, card) == 1 and order_oth.question_open(conn, orders.get_card(conn, card))
