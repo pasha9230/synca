@@ -460,8 +460,8 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
         _keep_dropped(conn, order_id, kept)
         orders.add_event(conn, order_id, now, who, "field", "%s: метка «На возврат» снята — %s" % (why, "; ".join(
             "%s, %d шт." % (names.get(i, "позиция"), n) for i, n, _by in done)))
-        action = "oth_sold_early" if why == SOLD_EARLY else ("oth_return_cancelled" if slot == "cancel_return" else "oth_issued_early")
-        _audit(conn, now, who, action, {"order": int(order_id), "items": {str(i): n for i, n, _by in done}})
+        _audit(conn, now, who, "oth_sold_early" if why == SOLD_EARLY else ("oth_return_cancelled" if slot == "cancel_return" else "oth_issued_early"),
+               {"order": int(order_id), "items": {str(i): n for i, n, _by in done}})
     return sum(n for _, n, _by in done)
 
 
@@ -1753,6 +1753,9 @@ def cancel_item_return(conn, item_id, now: str, who: str) -> int:
         raise OthError("У позиции нет ожидающей согласования отметки возврата.")
     if not agreeing(conn, orders.get_card(conn, card["id"])):
         _close_tasks(conn, card["id"], RETURN_TITLES, "cancel", now, who, "запрос на возврат отменён")
+    if store_value(conn, _item_key(item["item_id"], item["since"])):
+        conn.rollback()
+        raise OthError("Отмену возврата сохранить не удалось: обновите страницу и повторите.")
     conn.commit()
     return count
 

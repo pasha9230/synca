@@ -163,7 +163,7 @@ def office_rows(conn, login: str) -> List[dict]:
 
 def can_act(conn, card: dict) -> bool:
     """A checkbox of the page «На ОТХ»: the order is on the agreement of its return, or agreed and the act not signed."""
-    if card["stage"]["code"] not in (orders.RETURN_AGREE, orders.RETURN_GIVEN) or not card.get("point_id"):
+    if card["stage"]["code"] not in order_oth.RETURNING or not card.get("point_id"):
         return False
     plan = order_oth.return_plan(conn, card["id"])
     return order_oth.agreeing(conn, card) or (plan is not None and not plan["signed_at"])
@@ -199,6 +199,19 @@ def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, 
     agreed, failed = [], {}
     for card in cards:
         try:
+            if card["stage"]["code"] == "oth":
+                parts = order_oth.return_parts(conn, card)
+                held = order_oth.pieces_here(conn, card)
+                agreement = order_oth._returning_stage(conn)
+                if parts != held:
+                    new_id = order_oth._split_off(conn, card, parts, agreement, now, author,
+                                                  "отмеченные позиции согласованы с поставщиком по акту")
+                    conn.commit()
+                    order_oth.close_return_tasks(conn, card["id"], now, author, "позиции выделены для возврата")
+                    card = orders.get_card(conn, new_id)
+                else:
+                    orders.move_card(conn, card["id"], agreement["id"], now, author)
+                    card = orders.get_card(conn, card["id"])
             order_oth.agree(conn, card, today, now, author, day)
             agreed.append(card["id"])
         except (order_oth.OthError, orders.OrderError) as err:                     # moved meanwhile: the others still go

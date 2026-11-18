@@ -307,6 +307,16 @@ def test_operator_can_cancel_pending_position_request_from_oth_page(tmp_path, cl
     assert oth_stock.pieces(conn, manual=False) == {"1": 4}
 
 
+def test_failed_task_close_keeps_the_pending_return_mark(tmp_path, clock, monkeypatch):
+    from tires_sync import tasks
+    app, conn, pid, card, item, owner = marked(tmp_path, qty=2)
+    monkeypatch.setattr(tasks, "close", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("close failed")))
+    with pytest.raises(order_oth.OthError, match="сохранить не удалось"):
+        order_oth.cancel_item_return(conn, item, T1, "owner")
+    assert open_tasks(conn, card) == 1
+    assert order_oth.agreeing(conn, orders.get_card(conn, card))
+
+
 def test_agreed_the_order_goes_on_return_off_sale_and_without_the_button(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path)
     order_oth.agree(conn, orders.get_card(conn, card), date.fromisoformat("2026-10-16"), "2026-10-14T12:00:00", "owner")

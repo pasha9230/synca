@@ -166,15 +166,36 @@ def test_e3_orders_of_two_points_are_refused_and_nothing_changes(tmp_path, offic
     assert conn.execute("SELECT COUNT(*) FROM oth_return_act").fetchone()[0] == 0
 
 
-def test_act_cannot_agree_marked_order_still_on_oth(tmp_path):
+def test_act_splits_marked_pieces_from_oth_before_agreement(tmp_path):
     app, owner, conn, pid, card = setup(tmp_path)
     item = orders.list_items(conn, card)[0]["id"]
+    second = orders.add_item(conn, card, goods_id="2", name="Шина другого размера", brand_key="ikon", season="winter",
+                             diameter=17, territory="1", qty=1, sale_unit=6000, supplier_price=4500, terms=None,
+                             fee_pct=0, promo_pct=0, now="2026-10-16T11:00:00", author="owner")
     assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
-    assert not opr.can_act(conn, orders.get_card(conn, card))
-    with pytest.raises(order_oth.OthError, match="не на согласовании"):
-        opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
-                           date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    assert order_oth.item_to_return(conn, second, "2026-10-16T12:01:00", "owner", qty=1)
+    assert opr.can_act(conn, orders.get_card(conn, card))
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    [new] = result["agreed"]
+    assert new != card and orders.get_card(conn, new)["stage"]["code"] == orders.RETURN_GIVEN
+    assert sorted(i["qty"] for i in orders.get_card(conn, new)["items"] if i["qty"]) == [1, 2]
+    assert orders.get_card(conn, card)["stage"]["code"] == "oth"
+    assert [i["qty"] for i in orders.get_card(conn, card)["items"] if i["qty"]] == [2]
+    assert order_oth.return_plan(conn, new)["return_date"] == "2026-10-21"
     assert order_oth.return_plan(conn, card) is None
+    assert conn.execute("SELECT COUNT(*) FROM oth_return_act WHERE point_id = ? AND return_date = ?", (pid, "2026-10-21")).fetchone()[0] == 1
+
+
+def test_act_moves_whole_marked_order_through_agreement(tmp_path):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner")
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    assert result["agreed"] == [card]
+    assert orders.get_card(conn, card)["stage"]["code"] == orders.RETURN_GIVEN
+    assert any("Согласование возврата" in e["text"] for e in orders.list_events(conn, card) if e["kind"] == "stage")
 
 
 def test_e3_the_pdf_is_checked_and_another_date_of_an_agreed_order_is_refused(tmp_path, office_clock):
