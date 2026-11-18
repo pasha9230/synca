@@ -198,6 +198,21 @@ def test_act_moves_whole_marked_order_through_agreement(tmp_path):
     assert any("Согласование возврата" in e["text"] for e in orders.list_events(conn, card) if e["kind"] == "stage")
 
 
+def test_failed_agreement_rolls_back_partial_act_split(tmp_path, monkeypatch):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
+    before = conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0]
+    monkeypatch.setattr(order_oth, "_agree_whole", lambda *args, **kwargs: (_ for _ in ()).throw(order_oth.OthError("сбой согласования")))
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    assert result["agreed"] == [] and result["failed"] == {card: "сбой согласования"}
+    assert conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == before
+    assert order_oth.agreeing(conn, orders.get_card(conn, card))
+    assert open_tasks(conn, order_oth.RETURN_TASK, card)
+    assert conn.execute("SELECT COUNT(*) FROM oth_return_act").fetchone()[0] == 0
+
+
 def test_e3_the_pdf_is_checked_and_another_date_of_an_agreed_order_is_refused(tmp_path, office_clock):
     app, owner, conn, pid, card = setup(tmp_path)
     ids = two_orders(conn, pid)
