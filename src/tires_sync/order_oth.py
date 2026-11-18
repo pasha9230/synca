@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -67,7 +68,7 @@ def leave(conn, card: dict, stage: dict, now: str, author: str) -> None:
     """A move of the order (orders.move_card): an unlinked order that goes into an open stage gives the client back — straight from «На ОТХ»
     or after a closed stage set by mistake (no other way to link it again); a closed stage keeps it unlinked. Back to work, an unsigned agreement of the
     return is over (review 2026-11-05: a later «На возврат» is a new one); a closed stage keeps it, its undo comes back."""
-    if stage["code"] not in ("oth", orders.RETURN_GIVEN) and stage["kind"] == "open":      # «На возврат»: the goods go back, no client
+    if stage["code"] not in orders.RETURN_STAGES and stage["kind"] == "open":      # «На возврат»: the goods go back, no client
         reattach(conn, card["id"], now, author)
         if conn.execute("DELETE FROM oth_return_plan WHERE order_id = ? AND signed_at IS NULL", (card["id"],)).rowcount:
             orders.add_event(conn, card["id"], now, author, "field", "Согласование возврата снято: заказ снова в работе")
@@ -75,7 +76,7 @@ def leave(conn, card: dict, stage: dict, now: str, author: str) -> None:
 
 _STOCK_SQL = ("SELECT i.id, i.order_id, i.goods_id, i.code, i.name, i.qty, c.point_id, COALESCE(p.name, ''), c.entered_at, c.reserve_until, "
               "r.at, r.author, COALESCE(r.qty, 0), s.code FROM order_item i JOIN order_card c ON c.id = i.order_id JOIN order_stage s ON s.id = c.stage_id "
-              "LEFT JOIN point p ON p.id = c.point_id LEFT JOIN oth_return r ON r.item_id = i.id WHERE s.code IN ('oth', 'return_given') AND i.qty >= 1 "
+              "LEFT JOIN point p ON p.id = c.point_id LEFT JOIN oth_return r ON r.item_id = i.id WHERE s.code IN ('oth', 'return_agree', 'return_given') AND i.qty >= 1 "
               "AND NOT EXISTS (SELECT 1 FROM oth_return_plan rp WHERE rp.order_id = c.id AND rp.signed_at IS NOT NULL) ")
 # «На возврат» (return_given, the owner 2026-11-03): the tyres lie at the point until the act МХ-3, ours; never on sale (oth_stock, goods_on_oth, the owner
 # 2026-11-04: from «Согласуем» on); the act signed (a refund still to fill) — they are the supplier's. A mark «На возврат» of a position on «На ОТХ»
@@ -201,7 +202,8 @@ SIGNED_LINE = "Точка «%s»: %s подписан, шины отданы п�
 SIGNED_HEAD = "Точка отдала шины с ОТХ поставщику по акту МХ-3: "     # routes_alerts.is_return_ask (the old records too)
 SIGNED_ASK = SIGNED_HEAD + "заполните сумму возврата и переведите заказ в «%s»."   # the current name of «return» (orders.stage_name)
 RETURN_REASON = "возврат с ОТХ поставщику (%s)" % ACT
-RETURNING = ("oth", orders.RETURN_GIVEN)        # the stages a return is agreed and signed from (the orders agreed before 2026-11-03 are on oth)
+RETURNING = orders.RETURN_STAGES                 # the stages a return is agreed and signed from
+AGREEMENT_STAGE_KEY = "return_agreement_stage_2026_11_17"
 AGREE, AGREED, SIGNED = "agree", "agreed", "signed"
 LABELS = {AGREE: "Согласование возврата", AGREED: "Согласовано, отдать до %s", SIGNED: "Отдано, нужна сумма возврата"}
 POINT_LABELS = {AGREE: LABELS[AGREE], AGREED: "Согласовано на возврат, %s", SIGNED: LABELS[SIGNED]}     # «Рабочее место» (2026-11-04)
@@ -304,9 +306,52 @@ def apply_refund(conn, card_id, changes: dict, now: str, author: str) -> dict:
     return rest
 
 
-def _returning_stage(conn) -> dict:
-    orders._ensure_return_given_stage(conn)                                           # a pipeline nobody opened since the stage came
-    return next(s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN)
+def _returning_stage(conn, code=orders.RETURN_AGREE) -> dict:
+    orders._ensure_return_given_stage(conn)
+    orders._ensure_return_agree_stage(conn)
+    return next(s for s in orders.list_stages(conn) if s["code"] == code)
+
+
+def migrate_agreement_stage(conn, now: str) -> int:
+    """Retry the one-time migration on a later connection if another writer holds the database."""
+    try:
+        return _migrate_agreement_stage(conn, now)
+    except sqlite3.OperationalError as err:
+        if "locked" not in str(err).lower():
+            raise
+        conn.rollback()
+        return 0
+
+
+def _migrate_agreement_stage(conn, now: str) -> int:
+    """Move only unagreed orders from the old shared column into the new agreement column.
+
+    Preserve entered_at, marks, tasks and plans: this is a presentation/state split, not a new return request.
+    """
+    if conn.execute("SELECT 1 FROM app_state WHERE key = ?", (AGREEMENT_STAGE_KEY,)).fetchone():
+        return 0
+    if not conn.execute("SELECT 1 FROM order_stage WHERE code = 'oth'").fetchone():
+        return 0  # a fresh database has no pipeline yet
+    orders._ensure_return_given_stage(conn)
+    orders._ensure_return_agree_stage(conn)
+    agreeing = _returning_stage(conn)
+    given = _returning_stage(conn, orders.RETURN_GIVEN)
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        ids = [r[0] for r in conn.execute(
+            "SELECT c.id FROM order_card c WHERE c.stage_id = ? AND NOT EXISTS "
+            "(SELECT 1 FROM oth_return_plan p WHERE p.order_id = c.id) ORDER BY c.id", (given["id"],))]
+        for card_id in ids:
+            conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ? AND stage_id = ?", (agreeing["id"], card_id, given["id"]))
+            orders.add_event(conn, card_id, now, "система", "stage", "Этап: «%s» → «%s» (разделение этапов возврата)" %
+                             (given["name"], agreeing["name"]))
+        conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (AGREEMENT_STAGE_KEY, str(len(ids))))
+        conn.commit()
+        return len(ids)
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def _oth_since(conn, order_id) -> str:
@@ -415,7 +460,8 @@ def drop_marks(conn, order_id, now: str, who: str, item_id=None, pieces=None, wh
         _keep_dropped(conn, order_id, kept)
         orders.add_event(conn, order_id, now, who, "field", "%s: метка «На возврат» снята — %s" % (why, "; ".join(
             "%s, %d шт." % (names.get(i, "позиция"), n) for i, n, _by in done)))
-        _audit(conn, now, who, "oth_sold_early" if why == SOLD_EARLY else "oth_issued_early", {"order": int(order_id), "items": {str(i): n for i, n, _by in done}})
+        _audit(conn, now, who, "oth_sold_early" if why == SOLD_EARLY else ("oth_return_cancelled" if slot == "cancel_return" else "oth_issued_early"),
+               {"order": int(order_id), "items": {str(i): n for i, n, _by in done}})
     return sum(n for _, n, _by in done)
 
 
@@ -453,7 +499,7 @@ def restore_marks(conn, order_id, now: str, who: str, slot: str, why: str, piece
     if not back:
         return 0
     what = "; ".join("%s, %d шт." % (items[i]["name"], n) for i, n, _by in back)
-    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Статус «%s», шины в продаже до согласования возврата." % (
+    orders.add_event(conn, order_id, now, who, "field", "Метка «На возврат» возвращена (%s): %s. Статус «%s», шины сняты с продажи до отмены согласования возврата." % (
         why, what, LABELS[AGREE]))
     _audit(conn, now, who, "oth_marks_back", {"order": int(order_id), "items": {str(i): n for i, n, _by in back}})
     marks = []
@@ -614,7 +660,7 @@ def _agree_part(conn, card: dict, held: Dict[int, int], parts: Dict[int, int], d
     note = "на возврат едет меньше шин, чем в закупке: %d из %d" % (sent, offered) if sent < offered else ""
     try:
         if card["stage"]["code"] == "oth":                                            # «Согласовано» по позиции: the returning part leaves
-            new = _split_off(conn, card, parts, _returning_stage(conn), now, author, note or "согласован возврат части заказа")
+            new = _split_off(conn, card, parts, _returning_stage(conn, orders.RETURN_GIVEN), now, author, note or "согласован возврат части заказа")
             back = _agree_whole(conn, orders.get_card(conn, new), day, now, author, commit=False)
             target = new
         else:                                                                         # the rest is our stock again
@@ -640,7 +686,7 @@ def _agree_part(conn, card: dict, held: Dict[int, int], parts: Dict[int, int], d
 
 
 def _agree_whole(conn, card: dict, day: str, now: str, author: str, commit: bool = True) -> str:
-    stage = _returning_stage(conn) if card["stage"]["code"] == "oth" else None
+    stage = _returning_stage(conn, orders.RETURN_GIVEN) if card["stage"]["code"] in ("oth", orders.RETURN_AGREE) else None
     if conn.execute("INSERT OR IGNORE INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date) VALUES (?,?,?,?)",
                     (card["id"], now, author, day)).rowcount != 1:
         conn.rollback()
@@ -649,7 +695,9 @@ def _agree_whole(conn, card: dict, day: str, now: str, author: str, commit: bool
         _short(day), ACT, " %s." % OFF_DAY if off_day(day) else ""))
     _audit(conn, now, author, "oth_return_agreed", {"order": int(card["id"]), "date": day})
     conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (AGREED_KEY % card["id"], day))     # a VK point hears it (tell_agreed)
-    if not commit:                                                                    # a part (_agree_part): an order already on «На возврат», saved by the caller
+    if not commit:
+        if stage is not None and not orders.move_card(conn, card["id"], stage["id"], now, author, commit=False):
+            raise OthError("Заказ только что перенесли: обновите страницу.")
         return day
     if stage is None:
         conn.commit()
@@ -675,8 +723,13 @@ def unagree(conn, card: dict, now: str, author: str) -> bool:
         return False
     orders.add_event(conn, card["id"], now, author, "field", "Согласование возврата с поставщиком отменено: «%s», шины не в продаже." % LABELS[AGREE])
     _audit(conn, now, author, "oth_return_unagreed", {"order": int(card["id"])})
+    if card["stage"]["code"] == orders.RETURN_GIVEN:
+        stage = _returning_stage(conn)
+        if not orders.move_card(conn, card["id"], stage["id"], now, author, commit=False):
+            conn.rollback()
+            return False
     conn.commit()
-    if card["stage"]["code"] == orders.RETURN_GIVEN:                                  # «Согласуем» again: agree closed the task, somebody has to agree it again
+    if card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
         _ensure_task(conn, card["id"], now, author)
     return True
 
@@ -692,7 +745,7 @@ def act_orders(conn, order_id) -> str:
 def to_return(conn, point_id) -> List[dict]:
     """The orders of the point agreed for the return and not yet given: (card, plan), the earliest date first."""
     rows = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id JOIN oth_return_plan r ON r.order_id = c.id "
-                        "WHERE c.point_id = ? AND s.code IN (?, ?) AND r.signed_at IS NULL ORDER BY r.return_date, c.id", (point_id,) + RETURNING).fetchall()
+                        "WHERE c.point_id = ? AND s.code IN (?, ?, ?) AND r.signed_at IS NULL ORDER BY r.return_date, c.id", (point_id,) + RETURNING).fetchall()
     return [{"card": orders.get_card(conn, r[0]), "plan": return_plan(conn, r[0])} for r in rows]
 
 
@@ -704,7 +757,7 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> str:
     card = orders.get_card(conn, card["id"])                     # the stage and the refund as they are now (review 2026-11-03)
     if card["stage"]["code"] not in RETURNING:
         return ""
-    returning = _returning_stage(conn) if card["stage"]["code"] == "oth" else None       # read first: making it commits
+    returning = _returning_stage(conn, orders.RETURN_GIVEN) if card["stage"]["code"] == "oth" else None
     if conn.execute("UPDATE oth_return_plan SET signed_at = ?, signed_by = ? WHERE order_id = ? AND signed_at IS NULL",
                     (now, author, card["id"])).rowcount != 1:
         conn.rollback()
@@ -754,6 +807,14 @@ SINCE_KEY = "oth_ask_since"                      # app_state: the first tick of 
 
 def _ask_key(card: dict) -> str:
     return ASK_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or ""))
+
+
+def carry_question(conn, card: dict, entered_at: str) -> None:
+    """Keep the point's unanswered question when agreement changes only the return column."""
+    old = _ask_key(card)
+    new = _ask_key(dict(card, entered_at=entered_at))
+    if old != new:
+        conn.execute("INSERT OR IGNORE INTO app_state (key, value) SELECT ?, value FROM app_state WHERE key = ?", (new, old))
 
 
 def ask_due(card: dict, now: str) -> bool:
@@ -842,7 +903,7 @@ def _finish_one(conn, key: str, value: str, now: str, notify) -> None:
         card = orders.get_card(conn, card_id)
     except orders.OrderError:
         card = None
-    if (card is None or card["stage"]["code"] != orders.RETURN_GIVEN or card["entered_at"] != held["entered"]
+    if (card is None or card["stage"]["code"] != orders.RETURN_AGREE or card["entered_at"] != held["entered"]
             or return_plan(conn, card_id) is not None):                              # agreed while the alerts waited: tell_agreed says what is true now
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
@@ -935,7 +996,7 @@ def agreed(conn, card: dict) -> bool:
 
 def to_agree(conn, card: dict) -> bool:
     """«На возврат» and the return not agreed yet («Согласуем»): the point's «На возврат», waiting for the office."""
-    return card["stage"]["code"] == orders.RETURN_GIVEN and not agreed(conn, card)
+    return card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN) and not agreed(conn, card)
 
 
 def agreeing(conn, card: dict) -> bool:
@@ -945,7 +1006,7 @@ def agreeing(conn, card: dict) -> bool:
     code = card["stage"]["code"]
     if code not in RETURNING or agreed(conn, card):
         return False
-    if code == orders.RETURN_GIVEN:
+    if code in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
         return True
     since = _oth_since(conn, card["id"])
     return any(_marked(conn, item_id, int(qty), since) > 0
@@ -969,7 +1030,7 @@ def agreeing_since(conn, card: dict) -> str:
                 continue
             if at >= since:
                 found.append(at)
-    if card["stage"]["code"] == orders.RETURN_GIVEN:                  # a mark on «На ОТХ» before the move: the status went on (review)
+    if card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):  # a mark on «На ОТХ» before the move: the status went on (review)
         row = conn.execute("SELECT MAX(at) FROM order_event WHERE order_id = ? AND kind = 'field' AND text LIKE ? AND at >= ?",
                            (card["id"], "Согласование возврата с поставщиком отменено%", entered)).fetchone()
         cancelled = str(row[0] or "") if row else ""
@@ -1092,8 +1153,11 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     if return_plan(conn, card["id"]) is not None:                # agreed: the tyres go back to the supplier (the owner 2026-11-10)
         conn.rollback()
         return AGREED_REFUSED, AGREED_ANSWER % label, False
-    if not office and agreeing(conn, card):                      # the owner 2026-11-12 (over 2026-11-10): the point sells on «На ОТХ» only; on the
-        conn.rollback()                                          # agreement of the return the office sells, or takes the agreement off first
+    if card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
+        conn.rollback()
+        return AGREEING_REFUSED, AGREEING_ANSWER, False
+    if agreeing(conn, card):
+        conn.rollback()
         return AGREEING_REFUSED, AGREEING_ANSWER, False
     if given_back(conn, card["id"]):                             # the sale is of the whole order: its quantity would count them too
         conn.rollback()
@@ -1234,7 +1298,7 @@ def task_closed(conn, task: dict, how: str, result: str, who: str, now: str) -> 
             orders.add_event(conn, card["id"], now, who, "field", "Задача возврата закрыта «не возвращаем»: на 7-й день заказ не перейдёт на «%s»"
                              % orders.stage_name(conn, orders.RETURN_GIVEN), level="grey")
         _back_on_sale(conn, card, now, who)
-    elif card["stage"]["code"] == orders.RETURN_GIVEN:
+    elif card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
         _back_to_oth(conn, card, task, now, who)
     conn.commit()
 
@@ -1364,7 +1428,7 @@ def reserve_dates(conn) -> Dict[int, dict]:
     edited = orders.LABELS["reserve_until"] + ": "
     for order_id, at, text in conn.execute(
             "SELECT e.order_id, e.at, e.text FROM order_event e JOIN order_card c ON c.id = e.order_id JOIN order_stage s ON s.id = c.stage_id "
-            "WHERE s.code IN ('oth', 'return_given') AND e.kind = 'field' AND (e.text LIKE 'Резерв%' OR e.text LIKE ? OR e.text = ?) ORDER BY e.id", (edited + "%", orders.OTH_ENTERED)):
+            "WHERE s.code IN ('oth', 'return_agree', 'return_given') AND e.kind = 'field' AND (e.text LIKE 'Резерв%' OR e.text LIKE ? OR e.text = ?) ORDER BY e.id", (edited + "%", orders.OTH_ENTERED)):
         row = found.setdefault(order_id, {"arrived": "", "until": "", "oth_since": ""})
         if text == orders.OTH_ENTERED:
             row["oth_since"] = str(at or "")[:10]
@@ -1375,7 +1439,7 @@ def reserve_dates(conn) -> Dict[int, dict]:
         elif text.startswith((orders.RESERVE_WAS % "", edited)):
             row["until"] = day.group(0) if day else ""
     for order_id, until in conn.execute("SELECT c.id, c.reserve_until FROM order_card c JOIN order_stage s ON s.id = c.stage_id "
-                                        "WHERE s.code IN ('oth', 'return_given') AND c.reserve_until != ''"):
+                                        "WHERE s.code IN ('oth', 'return_agree', 'return_given') AND c.reserve_until != ''"):
         found.setdefault(order_id, {"arrived": "", "until": "", "oth_since": ""})["until"] = until      # moved here from the point past «На ОТХ»: the date stands
     return found
 
@@ -1467,7 +1531,7 @@ def remind_handover(conn, now: str, notify) -> int:
         return 0                                                                     # a late catch-up of the timer never tells at night
     told = 0
     for card_id, day in conn.execute("SELECT c.id, r.return_date FROM oth_return_plan r JOIN order_card c ON c.id = r.order_id JOIN order_stage s ON s.id = c.stage_id "
-                                     "WHERE r.signed_at IS NULL AND r.return_date < ? AND c.point_id IS NOT NULL AND s.code IN (?, ?) ORDER BY c.id",
+                                     "WHERE r.signed_at IS NULL AND r.return_date < ? AND c.point_id IS NOT NULL AND s.code IN (?, ?, ?) ORDER BY c.id",
                                      (today.isoformat(),) + RETURNING).fetchall():
         if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (REMIND_KEY % (card_id, today.isoformat()), now)).rowcount != 1:
             continue
@@ -1493,7 +1557,7 @@ RETURN_DAY_TITLE = "Сегодня возврат!"
 RETURN_DAY_BODY = "Распечатайте акт и передайте с шинами доставке поставщика."
 RETURN_DAY_MARK = "Важное"
 RETURN_DAY_SQL = ("FROM oth_return_plan r JOIN order_card c ON c.id = r.order_id JOIN order_stage s ON s.id = c.stage_id "
-                  "WHERE r.signed_at IS NULL AND r.return_date = ? AND s.code IN (?, ?) ")
+                  "WHERE r.signed_at IS NULL AND r.return_date = ? AND s.code IN (?, ?, ?) ")
 
 
 def tell_return_day(conn, now: str) -> int:
@@ -1587,7 +1651,7 @@ def moved_by_hand(conn, before: dict, now: str, who: str) -> None:
         card = orders.get_card(conn, before["id"])
     except orders.OrderError:                                                        # removed meanwhile
         return
-    if card["stage"]["code"] == orders.RETURN_GIVEN and before["stage"]["code"] != orders.RETURN_GIVEN:
+    if card["stage"]["code"] == orders.RETURN_AGREE and before["stage"]["code"] != orders.RETURN_AGREE:
         made = _ensure_task(conn, card["id"], now, who)
         try:                                                                         # a VK point hears the status, a failed task is made again (finish_moved)
             if card.get("point_id") and conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)",
@@ -1630,8 +1694,8 @@ def _item_key(item_id, entered: str) -> str:
 
 def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
     """«На возврат» of one position (the owner 2026-11-04): a part of an order has no stage of its own, so the order stays on «На ОТХ»; its pieces are
-    marked in oth_return (the block «Возвращено поставщику» of the page, with its «Отменить») and stay on sale until the return is agreed (stock, the
-    owner 2026-11-10), the position shows «Согласуем» while the responsible's task is open. False: moved already."""
+    marked in oth_return (the block «Возвращено поставщику» of the page, with its «Отменить») and leave sale immediately; the point sees the order
+    in its agreement tab while the responsible's task is open. False: moved already."""
     item = _stock_item(conn, item_id)
     card = orders.get_card(conn, item["order_id"])
     if card["stage"]["code"] != "oth":
@@ -1656,7 +1720,7 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
         conn.rollback()
         return False
     _add_returned(conn, item, pieces, now, who)
-    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Статус «%s», шины в продаже до согласования возврата, заказ остаётся на «%s»." % (
+    orders.add_event(conn, card["id"], now, who, "field", "На возврат: %s, %d шт. Статус «%s», шины сняты с продажи, заказ остаётся на «%s»." % (
         item["name"], pieces, LABELS[AGREE], card["stage"]["name"]))
     _audit(conn, now, who, "oth_item_to_return", {"order": card["id"], "item": item["item_id"], "qty": pieces})
     what = "позиция: %s, %d шт." % (item["name"], pieces)
@@ -1675,6 +1739,25 @@ def item_to_return(conn, item_id, now: str, who: str, qty=None) -> bool:
     conn.execute("UPDATE app_state SET value = ? WHERE key = ?", (json.dumps(mark, ensure_ascii=False), key))
     conn.commit()
     return True
+
+
+def cancel_item_return(conn, item_id, now: str, who: str) -> int:
+    """Cancel only the pending return mark, preserving pieces already handed to the supplier."""
+    item = _stock_item(conn, item_id)
+    card = orders.get_card(conn, item["order_id"])
+    if card["stage"]["code"] != "oth" or return_plan(conn, card["id"]) is not None:
+        raise OthError("Отменить отметку можно только на ОТХ до согласования возврата.")
+    count = drop_marks(conn, card["id"], now, who, item_id=item["item_id"],
+                       why="Отмена запроса на возврат", slot="cancel_return")
+    if not count:
+        raise OthError("У позиции нет ожидающей согласования отметки возврата.")
+    if not agreeing(conn, orders.get_card(conn, card["id"])):
+        _close_tasks(conn, card["id"], RETURN_TITLES, "cancel", now, who, "запрос на возврат отменён")
+    if store_value(conn, _item_key(item["item_id"], item["since"])):
+        conn.rollback()
+        raise OthError("Отмену возврата сохранить не удалось: обновите страницу и повторите.")
+    conn.commit()
+    return count
 
 
 def item_marks(conn) -> Dict[str, dict]:
@@ -1806,7 +1889,8 @@ def _migrate(conn, now: str, done: Dict[str, int]) -> Dict[str, int]:
                 if card["sale_ids"]:                                                  # move_card refuses an open stage with a sale
                     done["skipped"] += 1
                     continue
-                orders.move_card(conn, card_id, given["id"], now, "система", fire_rules=False, journal=False, commit=False)
+                orders.move_card(conn, card_id, given["id"], now, "система", fire_rules=False, journal=False, commit=False,
+                                 internal_return_restore=True)
                 orders.add_event(conn, card_id, now, "система", "field", MIGRATED + "заказ на «%s» — %s." % (given["name"], label_of(plan)),
                                  level="grey")
                 done["to_return_given"] += 1

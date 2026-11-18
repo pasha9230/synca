@@ -46,7 +46,7 @@ def test_e1_the_seventh_day_leaves_the_task_and_asks_the_point_nothing(tmp_path)
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00", lambda card, text: told.append((card["responsible"], text))) == 1
     order_oth.finish_moved(conn, "2026-10-26T13:30:00", lambda card, text: told.append((card["responsible"], text)))
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN
+    assert card["stage"]["code"] == orders.RETURN_AGREE
     assert [t["title"] for t in open_tasks(conn, order_oth.RETURN_TASK, cid)] == [order_oth.RETURN_TASK]     # «Согласовать возврат» stays
     assert not order_oth.question_open(conn, card)
     assert [t for who, t in told if who == ""] == []                                      # nothing to the point (it is on VK)
@@ -105,12 +105,13 @@ def test_e2_the_moment_of_the_status_on_oth_is_the_first_mark_and_unagree_starts
     assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"
     assert opr.buyer_until(conn, orders.get_card(conn, card)) == "2026-10-18T12:00:00"
     other = _card(conn, pid, code="at_point", webmim="5000300")
-    orders.move_card(conn, other, _stage(conn, orders.RETURN_GIVEN), "2026-10-20T10:00:00", "o")
+    orders.move_card(conn, other, _stage(conn, "oth"), "2026-10-20T09:00:00", "o", oth_split=False)
+    orders.move_card(conn, other, _stage(conn, orders.RETURN_AGREE), "2026-10-20T10:00:00", "o")
     order_oth.agree(conn, orders.get_card(conn, other), date(2026, 10, 20), "2026-10-20T11:00:00", "owner", "2026-10-23")
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == ""             # agreed: not on the agreement
     assert order_oth.unagree(conn, orders.get_card(conn, other), "2026-10-21T09:00:00", "owner")
     assert order_oth.agreeing_since(conn, orders.get_card(conn, other)) == "2026-10-21T09:00:00"
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-17T12:30:00", "система")     # the 7th day after the mark
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-17T12:30:00", "система")     # the 7th day after the mark
     assert order_oth.agreeing_since(conn, orders.get_card(conn, card)) == "2026-10-16T12:00:00"           # the status went on: no new 2 days
 
 
@@ -156,12 +157,76 @@ def test_e3_orders_of_two_points_are_refused_and_nothing_changes(tmp_path, offic
     to_return_stage(conn, card)
     gamma = other_point(conn)
     theirs = _card(conn, gamma, code="at_point", webmim="5000400")
-    orders.move_card(conn, theirs, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T10:00:00", "o")
+    orders.move_card(conn, theirs, _stage(conn, "oth"), "2026-10-15T09:00:00", "o", oth_split=False)
+    orders.move_card(conn, theirs, _stage(conn, orders.RETURN_AGREE), "2026-10-15T10:00:00", "o")
     r = act_post(owner, [card, theirs])
     assert r.status_code == 302
     assert "разных точек" in owner.get(r.headers["Location"]).get_data(as_text=True)
     assert order_oth.return_plan(conn, card) is None and order_oth.return_plan(conn, theirs) is None
     assert conn.execute("SELECT COUNT(*) FROM oth_return_act").fetchone()[0] == 0
+
+
+def test_act_splits_marked_pieces_from_oth_before_agreement(tmp_path):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    second = orders.add_item(conn, card, goods_id="2", name="Шина другого размера", brand_key="ikon", season="winter",
+                             diameter=17, territory="1", qty=1, sale_unit=6000, supplier_price=4500, terms=None,
+                             fee_pct=0, promo_pct=0, now="2026-10-16T11:00:00", author="owner")
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
+    assert order_oth.item_to_return(conn, second, "2026-10-16T12:01:00", "owner", qty=1)
+    assert opr.can_act(conn, orders.get_card(conn, card))
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    [new] = result["agreed"]
+    assert new != card and orders.get_card(conn, new)["stage"]["code"] == orders.RETURN_GIVEN
+    assert sorted(i["qty"] for i in orders.get_card(conn, new)["items"] if i["qty"]) == [1, 2]
+    assert orders.get_card(conn, card)["stage"]["code"] == "oth"
+    assert [i["qty"] for i in orders.get_card(conn, card)["items"] if i["qty"]] == [2]
+    assert order_oth.return_plan(conn, new)["return_date"] == "2026-10-21"
+    assert order_oth.return_plan(conn, card) is None
+    assert conn.execute("SELECT COUNT(*) FROM oth_return_act WHERE point_id = ? AND return_date = ?", (pid, "2026-10-21")).fetchone()[0] == 1
+
+
+def test_act_moves_whole_marked_order_through_agreement(tmp_path):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner")
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    assert result["agreed"] == [card]
+    assert orders.get_card(conn, card)["stage"]["code"] == orders.RETURN_GIVEN
+    assert any("Согласование возврата" in e["text"] for e in orders.list_events(conn, card) if e["kind"] == "stage")
+
+
+def test_failed_agreement_rolls_back_partial_act_split(tmp_path, monkeypatch):
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
+    before = conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0]
+    monkeypatch.setattr(order_oth, "_agree_whole", lambda *args, **kwargs: (_ for _ in ()).throw(order_oth.OthError("сбой согласования")))
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    assert result["agreed"] == [] and result["failed"] == {card: "сбой согласования"}
+    assert conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == before
+    assert order_oth.agreeing(conn, orders.get_card(conn, card))
+    assert open_tasks(conn, order_oth.RETURN_TASK, card)
+    assert conn.execute("SELECT COUNT(*) FROM oth_return_act").fetchone()[0] == 0
+
+
+def test_act_uses_only_marked_quantity_after_responsible_closes_task(tmp_path):
+    from tires_sync import tasks
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
+    task_id = conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (card,)).fetchone()[0]
+    tasks.close(conn, task_id, "done", "2026-10-16T12:10:00", "owner", "согласовано")
+    assert order_oth.agreeing(conn, orders.get_card(conn, card))
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    [new] = result["agreed"]
+    assert new != card
+    assert [i["qty"] for i in orders.get_card(conn, new)["items"] if i["qty"]] == [2]
+    assert [i["qty"] for i in orders.get_card(conn, card)["items"] if i["qty"]] == [2]
 
 
 def test_e3_the_pdf_is_checked_and_another_date_of_an_agreed_order_is_refused(tmp_path, office_clock):
@@ -279,6 +344,7 @@ def test_a_phone_of_375_px_has_no_horizontal_scroll(tmp_path, clock, new_view):
         from test_point_new_view import flag
         flag(conn, "all")
     more = _card(conn, pid, code="at_point", webmim="5000200")
+    orders.move_card(conn, more, _stage(conn, "oth"), "2026-10-16T09:00:00", "o", oth_split=False)
     to_return_stage(conn, more)                                                            # «Есть покупатель» on «Согласование возврата»
     clock["now"] = "2026-10-16T11:00:00"
     mine = manager(app, conn, pid)

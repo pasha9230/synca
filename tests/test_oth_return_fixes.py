@@ -46,7 +46,7 @@ def whole_returning(tmp_path):
     conn = db(tmp_path)
     cid = card_at(conn, "at_point", "2026-10-15T10:00:00")
     before = on_oth(conn, cid)
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), "2026-10-21T10:00:00", "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), "2026-10-21T10:00:00", "o")
     order_oth.moved_by_hand(conn, before, "2026-10-21T10:00:00", "o")
     return conn, cid
 
@@ -116,7 +116,7 @@ def test_1_an_order_with_tyres_given_to_the_supplier_stays_and_says_so(tmp_path)
     item = orders.get_card(conn, cid)["items"][0]["id"]
     order_oth.mark_returned(conn, item, "2026-10-21T12:00:00", "o", "1")
     close(conn, cid, "не возвращаем")
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN       # moving it would forget the piece given back
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE       # moving it would forget the piece given back
     assert conn.execute("SELECT qty FROM oth_return WHERE order_id = ?", (cid,)).fetchone()[0] == 1
     assert any(lvl == "yellow" and "вручную" in t for lvl, t in events(conn, cid))
 
@@ -137,7 +137,7 @@ def test_1_another_result_changes_nothing(tmp_path):
     (tmp_path / "w").mkdir()
     conn2, cid2 = whole_returning(tmp_path / "w")
     close(conn2, cid2, "договорились")
-    assert orders.get_card(conn2, cid2)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn2, cid2)["stage"]["code"] == orders.RETURN_AGREE
 
 
 # ---- 2. «пока», «ждём» — не отказ ---------------------------------------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def test_2_the_seventh_day_still_moves_and_the_agreement_is_as_usual(tmp_path):
     close(conn, cid, "Пока не возвращаем, ждём ответа")
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласование возврата"
+    assert card["stage"]["code"] == orders.RETURN_AGREE and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласование возврата"
     order_oth.agree(conn, card, TODAY, "2026-10-26T13:00:00", "o")
     assert order_oth.point_label_of(order_oth.return_plan(conn, cid)).startswith("Согласовано на возврат")
 
@@ -178,7 +178,7 @@ def test_2_the_whole_order_waits_on_return(tmp_path):
     conn, cid = whole_returning(tmp_path)
     close(conn, cid, "пока не возвращаем, ждём")
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласование возврата"
+    assert card["stage"]["code"] == orders.RETURN_AGREE and order_oth.label_of(order_oth.return_plan(conn, cid)) == "Согласование возврата"
     order_oth.agree(conn, card, TODAY, NOW, "o")
     assert order_oth.point_label_of(order_oth.return_plan(conn, cid)).startswith("Согласовано на возврат")
 

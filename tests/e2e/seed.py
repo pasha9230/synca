@@ -129,16 +129,17 @@ def build(root: Path, now: datetime = None) -> dict:
     for cid, days in ((r3, 3), (r7, 7)):
         conn.execute("UPDATE order_card SET reserve_until = ? WHERE id = ?", ((now - timedelta(days=days) + timedelta(days=3)).date().isoformat(), cid))
     oth = card("ОТХ", ["placed", "moving", "at_point", "oth"], webmim="500107", transfer="ПР-000107", days_ago=9)
-    card("на возврат", ["placed", "moving", "at_point", "oth", "return_given"], webmim="500108", transfer="ПР-000108", days_ago=10, point=1)
-    agreed = card("согласовано на возврат", ["placed", "moving", "at_point", "oth", "return_given"], webmim="500109", transfer="ПР-000109",
+    card("согласование возврата", ["placed", "moving", "at_point", "oth", "return_agree"], webmim="500108", transfer="ПР-000108", days_ago=10, point=1)
+    agreed = card("согласовано на возврат", ["placed", "moving", "at_point", "oth", "return_agree"], webmim="500109", transfer="ПР-000109",
                   days_ago=11)
     try:
         order_oth.agree(conn, orders.get_card(conn, agreed), now.date(), iso(now), "seed")
     except Exception as err:                                            # the audit shows the card anyway; the seed says why
         print("seed: «согласовано на возврат» not agreed: %s" % err, file=sys.stderr)
-    card("вернули поставщику", ["placed", "moving", "at_point", "oth", "return_given"], webmim="500110", transfer="ПР-000110", days_ago=14,
+    card("вернули поставщику", ["placed", "moving", "at_point", "oth", "return_agree"], webmim="500110", transfer="ПР-000110", days_ago=14,
          extra=dict(return_kind="supplier", return_reason="Тест: вернули", return_amount="20000"))
     ret = made["вернули поставщику"]
+    order_oth.agree(conn, orders.get_card(conn, ret), now.date(), iso(now), "seed")
     orders.move_card(conn, ret, stage["return"]["id"], iso(now - timedelta(days=13)), "seed", fire_rules=False)
     card("выдан", ["placed", "moving", "at_point", "done"], webmim="500111", transfer="ПР-000111", days_ago=5)
     card("отменён до точки", ["placed", "cancel"], webmim="500112", days_ago=4, extra=dict(cancel_reason="отменил клиент"))
