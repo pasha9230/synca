@@ -213,6 +213,22 @@ def test_failed_agreement_rolls_back_partial_act_split(tmp_path, monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM oth_return_act").fetchone()[0] == 0
 
 
+def test_act_uses_only_marked_quantity_after_responsible_closes_task(tmp_path):
+    from tires_sync import tasks
+    app, owner, conn, pid, card = setup(tmp_path)
+    item = orders.list_items(conn, card)[0]["id"]
+    assert order_oth.item_to_return(conn, item, "2026-10-16T12:00:00", "owner", qty=2)
+    task_id = conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (card,)).fetchone()[0]
+    tasks.close(conn, task_id, "done", "2026-10-16T12:10:00", "owner", "согласовано")
+    assert order_oth.agreeing(conn, orders.get_card(conn, card))
+    result = opr.act_for_orders(conn, [card], "2026-10-21", "act.pdf", PDF,
+                                date(2026, 10, 16), "2026-10-16T12:30:00", "owner")
+    [new] = result["agreed"]
+    assert new != card
+    assert [i["qty"] for i in orders.get_card(conn, new)["items"] if i["qty"]] == [2]
+    assert [i["qty"] for i in orders.get_card(conn, card)["items"] if i["qty"]] == [2]
+
+
 def test_e3_the_pdf_is_checked_and_another_date_of_an_agreed_order_is_refused(tmp_path, office_clock):
     app, owner, conn, pid, card = setup(tmp_path)
     ids = two_orders(conn, pid)

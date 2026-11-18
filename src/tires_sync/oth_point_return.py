@@ -171,6 +171,9 @@ def can_act(conn, card: dict) -> bool:
 
 def _agree_marked_oth(conn, card: dict, day: str, now: str, author: str) -> int:
     """Split marked pieces and agree them in one transaction; the unmarked remainder stays on OTH."""
+    stage_codes = {s["code"] for s in orders.list_stages(conn)}
+    if not {orders.RETURN_AGREE, orders.RETURN_GIVEN} <= stage_codes:
+        raise order_oth.OthError("Этапы возврата не настроены.")
     if conn.in_transaction:
         conn.commit()
     conn.execute("BEGIN IMMEDIATE")
@@ -178,8 +181,15 @@ def _agree_marked_oth(conn, card: dict, day: str, now: str, author: str) -> int:
         card = orders.get_card(conn, card["id"])
         if card["stage"]["code"] != "oth" or not can_act(conn, card):
             raise order_oth.OthError("Заказ изменился: обновите страницу и выберите акт заново.")
-        parts = order_oth.return_parts(conn, card)
         held = order_oth.pieces_here(conn, card)
+        returned = {item_id: int(qty) for item_id, qty in conn.execute(
+            "SELECT item_id, qty FROM oth_return WHERE order_id = ?", (card["id"],))}
+        since = order_oth._oth_since(conn, card["id"])
+        parts = {item_id: min(qty, order_oth._marked(conn, item_id, returned.get(item_id, 0), since))
+                 for item_id, qty in held.items()}
+        parts = {item_id: qty for item_id, qty in parts.items() if qty > 0}
+        if not parts:
+            raise order_oth.OthError("Отмеченных к возврату шин не осталось: обновите страницу.")
         agreement = next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_AGREE), None)
         if agreement is None:
             raise order_oth.OthError("Этап согласования возврата не настроен.")
