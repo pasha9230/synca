@@ -178,6 +178,8 @@ def _agree_marked_oth(conn, card: dict, day: str, now: str, author: str) -> int:
         conn.commit()
     conn.execute("BEGIN IMMEDIATE")
     try:
+        if not {orders.RETURN_AGREE, orders.RETURN_GIVEN} <= {s["code"] for s in orders.list_stages(conn)}:
+            raise order_oth.OthError("Этапы возврата изменились: обновите страницу.")
         card = orders.get_card(conn, card["id"])
         if card["stage"]["code"] != "oth" or not can_act(conn, card):
             raise order_oth.OthError("Заказ изменился: обновите страницу и выберите акт заново.")
