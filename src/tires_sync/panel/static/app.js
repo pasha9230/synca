@@ -844,7 +844,11 @@
         if (atEnd) chatToEnd();
       }
       var oth = document.querySelector("[data-chat-oth]"), freshOth = doc.querySelector("[data-chat-oth]");
-      if (oth && freshOth && oth.innerHTML !== freshOth.innerHTML) oth.replaceWith(freshOth);
+      if (oth && freshOth) {
+        var details = oth.querySelector("details"), freshDetails = freshOth.querySelector("details");
+        if (details && freshDetails) freshDetails.open = details.open;
+        if (oth.innerHTML !== freshOth.innerHTML) oth.replaceWith(freshOth);
+      }
       var held = false;
       [".chats-main .card-head", ".o2-order-line", ".chats-deal"].forEach(function (sel) {      // the head and the deal block follow too, unless a hand is in them
         var mine = document.querySelector(sel), fresh = doc.querySelector(sel);
