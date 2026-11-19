@@ -321,8 +321,8 @@ def test_a_gone_position_is_ticked_only_under_the_own_filter_and_never_gets_a_ma
     app, conn, (first, _) = _gone_app(tmp_path)
     client, tok = _owner(app)
     staging.set_own_price(conn, GONE, [first], {"price": 4500}, NOW)
-    assert 'name="g" value="%s"' % GONE not in client.get("/catalog").get_data(as_text=True)
-    assert 'name="g" value="%s"' % GONE in client.get("/catalog?own=1").get_data(as_text=True)
+    assert 'type="checkbox" name="g" value="%s"' % GONE not in client.get("/catalog").get_data(as_text=True)
+    assert 'type="checkbox" name="g" value="%s"' % GONE in client.get("/catalog?own=1").get_data(as_text=True)
     for mode in ("on", "off"):
         post(client, "/catalog/stage", tok, bulk=mode, g=["100", GONE])
         assert staging.summary(conn)["changes"].get("overrides") == {"1:100": mode}

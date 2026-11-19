@@ -55,7 +55,7 @@ def test_the_seventh_day_moves_at_12_30_not_on_the_sixth_nor_at_12_29_and_asks_t
     assert orders.get_card(conn, cid)["stage"]["code"] == "oth"
     assert reserve.check(conn, "2026-10-26T12:30:00", ok) == 0                           # the hourly tick moves it
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and not order_oth.question_open(conn, card)     # E1: no question
+    assert card["stage"]["code"] == orders.RETURN_AGREE and not order_oth.question_open(conn, card)     # E1: no question
     assert order_oth.ask_seventh_day(conn, "2026-10-26T13:07:00") == 0                   # once per stay on «На ОТХ»
     assert order_oth.ask_seventh_day(conn, "2026-10-27T13:07:00") == 0
     assert not [e for e in orders.list_events(conn, cid) if "задан вопрос" in e["text"]]
@@ -69,7 +69,7 @@ def test_a_later_day_still_asks_and_an_agreed_return_is_never_asked(tmp_path):
     agreed = card_at(conn, "at_point", "2026-10-15T10:00:00")
     order_oth.agree(conn, on_oth(conn, agreed), orders.date.fromisoformat("2026-10-21"), "2026-10-21T10:00:00", "owner")
     assert order_oth.ask_seventh_day(conn, "2026-10-29T09:07:00") == 1                   # a missed tick: moved at the next one
-    assert orders.get_card(conn, late)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, late)["stage"]["code"] == orders.RETURN_AGREE
     assert not order_oth.question_open(conn, orders.get_card(conn, late))                # E1: asked nothing
     assert not order_oth.question_open(conn, orders.get_card(conn, agreed))
 
@@ -109,7 +109,7 @@ def test_the_seventh_day_moves_the_order_with_one_task_of_the_responsible_and_he
     assert to_point == []
     told = [(who, t) for who, t in told if who]
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and card["entered_at"] == "2026-10-26T12:30:00"
+    assert card["stage"]["code"] == orders.RETURN_AGREE and card["entered_at"] == "2026-10-26T12:30:00"
     assert order_oth.to_agree(conn, card) and not order_oth.question_open(conn, card)
     assert told == [("owner", "Нужно согласовать на возврат: заказ №5200001 (точка «Бета») на ОТХ с 20.10.2026 — /orders/%d" % cid)]
     made = [tasks.get(conn, r[0]) for r in conn.execute("SELECT id FROM callback_task WHERE order_id = ? ORDER BY id", (cid,))]
@@ -117,7 +117,7 @@ def test_the_seventh_day_moves_the_order_with_one_task_of_the_responsible_and_he
     assert order_oth.RETURN_TASK == "Написать поставщику и согласовать возврат, узнать дату забора груза"
     assert not order_oth.answer_here(conn, card, "менеджер Бета", "2026-10-26T13:00:00")[2]     # no question to answer (E1)
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN
+    assert card["stage"]["code"] == orders.RETURN_AGREE
     assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ?", (cid,)).fetchone()[0] == 1     # no second task
     order_oth.agree(conn, card, orders.date.fromisoformat("2026-10-27"), "2026-10-27T10:00:00", "owner")
     assert not order_oth.to_agree(conn, orders.get_card(conn, cid))                      # agreed: the plaque of the act МХ-3 as before
@@ -156,7 +156,7 @@ def test_here_on_the_page_only_closes_the_question(tmp_path, clock):
     app, conn, pid, here, mine = asked_on_page(tmp_path)
     _t, page = press(mine, here, "oth_here")
     assert "Возврат поставщику идёт дальше" in page
-    assert orders.get_card(conn, here)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, here)["stage"]["code"] == orders.RETURN_AGREE
     back = mine.get("/my-point?tab=agree").get_data(as_text=True)                         # the block «Ждут согласования возврата» is the tab now
     assert 'data-tab="agree" aria-current="page"' in back and 'id="order-%d"' % here in back and "возврат согласуют с поставщиком" in back
     assert 'data-oth-question="%d"' % here not in back
@@ -173,7 +173,7 @@ def test_issued_on_the_page_closes_it_and_can_be_undone_with_the_question_open_a
     r = post(mine, "/my-point/%d/undo" % here, "tok")
     assert "отменена" in mine.get(r.headers["Location"]).get_data(as_text=True)
     card = orders.get_card(conn, here)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and card["entered_at"] == "2026-10-26T12:30:00" and order_oth.question_open(conn, card)
+    assert card["stage"]["code"] == orders.RETURN_AGREE and card["entered_at"] == "2026-10-26T12:30:00" and order_oth.question_open(conn, card)
     assert conn.execute("SELECT 1 FROM client_order WHERE order_id = ?", (here,)).fetchone() is None      # unlinked again on «На возврат»
     assert store.get_state(conn, order_oth._ask_key(card)).startswith("asked|")
     assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL", (here,)).fetchone()[0] == 1     # on again
@@ -203,7 +203,7 @@ def test_only_orders_that_entered_oth_after_the_first_tick_are_moved(tmp_path):
     new = card_at(conn, "at_point", "2026-10-15T10:00:00")
     orders.move_card(conn, new, stage(conn, "oth"), "2026-10-26T10:00:00", "точка", changes={"cancel_reason": "Клиент не пришёл"})
     assert order_oth.ask_seventh_day(conn, "2026-11-01T12:30:00") == 1
-    assert orders.get_card(conn, new)["stage"]["code"] == orders.RETURN_GIVEN and orders.get_card(conn, old)["stage"]["code"] == "oth"
+    assert orders.get_card(conn, new)["stage"]["code"] == orders.RETURN_AGREE and orders.get_card(conn, old)["stage"]["code"] == "oth"
     assert order_oth.ask_seventh_day(conn, "2026-11-02T12:30:00") == 0 and store.get_state(conn, order_oth.SINCE_KEY) == "2026-10-25T13:07:00"
 
 
