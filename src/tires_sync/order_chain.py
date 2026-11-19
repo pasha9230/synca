@@ -2,11 +2,13 @@
 of its own (its tyres, stage, chat, money); the card names the others of its chain, each a link to open it. A person ties an order to
 another in its card (as a chat is bound), unties it there; «Добавить заказ» of an order or of a client makes a new order already tied.
 
-A chain is a number shared by its orders (order_chain.chain): tying two chains makes one, an order untied leaves it, a chain of one order
-is no chain. A deleted order drops out by itself (its card is gone); restored, it is back in its chain. Nothing is sent to anybody."""
+A chain is a number shared by its orders (order_chain.chain), a new one for every new chain (never an order's id: an order untied and
+tied anew would join its old chain, review 2026-11-19 D1): tying two chains makes one, an order untied leaves it, a chain of one order is
+no chain; made_from: the order whose «Новый заказ этому клиенту» made this one. A deleted order drops out by itself (its card is gone); restored, it is back in its chain. Nothing is sent to anybody."""
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import List, Optional
 
 from . import orders
@@ -34,7 +36,7 @@ def others(conn, order_id: int) -> List[dict]:
 
 
 def find(conn, text: str) -> Optional[int]:
-    """The order a person typed: WebMIM's number first (unique, what everybody knows), else the panel's; «№», spaces and «О» are ignored."""
+    """The order a person typed: WebMIM's number first (unique, what everybody knows), else the panel's; «№» and the spaces around are ignored."""
     typed = str(text or "").replace("№", "").strip()
     if not typed:
         return None
@@ -44,7 +46,7 @@ def find(conn, text: str) -> Optional[int]:
     return row[0] if row else None
 
 
-def link(conn, order_id: int, other_id: int, now: str, author: str, commit: bool = True) -> None:
+def link(conn, order_id: int, other_id: int, now: str, author: str, commit: bool = True, made_from: int = 0) -> None:
     """Tie `other_id` (and its chain) to the chain of `order_id`. A record in every order that joined, one line of the audit."""
     if order_id == other_id:
         raise orders.OrderError("Это тот же заказ.")
@@ -52,11 +54,17 @@ def link(conn, order_id: int, other_id: int, now: str, author: str, commit: bool
     mine, theirs = _chain(conn, order_id), _chain(conn, other_id)
     if mine is not None and mine == theirs:
         raise orders.OrderError("Заказ №%s уже в этой цепочке." % _label(other))
-    chain = mine if mine is not None else (theirs if theirs is not None else min(order_id, other_id))
+    chain = mine if mine is not None else (theirs if theirs is not None else
+                                           conn.execute("SELECT COALESCE(MAX(chain), 0) + 1 FROM order_chain").fetchone()[0])
     before = set(_members(conn, chain))
-    for oid in (order_id, other_id):
-        if _chain(conn, oid) is None:
-            conn.execute("INSERT INTO order_chain (order_id, chain, at, author) VALUES (?,?,?,?)", (oid, chain, now, author))
+    try:
+        for oid in (order_id, other_id):
+            if _chain(conn, oid) is None:
+                conn.execute("INSERT INTO order_chain (order_id, chain, at, author, made_from) VALUES (?,?,?,?,?)",
+                             (oid, chain, now, author, made_from if oid == other_id else 0))
+    except sqlite3.IntegrityError:                            # another tab tied the same order this moment (review D4)
+        conn.rollback()
+        raise orders.OrderError("Заказ только что связали в другой вкладке: обновите страницу и проверьте.")
     if theirs is not None and theirs != chain:
         conn.execute("UPDATE order_chain SET chain = ? WHERE chain = ?", (chain, theirs))
     members = _members(conn, chain)
@@ -83,7 +91,8 @@ def unlink(conn, order_id: int, now: str, author: str, commit: bool = True) -> b
     conn.execute("DELETE FROM order_chain WHERE order_id = ?", (order_id,))
     if len(rest) < 2:
         conn.execute("DELETE FROM order_chain WHERE chain = ?", (chain,))
-    orders.add_event(conn, order_id, now, author, "chain", "Отвязан от цепочки заказов %s" % ", ".join("№%s" % _label(orders._row(conn, m)) for m in rest), level=GREY)
+    named = ", ".join("№%s" % _label(orders._row(conn, m)) for m in rest)
+    orders.add_event(conn, order_id, now, author, "chain", ("Отвязан от цепочки заказов %s" % named).strip(), level=GREY)
     for m in rest:
         orders.add_event(conn, m, now, author, "chain", "Заказ №%s отвязан от цепочки" % _label(card), level=GREY)
     conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)",
@@ -104,12 +113,17 @@ MADE_FROM = "Создан из заказа №%s: тот же клиент"
 TWIN_SECONDS = 60                                             # a second press of «Новый заказ этому клиенту» this soon is the same order
 
 
-def _just_made(conn, made: str, now: str, besides: int) -> Optional[int]:
-    """The order «Новый заказ этому клиенту» of the same order made in the last TWIN_SECONDS (a double press, a second tab), if any."""
+def _just_made(conn, order_id: int, now: str, besides: int) -> Optional[int]:
+    """An order «Новый заказ этому клиенту» made in the last TWIN_SECONDS from `order_id` or from any order of its chain (a double press,
+    a second tab; in CRM the second press comes from the order the first one made, review D2), by the source's id (review D3), if any."""
     from datetime import datetime, timedelta
     since = (datetime.fromisoformat(now) - timedelta(seconds=TWIN_SECONDS)).isoformat(timespec="seconds")
-    row = conn.execute("SELECT e.order_id FROM order_event e JOIN order_card c ON c.id = e.order_id WHERE e.kind = 'chain' AND e.text = ? "
-                       "AND e.at >= ? AND e.order_id != ? ORDER BY e.order_id DESC LIMIT 1", (made, since, besides)).fetchone()
+    chain = _chain(conn, order_id)
+    family = set(_members(conn, chain)) if chain is not None else set()
+    family.add(order_id)
+    marks = ",".join("?" * len(family))
+    row = conn.execute("SELECT l.order_id FROM order_chain l JOIN order_card c ON c.id = l.order_id WHERE l.made_from IN (%s) AND l.at >= ? "
+                       "AND l.order_id != ? ORDER BY l.order_id DESC LIMIT 1" % marks, (*sorted(family), since, besides)).fetchone()
     return row[0] if row else None
 
 
@@ -122,12 +136,12 @@ def again(conn, order_id: int, now: str, author: str) -> int:
     made = MADE_FROM % _label(card)
     try:
         new = orders.create_card(conn, fields, now, author, require_contact=False, commit=False, many_open=True)
-        twin = _just_made(conn, made, now, besides=new)       # asked after the insert: the write holds the lock, two presses make one order
+        twin = _just_made(conn, order_id, now, besides=new)       # asked after the insert: the write holds the lock, two presses make one order
         if twin is not None:
             conn.rollback()
             return twin
         orders.add_event(conn, new, now, author, "chain", made, level=GREY)
-        link(conn, order_id, new, now, author, commit=False)
+        link(conn, order_id, new, now, author, commit=False, made_from=order_id)
     except Exception:
         conn.rollback()                                       # all or nothing: no order without its chain
         raise

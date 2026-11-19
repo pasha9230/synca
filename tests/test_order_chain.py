@@ -185,3 +185,36 @@ def test_a_point_cannot_tie_nor_add_orders(tmp_path):
     for url in ("/orders/%d/chain" % a, "/orders/%d/again" % a, "/orders/%d/chain-unlink" % a):
         assert mine.post(url, data={"csrf": "tok", "other": str(b)}).status_code == 403
     assert ids(conn, a) == [] and conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 2 + (1 if made else 0)
+
+
+def test_an_untied_order_tied_again_starts_a_chain_of_its_own(tmp_path):
+    """Review D1: the number of a chain was the smallest order of its first pair: untied, that order tied anew joined the old chain."""
+    conn = db(tmp_path)
+    a, b, c, d = (card(conn) for _ in range(4))
+    chain.link(conn, a, b, NOW, "o")
+    chain.link(conn, a, c, NOW, "o")
+    chain.unlink(conn, a, NOW, "o")
+    chain.link(conn, a, d, NOW, "o")
+    assert ids(conn, a) == [d] and ids(conn, b) == [c]
+
+
+def test_a_second_tab_of_add_order_in_crm_returns_the_same_order(tmp_path):
+    """Review D2: the client's newest order is the one just made, so the second press went through another order and made a third."""
+    conn = db(tmp_path)
+    first = card(conn)
+    [(client_id,)] = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (first,)).fetchall()
+    new = chain.for_client(conn, client_id, NOW, "o")
+    assert chain.for_client(conn, client_id, "2026-11-19T12:00:20", "o") == new
+    assert conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 2
+
+
+def test_add_order_of_another_order_with_the_same_number_is_not_taken_for_a_double(tmp_path):
+    """Review D3: a WebMIM number equal to a panel number gave the same text «Создан из заказа №…»."""
+    conn = db(tmp_path)
+    a = card(conn)
+    other = card(conn, phone="+7 900 999-99-99", name="Пётр")
+    conn.execute("UPDATE order_card SET webmim_number = ? WHERE id = ?", (str(a), other))
+    conn.commit()
+    one = chain.again(conn, a, NOW, "o")
+    two = chain.again(conn, other, NOW, "o")
+    assert two != one and orders.get_card(conn, two)["client_name"] == "Пётр"
