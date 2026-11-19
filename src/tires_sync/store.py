@@ -174,6 +174,9 @@ CREATE INDEX IF NOT EXISTS order_merge_source_order ON order_merge_source (order
 CREATE TABLE IF NOT EXISTS order_merge_item (item_id INTEGER PRIMARY KEY, merge_id INTEGER NOT NULL, from_item INTEGER NOT NULL,
     from_order INTEGER NOT NULL, qty INTEGER NOT NULL, oth INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS order_merge_item_from ON order_merge_item (from_order);
+-- «Цепочка заказов» (order_chain, the owner 2026-11-19): the orders of one client tied, not merged; chain: the number they share
+CREATE TABLE IF NOT EXISTS order_chain (order_id INTEGER PRIMARY KEY, chain INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS order_chain_chain ON order_chain (chain);
 CREATE TABLE IF NOT EXISTS client_chat (chat_row INTEGER PRIMARY KEY, client_id INTEGER NOT NULL, how TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS client_chat_client ON client_chat (client_id);
 CREATE TABLE IF NOT EXISTS avito_call (

@@ -17,7 +17,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
+from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_chain, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -1132,6 +1132,60 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
+    @app.route("/orders/<int:card_id>/chain", methods=["POST"])
+    @login_required
+    def order_chain_link(card_id):
+        """«Связать с заказом» (the owner 2026-11-19, task #83): another order of the client typed by its number joins this order's chain."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        typed = str(request.form.get("other") or "")[:40]
+        other = order_chain.find(conn, typed)
+        try:
+            if other is None:
+                raise orders.OrderError("Заказа с номером «%s» нет: впишите номер МИМ или номер заказа в панели." % typed.strip())
+            order_chain.link(conn, card_id, other, local_iso(), author())
+            flash("Заказы связаны: в карточке видны номера других заказов клиента.", "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/chain-unlink", methods=["POST"])
+    @login_required
+    def order_chain_unlink(card_id):
+        """«Отвязать» of the chain: this order leaves it, the others stay tied."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if order_chain.unlink(conn, card_id, local_iso(), author()):
+            flash("Заказ отвязан от других заказов клиента.", "ok")
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/again", methods=["POST"])
+    @login_required
+    def order_again(card_id):
+        """«Добавить заказ этому клиенту»: a new order of the same client, tied (order_chain.again)."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        try:
+            new = order_chain.again(conn, card_id, local_iso(), author())
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return redirect("/orders/%d" % card_id)
+        flash("Создан новый заказ №%d этому же клиенту, он связан с заказом №%s. Добавьте шины." % (new, manager.label(orders.get_card(conn, card_id))), "ok")
+        return redirect("/orders/%d" % new)
+
+    @app.route("/clients/<int:client_id>/new-order", methods=["POST"])
+    @login_required
+    def client_new_order(client_id):
+        """«Добавить заказ» of a client's card (CRM): tied to the client's newest order (order_chain.for_client)."""
+        conn = get_conn()
+        try:
+            new = order_chain.for_client(conn, client_id, local_iso(), author())
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return redirect("/clients/%d" % client_id)
+        flash("Создан новый заказ №%d этому клиенту. Добавьте шины." % new, "ok")
+        return redirect("/orders/%d" % new)
+
     @app.route("/orders/<int:card_id>/arrived-message", methods=["POST"])
     @login_required
     def order_arrived_message(card_id):
@@ -1258,6 +1312,7 @@ def register(app) -> None:
             oth_parts=order_sheet.mim_parts(conn, card) if card["stage"]["code"] == "oth" and own_point() is None else None,   # its title and row (2026-11-07)
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
+            chain=order_chain.others(conn, card_id),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id), merge_unordered=order_merge_store.unordered(conn, card),
