@@ -69,6 +69,7 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .p2-mx3 .i{width:20px;height:20px;color:var(--p2-warn)}
 .p2-mx3 .p2-sub{display:block}
 .p2-mx3 form{margin:0}
+.p2-mx3>.mp-not-taken{grid-column:1/-1;min-width:0}
 
 /* the tabs */
 .p2w .mp-tabs{display:flex;gap:4px;border-bottom:1px solid var(--p2-border-2);margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
