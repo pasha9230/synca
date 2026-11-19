@@ -180,6 +180,7 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     oth = _on_oth(conn, pid)
     mine = manager(app, conn, pid)
     assert "Подписал акт и отдал" not in _text(mine.get("/my-point"))                     # not agreed: nothing to sign
+    orders.move_card(conn, oth, _stage(conn, orders.RETURN_AGREE), NOW, "o")
     assert "Согласовано с поставщиком" in _text(client.get("/orders/%d" % oth))
     assert post(mine, "/orders/%d/oth-agreed" % oth, "tok").status_code == 403            # the point never agrees
     r = agree_return(client, oth)
@@ -484,6 +485,7 @@ def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_stay_off_sale(t
     goods = orders.get_card(conn, oth)["items"][0]["goods_id"]
     assert goods in oth_stock.pieces(conn)
     assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))             # nothing agreed yet
+    orders.move_card(conn, oth, _stage(conn, orders.RETURN_AGREE), NOW, "o")
     agree_return(client, oth)
     assert goods not in oth_stock.pieces(conn) and 'data-return="%d"' % oth in _text(mine.get("/my-point"))
     assert "Отменить согласование" in _text(client.get("/orders/%d" % oth))
@@ -500,6 +502,7 @@ def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_stay_off_sale(t
 def test_no_cancel_once_the_act_is_signed(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid, webmim="700503")
+    orders.move_card(conn, oth, _stage(conn, orders.RETURN_AGREE), NOW, "o")
     agree_return(client, oth)
     assert order_oth.sign_act(conn, orders.get_card(conn, oth), "Бета", NOW, "point")
     assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))
@@ -509,6 +512,7 @@ def test_no_cancel_once_the_act_is_signed(tmp_path):
 def test_no_cancel_for_an_order_that_left_oth(tmp_path):
     app, client, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid, webmim="700504")
+    orders.move_card(conn, oth, _stage(conn, orders.RETURN_AGREE), NOW, "o")
     agree_return(client, oth)
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (_stage(conn, "at_point"), oth))      # moved off by hand, the plan unsigned
     conn.commit()

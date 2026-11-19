@@ -355,8 +355,8 @@ SECTION_OF.update(feed_update_now="orders")
 NEEDS.update(feed_update_now="supplier")
 # «На возврат» of a position on the page «На ОТХ» (the owner 2026-11-07): the owner and the partner, as «Согласовано с поставщиком»; the page itself
 # stays the catalog's, «Вернуть поставщику» stays the owner's
-SECTION_OF.update(oth_to_return="orders")
-NEEDS.update(oth_to_return="supplier")
+SECTION_OF.update(oth_to_return="orders", oth_cancel_return="orders")
+NEEDS.update(oth_to_return="supplier", oth_cancel_return="supplier")
 # the act of a return as a file (oth_return_act, the owner 2026-11-12): attached and deleted by the owner and the partner, as «На возврат»
 # above; the office downloads it with «Заказы», the point its own point's from «Рабочее место» (routes_mypoint checks the point)
 SECTION_OF.update(oth_return_act_upload="orders", oth_return_act_delete="orders", oth_return_act_file="orders", mypoint_return_act="mypoint")

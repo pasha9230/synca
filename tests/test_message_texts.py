@@ -167,11 +167,12 @@ def test_the_moved_note_goes_to_nobody_even_with_the_owners_text(tmp_path):
 
 
 def test_the_cancelled_return_goes_to_the_point_with_the_owners_text(tmp_path, monkeypatch):
-    from test_oth_fixes import T, _quiet, _webmim, card_at, panel
+    from test_oth_fixes import T, _quiet, _webmim, card_at, panel, stage
     app, owner, tok, conn = panel(tmp_path)
     oth = card_at(conn, "oth", T)
     told = _quiet(monkeypatch)
     mt.save(conn, mt.UNAGREED, "Отбой возврата №{order_label}", "owner", NOW)
+    orders.move_card(conn, oth, stage(conn, orders.RETURN_AGREE), T, "owner")
     agree_return(owner, oth, tok)
     post(owner, "/orders/%d/oth-unagree" % oth, tok)
     assert told == [(oth, "Отбой возврата №%s" % _webmim(conn, oth))]

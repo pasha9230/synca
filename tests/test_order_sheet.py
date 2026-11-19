@@ -176,12 +176,13 @@ def test_a_row_per_position_with_every_column(table):
 
 @pytest.mark.parametrize("code, kind, letter", [("placed", "webmim", ""), ("at_point", "webmim", ""), ("done", "webmim", "Р"), ("done", "stock", "Б"),
                                                 ("cancel", "webmim", ""), ("return", "webmim", ""), ("oth", "webmim", "О"),
-                                                ("return_given", "webmim", "")])      # the owner 2026-11-02: «О» is «На ОТХ» only
+                                                ("return_agree", "webmim", ""), ("return_given", "webmim", "")])
 def test_realization_follows_the_legend(table, code, kind, letter):
     conn, box, fake = table
     mine = placed(conn, deal_kind=kind)
     changes = {"cancel_reason": "отказ"} if code == "cancel" else {"return_kind": "client", "return_reason": "не подошли", "return_amount": "100"} if code == "return" else None
-    orders.move_card(conn, mine, stage(conn, code)["id"], NOW, "owner", changes)
+    orders.move_card(conn, mine, stage(conn, code)["id"], NOW, "owner", changes,
+                     internal_return_restore=code in (orders.RETURN_AGREE, orders.RETURN_GIVEN))
     assert {r["Реализация"] for r in sheet.rows_of(conn, mine, NOW).values()} == {letter}
 
 

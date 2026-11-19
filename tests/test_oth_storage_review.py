@@ -42,7 +42,7 @@ def test_the_cancelled_order_is_not_put_on_oth_again_while_its_tyres_lie_in_the_
     with pytest.raises(orders.OrderError, match="записи хранения №%d" % x):
         orders.move_card(conn, cid, stage(conn, "oth"), LATER, "o", oth_split=False)          # nor the old way: the tyres would lie twice
     with pytest.raises(orders.OrderError, match="записи хранения №%d" % x):
-        orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), LATER, "o")
+        orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), LATER, "o")
     assert code(conn, cid) == "cancel" and oth_stock.pieces(conn) == {"1": 4}
 
 
@@ -75,7 +75,7 @@ def test_a_closed_record_never_stands_on_oth_again(tmp_path, closed):
     conn = db(tmp_path)
     cid, x = closed(conn)
     assert code(conn, x) == "cancel"
-    for target, how in (("oth", {}), ("oth", dict(oth_split=False)), ("oth", dict(fire_rules=False, journal=False)), (orders.RETURN_GIVEN, {})):
+    for target, how in (("oth", {}), ("oth", dict(oth_split=False)), ("oth", dict(fire_rules=False, journal=False)), (orders.RETURN_AGREE, {})):
         with pytest.raises(orders.OrderError, match="Запись хранения №%d закрыта" % x):
             orders.move_card(conn, x, stage(conn, target), LATE, "o", **how)
         assert code(conn, x) == "cancel"
@@ -150,7 +150,7 @@ def test_the_seventh_day_of_a_record_asks_if_the_tyres_are_there_never_if_they_w
     card = orders.get_card(conn, x)
     assert order_oth.question_open(conn, card) and "выдали" not in order_oth.question(conn, card, LATE).lower()
     outcome, answer, done = order_oth.answer_issued(conn, card, "менеджер Бета", LATE)
-    assert not done and "«Продать»" in answer and code(conn, x) == orders.RETURN_GIVEN
+    assert not done and "«Продать»" in answer and code(conn, x) == orders.RETURN_AGREE
     assert order_oth.question_open(conn, orders.get_card(conn, x))                              # the question still waits for «На точке»
 
 
@@ -167,7 +167,7 @@ def test_the_vk_word_issued_for_a_record_is_refused_with_the_hint(tmp_path):
     conn = db(tmp_path)
     cid, x = on_the_return(conn)
     answer = mgr.handle_command(conn, "vk-1", POINT_VK, "выдал %s" % number(cid), None, LATE)
-    assert "«Продать»" in answer and code(conn, x) == orders.RETURN_GIVEN
+    assert "«Продать»" in answer and code(conn, x) == orders.RETURN_AGREE
 
 
 def test_the_vk_word_issued_for_a_record_on_oth_is_refused_with_the_hint(tmp_path):

@@ -58,7 +58,7 @@ def test_a_record_cancelled_by_mistake_does_not_go_to_return_given(tmp_path):
     cid, x = split(conn)
     orders.move_card(conn, x, stage(conn, "cancel"), LATER, "o", changes={"cancel_reason": "другое: ошиблись"})
     with pytest.raises(orders.OrderError, match="Запись хранения №%d закрыта" % x):
-        orders.move_card(conn, x, stage(conn, orders.RETURN_GIVEN), LATE, "o")
+        orders.move_card(conn, x, stage(conn, orders.RETURN_AGREE), LATE, "o")
 
 
 def _given_back(conn):
@@ -113,14 +113,17 @@ def sold_like_the_point(conn, x, who):
     assert point_log._kept(conn, x)[1]["action"] == "oth_sold"                                      # the point's «Отменить» (after the storno)
 
 
-def test_the_office_moving_a_record_to_done_sells_it_as_the_point_does(tmp_path):
+def test_the_office_cancels_the_return_before_selling_a_record(tmp_path):
     conn = db(tmp_path)
     sale_rules(conn)
     started(conn)
     cid, x = split(conn)
     asked_by_hand(conn, x, "2026-10-27T12:30:00")                                                  # E1: the question of a move by hand
     assert order_oth.question_open(conn, orders.get_card(conn, x))
-    assert orders.move_card(conn, x, stage(conn, "done"), "2026-10-27T13:00:00", "офис")
+    with pytest.raises(orders.OrderError, match="согласовании возврата"):
+        orders.move_card(conn, x, stage(conn, "done"), "2026-10-27T13:00:00", "офис")
+    assert orders.move_card(conn, x, stage(conn, "oth"), "2026-10-27T13:01:00", "офис")
+    assert orders.move_card(conn, x, stage(conn, "done"), "2026-10-27T13:02:00", "офис")
     sold_like_the_point(conn, x, "офис")
     assert not order_oth.question_open(conn, orders.get_card(conn, x))                              # the question of the seventh day: answered
     assert not any(e["text"] == "Точка продала шины с ОТХ" for e in orders.list_events(conn, x))

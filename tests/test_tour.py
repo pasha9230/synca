@@ -137,6 +137,7 @@ def test_every_step_of_the_staff_lights_an_element_of_the_home_page_and_only_its
 def test_every_step_of_the_point_lights_an_element_of_its_workplace(tmp_path):
     app, owner, tok, conn, pid, card = ready(tmp_path)
     oth = _on_oth(conn, pid)
+    orders.move_card(conn, oth, _stage(conn, orders.RETURN_AGREE), NOW, "o")
     assert agree_return(owner, oth).status_code == 302            # a return with the act МХ-3 on the page
     assert order_oth.return_plan(conn, oth)
     orders.move_card(conn, card, _stage(conn, "at_point"), NOW, "o")                    # a card on «На точке», the tab the page opens on
