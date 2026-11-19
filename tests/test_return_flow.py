@@ -408,3 +408,16 @@ def test_the_new_view_of_the_point_shows_na_vozvrat_with_its_label(tmp_path, clo
     agreed(conn, cid)
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     assert 'data-return="%d"' % cid in page and "сумма возврата — закупка шин" in page
+
+
+@pytest.mark.parametrize("new_view", [False, True])
+def test_the_return_plaque_names_the_tyres_and_their_quantity(tmp_path, clock, new_view):
+    """Task #84 of the spec: «На возврат» of a point showed «шины с ОТХ» instead of the positions (the card of the plaque has no items_text)."""
+    from test_point_new_view import flag
+    app, conn, pid, cid, mine = on_page(tmp_path)
+    if new_view:
+        flag(conn, "all")
+    agreed(conn, cid)
+    page = mine.get("/my-point?tab=return").get_data(as_text=True)
+    block = page[page.index('data-return="%d"' % cid):].split("</article>")[0]
+    assert "Nokian Hakkapeliitta 10" in block and "4 шт" in block and "шины с ОТХ<" not in block
