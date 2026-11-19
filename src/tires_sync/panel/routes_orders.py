@@ -17,7 +17,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
+from .. import chat_oth, message_texts, onboarding_texts, order_autosend, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -1294,7 +1294,16 @@ def register(app) -> None:
         chat["ref"] = deals.ref(chat["id"])
         chat["account_name"] = "" if own_point() is not None else next(                             # a point never sees an account's name
             (a["name"] for a in connections.list_accounts(conn) if a["id"] == chat["account_id"]), "")
-        return {"chat": chat, "messages": chats_store.thread(conn, chat), "can_send": any(ch["id"] == chat["id"] for ch in sendable),
+        messages = chats_store.thread(conn, chat)
+        traced = deals.ad_goods(conn, chat["account_id"], chat["item_id"])
+        try:
+            _conn, _settings, parsed, _ref = context(app)
+            live = parsed.offers
+        except Exception:
+            log.exception("the unload is not readable for the order chat's OTH hint")
+            live = {}
+        chat["oth"] = chat_oth.suggest(conn, live, traced[0] if traced else None, chat["item_title"], messages, own_point())
+        return {"chat": chat, "messages": messages, "can_send": any(ch["id"] == chat["id"] for ch in sendable),
                 "sig": chats_store.signature(conn, chat["id"]), "reply_token": secrets.token_hex(12), "image_token": secrets.token_hex(12),
                 "draft": session.get("draft_%d" % chat["id"], "")}
 
