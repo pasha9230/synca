@@ -35,10 +35,8 @@
       <input type="hidden" name="csrf" value="{{ csrf_token() }}">
       <input type="hidden" name="token" value="{{ first.token }}">
       <input type="hidden" name="handover" value="yes">
-      {% if group.rows|length > 1 %}
       <input type="hidden" name="return_date" value="{{ first.return_date }}">
       {% for r in group.rows %}<input type="hidden" name="return_order" value="{{ r.card.id }}">{% endfor %}
-      {% endif %}
       {{ pin }}<input type="hidden" name="tab" value="return">
       <button class="btn btn--primary mp-btn">Да, передал</button>
     </form>

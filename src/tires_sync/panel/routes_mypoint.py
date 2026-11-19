@@ -669,7 +669,7 @@ def register(app) -> None:
         selected = {order_id: _own_card(conn, order_id, point_id) for order_id in ids}
         return_date = request.form.get("return_date")
         who, now = author(), local_iso()
-        failures, signed = [], 0
+        failures, signed, last_answer = [], 0, ""
         for order_id in ids:
             # Lock before rechecking the date and the point. Reusing the single-order
             # transaction preserves the refund, history and undo for each order.
@@ -685,7 +685,7 @@ def register(app) -> None:
                     ("page-%s-%d" % (token, order_id), now, "панель: %s" % who, ACTIONS["act_signed"], order_id, "акт подписан"))
                 if not claimed.rowcount:
                     continue
-                outcome, _answer, ok = act(conn, card, "act_signed", who, now, None, None)
+                outcome, last_answer, ok = act(conn, card, "act_signed", who, now, None, None)
                 if not ok:
                     failures.append(mgr.label(card))
                 elif not outcome.startswith("уже"):
@@ -699,7 +699,7 @@ def register(app) -> None:
                 if conn.in_transaction:
                     conn.rollback()
         if signed:
-            flash("Передача поставщику отмечена. Заказов: %d." % signed, "info")
+            flash(last_answer if len(ids) == 1 else "Передача поставщику отмечена. Заказов: %d." % signed, "info")
         if failures:
             flash("Не отмечены заказы № %s. Проверьте статус или дату возврата." % ", № ".join(failures), "error")
         elif not signed:

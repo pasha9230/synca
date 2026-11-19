@@ -224,3 +224,26 @@ def test_one_confirmation_marks_only_the_displayed_orders_for_the_date(tmp_path,
     response = post(mine, endpoint, "tok", **data)
     assert response.status_code == 302
     assert "Заказов: 3" not in mine.get(response.headers["Location"]).get_data(as_text=True)
+
+
+def test_single_return_rejects_a_confirmation_from_before_rescheduling(tmp_path, clock, view):
+    app, _, conn, pid, card = setup(tmp_path, view)
+    agreed(conn, card)
+    mine = manager(app, conn, pid)
+    group = plaque(page_of(mine, "return"), card)
+    assert re.search(r'name="return_date" value="%s"' % DAY, group)
+    assert re.search(r'name="return_order" value="%d"' % card, group)
+    endpoint = "/my-point/%d/act_signed" % card
+    data = dict(token=token(group, card, "act_signed"), handover="yes", return_date=DAY, return_order=str(card))
+    conn.execute("UPDATE oth_return_plan SET return_date = ? WHERE order_id = ?", (LATER, card))
+    conn.commit()
+    response = post(mine, endpoint, "tok", **data)
+    assert response.status_code == 302
+    assert "Проверьте статус или дату возврата" in mine.get(response.headers["Location"]).get_data(as_text=True)
+    assert not order_oth.return_plan(conn, card)["signed_at"]
+
+    group = plaque(page_of(mine, "return"), card)
+    data.update(token=token(group, card, "act_signed"), return_date=LATER)
+    response = post(mine, endpoint, "tok", **data)
+    assert response.status_code == 302
+    assert order_oth.return_plan(conn, card)["signed_at"]
