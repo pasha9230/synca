@@ -51,3 +51,11 @@ def test_the_ad_matches_exactly_and_point_users_only_see_their_own_stock(tmp_pat
     hint = chat_oth.suggest(conn, live, "201", "", [message])
     assert (hint["source"], hint["model"], hint["size"]) == ("из сообщения", "Другая модель", "")
     assert hint["exact"] == [{"name": alternative.name, "point": "Юг", "qty": 2}]
+
+    earlier = {"direction": "in", "kind": "text", "text": "Есть 225/45 R17?"}
+    newer = {"direction": "in", "kind": "text", "text": "А лучше Другая модель"}
+    hint = chat_oth.suggest(conn, live, "201", "", [earlier, newer])
+    assert hint["model"] == "Другая модель" and hint["size"] == ""
+    assert hint["exact"] == [{"name": alternative.name, "point": "Юг", "qty": 2}]
+    hint = chat_oth.suggest(conn, live, "201", "", [newer, earlier])
+    assert hint["size"] == "225/45 R17" and not hint["exact"]

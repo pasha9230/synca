@@ -53,14 +53,9 @@ def _identity(text, offers):
 
 
 def suggest(conn, live, ad_id, title, messages, point_id=None):
-    """Use the latest explicit size from the customer, otherwise a recognized model or the ad."""
+    """Use the latest recognizable customer request, or fall back to the ad."""
     ad = (live.get(ad_id) or catalog_archive.last_offer(conn, ad_id)) if ad_id else None
     incoming = [m["text"] for m in reversed(messages) if m["direction"] == "in" and m["kind"] == "text"]
-    request = next(((text, size) for text in incoming if (size := _text_size(text))), None)
-    text, size = request or (title or "", _text_size(title))
-    if ad and not request:
-        size = _size(ad)
-
     stock = {}
     for row in oth_stock._rows(conn):
         if point_id is not None and row["point_id"] != point_id:
@@ -77,13 +72,17 @@ def suggest(conn, live, ad_id, title, messages, point_id=None):
     known = [offer for offer in inventory.values() if offer is not None]
     if ad:
         known.append(ad)
-    model_request = None
-    if not request and known:
-        for message in incoming[:10]:
+    request = model_request = None
+    for index, message in enumerate(incoming):
+        if message_size := _text_size(message):
+            request = message, message_size
+            break
+        if index < 10 and known:
             identity = _identity(message, known)
             if identity[2]:
                 model_request = identity
                 break
+    text, size = request or (title or "", _size(ad) if ad else _text_size(title))
     from_message = bool(request or model_request)
     if model_request:
         brand, model, wanted = model_request
