@@ -1044,7 +1044,7 @@ def register(app) -> None:
         """The stage of the button «На возврат» of the card: the office, on «На ОТХ», the return not agreed."""
         if card["stage"]["code"] != "oth" or own_point() is not None or not can_post("order_move") or order_oth.return_plan(conn, card["id"]):
             return None
-        return next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_GIVEN), None)
+        return next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_AGREE), None)
 
     @app.route("/orders/<int:card_id>/oth-agreed", methods=["POST"])
     @login_required
@@ -1053,6 +1053,9 @@ def register(app) -> None:
         entered (any day not in the past; not Monday, Wednesday or Friday: a hint, order_oth.OFF_DAY), the point sees it."""
         conn = get_conn()
         card = card_or_404(conn, card_id)
+        if card["stage"]["code"] == "oth":
+            flash("Сначала переведите заказ на этап «%s»." % orders.stage_name(conn, orders.RETURN_AGREE), "error")
+            return redirect("/orders/%d" % card_id)
         typed = {k[len("return_qty_"):]: v for k, v in request.form.items() if k.startswith("return_qty_") and k[len("return_qty_"):].isdigit()}
         seen_raw = str(request.form.get("return_seen") or "")
         try:
@@ -1085,7 +1088,7 @@ def register(app) -> None:
         if card_id not in {c["id"] for c in found}:
             found.insert(0, card)
         found = [c for c in found if not order_merge_store.into(conn, c["id"]) and not order_merge_store.is_target(conn, c["id"])]
-        stages = [s for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] not in ("oth", orders.RETURN_GIVEN)]
+        stages = [s for s in orders.list_stages(conn) if s["kind"] == "open" and s["code"] not in orders.RETURN_STAGES]
         return render_template("orders_merge.html", c=card, found=found, stages=stages, ref={c["id"]: order_merge_store._ref(c) for c in found},
                                label=manager.label)
 

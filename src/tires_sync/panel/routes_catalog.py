@@ -414,6 +414,7 @@ def register(app) -> None:
                 keys = ["%d:%s" % (a["id"], i["goods_id"]) for a in accounts]
                 own = now_own.get(keys[0])
                 i.update(own_here=own, own_text=service.own_price_text(own) if own else "", own_some=any(now_own.get(k) for k in keys),
+                         brand_price=None,
                          own_pending=any(now_own.get(k) != was_own.get(k) for k in keys),
                          own_cleared=any(was_own.get(k) and not now_own.get(k) for k in keys),
                          own_where=[{"account": labels[a["id"]], "text": service.own_price_text(now_own.get(k)),
@@ -760,13 +761,16 @@ def register(app) -> None:
         try:
             if not goods_id or not accounts:
                 raise ValueError("Не понял, какую позицию менять: обновите страницу.")
-            offer = context(app)[2].offers.get(goods_id)
+            current = context(app)[2].offers.get(goods_id)
+            offer = current or _bulk_positions(conn, [goods_id])[0].get(goods_id)
             if form.get("do") == "clear":                                 # «do», not «action»: that name hides form.action
                 value, each = None, {}
             else:
                 value = _own_value(form.get("value"))
                 if offer is None:
-                    raise ValueError("Такой позиции нет в выгрузке.")
+                    raise ValueError("Такой позиции нет в выгрузке и не было в ней раньше.")
+                if current is None and "pct" in value and not offer.base_price > 0:
+                    raise ValueError("Закупка этой позиции неизвестна: процент не от чего считать. Поставьте цену продажи в рублях.")
                 each = service.base_own_prices(conn, offer, value)
                 for account in accounts:                                  # a shift past the bounds: said with the account and its value
                     try:

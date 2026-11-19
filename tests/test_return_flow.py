@@ -32,6 +32,55 @@ def agreed(conn, cid):
     return orders.get_card(conn, cid)
 
 
+def test_existing_unagreed_returns_move_to_separate_stage_once(tmp_path):
+    conn = db(tmp_path)
+    waiting = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    agreed_id = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    old = stage(conn, orders.RETURN_GIVEN)
+    for card_id in (waiting, agreed_id):
+        conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ? WHERE id = ?",
+                     (old, "2026-10-26T12:30:00", card_id))
+    conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date) VALUES (?,?,?,?)",
+                 (agreed_id, "2026-10-27T10:00:00", "owner", "2026-10-28"))
+    conn.commit()
+
+    assert order_oth.migrate_agreement_stage(conn, "2026-11-17T12:00:00") == 1
+    assert orders.get_card(conn, waiting)["stage"]["code"] == orders.RETURN_AGREE
+    assert orders.get_card(conn, waiting)["entered_at"] == "2026-10-26T12:30:00"
+    assert orders.get_card(conn, agreed_id)["stage"]["code"] == orders.RETURN_GIVEN
+    assert order_oth.migrate_agreement_stage(conn, "2026-11-17T12:01:00") == 0
+
+
+def test_return_stage_migration_retries_after_database_writer_releases_lock(tmp_path):
+    conn = db(tmp_path)
+    card_id = card_at(conn, "at_point", "2026-10-15T10:00:00")
+    conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stage(conn, orders.RETURN_GIVEN), card_id))
+    conn.commit()
+    writer = store.open_db(tmp_path / "x.db")
+    reader = store.open_db(tmp_path / "x.db", timeout=0.01)
+    writer.execute("BEGIN IMMEDIATE")
+    try:
+        assert order_oth.migrate_agreement_stage(reader, "2026-11-17T12:00:00") == 0
+        assert reader.execute("SELECT 1 FROM app_state WHERE key = ?", (order_oth.AGREEMENT_STAGE_KEY,)).fetchone() is None
+    finally:
+        writer.rollback()
+    assert order_oth.migrate_agreement_stage(reader, "2026-11-17T12:01:00") == 1
+    assert orders.get_card(reader, card_id)["stage"]["code"] == orders.RETURN_AGREE
+
+
+@pytest.mark.parametrize("office", [False, True])
+@pytest.mark.parametrize("supplier_agreed", [False, True])
+def test_sale_is_refused_on_both_return_stages(tmp_path, office, supplier_agreed):
+    conn = db(tmp_path)
+    cid = returning(conn)
+    if supplier_agreed:
+        agreed(conn, cid)
+    before = orders.get_card(conn, cid)
+    outcome, _answer, sold = order_oth.sell(conn, before, "manager", "2026-10-27T12:00:00", office=office)
+    assert not sold and outcome.startswith("не выполнено")
+    assert orders.get_card(conn, cid)["stage"]["code"] == before["stage"]["code"]
+
+
 def label(conn, cid):
     return order_oth.label_of(order_oth.return_plan(conn, cid))
 
@@ -42,7 +91,7 @@ def test_the_seventh_day_moves_the_order_to_na_vozvrat_agreeing_and_the_tyres_le
     conn = db(tmp_path)
     cid = returning(conn)
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and card["stage"]["name"] == "На возврат"
+    assert card["stage"]["code"] == orders.RETURN_AGREE and card["stage"]["name"] == "Согласование возврата"
     assert label(conn, cid) == "Согласование возврата" and order_oth.to_agree(conn, card)
     assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: off sale from «Согласование возврата»
     assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ? AND title = ?", (cid, order_oth.RETURN_TASK)).fetchone()[0] == 1
@@ -58,7 +107,7 @@ def test_agreed_keeps_the_stage_takes_the_tyres_off_sale_and_unagree_gives_agree
     assert [r["card"]["id"] for r in order_oth.to_return(conn, card["point_id"])] == [cid]
     assert order_oth.unagree(conn, card, "2026-10-27T11:00:00", "owner")
     card = orders.get_card(conn, cid)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Согласование возврата"
+    assert card["stage"]["code"] == orders.RETURN_AGREE and label(conn, cid) == "Согласование возврата"
     assert oth_stock.pieces(conn, manual=False) == {}                                    # the owner 2026-11-04: stays off sale
 
 
@@ -195,7 +244,7 @@ def test_the_vk_returned_without_a_purchase_takes_agreeing_off_sale(tmp_path):
     conn.commit()
     outcome, _answer = order_manager.returned(conn, orders.get_card(conn, cid), "менеджер Бета", "2026-10-27T12:00:00")
     assert "этап не изменён" in outcome
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN and label(conn, cid) == "Отдано, нужна сумма возврата"
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE and label(conn, cid) == "Отдано, нужна сумма возврата"
     assert oth_stock.pieces(conn, manual=False) == {}
 
 
@@ -247,7 +296,7 @@ def on_page(tmp_path):
 
 def test_the_point_s_return_tab_shows_the_stage_and_its_label(tmp_path, clock):
     app, conn, pid, cid, mine = on_page(tmp_path)
-    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_GIVEN             # from the start, the question or not (2026-11-04)
+    assert orders.get_card(conn, cid)["stage"]["code"] == orders.RETURN_AGREE             # from the start, the question or not (2026-11-04)
     assert 'id="order-%d"' % cid not in mine.get("/my-point?tab=oth").get_data(as_text=True)
     assert 'id="order-%d"' % cid not in mine.get("/my-point?tab=return").get_data(as_text=True)     # «На возврат»: the agreed only (2026-11-12)
     page = mine.get("/my-point?tab=agree").get_data(as_text=True)

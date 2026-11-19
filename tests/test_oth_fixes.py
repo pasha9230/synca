@@ -89,6 +89,7 @@ def test_the_plaque_of_the_return_names_the_webmim_order_the_tyres_were_bought_b
     orders.move_card(conn, cid, stage(conn, "oth"), LATER, "o")                                   # the new client refused too
     plain = card_at(conn, "oth", T)
     for order in (cid, plain):
+        orders.move_card(conn, order, stage(conn, orders.RETURN_AGREE), LATER, "o")
         assert agree_return(owner, order, tok).status_code == 302
     page = manager(app, conn, point_id(conn)).get("/my-point").get_data(as_text=True)
     plaque = page.split('data-return="%d"' % cid)[1].split("</article>")[0]
@@ -105,6 +106,7 @@ def test_the_cancelled_agreement_is_told_to_the_point_once(tmp_path, monkeypatch
     told = _quiet(monkeypatch)
     post(owner, "/orders/%d/oth-unagree" % oth, tok)                                              # nothing agreed: nothing to tell
     assert told == []
+    orders.move_card(conn, oth, stage(conn, orders.RETURN_AGREE), LATER, "o")
     agree_return(owner, oth, tok)
     assert told == []                                                                              # the agreement is the plaque, as before
     assert post(owner, "/orders/%d/oth-unagree" % oth, tok).status_code == 302

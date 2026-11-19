@@ -226,7 +226,7 @@ def test_the_seventh_day_and_the_return_to_the_supplier_go_from_the_record(tmp_p
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:29:00") == 0
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
     rec = orders.get_card(conn, x)
-    assert rec["stage"]["code"] == orders.RETURN_GIVEN and orders.get_card(conn, cid)["stage"]["code"] == "cancel"
+    assert rec["stage"]["code"] == orders.RETURN_AGREE and orders.get_card(conn, cid)["stage"]["code"] == "cancel"
     assert oth_stock.pieces(conn) == {}                                                   # «На возврат»: off sale, as before
     day = order_oth.agree(conn, rec, date(2026, 10, 27), "2026-10-27T10:00:00", "o")
     assert order_oth.return_plan(conn, x)["return_date"] == day
@@ -470,7 +470,7 @@ def test_an_old_order_on_oth_goes_to_the_return_and_back_on_the_seventh_day(tmp_
     old = old_way(conn, monkeypatch)
     assert order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00") == 1
     card = orders.get_card(conn, old)
-    assert card["stage"]["code"] == orders.RETURN_GIVEN
+    assert card["stage"]["code"] == orders.RETURN_AGREE
     assert orders.move_card(conn, old, stage(conn, "oth"), "2026-10-27T10:00:00", "o")   # back on sale by hand: the same order, no record
     assert orders.get_card(conn, old)["stage"]["code"] == "oth" and oth_storage.record_ids(conn) == set()
     assert orders.get_card(conn, old)["webmim_number"] == number(old)
@@ -506,6 +506,6 @@ def test_a_record_comes_back_on_sale_from_the_return(tmp_path):
     started(conn)
     cid, x = split(conn)
     order_oth.ask_seventh_day(conn, "2026-10-26T12:30:00")
-    assert orders.get_card(conn, x)["stage"]["code"] == orders.RETURN_GIVEN
+    assert orders.get_card(conn, x)["stage"]["code"] == orders.RETURN_AGREE
     assert orders.move_card(conn, x, stage(conn, "oth"), "2026-10-27T10:00:00", "o")     # «не возвращаем»: on sale again, the same record
     assert orders.get_card(conn, x)["stage"]["code"] == "oth" and oth_storage.record_ids(conn) == {x} and oth_stock.pieces(conn) == {"1": 4}

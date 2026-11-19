@@ -237,6 +237,8 @@ def plan_decisions(conn, parsed, ref, settings: Settings, acct: int, today: date
     before_dedupe = dict(ev.ok)                                           # the tire of a lot same_tire hides (OTH hands it over)
     ev.inherit = same_tire.dedupe(ev, published, settings.min_stock, live_id_of, first_seen_of,
                                   lambda code: store.get_snapshot(conn, code, acct), retired, foreign, cross=cross)
+    expired_ids = mirror_feed.expired_shared_ids(conn, acct, today)
+    ev.inherit = {code: ad_id for code, ad_id in ev.inherit.items() if ad_id not in expired_ids}
     if trial is not None and cross is not None:                           # a 4tochki position that goes on under a WebMIM ad (this cycle or
         group_of = cross.group_of()                                       # before): its «Артикул» and «Страна» from WebMIM (owner, question 4)
         prefix = "s%d-" % tochki
@@ -659,6 +661,7 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
                 rendered.pop(code, None)
                 rendered4.pop(code, None)
     reissued = mirror_feed.reissued_own(conn, acct)                      # {code: "r<stamp>"} of the positions the owner renewed
+    expired_ids = mirror_feed.expired_shared_ids(conn, acct, today)
     owner_of = {id(a): code for a, code in owners}                        # the position behind every ad (a saved ad too)
     names = _fresh_names(owners, rendered, rendered4, ev)
     basis = basis or {}
@@ -689,6 +692,9 @@ def build_ads(conn, parsed, ev, published, ds, settings: Settings, acct: int, to
         elif id_suffix and not (node.text.endswith(id_suffix) or (id_suffix + "_") in node.text):
             node.text = node.text + id_suffix                  # the Id of this account: the same position never has the same Id in two accounts
         owner = owner_of.get(id(ad)) or code                 # the position behind the ad: a saved ad may carry the Id it took over
+        if node.text in expired_ids:                         # a saved ad or a same-tire handover must not revive an expired shared Id
+            own_id = mirror_feed.alias_id(acct, owner) if mirror_feed.alias_scheme(conn, acct) else owner
+            node.text = own_id + ("-x4" if pack else "") + ("" if mirror_feed.alias_scheme(conn, acct) else id_suffix)
         stamp = reissued.get(owner)
         if stamp and not node.text.endswith("_" + stamp) and _takes_mark(node.text, owner, acct):
             node.text = "%s_%s" % (node.text, stamp)        # renewed on purpose (mirror-reissue): Avito does not take back an ad deleted in the cabinet
@@ -877,6 +883,9 @@ def run_cycle(
     published, ev, ds = plan_decisions(conn, parsed, ref, settings, acct, today, now=now, removed_before=removed_before)
 
     from . import mirror_feed
+    expired_ids = mirror_feed.expired_shared_ids(conn, acct, today)
+    ev.inherit = {code: ad_id for code, ad_id in ev.inherit.items() if ad_id not in expired_ids}
+    ev.aliases = {code: ad_id for code, ad_id in ev.aliases.items() if ad_id not in expired_ids}
     if ev.inherit or ev.aliases:                                          # remembered: the tire keeps the Id of its oldest ad in later cycles too
         if account_id is not None:
             mirror_feed.bind_ids(conn, acct, ev.inherit, datetime.utcnow().isoformat(timespec="seconds"), "same_tire")

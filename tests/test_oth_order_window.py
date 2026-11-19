@@ -67,8 +67,8 @@ def test_one_row_on_top_of_the_return_and_the_buttons_under_it(w):
     text = window(w, cid)
     assert plain(text).count(LINE) == 1
     row = text.index("data-oth-head")
-    assert row < text.index("data-to-return") and row < text.index('action="/orders/%d/oth-agreed"' % cid)
-    assert text.index("data-to-return") < text.index('action="/orders/%d/oth-agreed"' % cid)
+    assert row < text.index("data-to-return")
+    assert 'action="/orders/%d/oth-agreed"' % cid not in text
     assert "Товар на точке:" not in text and "Крайняя дата резерва" not in text
 
 

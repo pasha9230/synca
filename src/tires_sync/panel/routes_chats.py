@@ -32,7 +32,7 @@ def before_placed(conn, stage: dict) -> bool:
     «Заказ оформлен» only (the owner 2026-11-08). The stages before it (new, wait, from a point) and a user's open stage standing before it."""
     if stage["code"] in ("new", "talk", "wait", orders.FROM_POINT[0]):
         return True
-    if stage["code"] in orders.PLACED_CODES or stage["kind"] != "open" or stage["code"] in ("return", orders.RETURN_GIVEN):
+    if stage["code"] in orders.PLACED_CODES or stage["kind"] != "open" or stage["code"] in ("return", orders.RETURN_AGREE, orders.RETURN_GIVEN):
         return False
     placed = orders._placed_stage(conn)
     return placed is not None and stage["position"] < placed["position"]

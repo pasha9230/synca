@@ -23,7 +23,8 @@
     var final = Math.ceil(Math.round(value * 1e6) / 1e7) * 10;      // up to tens, as the server (float dust below a millionth dropped)
     var cost = parseFloat(form.getAttribute("data-cost")) || purchase;   // «ниже закупки» as the server asks it: today's supplier price
     var below = cost > 0 && final < cost;
-    out.textContent = (kind === "pct" ? rub(Math.round(value)) : rub(n)) + " → " + rub(final) + " в фиде" + (below ? " — ниже закупки" : "");
+    out.textContent = (kind === "pct" ? rub(Math.round(value)) : rub(n)) + " → " + rub(final)
+      + (form.hasAttribute("data-own-later") ? " при публикации" : " в фиде") + (below ? " — ниже закупки" : "");
     out.classList.toggle("text-err", below);
     if (each) {                                                        // the cell: what goes into each account's feed (its correction on top)
       var shifts = [];
