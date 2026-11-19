@@ -384,6 +384,8 @@ _MORE_TEXTS = {
         d.get("order", "?"), sum(int(v) for v in (d.get("items") or {}).values()) or "?"),
     "oth_issued_early": lambda d: "Заказ выдан, возврат не нужен: заказ №%s, метка «На возврат» снята с %s шт." % (
         d.get("order", "?"), sum(int(v) for v in (d.get("items") or {}).values()) or "?"),
+    "oth_return_cancelled": lambda d: "Запрос на возврат отменён: заказ №%s, отметка снята с %s шт." % (
+        d.get("order", "?"), sum(int(v) for v in (d.get("items") or {}).values()) or "?"),
     "oth_marks_back": lambda d: "Метка «На возврат» возвращена: заказ №%s, %s шт." % (
         d.get("order", "?"), sum(int(v) for v in (d.get("items") or {}).values()) or "?"),
     "oth_return_amount": lambda d: "Возврат поставщику: заказ №%s, сумма возврата %s ₽ — закупка шин" % (d.get("order", "?"), d.get("amount", "?")),

@@ -24,7 +24,7 @@ T1 = "2026-10-16T11:00:00"
 NOTES = {"moving": ["Ждём доставки, отметьте «Приехал», как прибудут на точку."],                # the owner's task of 2026-11-12: the new texts
          "here": ["Эти позиции у нас, ожидаем выкупа заказчиком."],
          "oth": ["Невыкуп, хранение 7 дней. Если продаёте, впишите данные покупателя.", "Можно продать, +50 рублей за штуку."],
-         "agree": ["Отправили запрос на оформление возврата этих позиций. Для продажи нужна проверка."],
+         "agree": ["Шины сейчас на точке, согласуем с поставщиком и поставим на возврат.", "Если нужно их продать, согласуйте это отдельно с оператором: он должен сначала отменить запрос поставщику."],
          "return": ["Эти товары согласованы на возврат. Возвраты возможны в Пн, Ср, Пт. Распечатайте Акт МХ-3."],
          "issued": ["Заказы, отмеченные как реализованные заказчику."]}
 
@@ -46,7 +46,7 @@ def item_of(conn, card):
 
 
 def to_return_stage(conn, card):
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T10:00:00", "o")
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T10:00:00", "o")
     conn.commit()
 
 
@@ -157,9 +157,12 @@ def test_a_press_of_an_old_page_is_refused_in_plain_words_and_changes_nothing(tm
     assert order_oth.sell(conn, orders.get_card(conn, card), "gamma", T1) == (order_oth.AGREEING_REFUSED, REFUSED, False)
 
 
-def test_the_office_sells_on_the_agreement_as_before(tmp_path, clock):
+def test_the_office_must_cancel_the_mark_before_selling(tmp_path, clock):
     app, owner, conn, pid, card = setup(tmp_path)
     order_oth.item_to_return(conn, item_of(conn, card), "2026-10-14T10:00:00", "owner")
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "owner", T1, office=True)
+    assert not done and answer == order_oth.AGREEING_ANSWER
+    order_oth.unmark_returned(conn, item_of(conn, card), T1, "owner")
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "owner", T1, office=True)
     assert done and orders.get_card(conn, card)["stage"]["code"] == "done"
 
@@ -217,6 +220,7 @@ def test_the_past_and_no_date_are_still_refused(tmp_path, clock, day):
 @pytest.mark.parametrize("day, off", [("2099-01-01", True), ("2099-01-02", False)])       # a Thursday, a Friday
 def test_the_flash_of_the_office_says_the_hint_and_the_form_takes_any_day_from_today(tmp_path, clock, day, off):
     app, owner, conn, pid, card = setup(tmp_path)
+    to_return_stage(conn, card)
     form = owner.get("/orders/%d" % card).get_data(as_text=True)
     today = routes_orders_today(app)
     assert re.search(r'name="return_date" value="%s" min="%s"' % (order_oth.return_date(date.fromisoformat(today)), today), form)

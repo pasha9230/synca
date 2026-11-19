@@ -91,6 +91,12 @@ def test_a_failure_is_told_once_an_hour_and_the_recovery_once(watch):
     assert watch()[2] == []
 
 
+def test_stale_feed_is_named_in_the_outside_alert(watch):
+    code, out, sent, changed = watch(code="503", body="fail feed\n")
+    assert code == 0 and changed and len(sent) == 1
+    assert "публичный фид не обновлялся больше 3 часов" in sent[0]
+
+
 def test_no_answer_at_all_is_a_failure(watch):
     code, out, sent, changed = watch(down=True)
     assert code == 0 and len(sent) == 1 and "панель не отвечает" in sent[0]

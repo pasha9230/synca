@@ -28,7 +28,7 @@ def test_every_stage_of_the_board_has_an_order_and_the_split_one_has_two_webmim_
     root, out = seeded
     conn = store.connect(out["db"])
     codes = {orders.get_card(conn, cid)["stage"]["code"] for cid in out["orders"].values()}
-    assert {"new", "talk", "placed", "moving", "at_point", "oth", "return_given", "return", "done", "cancel"} <= codes
+    assert {"new", "talk", "placed", "moving", "at_point", "oth", "return_agree", "return_given", "return", "done", "cancel"} <= codes
     assert conn.execute("SELECT count(*) FROM order_mim_extra").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM avito_chat").fetchone()[0] == 8
     assert {r for (r,) in conn.execute("SELECT DISTINCT role FROM panel_user_role")} == {"partner", "chats", "viewer", "point", "client"}

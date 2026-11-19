@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import os
 from datetime import datetime
 
 from tires_sync import connections, store
@@ -55,6 +56,25 @@ def test_both_old_and_never_read_chats(tmp_path):
 
 def test_chats_are_not_checked_when_no_account_reads_them(tmp_path):
     assert setup(tmp_path, chats=False, synced=None).get("/health").status_code == 200
+
+
+def test_live_feed_must_have_a_recent_public_file(tmp_path):
+    client = setup(tmp_path)
+    feed_root = tmp_path / "feed"
+    client.application.config["FEED_ROOT"] = str(feed_root)
+    conn = store.connect(client.application.config["DB_PATH"])
+    account = connections.list_feed_accounts(conn)[0]
+    connections.set_live(conn, account["id"], True, "2026-10-21T14:00:00", "owner")
+    conn.close()
+    assert client.get("/health").get_data(as_text=True) == "fail feed\n"
+    path = feed_root / account["feed_token"] / "avito_feed.xml"
+    path.parent.mkdir(parents=True)
+    path.write_text("<Ads/>")
+    os.utime(path, (UTC_NOW.timestamp(), UTC_NOW.timestamp()))
+    assert client.get("/health").status_code == 200
+    stale = UTC_NOW.timestamp() - 3 * 3600 - 1
+    os.utime(path, (stale, stale))
+    assert client.get("/health").get_data(as_text=True) == "fail feed\n"
 
 
 def test_a_broken_base_is_fail_db_and_nothing_else(tmp_path, monkeypatch):

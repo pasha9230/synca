@@ -25,7 +25,7 @@ NOW = "2026-10-21T11:00:00"
 
 
 def returning(conn, cid, at="2026-10-21T10:00:00"):
-    orders.move_card(conn, cid, stage(conn, orders.RETURN_GIVEN), at, "o")
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), at, "o")
     return orders.get_card(conn, cid)
 
 
@@ -92,7 +92,7 @@ def test_11_the_refund_is_the_supplier_s_purchase_never_the_sale(tmp_path):
 def test_2_na_vozvrat_cannot_be_chosen_in_the_rules_of_a_stage(tmp_path):
     from test_vk_commands import ready
     app, client, tok, conn, pid, card = ready(tmp_path)
-    returning_id = _stage(conn, orders.RETURN_GIVEN)
+    returning_id = _stage(conn, orders.RETURN_AGREE)
     with pytest.raises(orders.OrderError):
         rules.add_rule(conn, _stage(conn, "at_point"), "enter", "0", "move", None, str(returning_id), "auto", None)
     page = client.get("/orders/settings").get_data(as_text=True)
@@ -171,7 +171,7 @@ def test_5_one_label_everywhere(tmp_path):
     assert order_oth.LABELS[order_oth.AGREE] == order_oth.POINT_LABELS[order_oth.AGREE] == "Согласование возврата"
     assert order_oth.FILTERS[order_oth.AGREE] == "Согласование возврата"
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_AGREE)))
     assert "data-return-label>Согласование возврата<" in client.get("/orders").get_data(as_text=True)
     card = client.get("/orders/%d" % cid).get_data(as_text=True)
     assert "Согласование возврата" in card and "Согласуем" not in card
@@ -240,18 +240,19 @@ def test_8_fewer_tyres_go_back_the_rest_is_our_stock_with_a_note(tmp_path):
 def test_8_the_card_offers_the_pieces_and_refuses_more_than_there_are(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
     item = orders.get_card(conn, cid)["items"][0]["id"]
+    orders.move_card(conn, cid, stage(conn, orders.RETURN_AGREE), NOW, "o")
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     assert 'name="return_qty_%d"' % item in page
     with pytest.raises(order_oth.OthError):
         order_oth.agree(conn, orders.get_card(conn, cid), TODAY, NOW, "o", qty={item: 99})
     found = __import__("re").search(r'name="return_date" value="([0-9-]+)"', page)
     post(client, "/orders/%d/oth-agreed" % cid, tok, return_date=found.group(1), **{"return_qty_%d" % item: "3"})
-    old = orders.get_card(conn, cid)                                           # on «На ОТХ»: the 3 going back leave, the rest stays on sale
-    assert old["stage"]["code"] == "oth" and [int(i["qty"]) for i in old["items"]] == [1]
+    old = orders.get_card(conn, cid)
+    assert old["stage"]["code"] == orders.RETURN_GIVEN and [int(i["qty"]) for i in old["items"]] == [3]
     [new] = order_oth.split_of(conn, cid)
     got = orders.get_card(conn, new)
-    assert got["stage"]["code"] == orders.RETURN_GIVEN and [int(i["qty"]) for i in got["items"]] == [3]
-    assert any("едет меньше шин, чем в закупке: 3 из 4" in t for _l, t in events(conn, new))
+    assert got["stage"]["code"] == "oth" and [int(i["qty"]) for i in got["items"]] == [1]
+    assert any("едет меньше шин, чем в закупке: 3 из 4" in t for _l, t in events(conn, cid))
 
 
 # ---- 9. «не возвращаем» ----------------------------------------------------------------------------------------------------------------
@@ -309,7 +310,7 @@ def test_10_no_extension_once_the_tyres_are_given(tmp_path):
 
 def test_10_the_tasks_page_has_the_button(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_GIVEN)))
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(_stage(conn, orders.RETURN_AGREE)))
     [task] = conn.execute("SELECT id, due_at FROM callback_task WHERE order_id = ?", (cid,)).fetchall()
     assert 'action="/tasks/%d/extend"' % task[0] in client.get("/tasks?tab=all").get_data(as_text=True)
     post(client, "/tasks/%d/extend" % task[0], tok)

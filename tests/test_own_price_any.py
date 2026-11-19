@@ -182,8 +182,8 @@ def test_the_bulk_own_price_takes_positions_without_the_supplier_and_the_manual_
     _draft(client, tok, [BLIND], [first], base="purchase", unit="rub", side="up", value="100")
     assert "%d:%s" % (first, BLIND) not in _changes(conn)                    # «от закупки» без закупки — нет
     staging.set_own_price(conn, "s3-1", [first], {"price": 2500}, NOW)
-    assert 'name="g" value="s3-1"' in client.get("/catalog?own=1").get_data(as_text=True)      # отмечается под фильтром «Ручные цены»
-    assert 'name="g" value="s3-1"' not in client.get("/catalog").get_data(as_text=True)
+    assert 'type="checkbox" name="g" value="s3-1"' in client.get("/catalog?own=1").get_data(as_text=True)      # отмечается под фильтром «Ручные цены»
+    assert 'type="checkbox" name="g" value="s3-1"' not in client.get("/catalog").get_data(as_text=True)
     for mode in ("on", "off"):                                               # ручное правило таким позициям не ставится (03.11)
         post(client, "/catalog/stage", tok, bulk=mode, g=["100", GONE, BLIND, "s3-1"])
         assert staging.summary(conn)["changes"].get("overrides") == {"1:100": mode}
@@ -231,5 +231,5 @@ def test_the_new_view_catalog_ticks_a_view_only_position_under_the_own_filter_on
     store.set_state(conn, UI_KEY % "office", "all")
     staging.set_own_price(conn, "s3-1", [first], {"price": 2500}, NOW)
     client, _tok = _owner(app)
-    assert 'name="g" value="s3-1"' in client.get("/catalog?own=1").get_data(as_text=True)
-    assert 'name="g" value="s3-1"' not in client.get("/catalog").get_data(as_text=True)
+    assert 'type="checkbox" name="g" value="s3-1"' in client.get("/catalog?own=1").get_data(as_text=True)
+    assert 'type="checkbox" name="g" value="s3-1"' not in client.get("/catalog").get_data(as_text=True)

@@ -748,6 +748,7 @@ def _migrate(conn) -> None:
     orders.hide_default_off_board(conn, moscow_iso())
     from . import order_oth                                           # the owner 2026-11-03: «На возврат», the orders of the old flow, once
     order_oth.migrate(conn, moscow_iso())
+    order_oth.migrate_agreement_stage(conn, moscow_iso())
     _add_column(conn, "order_mim_base", "number", "TEXT NOT NULL DEFAULT ''")      # a base of the first draft of the table
     from . import order_webmim                                        # the owner 2026-11-07: «Заказы WebMIM», the old orders kept as they read, once
     order_webmim.migrate(conn, moscow_iso())
