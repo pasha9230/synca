@@ -198,7 +198,8 @@ def undo(conn, db_path, audit_id, card_ids, now_local: str, author: str) -> dict
         reason_set = conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'field' AND at = ? AND author = ? AND text LIKE 'Причина отмены:%'",
                                   (card["id"], run["at"], run["author"])).fetchone()
         try:
-            if orders.move_card(conn, card["id"], line["back"]["id"], now_local, author, fire_rules=False, journal=False):
+            if orders.move_card(conn, card["id"], line["back"]["id"], now_local, author, fire_rules=False, journal=False,
+                                internal_return_restore=True):
                 if reason_set:                                              # off the closed stage first: only then may the reason go
                     try:
                         orders.update_card(conn, card["id"], {"cancel_reason": ""}, now_local, author, commit=False)

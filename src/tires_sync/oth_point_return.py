@@ -169,6 +169,47 @@ def can_act(conn, card: dict) -> bool:
     return order_oth.agreeing(conn, card) or (plan is not None and not plan["signed_at"])
 
 
+def _agree_marked_oth(conn, card: dict, day: str, now: str, author: str) -> int:
+    """Split marked pieces and agree them in one transaction; the unmarked remainder stays on OTH."""
+    stage_codes = {s["code"] for s in orders.list_stages(conn)}
+    if not {orders.RETURN_AGREE, orders.RETURN_GIVEN} <= stage_codes:
+        raise order_oth.OthError("Этапы возврата не настроены.")
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if not {orders.RETURN_AGREE, orders.RETURN_GIVEN} <= {s["code"] for s in orders.list_stages(conn)}:
+            raise order_oth.OthError("Этапы возврата изменились: обновите страницу.")
+        card = orders.get_card(conn, card["id"])
+        if card["stage"]["code"] != "oth" or not can_act(conn, card):
+            raise order_oth.OthError("Заказ изменился: обновите страницу и выберите акт заново.")
+        held = order_oth.pieces_here(conn, card)
+        returned = {item_id: int(qty) for item_id, qty in conn.execute(
+            "SELECT item_id, qty FROM oth_return WHERE order_id = ?", (card["id"],))}
+        since = order_oth._oth_since(conn, card["id"])
+        parts = {item_id: min(qty, order_oth._marked(conn, item_id, returned.get(item_id, 0), since))
+                 for item_id, qty in held.items()}
+        parts = {item_id: qty for item_id, qty in parts.items() if qty > 0}
+        if not parts:
+            raise order_oth.OthError("Отмеченных к возврату шин не осталось: обновите страницу.")
+        agreement = next((s for s in orders.list_stages(conn) if s["code"] == orders.RETURN_AGREE), None)
+        if agreement is None:
+            raise order_oth.OthError("Этап согласования возврата не настроен.")
+        if parts != held:
+            target = order_oth._split_off(conn, card, parts, agreement, now, author,
+                                          "отмеченные позиции согласованы с поставщиком по акту")
+        else:
+            orders.move_card(conn, card["id"], agreement["id"], now, author, commit=False)
+            target = card["id"]
+        order_oth._agree_whole(conn, orders.get_card(conn, target), day, now, author, commit=False)
+        order_oth._end_tasks(conn, card["id"], True, "согласовано с поставщиком", now, author)
+        conn.commit()
+        return target
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, author: str) -> Dict[str, object]:
     """The act of a return for several orders of one point (E3). Everything is checked first (the orders, one point, the date, the PDF);
     then every order is agreed for the date (order_oth.agree, as «Согласовано»: an order agreed for this date already stays as it is) and the
@@ -199,8 +240,11 @@ def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, 
     agreed, failed = [], {}
     for card in cards:
         try:
-            order_oth.agree(conn, card, today, now, author, day)
-            agreed.append(card["id"])
+            if card["stage"]["code"] == "oth":
+                agreed.append(_agree_marked_oth(conn, card, day, now, author))
+            else:
+                order_oth.agree(conn, card, today, now, author, day)
+                agreed.append(card["id"])
         except (order_oth.OthError, orders.OrderError) as err:                     # moved meanwhile: the others still go
             conn.rollback()
             failed[card["id"]] = str(err)
