@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from . import orders
 
@@ -50,9 +50,18 @@ def link(conn, order_id: int, other_id: int, now: str, author: str, commit: bool
     """Tie `other_id` (and its chain) to the chain of `order_id`. A record in every order that joined, one line of the audit."""
     if order_id == other_id:
         raise orders.OrderError("Это тот же заказ.")
-    card, other = orders.get_card(conn, order_id), orders.get_card(conn, other_id)     # OrderError: no such order
+    if commit and not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")                       # the chains and the new number read under the write lock (re-review N1)
+    try:
+        card, other = orders.get_card(conn, order_id), orders.get_card(conn, other_id)     # OrderError: no such order
+    except orders.OrderError:
+        if commit:
+            conn.rollback()
+        raise
     mine, theirs = _chain(conn, order_id), _chain(conn, other_id)
     if mine is not None and mine == theirs:
+        if commit:
+            conn.rollback()
         raise orders.OrderError("Заказ №%s уже в этой цепочке." % _label(other))
     chain = mine if mine is not None else (theirs if theirs is not None else
                                            conn.execute("SELECT COALESCE(MAX(chain), 0) + 1 FROM order_chain").fetchone()[0])
@@ -127,10 +136,11 @@ def _just_made(conn, order_id: int, now: str, besides: int) -> Optional[int]:
     return row[0] if row else None
 
 
-def again(conn, order_id: int, now: str, author: str) -> int:
+def again(conn, order_id: int, now: str, author: str) -> Tuple[int, bool]:
     """«Добавить заказ» of an order (the owner 2026-11-19): a new order of the same client — the name, the phone, the point, the responsible
     and the source copied, no tyres, no chat — on the first stage, tied to the chain. An open order of the same phone does not stop it:
-    the person asked for a second order (create_card's many_open); the guard of a double press stays on every other way to make one."""
+    the person asked for a second order (create_card's many_open); the guard of a double press stays on every other way to make one.
+    Returns (the order, made now): False — a press within TWIN_SECONDS gave the order made a moment ago (re-review N2: say so)."""
     card = orders.get_card(conn, order_id)
     fields = {k: card[k] for k in COPIED if card.get(k) not in (None, "")}
     made = MADE_FROM % _label(card)
@@ -139,7 +149,7 @@ def again(conn, order_id: int, now: str, author: str) -> int:
         twin = _just_made(conn, order_id, now, besides=new)       # asked after the insert: the write holds the lock, two presses make one order
         if twin is not None:
             conn.rollback()
-            return twin
+            return twin, False
         orders.add_event(conn, new, now, author, "chain", made, level=GREY)
         link(conn, order_id, new, now, author, commit=False, made_from=order_id)
     except Exception:
@@ -147,10 +157,10 @@ def again(conn, order_id: int, now: str, author: str) -> int:
         raise
     conn.commit()
     orders._fire_rules(conn, new, now, ())                    # the rules of the first stage, as create_card's own commit fires them
-    return new
+    return new, True
 
 
-def for_client(conn, client_id: int, now: str, author: str) -> int:
+def for_client(conn, client_id: int, now: str, author: str) -> Tuple[int, bool]:
     """«Добавить заказ» of a client's card in CRM: «Добавить заказ» of the client's newest order (tied to its chain); a client without an
     order gets a plain new order of the name and the first phone (the usual guard of one open order holds: there is none of theirs)."""
     row = conn.execute("SELECT l.order_id FROM client_order l JOIN order_card c ON c.id = l.order_id WHERE l.client_id = ? ORDER BY c.id DESC LIMIT 1",
@@ -161,4 +171,4 @@ def for_client(conn, client_id: int, now: str, author: str) -> int:
     if client is None:
         raise orders.OrderError("Такого клиента нет.")
     phone = conn.execute("SELECT phone FROM client_phone WHERE client_id = ? ORDER BY rowid LIMIT 1", (client_id,)).fetchone()
-    return orders.create_card(conn, {"client_name": client[0], "client_phone": phone[0] if phone else ""}, now, author, require_contact=False)
+    return orders.create_card(conn, {"client_name": client[0], "client_phone": phone[0] if phone else ""}, now, author, require_contact=False), True

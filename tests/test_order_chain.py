@@ -94,7 +94,7 @@ def test_add_order_copies_the_client_ties_it_and_passes_the_one_open_order_guard
     first = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="manager", source="avito"), NOW, "o")
     with pytest.raises(orders.OpenOrderExists):                    # the guard of an accidental double stays on the usual way
         orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE), NOW, "o")
-    new = chain.again(conn, first, NOW, "o")
+    new = chain.again(conn, first, NOW, "o")[0]
     made = orders.get_card(conn, new)
     assert (made["client_name"], made["client_phone"], made["responsible"], made["source"]) == ("Иван", PHONE, "manager", "avito")
     assert made["items"] == [] and made["stage"]["kind"] == "open"
@@ -107,7 +107,7 @@ def test_add_order_after_a_closed_one(tmp_path):
     first = card(conn)
     done = next(s for s in orders.list_stages(conn) if s["code"] == "done")
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (done["id"], first))     # closed (the way there is not what is tested)
-    new = chain.again(conn, first, NOW, "o")
+    new = chain.again(conn, first, NOW, "o")[0]
     assert ids(conn, new) == [first] and orders.get_card(conn, new)["stage"]["kind"] == "open"
 
 
@@ -115,15 +115,15 @@ def test_add_order_of_a_client_ties_to_the_newest_order_or_makes_the_first(tmp_p
     conn = db(tmp_path)
     first = card(conn)
     [(client_id,)] = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (first,)).fetchall()
-    second = chain.for_client(conn, client_id, NOW, "o")
+    second = chain.for_client(conn, client_id, NOW, "o")[0]
     assert ids(conn, second) == [first] and orders.get_card(conn, second)["client_phone"] == PHONE
     cur = conn.execute("INSERT INTO client (name, created_at) VALUES ('Пётр', ?)", (NOW,))
     conn.execute("INSERT INTO client_phone (phone, client_id) VALUES ('+79001234567', ?)", (cur.lastrowid,))
     conn.commit()
-    lone = chain.for_client(conn, cur.lastrowid, NOW, "o")
+    lone = chain.for_client(conn, cur.lastrowid, NOW, "o")[0]
     assert orders.get_card(conn, lone)["client_name"] == "Пётр" and ids(conn, lone) == []
     with pytest.raises(orders.OrderError, match="Такого клиента нет"):
-        chain.for_client(conn, 999, NOW, "o")
+        chain.for_client(conn, 999, NOW, "o")[0]
 
 
 def test_the_card_shows_the_chain_and_its_buttons_and_the_routes_work(tmp_path):
@@ -169,10 +169,10 @@ def test_the_client_card_offers_add_order(tmp_path):
 def test_a_double_press_of_add_order_makes_one_order_a_later_one_another(tmp_path):
     conn = db(tmp_path)
     first = card(conn)
-    new = chain.again(conn, first, NOW, "o")
-    assert chain.again(conn, first, "2026-11-19T12:00:30", "o") == new
+    new = chain.again(conn, first, NOW, "o")[0]
+    assert chain.again(conn, first, "2026-11-19T12:00:30", "o") == (new, False)
     assert conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 2
-    later = chain.again(conn, first, "2026-11-19T12:05:00", "o")
+    later = chain.again(conn, first, "2026-11-19T12:05:00", "o")[0]
     assert later != new and sorted(ids(conn, first)) == [new, later]
 
 
@@ -203,8 +203,8 @@ def test_a_second_tab_of_add_order_in_crm_returns_the_same_order(tmp_path):
     conn = db(tmp_path)
     first = card(conn)
     [(client_id,)] = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (first,)).fetchall()
-    new = chain.for_client(conn, client_id, NOW, "o")
-    assert chain.for_client(conn, client_id, "2026-11-19T12:00:20", "o") == new
+    new = chain.for_client(conn, client_id, NOW, "o")[0]
+    assert chain.for_client(conn, client_id, "2026-11-19T12:00:20", "o")[0] == new
     assert conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == 2
 
 
@@ -215,6 +215,33 @@ def test_add_order_of_another_order_with_the_same_number_is_not_taken_for_a_doub
     other = card(conn, phone="+7 900 999-99-99", name="Пётр")
     conn.execute("UPDATE order_card SET webmim_number = ? WHERE id = ?", (str(a), other))
     conn.commit()
-    one = chain.again(conn, a, NOW, "o")
-    two = chain.again(conn, other, NOW, "o")
+    one = chain.again(conn, a, NOW, "o")[0]
+    two = chain.again(conn, other, NOW, "o")[0]
     assert two != one and orders.get_card(conn, two)["client_name"] == "Пётр"
+
+
+def test_a_second_press_says_the_order_was_made_a_moment_ago(tmp_path):
+    from panel_helpers import login, make_app, post
+    app = make_app(tmp_path)
+    client = app.test_client()
+    tok = login(client)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    a = card(conn)
+    first = post(client, "/orders/%d/again" % a, tok).headers["Location"]
+    client.get(first)                                                 # the flash of the first press read
+    again = post(client, "/orders/%d/again" % a, tok)
+    assert again.headers["Location"] == first
+    assert "создан только что: открыт он, второй не создан" in client.get(first).get_data(as_text=True)
+
+
+def test_tying_holds_the_write_lock_while_it_reads_the_chains(tmp_path):
+    """Re-review N1: the new number was read before the write lock; two tabs tying two pairs at once could share it."""
+    conn = db(tmp_path)
+    a, b = card(conn), card(conn)
+    seen = []
+    conn.set_trace_callback(seen.append)
+    chain.link(conn, a, b, NOW, "o")
+    conn.set_trace_callback(None)
+    begin = next(i for i, q in enumerate(seen) if q.startswith("BEGIN IMMEDIATE"))
+    assert begin < next(i for i, q in enumerate(seen) if "MAX(chain)" in q)

@@ -38,6 +38,9 @@ def local_now():
     return now() + timedelta(hours=3)
 
 
+TWIN_TEXT = "Заказ №%d этому клиенту создан только что: открыт он, второй не создан. Нужен ещё один отдельный заказ: нажмите кнопку через минуту."
+
+
 def local_iso() -> str:
     return local_now().isoformat(timespec="seconds")
 
@@ -1166,11 +1169,14 @@ def register(app) -> None:
         conn = get_conn()
         card_or_404(conn, card_id)
         try:
-            new = order_chain.again(conn, card_id, local_iso(), author())
+            new, made = order_chain.again(conn, card_id, local_iso(), author())
         except orders.OrderError as err:
             flash(str(err), "error")
             return redirect("/orders/%d" % card_id)
-        flash("Создан новый заказ №%d этому же клиенту, он связан с заказом №%s. Добавьте шины." % (new, manager.label(orders.get_card(conn, card_id))), "ok")
+        if made:
+            flash("Создан новый заказ №%d этому же клиенту, он связан с заказом №%s. Добавьте шины." % (new, manager.label(orders.get_card(conn, card_id))), "ok")
+        else:
+            flash(TWIN_TEXT % new)
         return redirect("/orders/%d" % new)
 
     @app.route("/clients/<int:client_id>/new-order", methods=["POST"])
@@ -1179,11 +1185,14 @@ def register(app) -> None:
         """«Добавить заказ» of a client's card (CRM): tied to the client's newest order (order_chain.for_client)."""
         conn = get_conn()
         try:
-            new = order_chain.for_client(conn, client_id, local_iso(), author())
+            new, made = order_chain.for_client(conn, client_id, local_iso(), author())
         except orders.OrderError as err:
             flash(str(err), "error")
             return redirect("/clients/%d" % client_id)
-        flash("Создан новый заказ №%d этому клиенту. Добавьте шины." % new, "ok")
+        if made:
+            flash("Создан новый заказ №%d этому клиенту. Добавьте шины." % new, "ok")
+        else:
+            flash(TWIN_TEXT % new)
         return redirect("/orders/%d" % new)
 
     @app.route("/orders/<int:card_id>/arrived-message", methods=["POST"])
