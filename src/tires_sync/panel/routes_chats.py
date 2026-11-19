@@ -8,7 +8,7 @@ from pathlib import Path
 from flask import abort, flash, g, jsonify, redirect, render_template, request, session
 
 from .. import ad_stats, catalog_archive, chat_deals as deals, chat_handover, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
-from .. import order_autosend, order_notes, oth_sale
+from .. import chat_oth, order_autosend, order_notes, oth_sale
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
@@ -132,19 +132,13 @@ def _title_search(title: str) -> str:
 
 
 def register(app) -> None:
-    def _product(conn, chat):
+    def _product(live, traced):
         """The position behind the ad of a chat: the link to it in our catalog (not Avito's page: a click there counts as a view and may cost
         advertising money) and what the supplier had at the last unload. None when the ad is not ours."""
-        traced = deals.ad_goods(conn, chat["account_id"], chat["item_id"])
         if traced is None:
             return None
         goods_id = traced[0]
-        offer = None
-        try:
-            _conn, _settings, parsed, _ref = context(app)
-            offer = parsed.offers.get(goods_id)
-        except Exception:
-            log.exception("the unload is not readable for the product of a chat")
+        offer = live.get(goods_id)
         article = (offer.code if offer else "") or goods_id                         # the maker's article is what the catalog search finds best
         return {"code": article, "catalog_url": "/catalog?" + urlencode({"q": article}), "stock": offer.stock if offer else None}
 
@@ -161,10 +155,8 @@ def register(app) -> None:
         live = _live_offers(conn)
         return list(live.values()) + [o for o, _ in catalog_archive.gone_offers(conn) if o.goods_id not in live]
 
-    def _wait_prefill(conn, chat):
+    def _wait_prefill(conn, chat, live, traced):
         """What the form «Клиент ждёт эту шину» starts with: the tire of the ad when the catalog knows it (one lookup, not a scan), else what the title says."""
-        live = _live_offers(conn)
-        traced = deals.ad_goods(conn, chat["account_id"], chat["item_id"])
         offer = (live.get(traced[0]) or catalog_archive.gone_offer(conn, traced[0])) if traced else None
         if offer is not None:
             return {"line": order_wait.line_from_offer(offer), "source": "каталога"}
@@ -300,12 +292,15 @@ def register(app) -> None:
             current = _chat_or_404(conn, chat_row)
             current["account_name"] = names.get(current["account_id"], "")
             current["ref"] = deals.ref(current["id"])
-            current["product"] = _product(conn, current)
+            live = _live_offers(conn)
+            traced = deals.ad_goods(conn, current["account_id"], current["item_id"])
+            current["product"] = _product(live, traced)
             current["catalog_url"] = current["product"]["catalog_url"] if current["product"] else (
                 "/catalog?" + urlencode({"q": _title_search(current.get("item_title"))}) if current.get("item_title") else "")
-            current["wait"] = _wait_prefill(conn, current)
+            current["wait"] = _wait_prefill(conn, current, live, traced)
             current["waiting"] = current["id"] in (waiting if current["id"] in place else chats.waiting(conn, [current], g.setdefault("chat_wait_starts", {})))
             messages = chats.thread(conn, current)                        # the order window draws the same (routes_orders.order_chat_view)
+            current["oth"] = chat_oth.suggest(conn, live, traced[0] if traced else None, current["item_title"], messages, own_point())
             if current["order_id"]:
                 try:
                     deal = orders.get_card(conn, current["order_id"])

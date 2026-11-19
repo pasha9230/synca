@@ -51,6 +51,7 @@
 {% if current.product %}<span class="small muted">Артикул {{ current.product.code }}{% if current.product.stock is not none %} · у поставщика по последней выгрузке: {{ current.product.stock }} шт.{% else %} · в последней выгрузке не найден{% endif %}</span>{% endif %}
 <span class="ml-auto row" style="gap:var(--s-2)"><a class="btn btn--secondary btn--xs" href="{{ current.catalog_url }}" target="_blank" rel="noopener">В каталоге</a>
 {% if current.item_url and current.item_url.startswith("https://") %}<a class="small muted" href="{{ current.item_url }}" rel="noopener noreferrer" target="_blank" title="Откроет страницу Авито: переход по ней из другого кабинета может засчитаться как просмотр и потратить рекламный бюджет">на Авито</a>{% endif %}</span></div>{% endif %}
+{% include "_chat_oth.html" %}
 <div class="chat-thread">
 {% include "_chat_thread.html" %}
 </div>
