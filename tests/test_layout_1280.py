@@ -118,7 +118,7 @@ def test_the_last_open_stage_leads_to_done_and_closed_stages_have_no_next_button
     conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stages["oth"]["id"], cid))   # a test base: put the card on the last open stage
     conn.commit()
     found = next_button(window(client.get("/orders/%d" % cid).get_data(as_text=True)))
-    assert found and found.group(2) == str(stages["done"]["id"]) and found.group(3) == "Выполнено"
+    assert found and found.group(2) == str(stages["return_agree"]["id"]) and found.group(3) == "Согласование возврата"
     for code in ("done", "cancel", "return"):
         conn.execute("UPDATE order_card SET stage_id = ? WHERE id = ?", (stages[code]["id"], cid))
         conn.commit()

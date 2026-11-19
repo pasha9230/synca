@@ -10,6 +10,7 @@ import re
 import pytest
 
 from panel_helpers import login, post
+from test_manual_prices import BLIND, GONE, _gone_app
 from test_own_price import NOW, _app
 from tires_sync import connections, staging, store
 from tires_sync.settings_store import active_settings, confirm_draft
@@ -185,11 +186,36 @@ def test_a_bad_cell_changes_nothing(tmp_path, value):
     assert staging.summary(conn)["draft_id"] is None
 
 
-def test_a_position_gone_from_the_unload_is_refused(tmp_path):
+def test_an_unknown_position_is_refused(tmp_path):
     app, conn, _ = _app(tmp_path)
     client, tok = _owner(app)
     _inline(client, tok, "6990", goods="nope")
     assert staging.summary(conn)["draft_id"] is None
+
+
+def test_a_position_from_the_archive_can_be_edited_in_the_catalog_cell(tmp_path):
+    app, conn, (first, second) = _gone_app(tmp_path)
+    client, tok = _owner(app)
+    page = client.get("/catalog?st=gone").get_data(as_text=True)
+    assert 'name="g" value="%s"' % GONE in page
+    assert 'action="/catalog/own-price/inline"' in page
+    assert "data-own-later" in page and "Цена начнёт действовать, когда позиция попадёт в фид" in page
+    response = _inline(client, tok, "6990", goods=GONE)
+    assert response.status_code == 302
+    assert _changes(conn) == {"%d:%s" % (account, GONE): {"price": 6990} for account in (first, second)}
+    _inline(client, tok, "+5 %", goods=GONE)
+    assert _changes(conn) == {"%d:%s" % (account, GONE): {"pct": 5.0} for account in (first, second)}
+
+
+def test_archived_position_without_purchase_accepts_rubles_but_not_percent(tmp_path):
+    app, conn, (first, second) = _gone_app(tmp_path)
+    client, tok = _owner(app)
+    response = _inline(client, tok, "+5 %", goods=BLIND, **{"X-Requested-With": "fetch"})
+    assert response.get_json()["ok"] is False
+    assert "Закупка этой позиции неизвестна" in response.get_json()["message"]
+    assert staging.summary(conn)["draft_id"] is None
+    _inline(client, tok, "6990", goods=BLIND)
+    assert _changes(conn) == {"%d:%s" % (account, BLIND): {"price": 6990} for account in (first, second)}
 
 
 # --- защиты при «Применить» --------------------------------------------------------------------------------------------------------

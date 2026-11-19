@@ -50,12 +50,16 @@ def test_a_record_with_a_mark_is_not_offered_and_not_taken(tmp_path):
         oth_sale.to_new_client(conn, x, "Пётр", "+7 900 000 11 22", LATER, "o")
 
 
-def test_the_office_sells_the_marked_record_whole_and_the_point_does_not(tmp_path):
-    """The owner 2026-11-12: a record on the agreement of its return is not the point's to sell (was: sold whole by the point); the office sells it."""
+def test_the_office_cancels_the_mark_before_selling_the_record(tmp_path):
     conn = db(tmp_path)
     cid, x = marked_record(conn)
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "менеджер Бета", SOLD)
     assert not done and answer == order_oth.AGREEING_ANSWER and code(conn, x) == "oth"
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "owner", SOLD, office=True)
+    assert not done and answer == order_oth.AGREEING_ANSWER
+    with pytest.raises(orders.OrderError, match="Сначала отмените согласование"):
+        orders.move_card(conn, x, next(s["id"] for s in orders.list_stages(conn) if s["code"] == "done"), SOLD, "owner")
+    order_oth.unmark_returned(conn, item_of(conn, x), SOLD, "owner")
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "owner", SOLD, office=True)
     assert done, answer
     assert code(conn, x) == "done" and [i["qty"] for i in orders.get_card(conn, x)["items"]] == [4]
@@ -72,7 +76,7 @@ def test_nobody_sells_a_part_of_a_marked_record(tmp_path):
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "менеджер Бета", SOLD)
     assert not done and answer == order_oth.AGREEING_ANSWER
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, x), "owner", SOLD, office=True)
-    assert not done and "только целиком" in answer and "2 из 4 шт." in answer
+    assert not done and answer == order_oth.AGREEING_ANSWER
     assert code(conn, x) == "oth"
 
 

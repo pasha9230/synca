@@ -164,7 +164,7 @@ def test_after_the_signed_act_it_is_refused_and_the_button_is_gone(tmp_path, clo
     app, owner, conn, pid, card = setup(tmp_path)
     mine = manager(app, conn, pid)
     tok = token(mine.get("/my-point?tab=oth").get_data(as_text=True), card, "oth_sold")
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T09:00:00", "owner")
     assert "oth_sold" not in mine.get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12 (over 10.11): on «На ОТХ» only
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T2)
     assert not done and outcome == order_oth.AGREEING_REFUSED and answer == order_oth.AGREEING_ANSWER
@@ -200,7 +200,7 @@ def test_on_the_return_not_agreed_the_point_sells_nothing_the_question_and_the_t
     over: the point sells on «На ОТХ» only). No button, the server refuses; the order, its question and its task stay as they were."""
     app, owner, conn, pid, card = setup(tmp_path)
     conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (order_oth.SINCE_KEY, "2026-10-01T00:00:00"))
-    orders.move_card(conn, card, _stage(conn, orders.RETURN_GIVEN), "2026-10-15T09:00:00", "owner")
+    orders.move_card(conn, card, _stage(conn, orders.RETURN_AGREE), "2026-10-15T09:00:00", "owner")
     before = orders.get_card(conn, card)
     order_oth.moved_by_hand(conn, dict(before, stage=dict(before["stage"], code="oth")), "2026-10-15T09:00:00", "owner")     # its task, its question
     assert open_tasks(conn, card) == 1 and order_oth.question_open(conn, orders.get_card(conn, card))
@@ -209,7 +209,7 @@ def test_on_the_return_not_agreed_the_point_sells_nothing_the_question_and_the_t
     outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, card), "gamma", T1)
     assert not done and answer == "Шины на согласовании возврата: продать можно после отмены согласования оператором"
     now = orders.get_card(conn, card)
-    assert now["stage"]["code"] == orders.RETURN_GIVEN and linked(conn, card) is None and order_oth.return_plan(conn, card) is None
+    assert now["stage"]["code"] == orders.RETURN_AGREE and linked(conn, card) is None and order_oth.return_plan(conn, card) is None
     assert order_oth.question_open(conn, now) and open_tasks(conn, card) == 1          # nothing closed, nothing cancelled
 
 
@@ -290,10 +290,31 @@ def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_off_the_points_but
     [row] = order_oth.stock(conn)["stock"]
     assert (row["qty"], row["left"], row["marked_qty"]) == (4, 0, 4)                      # on sale; a real «Вернуть поставщику» has nothing to take
     assert "oth_sold" not in manager(app, conn, pid).get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12: the office sells
-    assert any("шины в продаже до согласования возврата" in t for t in texts(conn, card))
+    assert any("шины сняты с продажи" in t for t in texts(conn, card))
     page = owner.get("/oth").get_data(as_text=True)
-    assert "data-item-return>Согласование возврата · 4 шт., в продаже до согласования" in page and "в продаже 4" in page
+    assert "data-item-return>Согласование возврата · 4 шт., снято с продажи" in page and "на ОТХ 4" in page
     assert "шины снимаются с продажи" not in page and 'action="/oth/return"' not in page     # nothing left for a real «Вернуть поставщику»
+
+
+def test_operator_can_cancel_pending_position_request_from_oth_page(tmp_path, clock):
+    from tires_sync import oth_stock
+    app, conn, pid, card, item, owner = marked(tmp_path, qty=2)
+    page = owner.get("/oth").get_data(as_text=True)
+    assert 'action="/oth/cancel-return"' in page
+    response = post(owner, "/oth/cancel-return", "tok", item=str(item))
+    assert "Запрос на возврат отменён: 2 шт." in owner.get(response.headers["Location"]).get_data(as_text=True)
+    assert order_oth.return_parts(conn, orders.get_card(conn, card)) == order_oth.pieces_here(conn, orders.get_card(conn, card))
+    assert oth_stock.pieces(conn, manual=False) == {"1": 4}
+
+
+def test_failed_task_close_keeps_the_pending_return_mark(tmp_path, clock, monkeypatch):
+    from tires_sync import tasks
+    app, conn, pid, card, item, owner = marked(tmp_path, qty=2)
+    monkeypatch.setattr(tasks, "close", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("close failed")))
+    with pytest.raises(order_oth.OthError, match="сохранить не удалось"):
+        order_oth.cancel_item_return(conn, item, T1, "owner")
+    assert open_tasks(conn, card) == 1
+    assert order_oth.agreeing(conn, orders.get_card(conn, card))
 
 
 def test_agreed_the_order_goes_on_return_off_sale_and_without_the_button(tmp_path, clock):
@@ -324,26 +345,33 @@ def test_sold_by_the_office_before_the_agreement_drops_the_mark_cancels_the_task
     rules.add_rule(conn, _stage(conn, "done"), "enter", 0, "record_sale", None, "", "auto", None)
     conn.commit()
     assert open_tasks(conn, card) == 1
+    with pytest.raises(orders.OrderError, match="Сначала отмените согласование"):
+        orders.move_card(conn, card, _stage(conn, "done"), T1, "owner")
+    assert order_oth.cancel_item_return(conn, item, T1, "owner") == 4
     orders.move_card(conn, card, _stage(conn, "done"), T1, "owner")
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and sales(conn, card) == [(4, 20000.0, 16000.0)]
     assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (card,)).fetchone()
     assert not conn.execute("SELECT 1 FROM app_state WHERE key LIKE ?", ("oth_item_return:%d:%%" % item,)).fetchone()
     assert open_tasks(conn, card) == 0
     assert conn.execute("SELECT done_at, cancelled_at FROM callback_task WHERE order_id = ?", (card,)).fetchone() == (None, T1)
-    assert [t for t in texts(conn, card) if t.startswith(order_oth.SOLD_EARLY)] == ["%s: метка «На возврат» снята — Nokian Hakkapeliitta 10, 4 шт." % order_oth.SOLD_EARLY]
+    assert any(t.startswith("Отмена запроса на возврат: метка") for t in texts(conn, card))
 
 
 def test_the_office_moving_it_to_done_before_the_agreement_does_the_same(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path, qty=3)
+    with pytest.raises(orders.OrderError, match="Сначала отмените согласование"):
+        orders.move_card(conn, card, _stage(conn, "done"), T2, "owner")
+    assert order_oth.cancel_item_return(conn, item, T2, "owner") == 3
     orders.move_card(conn, card, _stage(conn, "done"), T2, "owner")
     assert not conn.execute("SELECT 1 FROM oth_return WHERE order_id = ?", (card,)).fetchone() and open_tasks(conn, card) == 0
     assert conn.execute("SELECT cancelled_at FROM callback_task WHERE order_id = ?", (card,)).fetchone() == (T2,)
-    assert any(t.startswith(order_oth.SOLD_EARLY) for t in texts(conn, card))
+    assert any(t.startswith("Отмена запроса на возврат: метка") for t in texts(conn, card))
 
 
 def test_a_real_return_stays_when_the_rest_is_sold_by_the_office(tmp_path, clock):
     app, conn, pid, card, item, owner = marked(tmp_path, qty=2)
     order_oth.mark_returned(conn, item, "2026-10-14T11:00:00", "owner", qty=1)
     assert sum(order_oth.goods_on_oth(conn).values()) == 3                                 # 1 free + 2 of the mark; the one given back is not
+    assert order_oth.cancel_item_return(conn, item, T2, "owner") == 2
     orders.move_card(conn, card, _stage(conn, "done"), T2, "owner")
     assert conn.execute("SELECT qty FROM oth_return WHERE order_id = ?", (card,)).fetchall() == [(1,)]
