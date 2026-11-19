@@ -64,8 +64,8 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 
 /* the plaque of the act МХ-3 (over every tab while tyres wait for the supplier) */
 .p2w .mp-returns{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
-.p2-mx3{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px 12px;padding:12px;border:1px solid var(--p2-warn-border);
-  background:var(--p2-warn-bg);border-radius:var(--p2-r)}
+.p2-mx3{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px 12px;padding:12px;border:1px solid var(--gray-200);
+  background:var(--gray-0);border-radius:var(--p2-r)}
 .p2-mx3 .i{width:20px;height:20px;color:var(--p2-warn)}
 .p2-mx3 .p2-sub{display:block}
 .p2-mx3 form{margin:0}

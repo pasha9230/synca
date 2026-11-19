@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import secrets
+import sqlite3
 from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
@@ -450,11 +451,19 @@ def mark_shared_acts(rows: list) -> None:
 def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
-    return [{"card": r["card"], "label": mgr.label(r["card"]), "date": _short_date(r["plan"]["return_date"]),
+    return [{"card": r["card"], "label": mgr.label(r["card"]), "return_date": r["plan"]["return_date"], "date": _short_date(r["plan"]["return_date"]),
              "return_by": _full_date(r["plan"]["return_date"]),                 # «Вернуть дд.мм.гггг» by the number (the task of 2026-11-12)
              "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"]),
              "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"])}      # «Скачать акт» (the owner 2026-11-12)
             for r in order_oth.to_return(conn, point_id)]
+
+
+def _return_groups(rows: list) -> list:
+    groups = {}
+    for row in rows:
+        group = groups.setdefault(row["return_date"], {"first": row, "rows": []})
+        group["rows"].append(row)
+    return list(groups.values())
 
 
 def nav_counts(conn, point_id) -> dict:
@@ -616,7 +625,7 @@ def register(app) -> None:
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
-                               returns=returns,
+                               returns=returns, return_groups=_return_groups(returns),
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL)
@@ -650,6 +659,53 @@ def register(app) -> None:
                                p=point_id if own_point() is None else None, back=back,
                                tab=(parse_qs(urlsplit(back).query).get("tab") or [""])[0])
 
+    def _sign_return_group(conn, point_id, back, card_id, token):
+        raw_ids = request.form.getlist("return_order")
+        if any(not re.fullmatch(r"[1-9][0-9]{0,17}", value) for value in raw_ids):
+            abort(400)
+        ids = list(dict.fromkeys(map(int, raw_ids)))
+        if card_id not in ids:
+            abort(400)
+        selected = {order_id: _own_card(conn, order_id, point_id) for order_id in ids}
+        return_date = request.form.get("return_date")
+        who, now = author(), local_iso()
+        failures, signed = [], 0
+        for order_id in ids:
+            # Lock before rechecking the date and the point. Reusing the single-order
+            # transaction preserves the refund, history and undo for each order.
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                card = orders.get_card(conn, order_id)
+                plan = order_oth.return_plan(conn, order_id)
+                if card["point_id"] != point_id or not plan or plan["return_date"] != return_date:
+                    failures.append(mgr.label(selected[order_id]))
+                    continue
+                claimed = conn.execute(
+                    "INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,?)",
+                    ("page-%s-%d" % (token, order_id), now, "панель: %s" % who, ACTIONS["act_signed"], order_id, "акт подписан"))
+                if not claimed.rowcount:
+                    continue
+                outcome, _answer, ok = act(conn, card, "act_signed", who, now, None, None)
+                if not ok:
+                    failures.append(mgr.label(card))
+                elif not outcome.startswith("уже"):
+                    signed += 1
+                    point_log.record(conn, now, who, point_id, "act_signed", order_id, outcome)
+                    point_log.remember(conn, card, "act_signed", point_id, who, now)
+            except (orders.OrderError, sqlite3.Error):
+                current_app.logger.exception("«Рабочее место»: bulk return failed for order %s", order_id)
+                failures.append(mgr.label(selected[order_id]))
+            finally:
+                if conn.in_transaction:
+                    conn.rollback()
+        if signed:
+            flash("Передача поставщику отмечена. Заказов: %d." % signed, "info")
+        if failures:
+            flash("Не отмечены заказы № %s. Проверьте статус или дату возврата." % ", № ".join(failures), "error")
+        elif not signed:
+            flash("Передача по этим заказам уже отмечена.", "info")
+        return redirect(back)
+
     @app.route("/my-point/<int:card_id>/<action>", methods=["POST"])
     @login_required
     def mypoint_action(card_id, action):
@@ -675,6 +731,8 @@ def register(app) -> None:
         if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
             flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
+        if action == "act_signed" and request.form.getlist("return_order"):
+            return _sign_return_group(conn, point_id, back, card_id, token)
         if action == "oth_sold" and card.get("oth_record"):                    # a record of storage is sold by the window (ТЗ part D)
             return redirect(_sale_url(card_id, point_id, back))
         if action in CONFIRM and request.form.get("confirm") != "yes" and not (order_intercity.on(card) and action not in ("oth_issued", "oth_sold")):

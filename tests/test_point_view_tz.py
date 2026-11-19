@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from test_mypoint import manager
+from test_mypoint import manager, token
+from panel_helpers import post
 from test_point_oth_sell import setup
 from test_point_return_tabs import to_return_stage
 from test_return_act import DAY, NOW, PDF, PDF2, agreed, clock  # noqa: F401  (the fixture)
@@ -39,8 +40,9 @@ def active(page) -> str:
 
 
 def plaque(page, card) -> str:
-    """The plaque of an order agreed for the return (above the tabs)."""
-    return re.search(r'<article[^>]*data-return="%d".*?</article>' % card, page, re.S).group(0)
+    """The return-date group containing the order."""
+    return next(group for group in re.findall(r'<section class="mp-return-group".*?</section>', page, re.S)
+                if 'data-return="%d"' % card in group)
 
 
 def marks(text) -> list:
@@ -100,13 +102,13 @@ def test_the_sound_of_an_order_at_the_point_leads_to_its_tab(tmp_path, clock):
 
 # 3. «На возврат»
 
-def test_the_date_to_return_by_stands_by_the_number_of_an_agreed_order(tmp_path, clock, view):
+def test_the_date_to_return_by_stands_above_the_agreed_orders(tmp_path, clock, view):
     app, owner, conn, pid, card = setup(tmp_path, view)
     agreed(conn, card)
     mine = manager(app, conn, pid)
     box = plaque(page_of(mine, "return"), card)
     assert re.search(r'<b class="mp-return-by" data-return-by>Вернуть 13\.11\.2026</b>', box)
-    assert box.index("№") < box.index("data-return-by")                          # by the number, after it
+    assert box.index("data-return-by") < box.index("№")
 
 
 def test_no_date_no_words(tmp_path, clock, view):
@@ -170,7 +172,7 @@ def test_one_act_of_several_orders_marks_each_of_them_in_one_colour(tmp_path, cl
     first, then = marks(plaque(page, card)), marks(plaque(page, three))
     assert first == marks(plaque(page, two)) == [("1", str(act))]                 # the colours go by the dates of the return
     assert then == marks(plaque(page, four)) == [("2", str(late))]
-    assert MARK not in plaque(page, alone) and page.count(MARK) == 4              # an act of one order: no mark
+    assert MARK not in plaque(page, alone) and page.count(MARK) == 2              # an act of one order: no mark
 
 
 def test_an_order_given_keeps_the_mark_of_the_act_it_shares(tmp_path, clock, view):
@@ -197,3 +199,28 @@ def test_the_palette_is_small_and_goes_round(tmp_path):
     for sheet in ("mypoint.css", "point2.css"):
         css = (Path(routes_mypoint.__file__).parent / "static" / sheet).read_text(encoding="utf-8")
         assert all(".mp-act-mark--%d" % n in css for n in range(1, routes_mypoint.ACT_COLOURS + 1)), sheet
+
+
+def test_one_confirmation_marks_only_the_displayed_orders_for_the_date(tmp_path, clock, view):
+    app, _, conn, pid, first = setup(tmp_path, view)
+    agreed(conn, first)
+    two = second(conn, pid, DAY, "5000300")
+    three = second(conn, pid, DAY, "5000400")
+    later = second(conn, pid, LATER, "5000500")
+    mine = manager(app, conn, pid)
+    group = plaque(page_of(mine, "return"), first)
+    assert group.count("<summary class=\"btn btn--primary mp-btn\">Подписал акт и отдал<") == 1
+    assert re.findall(r'name="return_order" value="(\d+)"', group) == list(map(str, (first, two, three)))
+    endpoint = "/my-point/%d/act_signed" % first
+    data = dict(token=token(group, first, "act_signed"), handover="yes", return_date=DAY,
+                return_order=list(map(str, (first, two, three, later))))
+    response = post(mine, endpoint, "tok", **data)
+    assert response.status_code == 302
+    page = mine.get(response.headers["Location"]).get_data(as_text=True)
+    assert "Заказов: 3" in page and "Не отмечены заказы" in page
+    assert not order_oth.return_plan(conn, later)["signed_at"]
+    for order_id in (first, two, three):
+        assert order_oth.return_plan(conn, order_id)["signed_at"]
+    response = post(mine, endpoint, "tok", **data)
+    assert response.status_code == 302
+    assert "Заказов: 3" not in mine.get(response.headers["Location"]).get_data(as_text=True)
