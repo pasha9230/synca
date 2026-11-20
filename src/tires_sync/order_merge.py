@@ -467,6 +467,8 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
             order_sheet.enroll(conn, new, now)                          # its rows go to the Google table, the sources' rows stay
         orders.add_event(conn, new, now, author, "merge", "Создан объединением заказов %s. Ничего не отправлено." % ", ".join(
             "№%s%s" % (_label(c), " (справочно)" if _ref(c) else "") for c in cards), level="grey")
+        from . import order_chain
+        order_chain.join(conn, [new] + [c["id"] for c in cards], now, author)     # one branch of the client's orders (the owner 2026-11-20)
         conn.execute("UPDATE order_event SET level = 'grey' WHERE id > ? AND order_id IN (%s)" % ",".join("?" * (len(cards) + 1)),
                      [start, new] + [c["id"] for c in cards])            # «Этап», «Заказ создан», «Резерв»: no alert in the bell
         conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, author, "order_merge", json.dumps(
