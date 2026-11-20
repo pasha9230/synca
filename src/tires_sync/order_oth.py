@@ -111,6 +111,51 @@ def stock(conn) -> Dict[str, List[dict]]:
             "returned": [dict(r, qty=r["returned_qty"]) for r in rows if r["returned_qty"] > 0]}
 
 
+RETURNED_SQL = ("SELECT i.id, i.order_id, i.goods_id, i.code, i.name, i.qty, c.point_id, COALESCE(p.name, ''), c.webmim_number, c.transfer_number, "
+                "rp.signed_at, rp.signed_by, rp.return_date FROM oth_return_plan rp JOIN order_card c ON c.id = rp.order_id JOIN order_item i ON i.order_id = c.id "
+                "LEFT JOIN point p ON p.id = c.point_id WHERE rp.signed_at IS NOT NULL AND i.qty >= 1 ORDER BY rp.signed_at DESC, i.order_id, i.id")
+
+
+def returned_history(conn, marked: List[dict]) -> List[dict]:
+    """«Возвращено поставщику» of the office (the owner 2026-11-21: what went back is never dropped from the list): the pieces marked returned
+    of the orders still on «На ОТХ» / «На возврат» (`marked`, stock()["returned"]) and every position of an order whose act МХ-3 the point
+    signed (oth_return_plan.signed_at) — those leave stock() for good. Newest first; each row: what, how many, which order, its numbers, the
+    point, when and by whom, the planned date of the return (an act's)."""
+    numbers = {}
+    for r in marked:
+        if r["order_id"] not in numbers:
+            numbers[r["order_id"]] = conn.execute("SELECT webmim_number, transfer_number FROM order_card WHERE id = ?", (r["order_id"],)).fetchone() or ("", "")
+    rows = [dict(item_id=r["item_id"], order_id=r["order_id"], goods_id=r["goods_id"], code=r["code"], name=r["name"], qty=int(r["qty"]), ordered=int(r["ordered"]),
+                 point_id=r["point_id"], point=r["point"], webmim_number=numbers[r["order_id"]][0] or "", transfer_number=numbers[r["order_id"]][1] or "",
+                 returned_at=r["returned_at"] or "", returned_by=r["returned_by"] or "", return_date="", by_act=False, to_return=r.get("to_return"))
+            for r in marked]
+    for r in conn.execute(RETURNED_SQL):
+        rows.append(dict(item_id=r[0], order_id=r[1], goods_id=r[2], code=r[3], name=r[4], qty=int(r[5]), ordered=int(r[5]), point_id=r[6], point=r[7],
+                         webmim_number=r[8] or "", transfer_number=r[9] or "", returned_at=r[10] or "", returned_by=r[11] or "",
+                         return_date=r[12] or "", by_act=True, to_return=None))
+    return sorted(rows, key=lambda r: r["returned_at"], reverse=True)
+
+
+RETURNED_QUERY_MAX = 100
+
+
+def filter_returned(rows: List[dict], query: str = "", qty_from=None, qty_to=None, day_from: str = "", day_to: str = "") -> List[dict]:
+    """The search and the filters of «Возвращено поставщику» (the owner 2026-11-21): the text in the WebMIM number, the name, the transfer
+    number or the code (any case, a part is enough); the pieces from / to; the day returned from / to (inclusive, «YYYY-MM-DD»)."""
+    text = " ".join(str(query or "").split()).casefold()[:RETURNED_QUERY_MAX]
+    out = []
+    for r in rows:
+        if text and not any(text in str(r[k] or "").casefold() for k in ("webmim_number", "name", "transfer_number", "code")):
+            continue
+        if qty_from is not None and r["qty"] < qty_from or qty_to is not None and r["qty"] > qty_to:
+            continue
+        day = (r["returned_at"] or "")[:10]
+        if day_from and day < day_from or day_to and day > day_to:
+            continue
+        out.append(r)
+    return out
+
+
 def goods_on_oth(conn) -> Dict[str, int]:
     """goods_id → how many pieces of it are on «На ОТХ» and not returned: the mark of the catalog; with «Свой остаток (ОТХ)» (oth_manual)."""
     from .oth_stock import manual_rows

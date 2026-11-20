@@ -2,6 +2,7 @@
 «Свой остаток (ОТХ)» of the catalog card (oth_manual, the owner 2026-11-03): the owner and the partner, from the office."""
 from __future__ import annotations
 
+import re
 from urllib.parse import quote
 
 from flask import Response, abort, flash, redirect, render_template, request
@@ -156,6 +157,15 @@ def register(app) -> None:
             flash("Неизвестная точка.")
         return redirect("/catalog/item/" + quote(goods_id, safe=""))
 
+    def _returned_filters() -> dict:
+        """The search and the filters of «Возвращено поставщику» as typed (`raw`, back into the form) and as read: a wrong number or day is left out."""
+        args = request.args
+        raw = {k: str(args.get(k) or "").strip()[:order_oth.RETURNED_QUERY_MAX] for k in ("q", "qty_from", "qty_to", "from", "to")}
+        number = lambda v: int(v) if v.isascii() and v.isdigit() else None
+        day = lambda v: v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) else ""
+        return {"raw": raw, "query": raw["q"], "qty_from": number(raw["qty_from"]), "qty_to": number(raw["qty_to"]),
+                "day_from": day(raw["from"]), "day_to": day(raw["to"])}
+
     @app.route("/oth")
     @login_required
     def oth_page():
@@ -182,7 +192,10 @@ def register(app) -> None:
             row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) == "oth" else None
         own = manual_list(conn)
         test = oth_stock._test_points(conn)
+        signed = conn.execute("SELECT DISTINCT c.point_id, COALESCE(p.name, '') FROM oth_return_plan rp JOIN order_card c ON c.id = rp.order_id "
+                              "LEFT JOIN point p ON p.id = c.point_id WHERE rp.signed_at IS NOT NULL AND c.point_id IS NOT NULL").fetchall()
         places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"] and r["point_id"] not in test}
+        places |= {(pid, name) for pid, name in signed if pid not in test}           # the points of the returns by act (2026-11-21)
         point = request.args.get("point", type=int)
         if point not in {p[0] for p in places}:                       # an unknown point, or one with nothing left: the whole page
             point = None
@@ -190,8 +203,15 @@ def register(app) -> None:
             data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
             own = [r for r in own if r["point_id"] == point]
         tab = "returned" if request.args.get("tab") == "returned" else "stock"     # two tabs (the owner 2026-11-08)
+        returned_filters = None
+        if tab == "returned":                                         # every return, never dropped; the search and the filters (2026-11-21)
+            returned_filters = _returned_filters()
+            history = [r for r in order_oth.returned_history(conn, data["returned"]) if not point or r["point_id"] == point]
+            data["returned_all"] = len(history)
+            data["returned"] = order_oth.filter_returned(history, **{k: v for k, v in returned_filters.items() if k != "raw"})
         from .routes_orders import local_now
         return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, tab=tab,
+                               returned_filters=returned_filters,
                                acts=oth_return_act.listed(conn), act_points=[p for p in order_points.list_points(conn) if p["id"] not in test],
                                act_day=order_oth.return_date(local_now().date()), **data)
 
