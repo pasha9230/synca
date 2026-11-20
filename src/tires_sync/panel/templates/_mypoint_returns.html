@@ -11,7 +11,14 @@
 {% set c = r.card %}
 <article class="mp-return-row" data-return="{{ c.id }}">
   <div><b>№ {{ r.label }}</b> <span class="mp-return-status" data-return-label>Согласовано на возврат, {{ r.date }}</span><br>
-  <span>{{ c.items_text or "шины с ОТХ" }}</span>{% if r.act_order %} · Шины с ОТХ: акт, скорее всего, по исходному заказу №{{ r.act_order }}.{% endif %}
+  <div class="mp-tyres" data-tyres>
+    {% for item in r.lines %}
+    <div class="mp-oth-item" data-return-item><span class="mp-oth-name">{{ item.name }}</span>
+      {% if item.code %}<span class="mp-sub">Код {{ item.code }}</span>{% endif %}
+      <span class="mp-sub">Кол-во: {{ item.qty }} шт.</span></div>
+    {% else %}шины не указаны{% endfor %}
+  </div>
+  {% if r.act_order %} · Шины с ОТХ: акт, скорее всего, по исходному заказу №{{ r.act_order }}.{% endif %}
   {% if hints and loop.first %}<p class="mp-hint" data-point-hint="return">{{ point_hint("return") }}</p>{% endif %}</div>
   {% if r.asked %}
   <div class="mp-return-question" data-oth-question="{{ c.id }}">

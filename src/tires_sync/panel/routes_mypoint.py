@@ -451,7 +451,8 @@ def mark_shared_acts(rows: list) -> None:
 def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
-    return [{"card": r["card"], "label": mgr.label(r["card"]), "return_date": r["plan"]["return_date"], "date": _short_date(r["plan"]["return_date"]),
+    return [{"card": r["card"], "label": mgr.label(r["card"]), "lines": point_lines(r["card"]),
+             "return_date": r["plan"]["return_date"], "date": _short_date(r["plan"]["return_date"]),
              "return_by": _full_date(r["plan"]["return_date"]),                 # «Вернуть дд.мм.гггг» by the number (the task of 2026-11-12)
              "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"]),
              "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"])}      # «Скачать акт» (the owner 2026-11-12)
@@ -793,7 +794,7 @@ def register(app) -> None:
             return redirect(back)
         try:
             sold = oth_point_sale.sell(conn, card["id"], pieces, form.get("name"), form.get("phone"), form.get("number"), form.get("transfer"),
-                                       form.get("anonymous") == "1", now, author())
+                                       form.get("anonymous") == "1", now, author(), seller=_acting_seller())
             error = ""
         except orders.OrderError as err:
             error = str(err)
@@ -811,6 +812,11 @@ def register(app) -> None:
         point_log.record(conn, now, author(), point_id, "oth_sold", card["id"], outcome)     # «История точки»
         flash("Заказ №%s — продано с ОТХ: заказ №%d на этапе «%s»." % (mgr.label(card), sold, orders.stage_name(conn, "done")), "info")
         return redirect(back)
+
+    def _acting_seller() -> str:
+        """The owner or the partner working as the point sells as themselves (the owner 2026-11-20); the point's own manager: nobody."""
+        user = current_user()
+        return user["login"] if user.get("as_point") is not None and user["real_role"] in ("owner", "partner") else ""
 
     def _sale_window(card, point_id, back, form, error):
         from urllib.parse import parse_qs, urlsplit
