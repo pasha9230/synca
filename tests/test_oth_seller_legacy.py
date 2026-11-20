@@ -2,6 +2,8 @@
 responsible, and «Аккаунт» of the Google table follows. A sale by a point keeps the responsible of the order that made it."""
 from __future__ import annotations
 
+import pytest
+
 from test_oth_client_swap import NEW_PHONE, _b, put_aside
 from test_oth_sale import LATER, T, new_order, offer, line
 from tests.test_order_reserve import card_at, db
@@ -117,3 +119,21 @@ def test_the_open_tasks_and_the_chats_of_the_order_go_to_the_seller(tmp_path):
     assert (who[mine], who[nobody], who[other], who[done]) == (SELLER, SELLER, "manager_c", "manager_a")
     assert conn.execute("SELECT responsible FROM avito_chat WHERE chat_id = 'c1'").fetchone()[0] == SELLER
     assert "Продажа с ОТХ: открытые задачи (2) и чаты (1) заказа переданы «manager_b»" in [e["text"] for e in orders.list_events(conn, b)]
+
+
+def test_a_done_order_keeps_its_responsible_when_its_new_order_takes_tyres_from_oth(tmp_path):
+    """The owner 2026-11-21: only the order that sells the tyres from OTH takes the seller; the earlier order of the client, already done,
+    keeps its responsible (a new order of it by «Новый заказ этому клиенту», then «Взять с ОТХ» into the new one)."""
+    from tires_sync import order_chain
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    done = new_order(conn)
+    conn.execute("UPDATE order_card SET responsible = 'manager_a', stage_id = (SELECT id FROM order_stage WHERE code = 'done') WHERE id = ?", (done,))
+    conn.commit()
+    new, _ = order_chain.again(conn, done, LATER, SELLER, staff={SELLER, "manager_a"}, admin="admin")
+    orders.add_item(conn, new, goods_id="1", name="Nokian 205/55 R16", brand_key="nokian", season="winter", diameter=16, territory="1", qty=4,
+                    sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=LATER, author=SELLER)
+    assert oth_sale.take(conn, new, line(conn, new, "1")["id"], offer(conn, new, "1")["from_item"], LATER, SELLER) == 4
+    assert responsible(conn, new) == SELLER and responsible(conn, done) == "manager_a" and told(conn, done) == []
+    with pytest.raises(orders.OrderError, match="Брать с ОТХ можно только до"):       # a done order takes nothing from OTH at all
+        oth_sale.take(conn, done, line(conn, done, "1")["id"], 0, LATER, SELLER)

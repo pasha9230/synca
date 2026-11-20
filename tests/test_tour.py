@@ -144,10 +144,13 @@ def test_every_step_of_the_point_lights_an_element_of_its_workplace(tmp_path):
     mine = manager(app, conn, pid)
     html = text(mine.get("/my-point?tab=here"))
     steps = tour.steps_for("point")
-    assert shown(html) == [s["title"] for s in steps] == ["Рабочее место", "Вкладки", "Поиск", "Передать клиента", "Карточка заказа",
-                                                          "Возврат поставщику", tour.AGAIN["title"]]
+    assert [s["title"] for s in steps] == ["Рабочее место", "Вкладки", "Поиск", "Передать клиента", "Карточка заказа", "Возврат поставщику",
+                                           tour.AGAIN["title"]]
+    assert shown(html) == [s["title"] for s in steps if s["sel"] != ".mp-returns"]       # the returns live in «На возврат» (2026-11-21)
     for s in steps:
-        assert len(select(html, s["sel"])) == 1, s["sel"]
+        if s["sel"] != ".mp-returns":
+            assert len(select(html, s["sel"])) == 1, s["sel"]
+    assert len(select(text(mine.get("/my-point?tab=return")), ".mp-returns")) == 1
     assert "МХ-3" in next(s for s in steps if s["sel"] == ".mp-returns")["text"]
 
 
