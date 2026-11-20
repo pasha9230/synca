@@ -259,3 +259,5 @@
   body.pt-card-page .owin-items td.owin-iqty{flex:1 1 auto;white-space:normal}
   body.pt-card-page .owin-items td.owin-isum{margin-left:auto;white-space:nowrap}
 }
+/* «Сегодня есть возвраты» (2026-11-21): «Перейти к возвратам» and «Подписал акт и отдал» wrap on a phone */
+.mp-today-acts{display:flex;flex-wrap:wrap;gap:8px;min-width:0;max-width:100%}.mp-today-acts>*{flex:1 1 160px;min-width:0}.mp-today-acts .mp-handover summary{width:100%}

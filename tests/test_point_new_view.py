@@ -125,11 +125,13 @@ def test_the_workplace_cards_tabs_and_questions(w):
     # «В другой город»: «Передал курьеру ТК» and the labels, no «Выдал»
     assert "/my-point/%d/shipped" % ids["far"] in here and "/my-point/%d/issued\"" % ids["far"] not in here
     assert 'href="/orders/%d/labels/' % ids["far"] in here and "data-intercity-tag" in here
-    # the act МХ-3 over every tab
-    assert 'data-return="%d"' % ids["ret"] in here and "/my-point/%d/act_signed" % ids["ret"] in here
+    # the act МХ-3: in «На возврат» only (the owner 2026-11-21)
+    assert 'data-return="%d"' % ids["ret"] not in here
+    ret = w["point"].get("/my-point?tab=return").get_data(as_text=True)
+    assert 'data-return="%d"' % ids["ret"] in ret and "/my-point/%d/act_signed" % ids["ret"] in ret
     oth = w["point"].get("/my-point?tab=oth").get_data(as_text=True)                  # an «asked» left on «На ОТХ» by the old rule still works
     assert 'data-oth-question="%d"' % ids["oth"] in oth and "/my-point/%d/oth_issued" % ids["oth"] in oth
-    assert 'data-return="%d"' % ids["ret"] in oth
+    assert 'data-return="%d"' % ids["ret"] not in oth
     moving = w["point"].get("/my-point?tab=moving").get_data(as_text=True)
     assert "/my-point/%d/arrived" % ids["moving"] in moving
 
@@ -137,7 +139,7 @@ def test_the_workplace_cards_tabs_and_questions(w):
 def test_the_tour_of_the_point_finds_its_places_on_the_new_workplace(w):
     flag(w["conn"], "all")
     html = w["point"].get("/my-point").get_data(as_text=True)
-    for mark in ('class="mp-tabs"', 'class="mp-search', 'data-tour="handoff"', 'class="mp-block"', 'class="mp-card p2-card', 'class="mp-returns"'):
+    for mark in ('class="mp-tabs"', 'class="mp-search', 'data-tour="handoff"', 'class="mp-block"', 'class="mp-card p2-card'):
         assert mark in html, mark
     assert re.search(r'<section class="mp-block"[^>]*><h2[^>]*>.*?</h2>\s*<article class="mp-card', html, re.S)   # .mp-block > .mp-card:first-of-type
 

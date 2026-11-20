@@ -148,15 +148,18 @@ def test_the_point_sees_the_button_on_the_plaque_and_in_todays_notice(tmp_path, 
     agreed(conn, card)
     order_oth.tell_return_day(conn, clock["now"])
     mine = manager(app, conn, pid)
+    assert "data-return-day" in mine.get("/my-point").get_data(as_text=True)          # the notice: the page as it opens (2026-11-21)
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
-    assert "data-return-day" in page and "Скачать акт" not in page                    # no file yet: no button
+    assert "data-return-day" not in page and "Скачать акт" not in page                # no notice on a tab chosen; no file yet: no button
     acts.save(conn, pid, "2026-11-16", "later.pdf", PDF, NOW, "owner")                # of another date: not this order's
     assert "Скачать акт" not in mine.get("/my-point?tab=return").get_data(as_text=True)
     act, _ = acts.save(conn, pid, DAY, "act.pdf", PDF, NOW, "owner")
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     link = 'href="/my-point/return-act/%d"' % act
-    assert page.count(link) == 2 and page.count("Скачать акт") == 2                   # the notice of today and the plaque of the order
-    assert page.count(link) == mine.get("/my-point?tab=here").get_data(as_text=True).count(link)     # both are above the tabs
+    assert page.count(link) == 1 and page.count("Скачать акт") == 1                   # the plaque of the order in «На возврат»
+    landing = mine.get("/my-point").get_data(as_text=True)
+    assert landing.count(link) == 1 and 'data-return="%d"' % card not in landing      # the notice of today, no plaque over the tabs
+    assert mine.get("/my-point?tab=here").get_data(as_text=True).count(link) == 0     # a tab chosen: neither the notice nor the plaque
     assert order_oth.sign_act(conn, orders.get_card(conn, card), "Бета", DAY + "T10:00:00", "gamma") in ("return", "signed")
     conn.commit()
     assert "data-return-day" not in mine.get("/my-point?tab=return").get_data(as_text=True)
@@ -178,3 +181,29 @@ def test_the_table_is_only_added(tmp_path):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(oth_return_act)")]
     assert cols == ["id", "point_id", "return_date", "name", "size", "data", "uploaded_at", "uploaded_by"]
     assert "oth_return_act" in store.SCHEMA and "DROP" not in store.SCHEMA.split("oth_return_act")[1][:600]
+
+
+@pytest.mark.parametrize("view", ["old", "new"])
+def test_one_notice_of_today_only_as_the_page_opens_and_its_button_signs_every_order_of_the_date(tmp_path, clock, view):
+    """The owner 2026-11-21: «Сегодня есть возвраты» — one block, on the return day, on the page as it opens (not on a tab chosen); «Перейти
+    к возвратам» and «Подписал акт и отдал» (every order of the date); the orders themselves are listed in «На возврат» only."""
+    app, owner, conn, pid, card = setup(tmp_path, view)
+    conn.execute("UPDATE point SET channel = 'panel' WHERE id = ?", (pid,))
+    agreed(conn, card)
+    order_oth.tell_return_day(conn, clock["now"])
+    mine = manager(app, conn, pid)
+    landing = mine.get("/my-point").get_data(as_text=True)
+    assert landing.count("data-return-day=") == 1 and "Сегодня есть возвраты: 1 заказ." in landing
+    assert 'href="/my-point?tab=return"' in landing and 'action="/my-point/return-day/signed"' in landing
+    assert 'data-return="%d"' % card not in landing                                   # the order's own card: in «На возврат»
+    for tab in ("here", "oth", "return"):
+        assert "data-return-day=" not in mine.get("/my-point?tab=%s" % tab).get_data(as_text=True), tab
+    import re
+    token = re.search(r'action="/my-point/return-day/signed".*?name="token" value="([0-9a-f]{24})"', landing, re.S).group(1)
+    assert mine.post("/my-point/return-day/signed", data={"csrf": "tok", "token": token}).status_code == 302     # no «Да, передал»: nothing
+    assert order_oth.return_plan(conn, card)["signed_at"] is None
+    assert mine.post("/my-point/return-day/signed", data={"csrf": "tok", "token": token, "handover": "yes"}).status_code == 302
+    assert order_oth.return_plan(conn, card)["signed_at"]
+    assert "data-return-day=" not in mine.get("/my-point").get_data(as_text=True)     # every act of the date signed: the notice is gone
+    mine.post("/my-point/return-day/signed", data={"csrf": "tok", "token": token, "handover": "yes"})            # pressed again: nothing more
+    assert conn.execute("SELECT COUNT(*) FROM audit WHERE action = 'oth_act_signed'").fetchone()[0] == 1

@@ -312,6 +312,7 @@ for _section, _endpoints in {
              "tasks_feed"),                             # the sound of one's own tasks «Позвонить…» (order_call.sounds): read-only
     "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                 "mypoint_not_taken",                    # «Водитель не забрал» of «Сегодня возврат!» (oth_point_return, 2026-11-12)
+                "mypoint_return_day_signed",            # «Подписал акт и отдал» of «Сегодня есть возвраты» (2026-11-21)
                 "mypoint_oth_sale"),                    # the window of «Продать» of a record on «На ОТХ» (oth_point_sale, ТЗ part D)
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
              "shop_cart_add", "shop_cart_page", "shop_cart_set", "shop_checkout", "shop_orders_page", "shop_order_page",   # its cart, its orders,
@@ -387,6 +388,7 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "order_unsent_by_hand",                       # «Отправил вручную» by its own orders (card_id of the address)
                          "mypoint_return_act",                         # «Скачать акт» of a return of its own point (2026-11-12)
                          "mypoint_not_taken",                          # «Водитель не забрал» of its own «Сегодня возврат!» (2026-11-12)
+                         "mypoint_return_day_signed",            # «Подписал акт и отдал» of «Сегодня есть возвраты» (2026-11-21)
                          "mypoint_oth_sale",                           # the window of «Продать» of its own record on «На ОТХ» (ТЗ part D)
                          "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
                          "whatsnew_page"}                              # «Что нового»: the point's items

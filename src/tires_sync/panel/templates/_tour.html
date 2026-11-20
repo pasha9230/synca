@@ -2,7 +2,7 @@
    button per step (the arrows move between them), outside the forms, so that Enter on it sends nothing; the light of the step's element is
    drawn by the <style> below (the selectors are ours, checked by tour.SELECTOR) #}
 {# what of the page the steps need (tour.WHEN): the values the page was drawn with #}
-{% set steps = tour({"point": point is defined and point, "cards": cards is defined and cards, "returns": returns is defined and returns,
+{% set steps = tour({"point": point is defined and point, "cards": cards is defined and cards, "returns": returns is defined and returns and tab is defined and tab == "return",
                      "catalog": empty is defined and not empty,
                      "warehouses": empty is defined and not empty and wh_both is defined and wh_both}) if tour is defined else [] %}
 {% if steps %}

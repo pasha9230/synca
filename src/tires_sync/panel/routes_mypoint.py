@@ -612,7 +612,8 @@ def register(app) -> None:
                            key=lambda r: not (r["asked"] or r["oth_asked"]))
             issued = [r for r in issued if r["card"]["id"] in ids]
             returns = [r for r in returns if r["card"]["id"] in ids]
-        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
+        landing = not request.args.get("tab") and found is None and not alerts_open     # the page as it opens: «Сегодня есть возвраты» (2026-11-21)
+        return render_template(point_page("mypoint.html"), landing=landing, point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
@@ -776,6 +777,49 @@ def register(app) -> None:
                                token=secrets.token_hex(12), single=len(rows) == 1, bonus=oth_point_sale.BONUS, no_contact=oth_point_sale.NO_CONTACT,
                                p=point_id if own_point() is None else None, back=back,
                                tab=(parse_qs(urlsplit(back).query).get("tab") or [""])[0])
+
+    @app.route("/my-point/return-day/signed", methods=["POST"])
+    @login_required
+    def mypoint_return_day_signed():
+        """«Подписал акт и отдал» of «Сегодня есть возвраты» (the owner 2026-11-21): every order of the point's return of today, each as its own
+        press in «На возврат» (act «act_signed»: the act, the stage, the history, a press twice does nothing more)."""
+        conn = get_conn()
+        point_id = _point_id(conn)
+        back = _back(point_id)
+        token = str(request.form.get("token") or "").strip()[:64]
+        if not re.fullmatch(r"[0-9a-f]{24}", token) or request.form.get("handover") != "yes":
+            flash("Передача не отмечена: обновите страницу и подтвердите кнопкой «Да, передал».", "error")
+            return redirect(back)
+        now = local_iso()
+        day = order_oth.return_day(conn, point_id, now)
+        if not day:
+            flash("Сегодня возвратов к передаче нет: всё уже отмечено.")
+            return redirect(back)
+        done, failed = [], []
+        for card_id in day["ids"]:
+            card = _own_card(conn, card_id, point_id)
+            claimed = conn.execute("INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,'обрабатывается')",
+                                   ("page-%s-%d" % (token, card_id), now, "панель: %s" % author(), ACTIONS["act_signed"], card_id))
+            conn.commit()
+            if claimed.rowcount != 1:                                           # the same press twice
+                continue
+            try:
+                outcome, answer, ok = act(conn, card, "act_signed", author(), now, None, None)
+            except Exception:                                                   # one order must not stop the others
+                conn.rollback()
+                current_app.logger.exception("«Рабочее место»: act_signed of order %s failed", card_id)
+                outcome, answer, ok = "ошибка при выполнении", "Не получилось отметить заказ №%s." % mgr.label(card), False
+            conn.execute("UPDATE order_command_log SET outcome = ? WHERE message_id = ?", (outcome, "page-%s-%d" % (token, card_id)))
+            conn.commit()
+            if ok and not outcome.startswith("уже"):
+                point_log.record(conn, now, author(), point_id, "act_signed", card_id, outcome)
+                point_log.remember(conn, card, "act_signed", point_id, author(), now)
+            (done if ok else failed).append(answer if not ok else mgr.label(card))
+        if done:
+            flash("Акт МХ-3 подписан, шины отданы: заказы %s." % ", ".join("№%s" % n for n in done), "info")
+        for answer in failed:
+            flash(answer, "error")
+        return redirect(back)
 
     @app.route("/my-point/return-day/not-taken", methods=["POST"])
     @login_required
