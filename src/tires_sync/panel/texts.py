@@ -138,6 +138,10 @@ def audit_text(entry: dict) -> str:
         return "Цены поставщика: принята новая цена (%d поз.)" % len(d.get("goods") or [])
     if action == "price_guard_keep":
         return "Цены поставщика: оставлена прежняя цена (%d поз.)" % len(d.get("goods") or [])
+    if action == "order_chain_link":
+        return "Заказы связаны в цепочку клиента: %s" % ", ".join("№%s" % i for i in d.get("chain") or [])
+    if action == "order_chain_unlink":
+        return "Заказ №%s отвязан от цепочки клиента" % d.get("order", "?")
     if action == "order_merge":
         return "Заказы %s объединены в заказ №%s" % (", ".join("№%s" % i for i in d.get("orders") or []), d.get("into", "?"))
     if action == "order_unmerge":
