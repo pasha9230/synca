@@ -203,11 +203,13 @@ def register(app) -> None:
             data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
             own = [r for r in own if r["point_id"] == point]
         tab = "returned" if request.args.get("tab") == "returned" else "stock"     # two tabs (the owner 2026-11-08)
-        returned_filters = None
-        if tab == "returned":                                         # every return, never dropped; the search and the filters (2026-11-21)
+        returned_filters = None                                       # every return, never dropped; the search and the filters (2026-11-21)
+        history = [r for r in order_oth.returned_history(conn, data["returned"]) if r["point_id"] not in test and (not point or r["point_id"] == point)]
+        data["returned_all"] = len(history)
+        data["returned_pieces"] = sum(r["qty"] for r in history)      # the tab's counter: the whole list, never the filtered one (review)
+        data["returned"] = history
+        if tab == "returned":
             returned_filters = _returned_filters()
-            history = [r for r in order_oth.returned_history(conn, data["returned"]) if not point or r["point_id"] == point]
-            data["returned_all"] = len(history)
             data["returned"] = order_oth.filter_returned(history, **{k: v for k, v in returned_filters.items() if k != "raw"})
         from .routes_orders import local_now
         return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, tab=tab,

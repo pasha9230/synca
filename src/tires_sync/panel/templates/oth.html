@@ -8,7 +8,7 @@
 {% set keep_point = ("&point=%d"|format(point)) if point else "" %}
 {# the forms of the rows come back to the same point (the owner 2026-11-10; routes_catalog_oth._back) #}
 {% set keep_form %}{% if point %}<input type="hidden" name="point" value="{{ point }}">{% endif %}{% endset %}
-<nav class="tabs o2-tabs" aria-label="На ОТХ"><a href="/oth{{ ('?point=%d'|format(point)) if point else '' }}"{% if tab != "returned" %} class="is-active" aria-current="page"{% endif %}>На складе <span class="badge badge--neutral">{{ stock|sum(attribute="qty") }} шт.</span></a><a href="/oth?tab=returned{{ keep_point }}"{% if tab == "returned" %} class="is-active" aria-current="page"{% endif %}>Возвращено поставщику <span class="badge badge--neutral">{{ returned|sum(attribute="qty") }} шт.</span></a></nav>
+<nav class="tabs o2-tabs" aria-label="На ОТХ"><a href="/oth{{ ('?point=%d'|format(point)) if point else '' }}"{% if tab != "returned" %} class="is-active" aria-current="page"{% endif %}>На складе <span class="badge badge--neutral">{{ stock|sum(attribute="qty") }} шт.</span></a><a href="/oth?tab=returned{{ keep_point }}"{% if tab == "returned" %} class="is-active" aria-current="page"{% endif %}>Возвращено поставщику <span class="badge badge--neutral" data-returned-pieces>{{ returned_pieces }} шт.</span></a></nav>
 {% if tab != "returned" %}
 <section class="card">
 {% if stock %}<div class="table-wrap"><table class="table">

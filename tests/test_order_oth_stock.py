@@ -583,3 +583,24 @@ def test_the_returned_tab_keeps_every_return_by_act_and_finds_it(tmp_path):
     assert "Ничего не найдено" in empty and found(empty) == []
     pid = orders.get_card(conn, a)["point_id"]
     assert found(page(point=str(pid))) == [a, b]                                            # both of the same point
+
+
+def test_the_returned_counter_is_the_whole_list_on_both_tabs_and_a_test_point_is_left_out(tmp_path):
+    """Review 2026-11-21: the counter of «Возвращено поставщику» counted the old marks only on «На складе» and the filtered rows on its own
+    tab; the returns of a test point were listed."""
+    from tires_sync import oth_stock
+    app, owner, tok, conn = panel(tmp_path)
+    a = card_at(conn, "oth", T)
+    _signed(conn, a, "5300001", "26R-0000011", "2026-10-24T12:00:00")
+    counter = lambda html: re.search(r'data-returned-pieces>(\d+) шт', html).group(1)
+    assert counter(owner.get("/oth").get_data(as_text=True)) == "4"
+    assert counter(owner.get("/oth?tab=returned&q=нет-такого").get_data(as_text=True)) == "4"
+    pid = orders.get_card(conn, a)["point_id"]
+    import pytest
+    mp = pytest.MonkeyPatch()
+    mp.setattr(oth_stock, "_test_points", lambda conn: {pid})
+    try:
+        html = owner.get("/oth?tab=returned").get_data(as_text=True)
+        assert counter(html) == "0" and "5300001" not in html
+    finally:
+        mp.undo()
