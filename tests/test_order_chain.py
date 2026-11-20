@@ -276,7 +276,8 @@ def test_the_panel_names_the_owner_for_a_deleted_responsible(tmp_path):
 
 
 
-def test_the_panel_names_the_one_user_of_the_role_owner_for_a_deleted_responsible(tmp_path):
+def test_the_one_who_presses_answers_for_the_new_order_whoever_answered_for_the_earlier(tmp_path):
+    """The owner 2026-11-20: each order answers to the person who works it, whatever the account, the channel or the earlier orders."""
     from panel_helpers import login, make_app, post
     from tires_sync import users
     app = make_app(tmp_path)
@@ -288,7 +289,10 @@ def test_the_panel_names_the_one_user_of_the_role_owner_for_a_deleted_responsibl
     conn.commit()
     a = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="уволен"), NOW, "o")
     new = int(post(client, "/orders/%d/again" % a, tok).headers["Location"].rsplit("/", 1)[1])
-    assert orders.get_card(conn, new)["responsible"] == "admin_a"
+    assert orders.get_card(conn, new)["responsible"] == app.config["AUTHOR"]
+    other = orders.create_card(conn, dict(client_name="Пётр", client_phone="+7 900 555-55-55", responsible="admin_a"), NOW, "o")
+    newer = int(post(client, "/orders/%d/again" % other, tok).headers["Location"].rsplit("/", 1)[1])
+    assert orders.get_card(conn, newer)["responsible"] == app.config["AUTHOR"]
 
 
 def test_an_order_of_the_robot_gets_the_admin_without_the_tag_of_a_deleted_user(tmp_path):
@@ -299,3 +303,10 @@ def test_an_order_of_the_robot_gets_the_admin_without_the_tag_of_a_deleted_user(
     card = orders.get_card(conn, new)
     assert card["responsible"] == "admin" and not card["tags"]
     assert not any(e["text"].startswith("Создавший user удален") for e in orders.list_events(conn, new))
+
+
+def test_the_maker_of_the_new_order_answers_for_it(tmp_path):
+    conn = db(tmp_path)
+    first = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="manager_a"), NOW, "o")
+    new, _ = chain.again(conn, first, NOW, "manager_b", staff={"manager_a", "manager_b"}, admin="admin")
+    assert orders.get_card(conn, new)["responsible"] == "manager_b" and orders.get_card(conn, first)["responsible"] == "manager_a"

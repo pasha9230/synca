@@ -157,14 +157,17 @@ def _removed(conn, login: str) -> bool:
 
 
 def again(conn, order_id: int, now: str, author: str, staff: Optional[set] = None, admin: str = "") -> Tuple[int, bool]:
-    """«Добавить заказ» of an order (the owner 2026-11-19): a new order of the same client — the name, the phone, the point, the responsible
-    and the source copied, no tyres, no chat — on the first stage, tied to the chain. An open order of the same phone does not stop it:
+    """«Добавить заказ» of an order (the owner 2026-11-19): a new order of the same client — the name, the phone, the point and the source
+    copied, no tyres, no chat — on the first stage, tied to the chain. Its responsible is the person who makes it (a member of `staff`,
+    the owner 2026-11-20); else (no staff given, the owner working as a point) the earlier order's, as below. An open order of the same phone does not stop it:
     the person asked for a second order (create_card's many_open); the guard of a double press stays on every other way to make one.
     Returns (the order, made now): False — a press within TWIN_SECONDS gave the order made a moment ago (re-review N2: say so).
     `staff`: the logins that may answer for an order; a responsible no longer among them (the user deleted) gives way to `admin` with the
     tag GONE_TAG and a record (the owner 2026-11-20: never an order without its responsible)."""
     card = orders.get_card(conn, order_id)
     fields = {k: card[k] for k in COPIED if card.get(k) not in (None, "")}
+    if staff is not None and author in staff:                  # the owner 2026-11-20: each order answers to who works it, whatever the
+        fields["responsible"] = author                         # account, the channel or the earlier orders: the one who makes it
     away = staff is not None and admin and fields.get("responsible") and fields["responsible"] not in staff
     gone = away and _removed(conn, fields["responsible"])     # a user deleted; a name that never was a user (the robot): the admin, no tag
     if away:
