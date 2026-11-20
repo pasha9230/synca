@@ -564,3 +564,18 @@ def test_the_order_line_is_for_who_may_order_only(tmp_path):
         session.update(user="chat1", epoch=store_.get_session_epoch(conn, "chat1"), csrf="tok")
     page = other.get("/orders/%d" % new).get_data(as_text=True)
     assert "не заказано у поставщика" in page and "Закажите у поставщика" not in page
+
+
+def test_the_merged_order_and_its_sources_are_one_chain_of_the_client(tmp_path):
+    """The owner 2026-11-20: the merged order names its sources, each source names the merged order and the other sources; a chain a
+    source had comes along."""
+    from tires_sync import order_chain
+    conn = db(tmp_path)
+    a = card_at(conn, "moving", T)
+    b = _second(conn)
+    earlier = orders.create_card(conn, dict(client_name="Ранний"), NOW, "o")
+    order_chain.link(conn, b, earlier, NOW, "o")
+    new = _merge(conn, [a, b])
+    others = lambda oid: sorted(o["id"] for o in order_chain.others(conn, oid))
+    assert others(new) == sorted([a, b, earlier]) and others(a) == sorted([new, b, earlier]) and others(earlier) == sorted([new, a, b])
+    assert all(e["level"] == "grey" for e in orders.list_events(conn, new) if e["kind"] == "chain")

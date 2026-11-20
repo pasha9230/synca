@@ -90,6 +90,18 @@ def link(conn, order_id: int, other_id: int, now: str, author: str, commit: bool
         conn.commit()
 
 
+
+def join(conn, ids: List[int], now: str, author: str) -> None:
+    """Tie all of `ids` into one chain, in the caller's transaction (no commit): «Объединить заказы» (the owner 2026-11-20: the merged
+    order and its sources are one branch of the client's orders; the merged one names the sources, each source names the merged one and
+    the other sources). The chains the sources had come along."""
+    first, rest = ids[0], ids[1:]
+    for other in rest:
+        mine, theirs = _chain(conn, first), _chain(conn, other)
+        if mine is None or mine != theirs:
+            link(conn, first, other, now, author, commit=False)
+
+
 def unlink(conn, order_id: int, now: str, author: str, commit: bool = True) -> bool:
     """Take `order_id` out of its chain; a chain left with one order is no chain. False: it was in none."""
     chain = _chain(conn, order_id)
