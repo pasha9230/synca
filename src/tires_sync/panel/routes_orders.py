@@ -86,9 +86,10 @@ def _responsible_options(app, conn, current: str = "") -> list:
 
 
 def _chain_staff(app, conn) -> dict:
-    """For «Новый заказ этому клиенту»: who may answer for an order, and the owner (the panel's admin) to name when the responsible of the
-    earlier order was deleted (the owner 2026-11-20)."""
-    return {"staff": {o["login"] for o in _responsible_options(app, conn)}, "admin": app.config["AUTHOR"]}
+    """For «Новый заказ этому клиенту»: who may answer for an order, and the panel's admin to name when the responsible of the earlier
+    order was deleted (the owner 2026-11-20): the one active panel user of the role «Владелец»; none or several: the main login."""
+    owners = [u["login"] for u in panel_users.list_users(conn) if u["active"] and u["role"] == "owner"]
+    return {"staff": {o["login"] for o in _responsible_options(app, conn)}, "admin": owners[0] if len(owners) == 1 else app.config["AUTHOR"]}
 
 
 def check_responsible(app, conn, login, current: str = "") -> None:

@@ -271,3 +271,19 @@ def test_the_panel_names_the_owner_for_a_deleted_responsible(tmp_path):
     a = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="уволен"), NOW, "o")
     new = int(post(client, "/orders/%d/again" % a, tok).headers["Location"].rsplit("/", 1)[1])
     assert orders.get_card(conn, new)["responsible"] == app.config["AUTHOR"]
+
+
+
+def test_the_panel_names_the_one_user_of_the_role_owner_for_a_deleted_responsible(tmp_path):
+    from panel_helpers import login, make_app, post
+    from tires_sync import users
+    app = make_app(tmp_path)
+    client = app.test_client()
+    tok = login(client)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    users.add_user(conn, "admin_a", "secret-pass-123", NOW, role="owner")
+    conn.commit()
+    a = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="уволен"), NOW, "o")
+    new = int(post(client, "/orders/%d/again" % a, tok).headers["Location"].rsplit("/", 1)[1])
+    assert orders.get_card(conn, new)["responsible"] == "admin_a"
