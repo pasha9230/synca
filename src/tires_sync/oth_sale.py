@@ -442,6 +442,8 @@ def _stage(conn, code: str) -> dict:
 
 
 SELLER_TEXT = "Продажа с ОТХ: ответственный «%s» → «%s» (продал с ОТХ)"
+MOVED_TEXT = "Продажа с ОТХ: открытые задачи (%d) и чаты (%d) заказа переданы «%s»"
+POINT_KEEPS_TEXT = "Продажа с ОТХ точкой: ответственный не меняется (остаётся «%s»)"
 
 
 def credit_seller(conn, card_id, seller: str, now: str, commit: bool = True) -> bool:
@@ -457,6 +459,13 @@ def credit_seller(conn, card_id, seller: str, now: str, commit: bool = True) -> 
         return False
     conn.execute("UPDATE order_card SET responsible = ?, updated_at = ? WHERE id = ?", (seller, now, int(card_id)))
     orders.add_event(conn, int(card_id), now, seller, "field", SELLER_TEXT % (shown or "не назначен", seller))
+    # the owner 2026-11-20: the open tasks of the order and its chats go to the seller with it (those of the former responsible or of nobody;
+    # a task given to somebody else on purpose stays theirs); the journal counts them
+    tasks = conn.execute("UPDATE callback_task SET assignee = ? WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL AND assignee IN (?, '')",
+                         (seller, int(card_id), shown or "")).rowcount
+    chats = conn.execute("UPDATE avito_chat SET responsible = ? WHERE order_id = ? AND responsible IN (?, '')", (seller, int(card_id), shown or "")).rowcount
+    if tasks or chats:
+        orders.add_event(conn, int(card_id), now, seller, "field", MOVED_TEXT % (tasks, chats, seller))
     if commit:
         conn.commit()
     return True
