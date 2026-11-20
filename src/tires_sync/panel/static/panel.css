@@ -844,3 +844,37 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
   body.ui-new input[type=file],body.ui-new .field{max-width:100%;min-width:0}
   body.ui-new .btn:not(.btn--link):not(.btn--link-gray){white-space:normal;height:auto;max-width:100%;text-align:center;line-height:1.25}
 }
+
+/* Return orders at a point, grouped by their scheduled handover date. */
+.mp-return-group {
+  margin: 0 0 var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-md);
+  background: var(--gray-0);
+}
+.mp-return-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2) var(--s-3); }
+.mp-return-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  gap: var(--s-2) var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--gray-200);
+  overflow-wrap: anywhere;
+}
+.mp-return-status { margin-inline-start: var(--s-2); color: var(--gray-600); }
+.mp-return-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
+.mp-return-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  align-items: start;
+  gap: var(--s-2) var(--s-3);
+  margin-top: var(--s-2);
+}
+.mp-return-controls > .mp-handover { grid-column: 2; }
+.mp-return-buttons .btn, .mp-return-controls .mp-handover .btn { width: 100%; height: auto; min-height: 44px; white-space: normal; text-align: center; }
+.mp-return-group form, .mp-return-group .mp-act-links { margin: 0; }
+@media (max-width: 640px) {
+  .mp-return-row, .mp-return-controls { grid-template-columns: minmax(0, 1fr); }
+  .mp-return-controls > .mp-handover { grid-column: auto; }
+}

@@ -19,7 +19,7 @@ PRESSABLE = re.compile(r"<(button|a|summary)\b([^>]*)>(.*?)</\1>", re.S)
 
 
 CARD = ["order_card.html"] + sorted(p.name for p in TEMPLATES.glob("_order_*.html"))     # the screen of the order's card
-POINT_SCREEN = ["mypoint.html"]                                                               # «Рабочее место»
+POINT_SCREEN = ["mypoint.html", "_mypoint_returns.html"]                                                               # «Рабочее место»
 
 
 PRESS = re.compile(r'press\(c, row, "[a-z_]+", "([^"]+)"')        # mypoint.html draws its buttons by the macro press(c, row, action, label, …)

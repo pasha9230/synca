@@ -1,0 +1,55 @@
+{% if return_groups %}
+<section class="mp-returns" aria-label="Возврат поставщику">
+{% for group in return_groups %}
+{% set first = group.first %}
+<section class="mp-return-group" data-return-group="{{ first.return_date }}">
+<header class="mp-return-head">
+  <b class="mp-return-by" data-return-by>Вернуть {{ first.return_by }}</b>
+  <span>Подпишите акт МХ-3 при передаче шин поставщику.</span>
+</header>
+{% for r in group.rows %}
+{% set c = r.card %}
+<article class="mp-return-row" data-return="{{ c.id }}">
+  <div><b>№ {{ r.label }}</b> <span class="mp-return-status" data-return-label>Согласовано на возврат, {{ r.date }}</span><br>
+  <div class="mp-tyres" data-tyres>
+    {% for item in r.lines %}
+    <div class="mp-oth-item" data-return-item><span class="mp-oth-name">{{ item.name }}</span>
+      {% if item.code %}<span class="mp-sub">Код {{ item.code }}</span>{% endif %}
+      <span class="mp-sub">Кол-во: {{ item.qty }} шт.</span></div>
+    {% else %}шины не указаны{% endfor %}
+  </div>
+  {% if r.act_order %} · Шины с ОТХ: акт, скорее всего, по исходному заказу №{{ r.act_order }}.{% endif %}
+  {% if hints and loop.first %}<p class="mp-hint" data-point-hint="return">{{ point_hint("return") }}</p>{% endif %}</div>
+  {% if r.asked %}
+  <div class="mp-return-question" data-oth-question="{{ c.id }}">
+    <b>{{ r.asked.oth_question }}</b>
+    <div class="mp-return-buttons">
+      {% if not c.oth_record %}{{ press(c, r.asked, "oth_issued", "Выдали", "btn--secondary", "Заказ № %s выдали?"|format(r.label), "Клиент забрал заказ; он закроется, согласование возврата снимется.", "Выдали") }}{% endif %}
+      {{ press(c, r.asked, "oth_here", "На точке", "btn--secondary") }}
+    </div>
+  </div>
+  {% endif %}
+</article>
+{% endfor %}
+<div class="mp-return-controls">
+  {% if first.act_file %}{{ act_links(first.act_file, first.act_mark) }}{% endif %}
+  <details class="mp-handover" data-handover="{{ first.card.id }}">
+    <summary class="btn btn--primary mp-btn">Подписал акт и отдал</summary>
+    <p><b>Подтверждаете передачу поставщику (водителю)?</b>
+    {% if group.rows|length == 1 %}Заказ № {{ first.label }} перейдёт в «{{ stage_name("return") }}», сумма возврата — закупка шин.
+    {% else %}Заказы № {{ group.rows|map(attribute="label")|join(", № ") }} будут отмечены как переданные.{% endif %}</p>
+    <form method="post" action="/my-point/{{ first.card.id }}/act_signed" data-once>
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="token" value="{{ first.token }}">
+      <input type="hidden" name="handover" value="yes">
+      <input type="hidden" name="return_date" value="{{ first.return_date }}">
+      {% for r in group.rows %}<input type="hidden" name="return_order" value="{{ r.card.id }}">{% endfor %}
+      {{ pin }}<input type="hidden" name="tab" value="return">
+      <button class="btn btn--primary mp-btn">Да, передал</button>
+    </form>
+  </details>
+</div>
+</section>
+{% endfor %}
+</section>
+{% endif %}

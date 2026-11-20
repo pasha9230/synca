@@ -93,9 +93,9 @@ def test_the_plaque_of_the_return_names_the_webmim_order_the_tyres_were_bought_b
         assert agree_return(owner, order, tok).status_code == 302
     page = manager(app, conn, point_id(conn)).get("/my-point").get_data(as_text=True)
     plaque = page.split('data-return="%d"' % cid)[1].split("</article>")[0]
-    assert "Подпишите акт МХ-3" in plaque and "по исходному заказу №%s" % _webmim(conn, old) in plaque
+    assert "Подпишите акт МХ-3" in page and "по исходному заказу №%s" % _webmim(conn, old) in plaque
     ordinary = page.split('data-return="%d"' % plain)[1].split("</article>")[0]
-    assert "Подпишите акт МХ-3" in ordinary and "исходному заказу" not in ordinary                      # an ordinary order on OTH: as before
+    assert "исходному заказу" not in ordinary                      # an ordinary order on OTH: as before
 
 
 # ---- 4. the point hears of a cancelled return ----------------------------------------------------------------------------------------
