@@ -449,11 +449,14 @@ def credit_seller(conn, card_id, seller: str, now: str, commit: bool = True) -> 
     seller as its responsible (and so «Аккаунт» of the Google table, order_sheet.account_label). A sale by a point (oth_point_sale) keeps
     the responsible of the order that made it: never through here. True: the responsible changed (a record says from whom to whom)."""
     seller = str(seller or "").strip()
-    row = conn.execute("SELECT responsible FROM order_card WHERE id = ?", (int(card_id),)).fetchone()
-    if not seller or row is None or row[0] == seller:
+    row = conn.execute("SELECT responsible, created_by FROM order_card WHERE id = ?", (int(card_id),)).fetchone()
+    if not seller or orders.ACTING_MARK in seller or row is None:     # «<имя> за точку «X»» is no login: a point's sale keeps it (review)
+        return False
+    shown = row[0] or ("" if orders.ACTING_MARK in (row[1] or "") else row[1])     # an empty responsible is the maker (orders.get_card)
+    if shown == seller:
         return False
     conn.execute("UPDATE order_card SET responsible = ?, updated_at = ? WHERE id = ?", (seller, now, int(card_id)))
-    orders.add_event(conn, int(card_id), now, seller, "field", SELLER_TEXT % (row[0] or "не назначен", seller))
+    orders.add_event(conn, int(card_id), now, seller, "field", SELLER_TEXT % (shown or "не назначен", seller))
     if commit:
         conn.commit()
     return True
@@ -624,7 +627,8 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
                   qty=int(r["qty"]), sale_unit=items[r["item_id"]]["sale_unit"], supplier_price=items[r["item_id"]]["supplier_price"],
                   terms=items[r["item_id"]]["terms"], fee_pct=items[r["item_id"]]["fee_pct"], promo_pct=items[r["item_id"]]["promo_pct"]) for r in rows]
     try:
-        new = orders.create_card_with_items(conn, {"client_name": name, "client_phone": phone, "point_id": old["point_id"], "responsible": author},
+        seller = {} if orders.ACTING_MARK in author else {"responsible": author}
+        new = orders.create_card_with_items(conn, dict({"client_name": name, "client_phone": phone, "point_id": old["point_id"]}, **seller),
                                             lines, now, author)                  # the seller answers for it (2026-11-20)
     except orders.OpenOrderExists as err:
         raise OthSaleError("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, err.order_id)) from None

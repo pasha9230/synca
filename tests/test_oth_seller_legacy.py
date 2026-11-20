@@ -75,3 +75,24 @@ def test_an_order_taking_all_the_tyres_with_its_client_makes_the_taker_the_respo
     assert oth_swap.take_client(conn, b, item["id"], orders.get_card(conn, a)["items"][0]["id"], LATER, SELLER) == a
     assert responsible(conn, a) == SELLER and told(conn, a)
 
+
+
+def test_the_owner_working_as_a_point_never_becomes_the_responsible(tmp_path):
+    """Review 2026-11-20: «<имя> за точку «X»» is no login (orders.ACTING_MARK): such a take keeps the responsible."""
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    b = new_order(conn)
+    conn.execute("UPDATE order_card SET responsible = 'manager_a' WHERE id = ?", (b,))
+    conn.commit()
+    acting = "Владелец за точку «Бета»"
+    oth_sale.take(conn, b, line(conn, b, "1")["id"], offer(conn, b, "1")["from_item"], LATER, acting)
+    assert responsible(conn, b) == "manager_a" and told(conn, b) == []
+
+
+def test_the_maker_of_an_order_without_a_responsible_selling_is_not_told_a_change(tmp_path):
+    """Review 2026-11-20: an empty responsible is the maker of the card (orders.get_card); the maker selling changes nothing."""
+    conn = db(tmp_path)
+    card_at(conn, "oth", T)
+    b = new_order(conn)                                           # made by «o», no responsible
+    oth_sale.take(conn, b, line(conn, b, "1")["id"], offer(conn, b, "1")["from_item"], LATER, "o")
+    assert told(conn, b) == []

@@ -147,10 +147,10 @@ def to_client(conn, card_id, name: str, phone: str, now: str, author: str) -> No
         if busy is not None:
             raise _error("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, busy["id"]))
         _audit(conn, now, author, _swap(conn, card, name, phone, now, author))
-        if not orders.move_card(conn, card["id"], stage["id"], now, author, commit=False):
-            raise _error("Клиент не сменён: заказ только что изменили. Обновите страницу.")
         from .oth_sale import credit_seller
         credit_seller(conn, card["id"], author, now, commit=False)         # sold from OTH to a new client: the seller answers (2026-11-20)
+        if not orders.move_card(conn, card["id"], stage["id"], now, author, commit=False):
+            raise _error("Клиент не сменён: заказ только что изменили. Обновите страницу.")
     except orders.OrderError:
         conn.rollback()
         raise
@@ -239,10 +239,10 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
         if not orders.move_card(conn, b["id"], cancel["id"], now, author, changes={"cancel_reason": CLIENT_TOOK % a_id}, fire_rules=False,
                                 journal=False, commit=False):
             raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % b["id"])
-        if not orders.move_card(conn, a_id, stage["id"], now, author, commit=False):
-            raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % a_id)
         from .oth_sale import credit_seller
         credit_seller(conn, a_id, author, now, commit=False)               # B's client bought A's tyres from OTH: the seller answers (2026-11-20)
+        if not orders.move_card(conn, a_id, stage["id"], now, author, commit=False):
+            raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % a_id)
     except orders.OrderError:
         conn.rollback()
         raise
