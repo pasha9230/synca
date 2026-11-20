@@ -736,7 +736,7 @@ def register(app) -> None:
             return redirect(back)
         try:
             sold = oth_point_sale.sell(conn, card["id"], pieces, form.get("name"), form.get("phone"), form.get("number"), form.get("transfer"),
-                                       form.get("anonymous") == "1", now, author())
+                                       form.get("anonymous") == "1", now, author(), seller=_acting_seller())
             error = ""
         except orders.OrderError as err:
             error = str(err)
@@ -754,6 +754,11 @@ def register(app) -> None:
         point_log.record(conn, now, author(), point_id, "oth_sold", card["id"], outcome)     # «История точки»
         flash("Заказ №%s — продано с ОТХ: заказ №%d на этапе «%s»." % (mgr.label(card), sold, orders.stage_name(conn, "done")), "info")
         return redirect(back)
+
+    def _acting_seller() -> str:
+        """The owner or the partner working as the point sells as themselves (the owner 2026-11-20); the point's own manager: nobody."""
+        user = current_user()
+        return user["login"] if user.get("as_point") is not None and user["real_role"] in ("owner", "partner") else ""
 
     def _sale_window(card, point_id, back, form, error):
         from urllib.parse import parse_qs, urlsplit
