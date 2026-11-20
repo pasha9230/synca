@@ -450,7 +450,8 @@ def mark_shared_acts(rows: list) -> None:
 def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
-    return [{"card": r["card"], "label": mgr.label(r["card"]), "date": _short_date(r["plan"]["return_date"]),
+    return [{"card": r["card"], "label": mgr.label(r["card"]), "lines": point_lines(r["card"]),       # the tyres of the plaque (spec #84: was «шины с ОТХ»)
+             "date": _short_date(r["plan"]["return_date"]),
              "return_by": _full_date(r["plan"]["return_date"]),                 # «Вернуть дд.мм.гггг» by the number (the task of 2026-11-12)
              "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"]),
              "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"])}      # «Скачать акт» (the owner 2026-11-12)
