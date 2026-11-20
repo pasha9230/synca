@@ -245,3 +245,29 @@ def test_tying_holds_the_write_lock_while_it_reads_the_chains(tmp_path):
     conn.set_trace_callback(None)
     begin = next(i for i, q in enumerate(seen) if q.startswith("BEGIN IMMEDIATE"))
     assert begin < next(i for i, q in enumerate(seen) if "MAX(chain)" in q)
+
+
+def test_a_deleted_responsible_gives_way_to_the_admin_with_a_tag_and_a_record(tmp_path):
+    """The owner 2026-11-20: never an order without its responsible; a responsible deleted from the users: the admin, «Пользователь удалён»."""
+    conn = db(tmp_path)
+    first = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="gone"), NOW, "o")
+    new, made = chain.again(conn, first, NOW, "o", staff={"admin", "manager"}, admin="admin")
+    card = orders.get_card(conn, new)
+    assert made and card["responsible"] == "admin" and card["tags"] == [chain.GONE_TAG]
+    assert any(e["text"].startswith("Пользователь удалён — назначен другой") and "«gone»" in e["text"] and e["level"] == "yellow"
+               for e in orders.list_events(conn, new))
+    kept = orders.create_card(conn, dict(client_name="Пётр", client_phone="+7 900 555-55-55", responsible="manager"), NOW, "o")
+    again, _ = chain.again(conn, kept, NOW, "o", staff={"admin", "manager"}, admin="admin")
+    assert orders.get_card(conn, again)["responsible"] == "manager" and not orders.get_card(conn, again)["tags"]
+
+
+def test_the_panel_names_the_owner_for_a_deleted_responsible(tmp_path):
+    from panel_helpers import login, make_app, post
+    app = make_app(tmp_path)
+    client = app.test_client()
+    tok = login(client)
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    a = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="уволен"), NOW, "o")
+    new = int(post(client, "/orders/%d/again" % a, tok).headers["Location"].rsplit("/", 1)[1])
+    assert orders.get_card(conn, new)["responsible"] == app.config["AUTHOR"]

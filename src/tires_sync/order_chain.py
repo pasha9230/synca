@@ -131,6 +131,8 @@ def _members(conn, chain: int) -> List[int]:
 
 COPIED = ("client_name", "client_phone", "point_id", "responsible", "source")
 MADE_FROM = "Создан из заказа №%s: тот же клиент"
+GONE_TAG = "Пользователь удалён"                   # a tag is at most 30 signs (orders.MAX_TAG); the record says the rest
+GONE_TEXT = "Пользователь удалён — назначен другой: ответственный прошлого заказа «%s» удалён из пользователей, назначен «%s»."
 TWIN_SECONDS = 60                                             # a second press of «Новый заказ этому клиенту» this soon is the same order
 
 
@@ -148,13 +150,19 @@ def _just_made(conn, order_id: int, now: str, besides: int) -> Optional[int]:
     return row[0] if row else None
 
 
-def again(conn, order_id: int, now: str, author: str) -> Tuple[int, bool]:
+def again(conn, order_id: int, now: str, author: str, staff: Optional[set] = None, admin: str = "") -> Tuple[int, bool]:
     """«Добавить заказ» of an order (the owner 2026-11-19): a new order of the same client — the name, the phone, the point, the responsible
     and the source copied, no tyres, no chat — on the first stage, tied to the chain. An open order of the same phone does not stop it:
     the person asked for a second order (create_card's many_open); the guard of a double press stays on every other way to make one.
-    Returns (the order, made now): False — a press within TWIN_SECONDS gave the order made a moment ago (re-review N2: say so)."""
+    Returns (the order, made now): False — a press within TWIN_SECONDS gave the order made a moment ago (re-review N2: say so).
+    `staff`: the logins that may answer for an order; a responsible no longer among them (the user deleted) gives way to `admin` with the
+    tag GONE_TAG and a record (the owner 2026-11-20: never an order without its responsible)."""
     card = orders.get_card(conn, order_id)
     fields = {k: card[k] for k in COPIED if card.get(k) not in (None, "")}
+    gone = staff is not None and admin and fields.get("responsible") and fields["responsible"] not in staff
+    if gone:
+        fields["responsible"] = admin
+        fields["tags"] = GONE_TAG
     made = MADE_FROM % _label(card)
     try:
         new = orders.create_card(conn, fields, now, author, require_contact=False, commit=False, many_open=True)
@@ -163,6 +171,8 @@ def again(conn, order_id: int, now: str, author: str) -> Tuple[int, bool]:
             conn.rollback()
             return twin, False
         orders.add_event(conn, new, now, author, "chain", made, level=GREY)
+        if gone:
+            orders.add_event(conn, new, now, author, "field", GONE_TEXT % (card["responsible"], admin), level="yellow")
         link(conn, order_id, new, now, author, commit=False, made_from=order_id)
     except Exception:
         conn.rollback()                                       # all or nothing: no order without its chain
@@ -172,13 +182,13 @@ def again(conn, order_id: int, now: str, author: str) -> Tuple[int, bool]:
     return new, True
 
 
-def for_client(conn, client_id: int, now: str, author: str) -> Tuple[int, bool]:
+def for_client(conn, client_id: int, now: str, author: str, staff: Optional[set] = None, admin: str = "") -> Tuple[int, bool]:
     """«Добавить заказ» of a client's card in CRM: «Добавить заказ» of the client's newest order (tied to its chain); a client without an
     order gets a plain new order of the name and the first phone (the usual guard of one open order holds: there is none of theirs)."""
     row = conn.execute("SELECT l.order_id FROM client_order l JOIN order_card c ON c.id = l.order_id WHERE l.client_id = ? ORDER BY c.id DESC LIMIT 1",
                        (client_id,)).fetchone()
     if row is not None:
-        return again(conn, row[0], now, author)
+        return again(conn, row[0], now, author, staff=staff, admin=admin)
     client = conn.execute("SELECT name FROM client WHERE id = ?", (client_id,)).fetchone()
     if client is None:
         raise orders.OrderError("Такого клиента нет.")

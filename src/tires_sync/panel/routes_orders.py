@@ -85,6 +85,12 @@ def _responsible_options(app, conn, current: str = "") -> list:
             for login in dict.fromkeys(logins)]
 
 
+def _chain_staff(app, conn) -> dict:
+    """For «Новый заказ этому клиенту»: who may answer for an order, and the owner (the panel's admin) to name when the responsible of the
+    earlier order was deleted (the owner 2026-11-20)."""
+    return {"staff": {o["login"] for o in _responsible_options(app, conn)}, "admin": app.config["AUTHOR"]}
+
+
 def check_responsible(app, conn, login, current: str = "") -> None:
     """The person sent as responsible (or on duty) must be one of the list the form offers (the owner, the staff, the one already set):
     a forged POST never names a client (a buyer) or anybody else. Empty is «nobody»."""
@@ -1169,7 +1175,7 @@ def register(app) -> None:
         conn = get_conn()
         card_or_404(conn, card_id)
         try:
-            new, made = order_chain.again(conn, card_id, local_iso(), author())
+            new, made = order_chain.again(conn, card_id, local_iso(), author(), **_chain_staff(app, conn))
         except orders.OrderError as err:
             flash(str(err), "error")
             return redirect("/orders/%d" % card_id)
@@ -1185,7 +1191,7 @@ def register(app) -> None:
         """«Добавить заказ» of a client's card (CRM): tied to the client's newest order (order_chain.for_client)."""
         conn = get_conn()
         try:
-            new, made = order_chain.for_client(conn, client_id, local_iso(), author())
+            new, made = order_chain.for_client(conn, client_id, local_iso(), author(), **_chain_staff(app, conn))
         except orders.OrderError as err:
             flash(str(err), "error")
             return redirect("/clients/%d" % client_id)
