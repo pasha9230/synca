@@ -254,7 +254,7 @@ def test_a_deleted_responsible_gives_way_to_the_admin_with_a_tag_and_a_record(tm
     new, made = chain.again(conn, first, NOW, "o", staff={"admin", "manager"}, admin="admin")
     card = orders.get_card(conn, new)
     assert made and card["responsible"] == "admin" and card["tags"] == [chain.GONE_TAG]
-    assert any(e["text"].startswith("Пользователь удалён — назначен другой") and "«gone»" in e["text"] and e["level"] == "yellow"
+    assert any(e["text"].startswith("Создавший user удален, назначен другой") and "«gone»" in e["text"] and e["level"] == "yellow"
                for e in orders.list_events(conn, new))
     kept = orders.create_card(conn, dict(client_name="Пётр", client_phone="+7 900 555-55-55", responsible="manager"), NOW, "o")
     again, _ = chain.again(conn, kept, NOW, "o", staff={"admin", "manager"}, admin="admin")

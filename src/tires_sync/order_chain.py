@@ -131,8 +131,8 @@ def _members(conn, chain: int) -> List[int]:
 
 COPIED = ("client_name", "client_phone", "point_id", "responsible", "source")
 MADE_FROM = "Создан из заказа №%s: тот же клиент"
-GONE_TAG = "Пользователь удалён"                   # a tag is at most 30 signs (orders.MAX_TAG); the record says the rest
-GONE_TEXT = "Пользователь удалён — назначен другой: ответственный прошлого заказа «%s» удалён из пользователей, назначен «%s»."
+GONE_TAG = "Создавший user удален"                 # the owner 2026-11-20, word for word (a tag is at most 30 signs)
+GONE_TEXT = "Создавший user удален, назначен другой: ответственный прошлого заказа «%s» удалён из пользователей, назначен «%s»."
 TWIN_SECONDS = 60                                             # a second press of «Новый заказ этому клиенту» this soon is the same order
 
 
