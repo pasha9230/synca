@@ -126,7 +126,9 @@ def sell(conn, record_id, pieces: Dict[int, int], name, phone, number, transfer,
     try:
         b = _sell(conn, int(record_id), pieces, name, phone, number, transfer, now, who)
         from . import oth_sale
-        if not (seller and oth_sale.credit_seller(conn, b, seller, now, commit=False)):
+        if seller:
+            oth_sale.credit_seller(conn, b, seller, now, commit=False)      # already the responsible: nothing to say
+        else:
             kept = orders.get_card(conn, b)["responsible"]
             orders.add_event(conn, b, now, who, "field", oth_sale.POINT_KEEPS_TEXT % (kept or "не назначен"))
     except Exception:
