@@ -280,3 +280,5 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .mp-act-mark--2{--act:#6639BA;--act-bg:#FBEFFF;--act-border:#D8B9FF}
 .mp-act-mark--3{--act:#0B6B5F;--act-bg:#D9F7F0;--act-border:#8ADBCB}
 .mp-act-mark--4{--act:#953800;--act-bg:#FFF1E5;--act-border:#FFB77C}
+/* «Сегодня есть возвраты» (2026-11-21) */
+.p2-mx3>.mp-today-acts{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;min-width:0}.mp-today-acts>*{flex:1 1 160px;min-width:0}

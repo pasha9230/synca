@@ -365,10 +365,12 @@ def test_a_phone_of_375_px_has_no_horizontal_scroll(tmp_path, clock, new_view):
                 ctx = b.new_context(viewport={"width": 375, "height": 800})
                 ctx.add_cookies([{"name": "session", "value": cookie, "domain": "127.0.0.1", "path": "/"}])
                 page = ctx.new_page()
-                for when, tab in ((DAY + "T09:05:00", "return"), ("2026-10-16T11:00:00", "agree")):
-                    clock["now"] = when
-                    page.goto("http://127.0.0.1:%d/my-point?tab=%s" % (server.server_port, tab))
+                for when, tab in ((DAY + "T09:05:00", ""), (DAY + "T09:05:00", "return"), ("2026-10-16T11:00:00", "agree")):
+                    clock["now"] = when                                            # «Сегодня есть возвраты»: the page as it opens (2026-11-21)
+                    page.goto("http://127.0.0.1:%d/my-point%s" % (server.server_port, "?tab=%s" % tab if tab else ""))
                     if tab == "return":
+                        assert page.locator("[data-return]").first.is_visible()
+                    elif not tab:
                         assert page.locator("[data-not-taken-next]").is_visible()
                     else:
                         assert page.locator('[data-oth-buyer="%d"] button' % more).is_visible()

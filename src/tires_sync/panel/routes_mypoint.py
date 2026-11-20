@@ -621,12 +621,15 @@ def register(app) -> None:
                            key=lambda r: not (r["asked"] or r["oth_asked"]))
             issued = [r for r in issued if r["card"]["id"] in ids]
             returns = [r for r in returns if r["card"]["id"] in ids]
-        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
+        landing = not request.args.get("tab") and found is None and not alerts_open     # the page as it opens: «Сегодня есть возвраты» (2026-11-21)
+        groups = _return_groups(returns)
+        today_group = next((g for g in groups if today_ret and g["first"]["return_date"] == today_ret["date"]), None)
+        return render_template(point_page("mypoint.html"), landing=landing, today_group=today_group, point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
-                               returns=returns, return_groups=_return_groups(returns),
+                               returns=returns, return_groups=groups,
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL)

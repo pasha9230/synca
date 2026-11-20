@@ -191,7 +191,7 @@ def test_agreed_return_the_point_signs_the_act_and_the_order_is_given_back(tmp_p
     assert "Передать на возврат %s" % day.strftime("%d.%m") in _text(client.get("/orders/%d" % oth))     # marked in the card
     agree_return(client, oth)                                     # twice: one plan, one record
     assert sum("согласован с поставщиком" in e["text"] for e in orders.list_events(conn, oth)) == 1
-    page = _text(mine.get("/my-point"))
+    page = _text(mine.get("/my-point?tab=return"))                                      # the returns: in «На возврат» (2026-11-21)
     assert 'data-return="%d"' % oth in page and "Согласовано на возврат, %s" % day.strftime("%d.%m") in page and "Подпишите акт МХ-3" in page
     token = re.search(r'action="/my-point/%d/act_signed".*?name="token" value="([0-9a-f]+)"' % oth, page, re.S).group(1)
     r = post(mine, "/my-point/%d/act_signed" % oth, "tok", token=token, handover="yes")
@@ -487,7 +487,7 @@ def test_the_agreement_is_cancelled_before_the_act_and_the_tyres_stay_off_sale(t
     assert "Отменить согласование" not in _text(client.get("/orders/%d" % oth))             # nothing agreed yet
     orders.move_card(conn, oth, _stage(conn, orders.RETURN_AGREE), NOW, "o")
     agree_return(client, oth)
-    assert goods not in oth_stock.pieces(conn) and 'data-return="%d"' % oth in _text(mine.get("/my-point"))
+    assert goods not in oth_stock.pieces(conn) and 'data-return="%d"' % oth in _text(mine.get("/my-point?tab=return"))
     assert "Отменить согласование" in _text(client.get("/orders/%d" % oth))
     assert post(mine, "/orders/%d/oth-unagree" % oth, "tok").status_code == 403             # the point never cancels it
     assert order_oth.return_plan(conn, oth) is not None

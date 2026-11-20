@@ -79,7 +79,7 @@ def test_an_agreed_return_goes_from_oth_to_the_return_tab(w):
     assert _cards(_page(w["point"], "/my-point?tab=oth")) == []
     page = _page(w["point"], "/my-point?tab=return")
     assert 'data-return="%d"' % w["made"]["oth"] in page and "Подписал акт и отдал" in page
-    assert 'data-return="%d"' % w["made"]["oth"] in _page(w["point"])                              # the plaque of the act over the other tabs
+    assert 'data-return="%d"' % w["made"]["oth"] not in _page(w["point"])        # the owner 2026-11-21: only in «На возврат», never over the tabs
 
 
 def test_the_question_of_the_last_day_is_a_line_of_its_card_and_first(w, monkeypatch):

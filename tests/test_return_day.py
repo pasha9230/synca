@@ -168,9 +168,10 @@ def test_the_bell_and_the_workplace_show_it_marked_important(tmp_path, clock, vi
     mine = manager(app, conn, pid)
     assert "data-return-day" not in mine.get("/my-point?tab=here").get_data(as_text=True)
     order_oth.tell_return_day(conn, clock["now"])
-    for tab in ("here", "return"):                                                    # on every tab of «Рабочее место»
-        page = mine.get("/my-point?tab=%s" % tab).get_data(as_text=True)
-        assert "data-return-day" in page and TEXT in page and ">Важное<" in page and "№ 5000100" in page
+    page = mine.get("/my-point").get_data(as_text=True)                               # the page as it opens (the owner 2026-11-21)
+    assert "data-return-day" in page and "Сегодня есть возвраты: 1 заказ." in page and ">Важное<" in page and "№ 5000100" in page
+    for tab in ("here", "return"):                                                    # never on a tab chosen
+        assert "data-return-day" not in mine.get("/my-point?tab=%s" % tab).get_data(as_text=True), tab
     rows = [it for it in mine.get("/alerts/feed").get_json()["items"] if str(it["id"]).startswith("return-day-")]
     assert len(rows) == 1 and rows[0]["title"] == "Важное · Сегодня возврат!" and "5000100" in rows[0]["text"]
     assert rows[0]["href"] == "/my-point?tab=return"
