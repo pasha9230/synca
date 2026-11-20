@@ -150,6 +150,12 @@ def _just_made(conn, order_id: int, now: str, besides: int) -> Optional[int]:
     return row[0] if row else None
 
 
+def _removed(conn, login: str) -> bool:
+    """`login` was a panel user and was deleted (users.remove_user writes «user_removed» to the audit)."""
+    return conn.execute("SELECT 1 FROM audit WHERE action = 'user_removed' AND json_extract(detail, '$.login') = ? LIMIT 1",
+                        (str(login or "").strip().lower(),)).fetchone() is not None
+
+
 def again(conn, order_id: int, now: str, author: str, staff: Optional[set] = None, admin: str = "") -> Tuple[int, bool]:
     """«Добавить заказ» of an order (the owner 2026-11-19): a new order of the same client — the name, the phone, the point, the responsible
     and the source copied, no tyres, no chat — on the first stage, tied to the chain. An open order of the same phone does not stop it:
@@ -159,9 +165,11 @@ def again(conn, order_id: int, now: str, author: str, staff: Optional[set] = Non
     tag GONE_TAG and a record (the owner 2026-11-20: never an order without its responsible)."""
     card = orders.get_card(conn, order_id)
     fields = {k: card[k] for k in COPIED if card.get(k) not in (None, "")}
-    gone = staff is not None and admin and fields.get("responsible") and fields["responsible"] not in staff
-    if gone:
+    away = staff is not None and admin and fields.get("responsible") and fields["responsible"] not in staff
+    gone = away and _removed(conn, fields["responsible"])     # a user deleted; a name that never was a user (the robot): the admin, no tag
+    if away:
         fields["responsible"] = admin
+    if gone:
         fields["tags"] = GONE_TAG
     made = MADE_FROM % _label(card)
     try:

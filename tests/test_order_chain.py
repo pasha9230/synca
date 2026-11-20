@@ -251,6 +251,8 @@ def test_a_deleted_responsible_gives_way_to_the_admin_with_a_tag_and_a_record(tm
     """The owner 2026-11-20: never an order without its responsible; a responsible deleted from the users: the admin, «Пользователь удалён»."""
     conn = db(tmp_path)
     first = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="gone"), NOW, "o")
+    store.write_audit(conn, NOW, "server", "user_removed", {"login": "gone"})      # what users.remove_user writes
+    conn.commit()
     new, made = chain.again(conn, first, NOW, "o", staff={"admin", "manager"}, admin="admin")
     card = orders.get_card(conn, new)
     assert made and card["responsible"] == "admin" and card["tags"] == [chain.GONE_TAG]
@@ -287,3 +289,13 @@ def test_the_panel_names_the_one_user_of_the_role_owner_for_a_deleted_responsibl
     a = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE, responsible="уволен"), NOW, "o")
     new = int(post(client, "/orders/%d/again" % a, tok).headers["Location"].rsplit("/", 1)[1])
     assert orders.get_card(conn, new)["responsible"] == "admin_a"
+
+
+def test_an_order_of_the_robot_gets_the_admin_without_the_tag_of_a_deleted_user(tmp_path):
+    """Review 2026-11-20: «чаты Авито» answering for an order made by the robot was never a user: the admin, no «Создавший user удален»."""
+    conn = db(tmp_path)
+    first = orders.create_card(conn, dict(client_name="Иван", client_phone=PHONE), NOW, "чаты Авито")
+    new, _ = chain.again(conn, first, NOW, "o", staff={"admin"}, admin="admin")
+    card = orders.get_card(conn, new)
+    assert card["responsible"] == "admin" and not card["tags"]
+    assert not any(e["text"].startswith("Создавший user удален") for e in orders.list_events(conn, new))
