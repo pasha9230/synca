@@ -819,6 +819,8 @@ def register(app) -> None:
             flash("Акт МХ-3 подписан, шины отданы: заказы %s." % ", ".join("№%s" % n for n in done), "info")
         for answer in failed:
             flash(answer, "error")
+        if not done and not failed:                                             # the same form again: every order of it was taken already
+            flash("Эта отметка уже выполнена.")
         return redirect(back)
 
     @app.route("/my-point/return-day/not-taken", methods=["POST"])
