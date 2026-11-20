@@ -441,6 +441,24 @@ def _stage(conn, code: str) -> dict:
     return found
 
 
+SELLER_TEXT = "Продажа с ОТХ: ответственный «%s» → «%s» (продал с ОТХ)"
+
+
+def credit_seller(conn, card_id, seller: str, now: str, commit: bool = True) -> bool:
+    """The owner 2026-11-20 (a rule of the owner: the code and tests/test_oth_seller*.py hold it): a sale of tyres from OTH is the one who made it — the order that sells them takes the
+    seller as its responsible (and so «Аккаунт» of the Google table, order_sheet.account_label). A sale by a point (oth_point_sale) keeps
+    the responsible of the order that made it: never through here. True: the responsible changed (a record says from whom to whom)."""
+    seller = str(seller or "").strip()
+    row = conn.execute("SELECT responsible FROM order_card WHERE id = ?", (int(card_id),)).fetchone()
+    if not seller or row is None or row[0] == seller:
+        return False
+    conn.execute("UPDATE order_card SET responsible = ?, updated_at = ? WHERE id = ?", (seller, now, int(card_id)))
+    orders.add_event(conn, int(card_id), now, seller, "field", SELLER_TEXT % (row[0] or "не назначен", seller))
+    if commit:
+        conn.commit()
+    return True
+
+
 def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     """«Взять с ОТХ»: the supplier's position `line_id` of the order gives up to its pieces to tyres of the position `from_item` lying on «На ОТХ».
     One transaction (the old order emptied is moved to «Отмена» in it). Returns the pieces taken; OthSaleError says why nothing was.
@@ -448,8 +466,12 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     from . import oth_storage
     owner = conn.execute("SELECT order_id FROM order_item WHERE id = ?", (int(from_item),)).fetchone()     # a manual row (below zero): none
     if owner is not None and oth_storage.is_record(conn, owner[0]):
-        return oth_storage.take(conn, card_id, from_item, now, author)
-    return _take_order(conn, card_id, line_id, from_item, now, author)
+        pieces = oth_storage.take(conn, card_id, from_item, now, author)
+    else:
+        pieces = _take_order(conn, card_id, line_id, from_item, now, author)
+    if pieces:
+        credit_seller(conn, card_id, author, now)                       # the one who took them from OTH sold them (2026-11-20)
+    return pieces
 
 
 def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit: bool = True) -> int:
@@ -602,7 +624,8 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
                   qty=int(r["qty"]), sale_unit=items[r["item_id"]]["sale_unit"], supplier_price=items[r["item_id"]]["supplier_price"],
                   terms=items[r["item_id"]]["terms"], fee_pct=items[r["item_id"]]["fee_pct"], promo_pct=items[r["item_id"]]["promo_pct"]) for r in rows]
     try:
-        new = orders.create_card_with_items(conn, {"client_name": name, "client_phone": phone, "point_id": old["point_id"]}, lines, now, author)
+        new = orders.create_card_with_items(conn, {"client_name": name, "client_phone": phone, "point_id": old["point_id"], "responsible": author},
+                                            lines, now, author)                  # the seller answers for it (2026-11-20)
     except orders.OpenOrderExists as err:
         raise OthSaleError("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, err.order_id)) from None
     orders.add_event(conn, new, now, author, "field", "Заказ создан для нового клиента шин с ОТХ заказа №%d." % old_id)
