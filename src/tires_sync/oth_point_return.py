@@ -276,7 +276,7 @@ def sent_back(conn, ids, now: str, author: str) -> Dict[str, object]:
                 failed[card_id] = "не на возврате: обновите страницу"
                 continue
             point = (card.get("point") or {}).get("name") or ""
-            if order_oth.sign_act(conn, card, point, now, author):
+            if order_oth.sign_act(conn, card, point, now, author, by_office=True):
                 done.append(card_id)
             else:
                 failed[card_id] = "заказ только что изменили"
