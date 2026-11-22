@@ -204,7 +204,8 @@ def test_the_page_na_oth_the_return_button_and_the_menu(tmp_path):
     r = post(owner, "/oth/return", tok, item=item)
     assert r.status_code == 302 and r.headers["Location"].endswith("/oth")
     html = owner.get("/oth").get_data(as_text=True)
-    assert "Возвращено поставщику" in html and "На ОТХ ничего нет" in html and "Отменить" in html
+    assert "Вернули поставщику" in html and "На ОТХ ничего нет" in html                    # the tab renamed (the owner 2026-11-22)
+    assert "Отменить" in owner.get("/oth?tab=returned").get_data(as_text=True)
     post(owner, "/oth/return", tok, item=item, undo="1")
     assert order_oth.goods_on_oth(conn) == {"1": 4}
     assert post(owner, "/oth/return", tok, item="999").status_code == 302
@@ -515,7 +516,7 @@ def test_the_page_returns_and_undoes_a_number_of_tyres(tmp_path):
     html = owner.get("/oth").get_data(as_text=True)
     assert "Отмечено как возвращённое поставщику" in html
     returned = owner.get("/oth?tab=returned").get_data(as_text=True)                       # two tabs (the owner 2026-11-08)
-    assert "из 4, возвращено 1" in html and "Возвращено поставщику" in returned               # the part is in both tabs
+    assert "из 4, возвращено 1" in html and "Вернули поставщику" in returned                 # the part is in both tabs
     assert re.search(r'name="qty" value="3" min="1" max="3"', html) and re.search(r'name="qty" value="1" min="1" max="1"', returned)
     post(owner, "/oth/return", tok, item=item, qty="9")
     assert "Можно вернуть не больше 3 шт." in owner.get("/oth").get_data(as_text=True)

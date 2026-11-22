@@ -143,7 +143,7 @@ def test_e3_one_act_for_several_orders_of_one_point(tmp_path, office_clock):
     app, owner, conn, pid, card = setup(tmp_path)
     assert card == 1
     ids = two_orders(conn, pid)
-    page = owner.get("/oth").get_data(as_text=True)
+    page = owner.get("/oth?tab=agree").get_data(as_text=True)                          # the orders on the agreement: their tab (2026-11-22)
     assert all(page.count('data-act-order="%d"' % i) == 1 for i in ids) and 'id="oth-act-orders"' in page
     assert act_post(owner, ids).status_code == 302
     assert [order_oth.return_plan(conn, i)["return_date"] for i in ids] == [ACT_DAY, ACT_DAY]

@@ -149,7 +149,7 @@ def filter_returned(rows: List[dict], query: str = "", qty_from=None, qty_to=Non
             continue
         if qty_from is not None and r["qty"] < qty_from or qty_to is not None and r["qty"] > qty_to:
             continue
-        day = (r["returned_at"] or "")[:10]
+        day = (r.get("filter_at") or r.get("returned_at") or "")[:10]            # the stock's rows: their day on «На ОТХ» (2026-11-22)
         if day_from and day < day_from or day_to and day > day_to:
             continue
         out.append(r)
