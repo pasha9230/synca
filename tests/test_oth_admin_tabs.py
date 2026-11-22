@@ -114,5 +114,16 @@ def test_the_office_s_sent_back_closes_the_order_with_its_refund(tmp_path, offic
     ids = two_orders(conn, pid)
     agree(owner, ids)
     owner.post("/oth/sent-back", data={"csrf": "tok", "order": [str(i) for i in ids]})
-    stages = {orders.get_card(conn, i)["stage"]["code"] for i in ids}
-    assert stages <= {"return", orders.RETURN_GIVEN} and all(order_oth.return_plan(conn, i)["signed_at"] for i in ids)
+    for i in ids:
+        card = orders.get_card(conn, i)
+        assert card["stage"]["code"] == "return" and card["return_amount"] > 0 and order_oth.return_plan(conn, i)["signed_at"], i
+
+
+def test_a_button_of_a_row_comes_back_to_its_tab(tmp_path, office_clock):
+    app, owner, conn, pid, card = setup(tmp_path)
+    two_orders(conn, pid)
+    page = owner.get("/oth?tab=agree").get_data(as_text=True)
+    form = re.search(r'<form method="post" action="/oth/cancel-return".*?</form>', page, re.S)
+    assert form is None or '<input type="hidden" name="tab" value="agree">' in form.group(0)
+    agree_one = re.search(r'<form method="post" action="/oth/return-act/orders"[^>]*data-agree-one=.*?</form>', page, re.S).group(0)
+    assert agree_one.count('name="tab"') == 1
