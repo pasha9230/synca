@@ -364,6 +364,8 @@ NEEDS.update(oth_return_act_upload="supplier", oth_return_act_delete="supplier")
 # one act for several orders of a point (oth_point_return.act_for_orders, E3 of 2026-11-12): the same people, as «Согласовано» and the act
 SECTION_OF.update(oth_return_act_orders="orders")
 NEEDS.update(oth_return_act_orders="supplier")
+SECTION_OF.update(oth_sent_back="orders")                     # «Вернули поставщику» of /oth: as the act of several orders (2026-11-22)
+NEEDS.update(oth_sent_back="supplier")
 # «Изменить цену просмотра» of «Аналитика рекламы» (ads_bid_set, the owner 2026-11-13): the owner and the partner. The window is the
 # analytics' (the money right); the writes are in «orders» with the money right, as the partner changes nothing in «analytics»; each view
 # checks the role itself as well (routes_ads_bid)

@@ -291,7 +291,7 @@ def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_off_the_points_but
     assert (row["qty"], row["left"], row["marked_qty"]) == (4, 0, 4)                      # on sale; a real «Вернуть поставщику» has nothing to take
     assert "oth_sold" not in manager(app, conn, pid).get("/my-point?tab=agree").get_data(as_text=True)     # the owner 2026-11-12: the office sells
     assert any("шины сняты с продажи" in t for t in texts(conn, card))
-    page = owner.get("/oth").get_data(as_text=True)
+    page = owner.get("/oth?tab=agree").get_data(as_text=True)                          # «На согласовании» (the owner 2026-11-22)
     assert "data-item-return>Согласование возврата · 4 шт., снято с продажи" in page and "на ОТХ 4" in page
     assert "шины снимаются с продажи" not in page and 'action="/oth/return"' not in page     # nothing left for a real «Вернуть поставщику»
 
@@ -299,7 +299,7 @@ def test_a_mark_not_agreed_stays_in_the_stock_of_the_feed_and_off_the_points_but
 def test_operator_can_cancel_pending_position_request_from_oth_page(tmp_path, clock):
     from tires_sync import oth_stock
     app, conn, pid, card, item, owner = marked(tmp_path, qty=2)
-    page = owner.get("/oth").get_data(as_text=True)
+    page = owner.get("/oth?tab=agree").get_data(as_text=True)                          # a marked position: «На согласовании» (2026-11-22)
     assert 'action="/oth/cancel-return"' in page
     response = post(owner, "/oth/cancel-return", "tok", item=str(item))
     assert "Запрос на возврат отменён: 2 шт." in owner.get(response.headers["Location"]).get_data(as_text=True)
