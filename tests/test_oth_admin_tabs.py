@@ -84,3 +84,35 @@ def test_the_sort_turns_and_keeps_the_filters(tmp_path, office_clock):
     page = owner.get("/oth?tab=returned&q=5300&s=date&d=desc").get_data(as_text=True)
     link = re.search(r'<a href="(/oth\?[^"]*s=date[^"]*)" class="is-active"', page).group(1)
     assert "q=5300" in link and "d=asc" in link and "tab=returned" in link                 # the chosen key again turns, the filters stay
+
+
+def test_a_filter_that_hides_the_first_row_of_an_order_keeps_its_checkbox_and_its_button(tmp_path, office_clock):
+    """Review 2026-11-22: the checkbox (and «Возврат согласован») stood on the first row of the order before the search."""
+    app, owner, conn, pid, card = setup(tmp_path)
+    ids = two_orders(conn, pid)
+    first = orders.get_card(conn, ids[0])
+    orders.add_item(conn, ids[0], goods_id="9", name="Вторая шина K-2", brand_key="nokian", season="winter", diameter=16, territory="1", qty=1,
+                    sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now="2026-11-12T10:00:00", author="o")
+    page = owner.get("/oth?tab=agree&q=Вторая").get_data(as_text=True)
+    assert 'data-act-order="%d"' % ids[0] in page and 'data-agree-one="%d"' % ids[0] in page
+    assert first
+
+
+def test_the_point_chosen_keeps_the_tab_and_the_search_keeps_the_sort(tmp_path, office_clock):
+    """Review 2026-11-22: the form of the point sent the page back to «На точке»; «Найти» dropped the sort."""
+    app, owner, conn, pid, card = setup(tmp_path)
+    two_orders(conn, pid)
+    page = owner.get("/oth?tab=agree&s=qty&d=desc").get_data(as_text=True)
+    point_form = re.search(r'<form method="get" action="/oth" class="filters">.*?</form>', page, re.S).group(0)
+    assert '<input type="hidden" name="tab" value="agree">' in point_form
+    search = re.search(r'<form method="get" action="/oth" class="filters" data-returned-filters>.*?</form>', page, re.S).group(0)
+    assert 'name="s" value="qty"' in search and 'name="d" value="desc"' in search
+
+
+def test_the_office_s_sent_back_closes_the_order_with_its_refund(tmp_path, office_clock):
+    app, owner, conn, pid, card = setup(tmp_path)
+    ids = two_orders(conn, pid)
+    agree(owner, ids)
+    owner.post("/oth/sent-back", data={"csrf": "tok", "order": [str(i) for i in ids]})
+    stages = {orders.get_card(conn, i)["stage"]["code"] for i in ids}
+    assert stages <= {"return", orders.RETURN_GIVEN} and all(order_oth.return_plan(conn, i)["signed_at"] for i in ids)

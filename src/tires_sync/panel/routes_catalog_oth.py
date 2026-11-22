@@ -181,10 +181,16 @@ def register(app) -> None:
         query = urlencode({k: v for k, v in args.items() if v})
         return "/oth" + ("?" + query if query else "")
 
+    def _number_key(value):
+        """«9» before «10»; a number with letters («5367654 О») by its digits first."""
+        text = str(value or "")
+        digits = re.match(r"\d+", text)
+        return (0, int(digits.group(0)), text) if digits else (1, 0, text.casefold())
+
     def _sorted(rows, key, desc):
         get = {"date": lambda r: r.get("filter_at") or r.get("returned_at") or "",
                "name": lambda r: (r["name"] or "").casefold(), "qty": lambda r: r["qty"],
-               "order": lambda r: str(r.get("webmim_number") or r["order_id"]), "point": lambda r: (r.get("point") or "").casefold()}[key]
+               "order": lambda r: _number_key(r.get("webmim_number") or r["order_id"]), "point": lambda r: (r.get("point") or "").casefold()}[key]
         return sorted(rows, key=get, reverse=desc)
 
     def _returned_filters() -> dict:
@@ -257,6 +263,11 @@ def register(app) -> None:
         rows = order_oth.filter_returned(lists[tab], **{k: v for k, v in filters.items() if k != "raw"})
         sort, desc = _sort()
         rows = _sorted(rows, sort, desc)
+        boxed = set()                                                 # the checkbox on the first row shown of the order (review: after the search)
+        for row in rows:
+            if "act_box" in row:
+                row["act_box"] = row["order_id"] in actable and row["order_id"] not in boxed
+                boxed.add(row["order_id"])
         data.update(stock=rows if tab != "returned" else [], returned=rows if tab == "returned" else [], returned_all=len(lists[tab]),
                     returned_pieces=counts["returned"])
         return render_template("oth.html", manual=own if tab == "point" else [], places=sorted(places, key=lambda p: (p[1].casefold(), p[0])),

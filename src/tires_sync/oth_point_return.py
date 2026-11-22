@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -282,4 +283,7 @@ def sent_back(conn, ids, now: str, author: str) -> Dict[str, object]:
         except (order_oth.OthError, orders.OrderError) as err:
             conn.rollback()
             failed[card_id] = str(err)
+        except sqlite3.Error:                                        # a busy base: this order not marked, the others still go (review)
+            conn.rollback()
+            failed[card_id] = "база занята, попробуйте ещё раз через минуту"
     return {"done": done, "failed": failed}
