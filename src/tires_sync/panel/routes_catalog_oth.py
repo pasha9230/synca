@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 from flask import Response, abort, flash, redirect, render_template, request
 
@@ -12,7 +12,6 @@ from .. import connections, oth_manual, oth_point_return, oth_return_act, oth_st
 from ..settings_store import active_settings
 from .common import author, can_post, current_user, get_conn, has_right, login_required, now_iso
 
-SORTS = {"date": "Дата", "name": "Название", "qty": "Количество", "order": "Заказ", "point": "Точка"}
 RETURNED_DAYS = 365                                          # «Вернули поставщику» keeps a year (the owner 2026-11-22)
 
 
@@ -164,34 +163,9 @@ def register(app) -> None:
             flash("Неизвестная точка.")
         return redirect("/catalog/item/" + quote(goods_id, safe=""))
 
-    def _sort():
-        """The sort of /oth (the owner 2026-11-22, as the catalog's «Сортировка»): ?s=<key>&d=asc|desc. Nothing chosen: by the date, the
-        oldest on «На ОТХ» first, the newest return first."""
-        key = request.args.get("s", "")
-        key = key if key in SORTS else "date"
-        d = request.args.get("d", "")
-        if d in ("asc", "desc"):
-            return key, d == "desc"
-        return key, key == "date" and request.args.get("tab") == "returned"
-
-    def _sort_link(tab, point, raw, key, sort, desc) -> str:
-        """The link of a key: the same filters; the key chosen again turns its direction."""
-        args = {"tab": tab if tab != "point" else "", "point": point or "", **{k: v for k, v in raw.items() if v}, "s": key,
-                "d": ("asc" if desc else "desc") if key == sort else "asc"}
-        query = urlencode({k: v for k, v in args.items() if v})
-        return "/oth" + ("?" + query if query else "")
-
-    def _number_key(value):
-        """«9» before «10»; a number with letters («5367654 О») by its digits first."""
-        text = str(value or "")
-        digits = re.match(r"\d+", text)
-        return (0, int(digits.group(0)), text) if digits else (1, 0, text.casefold())
-
-    def _sorted(rows, key, desc):
-        get = {"date": lambda r: r.get("filter_at") or r.get("returned_at") or "",
-               "name": lambda r: (r["name"] or "").casefold(), "qty": lambda r: r["qty"],
-               "order": lambda r: _number_key(r.get("webmim_number") or r["order_id"]), "point": lambda r: (r.get("point") or "").casefold()}[key]
-        return sorted(rows, key=get, reverse=desc)
+    def _sorted(rows, tab):
+        """The order of each tab (the owner 2026-11-22: no sort to choose): the oldest on «На ОТХ» first, the newest return first."""
+        return sorted(rows, key=lambda r: r.get("filter_at") or r.get("returned_at") or "", reverse=tab == "returned")
 
     def _returned_filters() -> dict:
         """The search and the filters of «Возвращено поставщику» as typed (`raw`, back into the form) and as read: a wrong number or day is left out."""
@@ -261,8 +235,7 @@ def register(app) -> None:
         counts = {key: sum(r["qty"] for r in rows) for key, rows in lists.items()}      # the tabs' counters: the whole lists, never filtered
         filters = _returned_filters()
         rows = order_oth.filter_returned(lists[tab], **{k: v for k, v in filters.items() if k != "raw"})
-        sort, desc = _sort()
-        rows = _sorted(rows, sort, desc)
+        rows = _sorted(rows, tab)
         boxed = set()                                                 # the checkbox on the first row shown of the order (review: after the search)
         for row in rows:
             if "act_box" in row:
@@ -271,8 +244,7 @@ def register(app) -> None:
         data.update(stock=rows if tab != "returned" else [], returned=rows if tab == "returned" else [], returned_all=len(lists[tab]),
                     returned_pieces=counts["returned"])
         return render_template("oth.html", manual=own if tab == "point" else [], places=sorted(places, key=lambda p: (p[1].casefold(), p[0])),
-                               point=point, tab=tab, counts=counts, listed=len(lists[tab]), returned_filters=filters, sort=sort, desc=desc,
-                               sort_links={k: _sort_link(tab, point, filters["raw"], k, sort, desc) for k in SORTS},
+                               point=point, tab=tab, counts=counts, listed=len(lists[tab]), returned_filters=filters,
                                acts=oth_return_act.listed(conn), act_points=[p for p in order_points.list_points(conn) if p["id"] not in test],
                                act_day=order_oth.return_date(local_now().date()), **data)
 

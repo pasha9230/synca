@@ -70,20 +70,17 @@ def test_the_returns_are_kept_a_year_and_every_tab_counts_and_filters(tmp_path, 
     assert tab_ids(owner, "agree", q="нет такого") == []
 
 
-def test_the_sort_turns_and_keeps_the_filters(tmp_path, office_clock):
+def test_no_sort_to_choose_and_each_tab_keeps_its_order(tmp_path, office_clock):
+    """The owner 2026-11-22: no sort on «На ОТХ»; the newest return first, the oldest on «На ОТХ» first."""
     from test_order_oth_stock import _signed
     from tests.test_order_reserve import card_at
     app, owner, conn, pid, card = setup(tmp_path)
-    a, b = card_at(conn, "oth", T1 := "2026-11-01T10:00:00"), card_at(conn, "oth", T1)
+    a, b = card_at(conn, "oth", "2026-11-01T10:00:00"), card_at(conn, "oth", "2026-11-01T10:00:00")
     _signed(conn, a, "5300001", "26R-1", "2026-11-02T12:00:00")
     _signed(conn, b, "5300002", "26R-2", "2026-11-05T12:00:00")
-    order = lambda html: [int(x) for x in re.findall(r'data-returned-row="\d+"[^>]*>.*?<a href="/orders/(\d+)"', html, re.S)]
-    assert order(owner.get("/oth?tab=returned").get_data(as_text=True)) == [b, a]          # the newest return first
-    assert order(owner.get("/oth?tab=returned&s=date&d=asc").get_data(as_text=True)) == [a, b]
-    assert order(owner.get("/oth?tab=returned&s=order&d=desc").get_data(as_text=True)) == [b, a]
-    page = owner.get("/oth?tab=returned&q=5300&s=date&d=desc").get_data(as_text=True)
-    link = re.search(r'<a href="(/oth\?[^"]*s=date[^"]*)" class="is-active"', page).group(1)
-    assert "q=5300" in link and "d=asc" in link and "tab=returned" in link                 # the chosen key again turns, the filters stay
+    page = owner.get("/oth?tab=returned&s=date&d=asc").get_data(as_text=True)              # an old link: the order of the tab all the same
+    assert "Сортировка" not in page and "data-oth-sort" not in page
+    assert [int(x) for x in re.findall(r'data-returned-row="\d+"[^>]*>.*?<a href="/orders/(\d+)"', page, re.S)] == [b, a]
 
 
 def test_a_filter_that_hides_the_first_row_of_an_order_keeps_its_checkbox_and_its_button(tmp_path, office_clock):
@@ -98,15 +95,13 @@ def test_a_filter_that_hides_the_first_row_of_an_order_keeps_its_checkbox_and_it
     assert first
 
 
-def test_the_point_chosen_keeps_the_tab_and_the_search_keeps_the_sort(tmp_path, office_clock):
-    """Review 2026-11-22: the form of the point sent the page back to «На точке»; «Найти» dropped the sort."""
+def test_the_point_chosen_keeps_the_tab(tmp_path, office_clock):
+    """Review 2026-11-22: the form of the point sent the page back to «На точке»."""
     app, owner, conn, pid, card = setup(tmp_path)
     two_orders(conn, pid)
-    page = owner.get("/oth?tab=agree&s=qty&d=desc").get_data(as_text=True)
+    page = owner.get("/oth?tab=agree").get_data(as_text=True)
     point_form = re.search(r'<form method="get" action="/oth" class="filters">.*?</form>', page, re.S).group(0)
     assert '<input type="hidden" name="tab" value="agree">' in point_form
-    search = re.search(r'<form method="get" action="/oth" class="filters" data-returned-filters>.*?</form>', page, re.S).group(0)
-    assert 'name="s" value="qty"' in search and 'name="d" value="desc"' in search
 
 
 def test_the_office_s_sent_back_closes_the_order_with_its_refund(tmp_path, office_clock):
@@ -117,6 +112,9 @@ def test_the_office_s_sent_back_closes_the_order_with_its_refund(tmp_path, offic
     for i in ids:
         card = orders.get_card(conn, i)
         assert card["stage"]["code"] == "return" and card["return_amount"] > 0 and order_oth.return_plan(conn, i)["signed_at"], i
+        texts = [e["text"] for e in orders.list_events(conn, i)]
+        assert any(t.startswith("Офис отметил «Вернули поставщику»: шины отданы поставщику по акту МХ-3 (точка «") for t in texts), i
+        assert not any(t.startswith("Точка «") and "подписан" in t for t in texts), i      # never as if the point had signed it
 
 
 def test_a_button_of_a_row_comes_back_to_its_tab(tmp_path, office_clock):

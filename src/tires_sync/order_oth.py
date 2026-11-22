@@ -244,6 +244,7 @@ def unmark_returned(conn, item_id, now: str, author: str, qty=None) -> None:
 
 ACT = "акт МХ-3"
 SIGNED_LINE = "Точка «%s»: %s подписан, шины отданы поставщику (возврат с ОТХ)."
+OFFICE_SIGNED_LINE = "Офис отметил «Вернули поставщику»: шины отданы поставщику по акту МХ-3 (точка «%s», возврат с ОТХ)."   # /oth (the owner 2026-11-22)
 SIGNED_HEAD = "Точка отдала шины с ОТХ поставщику по акту МХ-3: "     # routes_alerts.is_return_ask (the old records too)
 SIGNED_ASK = SIGNED_HEAD + "заполните сумму возврата и переведите заказ в «%s»."   # the current name of «return» (orders.stage_name)
 RETURN_REASON = "возврат с ОТХ поставщику (%s)" % ACT
@@ -794,11 +795,12 @@ def to_return(conn, point_id) -> List[dict]:
     return [{"card": orders.get_card(conn, r[0]), "plan": return_plan(conn, r[0])} for r in rows]
 
 
-def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> str:
+def sign_act(conn, card: dict, point_name: str, now: str, author: str, by_office: bool = False) -> str:
     """«Подписал акт и отдал»: the plan is marked signed (one statement: a second press, another tab, signs nothing more) and the order goes
     to «Вернули поставщику» with the refund filled (return_changes), in one transaction. A refund that cannot be counted (a position without
     the purchase) keeps the order on «На возврат» («Отдано, нужна сумма возврата») with a yellow record for the responsible.
-    Returns "return" (closed), "signed" (waits for the amount), "" (nothing to sign: no agreement, signed already, the order left)."""
+    Returns "return" (closed), "signed" (waits for the amount), "" (nothing to sign: no agreement, signed already, the order left).
+    `by_office`: «Вернули поставщику» of /oth — the journal says the office marked it, not the point (the owner 2026-11-22: clear records)."""
     card = orders.get_card(conn, card["id"])                     # the stage and the refund as they are now (review 2026-11-03)
     if card["stage"]["code"] not in RETURNING:
         return ""
@@ -807,7 +809,10 @@ def sign_act(conn, card: dict, point_name: str, now: str, author: str) -> str:
                     (now, author, card["id"])).rowcount != 1:
         conn.rollback()
         return ""
-    orders.add_event(conn, card["id"], now, author, "point", SIGNED_LINE % (point_name, ACT))     # saved with the move (move_card commits it all)
+    if by_office:
+        orders.add_event(conn, card["id"], now, author, "field", OFFICE_SIGNED_LINE % (point_name or "не указана"))
+    else:
+        orders.add_event(conn, card["id"], now, author, "point", SIGNED_LINE % (point_name, ACT))     # saved with the move (move_card commits it all)
     _audit(conn, now, author, "oth_act_signed", {"order": int(card["id"])})
     closed = next((s for s in orders.list_stages(conn) if s["code"] == "return"), None)
     changes = return_changes(card, RETURN_REASON)
