@@ -182,14 +182,15 @@ def _failing(conn, card_id, since, error="Google не ответил (OSError): 
     conn.commit()
 
 
-def test_a_failure_of_three_hours_is_one_alert_and_its_end_one_note(tmp_path):
+def test_a_failure_of_55_minutes_is_one_alert_and_its_end_one_note(tmp_path):
+    """The owner 2026-11-23: the alert at 55 minutes (was three hours)."""
     conn, box = env(tmp_path)
     sheet.save_settings(conn, "https://script.google.com/macros/s/AKfycbTEST_1234567890abc/exec", True, NOW, "owner")
     first, second = card(conn, "worker2"), card(conn, "worker2")
     _failing(conn, first["id"], NOW)
-    assert sheet.lasting_alarm(conn, "2026-10-15T14:59:00") is None                       # under three hours: a hiccup
-    text, notice = sheet.lasting_alarm(conn, "2026-10-15T15:00:00")
-    assert not notice and "дольше 3 ч: №%d " % first["id"] in text and "Google не ответил" in text
+    assert sheet.lasting_alarm(conn, "2026-10-15T12:54:00") is None                       # under 55 minutes: the retries go on
+    text, notice = sheet.lasting_alarm(conn, "2026-10-15T12:55:00")
+    assert not notice and "дольше 55 мин: №%d " % first["id"] in text and "Google не ответил" in text
     assert sheet.lasting_alarm(conn, "2026-10-15T15:30:00") == (text, False)               # not told yet (Telegram failed): said again
     sheet.alarm_told(conn, "2026-10-15T15:30:00", False)
     _failing(conn, second["id"], "2026-10-15T13:00:00")
@@ -299,3 +300,68 @@ def test_a_refused_alert_does_not_wipe_the_marks_another_process_wrote_meanwhile
     monkeypatch.setattr(cli, "_epoch", lambda: 1_000_000.0)
     assert cli._alert(conn, box, "A") is False
     assert (store.get_state(conn, "last_alert_at"), store.get_state(conn, "last_alert_text")) == ("1000050.0", "b-digest")
+
+
+def test_the_retries_go_every_5_to_10_minutes(tmp_path):
+    """The owner 2026-11-23: five retries every 5 minutes, then every 10 — never an hour between two looks."""
+    assert [sheet._retry_at(NOW, n)[11:16] for n in range(1, 9)] == ["12:05", "12:05", "12:05", "12:05", "12:05", "12:10", "12:10", "12:10"]
+
+
+def test_55_minutes_of_failure_bring_need_action_and_one_task_to_the_admin(tmp_path):
+    """The owner 2026-11-23: a red «Нужно действие» in the order's journal (the bell) and a task «Важное · …» to the admin with the error and
+    the order's data; once per streak; a streak over and a new one is told again."""
+    from tires_sync import order_notify
+    conn, box = env(tmp_path)
+    sheet.save_settings(conn, "https://script.google.com/macros/s/AKfycbTEST_1234567890abc/exec", True, NOW, "owner")
+    first = card(conn, "worker2")
+    _failing(conn, first["id"], NOW, "нет колонок: Дата счета")
+    assert sheet.escalate(conn, "2026-10-15T12:54:00") == []                               # the retries go on
+    assert sheet.escalate(conn, "2026-10-15T12:55:00") == [first["id"]]
+    red = [e for e in orders.list_events(conn, first["id"]) if e["text"].startswith("Нужно действие")]
+    assert len(red) == 1 and red[0]["level"] == "red" and "нет колонок: Дата счета" in red[0]["text"] and "55 мин" in red[0]["text"]
+    rows = conn.execute("SELECT assignee, title, note, kind FROM callback_task WHERE order_id = ?", (first["id"],)).fetchall()
+    assert len(rows) == 1 and rows[0][0] == order_notify.get_owner_login(conn) and rows[0][1].startswith("Важное · Google-таблица не приняла заказ №")
+    assert "нет колонок: Дата счета" in rows[0][2] and "Заказ №" in rows[0][2] and rows[0][3] == "other"
+    assert sheet.escalate(conn, "2026-10-15T13:30:00") == []                               # the same streak: nothing more
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ?", (first["id"],)).fetchone()[0] == 1
+    conn.execute("UPDATE sheet_order SET failing = 0, error = ''")                         # sent at last
+    conn.commit()
+    assert sheet.escalate(conn, "2026-10-15T14:00:00") == []
+    _failing(conn, first["id"], "2026-10-15T15:00:00")                                    # a new streak
+    assert sheet.escalate(conn, "2026-10-15T15:55:00") == [first["id"]]
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ?", (first["id"],)).fetchone()[0] == 2
+
+
+def test_a_table_switched_off_is_never_escalated(tmp_path):
+    """Review 2026-11-23: the owner switched the table off on purpose (flush sends nothing, failing stays): no «Нужно действие», no task."""
+    conn, box = env(tmp_path)
+    sheet.save_settings(conn, "https://script.google.com/macros/s/AKfycbTEST_1234567890abc/exec", False, NOW, "owner")
+    first = card(conn, "worker2")
+    _failing(conn, first["id"], NOW)
+    assert sheet.escalate(conn, "2026-10-15T13:30:00") == []
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ?", (first["id"],)).fetchone()[0] == 0
+
+
+def test_the_minutely_path_sends_a_few_orders_at_most(tmp_path, monkeypatch):
+    """Review 2026-11-23: a hung Google must not hold the minutely chats-sync for long: three orders per minute at most."""
+    seen = {}
+    monkeypatch.setattr(sheet, "_due", lambda conn, now, full, limit=None: seen.setdefault("limit", limit) and [])
+    conn, box = env(tmp_path)
+    sheet.save_settings(conn, "https://script.google.com/macros/s/AKfycbTEST_1234567890abc/exec", True, NOW, "owner")
+    from tires_sync import cli
+    monkeypatch.setattr(sheet, "_secret", lambda conn, box, s: "secret")
+    cli._google_sheet_retries(conn, box, NOW)
+    assert seen.get("limit") == sheet.MINUTE_BATCH == 3
+
+
+def test_the_minutely_retries_take_the_time_of_their_own_moment(tmp_path, monkeypatch):
+    """Review 2026-11-23: the time came from before the chats were read (minutes old): a claim could be stale at once."""
+    from datetime import datetime
+    from tires_sync import cli
+    seen = {}
+    monkeypatch.setattr(cli, "moscow_now", lambda: datetime(2026, 10, 15, 12, 7, 0))
+    monkeypatch.setattr(sheet, "flush", lambda conn, box, http, now, full=False, limit=None: seen.setdefault("now", now) and {})
+    monkeypatch.setattr(sheet, "escalate", lambda conn, now: [])
+    conn, box = env(tmp_path)
+    cli._google_sheet_retries(conn, box, "2026-10-15T12:00:00")
+    assert seen["now"] == "2026-10-15T12:07:00"

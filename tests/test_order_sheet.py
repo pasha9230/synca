@@ -290,14 +290,14 @@ def test_a_failure_is_said_once_and_retried_later_without_a_double(table):
     assert "ошибка" in sheet.flush(conn, box, fake, NOW)[mine]
     assert events(conn, mine) == ["Ошибка Google-таблицы: Google не ответил (OSError): повторим позже."]
     row = conn.execute("SELECT failing, next_at FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()
-    assert row == (1, "2026-10-23T12:01:00")
-    assert sheet.flush(conn, box, fake, "2026-10-23T12:00:30") == {} and len(fake.posts) == 1                   # not before its time
-    sheet.flush(conn, box, fake, "2026-10-23T12:01:00")                                                         # 500
-    sheet.flush(conn, box, fake, "2026-10-23T12:06:00")                                                         # a page of Google, not the script
-    assert conn.execute("SELECT failing, next_at FROM sheet_order WHERE order_id = ?", (mine,)).fetchone() == (3, "2026-10-23T12:21:00")
+    assert row == (1, "2026-10-23T12:05:00")                                                                     # every 5 minutes (2026-11-23)
+    assert sheet.flush(conn, box, fake, "2026-10-23T12:04:30") == {} and len(fake.posts) == 1                   # not before its time
+    sheet.flush(conn, box, fake, "2026-10-23T12:05:00")                                                         # 500
+    sheet.flush(conn, box, fake, "2026-10-23T12:10:00")                                                         # a page of Google, not the script
+    assert conn.execute("SELECT failing, next_at FROM sheet_order WHERE order_id = ?", (mine,)).fetchone() == (3, "2026-10-23T12:15:00")
     assert len(events(conn, mine)) == 1                                                                       # once per streak
     assert "страница Google" in conn.execute("SELECT error FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0]
-    sheet.flush(conn, box, fake, "2026-10-23T12:21:00")
+    sheet.flush(conn, box, fake, "2026-10-23T12:15:00")
     assert len(fake.rows) == 2 and events(conn, mine)[-1] == "Записано в Google-таблицу: 2 стр."
     assert conn.execute("SELECT failing, next_at, error FROM sheet_order WHERE order_id = ?", (mine,)).fetchone() == (0, "", "")
 
@@ -313,7 +313,7 @@ def test_an_answer_lost_after_the_rows_were_made_makes_no_double(table):
         return answer
     sheet.flush(conn, box, lost, NOW)
     assert len(fake.rows) == 2 and "Ошибка Google-таблицы" in events(conn, mine)[0]
-    sheet.flush(conn, box, lost, "2026-10-23T12:01:00")
+    sheet.flush(conn, box, lost, "2026-10-23T12:05:00")
     assert len(fake.rows) == 2 and all(r["create"] for r in fake.data_posts()[-1]["rows"])                 # sent again: the mark finds the rows
     assert events(conn, mine)[-1] == "Записано в Google-таблицу: 2 стр."
 
@@ -341,11 +341,11 @@ def test_a_missing_column_or_a_wrong_secret_is_said_and_retried(table):
     assert fake.rows == {} and events(conn, mine) == ["Google-таблица не приняла 2 стр. (нет колонок: Списание): отправим ещё раз."]
     fake.columns.append("Списание")
     fake.secret = "другой"
-    sheet.flush(conn, box, fake, "2026-10-23T12:01:00")
+    sheet.flush(conn, box, fake, "2026-10-23T12:05:00")
     assert len(events(conn, mine)) == 1                                                                         # still the same streak
     assert conn.execute("SELECT error FROM sheet_order WHERE order_id = ?", (mine,)).fetchone()[0] == "Скрипт отказал: неверный секрет"
     fake.secret = SECRET
-    sheet.flush(conn, box, fake, "2026-10-23T12:06:00")
+    sheet.flush(conn, box, fake, "2026-10-23T12:10:00")
     assert len(fake.rows) == 2
 
 
@@ -1007,7 +1007,7 @@ def test_one_broken_order_does_not_stop_the_others(table, monkeypatch):
     monkeypatch.setattr(sheet, "rows_of", rows_of)
     done = sheet.flush(conn, box, fake, NOW)
     assert done[broken].startswith("ошибка: сбой панели (KeyError)") and "Записано" in done[fine]
-    assert conn.execute("SELECT failing, next_at FROM sheet_order WHERE order_id = ?", (broken,)).fetchone() == (1, "2026-10-23T12:01:00")
+    assert conn.execute("SELECT failing, next_at FROM sheet_order WHERE order_id = ?", (broken,)).fetchone() == (1, "2026-10-23T12:05:00")
     assert events(conn, broken) == ["Ошибка Google-таблицы: сбой панели (KeyError): сообщите разработчику."]
 
 
