@@ -48,7 +48,7 @@ CHECK = ("Артикул", "Телефон")                              # writ
 RECENT_DAYS = 45                                               # the hourly look: the orders placed so recently (and every failing one)
 URL = re.compile(r"^https://script\.google\.com/(?:macros|a/macros/[a-z0-9.-]{1,100})/s/[A-Za-z0-9_-]{10,200}/exec$")   # a/macros/<domain>: Workspace
 REDIRECT = "https://script.googleusercontent.com/"            # Google answers a web app with a redirect there; anywhere else is refused
-RETRY_MINUTES = (1, 5, 15, 60)                                 # then every hour
+RETRY_MINUTES = (5, 5, 5, 5, 5, 10)                            # the owner 2026-11-23: every 5–10 minutes, then every 10 (the minutely chats-sync sends them)
 CLAIM_MINUTES = 3
 BATCH = 20                                                     # orders sent by one flush after a request (the hourly one takes all)
 AUTHOR = "Google-таблица"
@@ -846,16 +846,16 @@ def status(conn) -> dict:
 
 # ---- a lasting failure --------------------------------------------------------------------------------------------------------------
 
-LASTING_HOURS = 3                  # the retries (1/5/15/60 minutes) and two hourly looks: a short hiccup of Google wakes nobody (the lead 2026-10-24)
+LASTING_MINUTES = 55               # the owner 2026-11-23: five retries and more, then at 55 minutes «Нужно действие» and a task to the admin
 ALERTED_KEY = "sheet_lasting_alerted"
 STREAK_STARTS = ("Ошибка Google-таблицы:%", "Google-таблица не приняла%")       # said once, when a streak of failures begins (_failed, send_order)
-LASTING_ALERT = "Tires Sync: Google-таблица не принимает заказы дольше %d ч: %s (последняя ошибка: %s). Проверьте «Подключения → Google-таблица»."
+LASTING_ALERT = "Tires Sync: Google-таблица не принимает заказы дольше %d мин: %s (последняя ошибка: %s). Проверьте «Подключения → Google-таблица»."
 RECOVERED = "Tires Sync: Google-таблица снова принимает заказы."
 
 
 def lasting(conn, now: str) -> List[dict]:
-    """The orders whose failures go on for LASTING_HOURS or longer (the streak begins at its first record in the order's journal)."""
-    edge = (datetime.fromisoformat(now[:19]) - timedelta(hours=LASTING_HOURS)).isoformat(timespec="seconds")
+    """The orders whose failures go on for LASTING_MINUTES or longer (the streak begins at its first record in the order's journal)."""
+    edge = (datetime.fromisoformat(now[:19]) - timedelta(minutes=LASTING_MINUTES)).isoformat(timespec="seconds")
     found = []
     kept, day = _kept(conn)                                                # an order left alone never keeps the alarm on
     for card_id, error in conn.execute("SELECT s.order_id, s.error FROM sheet_order s WHERE s.failing > 0" + kept + " ORDER BY s.order_id",
@@ -868,7 +868,7 @@ def lasting(conn, now: str) -> List[dict]:
 
 
 def lasting_alarm(conn, now: str) -> Optional[Tuple[str, bool]]:
-    """(text, notice) for the owner, once per episode: the alert when an order has failed for LASTING_HOURS, the note when none has any more.
+    """(text, notice) for the owner, once per episode: the alert when an order has failed for LASTING_MINUTES, the note when none has any more.
     The episode turns only when the caller says it was told (alarm_told). None: nothing new to say. The table switched off: the episode is
     over without a word."""
     alerted = store.get_state(conn, ALERTED_KEY)
@@ -879,7 +879,7 @@ def lasting_alarm(conn, now: str) -> Optional[Tuple[str, bool]]:
     found = lasting(conn, now)
     if found and not alerted:
         names = ", ".join("№%d" % f["order_id"] for f in found[:10]) + (" и ещё %d" % (len(found) - 10) if len(found) > 10 else "")
-        return LASTING_ALERT % (LASTING_HOURS, names, (found[-1]["error"] or "без текста")[:200]), False
+        return LASTING_ALERT % (LASTING_MINUTES, names, (found[-1]["error"] or "без текста")[:200]), False
     if alerted and not found:
         return RECOVERED, True
     return None
@@ -889,3 +889,56 @@ def alarm_told(conn, now: str, notice: bool) -> None:
     """The owner was told what lasting_alarm gave: the episode begins (the alert) or ends (the note). cli._alert said False (Telegram refused
     it): the next hour says it again."""
     store.set_state(conn, ALERTED_KEY, "" if notice else now[:19])
+
+
+# ---- «Нужно действие» (the owner 2026-11-23: the row must reach the table) ----------------------------------------------------------
+
+ESCALATED_KEY = "sheet_escalated:%d"         # app_state, per order: the start of the streak already escalated (one red record and one task)
+NEED_ACTION = ("Нужно действие: заказ не записан в Google-таблицу %d мин (попыток: %d). Ошибка: %s. Проверьте «Подключения → "
+               "Google-таблица» и лист «Заказы»; после исправления строка запишется сама.")
+TASK_TITLE = "Важное · Google-таблица не приняла заказ №%s: разобраться"
+
+
+def admin_login(conn) -> str:
+    """Whom «Нужно действие» goes to: the owner's login of the alerts (the panel's setting of the alerts; the admin who hears the failures)."""
+    from . import order_notify
+    return order_notify.get_owner_login(conn)
+
+
+def escalate(conn, now: str) -> List[int]:
+    """Every order whose rows the table has refused for LASTING_MINUTES (lasting): once per streak, a red record «Нужно действие» in its
+    journal (the bell shows it) and a task «Важное · …» to the admin with the error and the order's data. A streak over (sent at last):
+    its mark goes, so a new streak is told again. Returns the orders told now."""
+    from . import order_manager, tasks
+    told = []
+    failing = {r[0] for r in conn.execute("SELECT order_id FROM sheet_order WHERE failing > 0")}
+    for key, in conn.execute("SELECT key FROM app_state WHERE key LIKE 'sheet_escalated:%'").fetchall():
+        if int(key.split(":")[1]) not in failing:                      # sent at last: the next streak is a new one
+            conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+    for found in lasting(conn, now):
+        card_id, since = found["order_id"], found["since"]
+        if store.get_state(conn, ESCALATED_KEY % card_id) == since:
+            continue
+        try:
+            card = orders.get_card(conn, card_id)
+        except orders.OrderError:
+            continue
+        tries = conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0]
+        minutes = int((datetime.fromisoformat(now[:19]) - datetime.fromisoformat(since[:19])).total_seconds() // 60)
+        error = (found["error"] or "без текста")[:150]
+        orders.add_event(conn, card_id, now, AUTHOR, "sheet", NEED_ACTION % (minutes, tries, error), level="red")
+        label = order_manager.label(card)
+        point = (card.get("point") or {}).get("name") or "точка не указана"
+        items = sum(int(i["qty"] or 0) for i in card["items"])
+        note = ("Ошибка таблицы: %s. Заказ №%s (панель №%d), этап «%s», %s, позиций %d (%d шт.), клиент %s. Не записан с %s, попыток %d."
+                % (error, label, card_id, card["stage"]["name"], point, len(card["items"]), items, card["client_name"] or "без имени",
+                   since[11:16], tries))[:tasks.NOTE_MAX]
+        try:
+            tasks.add(conn, kind="other", title=(TASK_TITLE % label)[:tasks.TITLE_MAX], due_at=now[:16], note=note, now=now, author=AUTHOR,
+                      assignee=admin_login(conn), allowed=None, order_id=card_id, commit=False)
+        except tasks.TaskError:
+            pass                                                         # the red record is there all the same
+        store.set_state(conn, ESCALATED_KEY % card_id, since)
+        told.append(card_id)
+    conn.commit()
+    return told
