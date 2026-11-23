@@ -51,6 +51,7 @@ REDIRECT = "https://script.googleusercontent.com/"            # Google answers a
 RETRY_MINUTES = (5, 5, 5, 5, 5, 10)                            # the owner 2026-11-23: every 5–10 minutes, then every 10 (the minutely chats-sync sends them)
 CLAIM_MINUTES = 3
 BATCH = 20                                                     # orders sent by one flush after a request (the hourly one takes all)
+MINUTE_BATCH = 3                                               # the minutely retries (chats-sync): a hung Google holds the chats no longer (review 2026-11-23)
 AUTHOR = "Google-таблица"
 REALIZED, REFUSED, FROM_STOCK = "Р", "О", "Б"                  # the legend of «Реализация» (docs/integrations/google-sheet-columns.md)
 
@@ -182,7 +183,7 @@ def enroll_open(conn, now: str) -> List[int]:
     return found
 
 
-def _due(conn, now: str, full: bool) -> List[int]:
+def _due(conn, now: str, full: bool, limit: Optional[int] = None) -> List[int]:
     """The orders to look at: those that failed and wait no longer, never sent, or with a record in the journal since the last look;
     `full` (the hourly tick) looks at every order placed in the last RECENT_DAYS (a WebMIM date read by the snapshot leaves no record) and
     at every failing one: an old closed order is not counted again every hour."""
@@ -199,7 +200,7 @@ def _due(conn, now: str, full: bool) -> List[int]:
     rows = conn.execute("SELECT s.order_id FROM sheet_order s JOIN order_card c ON c.id = s.order_id WHERE (s.next_at = '' OR s.next_at <= ?)"
                         " AND (s.claim_until = '' OR s.claim_until < ?)" + changed + kept +
                         " AND s.order_id NOT IN (SELECT CAST(substr(key, 13) AS INTEGER) FROM app_state WHERE key LIKE 'oth_storage:%')"
-                        " ORDER BY s.order_id LIMIT ?", [now, now] + args + day + [-1 if full else BATCH])
+                        " ORDER BY s.order_id LIMIT ?", [now, now] + args + day + [limit if limit else (-1 if full else BATCH)])
     return [r[0] for r in rows]
 
 
@@ -814,7 +815,7 @@ def _restore_order(conn, card_id: int, marks: List[str], url: str, secret: str, 
     return out
 
 
-def flush(conn, box, http: Transport, now: str, full: bool = False) -> Dict[int, str]:
+def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optional[int] = None) -> Dict[int, str]:
     """Send the queued orders whose rows changed (order → what happened). The table off, no address or no secret: nothing goes."""
     s = settings(conn)
     if not (s["enabled"] and s["url"]) or box is None:
@@ -823,7 +824,7 @@ def flush(conn, box, http: Transport, now: str, full: bool = False) -> Dict[int,
     if not secret:
         return {}
     done: Dict[int, str] = {}
-    for card_id in _due(conn, now, full):
+    for card_id in _due(conn, now, full, limit):
         if not _claim(conn, card_id, now):
             continue
         try:
@@ -911,6 +912,8 @@ def escalate(conn, now: str) -> List[int]:
     its mark goes, so a new streak is told again. Returns the orders told now."""
     from . import order_manager, tasks
     told = []
+    if not enabled(conn):                                                  # switched off on purpose: nothing to escalate (review 2026-11-23)
+        return told
     failing = {r[0] for r in conn.execute("SELECT order_id FROM sheet_order WHERE failing > 0")}
     for key, in conn.execute("SELECT key FROM app_state WHERE key LIKE 'sheet_escalated:%'").fetchall():
         if int(key.split(":")[1]) not in failing:                      # sent at last: the next streak is a new one
@@ -933,7 +936,7 @@ def escalate(conn, now: str) -> List[int]:
         note = ("Ошибка таблицы: %s. Заказ №%s (панель №%d), этап «%s», %s, позиций %d (%d шт.), клиент %s. Не записан с %s, попыток %d."
                 % (error, label, card_id, card["stage"]["name"], point, len(card["items"]), items, card["client_name"] or "без имени",
                    since[11:16], tries))[:tasks.NOTE_MAX]
-        try:
+        try:                                                             # the owner's login of the alerts: a panel user or the main login
             tasks.add(conn, kind="other", title=(TASK_TITLE % label)[:tasks.TITLE_MAX], due_at=now[:16], note=note, now=now, author=AUTHOR,
                       assignee=admin_login(conn), allowed=None, order_id=card_id, commit=False)
         except tasks.TaskError:

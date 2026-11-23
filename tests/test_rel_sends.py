@@ -330,3 +330,38 @@ def test_55_minutes_of_failure_bring_need_action_and_one_task_to_the_admin(tmp_p
     _failing(conn, first["id"], "2026-10-15T15:00:00")                                    # a new streak
     assert sheet.escalate(conn, "2026-10-15T15:55:00") == [first["id"]]
     assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ?", (first["id"],)).fetchone()[0] == 2
+
+
+def test_a_table_switched_off_is_never_escalated(tmp_path):
+    """Review 2026-11-23: the owner switched the table off on purpose (flush sends nothing, failing stays): no «Нужно действие», no task."""
+    conn, box = env(tmp_path)
+    sheet.save_settings(conn, "https://script.google.com/macros/s/AKfycbTEST_1234567890abc/exec", False, NOW, "owner")
+    first = card(conn, "worker2")
+    _failing(conn, first["id"], NOW)
+    assert sheet.escalate(conn, "2026-10-15T13:30:00") == []
+    assert conn.execute("SELECT COUNT(*) FROM callback_task WHERE order_id = ?", (first["id"],)).fetchone()[0] == 0
+
+
+def test_the_minutely_path_sends_a_few_orders_at_most(tmp_path, monkeypatch):
+    """Review 2026-11-23: a hung Google must not hold the minutely chats-sync for long: three orders per minute at most."""
+    seen = {}
+    monkeypatch.setattr(sheet, "_due", lambda conn, now, full, limit=None: seen.setdefault("limit", limit) and [])
+    conn, box = env(tmp_path)
+    sheet.save_settings(conn, "https://script.google.com/macros/s/AKfycbTEST_1234567890abc/exec", True, NOW, "owner")
+    from tires_sync import cli
+    monkeypatch.setattr(sheet, "_secret", lambda conn, box, s: "secret")
+    cli._google_sheet_retries(conn, box, NOW)
+    assert seen.get("limit") == sheet.MINUTE_BATCH == 3
+
+
+def test_the_minutely_retries_take_the_time_of_their_own_moment(tmp_path, monkeypatch):
+    """Review 2026-11-23: the time came from before the chats were read (minutes old): a claim could be stale at once."""
+    from datetime import datetime
+    from tires_sync import cli
+    seen = {}
+    monkeypatch.setattr(cli, "moscow_now", lambda: datetime(2026, 10, 15, 12, 7, 0))
+    monkeypatch.setattr(sheet, "flush", lambda conn, box, http, now, full=False, limit=None: seen.setdefault("now", now) and {})
+    monkeypatch.setattr(sheet, "escalate", lambda conn, now: [])
+    conn, box = env(tmp_path)
+    cli._google_sheet_retries(conn, box, "2026-10-15T12:00:00")
+    assert seen["now"] == "2026-10-15T12:07:00"

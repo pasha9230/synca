@@ -2753,7 +2753,8 @@ def _google_sheet_retries(conn, box, now: str) -> None:
     (order_sheet.escalate) and the alert to the owner (lasting_alarm). A failure here is only a warning: the chats are read all the same."""
     try:
         from . import order_sheet
-        order_sheet.flush(conn, box, _http(), now)
+        now = moscow_now().isoformat(timespec="seconds")          # the moment of the retries, not of the chats read before (review 2026-11-23)
+        order_sheet.flush(conn, box, _http(), now, limit=order_sheet.MINUTE_BATCH)
         order_sheet.escalate(conn, now)
         said = order_sheet.lasting_alarm(conn, now)
         if said and _alert(conn, box, said[0], notice=said[1], recovery=said[1]):
