@@ -273,3 +273,19 @@ def test_an_id_the_unload_lost_and_a_title_that_names_nothing_say_the_id_in_the_
     [note] = _journal(conn, card["id"])
     assert note.split("\n")[:2] == ["Позиция не добавлена: этой позиции нет в выгрузке поставщика и нет в базе позиций.",
                                     "Искали: код 999; название «Шина неизвестная 1/1 R1»."]
+
+
+def test_the_button_takes_the_position_by_the_exact_title_when_the_code_of_the_ad_moved(tmp_path, monkeypatch):
+    http = ScriptedHttp(TOKEN, (500, {"message": "down"}))
+    app, client, tok, conn, chat = panel(tmp_path, monkeypatch, http)
+    conn.execute("UPDATE avito_chat SET item_title = ? WHERE id = ?", ("Ikon Tyres 205/55/16 T 94 Autograph Snow 3", chat))
+    conn.commit()
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card = card_of(conn, chat)
+    assert card["items"] == []
+    conn.execute("DELETE FROM app_state WHERE key LIKE 'ad_lookup_pause:%'")
+    conn.commit()
+    http.replies[:] = [TOKEN, known((AD, "999"))]                            # Avito names the ad: its code is not in today's unload
+    post(client, "/orders/%d/ad-position" % card["id"], tok)
+    assert [i["goods_id"] for i in orders.get_card(conn, card["id"])["items"]] == ["100"]
+    assert any(t.startswith("Позиция найдена по названию поставщика: «Ikon Tyres 205/55/16 T 94 Autograph Snow 3» (код 100)") for t in _journal(conn, card["id"]))

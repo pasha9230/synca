@@ -50,11 +50,27 @@ def test_a_position_only_in_the_base_is_taken_from_it_by_its_code(tmp_path):
     archive.record(conn, parsed(kumho("x-old", stock=6, base_price=8500.0)), T1)
     found = order_search.locate(conn, parsed(make_offer(goods_id="1")), "x-old", [""])
     assert found.how == "base" and found.offer.goods_id == "x-old" and found.info["last_seen"] == T1 and found.info["last_stock"] == 6
-    [(kind, text, level), (office_kind, purchase, _grey)] = order_search.notes(found, "item")
-    assert kind == "item" and level == "yellow" and text.startswith("Позиция взята из базы позиций: в выгрузке поставщика сегодня её нет.")
-    assert "последний раз 2026-11-20, остаток тогда 6 шт." in text and "8500" not in text          # the point reads it: no purchase
-    assert office_kind == "webmim" and "8500 ₽" in purchase
-    assert not point_no_webmim({"kind": kind, "text": text}) and point_no_webmim({"kind": office_kind, "text": purchase})
+    [(kind, text, level)] = order_search.notes(found, "item")
+    lines = text.split("\n")
+    assert lines[0] == "Позиция взята из базы позиций: в выгрузке поставщика сегодня её нет."
+    assert "последний раз 2026-11-20, остаток тогда 6 шт." in lines[1] and "8500" not in "\n".join(lines[:4])     # the point of it first
+    assert "Цена закупки из базы позиций: 8500 ₽" in text and level == "yellow"
+    assert kind == "webmim" and point_no_webmim({"kind": kind, "text": text})                         # the office's only: never the point's
+
+
+def test_a_base_position_without_a_sale_price_says_so_clearly(tmp_path, monkeypatch):
+    from tires_sync import order_offers, orders
+
+    def no_price(*a, **k):
+        raise orders.OrderError("Для этой позиции не рассчитана цена продажи: задайте процент бренда.")
+    monkeypatch.setattr(order_offers, "offer_args", no_price)
+    conn = store.connect(str(tmp_path / "x.db"))
+    archive.record(conn, parsed(kumho("x-old")), T1)
+    found = order_search.locate(conn, parsed(make_offer(goods_id="1")), "x-old", [])
+    with pytest.raises(order_search.NotLocated) as err:
+        order_search.located_args(conn, None, None, None, found, "2026-11-24")
+    assert order_search.first_line(err.value) == ("Позиция «%s» (код x-old) есть только в базе позиций, цены продажи для неё нет "
+                                                  "(для этой позиции не рассчитана цена продажи: задайте процент бренда)." % NAME)
 
 
 def test_a_position_only_in_the_base_is_found_by_its_exact_name(tmp_path):
