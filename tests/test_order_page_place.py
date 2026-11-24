@@ -22,7 +22,7 @@ def test_the_card_has_the_mark_of_its_place_in_both_views(tmp_path, view):
     app, client, tok, conn, tanya = page(tmp_path, view)
     html = window(client, tanya["order_id"])
     assert html.count("data-keep-place") == 1
-    assert '<div class="order-chat" data-order-chat="%d" data-open-end>' % tanya["id"] in html   # the office's chat column, as before
+    assert '<div class="order-chat" data-order-chat="%d">' % tanya["id"] in html               # no «open at the end» mark any more
     assert "data-keep-place" not in client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)   # «Чаты»: its own place of the list
 
 
@@ -34,14 +34,20 @@ def test_a_move_to_the_same_stage_comes_back_without_an_anchor(tmp_path, view):
 
 
 def test_the_chat_of_the_card_never_moves_the_page():
-    end = block("function chatToEnd()", "var orderChat")
-    assert 'orderChat.contains(thread) && window.location.hash !== "#order-chat" && isPageBox(box)) return;' in end
-    page_box = block("function isPageBox(box)", "function chatBottom")
-    assert "document.scrollingElement" in page_box and 'classList.contains("main")' in page_box
+    start = block("var chatThread = document", "the order column folds away")
+    assert '(!window.location.hash && !inOrder) || window.location.hash === "#order-chat"' in start          # the card: only after a send
+    assert JS.index("var chatListHeld = false;") < JS.index("the list keeps its place") < JS.index("var chatThread = document")
+
+
+def test_a_list_put_back_beside_the_chat_stops_the_jump_to_its_end():
+    place = block("the list keeps its place", "var chatThread = document")
+    assert "chatListHeld = box !== list && !!thread && chatScroller(thread) === box;" in place                # one box, side by side
+    start = block("var chatThread = document", "the order column folds away")
+    assert "!chatListHeld &&" in start and 'if (!chatMoved) chatToEnd();' in start                           # photos: only when it ran at all
 
 
 def test_the_card_keeps_its_place_when_loaded_again():
-    keep = block("13b) Карточка заказа", "13a) Заказ")
+    keep = block("13c) Карточка заказа", "13a) Заказ")
     assert 'document.querySelector("[data-keep-place]")' in keep and "sessionStorage.removeItem(KEY)" in keep   # another page: next time from the top
     assert "mark.path === path" in keep and 'addEventListener("pagehide"' in keep                             # the same address only
     assert '!window.location.hash || (nav && nav.type === "reload")' in keep                                   # an anchor wins, except F5

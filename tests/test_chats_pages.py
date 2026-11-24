@@ -185,7 +185,10 @@ def test_the_list_keeps_its_place_after_a_reload_and_after_update_list():
     assert "live.dataset.place" in place and "all[place] = box.scrollTop" in place                     # by the list as the server reads it
     assert "box = visible ? chatScroller(list) : list" in place                                        # ТЗ №87: the box the list moves with (.main of «Новый вид»)
     assert "list.innerHTML" not in place and "after(bar).forEach" in place                              # «Обновить список»: the search and the menus stay
-    assert "scrollIntoView" not in place and "list.scrollTop +=" in place                            # only the list moves, never the page
+    reveal = place[place.index("function reveal()"):place.index("function places()")]
+    assert "scrollIntoView" not in place and "if (!row || shared) return;" in reveal and "box.scrollTop +=" in reveal   # only the box of the list moves
+    assert "thread.scrollTop" not in reveal and "window.scroll" not in reveal                                         # (the list, or .main beside the chat)
+    assert "list.scrollTop +=" in place                                                                               # «Обновить список»: the list itself
     assert 'closest("[data-chats-relist]")' in place and "e.preventDefault()" in place and 'getElementById("chats-offline")' in place
     assert 'href="" data-chats-relist>Обновить список</a>' in (root / "templates" / "chats.html").read_text(encoding="utf-8")
 
