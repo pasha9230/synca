@@ -268,6 +268,13 @@ def test_toolbar_stays_inside_the_viewport_in_both_size_modes(served):
             ctx.add_cookies([{"name": "session", "value": served["cookie"], "domain": "127.0.0.1", "path": "/"}])
             page = ctx.new_page()
             page.goto(served["base"] + "/catalog")
+            switch = page.get_by_role("switch", name="Все бренды поставщика")
+            with page.expect_navigation():
+                switch.check()
+            assert "all_brands=1" in page.url and switch.is_checked()
+            with page.expect_navigation():
+                switch.uncheck()
+            assert "all_brands=" not in page.url and not switch.is_checked()
             for mixed in (False, True):
                 toolbar = page.locator("form[data-oc]")
                 assert toolbar.locator(".oc-axis").count() == (2 if mixed else 0)

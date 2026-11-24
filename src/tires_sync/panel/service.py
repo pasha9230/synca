@@ -369,11 +369,13 @@ class _Filtered:
         self.other_territories = {}
 
 
-def hide_excluded(parsed, raw: dict, conn=None, ref=None):
+def hide_excluded(parsed, raw: dict, conn=None, ref=None, *, all_brands=False):
     """The catalog view without brands and radii the owner excluded. With `conn` (the catalog, its search and the dashboard; not the
     economics): the positions of 4tochki only of the brands we work with (the owner 2026-10-24, task 3: «тот же фильтр, что уже выбран
     для МИМ») - a brand of WebMIM with the same Avito name switched on in any season, or the 4tochki brand itself switched on."""
-    worked = _tochki_worked(conn, raw, parsed, ref) if conn is not None else None
+    if all_brands:
+        raw = {**raw, "excluded_brands": ()}
+    worked = _tochki_worked(conn, raw, parsed, ref) if conn is not None and not all_brands else None
     if worked is None and not (raw.get("excluded_brands") or raw.get("excluded_sizes")):
         return parsed
     prefix = worked[0] if worked else None
@@ -521,7 +523,7 @@ STOCK_CAP = 41          # 4tochki sends 41 for «more than 40»
 
 
 def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="brand", descending=False,
-                   base_raw=None, gone=(), view_only=frozenset(), capped_supplier=None, twins_from=None) -> list:
+                   base_raw=None, gone=(), view_only=frozenset(), capped_supplier=None, twins_from=None, preview_only=frozenset()) -> list:
     """Every supplier position grouped by brand, with our price and why it is (not) in the feed. `view_only`: positions shown but
     never published (4tochki with its switch off); `capped_supplier`: the supplier whose stock above 40 comes as 41. `twins_from`: the
     positions where the same tire at another supplier is looked for (tire_match; the catalog before its filters), else `parsed`."""
@@ -567,7 +569,9 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
             if not offer_matches(offer, avito_names[offer.brand_key], terms):
                 continue
         manual = settings.overrides.get(override_key(gid))
-        if gid in view_only:
+        if gid in preview_only:
+            state, text, code = "no", "Бренд вне рабочего ассортимента", "view_only"
+        elif gid in view_only:
             state, text, code = "no", VIEW_ONLY_TEXT, "view_only"
         elif manual == "off":
             state, text, code = "no", "снято вами", "manual_off"
@@ -595,7 +599,7 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
             "car_type": offer.car_type.upper() if offer.car_type.upper() in ("C", "LT") else "",
             "state": state, "reason": text, "scode": code, "manual": manual,
             "problem": gid in ev.problems and ev.problems[gid][0].split(":", 1)[0] != "model_needs_mapping", "published": gid in published_any,
-            "pending": base_overrides is not None and manual != base_overrides.get(override_key(gid)), "view_only": gid in view_only,
+            "pending": base_overrides is not None and manual != base_overrides.get(override_key(gid)), "view_only": gid in view_only or gid in preview_only,
             "own_price": gid in own_any,
             "below_cost": bool(cand and gid in settings.own_prices and offer.base_price > 0 and cand.price < offer.base_price),
             "purchase": ev.held[gid][0] if gid in ev.held else offer.base_price,     # what a percent is counted from: the anchor (price_guard)

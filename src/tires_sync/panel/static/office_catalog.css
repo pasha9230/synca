@@ -81,6 +81,30 @@
 }
 .oc-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .oc-search .input, .oc-search .btn { height: 40px; }
+.oc-catalog-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.oc-brand-switch { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; cursor: pointer; }
+.oc-brand-switch input {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  padding: 2px;
+  border-radius: 12px;
+  background: var(--gray-500);
+  cursor: pointer;
+}
+.oc-brand-switch input::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+}
+.oc-brand-switch input:checked { background: var(--primary-600); }
+.oc-brand-switch input:checked::before { transform: translateX(16px); }
+.oc-brand-switch input:focus-visible { outline: 2px solid var(--primary-600); outline-offset: 3px; }
 .oc-main-row { align-items: end; gap: 16px 24px; }
 .oc-axis { display: grid; gap: 4px; min-width: 0; }
 .oc-axis-t { padding: 0; }
