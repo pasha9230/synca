@@ -1156,6 +1156,7 @@ def answer_issued(conn, card: dict, who: str, now: str) -> tuple:
 
 
 SOLD_SKIP = "шины проданы с ОТХ другому покупателю: прежнему клиенту не пишем"
+POINT_SOLD = "Точка продала шины с ОТХ"   # the journal (kind «point») of a sale of the point; oth_point_sale adds «: N шт. …»; order_report pays by it
 OFFICE_SOLD = "Продано с ОТХ: запись хранения переведена в «Выполнено» в панели"
 AGREED_REFUSED = "не выполнено: возврат согласован"
 AGREEING_REFUSED = "не выполнено: шины на согласовании возврата"
@@ -1231,7 +1232,7 @@ def sell(conn, card: dict, who: str, now: str, office: bool = False) -> tuple:
     if office:
         orders.add_event(conn, card["id"], now, who, "field", OFFICE_SOLD)
     else:
-        orders.add_event(conn, card["id"], now, who, "point", "Точка продала шины с ОТХ")
+        orders.add_event(conn, card["id"], now, who, "point", POINT_SOLD)
     try:
         moved = orders.move_card(conn, card["id"], done["id"], now, who, journal=not office, oth_sold=True)
     except orders.OrderError as err:                                                 # rolled back with the rest

@@ -283,8 +283,8 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     if oth_swap.handed_fee(conn, card["id"]):                                     # never for a client who left (oth_swap)
         fee += order_report.rate_on(rates, "handoff_fee", day)
     if order_report.oth_sold_orders(conn, [card["id"]]):                          # the point sold them from «На ОТХ»: its bonus per tyre
-        fee += order_report.rate_on(rates, "oth_sale_fee", day) * sum(r["pieces"] for r in counted.values())
-    total =sum(r["sale_total"] for r in counted.values())
+        fee += round(order_report.rate_on(rates, "oth_sale_fee", day) * sum(r["pieces"] for r in counted.values()), 2)    # as the report
+    total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
     out = {}
     for item_id, sale in pairs.items():

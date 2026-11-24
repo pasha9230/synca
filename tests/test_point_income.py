@@ -220,6 +220,9 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     november = mine.get("/my-point/income?m=2026-11").get_data(as_text=True)
     assert "За этот месяц выплат нет." in november
     assert mine.get("/my-point/income?m=junk").status_code == 200
+    assert "за каждую шину, проданную с ОТХ, +50" in page.replace("\xa0", " ")
+    october = mine.get("/my-point/income?m=2026-10").get_data(as_text=True)          # before OTH_SALE_FEE_FROM: no «+0 ₽» in the hint
+    assert "проданную с ОТХ" not in october
 
 
 def test_the_handed_page_shows_the_bonus_of_each_client(tmp_path):

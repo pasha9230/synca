@@ -17,7 +17,7 @@ import re
 from datetime import date
 from typing import Dict, List, Optional
 
-from . import sales as sales_store, store, users, webmim_match
+from . import order_oth, sales as sales_store, store, users, webmim_match
 
 POINT_FEE = 75.0                     # rubles per order, paid to the point (the default: before the first dated rate)
 OWNER_SHARE = 0.5                    # of the net profit; the rest is the partner's (the default)
@@ -29,7 +29,7 @@ DEFAULTS = {"point_fee": POINT_FEE, "owner_share": OWNER_SHARE, "handoff_fee": H
 STARTS = {"handoff_fee": HANDOFF_FEE_FROM, "oth_sale_fee": OTH_SALE_FEE_FROM}     # before it, with no rate saved: 0
 # the journal of an order the point sold from «На ОТХ» (kind «point»): oth_point_sale._sell writes the first with «: N шт. …», order_oth.sell
 # the second as it is; the office's «Выполнено» of a record (order_oth.OFFICE_SOLD) and «Взять с ОТХ» are no sale of the point
-OTH_SOLD_EVENT = "Точка продала шины с ОТХ"
+OTH_SOLD_EVENT = order_oth.POINT_SOLD
 MAX_POINT_FEE = 100000.0
 NO_POINT = "точка не указана"
 MANUAL = "Продажи вручную"

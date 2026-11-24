@@ -193,7 +193,7 @@ def _sell(conn, x: int, pieces: Dict[int, int], name: str, phone: str, number, t
                     (done["id"], now, now, b, created["id"])).rowcount != 1:
         raise SaleError("Заказ продажи только что изменили: обновите страницу.")
     orders.add_event(conn, b, now, who, "stage", "Этап: «%s» → «%s»" % (created["name"], done["name"]))
-    orders.add_event(conn, b, now, who, "point", "Точка продала шины с ОТХ: %d шт. (запись хранения №%d)%s" % (
+    orders.add_event(conn, b, now, who, "point", order_oth.POINT_SOLD + ": %d шт. (запись хранения №%d)%s" % (
         sold, x, "; %s" % NO_CONTACT.lower() if not (name or phone) else ""))
     left = orders.get_card(conn, x)
     mark = oth_storage.record(conn, x) or {}

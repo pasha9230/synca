@@ -16,5 +16,5 @@
 <td>{% if e.oth %}{{ e.oth|money }} ({{ e.oth_pieces }} шт.){% else %}—{% endif %}</td><td>{{ e.total|money }}</td></tr>{% endfor %}
 </tbody></table></div>
 {% else %}<p class="mp-empty">За этот месяц выплат нет.</p>{% endif %}
-<p class="mp-hint">За выданный заказ {{ rates.point_fee|money }}; за выданный заказ клиента, которого вы передали, +{{ rates.handoff_fee|money }}; за каждую шину, проданную с ОТХ, +{{ rates.oth_sale_fee|money }}. Считается по дню продажи; отменённые заказы не входят.</p>
+<p class="mp-hint">За выданный заказ {{ rates.point_fee|money }}; за выданный заказ клиента, которого вы передали, +{{ rates.handoff_fee|money }}{% if rates.oth_sale_fee %}; за каждую шину, проданную с ОТХ, +{{ rates.oth_sale_fee|money }}{% endif %}. Считается по дню продажи; отменённые заказы не входят.</p>
 {% endif %}
