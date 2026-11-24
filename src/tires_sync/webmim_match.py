@@ -180,7 +180,7 @@ def sync(conn, client, server: str, now: str, today: date, days: int = DAYS, sle
                 before = known.get(order["id"])
                 if before is None:
                     counts["new"] += 1
-                    conn.execute("INSERT INTO webmim_order (server, id, number, status_code, status_text, create_date, external_number, customer_name, "
+                    conn.execute("INSERT OR IGNORE INTO webmim_order (server, id, number, status_code, status_text, create_date, external_number, customer_name, "
                                  "customer_phone_norm, fingerprint, seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                                  (server, order["id"], order["number"], order["status_code"], order["status_text"], order["create_date"],
                                   order["external_number"], order["customer_name"], order["customer_phone_norm"], order["fingerprint"], now))
@@ -226,6 +226,68 @@ def _row(row) -> dict:
 def snapshot(conn, server: str) -> List[dict]:
     return [_row(r) for r in conn.execute("SELECT %s FROM webmim_order WHERE server = ? ORDER BY create_date DESC, id DESC" % ", ".join(FIELDS),
                                           (server,))]
+
+
+def read_number(conn, number: str, client_of, now: str) -> dict:
+    """Read one production order for manual import. Reuse its snapshot when the positions are available."""
+    from . import webmim_create, webmim_invoice
+
+    sql = "SELECT %s FROM webmim_order WHERE server = 'prod' AND number = ?" % ", ".join(FIELDS)
+    cached = [_row(row) for row in conn.execute(sql, (number,))]
+    if len(cached) > 1:
+        raise orders.OrderError("В WebMIM найдено несколько заказов с этим номером.")
+    if cached and cached[0]["items"] is not None:
+        return cached[0]
+    if _refused_before(conn):
+        raise orders.OrderError("WebMIM отклонил вход. Проверьте учётку заказов в «Подключениях».")
+    try:
+        client = client_of()
+        if client is None:
+            raise orders.OrderError("Доступ к заказам WebMIM не настроен.")
+        with client:
+            if cached:
+                raw = client.order(cached[0]["id"], quick=True)
+            else:
+                matches = {}
+                rows, pages = client.orders_page(1, PER_PAGE)
+                if pages > 1:
+                    last, _ = client.orders_page(pages, PER_PAGE)
+                    rows += last
+                for row in rows:
+                    candidate = _order(row)
+                    if candidate and candidate["number"] == number:
+                        matches[candidate["id"]] = row
+                if not matches:
+                    raise orders.OrderError("Заказ пока не найден. После обновления снимка WebMIM нажмите «Сохранить» ещё раз.")
+                if len(matches) != 1:
+                    raise orders.OrderError("В WebMIM найдено несколько заказов с этим номером.")
+                raw = next(iter(matches.values()))
+            order = _order(raw)
+            if not order or order["number"] != number or draft(order) or webmim_create.cancelled(order):
+                raise orders.OrderError("WebMIM не подтвердил номер оформленного заказа.")
+            order["invoice"] = webmim_invoice.look(raw)["number"]
+            raw_items = client.items(order["id"])
+            order["items"], order["sum"] = _items(raw_items)
+            if len(order["items"]) != len(raw_items):
+                raise orders.OrderError("В WebMIM есть позиция без кода товара.")
+    except (OSError, SecretKeyError, webmim_orders.OrdersError) as err:
+        if isinstance(err, webmim_orders.OrdersError) and str(err).startswith(REFUSED):
+            connections.record_check(conn, "webmim_orders", connections.supplier_owner(1), False, REFUSED, now)
+        raise orders.OrderError("Не удалось прочитать заказ из WebMIM. Проверьте подключение и повторите сохранение.") from err
+    order.update(server="prod", seen_at=now, items_at=now)
+    return order
+
+
+def remember_read_order(conn, order: dict) -> None:
+    """Keep a targeted read in the same snapshot used for comparisons."""
+    values = dict(order, items=json.dumps(order["items"], ensure_ascii=False))
+    conn.execute(
+        "INSERT INTO webmim_order (%s) VALUES (%s) ON CONFLICT(server, id) DO UPDATE SET %s "
+        "WHERE excluded.items_at > webmim_order.items_at" %
+        (", ".join(FIELDS), ", ".join("?" for _ in FIELDS),
+         ", ".join("%s = excluded.%s" % (key, key) for key in FIELDS[2:])),
+        tuple(values[key] for key in FIELDS),
+    )
 
 
 def seen_at(conn, server: str) -> str:
