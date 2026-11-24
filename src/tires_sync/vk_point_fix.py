@@ -185,9 +185,23 @@ def order_changed(conn, card_id, before: dict, now: str, author: str, send: Opti
 client_changed = order_changed                                     # the name of 2026-11-24
 
 
-def _plain(before: dict, after: dict) -> List[str]:
-    """The values of PLAIN that changed (both known and not empty: a value the point was never told is no change to it)."""
-    return [k for k in PLAIN if str(before.get(k) or "").strip() and str(after.get(k) or "").strip() and before[k] != after[k]]
+def _same(k: str, a, b) -> bool:
+    if k == "client_name":
+        return _same_name(a, b)
+    if k == "client_phone":
+        return _same_phone(a, b)
+    return str(a or "") == str(b or "")
+
+
+def _differs(before: dict, after: dict) -> List[str]:
+    """The variables of the templates this save changed (before: snapshot, or only the client's name and phone): nothing else is ever
+    corrected (a value changed elsewhere meanwhile waits for a save that changes it)."""
+    return [k for k in before if k in templates.VARIABLES and not _same(k, before[k], after.get(k))]
+
+
+def _plain(before: dict, differs: List[str]) -> List[str]:
+    """The values of PLAIN this save changed that the point was told (not empty before: a value filled in is no change to announce)."""
+    return [k for k in PLAIN if k in differs and str(before.get(k) or "").strip()]
 
 
 def _client_keys(old_name, old_phone, card: dict) -> List[str]:
@@ -201,16 +215,13 @@ def _add(keys: List[str], more) -> None:
             keys.append(k)
 
 
-def _merge(old: dict, fresh: dict) -> dict:
-    """The values a message is built again with: the new ones; the old where the order has none now (a line is never emptied: «На ОТХ» has no
-    «резерв до») or the client's name or phone is only written otherwise."""
+def _merge(old: dict, fresh: dict, differs: List[str]) -> dict:
+    """The values a message is built again with: the new ones of what this save changed; the old where the order has none now (a line is
+    never emptied: «На ОТХ» has no «резерв до») or the client's name or phone is only written otherwise."""
     out = {}
     for k, v in old.items():
         new = str(fresh.get(k) or "")
-        if not new.strip() or (k == "client_name" and _same_name(v, new)) or (k == "client_phone" and _same_phone(v, new)):
-            out[k] = v
-        else:
-            out[k] = new
+        out[k] = new if k in differs and new.strip() and not _same(k, v, new) else v
     return out
 
 
@@ -235,11 +246,15 @@ def _changed(conn, card_id, before: dict, now: str, author: str, send, edit) -> 
         return ""                                                  # no VK of the point or no key: quietly nothing
     if "_point_id" in before and before["_point_id"] != point["id"]:
         return ""                                                  # another point: the old one's message stays, the new one is told as ever
+    if (card.get("stage") or {}).get("kind") != "open":
+        return ""                                                  # a closed or cancelled order: the point is not bothered
+    differs = _differs(before, templates.values(conn, card, now))
+    if not differs:
+        return ""                                                  # this save changed nothing the point is told
+    plain = _plain(before, differs)
     name, phone = card["client_name"] or "", card["client_phone"] or ""
-    after = templates.values(conn, card, now) if any(k in before for k in PLAIN) else {}
-    plain = _plain(before, after)
-    rows = [{"id": r[0], "message_id": r[1], "text": r[2], "name": r[3], "phone": r[4], "template": r[5], "vals": r[6], "wrap": r[7] or "",
-             "sent_at": r[8]} for r in conn.execute(
+    rows = [{"id": r[0], "message_id": r[1], "text": r[2] or "", "name": r[3], "phone": r[4], "template": r[5], "vals": r[6],
+             "wrap": r[7] or "", "sent_at": r[8]} for r in conn.execute(
         "SELECT id, message_id, text, client_name, client_phone, template, vals, wrap, sent_at FROM vk_point_message "
         "WHERE order_id = ? AND peer_id = ? ORDER BY id", (card_id, peer))]
     if not rows:
@@ -251,68 +266,80 @@ def _changed(conn, card_id, before: dict, now: str, author: str, send, edit) -> 
             return _event(conn, card, now, author, "Менеджер точки «%s» в ВК изменился: сообщение прежнему менеджеру не исправлено, "
                                                    "новому не отправлено" % point["name"], "grey")
         return _legacy(conn, card, peer, before, plain, now, author, send)
-    edited, why, keys = 0, "", []
+    edited, why, keys, filled = 0, "", [], []
     for row in rows:
-        built = _rebuilt(conn, card, row)
-        if built is not None:                                      # a message of its template: built again with the values of now
-            text, merged, changed = built
-            if not changed:
-                continue
-            _add(keys, changed)
-            failure = _try(edit, peer, row["message_id"], text)
-            if failure == DOWN:
-                return _down(conn, card, now, author, edited, keys)
-            if failure:
-                why = why or failure
-                continue
-            conn.execute("UPDATE vk_point_message SET text = ?, vals = ?, client_name = ?, client_phone = ?, edited_at = ? WHERE id = ?",
-                         (text, json.dumps(merged, ensure_ascii=False), name, phone, now, row["id"]))
-            conn.commit()
-            edited += 1
+        plan = _plan(conn, card, row, before, differs, plain)
+        if plan is None:
             continue
-        if plain:                                                  # an old message: its other values cannot be put in, the note says them
-            _add(keys, plain)
-            why = why or "старое сообщение не пересобрать"
-        client = _client_keys(row["name"], row["phone"], card)
-        if not client:
-            continue
-        _add(keys, client)
-        text = row["text"]
-        for old, new, same, labels in ((row["name"], name, _same_name, NAME_LINES), (row["phone"], phone, _same_phone, PHONE_LINES)):
-            if text is not None and not same(old, new):
-                text = _put(text, old, new, labels)
-        if text is None:
-            why = why or "старое сообщение не найдено"
+        text, vals, noted, added, reason = plan
+        claim = conn.execute("UPDATE vk_point_message SET vals = ?, client_name = ?, client_phone = ? WHERE id = ? AND vals IS ? AND "
+                             "client_name IS ? AND client_phone IS ?", (vals, name, phone, row["id"], row["vals"], row["name"], row["phone"]))
+        conn.commit()                                              # the change is this save's: a second worker or save never repeats it
+        if claim.rowcount != 1:
+            continue                                               # another worker took it first
+        if text is None or text == row["text"]:                    # nothing to put in the text: the note says it
+            _add(keys, noted)
+            why = why or reason
             continue
         failure = _try(edit, peer, row["message_id"], text)
-        if failure == DOWN:
-            return _down(conn, card, now, author, edited, keys)
-        if failure:
+        if failure == DOWN:                                        # VK may answer at the next save: the change is not taken
+            conn.execute("UPDATE vk_point_message SET vals = ?, client_name = ?, client_phone = ? WHERE id = ? AND vals IS ?",
+                         (row["vals"], row["name"], row["phone"], row["id"], vals))
+            conn.commit()
+            return _down(conn, card, now, author, edited, keys + noted)
+        _add(keys, noted)
+        if failure:                                                # VK keeps the old text, so does the panel: announced once by the note
             why = why or failure
             continue
-        conn.execute("UPDATE vk_point_message SET text = ?, client_name = ?, client_phone = ?, edited_at = ? WHERE id = ?",
-                     (text, name, phone, now, row["id"]))
+        conn.execute("UPDATE vk_point_message SET text = ?, edited_at = ? WHERE id = ?", (text, now, row["id"]))
         conn.commit()
         edited += 1
-    if not edited and not why:
-        return ""                                                  # nothing the point was told changed (or only written otherwise)
-    return _note(conn, card, peer, now, author, send, edited, why, keys)
+        _add(filled, added)
+    if keys:
+        return _note(conn, card, peer, now, author, send, edited, why, keys)
+    if edited:                                                     # only values filled in: the message is right, no note
+        return _event(conn, card, now, author, "Сообщение точке «%s» в ВК дополнено: %s" % (card["point"]["name"], _what(filled)), "grey")
+    return ""
 
 
-def _rebuilt(conn, card: dict, row: dict):
-    """(text, values, the keys changed) of a message kept with its template, built again with the order's values of now; None when it has no
-    template or its text in VK is no longer the template's (an old correction of the client's lines)."""
-    if not row["template"] or not row["vals"]:
+def _plan(conn, card: dict, row: dict, before: dict, differs: List[str], plain: List[str]):
+    """What one message gets: (its new text or None, its values as JSON, the keys the note announces, the keys only filled in, why the text
+    is not built) — or None when this save changed nothing of it. A message of its template is built again with the new values; one
+    whose text is not its template's (an older one, a text changed in VK) gets the client's name and phone put in its lines, and the note
+    for another value only when the old value is in its text."""
+    old = None
+    if row["template"] and row["vals"]:
+        try:
+            old = json.loads(row["vals"])
+        except ValueError:
+            old = None
+    if isinstance(old, dict):
+        merged = _merge(old, templates.values(conn, card, row["sent_at"]), differs)   # its own time: «дата оформления» stays
+        changed = [k for k in old if merged[k] != old[k]]
+        if not changed:
+            return None
+        vals = json.dumps(merged, ensure_ascii=False)
+        if _wrap(row["wrap"], templates.fill(row["template"], old)[0]).strip() == row["text"].strip():
+            noted = [k for k in changed if old[k].strip()]
+            text = _wrap(row["wrap"], templates.fill(row["template"], merged)[0]).strip()
+            return text, vals, noted, [k for k in changed if k not in noted], ""
+        others = [k for k in changed if k not in CLIENT and old[k].strip() and old[k] in row["text"]]
+        client = [k for k in changed if k in CLIENT]
+    else:
+        vals = row["vals"]
+        others = [k for k in plain if str(before.get(k) or "") in row["text"]]
+        client = [k for k in _client_keys(row["name"], row["phone"], card) if k in differs]
+        if not client and not others:
+            return None
+    text = row["text"]
+    for key, old_value, labels in (("client_name", row["name"], NAME_LINES), ("client_phone", row["phone"], PHONE_LINES)):
+        if key in client and text is not None and str(old_value or "").strip():
+            text = _put(text, old_value, card[key] or "", labels)
+    noted = [k for k in client if str(row["name" if k == "client_name" else "phone"] or "").strip()] + others
+    if not noted and text == row["text"]:
         return None
-    try:
-        old = json.loads(row["vals"])
-    except ValueError:
-        return None
-    if not isinstance(old, dict) or _wrap(row["wrap"], templates.fill(row["template"], old)[0]).strip() != str(row["text"] or "").strip():
-        return None
-    merged = _merge(old, templates.values(conn, card, row["sent_at"]))     # its own time: «дата оформления» of an order never placed stays
-    changed = [k for k in old if merged[k] != old[k]]
-    return _wrap(row["wrap"], templates.fill(row["template"], merged)[0]).strip(), merged, changed
+    reason = "старое сообщение не найдено" if text is None else "старое сообщение не пересобрать" if others else ""
+    return text, vals, noted, [], reason
 
 
 def _client_only(keys) -> bool:
@@ -368,20 +395,18 @@ def _down(conn, card: dict, now: str, author: str, edited: int, keys=()) -> str:
 
 
 def _legacy(conn, card: dict, peer: str, before: dict, plain: List[str], now: str, author: str, send) -> str:
-    """An order without a kept number: the note only, when the order is open and a sent message of it named the old name or phone (a new
-    client) or the point was told the order at all (its other values)."""
+    """An order without a kept number: the note only, when a sent message of it named the old name or phone (a new client) or the old
+    value (the others)."""
     old_name, old_phone = str(before.get("client_name") or ""), str(before.get("client_phone") or "")
     client = _client_keys(old_name, old_phone, card) if ("client_name" in before or "client_phone" in before) else []
     if not client and not plain:
         return ""
-    if (card.get("stage") or {}).get("kind") != "open":
-        return ""                                                  # a closed or cancelled order: the point is not bothered
     bodies: List[str] = [r[0] or "" for r in conn.execute(
         "SELECT body FROM order_task WHERE order_id = ? AND kind = 'message' AND status = 'done' AND result LIKE ?",
         (card["id"], "%" + SENT_TO_POINT + "%"))]
     if client and not any(_has(b, old_name) or _has(b, old_phone) for b in bodies):
         client = []                                                # the point was never told the client by the panel
-    keys = client + (plain if bodies else [])
+    keys = client + [k for k in plain if any(str(before[k]) in b for b in bodies)]
     if not keys:
         return ""
     return _note(conn, card, peer, now, author, send, 0, "номера сообщения нет", keys)
