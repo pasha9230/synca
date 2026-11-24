@@ -973,6 +973,8 @@ def register(app) -> None:
         named = deals.chat_of_field(conn, fields.get("avito_chat")) if can("chats", "edit") and fields.get("avito_chat") else None
         if named is not None:
             bind_chat(conn, card_id, named, "field", deliver=avito_deliver(conn, local_iso()))   # the chat is bound before the window offers the message
+        if fields.get("webmim_number") and fields.get("transfer_number"):
+            reconcile_saved_webmim(conn, card_id, fields)
         offer_send(conn, card_id, stamp)                                  # the rules of the first stage made a message: «Отправить клиенту?» at once
         return redirect("/orders/%d" % card_id)
 
@@ -1453,6 +1455,67 @@ def register(app) -> None:
             flash(str(err), "error")
         return back(card_id, "supplier")
 
+    def reconcile_saved_webmim(conn, card_id, changed) -> None:
+        card = orders.get_card(conn, card_id)
+        number = str(card["webmim_number"]).strip().lstrip("№").strip()
+        transfer = card["transfer_number"]
+        if (own_point() is not None or card["deal_kind"] != "webmim" or card["stage"]["kind"] != "open"
+                or not number.isascii() or not number.isdigit() or not transfer
+                or webmim_match.current_server(conn) != "prod" or card_id in webmim_match.made_elsewhere(conn, "prod")
+                or card_id in oth_sale.borrowed_ids(conn, card_id)
+                or (card["items"] and not {"webmim_number", "transfer_number"}.intersection(changed))):
+            return
+
+        def client_of():
+            box = app.config.get("SECRET_BOX")
+            return None if box is None else webmim_match.client_for(conn, box, app.config.get("WEBMIM_HTTP") or urllib_transport, "prod")
+
+        stamp, who = local_iso(), author()
+        try:
+            order = webmim_match.read_number(conn, number, client_of, stamp)
+            invoice = order.get("invoice")
+            if invoice and invoice.casefold() != "".join(transfer.split()).casefold():
+                raise orders.OrderError("Номер перемещения в карточке отличается от номера счёта WebMIM.")
+            if not order["items"] or webmim_match.draft(order) or webmim_create.cancelled(order):
+                raise orders.OrderError("В WebMIM нет позиций оформленного заказа.")
+            if card["webmim_id"] and card["webmim_id"] != order["id"]:
+                raise orders.OrderError("Номер WebMIM относится к другому заказу поставщика.")
+            conn.execute("BEGIN IMMEDIATE")
+            latest = orders.get_card(conn, card_id)
+            if any(latest[k] != card[k] for k in ("webmim_id", "webmim_number", "transfer_number", "deal_kind", "stage_id")):
+                raise orders.OrderError("Карточка изменилась. Обновите её и повторите сохранение.")
+            webmim_match.remember_read_order(conn, order)
+            if set(webmim_match._pairs(conn, [order]).get(order["id"], ())) - {card_id}:
+                raise orders.OrderError("Этот заказ WebMIM связан с другой карточкой панели.")
+            if latest["items"]:
+                matched = webmim_match.card_block(conn, latest)
+                if matched["foreign"]:
+                    raise orders.OrderError("Заказ WebMIM не соответствует этой карточке.")
+                conn.commit()
+                if matched["differences"]:
+                    flash("Позиции отличаются. Подробности в блоке «WebMIM».", "warning")
+                else:
+                    flash("Позиции и количество совпадают с WebMIM.", "ok")
+                return
+            _conn, settings, parsed, ref = context(app)
+            account_id = window_account(conn, {}, card_id)
+            for item in order["items"]:
+                offer = order_search.locate(conn, parsed, goods_id=item["goods_id"]).offer
+                args = order_offers.offer_args(conn, settings, parsed, ref, offer, stamp[:10], account_id)
+                args["supplier_price"] = item["price"]
+                args["name"] = item["name"] or args["name"]
+                orders.add_item(conn, card_id, qty=item["qty"], now=stamp, author=who, commit=False, **args)
+            orders.add_event(conn, card_id, stamp, who, "webmim", "Позиции загружены из заказа WebMIM.")
+            conn.commit()
+            flash("Позиции и количество загружены из WebMIM. Проверьте цену продажи.", "ok")
+        except orders.OrderError as err:
+            conn.rollback()
+            flash("Номера сохранены. Сверка с WebMIM: %s" % err, "warning")
+        except Exception:
+            conn.rollback()
+            log.exception("WebMIM item import for order %s", card_id)
+            flash("Номера сохранены. Не удалось загрузить позиции из WebMIM.", "warning")
+
     @app.route("/orders/<int:card_id>/save", methods=["POST"])
     @login_required
     def order_save(card_id, part=None):
@@ -1516,6 +1579,8 @@ def register(app) -> None:
             _conn, _settings, parsed, _ref = context(app)
             prices, source = order_offers.webmim_purchase(conn, orders.get_card(conn, card_id), parsed, app.config)
             orders.refresh_purchase(conn, card_id, prices, source, local_iso(), author())
+        if not typed_row and "stage_id" not in request.form and {"webmim_number", "transfer_number"}.intersection(request.form):
+            reconcile_saved_webmim(conn, card_id, changed)
         if lacking_before:                                                # a lacking value typed (the transfer number): the window opens
             engine.refresh_tasks(conn, card_id, local_iso())
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
