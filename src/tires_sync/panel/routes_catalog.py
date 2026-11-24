@@ -130,6 +130,12 @@ def _filter(parsed, args, season, studs):
     origin = _origin(args)
     if origin:
         shown = service._Filtered({g: o for g, o in shown.offers.items() if origin_of(o) == origin}, getattr(shown, "issues", {}))
+    runflat, commercial = args.get("rf") == "1", args.get("commercial") == "1"
+    if runflat or commercial:
+        shown = service._Filtered({
+            goods_id: offer for goods_id, offer in shown.offers.items()
+            if (not runflat or offer.runflat) and (not commercial or offer.car_type.upper() in ("C", "LT"))
+        }, getattr(shown, "issues", {}))
     return shown
 
 
@@ -551,7 +557,8 @@ def register(app) -> None:
                 "brands": chips("b") + chips("xb"), "brand_mode": "x" if args.get("bm") == "x" or (view["without"] and not view["brands"]) else "",
                 "mixed": mixed, "axes": [(p, label, client_catalog.axis_of(args, p)) for p, label in client_catalog.AXES],
                 "origin": _origin(args), "origins": ORIGINS, "stock_min": _num(args, "sn"), "price_from": _num(args, "pf"),
-                "price_to": _num(args, "pt"), "reset": "/catalog" + ("?sup=%d" % _num(args, "sup") if _num(args, "sup") else "")}
+                "price_to": _num(args, "pt"), "runflat": args.get("rf") == "1", "commercial": args.get("commercial") == "1",
+                "reset": "/catalog" + ("?sup=%d" % _num(args, "sup") if _num(args, "sup") else "")}
 
     def _feed_brands(conn, counts, suppliers):
         """«Бренды в фиде» of the owner: every brand on view and every brand taken off, with what one button does to it. The change is the
@@ -616,7 +623,9 @@ def register(app) -> None:
     @app.route("/catalog/table")
     @login_required
     def catalog_table():
-        return render_template(office_page("_catalog_table.html"), **table_context(request.args))
+        context = table_context(request.args)
+        template = "office2/_catalog_table.html" if context["mixed"] else office_page("_catalog_table.html")
+        return render_template(template, **context)
 
     def _names(conn, ids):
         parsed = load_merged(conn, active_settings(conn), current_app.config["UNLOAD_PATH"])

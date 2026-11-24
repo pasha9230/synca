@@ -61,14 +61,37 @@
 <input class="oc-ms-in" id="f-b" autocomplete="off" maxlength="40" placeholder="{{ "" if m.brands else "Все бренды" }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="oc-b-list" aria-labelledby="oc-b-l">
 <ul class="oc-ms-list" id="oc-b-list" role="listbox" aria-labelledby="oc-b-l" hidden>{% for c in brand_choices %}<li role="option" data-v="{{ c.key }}" data-label="{{ c.label }}"{% if c.key in m.brands|map(attribute="key") %} aria-selected="true"{% endif %}>{{ c.label }} <span class="muted xs">{{ c.count }}</span></li>{% endfor %}</ul></div></div>
 {%- endmacro %}
-{% macro mim_rows(m, brand_choices, size_text, size_unknown, q, season, studs, recent=()) -%}
+{% macro catalog_axis(axis, opts) -%}
+{% set a, label, vals = axis %}
+<div class="oc-axis"><span class="oc-axis-t">{{ label }}</span><div class="oc-glue" role="group" aria-label="{{ label }}">
+{% for k, l in (("w", "Ширина"), ("h", "Профиль"), ("d", "Диаметр")) %}{{ oc_one(a, k, l, vals[loop.index0], opts[k]) }}{% endfor %}
+</div></div>
+{%- endmacro %}
+
+{% macro mim_rows(m, brand_choices, size_text, size_unknown, q, season, studs, recent, own_only, show_money) -%}
+<div class="oc-search">
+<input class="input" name="q" value="{{ q }}" placeholder="Размер, название, артикул" aria-label="Поиск по каталогу">
+<button class="btn btn--primary" type="submit" aria-label="Найти">{{ icon("search") }}</button>
+</div>
+<div class="card oc-panel">
+{% if size_text and not m.mixed %}<input type="hidden" name="size" value="{{ size_text }}">{% endif %}
+{% if size_unknown and not m.mixed %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}
 {% if recent and not m.mixed %}<div class="o2-recent" aria-label="Недавние размеры"><span class="label">Недавние</span>{% for label, url in recent %}<a class="msel-chip o2-recent-chip" href="{{ url }}">{{ label }}</a>{% endfor %}</div>{% endif %}
 {% set opts = {} %}{% for p in m.pick2 %}{% set _ = opts.update({p.key: p.options}) %}{% endfor %}
-{% if not m.mixed %}<div class="oc-row"><div class="oc-glue" role="group" aria-label="Размер">{% for p in m.pick2 %}{{ oc_multi(p) }}{% endfor %}</div>{{ oc_brands(m, brand_choices) }}</div>
-{% else %}{% for a, label, vals in m.axes %}<div class="oc-row oc-axis"><span class="oc-axis-t">{{ label }}</span><div class="oc-glue" role="group" aria-label="{{ label }}">{% for k, l in (("w", "Ширина"), ("h", "Профиль"), ("d", "Диаметр")) %}{{ oc_one(a, k, l, vals[loop.index0], opts[k]) }}{% endfor %}</div></div>{% endfor %}
-<div class="oc-row">{{ oc_brands(m, brand_choices) }}</div>{% endif %}
-<div class="oc-row oc-row2">
-<label class="check oc-mixed"><input type="checkbox" name="mixed" value="1"{% if m.mixed %} checked{% endif %} data-oc-mixed>Разноширокие</label>
+{% set mixed_control %}<label class="check oc-mixed"><input type="checkbox" name="mixed" value="1"{% if m.mixed %} checked{% endif %} data-oc-mixed>Разноширокие</label>{% endset %}
+<div class="oc-row oc-main-row">
+{% if m.mixed %}{{ catalog_axis(m.axes[0], opts) }}
+{% else %}
+<div class="oc-glue" role="group" aria-label="Размер">{% for p in m.pick2 %}{{ oc_multi(p) }}{% endfor %}</div>
+{% for a, label, vals in m.axes %}{% for k in ("w", "h", "d") %}{% if vals[loop.index0] is not none %}<input type="hidden" name="{{ a }}{{ k }}" value="{{ vals[loop.index0] }}">{% endif %}{% endfor %}{% endfor %}
+{% endif %}
+<div class="seg" role="group" aria-label="Происхождение" title="По стране бренда из выгрузки: Россия — отечественные">
+<label><input type="radio" name="c" value=""{% if not m.origin %} checked{% endif %}>Все</label>
+{% for key, label in m.origins.items() %}<label><input type="radio" name="c" value="{{ key }}"{% if m.origin == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div>
+{{ oc_brands(m, brand_choices) }}
+</div>
+<div class="oc-row oc-main-row">
+{% if m.mixed %}{{ catalog_axis(m.axes[1], opts) }}{% else %}{{ mixed_control }}{% endif %}
 <div class="seg" role="group" aria-label="Сезон">
 <label><input type="radio" name="s" value=""{% if not season %} checked{% endif %}>Все</label>
 <label title="Лето"><input type="radio" name="s" value="summer"{% if season == "summer" %} checked{% endif %}><span class="ico-sun">{{ icon("sun") }}</span>Лето</label>
@@ -78,15 +101,22 @@
 <label><input type="radio" name="t" value=""{% if not studs %} checked{% endif %}>Все</label>
 <label title="Зима, шипы"><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}>{{ winter_stud() }}Шипы</label>
 <label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div>
-<div class="seg" role="group" aria-label="Происхождение" title="По стране бренда из выгрузки: Россия — отечественные">
-<label><input type="radio" name="c" value=""{% if not m.origin %} checked{% endif %}>Все</label>
-{% for key, label in m.origins.items() %}<label><input type="radio" name="c" value="{{ key }}"{% if m.origin == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div>
 <label class="oc-num">В наличии от <input class="input input--num" name="sn" value="{{ m.stock_min or "" }}" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="1" data-oc-num> шт.</label>
-<span class="oc-num">Цена от <input class="input input--num" name="pf" value="{{ m.price_from if m.price_from is not none else "" }}" inputmode="numeric" maxlength="7" autocomplete="off" aria-label="Цена от, ₽" data-oc-num> до <input class="input input--num" name="pt" value="{{ m.price_to if m.price_to is not none else "" }}" inputmode="numeric" maxlength="7" autocomplete="off" aria-label="Цена до, ₽" data-oc-num> ₽</span>
 </div>
-<div class="o2-frow o2-frow--2 oc-row3">
-{% if not m.mixed %}<div class="field o2-fwide"><span class="label">Размеры</span><input class="input" name="size" value="{{ size_text }}" placeholder="205/55R16 225/45R18" title="Несколько размеров целиком через пробел">{% if size_unknown %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}</div>{% endif %}
-<div class="field o2-fwide"><span class="label">Поиск</span><div class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ q }}" placeholder="Размер, название, артикул" title="Например: 205/55 R16, Ikon, часть названия или артикул"></div></div>
-{{ caller() }}
-<a class="btn btn--secondary o2-reset" href="{{ m.reset }}">Сбросить</a></div>
+{% if m.mixed %}{{ mixed_control }}{% endif %}
+<div class="oc-row">{{ caller() }}</div>
+<details class="oc-advanced">
+{% set active = (1 if m.price_from is not none or m.price_to is not none else 0) + m.runflat|int + m.commercial|int + own_only|int %}
+<summary class="btn btn--secondary"><span data-oc-expand>Все фильтры</span><span data-oc-collapse>Скрыть</span><b data-oc-filter-count{% if not active %} hidden{% endif %}> · {{ active }}</b></summary>
+<div class="oc-row oc-advanced-fields">
+<label class="field"><span class="label">Цена от, ₽</span><input class="input input--num" name="pf" value="{{ m.price_from if m.price_from is not none else "" }}" inputmode="numeric" maxlength="7" data-oc-num></label>
+<label class="field"><span class="label">Цена до, ₽</span><input class="input input--num" name="pt" value="{{ m.price_to if m.price_to is not none else "" }}" inputmode="numeric" maxlength="7" data-oc-num></label>
+<label class="check"><input type="checkbox" name="rf" value="1"{% if m.runflat %} checked{% endif %}>RunFlat</label>
+<label class="check"><input type="checkbox" name="commercial" value="1"{% if m.commercial %} checked{% endif %}>Коммерческая</label>
+{% if show_money %}<label class="check"><input type="checkbox" name="own" value="1"{% if own_only %} checked{% endif %}>Ручные цены</label>{% endif %}
+</div>
+</details>
+<div class="oc-reset-row"><a class="btn btn--secondary" href="{{ m.reset }}">Сбросить фильтры</a></div>
+<noscript><button class="btn btn--secondary">Показать</button></noscript>
+</div>
 {%- endmacro %}
