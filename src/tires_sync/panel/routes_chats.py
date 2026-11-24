@@ -24,7 +24,32 @@ from .routes_orders import local_iso, local_now, offer_send, send_offer
 
 LIST_LIMIT = 200
 AD_LOOKUP_TIMEOUT = 5         # seconds the press of «Создать заказ» waits for Avito's word on one ad it does not know yet
-FILTERS = {"": "Открытые", "wait": "Ждут ответа", "nodeal": "Без заказа", "noreply": "Не требуют ответа", "closed": "Закрытые"}
+# the tabs of the list (ТЗ №93, the owner 2026-11-25): «Все» first and by default (every chat, as Avito lists them), «Непрочитанные» is the
+# one «Ждут ответа» of the menu (chats.waiting, its number on the tab), «Не требуют ответа» is gone (such a chat is in «Все» and «Открытые»).
+# Every chat is in «Все»; «Открытые» + «Закрытые» = «Все»; «С заказом» + «Без заказа» = «Все» (the closed chats too).
+FILTERS = {"": "Все", "open": "Открытые", "wait": "Непрочитанные", "deal": "С заказом", "nodeal": "Без заказа", "closed": "Закрытые"}
+OLD_FILTERS = {"noreply": ""}             # a tab no more (a bookmark, a saved choice of page_prefs): «Все», never an error
+
+
+def filter_key(value) -> str:
+    """The tab of `?f=`: a known one, an old one renamed (OLD_FILTERS), else «Все»."""
+    value = str(value or "")
+    return value if value in FILTERS else OLD_FILTERS.get(value, "")
+
+
+def in_filter(flt: str, chat: dict, waiting: set) -> bool:
+    """The chat is in the tab `flt` (FILTERS). A chat whose order is being made (order_id = -1, chat_deals' claim) has no order yet."""
+    if flt == "open":
+        return chat["status"] != "closed"
+    if flt == "closed":
+        return chat["status"] == "closed"
+    if flt == "wait":
+        return chat["id"] in waiting
+    if flt == "deal":
+        return (chat["order_id"] or 0) > 0
+    if flt == "nodeal":
+        return not (chat["order_id"] or 0) > 0
+    return True
 
 
 def before_placed(conn, stage: dict) -> bool:
@@ -245,7 +270,7 @@ def register(app) -> None:
     @login_required
     def chats_page(chat_row=None):
         conn = get_conn()
-        flt = request.args.get("f", "") if request.args.get("f", "") in FILTERS else ""
+        flt = filter_key(request.args.get("f", ""))
         acc = _int(request.args.get("acc"))
         mine = own_point() is not None                                    # the manager of a point: the chats of the point's account only (in the query)
         if mine:
@@ -271,20 +296,8 @@ def register(app) -> None:
             scope.append(chat)
             if chat["id"] == chat_row:                                    # the open chat (owner's word 2026-10-24 (6)): see below
                 opened = chat
-            if flt == "noreply" and chat["status"] != "no_reply":
-                continue
-            if flt == "nodeal" and chat["order_id"]:
-                continue
-            if flt == "closed" and chat["status"] != "closed":
-                continue
-            if flt == "wait" and chat["status"] != "open":
-                continue
-            if flt in ("", "nodeal") and chat["status"] == "closed" and found is None:     # a search finds closed chats too
-                continue
-            rows.append(chat)
-        waiting = chats.waiting(conn, scope, g.setdefault("chat_wait_starts", {}))                              # «Ждут ответа»: one definition with the menu (п. 7, 2026-11-08)
-        if flt == "wait":
-            rows = [c for c in rows if c["id"] in waiting]
+        waiting = chats.waiting(conn, scope, g.setdefault("chat_wait_starts", {}))                              # «Непрочитанные»: one definition with the menu (п. 7, 2026-11-08)
+        rows = [c for c in scope if in_filter(flt, c, waiting)]
         total = len(rows)
         fits = chat_row is not None and any(c["id"] == chat_row for c in rows)   # in the state, maybe beyond the first LIST_LIMIT
         rows = rows[:LIST_LIMIT]
