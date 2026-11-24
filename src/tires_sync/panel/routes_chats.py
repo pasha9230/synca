@@ -8,7 +8,7 @@ from pathlib import Path
 from flask import abort, flash, g, jsonify, redirect, render_template, request, session
 
 from .. import ad_stats, catalog_archive, chat_deals as deals, chat_handover, chats, connections, order_engine as engine, order_manager as mgr, order_offers, order_points as points, order_wait, orders, store, trash
-from .. import order_autosend, order_notes, oth_sale
+from .. import order_autosend, order_notes, order_search, oth_sale
 from . import service
 from ..avito import AvitoClient
 from ..transport import urllib_transport
@@ -187,7 +187,19 @@ def register(app) -> None:
 
         def provider(goods_id, pack):
             try:
-                return order_offers.item_args(conn, settings, parsed, ref, goods_id, day, account)
+                try:
+                    return order_offers.item_args(conn, settings, parsed, ref, goods_id, day, account)
+                except orders.OrderError as err:
+                    if goods_id in parsed.offers:                       # the position is there: its own trouble (no price)
+                        raise
+                    # the owner 2026-11-24 (order 5383506, Kumho WS-31): the Id of the ad is not in today's unload (a position without a number of its
+                    # own gets an Id from its content, and it moves when the supplier rewrites a name). The ad's title names the tire: the one
+                    # position it names exactly is taken (never a guess by sound); else the journal names the Id, to see what moved.
+                    title = (chats.get_chat(conn, chat_row) or {}).get("item_title") or ""
+                    found = order_search.typed(conn, parsed, ref, title)[0] if title else None
+                    if found is None:
+                        raise orders.OrderError("%s (код в объявлении: %s)" % (str(err).rstrip("."), goods_id))
+                    return order_offers.item_args(conn, settings, parsed, ref, found.goods_id, day, account)
             except orders.OrderError:
                 raise
             except Exception as err:

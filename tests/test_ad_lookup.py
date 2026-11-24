@@ -243,3 +243,29 @@ def test_the_button_is_the_offices_a_point_neither_sees_nor_presses_it(tmp_path,
     assert "Подставить позицию из объявления</button>" not in manager.get("/orders/%d" % card["id"]).get_data(as_text=True)
     assert post(manager, "/orders/%d/ad-position" % card["id"], "tok").status_code == 403
     assert orders.get_card(conn, card["id"])["items"] == [] and len(http.calls) == 2
+
+
+def _journal(conn, card_id):
+    return [e["text"] for e in orders.list_events(conn, card_id) if "Позиция" in e["text"]]
+
+
+def test_an_id_the_unload_lost_is_found_by_the_exact_title_of_the_ad(tmp_path, monkeypatch):
+    """2026-11-24, order 5383506 (Kumho WS-31, a position without a number of its own): the Id of the ad is not in today's unload, the title names the tire."""
+    http = ScriptedHttp(TOKEN, known((AD, "999")))
+    app, client, tok, conn, chat = panel(tmp_path, monkeypatch, http)
+    conn.execute("UPDATE avito_chat SET item_title = ? WHERE id = ?", ("Ikon Tyres 205/55/16 T 94 Autograph Snow 3", chat))
+    conn.commit()
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card = card_of(conn, chat)
+    assert [i["goods_id"] for i in card["items"]] == ["100"] and _journal(conn, card["id"]) == []
+
+
+def test_an_id_the_unload_lost_and_a_title_that_names_nothing_say_the_id_in_the_journal(tmp_path, monkeypatch):
+    http = ScriptedHttp(TOKEN, known((AD, "999")))
+    app, client, tok, conn, chat = panel(tmp_path, monkeypatch, http)
+    conn.execute("UPDATE avito_chat SET item_title = ? WHERE id = ?", ("Шина неизвестная 1/1 R1", chat))
+    conn.commit()
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card = card_of(conn, chat)
+    assert card["items"] == []
+    assert _journal(conn, card["id"]) == ["Позиция не добавлена: Этой позиции нет в выгрузке поставщика (код в объявлении: 999)"]
