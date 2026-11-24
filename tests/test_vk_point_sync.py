@@ -165,7 +165,7 @@ def test_a_message_kept_without_its_template_gets_the_note_only(tmp_path):
     assert "отправлено новое сообщение об изменении заказа" in event["text"] and "старое сообщение не пересобрать" in event["text"]
 
 
-def test_without_a_number_the_note_goes_for_new_pieces_and_a_new_date(tmp_path):
+def test_without_a_number_the_note_says_only_what_the_message_had(tmp_path):
     conn, mine, vk = told(tmp_path)
     conn.execute("DELETE FROM vk_point_message")
     conn.commit()
@@ -176,7 +176,8 @@ def test_without_a_number_the_note_goes_for_new_pieces_and_a_new_date(tmp_path):
     changed(conn, mine, vk, both)
     assert vk.tries == 0 and len(vk.sent) == 2
     note = vk.sent[1][1]
-    assert "позиции: Шина 111 × 3" in note and "дата доставки 26.10.2026" in note and "WebMIM" not in note
+    assert "позиции: Шина 111 × 3" in note and "WebMIM" not in note
+    assert "дата доставки" not in note                             # the point's message never had the date: nothing to announce of it
     assert "номера сообщения нет" in notify_events(conn, mine)[0]["text"]
 
 
@@ -255,3 +256,94 @@ def test_a_new_point_on_the_page_leaves_the_old_message(panel):
     app.config["VK_HTTP"] = ScriptedHttp((200, {"response": 9}))
     assert autosave(client, mine, "point_id", str(other)).get_json()["ok"]
     assert vk_send.EDIT_URL not in [c[1] for c in app.config["VK_HTTP"].calls] and rows(conn, mine)[0]["text"] == text
+
+
+# ---- the review of 2026-11-25 ------------------------------------------------------------------------------------------------------------
+
+def rows_vals(conn, card_id):
+    return conn.execute("SELECT vals FROM vk_point_message WHERE order_id = ?", (card_id,)).fetchone()[0]
+
+
+def test_after_a_refusal_the_change_is_announced_once(tmp_path):
+    for fail in (vk_send.VkError("ВК не принял сообщение (код 909): old", code=909), vk_send.VkError("ВК не принял сообщение (код 15): no")):
+        (tmp_path / str(fail.code)).mkdir()
+        conn, mine, vk = told(tmp_path / str(fail.code), Vk(edit_fail=fail))
+        text = rows(conn, mine)[0]["text"]
+        changed(conn, mine, vk, qty, item(conn, mine)["id"], 3)
+        assert vk.tries == 1 and len(vk.sent) == 2
+        row = conn.execute("SELECT text, vals FROM vk_point_message WHERE order_id = ?", (mine,)).fetchone()
+        assert row[0] == text and "Кол-во 3 шт" in json.loads(row[1])["items_full"]      # the text stays old, the values are taken
+        changed(conn, mine, vk, card_fields, mine, comment="ещё раз")                     # the next save changes nothing of it
+        assert vk.tries == 1 and len(vk.sent) == 2
+        changed(conn, mine, vk, card_fields, mine, client_name="Пётр")                    # a new change: only it
+        assert vk.tries == 2 and len(vk.sent) == 3 and "имя Пётр" in vk.sent[2][1] and "позиции" not in vk.sent[2][1]
+
+
+def test_a_message_too_long_for_vk_is_announced_once(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    many = "\n".join("Строка %d" % n for n in range(500))
+    vals = json.dumps(dict(json.loads(rows_vals(conn, mine)), point_hours=many), ensure_ascii=False)
+    conn.execute("UPDATE vk_point_message SET template = template || ?, vals = ?, text = text || ? WHERE order_id = ?",
+                 ("\n{point_hours}", vals, "\n" + many, mine))
+    conn.commit()
+    changed(conn, mine, vk, qty, item(conn, mine)["id"], 3)
+    assert vk.tries == 0 and len(vk.sent) == 2 and "текст длиннее лимита ВК" in notify_events(conn, mine)[0]["text"]
+    changed(conn, mine, vk, card_fields, mine, comment="ещё раз")
+    assert vk.tries == 0 and len(vk.sent) == 2
+
+
+def test_a_change_made_elsewhere_is_not_gathered_by_another_save(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    conn.execute("UPDATE order_item SET qty = 3 WHERE id = ?", (item(conn, mine)["id"],))       # not by a press of the window
+    conn.commit()
+    changed(conn, mine, vk, card_fields, mine, comment="перезвонить")
+    assert vk.tries == 0 and len(vk.sent) == 1
+    changed(conn, mine, vk, card_fields, mine, client_name="Пётр")                   # a change of this save: only it
+    [(_p, _m, text)] = vk.edits
+    assert "Покупатель Пётр" in text and "Кол-во 4 шт" in text and "Кол-во 3 шт" not in text
+
+
+def test_a_value_filled_in_edits_the_message_without_a_note(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    template = "Заказ {webmim_number}\nПеремещение {transfer_number}"
+    vk_point_fix.remember(conn, mine, "555", 300, "(бот) Заказ 5001\nПеремещение ", vk_point_fix.TASK, NOW, template=template)
+    conn.commit()
+    changed(conn, mine, vk, card_fields, mine, transfer_number="П-77")
+    assert vk.edits == [("555", 300, "(бот) Заказ 5001\nПеремещение П-77")] and len(vk.sent) == 1
+    [event] = notify_events(conn, mine)
+    assert "дополнено: номер перемещения" in event["text"] and event["level"] == "grey"
+    changed(conn, mine, vk, card_fields, mine, transfer_number="П-78")               # a value put in place of another: the note
+    assert len(vk.edits) == 2 and len(vk.sent) == 2 and "номер перемещения П-78" in vk.sent[1][1]
+
+
+def test_a_closed_order_is_never_corrected(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    conn.execute("UPDATE order_card SET stage_id = (SELECT id FROM order_stage WHERE kind != 'open' ORDER BY id LIMIT 1) WHERE id = ?", (mine,))
+    conn.commit()
+    changed(conn, mine, vk, card_fields, mine, client_name="Пётр", delivery_date="2026-10-26")
+    assert vk.tries == 0 and len(vk.sent) == 1 and notify_events(conn, mine) == []
+
+
+def test_an_old_message_gets_the_note_only_for_a_value_it_has(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    conn.execute("UPDATE vk_point_message SET template = NULL, vals = NULL, wrap = NULL")
+    conn.commit()
+    changed(conn, mine, vk, card_fields, mine, delivery_date="2026-10-26")            # the message has no date
+    assert vk.tries == 0 and len(vk.sent) == 1 and notify_events(conn, mine) == []
+    changed(conn, mine, vk, card_fields, mine, webmim_number="5002")                  # it has the number
+    assert vk.tries == 0 and len(vk.sent) == 2 and "номер заказа у поставщика 5002" in vk.sent[1][1]
+
+
+def test_a_message_another_worker_took_is_not_edited_twice(tmp_path, monkeypatch):
+    conn, mine, vk = told(tmp_path)
+    real = vk_point_fix.templates.values
+
+    def values(c, card, now=None):                                # the other worker writes the row between the read and the claim
+        if now == NOW:
+            c.execute("UPDATE vk_point_message SET vals = '{}' WHERE order_id = ?", (mine,))
+        return real(c, card, now)
+    before = vk_point_fix.snapshot(conn, mine, LATER)
+    qty(conn, item(conn, mine)["id"], 3)
+    monkeypatch.setattr(vk_point_fix.templates, "values", values)
+    vk_point_fix.order_changed(conn, mine, before, LATER, "owner", vk.send, vk.edit)
+    assert vk.tries == 0 and len(vk.sent) == 1
