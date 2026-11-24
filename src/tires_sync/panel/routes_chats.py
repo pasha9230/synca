@@ -430,11 +430,27 @@ def register(app) -> None:
             return back(chat_row)
         try:
             _conn, settings, parsed, ref = context(app)
-            args = order_offers.item_args(conn, settings, parsed, ref, goods_id, local_now().date().isoformat(), order_offers.account_for(conn, chat_row=chat_row))
-            if request.form.get("sale_unit", "").strip():
-                args["sale_unit"] = request.form["sale_unit"]
-            orders.add_item(conn, chat["order_id"], qty=request.form.get("qty", "1"), now=local_iso(), author=author(), **args)
+            account, day = order_offers.account_for(conn, chat_row=chat_row), local_now().date().isoformat()
+            typed = request.form.get("sale_unit", "")
+            found = None
+            if own_point() is None:                     # ТЗ 94: the office adds any position of the base (no stock, out of the feed, gone)
+                try:
+                    found = order_search.locate(conn, parsed, goods_id)
+                except order_search.NotLocated as err:
+                    raise orders.OrderError(order_search.first_line(err))
+                args = order_search.located_args(conn, settings, parsed, ref, found, day, account, manual_sale=typed)
+            else:
+                args = order_offers.item_args(conn, settings, parsed, ref, goods_id, day, account)
+            if typed.strip():
+                args["sale_unit"] = typed
+            stamp = local_iso()
+            orders.add_item(conn, chat["order_id"], qty=request.form.get("qty", "1"), now=stamp, author=author(), commit=found is None, **args)
+            if found is not None:
+                order_search.write_notes(conn, chat["order_id"], order_search.notes(found, "item"), stamp, author())
+                conn.commit()
             flash("В заказ №%d добавлено: %s." % (chat["order_id"], args.get("name") or goods_id), "ok")
+            if found is not None and found.warning():
+                flash(found.warning(), "error")
         except orders.OrderError as err:
             flash(str(err))
         return back(chat_row)

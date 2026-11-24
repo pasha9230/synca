@@ -1,5 +1,6 @@
 """The search of a position for an order by its name: «icon tires автограф» finds Ikon Tyres Autograph. Case, Russian or Latin letters, a usual
-misspelling and the wrong keyboard layout do not matter. Only positions with a stock are offered, each with the price of its ad."""
+misspelling and the wrong keyboard layout do not matter. Only positions with a stock are offered, each with the price of its ad; the office's
+manual order offers every position of the base, marked (ТЗ 94: suggestions(every=True))."""
 from __future__ import annotations
 
 import re
@@ -72,11 +73,11 @@ def _score(offer, avito_brand: str, words: List[str]) -> int:
     return total
 
 
-def _find(parsed, names: dict, query: str) -> list:
+def _find(parsed, names: dict, query: str, every: bool = False) -> list:
     words = query.lower().split()
     found = []
     for offer in parsed.offers.values():
-        if offer.stock <= 0:
+        if offer.stock <= 0 and not every:
             continue
         score = _score(offer, names.get(offer.brand_key, ""), words)
         if score:
@@ -89,25 +90,40 @@ def _clean(query: str) -> str:
     return " ".join((query or "").replace("·", " ").split())[:80]
 
 
-def scored(conn, parsed, ref, query: str) -> list:
+def scored(conn, parsed, ref, query: str, every: bool = False) -> list:
     """[(score, exact, offer)] of the positions with a stock that the query finds, the best first; `exact` when every word is found as the catalog search
-    finds it (no sound guess). A query typed in the wrong keyboard layout is tried switched when it finds nothing."""
+    finds it (no sound guess). A query typed in the wrong keyboard layout is tried switched when it finds nothing. `every`: the positions without
+    a stock too (the office's manual order, ТЗ 94); those with a stock still come first."""
     query = _clean(query)
     if not query:
         return []
     brand_map = store.load_brand_map(conn)
     names = {key: resolve_brand(key, ref, brand_map) or "" for key in {o.brand_key for o in parsed.offers.values()}}
-    found = _find(parsed, names, query)
+    found = _find(parsed, names, query, every)
     for other in (query.lower().translate(_TO_RU), query.lower().translate(_TO_EN)):
         if found or other == query.lower():
             continue
-        found = _find(parsed, names, other)
+        found = _find(parsed, names, other, every)
     return found
 
 
-def find(conn, parsed, ref, query: str) -> list:
-    """The positions with a stock that the query finds, the best first."""
-    return [offer for _score_, _exact, offer in scored(conn, parsed, ref, query)]
+def find(conn, parsed, ref, query: str, every: bool = False) -> list:
+    """The positions with a stock that the query finds, the best first (`every`: without a stock too)."""
+    return [offer for _score_, _exact, offer in scored(conn, parsed, ref, query, every)]
+
+
+class _Pool:
+    """Today's unload and the positions the supplier took away (the permanent base, catalog_archive), as one `parsed` for the search."""
+
+    def __init__(self, parsed, gone):
+        self.offers = dict(parsed.offers)
+        self.offers.update((o.goods_id, o) for o in gone if o.goods_id not in self.offers)
+        self.issues = getattr(parsed, "issues", {})
+
+
+def every_offer(conn, parsed):
+    """Every position the panel knows (ТЗ 94): today's unload, with a stock or not, and the permanent base of positions it has no more."""
+    return _Pool(parsed, [o for o, _info in catalog_archive.gone_offers(conn)])
 
 
 def same_named(parsed, text: str) -> list:
@@ -154,6 +170,7 @@ class Located:
     info: Optional[dict] = None
     searched: str = ""
     price_note: str = ""                        # located_args: «цена расчётная, не из объявления» for an ad whose code moved
+    manual_price: bool = False                  # located_args: the panel has no sale price, the office typed it (ТЗ 94)
 
     def note(self) -> str:
         """The record of the journal that says where the position came from; "" for one found by its code. A position of the base: its last
@@ -174,9 +191,13 @@ class Located:
 
     def warning(self) -> str:
         """What the page says at once about a position the order took without a stock today (the base: its note says it)."""
-        if self.how == "base" or self.offer.stock > 0:
-            return ""
-        return "Внимание: у позиции «%s» остаток у поставщика сегодня 0 шт." % (self.offer.name_orig or self.offer.name)
+        name = self.offer.name_orig or self.offer.name
+        parts = []
+        if self.how != "base" and self.offer.stock <= 0:
+            parts.append("Внимание: у позиции «%s» остаток у поставщика сегодня 0 шт." % name)
+        if self.manual_price:                   # ТЗ 94: a warning, never a block
+            parts.append("Внимание: у позиции «%s» в панели нет цены продажи (вне фида или бренд без процента): взята цена, вписанная вручную." % name)
+        return " ".join(parts)
 
 
 def first_line(err) -> str:
@@ -235,17 +256,19 @@ def locate(conn, parsed, goods_id: str = "", names=()) -> Located:
     raise NotLocated("этой позиции нет в выгрузке поставщика и нет в базе позиций.\nИскали: %s.\nВ выгрузке сегодня: нет. В базе позиций: нет." % searched)
 
 
-def located_args(conn, settings, parsed, ref, found: Located, day: str, account_id=None, ad_goods_id=None) -> dict:
+def located_args(conn, settings, parsed, ref, found: Located, day: str, account_id=None, ad_goods_id=None, manual_sale=None) -> dict:
     """The keyword arguments of orders.add_item for the position locate found (order_offers.offer_args); a position of the base without a sale
     price says so with what was searched. `ad_goods_id`: the code the ad of a chat was published with (chat_deals.ad_goods): the price of that
-    ad is the client's, whatever code the position has today; without it the panel's calculation, and the journal says so (price_note)."""
+    ad is the client's, whatever code the position has today; without it the panel's calculation, and the journal says so (price_note).
+    `manual_sale`: the office's typed price for a position the panel has no price for (order_offers.offer_args, ТЗ 94)."""
     try:
-        args = order_offers.offer_args(conn, settings, parsed, ref, found.offer, day, account_id, ad_goods_id=ad_goods_id)
+        args = order_offers.offer_args(conn, settings, parsed, ref, found.offer, day, account_id, ad_goods_id=ad_goods_id, manual_sale=manual_sale)
         if ad_goods_id and found.how != "id" and not order_offers.ad_prices(conn, account_id, [ad_goods_id]).get(str(ad_goods_id)):
             found.price_note = "Цена продажи расчётная, не из объявления: объявления с кодом %s в последнем фиде аккаунта нет." % ad_goods_id
+        found.manual_price = manual_sale is not None and args["sale_unit"] is manual_sale     # the panel had none: the typed one was taken
         return args
     except orders.OrderError as err:
-        if found.how != "base":
+        if found.how != "base" or manual_sale is not None:
             raise
         raise NotLocated("позиция «%s» (код %s) есть только в базе позиций, цены продажи для неё нет (%s).\nИскали: %s.\nВ выгрузке сегодня: нет. "
                          "В базе позиций: да, у поставщика последний раз %s." % (found.offer.name_orig or found.offer.name, found.offer.goods_id,
@@ -258,9 +281,11 @@ def notes(found: Located, kind: str) -> list:
     sees it. One of the base: the office's only (kind «webmim»: a point never reads it in the card nor in its «Уведомления»,
     routes_orders.point_no_webmim), with the last purchase price. Nothing for a position found by its code."""
     note = found.note()
-    if not note:
-        return []
-    return [("webmim", note, "yellow")] if found.how == "base" else [(kind, note, "grey")]
+    out = ([("webmim", note, "yellow")] if found.how == "base" else [(kind, note, "grey")]) if note else []
+    if found.manual_price:                      # ТЗ 94: the office's record only, as the purchase of the base
+        out.append(("webmim", "Цена продажи «%s» (код %s) вписана вручную: в панели цены для неё нет (вне фида или бренд/сезон без процента)." % (
+            found.offer.name_orig or found.offer.name, found.offer.goods_id), "grey"))
+    return out
 
 
 def write_notes(conn, card_id, records, now: str, author: str) -> None:
@@ -269,14 +294,40 @@ def write_notes(conn, card_id, records, now: str, author: str) -> None:
         orders.add_event(conn, card_id, now, author, kind, text, level)
 
 
-def suggestions(conn, settings, parsed, ref, query: str, day: str, limit: int = LIMIT, account_id=None) -> List[dict]:
+def marks(offer, row, in_unload: bool) -> List[str]:
+    """What the office's list says of a position it may order though it is not on sale (ТЗ 94): a warning, never a block."""
+    out = []
+    if not in_unload:
+        out.append("нет в выгрузке поставщика")
+    if offer.stock <= 0:
+        out.append("нет в наличии")
+    if in_unload and row and row.get("state") != "feed":
+        reason = row.get("reason") or ""
+        by_stock = offer.stock <= 0 and row.get("scode") in ("stock_zero", "low_stock")      # «нет в наличии» says it already
+        out.append("вне фида" + (": " + reason if reason and not by_stock else ""))
+    return out
+
+
+def suggestions(conn, settings, parsed, ref, query: str, day: str, limit: int = LIMIT, account_id=None, every: bool = False) -> List[dict]:
     """What the order shows while a position is typed: up to `limit` positions with a stock, each with its size, stock and the price of its ad
-    in the account `account_id` (order_offers.account_for; the main one by default) from the general `settings`."""
-    offers = find(conn, parsed, ref, query)[:limit]
+    in the account `account_id` (order_offers.account_for; the main one by default) from the general `settings`.
+    `every` (the office's manual order, the owner's ТЗ 94 of 2026-11-25): every position of the base — without a stock, out of the feed, of any
+    brand and season, and those the unload has no more (catalog_archive) — each with `marks` (what it is not) and `warn`; the price as for any
+    position, None when the panel has none (typed by hand then). Only a reading: nothing of the feed, the prices or the settings changes."""
+    pool = every_offer(conn, parsed) if every else parsed
+    offers = find(conn, pool, ref, query, every)[:limit]
     if not offers:
         return []
     only = service._Filtered({o.goods_id: o for o in offers}, getattr(parsed, "issues", {}))
-    prices = {r["goods_id"]: r["sale"] for r in economics_view.positions(conn, order_offers.effective_settings(conn, settings, account_id), only, ref, day, terms_store.get_params(conn))}
+    rows = {r["goods_id"]: r for r in economics_view.positions(conn, order_offers.effective_settings(conn, settings, account_id), only, ref, day, terms_store.get_params(conn))}
+    prices = {g: r["sale"] for g, r in rows.items()}
     prices.update(order_offers.ad_prices(conn, account_id, [o.goods_id for o in offers]))           # the price of the account's published ad first
-    return [{"goods_id": o.goods_id, "name": o.name_orig or o.name, "size": "%d/%d R%d" % (o.width, o.height, o.diameter), "stock": o.stock,
-             "price": prices.get(o.goods_id)} for o in offers]
+    out = []
+    for o in offers:
+        item = {"goods_id": o.goods_id, "name": o.name_orig or o.name, "size": "%d/%d R%d" % (o.width, o.height, o.diameter), "stock": o.stock,
+                "price": prices.get(o.goods_id)}
+        if every:
+            item["marks"] = marks(o, rows.get(o.goods_id), o.goods_id in parsed.offers)
+            item["warn"] = bool(item["marks"]) or item["price"] is None
+        out.append(item)
+    return out

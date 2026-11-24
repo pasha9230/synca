@@ -65,16 +65,25 @@ def item_args(conn, settings, parsed, ref, goods_id, day: str, account_id=None) 
     return offer_args(conn, settings, parsed, ref, offer, day, account_id)
 
 
-def offer_args(conn, settings, parsed, ref, offer, day: str, account_id=None, ad_goods_id=None) -> dict:
+NO_PRICE_TYPED = "Для позиции «%s» в панели нет цены продажи (бренд или сезон без процента, позиция вне фида): впишите цену за шт. вручную."
+
+
+def offer_args(conn, settings, parsed, ref, offer, day: str, account_id=None, ad_goods_id=None, manual_sale=None) -> dict:
     """item_args for an offer itself: one of the unload, or one of the permanent base of positions (catalog_archive) the unload has no more,
     priced the same way (its ad's price first, else the calculation from its last purchase). `ad_goods_id`: the code of the ad the client saw,
-    when it is not the offer's of today (a code that moved): that ad's price first. Raises OrderError without a sale price."""
+    when it is not the offer's of today (a code that moved): that ad's price first. Raises OrderError without a sale price.
+    `manual_sale` (ТЗ 94, 2026-11-25: the office orders any position, in the feed or not): the price typed by the office, taken only when the
+    panel has none; None keeps the old rule. "" (allowed, nothing typed): the error asks for the price by hand. Nothing of the feed changes."""
     only = service._Filtered({offer.goods_id: offer}, getattr(parsed, "issues", {}))
     params = terms_store.get_params(conn)
     rows = economics_view.positions(conn, effective_settings(conn, settings, account_id), only, ref, day, params)
     row = rows[0] if rows else None
     ad_key = str(ad_goods_id or offer.goods_id)
     sale = ad_prices(conn, account_id, [ad_key]).get(ad_key) or (row or {}).get("sale")     # the ad first, the calculation else
+    if not sale and manual_sale is not None:
+        if not str(manual_sale).strip():
+            raise orders.OrderError(NO_PRICE_TYPED % (offer.name_orig or offer.name)[:120])
+        sale = manual_sale                                                                   # checked as any typed price by orders.add_item
     if not sale:
         raise orders.OrderError("Для этой позиции не рассчитана цена продажи: задайте процент бренда.")
     season = economics_view.season_of(offer)
