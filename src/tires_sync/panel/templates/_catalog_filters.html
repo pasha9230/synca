@@ -76,7 +76,13 @@
 <div class="card oc-panel">
 {% if size_text and not m.mixed %}<input type="hidden" name="size" value="{{ size_text }}">{% endif %}
 {% if size_unknown and not m.mixed %}<span class="xs text-err" data-size-unknown>Не понял: {{ size_unknown|join(", ") }} (пример: 205/55R16)</span>{% endif %}
+<div class="oc-catalog-head">
 {% if recent and not m.mixed %}<div class="o2-recent" aria-label="Недавние размеры"><span class="label">Недавние</span>{% for label, url in recent %}<a class="msel-chip o2-recent-chip" href="{{ url }}">{{ label }}</a>{% endfor %}</div>{% endif %}
+<label class="oc-brand-switch">
+<input type="checkbox" role="switch" name="all_brands" value="1" data-oc-all-brands{% if m.all_brands %} checked{% endif %}>
+<span>Все бренды поставщика</span>
+</label>
+</div>
 {% set opts = {} %}{% for p in m.pick2 %}{% set _ = opts.update({p.key: p.options}) %}{% endfor %}
 {% set mixed_control %}<label class="check oc-mixed"><input type="checkbox" name="mixed" value="1"{% if m.mixed %} checked{% endif %} data-oc-mixed>Разноширокие</label>{% endset %}
 <div class="oc-row oc-main-row">
@@ -105,18 +111,23 @@
 {{ caller() }}
 </div>
 {% if m.mixed %}{{ mixed_control }}{% endif %}
+<div class="oc-filter-actions">
 <details class="oc-advanced">
 {% set active = (1 if m.price_from is not none or m.price_to is not none else 0) + m.runflat|int + m.commercial|int + own_only|int %}
-<summary class="btn btn--secondary"><span data-oc-expand>Все фильтры</span><span data-oc-collapse>Скрыть</span><b data-oc-filter-count{% if not active %} hidden{% endif %}> · {{ active }}</b></summary>
+<summary class="btn btn--link"><span class="oc-filter-arrow">{{ icon("chev") }}</span><span data-oc-expand>Все фильтры</span><span data-oc-collapse>Скрыть</span><b data-oc-filter-count{% if not active %} hidden{% endif %}> · {{ active }}</b></summary>
 <div class="oc-row oc-advanced-fields">
 <label class="field"><span class="label">Цена от, ₽</span><input class="input input--num" name="pf" value="{{ m.price_from if m.price_from is not none else "" }}" inputmode="numeric" maxlength="7" data-oc-num></label>
 <label class="field"><span class="label">Цена до, ₽</span><input class="input input--num" name="pt" value="{{ m.price_to if m.price_to is not none else "" }}" inputmode="numeric" maxlength="7" data-oc-num></label>
-<label class="check"><input type="checkbox" name="rf" value="1"{% if m.runflat %} checked{% endif %}>RunFlat</label>
-<label class="check"><input type="checkbox" name="commercial" value="1"{% if m.commercial %} checked{% endif %}>Коммерческая</label>
-{% if show_money %}<label class="check"><input type="checkbox" name="own" value="1"{% if own_only %} checked{% endif %}>Ручные цены</label>{% endif %}
+<label class="btn btn--secondary oc-filter-option"><input type="checkbox" name="rf" value="1"{% if m.runflat %} checked{% endif %}><span>RunFlat</span></label>
+<label class="btn btn--secondary oc-filter-option"><input type="checkbox" name="commercial" value="1"{% if m.commercial %} checked{% endif %}><span>Коммерческая</span></label>
+{% if show_money %}<label class="btn btn--secondary oc-filter-option"><input type="checkbox" name="own" value="1"{% if own_only %} checked{% endif %}><span>Ручные цены</span></label>{% endif %}
 </div>
 </details>
-<div class="oc-reset-row"><a class="btn btn--secondary" href="{{ m.reset }}">Сбросить фильтры</a></div>
+<div id="oc-filter-reset" class="oc-reset-row" data-oc-live>
+{% if m.filters_active %}<a class="btn btn--link" href="{{ m.reset }}">{{ icon("minus-circle") }}Сбросить фильтры</a>
+{% else %}<button class="btn btn--link" type="button" disabled>{{ icon("minus-circle") }}Сбросить фильтры</button>{% endif %}
+</div>
+</div>
 <noscript><button class="btn btn--secondary">Показать</button></noscript>
 </div>
 {%- endmacro %}

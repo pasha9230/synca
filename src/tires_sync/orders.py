@@ -859,7 +859,7 @@ def _no_sale(conn, card_id) -> None:
 
 
 def add_item(conn, card_id, *, goods_id, name, brand_key, season, diameter, territory, qty, sale_unit, supplier_price, terms,
-             fee_pct, promo_pct, now: str, author: str, code: str = "", commit: bool = True) -> int:
+             fee_pct, promo_pct, now: str, author: str, code: str = "", commit: bool = True, awaiting_sale_price: bool = False) -> int:
     _row(conn, card_id)
     _no_sale(conn, card_id)
     goods_id, name = str(goods_id or "").strip(), " ".join(str(name or "").split())
@@ -869,7 +869,7 @@ def add_item(conn, card_id, *, goods_id, name, brand_key, season, diameter, terr
     if point and _row(conn, card_id)["deal_kind"] != "stock":
         raise OrderError("Шину без выгрузки WebMIM можно добавить только в сделку «Из наличия точки»: выберите этот тип сделки и нажмите «Сохранить».")
     qty = _qty(qty)
-    sale = _number(sale_unit, "Цена продажи", 0, 1_000_000, low_open=True)
+    sale = 0 if awaiting_sale_price else _number(sale_unit, "Цена продажи", 0, 1_000_000, low_open=True)
     price = _number(supplier_price, "Цена поставщика", 0, 10_000_000, low_open=not point)       # a point tyre: 0 until the purchase is typed
     fee = _number(fee_pct or 0, "Комиссия", 0, 100)
     promo = _number(promo_pct or 0, "Реклама", 0, 100)
@@ -878,7 +878,8 @@ def add_item(conn, card_id, *, goods_id, name, brand_key, season, diameter, terr
         " purchase_manual) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (card_id, goods_id, str(code or "").strip()[:60], name, str(brand_key or ""), str(season or "all"), int(diameter or 0), str(territory or ""), qty, price, sale,
          json.dumps(terms or {}, ensure_ascii=False), fee, promo, 1 if point else 0))
-    add_event(conn, card_id, now, author, "item", "Добавлено: %s × %d по %s ₽" % (name, qty, format(sale, ".0f")))
+    price_note = " · цена продажи не указана" if awaiting_sale_price else " по %s ₽" % format(sale, ".0f")
+    add_event(conn, card_id, now, author, "item", "Добавлено: %s × %d%s" % (name, qty, price_note))
     order_alerts.resolve_position_added(conn, card_id, now, author)          # «Позиция не добавлена» of before is fixed
     from . import oth_sale
     oth_sale.items_changed(conn, card_id, now, author)                  # a number of tyres «с ОТХ» gives way: the supplier is to be asked
@@ -1000,6 +1001,8 @@ def missing_for(card: dict, stage: dict, placed: Optional[dict] = None) -> List[
     if _needs_placed(stage, placed):
         if not any(int(i["qty"]) >= 1 for i in card["items"]):
             gaps.append("позиции")
+        elif any(i["qty"] >= 1 and i["sale_unit"] <= 0 for i in card["items"]):
+            gaps.append("цены продажи в позициях")
         if not card["point_id"]:
             gaps.append("точка")
         record = bool(card.get("oth_record")) and code in ("oth", "done")     # a record of storage: no client, the tyres are there; «Выполнено»:
@@ -1456,6 +1459,8 @@ def record_sales(conn, card_id, day: str, now: str, author: str, today: str) -> 
     sold = [it for it in card["items"] if int(it["qty"]) >= 1]       # a position emptied by «Взять с ОТХ» (oth_sale) has nothing to sell
     if not sold:
         raise OrderError("В заказе нет позиций: записывать нечего.")
+    if any(it["sale_unit"] <= 0 for it in sold):
+        raise OrderError("Укажите цены продажи во всех позициях заказа.")
     unknown = [it["name"] for it in sold if not float(it["supplier_price"]) > 0]      # a point tyre before its purchase: never a made-up profit
     if unknown:
         raise OrderError("Не указана закупка: «%s». Впишите «Закупка за 1 шт» в позиции и запишите продажу снова." % "», «".join(unknown))
