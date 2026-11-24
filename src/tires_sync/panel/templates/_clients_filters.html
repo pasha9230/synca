@@ -1,0 +1,12 @@
+{# The filters of the list of the clients (ТЗ №79 of the owner, 2026-11-24), the office only, in both views: `o2` — «Новый вид» (bare
+   selects in the row of the search), else the old one (a label above each). Every value is «all» when empty; the form sends GET: the view
+   stays in the address. #}
+{% macro field(label, o2) %}{% if o2 %}{{ caller() }}{% else %}<label class="field"><span class="label">{{ label }}</span>{{ caller() }}</label>{% endif %}{% endmacro %}
+{% set sel = "select o2-crm-f" if o2 else "input" %}
+{% set day = "input o2-crm-f" if o2 else "input" %}
+{% call field("Откуда", o2) %}<select class="{{ sel }}" name="src" aria-label="Откуда клиент пришёл впервые"><option value="">{{ "Откуда: все" if o2 else "Все" }}</option>{% for v, l in origins %}<option value="{{ v }}"{% if v == f.origin %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>{% endcall %}
+{% call field("Имя", o2) %}<select class="{{ sel }}" name="nm" aria-label="Имя"><option value="">{{ "Имя: все" if o2 else "Все" }}</option>{% for v, l in NAMED.items() %}<option value="{{ v }}"{% if v == f.named %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>{% endcall %}
+{% call field("Заказов", o2) %}<select class="{{ sel }}" name="ord" aria-label="Заказов, кроме отменённых"><option value="">{{ "Заказов: все" if o2 else "Все" }}</option>{% for v, l in ORDER_COUNTS.items() %}<option value="{{ v }}"{% if v == f.orders %} selected{% endif %}>{{ ("Заказов: " if o2 else "") ~ l }}</option>{% endfor %}</select>{% endcall %}
+{% call field("Дата", o2) %}<select class="{{ sel }}" name="dk" aria-label="Какая дата">{% for v, l in DATE_KINDS.items() %}<option value="{{ v }}"{% if v == f.date_kind %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>{% endcall %}
+{% call field("с", o2) %}<input class="{{ day }}" type="date" name="df" value="{{ f.date_from }}" aria-label="Дата с">{% endcall %}
+{% call field("по", o2) %}<input class="{{ day }}" type="date" name="dt" value="{{ f.date_to }}" aria-label="Дата по">{% endcall %}
