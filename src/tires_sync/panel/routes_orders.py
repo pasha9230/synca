@@ -1499,15 +1499,27 @@ def register(app) -> None:
                 return
             _conn, settings, parsed, ref = context(app)
             account_id = window_account(conn, {}, card_id)
+            lines = []
             for item in order["items"]:
-                offer = order_search.locate(conn, parsed, goods_id=item["goods_id"]).offer
-                args = order_offers.offer_args(conn, settings, parsed, ref, offer, stamp[:10], account_id)
-                args["supplier_price"] = item["price"]
-                args["name"] = item["name"] or args["name"]
-                orders.add_item(conn, card_id, qty=item["qty"], now=stamp, author=who, commit=False, **args)
+                try:
+                    offer = order_search.locate(conn, parsed, goods_id=item["goods_id"]).offer
+                except order_search.NotLocated:
+                    params = terms_store.get_params(conn)
+                    args = dict(goods_id=item["goods_id"], name=item["name"], brand_key="", season="all",
+                                diameter=0, territory="", sale_unit=None, terms={},
+                                fee_pct=params["fee_pct"], promo_pct=params["promo_pct"])
+                else:
+                    args = order_offers.offer_args(conn, settings, parsed, ref, offer, stamp[:10], account_id)
+                lines.append(dict(args, qty=item["qty"], supplier_price=item["price"], name=item["name"] or args["name"]))
+            awaiting_prices = any(line["sale_unit"] is None for line in lines)
+            if awaiting_prices and orders._needs_placed(latest["stage"], orders._placed_stage(conn)):
+                raise orders.OrderError("На этом этапе нельзя загрузить позиции без цены продажи.")
+            for line in lines:
+                orders.add_item(conn, card_id, now=stamp, author=who, commit=False, awaiting_sale_price=awaiting_prices, **line)
             orders.add_event(conn, card_id, stamp, who, "webmim", "Позиции загружены из заказа WebMIM.")
             conn.commit()
-            flash("Позиции и количество загружены из WebMIM. Проверьте цену продажи.", "ok")
+            flash("Позиции загружены из WebMIM. Укажите цены продажи вручную." if awaiting_prices
+                  else "Позиции и количество загружены из WebMIM. Проверьте цену продажи.", "ok")
         except orders.OrderError as err:
             conn.rollback()
             flash("Номера сохранены. Сверка с WebMIM: %s" % err, "warning")
