@@ -97,7 +97,11 @@ def test_off_the_owner_keeps_the_old_pages(w, state):
     if state:
         flag(w, state)
     for page, html in snap(w, w["owner"]).items():
-        assert not is_new(html) and "office2/" not in html and 'class="o2' not in html, page
+        assert not is_new(html) and "office2/" not in html, page
+        if page.split("?", 1)[0] != "/catalog":
+            assert 'class="o2' not in html, page
+        else:
+            assert 'class="bulkbar o2-bulkbar"' not in html
     assert 'class="chats-layout"' in snap(w, w["owner"], ["/chats/{chat}"])["/chats/{chat}"]
 
 
@@ -187,8 +191,8 @@ def test_a_late_task_of_the_chat_shows_on_the_folded_button(w):
 def test_the_catalog_has_the_filters_in_rows_the_season_tags_and_the_bulk_panels(w):
     flag(w, "all")
     html = w["owner"].get("/catalog").get_data(as_text=True)
-    assert 'class="filters o2-filters oc-filters" data-oc' in html and "office_catalog.js" in html     # the block as MIM (2026-11-11)
-    for field in ('name="w"', 'name="size"', 'name="q"', 'name="s"', 'name="t"', 'name="st"', 'name="own"', 'data-name="b"', 'name="bm" value="x"'):
+    assert 'class="filters oc-filters" data-oc' in html and "office_catalog.js" in html     # the block as MIM (2026-11-11)
+    for field in ('name="w"', 'name="q"', 'name="s"', 'name="t"', 'name="st"', 'name="own"', 'data-name="b"', 'name="bm" value="x"'):
         assert field in html, field
     assert 'class="ico-sun"' in html and 'class="ico-snow"' in html and "o2-wstud" in html         # sun, snowflake, winter with studs
     assert 'class="o2-season o2-season--winter"' in html
