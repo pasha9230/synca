@@ -256,7 +256,7 @@ def test_a_change_sends_only_the_columns_that_follow_the_order(table):
     conn, box, fake = table
     mine = placed(conn, comment="Хочу сегодня")
     sheet.flush(conn, box, fake, NOW)
-    orders.update_card(conn, mine, {"transfer_number": "26R-1", "client_name": "Иван Петров", "comment": "Сам доставил"}, LATER, "pavel")
+    orders.update_card(conn, mine, {"transfer_number": "26R-1", "comment": "Сам доставил"}, LATER, "pavel")   # the name follows since 24.11 (ТЗ №88): test_sheet_client_follows
     orders.move_card(conn, mine, stage(conn, "at_point")["id"], LATER, "pavel")
     sheet.flush(conn, box, fake, LATER)
     update = fake.data_posts()[-1]["rows"]

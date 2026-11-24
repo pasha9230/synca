@@ -6,7 +6,7 @@
 <section class="card">
 {% if can_post("connections_sheet") %}<form method="post" action="/connections/sheet">{% else %}<fieldset disabled class="ro-form" style="border:0;padding:0;margin:0;min-width:0">{% endif %}
 <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-<div class="card-head"><h3>Google-таблица заказов</h3><span class="sub">Панель сама добавляет строки на лист «{{ sheet_name }}» при оформлении заказа и обновляет их: перемещение, этап, реализация, списание, уведомления, прибыль</span></div>
+<div class="card-head"><h3>Google-таблица заказов</h3><span class="sub">Панель сама добавляет строки на лист «{{ sheet_name }}» при оформлении заказа и обновляет их: перемещение, этап, реализация, списание, уведомления, прибыль, имя и телефон клиента</span></div>
 <div class="card-body stack">
 <label class="field"><span class="label">Адрес веб-приложения Apps Script</span><input class="input mono" name="url" value="{{ sheet.url }}" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec" data-sheet-url><span class="hint">Как получить: инструкция «Google-таблица заказов: скрипт» — у владельца.</span></label>
 <label class="field"><span class="label">Секрет {% if sheet_secrets.secret %}<span class="badge badge--ok">задан ({{ sheet_secrets.secret.updated|dt_utc }})</span>{% else %}<span class="badge badge--neutral">не задан</span>{% endif %}</span>
