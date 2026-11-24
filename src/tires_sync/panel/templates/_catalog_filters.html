@@ -90,7 +90,7 @@
 {% for key, label in m.origins.items() %}<label><input type="radio" name="c" value="{{ key }}"{% if m.origin == key %} checked{% endif %}>{{ label }}</label>{% endfor %}</div>
 {{ oc_brands(m, brand_choices) }}
 </div>
-<div class="oc-row oc-main-row">
+<div class="oc-row oc-main-row oc-second-row">
 {% if m.mixed %}{{ catalog_axis(m.axes[1], opts) }}{% else %}{{ mixed_control }}{% endif %}
 <div class="seg" role="group" aria-label="Сезон">
 <label><input type="radio" name="s" value=""{% if not season %} checked{% endif %}>Все</label>
@@ -101,10 +101,10 @@
 <label><input type="radio" name="t" value=""{% if not studs %} checked{% endif %}>Все</label>
 <label title="Зима, шипы"><input type="radio" name="t" value="studded"{% if studs == "studded" %} checked{% endif %}>{{ winter_stud() }}Шипы</label>
 <label><input type="radio" name="t" value="friction"{% if studs == "friction" %} checked{% endif %}>Без шипов</label></div>
-<label class="oc-num">В наличии от <input class="input input--num" name="sn" value="{{ m.stock_min or "" }}" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="1" data-oc-num> шт.</label>
+<label class="oc-outlined oc-stock"><span>В наличии</span><input class="input input--num" name="sn" value="{{ m.stock_min if m.stock_min is not none else '' }}" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="1" data-oc-num></label>
+{{ caller() }}
 </div>
 {% if m.mixed %}{{ mixed_control }}{% endif %}
-<div class="oc-row">{{ caller() }}</div>
 <details class="oc-advanced">
 {% set active = (1 if m.price_from is not none or m.price_to is not none else 0) + m.runflat|int + m.commercial|int + own_only|int %}
 <summary class="btn btn--secondary"><span data-oc-expand>Все фильтры</span><span data-oc-collapse>Скрыть</span><b data-oc-filter-count{% if not active %} hidden{% endif %}> · {{ active }}</b></summary>
