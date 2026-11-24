@@ -33,7 +33,7 @@ PAGES = {
     "calls_page": ("days missed q account", "", "account"),
     "mappings": ("q b a c", "", ""),
     "photos_review": ("tab show", "tab", ""),
-    "clients_page": ("q tag", "", "tag"),
+    "clients_page": ("q tag src nm ord dk df dt p", "dk p", "tag src nm ord dk df dt"),     # ТЗ №79: the filters of the office only
     "mypoint_page": ("tab q p", "tab", "p"),
     "shop_page": ("size q s t wh b xb o r p", "o r p", ""),
     "new_positions": ("days", "", ""),
