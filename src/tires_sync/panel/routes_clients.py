@@ -45,7 +45,9 @@ def register(app) -> None:
         more, pairs = max(0, len(pairs) - DUPLICATES_SHOWN), pairs[:DUPLICATES_SHOWN]
         ids = sorted({p["a"] for p in pairs} | {p["b"] for p in pairs})
         names = dict(conn.execute("SELECT id, name FROM client WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)) if ids else {}
-        return render_template("clients_duplicates.html", pairs=pairs, names=names, more=more)
+        kept = clients.list_filter(request.args).pairs()                # the view of the list it came from: the tab «Клиенты» goes back to it
+        return render_template(office_page("clients_duplicates.html"), pairs=pairs, names=names, more=more, list_qs=urlencode(kept),
+                               list_url=_url("/clients", kept), dup_url=_url("/clients/duplicates", kept))
 
     @app.route("/clients/<int:client_id>")
     def client_page(client_id):
@@ -74,8 +76,9 @@ def register(app) -> None:
                                HANDED=clients.HANDED, GAP=clients.NEW_INQUIRY_GAP_HOURS)
 
     def _back(client_id):
-        if request.form.get("back") == "duplicates":
-            return redirect("/clients/duplicates")
+        if request.form.get("back") == "duplicates":                  # the view of the list is kept, read again (never an address as posted)
+            kept = clients.list_filter(dict(parse_qsl(request.form.get("list", "")[:1000]))).pairs()
+            return redirect(_url("/clients/duplicates", kept))
         return redirect("/clients/%d" % client_id)
 
     @app.route("/clients/<int:client_id>/save", methods=["POST"])
