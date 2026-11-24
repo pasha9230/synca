@@ -11,12 +11,24 @@ from cryptography.fernet import Fernet
 from test_order_sheet import FakeScript, events, placed, stage, turn_on
 from test_sheet_restore import NewScript
 from test_webmim_create import NOW, db
-from tires_sync import order_sheet as sheet, orders
+from tires_sync import order_sheet as sheet, orders, store
 from tires_sync.secretbox import SecretBox
 
 LATER = "2026-10-23T12:30:00"
 LATEST = "2026-10-23T13:00:00"
 OLD_PHONE = "89111112233"                     # the phone of test_webmim_create.card as the table keeps it
+
+
+class LostAnswer(NewScript):
+    """The script writes the rows, then its answer never reaches the panel (`lose`: the next POST)."""
+    lose = False
+
+    def __call__(self, method, url, headers, body):
+        answer = super().__call__(method, url, headers, body)
+        if method == "POST" and self.lose:
+            self.lose = False
+            raise OSError("timed out")
+        return answer
 
 
 def table_with(tmp_path, fake):
@@ -108,3 +120,75 @@ def test_a_row_rewritten_by_hand_is_left_alone_and_never_raises_the_alarm(tmp_pa
     assert len(fake.data_posts()) == posts                                        # never sent again
     late = "2026-10-24T12:00:00"
     assert sheet.lasting(conn, late) == [] and sheet.escalate(conn, late) == []   # no «Нужно действие»
+
+
+# ---- the review of 24.11: a lost answer, a phone typed by hand first, the changes made before the deploy -----------------------------
+
+def stored(conn, card_id):
+    return json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0])
+
+
+def test_a_lost_answer_is_sent_again_and_the_row_is_not_said_edited(tmp_path):
+    conn, box, fake = table_with(tmp_path, LostAnswer())
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    orders.update_card(conn, mine, {"client_phone": "+7 922 333-44-55"}, LATER, "pavel")
+    fake.lose = True
+    assert sheet.flush(conn, box, fake, LATER)[mine].startswith("ошибка")
+    assert {r["Телефон"] for r in fake.rows.values()} == {"89223334455"} and failing(conn, mine) == 1   # written, the panel never knew
+    sheet.flush(conn, box, fake, "2026-10-23T12:40:00")                           # the retry: checked by the old phone, then by the new
+    first, second = fake.data_posts()[-2:]
+    assert all(r["check"]["Телефон"] == OLD_PHONE for r in first["rows"])
+    assert all(r["check"]["Телефон"] == "89223334455" and r["fields"] == {"Телефон": "89223334455"} for r in second["rows"])
+    said = events(conn, mine)
+    assert sheet.EDITED_LINE % 2 not in said and said[-1] == "Google-таблица: телефон обновлён (2 стр.)."
+    rows = stored(conn, mine)
+    assert failing(conn, mine) == 0 and all(not r.get("_missing") and r["Телефон"] == "89223334455" for r in rows.values())
+
+
+def test_a_new_phone_the_owner_typed_into_the_cell_first_is_no_edit(tmp_path):
+    conn, box, fake = table_with(tmp_path, NewScript())
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    for row in fake.rows.values():
+        row["Телефон"] = "89223334455"                                            # the owner typed the new number before the panel had it
+    orders.update_card(conn, mine, {"client_phone": "+7 922 333-44-55"}, LATER, "pavel")
+    sheet.flush(conn, box, fake, LATER)
+    said = events(conn, mine)
+    assert not any("изменена вручную" in e for e in said) and said[-1] == "Google-таблица: телефон обновлён (2 стр.)."
+    assert all(not r.get("_missing") and r["Телефон"] == "89223334455" for r in stored(conn, mine).values())
+
+
+def test_a_change_made_before_the_deploy_never_rewrites_the_cell_and_a_later_one_does(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    first = sorted(fake.rows)[0]
+    fake.rows[first]["Имя"] = "Иван (постоянный)"                                  # the owner corrected the cell
+    store.set_state(conn, sheet.BASELINE_KEY, "")                                 # the deploy: its first pass is still to come
+    orders.update_card(conn, mine, {"client_name": "Иван Петров", "client_phone": "+7 922 333-44-55"}, LATER, "pavel")
+    conn.execute("UPDATE sheet_order SET seen_event = ? WHERE order_id = ?", (sheet._last_event(conn, mine), mine))   # the old panel saw it
+    conn.commit()
+    posts = len(fake.data_posts())
+    assert sheet.flush(conn, box, fake, LATEST) == {}
+    assert sheet.flush(conn, box, fake, LATEST, full=True) == {mine: "нечего отправлять"}
+    assert len(fake.data_posts()) == posts and store.get_state(conn, sheet.BASELINE_KEY) == LATEST
+    assert fake.rows[first]["Имя"] == "Иван (постоянный)" and {r["Телефон"] for r in fake.rows.values()} == {OLD_PHONE}
+    assert not any(e.startswith("Google-таблица:") for e in events(conn, mine))
+    orders.update_card(conn, mine, {"client_phone": "+7 933 444-55-66"}, "2026-10-23T14:00:00", "pavel")   # after the deploy: it follows
+    sheet.flush(conn, box, fake, "2026-10-23T14:00:00")
+    sent = fake.data_posts()[-1]["rows"]
+    assert all(r["fields"] == {"Телефон": "89334445566"} and r["check"]["Телефон"] == OLD_PHONE for r in sent)   # checked by the cell's
+    assert fake.rows[first]["Имя"] == "Иван (постоянный)" and {r["Телефон"] for r in fake.rows.values()} == {"89334445566"}
+    assert all(sheet.SEEN_PHONE not in r for r in stored(conn, mine).values())
+
+
+def test_a_change_after_the_deploy_before_the_first_pass_still_goes(table):
+    conn, box, fake = table
+    mine = placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    store.set_state(conn, sheet.BASELINE_KEY, "")
+    orders.update_card(conn, mine, {"client_name": "Пётр"}, LATER, "pavel")      # not looked at yet: a change after the deploy
+    sheet.flush(conn, box, fake, LATER)
+    assert all(r["fields"] == {"Имя": "Пётр"} for r in fake.data_posts()[-1]["rows"])
+    assert {r["Имя"] for r in fake.rows.values()} == {"Пётр"} and store.get_state(conn, sheet.BASELINE_KEY) == LATER
