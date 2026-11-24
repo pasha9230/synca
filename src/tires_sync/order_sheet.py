@@ -7,7 +7,8 @@ written once with every column, then only the columns that follow the order (UPD
 rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
 it finds a row by the value «tires:<order>:<position>» in its hidden column «tires_id» (the script adds and hides it; a value moves with
 its row when the sheet is sorted; the notes of «Дата счета» and «Дата» held it before 2026-11-01 — the script moves those marks over and
-drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» and «Телефон» are still what the panel wrote (CHECK; the name the owner may correct).
+drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» and «Телефон» are still what the panel wrote (CHECK).
+«Имя» and «Телефон» follow the order since 24.11 (CLIENT): a change in the panel is written over the cell, an unchanged one leaves the cell alone.
 
 Nothing waits for Google in a request: `enroll` only queues the order (`sheet_order`) in the transaction of the move, `flush` sends what
 changed since the last answer, after the request in a thread of its own (panel) and every hour (`orders-tick`). A failure is retried later
@@ -39,12 +40,15 @@ OPTIONAL = ("Аккаунт",)                     # the owner 2026-11-02: sent 
 SENT = tuple(c for c in COLUMNS if c not in OWNERS + OPTIONAL)  # what a new row is written with (a sheet without «Примечание» still takes it)
 ASKED = tuple(c for c in COLUMNS if c != "Примечание" and c not in OPTIONAL)   # what «Проверить» needs; never «tires_id» (the script's KEY_COLUMN:
                                                                # it adds the hidden column by itself, the panel never sends nor reads it)
+CLIENT = ("Имя", "Телефон")                                  # the owner 24.11 (ТЗ №88): changed in the panel, they follow the order in every
+                                                             # row of it, over a correction in the cell (as «Аккаунт»); not changed — the cell stays
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
-           "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
+           "Уведомление точке", "Уведомление клиенту") + CLIENT  # the rest is written once: a correction of the owner in the cell stays
 FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
-CHECK = ("Артикул", "Телефон")                              # written once: the script finds the row by its mark and checks it is still there;
+CHECK = ("Артикул", "Телефон")                              # the script finds the row by its mark and checks it is still there;
                                                              # the phone too (the lead's review 2026-11-01): two rows of one code swapped
-                                                             # by a sort that left their marks behind are «missing», never written over
+                                                             # by a sort that left their marks behind are «missing», never written over.
+                                                             # Always the values the panel wrote last: a new phone is checked by the old one
 RECENT_DAYS = 45                                               # the hourly look: the orders placed so recently (and every failing one)
 URL = re.compile(r"^https://script\.google\.com/(?:macros|a/macros/[a-z0-9.-]{1,100})/s/[A-Za-z0-9_-]{10,200}/exec$")   # a/macros/<domain>: Workspace
 REDIRECT = "https://script.googleusercontent.com/"            # Google answers a web app with a redirect there; anywhere else is refused
@@ -498,6 +502,16 @@ def followed(conn, card_id: int) -> set:
     return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)} | seconds
 
 
+def _differs(column: str, before, now) -> bool:
+    """A column of UPDATED changed since the panel wrote it. «Телефон» by its number (sheet_phone: a row written as «+7 911 …» before
+    2026-10-30 is the same number as «8911…»), «Имя» without the spaces around and inside (ТЗ №88): a new form is no change."""
+    if column == "Телефон":
+        return sheet_phone(before) != sheet_phone(now)
+    if column == "Имя":
+        return " ".join(str(before or "").split()) != " ".join(str(now or "").split())
+    return before != now
+
+
 def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey: bool = False) -> List[dict]:
     """What to send: a new position with every column (`create`), a written one with the columns of UPDATED that changed and the cells
     of CHECK as written (the script writes nothing into a row that no longer has them). A row marked `_missing` (rewritten by hand, or
@@ -514,7 +528,7 @@ def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey
             if grey:
                 op["shade"] = True
         elif not before.get("_missing") and not before.get("_removed"):  # a row removed before 2026-11-11 is never made again (the owner)
-            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
+            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if _differs(c, before.get(c), fields[c])}
             shade = grey != bool(before.get("_grey"))
             if not diff and not extra and not shade:
                 continue
@@ -608,13 +622,25 @@ def _last_event(conn, card_id: int) -> int:
                         "(SELECT CAST(value AS INTEGER) FROM app_state WHERE key = 'oth_stored:' || ?)", (card_id, card_id)).fetchone()[0]
 
 
-def _names(items: List[dict]) -> str:
+def _names(items: List[dict], skip=()) -> str:
     seen: List[str] = []
     for op in items:
         for c in list(op["fields"]) + list(op.get("extra") or {}):
-            if c not in seen:
+            if c not in seen and c not in skip:
                 seen.append(c)
     return ", ".join(c for c in COLUMNS if c in seen)
+
+
+def client_line(kept: List[dict]) -> str:
+    """One record per send of the rows whose «Имя» or «Телефон» the table took (ТЗ №88): how many, never the values (the record of the
+    change in the order has them). "" when none."""
+    rows = [op for op in kept if any(c in op["fields"] for c in CLIENT)]
+    if not rows:
+        return ""
+    name = any("Имя" in op["fields"] for op in rows)
+    phone = any("Телефон" in op["fields"] for op in rows)
+    what = "имя и телефон обновлены" if name and phone else ("имя обновлено" if name else "телефон обновлён")
+    return "Google-таблица: %s (%d стр.)." % (what, len(rows))
 
 
 def _failed(conn, card_id: int, failing: int, why: str, now: str, seen: int) -> str:
@@ -699,8 +725,11 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     lines = []
     if made:
         lines.append("Записано в Google-таблицу: %d стр." % len(made))
-    if any(op["fields"] or op.get("extra") for op in kept):
-        lines.append("Google-таблица обновлена: %s." % _names([op for op in kept if op["fields"] or op.get("extra")]))
+    others = _names([op for op in kept if op["fields"] or op.get("extra")], skip=CLIENT)    # the name and phone: a line of their own
+    if others:
+        lines.append("Google-таблица обновлена: %s." % others)
+    if client_line(kept):
+        lines.append(client_line(kept))
     greyed = [op for op in made + kept if op.get("shade") is True]
     cleared = [op for op in kept if op.get("shade") is False]
     if greyed:
