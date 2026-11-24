@@ -228,7 +228,7 @@ def locate(conn, parsed, goods_id: str = "", names=()) -> Located:
             raise NotLocated("в выгрузке поставщика сегодня её нет, в базе позиций с таким названием их %d — ни одна не взята.\nИскали: %s.\n"
                              "В выгрузке сегодня: нет. В базе позиций: %d.\n%s" % (len(based), searched, len(based),
                                                                                      _variants([(o, i.get("last_stock")) for o, i in based])))
-    raise NotLocated("этой позиции нет ни в выгрузке поставщика, ни в базе позиций.\nИскали: %s.\nВ выгрузке сегодня: нет. В базе позиций: нет." % searched)
+    raise NotLocated("этой позиции нет в выгрузке поставщика и нет в базе позиций.\nИскали: %s.\nВ выгрузке сегодня: нет. В базе позиций: нет." % searched)
 
 
 def located_args(conn, settings, parsed, ref, found: Located, day: str, account_id=None) -> dict:

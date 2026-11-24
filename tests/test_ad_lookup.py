@@ -257,7 +257,9 @@ def test_an_id_the_unload_lost_is_found_by_the_exact_title_of_the_ad(tmp_path, m
     conn.commit()
     post(client, "/chats/%d/create-deal" % chat, tok)
     card = card_of(conn, chat)
-    assert [i["goods_id"] for i in card["items"]] == ["100"] and _journal(conn, card["id"]) == []
+    assert [i["goods_id"] for i in card["items"]] == ["100"]
+    [note] = _journal(conn, card["id"])
+    assert note.startswith("Позиция найдена по названию поставщика: «Ikon Tyres 205/55/16 T 94 Autograph Snow 3» (код 100)") and "Искали: код 999" in note
 
 
 def test_an_id_the_unload_lost_and_a_title_that_names_nothing_say_the_id_in_the_journal(tmp_path, monkeypatch):
@@ -268,4 +270,6 @@ def test_an_id_the_unload_lost_and_a_title_that_names_nothing_say_the_id_in_the_
     post(client, "/chats/%d/create-deal" % chat, tok)
     card = card_of(conn, chat)
     assert card["items"] == []
-    assert _journal(conn, card["id"]) == ["Позиция не добавлена: Этой позиции нет в выгрузке поставщика (код в объявлении: 999)"]
+    [note] = _journal(conn, card["id"])
+    assert note.split("\n")[:2] == ["Позиция не добавлена: этой позиции нет в выгрузке поставщика и нет в базе позиций.",
+                                    "Искали: код 999; название «Шина неизвестная 1/1 R1»."]
