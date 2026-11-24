@@ -65,6 +65,21 @@ def test_a_4tochki_brand_switched_on_at_webmim_by_its_avito_name_is_shown_and_ot
     assert "IKON Test Model 205/55 R16 94T" in table.get_data(as_text=True) and "Zeta" not in table.get_data(as_text=True)
 
 
+def test_all_brands_switch_adds_supplier_rows_only_to_catalog_preview(tmp_path):
+    app, client, tok, sid = app_with(tmp_path, rows=[other("T1", "IKON"), other("T2", "Zeta Tyres")])
+    pair_ikon(app)
+    gid = "s%d-T2" % sid
+    assert "Zeta Tyres" not in catalog_ids(client)
+    query = "?sup=%d&all_brands=1" % sid
+    html = client.get("/catalog" + query).get_data(as_text=True)
+    assert 'role="switch" name="all_brands" value="1" data-oc-all-brands checked' in html
+    assert "Zeta Tyres Other Model" in html
+    assert "Бренд вне рабочего ассортимента" in html
+    assert "on:" + gid not in html
+    assert "Zeta Tyres Other Model" in client.get("/catalog/table" + query).get_data(as_text=True)
+    assert "Zeta Tyres" not in search_text(client, "Zeta")
+
+
 def test_a_4tochki_brand_switched_on_for_4tochki_itself_is_shown(tmp_path):
     app, client, tok, sid = app_with(tmp_path, rows=[other("T2", "Zeta Tyres")])
     assert "Zeta Tyres" not in catalog_ids(client)
