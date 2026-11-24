@@ -253,6 +253,8 @@ body.o2{--o2-op-w:clamp(360px,28vw,460px)}
 .o2-crm-q .i{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--o2-text-3);pointer-events:none}
 .o2-crm-q .input{width:100%;padding-left:34px}
 .o2-crm-tag{width:auto;min-width:160px}
+.o2-crm-f{width:auto;min-width:150px}
+@media (max-width:640px){.o2-crm-find .o2-crm-tag,.o2-crm-find .o2-crm-f{flex:1 1 140px;min-width:0}}
 .o2 .o2-crm-list .table th{font-size:13px;color:var(--o2-text-2);background:var(--o2-fill)}
 .o2-crm-name{color:var(--o2-text);font-weight:500;text-decoration:none}
 .o2-crm-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
