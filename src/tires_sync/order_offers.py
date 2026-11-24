@@ -62,6 +62,12 @@ def item_args(conn, settings, parsed, ref, goods_id, day: str, account_id=None) 
     offer = parsed.offers.get(goods_id)
     if offer is None:
         raise orders.OrderError("Этой позиции нет в выгрузке поставщика.")
+    return offer_args(conn, settings, parsed, ref, offer, day, account_id)
+
+
+def offer_args(conn, settings, parsed, ref, offer, day: str, account_id=None) -> dict:
+    """item_args for an offer itself: one of the unload, or one of the permanent base of positions (catalog_archive) the unload has no more,
+    priced the same way (its ad's price first, else the calculation from its last purchase). Raises OrderError without a sale price."""
     only = service._Filtered({offer.goods_id: offer}, getattr(parsed, "issues", {}))
     params = terms_store.get_params(conn)
     rows = economics_view.positions(conn, effective_settings(conn, settings, account_id), only, ref, day, params)
