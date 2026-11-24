@@ -224,6 +224,22 @@ def test_the_list_carries_its_view_to_the_duplicates_and_back(tmp_path, monkeypa
     assert 'href="/clients/duplicates"' in owner.get("/clients").get_data(as_text=True)            # no filter: the bare address, as before
 
 
+def test_the_filters_are_kept_for_the_menu_but_never_the_page_number(tmp_path, monkeypatch):
+    """The review: «CRM» of the menu opens the filters chosen last (page_prefs), always on the first page."""
+    monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
+    monkeypatch.setattr(clients, "LIST_PAGE", 1)
+    app, conn = _app(tmp_path)
+    _world(conn)
+    owner = app.test_client()
+    login(owner)
+    same = {"Referer": "http://localhost/clients"}
+    assert owner.get("/clients?nm=no", headers=same).status_code == 200
+    assert "2 из 2" in owner.get("/clients?nm=no&p=2", headers=same).get_data(as_text=True)     # the second page, chosen on the page
+    r = owner.get("/clients", headers={"Referer": "http://localhost/orders"})                     # the menu, from another page
+    assert r.status_code == 302 and r.headers["Location"].endswith("/clients?nm=no")
+    assert "1 из 2" in owner.get(r.headers["Location"]).get_data(as_text=True)
+
+
 def test_the_new_view_keeps_the_tabs_on_the_duplicates(tmp_path, monkeypatch):
     """The cause of п. 1: in «Новый вид» «Возможные дубли» was the old page with no tabs — no «Клиенты» to go back by, another look."""
     monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
