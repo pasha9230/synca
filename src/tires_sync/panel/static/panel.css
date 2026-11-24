@@ -561,9 +561,9 @@ a.menu-item{text-decoration:none}
 .feed li.is-note{background:var(--warn-50);border:1px solid var(--warn-200)}
 .feed li.is-red{background:var(--err-50);border:1px solid var(--err-200);color:var(--err-700)}
 .feed time{color:var(--gray-500);margin-right:var(--s-2)}
-.feed .feed-text{white-space:pre-line}
+.feed .feed-clip{white-space:pre-line}
 .feed .feed-clip.is-folded{display:-webkit-box;-webkit-line-clamp:4;line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-.feed .feed-more{margin-top:var(--s-1);padding:0;border:0;background:none;color:var(--brand-600, #2563eb);font-size:var(--fs-sm);cursor:pointer;text-decoration:underline}
+.feed .feed-more{margin-top:var(--s-1);padding:0;border:0;background:none;color:var(--primary-700);font-size:var(--fs-sm);cursor:pointer;text-decoration:underline}
 @media (max-width:1100px){.ocard-layout{grid-template-columns:1fr}}
 
 .ocard.waiting { box-shadow: inset 4px 0 0 var(--warn-500); }
