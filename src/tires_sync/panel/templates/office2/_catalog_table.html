@@ -46,5 +46,5 @@
 <tbody>{% for i in items %}
 {{ row(i) }}{% endfor %}</tbody></table></div>
 {% if pager %}<nav class="pager" aria-label="Страницы">{% for n, url in pager.items() %}<a href="{{ url }}"{% if n == page %} class="is-active" aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}</nav>{% endif %}
-{% else %}<div class="empty"><div class="empty-icon">{{ icon("search") }}</div><h3>Ничего не найдено</h3><p>Измените фильтры или сбросьте их.</p><a class="btn btn--link-gray" href="/catalog{% if sup %}?sup={{ sup }}{% endif %}">Сбросить фильтры</a></div>{% endif %}
+{% else %}<div class="empty"><div class="empty-icon">{{ icon("search") }}</div><h3>Ничего не найдено</h3><p>Измените фильтры или сбросьте их.</p></div>{% endif %}
 </section>
