@@ -60,3 +60,49 @@
   .oc-axis-t{flex:1 1 100%;padding:0}
   .oc-ms-in{font-size:16px;height:44px}
 }
+
+/* Shared catalog toolbar in both office views. */
+.oc-filters {
+  --o2-border-2: var(--gray-300);
+  --o2-primary: var(--primary-600);
+  --o2-primary-bg: var(--primary-50);
+  --o2-text-2: var(--gray-700);
+  --o2-text-3: var(--gray-500);
+  --o2-fill: var(--gray-100);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
+  padding: 0;
+}
+.oc-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: clamp(12px, 2vw, 24px);
+}
+.oc-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.oc-search .input, .oc-search .btn { height: 40px; }
+.oc-main-row { align-items: end; gap: 16px 24px; }
+.oc-axis { display: grid; gap: 4px; min-width: 0; }
+.oc-axis-t { padding: 0; }
+.oc-main-row .oc-glue, .oc-axis, .oc-main-row .oc-mixed { width: min(100%, 396px); flex: 0 1 396px; }
+.oc-main-row .oc-glue .oc-ms { flex: 1 1 0; }
+.oc-main-row .oc-axis .oc-glue { width: 100%; }
+.oc-main-row .oc-mixed { display: flex; min-height: 40px; align-items: center; }
+.oc-row > .seg { flex-wrap: wrap; max-width: 100%; }
+.oc-row > .seg label { white-space: normal; min-height: 38px; height: auto; padding-block: 5px; }
+.oc-num { min-height: 40px; }
+.oc-advanced { display: flex; flex-direction: column; align-items: center; gap: 16px; border-top: 1px solid var(--gray-200); padding-top: 16px; }
+.oc-advanced::details-content { order: -1; width: 100%; }
+.oc-advanced > summary { align-self: center; cursor: pointer; }
+.oc-advanced > summary::-webkit-details-marker { display: none; }
+.oc-advanced-fields { width: 100%; align-items: end; gap: 16px 24px; }
+.oc-advanced-fields .field { max-width: 9rem; }
+.oc-advanced-fields .check { min-height: 40px; display: inline-flex; align-items: center; }
+.oc-advanced:not([open]) [data-oc-collapse], .oc-advanced[open] [data-oc-expand] { display: none; }
+.oc-reset-row { justify-self: end; margin-top: -56px; }
+@media (max-width: 640px) {
+  .oc-main-row .oc-glue, .oc-axis, .oc-main-row .oc-mixed { flex-basis: 100%; }
+  .oc-reset-row { margin-top: 0; }
+}
