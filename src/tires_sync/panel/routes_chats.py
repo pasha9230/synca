@@ -197,7 +197,8 @@ def register(app) -> None:
                         raise
                 title = (chats.get_chat(conn, chat_row) or {}).get("item_title") or ""
                 found = order_search.locate(conn, parsed, goods_id, [title])
-                return dict(order_search.located_args(conn, settings, parsed, ref, found, day, account), notes=order_search.notes(found, "chat"))
+                args = order_search.located_args(conn, settings, parsed, ref, found, day, account, ad_goods_id=goods_id)   # the price of the ad itself
+                return dict(args, notes=order_search.notes(found, "chat"))
             except orders.OrderError:
                 raise
             except Exception as err:

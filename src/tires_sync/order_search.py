@@ -153,26 +153,30 @@ class Located:
     how: str
     info: Optional[dict] = None
     searched: str = ""
+    price_note: str = ""                        # located_args: «цена расчётная, не из объявления» for an ad whose code moved
 
     def note(self) -> str:
-        """The record of the journal that says where the position came from (no purchase price: the point reads it); "" for one found by its code."""
+        """The record of the journal that says where the position came from; "" for one found by its code. A position of the base: its last
+        purchase price too (the record is the office's only: notes)."""
         if self.how == "id":
             return ""
         name = self.offer.name_orig or self.offer.name
+        tail = ("\n" + self.price_note) if self.price_note else ""
         if self.how == "name":
-            return "Позиция найдена по названию поставщика: «%s» (код %s), остаток сегодня %d шт.\nИскали: %s.\nВ выгрузке сегодня по коду: нет; по названию: да." % (
-                name, self.offer.goods_id, self.offer.stock, self.searched)
+            where = "по коду нет, по названию да" if self.searched.startswith("код ") else "по названию да"
+            return "Позиция найдена по названию поставщика: «%s» (код %s), остаток сегодня %d шт.\nИскали: %s.\nВ выгрузке сегодня: %s.%s" % (
+                name, self.offer.goods_id, self.offer.stock, self.searched, where, tail)
         info = self.info or {}
         return ("Позиция взята из базы позиций: в выгрузке поставщика сегодня её нет.\n«%s» (код %s): у поставщика последний раз %s, остаток тогда %s шт.\n"
-                "Проверьте наличие у поставщика перед заказом.\nИскали: %s." % (name, self.offer.goods_id, _day(info.get("last_seen")),
-                                                                             info.get("last_stock", "?"), self.searched))
+                "Проверьте наличие у поставщика перед заказом.\nИскали: %s.\nЦена закупки из базы позиций: %s ₽ (последняя известная).%s" % (
+                    name, self.offer.goods_id, _day(info.get("last_seen")), info.get("last_stock", "?"), self.searched,
+                    format(float(self.offer.base_price or 0), ".0f"), tail))
 
-    def purchase_note(self) -> str:
-        """The office's record of the purchase price a position of the base came with (the last one known); "" for one of today's unload."""
-        if self.how != "base":
+    def warning(self) -> str:
+        """What the page says at once about a position the order took without a stock today (the base: its note says it)."""
+        if self.how == "base" or self.offer.stock > 0:
             return ""
-        return "Цена закупки позиции «%s» из базы позиций: %s ₽ (последняя известная, %s)." % (
-            self.offer.name_orig or self.offer.name, format(float(self.offer.base_price or 0), ".0f"), _day((self.info or {}).get("last_seen")))
+        return "Внимание: у позиции «%s» остаток у поставщика сегодня 0 шт." % (self.offer.name_orig or self.offer.name)
 
 
 def first_line(err) -> str:
@@ -213,7 +217,7 @@ def locate(conn, parsed, goods_id: str = "", names=()) -> Located:
         if len(named) == 1:
             return Located(named[0], "name", searched=searched)
         if named:
-            raise NotLocated("по названию нашлось позиций: %d, ни одна не взята — выберите нужную в карточке заказа.\nИскали: %s.\n"
+            raise NotLocated("по названию нашлось позиций: %d, ни одна не взята — впишите код нужной в карточке заказа.\nИскали: %s.\n"
                              "В выгрузке сегодня: %d с таким названием.\n%s" % (len(named), searched, len(named),
                                                                                   _variants([(o, o.stock) for o in named])))
     if goods_id:
@@ -231,11 +235,15 @@ def locate(conn, parsed, goods_id: str = "", names=()) -> Located:
     raise NotLocated("этой позиции нет в выгрузке поставщика и нет в базе позиций.\nИскали: %s.\nВ выгрузке сегодня: нет. В базе позиций: нет." % searched)
 
 
-def located_args(conn, settings, parsed, ref, found: Located, day: str, account_id=None) -> dict:
+def located_args(conn, settings, parsed, ref, found: Located, day: str, account_id=None, ad_goods_id=None) -> dict:
     """The keyword arguments of orders.add_item for the position locate found (order_offers.offer_args); a position of the base without a sale
-    price says so with what was searched."""
+    price says so with what was searched. `ad_goods_id`: the code the ad of a chat was published with (chat_deals.ad_goods): the price of that
+    ad is the client's, whatever code the position has today; without it the panel's calculation, and the journal says so (price_note)."""
     try:
-        return order_offers.offer_args(conn, settings, parsed, ref, found.offer, day, account_id)
+        args = order_offers.offer_args(conn, settings, parsed, ref, found.offer, day, account_id, ad_goods_id=ad_goods_id)
+        if ad_goods_id and found.how != "id" and not order_offers.ad_prices(conn, account_id, [ad_goods_id]).get(str(ad_goods_id)):
+            found.price_note = "Цена продажи расчётная, не из объявления: объявления с кодом %s в последнем фиде аккаунта нет." % ad_goods_id
+        return args
     except orders.OrderError as err:
         if found.how != "base":
             raise
@@ -246,15 +254,13 @@ def located_args(conn, settings, parsed, ref, found: Located, day: str, account_
 
 
 def notes(found: Located, kind: str) -> list:
-    """[(kind, text, level)] of the journal records of where an added position came from: the one every reader of the order sees (`kind`, no money
-    of the supplier), and the purchase price of a position of the base for the office only (kind «webmim»: a point never reads it,
-    routes_orders.point_no_webmim). Nothing for a position found by its code."""
-    out = []
-    if found.note():
-        out.append((kind, found.note(), "yellow" if found.how == "base" else "grey"))
-    if found.purchase_note():
-        out.append(("webmim", found.purchase_note(), "grey"))
-    return out
+    """[(kind, text, level)] of the journal record of where an added position came from. One found by the name: `kind`, every reader of the order
+    sees it. One of the base: the office's only (kind «webmim»: a point never reads it in the card nor in its «Уведомления»,
+    routes_orders.point_no_webmim), with the last purchase price. Nothing for a position found by its code."""
+    note = found.note()
+    if not note:
+        return []
+    return [("webmim", note, "yellow")] if found.how == "base" else [(kind, note, "grey")]
 
 
 def write_notes(conn, card_id, records, now: str, author: str) -> None:
