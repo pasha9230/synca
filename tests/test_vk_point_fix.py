@@ -12,8 +12,10 @@ from http_fakes import ScriptedHttp
 from panel_helpers import post
 from test_order_messages import VK_OK, keys, vk_calls, with_vk
 from test_order_placed import Deliver, panel, ready  # noqa: F401  (panel: the fixture of the press on the page)
+from test_oth_sale import LATER as OTH_LATER, T
 from test_webmim_create import NOW, FakeWebmim, db, place
-from tires_sync import connections, order_notify, order_placed, orders, vk_point_fix, vk_send
+from test_order_reserve import card_at, db as reserve_db
+from tires_sync import connections, order_notify, order_placed, orders, oth_sale, vk_point_fix, vk_send
 from tires_sync.secretbox import SecretBox
 
 LATER = "2026-10-23T13:00:00"
@@ -25,6 +27,7 @@ class Vk:
 
     def __init__(self, edit_fail=None, send_fail=None):
         self.sent, self.edits, self.edit_fail, self.send_fail = [], [], edit_fail, send_fail
+        self.tries = 0                                              # every edit asked, failed or not
 
     def send(self, peer_id, text, random_id=None):
         if self.send_fail is not None:
@@ -33,6 +36,7 @@ class Vk:
         return 100 + len(self.sent)
 
     def edit(self, peer_id, message_id, text):
+        self.tries += 1
         if self.edit_fail is not None:
             raise self.edit_fail
         self.edits.append((peer_id, message_id, text))
@@ -128,6 +132,71 @@ def test_vk_down_keeps_the_card_and_writes_a_red_record(tmp_path):
     assert event["level"] == "red" and "ВК недоступен" in event["text"]
 
 
+def test_after_vk_down_nothing_more_is_tried_in_this_save(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    [row] = rows(conn, mine)
+    vk_point_fix.remember(conn, mine, "555", 202, row["text"], vk_point_fix.OTH_HOLD, NOW)      # a second message of the order
+    conn.commit()
+    vk.edit_fail = vk_send.VkError("ВК недоступен: нет связи с сервером.")
+    change(conn, mine, vk, client_name="Пётр")
+    assert vk.tries == 1 and len(vk.sent) == 1                    # no second edit, no note
+    [event] = notify_events(conn, mine)
+    assert event["level"] == "red" and "ВК недоступен" in event["text"]
+
+
+def test_only_the_buyer_line_is_corrected_not_a_word_elsewhere(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    name = orders.get_card(conn, mine)["client_name"]
+    tail = "\nКомментарий: %s просил %sа не звать, %sов в курсе" % (name, name, name)
+    conn.execute("UPDATE vk_point_message SET text = text || ? WHERE order_id = ?", (tail, mine))
+    conn.commit()
+    change(conn, mine, vk, client_name="Пётр")
+    [(_peer, _mid, text)] = vk.edits
+    assert text.endswith(tail) and "Покупатель Пётр" in text and text.count("Пётр") == 1
+
+
+def test_a_text_longer_than_vk_takes_sends_a_note_instead(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    conn.execute("UPDATE vk_point_message SET text = text || ? WHERE order_id = ?", ("\n" + "я" * vk_send.VK_LIMIT, mine))
+    conn.commit()
+    change(conn, mine, vk, client_name="Пётр")
+    assert vk.tries == 0 and len(vk.sent) == 2 and "имя Пётр" in vk.sent[1][1]
+    assert "текст длиннее лимита ВК" in notify_events(conn, mine)[0]["text"]
+
+
+def test_another_manager_of_the_point_gets_nothing_and_the_journal_says_so(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    conn.execute("UPDATE point SET vk_peer_id = '777' WHERE id = (SELECT point_id FROM order_card WHERE id = ?)", (mine,))
+    conn.commit()
+    change(conn, mine, vk, client_name="Пётр")
+    assert vk.tries == 0 and len(vk.sent) == 1
+    [event] = notify_events(conn, mine)
+    assert event["level"] == "grey" and "Менеджер точки" in event["text"] and "не исправлено" in event["text"]
+
+
+def test_a_closed_order_without_a_number_gets_no_note(tmp_path):
+    conn, mine, vk = told(tmp_path)
+    conn.execute("DELETE FROM vk_point_message")
+    card = orders.get_card(conn, mine)
+    conn.execute("UPDATE order_card SET client_name = 'Пётр', stage_id = (SELECT id FROM order_stage WHERE kind != 'open' ORDER BY id LIMIT 1) "
+                 "WHERE id = ?", (mine,))
+    conn.commit()
+    assert orders.get_card(conn, mine)["stage"]["kind"] != "open"
+    before = {"client_name": card["client_name"], "client_phone": card["client_phone"]}
+    assert vk_point_fix.client_changed(conn, mine, before, LATER, "owner", vk.send, vk.edit) == ""
+    assert vk.tries == 0 and len(vk.sent) == 1 and notify_events(conn, mine) == []
+
+
+def test_a_new_client_on_oth_forgets_the_messages_of_the_old_one(tmp_path):
+    conn = reserve_db(tmp_path)
+    a = card_at(conn, "oth", T)
+    conn.execute("INSERT INTO vk_point_message (order_id, peer_id, message_id, kind, text, client_name, client_phone, sent_at) "
+                 "VALUES (?, '555', 9, 'task', '(бот) Покупатель Иван', 'Иван', '', ?)", (a, T))
+    conn.commit()
+    assert oth_sale.to_new_client(conn, a, "Пётр", "+7 900 555 66 77", OTH_LATER, "o") == a
+    assert rows(conn, a) == []
+
+
 def test_without_a_number_a_new_message_goes(tmp_path):
     conn, mine, vk = told(tmp_path)
     conn.execute("DELETE FROM vk_point_message")                  # an order told before the numbers were kept
@@ -182,6 +251,21 @@ def test_the_autosaved_name_edits_the_message_and_sends_a_note(panel):
     edit, note = vk_calls(app)
     assert edit["peer_id"] == ["555"] and edit["message_id"] == ["7"] and "Пётр" in edit["message"][0]
     assert note["peer_id"] == ["555"] and "имя Пётр" in note["message"][0]
+
+
+def test_the_save_button_edits_the_message_with_a_short_timeout(panel):
+    app, conn, fake, avito, box, client = panel
+    mine = placed_on_page(panel)
+    calls = []
+
+    def http(method, url, headers, body, timeout=30):              # takes a timeout as transport.urllib_transport
+        calls.append((url, timeout, urllib.parse.parse_qs(body.decode("utf-8"))))
+        return 200, {}, b'{"response": 1}'
+    app.config["VK_HTTP"] = http
+    assert post(client, "/orders/%d/save" % mine, "tok", client_name="Пётр").status_code == 302
+    assert [(c[0], c[1]) for c in calls] == [(vk_send.EDIT_URL, vk_point_fix.SHORT_TIMEOUT), (vk_send.URL, vk_point_fix.SHORT_TIMEOUT)]
+    assert calls[0][2]["message_id"] == ["7"] and "Пётр" in calls[0][2]["message"][0] and "имя Пётр" in calls[1][2]["message"][0]
+    assert orders.get_card(conn, mine)["client_name"] == "Пётр"
 
 
 def test_vk_down_on_the_page_saves_the_card(panel):
