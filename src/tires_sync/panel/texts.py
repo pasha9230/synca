@@ -23,7 +23,8 @@ def author_label(author: str) -> str:
     return AUTHOR_NAMES.get(author, author)
 
 
-ORDER_RATES = {"point_fee": ("Выплата точке за заказ", "₽"), "owner_share": ("Доля собственника", "%"), "handoff_fee": ("За переданного клиента", "₽")}
+ORDER_RATES = {"point_fee": ("Выплата точке за заказ", "₽"), "owner_share": ("Доля собственника", "%"), "handoff_fee": ("За переданного клиента", "₽"),
+               "oth_sale_fee": ("За шину, проданную с ОТХ", "₽")}
 INQUIRY_EVENTS = {"message": "сообщение", "call": "звонок", "handoff": "передача заказа"}
 
 
@@ -180,6 +181,8 @@ def audit_text(entry: dict) -> str:
         return "Подписи долей в отчёте по заказам: «%s» и «%s»" % (to.get("owner") or "по умолчанию", to.get("partner") or "по умолчанию")
     if action == "order_rate":
         return _order_rate_text(d)
+    if action == "point_income_shown":
+        return "Страница «Доход» у точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "inquiry":
         from ..inquiry import STATUSES
         return "Обращение клиента №%s: %s → %s%s" % (d.get("client", "?"), STATUSES.get(d.get("from"), d.get("from") or "—"),

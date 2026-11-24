@@ -25,7 +25,7 @@ from datetime import date, timedelta
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
 from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
-from .common import author, current_user, get_conn, login_required, own_point
+from .common import author, current_user, get_conn, has_right, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
 
@@ -493,6 +493,16 @@ def register(app) -> None:
 
     app.jinja_env.globals["point_nav"] = point_nav
 
+    def point_income_on() -> bool:
+        """«Доход» in the menu of a point: the manager of a point (or one working as it) while the owner's switch is on (ТЗ 80)."""
+        if own_point() is None:
+            return False
+        if "point_income_on" not in g:
+            g.point_income_on = order_report.income_shown(get_conn())
+        return g.point_income_on
+
+    app.jinja_env.globals["point_income_on"] = point_income_on
+
     def _the_point(conn):
         point_id = _point_id(conn)
         try:
@@ -516,11 +526,48 @@ def register(app) -> None:
                 return done
             error, form = done
         since = (date.fromisoformat(local_iso()[:10]) - timedelta(days=HANDED_DAYS)).isoformat()
+        paid = {}                                                               # order → the bonus of a client handed over (ТЗ 80): the report's
+        if point_id is not None and _income_open(conn):
+            paid = {e["order"]: e["handoff"] for e in order_report.point_income(conn, since, local_iso()[:10], point_id)["orders"] if e["handoff"]}
         return render_template(point_page("mypoint_handed.html"), point=point, choose=own_point() is None, user=current_user(),
                                points=points.list_points(conn) if own_point() is None else [],
                                handed=mgr.point_handoffs(conn, point_id, since) if point_id is not None else [], seasons=mgr.SEASONS,
-                               bonus=order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10]),
+                               bonus=order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10]), paid=paid,
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form), 400 if error else 200
+
+    def _income_open(conn) -> bool:
+        """The sums of «Доход» are shown: to a point while the owner's switch is on; to the office with the money right (the owner checks them)."""
+        return order_report.income_shown(conn) if own_point() is not None else has_right("money")
+
+    @app.route("/my-point/income")
+    @login_required
+    def mypoint_income():
+        """«Доход» of a point (ТЗ 80): what it is paid for a month, order by order — the fee of an issued order, the bonus of a client it handed
+        over, the bonus of the tyres it sold from «На ОТХ» — from order_report.point_income (the count of the report and of the analytics).
+        Its own point only (own_point); the switch off: the point gets 404, as if the page were not there."""
+        conn = get_conn()
+        if not _income_open(conn):
+            abort(404 if own_point() is not None else 403)
+        point_id, point = _the_point(conn)
+        this_month = local_iso()[:7]
+        month = request.args.get("m", "").strip()[:7]
+        try:
+            first = date.fromisoformat(month + "-01")
+        except ValueError:
+            first = date.fromisoformat(this_month + "-01")
+        last = (first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        start, end = first.isoformat(), last.isoformat()
+        income = order_report.point_income(conn, start, end, point_id) if point_id is not None else {"orders": []}
+        ids = [e["order"] for e in income["orders"] if e["order"]]
+        labels = {}
+        if ids:                                                                 # the numbers in one query: the WebMIM number, else the panel's
+            labels = {r[0]: r[1] or str(r[0]) for r in conn.execute(
+                "SELECT id, webmim_number FROM order_card WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)}
+        rates = order_report.list_rates(conn)
+        return render_template(point_page("mypoint_income.html"), point=point, choose=own_point() is None,
+                               points=points.list_points(conn) if own_point() is None else [], income=income, labels=labels,
+                               month=first.isoformat()[:7], this_month=this_month, start=start, end=end,
+                               rates={name: order_report.rate_on(rates, name, min(end, local_iso()[:10])) for name in ("point_fee", "handoff_fee", "oth_sale_fee")})
 
     @app.route("/my-point", methods=["GET", "POST"])
     @login_required
