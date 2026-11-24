@@ -707,9 +707,6 @@
     }
     return document.scrollingElement || document.documentElement;
   }
-  function isPageBox(box) {                           // the box that moves the whole page: the document or .main of the panel
-    return box === document.scrollingElement || box === document.documentElement || box === document.body || !!(box.classList && box.classList.contains("main"));
-  }
   function chatBottom(box) {                          // where the screen ends for the thread: above a reply field stuck to the bottom
     var comp = document.querySelector(".chat-composer"), view = box === document.scrollingElement || box === document.documentElement ? window.innerHeight : box.getBoundingClientRect().bottom;
     if (comp && !(box.classList && box.classList.contains("chat-thread")) && getComputedStyle(comp).position === "sticky") view -= comp.getBoundingClientRect().height;   // the thread scrolls by itself: the field is below it
@@ -723,20 +720,11 @@
     var thread = document.querySelector(".chat-thread"), last = thread && thread.lastElementChild;
     if (!last) return;
     var box = chatScroller(thread), comp = document.querySelector(".chat-composer");
-    if (orderChat && orderChat.contains(thread) && window.location.hash !== "#order-chat" && isPageBox(box)) return;   // ТЗ №87: the order card opens at its top, the chat moves only its own box
     var end = box !== thread && comp && getComputedStyle(comp).position !== "sticky" ? comp : last;   // the old view: the reply field under the thread in sight too
     var over = end.getBoundingClientRect().bottom - chatBottom(box);
     if (over > 0) box.scrollTop += over + 8;
   }
-  var orderChat = document.querySelector(".order-chat");   // the order window: at the end unless it is a point's long phone page (data-open-end)
-  if (document.querySelector(".chat-thread") && ((!window.location.hash && (!orderChat || orderChat.hasAttribute("data-open-end"))) || window.location.hash === "#order-chat")) {
-    chatToEnd();                                    // #order-chat: back from a send in the order window (its scroll-margin, panel.css, sets the place)
-    var chatMoved = false;                          // photos load after the first scroll and push the end down: follow them until the person scrolls
-    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { chatMoved = true; }, {once: true, passive: true}); });
-    document.querySelectorAll(".chat-thread img").forEach(function (img) {
-      if (!img.complete) img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });
-    });
-  }
+  var chatListHeld = false;                         // the list put its place back in the box the chat scrolls too: the chat's end stays where it is (below)
   (function () {                                    // «Чаты»: the list keeps its place (owner's word 2026-10-24: a chat picked low in the list, a reload, and the list was at the top again)
     var list = document.querySelector(".chats-list"), live = document.getElementById("chats-live");
     if (!list || !live) return;
@@ -747,7 +735,7 @@
     var visible = !!list.getClientRects().length, box = visible ? chatScroller(list) : list, thread = document.querySelector(".chat-thread");
     var lr = list.getBoundingClientRect(), tr = thread && thread.getClientRects().length ? thread.getBoundingClientRect() : null;
     var shared = box !== list && !!tr && chatScroller(thread) === box && lr.left < tr.right && tr.left < lr.right;
-    function reveal() {                              // the open chat in sight, moving the box of the list only (never the chat's own box)
+    function reveal() {                              // the open chat's row in sight, moving the box of the list (the list, or .main beside the chat); a stacked chat: nothing moves
       var row = active();
       if (!row || shared) return;
       var page = box === document.scrollingElement || box === document.documentElement;
@@ -758,7 +746,10 @@
       try { var all = JSON.parse(sessionStorage.getItem(KEY) || "{}"); return all && typeof all === "object" ? all : {}; } catch (e) { return {}; }
     }
     var mark = places()[place];                     // a click on a chat, a form of the chat, F5: the page is loaded again, the list comes back where it was
-    if (typeof mark === "number" && visible && !shared) box.scrollTop = mark;
+    if (typeof mark === "number" && visible && !shared) {
+      box.scrollTop = mark;
+      chatListHeld = box !== list && !!thread && chatScroller(thread) === box;   // side by side in one box: no jump to the chat's end, now or when photos load
+    }
     if (visible) reveal();
     window.addEventListener("pagehide", function () {    // each list (state, account, search) keeps its own place in this tab
       if (!visible || shared || !list.getClientRects().length) return;      // hidden beside the order panel or a phone's open chat: the place it had stays
@@ -801,6 +792,19 @@
         });
     });
   })();
+  // «Чаты» with no anchor: the page (or the chat's own box) at the last message. The order card (ТЗ №87, instead of the owner's 2026-11-09):
+  // its chat column never scrolls the page on opening, F5, «Сохранить» or a new stage, only back from a send there (#order-chat, its
+  // scroll-margin in panel.css sets the place). A list whose place came back in the box the chat scrolls too (a middle screen, side by side): the list wins.
+  var chatThread = document.querySelector(".chat-thread"), orderChat = document.querySelector(".order-chat");
+  var inOrder = !!(orderChat && chatThread && orderChat.contains(chatThread));
+  if (chatThread && !chatListHeld && ((!window.location.hash && !inOrder) || window.location.hash === "#order-chat")) {
+    chatToEnd();
+    var chatMoved = false;                          // photos load after the first scroll and push the end down: follow them until the person scrolls
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { chatMoved = true; }, {once: true, passive: true}); });
+    document.querySelectorAll(".chat-thread img").forEach(function (img) {
+      if (!img.complete) img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });
+    });
+  }
   (function () {                                    // «Чаты»: the order column folds away and comes back; the choice is remembered on this computer
     var layout = document.querySelector(".chats-layout");
     if (!layout) return;
@@ -1193,7 +1197,7 @@
       }
     });
   });
-  // 13b) Карточка заказа (ТЗ №87) держит место прокрутки: F5, «Сохранить», смена этапа (страница грузится снова с того же адреса) — то же место;
+  // 13c) Карточка заказа (ТЗ №87) держит место прокрутки: F5, «Сохранить», смена этапа (страница грузится снова с того же адреса) — то же место;
   //     вход из другого места — сверху; явный якорь (#webmim-parts, #items…) — туда, куда он ведёт, кроме F5
   (function () {
     var KEY = "card-place", path = window.location.pathname + window.location.search;
