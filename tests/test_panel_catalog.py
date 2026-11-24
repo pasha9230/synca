@@ -96,13 +96,13 @@ def test_flat_and_grouped_price_sort_put_the_unpriced_last_by_brand_and_name():
 def test_page_explains_percents_and_has_segmented_filters_that_submit_themselves(tmp_path):
     html = app_with(tmp_path, *ROWS).get("/catalog").get_data(as_text=True)
     assert "Бренды и наценки" in html and "Сопоставления" in html
-    assert html.count('class="seg"') == 2
+    assert html.count('class="seg"') == 3
     for label in ("Все", "Лето", "Зима", "Шипы", "Без шипов", "В фиде", "Не в фиде", "Нет пары"):
         assert label in html
     assert 'name="s" value="summer"' in html and 'name="t" value="studded"' in html and '<option value="feed"' in html
-    assert 'aria-label="Ширина"' in html and 'aria-label="Профиль"' in html and 'aria-label="Диаметр"' in html
+    assert all('id="oc-%s-l">' % dimension in html for dimension in ("w", "h", "d"))
     assert 'placeholder="Размер, название, артикул"' in html                                          # the search is not only by the maker any more
-    assert "data-autosubmit" in html and "onchange=" not in html
+    assert "office_catalog.js" in html and "onchange=" not in html
 
 
 def test_winter_split_shows_studded_and_friction_models_with_icons(tmp_path):
@@ -165,7 +165,7 @@ def test_size_filter_accepts_several_values_per_field(tmp_path):
     assert len(names(client.get("/catalog?w=abc").get_data(as_text=True))) == 3  # not a number: no filter
     assert len(names(client.get("/catalog?w=999").get_data(as_text=True))) == 0
     html = client.get("/catalog?w=205,215&h=55").get_data(as_text=True)
-    assert 'name="w" value="205 215"' in html and 'name="h" value="55"' in html     # shown with spaces (the owner 2026-10-29: «225 205 195»)
+    assert all(field in html for field in ('name="w" value="205"', 'name="w" value="215"', 'name="h" value="55"'))
     assert len(names(client.get("/catalog/table?w=205,215").get_data(as_text=True))) == 2
 
 

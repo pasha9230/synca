@@ -22,7 +22,7 @@ def view(conn, who, state):
 
 
 def filters(html) -> str:
-    start = html.index('class="card o2-cat-filters"')
+    start = re.search(r'class="(?:card )?o2-cat-filters"', html).start()
     return html[start:html.index("</form>", start)]
 
 

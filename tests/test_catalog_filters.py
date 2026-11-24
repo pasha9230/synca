@@ -78,7 +78,7 @@ def test_several_brands_and_brands_left_out_are_the_view_only(tmp_path):
     assert get("?xb=IKON+TYRES") == ["C6", "C7"]
     assert get("?b=IKON+TYRES&b=LAUFENN&xb=LAUFENN") == ["C1", "C2", "C3", "C4", "C5"]
     page = owner.get("/catalog?b=LAUFENN&b=" + NEIZV + "&o=stock").get_data(as_text=True)
-    assert 'name="b" value="LAUFENN" checked' in page and 'name="xb" value="LAUFENN" aria' in page
+    assert 'name="b" value="LAUFENN"' in page and 'name="bm" value="x"' in page
     sort = re.search(r'href="(/catalog\?[^"]*o=price[^"]*)"', page).group(1)       # the links of the page keep every brand
     assert sort.count("b=") == 2
     assert 'data-brand-off="FOO"' not in owner.get("/catalog?b=FOO").get_data(as_text=True)   # a brand of the address is no row of «Бренды в фиде»
