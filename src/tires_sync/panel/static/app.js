@@ -707,6 +707,9 @@
     }
     return document.scrollingElement || document.documentElement;
   }
+  function isPageBox(box) {                           // the box that moves the whole page: the document or .main of the panel
+    return box === document.scrollingElement || box === document.documentElement || box === document.body || !!(box.classList && box.classList.contains("main"));
+  }
   function chatBottom(box) {                          // where the screen ends for the thread: above a reply field stuck to the bottom
     var comp = document.querySelector(".chat-composer"), view = box === document.scrollingElement || box === document.documentElement ? window.innerHeight : box.getBoundingClientRect().bottom;
     if (comp && !(box.classList && box.classList.contains("chat-thread")) && getComputedStyle(comp).position === "sticky") view -= comp.getBoundingClientRect().height;   // the thread scrolls by itself: the field is below it
@@ -720,6 +723,7 @@
     var thread = document.querySelector(".chat-thread"), last = thread && thread.lastElementChild;
     if (!last) return;
     var box = chatScroller(thread), comp = document.querySelector(".chat-composer");
+    if (orderChat && orderChat.contains(thread) && window.location.hash !== "#order-chat" && isPageBox(box)) return;   // ТЗ №87: the order card opens at its top, the chat moves only its own box
     var end = box !== thread && comp && getComputedStyle(comp).position !== "sticky" ? comp : last;   // the old view: the reply field under the thread in sight too
     var over = end.getBoundingClientRect().bottom - chatBottom(box);
     if (over > 0) box.scrollTop += over + 8;
@@ -738,23 +742,29 @@
     if (!list || !live) return;
     var KEY = "chats-list-place", place = live.dataset.place || "";    // the list as the server reads it: state, account, search (not the address as typed)
     function active() { return list.querySelector(".chat-row.is-active"); }
-    function reveal() {                              // the open chat in sight, moving the list only (never the page)
+    // ТЗ №87: the list of «Новый вид» (and the old one on a middle screen) has no scroll of its own, it moves with .main of the panel or the page;
+    // its place is the place of that box. A narrow screen with the list and the chat one under the other in that box: the chat's last message wins (as before).
+    var visible = !!list.getClientRects().length, box = visible ? chatScroller(list) : list, thread = document.querySelector(".chat-thread");
+    var lr = list.getBoundingClientRect(), tr = thread && thread.getClientRects().length ? thread.getBoundingClientRect() : null;
+    var shared = box !== list && !!tr && chatScroller(thread) === box && lr.left < tr.right && tr.left < lr.right;
+    function reveal() {                              // the open chat in sight, moving the box of the list only (never the chat's own box)
       var row = active();
-      if (!row) return;
-      var box = list.getBoundingClientRect(), at = row.getBoundingClientRect();
-      if (at.top < box.top || at.bottom > box.bottom) list.scrollTop += at.top - box.top - Math.max(0, (list.clientHeight - row.offsetHeight) / 2);
+      if (!row || shared) return;
+      var page = box === document.scrollingElement || box === document.documentElement;
+      var top = page ? 0 : box.getBoundingClientRect().top, bottom = page ? window.innerHeight : box.getBoundingClientRect().bottom, at = row.getBoundingClientRect();
+      if (at.top < top || at.bottom > bottom) box.scrollTop += at.top - top - Math.max(0, (bottom - top - row.offsetHeight) / 2);
     }
     function places() {
       try { var all = JSON.parse(sessionStorage.getItem(KEY) || "{}"); return all && typeof all === "object" ? all : {}; } catch (e) { return {}; }
     }
     var mark = places()[place];                     // a click on a chat, a form of the chat, F5: the page is loaded again, the list comes back where it was
-    if (typeof mark === "number") list.scrollTop = mark;
-    reveal();
+    if (typeof mark === "number" && visible && !shared) box.scrollTop = mark;
+    if (visible) reveal();
     window.addEventListener("pagehide", function () {    // each list (state, account, search) keeps its own place in this tab
-      if (!list.getClientRects().length) return;      // hidden beside the order panel: its scroll reads 0, the place it had stays
+      if (!visible || shared || !list.getClientRects().length) return;      // hidden beside the order panel or a phone's open chat: the place it had stays
       var all = places();
       if (!(place in all) && Object.keys(all).length >= 20) all = {};
-      all[place] = list.scrollTop;
+      all[place] = box.scrollTop;
       try { sessionStorage.setItem(KEY, JSON.stringify(all)); } catch (e) { /* private mode: the list starts at the top */ }
     });
     function after(bar) {                            // what follows the filter row: the rows of the chats or the empty note
@@ -766,7 +776,7 @@
       var link = e.target.closest && e.target.closest("[data-chats-relist]");
       if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
       e.preventDefault();
-      var row = active(), offset = row ? row.getBoundingClientRect().top - list.getBoundingClientRect().top : null, top = list.scrollTop;
+      var row = active(), offset = row ? row.getBoundingClientRect().top - list.getBoundingClientRect().top : null, top = list.scrollTop;   // the list's own scroll; a box above it keeps its place by itself
       fetch(window.location.href, {credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
         .then(function (r) { if (!r.ok || r.redirected) throw new Error("page"); return r.text(); })
         .then(function (html) {
@@ -1183,6 +1193,33 @@
       }
     });
   });
+  // 13b) Карточка заказа (ТЗ №87) держит место прокрутки: F5, «Сохранить», смена этапа (страница грузится снова с того же адреса) — то же место;
+  //     вход из другого места — сверху; явный якорь (#webmim-parts, #items…) — туда, куда он ведёт, кроме F5
+  (function () {
+    var KEY = "card-place", path = window.location.pathname + window.location.search;
+    if (!document.querySelector("[data-keep-place]")) {       // another page between two visits: the next visit to the card starts at its top
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* no storage: nothing kept */ }
+      return;
+    }
+    function pageBox() {                                    // .main of the panel scrolls on a computer; a phone scrolls the page itself
+      var main = document.querySelector(".main");
+      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
+      return document.scrollingElement || document.documentElement;
+    }
+    var mark = null, moved = false, nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+    try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch (e) { mark = null; }
+    var again = !!mark && mark.path === path && typeof mark.top === "number";
+    function put() { if (again && !moved) pageBox().scrollTop = mark.top; }
+    if (again && (!window.location.hash || (nav && nav.type === "reload"))) {
+      put();
+      ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { moved = true; }, {once: true, passive: true}); });
+      window.addEventListener("load", put);                 // photos above push the place down: put it again unless the person scrolled
+    }
+    window.addEventListener("pagehide", function () {
+      try { sessionStorage.setItem(KEY, JSON.stringify({path: path, top: pageBox().scrollTop})); } catch (e) { /* private mode: the card opens at its top */ }
+    });
+  })();
+
   // 13a) Заказ: ссылка на часть страницы (#wants после правки строки «Что нужно клиенту») раскрывает её, если она свёрнута
   //      и при щелчке по ссылке на этой же странице (#intercity у метки «В другой город»)
   (function () {

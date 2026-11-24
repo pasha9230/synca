@@ -24,7 +24,7 @@
 <a class="o2c-back" href="/orders">{{ icon("arrow-left", "i-sm") }}Заказы</a>
 </header>
 {% include "_order_unsent.html" %}
-<div class="o2c-body" data-ccs data-csrf="{{ csrf_token() }}" data-layout='{{ layout|tojson }}'>
+<div class="o2c-body" data-keep-place data-ccs data-csrf="{{ csrf_token() }}" data-layout='{{ layout|tojson }}'>
 {% call col(0) %}
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}
 {% if back_ask %}<div class="flash flash--info" id="oth-back" role="alert" data-oth-back><div class="flash-text stack"><b>{{ back_ask.question }}</b>
