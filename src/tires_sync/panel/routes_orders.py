@@ -18,7 +18,7 @@ from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
 from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_chain, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
-from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_cabinet, webmim_create, webmim_match
+from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_point_fix, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
 from .routes_design import office_new, office_page
@@ -1499,15 +1499,27 @@ def register(app) -> None:
                 return
             _conn, settings, parsed, ref = context(app)
             account_id = window_account(conn, {}, card_id)
+            lines = []
             for item in order["items"]:
-                offer = order_search.locate(conn, parsed, goods_id=item["goods_id"]).offer
-                args = order_offers.offer_args(conn, settings, parsed, ref, offer, stamp[:10], account_id)
-                args["supplier_price"] = item["price"]
-                args["name"] = item["name"] or args["name"]
-                orders.add_item(conn, card_id, qty=item["qty"], now=stamp, author=who, commit=False, **args)
+                try:
+                    offer = order_search.locate(conn, parsed, goods_id=item["goods_id"]).offer
+                except order_search.NotLocated:
+                    params = terms_store.get_params(conn)
+                    args = dict(goods_id=item["goods_id"], name=item["name"], brand_key="", season="all",
+                                diameter=0, territory="", sale_unit=None, terms={},
+                                fee_pct=params["fee_pct"], promo_pct=params["promo_pct"])
+                else:
+                    args = order_offers.offer_args(conn, settings, parsed, ref, offer, stamp[:10], account_id)
+                lines.append(dict(args, qty=item["qty"], supplier_price=item["price"], name=item["name"] or args["name"]))
+            awaiting_prices = any(line["sale_unit"] is None for line in lines)
+            if awaiting_prices and orders._needs_placed(latest["stage"], orders._placed_stage(conn)):
+                raise orders.OrderError("На этом этапе нельзя загрузить позиции без цены продажи.")
+            for line in lines:
+                orders.add_item(conn, card_id, now=stamp, author=who, commit=False, awaiting_sale_price=awaiting_prices, **line)
             orders.add_event(conn, card_id, stamp, who, "webmim", "Позиции загружены из заказа WebMIM.")
             conn.commit()
-            flash("Позиции и количество загружены из WebMIM. Проверьте цену продажи.", "ok")
+            flash("Позиции загружены из WebMIM. Укажите цены продажи вручную." if awaiting_prices
+                  else "Позиции и количество загружены из WebMIM. Проверьте цену продажи.", "ok")
         except orders.OrderError as err:
             conn.rollback()
             flash("Номера сохранены. Сверка с WebMIM: %s" % err, "warning")
@@ -1543,6 +1555,7 @@ def register(app) -> None:
             if "stage_id" in request.form or request.form.get("tab") != "money":
                 return card_page(conn, card, dict(changes, **typed_row))  # the window comes back with what was typed: nothing saved, nothing moved
             return back(card_id, "money")
+        client_fixed(conn, card, changed)
         if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one;
             # before the row: the row is priced by the account of the chats the order has after this press (order_offers.account_for)
             unlink, moved, offered = (_int(request.form.get(k)) for k in ("chat_unlink", "chat_move", "chat_bind"))
@@ -1665,6 +1678,7 @@ def register(app) -> None:
             changed = orders.update_card(conn, card_id, changes, local_iso(), author())
         except orders.OrderError as err:
             return jsonify(ok=False, error=str(err)), 400
+        client_fixed(conn, card, changed)
         if changed and lacking_before:                                    # a lacking value typed (the phone): the waiting messages, as «Сохранить»
             engine.refresh_tasks(conn, card_id, local_iso())
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
@@ -1721,6 +1735,20 @@ def register(app) -> None:
             client = AvitoClient(client_id, client_secret, http=app.config.get("AVITO_HTTP") or urllib_transport, allow_write=True)
             chats_store.send_reply(conn, client, chat_row, text, token, stamp, author())
         return deliver
+
+    def client_fixed(conn, before: dict, changed) -> None:
+        """The client's name or phone saved in the window (committed): the message the panel sent to the point in VK is corrected
+        (vk_point_fix; the owner 2026-11-24). Only this order; nothing for a point's own save. Never fails the save."""
+        if not ({"client_name", "client_phone"} & set(changed or ())) or own_point() is not None:
+            return
+        try:
+            box, http = app.config.get("SECRET_BOX"), vk_point_fix.short_http(app.config.get("VK_HTTP") or urllib_transport)
+            send, edit = vk_send.sender_for(conn, box, http=http), vk_send.editor_for(conn, box, http=http)
+        except Exception:                                                 # noqa: BLE001  a key that cannot be read: nothing to VK
+            log.exception("the key of the VK community could not be read")
+            return
+        vk_point_fix.client_changed(conn, before["id"], {"client_name": before["client_name"], "client_phone": before["client_phone"]},
+                                    local_iso(), author(), send, edit)
 
     def vk_sender(conn, quiet=False):
         """send(peer_id, text, random_id=) through the VK community; None without the master key or the key of the community.
@@ -2001,7 +2029,7 @@ def register(app) -> None:
         card = orders.get_card(conn, card_id)
         sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author())     # without a WebMIM number, the text without it: order_manager
         told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, oth_sale.point_text(conn, card, now), now,
-                                       vk_http=app.config.get("VK_HTTP") or urllib_transport)
+                                       vk_http=app.config.get("VK_HTTP") or urllib_transport, remember=vk_point_fix.OTH_HOLD)
         flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")
 
     def _storage(conn, card: dict):

@@ -459,6 +459,12 @@ CREATE TABLE IF NOT EXISTS order_task (
     created_at TEXT NOT NULL, done_at TEXT, UNIQUE (order_id, rule_id, entered_at)
 );
 CREATE INDEX IF NOT EXISTS order_task_order ON order_task (order_id, status);
+CREATE TABLE IF NOT EXISTS vk_point_message (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, peer_id TEXT NOT NULL, message_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', client_phone TEXT NOT NULL DEFAULT '',
+    sent_at TEXT NOT NULL, edited_at TEXT
+);
+CREATE INDEX IF NOT EXISTS vk_point_message_order ON vk_point_message (order_id);
 CREATE TABLE IF NOT EXISTS order_want (
     id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
     width INTEGER NOT NULL DEFAULT 0, profile INTEGER NOT NULL DEFAULT 0, radius INTEGER NOT NULL DEFAULT 0,

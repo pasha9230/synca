@@ -141,16 +141,34 @@
   .oc-second-row > .seg { flex-wrap: nowrap; }
   .oc-second-row > .seg label { flex: 1 1 auto; min-width: 0; padding-inline: clamp(4px, .55vw, 12px); overflow-wrap: anywhere; }
 }
-.oc-advanced { display: flex; flex-direction: column; align-items: center; gap: 16px; border-top: 1px solid var(--gray-200); padding-top: 16px; }
+.oc-filter-actions { display: grid; border-top: 1px solid var(--gray-200); padding-top: 12px; }
+.oc-advanced { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
+.oc-advanced, .oc-reset-row { grid-area: 1 / 1; }
+.oc-filter-actions .btn { min-height: 40px; gap: 6px; padding-inline: 4px; white-space: normal; }
+.oc-filter-arrow { display: inline-flex; transform: rotate(90deg); }
+.oc-advanced[open] .oc-filter-arrow { transform: rotate(-90deg); }
 .oc-advanced::details-content { order: -1; width: 100%; }
 .oc-advanced > summary { align-self: center; cursor: pointer; }
 .oc-advanced > summary::-webkit-details-marker { display: none; }
 .oc-advanced-fields { width: 100%; align-items: end; gap: 16px 24px; }
 .oc-advanced-fields .field { max-width: 9rem; }
-.oc-advanced-fields .check { min-height: 40px; display: inline-flex; align-items: center; }
+.oc-filter-option { position: relative; min-height: 40px; cursor: pointer; }
+.oc-filter-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.oc-filter-option:has(input:checked) {
+  background: var(--primary-50);
+  color: var(--primary-700);
+  border-color: var(--primary-600);
+}
+.oc-filter-option:has(input:focus-visible) { outline: 2px solid var(--primary-600); outline-offset: 2px; }
 .oc-advanced:not([open]) [data-oc-collapse], .oc-advanced[open] [data-oc-expand] { display: none; }
-.oc-reset-row { justify-self: end; margin-top: -56px; }
+.oc-reset-row { justify-self: end; align-self: end; z-index: 1; }
+.oc-reset-row .btn:disabled { color: var(--gray-500); opacity: .65; cursor: default; text-decoration: none !important; }
+@container (max-width: 540px) {
+  .oc-advanced > summary { align-self: flex-start; }
+}
+@container (max-width: 300px) {
+  .oc-reset-row { grid-row: 2; }
+}
 @media (max-width: 640px) {
   .oc-main-row .oc-glue, .oc-axis, .oc-main-row .oc-mixed { flex-basis: 100%; }
-  .oc-reset-row { margin-top: 0; }
 }

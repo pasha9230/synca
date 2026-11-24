@@ -275,6 +275,15 @@ def test_toolbar_stays_inside_the_viewport_in_both_size_modes(served):
             with page.expect_navigation():
                 switch.uncheck()
             assert "all_brands=" not in page.url and not switch.is_checked()
+            reset = page.get_by_text("Сбросить фильтры", exact=True)
+            assert reset.count() == 1 and reset.is_disabled()
+            page.locator(".oc-advanced summary").click()
+            page.locator(".oc-filter-option", has_text="RunFlat").click()
+            page.get_by_role("link", name="Сбросить фильтры").wait_for(timeout=5000)
+            assert reset.count() == 1 and "rf=1" in page.url
+            with page.expect_navigation():
+                reset.click()
+            assert reset.is_disabled()
             for mixed in (False, True):
                 toolbar = page.locator("form[data-oc]")
                 assert toolbar.locator(".oc-axis").count() == (2 if mixed else 0)

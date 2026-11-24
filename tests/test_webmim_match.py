@@ -368,7 +368,7 @@ def test_saving_both_mim_numbers_imports_items_without_moving_the_order(panel):
 @pytest.mark.parametrize("with_items", [False, True])
 def test_webmim_save_preserves_existing_items_and_does_not_import_a_partial_order(panel, with_items):
     app, conn = panel
-    snap(conn, (wm(71, 371, "07.10.26 10:00:00"), [("100", 4, 3281), ("missing", 2, 3532)]))
+    snap(conn, (wm(71, 371, "07.10.26 10:00:00"), [("100", 4, 3281), ("missing", 2, -1)]))
     mine = card(conn, goods=[("100", 1)] if with_items else [])
     client = app.test_client()
     response = post(client, "/orders/%d/save" % mine, login(client),
@@ -377,6 +377,25 @@ def test_webmim_save_preserves_existing_items_and_does_not_import_a_partial_orde
     saved = orders.get_card(conn, mine)
     assert saved["webmim_number"] == "371" and saved["transfer_number"] == "26R-1234567"
     assert [(i["goods_id"], i["qty"]) for i in saved["items"]] == ([("100", 1)] if with_items else [])
+
+
+def test_import_without_catalog_match_waits_for_manual_sale_prices(panel):
+    app, conn = panel
+    snap(conn, (wm(71, 371, "07.10.26 10:00:00"), [("100", 6, 5801.52), ("rim", 4, 2539.35)]))
+    mine = card(conn)
+    client = app.test_client()
+    tok = login(client)
+    post(client, "/orders/%d/save" % mine, tok, webmim_number="371", transfer_number="26R-1234567")
+    saved = orders.get_card(conn, mine)
+    assert [(i["goods_id"], i["qty"], i["supplier_price"], i["sale_unit"]) for i in saved["items"]] == [
+        ("100", 6, 5801.52, 0), ("rim", 4, 2539.35, 0),
+    ]
+    placed = orders._placed_stage(conn)
+    assert "цены продажи в позициях" in orders.missing_for(saved, placed, placed)
+    assert "Укажите цену" in client.get("/orders/%d" % mine).get_data(as_text=True)
+    for item in saved["items"]:
+        orders.update_item(conn, item["id"], item["qty"], 7000, NOW, "owner")
+    assert "цены продажи в позициях" not in orders.missing_for(orders.get_card(conn, mine), placed, placed)
 
 
 def test_missing_snapshot_reads_a_new_order_from_webmim(panel):

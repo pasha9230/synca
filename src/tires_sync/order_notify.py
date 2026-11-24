@@ -192,7 +192,10 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
                 raise vk_send.VkError("ВК не настроен: нет ключа сообщества.")
             from .order_manager import signed
             body = signed(for_point(text))                         # the bot writes it: «(бот) » (the owner 2026-10-24); no WebMIM to a point
-            sender(way["to"], body, random_id=vk_send.stable_id("notify|%s|%s|%s|%s" % (card["id"], way["to"], body, now[:13])))
+            message_id = sender(way["to"], body, random_id=vk_send.stable_id("notify|%s|%s|%s|%s" % (card["id"], way["to"], body, now[:13])))
+            if way.get("remember"):                                # tell_point's text with the client: its number, to correct it later
+                from . import vk_point_fix
+                vk_point_fix.remember(conn, card["id"], way["to"], message_id, body.strip(), way["remember"], now)
             _event(conn, card["id"], now, "Оповещение отправлено: ВК → точка «%s»" % way["why"])
             return "отправлено в ВК (%s)" % way["why"]
         except vk_send.VkError as err:
@@ -245,11 +248,13 @@ def deliver(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_
 
 
 def tell_point(conn, box: Optional[SecretBox], card: dict, text: str, now: str, tg_http: Transport = urllib_transport,
-               vk_http: Transport = urllib_transport) -> str:
+               vk_http: Transport = urllib_transport, remember: str = "") -> str:
     """Write to the point of the order itself (its «Рабочее место» or its VK, as deliver writes a point), not to the responsible; never raises.
-    No way to the point: the owner is told, as by deliver."""
+    No way to the point: the owner is told, as by deliver. `remember`: the kind of the text (vk_point_fix) whose number in VK is kept."""
     point = card.get("point")
     way = _point_route(point) if point else {"channel": "owner", "to": "", "why": "у заказа нет точки"}
+    if remember and way["channel"] == "vk":
+        way = dict(way, remember=remember)
     own = points.of_account(conn, card["id"]) if point else None
     if own is not None:                                            # an order of the point's account: left on its «Рабочее место», never the owner
         way = dict(way, own_point=own["id"])

@@ -545,10 +545,10 @@ def register(app) -> None:
             without_brands=view["without"], feed_brands=_feed_brands(conn, feed_counts, suppliers) if can_post("connections_excluded_brand") else None,
             size_options=options, supplier_tabs=supplier_tabs, wait=wait,
             pick=client_catalog.size_pick("/catalog", here, {k: _nums(args, k) or () for k in ("w", "h", "d")}, options),
-            mim=_mim_block(args, here, options, brand_choices, view),
+            mim=_mim_block(args, here, options, brand_choices, view, b),
             recent=client_catalog.recent_links("/catalog", _pairs(args, ("wait",)), client_catalog.recent_sizes(conn, current_user()["login"])), **b)
 
-    def _mim_block(args, here, options, brand_choices, view) -> dict:
+    def _mim_block(args, here, options, brand_choices, view, b) -> dict:
         """The block of the filters of the office's «Новый вид» as the catalog of MIM (lane office-catalog-mim, the owner 2026-11-11; the
         client's «Вид 2» the sample): the three glued fields of ANY size (client_catalog.size_pick2), «Производитель» with «Кроме», the
         axes of «Разноширокие», «Импортные / Отечественные», «В наличии от», «Цена от / до». The values only: office2/catalog.html draws it."""
@@ -560,12 +560,19 @@ def register(app) -> None:
             return [{"key": key, "name": name, "label": labels.get(key, re.sub(r"^S\d+:", "", key)),
                      "url": client_catalog._url("/catalog", [(k, v) for k, v in rest if not (k == name and v == key)])} for key in on]
         mixed = args.get("mixed") == "1"
+        active = (mixed or any(_nums(args, key) for key in ("w", "h", "d"))
+                  or bool((args.get("size") or "").strip()) or bool(service.search_terms(args.get("q", "")))
+                  or view["brands"] or view["without"] or _origin(args) or _num(args, "sn")
+                  or _num(args, "pf") is not None or _num(args, "pt") is not None
+                  or args.get("rf") == "1" or args.get("commercial") == "1"
+                  or b["season"] or b["studs"] or b["status"] != "all" or b["own_only"] or b["market_over"])
         return {"pick2": client_catalog.size_pick2("/catalog", here, {k: _nums(args, k) or () for k in ("w", "h", "d")}, options),
                 "brands": chips("b") + chips("xb"), "brand_mode": "x" if args.get("bm") == "x" or (view["without"] and not view["brands"]) else "",
                 "mixed": mixed, "all_brands": args.get("all_brands") == "1", "axes": [(p, label, client_catalog.axis_of(args, p)) for p, label in client_catalog.AXES],
                 "origin": _origin(args), "origins": ORIGINS, "stock_min": _num(args, "sn"), "price_from": _num(args, "pf"),
                 "price_to": _num(args, "pt"), "runflat": args.get("rf") == "1", "commercial": args.get("commercial") == "1",
-                "reset": client_catalog._url("/catalog", [(k, args[k]) for k in ("sup", "all_brands") if args.get(k)])}
+                "filters_active": bool(active),
+                "reset": client_catalog._url("/catalog", [(k, args[k]) for k in ("sup", "all_brands", "o", "r", "n") if args.get(k)])}
 
     def _feed_brands(conn, counts, suppliers):
         """«Бренды в фиде» of the owner: every brand on view and every brand taken off, with what one button does to it. The change is the
