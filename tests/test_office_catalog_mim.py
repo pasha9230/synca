@@ -271,6 +271,16 @@ def test_toolbar_stays_inside_the_viewport_in_both_size_modes(served):
             for mixed in (False, True):
                 toolbar = page.locator("form[data-oc]")
                 assert toolbar.locator(".oc-axis").count() == (2 if mixed else 0)
+                row = toolbar.locator(".oc-second-row")
+                stock = row.get_by_label("В наличии", exact=True)
+                status = row.get_by_label("Статус", exact=True)
+                assert stock.get_attribute("placeholder") == "1"
+                page.set_viewport_size({"width": 1182, "height": 850})
+                season = row.get_by_role("group", name="Сезон")
+                assert abs(stock.bounding_box()["y"] - status.bounding_box()["y"]) <= 1
+                assert abs(stock.bounding_box()["y"] - season.bounding_box()["y"]) <= 1
+                assert stock.bounding_box()["x"] < status.bounding_box()["x"]
+                page.set_viewport_size({"width": 375, "height": 850})
                 field = toolbar.locator('[name="rf"]')
                 assert not field.is_visible()
                 toolbar.locator(".oc-advanced summary").click()
