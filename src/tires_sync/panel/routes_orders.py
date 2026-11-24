@@ -1665,7 +1665,7 @@ def register(app) -> None:
         if not ({"client_name", "client_phone"} & set(changed or ())) or own_point() is not None:
             return
         try:
-            box, http = app.config.get("SECRET_BOX"), app.config.get("VK_HTTP") or urllib_transport
+            box, http = app.config.get("SECRET_BOX"), vk_point_fix.short_http(app.config.get("VK_HTTP") or urllib_transport)
             send, edit = vk_send.sender_for(conn, box, http=http), vk_send.editor_for(conn, box, http=http)
         except Exception:                                                 # noqa: BLE001  a key that cannot be read: nothing to VK
             log.exception("the key of the VK community could not be read")
