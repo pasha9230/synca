@@ -230,7 +230,7 @@
   form.addEventListener("change", function (e) {
     var t = e.target;
     if (t.closest(".oc-ms-in, [data-oc-ms]") || t.hasAttribute("data-oc-num") || t.hasAttribute("data-oc-bm")) return;
-    if (t.hasAttribute("data-oc-mixed")) { now(); return; }    // «Разноширокие»: other fields, the page anew at once
+    if (t.matches("[data-oc-mixed], [data-oc-all-brands]")) { now(); return; }    // These filters change the other controls.
     updateFilterCount();
     later();
   });
