@@ -1644,4 +1644,20 @@
     if (win) new MutationObserver(function () { if (!win.classList.contains("is-open")) window.location.replace(window.location.pathname + "#webmim"); })
       .observe(win, {attributes: true, attributeFilter: ["class"]});
   })();
+  // Журнал заказа: запись длиннее 4 строк свёрнута, «показать полностью» открывает её (владелец 2026-11-24)
+  (function () {
+    document.querySelectorAll("[data-clip]").forEach(function (clip) {
+      clip.classList.add("is-folded");
+      if (clip.scrollHeight <= clip.clientHeight + 1) { clip.classList.remove("is-folded"); return; }
+      var more = document.createElement("button");
+      more.type = "button";
+      more.className = "feed-more";
+      more.textContent = "показать полностью";
+      more.addEventListener("click", function () {
+        var folded = clip.classList.toggle("is-folded");
+        more.textContent = folded ? "показать полностью" : "свернуть";
+      });
+      clip.parentNode.appendChild(more);
+    });
+  })();
 })();

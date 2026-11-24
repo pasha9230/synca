@@ -116,6 +116,31 @@ def item_info(conn, goods_id: str):
     return {"first_seen": row[0], "last_seen": row[1], "last_stock": row[2], "last_price": row[3], "gone_since": row[4]}
 
 
+def by_name(conn, name: str) -> List[Tuple[Offer, dict]]:
+    """The positions of the base (taken away or not) whose supplier's name (name or name_orig) is exactly `name`, case and extra spaces aside:
+    the offer as the unload last had it (stock 0) and what item_info knows. A scan of the base: only for one press, never in a loop."""
+    wanted = same_name(name)
+    if not wanted:
+        return []
+    out = []
+    for goods_id, data, first, last, stock, price, gone in conn.execute(
+            "SELECT goods_id, data, first_seen, last_seen, last_stock, last_price, gone_since FROM catalog_item ORDER BY goods_id"):
+        try:
+            offer = _load(data)
+        except Exception:                                    # a row of an older shape of Offer is skipped
+            continue
+        if wanted not in (same_name(offer.name), same_name(offer.name_orig)):
+            continue
+        out.append((dataclasses.replace(offer, stock=0),
+                    {"first_seen": first, "last_seen": last, "last_stock": stock, "last_price": price, "gone_since": gone}))
+    return out
+
+
+def same_name(text) -> str:
+    """A supplier's name as names are compared: lower case, spaces collapsed."""
+    return " ".join(str(text or "").split()).lower()
+
+
 def gone_offers(conn) -> List[Tuple[Offer, dict]]:
     """The positions the supplier took away: the offer as it was (stock 0) and what is known about it."""
     out = []

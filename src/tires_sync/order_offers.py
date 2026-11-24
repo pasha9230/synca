@@ -62,11 +62,19 @@ def item_args(conn, settings, parsed, ref, goods_id, day: str, account_id=None) 
     offer = parsed.offers.get(goods_id)
     if offer is None:
         raise orders.OrderError("Этой позиции нет в выгрузке поставщика.")
+    return offer_args(conn, settings, parsed, ref, offer, day, account_id)
+
+
+def offer_args(conn, settings, parsed, ref, offer, day: str, account_id=None, ad_goods_id=None) -> dict:
+    """item_args for an offer itself: one of the unload, or one of the permanent base of positions (catalog_archive) the unload has no more,
+    priced the same way (its ad's price first, else the calculation from its last purchase). `ad_goods_id`: the code of the ad the client saw,
+    when it is not the offer's of today (a code that moved): that ad's price first. Raises OrderError without a sale price."""
     only = service._Filtered({offer.goods_id: offer}, getattr(parsed, "issues", {}))
     params = terms_store.get_params(conn)
     rows = economics_view.positions(conn, effective_settings(conn, settings, account_id), only, ref, day, params)
     row = rows[0] if rows else None
-    sale = ad_prices(conn, account_id, [offer.goods_id]).get(offer.goods_id) or (row or {}).get("sale")     # the ad first, the calculation else
+    ad_key = str(ad_goods_id or offer.goods_id)
+    sale = ad_prices(conn, account_id, [ad_key]).get(ad_key) or (row or {}).get("sale")     # the ad first, the calculation else
     if not sale:
         raise orders.OrderError("Для этой позиции не рассчитана цена продажи: задайте процент бренда.")
     season = economics_view.season_of(offer)

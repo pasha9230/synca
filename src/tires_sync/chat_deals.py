@@ -235,9 +235,13 @@ def _add_position(conn, chat: dict, card_id: int, provider, now: str, author: st
         args = provider(goods_id, pack)
         if not args:
             raise OrderError("позиции %s нет в выгрузке" % goods_id)
+        args = dict(args)
+        records = args.pop("notes", None) or ()                          # where the position came from (order_search.notes): after it is added
         if ad_lookup is not None and conn.execute("SELECT 1 FROM order_item WHERE order_id = ? LIMIT 1", (card_id,)).fetchone():
             return False                                                  # added by another press while Avito was asked: never a second one
         orders.add_item(conn, card_id, qty=DEFAULT_QTY, now=now, author=author, **args)
+        for kind, text, level in records:
+            orders.add_event(conn, card_id, now, author, kind, text, level)
         added = True
     except OrderError as err:
         orders.add_event(conn, card_id, now, author, "chat", "Позиция не добавлена: %s" % err)

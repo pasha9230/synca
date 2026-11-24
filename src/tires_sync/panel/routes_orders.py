@@ -537,30 +537,50 @@ def register(app) -> None:
         return order_offers.item_args(conn, settings, parsed, ref, goods_id, local_now().date().isoformat(), account_id)
 
     def typed_goods(conn, code, text, stock=False):
-        """(code, name when found by the text): the position the manager chose in the list, or the one the text names exactly. Raises OrderError when the text is not exact
+        """(order_search.Located, name when found by the text): the position the manager chose in the list (by its code, else by the supplier's exact
+        name the list filled in: the code moves when the supplier rewrites a name), or the one the text names exactly, else the one position of the
+        permanent base of positions with that name (order_search.locate, the same as a chat's ad). Raises OrderError when the text is not exact
         enough: then the manager chooses in the list. `stock`: a deal of the point's stock, whose tyre the unload may not have (the list offers it)."""
-        if code:
-            return code, ""
         _conn, _settings, parsed, ref = context(app)
+        if code:
+            try:
+                return order_search.locate(conn, parsed, code, [text]), ""
+            except order_search.NotLocated as err:
+                raise orders.OrderError(order_search.first_line(err))
+        named = order_search.same_named(parsed, text)
+        if len(named) > 1:                                                # the list shows no position without a stock: the codes are named here
+            raise orders.OrderError("Позиций с названием «%s» в выгрузке поставщика: %d, ни одна не добавлена. Впишите в поле код нужной: %s." % (
+                text[:80], len(named), "; ".join("%s (остаток %d шт.)" % (o.goods_id, o.stock) for o in named[:order_search.SHOWN_VARIANTS])))
         offer, count = order_search.typed(conn, parsed, ref, text)
+        if offer is not None and offer.stock <= 0:                        # taken without a stock today: the journal and the page say so
+            return order_search.Located(offer, "name", searched="название «%s»" % text[:120]), offer.name_orig or offer.name
         if offer is not None:
-            return offer.goods_id, offer.name_orig or offer.name
+            return order_search.Located(offer, "id"), offer.name_orig or offer.name
         hint = " Шину, которой нет в выгрузке, выберите в списке строкой «шина с точки»." if stock else ""
         if count:
             raise orders.OrderError("По «%s» нашлось позиций: %d. Выберите нужную в списке под полем.%s" % (text[:80], count, hint))
-        raise orders.OrderError("По «%s» не нашлось ни кода позиции, ни модели с остатком.%s" % (text[:80], hint))
+        try:                                                              # the unload has it not: the permanent base of positions, by the exact name
+            found = order_search.locate(conn, parsed, "", [text])
+        except order_search.NotLocated:
+            raise orders.OrderError("По «%s» не нашлось ни кода позиции, ни модели с остатком, ни позиции с таким названием в базе позиций.%s" % (text[:80], hint))
+        return found, found.offer.name_orig or found.offer.name
 
     def row_item(conn, code, text, sale_unit, stock=False, account_id=None, sale_auto=""):
-        """(keyword arguments of orders.add_item without qty, name found by the text) for a row of «Позиции»: a position of the unload, or a tyre of the
-        point (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's; the price the list or the catalog
-        put in the field and nobody changed (`sale_auto`, the same text) is the panel's: priced now by the account of the window."""
+        """(keyword arguments of orders.add_item without qty, name found by the text, journal records of where it came from: order_search.notes,
+        a warning for the page: Located.warning) for a row of «Позиции»: a position of the unload or of the base of positions, or a tyre of the point
+        (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's; the price the list or the catalog put
+        in the field and nobody changed (`sale_auto`, the same text) is the panel's: priced now by the account of the window."""
         if code == orders.POINT_GOODS:
-            return order_offers.point_item_args(conn, text, sale_unit), ""
-        goods_id, by_text = typed_goods(conn, code, text, stock)
-        args = offer_item(conn, goods_id, account_id)
+            return order_offers.point_item_args(conn, text, sale_unit), "", [], ""
+        found, by_text = typed_goods(conn, code, text, stock)
+        _conn, settings, parsed, ref = context(app)
+        try:
+            args = order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), account_id)
+        except order_search.NotLocated as err:
+            raise orders.OrderError(order_search.first_line(err))
         if str(sale_unit or "").strip() and str(sale_unit).strip() != str(sale_auto or "").strip():
             args["sale_unit"] = sale_unit
-        return args, by_text
+        return args, by_text, order_search.notes(found, "item"), found.warning()
 
     def account_default(conn, fields) -> str:
         """The responsible of a new order made by hand: the manager of the point of the account of its chat («Чат Авито»), else the
@@ -925,15 +945,21 @@ def register(app) -> None:
                 raise orders.OrderError("В новом заказе не больше %d позиций: остальные добавьте в карточке." % MAX_NEW_ROWS)
             check_responsible(app, conn, fields.get("responsible"))
             fields["responsible"] = account_default(conn, fields)
-            items, account = [], window_account(conn, fields) if rows else None
+            items, account, records, warnings = [], window_account(conn, fields) if rows else None, [], []
             for row in rows:                                              # every position is checked before anything is written
-                args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock", account,
-                                         row["sale_auto"])
+                args, by_text, notes, warning = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock",
+                                                         account, row["sale_auto"])
                 items.append(dict(args, qty=row["qty"]))
+                records += notes
+                if warning:
+                    warnings.append(warning)
                 if by_text:
                     found.append(by_text)
             stamp = local_iso()
             card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items, scope_point=own_point())
+            if records:                                                   # where a position came from (the base of positions, a moved code)
+                order_search.write_notes(conn, card_id, records, stamp, author())
+                conn.commit()
         except orders.OpenOrderExists as err:                            # the owner 2026-10-27: one open order per phone
             flash(str(err), "error")
             return new_page(conn, dict(request.form.items()), rows, busy=err.order_id)
@@ -942,6 +968,8 @@ def register(app) -> None:
             return new_page(conn, dict(request.form.items()), rows)
         if found:
             flash("Добавлено по тексту: %s." % "; ".join(found))
+        for warning in warnings:
+            flash(warning, "error")
         named = deals.chat_of_field(conn, fields.get("avito_chat")) if can("chats", "edit") and fields.get("avito_chat") else None
         if named is not None:
             bind_chat(conn, card_id, named, "field", deliver=avito_deliver(conn, local_iso()))   # the chat is bound before the window offers the message
@@ -1769,9 +1797,14 @@ def register(app) -> None:
         code, text = form.get("goods_id", "").strip(), form.get("query", "").strip()
         if not text:                                     # a choice in the list fills the text too: a code alone is what a browser restored after «Назад»
             raise orders.OrderError("Позиция не выбрана: начните вводить модель и выберите шину из списка.")
-        args, by_text = row_item(conn, code, text, form.get("sale_unit", ""), orders._row(conn, card_id)["deal_kind"] == "stock",
-                                 window_account(conn, {}, card_id), form.get("sale_auto", ""))
-        orders.add_item(conn, card_id, qty=form.get("qty", "1"), now=local_iso(), author=author(), **args)
+        args, by_text, notes, warning = row_item(conn, code, text, form.get("sale_unit", ""), orders._row(conn, card_id)["deal_kind"] == "stock",
+                                                 window_account(conn, {}, card_id), form.get("sale_auto", ""))
+        stamp = local_iso()
+        orders.add_item(conn, card_id, qty=form.get("qty", "1"), now=stamp, author=author(), commit=False, **args)
+        order_search.write_notes(conn, card_id, notes, stamp, author())   # where it came from (the base of positions, a moved code)
+        conn.commit()
+        if warning:                                                       # added without a stock today: said on the page at once
+            flash(warning, "error")
         return by_text
 
     def point_tyre(conn, card_id, form):
