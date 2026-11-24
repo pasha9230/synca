@@ -502,6 +502,51 @@ def followed(conn, card_id: int) -> set:
     return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)} | seconds
 
 
+BASELINE_KEY = "sheet_client_baseline"   # app_state: when the first pass after ТЗ №88 took the names and phones of the panel as followed
+SEEN_PHONE = "_seen_phone"               # a written row: the panel's phone taken as followed by that pass; «Телефон» stays what the cell has
+                                         # (CHECK), so the next change is still checked by it
+
+
+def client_baseline(conn, now: str) -> int:
+    """Once, at the first pass after ТЗ №88 (the review 24.11): a name or phone changed in the panel BEFORE it is never written over the
+    cell (the owner may have corrected it by hand) — only a later change follows. Every written row of an order whose journal has no record
+    the table has not looked at yet (seen_event: a change made after the deploy waits there and goes as any change) takes the panel's name
+    as written and its phone as SEEN_PHONE. Nothing is sent. An order being sent now (claim) is left: its sender has passed here already.
+    Returns the orders touched."""
+    if store.get_state(conn, BASELINE_KEY):
+        return 0
+    touched = 0
+    for card_id, seen, rows in conn.execute("SELECT order_id, seen_event, rows FROM sheet_order WHERE rows != '' AND rows != '{}'").fetchall():
+        if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND id > ? AND author != ? LIMIT 1", (card_id, seen, AUTHOR)).fetchone():
+            continue
+        try:
+            card = orders.get_card(conn, card_id)
+        except orders.OrderError:
+            continue
+        name, phone = " ".join(str(card["client_name"] or "").split()), sheet_phone(card["client_phone"])
+        if not _take_as_seen(json.loads(rows or "{}"), name, phone) or not _claim(conn, card_id, now):
+            continue
+        written = json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0] or "{}")   # after the claim
+        _take_as_seen(written, name, phone)
+        conn.execute("UPDATE sheet_order SET rows = ?, claim_until = '' WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
+        conn.commit()
+        touched += 1
+    store.set_state(conn, BASELINE_KEY, now)
+    conn.commit()
+    return touched
+
+
+def _take_as_seen(written: Dict[str, dict], name: str, phone: str) -> bool:
+    """client_baseline on the rows of one order (changed in place): True when a row took something."""
+    changed = False
+    for row in written.values():
+        if "Имя" in row and _differs("Имя", row.get("Имя"), name):
+            row["Имя"], changed = name, True
+        if "Телефон" in row and _differs("Телефон", row.get(SEEN_PHONE, row.get("Телефон")), phone):
+            row[SEEN_PHONE], changed = phone, True
+    return changed
+
+
 def _differs(column: str, before, now) -> bool:
     """A column of UPDATED changed since the panel wrote it. «Телефон» by its number (sheet_phone: a row written as «+7 911 …» before
     2026-10-30 is the same number as «8911…»), «Имя» without the spaces around and inside (ТЗ №88): a new form is no change."""
@@ -528,7 +573,8 @@ def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey
             if grey:
                 op["shade"] = True
         elif not before.get("_missing") and not before.get("_removed"):  # a row removed before 2026-11-11 is never made again (the owner)
-            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if _differs(c, before.get(c), fields[c])}
+            base = dict(before, **({"Телефон": before[SEEN_PHONE]} if SEEN_PHONE in before else {}))   # a phone of before 24.11: not sent
+            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if _differs(c, base.get(c), fields[c])}
             shade = grey != bool(before.get("_grey"))
             if not diff and not extra and not shade:
                 continue
@@ -679,6 +725,27 @@ def _recreate(http: Transport, url: str, secret: str, ops: List[dict], replies: 
     return ops, replies, ""
 
 
+def _recheck_phone(http: Transport, url: str, secret: str, ops: List[dict], replies: List[dict], failed: str) -> Tuple[List[dict], List[dict], str]:
+    """A row said «edited» to an update carrying a new «Телефон» (the review 24.11): the cell may hold that new phone already — the script
+    wrote it and its answer was lost (a timeout, a rollback of send_order), or the owner typed it before the panel had it. The same op goes
+    once more, checked by the new phone (the code as before): «updated» — the row is the order's, its columns are written and taken; «edited»
+    again — a row rewritten by hand, as before. A failed second send leaves those rows not taken (an error: they go again later, never
+    marked «edited» by a doubt). The script is not changed: it checks what the panel says."""
+    again = [dict(op, check=dict(op["check"], **{"Телефон": op["fields"]["Телефон"]})) for op in ops
+             if not op["create"] and "Телефон" in op["fields"] and _status(replies, op["key"]) == EDITED]
+    if not again:
+        return ops, replies, failed
+    keys = {op["key"] for op in again}
+    try:
+        answer = call(http, url, {"secret": secret, "sheet": SHEET, "rows": again})
+        fresh = [r for r in answer.get("results") or [] if isinstance(r, dict)]
+    except SheetError as err:
+        fresh, failed = [{"key": k, "status": "error", "error": str(err)[:200]} for k in keys], failed or str(err)[:200]
+    ops = [op for op in ops if op["key"] not in keys] + again
+    replies = [r for r in replies if str(r.get("key")) not in keys] + fresh
+    return ops, replies, failed
+
+
 def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: str) -> str:
     """Send what changed in one order (claimed by the caller); returns what happened, in words. No row is ever removed (the owner
     2026-11-11): an order on «Отмена» gets its columns as any other; a row removed before that (`_removed`) is never made again."""
@@ -703,7 +770,8 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     replies = [r for r in answer.get("results") or [] if isinstance(r, dict)]
     lost_rows = [op["key"] for op in ops if not op["create"] and _status(replies, op["key"]) == GONE]
     ops, replies, failed = _recreate(http, url, secret, ops, replies, current, lost_rows, grey=not listed(conn, card_id))
-    results = {str(r.get("key")): str(r.get("status")) for r in replies}
+    ops, replies, failed = _recheck_phone(http, url, secret, ops, replies, failed)
+    results ={str(r.get("key")): str(r.get("status")) for r in replies}
     shaded = {str(r.get("key")): r.get("shade") for r in replies}          # the fill the script made (a script before 2026-11-02 says nothing)
     why = next((str(r.get("error"))[:200] for r in replies if r.get("error")), "") or failed
     unshaded = [op for op in ops if "shade" in op and results.get(op["key"]) in ("created", "updated") and shaded.get(op["key"]) is not op["shade"]]
@@ -716,6 +784,8 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     remade = [op for op in made if op["key"] in lost_rows]
     for op in made + kept:
         written[op["key"]] = dict(written.get(op["key"], {}), **op["fields"], **op.get("extra", {}))
+        if "Телефон" in op["fields"]:                                       # the cell has the panel's phone now: no baseline of it is left
+            written[op["key"]].pop(SEEN_PHONE, None)
         if "shade" in op:
             written[op["key"]]["_grey"] = op["shade"]
         elif op in remade:                                                 # made again white: no fill of the lost row is left
@@ -852,6 +922,7 @@ def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optio
     secret = _secret(conn, box, s)
     if not secret:
         return {}
+    client_baseline(conn, now)                                             # once: the names and phones changed before ТЗ №88 stay
     done: Dict[int, str] = {}
     for card_id in _due(conn, now, full, limit):
         if not _claim(conn, card_id, now):
